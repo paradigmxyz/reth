@@ -25,8 +25,9 @@ pub fn default_max_tracing_requests() -> usize {
     // We reserve 2 cores for the rest of the system
     const RESERVED: usize = 2;
 
-    std::thread::available_parallelism()
-        .map_or(25, |cpus| max(cpus.get().saturating_sub(RESERVED), RESERVED))
+    std::thread::available_parallelism().map_or(25, |cpus| {
+        max(cpus.get().saturating_sub(RESERVED), RESERVED)
+    })
 }
 
 /// The default number of getproof calls we are allowing to run concurrently.

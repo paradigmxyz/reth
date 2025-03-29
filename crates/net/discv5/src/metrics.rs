@@ -81,13 +81,15 @@ impl DiscoveredPeersMetrics {
     /// Increments number of sessions established by [`discv5::Discv5`], with peers that don't have
     /// a reachable node record.
     pub fn increment_established_sessions_unreachable_enr(&self, num: u64) {
-        self.established_sessions_unreachable_enr_total.increment(num)
+        self.established_sessions_unreachable_enr_total
+            .increment(num)
     }
 
     /// Increments number of sessions established by [`discv5::Discv5`], that pass configured
     /// [`filter`](crate::filter) rules.
     pub fn increment_established_sessions_filtered(&self, num: u64) {
-        self.established_sessions_custom_filtered_total.increment(num)
+        self.established_sessions_custom_filtered_total
+            .increment(num)
     }
 
     /// Increments number of unverifiable ENRs discovered by [`discv5::Discv5`]. These are peers

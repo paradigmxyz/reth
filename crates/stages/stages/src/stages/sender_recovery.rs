@@ -48,13 +48,17 @@ pub struct SenderRecoveryStage {
 impl SenderRecoveryStage {
     /// Create new instance of [`SenderRecoveryStage`].
     pub const fn new(config: SenderRecoveryConfig) -> Self {
-        Self { commit_threshold: config.commit_threshold }
+        Self {
+            commit_threshold: config.commit_threshold,
+        }
     }
 }
 
 impl Default for SenderRecoveryStage {
     fn default() -> Self {
-        Self { commit_threshold: 5_000_000 }
+        Self {
+            commit_threshold: 5_000_000,
+        }
     }
 }
 
@@ -77,7 +81,7 @@ where
     /// entries in the [`TransactionSenders`][reth_db_api::tables::TransactionSenders] table.
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()))
+            return Ok(ExecOutput::done(input.checkpoint()));
         }
 
         let (tx_range, block_range, is_final_range) =
@@ -91,11 +95,13 @@ where
                 checkpoint: StageCheckpoint::new(end_block)
                     .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
                 done: is_final_range,
-            })
+            });
         }
 
         // Acquire the cursor for inserting elements
-        let mut senders_cursor = provider.tx_ref().cursor_write::<tables::TransactionSenders>()?;
+        let mut senders_cursor = provider
+            .tx_ref()
+            .cursor_write::<tables::TransactionSenders>()?;
 
         info!(target: "sync::stages::sender_recovery", ?tx_range, "Recovering senders");
 
@@ -109,7 +115,12 @@ where
         let tx_batch_sender = setup_range_recovery(provider);
 
         for range in batch {
-            recover_range(range, provider, tx_batch_sender.clone(), &mut senders_cursor)?;
+            recover_range(
+                range,
+                provider,
+                tx_batch_sender.clone(),
+                &mut senders_cursor,
+            )?;
         }
 
         Ok(ExecOutput {
@@ -132,7 +143,9 @@ where
             .block_body_indices(unwind_to)?
             .ok_or(ProviderError::BlockBodyIndicesNotFound(unwind_to))?
             .last_tx_num();
-        provider.tx_ref().unwind_table_by_num::<tables::TransactionSenders>(latest_tx_id)?;
+        provider
+            .tx_ref()
+            .unwind_table_by_num::<tables::TransactionSenders>(latest_tx_id)?;
 
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(unwind_to)
@@ -206,7 +219,7 @@ where
                                     .into(),
                             ))
                         }
-                    }
+                    };
                 }
             };
             senders_cursor.append(tx_id, &sender)?;
@@ -269,9 +282,10 @@ where
                     Ok(chunk) => chunk,
                     Err(err) => {
                         // We exit early since we could not process this chunk.
-                        let _ = recovered_senders_tx
-                            .send(Err(Box::new(SenderRecoveryStageError::StageError(err.into()))));
-                        break
+                        let _ = recovered_senders_tx.send(Err(Box::new(
+                            SenderRecoveryStageError::StageError(err.into()),
+                        )));
+                        break;
                     }
                 };
 
@@ -294,7 +308,7 @@ where
 
                         // Finish early
                         if is_err {
-                            break
+                            break;
                         }
                     }
                 });
@@ -338,7 +352,9 @@ where
         // Count only static files entries. If we count the database entries too, we may have
         // duplicates. We're sure that the static files have all entries that database has,
         // because we run the `StaticFileProducer` before starting the pipeline.
-        total: provider.static_file_provider().count_entries::<tables::Transactions>()? as u64,
+        total: provider
+            .static_file_provider()
+            .count_entries::<tables::Transactions>()? as u64,
     })
 }
 
@@ -437,7 +453,10 @@ mod tests {
         );
 
         // Validate the stage execution
-        assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
+        assert!(
+            runner.validate_execution(input, result.ok()).is_ok(),
+            "execution validation"
+        );
     }
 
     /// Execute the stage twice with input range that exceeds the commit threshold
@@ -454,7 +473,11 @@ mod tests {
         let seed = random_block_range(
             &mut rng,
             stage_progress + 1..=previous_stage,
-            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..4, ..Default::default() },
+            BlockRangeParams {
+                parent: Some(B256::ZERO),
+                tx_count: 0..4,
+                ..Default::default()
+            },
         ); // set tx count range high enough to hit the threshold
         runner
             .db
@@ -490,8 +513,11 @@ mod tests {
             ExecOutput {
                 checkpoint: StageCheckpoint::new(expected_progress).with_entities_stage_checkpoint(
                     EntitiesCheckpoint {
-                        processed: runner.db.table::<tables::TransactionSenders>().unwrap().len()
-                            as u64,
+                        processed: runner
+                            .db
+                            .table::<tables::TransactionSenders>()
+                            .unwrap()
+                            .len() as u64,
                         total: total_transactions
                     }
                 ),
@@ -511,13 +537,19 @@ mod tests {
             result.as_ref().unwrap(),
             &ExecOutput {
                 checkpoint: StageCheckpoint::new(previous_stage).with_entities_stage_checkpoint(
-                    EntitiesCheckpoint { processed: total_transactions, total: total_transactions }
+                    EntitiesCheckpoint {
+                        processed: total_transactions,
+                        total: total_transactions
+                    }
                 ),
                 done: true
             }
         );
 
-        assert!(runner.validate_execution(first_input, result.ok()).is_ok(), "validation failed");
+        assert!(
+            runner.validate_execution(first_input, result.ok()).is_ok(),
+            "validation failed"
+        );
     }
 
     #[test]
@@ -528,9 +560,14 @@ mod tests {
         let blocks = random_block_range(
             &mut rng,
             0..=100,
-            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..10, ..Default::default() },
+            BlockRangeParams {
+                parent: Some(B256::ZERO),
+                tx_count: 0..10,
+                ..Default::default()
+            },
         );
-        db.insert_blocks(blocks.iter(), StorageKind::Static).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), StorageKind::Static)
+            .expect("insert blocks");
 
         let max_pruned_block = 30;
         let max_processed_block = 70;
@@ -540,13 +577,16 @@ mod tests {
         for block in &blocks[..=max_processed_block] {
             for transaction in &block.body().transactions {
                 if block.number > max_pruned_block {
-                    tx_senders
-                        .push((tx_number, transaction.recover_signer().expect("recover signer")));
+                    tx_senders.push((
+                        tx_number,
+                        transaction.recover_signer().expect("recover signer"),
+                    ));
                 }
                 tx_number += 1;
             }
         }
-        db.insert_transaction_senders(tx_senders).expect("insert tx hash numbers");
+        db.insert_transaction_senders(tx_senders)
+            .expect("insert tx hash numbers");
 
         let provider = db.factory.provider_rw().unwrap();
         provider
@@ -574,7 +614,10 @@ mod tests {
                     .iter()
                     .map(|block| block.transaction_count() as u64)
                     .sum(),
-                total: blocks.iter().map(|block| block.transaction_count() as u64).sum()
+                total: blocks
+                    .iter()
+                    .map(|block| block.transaction_count() as u64)
+                    .sum()
             }
         );
     }
@@ -586,7 +629,10 @@ mod tests {
 
     impl Default for SenderRecoveryTestRunner {
         fn default() -> Self {
-            Self { threshold: 1000, db: TestStageDB::default() }
+            Self {
+                threshold: 1000,
+                db: TestStageDB::default(),
+            }
         }
     }
 
@@ -609,10 +655,12 @@ mod tests {
                 .block_body_indices(block)?
                 .ok_or(ProviderError::BlockBodyIndicesNotFound(block));
             match body_result {
-                Ok(body) => self.db.ensure_no_entry_above::<tables::TransactionSenders, _>(
-                    body.last_tx_num(),
-                    |key| key,
-                )?,
+                Ok(body) => self
+                    .db
+                    .ensure_no_entry_above::<tables::TransactionSenders, _>(
+                        body.last_tx_num(),
+                        |key| key,
+                    )?,
                 Err(_) => {
                     assert!(self.db.table_is_empty::<tables::TransactionSenders>()?);
                 }
@@ -630,7 +678,9 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            SenderRecoveryStage { commit_threshold: self.threshold }
+            SenderRecoveryStage {
+                commit_threshold: self.threshold,
+            }
         }
     }
 
@@ -645,7 +695,11 @@ mod tests {
             let blocks = random_block_range(
                 &mut rng,
                 stage_progress..=end,
-                BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..2, ..Default::default() },
+                BlockRangeParams {
+                    parent: Some(B256::ZERO),
+                    tx_count: 0..2,
+                    ..Default::default()
+                },
             );
             self.db.insert_blocks(blocks.iter(), StorageKind::Static)?;
             Ok(blocks)
@@ -663,11 +717,12 @@ mod tests {
                     let end_block = output.checkpoint.block_number;
 
                     if start_block > end_block {
-                        return Ok(())
+                        return Ok(());
                     }
 
-                    let mut body_cursor =
-                        provider.tx_ref().cursor_read::<tables::BlockBodyIndices>()?;
+                    let mut body_cursor = provider
+                        .tx_ref()
+                        .cursor_read::<tables::BlockBodyIndices>()?;
                     body_cursor.seek_exact(start_block)?;
 
                     while let Some((_, body)) = body_cursor.next()? {
@@ -675,8 +730,9 @@ mod tests {
                             let transaction: TransactionSigned = provider
                                 .transaction_by_id_unhashed(tx_id)?
                                 .expect("no transaction entry");
-                            let signer =
-                                transaction.recover_signer().expect("failed to recover signer");
+                            let signer = transaction
+                                .recover_signer()
+                                .expect("failed to recover signer");
                             assert_eq!(Some(signer), provider.transaction_sender(tx_id)?)
                         }
                     }

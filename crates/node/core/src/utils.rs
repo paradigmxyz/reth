@@ -41,7 +41,10 @@ pub async fn get_single_header<Client>(
 where
     Client: HeadersClient<Header: reth_primitives_traits::BlockHeader>,
 {
-    let (peer_id, response) = client.get_header_with_priority(id, Priority::High).await?.split();
+    let (peer_id, response) = client
+        .get_header_with_priority(id, Priority::High)
+        .await?
+        .split();
 
     let Some(header) = response else {
         client.report_bad_message(peer_id);

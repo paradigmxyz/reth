@@ -74,7 +74,10 @@ mod block_bincode {
         for Block<'a, T, H>
     {
         fn from(value: &'a alloy_consensus::Block<T, H>) -> Self {
-            Self { header: value.header.as_repr(), body: (&value.body).into() }
+            Self {
+                header: value.header.as_repr(),
+                body: (&value.body).into(),
+            }
         }
     }
 
@@ -82,7 +85,10 @@ mod block_bincode {
         for alloy_consensus::Block<T, H>
     {
         fn from(value: Block<'a, T, H>) -> Self {
-            Self { header: SerdeBincodeCompat::from_repr(value.header), body: value.body.into() }
+            Self {
+                header: SerdeBincodeCompat::from_repr(value.header),
+                body: value.body.into(),
+            }
         }
     }
 
@@ -170,7 +176,11 @@ mod block_bincode {
                     .into_iter()
                     .map(SerdeBincodeCompat::from_repr)
                     .collect(),
-                ommers: value.ommers.into_iter().map(SerdeBincodeCompat::from_repr).collect(),
+                ommers: value
+                    .ommers
+                    .into_iter()
+                    .map(SerdeBincodeCompat::from_repr)
+                    .collect(),
                 withdrawals: value.withdrawals.into_owned(),
             }
         }

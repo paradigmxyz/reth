@@ -33,7 +33,10 @@ impl RpcRequestMetrics {
                 call_metrics: module
                     .method_names()
                     .map(|method| {
-                        (method, RpcServerCallMetrics::new_with_labels(&[("method", method)]))
+                        (
+                            method,
+                            RpcServerCallMetrics::new_with_labels(&[("method", method)]),
+                        )
                     })
                     .collect(),
             }),
@@ -95,8 +98,15 @@ pub struct RpcRequestMetricsService<S> {
 impl<S> RpcRequestMetricsService<S> {
     pub(crate) fn new(service: S, metrics: RpcRequestMetrics) -> Self {
         // this instance is kept alive for the duration of the connection
-        metrics.inner.connection_metrics.connections_opened_total.increment(1);
-        Self { inner: service, metrics }
+        metrics
+            .inner
+            .connection_metrics
+            .connections_opened_total
+            .increment(1);
+        Self {
+            inner: service,
+            metrics,
+        }
     }
 }
 
@@ -107,8 +117,16 @@ where
     type Future = MeteredRequestFuture<S::Future>;
 
     fn call(&self, req: Request<'a>) -> Self::Future {
-        self.metrics.inner.connection_metrics.requests_started_total.increment(1);
-        let call_metrics = self.metrics.inner.call_metrics.get_key_value(req.method.as_ref());
+        self.metrics
+            .inner
+            .connection_metrics
+            .requests_started_total
+            .increment(1);
+        let call_metrics = self
+            .metrics
+            .inner
+            .call_metrics
+            .get_key_value(req.method.as_ref());
         if let Some((_, call_metrics)) = &call_metrics {
             call_metrics.started_total.increment(1);
         }
@@ -124,7 +142,11 @@ where
 impl<S> Drop for RpcRequestMetricsService<S> {
     fn drop(&mut self) {
         // update connection metrics, connection closed
-        self.metrics.inner.connection_metrics.connections_closed_total.increment(1);
+        self.metrics
+            .inner
+            .connection_metrics
+            .connections_closed_total
+            .increment(1);
     }
 }
 
@@ -158,12 +180,21 @@ impl<F: Future<Output = MethodResponse>> Future for MeteredRequestFuture<F> {
             let elapsed = this.started_at.elapsed().as_secs_f64();
 
             // update transport metrics
-            this.metrics.inner.connection_metrics.requests_finished_total.increment(1);
-            this.metrics.inner.connection_metrics.request_time_seconds.record(elapsed);
+            this.metrics
+                .inner
+                .connection_metrics
+                .requests_finished_total
+                .increment(1);
+            this.metrics
+                .inner
+                .connection_metrics
+                .request_time_seconds
+                .record(elapsed);
 
             // update call metrics
-            if let Some(call_metrics) =
-                this.method.and_then(|method| this.metrics.inner.call_metrics.get(method))
+            if let Some(call_metrics) = this
+                .method
+                .and_then(|method| this.metrics.inner.call_metrics.get(method))
             {
                 call_metrics.time_seconds.record(elapsed);
                 if resp.is_success() {

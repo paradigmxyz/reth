@@ -28,7 +28,10 @@ pub struct TxPoolApi<Pool, Eth> {
 impl<Pool, Eth> TxPoolApi<Pool, Eth> {
     /// Creates a new instance of `TxpoolApi`.
     pub const fn new(pool: Pool, tx_resp_builder: Eth) -> Self {
-        Self { pool, tx_resp_builder }
+        Self {
+            pool,
+            tx_resp_builder,
+        }
     }
 }
 
@@ -58,12 +61,23 @@ where
 
         let AllPoolTransactions { pending, queued } = self.pool.all_transactions();
 
-        let mut content = TxpoolContent { pending: BTreeMap::new(), queued: BTreeMap::new() };
+        let mut content = TxpoolContent {
+            pending: BTreeMap::new(),
+            queued: BTreeMap::new(),
+        };
         for pending in pending {
-            insert::<_, Eth>(&pending.transaction, &mut content.pending, &self.tx_resp_builder)?;
+            insert::<_, Eth>(
+                &pending.transaction,
+                &mut content.pending,
+                &self.tx_resp_builder,
+            )?;
         }
         for queued in queued {
-            insert::<_, Eth>(&queued.transaction, &mut content.queued, &self.tx_resp_builder)?;
+            insert::<_, Eth>(
+                &queued.transaction,
+                &mut content.queued,
+                &self.tx_resp_builder,
+            )?;
         }
 
         Ok(content)
@@ -84,7 +98,10 @@ where
     async fn txpool_status(&self) -> RpcResult<TxpoolStatus> {
         trace!(target: "rpc::eth", "Serving txpool_status");
         let all = self.pool.all_transactions();
-        Ok(TxpoolStatus { pending: all.pending.len() as u64, queued: all.queued.len() as u64 })
+        Ok(TxpoolStatus {
+            pending: all.pending.len() as u64,
+            queued: all.queued.len() as u64,
+        })
     }
 
     /// Returns a summary of all the transactions currently pending for inclusion in the next

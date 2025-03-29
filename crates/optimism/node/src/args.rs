@@ -93,7 +93,10 @@ mod tests {
 
     #[test]
     fn test_parse_optimism_walkback_args() {
-        let expected_args = RollupArgs { enable_genesis_walkback: true, ..Default::default() };
+        let expected_args = RollupArgs {
+            enable_genesis_walkback: true,
+            ..Default::default()
+        };
         let args =
             CommandParser::<RollupArgs>::parse_from(["reth", "--rollup.enable-genesis-walkback"])
                 .args;
@@ -102,7 +105,10 @@ mod tests {
 
     #[test]
     fn test_parse_optimism_compute_pending_block_args() {
-        let expected_args = RollupArgs { compute_pending_block: true, ..Default::default() };
+        let expected_args = RollupArgs {
+            compute_pending_block: true,
+            ..Default::default()
+        };
         let args =
             CommandParser::<RollupArgs>::parse_from(["reth", "--rollup.compute-pending-block"])
                 .args;
@@ -111,15 +117,20 @@ mod tests {
 
     #[test]
     fn test_parse_optimism_discovery_v4_args() {
-        let expected_args = RollupArgs { discovery_v4: true, ..Default::default() };
+        let expected_args = RollupArgs {
+            discovery_v4: true,
+            ..Default::default()
+        };
         let args = CommandParser::<RollupArgs>::parse_from(["reth", "--rollup.discovery.v4"]).args;
         assert_eq!(args, expected_args);
     }
 
     #[test]
     fn test_parse_optimism_sequencer_http_args() {
-        let expected_args =
-            RollupArgs { sequencer_http: Some("http://host:port".into()), ..Default::default() };
+        let expected_args = RollupArgs {
+            sequencer_http: Some("http://host:port".into()),
+            ..Default::default()
+        };
         let args = CommandParser::<RollupArgs>::parse_from([
             "reth",
             "--rollup.sequencer-http",
@@ -131,7 +142,10 @@ mod tests {
 
     #[test]
     fn test_parse_optimism_disable_txpool_args() {
-        let expected_args = RollupArgs { disable_txpool_gossip: true, ..Default::default() };
+        let expected_args = RollupArgs {
+            disable_txpool_gossip: true,
+            ..Default::default()
+        };
         let args =
             CommandParser::<RollupArgs>::parse_from(["reth", "--rollup.disable-tx-pool-gossip"])
                 .args;
@@ -140,7 +154,10 @@ mod tests {
 
     #[test]
     fn test_parse_optimism_enable_tx_conditional() {
-        let expected_args = RollupArgs { enable_tx_conditional: true, ..Default::default() };
+        let expected_args = RollupArgs {
+            enable_tx_conditional: true,
+            ..Default::default()
+        };
         let args =
             CommandParser::<RollupArgs>::parse_from(["reth", "--rollup.enable-tx-conditional"])
                 .args;

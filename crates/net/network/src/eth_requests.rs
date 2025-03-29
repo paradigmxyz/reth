@@ -85,7 +85,12 @@ where
 {
     /// Returns the list of requested headers
     fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<C::Header> {
-        let GetBlockHeaders { start_block, limit, skip, direction } = request;
+        let GetBlockHeaders {
+            start_block,
+            limit,
+            skip,
+            direction,
+        } = request;
 
         let mut headers = Vec::new();
 
@@ -93,7 +98,7 @@ where
             BlockHashOrNumber::Hash(start) => start.into(),
             BlockHashOrNumber::Number(num) => {
                 let Some(hash) = self.client.block_hash(num).unwrap_or_default() else {
-                    return headers
+                    return headers;
                 };
                 hash.into()
             }
@@ -103,25 +108,31 @@ where
         let mut total_bytes = 0;
 
         for _ in 0..limit {
-            if let Some(header) = self.client.header_by_hash_or_number(block).unwrap_or_default() {
+            if let Some(header) = self
+                .client
+                .header_by_hash_or_number(block)
+                .unwrap_or_default()
+            {
                 match direction {
                     HeadersDirection::Rising => {
                         if let Some(next) = (header.number() + 1).checked_add(skip) {
                             block = next.into()
                         } else {
-                            break
+                            break;
                         }
                     }
                     HeadersDirection::Falling => {
                         if skip > 0 {
                             // prevent under flows for block.number == 0 and `block.number - skip <
                             // 0`
-                            if let Some(next) =
-                                header.number().checked_sub(1).and_then(|num| num.checked_sub(skip))
+                            if let Some(next) = header
+                                .number()
+                                .checked_sub(1)
+                                .and_then(|num| num.checked_sub(skip))
                             {
                                 block = next.into()
                             } else {
-                                break
+                                break;
                             }
                         } else {
                             block = header.parent_hash().into()
@@ -133,10 +144,10 @@ where
                 headers.push(header);
 
                 if headers.len() >= MAX_HEADERS_SERVE || total_bytes > SOFT_RESPONSE_LIMIT {
-                    break
+                    break;
                 }
             } else {
-                break
+                break;
             }
         }
 
@@ -149,7 +160,9 @@ where
         request: GetBlockHeaders,
         response: oneshot::Sender<RequestResult<BlockHeaders<C::Header>>>,
     ) {
-        self.metrics.eth_headers_requests_received_total.increment(1);
+        self.metrics
+            .eth_headers_requests_received_total
+            .increment(1);
         let headers = self.get_headers_response(request);
         let _ = response.send(Ok(BlockHeaders(headers)));
     }
@@ -172,10 +185,10 @@ where
                 bodies.push(body);
 
                 if bodies.len() >= MAX_BODIES_SERVE || total_bytes > SOFT_RESPONSE_LIMIT {
-                    break
+                    break;
                 }
             } else {
-                break
+                break;
             }
         }
 
@@ -188,27 +201,33 @@ where
         request: GetReceipts,
         response: oneshot::Sender<RequestResult<Receipts<C::Receipt>>>,
     ) {
-        self.metrics.eth_receipts_requests_received_total.increment(1);
+        self.metrics
+            .eth_receipts_requests_received_total
+            .increment(1);
 
         let mut receipts = Vec::new();
 
         let mut total_bytes = 0;
 
         for hash in request.0 {
-            if let Some(receipts_by_block) =
-                self.client.receipts_by_block(BlockHashOrNumber::Hash(hash)).unwrap_or_default()
+            if let Some(receipts_by_block) = self
+                .client
+                .receipts_by_block(BlockHashOrNumber::Hash(hash))
+                .unwrap_or_default()
             {
-                let receipt =
-                    receipts_by_block.into_iter().map(ReceiptWithBloom::from).collect::<Vec<_>>();
+                let receipt = receipts_by_block
+                    .into_iter()
+                    .map(ReceiptWithBloom::from)
+                    .collect::<Vec<_>>();
 
                 total_bytes += receipt.length();
                 receipts.push(receipt);
 
                 if receipts.len() >= MAX_RECEIPTS_SERVE || total_bytes > SOFT_RESPONSE_LIMIT {
-                    break
+                    break;
                 }
             } else {
-                break
+                break;
             }
         }
 
@@ -240,23 +259,33 @@ where
             this.incoming_requests.poll_next_unpin(cx),
             |incoming| {
                 match incoming {
-                    IncomingEthRequest::GetBlockHeaders { peer_id, request, response } => {
-                        this.on_headers_request(peer_id, request, response)
-                    }
-                    IncomingEthRequest::GetBlockBodies { peer_id, request, response } => {
-                        this.on_bodies_request(peer_id, request, response)
-                    }
+                    IncomingEthRequest::GetBlockHeaders {
+                        peer_id,
+                        request,
+                        response,
+                    } => this.on_headers_request(peer_id, request, response),
+                    IncomingEthRequest::GetBlockBodies {
+                        peer_id,
+                        request,
+                        response,
+                    } => this.on_bodies_request(peer_id, request, response),
                     IncomingEthRequest::GetNodeData { .. } => {
-                        this.metrics.eth_node_data_requests_received_total.increment(1);
+                        this.metrics
+                            .eth_node_data_requests_received_total
+                            .increment(1);
                     }
-                    IncomingEthRequest::GetReceipts { peer_id, request, response } => {
-                        this.on_receipts_request(peer_id, request, response)
-                    }
+                    IncomingEthRequest::GetReceipts {
+                        peer_id,
+                        request,
+                        response,
+                    } => this.on_receipts_request(peer_id, request, response),
                 }
             },
         );
 
-        this.metrics.acc_duration_poll_eth_req_handler.set(acc.as_secs_f64());
+        this.metrics
+            .acc_duration_poll_eth_req_handler
+            .set(acc.as_secs_f64());
 
         // stream is fully drained and import futures pending
         if maybe_more_incoming_requests {

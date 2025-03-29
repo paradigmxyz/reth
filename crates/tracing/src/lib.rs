@@ -79,7 +79,11 @@ impl RethTracer {
     ///  Initializes with default stdout layer configuration.
     ///  Journald and file layers are not set by default.
     pub fn new() -> Self {
-        Self { stdout: LayerInfo::default(), journald: None, file: None }
+        Self {
+            stdout: LayerInfo::default(),
+            journald: None,
+            file: None,
+        }
     }
 
     ///  Sets a custom configuration for the stdout layer.
@@ -146,7 +150,12 @@ impl LayerInfo {
         filters: String,
         color: Option<String>,
     ) -> Self {
-        Self { format, default_directive, filters, color }
+        Self {
+            format,
+            default_directive,
+            filters,
+            color,
+        }
     }
 }
 
@@ -212,7 +221,9 @@ impl Tracer for RethTracer {
 
         // The error is returned if the global default subscriber is already set,
         // so it's safe to ignore it
-        let _ = tracing_subscriber::registry().with(layers.into_inner()).try_init();
+        let _ = tracing_subscriber::registry()
+            .with(layers.into_inner())
+            .try_init();
         Ok(file_guard)
     }
 }

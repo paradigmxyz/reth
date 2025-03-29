@@ -22,7 +22,9 @@ where
 
 impl<T> Clone for EventSender<T> {
     fn clone(&self) -> Self {
-        Self { sender: self.sender.clone() }
+        Self {
+            sender: self.sender.clone(),
+        }
     }
 }
 

@@ -49,7 +49,11 @@ where
         .into_task_with(task_executor);
 
     let body_downloader = BodiesDownloaderBuilder::new(config.bodies)
-        .build(client, consensus.clone().as_consensus(), provider_factory.clone())
+        .build(
+            client,
+            consensus.clone().as_consensus(),
+            provider_factory.clone(),
+        )
         .into_task_with(task_executor);
 
     let pipeline = build_pipeline(

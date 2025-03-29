@@ -74,16 +74,17 @@ where
             let transactions_backup_config =
                 reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
 
-            ctx.task_executor().spawn_critical_with_graceful_shutdown_signal(
-                "local transactions backup task",
-                |shutdown| {
-                    reth_transaction_pool::maintain::backup_local_transactions_task(
-                        shutdown,
-                        pool.clone(),
-                        transactions_backup_config,
-                    )
-                },
-            );
+            ctx.task_executor()
+                .spawn_critical_with_graceful_shutdown_signal(
+                    "local transactions backup task",
+                    |shutdown| {
+                        reth_transaction_pool::maintain::backup_local_transactions_task(
+                            shutdown,
+                            pool.clone(),
+                            transactions_backup_config,
+                        )
+                    },
+                );
 
             // spawn the maintenance task
             ctx.task_executor().spawn_critical(

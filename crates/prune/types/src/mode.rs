@@ -5,8 +5,14 @@ use alloy_primitives::BlockNumber;
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
-#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    any(test, feature = "reth-codec"),
+    reth_codecs::add_arbitrary_tests(compact)
+)]
+#[cfg_attr(
+    any(test, feature = "serde"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
 #[cfg_attr(any(test, feature = "serde"), serde(rename_all = "lowercase"))]
 pub enum PruneMode {
     /// Prune all blocks.
@@ -62,7 +68,7 @@ impl PruneMode {
             Self::Full => true,
             Self::Distance(distance) => {
                 if *distance > tip {
-                    return false
+                    return false;
                 }
                 block < tip - *distance
             }
@@ -96,7 +102,10 @@ mod tests {
 
         let tests = vec![
             // MINIMUM_PRUNING_DISTANCE makes this impossible
-            (PruneMode::Full, Err(PruneSegmentError::Configuration(segment))),
+            (
+                PruneMode::Full,
+                Err(PruneSegmentError::Configuration(segment)),
+            ),
             // Nothing to prune
             (PruneMode::Distance(tip + 1), Ok(None)),
             (
@@ -155,7 +164,12 @@ mod tests {
         ];
 
         for (index, (mode, block, expected_result)) in tests.into_iter().enumerate() {
-            assert_eq!(mode.should_prune(block, tip), expected_result, "Test {} failed", index + 1,);
+            assert_eq!(
+                mode.should_prune(block, tip),
+                expected_result,
+                "Test {} failed",
+                index + 1,
+            );
         }
     }
 

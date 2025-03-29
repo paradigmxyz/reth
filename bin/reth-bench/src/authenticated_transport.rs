@@ -42,7 +42,9 @@ impl InnerTransport {
             "http" | "https" => Self::connect_http(url, jwt),
             "ws" | "wss" => Self::connect_ws(url, jwt).await,
             "file" => Ok((Self::connect_ipc(url).await?, Claims::default())),
-            _ => Err(AuthenticatedTransportError::BadScheme(url.scheme().to_string())),
+            _ => Err(AuthenticatedTransportError::BadScheme(
+                url.scheme().to_string(),
+            )),
         }
     }
 
@@ -67,8 +69,9 @@ impl InnerTransport {
         headers.insert(reqwest::header::AUTHORIZATION, auth_value);
         client_builder = client_builder.default_headers(headers);
 
-        let client =
-            client_builder.build().map_err(AuthenticatedTransportError::HttpConstructionError)?;
+        let client = client_builder
+            .build()
+            .map_err(AuthenticatedTransportError::HttpConstructionError)?;
 
         let inner = Self::Http(Http::with_client(client, url));
         Ok((inner, claims))
@@ -147,7 +150,11 @@ impl AuthenticatedTransport {
     /// Create a new builder with the given URL.
     pub async fn connect(url: Url, jwt: JwtSecret) -> Result<Self, AuthenticatedTransportError> {
         let (inner, claims) = InnerTransport::connect(url.clone(), jwt).await?;
-        Ok(Self { inner_and_claims: Arc::new(RwLock::new((inner, claims))), jwt, url })
+        Ok(Self {
+            inner_and_claims: Arc::new(RwLock::new((inner, claims))),
+            jwt,
+            url,
+        })
     }
 
     /// Sends a request using the underlying transport.
@@ -167,8 +174,9 @@ impl AuthenticatedTransport {
 
             // if the claims are out of date, reset the inner transport
             if !shifted_claims.is_within_time_window() {
-                let (new_inner, new_claims) =
-                    InnerTransport::connect(this.url.clone(), this.jwt).await.map_err(|e| {
+                let (new_inner, new_claims) = InnerTransport::connect(this.url.clone(), this.jwt)
+                    .await
+                    .map_err(|e| {
                         TransportError::Transport(TransportErrorKind::Custom(Box::new(e)))
                     })?;
                 *inner_and_claims = (new_inner, new_claims);
@@ -220,9 +228,9 @@ impl TransportConnect for AuthenticatedTransportConnect {
             AuthenticatedTransport::connect(self.url.clone(), self.jwt)
                 .map(|res| match res {
                     Ok(transport) => Ok(transport),
-                    Err(err) => {
-                        Err(TransportError::Transport(TransportErrorKind::Custom(Box::new(err))))
-                    }
+                    Err(err) => Err(TransportError::Transport(TransportErrorKind::Custom(
+                        Box::new(err),
+                    ))),
                 })
                 .await?,
         ))

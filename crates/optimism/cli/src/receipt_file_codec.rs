@@ -43,7 +43,7 @@ where
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         if src.is_empty() {
-            return Ok(None)
+            return Ok(None);
         }
 
         let buf_slice = &mut src.as_ref();
@@ -96,13 +96,22 @@ impl TryFrom<OpGethReceipt> for OpReceipt {
     type Error = FileClientError;
 
     fn try_from(exported_receipt: OpGethReceipt) -> Result<Self, Self::Error> {
-        let OpGethReceipt { tx_type, status, cumulative_gas_used, logs, .. } = exported_receipt;
+        let OpGethReceipt {
+            tx_type,
+            status,
+            cumulative_gas_used,
+            logs,
+            ..
+        } = exported_receipt;
 
         let tx_type = OpTxType::try_from(tx_type.to_be_bytes()[0])
             .map_err(|e| FileClientError::Rlp(e.into(), vec![tx_type]))?;
 
-        let receipt =
-            alloy_consensus::Receipt { status: (status != 0).into(), cumulative_gas_used, logs };
+        let receipt = alloy_consensus::Receipt {
+            status: (status != 0).into(),
+            cumulative_gas_used,
+            logs,
+        };
 
         match tx_type {
             OpTxType::Legacy => Ok(Self::Legacy(receipt)),

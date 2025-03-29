@@ -85,7 +85,10 @@ impl core::fmt::Debug for ECIES {
             .field("remote_id", &self.remote_id)
             .field("ephemeral_public_key", &self.ephemeral_public_key)
             .field("ephemeral_shared_secret", &self.ephemeral_shared_secret)
-            .field("remote_ephemeral_public_key", &self.remote_ephemeral_public_key)
+            .field(
+                "remote_ephemeral_public_key",
+                &self.remote_ephemeral_public_key,
+            )
             .field("nonce", &self.nonce)
             .field("remote_nonce", &self.remote_nonce)
             .field("ingress_mac", &self.ingress_mac)
@@ -99,7 +102,11 @@ impl core::fmt::Debug for ECIES {
 
 fn split_at_mut<T>(arr: &mut [T], idx: usize) -> Result<(&mut [T], &mut [T]), ECIESError> {
     if idx > arr.len() {
-        return Err(ECIESErrorImpl::OutOfBounds { idx, len: arr.len() }.into())
+        return Err(ECIESErrorImpl::OutOfBounds {
+            idx,
+            len: arr.len(),
+        }
+        .into());
     }
     Ok(arr.split_at_mut(idx))
 }
@@ -138,7 +145,7 @@ impl<'a> EncryptedMessage<'a> {
     pub fn parse(data: &mut [u8]) -> Result<EncryptedMessage<'_>, ECIESError> {
         // Auth data is 2 bytes, public key is 65 bytes
         if data.len() < 65 + 2 {
-            return Err(ECIESErrorImpl::EncryptedDataTooSmall.into())
+            return Err(ECIESErrorImpl::EncryptedDataTooSmall.into());
         }
         let (auth_data, encrypted) = data.split_at_mut(2);
 
@@ -151,8 +158,10 @@ impl<'a> EncryptedMessage<'a> {
         let public_key = PublicKey::from_slice(pubkey_bytes)?;
 
         // return an error if the encrypted len is currently less than 32
-        let tag_index =
-            encrypted.len().checked_sub(32).ok_or(ECIESErrorImpl::EncryptedDataTooSmall)?;
+        let tag_index = encrypted
+            .len()
+            .checked_sub(32)
+            .ok_or(ECIESErrorImpl::EncryptedDataTooSmall)?;
 
         // NOTE: we've already checked that the encrypted data is long enough to contain the
         // encrypted data and tag
@@ -164,14 +173,20 @@ impl<'a> EncryptedMessage<'a> {
 
         // now we can check if the encrypted data is long enough to contain the IV
         if data_iv.len() < 16 {
-            return Err(ECIESErrorImpl::EncryptedDataTooSmall.into())
+            return Err(ECIESErrorImpl::EncryptedDataTooSmall.into());
         }
         let (iv, encrypted_data) = data_iv.split_at_mut(16);
 
         // NOTE: this will not panic because we are splitting at 16 bytes
         let iv = B128::from_slice(iv);
 
-        Ok(EncryptedMessage { auth_data, public_key, iv, encrypted_data, tag })
+        Ok(EncryptedMessage {
+            auth_data,
+            public_key,
+            iv,
+            encrypted_data,
+            tag,
+        })
     }
 
     /// Use the given secret and this encrypted message to derive the shared secret, and use the
@@ -234,7 +249,7 @@ impl<'a> EncryptedMessage<'a> {
             &self.auth_data,
         );
         if check_tag != self.tag {
-            return Err(ECIESErrorImpl::TagCheckDecryptFailed.into())
+            return Err(ECIESErrorImpl::TagCheckDecryptFailed.into());
         }
 
         Ok(())
@@ -243,7 +258,9 @@ impl<'a> EncryptedMessage<'a> {
     /// Use the given ECIES keys to decrypt the contained encrypted data, consuming the message and
     /// returning the decrypted data.
     pub fn decrypt(self, keys: &RLPxSymmetricKeys) -> &'a mut [u8] {
-        let Self { iv, encrypted_data, .. } = self;
+        let Self {
+            iv, encrypted_data, ..
+        } = self;
 
         // rename for clarity once it's decrypted
         let decrypted_data = encrypted_data;
@@ -390,8 +407,11 @@ impl ECIES {
 
         let total_size: u16 = u16::try_from(65 + 16 + data.len() + 32).unwrap();
 
-        let tag =
-            hmac_sha256(mac_key.as_ref(), &[iv.as_slice(), &encrypted], &total_size.to_be_bytes());
+        let tag = hmac_sha256(
+            mac_key.as_ref(),
+            &[iv.as_slice(), &encrypted],
+            &total_size.to_be_bytes(),
+        );
 
         out.extend_from_slice(iv.as_slice());
         out.extend_from_slice(&encrypted);
@@ -476,7 +496,9 @@ impl ECIES {
     fn parse_auth_unencrypted(&mut self, data: &[u8]) -> Result<(), ECIESError> {
         let mut data = Rlp::new(data)?;
 
-        let sigdata = data.get_next::<[u8; 65]>()?.ok_or(ECIESErrorImpl::InvalidAuthData)?;
+        let sigdata = data
+            .get_next::<[u8; 65]>()?
+            .ok_or(ECIESErrorImpl::InvalidAuthData)?;
         let signature = RecoverableSignature::from_compact(
             &sigdata[..64],
             RecoveryId::try_from(sigdata[64] as i32)?,
@@ -491,8 +513,10 @@ impl ECIES {
             &secp256k1::Message::from_digest((x ^ self.remote_nonce.unwrap()).0),
             &signature,
         )?);
-        self.ephemeral_shared_secret =
-            Some(ecdh_x(&self.remote_ephemeral_public_key.unwrap(), &self.ephemeral_secret_key));
+        self.ephemeral_shared_secret = Some(ecdh_x(
+            &self.remote_ephemeral_public_key.unwrap(),
+            &self.ephemeral_secret_key,
+        ));
 
         Ok(())
     }
@@ -562,12 +586,15 @@ impl ECIES {
     /// `ephemeral_shared_secret` fields in the ECIES state.
     fn parse_ack_unencrypted(&mut self, data: &[u8]) -> Result<(), ECIESError> {
         let mut data = Rlp::new(data)?;
-        self.remote_ephemeral_public_key =
-            Some(id2pk(data.get_next()?.ok_or(ECIESErrorImpl::InvalidAckData)?)?);
+        self.remote_ephemeral_public_key = Some(id2pk(
+            data.get_next()?.ok_or(ECIESErrorImpl::InvalidAckData)?,
+        )?);
         self.remote_nonce = Some(data.get_next()?.ok_or(ECIESErrorImpl::InvalidAckData)?);
 
-        self.ephemeral_shared_secret =
-            Some(ecdh_x(&self.remote_ephemeral_public_key.unwrap(), &self.ephemeral_secret_key));
+        self.ephemeral_shared_secret = Some(ecdh_x(
+            &self.remote_ephemeral_public_key.unwrap(),
+            &self.ephemeral_secret_key,
+        ));
         Ok(())
     }
 
@@ -606,8 +633,14 @@ impl ECIES {
             hasher.update(shared_secret.0.as_ref());
             B256::from(hasher.finalize().as_ref())
         };
-        self.ingress_aes = Some(Ctr64BE::<Aes256>::new((&aes_secret.0).into(), (&iv.0).into()));
-        self.egress_aes = Some(Ctr64BE::<Aes256>::new((&aes_secret.0).into(), (&iv.0).into()));
+        self.ingress_aes = Some(Ctr64BE::<Aes256>::new(
+            (&aes_secret.0).into(),
+            (&iv.0).into(),
+        ));
+        self.egress_aes = Some(Ctr64BE::<Aes256>::new(
+            (&aes_secret.0).into(),
+            (&iv.0).into(),
+        ));
 
         let mac_secret: B256 = {
             let mut hasher = Keccak256::new();
@@ -616,14 +649,23 @@ impl ECIES {
             B256::from(hasher.finalize().as_ref())
         };
         self.ingress_mac = Some(MAC::new(mac_secret));
-        self.ingress_mac.as_mut().unwrap().update((mac_secret ^ self.nonce).as_ref());
-        self.ingress_mac.as_mut().unwrap().update(self.remote_init_msg.as_ref().unwrap());
+        self.ingress_mac
+            .as_mut()
+            .unwrap()
+            .update((mac_secret ^ self.nonce).as_ref());
+        self.ingress_mac
+            .as_mut()
+            .unwrap()
+            .update(self.remote_init_msg.as_ref().unwrap());
         self.egress_mac = Some(MAC::new(mac_secret));
         self.egress_mac
             .as_mut()
             .unwrap()
             .update((mac_secret ^ self.remote_nonce.unwrap()).as_ref());
-        self.egress_mac.as_mut().unwrap().update(self.init_msg.as_ref().unwrap());
+        self.egress_mac
+            .as_mut()
+            .unwrap()
+            .update(self.init_msg.as_ref().unwrap());
     }
 
     #[cfg(test)]
@@ -641,7 +683,10 @@ impl ECIES {
         header[3..6].copy_from_slice(&[194, 128, 128]);
 
         let mut header = HeaderBytes::from(header);
-        self.egress_aes.as_mut().unwrap().apply_keystream(&mut header);
+        self.egress_aes
+            .as_mut()
+            .unwrap()
+            .apply_keystream(&mut header);
         self.egress_mac.as_mut().unwrap().update_header(&header);
         let tag = self.egress_mac.as_mut().unwrap().digest();
 
@@ -657,7 +702,7 @@ impl ECIES {
         //
         // The header is 16 bytes, and the mac is 16 bytes, so the data must be at least 32 bytes
         if data.len() < 32 {
-            return Err(ECIESErrorImpl::InvalidHeader.into())
+            return Err(ECIESErrorImpl::InvalidHeader.into());
         }
 
         let (header_bytes, mac_bytes) = split_at_mut(data, 16)?;
@@ -667,12 +712,12 @@ impl ECIES {
         self.ingress_mac.as_mut().unwrap().update_header(header);
         let check_mac = self.ingress_mac.as_mut().unwrap().digest();
         if check_mac != mac {
-            return Err(ECIESErrorImpl::TagCheckHeaderFailed.into())
+            return Err(ECIESErrorImpl::TagCheckHeaderFailed.into());
         }
 
         self.ingress_aes.as_mut().unwrap().apply_keystream(header);
         if header.as_slice().len() < 3 {
-            return Err(ECIESErrorImpl::InvalidHeader.into())
+            return Err(ECIESErrorImpl::InvalidHeader.into());
         }
 
         let body_size = usize::try_from(header.as_slice().read_uint::<BigEndian>(3)?)?;
@@ -717,13 +762,16 @@ impl ECIES {
         // error if the data is too small to contain the tag
         // TODO: create a custom type similar to EncryptedMessage for parsing, checking MACs, and
         // decrypting the body
-        let mac_index = data.len().checked_sub(16).ok_or(ECIESErrorImpl::EncryptedDataTooSmall)?;
+        let mac_index = data
+            .len()
+            .checked_sub(16)
+            .ok_or(ECIESErrorImpl::EncryptedDataTooSmall)?;
         let (body, mac_bytes) = split_at_mut(data, mac_index)?;
         let mac = B128::from_slice(mac_bytes);
         self.ingress_mac.as_mut().unwrap().update_body(body);
         let check_mac = self.ingress_mac.as_mut().unwrap().digest();
         if check_mac != mac {
-            return Err(ECIESErrorImpl::TagCheckBodyFailed.into())
+            return Err(ECIESErrorImpl::TagCheckBodyFailed.into());
         }
 
         let size = self.body_size.unwrap();
@@ -854,10 +902,18 @@ mod tests {
         let client_nonce =
             b256!("0x7e968bba13b6c50e2c4cd7f241cc0d64d1ac25c7f5952df231ac6a2bda8ee5d6");
 
-        let server_id = pk2id(&PublicKey::from_secret_key(SECP256K1, &eip8_test_server_key()));
+        let server_id = pk2id(&PublicKey::from_secret_key(
+            SECP256K1,
+            &eip8_test_server_key(),
+        ));
 
-        ECIES::new_static_client(client_static_key, server_id, client_nonce, client_ephemeral_key)
-            .unwrap()
+        ECIES::new_static_client(
+            client_static_key,
+            server_id,
+            client_nonce,
+            client_ephemeral_key,
+        )
+        .unwrap()
     }
 
     fn eip8_test_server() -> ECIES {
@@ -955,7 +1011,9 @@ mod tests {
         let mut test_client = eip8_test_client();
         let mut test_server = eip8_test_server();
 
-        test_server.read_auth(&mut test_client.create_auth()).unwrap();
+        test_server
+            .read_auth(&mut test_client.create_auth())
+            .unwrap();
 
         test_client.read_ack(&mut test_server.create_ack()).unwrap();
 

@@ -27,7 +27,10 @@ impl<S> Layer<S> for MyMiddlewareLayer {
     type Service = MyMiddlewareService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        MyMiddlewareService { service: inner, count: self.count.clone() }
+        MyMiddlewareService {
+            service: inner,
+            count: self.count.clone(),
+        }
     }
 }
 
@@ -60,8 +63,10 @@ where
 async fn test_rpc_middleware() {
     let builder = test_rpc_builder();
     let eth_api = builder.bootstrap_eth_api();
-    let modules =
-        builder.build(TransportRpcModuleConfig::set_http(RpcModuleSelection::All), eth_api);
+    let modules = builder.build(
+        TransportRpcModuleConfig::set_http(RpcModuleSelection::All),
+        eth_api,
+    );
 
     let mylayer = MyMiddlewareLayer::default();
 
@@ -73,7 +78,9 @@ async fn test_rpc_middleware() {
         .unwrap();
 
     let client = handle.http_client().unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::protocol_version(&client).await.unwrap();
+    EthApiClient::<Transaction, Block, Receipt, Header>::protocol_version(&client)
+        .await
+        .unwrap();
     let count = mylayer.count.load(Ordering::Relaxed);
     assert_eq!(count, 1);
 }

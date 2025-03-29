@@ -25,7 +25,12 @@ impl MerkleCheckpoint {
         walker_stack: Vec<StoredSubNode>,
         state: HashBuilderState,
     ) -> Self {
-        Self { target_block, last_account_key, walker_stack, state }
+        Self {
+            target_block,
+            last_account_key,
+            walker_stack,
+            state,
+        }
     }
 }
 
@@ -69,7 +74,15 @@ impl reth_codecs::Compact for MerkleCheckpoint {
         }
 
         let (state, buf) = HashBuilderState::from_compact(buf, 0);
-        (Self { target_block, last_account_key, walker_stack, state }, buf)
+        (
+            Self {
+                target_block,
+                last_account_key,
+                walker_stack,
+                state,
+            },
+            buf,
+        )
     }
 }
 
@@ -77,7 +90,10 @@ impl reth_codecs::Compact for MerkleCheckpoint {
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
+#[cfg_attr(
+    any(test, feature = "reth-codec"),
+    reth_codecs::add_arbitrary_tests(compact)
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AccountHashingCheckpoint {
     /// The next account to start hashing from.
@@ -92,7 +108,10 @@ pub struct AccountHashingCheckpoint {
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
+#[cfg_attr(
+    any(test, feature = "reth-codec"),
+    reth_codecs::add_arbitrary_tests(compact)
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StorageHashingCheckpoint {
     /// The next account to start hashing from.
@@ -109,7 +128,10 @@ pub struct StorageHashingCheckpoint {
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
+#[cfg_attr(
+    any(test, feature = "reth-codec"),
+    reth_codecs::add_arbitrary_tests(compact)
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ExecutionCheckpoint {
     /// Block range which this checkpoint is valid for.
@@ -122,7 +144,10 @@ pub struct ExecutionCheckpoint {
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
+#[cfg_attr(
+    any(test, feature = "reth-codec"),
+    reth_codecs::add_arbitrary_tests(compact)
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HeadersCheckpoint {
     /// Block range which this checkpoint is valid for.
@@ -135,7 +160,10 @@ pub struct HeadersCheckpoint {
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
+#[cfg_attr(
+    any(test, feature = "reth-codec"),
+    reth_codecs::add_arbitrary_tests(compact)
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct IndexHistoryCheckpoint {
     /// Block range which this checkpoint is valid for.
@@ -148,7 +176,10 @@ pub struct IndexHistoryCheckpoint {
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
+#[cfg_attr(
+    any(test, feature = "reth-codec"),
+    reth_codecs::add_arbitrary_tests(compact)
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct EntitiesCheckpoint {
     /// Number of entities already processed.
@@ -163,7 +194,7 @@ impl EntitiesCheckpoint {
     /// Return [None] if `total == 0`.
     pub fn fmt_percentage(&self) -> Option<String> {
         if self.total == 0 {
-            return None
+            return None;
         }
 
         // Calculate percentage with 2 decimal places.
@@ -184,7 +215,10 @@ impl EntitiesCheckpoint {
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
+#[cfg_attr(
+    any(test, feature = "reth-codec"),
+    reth_codecs::add_arbitrary_tests(compact)
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CheckpointBlockRange {
     /// The first block of the range, inclusive.
@@ -195,13 +229,19 @@ pub struct CheckpointBlockRange {
 
 impl From<RangeInclusive<BlockNumber>> for CheckpointBlockRange {
     fn from(range: RangeInclusive<BlockNumber>) -> Self {
-        Self { from: *range.start(), to: *range.end() }
+        Self {
+            from: *range.start(),
+            to: *range.end(),
+        }
     }
 }
 
 impl From<&RangeInclusive<BlockNumber>> for CheckpointBlockRange {
     fn from(range: &RangeInclusive<BlockNumber>) -> Self {
-        Self { from: *range.start(), to: *range.end() }
+        Self {
+            from: *range.start(),
+            to: *range.end(),
+        }
     }
 }
 
@@ -209,7 +249,10 @@ impl From<&RangeInclusive<BlockNumber>> for CheckpointBlockRange {
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
+#[cfg_attr(
+    any(test, feature = "reth-codec"),
+    reth_codecs::add_arbitrary_tests(compact)
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StageCheckpoint {
     /// The maximum block processed by the stage.
@@ -221,7 +264,10 @@ pub struct StageCheckpoint {
 impl StageCheckpoint {
     /// Creates a new [`StageCheckpoint`] with only `block_number` set.
     pub fn new(block_number: BlockNumber) -> Self {
-        Self { block_number, ..Default::default() }
+        Self {
+            block_number,
+            ..Default::default()
+        }
     }
 
     /// Sets the block number.
@@ -245,7 +291,9 @@ impl StageCheckpoint {
             }
             _ => return self,
         });
-        _ = self.stage_checkpoint.map(|mut checkpoint| checkpoint.set_block_range(from, to));
+        _ = self
+            .stage_checkpoint
+            .map(|mut checkpoint| checkpoint.set_block_range(from, to));
         self
     }
 
@@ -257,14 +305,18 @@ impl StageCheckpoint {
         match stage_checkpoint {
             StageUnitCheckpoint::Account(AccountHashingCheckpoint {
                 progress: entities, ..
-            }) |
-            StageUnitCheckpoint::Storage(StorageHashingCheckpoint {
+            })
+            | StageUnitCheckpoint::Storage(StorageHashingCheckpoint {
                 progress: entities, ..
-            }) |
-            StageUnitCheckpoint::Entities(entities) |
-            StageUnitCheckpoint::Execution(ExecutionCheckpoint { progress: entities, .. }) |
-            StageUnitCheckpoint::Headers(HeadersCheckpoint { progress: entities, .. }) |
-            StageUnitCheckpoint::IndexHistory(IndexHistoryCheckpoint {
+            })
+            | StageUnitCheckpoint::Entities(entities)
+            | StageUnitCheckpoint::Execution(ExecutionCheckpoint {
+                progress: entities, ..
+            })
+            | StageUnitCheckpoint::Headers(HeadersCheckpoint {
+                progress: entities, ..
+            })
+            | StageUnitCheckpoint::IndexHistory(IndexHistoryCheckpoint {
                 progress: entities,
                 ..
             }) => Some(entities),
@@ -278,7 +330,10 @@ impl StageCheckpoint {
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
+#[cfg_attr(
+    any(test, feature = "reth-codec"),
+    reth_codecs::add_arbitrary_tests(compact)
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum StageUnitCheckpoint {
     /// Saves the progress of AccountHashing stage.
@@ -300,10 +355,22 @@ impl StageUnitCheckpoint {
     /// range.
     pub fn set_block_range(&mut self, from: u64, to: u64) -> Option<CheckpointBlockRange> {
         match self {
-            Self::Account(AccountHashingCheckpoint { ref mut block_range, .. }) |
-            Self::Storage(StorageHashingCheckpoint { ref mut block_range, .. }) |
-            Self::Execution(ExecutionCheckpoint { ref mut block_range, .. }) |
-            Self::IndexHistory(IndexHistoryCheckpoint { ref mut block_range, .. }) => {
+            Self::Account(AccountHashingCheckpoint {
+                ref mut block_range,
+                ..
+            })
+            | Self::Storage(StorageHashingCheckpoint {
+                ref mut block_range,
+                ..
+            })
+            | Self::Execution(ExecutionCheckpoint {
+                ref mut block_range,
+                ..
+            })
+            | Self::IndexHistory(IndexHistoryCheckpoint {
+                ref mut block_range,
+                ..
+            }) => {
                 let old_range = *block_range;
                 *block_range = CheckpointBlockRange { from, to };
 

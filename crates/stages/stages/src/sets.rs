@@ -152,7 +152,12 @@ where
     {
         StageSetBuilder::default()
             .add_set(default_offline)
-            .add_set(OfflineStages::new(executor_provider, consensus, stages_config, prune_modes))
+            .add_set(OfflineStages::new(
+                executor_provider,
+                consensus,
+                stages_config,
+                prune_modes,
+            ))
             .add_stage(FinishStage)
     }
 }
@@ -215,7 +220,14 @@ where
         body_downloader: B,
         stages_config: StageConfig,
     ) -> Self {
-        Self { provider, tip, consensus, header_downloader, body_downloader, stages_config }
+        Self {
+            provider,
+            tip,
+            consensus,
+            header_downloader,
+            body_downloader,
+            stages_config,
+        }
     }
 }
 
@@ -234,7 +246,9 @@ where
         HeaderStage<P, H>: Stage<Provider>,
         BodyStage<B>: Stage<Provider>,
     {
-        StageSetBuilder::default().add_stage(headers).add_stage(BodyStage::new(body_downloader))
+        StageSetBuilder::default()
+            .add_stage(headers)
+            .add_stage(BodyStage::new(body_downloader))
     }
 
     /// Create a new builder using the given bodies stage.
@@ -313,7 +327,12 @@ impl<E: BlockExecutorProvider> OfflineStages<E> {
         stages_config: StageConfig,
         prune_modes: PruneModes,
     ) -> Self {
-        Self { executor_provider, consensus, stages_config, prune_modes }
+        Self {
+            executor_provider,
+            consensus,
+            stages_config,
+            prune_modes,
+        }
     }
 }
 
@@ -327,23 +346,32 @@ where
     PruneStage: Stage<Provider>,
 {
     fn builder(self) -> StageSetBuilder<Provider> {
-        ExecutionStages::new(self.executor_provider, self.consensus, self.stages_config.clone())
-            .builder()
-            // If sender recovery prune mode is set, add the prune sender recovery stage.
-            .add_stage_opt(self.prune_modes.sender_recovery.map(|prune_mode| {
-                PruneSenderRecoveryStage::new(prune_mode, self.stages_config.prune.commit_threshold)
-            }))
-            .add_set(HashingStages { stages_config: self.stages_config.clone() })
-            .add_set(HistoryIndexingStages {
-                stages_config: self.stages_config.clone(),
-                prune_modes: self.prune_modes.clone(),
-            })
-            // If any prune modes are set, add the prune stage.
-            .add_stage_opt(self.prune_modes.is_empty().not().then(|| {
-                // Prune stage should be added after all hashing stages, because otherwise it will
-                // delete
-                PruneStage::new(self.prune_modes.clone(), self.stages_config.prune.commit_threshold)
-            }))
+        ExecutionStages::new(
+            self.executor_provider,
+            self.consensus,
+            self.stages_config.clone(),
+        )
+        .builder()
+        // If sender recovery prune mode is set, add the prune sender recovery stage.
+        .add_stage_opt(self.prune_modes.sender_recovery.map(|prune_mode| {
+            PruneSenderRecoveryStage::new(prune_mode, self.stages_config.prune.commit_threshold)
+        }))
+        .add_set(HashingStages {
+            stages_config: self.stages_config.clone(),
+        })
+        .add_set(HistoryIndexingStages {
+            stages_config: self.stages_config.clone(),
+            prune_modes: self.prune_modes.clone(),
+        })
+        // If any prune modes are set, add the prune stage.
+        .add_stage_opt(self.prune_modes.is_empty().not().then(|| {
+            // Prune stage should be added after all hashing stages, because otherwise it will
+            // delete
+            PruneStage::new(
+                self.prune_modes.clone(),
+                self.stages_config.prune.commit_threshold,
+            )
+        }))
     }
 }
 
@@ -366,7 +394,11 @@ impl<E: BlockExecutorProvider> ExecutionStages<E> {
         consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
         stages_config: StageConfig,
     ) -> Self {
-        Self { executor_provider, consensus, stages_config }
+        Self {
+            executor_provider,
+            consensus,
+            stages_config,
+        }
     }
 }
 
@@ -413,7 +445,9 @@ where
                 self.stages_config.storage_hashing,
                 self.stages_config.etl.clone(),
             ))
-            .add_stage(MerkleStage::new_execution(self.stages_config.merkle.clean_threshold))
+            .add_stage(MerkleStage::new_execution(
+                self.stages_config.merkle.clean_threshold,
+            ))
     }
 }
 

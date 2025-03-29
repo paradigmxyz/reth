@@ -54,7 +54,13 @@ where
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
     ) -> Self {
-        Self { provider, incoming, pruner, metrics: PersistenceMetrics::default(), sync_metrics_tx }
+        Self {
+            provider,
+            incoming,
+            pruner,
+            metrics: PersistenceMetrics::default(),
+            sync_metrics_tx,
+        }
     }
 
     /// Prunes block data before the given block hash according to the configured prune
@@ -64,7 +70,9 @@ where
         let start_time = Instant::now();
         // TODO: doing this properly depends on pruner segment changes
         let result = self.pruner.run(block_num);
-        self.metrics.prune_before_duration_seconds.record(start_time.elapsed());
+        self.metrics
+            .prune_before_duration_seconds
+            .record(start_time.elapsed());
         result
     }
 }
@@ -82,8 +90,9 @@ where
                 PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
                     let result = self.on_remove_blocks_above(new_tip_num)?;
                     // send new sync metrics based on removed blocks
-                    let _ =
-                        self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
+                    let _ = self.sync_metrics_tx.send(MetricEvent::SyncHeight {
+                        height: new_tip_num,
+                    });
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(result);
                 }
@@ -96,9 +105,9 @@ where
 
                     if let Some(block_number) = result_number {
                         // send new sync metrics based on saved blocks
-                        let _ = self
-                            .sync_metrics_tx
-                            .send(MetricEvent::SyncHeight { height: block_number });
+                        let _ = self.sync_metrics_tx.send(MetricEvent::SyncHeight {
+                            height: block_number,
+                        });
 
                         if self.pruner.is_pruning_needed(block_number) {
                             // We log `PrunerOutput` inside the `Pruner`
@@ -135,8 +144,13 @@ where
         UnifiedStorageWriter::commit_unwind(provider_rw)?;
 
         debug!(target: "engine::persistence", ?new_tip_num, ?new_tip_hash, "Removed blocks from disk");
-        self.metrics.remove_blocks_above_duration_seconds.record(start_time.elapsed());
-        Ok(new_tip_hash.map(|hash| BlockNumHash { hash, number: new_tip_num }))
+        self.metrics
+            .remove_blocks_above_duration_seconds
+            .record(start_time.elapsed());
+        Ok(new_tip_hash.map(|hash| BlockNumHash {
+            hash,
+            number: new_tip_num,
+        }))
     }
 
     fn on_save_blocks(
@@ -157,7 +171,9 @@ where
             UnifiedStorageWriter::from(&provider_rw, &static_file_provider).save_blocks(blocks)?;
             UnifiedStorageWriter::commit(provider_rw)?;
         }
-        self.metrics.save_blocks_duration_seconds.record(start_time.elapsed());
+        self.metrics
+            .save_blocks_duration_seconds
+            .record(start_time.elapsed());
         Ok(last_block_hash_num)
     }
 }
@@ -182,7 +198,10 @@ pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
     ///
     /// First, header, transaction, and receipt-related data should be written to static files.
     /// Then the execution history-related data will be written to the database.
-    SaveBlocks(Vec<ExecutedBlockWithTrieUpdates<N>>, oneshot::Sender<Option<BlockNumHash>>),
+    SaveBlocks(
+        Vec<ExecutedBlockWithTrieUpdates<N>>,
+        oneshot::Sender<Option<BlockNumHash>>,
+    ),
 
     /// Removes block data above the given block number from the database.
     ///
@@ -311,8 +330,14 @@ mod tests {
         let (_finished_exex_height_tx, finished_exex_height_rx) =
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
 
-        let pruner =
-            Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
+        let pruner = Pruner::new_with_factory(
+            provider.clone(),
+            vec![],
+            5,
+            0,
+            None,
+            finished_exex_height_rx,
+        );
 
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
         PersistenceHandle::<EthPrimitives>::spawn_service(provider, pruner, sync_metrics_tx)
@@ -347,12 +372,14 @@ mod tests {
 
         persistence_handle.save_blocks(blocks, tx).unwrap();
 
-        let BlockNumHash { hash: actual_hash, number: _ } =
-            tokio::time::timeout(std::time::Duration::from_secs(10), rx)
-                .await
-                .expect("test timed out")
-                .expect("channel closed unexpectedly")
-                .expect("no hash returned");
+        let BlockNumHash {
+            hash: actual_hash,
+            number: _,
+        } = tokio::time::timeout(std::time::Duration::from_secs(10), rx)
+            .await
+            .expect("test timed out")
+            .expect("channel closed unexpectedly")
+            .expect("no hash returned");
 
         assert_eq!(block_hash, actual_hash);
     }
@@ -363,12 +390,17 @@ mod tests {
         let persistence_handle = default_persistence_handle();
 
         let mut test_block_builder = TestBlockBuilder::eth();
-        let blocks = test_block_builder.get_executed_blocks(0..5).collect::<Vec<_>>();
+        let blocks = test_block_builder
+            .get_executed_blocks(0..5)
+            .collect::<Vec<_>>();
         let last_hash = blocks.last().unwrap().recovered_block().hash();
         let (tx, rx) = oneshot::channel();
 
         persistence_handle.save_blocks(blocks, tx).unwrap();
-        let BlockNumHash { hash: actual_hash, number: _ } = rx.await.unwrap().unwrap();
+        let BlockNumHash {
+            hash: actual_hash,
+            number: _,
+        } = rx.await.unwrap().unwrap();
         assert_eq!(last_hash, actual_hash);
     }
 
@@ -380,13 +412,18 @@ mod tests {
         let ranges = [0..1, 1..2, 2..4, 4..5];
         let mut test_block_builder = TestBlockBuilder::eth();
         for range in ranges {
-            let blocks = test_block_builder.get_executed_blocks(range).collect::<Vec<_>>();
+            let blocks = test_block_builder
+                .get_executed_blocks(range)
+                .collect::<Vec<_>>();
             let last_hash = blocks.last().unwrap().recovered_block().hash();
             let (tx, rx) = oneshot::channel();
 
             persistence_handle.save_blocks(blocks, tx).unwrap();
 
-            let BlockNumHash { hash: actual_hash, number: _ } = rx.await.unwrap().unwrap();
+            let BlockNumHash {
+                hash: actual_hash,
+                number: _,
+            } = rx.await.unwrap().unwrap();
             assert_eq!(last_hash, actual_hash);
         }
     }

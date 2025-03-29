@@ -58,34 +58,45 @@ impl Command {
     /// Execute `db get` command
     pub fn execute<N: ProviderNodeTypes>(self, tool: &DbTool<N>) -> eyre::Result<()> {
         match self.subcommand {
-            Subcommand::Mdbx { table, key, subkey, raw } => {
-                table.view(&GetValueViewer { tool, key, subkey, raw })?
-            }
+            Subcommand::Mdbx {
+                table,
+                key,
+                subkey,
+                raw,
+            } => table.view(&GetValueViewer {
+                tool,
+                key,
+                subkey,
+                raw,
+            })?,
             Subcommand::StaticFile { segment, key, raw } => {
                 let (key, mask): (u64, _) = match segment {
-                    StaticFileSegment::Headers => {
-                        (table_key::<tables::Headers>(&key)?, <HeaderWithHashMask<Header>>::MASK)
-                    }
-                    StaticFileSegment::Transactions => {
-                        (table_key::<tables::Transactions>(&key)?, <TransactionMask<TxTy<N>>>::MASK)
-                    }
-                    StaticFileSegment::Receipts => {
-                        (table_key::<tables::Receipts>(&key)?, <ReceiptMask<ReceiptTy<N>>>::MASK)
-                    }
+                    StaticFileSegment::Headers => (
+                        table_key::<tables::Headers>(&key)?,
+                        <HeaderWithHashMask<Header>>::MASK,
+                    ),
+                    StaticFileSegment::Transactions => (
+                        table_key::<tables::Transactions>(&key)?,
+                        <TransactionMask<TxTy<N>>>::MASK,
+                    ),
+                    StaticFileSegment::Receipts => (
+                        table_key::<tables::Receipts>(&key)?,
+                        <ReceiptMask<ReceiptTy<N>>>::MASK,
+                    ),
                     StaticFileSegment::BlockMeta => todo!(),
                 };
 
-                let content = tool.provider_factory.static_file_provider().find_static_file(
-                    segment,
-                    |provider| {
+                let content = tool
+                    .provider_factory
+                    .static_file_provider()
+                    .find_static_file(segment, |provider| {
                         let mut cursor = provider.cursor()?;
                         cursor.get(key.into(), mask).map(|result| {
                             result.map(|vec| {
                                 vec.iter().map(|slice| slice.to_vec()).collect::<Vec<_>>()
                             })
                         })
-                    },
-                )?;
+                    })?;
 
                 match content {
                     Some(content) => {
@@ -159,7 +170,11 @@ impl<N: ProviderNodeTypes> TableViewer<()> for GetValueViewer<'_, N> {
                 .get::<RawTable<T>>(RawKey::from(key))?
                 .map(|content| hex::encode_prefixed(content.raw_value()))
         } else {
-            self.tool.get::<T>(key)?.as_ref().map(serde_json::to_string_pretty).transpose()?
+            self.tool
+                .get::<T>(key)?
+                .as_ref()
+                .map(serde_json::to_string_pretty)
+                .transpose()?
         };
 
         match content {

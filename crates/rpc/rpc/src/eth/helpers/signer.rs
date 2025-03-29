@@ -36,7 +36,9 @@ impl DevSigner {
     /// Generates a random dev signer which satisfies [`EthSigner`] trait
     pub fn random<T: Decodable2718>() -> Box<dyn EthSigner<T>> {
         let mut signers = Self::random_signers(1);
-        signers.pop().expect("expect to generate at least one signer")
+        signers
+            .pop()
+            .expect("expect to generate at least one signer")
     }
 
     /// Generates provided number of random dev signers
@@ -50,7 +52,10 @@ impl DevSigner {
             let addresses = vec![address];
 
             let accounts = HashMap::from([(address, sk)]);
-            signers.push(Box::new(Self { addresses, accounts }) as Box<dyn EthSigner<T>>);
+            signers.push(Box::new(Self {
+                addresses,
+                accounts,
+            }) as Box<dyn EthSigner<T>>);
         }
         signers
     }
@@ -84,12 +89,18 @@ impl<T: Decodable2718> EthSigner<T> for DevSigner {
 
     async fn sign_transaction(&self, request: TransactionRequest, address: &Address) -> Result<T> {
         // create local signer wallet from signing key
-        let signer = self.accounts.get(address).ok_or(SignError::NoAccount)?.clone();
+        let signer = self
+            .accounts
+            .get(address)
+            .ok_or(SignError::NoAccount)?
+            .clone();
         let wallet = EthereumWallet::from(signer);
 
         // build and sign transaction with signer
-        let txn_envelope =
-            request.build(&wallet).await.map_err(|_| SignError::InvalidTransactionRequest)?;
+        let txn_envelope = request
+            .build(&wallet)
+            .await
+            .map_err(|_| SignError::InvalidTransactionRequest)?;
 
         // decode transaction into signed transaction type
         let encoded = txn_envelope.encoded_2718();
@@ -100,7 +111,9 @@ impl<T: Decodable2718> EthSigner<T> for DevSigner {
     }
 
     fn sign_typed_data(&self, address: Address, payload: &TypedData) -> Result<Signature> {
-        let encoded = payload.eip712_signing_hash().map_err(|_| SignError::InvalidTypedData)?;
+        let encoded = payload
+            .eip712_signing_hash()
+            .map_err(|_| SignError::InvalidTypedData)?;
         self.sign_hash(encoded, address)
     }
 }
@@ -116,11 +129,16 @@ mod tests {
 
     fn build_signer() -> DevSigner {
         let signer: PrivateKeySigner =
-            "4646464646464646464646464646464646464646464646464646464646464646".parse().unwrap();
+            "4646464646464646464646464646464646464646464646464646464646464646"
+                .parse()
+                .unwrap();
         let address = signer.address();
         let accounts = HashMap::from([(address, signer)]);
         let addresses = vec![address];
-        DevSigner { addresses, accounts }
+        DevSigner {
+            addresses,
+            accounts,
+        }
     }
 
     #[tokio::test]

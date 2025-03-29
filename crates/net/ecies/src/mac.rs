@@ -41,7 +41,10 @@ pub struct MAC {
 impl MAC {
     /// Initialize the MAC with the given secret
     pub fn new(secret: B256) -> Self {
-        Self { secret, hasher: Keccak256::new() }
+        Self {
+            secret,
+            hasher: Keccak256::new(),
+        }
     }
 
     /// Update the internal keccak256 hasher with the given data
@@ -54,7 +57,8 @@ impl MAC {
         let aes = Aes256Enc::new_from_slice(self.secret.as_ref()).unwrap();
         let mut encrypted = self.digest().0;
 
-        aes.encrypt_padded::<NoPadding>(&mut encrypted, B128::len_bytes()).unwrap();
+        aes.encrypt_padded::<NoPadding>(&mut encrypted, B128::len_bytes())
+            .unwrap();
         for i in 0..data.len() {
             encrypted[i] ^= data[i];
         }
@@ -68,7 +72,8 @@ impl MAC {
         let aes = Aes256Enc::new_from_slice(self.secret.as_ref()).unwrap();
         let mut encrypted = self.digest().0;
 
-        aes.encrypt_padded::<NoPadding>(&mut encrypted, B128::len_bytes()).unwrap();
+        aes.encrypt_padded::<NoPadding>(&mut encrypted, B128::len_bytes())
+            .unwrap();
         for i in 0..16 {
             encrypted[i] ^= prev[i];
         }

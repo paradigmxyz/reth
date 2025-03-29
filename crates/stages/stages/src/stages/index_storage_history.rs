@@ -34,13 +34,21 @@ impl IndexStorageHistoryStage {
         etl_config: EtlConfig,
         prune_mode: Option<PruneMode>,
     ) -> Self {
-        Self { commit_threshold: config.commit_threshold, prune_mode, etl_config }
+        Self {
+            commit_threshold: config.commit_threshold,
+            prune_mode,
+            etl_config,
+        }
     }
 }
 
 impl Default for IndexStorageHistoryStage {
     fn default() -> Self {
-        Self { commit_threshold: 100_000, prune_mode: None, etl_config: EtlConfig::default() }
+        Self {
+            commit_threshold: 100_000,
+            prune_mode: None,
+            etl_config: EtlConfig::default(),
+        }
     }
 }
 
@@ -77,7 +85,10 @@ where
 
                 // Save prune checkpoint only if we don't have one already.
                 // Otherwise, pruner may skip the unpruned range of blocks.
-                if provider.get_prune_checkpoint(PruneSegment::StorageHistory)?.is_none() {
+                if provider
+                    .get_prune_checkpoint(PruneSegment::StorageHistory)?
+                    .is_none()
+                {
                     provider.save_prune_checkpoint(
                         PruneSegment::StorageHistory,
                         PruneCheckpoint {
@@ -91,7 +102,7 @@ where
         }
 
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()))
+            return Ok(ExecOutput::done(input.checkpoint()));
         }
 
         let mut range = input.next_block_range();
@@ -112,7 +123,12 @@ where
                 |AddressStorageKey((address, storage_key)), highest_block_number| {
                     StorageShardedKey::new(address, storage_key, highest_block_number)
                 },
-                |(key, value)| (key.block_number(), AddressStorageKey((key.address(), value.key))),
+                |(key, value)| {
+                    (
+                        key.block_number(),
+                        AddressStorageKey((key.address(), value.key)),
+                    )
+                },
                 &self.etl_config,
             )?;
 
@@ -128,7 +144,10 @@ where
             |key| AddressStorageKey((key.address, key.sharded_key.key)),
         )?;
 
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: true })
+        Ok(ExecOutput {
+            checkpoint: StageCheckpoint::new(*range.end()),
+            done: true,
+        })
     }
 
     /// Unwind the stage.
@@ -142,7 +161,9 @@ where
 
         provider.unwind_storage_history_indices_range(BlockNumberAddress::range(range))?;
 
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_progress) })
+        Ok(UnwindOutput {
+            checkpoint: StageCheckpoint::new(unwind_progress),
+        })
     }
 }
 
@@ -181,7 +202,10 @@ mod tests {
 
     const fn storage(key: B256) -> StorageEntry {
         // Value is not used in indexing stage.
-        StorageEntry { key, value: U256::ZERO }
+        StorageEntry {
+            key,
+            value: U256::ZERO,
+        }
     }
 
     const fn block_number_address(block_number: u64) -> BlockNumberAddress {
@@ -192,7 +216,10 @@ mod tests {
     const fn shard(shard_index: u64) -> StorageShardedKey {
         StorageShardedKey {
             address: ADDRESS,
-            sharded_key: ShardedKey { key: STORAGE_KEY, highest_block_number: shard_index },
+            sharded_key: ShardedKey {
+                key: STORAGE_KEY,
+                highest_block_number: shard_index,
+            },
         }
     }
 
@@ -218,7 +245,10 @@ mod tests {
             for block in 0..=MAX_BLOCK {
                 tx.put::<tables::BlockBodyIndices>(
                     block,
-                    StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
+                    StoredBlockBodyIndices {
+                        tx_count: 3,
+                        ..Default::default()
+                    },
                 )?;
                 // setup changeset that is going to be applied to history index
                 tx.put::<tables::StorageChangeSets>(
@@ -234,13 +264,21 @@ mod tests {
     fn run(db: &TestStageDB, run_to: u64, input_checkpoint: Option<BlockNumber>) {
         let input = ExecInput {
             target: Some(run_to),
-            checkpoint: input_checkpoint
-                .map(|block_number| StageCheckpoint { block_number, stage_checkpoint: None }),
+            checkpoint: input_checkpoint.map(|block_number| StageCheckpoint {
+                block_number,
+                stage_checkpoint: None,
+            }),
         };
         let mut stage = IndexStorageHistoryStage::default();
         let provider = db.factory.database_provider_rw().unwrap();
         let out = stage.execute(&provider, input).unwrap();
-        assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(run_to), done: true });
+        assert_eq!(
+            out,
+            ExecOutput {
+                checkpoint: StageCheckpoint::new(run_to),
+                done: true
+            }
+        );
         provider.commit().unwrap();
     }
 
@@ -253,7 +291,12 @@ mod tests {
         let mut stage = IndexStorageHistoryStage::default();
         let provider = db.factory.database_provider_rw().unwrap();
         let out = stage.unwind(&provider, input).unwrap();
-        assert_eq!(out, UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) });
+        assert_eq!(
+            out,
+            UnwindOutput {
+                checkpoint: StageCheckpoint::new(unwind_to)
+            }
+        );
         provider.commit().unwrap();
     }
 
@@ -288,7 +331,8 @@ mod tests {
         // setup
         partial_setup(&db);
         db.commit(|tx| {
-            tx.put::<tables::StoragesHistory>(shard(u64::MAX), list(&[1, 2, 3])).unwrap();
+            tx.put::<tables::StoragesHistory>(shard(u64::MAX), list(&[1, 2, 3]))
+                .unwrap();
             Ok(())
         })
         .unwrap();
@@ -298,7 +342,10 @@ mod tests {
 
         // verify
         let table = cast(db.table::<tables::StoragesHistory>().unwrap());
-        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![1, 2, 3, 4, 5])]));
+        assert_eq!(
+            table,
+            BTreeMap::from([(shard(u64::MAX), vec![1, 2, 3, 4, 5])])
+        );
 
         // unwind
         unwind(&db, 5, 3);
@@ -318,13 +365,18 @@ mod tests {
         // setup
         partial_setup(&db);
         db.commit(|tx| {
-            tx.put::<tables::StoragesHistory>(shard(u64::MAX), list(&full_list)).unwrap();
+            tx.put::<tables::StoragesHistory>(shard(u64::MAX), list(&full_list))
+                .unwrap();
             Ok(())
         })
         .unwrap();
 
         // run
-        run(&db, LAST_BLOCK_IN_FULL_SHARD + 2, Some(LAST_BLOCK_IN_FULL_SHARD));
+        run(
+            &db,
+            LAST_BLOCK_IN_FULL_SHARD + 2,
+            Some(LAST_BLOCK_IN_FULL_SHARD),
+        );
 
         // verify
         let table = cast(db.table::<tables::StoragesHistory>().unwrap());
@@ -332,7 +384,10 @@ mod tests {
             table,
             BTreeMap::from([
                 (shard(LAST_BLOCK_IN_FULL_SHARD), full_list.clone()),
-                (shard(u64::MAX), vec![LAST_BLOCK_IN_FULL_SHARD + 1, LAST_BLOCK_IN_FULL_SHARD + 2])
+                (
+                    shard(u64::MAX),
+                    vec![LAST_BLOCK_IN_FULL_SHARD + 1, LAST_BLOCK_IN_FULL_SHARD + 2]
+                )
             ])
         );
 
@@ -353,19 +408,27 @@ mod tests {
         // setup
         partial_setup(&db);
         db.commit(|tx| {
-            tx.put::<tables::StoragesHistory>(shard(u64::MAX), list(&almost_full_list)).unwrap();
+            tx.put::<tables::StoragesHistory>(shard(u64::MAX), list(&almost_full_list))
+                .unwrap();
             Ok(())
         })
         .unwrap();
 
         // run
-        run(&db, LAST_BLOCK_IN_FULL_SHARD, Some(LAST_BLOCK_IN_FULL_SHARD - 2));
+        run(
+            &db,
+            LAST_BLOCK_IN_FULL_SHARD,
+            Some(LAST_BLOCK_IN_FULL_SHARD - 2),
+        );
 
         // verify
         almost_full_list.push(LAST_BLOCK_IN_FULL_SHARD - 1);
         almost_full_list.push(LAST_BLOCK_IN_FULL_SHARD);
         let table = cast(db.table::<tables::StoragesHistory>().unwrap());
-        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), almost_full_list.clone())]));
+        assert_eq!(
+            table,
+            BTreeMap::from([(shard(u64::MAX), almost_full_list.clone())])
+        );
 
         // unwind
         unwind(&db, LAST_BLOCK_IN_FULL_SHARD, LAST_BLOCK_IN_FULL_SHARD - 2);
@@ -388,13 +451,18 @@ mod tests {
         // setup
         partial_setup(&db);
         db.commit(|tx| {
-            tx.put::<tables::StoragesHistory>(shard(u64::MAX), list(&close_full_list)).unwrap();
+            tx.put::<tables::StoragesHistory>(shard(u64::MAX), list(&close_full_list))
+                .unwrap();
             Ok(())
         })
         .unwrap();
 
         // run
-        run(&db, LAST_BLOCK_IN_FULL_SHARD + 1, Some(LAST_BLOCK_IN_FULL_SHARD - 1));
+        run(
+            &db,
+            LAST_BLOCK_IN_FULL_SHARD + 1,
+            Some(LAST_BLOCK_IN_FULL_SHARD - 1),
+        );
 
         // verify
         close_full_list.push(LAST_BLOCK_IN_FULL_SHARD);
@@ -425,8 +493,10 @@ mod tests {
         // setup
         partial_setup(&db);
         db.commit(|tx| {
-            tx.put::<tables::StoragesHistory>(shard(1), list(&full_list)).unwrap();
-            tx.put::<tables::StoragesHistory>(shard(2), list(&full_list)).unwrap();
+            tx.put::<tables::StoragesHistory>(shard(1), list(&full_list))
+                .unwrap();
+            tx.put::<tables::StoragesHistory>(shard(2), list(&full_list))
+                .unwrap();
             tx.put::<tables::StoragesHistory>(
                 shard(u64::MAX),
                 list(&[LAST_BLOCK_IN_FULL_SHARD + 1]),
@@ -436,7 +506,11 @@ mod tests {
         })
         .unwrap();
 
-        run(&db, LAST_BLOCK_IN_FULL_SHARD + 2, Some(LAST_BLOCK_IN_FULL_SHARD + 1));
+        run(
+            &db,
+            LAST_BLOCK_IN_FULL_SHARD + 2,
+            Some(LAST_BLOCK_IN_FULL_SHARD + 1),
+        );
 
         // verify
         let table = cast(db.table::<tables::StoragesHistory>().unwrap());
@@ -445,12 +519,19 @@ mod tests {
             BTreeMap::from([
                 (shard(1), full_list.clone()),
                 (shard(2), full_list.clone()),
-                (shard(u64::MAX), vec![LAST_BLOCK_IN_FULL_SHARD + 1, LAST_BLOCK_IN_FULL_SHARD + 2])
+                (
+                    shard(u64::MAX),
+                    vec![LAST_BLOCK_IN_FULL_SHARD + 1, LAST_BLOCK_IN_FULL_SHARD + 2]
+                )
             ])
         );
 
         // unwind
-        unwind(&db, LAST_BLOCK_IN_FULL_SHARD + 2, LAST_BLOCK_IN_FULL_SHARD + 1);
+        unwind(
+            &db,
+            LAST_BLOCK_IN_FULL_SHARD + 2,
+            LAST_BLOCK_IN_FULL_SHARD + 1,
+        );
 
         // verify initial state
         let table = cast(db.table::<tables::StoragesHistory>().unwrap());
@@ -474,13 +555,19 @@ mod tests {
             // we just need first and last
             tx.put::<tables::BlockBodyIndices>(
                 0,
-                StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
+                StoredBlockBodyIndices {
+                    tx_count: 3,
+                    ..Default::default()
+                },
             )
             .unwrap();
 
             tx.put::<tables::BlockBodyIndices>(
                 100,
-                StoredBlockBodyIndices { tx_count: 5, ..Default::default() },
+                StoredBlockBodyIndices {
+                    tx_count: 5,
+                    ..Default::default()
+                },
             )
             .unwrap();
 
@@ -496,14 +583,23 @@ mod tests {
         .unwrap();
 
         // run
-        let input = ExecInput { target: Some(20000), ..Default::default() };
+        let input = ExecInput {
+            target: Some(20000),
+            ..Default::default()
+        };
         let mut stage = IndexStorageHistoryStage {
             prune_mode: Some(PruneMode::Before(36)),
             ..Default::default()
         };
         let provider = db.factory.database_provider_rw().unwrap();
         let out = stage.execute(&provider, input).unwrap();
-        assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(20000), done: true });
+        assert_eq!(
+            out,
+            ExecOutput {
+                checkpoint: StageCheckpoint::new(20000),
+                done: true
+            }
+        );
         provider.commit().unwrap();
 
         // verify
@@ -528,7 +624,11 @@ mod tests {
 
     impl Default for IndexStorageHistoryTestRunner {
         fn default() -> Self {
-            Self { db: TestStageDB::default(), commit_threshold: 1000, prune_mode: None }
+            Self {
+                db: TestStageDB::default(),
+                commit_threshold: 1000,
+                prune_mode: None,
+            }
         }
     }
 
@@ -565,13 +665,19 @@ mod tests {
             let blocks = random_block_range(
                 &mut rng,
                 start..=end,
-                BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..3, ..Default::default() },
+                BlockRangeParams {
+                    parent: Some(B256::ZERO),
+                    tx_count: 0..3,
+                    ..Default::default()
+                },
             );
 
             let (changesets, _) = random_changeset_range(
                 &mut rng,
                 blocks.iter(),
-                accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
+                accounts
+                    .into_iter()
+                    .map(|(addr, acc)| (addr, (acc, Vec::new()))),
                 0..3,
                 0..u64::MAX,
             );
@@ -591,17 +697,21 @@ mod tests {
                 let start_block = input.next_block();
                 let end_block = output.checkpoint.block_number;
                 if start_block > end_block {
-                    return Ok(())
+                    return Ok(());
                 }
 
                 assert_eq!(
                     output,
-                    ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true }
+                    ExecOutput {
+                        checkpoint: StageCheckpoint::new(input.target()),
+                        done: true
+                    }
                 );
 
                 let provider = self.db.factory.provider()?;
-                let mut changeset_cursor =
-                    provider.tx_ref().cursor_read::<tables::StorageChangeSets>()?;
+                let mut changeset_cursor = provider
+                    .tx_ref()
+                    .cursor_read::<tables::StorageChangeSets>()?;
 
                 let storage_transitions = changeset_cursor
                     .walk_range(BlockNumberAddress::range(start_block..=end_block))?

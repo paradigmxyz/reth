@@ -17,8 +17,17 @@ pub struct Wallet {
 impl Wallet {
     /// Creates a new account from one of the secret/pubkeys of the genesis allocations (test.json)
     pub fn new(amount: usize) -> Self {
-        let inner = MnemonicBuilder::<English>::default().phrase(TEST_MNEMONIC).build().unwrap();
-        Self { inner, chain_id: 1, amount, derivation_path: None, inner_nonce: 0 }
+        let inner = MnemonicBuilder::<English>::default()
+            .phrase(TEST_MNEMONIC)
+            .build()
+            .unwrap();
+        Self {
+            inner,
+            chain_id: 1,
+            amount,
+            derivation_path: None,
+            inner_nonce: 0,
+        }
     }
 
     /// Sets chain id
@@ -40,8 +49,10 @@ impl Wallet {
 
         let mut wallets = Vec::with_capacity(self.amount);
         for idx in 0..self.amount {
-            let builder =
-                builder.clone().derivation_path(format!("{derivation_path}{idx}")).unwrap();
+            let builder = builder
+                .clone()
+                .derivation_path(format!("{derivation_path}{idx}"))
+                .unwrap();
             let wallet = builder.build().unwrap().with_chain_id(Some(self.chain_id));
             wallets.push(wallet)
         }

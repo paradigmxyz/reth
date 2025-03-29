@@ -60,7 +60,10 @@ where
     let exec = tasks.executor();
 
     let network_config = NetworkArgs {
-        discovery: DiscoveryArgs { disable_discovery: true, ..DiscoveryArgs::default() },
+        discovery: DiscoveryArgs {
+            disable_discovery: true,
+            ..DiscoveryArgs::default()
+        },
         ..NetworkArgs::default()
     };
 
@@ -76,7 +79,10 @@ where
 
         let span = span!(Level::INFO, "node", idx);
         let _enter = span.enter();
-        let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
+        let NodeHandle {
+            node,
+            node_exit_future: _,
+        } = NodeBuilder::new(node_config.clone())
             .testing_node(exec.clone())
             .node(Default::default())
             .launch()
@@ -99,7 +105,11 @@ where
         nodes.push(node);
     }
 
-    Ok((nodes, tasks, Wallet::default().with_chain_id(chain_spec.chain().into())))
+    Ok((
+        nodes,
+        tasks,
+        Wallet::default().with_chain_id(chain_spec.chain().into()),
+    ))
 }
 
 /// Creates the initial setup with `num_nodes` started and interconnected.
@@ -122,7 +132,10 @@ where
     let exec = tasks.executor();
 
     let network_config = NetworkArgs {
-        discovery: DiscoveryArgs { disable_discovery: true, ..DiscoveryArgs::default() },
+        discovery: DiscoveryArgs {
+            disable_discovery: true,
+            ..DiscoveryArgs::default()
+        },
         ..NetworkArgs::default()
     };
 
@@ -144,7 +157,10 @@ where
         let span = span!(Level::INFO, "node", idx);
         let _enter = span.enter();
         let node = N::default();
-        let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
+        let NodeHandle {
+            node,
+            node_exit_future: _,
+        } = NodeBuilder::new(node_config.clone())
             .testing_node(exec.clone())
             .with_types_and_provider::<N, BlockchainProvider<_>>()
             .with_components(node.components_builder())
@@ -179,7 +195,11 @@ where
         nodes.push(node);
     }
 
-    Ok((nodes, tasks, Wallet::default().with_chain_id(chain_spec.chain().into())))
+    Ok((
+        nodes,
+        tasks,
+        Wallet::default().with_chain_id(chain_spec.chain().into()),
+    ))
 }
 
 // Type aliases

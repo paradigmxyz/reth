@@ -27,7 +27,10 @@ mod tests {
         assert_eq!(trie_account.code_hash, KECCAK_EMPTY);
 
         // Check that the default Account converts to the same TrieAccount
-        assert_eq!(Account::default().into_trie_account(EMPTY_ROOT_HASH), trie_account);
+        assert_eq!(
+            Account::default().into_trie_account(EMPTY_ROOT_HASH),
+            trie_account
+        );
     }
 
     #[test]

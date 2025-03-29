@@ -82,11 +82,17 @@ impl AccountHashingStage {
         let blocks = random_block_range(
             &mut rng,
             opts.blocks.clone(),
-            BlockRangeParams { parent: Some(B256::ZERO), tx_count: opts.txs, ..Default::default() },
+            BlockRangeParams {
+                parent: Some(B256::ZERO),
+                tx_count: opts.txs,
+                ..Default::default()
+            },
         );
 
         for block in blocks {
-            provider.insert_historical_block(block.try_recover().unwrap()).unwrap();
+            provider
+                .insert_historical_block(block.try_recover().unwrap())
+                .unwrap();
         }
         provider
             .static_file_provider()
@@ -97,15 +103,17 @@ impl AccountHashingStage {
         let mut accounts = random_eoa_accounts(&mut rng, opts.accounts);
         {
             // Account State generator
-            let mut account_cursor =
-                provider.tx_ref().cursor_write::<tables::PlainAccountState>()?;
+            let mut account_cursor = provider
+                .tx_ref()
+                .cursor_write::<tables::PlainAccountState>()?;
             accounts.sort_by(|a, b| a.0.cmp(&b.0));
             for (addr, acc) in &accounts {
                 account_cursor.append(*addr, acc)?;
             }
 
-            let mut acc_changeset_cursor =
-                provider.tx_ref().cursor_write::<tables::AccountChangeSets>()?;
+            let mut acc_changeset_cursor = provider
+                .tx_ref()
+                .cursor_write::<tables::AccountChangeSets>()?;
             for (t, (addr, acc)) in opts.blocks.zip(&accounts) {
                 let Account { nonce, balance, .. } = acc;
                 let prev_acc = Account {
@@ -113,7 +121,10 @@ impl AccountHashingStage {
                     balance: balance - U256::from(1),
                     bytecode_hash: None,
                 };
-                let acc_before_tx = AccountBeforeTx { address: *addr, info: Some(prev_acc) };
+                let acc_before_tx = AccountBeforeTx {
+                    address: *addr,
+                    info: Some(prev_acc),
+                };
                 acc_changeset_cursor.append(t, &acc_before_tx)?;
             }
         }
@@ -144,7 +155,7 @@ where
     /// Execute the stage.
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()))
+            return Ok(ExecOutput::done(input.checkpoint()));
         }
 
         let (from_block, to_block) = input.next_block_range().into_inner();
@@ -202,8 +213,10 @@ where
                 }
 
                 let (key, value) = item?;
-                hashed_account_cursor
-                    .append(RawKey::<B256>::from_vec(key), &RawValue::<Account>::from_vec(value))?;
+                hashed_account_cursor.append(
+                    RawKey::<B256>::from_vec(key),
+                    &RawValue::<Account>::from_vec(value),
+                )?;
             }
         } else {
             // Aggregate all transition changesets and make a list of accounts that have been
@@ -225,7 +238,10 @@ where
                 ..Default::default()
             });
 
-        Ok(ExecOutput { checkpoint, done: true })
+        Ok(ExecOutput {
+            checkpoint,
+            done: true,
+        })
     }
 
     /// Unwind the stage.
@@ -240,8 +256,10 @@ where
         // Aggregate all transition changesets and make a list of accounts that have been changed.
         provider.unwind_account_hashing_range(range)?;
 
-        let mut stage_checkpoint =
-            input.checkpoint.account_hashing_stage_checkpoint().unwrap_or_default();
+        let mut stage_checkpoint = input
+            .checkpoint
+            .account_hashing_stage_checkpoint()
+            .unwrap_or_default();
 
         stage_checkpoint.progress = stage_checkpoint_progress(provider)?;
 
@@ -323,7 +341,9 @@ mod tests {
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
 
-        runner.seed_execution(input).expect("failed to seed execution");
+        runner
+            .seed_execution(input)
+            .expect("failed to seed execution");
 
         let rx = runner.execute(input);
         let result = rx.await.unwrap();
@@ -348,7 +368,10 @@ mod tests {
         );
 
         // Validate the stage execution
-        assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
+        assert!(
+            runner.validate_execution(input, result.ok()).is_ok(),
+            "execution validation"
+        );
     }
 
     mod test_utils {
@@ -453,7 +476,11 @@ mod tests {
                 let provider = self.db.factory.database_provider_rw()?;
                 let res = Ok(AccountHashingStage::seed(
                     &provider,
-                    SeedOpts { blocks: 1..=input.target(), accounts: 10, txs: 0..3 },
+                    SeedOpts {
+                        blocks: 1..=input.target(),
+                        accounts: 10,
+                        txs: 0..3,
+                    },
                 )
                 .unwrap());
                 provider.commit().expect("failed to commit");
@@ -469,7 +496,7 @@ mod tests {
                     let start_block = input.next_block();
                     let end_block = output.checkpoint.block_number;
                     if start_block > end_block {
-                        return Ok(())
+                        return Ok(());
                     }
                 }
                 self.check_hashed_accounts()

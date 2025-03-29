@@ -58,7 +58,10 @@ where
     type Service = AuthService<S, V>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        AuthService { validator: self.validator.clone(), inner }
+        AuthService {
+            validator: self.validator.clone(),
+            inner,
+        }
     }
 }
 
@@ -113,11 +116,17 @@ pub struct ResponseFuture<F> {
 
 impl<F> ResponseFuture<F> {
     const fn future(future: F) -> Self {
-        Self { kind: Kind::Future { future } }
+        Self {
+            kind: Kind::Future { future },
+        }
     }
 
     const fn invalid_auth(err_res: HttpResponse) -> Self {
-        Self { kind: Kind::Error { response: Some(err_res) } }
+        Self {
+            kind: Kind::Error {
+                response: Some(err_res),
+            },
+        }
     }
 }
 
@@ -180,7 +189,10 @@ mod tests {
     }
 
     async fn valid_jwt() {
-        let claims = Claims { iat: to_u64(SystemTime::now()), exp: Some(10000000000) };
+        let claims = Claims {
+            iat: to_u64(SystemTime::now()),
+            exp: Some(10000000000),
+        };
         let secret = JwtSecret::from_hex(SECRET).unwrap(); // Same secret as the server
         let jwt = secret.encode(&claims).unwrap();
         let (status, _) = send_request(Some(jwt)).await;
@@ -198,7 +210,10 @@ mod tests {
         // This secret is different from the server. This will generate a
         // different signature
         let secret = JwtSecret::random();
-        let claims = Claims { iat: to_u64(SystemTime::now()), exp: Some(10000000000) };
+        let claims = Claims {
+            iat: to_u64(SystemTime::now()),
+            exp: Some(10000000000),
+        };
         let jwt = secret.encode(&claims).unwrap();
 
         let (status, body) = send_request(Some(jwt)).await;
@@ -211,7 +226,10 @@ mod tests {
         let secret = JwtSecret::from_hex(SECRET).unwrap(); // Same secret as the server
 
         let iat = to_u64(SystemTime::now()) + 1000;
-        let claims = Claims { iat, exp: Some(10000000000) };
+        let claims = Claims {
+            iat,
+            exp: Some(10000000000),
+        };
         let jwt = secret.encode(&claims).unwrap();
 
         let (status, body) = send_request(Some(jwt)).await;
@@ -229,8 +247,10 @@ mod tests {
 
     async fn send_request(jwt: Option<String>) -> (StatusCode, String) {
         let server = spawn_server().await;
-        let client =
-            reqwest::Client::builder().timeout(std::time::Duration::from_secs(1)).build().unwrap();
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(1))
+            .build()
+            .unwrap();
 
         let body = r#"{"jsonrpc": "2.0", "method": "greet_melkor", "params": [], "id": 1}"#;
         let response = client
@@ -268,7 +288,9 @@ mod tests {
 
         // Create a mock rpc module
         let mut module = RpcModule::new(());
-        module.register_method("greet_melkor", |_, _, _| "You are the dark lord").unwrap();
+        module
+            .register_method("greet_melkor", |_, _, _| "You are the dark lord")
+            .unwrap();
 
         server.start(module)
     }

@@ -85,13 +85,20 @@ mod tests {
 
         let provider_rw = test_db.factory.provider_rw().unwrap();
         let tip = 66;
-        let input = ExecInput { target: Some(tip), checkpoint: None };
+        let input = ExecInput {
+            target: Some(tip),
+            checkpoint: None,
+        };
         let mut genesis_rlp = hex!("f901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
         let genesis = SealedBlock::<Block>::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::<Block>::decode(&mut block_rlp).unwrap();
-        provider_rw.insert_historical_block(genesis.try_recover().unwrap()).unwrap();
-        provider_rw.insert_historical_block(block.clone().try_recover().unwrap()).unwrap();
+        provider_rw
+            .insert_historical_block(genesis.try_recover().unwrap())
+            .unwrap();
+        provider_rw
+            .insert_historical_block(block.clone().try_recover().unwrap())
+            .unwrap();
 
         // Fill with bogus blocks to respect PruneMode distance.
         let mut head = block.hash();
@@ -100,10 +107,15 @@ mod tests {
             let nblock = random_block(
                 &mut rng,
                 block_number,
-                generators::BlockParams { parent: Some(head), ..Default::default() },
+                generators::BlockParams {
+                    parent: Some(head),
+                    ..Default::default()
+                },
             );
             head = nblock.hash();
-            provider_rw.insert_historical_block(nblock.try_recover().unwrap()).unwrap();
+            provider_rw
+                .insert_historical_block(nblock.try_recover().unwrap())
+                .unwrap();
         }
         provider_rw
             .static_file_provider()
@@ -121,7 +133,11 @@ mod tests {
             .tx_ref()
             .put::<tables::PlainAccountState>(
                 address!("0x1000000000000000000000000000000000000000"),
-                Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) },
+                Account {
+                    nonce: 0,
+                    balance: U256::ZERO,
+                    bytecode_hash: Some(code_hash),
+                },
             )
             .unwrap();
         provider_rw
@@ -174,12 +190,18 @@ mod tests {
             );
 
             assert_eq!(
-                provider.changed_storages_and_blocks_with_range(0..=1000).unwrap().len(),
+                provider
+                    .changed_storages_and_blocks_with_range(0..=1000)
+                    .unwrap()
+                    .len(),
                 expect_num_storage_changesets
             );
 
             assert_eq!(
-                provider.changed_accounts_and_blocks_with_range(0..=1000).unwrap().len(),
+                provider
+                    .changed_accounts_and_blocks_with_range(0..=1000)
+                    .unwrap()
+                    .len(),
                 expect_num_acc_changesets
             );
 
@@ -194,9 +216,14 @@ mod tests {
                 assert!(acc_indexing_stage.execute(&provider, input).is_err());
             } else {
                 acc_indexing_stage.execute(&provider, input).unwrap();
-                let mut account_history: Cursor<RW, AccountsHistory> =
-                    provider.tx_ref().cursor_read::<tables::AccountsHistory>().unwrap();
-                assert_eq!(account_history.walk(None).unwrap().count(), expect_num_acc_changesets);
+                let mut account_history: Cursor<RW, AccountsHistory> = provider
+                    .tx_ref()
+                    .cursor_read::<tables::AccountsHistory>()
+                    .unwrap();
+                assert_eq!(
+                    account_history.walk(None).unwrap().count(),
+                    expect_num_acc_changesets
+                );
             }
 
             // Check StorageHistory
@@ -211,8 +238,10 @@ mod tests {
             } else {
                 storage_indexing_stage.execute(&provider, input).unwrap();
 
-                let mut storage_history =
-                    provider.tx_ref().cursor_read::<tables::StoragesHistory>().unwrap();
+                let mut storage_history = provider
+                    .tx_ref()
+                    .cursor_read::<tables::StoragesHistory>()
+                    .unwrap();
                 assert_eq!(
                     storage_history.walk(None).unwrap().count(),
                     expect_num_storage_changesets
@@ -265,7 +294,11 @@ mod tests {
         let blocks = random_block_range(
             &mut rng,
             0..=tip,
-            BlockRangeParams { parent: Some(genesis_hash), tx_count: 2..3, ..Default::default() },
+            BlockRangeParams {
+                parent: Some(genesis_hash),
+                tx_count: 2..3,
+                ..Default::default()
+            },
         );
         db.insert_blocks(blocks.iter(), StorageKind::Static)?;
 
@@ -379,7 +412,9 @@ mod tests {
         let db_provider = db.factory.database_provider_ro().unwrap();
 
         assert!(matches!(
-            db.factory.static_file_provider().check_consistency(&db_provider, false),
+            db.factory
+                .static_file_provider()
+                .check_consistency(&db_provider, false),
             Ok(None)
         ));
     }
@@ -430,7 +465,10 @@ mod tests {
             db.factory
                 .static_file_provider()
                 .get_highest_static_file_tx(StaticFileSegment::Transactions),
-            db.factory.block_body_indices(block).unwrap().map(|b| b.last_tx_num())
+            db.factory
+                .block_body_indices(block)
+                .unwrap()
+                .map(|b| b.last_tx_num())
         );
 
         let block = 86;
@@ -445,7 +483,10 @@ mod tests {
             db.factory
                 .static_file_provider()
                 .get_highest_static_file_tx(StaticFileSegment::Receipts),
-            db.factory.block_body_indices(block).unwrap().map(|b| b.last_tx_num())
+            db.factory
+                .block_body_indices(block)
+                .unwrap()
+                .map(|b| b.last_tx_num())
         );
 
         let block = 80;
@@ -458,7 +499,12 @@ mod tests {
         );
 
         // When a checkpoint is ahead, we request a pipeline unwind.
-        save_checkpoint_and_check(&db, StageId::Headers, 91, Some(PipelineTarget::Unwind(block)));
+        save_checkpoint_and_check(
+            &db,
+            StageId::Headers,
+            91,
+            Some(PipelineTarget::Unwind(block)),
+        );
     }
 
     #[test]

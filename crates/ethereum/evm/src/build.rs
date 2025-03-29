@@ -23,7 +23,10 @@ pub struct EthBlockAssembler<ChainSpec> {
 impl<ChainSpec> EthBlockAssembler<ChainSpec> {
     /// Creates a new [`EthBlockAssembler`].
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { chain_spec, extra_data: Default::default() }
+        Self {
+            chain_spec,
+            extra_data: Default::default(),
+        }
     }
 }
 
@@ -47,7 +50,12 @@ where
             execution_ctx: ctx,
             parent,
             transactions,
-            output: BlockExecutionResult { receipts, requests, gas_used },
+            output:
+                BlockExecutionResult {
+                    receipts,
+                    requests,
+                    gas_used,
+                },
             state_root,
             ..
         } = input;
@@ -63,8 +71,9 @@ where
             .is_shanghai_active_at_timestamp(timestamp)
             .then(|| ctx.withdrawals.map(|w| w.into_owned()).unwrap_or_default());
 
-        let withdrawals_root =
-            withdrawals.as_deref().map(|w| proofs::calculate_withdrawals_root(w));
+        let withdrawals_root = withdrawals
+            .as_deref()
+            .map(|w| proofs::calculate_withdrawals_root(w));
         let requests_hash = self
             .chain_spec
             .is_prague_active_at_timestamp(timestamp)
@@ -75,9 +84,16 @@ where
 
         // only determine cancun fields when active
         if self.chain_spec.is_cancun_active_at_timestamp(timestamp) {
-            blob_gas_used =
-                Some(transactions.iter().map(|tx| tx.blob_gas_used().unwrap_or_default()).sum());
-            excess_blob_gas = if self.chain_spec.is_cancun_active_at_timestamp(parent.timestamp) {
+            blob_gas_used = Some(
+                transactions
+                    .iter()
+                    .map(|tx| tx.blob_gas_used().unwrap_or_default())
+                    .sum(),
+            );
+            excess_blob_gas = if self
+                .chain_spec
+                .is_cancun_active_at_timestamp(parent.timestamp)
+            {
                 parent.maybe_next_block_excess_blob_gas(
                     self.chain_spec.blob_params_at_timestamp(timestamp),
                 )
@@ -114,7 +130,11 @@ where
 
         Ok(Block {
             header,
-            body: BlockBody { transactions, ommers: Default::default(), withdrawals },
+            body: BlockBody {
+                transactions,
+                ommers: Default::default(),
+                withdrawals,
+            },
         })
     }
 }

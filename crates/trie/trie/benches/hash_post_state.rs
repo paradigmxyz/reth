@@ -35,7 +35,8 @@ fn from_bundle_state_seq(state: &HashMap<Address, BundleAccount>) -> HashedPostS
 
     for (address, account) in state {
         let hashed_address = keccak256(address);
-        this.accounts.insert(hashed_address, account.info.as_ref().map(Into::into));
+        this.accounts
+            .insert(hashed_address, account.info.as_ref().map(Into::into));
 
         let hashed_storage = HashedStorage::from_iter(
             account.status.was_destroyed(),

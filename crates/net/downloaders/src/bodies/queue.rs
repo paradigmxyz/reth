@@ -35,7 +35,11 @@ where
 {
     /// Create new instance of request queue.
     pub(crate) fn new(metrics: BodyDownloaderMetrics) -> Self {
-        Self { metrics, inner: Default::default(), last_requested_block_number: None }
+        Self {
+            metrics,
+            inner: Default::default(),
+            last_requested_block_number: None,
+        }
     }
 
     /// Returns `true` if the queue is empty.

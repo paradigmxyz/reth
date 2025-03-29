@@ -12,13 +12,15 @@ use std::future::Future;
 /// See [`alloy_eips::eip2718::Decodable2718::decode_2718`]
 pub fn recover_raw_transaction<T: SignedTransaction>(mut data: &[u8]) -> EthResult<Recovered<T>> {
     if data.is_empty() {
-        return Err(EthApiError::EmptyRawTransactionData)
+        return Err(EthApiError::EmptyRawTransactionData);
     }
 
     let transaction =
         T::decode_2718(&mut data).map_err(|_| EthApiError::FailedToDecodeSignedTransaction)?;
 
-    transaction.try_into_recovered().or(Err(EthApiError::InvalidTransactionSignature))
+    transaction
+        .try_into_recovered()
+        .or(Err(EthApiError::InvalidTransactionSignature))
 }
 
 /// Performs a binary search within a given block range to find the desired block number.

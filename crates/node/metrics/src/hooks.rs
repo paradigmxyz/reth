@@ -34,7 +34,9 @@ impl HooksBuilder {
 
     /// Builds the [`Hooks`] collection from the registered hooks.
     pub fn build(self) -> Hooks {
-        Hooks { inner: Arc::new(self.hooks) }
+        Hooks {
+            inner: Arc::new(self.hooks),
+        }
     }
 }
 
@@ -53,7 +55,10 @@ impl Default for HooksBuilder {
 impl std::fmt::Debug for HooksBuilder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HooksBuilder")
-            .field("hooks", &format_args!("Vec<Box<dyn Hook>>, len: {}", self.hooks.len()))
+            .field(
+                "hooks",
+                &format_args!("Vec<Box<dyn Hook>>, len: {}", self.hooks.len()),
+            )
             .finish()
     }
 }
@@ -80,7 +85,10 @@ impl fmt::Debug for Hooks {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let hooks_len = self.inner.len();
         f.debug_struct("Hooks")
-            .field("inner", &format_args!("Arc<Vec<Box<dyn Hook>>>, len: {}", hooks_len))
+            .field(
+                "inner",
+                &format_args!("Arc<Vec<Box<dyn Hook>>>, len: {}", hooks_len),
+            )
             .finish()
     }
 }
@@ -91,9 +99,11 @@ fn collect_memory_stats() {
     use tikv_jemalloc_ctl::{epoch, stats};
     use tracing::error;
 
-    if epoch::advance().map_err(|error| error!(%error, "Failed to advance jemalloc epoch")).is_err()
+    if epoch::advance()
+        .map_err(|error| error!(%error, "Failed to advance jemalloc epoch"))
+        .is_err()
     {
-        return
+        return;
     }
 
     if let Ok(value) = stats::active::read()
@@ -144,13 +154,13 @@ fn collect_io_stats() {
     let Ok(process) = procfs::process::Process::myself()
         .map_err(|error| error!(%error, "Failed to get currently running process"))
     else {
-        return
+        return;
     };
 
     let Ok(io) = process.io().map_err(
         |error| error!(%error, "Failed to get IO stats for the currently running process"),
     ) else {
-        return
+        return;
     };
 
     counter!("io.rchar").absolute(io.rchar);

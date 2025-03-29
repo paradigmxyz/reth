@@ -25,7 +25,10 @@ pub fn generate_vectors(mut tables: Vec<String>) -> Result<()> {
     // Prepare random seed for test (same method as used by proptest)
     let mut seed = [0u8; 32];
     getrandom(&mut seed)?;
-    println!("Seed for table test vectors: {:?}", hex::encode_prefixed(seed));
+    println!(
+        "Seed for table test vectors: {:?}",
+        hex::encode_prefixed(seed)
+    );
 
     // Start the runner with the seed
     let config = ProptestConfig::default();
@@ -93,8 +96,9 @@ where
 {
     let mut rows = vec![];
     let mut seen_keys = HashSet::new();
-    let strategy =
-        proptest::collection::vec(arb::<TableRow<T>>(), per_table - rows.len()).no_shrink().boxed();
+    let strategy = proptest::collection::vec(arb::<TableRow<T>>(), per_table - rows.len())
+        .no_shrink()
+        .boxed();
 
     while rows.len() < per_table {
         // Generate all `per_table` rows: (Key, Value)
@@ -126,19 +130,26 @@ where
     // We want to control our repeated keys
     let mut seen_keys = HashSet::new();
 
-    let start_values = proptest::collection::vec(arb::<T::Value>(), 100..300).no_shrink().boxed();
+    let start_values = proptest::collection::vec(arb::<T::Value>(), 100..300)
+        .no_shrink()
+        .boxed();
 
     let start_keys = arb::<T::Key>().no_shrink().boxed();
 
     while rows.len() < per_table {
-        let key: T::Key = start_keys.new_tree(runner).map_err(|e| eyre::eyre!("{e}"))?.current();
+        let key: T::Key = start_keys
+            .new_tree(runner)
+            .map_err(|e| eyre::eyre!("{e}"))?
+            .current();
 
         if !seen_keys.insert(key.clone()) {
-            continue
+            continue;
         }
 
-        let mut values: Vec<T::Value> =
-            start_values.new_tree(runner).map_err(|e| eyre::eyre!("{e}"))?.current();
+        let mut values: Vec<T::Value> = start_values
+            .new_tree(runner)
+            .map_err(|e| eyre::eyre!("{e}"))?
+            .current();
 
         values.sort();
 

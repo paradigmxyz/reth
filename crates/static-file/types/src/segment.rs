@@ -58,12 +58,20 @@ impl StaticFileSegment {
     pub fn iter() -> impl Iterator<Item = Self> {
         // The order of segments is significant and must be maintained to ensure correctness. For
         // example, Transactions require BlockBodyIndices from Blockmeta to be sound.
-        [Self::Headers, Self::BlockMeta, Self::Transactions, Self::Receipts].into_iter()
+        [
+            Self::Headers,
+            Self::BlockMeta,
+            Self::Transactions,
+            Self::Receipts,
+        ]
+        .into_iter()
     }
 
     /// Returns the default configuration of the segment.
     pub const fn config(&self) -> SegmentConfig {
-        SegmentConfig { compression: Compression::Lz4 }
+        SegmentConfig {
+            compression: Compression::Lz4,
+        }
     }
 
     /// Returns the number of columns for the segment
@@ -78,7 +86,12 @@ impl StaticFileSegment {
     pub fn filename(&self, block_range: &SegmentRangeInclusive) -> String {
         // ATTENTION: if changing the name format, be sure to reflect those changes in
         // [`Self::parse_filename`].
-        format!("static_file_{}_{}_{}", self.as_ref(), block_range.start(), block_range.end())
+        format!(
+            "static_file_{}_{}_{}",
+            self.as_ref(),
+            block_range.start(),
+            block_range.end()
+        )
     }
 
     /// Returns file name for the provided segment and range, alongside filters, compression.
@@ -115,14 +128,14 @@ impl StaticFileSegment {
     pub fn parse_filename(name: &str) -> Option<(Self, SegmentRangeInclusive)> {
         let mut parts = name.split('_');
         if !(parts.next() == Some("static") && parts.next() == Some("file")) {
-            return None
+            return None;
         }
 
         let segment = Self::from_str(parts.next()?).ok()?;
         let (block_start, block_end) = (parts.next()?.parse().ok()?, parts.next()?.parse().ok()?);
 
         if block_start > block_end {
-            return None
+            return None;
         }
 
         Some((segment, SegmentRangeInclusive::new(block_start, block_end)))
@@ -178,7 +191,12 @@ impl SegmentHeader {
         tx_range: Option<SegmentRangeInclusive>,
         segment: StaticFileSegment,
     ) -> Self {
-        Self { expected_block_range, block_range, tx_range, segment }
+        Self {
+            expected_block_range,
+            block_range,
+            tx_range,
+            segment,
+        }
     }
 
     /// Returns the static file segment kind.
@@ -303,7 +321,7 @@ impl SegmentHeader {
     /// Returns the row offset which depends on whether the segment is block or transaction based.
     pub fn start(&self) -> Option<u64> {
         if self.segment.is_block_based() {
-            return self.block_start()
+            return self.block_start();
         }
         self.tx_start()
     }
@@ -350,7 +368,10 @@ impl core::fmt::Display for SegmentRangeInclusive {
 
 impl From<RangeInclusive<u64>> for SegmentRangeInclusive {
     fn from(value: RangeInclusive<u64>) -> Self {
-        Self { start: *value.start(), end: *value.end() }
+        Self {
+            start: *value.start(),
+            end: *value.end(),
+        }
     }
 }
 
@@ -375,8 +396,18 @@ mod tests {
     #[test]
     fn test_filename() {
         let test_vectors = [
-            (StaticFileSegment::Headers, 2..=30, "static_file_headers_2_30", None),
-            (StaticFileSegment::Receipts, 30..=300, "static_file_receipts_30_300", None),
+            (
+                StaticFileSegment::Headers,
+                2..=30,
+                "static_file_headers_2_30",
+                None,
+            ),
+            (
+                StaticFileSegment::Receipts,
+                30..=300,
+                "static_file_receipts_30_300",
+                None,
+            ),
             (
                 StaticFileSegment::Transactions,
                 1_123_233..=11_223_233,
@@ -414,17 +445,29 @@ mod tests {
                 assert_eq!(segment.filename(&block_range), filename);
             }
 
-            assert_eq!(StaticFileSegment::parse_filename(filename), Some((segment, block_range)));
+            assert_eq!(
+                StaticFileSegment::parse_filename(filename),
+                Some((segment, block_range))
+            );
         }
 
-        assert_eq!(StaticFileSegment::parse_filename("static_file_headers_2"), None);
-        assert_eq!(StaticFileSegment::parse_filename("static_file_headers_"), None);
+        assert_eq!(
+            StaticFileSegment::parse_filename("static_file_headers_2"),
+            None
+        );
+        assert_eq!(
+            StaticFileSegment::parse_filename("static_file_headers_"),
+            None
+        );
 
         // roundtrip test
         let dummy_range = SegmentRangeInclusive::new(123, 1230);
         for segment in StaticFileSegment::iter() {
             let filename = segment.filename(&dummy_range);
-            assert_eq!(Some((segment, dummy_range)), StaticFileSegment::parse_filename(&filename));
+            assert_eq!(
+                Some((segment, dummy_range)),
+                StaticFileSegment::parse_filename(&filename)
+            );
         }
     }
 

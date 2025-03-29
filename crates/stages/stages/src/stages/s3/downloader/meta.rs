@@ -47,7 +47,11 @@ impl Metadata {
             .filter(|(_, remaining)| remaining.is_some())
             .map(|(index, remaining)| {
                 let range = remaining.as_ref().expect("qed");
-                RemainingChunkRange { index, start: *range.start(), end: *range.end() }
+                RemainingChunkRange {
+                    index,
+                    start: *range.start(),
+                    end: *range.end(),
+                }
             })
             .collect()
     }
@@ -62,7 +66,7 @@ impl Metadata {
 
         let num_chunks = self.chunks.len();
         if index >= self.chunks.len() {
-            return Err(DownloaderError::InvalidChunk(index, num_chunks))
+            return Err(DownloaderError::InvalidChunk(index, num_chunks));
         }
 
         // Update chunk with downloaded range
@@ -75,7 +79,12 @@ impl Metadata {
             }
         }
 
-        let file = self.path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+        let file = self
+            .path
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
         info!(
             target: "sync::stages::s3::downloader",
             file,
@@ -94,10 +103,20 @@ impl Metadata {
     /// Loads a [`Metadata`] file from disk using the target data file.
     pub fn load(data_file: &Path) -> Result<Self, DownloaderError> {
         let metadata_file_path = Self::file_path(data_file);
-        let MetadataFile { total_size, downloaded, chunk_size, chunks } =
-            bincode::deserialize_from(File::open(&metadata_file_path)?)?;
+        let MetadataFile {
+            total_size,
+            downloaded,
+            chunk_size,
+            chunks,
+        } = bincode::deserialize_from(File::open(&metadata_file_path)?)?;
 
-        Ok(Self { total_size, downloaded, chunk_size, chunks, path: metadata_file_path })
+        Ok(Self {
+            total_size,
+            downloaded,
+            chunk_size,
+            chunks,
+            path: metadata_file_path,
+        })
     }
 
     /// Returns true if we have downloaded all chunks.

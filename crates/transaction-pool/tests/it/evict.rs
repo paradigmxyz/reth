@@ -19,14 +19,28 @@ async fn only_blobs_eviction() {
 
     // set the pool limits to something small
     let pool_config = PoolConfig {
-        pending_limit: SubPoolLimit { max_txs: 10, max_size: 1000 },
-        queued_limit: SubPoolLimit { max_txs: 10, max_size: 1000 },
-        basefee_limit: SubPoolLimit { max_txs: 10, max_size: 1000 },
-        blob_limit: SubPoolLimit { max_txs: 10, max_size: 1000 },
+        pending_limit: SubPoolLimit {
+            max_txs: 10,
+            max_size: 1000,
+        },
+        queued_limit: SubPoolLimit {
+            max_txs: 10,
+            max_size: 1000,
+        },
+        basefee_limit: SubPoolLimit {
+            max_txs: 10,
+            max_size: 1000,
+        },
+        blob_limit: SubPoolLimit {
+            max_txs: 10,
+            max_size: 1000,
+        },
         ..Default::default()
     };
 
-    let pool: TestPool = TestPoolBuilder::default().with_config(pool_config.clone()).into();
+    let pool: TestPool = TestPoolBuilder::default()
+        .with_config(pool_config.clone())
+        .into();
     let block_info = BlockInfo {
         block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
         last_seen_block_hash: B256::ZERO,
@@ -91,7 +105,9 @@ async fn only_blobs_eviction() {
             assert_eq!(set[0].nonce(), 0);
 
             // and finally insert it into the pool
-            let results = pool.add_transactions(TransactionOrigin::External, set).await;
+            let results = pool
+                .add_transactions(TransactionOrigin::External, set)
+                .await;
             for (i, result) in results.iter().enumerate() {
                 match result {
                     Ok(hash) => {
@@ -132,14 +148,28 @@ async fn mixed_eviction() {
     // to be set so that the transactions will actually pass validation. Transactions here do not
     // have nonce gaps.
     let pool_config = PoolConfig {
-        pending_limit: SubPoolLimit { max_txs: 20, max_size: 2000 },
-        queued_limit: SubPoolLimit { max_txs: 20, max_size: 2000 },
-        basefee_limit: SubPoolLimit { max_txs: 20, max_size: 2000 },
-        blob_limit: SubPoolLimit { max_txs: 20, max_size: 2000 },
+        pending_limit: SubPoolLimit {
+            max_txs: 20,
+            max_size: 2000,
+        },
+        queued_limit: SubPoolLimit {
+            max_txs: 20,
+            max_size: 2000,
+        },
+        basefee_limit: SubPoolLimit {
+            max_txs: 20,
+            max_size: 2000,
+        },
+        blob_limit: SubPoolLimit {
+            max_txs: 20,
+            max_size: 2000,
+        },
         ..Default::default()
     };
 
-    let pool: TestPool = TestPoolBuilder::default().with_config(pool_config.clone()).into();
+    let pool: TestPool = TestPoolBuilder::default()
+        .with_config(pool_config.clone())
+        .into();
     let block_info = BlockInfo {
         block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
         last_seen_block_hash: B256::ZERO,
@@ -197,7 +227,9 @@ async fn mixed_eviction() {
             let set = set.into_inner().into_vec();
             assert_eq!(set[0].nonce(), 0);
 
-            let results = pool.add_transactions(TransactionOrigin::External, set).await;
+            let results = pool
+                .add_transactions(TransactionOrigin::External, set)
+                .await;
             for (i, result) in results.iter().enumerate() {
                 match result {
                     Ok(_) => {
@@ -234,14 +266,28 @@ async fn nonce_gaps_eviction() {
     //
     // This test also inserts nonce gaps into the non-blob transactions.
     let pool_config = PoolConfig {
-        pending_limit: SubPoolLimit { max_txs: 20, max_size: 2000 },
-        queued_limit: SubPoolLimit { max_txs: 20, max_size: 2000 },
-        basefee_limit: SubPoolLimit { max_txs: 20, max_size: 2000 },
-        blob_limit: SubPoolLimit { max_txs: 20, max_size: 2000 },
+        pending_limit: SubPoolLimit {
+            max_txs: 20,
+            max_size: 2000,
+        },
+        queued_limit: SubPoolLimit {
+            max_txs: 20,
+            max_size: 2000,
+        },
+        basefee_limit: SubPoolLimit {
+            max_txs: 20,
+            max_size: 2000,
+        },
+        blob_limit: SubPoolLimit {
+            max_txs: 20,
+            max_size: 2000,
+        },
         ..Default::default()
     };
 
-    let pool: TestPool = TestPoolBuilder::default().with_config(pool_config.clone()).into();
+    let pool: TestPool = TestPoolBuilder::default()
+        .with_config(pool_config.clone())
+        .into();
     let block_info = BlockInfo {
         block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
         last_seen_block_hash: B256::ZERO,
@@ -305,7 +351,9 @@ async fn nonce_gaps_eviction() {
             set.with_nonce_gaps(gap_pct, gap_range.clone(), &mut rand::thread_rng());
             let set = set.into_inner().into_vec();
 
-            let results = pool.add_transactions(TransactionOrigin::External, set).await;
+            let results = pool
+                .add_transactions(TransactionOrigin::External, set)
+                .await;
             for (i, result) in results.iter().enumerate() {
                 match result {
                     Ok(_) => {

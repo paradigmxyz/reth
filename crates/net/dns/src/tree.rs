@@ -119,7 +119,12 @@ impl TreeRootEntry {
         })?
         .into();
 
-        Ok(Self { enr_root, link_root, sequence_number, signature })
+        Ok(Self {
+            enr_root,
+            link_root,
+            sequence_number,
+            signature,
+        })
     }
 
     /// Returns the _unsigned_ content pairs of the entry:
@@ -136,7 +141,9 @@ impl TreeRootEntry {
 
     /// Signs the content with the given key
     pub fn sign<K: EnrKey>(&mut self, key: &K) -> Result<(), EnrError> {
-        let sig = key.sign_v4(self.content().as_bytes()).map_err(|_| EnrError::SigningError)?;
+        let sig = key
+            .sign_v4(self.content().as_bytes())
+            .map_err(|_| EnrError::SigningError)?;
         self.signature = sig.into();
         Ok(())
     }
@@ -175,7 +182,12 @@ impl fmt::Debug for TreeRootEntry {
 
 impl fmt::Display for TreeRootEntry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} sig={}", self.content(), BASE64URL_NOPAD.encode(self.signature.as_ref()))
+        write!(
+            f,
+            "{} sig={}",
+            self.content(),
+            BASE64URL_NOPAD.encode(self.signature.as_ref())
+        )
     }
 }
 
@@ -205,13 +217,16 @@ impl BranchEntry {
 
             let decoded_len = base32_no_padding_decoded_len(hash.len());
             if !(12..=32).contains(&decoded_len) || hash.chars().any(|c| c.is_whitespace()) {
-                return Err(ParseDnsEntryError::InvalidChildHash(hash.to_string()))
+                return Err(ParseDnsEntryError::InvalidChildHash(hash.to_string()));
             }
             Ok(hash.to_string())
         }
 
-        let children =
-            input.trim().split(',').map(ensure_valid_hash).collect::<ParseEntryResult<Vec<_>>>()?;
+        let children = input
+            .trim()
+            .split(',')
+            .map(ensure_valid_hash)
+            .collect::<ParseEntryResult<Vec<_>>>()?;
         Ok(Self { children })
     }
 }
@@ -256,7 +271,10 @@ impl<K: EnrKeyUnambiguous> LinkEntry<K> {
         })?)
         .map_err(|err| ParseDnsEntryError::RlpDecodeError(err.to_string()))?;
 
-        Ok(Self { domain: domain.to_string(), pubkey })
+        Ok(Self {
+            domain: domain.to_string(),
+            pubkey,
+        })
     }
 }
 
@@ -322,7 +340,9 @@ impl<K: EnrKeyUnambiguous> NodeEntry<K> {
     ///
     /// Caution: This assumes the prefix is already removed.
     fn parse_value(s: &str) -> ParseEntryResult<Self> {
-        Ok(Self { enr: s.parse().map_err(ParseDnsEntryError::Other)? })
+        Ok(Self {
+            enr: s.parse().map_err(ParseDnsEntryError::Other)?,
+        })
     }
 }
 
@@ -357,7 +377,10 @@ where
 ///
 /// Returns an err if the `input` does not start with the `key`
 fn ensure_strip_key(input: &mut &str, key: &str, err: &'static str) -> ParseEntryResult<()> {
-    *input = input.trim_start().strip_prefix(key).ok_or(FieldNotFound(err))?;
+    *input = input
+        .trim_start()
+        .strip_prefix(key)
+        .ok_or(FieldNotFound(err))?;
     Ok(())
 }
 

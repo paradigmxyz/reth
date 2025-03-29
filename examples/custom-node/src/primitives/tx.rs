@@ -121,11 +121,15 @@ impl Typed2718 for CustomTransaction {
 
 impl Decodable2718 for CustomTransaction {
     fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
-        Ok(Self { inner: OpTransactionSigned::typed_decode(ty, buf)? })
+        Ok(Self {
+            inner: OpTransactionSigned::typed_decode(ty, buf)?,
+        })
     }
 
     fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
-        Ok(Self { inner: OpTransactionSigned::fallback_decode(buf)? })
+        Ok(Self {
+            inner: OpTransactionSigned::fallback_decode(buf)?,
+        })
     }
 }
 
@@ -141,7 +145,9 @@ impl Encodable2718 for CustomTransaction {
 
 impl Decodable for CustomTransaction {
     fn decode(buf: &mut &[u8]) -> RlpResult<Self> {
-        Ok(Self { inner: OpTransactionSigned::decode(buf)? })
+        Ok(Self {
+            inner: OpTransactionSigned::decode(buf)?,
+        })
     }
 }
 

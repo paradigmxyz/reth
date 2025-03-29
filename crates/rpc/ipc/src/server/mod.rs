@@ -143,7 +143,10 @@ where
             Ok(listener) => listener,
             Err(err) => {
                 on_ready
-                    .send(Err(IpcServerStartError { endpoint: self.endpoint.clone(), source: err }))
+                    .send(Err(IpcServerStartError {
+                        endpoint: self.endpoint.clone(),
+                        source: err,
+                    }))
                     .ok();
                 return;
             }
@@ -163,7 +166,10 @@ where
         trace!("accepting ipc connections");
         loop {
             match try_accept_conn(&listener, stopped).await {
-                AcceptConnection::Established { local_socket_stream, stop } => {
+                AcceptConnection::Established {
+                    local_socket_stream,
+                    stop,
+                } => {
                     let Some(conn_permit) = connection_guard.try_acquire() else {
                         let (_reader, mut writer) = local_socket_stream.split();
                         let _ = writer
@@ -219,7 +225,10 @@ where
 
 enum AcceptConnection<S> {
     Shutdown,
-    Established { local_socket_stream: LocalSocketStream, stop: S },
+    Established {
+        local_socket_stream: LocalSocketStream,
+        stop: S,
+    },
     Err((io::Error, S)),
 }
 
@@ -229,7 +238,10 @@ where
 {
     match futures_util::future::select(pin!(listener.accept()), stopped).await {
         Either::Left((res, stop)) => match res {
-            Ok(local_socket_stream) => AcceptConnection::Established { local_socket_stream, stop },
+            Ok(local_socket_stream) => AcceptConnection::Established {
+                local_socket_stream,
+                stop,
+            },
             Err(e) => AcceptConnection::Err((e, stop)),
         },
         Either::Right(_) => AcceptConnection::Shutdown,
@@ -484,7 +496,9 @@ fn process_connection<'b, RpcMiddleware, HttpMiddleware>(
 
     let service = http_middleware.service(tower_service);
     tokio::spawn(async {
-        to_ipc_service(ipc, service, stop_handle, rx).in_current_span().await;
+        to_ipc_service(ipc, service, stop_handle, rx)
+            .in_current_span()
+            .await;
         drop(drop_on_completion)
     });
 }
@@ -867,30 +881,42 @@ mod tests {
     async fn can_set_the_max_response_body_size() {
         // init_test_tracing();
         let endpoint = &dummy_name();
-        let server = Builder::default().max_response_body_size(100).build(endpoint.clone());
+        let server = Builder::default()
+            .max_response_body_size(100)
+            .build(endpoint.clone());
         let mut module = RpcModule::new(());
-        module.register_method("anything", |_, _, _| "a".repeat(101)).unwrap();
+        module
+            .register_method("anything", |_, _, _| "a".repeat(101))
+            .unwrap();
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
         let client = IpcClientBuilder::default().build(endpoint).await.unwrap();
         let response: Result<String, Error> = client.request("anything", rpc_params![]).await;
-        assert!(response.unwrap_err().to_string().contains("Exceeded max limit of"));
+        assert!(response
+            .unwrap_err()
+            .to_string()
+            .contains("Exceeded max limit of"));
     }
 
     #[tokio::test]
     async fn can_set_the_max_request_body_size() {
         init_test_tracing();
         let endpoint = &dummy_name();
-        let server = Builder::default().max_request_body_size(100).build(endpoint.clone());
+        let server = Builder::default()
+            .max_request_body_size(100)
+            .build(endpoint.clone());
         let mut module = RpcModule::new(());
-        module.register_method("anything", |_, _, _| "succeed").unwrap();
+        module
+            .register_method("anything", |_, _, _| "succeed")
+            .unwrap();
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
         let client = IpcClientBuilder::default().build(endpoint).await.unwrap();
-        let response: Result<String, Error> =
-            client.request("anything", rpc_params!["a".repeat(101)]).await;
+        let response: Result<String, Error> = client
+            .request("anything", rpc_params!["a".repeat(101)])
+            .await;
         assert!(response.is_err());
         let mut batch_request_builder = BatchRequestBuilder::new();
         let _ = batch_request_builder.insert("anything", rpc_params![]);
@@ -910,9 +936,13 @@ mod tests {
         init_test_tracing();
 
         let endpoint = &dummy_name();
-        let server = Builder::default().max_connections(2).build(endpoint.clone());
+        let server = Builder::default()
+            .max_connections(2)
+            .build(endpoint.clone());
         let mut module = RpcModule::new(());
-        module.register_method("anything", |_, _, _| "succeed").unwrap();
+        module
+            .register_method("anything", |_, _, _| "succeed")
+            .unwrap();
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
@@ -946,7 +976,9 @@ mod tests {
         let server = Builder::default().build(endpoint.clone());
         let mut module = RpcModule::new(());
         let msg = r#"{"jsonrpc":"2.0","id":83,"result":"0x7a69"}"#;
-        module.register_method("eth_chainId", move |_, _, _| msg).unwrap();
+        module
+            .register_method("eth_chainId", move |_, _, _| msg)
+            .unwrap();
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
@@ -986,7 +1018,9 @@ mod tests {
         let server = Builder::default().build(endpoint.clone());
         let mut module = RpcModule::new(());
         let msg = r#"{"admin":"1.0","debug":"1.0","engine":"1.0","eth":"1.0","ethash":"1.0","miner":"1.0","net":"1.0","rpc":"1.0","txpool":"1.0","web3":"1.0"}"#;
-        module.register_method("rpc_modules", move |_, _, _| msg).unwrap();
+        module
+            .register_method("rpc_modules", move |_, _, _| msg)
+            .unwrap();
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
@@ -1022,8 +1056,10 @@ mod tests {
         tokio::spawn(handle.stopped());
 
         let client = IpcClientBuilder::default().build(endpoint).await.unwrap();
-        let sub: Subscription<usize> =
-            client.subscribe("subscribe_hello", rpc_params![], "unsubscribe_hello").await.unwrap();
+        let sub: Subscription<usize> = client
+            .subscribe("subscribe_hello", rpc_params![], "unsubscribe_hello")
+            .await
+            .unwrap();
 
         let items = sub.take(16).collect::<Vec<_>>().await;
         assert_eq!(items.len(), 16);
@@ -1056,13 +1092,19 @@ mod tests {
         let endpoint = &dummy_name();
 
         let rpc_middleware = RpcServiceBuilder::new().layer_fn(ModifyRequestIf);
-        let server = Builder::default().set_rpc_middleware(rpc_middleware).build(endpoint.clone());
+        let server = Builder::default()
+            .set_rpc_middleware(rpc_middleware)
+            .build(endpoint.clone());
 
         let mut module = RpcModule::new(());
         let goodbye_msg = r#"{"jsonrpc":"2.0","id":1,"result":"goodbye"}"#;
         let hello_msg = r#"{"jsonrpc":"2.0","id":2,"result":"hello"}"#;
-        module.register_method("say_hello", move |_, _, _| hello_msg).unwrap();
-        module.register_method("say_goodbye", move |_, _, _| goodbye_msg).unwrap();
+        module
+            .register_method("say_hello", move |_, _, _| hello_msg)
+            .unwrap();
+        module
+            .register_method("say_goodbye", move |_, _, _| goodbye_msg)
+            .unwrap();
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 

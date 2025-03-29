@@ -44,7 +44,9 @@ impl LogFormat {
         file_writer: Option<NonBlocking>,
     ) -> BoxedLayer<Registry> {
         let ansi = if let Some(color) = color {
-            std::env::var("RUST_LOG_STYLE").map(|val| val != "never").unwrap_or(color != "never")
+            std::env::var("RUST_LOG_STYLE")
+                .map(|val| val != "never")
+                .unwrap_or(color != "never")
         } else {
             false
         };
@@ -58,8 +60,10 @@ impl LogFormat {
 
         match self {
             Self::Json => {
-                let layer =
-                    tracing_subscriber::fmt::layer().json().with_ansi(ansi).with_target(target);
+                let layer = tracing_subscriber::fmt::layer()
+                    .json()
+                    .with_ansi(ansi)
+                    .with_target(target);
 
                 if let Some(writer) = file_writer {
                     layer.with_writer(writer).with_filter(filter).boxed()
@@ -69,7 +73,9 @@ impl LogFormat {
             }
             Self::LogFmt => tracing_logfmt::layer().with_filter(filter).boxed(),
             Self::Terminal => {
-                let layer = tracing_subscriber::fmt::layer().with_ansi(ansi).with_target(target);
+                let layer = tracing_subscriber::fmt::layer()
+                    .with_ansi(ansi)
+                    .with_target(target);
 
                 if let Some(writer) = file_writer {
                     layer.with_writer(writer).with_filter(filter).boxed()

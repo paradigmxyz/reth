@@ -59,7 +59,9 @@ pub struct BlockingTaskPool {
 impl BlockingTaskPool {
     /// Create a new `BlockingTaskPool` with the given threadpool.
     pub fn new(pool: rayon::ThreadPool) -> Self {
-        Self { pool: Arc::new(pool) }
+        Self {
+            pool: Arc::new(pool),
+        }
     }
 
     /// Convenience function to start building a new threadpool.

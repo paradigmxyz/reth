@@ -81,7 +81,10 @@ pub struct OpNode {
 impl OpNode {
     /// Creates a new instance of the Optimism node type.
     pub fn new(args: RollupArgs) -> Self {
-        Self { args, da_config: OpDAConfig::default() }
+        Self {
+            args,
+            da_config: OpDAConfig::default(),
+        }
     }
 
     /// Configure the data availability configuration for the OP builder.
@@ -110,8 +113,12 @@ impl OpNode {
             >,
         >,
     {
-        let RollupArgs { disable_txpool_gossip, compute_pending_block, discovery_v4, .. } =
-            self.args;
+        let RollupArgs {
+            disable_txpool_gossip,
+            compute_pending_block,
+            discovery_v4,
+            ..
+        } = self.args;
         ComponentsBuilder::default()
             .node_types::<Node>()
             .pool(
@@ -211,7 +218,11 @@ where
     type RpcBlock = alloy_rpc_types_eth::Block<op_alloy_consensus::OpTxEnvelope>;
 
     fn rpc_to_primitive_block(rpc_block: Self::RpcBlock) -> reth_node_api::BlockTy<Self> {
-        let alloy_rpc_types_eth::Block { header, transactions, .. } = rpc_block;
+        let alloy_rpc_types_eth::Block {
+            header,
+            transactions,
+            ..
+        } = rpc_block;
         reth_optimism_primitives::OpBlock {
             header: header.inner,
             body: reth_optimism_primitives::OpBlockBody {
@@ -296,7 +307,12 @@ where
         self,
         ctx: reth_node_api::AddOnsContext<'_, N>,
     ) -> eyre::Result<Self::Handle> {
-        let Self { rpc_add_ons, da_config, sequencer_client, enable_tx_conditional } = self;
+        let Self {
+            rpc_add_ons,
+            da_config,
+            sequencer_client,
+            enable_tx_conditional,
+        } = self;
 
         let builder = reth_optimism_payload_builder::OpPayloadBuilder::new(
             ctx.node.pool().clone(),
@@ -434,7 +450,11 @@ impl OpAddOnsBuilder {
         N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>,
         OpEthApiBuilder: EthApiBuilder<N>,
     {
-        let Self { sequencer_client, da_config, enable_tx_conditional } = self;
+        let Self {
+            sequencer_client,
+            da_config,
+            enable_tx_conditional,
+        } = self;
 
         let sequencer_client_clone = sequencer_client.clone();
         OpAddOns {
@@ -541,12 +561,17 @@ where
     type Pool = OpTransactionPool<Node::Provider, DiskFileBlobStore, T>;
 
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
-        let Self { pool_config_overrides, .. } = self;
+        let Self {
+            pool_config_overrides,
+            ..
+        } = self;
         let data_dir = ctx.config().datadir();
         let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
         // supervisor used for interop
-        if ctx.chain_spec().is_interop_active_at_timestamp(ctx.head().timestamp) &&
-            self.supervisor_http == DEFAULT_SUPERVISOR_URL
+        if ctx
+            .chain_spec()
+            .is_interop_active_at_timestamp(ctx.head().timestamp)
+            && self.supervisor_http == DEFAULT_SUPERVISOR_URL
         {
             info!(target: "reth::cli",
                 url=%DEFAULT_SUPERVISOR_URL,
@@ -591,16 +616,17 @@ where
             let transactions_backup_config =
                 reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
 
-            ctx.task_executor().spawn_critical_with_graceful_shutdown_signal(
-                "local transactions backup task",
-                |shutdown| {
-                    reth_transaction_pool::maintain::backup_local_transactions_task(
-                        shutdown,
-                        pool.clone(),
-                        transactions_backup_config,
-                    )
-                },
-            );
+            ctx.task_executor()
+                .spawn_critical_with_graceful_shutdown_signal(
+                    "local transactions backup task",
+                    |shutdown| {
+                        reth_transaction_pool::maintain::backup_local_transactions_task(
+                            shutdown,
+                            pool.clone(),
+                            transactions_backup_config,
+                        )
+                    },
+                );
 
             // spawn the main maintenance task
             ctx.task_executor().spawn_critical(
@@ -672,7 +698,11 @@ impl OpPayloadBuilder {
     /// Create a new instance with the given `compute_pending_block` flag and data availability
     /// config.
     pub fn new(compute_pending_block: bool) -> Self {
-        Self { compute_pending_block, best_transactions: (), da_config: OpDAConfig::default() }
+        Self {
+            compute_pending_block,
+            best_transactions: (),
+            da_config: OpDAConfig::default(),
+        }
     }
 
     /// Configure the data availability configuration for the OP payload builder.
@@ -686,8 +716,16 @@ impl<Txs> OpPayloadBuilder<Txs> {
     /// Configures the type responsible for yielding the transactions that should be included in the
     /// payload.
     pub fn with_transactions<T>(self, best_transactions: T) -> OpPayloadBuilder<T> {
-        let Self { compute_pending_block, da_config, .. } = self;
-        OpPayloadBuilder { compute_pending_block, best_transactions, da_config }
+        let Self {
+            compute_pending_block,
+            da_config,
+            ..
+        } = self;
+        OpPayloadBuilder {
+            compute_pending_block,
+            best_transactions,
+            da_config,
+        }
     }
 
     /// A helper method to initialize [`reth_optimism_payload_builder::OpPayloadBuilder`] with the
@@ -716,7 +754,9 @@ impl<Txs> OpPayloadBuilder<Txs> {
             pool,
             ctx.provider().clone(),
             evm_config,
-            OpBuilderConfig { da_config: self.da_config.clone() },
+            OpBuilderConfig {
+                da_config: self.da_config.clone(),
+            },
         )
         .with_transactions(self.best_transactions.clone())
         .set_compute_pending_block(self.compute_pending_block);
@@ -771,7 +811,10 @@ impl OpNetworkBuilder {
     where
         Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
     {
-        let Self { disable_txpool_gossip, disable_discovery_v4 } = self.clone();
+        let Self {
+            disable_txpool_gossip,
+            disable_discovery_v4,
+        } = self.clone();
         let args = &ctx.config().network;
         let network_builder = ctx
             .network_config_builder()?

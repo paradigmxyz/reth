@@ -35,7 +35,10 @@ use reth_primitives_traits::{
 use revm_context::TxEnv;
 
 /// Signed transaction.
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
+#[cfg_attr(
+    any(test, feature = "reth-codec"),
+    reth_codecs::add_arbitrary_tests(rlp)
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Eq, AsRef, Deref)]
 pub struct OpTransactionSigned {
@@ -53,7 +56,11 @@ pub struct OpTransactionSigned {
 impl OpTransactionSigned {
     /// Creates a new signed transaction from the given transaction, signature and hash.
     pub fn new(transaction: OpTypedTransaction, signature: Signature, hash: B256) -> Self {
-        Self { hash: hash.into(), signature, transaction }
+        Self {
+            hash: hash.into(),
+            signature,
+            transaction,
+        }
     }
 
     /// Consumes the type and returns the transaction.
@@ -77,7 +84,11 @@ impl OpTransactionSigned {
     ///
     /// Note: this only calculates the hash on the first [`OpTransactionSigned::hash`] call.
     pub fn new_unhashed(transaction: OpTypedTransaction, signature: Signature) -> Self {
-        Self { hash: Default::default(), signature, transaction }
+        Self {
+            hash: Default::default(),
+            signature,
+            transaction,
+        }
     }
 
     /// Returns whether this transaction is a deposit.
@@ -101,10 +112,14 @@ impl SignedTransaction for OpTransactionSigned {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
         if let OpTypedTransaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Ok(from)
+            return Ok(from);
         }
 
-        let Self { transaction, signature, .. } = self;
+        let Self {
+            transaction,
+            signature,
+            ..
+        } = self;
         let signature_hash = signature_hash(transaction);
         recover_signer(signature, signature_hash)
     }
@@ -113,10 +128,14 @@ impl SignedTransaction for OpTransactionSigned {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
         if let OpTypedTransaction::Deposit(TxDeposit { from, .. }) = &self.transaction {
-            return Ok(*from)
+            return Ok(*from);
         }
 
-        let Self { transaction, signature, .. } = self;
+        let Self {
+            transaction,
+            signature,
+            ..
+        } = self;
         let signature_hash = signature_hash(transaction);
         recover_signer_unchecked(signature, signature_hash)
     }
@@ -155,7 +174,13 @@ macro_rules! impl_from_signed {
     };
 }
 
-impl_from_signed!(TxLegacy, TxEip2930, TxEip1559, TxEip7702, OpTypedTransaction);
+impl_from_signed!(
+    TxLegacy,
+    TxEip2930,
+    TxEip1559,
+    TxEip7702,
+    OpTypedTransaction
+);
 
 impl From<OpTxEnvelope> for OpTransactionSigned {
     fn from(value: OpTxEnvelope) -> Self {
@@ -192,7 +217,11 @@ impl From<OpTransactionSigned> for Signed<OpTypedTransaction> {
 impl From<Sealed<TxDeposit>> for OpTransactionSigned {
     fn from(value: Sealed<TxDeposit>) -> Self {
         let (tx, hash) = value.into_parts();
-        Self::new(OpTypedTransaction::Deposit(tx), TxDeposit::signature(), hash)
+        Self::new(
+            OpTypedTransaction::Deposit(tx),
+            TxDeposit::signature(),
+            hash,
+        )
     }
 }
 
@@ -331,7 +360,11 @@ impl alloy_rlp::Encodable for OpTransactionSigned {
     fn length(&self) -> usize {
         let mut payload_length = self.encode_2718_len();
         if !self.is_legacy() {
-            payload_length += Header { list: false, payload_length }.length();
+            payload_length += Header {
+                list: false,
+                payload_length,
+            }
+            .length();
         }
 
         payload_length
@@ -372,7 +405,11 @@ impl Encodable2718 for OpTransactionSigned {
     }
 
     fn encode_2718(&self, out: &mut dyn alloy_rlp::BufMut) {
-        let Self { transaction, signature, .. } = self;
+        let Self {
+            transaction,
+            signature,
+            ..
+        } = self;
 
         match &transaction {
             OpTypedTransaction::Legacy(legacy_tx) => {
@@ -393,7 +430,10 @@ impl Encodable2718 for OpTransactionSigned {
 
 impl Decodable2718 for OpTransactionSigned {
     fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
-        match ty.try_into().map_err(|_| Eip2718Error::UnexpectedType(ty))? {
+        match ty
+            .try_into()
+            .map_err(|_| Eip2718Error::UnexpectedType(ty))?
+        {
             op_alloy_consensus::OpTxType::Legacy => Err(Eip2718Error::UnexpectedType(0)),
             op_alloy_consensus::OpTxType::Eip2930 => {
                 let (tx, signature, hash) = TxEip2930::rlp_decode_signed(buf)?.into_parts();
@@ -510,9 +550,9 @@ impl Typed2718 for OpTransactionSigned {
 
 impl PartialEq for OpTransactionSigned {
     fn eq(&self, other: &Self) -> bool {
-        self.signature == other.signature &&
-            self.transaction == other.transaction &&
-            self.tx_hash() == other.tx_hash()
+        self.signature == other.signature
+            && self.transaction == other.transaction
+            && self.tx_hash() == other.tx_hash()
     }
 }
 
@@ -602,7 +642,14 @@ impl reth_codecs::Compact for OpTransactionSigned {
             OpTypedTransaction::from_compact(buf, transaction_type)
         };
 
-        (Self { signature, transaction, hash: Default::default() }, buf)
+        (
+            Self {
+                signature,
+                transaction,
+                hash: Default::default(),
+            },
+            buf,
+        )
     }
 }
 
@@ -629,7 +676,11 @@ impl<'a> arbitrary::Arbitrary<'a> for OpTransactionSigned {
             }
         }
 
-        let signature = if is_deposit(&transaction) { TxDeposit::signature() } else { signature };
+        let signature = if is_deposit(&transaction) {
+            TxDeposit::signature()
+        } else {
+            signature
+        };
 
         Ok(Self::new_unhashed(transaction, signature))
     }
@@ -667,7 +718,11 @@ impl TryFrom<OpTransactionSigned> for OpPooledTransaction {
 
     fn try_from(value: OpTransactionSigned) -> Result<Self, Self::Error> {
         let hash = *value.tx_hash();
-        let OpTransactionSigned { hash: _, signature, transaction } = value;
+        let OpTransactionSigned {
+            hash: _,
+            signature,
+            transaction,
+        } = value;
 
         match transaction {
             OpTypedTransaction::Legacy(tx) => {
@@ -715,9 +770,9 @@ pub mod serde_bincode_compat {
                 super::OpTypedTransaction::Eip2930(tx) => Self::Eip2930(TxEip2930::from(tx)),
                 super::OpTypedTransaction::Eip1559(tx) => Self::Eip1559(TxEip1559::from(tx)),
                 super::OpTypedTransaction::Eip7702(tx) => Self::Eip7702(TxEip7702::from(tx)),
-                super::OpTypedTransaction::Deposit(tx) => {
-                    Self::Deposit(op_alloy_consensus::serde_bincode_compat::TxDeposit::from(tx))
-                }
+                super::OpTypedTransaction::Deposit(tx) => Self::Deposit(
+                    op_alloy_consensus::serde_bincode_compat::TxDeposit::from(tx),
+                ),
             }
         }
     }

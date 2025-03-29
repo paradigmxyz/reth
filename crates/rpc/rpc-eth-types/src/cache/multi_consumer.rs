@@ -71,9 +71,11 @@ where
         self.cache
             .remove(key)
             .inspect(|value| self.memory_usage = self.memory_usage.saturating_sub(value.size()));
-        self.queued
-            .remove(key)
-            .inspect(|removed| self.metrics.queued_consumers_count.decrement(removed.len() as f64))
+        self.queued.remove(key).inspect(|removed| {
+            self.metrics
+                .queued_consumers_count
+                .decrement(removed.len() as f64)
+        })
     }
 
     /// Returns a reference to the value for a given key and promotes that element to be the most

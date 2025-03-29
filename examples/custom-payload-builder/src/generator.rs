@@ -39,7 +39,12 @@ impl<Client, Tasks, Builder> EmptyBlockPayloadJobGenerator<Client, Tasks, Builde
         config: BasicPayloadJobGeneratorConfig,
         builder: Builder,
     ) -> Self {
-        Self { client, executor, _config: config, builder }
+        Self {
+            client,
+            executor,
+            _config: config,
+            builder,
+        }
     }
 }
 

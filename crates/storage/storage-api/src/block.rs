@@ -291,7 +291,8 @@ pub trait BlockReaderIdExt: BlockReader + ReceiptProviderIdExt {
     ///
     /// Returns `None` if block is not found.
     fn block_by_number_or_tag(&self, id: BlockNumberOrTag) -> ProviderResult<Option<Self::Block>> {
-        self.convert_block_number(id)?.map_or_else(|| Ok(None), |num| self.block(num.into()))
+        self.convert_block_number(id)?
+            .map_or_else(|| Ok(None), |num| self.block(num.into()))
     }
 
     /// Returns the pending block header if available
@@ -343,9 +344,10 @@ pub trait BlockReaderIdExt: BlockReader + ReceiptProviderIdExt {
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         match id {
             BlockId::Hash(hash) => self.recovered_block(hash.block_hash.into(), transaction_kind),
-            BlockId::Number(num) => self
-                .convert_block_number(num)?
-                .map_or_else(|| Ok(None), |num| self.recovered_block(num.into(), transaction_kind)),
+            BlockId::Number(num) => self.convert_block_number(num)?.map_or_else(
+                || Ok(None),
+                |num| self.recovered_block(num.into(), transaction_kind),
+            ),
         }
     }
 
@@ -390,7 +392,8 @@ pub trait BlockReaderIdExt: BlockReader + ReceiptProviderIdExt {
         &self,
         id: BlockNumberOrTag,
     ) -> ProviderResult<Option<Vec<Self::Header>>> {
-        self.convert_block_number(id)?.map_or_else(|| Ok(None), |num| self.ommers(num.into()))
+        self.convert_block_number(id)?
+            .map_or_else(|| Ok(None), |num| self.ommers(num.into()))
     }
 
     /// Returns the ommers with the matching `BlockId` from the database.

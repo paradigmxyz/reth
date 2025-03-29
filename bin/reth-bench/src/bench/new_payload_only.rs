@@ -35,13 +35,20 @@ impl Command {
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
         // TODO: this could be just a function I guess, but destructuring makes the code slightly
         // more readable than a 4 element tuple.
-        let BenchContext { benchmark_mode, block_provider, auth_provider, mut next_block } =
-            BenchContext::new(&self.benchmark, self.rpc_url).await?;
+        let BenchContext {
+            benchmark_mode,
+            block_provider,
+            auth_provider,
+            mut next_block,
+        } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
         let (sender, mut receiver) = tokio::sync::mpsc::channel(1000);
         tokio::task::spawn(async move {
             while benchmark_mode.contains(next_block) {
-                let block_res = block_provider.get_block_by_number(next_block.into()).full().await;
+                let block_res = block_provider
+                    .get_block_by_number(next_block.into())
+                    .full()
+                    .await;
                 let block = block_res.unwrap().unwrap();
                 let block = block
                     .into_inner()
@@ -52,12 +59,18 @@ impl Command {
                     .unwrap()
                     .into_consensus();
 
-                let blob_versioned_hashes =
-                    block.body.blob_versioned_hashes_iter().copied().collect::<Vec<_>>();
+                let blob_versioned_hashes = block
+                    .body
+                    .blob_versioned_hashes_iter()
+                    .copied()
+                    .collect::<Vec<_>>();
                 let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
 
                 next_block += 1;
-                sender.send((block.header, blob_versioned_hashes, payload, sidecar)).await.unwrap();
+                sender
+                    .send((block.header, blob_versioned_hashes, payload, sidecar))
+                    .await
+                    .unwrap();
             }
         });
 
@@ -93,7 +106,10 @@ impl Command {
             )
             .await?;
 
-            let new_payload_result = NewPayloadResult { gas_used, latency: start.elapsed() };
+            let new_payload_result = NewPayloadResult {
+                gas_used,
+                latency: start.elapsed(),
+            };
             info!(%new_payload_result);
 
             // current duration since the start of the benchmark minus the time
@@ -101,7 +117,11 @@ impl Command {
             let current_duration = total_benchmark_duration.elapsed() - total_wait_time;
 
             // record the current result
-            let row = TotalGasRow { block_number, gas_used, time: current_duration };
+            let row = TotalGasRow {
+                block_number,
+                gas_used,
+                time: current_duration,
+            };
             results.push((row, new_payload_result));
         }
 
@@ -112,7 +132,10 @@ impl Command {
         if let Some(path) = self.benchmark.output {
             // first write the new payload results to a file
             let output_path = path.join(NEW_PAYLOAD_OUTPUT_SUFFIX);
-            info!("Writing newPayload call latency output to file: {:?}", output_path);
+            info!(
+                "Writing newPayload call latency output to file: {:?}",
+                output_path
+            );
             let mut writer = Writer::from_path(output_path)?;
             for result in new_payload_results {
                 writer.serialize(result)?;

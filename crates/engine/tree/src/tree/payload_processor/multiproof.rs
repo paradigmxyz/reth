@@ -50,7 +50,10 @@ impl SparseTrieUpdate {
     /// Construct update from multiproof.
     #[cfg(test)]
     pub(super) fn from_multiproof(multiproof: MultiProof) -> Self {
-        Self { multiproof, ..Default::default() }
+        Self {
+            multiproof,
+            ..Default::default()
+        }
     }
 
     /// Extend update with contents of the other.
@@ -158,7 +161,7 @@ impl ProofSequencer {
 
         // return early if we don't have the next expected proof
         if !self.pending_proofs.contains_key(&self.next_to_deliver) {
-            return Vec::new()
+            return Vec::new();
         }
 
         let mut consecutive_proofs = Vec::with_capacity(self.pending_proofs.len());
@@ -216,7 +219,11 @@ pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostStat
             trace!(target: "engine::root", ?address, ?hashed_address, "Adding account to state update");
 
             let destroyed = account.is_selfdestructed();
-            let info = if destroyed { None } else { Some(account.info.into()) };
+            let info = if destroyed {
+                None
+            } else {
+                Some(account.info.into())
+            };
             hashed_state.accounts.insert(hashed_address, info);
 
             let mut changed_storage_iter = account
@@ -227,11 +234,14 @@ pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostStat
                 .peekable();
 
             if destroyed {
-                hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
-            } else if changed_storage_iter.peek().is_some() {
                 hashed_state
                     .storages
-                    .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
+                    .insert(hashed_address, HashedStorage::new(true));
+            } else if changed_storage_iter.peek().is_some() {
+                hashed_state.storages.insert(
+                    hashed_address,
+                    HashedStorage::from_iter(false, changed_storage_iter),
+                );
             }
         }
     }
@@ -301,16 +311,20 @@ where
                 sequence_number = input.proof_sequence_number,
                 "No proof targets, sending empty multiproof back immediately"
             );
-            let _ = input.state_root_message_sender.send(MultiProofMessage::EmptyProof {
-                sequence_number: input.proof_sequence_number,
-                state: input.hashed_state_update,
-            });
-            return
+            let _ = input
+                .state_root_message_sender
+                .send(MultiProofMessage::EmptyProof {
+                    sequence_number: input.proof_sequence_number,
+                    state: input.hashed_state_update,
+                });
+            return;
         }
 
         if self.inflight >= self.max_concurrent {
             self.pending.push_back(input);
-            self.metrics.pending_multiproofs_histogram.record(self.pending.len() as f64);
+            self.metrics
+                .pending_multiproofs_histogram
+                .record(self.pending.len() as f64);
             return;
         }
 
@@ -321,10 +335,14 @@ where
     /// spawn a new calculation if needed.
     fn on_calculation_complete(&mut self) {
         self.inflight = self.inflight.saturating_sub(1);
-        self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
+        self.metrics
+            .inflight_multiproofs_histogram
+            .record(self.inflight as f64);
 
         if let Some(input) = self.pending.pop_front() {
-            self.metrics.pending_multiproofs_histogram.record(self.pending.len() as f64);
+            self.metrics
+                .pending_multiproofs_histogram
+                .record(self.pending.len() as f64);
             self.spawn_multiproof(input);
         }
     }
@@ -345,7 +363,10 @@ where
 
         self.executor.spawn_blocking(move || {
             let account_targets = proof_targets.len();
-            let storage_targets = proof_targets.values().map(|slots| slots.len()).sum::<usize>();
+            let storage_targets = proof_targets
+                .values()
+                .map(|slots| slots.len())
+                .sum::<usize>();
 
             trace!(
                 target: "engine::root",
@@ -397,7 +418,9 @@ where
         });
 
         self.inflight += 1;
-        self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
+        self.metrics
+            .inflight_multiproofs_histogram
+            .record(self.inflight as f64);
     }
 }
 
@@ -515,10 +538,17 @@ where
         let proof_targets = self.get_prefetch_proof_targets(targets);
         self.fetched_proof_targets.extend_ref(&proof_targets);
 
-        self.metrics.prefetch_proof_targets_accounts_histogram.record(proof_targets.len() as f64);
+        self.metrics
+            .prefetch_proof_targets_accounts_histogram
+            .record(proof_targets.len() as f64);
         self.metrics
             .prefetch_proof_targets_storages_histogram
-            .record(proof_targets.values().map(|slots| slots.len()).sum::<usize>() as f64);
+            .record(
+                proof_targets
+                    .values()
+                    .map(|slots| slots.len())
+                    .sum::<usize>() as f64,
+            );
 
         // Process proof targets in chunks.
         let mut chunks = 0;
@@ -533,7 +563,9 @@ where
             });
             chunks += 1;
         }
-        self.metrics.prefetch_proof_chunks_histogram.record(chunks as f64);
+        self.metrics
+            .prefetch_proof_chunks_histogram
+            .record(chunks as f64);
 
         chunks
     }
@@ -591,7 +623,7 @@ where
             let Some(fetched_storage) = self.fetched_proof_targets.get(hashed_address) else {
                 // this means the account has not been fetched yet, so we must fetch everything
                 // associated with this account
-                continue
+                continue;
             };
 
             let prev_target_storage_len = target_storage.len();
@@ -655,8 +687,15 @@ where
             .record(spawned_proof_targets.len() as f64);
         self.metrics
             .state_update_proof_targets_storages_histogram
-            .record(spawned_proof_targets.values().map(|slots| slots.len()).sum::<usize>() as f64);
-        self.metrics.state_update_proof_chunks_histogram.record(chunks as f64);
+            .record(
+                spawned_proof_targets
+                    .values()
+                    .map(|slots| slots.len())
+                    .sum::<usize>() as f64,
+            );
+        self.metrics
+            .state_update_proof_chunks_histogram
+            .record(chunks as f64);
 
         self.fetched_proof_targets.extend(spawned_proof_targets);
 
@@ -794,17 +833,23 @@ where
                                 target: "engine::root",
                                 "State updates finished and all proofs processed, ending calculation"
                             );
-                            break
+                            break;
                         }
                     }
-                    MultiProofMessage::EmptyProof { sequence_number, state } => {
+                    MultiProofMessage::EmptyProof {
+                        sequence_number,
+                        state,
+                    } => {
                         trace!(target: "engine::root", "processing MultiProofMessage::EmptyProof");
 
                         proofs_processed += 1;
 
                         if let Some(combined_update) = self.on_proof(
                             sequence_number,
-                            SparseTrieUpdate { state, multiproof: MultiProof::default() },
+                            SparseTrieUpdate {
+                                state,
+                                multiproof: MultiProof::default(),
+                            },
                         ) {
                             let _ = self.to_sparse_trie.send(combined_update);
                         }
@@ -819,7 +864,7 @@ where
                                 target: "engine::root",
                                 "State updates finished and all proofs processed, ending calculation"
                             );
-                            break
+                            break;
                         }
                     }
                     MultiProofMessage::ProofCalculated(proof_calculated) => {
@@ -858,7 +903,7 @@ where
                             debug!(
                                 target: "engine::root",
                                 "State updates finished and all proofs processed, ending calculation");
-                            break
+                            break;
                         }
                     }
                     MultiProofMessage::ProofCalculationError(err) => {
@@ -867,7 +912,7 @@ where
                             ?err,
                             "proof calculation error"
                         );
-                        return
+                        return;
                     }
                 },
                 Err(_) => {
@@ -891,10 +936,16 @@ where
         );
 
         // update total metrics on finish
-        self.metrics.state_updates_received_histogram.record(state_update_proofs_requested as f64);
-        self.metrics.proofs_processed_histogram.record(proofs_processed as f64);
+        self.metrics
+            .state_updates_received_histogram
+            .record(state_update_proofs_requested as f64);
+        self.metrics
+            .proofs_processed_histogram
+            .record(proofs_processed as f64);
         if let Some(total_time) = first_update_time.map(|t| t.elapsed()) {
-            self.metrics.multiproof_task_total_duration_histogram.record(total_time);
+            self.metrics
+                .multiproof_task_total_duration_histogram
+                .record(total_time);
         }
     }
 }
@@ -925,7 +976,10 @@ fn get_proof_targets(
             .peekable();
 
         if changed_slots.peek().is_some() {
-            targets.entry(*hashed_address).or_default().extend(changed_slots);
+            targets
+                .entry(*hashed_address)
+                .or_default()
+                .extend(changed_slots);
         }
     }
 
@@ -954,7 +1008,12 @@ mod tests {
         let state_sorted = Arc::new(input.state.clone().into_sorted());
         let prefix_sets = Arc::new(input.prefix_sets);
 
-        MultiProofConfig { consistent_view, nodes_sorted, state_sorted, prefix_sets }
+        MultiProofConfig {
+            consistent_view,
+            nodes_sorted,
+            state_sorted,
+            prefix_sets,
+        }
     }
 
     fn create_test_state_root_task<F>(factory: F) -> MultiProofTask<F>
@@ -1250,7 +1309,9 @@ mod tests {
         // add a different addr and slot to fetched proof targets
         let addr3 = B256::random();
         let slot3 = B256::random();
-        test_state_root_task.fetched_proof_targets.insert(addr3, vec![slot3].into_iter().collect());
+        test_state_root_task
+            .fetched_proof_targets
+            .insert(addr3, vec![slot3].into_iter().collect());
 
         let prefetch_proof_targets =
             test_state_root_task.get_prefetch_proof_targets(targets.clone());
@@ -1275,7 +1336,9 @@ mod tests {
         targets.insert(addr2, vec![slot2].into_iter().collect());
 
         // add a subset of the first target to fetched proof targets
-        test_state_root_task.fetched_proof_targets.insert(addr1, vec![slot1].into_iter().collect());
+        test_state_root_task
+            .fetched_proof_targets
+            .insert(addr1, vec![slot1].into_iter().collect());
 
         let prefetch_proof_targets =
             test_state_root_task.get_prefetch_proof_targets(targets.clone());

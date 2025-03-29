@@ -152,8 +152,14 @@ pub mod fuzz_rlp {
     fuzz_type_and_name!(GetBlockBodies, fuzz_GetBlockBodies);
     fuzz_type_and_name!(BlockBodies, fuzz_BlockBodies);
     fuzz_type_and_name!(NewBlock, fuzz_NewBlock);
-    fuzz_type_and_name!(NewPooledTransactionHashes66, fuzz_NewPooledTransactionHashes66);
-    fuzz_type_and_name!(NewPooledTransactionHashes68, fuzz_NewPooledTransactionHashes68);
+    fuzz_type_and_name!(
+        NewPooledTransactionHashes66,
+        fuzz_NewPooledTransactionHashes66
+    );
+    fuzz_type_and_name!(
+        NewPooledTransactionHashes68,
+        fuzz_NewPooledTransactionHashes68
+    );
     fuzz_type_and_name!(GetPooledTransactions, fuzz_GetPooledTransactions);
     fuzz_type_and_name!(PooledTransactions, fuzz_PooledTransactions);
     fuzz_type_and_name!(GetNodeData, fuzz_GetNodeData);

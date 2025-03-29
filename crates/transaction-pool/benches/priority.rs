@@ -8,12 +8,18 @@ use std::hint::black_box;
 
 fn generate_test_data_fee_delta() -> (u128, u128) {
     let mut runner = TestRunner::deterministic();
-    prop::arbitrary::any::<(u128, u128)>().new_tree(&mut runner).unwrap().current()
+    prop::arbitrary::any::<(u128, u128)>()
+        .new_tree(&mut runner)
+        .unwrap()
+        .current()
 }
 
 fn generate_test_data_priority() -> (u128, u128, u128, u128) {
     let mut runner = TestRunner::deterministic();
-    prop::arbitrary::any::<(u128, u128, u128, u128)>().new_tree(&mut runner).unwrap().current()
+    prop::arbitrary::any::<(u128, u128, u128, u128)>()
+        .new_tree(&mut runner)
+        .unwrap()
+        .current()
 }
 
 fn priority_bench(
@@ -54,12 +60,20 @@ fn blob_priority_calculation(c: &mut Criterion) {
     let fee_jump_input = generate_test_data_fee_delta();
 
     // Unstable sorting of unsorted collection
-    fee_jump_bench(&mut group, "BenchmarkDynamicFeeJumpCalculation", fee_jump_input);
+    fee_jump_bench(
+        &mut group,
+        "BenchmarkDynamicFeeJumpCalculation",
+        fee_jump_input,
+    );
 
     let blob_priority_input = generate_test_data_priority();
 
     // BinaryHeap that is resorted on each update
-    priority_bench(&mut group, "BenchmarkPriorityCalculation", blob_priority_input);
+    priority_bench(
+        &mut group,
+        "BenchmarkPriorityCalculation",
+        blob_priority_input,
+    );
 }
 
 criterion_group!(priority, blob_priority_calculation);

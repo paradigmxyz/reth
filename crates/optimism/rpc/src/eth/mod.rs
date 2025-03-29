@@ -308,7 +308,9 @@ pub struct OpEthApiBuilder {
 impl OpEthApiBuilder {
     /// Creates a [`OpEthApiBuilder`] instance from core components.
     pub const fn new() -> Self {
-        Self { sequencer_client: None }
+        Self {
+            sequencer_client: None,
+        }
     }
 
     /// With a [`SequencerClient`].
@@ -342,6 +344,11 @@ where
         .proof_permits(ctx.config.proof_permits)
         .build_inner();
 
-        OpEthApi { inner: Arc::new(OpEthApiInner { eth_api, sequencer_client }) }
+        OpEthApi {
+            inner: Arc::new(OpEthApiInner {
+                eth_api,
+                sequencer_client,
+            }),
+        }
     }
 }

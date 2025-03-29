@@ -249,7 +249,10 @@ mod tests {
                     .expect("Failed to convert TransactionSigned to PooledTransaction")
             })
             .collect();
-        let expected = RequestPair { request_id: 1111, message: PooledTransactions(message) };
+        let expected = RequestPair {
+            request_id: 1111,
+            message: PooledTransactions(message),
+        };
 
         let request = RequestPair::<PooledTransactions>::decode(&mut &data[..]).unwrap();
         assert_eq!(request, expected);
@@ -381,12 +384,17 @@ mod tests {
                     .expect("Failed to convert TransactionSigned to PooledTransaction")
             })
             .collect();
-        let expected_transactions =
-            RequestPair { request_id: 0, message: PooledTransactions(message) };
+        let expected_transactions = RequestPair {
+            request_id: 0,
+            message: PooledTransactions(message),
+        };
 
         // checking tx by tx for easier debugging if there are any regressions
-        for (decoded, expected) in
-            decoded_transactions.message.0.iter().zip(expected_transactions.message.0.iter())
+        for (decoded, expected) in decoded_transactions
+            .message
+            .0
+            .iter()
+            .zip(expected_transactions.message.0.iter())
         {
             assert_eq!(decoded, expected);
         }
@@ -518,7 +526,10 @@ mod tests {
                     .expect("Failed to convert TransactionSigned to PooledTransaction")
             })
             .collect();
-        let transactions = RequestPair { request_id: 0, message: PooledTransactions(message) };
+        let transactions = RequestPair {
+            request_id: 0,
+            message: PooledTransactions(message),
+        };
 
         let mut encoded = vec![];
         transactions.encode(&mut encoded);

@@ -27,7 +27,7 @@ fn main() {
                 .node(EthereumNode::default())
                 .extend_rpc_modules(move |ctx| {
                     if !args.enable_ext {
-                        return Ok(())
+                        return Ok(());
                     }
 
                     // here we get the configured pool.
@@ -94,7 +94,9 @@ mod tests {
         let server_addr = start_server().await;
         let uri = format!("http://{}", server_addr);
         let client = HttpClientBuilder::default().build(&uri).unwrap();
-        let count = TxpoolExtApiClient::transaction_count(&client).await.unwrap();
+        let count = TxpoolExtApiClient::transaction_count(&client)
+            .await
+            .unwrap();
         assert_eq!(count, 0);
     }
 

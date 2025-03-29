@@ -100,7 +100,11 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             init_genesis(&provider_factory)?;
         }
 
-        Ok(Environment { config, provider_factory, data_dir })
+        Ok(Environment {
+            config,
+            provider_factory,
+            data_dir,
+        })
     }
 
     /// Returns a [`ProviderFactory`] after executing consistency checks.
@@ -117,9 +121,15 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
     where
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
-        let has_receipt_pruning = config.prune.as_ref().is_some_and(|a| a.has_receipts_pruning());
-        let prune_modes =
-            config.prune.as_ref().map(|prune| prune.segments.clone()).unwrap_or_default();
+        let has_receipt_pruning = config
+            .prune
+            .as_ref()
+            .is_some_and(|a| a.has_receipts_pruning());
+        let prune_modes = config
+            .prune
+            .as_ref()
+            .map(|prune| prune.segments.clone())
+            .unwrap_or_default();
         let factory = ProviderFactory::<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>::new(
             db,
             self.chain.clone(),
@@ -134,7 +144,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         {
             if factory.db_ref().is_read_only()? {
                 warn!(target: "reth::cli", ?unwind_target, "Inconsistent storage. Restart node to heal.");
-                return Ok(factory)
+                return Ok(factory);
             }
 
             // Highly unlikely to happen, and given its destructive nature, it's better to panic
@@ -157,7 +167,10 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
                     config.stages.clone(),
                     prune_modes.clone(),
                 ))
-                .build(factory.clone(), StaticFileProducer::new(factory.clone(), prune_modes));
+                .build(
+                    factory.clone(),
+                    StaticFileProducer::new(factory.clone(), prune_modes),
+                );
 
             // Move all applicable data from database to static files.
             pipeline.move_to_static_files()?;

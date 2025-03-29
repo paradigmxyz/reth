@@ -20,7 +20,10 @@ impl<Provider> Stage<Provider> for FinishStage {
         _provider: &Provider,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
+        Ok(ExecOutput {
+            checkpoint: StageCheckpoint::new(input.target()),
+            done: true,
+        })
     }
 
     fn unwind(
@@ -28,7 +31,9 @@ impl<Provider> Stage<Provider> for FinishStage {
         _provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+        Ok(UnwindOutput {
+            checkpoint: StageCheckpoint::new(input.unwind_to),
+        })
     }
 }
 
@@ -78,7 +83,7 @@ mod tests {
             let end = input.target.unwrap_or_default() + 1;
 
             if start + 1 >= end {
-                return Ok(Vec::default())
+                return Ok(Vec::default());
             }
 
             let mut headers = random_header_range(&mut rng, start + 1..end, head.hash());

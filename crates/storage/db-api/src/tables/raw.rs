@@ -52,13 +52,19 @@ pub struct RawKey<K: Key> {
 impl<K: Key> RawKey<K> {
     /// Create new raw key.
     pub fn new(key: K) -> Self {
-        Self { key: K::encode(key).into(), _phantom: std::marker::PhantomData }
+        Self {
+            key: K::encode(key).into(),
+            _phantom: std::marker::PhantomData,
+        }
     }
 
     /// Creates a raw key from an existing `Vec`. Useful when we already have the encoded
     /// key.
     pub const fn from_vec(vec: Vec<u8>) -> Self {
-        Self { key: vec, _phantom: std::marker::PhantomData }
+        Self {
+            key: vec,
+            _phantom: std::marker::PhantomData,
+        }
     }
 
     /// Returns the decoded value.
@@ -101,11 +107,17 @@ impl<K: Key> Encode for RawKey<K> {
 // Decode
 impl<K: Key> Decode for RawKey<K> {
     fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
-        Ok(Self { key: value.to_vec(), _phantom: std::marker::PhantomData })
+        Ok(Self {
+            key: value.to_vec(),
+            _phantom: std::marker::PhantomData,
+        })
     }
 
     fn decode_owned(value: Vec<u8>) -> Result<Self, DatabaseError> {
-        Ok(Self { key: value, _phantom: std::marker::PhantomData })
+        Ok(Self {
+            key: value,
+            _phantom: std::marker::PhantomData,
+        })
     }
 }
 
@@ -121,13 +133,19 @@ pub struct RawValue<V: Value> {
 impl<V: Value> RawValue<V> {
     /// Create new raw value.
     pub fn new(value: V) -> Self {
-        Self { value: V::compress(value).into(), _phantom: std::marker::PhantomData }
+        Self {
+            value: V::compress(value).into(),
+            _phantom: std::marker::PhantomData,
+        }
     }
 
     /// Creates a raw value from an existing `Vec`. Useful when we already have the encoded
     /// value.
     pub const fn from_vec(vec: Vec<u8>) -> Self {
-        Self { value: vec, _phantom: std::marker::PhantomData }
+        Self {
+            value: vec,
+            _phantom: std::marker::PhantomData,
+        }
     }
 
     /// Returns the decompressed value.
@@ -177,10 +195,16 @@ impl<V: Value> Compress for RawValue<V> {
 
 impl<V: Value> Decompress for RawValue<V> {
     fn decompress(value: &[u8]) -> Result<Self, DatabaseError> {
-        Ok(Self { value: value.to_vec(), _phantom: std::marker::PhantomData })
+        Ok(Self {
+            value: value.to_vec(),
+            _phantom: std::marker::PhantomData,
+        })
     }
 
     fn decompress_owned(value: Vec<u8>) -> Result<Self, DatabaseError> {
-        Ok(Self { value, _phantom: std::marker::PhantomData })
+        Ok(Self {
+            value,
+            _phantom: std::marker::PhantomData,
+        })
     }
 }

@@ -42,12 +42,22 @@ impl TrustedPeer {
 
     /// Creates a new record from a socket addr and peer id.
     pub const fn new(host: Host, port: u16, id: PeerId) -> Self {
-        Self { host, tcp_port: port, udp_port: port, id }
+        Self {
+            host,
+            tcp_port: port,
+            udp_port: port,
+            id,
+        }
     }
 
     #[cfg(any(test, feature = "std"))]
     const fn to_node_record(&self, ip: IpAddr) -> NodeRecord {
-        NodeRecord { address: ip, id: self.id, tcp_port: self.tcp_port, udp_port: self.udp_port }
+        NodeRecord {
+            address: ip,
+            id: self.id,
+            tcp_port: self.tcp_port,
+            udp_port: self.udp_port,
+        }
     }
 
     /// Tries to resolve directly to a [`NodeRecord`] if the host is an IP address.
@@ -152,7 +162,9 @@ impl FromStr for TrustedPeer {
             .query_pairs()
             .find_map(|(maybe_disc, port)| (maybe_disc.as_ref() == "discport").then_some(port))
         {
-            discovery_port.parse::<u16>().map_err(NodeRecordParseError::Discport)?
+            discovery_port
+                .parse::<u16>()
+                .map_err(NodeRecordParseError::Discport)?
         } else {
             port
         };
@@ -162,7 +174,12 @@ impl FromStr for TrustedPeer {
             .parse::<PeerId>()
             .map_err(|e| NodeRecordParseError::InvalidId(e.to_string()))?;
 
-        Ok(Self { host, id, tcp_port: port, udp_port })
+        Ok(Self {
+            host,
+            id,
+            tcp_port: port,
+            udp_port,
+        })
     }
 }
 
@@ -173,7 +190,12 @@ impl From<NodeRecord> for TrustedPeer {
             IpAddr::V6(ip) => Host::Ipv6(ip),
         };
 
-        Self { host, tcp_port: record.tcp_port, udp_port: record.udp_port, id: record.id }
+        Self {
+            host,
+            tcp_port: record.tcp_port,
+            udp_port: record.udp_port,
+            id: record.id,
+        }
     }
 }
 
@@ -298,8 +320,11 @@ mod tests {
         // Run tests
         for domain in tests {
             // Construct record
-            let rec =
-                TrustedPeer::new(url::Host::Domain(domain.to_owned()), 30300, PeerId::random());
+            let rec = TrustedPeer::new(
+                url::Host::Domain(domain.to_owned()),
+                30300,
+                PeerId::random(),
+            );
 
             // Resolve domain and validate
             let ensure = |rec: NodeRecord| match rec.address {

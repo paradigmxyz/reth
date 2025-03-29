@@ -46,10 +46,11 @@ where
         let to_block = sharded_key.as_ref().highest_block_number;
 
         'shard: loop {
-            let Some((key, block_nums)) =
-                shard.map(|(k, v)| Result::<_, DatabaseError>::Ok((k.key()?, v))).transpose()?
+            let Some((key, block_nums)) = shard
+                .map(|(k, v)| Result::<_, DatabaseError>::Ok((k.key()?, v)))
+                .transpose()?
             else {
-                break
+                break;
             };
 
             if key_matches(&key, &sharded_key) {
@@ -60,7 +61,7 @@ where
                 }
             } else {
                 // If such shard doesn't exist, skip to the next sharded key
-                break 'shard
+                break 'shard;
             }
 
             shard = cursor.next()?;
@@ -100,8 +101,10 @@ where
     // contain the target block number, as it's in this shard.
     else {
         let blocks = raw_blocks.value()?;
-        let higher_blocks =
-            blocks.iter().skip_while(|block| *block <= to_block).collect::<Vec<_>>();
+        let higher_blocks = blocks
+            .iter()
+            .skip_while(|block| *block <= to_block)
+            .collect::<Vec<_>>();
 
         // If there were blocks less than or equal to the target one
         // (so the shard has changed), update the shard.

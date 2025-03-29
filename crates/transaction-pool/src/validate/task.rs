@@ -41,7 +41,9 @@ impl ValidationTask {
 
     /// Creates a new task with the given receiver.
     pub fn with_receiver(jobs: mpsc::Receiver<Pin<Box<dyn Future<Output = ()> + Send>>>) -> Self {
-        Self { validation_jobs: Arc::new(Mutex::new(ReceiverStream::new(jobs))) }
+        Self {
+            validation_jobs: Arc::new(Mutex::new(ReceiverStream::new(jobs))),
+        }
     }
 
     /// Executes all new validation jobs that come in.
@@ -56,7 +58,9 @@ impl ValidationTask {
 
 impl std::fmt::Debug for ValidationTask {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ValidationTask").field("validation_jobs", &"...").finish()
+        f.debug_struct("ValidationTask")
+            .field("validation_jobs", &"...")
+            .finish()
     }
 }
 
@@ -72,7 +76,10 @@ impl ValidationJobSender {
         &self,
         job: Pin<Box<dyn Future<Output = ()> + Send>>,
     ) -> Result<(), TransactionValidatorError> {
-        self.tx.send(job).await.map_err(|_| TransactionValidatorError::ValidationServiceUnreachable)
+        self.tx
+            .send(job)
+            .await
+            .map_err(|_| TransactionValidatorError::ValidationServiceUnreachable)
     }
 }
 
@@ -151,7 +158,10 @@ impl<V> TransactionValidationTaskExecutor<V> {
     /// validation tasks.
     pub fn new(validator: V) -> Self {
         let (tx, _) = ValidationTask::new();
-        Self { validator, to_validation_task: Arc::new(sync::Mutex::new(tx)) }
+        Self {
+            validator,
+            to_validation_task: Arc::new(sync::Mutex::new(tx)),
+        }
     }
 }
 
@@ -184,7 +194,7 @@ where
                 return TransactionValidationOutcome::Error(
                     hash,
                     Box::new(TransactionValidatorError::ValidationServiceUnreachable),
-                )
+                );
             }
         }
 

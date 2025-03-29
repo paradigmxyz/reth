@@ -73,17 +73,38 @@ pub struct StageCommand {
 
 macro_rules! handle_stage {
     ($stage_fn:ident, $tool:expr, $command:expr) => {{
-        let StageCommand { output_datadir, from, to, dry_run, .. } = $command;
+        let StageCommand {
+            output_datadir,
+            from,
+            to,
+            dry_run,
+            ..
+        } = $command;
         let output_datadir =
             output_datadir.with_chain($tool.chain().chain(), DatadirArgs::default());
         $stage_fn($tool, *from, *to, output_datadir, *dry_run).await?
     }};
 
     ($stage_fn:ident, $tool:expr, $command:expr, $executor:expr, $consensus:expr) => {{
-        let StageCommand { output_datadir, from, to, dry_run, .. } = $command;
+        let StageCommand {
+            output_datadir,
+            from,
+            to,
+            dry_run,
+            ..
+        } = $command;
         let output_datadir =
             output_datadir.with_chain($tool.chain().chain(), DatadirArgs::default());
-        $stage_fn($tool, *from, *to, output_datadir, *dry_run, $executor, $consensus).await?
+        $stage_fn(
+            $tool,
+            *from,
+            *to,
+            output_datadir,
+            *dry_run,
+            $executor,
+            $consensus,
+        )
+        .await?
     }};
 }
 
@@ -95,7 +116,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         Comp: CliNodeComponents<N>,
         F: FnOnce(Arc<C::ChainSpec>) -> Comp,
     {
-        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RO)?;
+        let Environment {
+            provider_factory, ..
+        } = self.env.init::<N>(AccessRights::RO)?;
         let tool = DbTool::new(provider_factory)?;
 
         match &self.command {

@@ -17,15 +17,21 @@ pub struct PruneCommand<C: ChainSpecParser> {
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneCommand<C> {
     /// Execute the `prune` command
     pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(self) -> eyre::Result<()> {
-        let Environment { config, provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
+        let Environment {
+            config,
+            provider_factory,
+            ..
+        } = self.env.init::<N>(AccessRights::RW)?;
         let prune_config = config.prune.unwrap_or_default();
 
         // Copy data from database to static files
         info!(target: "reth::cli", "Copying data from database to static files...");
         let static_file_producer =
             StaticFileProducer::new(provider_factory.clone(), prune_config.segments.clone());
-        let lowest_static_file_height =
-            static_file_producer.lock().copy_to_static_files()?.min_block_num();
+        let lowest_static_file_height = static_file_producer
+            .lock()
+            .copy_to_static_files()?
+            .min_block_num();
         info!(target: "reth::cli", ?lowest_static_file_height, "Copied data from database to static files");
 
         // Delete data which has been copied to static files.

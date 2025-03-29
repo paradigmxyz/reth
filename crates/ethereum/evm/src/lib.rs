@@ -128,14 +128,24 @@ where
         let spec = config::revm_spec(self.chain_spec(), header);
 
         // configure evm env based on parent block
-        let cfg_env = CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec);
+        let cfg_env = CfgEnv::new()
+            .with_chain_id(self.chain_spec().chain().id())
+            .with_spec(spec);
 
         let block_env = BlockEnv {
             number: header.number(),
             beneficiary: header.beneficiary(),
             timestamp: header.timestamp(),
-            difficulty: if spec >= SpecId::MERGE { U256::ZERO } else { header.difficulty() },
-            prevrandao: if spec >= SpecId::MERGE { header.mix_hash() } else { None },
+            difficulty: if spec >= SpecId::MERGE {
+                U256::ZERO
+            } else {
+                header.difficulty()
+            },
+            prevrandao: if spec >= SpecId::MERGE {
+                header.mix_hash()
+            } else {
+                None
+            },
             gas_limit: header.gas_limit(),
             basefee: header.base_fee_per_gas().unwrap_or_default(),
             // EIP-4844 excess blob gas of this block, introduced in Cancun
@@ -160,26 +170,33 @@ where
         );
 
         // configure evm env based on parent block
-        let cfg = CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec_id);
+        let cfg = CfgEnv::new()
+            .with_chain_id(self.chain_spec().chain().id())
+            .with_spec(spec_id);
 
         // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
         // cancun now, we need to set the excess blob gas to the default value(0)
         let blob_excess_gas_and_price = parent
             .maybe_next_block_excess_blob_gas(
-                self.chain_spec().blob_params_at_timestamp(attributes.timestamp),
+                self.chain_spec()
+                    .blob_params_at_timestamp(attributes.timestamp),
             )
             .or_else(|| (spec_id == SpecId::CANCUN).then_some(0))
             .map(|gas| BlobExcessGasAndPrice::new(gas, spec_id >= SpecId::PRAGUE));
 
         let mut basefee = parent.next_block_base_fee(
-            self.chain_spec().base_fee_params_at_timestamp(attributes.timestamp),
+            self.chain_spec()
+                .base_fee_params_at_timestamp(attributes.timestamp),
         );
 
         let mut gas_limit = attributes.gas_limit;
 
         // If we are on the London fork boundary, we need to multiply the parent's gas limit by the
         // elasticity multiplier to get the new gas limit.
-        if self.chain_spec().fork(EthereumHardfork::London).transitions_at_block(parent.number + 1)
+        if self
+            .chain_spec()
+            .fork(EthereumHardfork::London)
+            .transitions_at_block(parent.number + 1)
         {
             let elasticity_multiplier = self
                 .chain_spec()
@@ -295,7 +312,10 @@ mod tests {
         // Create a custom configuration environment with a chain ID of 111
         let cfg = CfgEnv::default().with_chain_id(111);
 
-        let evm_env = EvmEnv { cfg_env: cfg.clone(), ..Default::default() };
+        let evm_env = EvmEnv {
+            cfg_env: cfg.clone(),
+            ..Default::default()
+        };
 
         let evm = evm_config.evm_with_env(db, evm_env);
 
@@ -310,10 +330,17 @@ mod tests {
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
         // Create customs block and tx env
-        let block =
-            BlockEnv { basefee: 1000, gas_limit: 10_000_000, number: 42, ..Default::default() };
+        let block = BlockEnv {
+            basefee: 1000,
+            gas_limit: 10_000_000,
+            number: 42,
+            ..Default::default()
+        };
 
-        let evm_env = EvmEnv { block_env: block, ..Default::default() };
+        let evm_env = EvmEnv {
+            block_env: block,
+            ..Default::default()
+        };
 
         let evm = evm_config.evm_with_env(db, evm_env.clone());
 
@@ -362,7 +389,10 @@ mod tests {
 
         let cfg_env = CfgEnv::default().with_chain_id(111);
         let block = BlockEnv::default();
-        let evm_env = EvmEnv { cfg_env: cfg_env.clone(), block_env: block };
+        let evm_env = EvmEnv {
+            cfg_env: cfg_env.clone(),
+            block_env: block,
+        };
 
         let evm = evm_config.evm_with_env_and_inspector(db, evm_env, NoOpInspector {});
 
@@ -377,9 +407,16 @@ mod tests {
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
         // Create custom block and tx environment
-        let block =
-            BlockEnv { basefee: 1000, gas_limit: 10_000_000, number: 42, ..Default::default() };
-        let evm_env = EvmEnv { block_env: block, ..Default::default() };
+        let block = BlockEnv {
+            basefee: 1000,
+            gas_limit: 10_000_000,
+            number: 42,
+            ..Default::default()
+        };
+        let evm_env = EvmEnv {
+            block_env: block,
+            ..Default::default()
+        };
 
         let evm = evm_config.evm_with_env_and_inspector(db, evm_env.clone(), NoOpInspector {});
 

@@ -130,7 +130,9 @@ where
     fn evm_env(&self, header: &Header) -> EvmEnv<OpSpecId> {
         let spec = config::revm_spec(self.chain_spec(), header);
 
-        let cfg_env = CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec);
+        let cfg_env = CfgEnv::new()
+            .with_chain_id(self.chain_spec().chain().id())
+            .with_spec(spec);
 
         let block_env = BlockEnv {
             number: header.number(),
@@ -166,14 +168,16 @@ where
         let spec_id = revm_spec_by_timestamp_after_bedrock(self.chain_spec(), attributes.timestamp);
 
         // configure evm env based on parent block
-        let cfg_env =
-            CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec_id);
+        let cfg_env = CfgEnv::new()
+            .with_chain_id(self.chain_spec().chain().id())
+            .with_spec(spec_id);
 
         // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
         // cancun now, we need to set the excess blob gas to the default value(0)
         let blob_excess_gas_and_price = parent
             .maybe_next_block_excess_blob_gas(
-                self.chain_spec().blob_params_at_timestamp(attributes.timestamp),
+                self.chain_spec()
+                    .blob_params_at_timestamp(attributes.timestamp),
             )
             .or_else(|| (spec_id.into_eth_spec().is_enabled_in(SpecId::CANCUN)).then_some(0))
             .map(|gas| BlobExcessGasAndPrice::new(gas, false));
@@ -260,9 +264,10 @@ mod tests {
 
         // Use the `OpEvmConfig` to create the `cfg_env` and `block_env` based on the ChainSpec,
         // Header, and total difficulty
-        let EvmEnv { cfg_env, .. } =
-            OpEvmConfig::optimism(Arc::new(OpChainSpec { inner: chain_spec.clone() }))
-                .evm_env(&header);
+        let EvmEnv { cfg_env, .. } = OpEvmConfig::optimism(Arc::new(OpChainSpec {
+            inner: chain_spec.clone(),
+        }))
+        .evm_env(&header);
 
         // Assert that the chain ID in the `cfg_env` is correctly set to the chain ID of the
         // ChainSpec
@@ -290,9 +295,14 @@ mod tests {
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
         // Create a custom configuration environment with a chain ID of 111
-        let cfg = CfgEnv::new().with_chain_id(111).with_spec(OpSpecId::default());
+        let cfg = CfgEnv::new()
+            .with_chain_id(111)
+            .with_spec(OpSpecId::default());
 
-        let evm_env = EvmEnv { cfg_env: cfg.clone(), ..Default::default() };
+        let evm_env = EvmEnv {
+            cfg_env: cfg.clone(),
+            ..Default::default()
+        };
 
         let evm = evm_config.evm_with_env(db, evm_env);
 
@@ -307,10 +317,17 @@ mod tests {
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
         // Create customs block and tx env
-        let block =
-            BlockEnv { basefee: 1000, gas_limit: 10_000_000, number: 42, ..Default::default() };
+        let block = BlockEnv {
+            basefee: 1000,
+            gas_limit: 10_000_000,
+            number: 42,
+            ..Default::default()
+        };
 
-        let evm_env = EvmEnv { block_env: block, ..Default::default() };
+        let evm_env = EvmEnv {
+            block_env: block,
+            ..Default::default()
+        };
 
         let evm = evm_config.evm_with_env(db, evm_env.clone());
 
@@ -324,8 +341,10 @@ mod tests {
 
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
-        let evm_env =
-            EvmEnv { cfg_env: CfgEnv::new().with_spec(OpSpecId::ECOTONE), ..Default::default() };
+        let evm_env = EvmEnv {
+            cfg_env: CfgEnv::new().with_spec(OpSpecId::ECOTONE),
+            ..Default::default()
+        };
 
         let evm = evm_config.evm_with_env(db, evm_env.clone());
 
@@ -337,7 +356,10 @@ mod tests {
         let evm_config = test_evm_config();
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
-        let evm_env = EvmEnv { cfg_env: Default::default(), ..Default::default() };
+        let evm_env = EvmEnv {
+            cfg_env: Default::default(),
+            ..Default::default()
+        };
 
         let evm = evm_config.evm_with_env_and_inspector(db, evm_env.clone(), NoOpInspector {});
 
@@ -351,9 +373,14 @@ mod tests {
         let evm_config = test_evm_config();
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
-        let cfg = CfgEnv::new().with_chain_id(111).with_spec(OpSpecId::default());
+        let cfg = CfgEnv::new()
+            .with_chain_id(111)
+            .with_spec(OpSpecId::default());
         let block = BlockEnv::default();
-        let evm_env = EvmEnv { block_env: block, cfg_env: cfg.clone() };
+        let evm_env = EvmEnv {
+            block_env: block,
+            cfg_env: cfg.clone(),
+        };
 
         let evm = evm_config.evm_with_env_and_inspector(db, evm_env.clone(), NoOpInspector {});
 
@@ -368,9 +395,16 @@ mod tests {
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
         // Create custom block and tx environment
-        let block =
-            BlockEnv { basefee: 1000, gas_limit: 10_000_000, number: 42, ..Default::default() };
-        let evm_env = EvmEnv { block_env: block, ..Default::default() };
+        let block = BlockEnv {
+            basefee: 1000,
+            gas_limit: 10_000_000,
+            number: 42,
+            ..Default::default()
+        };
+        let evm_env = EvmEnv {
+            block_env: block,
+            ..Default::default()
+        };
 
         let evm = evm_config.evm_with_env_and_inspector(db, evm_env.clone(), NoOpInspector {});
 
@@ -383,8 +417,10 @@ mod tests {
         let evm_config = test_evm_config();
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
-        let evm_env =
-            EvmEnv { cfg_env: CfgEnv::new().with_spec(OpSpecId::ECOTONE), ..Default::default() };
+        let evm_env = EvmEnv {
+            cfg_env: CfgEnv::new().with_spec(OpSpecId::ECOTONE),
+            ..Default::default()
+        };
 
         let evm = evm_config.evm_with_env_and_inspector(db, evm_env.clone(), NoOpInspector {});
 
@@ -445,7 +481,10 @@ mod tests {
             Chain::new([block1, block2], execution_outcome.clone(), None);
 
         // Assert that the proper receipt vector is returned for block1_hash
-        assert_eq!(chain.receipts_by_block_hash(block1_hash), Some(vec![&receipt1]));
+        assert_eq!(
+            chain.receipts_by_block_hash(block1_hash),
+            Some(vec![&receipt1])
+        );
 
         // Create an ExecutionOutcome object with a single receipt vector containing receipt1
         let execution_outcome1 = ExecutionOutcome {
@@ -456,17 +495,28 @@ mod tests {
         };
 
         // Assert that the execution outcome at the first block contains only the first receipt
-        assert_eq!(chain.execution_outcome_at_block(10), Some(execution_outcome1));
+        assert_eq!(
+            chain.execution_outcome_at_block(10),
+            Some(execution_outcome1)
+        );
 
         // Assert that the execution outcome at the tip block contains the whole execution outcome
-        assert_eq!(chain.execution_outcome_at_block(11), Some(execution_outcome));
+        assert_eq!(
+            chain.execution_outcome_at_block(11),
+            Some(execution_outcome)
+        );
     }
 
     #[test]
     fn test_initialisation() {
         // Create a new BundleState object with initial data
         let bundle = BundleState::new(
-            vec![(Address::new([2; 20]), None, Some(AccountInfo::default()), HashMap::default())],
+            vec![(
+                Address::new([2; 20]),
+                None,
+                Some(AccountInfo::default()),
+                HashMap::default(),
+            )],
             vec![vec![(Address::new([2; 20]), None, vec![])]],
             vec![],
         );
@@ -479,7 +529,11 @@ mod tests {
         }))]];
 
         // Create a Requests object with a vector of requests
-        let requests = vec![Requests::new(vec![bytes!("dead"), bytes!("beef"), bytes!("beebee")])];
+        let requests = vec![Requests::new(vec![
+            bytes!("dead"),
+            bytes!("beef"),
+            bytes!("beebee"),
+        ])];
 
         // Define the first block number
         let first_block = 123;
@@ -501,8 +555,10 @@ mod tests {
 
         // Create a BundleStateInit object and insert initial data
         let mut state_init: BundleStateInit = HashMap::default();
-        state_init
-            .insert(Address::new([2; 20]), (None, Some(Account::default()), HashMap::default()));
+        state_init.insert(
+            Address::new([2; 20]),
+            (None, Some(Account::default()), HashMap::default()),
+        );
 
         // Create a HashMap for account reverts and insert initial data
         let mut revert_inner: HashMap<Address, AccountRevertInit> = HashMap::default();
@@ -685,13 +741,19 @@ mod tests {
         let request = bytes!("deadbeef");
 
         // Create a vector of Requests containing the request.
-        let requests =
-            vec![Requests::new(vec![request.clone()]), Requests::new(vec![request.clone()])];
+        let requests = vec![
+            Requests::new(vec![request.clone()]),
+            Requests::new(vec![request.clone()]),
+        ];
 
         // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
         // first_block
-        let mut exec_res =
-            ExecutionOutcome { bundle: Default::default(), receipts, requests, first_block };
+        let mut exec_res = ExecutionOutcome {
+            bundle: Default::default(),
+            receipts,
+            requests,
+            first_block,
+        };
 
         // Assert that the revert_to method returns true when reverting to the initial block number.
         assert!(exec_res.revert_to(123));
@@ -733,8 +795,12 @@ mod tests {
         let first_block = 123;
 
         // Create an ExecutionOutcome object.
-        let mut exec_res =
-            ExecutionOutcome { bundle: Default::default(), receipts, requests, first_block };
+        let mut exec_res = ExecutionOutcome {
+            bundle: Default::default(),
+            receipts,
+            requests,
+            first_block,
+        };
 
         // Extend the ExecutionOutcome object by itself.
         exec_res.extend(exec_res.clone());
@@ -745,7 +811,10 @@ mod tests {
             ExecutionOutcome {
                 bundle: Default::default(),
                 receipts: vec![vec![Some(receipt.clone())], vec![Some(receipt)]],
-                requests: vec![Requests::new(vec![request.clone()]), Requests::new(vec![request])],
+                requests: vec![
+                    Requests::new(vec![request.clone()]),
+                    Requests::new(vec![request])
+                ],
                 first_block: 123,
             }
         );
@@ -782,8 +851,12 @@ mod tests {
 
         // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
         // first_block
-        let exec_res =
-            ExecutionOutcome { bundle: Default::default(), receipts, requests, first_block };
+        let exec_res = ExecutionOutcome {
+            bundle: Default::default(),
+            receipts,
+            requests,
+            first_block,
+        };
 
         // Split the ExecutionOutcome at block number 124
         let result = exec_res.clone().split_at(124);
@@ -800,7 +873,10 @@ mod tests {
         let higher_execution_outcome = ExecutionOutcome {
             bundle: Default::default(),
             receipts: vec![vec![Some(receipt.clone())], vec![Some(receipt)]],
-            requests: vec![Requests::new(vec![request.clone()]), Requests::new(vec![request])],
+            requests: vec![
+                Requests::new(vec![request.clone()]),
+                Requests::new(vec![request]),
+            ],
             first_block: 124,
         };
 

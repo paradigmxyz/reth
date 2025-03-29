@@ -66,12 +66,24 @@ impl BscHardfork {
             (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
             (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
             (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
-            (EthereumHardfork::SpuriousDragon.boxed(), ForkCondition::Block(0)),
+            (
+                EthereumHardfork::SpuriousDragon.boxed(),
+                ForkCondition::Block(0),
+            ),
             (EthereumHardfork::Byzantium.boxed(), ForkCondition::Block(0)),
-            (EthereumHardfork::Constantinople.boxed(), ForkCondition::Block(0)),
-            (EthereumHardfork::Petersburg.boxed(), ForkCondition::Block(0)),
+            (
+                EthereumHardfork::Constantinople.boxed(),
+                ForkCondition::Block(0),
+            ),
+            (
+                EthereumHardfork::Petersburg.boxed(),
+                ForkCondition::Block(0),
+            ),
             (EthereumHardfork::Istanbul.boxed(), ForkCondition::Block(0)),
-            (EthereumHardfork::MuirGlacier.boxed(), ForkCondition::Block(0)),
+            (
+                EthereumHardfork::MuirGlacier.boxed(),
+                ForkCondition::Block(0),
+            ),
             (Self::Ramanujan.boxed(), ForkCondition::Block(0)),
             (Self::Niels.boxed(), ForkCondition::Block(0)),
             (Self::MirrorSync.boxed(), ForkCondition::Block(5184000)),
@@ -83,15 +95,30 @@ impl BscHardfork {
             (Self::Planck.boxed(), ForkCondition::Block(27281024)),
             (Self::Luban.boxed(), ForkCondition::Block(29020050)),
             (Self::Plato.boxed(), ForkCondition::Block(30720096)),
-            (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(31302048)),
-            (EthereumHardfork::London.boxed(), ForkCondition::Block(31302048)),
+            (
+                EthereumHardfork::Berlin.boxed(),
+                ForkCondition::Block(31302048),
+            ),
+            (
+                EthereumHardfork::London.boxed(),
+                ForkCondition::Block(31302048),
+            ),
             (Self::Hertz.boxed(), ForkCondition::Block(31302048)),
             (Self::HertzFix.boxed(), ForkCondition::Block(34140700)),
-            (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(1705996800)),
+            (
+                EthereumHardfork::Shanghai.boxed(),
+                ForkCondition::Timestamp(1705996800),
+            ),
             (Self::Kepler.boxed(), ForkCondition::Timestamp(1705996800)),
             (Self::Feynman.boxed(), ForkCondition::Timestamp(1713419340)),
-            (Self::FeynmanFix.boxed(), ForkCondition::Timestamp(1713419340)),
-            (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(1718863500)),
+            (
+                Self::FeynmanFix.boxed(),
+                ForkCondition::Timestamp(1713419340),
+            ),
+            (
+                EthereumHardfork::Cancun.boxed(),
+                ForkCondition::Timestamp(1718863500),
+            ),
             (Self::Haber.boxed(), ForkCondition::Timestamp(1718863500)),
             (Self::HaberFix.boxed(), ForkCondition::Timestamp(1727316120)),
             (Self::Bohr.boxed(), ForkCondition::Timestamp(1727317200)),
@@ -142,7 +169,11 @@ pub fn boot_nodes() -> Vec<NodeRecord> {
 }
 
 pub fn head() -> Head {
-    Head { number: 40_000_000, timestamp: 1742436600, ..Default::default() }
+    Head {
+        number: 40_000_000,
+        timestamp: 1742436600,
+        ..Default::default()
+    }
 }
 #[cfg(test)]
 mod tests {
@@ -154,7 +185,10 @@ mod tests {
     fn can_create_forkid() {
         let b = hex::decode("ce18f5d3").unwrap();
         let expected = [b[0], b[1], b[2], b[3]];
-        let expected_f_id = ForkId { hash: ForkHash(expected), next: 0 };
+        let expected_f_id = ForkId {
+            hash: ForkHash(expected),
+            next: 0,
+        };
 
         let fork_id = bsc_chain_spec().fork_id(&head());
         assert_eq!(fork_id, expected_f_id);

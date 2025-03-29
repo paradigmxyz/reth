@@ -34,8 +34,11 @@ use serde_with::{DeserializeFromStr, SerializeDisplay};
 /// URLs to `GET` the external IP address.
 ///
 /// Taken from: <https://stackoverflow.com/questions/3253701/get-public-external-ip-address>
-const EXTERNAL_IP_APIS: &[&str] =
-    &["https://ipinfo.io/ip", "https://icanhazip.com", "https://ifconfig.me"];
+const EXTERNAL_IP_APIS: &[&str] = &[
+    "https://ipinfo.io/ip",
+    "https://icanhazip.com",
+    "https://ifconfig.me",
+];
 
 /// All builtin resolvers.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Default, Hash)]
@@ -109,7 +112,7 @@ impl FromStr for NatResolver {
                 let Some(ip) = s.strip_prefix("extip:") else {
                     return Err(ParseNatResolverError::UnknownVariant(format!(
                         "Unknown Nat Resolver: {s}"
-                    )))
+                    )));
                 };
                 Self::ExternalIp(ip.parse()?)
             }
@@ -138,7 +141,11 @@ impl fmt::Debug for ResolveNatInterval {
 
 impl ResolveNatInterval {
     fn with_interval(resolver: NatResolver, interval: tokio::time::Interval) -> Self {
-        Self { resolver, future: None, interval }
+        Self {
+            resolver,
+            future: None,
+            interval,
+        }
     }
 
     /// Creates a new [`ResolveNatInterval`] that attempts to resolve the public IP with interval of
@@ -212,7 +219,11 @@ pub async fn external_addr_with(resolver: NatResolver) -> Option<IpAddr> {
 }
 
 async fn resolve_external_ip() -> Option<IpAddr> {
-    let futures = EXTERNAL_IP_APIS.iter().copied().map(resolve_external_ip_url_res).map(Box::pin);
+    let futures = EXTERNAL_IP_APIS
+        .iter()
+        .copied()
+        .map(resolve_external_ip_url_res)
+        .map(Box::pin);
     futures_util::future::select_ok(futures)
         .await
         .inspect_err(|err| {

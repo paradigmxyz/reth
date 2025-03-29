@@ -104,7 +104,10 @@ mod tests {
         let list_with_zero_length = hex::decode("c000").unwrap();
         let res = DisconnectReason::decode(&mut &list_with_zero_length[..]);
         assert!(res.is_err());
-        assert_eq!(res.unwrap_err().to_string(), "unexpected list length (got 0, expected 1)")
+        assert_eq!(
+            res.unwrap_err().to_string(),
+            "unexpected list length (got 0, expected 1)"
+        )
     }
 
     #[test]

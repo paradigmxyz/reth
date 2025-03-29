@@ -30,7 +30,9 @@ impl<ChainSpec> OpBlockAssembler<ChainSpec> {
 
 impl<ChainSpec> Clone for OpBlockAssembler<ChainSpec> {
     fn clone(&self) -> Self {
-        Self { chain_spec: self.chain_spec.clone() }
+        Self {
+            chain_spec: self.chain_spec.clone(),
+        }
     }
 }
 
@@ -53,7 +55,9 @@ where
             evm_env,
             execution_ctx: ctx,
             transactions,
-            output: BlockExecutionResult { receipts, gas_used, .. },
+            output: BlockExecutionResult {
+                receipts, gas_used, ..
+            },
             bundle_state,
             state_root,
             state_provider,

@@ -218,6 +218,9 @@ where
             + Unpin
             + 'static,
     {
-        EthApi { inner: Arc::new(self.build_inner()), tx_resp_builder: EthTxBuilder }
+        EthApi {
+            inner: Arc::new(self.build_inner()),
+            tx_resp_builder: EthTxBuilder,
+        }
     }
 }

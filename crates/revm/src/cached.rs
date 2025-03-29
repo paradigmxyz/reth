@@ -54,7 +54,13 @@ impl CachedReads {
         info: AccountInfo,
         storage: HashMap<U256, U256>,
     ) {
-        self.accounts.insert(address, CachedAccount { info: Some(info), storage });
+        self.accounts.insert(
+            address,
+            CachedAccount {
+                info: Some(info),
+                storage,
+            },
+        );
     }
 
     /// Extends current cache with entries from another [`CachedReads`] instance.
@@ -80,7 +86,9 @@ impl<'a, DB> CachedReadsDbMut<'a, DB> {
     /// Converts this [`Database`] implementation into a [`DatabaseRef`] that will still cache
     /// reads.
     pub const fn into_db(self) -> CachedReadsDBRef<'a, DB> {
-        CachedReadsDBRef { inner: RefCell::new(self) }
+        CachedReadsDBRef {
+            inner: RefCell::new(self),
+        }
     }
 
     /// Returns access to wrapped [`DatabaseRef`].
@@ -104,9 +112,10 @@ impl<DB: DatabaseRef> Database for CachedReadsDbMut<'_, DB> {
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         let basic = match self.cached.accounts.entry(address) {
             Entry::Occupied(entry) => entry.get().info.clone(),
-            Entry::Vacant(entry) => {
-                entry.insert(CachedAccount::new(self.db.basic_ref(address)?)).info.clone()
-            }
+            Entry::Vacant(entry) => entry
+                .insert(CachedAccount::new(self.db.basic_ref(address)?))
+                .info
+                .clone(),
         };
         Ok(basic)
     }
@@ -193,7 +202,10 @@ pub struct CachedAccount {
 
 impl CachedAccount {
     fn new(info: Option<AccountInfo>) -> Self {
-        Self { info, storage: HashMap::default() }
+        Self {
+            info,
+            storage: HashMap::default(),
+        }
     }
 }
 
@@ -212,7 +224,9 @@ mod tests {
         // Create primary cache
         let mut primary = {
             let mut cache = CachedReads::default();
-            cache.accounts.insert(address1, CachedAccount::new(Some(AccountInfo::default())));
+            cache
+                .accounts
+                .insert(address1, CachedAccount::new(Some(AccountInfo::default())));
             cache.contracts.insert(hash1, Bytecode::default());
             cache.block_hashes.insert(1, hash1);
             cache
@@ -221,7 +235,9 @@ mod tests {
         // Create additional cache
         let additional = {
             let mut cache = CachedReads::default();
-            cache.accounts.insert(address2, CachedAccount::new(Some(AccountInfo::default())));
+            cache
+                .accounts
+                .insert(address2, CachedAccount::new(Some(AccountInfo::default())));
             cache.contracts.insert(hash2, Bytecode::default());
             cache.block_hashes.insert(2, hash2);
             cache
@@ -232,20 +248,20 @@ mod tests {
 
         // Verify the combined state
         assert!(
-            primary.accounts.len() == 2 &&
-                primary.contracts.len() == 2 &&
-                primary.block_hashes.len() == 2,
+            primary.accounts.len() == 2
+                && primary.contracts.len() == 2
+                && primary.block_hashes.len() == 2,
             "All maps should contain 2 entries"
         );
 
         // Verify specific entries
         assert!(
-            primary.accounts.contains_key(&address1) &&
-                primary.accounts.contains_key(&address2) &&
-                primary.contracts.contains_key(&hash1) &&
-                primary.contracts.contains_key(&hash2) &&
-                primary.block_hashes.get(&1) == Some(&hash1) &&
-                primary.block_hashes.get(&2) == Some(&hash2),
+            primary.accounts.contains_key(&address1)
+                && primary.accounts.contains_key(&address2)
+                && primary.contracts.contains_key(&hash1)
+                && primary.contracts.contains_key(&hash2)
+                && primary.block_hashes.get(&1) == Some(&hash1)
+                && primary.block_hashes.get(&2) == Some(&hash2),
             "All expected entries should be present"
         );
     }

@@ -107,6 +107,12 @@ impl RessProtocolProvider for MockRessProtocolProvider {
         if let Some(delay) = self.witness_delay {
             tokio::time::sleep(delay).await;
         }
-        Ok(self.witnesses.lock().unwrap().get(&block_hash).cloned().unwrap_or_default())
+        Ok(self
+            .witnesses
+            .lock()
+            .unwrap()
+            .get(&block_hash)
+            .cloned()
+            .unwrap_or_default())
     }
 }

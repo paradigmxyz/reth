@@ -54,8 +54,10 @@ pub fn tx_fetch_bench(c: &mut Criterion) {
                         handle.connect_peers().await;
 
                         let listening_peer = &handle.peers()[num_peers - 1];
-                        let listening_peer_tx_listener =
-                            listening_peer.pool().unwrap().pending_transactions_listener();
+                        let listening_peer_tx_listener = listening_peer
+                            .pool()
+                            .unwrap()
+                            .pending_transactions_listener();
 
                         let num_tx_per_peer = 10;
 
@@ -74,7 +76,10 @@ pub fn tx_fetch_bench(c: &mut Criterion) {
                                     sender,
                                     ExtendedAccount::new(0, U256::from(100_000_000)),
                                 );
-                                peer_pool.add_external_transaction(tx.clone()).await.unwrap();
+                                peer_pool
+                                    .add_external_transaction(tx.clone())
+                                    .await
+                                    .unwrap();
                             }
                         }
 

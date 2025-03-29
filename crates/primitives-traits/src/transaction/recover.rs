@@ -33,7 +33,9 @@ mod rayon {
         T: SignedTransaction,
         I: IntoParallelIterator<Item = &'a T> + IntoIterator<Item = &'a T> + Send,
     {
-        txes.into_par_iter().map(|tx| tx.recover_signer_unchecked()).collect()
+        txes.into_par_iter()
+            .map(|tx| tx.recover_signer_unchecked())
+            .collect()
     }
 }
 
@@ -63,6 +65,8 @@ mod iter {
         T: SignedTransaction,
         I: IntoIterator<Item = &'a T>,
     {
-        txes.into_iter().map(|tx| tx.recover_signer_unchecked()).collect()
+        txes.into_iter()
+            .map(|tx| tx.recover_signer_unchecked())
+            .collect()
     }
 }

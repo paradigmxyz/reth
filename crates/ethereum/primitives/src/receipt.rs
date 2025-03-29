@@ -35,10 +35,10 @@ pub struct Receipt {
 impl Receipt {
     /// Returns length of RLP-encoded receipt fields with the given [`Bloom`] without an RLP header.
     pub fn rlp_encoded_fields_length(&self, bloom: &Bloom) -> usize {
-        self.success.length() +
-            self.cumulative_gas_used.length() +
-            bloom.length() +
-            self.logs.length()
+        self.success.length()
+            + self.cumulative_gas_used.length()
+            + bloom.length()
+            + self.logs.length()
     }
 
     /// RLP-encodes receipt fields with the given [`Bloom`] without an RLP header.
@@ -51,7 +51,10 @@ impl Receipt {
 
     /// Returns RLP header for inner encoding.
     pub fn rlp_header_inner(&self, bloom: &Bloom) -> Header {
-        Header { list: true, payload_length: self.rlp_encoded_fields_length(bloom) }
+        Header {
+            list: true,
+            payload_length: self.rlp_encoded_fields_length(bloom),
+        }
     }
 
     /// RLP-decodes the receipt from the provided buffer. This does not expect a type byte or
@@ -77,7 +80,12 @@ impl Receipt {
         }
 
         Ok(ReceiptWithBloom {
-            receipt: Self { cumulative_gas_used, tx_type, success, logs },
+            receipt: Self {
+                cumulative_gas_used,
+                tx_type,
+                success,
+                logs,
+            },
             logs_bloom,
         })
     }
@@ -120,8 +128,11 @@ impl RlpEncodableReceipt for Receipt {
 
     fn rlp_encode_with_bloom(&self, bloom: &Bloom, out: &mut dyn BufMut) {
         if !self.tx_type.is_legacy() {
-            Header { list: false, payload_length: self.eip2718_encoded_length_with_bloom(bloom) }
-                .encode(out);
+            Header {
+                list: false,
+                payload_length: self.eip2718_encoded_length_with_bloom(bloom),
+            }
+            .encode(out);
         }
         self.eip2718_encode_with_bloom(bloom, out);
     }
@@ -134,7 +145,7 @@ impl RlpDecodableReceipt for Receipt {
 
         // Legacy receipt, reuse initial buffer without advancing
         if header.list {
-            return Self::rlp_decode_inner(buf, TxType::Legacy)
+            return Self::rlp_decode_inner(buf, TxType::Legacy);
         }
 
         // Otherwise, advance the buffer and try decoding type flag followed by receipt
@@ -184,10 +195,10 @@ impl Typed2718 for Receipt {
 
 impl InMemorySize for Receipt {
     fn size(&self) -> usize {
-        self.tx_type.size() +
-            core::mem::size_of::<bool>() +
-            core::mem::size_of::<u64>() +
-            self.logs.capacity() * core::mem::size_of::<Log>()
+        self.tx_type.size()
+            + core::mem::size_of::<bool>()
+            + core::mem::size_of::<u64>()
+            + self.logs.capacity() * core::mem::size_of::<Log>()
     }
 }
 
@@ -237,7 +248,10 @@ pub(super) mod serde_bincode_compat {
         D: Deserializer<'de>,
     {
         let value = U8::deserialize(deserializer)?;
-        value.to::<u8>().try_into().map_err(serde::de::Error::custom)
+        value
+            .to::<u8>()
+            .try_into()
+            .map_err(serde::de::Error::custom)
     }
 
     impl<'a> From<&'a super::Receipt> for Receipt<'a> {

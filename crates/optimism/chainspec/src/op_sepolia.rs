@@ -26,8 +26,14 @@ pub static OP_SEPOLIA: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
             hardforks,
             base_fee_params: BaseFeeParamsKind::Variable(
                 vec![
-                    (EthereumHardfork::London.boxed(), BaseFeeParams::optimism_sepolia()),
-                    (OpHardfork::Canyon.boxed(), BaseFeeParams::optimism_sepolia_canyon()),
+                    (
+                        EthereumHardfork::London.boxed(),
+                        BaseFeeParams::optimism_sepolia(),
+                    ),
+                    (
+                        OpHardfork::Canyon.boxed(),
+                        BaseFeeParams::optimism_sepolia_canyon(),
+                    ),
                 ]
                 .into(),
             ),

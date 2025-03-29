@@ -45,7 +45,11 @@ impl<T: PoolTransaction> BlobTransactions<T> {
     pub(crate) fn add_transaction(&mut self, tx: Arc<ValidPoolTransaction<T>>) {
         assert!(tx.is_eip4844(), "transaction is not a blob tx");
         let id = *tx.id();
-        assert!(!self.contains(&id), "transaction already included {:?}", self.get(&id).unwrap());
+        assert!(
+            !self.contains(&id),
+            "transaction already included {:?}",
+            self.get(&id).unwrap()
+        );
         let submission_id = self.next_id();
 
         // keep track of size
@@ -96,16 +100,16 @@ impl<T: PoolTransaction> BlobTransactions<T> {
                 let mut iter = self.by_id.iter().peekable();
 
                 while let Some((id, tx)) = iter.next() {
-                    if tx.transaction.max_fee_per_blob_gas().unwrap_or_default() <
-                        blob_fee_to_satisfy ||
-                        tx.transaction.max_fee_per_gas() <
-                            best_transactions_attributes.basefee as u128
+                    if tx.transaction.max_fee_per_blob_gas().unwrap_or_default()
+                        < blob_fee_to_satisfy
+                        || tx.transaction.max_fee_per_gas()
+                            < best_transactions_attributes.basefee as u128
                     {
                         // does not satisfy the blob fee or base fee
                         // still parked in blob pool -> skip descendant transactions
                         'this: while let Some((peek, _)) = iter.peek() {
                             if peek.sender != id.sender {
-                                break 'this
+                                break 'this;
                             }
                             iter.next();
                         }
@@ -150,13 +154,13 @@ impl<T: PoolTransaction> BlobTransactions<T> {
             let mut iter = self.by_id.iter().peekable();
 
             while let Some((id, tx)) = iter.next() {
-                if tx.transaction.max_fee_per_blob_gas() < Some(pending_fees.blob_fee) ||
-                    tx.transaction.max_fee_per_gas() < pending_fees.base_fee as u128
+                if tx.transaction.max_fee_per_blob_gas() < Some(pending_fees.blob_fee)
+                    || tx.transaction.max_fee_per_gas() < pending_fees.base_fee as u128
                 {
                     // still parked in blob pool -> skip descendant transactions
                     'this: while let Some((peek, _)) = iter.peek() {
                         if peek.sender != id.sender {
-                            break 'this
+                            break 'this;
                         }
                         iter.next();
                     }
@@ -284,7 +288,10 @@ impl<T: PoolTransaction> BlobTransaction<T> {
             pending_fees.base_fee as u128,
             transaction.max_fee_per_gas(),
         );
-        let ord = BlobOrd { priority, submission_id };
+        let ord = BlobOrd {
+            priority,
+            submission_id,
+        };
         Self { transaction, ord }
     }
 
@@ -301,7 +308,10 @@ impl<T: PoolTransaction> BlobTransaction<T> {
 
 impl<T: PoolTransaction> Clone for BlobTransaction<T> {
     fn clone(&self) -> Self {
-        Self { transaction: self.transaction.clone(), ord: self.ord.clone() }
+        Self {
+            transaction: self.transaction.clone(),
+            ord: self.ord.clone(),
+        }
     }
 }
 
@@ -350,7 +360,7 @@ const LOG_2_1_125: f64 = 0.16992500144231237;
 pub fn fee_delta(max_tx_fee: u128, current_fee: u128) -> i64 {
     if max_tx_fee == current_fee {
         // if these are equal, then there's no fee jump
-        return 0
+        return 0;
     }
 
     let max_tx_fee_jumps = if max_tx_fee == 0 {
@@ -499,7 +509,10 @@ mod tests {
                         max_fee_per_gas: 3,
                     },
                 ],
-                network_fees: PendingFees { base_fee: 0, blob_fee: 0 },
+                network_fees: PendingFees {
+                    base_fee: 0,
+                    blob_fee: 0,
+                },
             },
             // If only basefees are used (blob fee matches with network), return the ones the
             // furthest below the current basefee, splitting same ones with the tip. Anything above
@@ -542,7 +555,10 @@ mod tests {
                         max_fee_per_gas: 2000,
                     },
                 ],
-                network_fees: PendingFees { base_fee: 1999, blob_fee: 0 },
+                network_fees: PendingFees {
+                    base_fee: 1999,
+                    blob_fee: 0,
+                },
             },
             // If only blobfees are used (base fee matches with network), return the
             // ones the furthest below the current blobfee, splitting same ones with
@@ -585,7 +601,10 @@ mod tests {
                         max_fee_per_gas: 0,
                     },
                 ],
-                network_fees: PendingFees { base_fee: 0, blob_fee: 1999 },
+                network_fees: PendingFees {
+                    base_fee: 0,
+                    blob_fee: 1999,
+                },
             },
             // If both basefee and blobfee is specified, sort by the larger distance
             // of the two from the current network conditions, splitting same (loglog)
@@ -624,7 +643,10 @@ mod tests {
                         max_fee_per_gas: 800,
                     },
                 ],
-                network_fees: PendingFees { base_fee: 1000, blob_fee: 100 },
+                network_fees: PendingFees {
+                    base_fee: 1000,
+                    blob_fee: 100,
+                },
             },
         ];
 
@@ -731,7 +753,10 @@ mod tests {
     #[test]
     fn test_satisfy_attributes_empty_pool() {
         let pool: BlobTransactions<MockTransaction> = BlobTransactions::default();
-        let attributes = BestTransactionsAttributes { blob_fee: Some(100), basefee: 100 };
+        let attributes = BestTransactionsAttributes {
+            blob_fee: Some(100),
+            basefee: 100,
+        };
         // Satisfy attributes on an empty pool should return an empty vector
         let satisfied = pool.satisfy_attributes(attributes);
         assert!(satisfied.is_empty());
@@ -773,7 +798,10 @@ mod tests {
         pool.add_transaction(tx3);
 
         // Set a size limit that requires truncation
-        let limit = SubPoolLimit { max_txs: 2, max_size: 300 };
+        let limit = SubPoolLimit {
+            max_txs: 2,
+            max_size: 300,
+        };
         let removed = pool.truncate_pool(limit);
 
         // Check that only one transaction was removed to satisfy the limit

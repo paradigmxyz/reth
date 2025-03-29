@@ -64,7 +64,10 @@ where
         transaction: &Self::Transaction,
         base_fee: u64,
     ) -> Priority<Self::PriorityValue> {
-        transaction.effective_tip_per_gas(base_fee).map(U256::from).into()
+        transaction
+            .effective_tip_per_gas(base_fee)
+            .map(U256::from)
+            .into()
     }
 }
 

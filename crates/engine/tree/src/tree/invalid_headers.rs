@@ -26,11 +26,20 @@ pub struct InvalidHeaderCache {
 impl InvalidHeaderCache {
     /// Invalid header cache constructor.
     pub fn new(max_length: u32) -> Self {
-        Self { headers: LruMap::new(ByLength::new(max_length)), metrics: Default::default() }
+        Self {
+            headers: LruMap::new(ByLength::new(max_length)),
+            metrics: Default::default(),
+        }
     }
 
     fn insert_entry(&mut self, hash: B256, header: BlockWithParent) {
-        self.headers.insert(hash, HeaderEntry { header, hit_count: 0 });
+        self.headers.insert(
+            hash,
+            HeaderEntry {
+                header,
+                hit_count: 0,
+            },
+        );
     }
 
     /// Returns the invalid ancestor's header if it exists in the cache.
@@ -42,7 +51,7 @@ impl InvalidHeaderCache {
             let entry = self.headers.get(hash)?;
             entry.hit_count += 1;
             if entry.hit_count < INVALID_HEADER_HIT_EVICTION_THRESHOLD {
-                return Some(entry.header)
+                return Some(entry.header);
             }
         }
         // if we get here, the entry has been hit too many times, so we evict it

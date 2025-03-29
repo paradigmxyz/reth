@@ -27,7 +27,10 @@ mod general_state_tests {
         st_call_delegate_codes_call_code_homestead,
         stCallDelegateCodesCallCodeHomestead
     );
-    general_state_test!(st_call_delegate_codes_homestead, stCallDelegateCodesHomestead);
+    general_state_test!(
+        st_call_delegate_codes_homestead,
+        stCallDelegateCodesHomestead
+    );
     general_state_test!(st_chain_id, stChainId);
     general_state_test!(st_code_copy_test, stCodeCopyTest);
     general_state_test!(st_code_size_limit, stCodeSizeLimit);

@@ -71,21 +71,23 @@ impl Pinger {
         match self.state() {
             PingState::Ready => {
                 if self.ping_interval.poll_tick(cx).is_ready() {
-                    self.timeout_timer.as_mut().reset(Instant::now() + self.timeout);
+                    self.timeout_timer
+                        .as_mut()
+                        .reset(Instant::now() + self.timeout);
                     self.state = PingState::WaitingForPong;
-                    return Poll::Ready(Ok(PingerEvent::Ping))
+                    return Poll::Ready(Ok(PingerEvent::Ping));
                 }
             }
             PingState::WaitingForPong => {
                 if self.timeout_timer.is_elapsed() {
                     self.state = PingState::TimedOut;
-                    return Poll::Ready(Ok(PingerEvent::Timeout))
+                    return Poll::Ready(Ok(PingerEvent::Timeout));
                 }
             }
             PingState::TimedOut => {
                 // we treat continuous calls while in timeout as pending, since the connection is
                 // not yet terminated
-                return Poll::Pending
+                return Poll::Pending;
             }
         };
         Poll::Pending

@@ -34,7 +34,11 @@ pub trait EthApiSpec:
     /// Returns the current ethereum protocol version.
     fn protocol_version(&self) -> impl Future<Output = RethResult<U64>> + Send {
         async move {
-            let status = self.network().network_status().await.map_err(RethError::other)?;
+            let status = self
+                .network()
+                .network_status()
+                .await
+                .map_err(RethError::other)?;
             Ok(U64::from(status.protocol_version))
         }
     }
@@ -51,7 +55,11 @@ pub trait EthApiSpec:
 
     /// Returns a list of addresses owned by provider.
     fn accounts(&self) -> Vec<Address> {
-        self.signers().read().iter().flat_map(|s| s.accounts()).collect()
+        self.signers()
+            .read()
+            .iter()
+            .flat_map(|s| s.accounts())
+            .collect()
     }
 
     /// Returns `true` if the network is undergoing sync.
@@ -63,7 +71,10 @@ pub trait EthApiSpec:
     fn sync_status(&self) -> RethResult<SyncStatus> {
         let status = if self.is_syncing() {
             let current_block = U256::from(
-                self.provider().chain_info().map(|info| info.best_number).unwrap_or_default(),
+                self.provider()
+                    .chain_info()
+                    .map(|info| info.best_number)
+                    .unwrap_or_default(),
             );
 
             let stages = self
@@ -71,7 +82,10 @@ pub trait EthApiSpec:
                 .get_all_checkpoints()
                 .unwrap_or_default()
                 .into_iter()
-                .map(|(name, checkpoint)| Stage { name, block: checkpoint.block_number })
+                .map(|(name, checkpoint)| Stage {
+                    name,
+                    block: checkpoint.block_number,
+                })
                 .collect();
 
             SyncStatus::Info(Box::new(SyncInfo {

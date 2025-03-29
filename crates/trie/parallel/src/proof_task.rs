@@ -137,12 +137,14 @@ where
     /// This will return an error if a transaction must be created on-demand and the consistent view
     /// provider fails.
     pub fn try_spawn_next(&mut self) -> ProviderResult<()> {
-        let Some(task) = self.pending_tasks.pop_front() else { return Ok(()) };
+        let Some(task) = self.pending_tasks.pop_front() else {
+            return Ok(());
+        };
 
         let Some(proof_task_tx) = self.get_or_create_tx()? else {
             // if there are no txs available, requeue the proof task
             self.pending_tasks.push_front(task);
-            return Ok(())
+            return Ok(());
         };
 
         let tx_sender = self.tx_sender.clone();
@@ -300,7 +302,9 @@ where
         );
 
         let start = Instant::now();
-        let result = blinded_provider_factory.account_node_provider().blinded_node(&path);
+        let result = blinded_provider_factory
+            .account_node_provider()
+            .blinded_node(&path);
         debug!(
             target: "trie::proof_task",
             ?path,
@@ -345,7 +349,9 @@ where
         );
 
         let start = Instant::now();
-        let result = blinded_provider_factory.storage_node_provider(account).blinded_node(&path);
+        let result = blinded_provider_factory
+            .storage_node_provider(account)
+            .blinded_node(&path);
         debug!(
             target: "trie::proof_task",
             ?account,
@@ -391,7 +397,12 @@ impl StorageProofInput {
         target_slots: B256Set,
         with_branch_node_masks: bool,
     ) -> Self {
-        Self { hashed_address, prefix_set, target_slots, with_branch_node_masks }
+        Self {
+            hashed_address,
+            prefix_set,
+            target_slots,
+            with_branch_node_masks,
+        }
     }
 }
 
@@ -416,7 +427,11 @@ impl ProofTaskCtx {
         state_sorted: Arc<HashedPostStateSorted>,
         prefix_sets: Arc<TriePrefixSetsMut>,
     ) -> Self {
-        Self { nodes_sorted, state_sorted, prefix_sets }
+        Self {
+            nodes_sorted,
+            state_sorted,
+            prefix_sets,
+        }
     }
 }
 
@@ -459,7 +474,10 @@ impl<Tx> ProofTaskManagerHandle<Tx> {
     /// Creates a new [`ProofTaskManagerHandle`] with the given sender.
     pub fn new(sender: Sender<ProofTaskMessage<Tx>>, active_handles: Arc<AtomicUsize>) -> Self {
         active_handles.fetch_add(1, Ordering::SeqCst);
-        Self { sender, active_handles }
+        Self {
+            sender,
+            active_handles,
+        }
     }
 
     /// Queues a task to the proof task manager.
@@ -494,11 +512,16 @@ impl<Tx: DbTx> BlindedProviderFactory for ProofTaskManagerHandle<Tx> {
     type StorageNodeProvider = ProofTaskBlindedNodeProvider<Tx>;
 
     fn account_node_provider(&self) -> Self::AccountNodeProvider {
-        ProofTaskBlindedNodeProvider::AccountNode { sender: self.sender.clone() }
+        ProofTaskBlindedNodeProvider::AccountNode {
+            sender: self.sender.clone(),
+        }
     }
 
     fn storage_node_provider(&self, account: B256) -> Self::StorageNodeProvider {
-        ProofTaskBlindedNodeProvider::StorageNode { account, sender: self.sender.clone() }
+        ProofTaskBlindedNodeProvider::StorageNode {
+            account,
+            sender: self.sender.clone(),
+        }
     }
 }
 

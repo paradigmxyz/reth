@@ -31,8 +31,9 @@ impl Command {
                 let peer_id = pk2id(&key.public_key(SECP256K1));
                 let hello = HelloMessage::builder(peer_id).build();
 
-                let (_, their_hello) =
-                    UnauthedP2PStream::new(ecies_stream).handshake(hello).await?;
+                let (_, their_hello) = UnauthedP2PStream::new(ecies_stream)
+                    .handshake(hello)
+                    .await?;
 
                 println!("{:#?}", their_hello);
             }

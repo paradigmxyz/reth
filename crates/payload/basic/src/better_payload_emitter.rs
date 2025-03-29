@@ -18,7 +18,10 @@ where
     /// Create a new [`BetterPayloadEmitter`] with the given inner payload builder.
     /// Owns the sender half of a broadcast channel that emits the better payloads.
     pub fn new(better_payloads_tx: broadcast::Sender<Arc<PB::BuiltPayload>>, inner: PB) -> Self {
-        Self { better_payloads_tx, inner }
+        Self {
+            better_payloads_tx,
+            inner,
+        }
     }
 }
 
@@ -35,9 +38,15 @@ where
         args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
         match self.inner.try_build(args) {
-            Ok(BuildOutcome::Better { payload, cached_reads }) => {
+            Ok(BuildOutcome::Better {
+                payload,
+                cached_reads,
+            }) => {
                 let _ = self.better_payloads_tx.send(Arc::new(payload.clone()));
-                Ok(BuildOutcome::Better { payload, cached_reads })
+                Ok(BuildOutcome::Better {
+                    payload,
+                    cached_reads,
+                })
             }
             res => res,
         }

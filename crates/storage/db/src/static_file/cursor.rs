@@ -17,13 +17,18 @@ type ColumnResult<T> = ProviderResult<Option<T>>;
 impl<'a> StaticFileCursor<'a> {
     /// Returns a new [`StaticFileCursor`].
     pub fn new(jar: &'a NippyJar<SegmentHeader>, reader: Arc<DataReader>) -> ProviderResult<Self> {
-        Ok(Self(NippyJarCursor::with_reader(jar, reader).map_err(ProviderError::other)?))
+        Ok(Self(
+            NippyJarCursor::with_reader(jar, reader).map_err(ProviderError::other)?,
+        ))
     }
 
     /// Returns the current `BlockNumber` or `TxNumber` of the cursor depending on the kind of
     /// static file segment.
     pub fn number(&self) -> Option<u64> {
-        self.jar().user_header().start().map(|start| self.row_index() + start)
+        self.jar()
+            .user_header()
+            .start()
+            .map(|start| self.row_index() + start)
     }
 
     /// Gets a row of values.
@@ -33,7 +38,7 @@ impl<'a> StaticFileCursor<'a> {
         mask: usize,
     ) -> ProviderResult<Option<Vec<&'_ [u8]>>> {
         if self.jar().rows() == 0 {
-            return Ok(None)
+            return Ok(None);
         }
 
         let row = match key_or_num {
@@ -41,7 +46,7 @@ impl<'a> StaticFileCursor<'a> {
             KeyOrNumber::Number(n) => match self.jar().user_header().start() {
                 Some(offset) => {
                     if offset > n {
-                        return Ok(None)
+                        return Ok(None);
                     }
                     self.row_by_number_with_cols((n - offset) as usize, mask)
                 }
@@ -74,7 +79,10 @@ impl<'a> StaticFileCursor<'a> {
         let row = self.get(key_or_num, M::MASK)?;
 
         match row {
-            Some(row) => Ok(Some((M::FIRST::decompress(row[0])?, M::SECOND::decompress(row[1])?))),
+            Some(row) => Ok(Some((
+                M::FIRST::decompress(row[0])?,
+                M::SECOND::decompress(row[1])?,
+            ))),
             None => Ok(None),
         }
     }

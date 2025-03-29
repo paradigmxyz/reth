@@ -16,7 +16,11 @@ impl<P: ConnectionProvider> Resolver for hickory_resolver::Resolver<P> {
     async fn lookup_txt(&self, query: &str) -> Option<String> {
         // See: [AsyncResolver::txt_lookup]
         // > *hint* queries that end with a '.' are fully qualified names and are cheaper lookups
-        let fqn = if query.ends_with('.') { query.to_string() } else { format!("{query}.") };
+        let fqn = if query.ends_with('.') {
+            query.to_string()
+        } else {
+            format!("{query}.")
+        };
         match self.txt_lookup(fqn).await {
             Err(err) => {
                 trace!(target: "disc::dns", %err, ?query, "dns lookup failed");

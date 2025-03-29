@@ -42,7 +42,10 @@ pub struct MetricsListener {
 impl MetricsListener {
     /// Creates a new [`MetricsListener`] with the provided receiver of [`MetricEvent`].
     pub fn new(events_rx: UnboundedReceiver<MetricEvent>) -> Self {
-        Self { events_rx, sync_metrics: SyncMetrics::default() }
+        Self {
+            events_rx,
+            sync_metrics: SyncMetrics::default(),
+        }
     }
 
     fn handle_event(&mut self, event: MetricEvent) {
@@ -60,7 +63,11 @@ impl MetricsListener {
                     });
                 }
             }
-            MetricEvent::StageCheckpoint { stage_id, checkpoint, max_block_number } => {
+            MetricEvent::StageCheckpoint {
+                stage_id,
+                checkpoint,
+                max_block_number,
+            } => {
                 let stage_metrics = self.sync_metrics.get_stage_metrics(stage_id);
 
                 stage_metrics.checkpoint.set(checkpoint.block_number as f64);
@@ -90,7 +97,7 @@ impl Future for MetricsListener {
         loop {
             let Some(event) = ready!(this.events_rx.poll_recv(cx)) else {
                 // Channel has closed
-                return Poll::Ready(())
+                return Poll::Ready(());
             };
 
             this.handle_event(event);

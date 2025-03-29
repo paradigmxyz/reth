@@ -107,8 +107,16 @@ fn generate_from_compact(
     zstd: Option<ZstdConfig>,
 ) -> TokenStream2 {
     let mut lines = vec![];
-    let mut known_types =
-        vec!["B256", "Address", "Bloom", "Vec", "TxHash", "BlockHash", "FixedBytes", "Cow"];
+    let mut known_types = vec![
+        "B256",
+        "Address",
+        "Bloom",
+        "Vec",
+        "TxHash",
+        "BlockHash",
+        "FixedBytes",
+        "Cow",
+    ];
 
     // Only types without `Bytes` should be added here. It's currently manually added, since
     // it's hard to figure out with derive_macro which types have Bytes fields.
@@ -117,7 +125,9 @@ fn generate_from_compact(
     known_types.extend_from_slice(&["TxKind", "AccessList", "Signature", "CheckpointBlockRange"]);
 
     // let mut handle = FieldListHandler::new(fields);
-    let is_enum = fields.iter().any(|field| matches!(field, FieldTypes::EnumVariant(_)));
+    let is_enum = fields
+        .iter()
+        .any(|field| matches!(field, FieldTypes::EnumVariant(_)));
 
     if is_enum {
         let enum_lines = EnumHandler::new(fields).generate_from(ident);
@@ -144,7 +154,7 @@ fn generate_from_compact(
                     let ident = format_ident!("{}", field.name);
                     return Some(quote! {
                         #ident: #ident,
-                    })
+                    });
                 }
                 None
             });
@@ -197,7 +207,9 @@ fn generate_to_compact(
         let mut buffer = #reth_codecs::__private::bytes::BytesMut::new();
     }];
 
-    let is_enum = fields.iter().any(|field| matches!(field, FieldTypes::EnumVariant(_)));
+    let is_enum = fields
+        .iter()
+        .any(|field| matches!(field, FieldTypes::EnumVariant(_)));
 
     if is_enum {
         let enum_lines = EnumHandler::new(fields).generate_to(ident);

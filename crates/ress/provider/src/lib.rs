@@ -86,8 +86,9 @@ where
         // to access non-canonical or invalid blocks via the provider.
         let maybe_block = if let Some(block) = self.pending_state.recovered_block(&block_hash) {
             Some(block)
-        } else if let Some(block) =
-            self.provider.find_block_by_hash(block_hash, BlockSource::Any)?
+        } else if let Some(block) = self
+            .provider
+            .find_block_by_hash(block_hash, BlockSource::Any)?
         {
             let signers = block.recover_signers()?;
             Some(Arc::new(block.into_recovered_with_signers(signers)))
@@ -101,17 +102,18 @@ where
     /// Generate state witness
     pub fn generate_witness(&self, block_hash: B256) -> ProviderResult<Vec<Bytes>> {
         if let Some(witness) = self.witness_cache.lock().get(&block_hash).cloned() {
-            return Ok(witness.as_ref().clone())
+            return Ok(witness.as_ref().clone());
         }
 
-        let block =
-            self.block_by_hash(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
+        let block = self
+            .block_by_hash(block_hash)?
+            .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
 
         let best_block_number = self.provider.best_block_number()?;
         if best_block_number.saturating_sub(block.number()) > self.max_witness_window {
             return Err(ProviderError::TrieWitnessError(
                 "witness target block exceeds maximum witness window".to_owned(),
-            ))
+            ));
         }
 
         let mut executed_ancestors = Vec::new();
@@ -140,7 +142,7 @@ where
                     }
 
                     let Some(executed) = executed else {
-                        return Err(ProviderError::StateForHashNotFound(ancestor_hash))
+                        return Err(ProviderError::StateForHashNotFound(ancestor_hash));
                     };
                     ancestor_hash = executed.sealed_block().parent_hash();
                     executed_ancestors.push(executed);
@@ -156,12 +158,13 @@ where
 
         // We allow block execution to fail, since we still want to record all accessed state by
         // invalid blocks.
-        if let Err(error) = self.block_executor.executor(&mut db).execute_with_state_closure(
-            &block,
-            |state: &State<_>| {
+        if let Err(error) = self
+            .block_executor
+            .executor(&mut db)
+            .execute_with_state_closure(&block, |state: &State<_>| {
                 record.record_executed_state(state);
-            },
-        ) {
+            })
+        {
             debug!(target: "reth::ress_provider", %block_hash, %error, "Error executing the block");
         }
 
@@ -183,8 +186,10 @@ where
                 MultiProofTargets::from_iter([(B256::ZERO, Default::default())]),
             )?;
             let mut witness = Vec::new();
-            if let Some(root_node) =
-                multiproof.account_subtree.into_inner().remove(&Nibbles::default())
+            if let Some(root_node) = multiproof
+                .account_subtree
+                .into_inner()
+                .remove(&Nibbles::default())
             {
                 witness.push(root_node);
             }
@@ -194,7 +199,9 @@ where
         };
 
         // Insert witness into the cache.
-        self.witness_cache.lock().insert(block_hash, Arc::new(witness.clone()));
+        self.witness_cache
+            .lock()
+            .insert(block_hash, Arc::new(witness.clone()));
 
         Ok(witness)
     }
@@ -231,7 +238,11 @@ where
     async fn witness(&self, block_hash: B256) -> ProviderResult<Vec<Bytes>> {
         trace!(target: "reth::ress_provider", %block_hash, "Serving witness");
         let started_at = Instant::now();
-        let _permit = self.witness_semaphore.acquire().await.map_err(ProviderError::other)?;
+        let _permit = self
+            .witness_semaphore
+            .acquire()
+            .await
+            .map_err(ProviderError::other)?;
         let this = self.clone();
         let (tx, rx) = oneshot::channel();
         self.task_spawner.spawn_blocking(Box::pin(async move {

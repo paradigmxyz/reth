@@ -47,7 +47,12 @@ where
         blinded_provider_factory: BPF,
         metrics: MultiProofTaskMetrics,
     ) -> Self {
-        Self { executor, updates, blinded_provider_factory, metrics }
+        Self {
+            executor,
+            updates,
+            blinded_provider_factory,
+            metrics,
+        }
     }
 
     /// Runs the sparse trie task to completion.
@@ -83,7 +88,9 @@ where
             let elapsed = update_sparse_trie(&mut trie, update).map_err(|e| {
                 ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
             })?;
-            self.metrics.sparse_trie_update_duration_histogram.record(elapsed);
+            self.metrics
+                .sparse_trie_update_duration_histogram
+                .record(elapsed);
             trace!(target: "engine::root", ?elapsed, num_iterations, "Root calculation completed");
         }
 
@@ -94,10 +101,17 @@ where
             ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
         })?;
 
-        self.metrics.sparse_trie_final_update_duration_histogram.record(start.elapsed());
-        self.metrics.sparse_trie_total_duration_histogram.record(now.elapsed());
+        self.metrics
+            .sparse_trie_final_update_duration_histogram
+            .record(start.elapsed());
+        self.metrics
+            .sparse_trie_total_duration_histogram
+            .record(now.elapsed());
 
-        Ok(StateRootComputeOutcome { state_root, trie_updates })
+        Ok(StateRootComputeOutcome {
+            state_root,
+            trie_updates,
+        })
     }
 }
 
@@ -114,7 +128,10 @@ pub struct StateRootComputeOutcome {
 /// Updates the sparse trie with the given proofs and state, and returns the elapsed time.
 pub(crate) fn update_sparse_trie<BPF>(
     trie: &mut SparseStateTrie<BPF>,
-    SparseTrieUpdate { mut state, multiproof }: SparseTrieUpdate,
+    SparseTrieUpdate {
+        mut state,
+        multiproof,
+    }: SparseTrieUpdate,
 ) -> SparseStateTrieResult<Duration>
 where
     BPF: BlindedProviderFactory + Send + Sync,

@@ -45,7 +45,8 @@ pub struct ParallelTrieMetrics {
 impl ParallelTrieMetrics {
     /// Record parallel trie metrics.
     pub fn record(&self, stats: ParallelTrieStats) {
-        self.precomputed_storage_roots.record(stats.precomputed_storage_roots() as f64);
+        self.precomputed_storage_roots
+            .record(stats.precomputed_storage_roots() as f64);
         self.missed_leaves.record(stats.missed_leaves() as f64);
     }
 }

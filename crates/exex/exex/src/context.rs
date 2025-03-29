@@ -134,7 +134,9 @@ where
         &self,
         height: BlockNumHash,
     ) -> Result<(), SendError<BlockNumHash>> {
-        self.events.send(ExExEvent::FinishedHeight(height)).map_err(|_| SendError(height))
+        self.events
+            .send(ExExEvent::FinishedHeight(height))
+            .map_err(|_| SendError(height))
     }
 }
 
@@ -165,7 +167,9 @@ mod tests {
                 self.ctx.payload_builder_handle();
                 self.ctx.task_executor();
                 self.ctx.set_notifications_without_head();
-                self.ctx.set_notifications_with_head(ExExHead { block: Default::default() });
+                self.ctx.set_notifications_with_head(ExExHead {
+                    block: Default::default(),
+                });
                 Ok(())
             }
         }

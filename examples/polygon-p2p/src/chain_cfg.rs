@@ -22,7 +22,10 @@ static BOOTNODES : [&str; 4] = [
 ];
 
 pub(crate) fn head() -> Head {
-    Head { number: SHANGHAI_BLOCK, ..Default::default() }
+    Head {
+        number: SHANGHAI_BLOCK,
+        ..Default::default()
+    }
 }
 
 pub(crate) fn boot_nodes() -> Vec<NodeRecord> {

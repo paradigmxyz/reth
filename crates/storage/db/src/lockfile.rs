@@ -53,7 +53,7 @@ impl StorageLock {
                     start_time = process_lock.start_time,
                     "Storage lock already taken."
                 );
-                return Err(StorageLockError::Taken(process_lock.pid))
+                return Err(StorageLockError::Taken(process_lock.pid));
             }
         }
 
@@ -114,13 +114,18 @@ impl ProcessUID {
             true,
             ProcessRefreshKind::nothing(),
         );
-        system.process(pid2).map(|process| Self { pid, start_time: process.start_time() })
+        system.process(pid2).map(|process| Self {
+            pid,
+            start_time: process.start_time(),
+        })
     }
 
     /// Creates [`Self`] from own process.
     fn own() -> Self {
         static CACHE: OnceLock<ProcessUID> = OnceLock::new();
-        CACHE.get_or_init(|| Self::new(process::id() as usize).expect("own process")).clone()
+        CACHE
+            .get_or_init(|| Self::new(process::id() as usize).expect("own process"))
+            .clone()
     }
 
     /// Parses [`Self`] from a file.
@@ -176,7 +181,10 @@ mod tests {
         let lock = StorageLock::try_acquire_file_lock(temp_dir.path()).unwrap();
 
         // Same process can re-acquire the lock
-        assert_eq!(Ok(lock.clone()), StorageLock::try_acquire_file_lock(temp_dir.path()));
+        assert_eq!(
+            Ok(lock.clone()),
+            StorageLock::try_acquire_file_lock(temp_dir.path())
+        );
 
         // A lock of a non existent PID can be acquired.
         let lock_file = temp_dir.path().join(LOCKFILE_NAME);
@@ -185,8 +193,16 @@ mod tests {
         while system.process(fake_pid.into()).is_some() {
             fake_pid += 1;
         }
-        ProcessUID { pid: fake_pid, start_time: u64::MAX }.write(&lock_file).unwrap();
-        assert_eq!(Ok(lock.clone()), StorageLock::try_acquire_file_lock(temp_dir.path()));
+        ProcessUID {
+            pid: fake_pid,
+            start_time: u64::MAX,
+        }
+        .write(&lock_file)
+        .unwrap();
+        assert_eq!(
+            Ok(lock.clone()),
+            StorageLock::try_acquire_file_lock(temp_dir.path())
+        );
 
         let mut pid_1 = ProcessUID::new(1).unwrap();
 
@@ -200,7 +216,10 @@ mod tests {
         // A lock of a different but existing PID can be acquired ONLY IF the start_time differs.
         pid_1.start_time += 1;
         pid_1.write(&lock_file).unwrap();
-        assert_eq!(Ok(lock), StorageLock::try_acquire_file_lock(temp_dir.path()));
+        assert_eq!(
+            Ok(lock),
+            StorageLock::try_acquire_file_lock(temp_dir.path())
+        );
     }
 
     #[test]

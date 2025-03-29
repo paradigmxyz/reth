@@ -5,7 +5,10 @@ use alloc::string::String;
 /// Client version that accessed the database.
 #[derive(Clone, Eq, PartialEq, Debug, Default)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
+#[cfg_attr(
+    any(test, feature = "reth-codec"),
+    reth_codecs::add_arbitrary_tests(compact)
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ClientVersion {
     /// Client version
@@ -38,7 +41,11 @@ impl reth_codecs::Compact for ClientVersion {
         let (version, buf) = String::from_compact(buf, len);
         let (git_sha, buf) = String::from_compact(buf, len);
         let (build_timestamp, buf) = String::from_compact(buf, len);
-        let client_version = Self { version, git_sha, build_timestamp };
+        let client_version = Self {
+            version,
+            git_sha,
+            build_timestamp,
+        };
         (client_version, buf)
     }
 }

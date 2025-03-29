@@ -72,6 +72,9 @@ pub trait SpawnBlocking: EthApiTypes + Clone + Send + Sync + 'static {
     {
         let this = self.clone();
         let fut = self.tracing_task_pool().spawn(move || f(this));
-        async move { fut.await.map_err(|_| EthApiError::InternalBlockingTaskError)? }
+        async move {
+            fut.await
+                .map_err(|_| EthApiError::InternalBlockingTaskError)?
+        }
     }
 }

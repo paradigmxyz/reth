@@ -51,5 +51,8 @@ pub fn base_testnet_nodes() -> Vec<NodeRecord> {
 
 /// Parses all the nodes
 pub fn parse_nodes(nodes: impl IntoIterator<Item = impl AsRef<str>>) -> Vec<NodeRecord> {
-    nodes.into_iter().map(|s| s.as_ref().parse().unwrap()).collect()
+    nodes
+        .into_iter()
+        .map(|s| s.as_ref().parse().unwrap())
+        .collect()
 }

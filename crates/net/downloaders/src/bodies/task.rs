@@ -88,7 +88,10 @@ impl<B: Block + 'static> TaskDownloader<B> {
 
         spawner.spawn(downloader.boxed());
 
-        Self { from_downloader: ReceiverStream::new(bodies_rx), to_downloader }
+        Self {
+            from_downloader: ReceiverStream::new(bodies_rx),
+            to_downloader,
+        }
     }
 }
 
@@ -136,13 +139,13 @@ impl<T: BodyDownloader> Future for SpawnedDownloader<T> {
                         if forward_error_result.is_err() {
                             // channel closed, this means [TaskDownloader] was dropped,
                             // so we can also exit
-                            return Poll::Ready(())
+                            return Poll::Ready(());
                         }
                     }
                 } else {
                     // channel closed, this means [TaskDownloader] was dropped, so we can also
                     // exit
-                    return Poll::Ready(())
+                    return Poll::Ready(());
                 }
             }
 
@@ -152,7 +155,7 @@ impl<T: BodyDownloader> Future for SpawnedDownloader<T> {
                         if this.bodies_tx.send_item(bodies).is_err() {
                             // channel closed, this means [TaskDownloader] was dropped, so we can
                             // also exit
-                            return Poll::Ready(())
+                            return Poll::Ready(());
                         }
                     }
                     None => return Poll::Pending,
@@ -160,7 +163,7 @@ impl<T: BodyDownloader> Future for SpawnedDownloader<T> {
                 Err(_) => {
                     // channel closed, this means [TaskDownloader] was dropped, so we can also
                     // exit
-                    return Poll::Ready(())
+                    return Poll::Ready(());
                 }
             }
         }
@@ -193,7 +196,9 @@ mod tests {
         insert_headers(factory.db_ref().db(), &headers);
 
         let client = Arc::new(
-            TestBodiesClient::default().with_bodies(bodies.clone()).with_should_delay(true),
+            TestBodiesClient::default()
+                .with_bodies(bodies.clone())
+                .with_should_delay(true),
         );
         let downloader = BodiesDownloaderBuilder::default()
             .build::<reth_ethereum_primitives::Block, _, _>(
@@ -203,7 +208,9 @@ mod tests {
             );
         let mut downloader = TaskDownloader::spawn(downloader);
 
-        downloader.set_download_range(0..=19).expect("failed to set download range");
+        downloader
+            .set_download_range(0..=19)
+            .expect("failed to set download range");
 
         assert_matches!(
             downloader.next().await,
@@ -226,7 +233,12 @@ mod tests {
             );
         let mut downloader = TaskDownloader::spawn(downloader);
 
-        downloader.set_download_range(1..=0).expect("failed to set download range");
-        assert_matches!(downloader.next().await, Some(Err(DownloadError::InvalidBodyRange { .. })));
+        downloader
+            .set_download_range(1..=0)
+            .expect("failed to set download range");
+        assert_matches!(
+            downloader.next().await,
+            Some(Err(DownloadError::InvalidBodyRange { .. }))
+        );
     }
 }

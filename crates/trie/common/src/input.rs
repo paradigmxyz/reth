@@ -21,14 +21,22 @@ impl TrieInput {
         state: HashedPostState,
         prefix_sets: TriePrefixSetsMut,
     ) -> Self {
-        Self { nodes, state, prefix_sets }
+        Self {
+            nodes,
+            state,
+            prefix_sets,
+        }
     }
 
     /// Create new trie input from in-memory state. The prefix sets will be constructed and
     /// set automatically.
     pub fn from_state(state: HashedPostState) -> Self {
         let prefix_sets = state.construct_prefix_sets();
-        Self { nodes: TrieUpdates::default(), state, prefix_sets }
+        Self {
+            nodes: TrieUpdates::default(),
+            state,
+            prefix_sets,
+        }
     }
 
     /// Prepend state to the input and extend the prefix sets.

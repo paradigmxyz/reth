@@ -85,7 +85,9 @@ pub enum MerkleStage {
 impl MerkleStage {
     /// Stage default for the [`MerkleStage::Execution`].
     pub const fn default_execution() -> Self {
-        Self::Execution { clean_threshold: MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD }
+        Self::Execution {
+            clean_threshold: MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
+        }
     }
 
     /// Stage default for the [`MerkleStage::Unwind`].
@@ -103,11 +105,12 @@ impl MerkleStage {
         &self,
         provider: &impl StageCheckpointReader,
     ) -> Result<Option<MerkleCheckpoint>, StageError> {
-        let buf =
-            provider.get_stage_checkpoint_progress(StageId::MerkleExecute)?.unwrap_or_default();
+        let buf = provider
+            .get_stage_checkpoint_progress(StageId::MerkleExecute)?
+            .unwrap_or_default();
 
         if buf.is_empty() {
-            return Ok(None)
+            return Ok(None);
         }
 
         let (checkpoint, _) = MerkleCheckpoint::from_compact(&buf, buf.len());
@@ -157,7 +160,7 @@ where
         let threshold = match self {
             Self::Unwind => {
                 info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
-                return Ok(ExecOutput::done(StageCheckpoint::new(input.target())))
+                return Ok(ExecOutput::done(StageCheckpoint::new(input.target())));
             }
             Self::Execution { clean_threshold } => *clean_threshold,
             #[cfg(any(test, feature = "test-utils"))]
@@ -175,7 +178,13 @@ where
 
         let mut checkpoint = self.get_execution_checkpoint(provider)?;
         let (trie_root, entities_checkpoint) = if range.is_empty() {
-            (target_block_root, input.checkpoint().entities_stage_checkpoint().unwrap_or_default())
+            (
+                target_block_root,
+                input
+                    .checkpoint()
+                    .entities_stage_checkpoint()
+                    .unwrap_or_default(),
+            )
         } else if to_block - from_block > threshold || from_block == 1 {
             // if there are more blocks than threshold it is faster to rebuild the trie
             let mut entities_checkpoint = if let Some(checkpoint) =
@@ -208,8 +217,8 @@ where
             }
             .unwrap_or(EntitiesCheckpoint {
                 processed: 0,
-                total: (provider.count_entries::<tables::HashedAccounts>()? +
-                    provider.count_entries::<tables::HashedStorages>()?)
+                total: (provider.count_entries::<tables::HashedAccounts>()?
+                    + provider.count_entries::<tables::HashedStorages>()?)
                     as u64,
             });
 
@@ -228,7 +237,11 @@ where
                     let checkpoint = MerkleCheckpoint::new(
                         to_block,
                         state.last_account_key,
-                        state.walker_stack.into_iter().map(StoredSubNode::from).collect(),
+                        state
+                            .walker_stack
+                            .into_iter()
+                            .map(StoredSubNode::from)
+                            .collect(),
                         state.hash_builder.into(),
                     );
                     self.save_execution_checkpoint(provider, Some(checkpoint))?;
@@ -240,7 +253,7 @@ where
                             .checkpoint()
                             .with_entities_stage_checkpoint(entities_checkpoint),
                         done: false,
-                    })
+                    });
                 }
                 StateRootProgress::Complete(root, hashed_entries_walked, updates) => {
                     provider.write_trie_updates(&updates)?;
@@ -261,8 +274,8 @@ where
 
             provider.write_trie_updates(&updates)?;
 
-            let total_hashed_entries = (provider.count_entries::<tables::HashedAccounts>()? +
-                provider.count_entries::<tables::HashedStorages>()?)
+            let total_hashed_entries = (provider.count_entries::<tables::HashedAccounts>()?
+                + provider.count_entries::<tables::HashedStorages>()?)
                 as u64;
 
             let entities_checkpoint = EntitiesCheckpoint {
@@ -298,15 +311,21 @@ where
         let range = input.unwind_block_range();
         if matches!(self, Self::Execution { .. }) {
             info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
-            return Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+            return Ok(UnwindOutput {
+                checkpoint: StageCheckpoint::new(input.unwind_to),
+            });
         }
 
         let mut entities_checkpoint =
-            input.checkpoint.entities_stage_checkpoint().unwrap_or(EntitiesCheckpoint {
-                processed: 0,
-                total: (tx.entries::<tables::HashedAccounts>()? +
-                    tx.entries::<tables::HashedStorages>()?) as u64,
-            });
+            input
+                .checkpoint
+                .entities_stage_checkpoint()
+                .unwrap_or(EntitiesCheckpoint {
+                    processed: 0,
+                    total: (tx.entries::<tables::HashedAccounts>()?
+                        + tx.entries::<tables::HashedStorages>()?)
+                        as u64,
+                });
 
         if input.unwind_to == 0 {
             tx.clear::<tables::AccountsTrie>()?;
@@ -317,7 +336,7 @@ where
             return Ok(UnwindOutput {
                 checkpoint: StageCheckpoint::new(input.unwind_to)
                     .with_entities_stage_checkpoint(entities_checkpoint),
-            })
+            });
         }
 
         // Unwind trie only if there are transitions
@@ -340,7 +359,9 @@ where
             // TODO(alexey): update entities checkpoint
         }
 
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+        Ok(UnwindOutput {
+            checkpoint: StageCheckpoint::new(input.unwind_to),
+        })
     }
 }
 
@@ -357,7 +378,11 @@ fn validate_state_root<H: BlockHeader + Sealable + Debug>(
         error!(target: "sync::stages::merkle", ?target_block, ?got, ?expected, "Failed to verify block state root! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
         Err(StageError::Block {
             error: BlockErrorKind::Validation(ConsensusError::BodyStateRootDiff(
-                GotExpected { got, expected: expected.state_root() }.into(),
+                GotExpected {
+                    got,
+                    expected: expected.state_root(),
+                }
+                .into(),
             )),
             block: Box::new(expected.block_with_parent()),
         })
@@ -400,7 +425,9 @@ mod tests {
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
 
-        runner.seed_execution(input).expect("failed to seed execution");
+        runner
+            .seed_execution(input)
+            .expect("failed to seed execution");
 
         let rx = runner.execute(input);
 
@@ -425,7 +452,10 @@ mod tests {
         );
 
         // Validate the stage execution
-        assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
+        assert!(
+            runner.validate_execution(input, result.ok()).is_ok(),
+            "execution validation"
+        );
     }
 
     /// Update small trie
@@ -440,7 +470,9 @@ mod tests {
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
 
-        runner.seed_execution(input).expect("failed to seed execution");
+        runner
+            .seed_execution(input)
+            .expect("failed to seed execution");
 
         let rx = runner.execute(input);
 
@@ -465,7 +497,10 @@ mod tests {
         );
 
         // Validate the stage execution
-        assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
+        assert!(
+            runner.validate_execution(input, result.ok()).is_ok(),
+            "execution validation"
+        );
     }
 
     struct MerkleTestRunner {
@@ -475,7 +510,10 @@ mod tests {
 
     impl Default for MerkleTestRunner {
         fn default() -> Self {
-            Self { db: TestStageDB::default(), clean_threshold: 10000 }
+            Self {
+                db: TestStageDB::default(),
+                clean_threshold: 10000,
+            }
         }
     }
 
@@ -487,7 +525,9 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            Self::S::Both { clean_threshold: self.clean_threshold }
+            Self::S::Both {
+                clean_threshold: self.clean_threshold,
+            }
         }
     }
 
@@ -511,7 +551,8 @@ mod tests {
                         ..Default::default()
                     },
                 ));
-                self.db.insert_blocks(preblocks.iter(), StorageKind::Static)?;
+                self.db
+                    .insert_blocks(preblocks.iter(), StorageKind::Static)?;
             }
 
             let num_of_accounts = 31;
@@ -520,13 +561,18 @@ mod tests {
                 .collect::<BTreeMap<_, _>>();
 
             self.db.insert_accounts_and_storages(
-                accounts.iter().map(|(addr, acc)| (*addr, (*acc, std::iter::empty()))),
+                accounts
+                    .iter()
+                    .map(|(addr, acc)| (*addr, (*acc, std::iter::empty()))),
             )?;
 
             let (header, body) = random_block(
                 &mut rng,
                 stage_progress,
-                BlockParams { parent: preblocks.last().map(|b| b.hash()), ..Default::default() },
+                BlockParams {
+                    parent: preblocks.last().map(|b| b.hash()),
+                    ..Default::default()
+                },
             )
             .split_sealed_header_body();
             let mut header = header.unseal();
@@ -547,7 +593,11 @@ mod tests {
             blocks.extend(random_block_range(
                 &mut rng,
                 start..=end,
-                BlockRangeParams { parent: Some(head_hash), tx_count: 0..3, ..Default::default() },
+                BlockRangeParams {
+                    parent: Some(head_hash),
+                    tx_count: 0..3,
+                    ..Default::default()
+                },
             ));
             let last_block = blocks.last().cloned().unwrap();
             self.db.insert_blocks(blocks.iter(), StorageKind::Static)?;
@@ -555,7 +605,9 @@ mod tests {
             let (transitions, final_state) = random_changeset_range(
                 &mut rng,
                 blocks.iter(),
-                accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
+                accounts
+                    .into_iter()
+                    .map(|(addr, acc)| (addr, (acc, Vec::new()))),
                 0..3,
                 0..256,
             );
@@ -588,15 +640,18 @@ mod tests {
             })?;
 
             let static_file_provider = self.db.factory.static_file_provider();
-            let mut writer =
-                static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
+            let mut writer = static_file_provider
+                .latest_writer(StaticFileSegment::Headers)
+                .unwrap();
             let mut last_header = last_block.clone_sealed_header();
             last_header.set_state_root(root);
 
             let hash = last_header.hash_slow();
             writer.prune_headers(1).unwrap();
             writer.commit().unwrap();
-            writer.append_header(&last_header, U256::ZERO, &hash).unwrap();
+            writer
+                .append_header(&last_header, U256::ZERO, &hash)
+                .unwrap();
             writer.commit().unwrap();
 
             Ok(blocks)
@@ -636,7 +691,7 @@ mod tests {
                         rev_changeset_walker.next().transpose().unwrap()
                     {
                         if bn_address.block_number() < target_block {
-                            break
+                            break;
                         }
 
                         tree.entry(keccak256(bn_address.address()))
@@ -653,8 +708,13 @@ mod tests {
                             }
 
                             if !value.is_zero() {
-                                let storage_entry = StorageEntry { key: hashed_slot, value };
-                                storage_cursor.upsert(hashed_address, &storage_entry).unwrap();
+                                let storage_entry = StorageEntry {
+                                    key: hashed_slot,
+                                    value,
+                                };
+                                storage_cursor
+                                    .upsert(hashed_address, &storage_entry)
+                                    .unwrap();
                             }
                         }
                     }
@@ -667,7 +727,7 @@ mod tests {
                         rev_changeset_walker.next().transpose().unwrap()
                     {
                         if block_number < target_block {
-                            break
+                            break;
                         }
 
                         if let Some(acc) = account_before_tx.info {

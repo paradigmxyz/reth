@@ -68,10 +68,10 @@ impl<N: NodePrimitives> Stream for CanonStateNotificationStream<N> {
                 Some(Ok(notification)) => Poll::Ready(Some(notification)),
                 Some(Err(err)) => {
                     debug!(%err, "canonical state notification stream lagging behind");
-                    continue
+                    continue;
                 }
                 None => Poll::Ready(None),
-            }
+            };
         }
     }
 }
@@ -143,12 +143,18 @@ impl<N: NodePrimitives> CanonStateNotification<N> {
 
         // get old receipts
         if let Some(old) = self.reverted() {
-            receipts
-                .extend(old.receipts_with_attachment().into_iter().map(|receipt| (receipt, true)));
+            receipts.extend(
+                old.receipts_with_attachment()
+                    .into_iter()
+                    .map(|receipt| (receipt, true)),
+            );
         }
         // get new receipts
         receipts.extend(
-            self.committed().receipts_with_attachment().into_iter().map(|receipt| (receipt, false)),
+            self.committed()
+                .receipts_with_attachment()
+                .into_iter()
+                .map(|receipt| (receipt, false)),
         );
         receipts
     }
@@ -194,7 +200,9 @@ pub struct ForkChoiceStream<T> {
 impl<T: Clone + Sync + Send + 'static> ForkChoiceStream<T> {
     /// Creates a new `ForkChoiceStream`
     pub fn new(rx: watch::Receiver<Option<T>>) -> Self {
-        Self { st: WatchStream::from_changes(rx) }
+        Self {
+            st: WatchStream::from_changes(rx),
+        }
     }
 }
 
@@ -273,8 +281,11 @@ mod tests {
         block3.set_block_number(3);
         block3.set_hash(block3_hash);
 
-        let old_chain: Arc<Chain> =
-            Arc::new(Chain::new(vec![block1.clone()], ExecutionOutcome::default(), None));
+        let old_chain: Arc<Chain> = Arc::new(Chain::new(
+            vec![block1.clone()],
+            ExecutionOutcome::default(),
+            None,
+        ));
         let new_chain = Arc::new(Chain::new(
             vec![block2.clone(), block3.clone()],
             ExecutionOutcome::default(),
@@ -282,8 +293,10 @@ mod tests {
         ));
 
         // Create a reorg notification
-        let notification =
-            CanonStateNotification::Reorg { old: old_chain.clone(), new: new_chain.clone() };
+        let notification = CanonStateNotification::Reorg {
+            old: old_chain.clone(),
+            new: new_chain.clone(),
+        };
 
         // Test that `reverted` returns the old chain
         assert_eq!(notification.reverted(), Some(old_chain));
@@ -337,11 +350,17 @@ mod tests {
         let receipts = vec![vec![receipt1.clone()]];
 
         // Define an `ExecutionOutcome` with the created receipts.
-        let execution_outcome = ExecutionOutcome { receipts, ..Default::default() };
+        let execution_outcome = ExecutionOutcome {
+            receipts,
+            ..Default::default()
+        };
 
         // Create a new chain segment with `block1` and `block2` and the execution outcome.
-        let new_chain: Arc<Chain> =
-            Arc::new(Chain::new(vec![block1.clone(), block2.clone()], execution_outcome, None));
+        let new_chain: Arc<Chain> = Arc::new(Chain::new(
+            vec![block1.clone(), block2.clone()],
+            execution_outcome,
+            None,
+        ));
 
         // Create a commit notification containing the new chain segment.
         let notification = CanonStateNotification::Commit { new: new_chain };
@@ -393,12 +412,17 @@ mod tests {
         };
         let old_receipts = vec![vec![old_receipt.clone()]];
 
-        let old_execution_outcome =
-            ExecutionOutcome { receipts: old_receipts, ..Default::default() };
+        let old_execution_outcome = ExecutionOutcome {
+            receipts: old_receipts,
+            ..Default::default()
+        };
 
         // Create an old chain segment to be reverted, containing `old_block1`.
-        let old_chain: Arc<Chain> =
-            Arc::new(Chain::new(vec![old_block1.clone()], old_execution_outcome, None));
+        let old_chain: Arc<Chain> = Arc::new(Chain::new(
+            vec![old_block1.clone()],
+            old_execution_outcome,
+            None,
+        ));
 
         // Define block2 for the new chain segment, which will be committed.
         let mut body = BlockBody::<TransactionSigned>::default();
@@ -422,14 +446,23 @@ mod tests {
         };
         let new_receipts = vec![vec![new_receipt.clone()]];
 
-        let new_execution_outcome =
-            ExecutionOutcome { receipts: new_receipts, ..Default::default() };
+        let new_execution_outcome = ExecutionOutcome {
+            receipts: new_receipts,
+            ..Default::default()
+        };
 
         // Create a new chain segment to be committed, containing `new_block1`.
-        let new_chain = Arc::new(Chain::new(vec![new_block1.clone()], new_execution_outcome, None));
+        let new_chain = Arc::new(Chain::new(
+            vec![new_block1.clone()],
+            new_execution_outcome,
+            None,
+        ));
 
         // Create a reorg notification with both reverted (old) and committed (new) chain segments.
-        let notification = CanonStateNotification::Reorg { old: old_chain, new: new_chain };
+        let notification = CanonStateNotification::Reorg {
+            old: old_chain,
+            new: new_chain,
+        };
 
         // Retrieve receipts from both old (reverted) and new (committed) segments.
         let block_receipts = notification.block_receipts();

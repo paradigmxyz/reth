@@ -41,7 +41,10 @@ impl<N: NodePrimitives> PendingState<N> {
     pub fn insert_invalid_block(&self, block: Arc<RecoveredBlock<N::Block>>) {
         let mut this = self.0.write();
         let block_hash = block.hash();
-        this.block_hashes_by_number.entry(block.number()).or_default().insert(block_hash);
+        this.block_hashes_by_number
+            .entry(block.number())
+            .or_default()
+            .insert(block_hash);
         this.invalid_blocks_by_hash.insert(block_hash, block);
     }
 
@@ -101,8 +104,8 @@ pub async fn maintain_pending_state<P>(
 {
     while let Some(event) = events.next().await {
         match event {
-            BeaconConsensusEngineEvent::CanonicalBlockAdded(block, _) |
-            BeaconConsensusEngineEvent::ForkBlockAdded(block, _) => {
+            BeaconConsensusEngineEvent::CanonicalBlockAdded(block, _)
+            | BeaconConsensusEngineEvent::ForkBlockAdded(block, _) => {
                 trace!(target: "reth::ress_provider", block = ? block.recovered_block().num_hash(), "Insert block into pending state");
                 pending_state.insert_block(block);
             }
@@ -122,8 +125,8 @@ pub async fn maintain_pending_state<P>(
                 }
             }
             // ignore
-            BeaconConsensusEngineEvent::CanonicalChainCommitted(_, _) |
-            BeaconConsensusEngineEvent::LiveSyncProgress(_) => (),
+            BeaconConsensusEngineEvent::CanonicalChainCommitted(_, _)
+            | BeaconConsensusEngineEvent::LiveSyncProgress(_) => (),
         }
     }
 }

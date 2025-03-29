@@ -32,7 +32,10 @@ pub struct PruneStage {
 impl PruneStage {
     /// Crate new prune stage with the given prune modes and commit threshold.
     pub const fn new(prune_modes: PruneModes, commit_threshold: usize) -> Self {
-        Self { prune_modes, commit_threshold }
+        Self {
+            prune_modes,
+            commit_threshold,
+        }
     }
 }
 
@@ -56,7 +59,10 @@ where
 
         let result = pruner.run_with_provider(provider, input.target())?;
         if result.progress.is_finished() {
-            Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
+            Ok(ExecOutput {
+                checkpoint: StageCheckpoint::new(input.target()),
+                done: true,
+            })
         } else {
             if let Some((last_segment, last_segment_output)) = result.segments.last() {
                 match last_segment_output {
@@ -64,7 +70,10 @@ where
                         progress,
                         pruned,
                         checkpoint:
-                            checkpoint @ Some(SegmentOutputCheckpoint { block_number: Some(_), .. }),
+                            checkpoint @ Some(SegmentOutputCheckpoint {
+                                block_number: Some(_),
+                                ..
+                            }),
                     } => {
                         info!(
                             target: "sync::stages::prune::exec",
@@ -75,7 +84,11 @@ where
                             "Last segment has more data to prune"
                         )
                     }
-                    SegmentOutput { progress, pruned, checkpoint: _ } => {
+                    SegmentOutput {
+                        progress,
+                        pruned,
+                        checkpoint: _,
+                    } => {
                         info!(
                             target: "sync::stages::prune::exec",
                             ?last_segment,
@@ -88,7 +101,10 @@ where
             }
             // We cannot set the checkpoint yet, because prune segments may have different highest
             // pruned block numbers
-            Ok(ExecOutput { checkpoint: input.checkpoint(), done: false })
+            Ok(ExecOutput {
+                checkpoint: input.checkpoint(),
+                done: false,
+            })
         }
     }
 
@@ -104,7 +120,9 @@ where
             checkpoint.block_number = Some(input.unwind_to);
             provider.save_prune_checkpoint(segment, checkpoint)?;
         }
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+        Ok(UnwindOutput {
+            checkpoint: StageCheckpoint::new(input.unwind_to),
+        })
     }
 }
 
@@ -119,7 +137,10 @@ impl PruneSenderRecoveryStage {
     /// Create new prune sender recovery stage with the given prune mode and commit threshold.
     pub fn new(prune_mode: PruneMode, commit_threshold: usize) -> Self {
         Self(PruneStage::new(
-            PruneModes { sender_recovery: Some(prune_mode), ..PruneModes::none() },
+            PruneModes {
+                sender_recovery: Some(prune_mode),
+                ..PruneModes::none()
+            },
             commit_threshold,
         ))
     }
@@ -144,7 +165,9 @@ where
         if !result.done {
             let checkpoint = provider
                 .get_prune_checkpoint(PruneSegment::SenderRecovery)?
-                .ok_or(StageError::MissingPruneCheckpoint(PruneSegment::SenderRecovery))?;
+                .ok_or(StageError::MissingPruneCheckpoint(
+                    PruneSegment::SenderRecovery,
+                ))?;
 
             // `unwrap_or_default` is safe because we know that genesis block doesn't have any
             // transactions and senders
@@ -212,13 +235,24 @@ mod tests {
             let blocks = random_block_range(
                 &mut rng,
                 input.checkpoint().block_number..=input.target(),
-                BlockRangeParams { parent: Some(B256::ZERO), tx_count: 1..3, ..Default::default() },
+                BlockRangeParams {
+                    parent: Some(B256::ZERO),
+                    tx_count: 1..3,
+                    ..Default::default()
+                },
             );
             self.db.insert_blocks(blocks.iter(), StorageKind::Static)?;
             self.db.insert_transaction_senders(
-                blocks.iter().flat_map(|block| block.body().transactions.iter()).enumerate().map(
-                    |(i, tx)| (i as u64, tx.recover_signer().expect("failed to recover signer")),
-                ),
+                blocks
+                    .iter()
+                    .flat_map(|block| block.body().transactions.iter())
+                    .enumerate()
+                    .map(|(i, tx)| {
+                        (
+                            i as u64,
+                            tx.recover_signer().expect("failed to recover signer"),
+                        )
+                    }),
             )?;
             Ok(blocks)
         }
@@ -233,7 +267,7 @@ mod tests {
                 let end_block = output.checkpoint.block_number;
 
                 if start_block > end_block {
-                    return Ok(())
+                    return Ok(());
                 }
 
                 let provider = self.db.factory.provider()?;

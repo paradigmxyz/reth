@@ -105,7 +105,11 @@ where
             BlockId::Number(tag) => self.block_by_number(tag, false).await,
         }?
         .ok_or_else(|| RpcError::Custom("block not found".to_string()))?;
-        let hashes = block.transactions.hashes().map(|tx| (tx, opts.clone())).collect::<Vec<_>>();
+        let hashes = block
+            .transactions
+            .hashes()
+            .map(|tx| (tx, opts.clone()))
+            .collect::<Vec<_>>();
         let stream = futures::stream::iter(hashes.into_iter().map(move |(tx, opts)| async move {
             match self.debug_trace_transaction_json(tx, opts).await {
                 Ok(result) => Ok((result, tx)),
@@ -114,7 +118,9 @@ where
         }))
         .buffered(10);
 
-        Ok(DebugTraceTransactionsStream { stream: Box::pin(stream) })
+        Ok(DebugTraceTransactionsStream {
+            stream: Box::pin(stream),
+        })
     }
 
     fn debug_trace_block_buffered_unordered<I, B>(
@@ -127,8 +133,10 @@ where
         I: IntoIterator<Item = B>,
         B: Into<BlockId> + Send,
     {
-        let blocks =
-            params.into_iter().map(|block| (block.into(), opts.clone())).collect::<Vec<_>>();
+        let blocks = params
+            .into_iter()
+            .map(|block| (block.into(), opts.clone()))
+            .collect::<Vec<_>>();
         let stream =
             futures::stream::iter(blocks.into_iter().map(move |(block, opts)| async move {
                 let trace_future = match block {
@@ -142,7 +150,9 @@ where
                 }
             }))
             .buffer_unordered(n);
-        DebugTraceBlockStream { stream: Box::pin(stream) }
+        DebugTraceBlockStream {
+            stream: Box::pin(stream),
+        }
     }
 
     async fn debug_trace_call_json(
@@ -254,8 +264,10 @@ impl JsTracerBuilder {
         let mut template = JS_TRACER_TEMPLATE.to_string();
         template = template.replace("//<setup>", self.setup_body.as_deref().unwrap_or_default());
         template = template.replace("//<fault>", self.fault_body.as_deref().unwrap_or_default());
-        template =
-            template.replace("//<result>", self.result_body.as_deref().unwrap_or("return {};"));
+        template = template.replace(
+            "//<result>",
+            self.result_body.as_deref().unwrap_or("return {};"),
+        );
         template = template.replace("//<step>", self.step_body.as_deref().unwrap_or_default());
         template = template.replace("//<enter>", self.enter_body.as_deref().unwrap_or_default());
         template = template.replace("//<exit>", self.exit_body.as_deref().unwrap_or_default());
@@ -312,7 +324,8 @@ impl Stream for DebugTraceTransactionsStream<'_> {
 
 impl std::fmt::Debug for DebugTraceTransactionsStream<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DebugTraceTransactionsStream").finish_non_exhaustive()
+        f.debug_struct("DebugTraceTransactionsStream")
+            .finish_non_exhaustive()
     }
 }
 
@@ -344,7 +357,8 @@ impl Stream for DebugTraceBlockStream<'_> {
 
 impl std::fmt::Debug for DebugTraceBlockStream<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DebugTraceBlockStream").finish_non_exhaustive()
+        f.debug_struct("DebugTraceBlockStream")
+            .finish_non_exhaustive()
     }
 }
 
@@ -387,8 +401,10 @@ mod tests {
         let tx = TX_1.parse().unwrap();
         let url = parse_env_url("RETH_RPC_TEST_NODE_URL").unwrap();
         let client = HttpClientBuilder::default().build(url).unwrap();
-        let res =
-            client.debug_trace_transaction_json(tx, NoopJsTracer::default().into()).await.unwrap();
+        let res = client
+            .debug_trace_transaction_json(tx, NoopJsTracer::default().into())
+            .await
+            .unwrap();
         assert_eq!(res, serde_json::Value::Object(Default::default()));
     }
 
@@ -415,7 +431,10 @@ mod tests {
         let opts = GethDebugTracingOptions::default()
             .with_call_config(CallConfig::default().only_top_call());
 
-        let mut stream = client.debug_trace_transactions_in_block(block, opts).await.unwrap();
+        let mut stream = client
+            .debug_trace_transactions_in_block(block, opts)
+            .await
+            .unwrap();
         while let Some(res) = stream.next().await {
             if let Err((err, tx)) = res {
                 println!("failed to trace {tx:?}  {err}");

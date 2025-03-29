@@ -31,7 +31,9 @@ impl<TX: DbTx> HashedCursorFactory for DatabaseHashedCursorFactory<'_, TX> {
         DatabaseHashedStorageCursor<<TX as DbTx>::DupCursor<tables::HashedStorages>>;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, DatabaseError> {
-        Ok(DatabaseHashedAccountCursor(self.0.cursor_read::<tables::HashedAccounts>()?))
+        Ok(DatabaseHashedAccountCursor(
+            self.0.cursor_read::<tables::HashedAccounts>()?,
+        ))
     }
 
     fn hashed_storage_cursor(
@@ -86,7 +88,10 @@ pub struct DatabaseHashedStorageCursor<C> {
 impl<C> DatabaseHashedStorageCursor<C> {
     /// Create new [`DatabaseHashedStorageCursor`].
     pub const fn new(cursor: C, hashed_address: B256) -> Self {
-        Self { cursor, hashed_address }
+        Self {
+            cursor,
+            hashed_address,
+        }
     }
 }
 
@@ -97,7 +102,10 @@ where
     type Value = U256;
 
     fn seek(&mut self, subkey: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
-        Ok(self.cursor.seek_by_key_subkey(self.hashed_address, subkey)?.map(|e| (e.key, e.value)))
+        Ok(self
+            .cursor
+            .seek_by_key_subkey(self.hashed_address, subkey)?
+            .map(|e| (e.key, e.value)))
     }
 
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {

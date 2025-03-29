@@ -33,7 +33,7 @@ pub(crate) trait DbTxPruneExt: DbTxMut {
                     table = %T::NAME,
                     "Pruning limit reached"
                 );
-                break
+                break;
             }
 
             let row = cursor.seek_exact(key)?;
@@ -76,7 +76,7 @@ pub(crate) trait DbTxPruneExt: DbTxMut {
                     table = %T::NAME,
                     "Pruning limit reached"
                 );
-                break false
+                break false;
             }
 
             let done = self.prune_table_with_range_step(
@@ -87,7 +87,7 @@ pub(crate) trait DbTxPruneExt: DbTxMut {
             )?;
 
             if done {
-                break true
+                break true;
             }
             deleted_entries += 1;
         };
@@ -109,7 +109,9 @@ pub(crate) trait DbTxPruneExt: DbTxMut {
         skip_filter: &mut impl FnMut(&TableRow<T>) -> bool,
         delete_callback: &mut impl FnMut(TableRow<T>),
     ) -> Result<bool, DatabaseError> {
-        let Some(res) = walker.next() else { return Ok(true) };
+        let Some(res) = walker.next() else {
+            return Ok(true);
+        };
 
         let row = res?;
 

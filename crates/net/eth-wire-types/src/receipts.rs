@@ -57,7 +57,10 @@ mod tests {
     #[test]
     fn roundtrip_eip1559() {
         let receipts = Receipts(vec![vec![ReceiptWithBloom {
-            receipt: Receipt { tx_type: TxType::Eip1559, ..Default::default() },
+            receipt: Receipt {
+                tx_type: TxType::Eip1559,
+                ..Default::default()
+            },
             logs_bloom: Default::default(),
         }]]);
 

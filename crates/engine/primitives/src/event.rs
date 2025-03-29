@@ -51,7 +51,11 @@ where
                 write!(f, "ForkchoiceUpdated({state:?}, {status:?})")
             }
             Self::ForkBlockAdded(block, duration) => {
-                write!(f, "ForkBlockAdded({:?}, {duration:?})", block.recovered_block.num_hash())
+                write!(
+                    f,
+                    "ForkBlockAdded({:?}, {duration:?})",
+                    block.recovered_block.num_hash()
+                )
             }
             Self::CanonicalBlockAdded(block, duration) => {
                 write!(
@@ -61,7 +65,11 @@ where
                 )
             }
             Self::CanonicalChainCommitted(block, duration) => {
-                write!(f, "CanonicalChainCommitted({:?}, {duration:?})", block.num_hash())
+                write!(
+                    f,
+                    "CanonicalChainCommitted({:?}, {duration:?})",
+                    block.num_hash()
+                )
             }
             Self::InvalidBlock(block) => {
                 write!(f, "InvalidBlock({:?})", block.num_hash())

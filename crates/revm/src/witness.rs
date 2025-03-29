@@ -34,15 +34,20 @@ impl ExecutionWitnessRecord {
                 // a contract is created within the block
                 // the contract only exists in bundle state, therefore we need
                 // to include them as well
-                statedb.bundle_state.contracts.values().map(|code| code.original_bytes()),
+                statedb
+                    .bundle_state
+                    .contracts
+                    .values()
+                    .map(|code| code.original_bytes()),
             )
             .collect();
 
         for (address, account) in &statedb.cache.accounts {
             let hashed_address = keccak256(address);
-            self.hashed_state
-                .accounts
-                .insert(hashed_address, account.account.as_ref().map(|a| (&a.info).into()));
+            self.hashed_state.accounts.insert(
+                hashed_address,
+                account.account.as_ref().map(|a| (&a.info).into()),
+            );
 
             let storage = self
                 .hashed_state

@@ -23,7 +23,9 @@ pub fn parse_duration_from_secs_or_ms(
     arg: &str,
 ) -> eyre::Result<Duration, std::num::ParseIntError> {
     if arg.ends_with("ms") {
-        arg.trim_end_matches("ms").parse().map(Duration::from_millis)
+        arg.trim_end_matches("ms")
+            .parse()
+            .map(Duration::from_millis)
     } else if arg.ends_with('s') {
         arg.trim_end_matches('s').parse().map(Duration::from_secs)
     } else {
@@ -68,15 +70,18 @@ pub enum SocketAddressParsingError {
 /// An error is returned if the value is empty.
 pub fn parse_socket_address(value: &str) -> eyre::Result<SocketAddr, SocketAddressParsingError> {
     if value.is_empty() {
-        return Err(SocketAddressParsingError::Empty)
+        return Err(SocketAddressParsingError::Empty);
     }
 
-    if let Some(port) = value.strip_prefix(':').or_else(|| value.strip_prefix("localhost:")) {
+    if let Some(port) = value
+        .strip_prefix(':')
+        .or_else(|| value.strip_prefix("localhost:"))
+    {
         let port: u16 = port.parse()?;
-        return Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
+        return Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port));
     }
     if let Ok(port) = value.parse() {
-        return Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
+        return Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port));
     }
     value
         .to_socket_addrs()?
@@ -109,7 +114,11 @@ mod tests {
     fn parse_socket_address_random() {
         let port: u16 = rand::thread_rng().gen();
 
-        for value in [format!("localhost:{port}"), format!(":{port}"), port.to_string()] {
+        for value in [
+            format!("localhost:{port}"),
+            format!(":{port}"),
+            port.to_string(),
+        ] {
             let socket_addr = parse_socket_address(&value)
                 .unwrap_or_else(|_| panic!("could not parse socket address: {value}"));
 

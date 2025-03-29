@@ -51,7 +51,10 @@ pub struct StageSetBuilder<Provider> {
 
 impl<Provider> Default for StageSetBuilder<Provider> {
     fn default() -> Self {
-        Self { stages: HashMap::default(), order: Vec::new() }
+        Self {
+            stages: HashMap::default(),
+            order: Vec::new(),
+        }
     }
 }
 
@@ -73,7 +76,17 @@ impl<Provider> StageSetBuilder<Provider> {
 
     fn upsert_stage_state(&mut self, stage: Box<dyn Stage<Provider>>, added_at_index: usize) {
         let stage_id = stage.id();
-        if self.stages.insert(stage.id(), StageEntry { stage, enabled: true }).is_some() {
+        if self
+            .stages
+            .insert(
+                stage.id(),
+                StageEntry {
+                    stage,
+                    enabled: true,
+                },
+            )
+            .is_some()
+        {
             if let Some(to_remove) = self
                 .order
                 .iter()
@@ -170,8 +183,10 @@ impl<Provider> StageSetBuilder<Provider> {
     ///
     /// Panics if the stage is not in this set.
     pub fn enable(mut self, stage_id: StageId) -> Self {
-        let entry =
-            self.stages.get_mut(&stage_id).expect("Cannot enable a stage that is not in the set.");
+        let entry = self
+            .stages
+            .get_mut(&stage_id)
+            .expect("Cannot enable a stage that is not in the set.");
         entry.enabled = true;
         self
     }
@@ -201,7 +216,9 @@ impl<Provider> StageSetBuilder<Provider> {
     /// If any of the stages is not in this set, it is ignored.
     pub fn disable_all(mut self, stages: &[StageId]) -> Self {
         for stage_id in stages {
-            let Some(entry) = self.stages.get_mut(stage_id) else { continue };
+            let Some(entry) = self.stages.get_mut(stage_id) else {
+                continue;
+            };
             entry.enabled = false;
         }
         self
@@ -216,7 +233,7 @@ impl<Provider> StageSetBuilder<Provider> {
         F: FnOnce() -> bool,
     {
         if f() {
-            return self.disable(stage_id)
+            return self.disable(stage_id);
         }
         self
     }
@@ -230,7 +247,7 @@ impl<Provider> StageSetBuilder<Provider> {
         F: FnOnce() -> bool,
     {
         if f() {
-            return self.disable_all(stages)
+            return self.disable_all(stages);
         }
         self
     }

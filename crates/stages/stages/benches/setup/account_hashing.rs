@@ -20,7 +20,11 @@ use std::{fs, ops::RangeInclusive, path::Path};
 /// Returns the path to the database file, stage and range of stage execution if it exists.
 pub fn prepare_account_hashing(
     num_blocks: u64,
-) -> (TestStageDB, AccountHashingStage, RangeInclusive<BlockNumber>) {
+) -> (
+    TestStageDB,
+    AccountHashingStage,
+    RangeInclusive<BlockNumber>,
+) {
     let (db, stage_range) = match std::env::var(constants::ACCOUNT_HASHING_DB) {
         Ok(db) => {
             let path = Path::new(&db).to_path_buf();
@@ -53,16 +57,25 @@ fn find_stage_range(db: &Path) -> RangeInclusive<BlockNumber> {
 }
 
 fn generate_testdata_db(num_blocks: u64) -> (TestStageDB, RangeInclusive<BlockNumber>) {
-    let opts = SeedOpts { blocks: 0..=num_blocks, accounts: 100_000, txs: 100..150 };
+    let opts = SeedOpts {
+        blocks: 0..=num_blocks,
+        accounts: 100_000,
+        txs: 100..150,
+    };
 
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join("account-hashing-bench");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("testdata")
+        .join("account-hashing-bench");
     let exists = path.exists();
     let db = TestStageDB::new(&path);
 
     if !exists {
         // create the dirs
         fs::create_dir_all(&path).unwrap();
-        println!("Account Hashing testdata not found, generating to {:?}", path.display());
+        println!(
+            "Account Hashing testdata not found, generating to {:?}",
+            path.display()
+        );
         let provider = db.factory.provider_rw().unwrap();
         let _accounts = AccountHashingStage::seed(&provider, opts.clone());
         provider.commit().expect("failed to commit");

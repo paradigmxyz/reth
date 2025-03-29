@@ -64,7 +64,11 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
             let mut checker = NippyJarChecker::new(jar);
             checker.ensure_consistency()?;
 
-            let NippyJarChecker { jar, data_file, offsets_file } = checker;
+            let NippyJarChecker {
+                jar,
+                data_file,
+                offsets_file,
+            } = checker;
 
             // Calling ensure_consistency, will fill data_file and offsets_file
             (jar, data_file.expect("qed"), offsets_file.expect("qed"))
@@ -210,7 +214,8 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
 
                 // Last offset represents the size of the data file if no more data is to be
                 // appended. Otherwise, represents the offset of the next data item.
-                self.offsets.push(self.offsets.last().expect("qed") + written as u64);
+                self.offsets
+                    .push(self.offsets.last().expect("qed") + written as u64);
             }
             None => {
                 return Err(NippyJarError::UnexpectedMissingValue(
@@ -230,7 +235,8 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         let len = if let Some(compression) = &self.jar.compressor {
             let before = self.tmp_buf.len();
             let len = compression.compress_to(value, &mut self.tmp_buf)?;
-            self.data_file.write_all(&self.tmp_buf[before..before + len])?;
+            self.data_file
+                .write_all(&self.tmp_buf[before..before + len])?;
             len
         } else {
             self.data_file.write_all(value)?;
@@ -264,7 +270,8 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         if offsets_prune_count > 0 {
             // Determine new length based on the offset to prune up to
             let new_len = self.offsets[(self.offsets.len() - 1) - offsets_prune_count]; // last element is the expected size of the data file
-            self.offsets.truncate(self.offsets.len() - offsets_prune_count);
+            self.offsets
+                .truncate(self.offsets.len() - offsets_prune_count);
 
             // Truncate the data file to the new length
             self.data_file.get_mut().set_len(new_len)?;
@@ -284,7 +291,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
                     return Err(NippyJarError::InvalidPruning(
                         num_offsets,
                         remaining_to_prune as u64,
-                    ))
+                    ));
                 }
 
                 let new_num_offsets = num_offsets.saturating_sub(remaining_to_prune as u64);
@@ -298,8 +305,9 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
                     // Calculate the new length for the on-disk offset list
                     let new_len = 1 + new_num_offsets * OFFSET_SIZE_BYTES as u64;
                     // Seek to the position of the last offset
-                    self.offsets_file
-                        .seek(SeekFrom::Start(new_len.saturating_sub(OFFSET_SIZE_BYTES as u64)))?;
+                    self.offsets_file.seek(SeekFrom::Start(
+                        new_len.saturating_sub(OFFSET_SIZE_BYTES as u64),
+                    ))?;
                     // Read the last offset value
                     let mut last_offset = [0u8; OFFSET_SIZE_BYTES as usize];
                     self.offsets_file.get_ref().read_exact(&mut last_offset)?;
@@ -310,7 +318,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
                     self.data_file.get_mut().set_len(last_offset)?;
                 }
             } else {
-                return Err(NippyJarError::InvalidPruning(0, remaining_to_prune as u64))
+                return Err(NippyJarError::InvalidPruning(0, remaining_to_prune as u64));
             }
         }
 
@@ -392,7 +400,8 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         // The last offset on disk can be the first offset of `self.offsets` given how
         // `append_column()` works alongside commit. So we need to skip it.
         let mut last_offset_ondisk = if self.offsets_file.get_ref().metadata()?.len() > 1 {
-            self.offsets_file.seek(SeekFrom::End(-(OFFSET_SIZE_BYTES as i64)))?;
+            self.offsets_file
+                .seek(SeekFrom::End(-(OFFSET_SIZE_BYTES as i64)))?;
             let mut buf = [0u8; OFFSET_SIZE_BYTES as usize];
             self.offsets_file.get_ref().read_exact(&mut buf)?;
             Some(u64::from_le_bytes(buf))
@@ -406,7 +415,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         for offset in self.offsets.drain(..) {
             if let Some(last_offset_ondisk) = last_offset_ondisk.take() {
                 if last_offset_ondisk == offset {
-                    continue
+                    continue;
                 }
             }
             self.offsets_file.write_all(&offset.to_le_bytes())?;

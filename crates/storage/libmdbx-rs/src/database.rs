@@ -33,7 +33,11 @@ impl Database {
             c_name_buf.push(0);
             CStr::from_bytes_with_nul(&c_name_buf).unwrap()
         });
-        let name_ptr = if let Some(c_name) = c_name { c_name.as_ptr() } else { ptr::null() };
+        let name_ptr = if let Some(c_name) = c_name {
+            c_name.as_ptr()
+        } else {
+            ptr::null()
+        };
         let mut dbi: ffi::MDBX_dbi = 0;
         txn.txn_execute(|txn_ptr| {
             mdbx_result(unsafe { ffi::mdbx_dbi_open(txn_ptr, name_ptr, flags, &mut dbi) })
@@ -42,7 +46,10 @@ impl Database {
     }
 
     pub(crate) const fn new_from_ptr(dbi: ffi::MDBX_dbi, env: Environment) -> Self {
-        Self { dbi, _env: Some(env) }
+        Self {
+            dbi,
+            _env: Some(env),
+        }
     }
 
     /// Opens the freelist database with DBI `0`.

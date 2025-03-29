@@ -148,13 +148,20 @@ impl TotalGasOutput {
     /// Create a new [`TotalGasOutput`] from a list of [`TotalGasRow`].
     pub(crate) fn new(rows: Vec<TotalGasRow>) -> Self {
         // the duration is obtained from the last row
-        let total_duration =
-            rows.last().map(|row| row.time).expect("the row has at least one element");
+        let total_duration = rows
+            .last()
+            .map(|row| row.time)
+            .expect("the row has at least one element");
         let blocks_processed = rows.len() as u64;
         let total_gas_used: u64 = rows.into_iter().map(|row| row.gas_used).sum();
         let total_gas_per_second = total_gas_used as f64 / total_duration.as_secs_f64();
 
-        Self { total_gas_used, total_duration, total_gas_per_second, blocks_processed }
+        Self {
+            total_gas_used,
+            total_duration,
+            total_gas_per_second,
+            blocks_processed,
+        }
     }
 
     /// Return the total gigagas per second.
@@ -189,7 +196,11 @@ mod tests {
 
     #[test]
     fn test_write_total_gas_row_csv() {
-        let row = TotalGasRow { block_number: 1, gas_used: 1_000, time: Duration::from_secs(1) };
+        let row = TotalGasRow {
+            block_number: 1,
+            gas_used: 1_000,
+            time: Duration::from_secs(1),
+        };
 
         let mut writer = Writer::from_writer(vec![]);
         writer.serialize(row).unwrap();

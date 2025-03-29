@@ -85,7 +85,9 @@ where
 {
     let metrics = MaintainPoolConditionalMetrics::default();
     loop {
-        let Some(event) = events.next().await else { break };
+        let Some(event) = events.next().await else {
+            break;
+        };
         if let CanonStateNotification::Commit { new } = event {
             let block_attr = BlockConditionalAttributes {
                 number: new.tip().number(),
@@ -140,7 +142,9 @@ pub async fn maintain_transaction_pool_interop<N, Pool, St>(
     let metrics = MaintainPoolInteropMetrics::default();
     let supervisor_client = Arc::new(supervisor_client);
     loop {
-        let Some(event) = events.next().await else { break };
+        let Some(event) = events.next().await else {
+            break;
+        };
         if let CanonStateNotification::Commit { new } = event {
             let timestamp = new.tip().timestamp();
             let mut to_remove = Vec::new();

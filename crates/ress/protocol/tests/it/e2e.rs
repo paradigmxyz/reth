@@ -66,7 +66,7 @@ async fn disconnect_on_stateful_pair() {
             peer0_event_listener.next().await.unwrap()
         {
             assert_eq!(peer_id, *handle.peers()[1].peer_id());
-            break
+            break;
         }
     }
 
@@ -76,7 +76,7 @@ async fn disconnect_on_stateful_pair() {
             peer1_event_listener.next().await.unwrap()
         {
             assert_eq!(peer_id, *handle.peers()[0].peer_id());
-            break
+            break;
         }
     }
 }
@@ -113,7 +113,11 @@ async fn message_exchange() {
 
     let peer0_to_peer1 = from_peer0.recv().await.unwrap();
     let peer0_conn = match peer0_to_peer1 {
-        ProtocolEvent::Established { direction: _, peer_id, to_connection } => {
+        ProtocolEvent::Established {
+            direction: _,
+            peer_id,
+            to_connection,
+        } => {
             assert_eq!(peer_id, *handle.peers()[1].peer_id());
             to_connection
         }
@@ -136,7 +140,10 @@ async fn message_exchange() {
     let (tx, rx) = oneshot::channel();
     peer0_conn
         .send(RessPeerRequest::GetHeaders {
-            request: GetHeaders { start_hash: B256::ZERO, limit: 1 },
+            request: GetHeaders {
+                start_hash: B256::ZERO,
+                limit: 1,
+            },
             tx,
         })
         .unwrap();
@@ -144,17 +151,32 @@ async fn message_exchange() {
 
     // send get bodies message from peer0 to peer1
     let (tx, rx) = oneshot::channel();
-    peer0_conn.send(RessPeerRequest::GetBlockBodies { request: Vec::new(), tx }).unwrap();
+    peer0_conn
+        .send(RessPeerRequest::GetBlockBodies {
+            request: Vec::new(),
+            tx,
+        })
+        .unwrap();
     assert_eq!(rx.await.unwrap(), Vec::new());
 
     // send get witness message from peer0 to peer1
     let (tx, rx) = oneshot::channel();
-    peer0_conn.send(RessPeerRequest::GetWitness { block_hash: B256::ZERO, tx }).unwrap();
+    peer0_conn
+        .send(RessPeerRequest::GetWitness {
+            block_hash: B256::ZERO,
+            tx,
+        })
+        .unwrap();
     assert_eq!(rx.await.unwrap(), Vec::<Bytes>::new());
 
     // send get bytecode message from peer0 to peer1
     let (tx, rx) = oneshot::channel();
-    peer0_conn.send(RessPeerRequest::GetBytecode { code_hash: B256::ZERO, tx }).unwrap();
+    peer0_conn
+        .send(RessPeerRequest::GetBytecode {
+            code_hash: B256::ZERO,
+            tx,
+        })
+        .unwrap();
     assert_eq!(rx.await.unwrap(), Bytes::default());
 }
 
@@ -192,7 +214,11 @@ async fn witness_fetching_does_not_block() {
 
     let peer0_to_peer1 = from_peer0.recv().await.unwrap();
     let peer0_conn = match peer0_to_peer1 {
-        ProtocolEvent::Established { direction: _, peer_id, to_connection } => {
+        ProtocolEvent::Established {
+            direction: _,
+            peer_id,
+            to_connection,
+        } => {
             assert_eq!(peer_id, *handle.peers()[1].peer_id());
             to_connection
         }
@@ -215,13 +241,21 @@ async fn witness_fetching_does_not_block() {
     let witness_requested_at = Instant::now();
     let (witness_tx, witness_rx) = oneshot::channel();
     peer0_conn
-        .send(RessPeerRequest::GetWitness { block_hash: B256::ZERO, tx: witness_tx })
+        .send(RessPeerRequest::GetWitness {
+            block_hash: B256::ZERO,
+            tx: witness_tx,
+        })
         .unwrap();
 
     // send get bytecode message from peer0 to peer1
     let bytecode_requested_at = Instant::now();
     let (tx, rx) = oneshot::channel();
-    peer0_conn.send(RessPeerRequest::GetBytecode { code_hash: B256::ZERO, tx }).unwrap();
+    peer0_conn
+        .send(RessPeerRequest::GetBytecode {
+            code_hash: B256::ZERO,
+            tx,
+        })
+        .unwrap();
     assert_eq!(rx.await.unwrap(), Bytes::default());
     assert!(bytecode_requested_at.elapsed() < witness_delay);
 
@@ -277,7 +311,11 @@ async fn max_active_connections() {
     peer0_handle.network().add_peer(peer1_id, peer1_addr);
 
     let _peer0_to_peer1 = match from_peer0.recv().await.unwrap() {
-        ProtocolEvent::Established { peer_id, to_connection, .. } => {
+        ProtocolEvent::Established {
+            peer_id,
+            to_connection,
+            ..
+        } => {
             assert_eq!(peer_id, *peer1_id);
             to_connection
         }

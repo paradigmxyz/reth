@@ -21,7 +21,9 @@ impl ProtocolHandler for CustomRlpxProtoHandler {
     type ConnectionHandler = CustomRlpxConnectionHandler;
 
     fn on_incoming(&self, _socket_addr: SocketAddr) -> Option<Self::ConnectionHandler> {
-        Some(CustomRlpxConnectionHandler { state: self.state.clone() })
+        Some(CustomRlpxConnectionHandler {
+            state: self.state.clone(),
+        })
     }
 
     fn on_outgoing(
@@ -29,6 +31,8 @@ impl ProtocolHandler for CustomRlpxProtoHandler {
         _socket_addr: SocketAddr,
         _peer_id: PeerId,
     ) -> Option<Self::ConnectionHandler> {
-        Some(CustomRlpxConnectionHandler { state: self.state.clone() })
+        Some(CustomRlpxConnectionHandler {
+            state: self.state.clone(),
+        })
     }
 }

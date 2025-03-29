@@ -92,7 +92,7 @@ where
 
                 self.spawn_transaction(tx);
             } else {
-                break
+                break;
             }
         }
     }
@@ -140,7 +140,7 @@ where
             self.ctx.cache_metrics.clone(),
         );
         if cache.cache().insert_state(&state).is_err() {
-            return
+            return;
         }
 
         cache.update_metrics();
@@ -149,7 +149,10 @@ where
 
         // update the cache for the executed block
         self.execution_cache.save_cache(cache);
-        self.ctx.metrics.cache_saving_duration.set(start.elapsed().as_secs_f64());
+        self.ctx
+            .metrics
+            .cache_saving_duration
+            .set(start.elapsed().as_secs_f64());
     }
 
     /// Executes the task.
@@ -158,7 +161,10 @@ where
     /// was cancelled.
     pub(super) fn run(mut self) {
         self.ctx.metrics.transactions.set(self.pending.len() as f64);
-        self.ctx.metrics.transactions_histogram.record(self.pending.len() as f64);
+        self.ctx
+            .metrics
+            .transactions_histogram
+            .record(self.pending.len() as f64);
 
         // spawn execution tasks.
         self.spawn_next();
@@ -180,7 +186,7 @@ where
                         self.save_cache(state);
                     }
 
-                    break
+                    break;
                 }
             }
 
@@ -214,14 +220,23 @@ where
         let state = self.transact(tx)?;
 
         let (targets, storage_targets) = multiproof_targets_from_state(state);
-        metrics.prefetch_storage_targets.record(storage_targets as f64);
+        metrics
+            .prefetch_storage_targets
+            .record(storage_targets as f64);
 
         Some(targets)
     }
 
     /// Splits this context into an evm, an evm config, and metrics.
     fn evm_for_ctx(self) -> Option<(EvmFor<Evm, impl Database>, Evm, PrewarmMetrics)> {
-        let Self { header, evm_config, cache: caches, cache_metrics, provider, metrics } = self;
+        let Self {
+            header,
+            evm_config,
+            cache: caches,
+            cache_metrics,
+            provider,
+            metrics,
+        } = self;
 
         let state_provider = match provider.build() {
             Ok(provider) => provider,
@@ -231,7 +246,7 @@ where
                     %err,
                     "Failed to build state provider in prewarm thread"
                 );
-                return None
+                return None;
             }
         };
 
@@ -276,7 +291,7 @@ where
                     sender=%tx.signer(),
                     "Error when executing prewarm transaction",
                 );
-                return None
+                return None;
             }
         };
         metrics.execution_duration.record(start.elapsed());
@@ -299,7 +314,7 @@ fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargets, usize) 
         //
         // See: https://eips.ethereum.org/EIPS/eip-6780
         if !account.is_touched() || account.is_selfdestructed() {
-            continue
+            continue;
         }
 
         let mut storage_set =
@@ -307,7 +322,7 @@ fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargets, usize) 
         for (key, slot) in account.storage {
             // do nothing if unchanged
             if !slot.is_changed() {
-                continue
+                continue;
             }
 
             storage_set.insert(keccak256(B256::new(key.to_be_bytes())));

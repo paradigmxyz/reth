@@ -90,9 +90,11 @@ where
                 // if this is the first match in the receipt's logs, look up the transaction hash
                 if transaction_hash.is_none() {
                     transaction_hash = match &provider_or_block {
-                        ProviderOrBlock::Block(block) => {
-                            block.body().transactions().get(receipt_idx).map(|t| t.trie_hash())
-                        }
+                        ProviderOrBlock::Block(block) => block
+                            .body()
+                            .transactions()
+                            .get(receipt_idx)
+                            .map(|t| t.trie_hash()),
                         ProviderOrBlock::Provider(provider) => {
                             let first_tx_num = match loaded_first_tx_num {
                                 Some(num) => num,
@@ -145,13 +147,13 @@ pub fn log_matches_filter(
     log: &alloy_primitives::Log,
     params: &FilteredParams,
 ) -> bool {
-    if params.filter.is_some() &&
-        (!params.filter_block_range(block.number) ||
-            !params.filter_block_hash(block.hash) ||
-            !params.filter_address(&log.address) ||
-            !params.filter_topics(log.topics()))
+    if params.filter.is_some()
+        && (!params.filter_block_range(block.number)
+            || !params.filter_block_hash(block.hash)
+            || !params.filter_address(&log.address)
+            || !params.filter_topics(log.topics()))
     {
-        return false
+        return false;
     }
     true
 }
@@ -192,7 +194,10 @@ mod tests {
     fn test_log_range_from_and_to() {
         let from = 14000000u64;
         let to = 14000100u64;
-        let info = ChainInfo { best_number: 15000000, ..Default::default() };
+        let info = ChainInfo {
+            best_number: 15000000,
+            ..Default::default()
+        };
         let range = get_filter_block_range(Some(from), Some(to), info.best_number, info);
         assert_eq!(range, (from, to));
     }
@@ -201,7 +206,10 @@ mod tests {
     fn test_log_range_higher() {
         let from = 15000001u64;
         let to = 15000002u64;
-        let info = ChainInfo { best_number: 15000000, ..Default::default() };
+        let info = ChainInfo {
+            best_number: 15000000,
+            ..Default::default()
+        };
         let range = get_filter_block_range(Some(from), Some(to), info.best_number, info);
         assert_eq!(range, (info.best_number, info.best_number));
     }
@@ -209,7 +217,10 @@ mod tests {
     #[test]
     fn test_log_range_from() {
         let from = 14000000u64;
-        let info = ChainInfo { best_number: 15000000, ..Default::default() };
+        let info = ChainInfo {
+            best_number: 15000000,
+            ..Default::default()
+        };
         let range = get_filter_block_range(Some(from), None, info.best_number, info);
         assert_eq!(range, (from, info.best_number));
     }
@@ -217,14 +228,20 @@ mod tests {
     #[test]
     fn test_log_range_to() {
         let to = 14000000u64;
-        let info = ChainInfo { best_number: 15000000, ..Default::default() };
+        let info = ChainInfo {
+            best_number: 15000000,
+            ..Default::default()
+        };
         let range = get_filter_block_range(None, Some(to), info.best_number, info);
         assert_eq!(range, (info.best_number, to));
     }
 
     #[test]
     fn test_log_range_empty() {
-        let info = ChainInfo { best_number: 15000000, ..Default::default() };
+        let info = ChainInfo {
+            best_number: 15000000,
+            ..Default::default()
+        };
         let range = get_filter_block_range(None, None, info.best_number, info);
 
         // no range given -> head
@@ -240,7 +257,10 @@ mod tests {
         assert!(filter.get_to_block().is_none());
 
         let best_number = 17229427;
-        let info = ChainInfo { best_number, ..Default::default() };
+        let info = ChainInfo {
+            best_number,
+            ..Default::default()
+        };
 
         let (from_block, to_block) = filter.block_option.as_range();
 

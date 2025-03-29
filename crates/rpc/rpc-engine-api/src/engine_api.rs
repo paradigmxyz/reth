@@ -181,7 +181,10 @@ where
         let res = Self::new_payload_v1(self, payload).await;
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v1.record(elapsed);
-        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
+        self.inner
+            .metrics
+            .new_payload_response
+            .update_response_metrics(&res, gas_used, elapsed);
         res
     }
 
@@ -217,7 +220,10 @@ where
         let res = Self::new_payload_v2(self, payload).await;
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v2.record(elapsed);
-        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
+        self.inner
+            .metrics
+            .new_payload_response
+            .update_response_metrics(&res, gas_used, elapsed);
         res
     }
 
@@ -254,7 +260,10 @@ where
         let res = Self::new_payload_v3(self, payload).await;
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v3.record(elapsed);
-        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
+        self.inner
+            .metrics
+            .new_payload_response
+            .update_response_metrics(&res, gas_used, elapsed);
         Ok(res?)
     }
 
@@ -292,7 +301,10 @@ where
 
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v4.record(elapsed);
-        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
+        self.inner
+            .metrics
+            .new_payload_response
+            .update_response_metrics(&res, gas_used, elapsed);
         Ok(res?)
     }
 }
@@ -329,8 +341,15 @@ where
     ) -> EngineApiResult<ForkchoiceUpdated> {
         let start = Instant::now();
         let res = Self::fork_choice_updated_v1(self, state, payload_attrs).await;
-        self.inner.metrics.latency.fork_choice_updated_v1.record(start.elapsed());
-        self.inner.metrics.fcu_response.update_response_metrics(&res);
+        self.inner
+            .metrics
+            .latency
+            .fork_choice_updated_v1
+            .record(start.elapsed());
+        self.inner
+            .metrics
+            .fcu_response
+            .update_response_metrics(&res);
         res
     }
 
@@ -355,8 +374,15 @@ where
     ) -> EngineApiResult<ForkchoiceUpdated> {
         let start = Instant::now();
         let res = Self::fork_choice_updated_v2(self, state, payload_attrs).await;
-        self.inner.metrics.latency.fork_choice_updated_v2.record(start.elapsed());
-        self.inner.metrics.fcu_response.update_response_metrics(&res);
+        self.inner
+            .metrics
+            .latency
+            .fork_choice_updated_v2
+            .record(start.elapsed());
+        self.inner
+            .metrics
+            .fcu_response
+            .update_response_metrics(&res);
         res
     }
 
@@ -381,8 +407,15 @@ where
     ) -> EngineApiResult<ForkchoiceUpdated> {
         let start = Instant::now();
         let res = Self::fork_choice_updated_v3(self, state, payload_attrs).await;
-        self.inner.metrics.latency.fork_choice_updated_v3.record(start.elapsed());
-        self.inner.metrics.fcu_response.update_response_metrics(&res);
+        self.inner
+            .metrics
+            .latency
+            .fork_choice_updated_v3
+            .record(start.elapsed());
+        self.inner
+            .metrics
+            .fcu_response
+            .update_response_metrics(&res);
         res
     }
 
@@ -419,7 +452,11 @@ where
     ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV1> {
         let start = Instant::now();
         let res = Self::get_payload_v1(self, payload_id).await;
-        self.inner.metrics.latency.get_payload_v1.record(start.elapsed());
+        self.inner
+            .metrics
+            .latency
+            .get_payload_v1
+            .record(start.elapsed());
         res
     }
 
@@ -465,7 +502,11 @@ where
     ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV2> {
         let start = Instant::now();
         let res = Self::get_payload_v2(self, payload_id).await;
-        self.inner.metrics.latency.get_payload_v2.record(start.elapsed());
+        self.inner
+            .metrics
+            .latency
+            .get_payload_v2
+            .record(start.elapsed());
         res
     }
 
@@ -511,7 +552,11 @@ where
     ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV3> {
         let start = Instant::now();
         let res = Self::get_payload_v3(self, payload_id).await;
-        self.inner.metrics.latency.get_payload_v3.record(start.elapsed());
+        self.inner
+            .metrics
+            .latency
+            .get_payload_v3
+            .record(start.elapsed());
         res
     }
 
@@ -557,7 +602,11 @@ where
     ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV4> {
         let start = Instant::now();
         let res = Self::get_payload_v4(self, payload_id).await;
-        self.inner.metrics.latency.get_payload_v4.record(start.elapsed());
+        self.inner
+            .metrics
+            .latency
+            .get_payload_v4
+            .record(start.elapsed());
         res
     }
 
@@ -578,12 +627,14 @@ where
 
         self.inner.task_spawner.spawn_blocking(Box::pin(async move {
             if count > MAX_PAYLOAD_BODIES_LIMIT {
-                tx.send(Err(EngineApiError::PayloadRequestTooLarge { len: count })).ok();
+                tx.send(Err(EngineApiError::PayloadRequestTooLarge { len: count }))
+                    .ok();
                 return;
             }
 
             if start == 0 || count == 0 {
-                tx.send(Err(EngineApiError::InvalidBodiesRange { start, count })).ok();
+                tx.send(Err(EngineApiError::InvalidBodiesRange { start, count }))
+                    .ok();
                 return;
             }
 
@@ -615,7 +666,8 @@ where
             tx.send(Ok(result)).ok();
         }));
 
-        rx.await.map_err(|err| EngineApiError::Internal(Box::new(err)))?
+        rx.await
+            .map_err(|err| EngineApiError::Internal(Box::new(err)))?
     }
 
     /// Returns the execution payload bodies by the range starting at `start`, containing `count`
@@ -635,7 +687,11 @@ where
     ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
         self.get_payload_bodies_by_range_with(start, count, |block| ExecutionPayloadBodyV1 {
             transactions: block.body().encoded_2718_transactions(),
-            withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
+            withdrawals: block
+                .body()
+                .withdrawals()
+                .cloned()
+                .map(Withdrawals::into_inner),
         })
         .await
     }
@@ -648,7 +704,11 @@ where
     ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
         let start_time = Instant::now();
         let res = Self::get_payload_bodies_by_range_v1(self, start, count).await;
-        self.inner.metrics.latency.get_payload_bodies_by_range_v1.record(start_time.elapsed());
+        self.inner
+            .metrics
+            .latency
+            .get_payload_bodies_by_range_v1
+            .record(start_time.elapsed());
         res
     }
 
@@ -687,7 +747,8 @@ where
             tx.send(Ok(result)).ok();
         }));
 
-        rx.await.map_err(|err| EngineApiError::Internal(Box::new(err)))?
+        rx.await
+            .map_err(|err| EngineApiError::Internal(Box::new(err)))?
     }
 
     /// Called to retrieve execution payload bodies by hashes.
@@ -697,7 +758,11 @@ where
     ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
         self.get_payload_bodies_by_hash_with(hashes, |block| ExecutionPayloadBodyV1 {
             transactions: block.body().encoded_2718_transactions(),
-            withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
+            withdrawals: block
+                .body()
+                .withdrawals()
+                .cloned()
+                .map(Withdrawals::into_inner),
         })
         .await
     }
@@ -709,7 +774,11 @@ where
     ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
         let start = Instant::now();
         let res = Self::get_payload_bodies_by_hash_v1(self, hashes);
-        self.inner.metrics.latency.get_payload_bodies_by_hash_v1.record(start.elapsed());
+        self.inner
+            .metrics
+            .latency
+            .get_payload_bodies_by_hash_v1
+            .record(start.elapsed());
         res.await
     }
 
@@ -737,17 +806,19 @@ where
             return Err(EngineApiError::TerminalTD {
                 execution: merge_terminal_td,
                 consensus: terminal_total_difficulty,
-            })
+            });
         }
 
-        self.inner.beacon_consensus.transition_configuration_exchanged();
+        self.inner
+            .beacon_consensus
+            .transition_configuration_exchanged();
 
         // Short circuit if communicated block hash is zero
         if terminal_block_hash.is_zero() {
             return Ok(TransitionConfiguration {
                 terminal_total_difficulty: merge_terminal_td,
                 ..Default::default()
-            })
+            });
         }
 
         // Attempt to look up terminal block hash
@@ -778,7 +849,11 @@ where
     ) -> EngineApiResult<TransitionConfiguration> {
         let start = Instant::now();
         let res = Self::exchange_transition_configuration(self, config);
-        self.inner.metrics.latency.exchange_transition_configuration.record(start.elapsed());
+        self.inner
+            .metrics
+            .latency
+            .exchange_transition_configuration
+            .record(start.elapsed());
         res
     }
 
@@ -804,8 +879,10 @@ where
         self.inner.record_elapsed_time_on_fcu();
 
         if let Some(ref attrs) = payload_attrs {
-            let attr_validation_res =
-                self.inner.validator.ensure_well_formed_attributes(version, attrs);
+            let attr_validation_res = self
+                .inner
+                .validator
+                .ensure_well_formed_attributes(version, attrs);
 
             // From the engine API spec:
             //
@@ -821,18 +898,25 @@ where
             // To do this, we set the payload attrs to `None` if attribute validation failed, but
             // we still apply the forkchoice update.
             if let Err(err) = attr_validation_res {
-                let fcu_res =
-                    self.inner.beacon_consensus.fork_choice_updated(state, None, version).await?;
+                let fcu_res = self
+                    .inner
+                    .beacon_consensus
+                    .fork_choice_updated(state, None, version)
+                    .await?;
                 // TODO: decide if we want this branch - the FCU INVALID response might be more
                 // useful than the payload attributes INVALID response
                 if fcu_res.is_invalid() {
-                    return Ok(fcu_res)
+                    return Ok(fcu_res);
                 }
-                return Err(err.into())
+                return Err(err.into());
             }
         }
 
-        Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs, version).await?)
+        Ok(self
+            .inner
+            .beacon_consensus
+            .fork_choice_updated(state, payload_attrs, version)
+            .await?)
     }
 
     /// Returns reference to supported capabilities.
@@ -845,7 +929,9 @@ where
         versioned_hashes: Vec<B256>,
     ) -> EngineApiResult<Vec<Option<BlobAndProofV1>>> {
         if versioned_hashes.len() > MAX_BLOB_LIMIT {
-            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() })
+            return Err(EngineApiError::BlobRequestTooLarge {
+                len: versioned_hashes.len(),
+            });
         }
 
         self.inner
@@ -861,14 +947,26 @@ where
         let hashes_len = versioned_hashes.len();
         let start = Instant::now();
         let res = Self::get_blobs_v1(self, versioned_hashes);
-        self.inner.metrics.latency.get_blobs_v1.record(start.elapsed());
+        self.inner
+            .metrics
+            .latency
+            .get_blobs_v1
+            .record(start.elapsed());
 
         if let Ok(blobs) = &res {
             let blobs_found = blobs.iter().flatten().count();
             let blobs_missed = hashes_len - blobs_found;
 
-            self.inner.metrics.blob_metrics.blob_count.increment(blobs_found as u64);
-            self.inner.metrics.blob_metrics.blob_misses.increment(blobs_missed as u64);
+            self.inner
+                .metrics
+                .blob_metrics
+                .blob_count
+                .increment(blobs_found as u64);
+            self.inner
+                .metrics
+                .blob_metrics
+                .blob_misses
+                .increment(blobs_missed as u64);
         }
 
         res
@@ -885,13 +983,18 @@ where
     fn record_elapsed_time_on_fcu(&self) {
         if let Some(start_time) = self.latest_new_payload_response.lock().take() {
             let elapsed_time = start_time.elapsed();
-            self.metrics.latency.new_payload_forkchoice_updated_time_diff.record(elapsed_time);
+            self.metrics
+                .latency
+                .new_payload_forkchoice_updated_time_diff
+                .record(elapsed_time);
         }
     }
 
     /// Updates the timestamp for the latest new payload response.
     fn on_new_payload_response(&self) {
-        self.latest_new_payload_response.lock().replace(Instant::now());
+        self.latest_new_payload_response
+            .lock()
+            .replace(Instant::now());
     }
 }
 
@@ -911,8 +1014,10 @@ where
     /// Caution: This should not accept the `withdrawals` field
     async fn new_payload_v1(&self, payload: ExecutionPayloadV1) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV1");
-        let payload =
-            ExecutionData { payload: payload.into(), sidecar: ExecutionPayloadSidecar::none() };
+        let payload = ExecutionData {
+            payload: payload.into(),
+            sidecar: ExecutionPayloadSidecar::none(),
+        };
         Ok(self.new_payload_v1_metered(payload).await?)
     }
 
@@ -967,7 +1072,10 @@ where
         let payload = ExecutionData {
             payload: payload.into(),
             sidecar: ExecutionPayloadSidecar::v4(
-                CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
+                CancunPayloadFields {
+                    versioned_hashes,
+                    parent_beacon_block_root,
+                },
                 PraguePayloadFields { requests },
             ),
         };
@@ -985,7 +1093,9 @@ where
         payload_attributes: Option<EngineT::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV1");
-        Ok(self.fork_choice_updated_v1_metered(fork_choice_state, payload_attributes).await?)
+        Ok(self
+            .fork_choice_updated_v1_metered(fork_choice_state, payload_attributes)
+            .await?)
     }
 
     /// Handler for `engine_forkchoiceUpdatedV2`
@@ -996,7 +1106,9 @@ where
         payload_attributes: Option<EngineT::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV2");
-        Ok(self.fork_choice_updated_v2_metered(fork_choice_state, payload_attributes).await?)
+        Ok(self
+            .fork_choice_updated_v2_metered(fork_choice_state, payload_attributes)
+            .await?)
     }
 
     /// Handler for `engine_forkchoiceUpdatedV2`
@@ -1008,7 +1120,9 @@ where
         payload_attributes: Option<EngineT::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV3");
-        Ok(self.fork_choice_updated_v3_metered(fork_choice_state, payload_attributes).await?)
+        Ok(self
+            .fork_choice_updated_v3_metered(fork_choice_state, payload_attributes)
+            .await?)
     }
 
     /// Handler for `engine_getPayloadV1`
@@ -1088,7 +1202,9 @@ where
         block_hashes: Vec<BlockHash>,
     ) -> RpcResult<ExecutionPayloadBodiesV1> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByHashV1");
-        Ok(self.get_payload_bodies_by_hash_v1_metered(block_hashes).await?)
+        Ok(self
+            .get_payload_bodies_by_hash_v1_metered(block_hashes)
+            .await?)
     }
 
     /// Handler for `engine_getPayloadBodiesByRangeV1`
@@ -1113,7 +1229,9 @@ where
         count: U64,
     ) -> RpcResult<ExecutionPayloadBodiesV1> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByRangeV1");
-        Ok(self.get_payload_bodies_by_range_v1_metered(start.to(), count.to()).await?)
+        Ok(self
+            .get_payload_bodies_by_range_v1_metered(start.to(), count.to())
+            .await?)
     }
 
     /// Handler for `engine_exchangeTransitionConfigurationV1`
@@ -1232,7 +1350,11 @@ mod tests {
             EthereumEngineValidator::new(chain_spec.clone()),
             false,
         );
-        let handle = EngineApiTestHandle { chain_spec, provider, from_api: engine_rx };
+        let handle = EngineApiTestHandle {
+            chain_spec,
+            provider,
+            from_api: engine_rx,
+        };
         (handle, api)
     }
 
@@ -1268,7 +1390,10 @@ mod tests {
 
             api.new_payload_v1(execution_data).await.unwrap();
         });
-        assert_matches!(handle.from_api.recv().await, Some(BeaconEngineMessage::NewPayload { .. }));
+        assert_matches!(
+            handle.from_api.recv().await,
+            Some(BeaconEngineMessage::NewPayload { .. })
+        );
     }
 
     // tests covering `engine_getPayloadBodiesByRange` and `engine_getPayloadBodiesByHash`
@@ -1313,7 +1438,10 @@ mod tests {
             let blocks = random_block_range(
                 &mut rng,
                 start..=start + count - 1,
-                BlockRangeParams { tx_count: 0..2, ..Default::default() },
+                BlockRangeParams {
+                    tx_count: 0..2,
+                    ..Default::default()
+                },
             );
             handle
                 .provider
@@ -1325,7 +1453,10 @@ mod tests {
                 .map(|b| Some(ExecutionPayloadBodyV1::from_block(b.into_block())))
                 .collect::<Vec<_>>();
 
-            let res = api.get_payload_bodies_by_range_v1(start, count).await.unwrap();
+            let res = api
+                .get_payload_bodies_by_range_v1(start, count)
+                .await
+                .unwrap();
             assert_eq!(res, expected);
         }
 
@@ -1338,7 +1469,10 @@ mod tests {
             let blocks = random_block_range(
                 &mut rng,
                 start..=start + count - 1,
-                BlockRangeParams { tx_count: 0..2, ..Default::default() },
+                BlockRangeParams {
+                    tx_count: 0..2,
+                    ..Default::default()
+                },
             );
 
             // Insert only blocks in ranges 1-25 and 50-75
@@ -1348,8 +1482,8 @@ mod tests {
                 blocks
                     .iter()
                     .filter(|b| {
-                        !first_missing_range.contains(&b.number) &&
-                            !second_missing_range.contains(&b.number)
+                        !first_missing_range.contains(&b.number)
+                            && !second_missing_range.contains(&b.number)
                     })
                     .map(|b| (b.hash(), b.clone().into_block())),
             );
@@ -1369,7 +1503,10 @@ mod tests {
                 })
                 .collect::<Vec<_>>();
 
-            let res = api.get_payload_bodies_by_range_v1(start, count).await.unwrap();
+            let res = api
+                .get_payload_bodies_by_range_v1(start, count)
+                .await
+                .unwrap();
             assert_eq!(res, expected);
 
             let expected = blocks
@@ -1378,8 +1515,8 @@ mod tests {
                 // ensure we still return trailing `None`s here because by-hash will not be aware
                 // of the missing block's number, and cannot compare it to the current best block
                 .map(|b| {
-                    if first_missing_range.contains(&b.number) ||
-                        second_missing_range.contains(&b.number)
+                    if first_missing_range.contains(&b.number)
+                        || second_missing_range.contains(&b.number)
                     {
                         None
                     } else {
@@ -1409,8 +1546,8 @@ mod tests {
                     .chain_spec
                     .fork(EthereumHardfork::Paris)
                     .ttd()
-                    .unwrap() +
-                    U256::from(1),
+                    .unwrap()
+                    + U256::from(1),
                 ..Default::default()
             };
 
@@ -1474,8 +1611,11 @@ mod tests {
             let (handle, api) = setup_engine_api();
 
             let terminal_block_number = 1000;
-            let terminal_block =
-                random_block(&mut generators::rng(), terminal_block_number, BlockParams::default());
+            let terminal_block = random_block(
+                &mut generators::rng(),
+                terminal_block_number,
+                BlockParams::default(),
+            );
 
             let transition_config = TransitionConfiguration {
                 terminal_total_difficulty: handle
@@ -1487,9 +1627,13 @@ mod tests {
                 terminal_block_number,
             };
 
-            handle.provider.add_block(terminal_block.hash(), terminal_block.into_block());
+            handle
+                .provider
+                .add_block(terminal_block.hash(), terminal_block.into_block());
 
-            let config = api.exchange_transition_configuration(transition_config).unwrap();
+            let config = api
+                .exchange_transition_configuration(transition_config)
+                .unwrap();
             assert_eq!(config, transition_config);
         }
     }

@@ -24,14 +24,22 @@ struct TrieUpdatesDiff {
 
 impl TrieUpdatesDiff {
     fn has_differences(&self) -> bool {
-        !self.account_nodes.is_empty() ||
-            !self.removed_nodes.is_empty() ||
-            !self.storage_tries.is_empty()
+        !self.account_nodes.is_empty()
+            || !self.removed_nodes.is_empty()
+            || !self.storage_tries.is_empty()
     }
 
     pub(super) fn log_differences(mut self) {
         if self.has_differences() {
-            for (path, EntryDiff { task, regular, database }) in &mut self.account_nodes {
+            for (
+                path,
+                EntryDiff {
+                    task,
+                    regular,
+                    database,
+                },
+            ) in &mut self.account_nodes
+            {
                 warn!(target: "engine::tree", ?path, ?task, ?regular, ?database, "Difference in account trie updates");
             }
 
@@ -63,9 +71,9 @@ struct StorageTrieUpdatesDiff {
 
 impl StorageTrieUpdatesDiff {
     fn has_differences(&self) -> bool {
-        self.is_deleted.is_some() ||
-            !self.storage_nodes.is_empty() ||
-            !self.removed_nodes.is_empty()
+        self.is_deleted.is_some()
+            || !self.storage_nodes.is_empty()
+            || !self.removed_nodes.is_empty()
     }
 
     fn log_differences(&self, address: B256) {
@@ -78,7 +86,15 @@ impl StorageTrieUpdatesDiff {
             warn!(target: "engine::tree", ?address, ?task_deleted, ?regular_deleted, ?database_not_exists, "Difference in storage trie deletion");
         }
 
-        for (path, EntryDiff { task, regular, database }) in &self.storage_nodes {
+        for (
+            path,
+            EntryDiff {
+                task,
+                regular,
+                database,
+            },
+        ) in &self.storage_nodes
+        {
             warn!(target: "engine::tree", ?address, ?path, ?task, ?regular, ?database, "Difference in storage trie updates");
         }
 
@@ -117,11 +133,21 @@ pub(super) fn compare_trie_updates(
         .cloned()
         .collect::<BTreeSet<_>>()
     {
-        let (task, regular) = (task.account_nodes.remove(&key), regular.account_nodes.remove(&key));
+        let (task, regular) = (
+            task.account_nodes.remove(&key),
+            regular.account_nodes.remove(&key),
+        );
         let database = account_trie_cursor.seek_exact(key.clone())?.map(|x| x.1);
 
         if !branch_nodes_equal(task.as_ref(), regular.as_ref(), database.as_ref())? {
-            diff.account_nodes.insert(key, EntryDiff { task, regular, database });
+            diff.account_nodes.insert(
+                key,
+                EntryDiff {
+                    task,
+                    regular,
+                    database,
+                },
+            );
         }
     }
 
@@ -134,8 +160,10 @@ pub(super) fn compare_trie_updates(
         .cloned()
         .collect::<BTreeSet<_>>()
     {
-        let (task_removed, regular_removed) =
-            (task.removed_nodes.contains(&key), regular.removed_nodes.contains(&key));
+        let (task_removed, regular_removed) = (
+            task.removed_nodes.contains(&key),
+            regular.removed_nodes.contains(&key),
+        );
         let database_not_exists = account_trie_cursor.seek_exact(key.clone())?.is_none();
         // If the deletion is a no-op, meaning that the entry is not in the
         // database, do not add it to the diff.
@@ -159,8 +187,10 @@ pub(super) fn compare_trie_updates(
         .copied()
         .collect::<BTreeSet<_>>()
     {
-        let (mut task, mut regular) =
-            (task.storage_tries.remove(&key), regular.storage_tries.remove(&key));
+        let (mut task, mut regular) = (
+            task.storage_tries.remove(&key),
+            regular.storage_tries.remove(&key),
+        );
         if task != regular {
             #[expect(clippy::or_fun_call)]
             let storage_diff = compare_storage_trie_updates(
@@ -209,10 +239,20 @@ fn compare_storage_trie_updates<C: TrieCursor>(
         .cloned()
         .collect::<BTreeSet<_>>()
     {
-        let (task, regular) = (task.storage_nodes.remove(&key), regular.storage_nodes.remove(&key));
+        let (task, regular) = (
+            task.storage_nodes.remove(&key),
+            regular.storage_nodes.remove(&key),
+        );
         let database = storage_trie_cursor.seek_exact(key.clone())?.map(|x| x.1);
         if !branch_nodes_equal(task.as_ref(), regular.as_ref(), database.as_ref())? {
-            diff.storage_nodes.insert(key, EntryDiff { task, regular, database });
+            diff.storage_nodes.insert(
+                key,
+                EntryDiff {
+                    task,
+                    regular,
+                    database,
+                },
+            );
         }
     }
 
@@ -225,10 +265,14 @@ fn compare_storage_trie_updates<C: TrieCursor>(
         .cloned()
         .collect::<BTreeSet<_>>()
     {
-        let (task_removed, regular_removed) =
-            (task.removed_nodes.contains(&key), regular.removed_nodes.contains(&key));
-        let database_not_exists =
-            storage_trie_cursor.seek_exact(key.clone())?.map(|x| x.1).is_none();
+        let (task_removed, regular_removed) = (
+            task.removed_nodes.contains(&key),
+            regular.removed_nodes.contains(&key),
+        );
+        let database_not_exists = storage_trie_cursor
+            .seek_exact(key.clone())?
+            .map(|x| x.1)
+            .is_none();
         // If the deletion is a no-op, meaning that the entry is not in the
         // database, do not add it to the diff.
         if task_removed != regular_removed && !database_not_exists {
@@ -289,11 +333,11 @@ fn branch_nodes_equal(
 ) -> Result<bool, DatabaseError> {
     Ok(match (task, regular) {
         (Some(task), Some(regular)) => {
-            task.state_mask == regular.state_mask &&
-                task.tree_mask == regular.tree_mask &&
-                task.hash_mask == regular.hash_mask &&
-                task.hashes == regular.hashes &&
-                task.root_hash == regular.root_hash
+            task.state_mask == regular.state_mask
+                && task.tree_mask == regular.tree_mask
+                && task.hash_mask == regular.hash_mask
+                && task.hashes == regular.hashes
+                && task.root_hash == regular.root_hash
         }
         (None, None) => true,
         _ => {

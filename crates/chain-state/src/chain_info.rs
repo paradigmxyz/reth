@@ -49,12 +49,18 @@ where
     /// Returns the [`ChainInfo`] for the canonical head.
     pub fn chain_info(&self) -> ChainInfo {
         let inner = self.inner.canonical_head.read();
-        ChainInfo { best_hash: inner.hash(), best_number: inner.number() }
+        ChainInfo {
+            best_hash: inner.hash(),
+            best_number: inner.number(),
+        }
     }
 
     /// Update the timestamp when we received a forkchoice update.
     pub fn on_forkchoice_update_received(&self) {
-        self.inner.last_forkchoice_update.write().replace(Instant::now());
+        self.inner
+            .last_forkchoice_update
+            .write()
+            .replace(Instant::now());
     }
 
     /// Returns the instant when we received the latest forkchoice update.
@@ -64,7 +70,10 @@ where
 
     /// Update the timestamp when we exchanged a transition configuration.
     pub fn on_transition_configuration_exchanged(&self) {
-        self.inner.last_transition_configuration_exchange.write().replace(Instant::now());
+        self.inner
+            .last_transition_configuration_exchange
+            .write()
+            .replace(Instant::now());
     }
 
     /// Returns the instant when we exchanged the transition configuration last time.
@@ -100,12 +109,20 @@ where
 
     /// Returns the safe header of the chain.
     pub fn get_safe_num_hash(&self) -> Option<BlockNumHash> {
-        self.inner.safe_block.borrow().as_ref().map(SealedHeader::num_hash)
+        self.inner
+            .safe_block
+            .borrow()
+            .as_ref()
+            .map(SealedHeader::num_hash)
     }
 
     /// Returns the finalized header of the chain.
     pub fn get_finalized_num_hash(&self) -> Option<BlockNumHash> {
-        self.inner.finalized_block.borrow().as_ref().map(SealedHeader::num_hash)
+        self.inner
+            .finalized_block
+            .borrow()
+            .as_ref()
+            .map(SealedHeader::num_hash)
     }
 
     /// Sets the canonical head of the chain.
@@ -114,7 +131,9 @@ where
         *self.inner.canonical_head.write() = header;
 
         // also update the atomic number.
-        self.inner.canonical_head_number.store(number, Ordering::Relaxed);
+        self.inner
+            .canonical_head_number
+            .store(number, Ordering::Relaxed);
     }
 
     /// Sets the safe header of the chain.
@@ -122,7 +141,7 @@ where
         self.inner.safe_block.send_if_modified(|current_header| {
             if current_header.as_ref().map(SealedHeader::hash) != Some(header.hash()) {
                 let _ = current_header.replace(header);
-                return true
+                return true;
             }
 
             false
@@ -131,14 +150,16 @@ where
 
     /// Sets the finalized header of the chain.
     pub fn set_finalized(&self, header: SealedHeader<N::BlockHeader>) {
-        self.inner.finalized_block.send_if_modified(|current_header| {
-            if current_header.as_ref().map(SealedHeader::hash) != Some(header.hash()) {
-                let _ = current_header.replace(header);
-                return true
-            }
+        self.inner
+            .finalized_block
+            .send_if_modified(|current_header| {
+                if current_header.as_ref().map(SealedHeader::hash) != Some(header.hash()) {
+                    let _ = current_header.replace(header);
+                    return true;
+                }
 
-            false
-        });
+                false
+            });
     }
 
     /// Subscribe to the finalized block.
@@ -229,14 +250,18 @@ mod tests {
 
         // Assert that there has been no transition configuration exchange yet (the timestamp is
         // None)
-        assert!(tracker.last_transition_configuration_exchanged_at().is_none());
+        assert!(tracker
+            .last_transition_configuration_exchanged_at()
+            .is_none());
 
         // Call the method to record the transition configuration exchange
         tracker.on_transition_configuration_exchanged();
 
         // Assert that there is now a timestamp indicating when the transition configuration
         // exchange occurred
-        assert!(tracker.last_transition_configuration_exchanged_at().is_some());
+        assert!(tracker
+            .last_transition_configuration_exchanged_at()
+            .is_some());
     }
 
     #[test]
@@ -352,11 +377,17 @@ mod tests {
         let finalized_header = random_header(&mut rng, 10, None);
 
         // Create a new chain info tracker with the finalized header
-        let tracker: ChainInfoTracker<EthPrimitives> =
-            ChainInfoTracker::new(finalized_header.clone(), Some(finalized_header.clone()), None);
+        let tracker: ChainInfoTracker<EthPrimitives> = ChainInfoTracker::new(
+            finalized_header.clone(),
+            Some(finalized_header.clone()),
+            None,
+        );
 
         // Assert that the BlockNumHash returned matches the finalized header
-        assert_eq!(tracker.get_finalized_num_hash(), Some(finalized_header.num_hash()));
+        assert_eq!(
+            tracker.get_finalized_num_hash(),
+            Some(finalized_header.num_hash())
+        );
     }
 
     #[test]

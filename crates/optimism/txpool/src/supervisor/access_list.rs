@@ -25,7 +25,9 @@ use alloy_primitives::B256;
 pub fn parse_access_list_items_to_inbox_entries<'a>(
     access_list_items: impl Iterator<Item = &'a AccessListItem>,
 ) -> impl Iterator<Item = &'a B256> {
-    access_list_items.filter_map(parse_access_list_item_to_inbox_entries).flatten()
+    access_list_items
+        .filter_map(parse_access_list_item_to_inbox_entries)
+        .flatten()
 }
 
 /// Parse [`AccessListItem`] to inbox entries, if any.

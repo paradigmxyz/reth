@@ -26,7 +26,9 @@ where
     pub fn new() -> (Self, PayloadBuilderHandle<T>) {
         let (service_tx, command_rx) = mpsc::unbounded_channel();
         (
-            Self { command_rx: UnboundedReceiverStream::new(command_rx) },
+            Self {
+                command_rx: UnboundedReceiverStream::new(command_rx),
+            },
             PayloadBuilderHandle::new(service_tx),
         )
     }
@@ -42,7 +44,7 @@ where
         let this = self.get_mut();
         loop {
             let Some(cmd) = ready!(this.command_rx.poll_next_unpin(cx)) else {
-                return Poll::Ready(())
+                return Poll::Ready(());
             };
             match cmd {
                 PayloadServiceCommand::BuildNewPayload(attr, tx) => {

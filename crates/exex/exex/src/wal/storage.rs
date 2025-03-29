@@ -33,7 +33,10 @@ where
     pub(super) fn new(path: impl AsRef<Path>) -> WalResult<Self> {
         reth_fs_util::create_dir_all(&path)?;
 
-        Ok(Self { path: path.as_ref().to_path_buf(), _pd: std::marker::PhantomData })
+        Ok(Self {
+            path: path.as_ref().to_path_buf(),
+            _pd: std::marker::PhantomData,
+        })
     }
 
     fn file_path(&self, id: u32) -> PathBuf {
@@ -118,8 +121,9 @@ where
         range: RangeInclusive<u32>,
     ) -> impl Iterator<Item = WalResult<(u32, u64, ExExNotification<N>)>> + '_ {
         range.map(move |id| {
-            let (notification, size) =
-                self.read_notification(id)?.ok_or(WalError::FileNotFound(id))?;
+            let (notification, size) = self
+                .read_notification(id)?
+                .ok_or(WalError::FileNotFound(id))?;
 
             Ok((id, size, notification))
         })
@@ -139,7 +143,10 @@ where
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(err) => return Err(reth_fs_util::FsPathError::open(err, &file_path).into()),
         };
-        let size = file.metadata().map_err(|err| WalError::FileMetadata(file_id, err))?.len();
+        let size = file
+            .metadata()
+            .map_err(|err| WalError::FileMetadata(file_id, err))?
+            .len();
 
         // Deserialize using the bincode- and msgpack-compatible serde wrapper
         let notification: reth_exex_types::serde_bincode_compat::ExExNotification<'_, N> =
@@ -171,7 +178,10 @@ where
             rmp_serde::encode::write(file, &notification)
         })?;
 
-        Ok(file_path.metadata().map_err(|err| WalError::FileMetadata(file_id, err))?.len())
+        Ok(file_path
+            .metadata()
+            .map_err(|err| WalError::FileMetadata(file_id, err))?
+            .len())
     }
 }
 

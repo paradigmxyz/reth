@@ -18,7 +18,9 @@ pub struct Receipts<N> {
 
 impl<N> Receipts<N> {
     pub const fn new(static_file_provider: StaticFileProvider<N>) -> Self {
-        Self { static_file_provider }
+        Self {
+            static_file_provider,
+        }
     }
 }
 

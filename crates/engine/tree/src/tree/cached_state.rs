@@ -44,7 +44,11 @@ where
         caches: ProviderCaches,
         metrics: CachedStateMetrics,
     ) -> Self {
-        Self { state_provider, caches, metrics }
+        Self {
+            state_provider,
+            caches,
+            metrics,
+        }
     }
 }
 
@@ -117,7 +121,7 @@ impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         if let Some(res) = self.caches.account_cache.get(address) {
             self.metrics.account_cache_hits.increment(1);
-            return Ok(res)
+            return Ok(res);
         }
 
         self.metrics.account_cache_misses.increment(1);
@@ -136,7 +140,7 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
     ) -> ProviderResult<Option<StorageValue>> {
         if let Some(res) = self.caches.get_storage(&account, &storage_key) {
             self.metrics.storage_cache_hits.increment(1);
-            return Ok(res)
+            return Ok(res);
         }
 
         self.metrics.storage_cache_misses.increment(1);
@@ -149,7 +153,7 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         if let Some(res) = self.caches.code_cache.get(code_hash) {
             self.metrics.code_cache_hits.increment(1);
-            return Ok(res)
+            return Ok(res);
         }
 
         self.metrics.code_cache_misses.increment(1);
@@ -180,7 +184,8 @@ impl<S: StateRootProvider> StateRootProvider for CachedStateProvider<S> {
         &self,
         input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        self.state_provider.state_root_from_nodes_with_updates(input)
+        self.state_provider
+            .state_root_from_nodes_with_updates(input)
     }
 }
 
@@ -226,7 +231,8 @@ impl<S: StorageRootProvider> StorageRootProvider for CachedStateProvider<S> {
         slot: B256,
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageProof> {
-        self.state_provider.storage_proof(address, slot, hashed_storage)
+        self.state_provider
+            .storage_proof(address, slot, hashed_storage)
     }
 
     fn storage_multiproof(
@@ -235,7 +241,8 @@ impl<S: StorageRootProvider> StorageRootProvider for CachedStateProvider<S> {
         slots: &[B256],
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
-        self.state_provider.storage_multiproof(address, slots, hashed_storage)
+        self.state_provider
+            .storage_multiproof(address, slots, hashed_storage)
     }
 }
 
@@ -279,7 +286,9 @@ impl ProviderCaches {
         address: &Address,
         key: &StorageKey,
     ) -> Option<Option<StorageValue>> {
-        self.storage_cache.get(address).and_then(|account_cache| account_cache.get_storage(key))
+        self.storage_cache
+            .get(address)
+            .and_then(|account_cache| account_cache.get_storage(key))
     }
 
     /// Insert storage value into hierarchical cache
@@ -315,7 +324,7 @@ impl ProviderCaches {
             // If the account was not modified, as in not changed and not destroyed, then we have
             // nothing to do w.r.t. this particular account and can move on
             if account.status.is_not_modified() {
-                continue
+                continue;
             }
 
             // if the account was destroyed, invalidate from the account / storage caches
@@ -324,7 +333,7 @@ impl ProviderCaches {
                 self.account_cache.invalidate(addr);
 
                 self.invalidate_account_storage(addr);
-                continue
+                continue;
             }
 
             // if we have an account that was modified, but it has a `None` account info, some wild
@@ -332,12 +341,13 @@ impl ProviderCaches {
             // `None` current info, should be destroyed.
             let Some(ref account_info) = account.info else {
                 trace!(target: "engine::caching", ?account, "Account with None account info found in state updates");
-                return Err(())
+                return Err(());
             };
 
             // insert will update if present, so we just use the new account info as the new value
             // for the account cache
-            self.account_cache.insert(*addr, Some(Account::from(account_info)));
+            self.account_cache
+                .insert(*addr, Some(Account::from(account_info)));
 
             // now we iterate over all storage and make updates to the cached storage values
             for (storage_key, slot) in &account.storage {
@@ -427,7 +437,11 @@ impl ProviderCacheBuilder {
             .time_to_idle(TIME_TO_IDLE)
             .build_with_hasher(DefaultHashBuilder::default());
 
-        ProviderCaches { code_cache, storage_cache, account_cache }
+        ProviderCaches {
+            code_cache,
+            storage_cache,
+            account_cache,
+        }
     }
 }
 
@@ -469,7 +483,11 @@ impl SavedCache {
         caches: ProviderCaches,
         metrics: CachedStateMetrics,
     ) -> Self {
-        Self { hash, caches, metrics }
+        Self {
+            hash,
+            caches,
+            metrics,
+        }
     }
 
     /// Returns the hash for this cache
@@ -489,9 +507,15 @@ impl SavedCache {
 
     /// Updates the metrics for the [`ProviderCaches`].
     pub(crate) fn update_metrics(&self) {
-        self.metrics.storage_cache_size.set(self.caches.total_storage_slots() as f64);
-        self.metrics.account_cache_size.set(self.caches.account_cache.entry_count() as f64);
-        self.metrics.code_cache_size.set(self.caches.code_cache.entry_count() as f64);
+        self.metrics
+            .storage_cache_size
+            .set(self.caches.total_storage_slots() as f64);
+        self.metrics
+            .account_cache_size
+            .set(self.caches.account_cache.entry_count() as f64);
+        self.metrics
+            .code_cache_size
+            .set(self.caches.code_cache.entry_count() as f64);
     }
 }
 
@@ -578,7 +602,8 @@ mod tests {
                 let ret = self.inner.alloc(layout);
                 if !ret.is_null() {
                     self.allocated.fetch_add(layout.size(), Ordering::SeqCst);
-                    self.total_allocated.fetch_add(layout.size(), Ordering::SeqCst);
+                    self.total_allocated
+                        .fetch_add(layout.size(), Ordering::SeqCst);
                 }
                 ret
             }
@@ -626,12 +651,19 @@ mod tests {
                 cache.insert_storage(key, Some(value));
             }
         });
-        println!("Average overhead over {} slots: {} bytes", TOTAL_SLOTS, test_slots / TOTAL_SLOTS);
+        println!(
+            "Average overhead over {} slots: {} bytes",
+            TOTAL_SLOTS,
+            test_slots / TOTAL_SLOTS
+        );
 
         println!("\nTheoretical sizes:");
         println!("StorageKey size: {} bytes", size_of::<StorageKey>());
         println!("StorageValue size: {} bytes", size_of::<StorageValue>());
-        println!("Option<StorageValue> size: {} bytes", size_of::<Option<StorageValue>>());
+        println!(
+            "Option<StorageValue> size: {} bytes",
+            size_of::<Option<StorageValue>>()
+        );
         println!("Option<B256> size: {} bytes", size_of::<Option<B256>>());
     }
 }

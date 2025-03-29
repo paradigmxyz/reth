@@ -38,10 +38,14 @@ async fn can_sync() -> eyre::Result<()> {
     let block_number = payload.block().number;
 
     // assert the block has been committed to the blockchain
-    first_node.assert_new_block(tx_hash, block_hash, block_number).await?;
+    first_node
+        .assert_new_block(tx_hash, block_hash, block_number)
+        .await?;
 
     // only send forkchoice update to second node
-    second_node.update_forkchoice(block_hash, block_hash).await?;
+    second_node
+        .update_forkchoice(block_hash, block_hash)
+        .await?;
 
     // expect second node advanced via p2p gossip
     second_node.assert_new_block(tx_hash, block_hash, 1).await?;
@@ -78,7 +82,12 @@ async fn e2e_test_send_transactions() -> eyre::Result<()> {
 
     assert_eq!(second_provider.get_block_number().await?, 0);
 
-    let head = provider.get_block_by_number(Default::default()).await?.unwrap().header.hash;
+    let head = provider
+        .get_block_by_number(Default::default())
+        .await?
+        .unwrap()
+        .header
+        .hash;
 
     second_node.sync_to(head).await?;
 
@@ -114,7 +123,10 @@ async fn test_long_reorg() -> eyre::Result<()> {
     advance_with_random_transactions(&mut first_node, 100, &mut rng, false).await?;
 
     // Sync second node to 20th block.
-    let head = first_provider.get_block_by_number(20.into()).await?.unwrap();
+    let head = first_provider
+        .get_block_by_number(20.into())
+        .await?
+        .unwrap();
     second_node.sync_to(head.header.hash).await?;
 
     // Produce a fork chain with blocks 21..60
@@ -164,7 +176,10 @@ async fn test_reorg_through_backfill() -> eyre::Result<()> {
     advance_with_random_transactions(&mut first_node, 100, &mut rng, true).await?;
 
     // Sync second node to 20th block.
-    let head = first_provider.get_block_by_number(20.into()).await?.unwrap();
+    let head = first_provider
+        .get_block_by_number(20.into())
+        .await?
+        .unwrap();
     second_node.sync_to(head.header.hash).await?;
 
     // Produce an unfinalized fork chain with 5 blocks
@@ -172,7 +187,10 @@ async fn test_reorg_through_backfill() -> eyre::Result<()> {
     advance_with_random_transactions(&mut second_node, 5, &mut rng, false).await?;
 
     // Now reorg second node to the finalized canonical head
-    let head = first_provider.get_block_by_number(100.into()).await?.unwrap();
+    let head = first_provider
+        .get_block_by_number(100.into())
+        .await?
+        .unwrap();
     second_node.sync_to(head.header.hash).await?;
 
     Ok(())

@@ -47,7 +47,7 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.range.is_empty() {
-            return None
+            return None;
         }
 
         Some(self.execute_range())
@@ -130,7 +130,7 @@ where
                 cumulative_gas,
                 batch_start.elapsed(),
             ) {
-                break
+                break;
             }
         }
 
@@ -179,7 +179,9 @@ where
     )>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.range.next().map(|block_number| self.execute_block(block_number))
+        self.range
+            .next()
+            .map(|block_number| self.execute_block(block_number))
     }
 }
 
@@ -194,7 +196,10 @@ where
     ) -> StreamBackfillJob<
         E,
         P,
-        (RecoveredBlock<reth_ethereum_primitives::Block>, BlockExecutionOutput<Receipt>),
+        (
+            RecoveredBlock<reth_ethereum_primitives::Block>,
+            BlockExecutionOutput<Receipt>,
+        ),
     > {
         self.into()
     }

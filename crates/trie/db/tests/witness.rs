@@ -38,7 +38,9 @@ fn includes_empty_node_preimage() {
     );
 
     // Insert account into database
-    provider.insert_account_for_hashing([(address, Some(Account::default()))]).unwrap();
+    provider
+        .insert_account_for_hashing([(address, Some(Account::default()))])
+        .unwrap();
 
     let state_root = StateRoot::from_tx(provider.tx_ref()).root().unwrap();
     let multiproof = Proof::from_tx(provider.tx_ref())
@@ -62,7 +64,10 @@ fn includes_empty_node_preimage() {
         assert_eq!(witness.get(&keccak256(node)), Some(node));
     }
     // witness includes empty state trie root node
-    assert_eq!(witness.get(&EMPTY_ROOT_HASH), Some(&Bytes::from([EMPTY_STRING_CODE])));
+    assert_eq!(
+        witness.get(&EMPTY_ROOT_HASH),
+        Some(&Bytes::from([EMPTY_STRING_CODE]))
+    );
 }
 
 #[test]
@@ -76,9 +81,17 @@ fn includes_nodes_for_destroyed_storage_nodes() {
     let hashed_slot = keccak256(slot);
 
     // Insert account and slot into database
-    provider.insert_account_for_hashing([(address, Some(Account::default()))]).unwrap();
     provider
-        .insert_storage_for_hashing([(address, [StorageEntry { key: slot, value: U256::from(1) }])])
+        .insert_account_for_hashing([(address, Some(Account::default()))])
+        .unwrap();
+    provider
+        .insert_storage_for_hashing([(
+            address,
+            [StorageEntry {
+                key: slot,
+                value: U256::from(1),
+            }],
+        )])
         .unwrap();
 
     let state_root = StateRoot::from_tx(provider.tx_ref()).root().unwrap();
@@ -89,21 +102,21 @@ fn includes_nodes_for_destroyed_storage_nodes() {
         )]))
         .unwrap();
 
-    let witness =
-        TrieWitness::from_tx(provider.tx_ref())
-            .compute(HashedPostState {
-                accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
-                storages: HashMap::from_iter([(
-                    hashed_address,
-                    HashedStorage::from_iter(true, []),
-                )]), // destroyed
-            })
-            .unwrap();
+    let witness = TrieWitness::from_tx(provider.tx_ref())
+        .compute(HashedPostState {
+            accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
+            storages: HashMap::from_iter([(hashed_address, HashedStorage::from_iter(true, []))]), // destroyed
+        })
+        .unwrap();
     assert!(witness.contains_key(&state_root));
     for node in multiproof.account_subtree.values() {
         assert_eq!(witness.get(&keccak256(node)), Some(node));
     }
-    for node in multiproof.storages.iter().flat_map(|(_, storage)| storage.subtree.values()) {
+    for node in multiproof
+        .storages
+        .iter()
+        .flat_map(|(_, storage)| storage.subtree.values())
+    {
         assert_eq!(witness.get(&keccak256(node)), Some(node));
     }
 }
@@ -119,14 +132,30 @@ fn correctly_decodes_branch_node_values() {
     let hashed_slot2 = B256::with_last_byte(2);
 
     // Insert account and slots into database
-    provider.insert_account_for_hashing([(address, Some(Account::default()))]).unwrap();
-    let mut hashed_storage_cursor =
-        provider.tx_ref().cursor_dup_write::<tables::HashedStorages>().unwrap();
-    hashed_storage_cursor
-        .upsert(hashed_address, &StorageEntry { key: hashed_slot1, value: U256::from(1) })
+    provider
+        .insert_account_for_hashing([(address, Some(Account::default()))])
+        .unwrap();
+    let mut hashed_storage_cursor = provider
+        .tx_ref()
+        .cursor_dup_write::<tables::HashedStorages>()
         .unwrap();
     hashed_storage_cursor
-        .upsert(hashed_address, &StorageEntry { key: hashed_slot2, value: U256::from(1) })
+        .upsert(
+            hashed_address,
+            &StorageEntry {
+                key: hashed_slot1,
+                value: U256::from(1),
+            },
+        )
+        .unwrap();
+    hashed_storage_cursor
+        .upsert(
+            hashed_address,
+            &StorageEntry {
+                key: hashed_slot2,
+                value: U256::from(1),
+            },
+        )
         .unwrap();
 
     let state_root = StateRoot::from_tx(provider.tx_ref()).root().unwrap();
@@ -153,7 +182,11 @@ fn correctly_decodes_branch_node_values() {
     for node in multiproof.account_subtree.values() {
         assert_eq!(witness.get(&keccak256(node)), Some(node));
     }
-    for node in multiproof.storages.iter().flat_map(|(_, storage)| storage.subtree.values()) {
+    for node in multiproof
+        .storages
+        .iter()
+        .flat_map(|(_, storage)| storage.subtree.values())
+    {
         assert_eq!(witness.get(&keccak256(node)), Some(node));
     }
 }

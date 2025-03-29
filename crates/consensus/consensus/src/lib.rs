@@ -111,7 +111,8 @@ pub trait HeaderValidator<H = Header>: Debug + Send + Sync {
                 .map_err(|e| HeaderConsensusError(e, initial_header.clone()))?;
             let mut parent = initial_header;
             for child in remaining_headers {
-                self.validate_header(child).map_err(|e| HeaderConsensusError(e, child.clone()))?;
+                self.validate_header(child)
+                    .map_err(|e| HeaderConsensusError(e, child.clone()))?;
                 self.validate_header_against_parent(child, parent)
                     .map_err(|e| HeaderConsensusError(e, child.clone()))?;
                 parent = child;

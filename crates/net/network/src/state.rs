@@ -49,7 +49,9 @@ impl BlockNumReader {
 
 impl fmt::Debug for BlockNumReader {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("BlockNumReader").field("inner", &"<dyn BlockNumReader>").finish()
+        f.debug_struct("BlockNumReader")
+            .field("inner", &"<dyn BlockNumReader>")
+            .finish()
     }
 }
 
@@ -150,12 +152,20 @@ impl<N: NetworkPrimitives> NetworkState<N> {
         request_tx: PeerRequestSender<PeerRequest<N>>,
         timeout: Arc<AtomicU64>,
     ) {
-        debug_assert!(!self.active_peers.contains_key(&peer), "Already connected; not possible");
+        debug_assert!(
+            !self.active_peers.contains_key(&peer),
+            "Already connected; not possible"
+        );
 
         // find the corresponding block number
-        let block_number =
-            self.client.block_number(status.blockhash).ok().flatten().unwrap_or_default();
-        self.state_fetcher.new_active_peer(peer, status.blockhash, block_number, timeout);
+        let block_number = self
+            .client
+            .block_number(status.blockhash)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        self.state_fetcher
+            .new_active_peer(peer, status.blockhash, block_number, timeout);
 
         self.active_peers.insert(
             peer,
@@ -200,16 +210,21 @@ impl<N: NetworkPrimitives> NetworkState<N> {
         for (peer_id, peer) in peers {
             if peer.blocks.contains(&msg.hash) {
                 // skip peers which already reported the block
-                continue
+                continue;
             }
 
             // Queue a `NewBlock` message for the peer
             if count < num_propagate {
-                self.queued_messages
-                    .push_back(StateAction::NewBlock { peer_id: *peer_id, block: msg.clone() });
+                self.queued_messages.push_back(StateAction::NewBlock {
+                    peer_id: *peer_id,
+                    block: msg.clone(),
+                });
 
                 // update peer block info
-                if self.state_fetcher.update_peer_block(peer_id, msg.hash, number) {
+                if self
+                    .state_fetcher
+                    .update_peer_block(peer_id, msg.hash, number)
+                {
                     peer.best_hash = msg.hash;
                 }
 
@@ -220,7 +235,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
             }
 
             if count >= num_propagate {
-                break
+                break;
             }
         }
     }
@@ -229,14 +244,20 @@ impl<N: NetworkPrimitives> NetworkState<N> {
     /// but sending `NewBlockHash` broadcast to all peers that haven't seen it yet.
     pub(crate) fn announce_new_block_hash(&mut self, msg: NewBlockMessage<N::Block>) {
         let number = msg.block.block.header().number();
-        let hashes = NewBlockHashes(vec![BlockHashNumber { hash: msg.hash, number }]);
+        let hashes = NewBlockHashes(vec![BlockHashNumber {
+            hash: msg.hash,
+            number,
+        }]);
         for (peer_id, peer) in &mut self.active_peers {
             if peer.blocks.contains(&msg.hash) {
                 // skip peers which already reported the block
-                continue
+                continue;
             }
 
-            if self.state_fetcher.update_peer_block(peer_id, msg.hash, number) {
+            if self
+                .state_fetcher
+                .update_peer_block(peer_id, msg.hash, number)
+            {
                 peer.best_hash = msg.hash;
             }
 
@@ -302,7 +323,8 @@ impl<N: NetworkPrimitives> NetworkState<N> {
 
     /// Connects a peer and its address with the given kind
     pub(crate) fn add_and_connect(&mut self, peer_id: PeerId, kind: PeerKind, addr: PeerAddr) {
-        self.peers_manager.add_and_connect_kind(peer_id, kind, addr, None)
+        self.peers_manager
+            .add_and_connect_kind(peer_id, kind, addr, None)
     }
 
     /// Removes a peer and its address with the given kind from the peerset.
@@ -316,7 +338,11 @@ impl<N: NetworkPrimitives> NetworkState<N> {
     /// Event hook for events received from the discovery service.
     fn on_discovery_event(&mut self, event: DiscoveryEvent) {
         match event {
-            DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued { peer_id, addr, fork_id }) => {
+            DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued {
+                peer_id,
+                addr,
+                fork_id,
+            }) => {
                 self.queued_messages.push_back(StateAction::DiscoveredNode {
                     peer_id,
                     addr,
@@ -333,28 +359,38 @@ impl<N: NetworkPrimitives> NetworkState<N> {
     /// Event hook for new actions derived from the peer management set.
     fn on_peer_action(&mut self, action: PeerAction) {
         match action {
-            PeerAction::Connect { peer_id, remote_addr } => {
-                self.queued_messages.push_back(StateAction::Connect { peer_id, remote_addr });
+            PeerAction::Connect {
+                peer_id,
+                remote_addr,
+            } => {
+                self.queued_messages.push_back(StateAction::Connect {
+                    peer_id,
+                    remote_addr,
+                });
             }
             PeerAction::Disconnect { peer_id, reason } => {
                 self.state_fetcher.on_pending_disconnect(&peer_id);
-                self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason });
+                self.queued_messages
+                    .push_back(StateAction::Disconnect { peer_id, reason });
             }
-            PeerAction::DisconnectBannedIncoming { peer_id } |
-            PeerAction::DisconnectUntrustedIncoming { peer_id } => {
+            PeerAction::DisconnectBannedIncoming { peer_id }
+            | PeerAction::DisconnectUntrustedIncoming { peer_id } => {
                 self.state_fetcher.on_pending_disconnect(&peer_id);
-                self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason: None });
+                self.queued_messages.push_back(StateAction::Disconnect {
+                    peer_id,
+                    reason: None,
+                });
             }
             PeerAction::DiscoveryBanPeerId { peer_id, ip_addr } => {
                 self.ban_discovery(peer_id, ip_addr)
             }
             PeerAction::DiscoveryBanIp { ip_addr } => self.ban_ip_discovery(ip_addr),
-            PeerAction::PeerAdded(peer_id) => {
-                self.queued_messages.push_back(StateAction::PeerAdded(peer_id))
-            }
-            PeerAction::PeerRemoved(peer_id) => {
-                self.queued_messages.push_back(StateAction::PeerRemoved(peer_id))
-            }
+            PeerAction::PeerAdded(peer_id) => self
+                .queued_messages
+                .push_back(StateAction::PeerAdded(peer_id)),
+            PeerAction::PeerRemoved(peer_id) => self
+                .queued_messages
+                .push_back(StateAction::PeerRemoved(peer_id)),
             PeerAction::BanPeer { .. } | PeerAction::UnBanPeer { .. } => {}
         }
     }
@@ -391,7 +427,8 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                 self.handle_block_request(peer, request);
             }
             BlockResponseOutcome::BadResponse(peer, reputation_change) => {
-                self.peers_manager.apply_reputation_change(&peer, reputation_change);
+                self.peers_manager
+                    .apply_reputation_change(&peer, reputation_change);
             }
         }
     }
@@ -422,7 +459,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
         loop {
             // drain buffered messages
             if let Some(message) = self.queued_messages.pop_front() {
-                return Poll::Ready(message)
+                return Poll::Ready(message);
             }
 
             while let Poll::Ready(discovery) = self.discovery.poll(cx) {
@@ -444,7 +481,9 @@ impl<N: NetworkPrimitives> NetworkState<N> {
 
                 // poll all connected peers for responses
                 for (id, peer) in &mut self.active_peers {
-                    let Some(mut response) = peer.pending_response.take() else { continue };
+                    let Some(mut response) = peer.pending_response.take() else {
+                        continue;
+                    };
                     match response.poll(cx) {
                         Poll::Ready(res) => {
                             // check if the error is due to a closed channel to the session
@@ -492,7 +531,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
             // We need to poll again tn case we have received any responses because they may have
             // triggered follow-up requests.
             if self.queued_messages.is_empty() {
-                return Poll::Pending
+                return Poll::Pending;
             }
         }
     }
@@ -533,7 +572,10 @@ pub(crate) enum StateAction<N: NetworkPrimitives> {
         hashes: NewBlockHashes,
     },
     /// Create a new connection to the given node.
-    Connect { remote_addr: SocketAddr, peer_id: PeerId },
+    Connect {
+        remote_addr: SocketAddr,
+        peer_id: PeerId,
+    },
     /// Disconnect an existing connection
     Disconnect {
         peer_id: PeerId,
@@ -547,7 +589,11 @@ pub(crate) enum StateAction<N: NetworkPrimitives> {
         fork_id: ForkId,
     },
     /// A new node was found through the discovery, possibly with a `ForkId`
-    DiscoveredNode { peer_id: PeerId, addr: PeerAddr, fork_id: Option<ForkId> },
+    DiscoveredNode {
+        peer_id: PeerId,
+        addr: PeerAddr,
+        fork_id: Option<ForkId>,
+    },
     /// A peer was added
     PeerAdded(PeerId),
     /// A peer was dropped
@@ -617,7 +663,10 @@ mod tests {
 
         assert!(state.active_peers.contains_key(&peer_id));
 
-        let body = BlockBody { ommers: vec![Header::default()], ..Default::default() };
+        let body = BlockBody {
+            ommers: vec![Header::default()],
+            ..Default::default()
+        };
 
         let body_response = body.clone();
 
@@ -644,7 +693,11 @@ mod tests {
         });
 
         // send requests to the state via the client
-        let (peer, bodies) = client.get_block_bodies(vec![B256::random()]).await.unwrap().split();
+        let (peer, bodies) = client
+            .get_block_bodies(vec![B256::random()])
+            .await
+            .unwrap()
+            .split();
         assert_eq!(peer, peer_id);
         assert_eq!(bodies, vec![body]);
 

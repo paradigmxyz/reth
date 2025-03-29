@@ -51,21 +51,25 @@ where
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No account history to prune");
-                return Ok(SegmentOutput::done())
+                return Ok(SegmentOutput::done());
             }
         };
         let range_end = *range.end();
 
         let mut limiter = if let Some(limit) = input.limiter.deleted_entries_limit() {
-            input.limiter.set_deleted_entries_limit(limit / ACCOUNT_HISTORY_TABLES_TO_PRUNE)
+            input
+                .limiter
+                .set_deleted_entries_limit(limit / ACCOUNT_HISTORY_TABLES_TO_PRUNE)
         } else {
             input.limiter
         };
         if limiter.is_limit_reached() {
             return Ok(SegmentOutput::not_done(
                 limiter.interrupt_reason(),
-                input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
-            ))
+                input
+                    .previous_checkpoint
+                    .map(SegmentOutputCheckpoint::from_prune_checkpoint),
+            ));
         }
 
         let mut last_changeset_pruned_block = None;
@@ -78,8 +82,9 @@ where
         // size should be up to 0.5MB + some hashmap overhead. `blocks_since_last_run` is
         // additionally limited by the `max_reorg_depth`, so no OOM is expected here.
         let mut highest_deleted_accounts = FxHashMap::default();
-        let (pruned_changesets, done) =
-            provider.tx_ref().prune_table_with_range::<tables::AccountChangeSets>(
+        let (pruned_changesets, done) = provider
+            .tx_ref()
+            .prune_table_with_range::<tables::AccountChangeSets>(
                 range,
                 &mut limiter,
                 |_| false,
@@ -93,7 +98,13 @@ where
         let last_changeset_pruned_block = last_changeset_pruned_block
             // If there's more account changesets to prune, set the checkpoint block number to
             // previous, so we could finish pruning its account changesets on the next run.
-            .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
+            .map(|block_number| {
+                if done {
+                    block_number
+                } else {
+                    block_number.saturating_sub(1)
+                }
+            })
             .unwrap_or(range_end);
 
         // Sort highest deleted block numbers by account address and turn them into sharded keys.
@@ -151,30 +162,44 @@ mod tests {
         let blocks = random_block_range(
             &mut rng,
             1..=5000,
-            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
+            BlockRangeParams {
+                parent: Some(B256::ZERO),
+                tx_count: 0..1,
+                ..Default::default()
+            },
         );
-        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None))
+            .expect("insert blocks");
 
-        let accounts = random_eoa_accounts(&mut rng, 2).into_iter().collect::<BTreeMap<_, _>>();
+        let accounts = random_eoa_accounts(&mut rng, 2)
+            .into_iter()
+            .collect::<BTreeMap<_, _>>();
 
         let (changesets, _) = random_changeset_range(
             &mut rng,
             blocks.iter(),
-            accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
+            accounts
+                .into_iter()
+                .map(|(addr, acc)| (addr, (acc, Vec::new()))),
             0..0,
             0..0,
         );
-        db.insert_changesets(changesets.clone(), None).expect("insert changesets");
-        db.insert_history(changesets.clone(), None).expect("insert history");
+        db.insert_changesets(changesets.clone(), None)
+            .expect("insert changesets");
+        db.insert_history(changesets.clone(), None)
+            .expect("insert history");
 
-        let account_occurrences = db.table::<tables::AccountsHistory>().unwrap().into_iter().fold(
-            BTreeMap::<_, usize>::new(),
-            |mut map, (key, _)| {
+        let account_occurrences = db
+            .table::<tables::AccountsHistory>()
+            .unwrap()
+            .into_iter()
+            .fold(BTreeMap::<_, usize>::new(), |mut map, (key, _)| {
                 map.entry(key.key).or_default().add_assign(1);
                 map
-            },
-        );
-        assert!(account_occurrences.into_iter().any(|(_, occurrences)| occurrences > 1));
+            });
+        assert!(account_occurrences
+            .into_iter()
+            .any(|(_, occurrences)| occurrences > 1));
 
         assert_eq!(
             db.table::<tables::AccountChangeSets>().unwrap().len(),
@@ -232,8 +257,8 @@ mod tests {
                     .iter()
                     .enumerate()
                     .skip_while(|(i, (block_number, _))| {
-                        *i < deleted_entries_limit / ACCOUNT_HISTORY_TABLES_TO_PRUNE * run &&
-                            *block_number <= to_block as usize
+                        *i < deleted_entries_limit / ACCOUNT_HISTORY_TABLES_TO_PRUNE * run
+                            && *block_number <= to_block as usize
                     })
                     .next()
                     .map(|(i, _)| i)
@@ -273,8 +298,9 @@ mod tests {
                     .iter()
                     .filter(|(key, _)| key.highest_block_number > last_pruned_block_number)
                     .map(|(key, blocks)| {
-                        let new_blocks =
-                            blocks.iter().skip_while(|block| *block <= last_pruned_block_number);
+                        let new_blocks = blocks
+                            .iter()
+                            .skip_while(|block| *block <= last_pruned_block_number);
                         (key.clone(), BlockNumberList::new_pre_sorted(new_blocks))
                     })
                     .collect::<Vec<_>>();
@@ -298,7 +324,10 @@ mod tests {
         test_prune(
             998,
             1,
-            (PruneProgress::HasMoreData(PruneInterruptReason::DeletedEntriesLimitReached), 1000),
+            (
+                PruneProgress::HasMoreData(PruneInterruptReason::DeletedEntriesLimitReached),
+                1000,
+            ),
         );
         test_prune(998, 2, (PruneProgress::Finished, 998));
         test_prune(1400, 3, (PruneProgress::Finished, 804));

@@ -66,13 +66,19 @@ impl BenchContext {
         // construct the authed transport
         info!("Connecting to Engine RPC at {} for replay", auth_url);
         let auth_transport = AuthenticatedTransportConnect::new(auth_url, jwt);
-        let client = ClientBuilder::default().connect_with(auth_transport).await?;
+        let client = ClientBuilder::default()
+            .connect_with(auth_transport)
+            .await?;
         let auth_provider = RootProvider::<AnyNetwork>::new(client);
 
         let first_block = match benchmark_mode {
             BenchMode::Continuous => {
                 // fetch Latest block
-                block_provider.get_block_by_number(BlockNumberOrTag::Latest).full().await?.unwrap()
+                block_provider
+                    .get_block_by_number(BlockNumberOrTag::Latest)
+                    .full()
+                    .await?
+                    .unwrap()
             }
             BenchMode::Range(ref mut range) => {
                 match range.next() {
@@ -94,6 +100,11 @@ impl BenchContext {
         };
 
         let next_block = first_block.header.number + 1;
-        Ok(Self { auth_provider, block_provider, benchmark_mode, next_block })
+        Ok(Self {
+            auth_provider,
+            block_provider,
+            benchmark_mode,
+            next_block,
+        })
     }
 }

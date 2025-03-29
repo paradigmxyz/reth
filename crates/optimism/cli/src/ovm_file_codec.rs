@@ -106,7 +106,11 @@ impl OvmTransactionSigned {
         transaction: OpTypedTransaction,
         signature: Signature,
     ) -> Self {
-        let mut initial_tx = Self { transaction, hash: Default::default(), signature };
+        let mut initial_tx = Self {
+            transaction,
+            hash: Default::default(),
+            signature,
+        };
         initial_tx.hash = initial_tx.recalculate_hash();
         initial_tx
     }
@@ -154,8 +158,9 @@ impl OvmTransactionSigned {
             (Signature::new(r, s, false), None)
         } else {
             // Regular transaction case
-            let (parity, chain_id) = from_eip155_value(v)
-                .ok_or(alloy_rlp::Error::Custom("invalid parity for legacy transaction"))?;
+            let (parity, chain_id) = from_eip155_value(v).ok_or(alloy_rlp::Error::Custom(
+                "invalid parity for legacy transaction",
+            ))?;
             (Signature::new(r, s, parity), chain_id)
         };
 
@@ -182,7 +187,11 @@ impl OvmTransactionSigned {
     // so decoding methods do not need to manually advance the buffer
     pub fn decode_rlp_legacy_transaction(data: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let (transaction, hash, signature) = Self::decode_rlp_legacy_transaction_tuple(data)?;
-        let signed = Self { transaction: OpTypedTransaction::Legacy(transaction), hash, signature };
+        let signed = Self {
+            transaction: OpTypedTransaction::Legacy(transaction),
+            hash,
+            signature,
+        };
         Ok(signed)
     }
 }
@@ -263,19 +272,34 @@ impl Encodable2718 for OvmTransactionSigned {
 
 impl Decodable2718 for OvmTransactionSigned {
     fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
-        match ty.try_into().map_err(|_| Eip2718Error::UnexpectedType(ty))? {
+        match ty
+            .try_into()
+            .map_err(|_| Eip2718Error::UnexpectedType(ty))?
+        {
             OpTxType::Legacy => Err(Eip2718Error::UnexpectedType(0)),
             OpTxType::Eip2930 => {
                 let (tx, signature, hash) = TxEip2930::rlp_decode_signed(buf)?.into_parts();
-                Ok(Self { transaction: OpTypedTransaction::Eip2930(tx), signature, hash })
+                Ok(Self {
+                    transaction: OpTypedTransaction::Eip2930(tx),
+                    signature,
+                    hash,
+                })
             }
             OpTxType::Eip1559 => {
                 let (tx, signature, hash) = TxEip1559::rlp_decode_signed(buf)?.into_parts();
-                Ok(Self { transaction: OpTypedTransaction::Eip1559(tx), signature, hash })
+                Ok(Self {
+                    transaction: OpTypedTransaction::Eip1559(tx),
+                    signature,
+                    hash,
+                })
             }
             OpTxType::Eip7702 => {
                 let (tx, signature, hash) = TxEip7702::rlp_decode_signed(buf)?.into_parts();
-                Ok(Self { transaction: OpTypedTransaction::Eip7702(tx), signature, hash })
+                Ok(Self {
+                    transaction: OpTypedTransaction::Eip7702(tx),
+                    signature,
+                    hash,
+                })
             }
             OpTxType::Deposit => Ok(Self::from_transaction_and_signature(
                 OpTypedTransaction::Deposit(TxDeposit::rlp_decode(buf)?),

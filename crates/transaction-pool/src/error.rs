@@ -77,7 +77,10 @@ pub enum PoolErrorKind {
 impl PoolError {
     /// Creates a new pool error.
     pub fn new(hash: TxHash, kind: impl Into<PoolErrorKind>) -> Self {
-        Self { hash, kind: kind.into() }
+        Self {
+            hash,
+            kind: kind.into(),
+        }
     }
 
     /// Creates a new pool error with the `Other` kind.
@@ -85,7 +88,10 @@ impl PoolError {
         hash: TxHash,
         error: impl Into<Box<dyn core::error::Error + Send + Sync>>,
     ) -> Self {
-        Self { hash, kind: PoolErrorKind::Other(error.into()) }
+        Self {
+            hash,
+            kind: PoolErrorKind::Other(error.into()),
+        }
     }
 
     /// Returns `true` if the error was caused by a transaction that is considered bad in the
@@ -257,14 +263,14 @@ impl InvalidPoolTransactionError {
                 // depend on dynamic environmental conditions and should not be assumed to have been
                 // intentionally caused by the sender
                 match err {
-                    InvalidTransactionError::InsufficientFunds { .. } |
-                    InvalidTransactionError::NonceNotConsistent { .. } => {
+                    InvalidTransactionError::InsufficientFunds { .. }
+                    | InvalidTransactionError::NonceNotConsistent { .. } => {
                         // transaction could just have arrived late/early
                         false
                     }
-                    InvalidTransactionError::GasTooLow |
-                    InvalidTransactionError::GasTooHigh |
-                    InvalidTransactionError::TipAboveFeeCap => {
+                    InvalidTransactionError::GasTooLow
+                    | InvalidTransactionError::GasTooHigh
+                    | InvalidTransactionError::TipAboveFeeCap => {
                         // these are technically not invalid
                         false
                     }
@@ -272,18 +278,18 @@ impl InvalidPoolTransactionError {
                         // dynamic, but not used during validation
                         false
                     }
-                    InvalidTransactionError::Eip2930Disabled |
-                    InvalidTransactionError::Eip1559Disabled |
-                    InvalidTransactionError::Eip4844Disabled |
-                    InvalidTransactionError::Eip7702Disabled => {
+                    InvalidTransactionError::Eip2930Disabled
+                    | InvalidTransactionError::Eip1559Disabled
+                    | InvalidTransactionError::Eip4844Disabled
+                    | InvalidTransactionError::Eip7702Disabled => {
                         // settings
                         false
                     }
-                    InvalidTransactionError::OldLegacyChainId |
-                    InvalidTransactionError::ChainIdMismatch |
-                    InvalidTransactionError::GasUintOverflow |
-                    InvalidTransactionError::TxTypeNotSupported |
-                    InvalidTransactionError::SignerAccountHasBytecode => true,
+                    InvalidTransactionError::OldLegacyChainId
+                    | InvalidTransactionError::ChainIdMismatch
+                    | InvalidTransactionError::GasUintOverflow
+                    | InvalidTransactionError::TxTypeNotSupported
+                    | InvalidTransactionError::SignerAccountHasBytecode => true,
                 }
             }
             Self::ExceedsGasLimit(_, _) => true,
@@ -330,8 +336,13 @@ impl InvalidPoolTransactionError {
 
     /// Returns `true` if an import failed due to nonce gap.
     pub const fn is_nonce_gap(&self) -> bool {
-        matches!(self, Self::Consensus(InvalidTransactionError::NonceNotConsistent { .. })) ||
-            matches!(self, Self::Eip4844(Eip4844PoolTransactionError::Eip4844NonceGap))
+        matches!(
+            self,
+            Self::Consensus(InvalidTransactionError::NonceNotConsistent { .. })
+        ) || matches!(
+            self,
+            Self::Eip4844(Eip4844PoolTransactionError::Eip4844NonceGap)
+        )
     }
 
     /// Returns the arbitrary error if it is [`InvalidPoolTransactionError::Other`]
@@ -352,7 +363,9 @@ impl InvalidPoolTransactionError {
     /// Returns true if the this type is a [`InvalidPoolTransactionError::Other`] of that error
     /// type. Returns false otherwise.
     pub fn is_other<T: core::error::Error + 'static>(&self) -> bool {
-        self.as_other().map(|err| err.as_any().is::<T>()).unwrap_or(false)
+        self.as_other()
+            .map(|err| err.as_any().is::<T>())
+            .unwrap_or(false)
     }
 }
 

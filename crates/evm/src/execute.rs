@@ -61,7 +61,10 @@ pub trait Executor<DB: Database>: Sized {
     {
         let result = self.execute_one(block)?;
         let mut state = self.into_state();
-        Ok(BlockExecutionOutput { state: state.take_bundle(), result })
+        Ok(BlockExecutionOutput {
+            state: state.take_bundle(),
+            result,
+        })
     }
 
     /// Executes multiple inputs in the batch, and returns an aggregated [`ExecutionOutcome`].
@@ -101,7 +104,10 @@ pub trait Executor<DB: Database>: Sized {
         let result = self.execute_one(block)?;
         let mut state = self.into_state();
         f(&state);
-        Ok(BlockExecutionOutput { state: state.take_bundle(), result })
+        Ok(BlockExecutionOutput {
+            state: state.take_bundle(),
+            result,
+        })
     }
 
     /// Executes the EVM with the given input and accepts a state hook closure that is invoked with
@@ -116,7 +122,10 @@ pub trait Executor<DB: Database>: Sized {
     {
         let result = self.execute_one_with_state_hook(block, state_hook)?;
         let mut state = self.into_state();
-        Ok(BlockExecutionOutput { state: state.take_bundle(), result })
+        Ok(BlockExecutionOutput {
+            state: state.take_bundle(),
+            result,
+        })
     }
 
     /// Consumes the executor and returns the [`State`] containing all state changes.
@@ -311,8 +320,9 @@ where
         tx: Recovered<TxTy<Self::Primitives>>,
         f: impl FnOnce(&ExecutionResult<<F::EvmFactory as EvmFactory>::HaltReason>),
     ) -> Result<u64, BlockExecutionError> {
-        let gas_used =
-            self.executor.execute_transaction_with_result_closure(tx.as_recovered_ref(), f)?;
+        let gas_used = self
+            .executor
+            .execute_transaction_with_result_closure(tx.as_recovered_ref(), f)?;
         self.transactions.push(tx);
         Ok(gas_used)
     }
@@ -333,8 +343,11 @@ where
             .state_root_with_updates(hashed_state.clone())
             .map_err(BlockExecutionError::other)?;
 
-        let (transactions, senders) =
-            self.transactions.into_iter().map(|tx| tx.into_parts()).unzip();
+        let (transactions, senders) = self
+            .transactions
+            .into_iter()
+            .map(|tx| tx.into_parts())
+            .unzip();
 
         let block = self.assembler.assemble_block(BlockAssemblerInput {
             evm_env,
@@ -349,7 +362,12 @@ where
 
         let block = RecoveredBlock::new_unhashed(block, senders);
 
-        Ok(BlockBuilderOutcome { execution_result: result, hashed_state, trie_updates, block })
+        Ok(BlockBuilderOutcome {
+            execution_result: result,
+            hashed_state,
+            trie_updates,
+            block,
+        })
     }
 
     fn executor_mut(&mut self) -> &mut Self::Executor {
@@ -366,7 +384,9 @@ where
     F: Clone,
 {
     fn clone(&self) -> Self {
-        Self { strategy_factory: self.strategy_factory.clone() }
+        Self {
+            strategy_factory: self.strategy_factory.clone(),
+        }
     }
 }
 
@@ -412,9 +432,15 @@ pub struct BasicBlockExecutor<F, DB> {
 impl<F, DB: Database> BasicBlockExecutor<F, DB> {
     /// Creates a new `BasicBlockExecutor` with the given strategy.
     pub fn new(strategy_factory: F, db: DB) -> Self {
-        let db =
-            State::builder().with_database(db).with_bundle_update().without_state_clear().build();
-        Self { strategy_factory, db }
+        let db = State::builder()
+            .with_database(db)
+            .with_bundle_update()
+            .without_state_clear()
+            .build();
+        Self {
+            strategy_factory,
+            db,
+        }
     }
 }
 
@@ -431,7 +457,9 @@ where
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        let mut strategy = self.strategy_factory.executor_for_block(&mut self.db, block);
+        let mut strategy = self
+            .strategy_factory
+            .executor_for_block(&mut self.db, block);
 
         strategy.apply_pre_execution_changes()?;
         for tx in block.transactions_recovered() {
@@ -554,7 +582,10 @@ mod tests {
         nonce: u64,
     ) -> State<CacheDB<EmptyDB>> {
         let db = CacheDB::<EmptyDB>::default();
-        let mut state = State::builder().with_database(db).with_bundle_update().build();
+        let mut state = State::builder()
+            .with_database(db)
+            .with_bundle_update()
+            .build();
 
         let account_info = AccountInfo {
             balance: U256::from(balance),
@@ -587,7 +618,10 @@ mod tests {
 
         let increments = HashMap::default();
         let result = balance_increment_state(&increments, &mut state).unwrap();
-        assert!(result.is_empty(), "Empty increments map should return empty state");
+        assert!(
+            result.is_empty(),
+            "Empty increments map should return empty state"
+        );
     }
 
     #[test]
@@ -597,8 +631,12 @@ mod tests {
 
         let mut state = setup_state_with_account(addr1, 100, 1);
 
-        let account2 =
-            AccountInfo { balance: U256::from(200), nonce: 1, code_hash: KECCAK_EMPTY, code: None };
+        let account2 = AccountInfo {
+            balance: U256::from(200),
+            nonce: 1,
+            code_hash: KECCAK_EMPTY,
+            code: None,
+        };
         state.insert_account(addr2, account2);
 
         let mut increments = HashMap::default();
@@ -619,8 +657,12 @@ mod tests {
 
         let mut state = setup_state_with_account(addr1, 100, 1);
 
-        let account2 =
-            AccountInfo { balance: U256::from(200), nonce: 1, code_hash: KECCAK_EMPTY, code: None };
+        let account2 = AccountInfo {
+            balance: U256::from(200),
+            nonce: 1,
+            code_hash: KECCAK_EMPTY,
+            code: None,
+        };
         state.insert_account(addr2, account2);
 
         let mut increments = HashMap::default();
@@ -629,8 +671,15 @@ mod tests {
 
         let result = balance_increment_state(&increments, &mut state).unwrap();
 
-        assert_eq!(result.len(), 1, "Only non-zero increments should be included");
-        assert!(!result.contains_key(&addr1), "Zero increment account should not be included");
+        assert_eq!(
+            result.len(),
+            1,
+            "Only non-zero increments should be included"
+        );
+        assert!(
+            !result.contains_key(&addr1),
+            "Zero increment account should not be included"
+        );
         assert_eq!(result.get(&addr2).unwrap().info.balance, U256::from(200));
     }
 }

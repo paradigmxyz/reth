@@ -125,7 +125,13 @@ impl OpReceiptFieldsBuilder {
 
         self.l1_fee = Some(
             l1_block_info
-                .l1_tx_data_fee(chain_spec, timestamp, block_number, &raw_tx, tx.is_deposit())
+                .l1_tx_data_fee(
+                    chain_spec,
+                    timestamp,
+                    block_number,
+                    &raw_tx,
+                    tx.is_deposit(),
+                )
                 .map_err(|_| OpEthApiError::L1BlockFeeError)?
                 .saturating_to(),
         );
@@ -143,22 +149,29 @@ impl OpReceiptFieldsBuilder {
 
         self.l1_base_fee = Some(l1_block_info.l1_base_fee.saturating_to());
         self.l1_base_fee_scalar = Some(l1_block_info.l1_base_fee_scalar.saturating_to());
-        self.l1_blob_base_fee = l1_block_info.l1_blob_base_fee.map(|fee| fee.saturating_to());
-        self.l1_blob_base_fee_scalar =
-            l1_block_info.l1_blob_base_fee_scalar.map(|scalar| scalar.saturating_to());
+        self.l1_blob_base_fee = l1_block_info
+            .l1_blob_base_fee
+            .map(|fee| fee.saturating_to());
+        self.l1_blob_base_fee_scalar = l1_block_info
+            .l1_blob_base_fee_scalar
+            .map(|scalar| scalar.saturating_to());
 
         // If the operator fee params are both set to 0, we don't add them to the receipt.
-        let operator_fee_scalar_has_non_zero_value: bool =
-            l1_block_info.operator_fee_scalar.is_some_and(|scalar| !scalar.is_zero());
+        let operator_fee_scalar_has_non_zero_value: bool = l1_block_info
+            .operator_fee_scalar
+            .is_some_and(|scalar| !scalar.is_zero());
 
-        let operator_fee_constant_has_non_zero_value =
-            l1_block_info.operator_fee_constant.is_some_and(|constant| !constant.is_zero());
+        let operator_fee_constant_has_non_zero_value = l1_block_info
+            .operator_fee_constant
+            .is_some_and(|constant| !constant.is_zero());
 
         if operator_fee_scalar_has_non_zero_value || operator_fee_constant_has_non_zero_value {
-            self.operator_fee_scalar =
-                l1_block_info.operator_fee_scalar.map(|scalar| scalar.saturating_to());
-            self.operator_fee_constant =
-                l1_block_info.operator_fee_constant.map(|constant| constant.saturating_to());
+            self.operator_fee_scalar = l1_block_info
+                .operator_fee_scalar
+                .map(|scalar| scalar.saturating_to());
+            self.operator_fee_constant = l1_block_info
+                .operator_fee_constant
+                .map(|constant| constant.saturating_to());
         }
 
         Ok(self)
@@ -233,41 +246,54 @@ impl OpReceiptBuilder {
     ) -> Result<Self, OpEthApiError> {
         let timestamp = meta.timestamp;
         let block_number = meta.block_number;
-        let core_receipt =
-            build_receipt(transaction, meta, receipt, all_receipts, None, |receipt_with_bloom| {
-                match receipt {
-                    OpReceipt::Legacy(_) => OpReceiptEnvelope::<Log>::Legacy(receipt_with_bloom),
-                    OpReceipt::Eip2930(_) => OpReceiptEnvelope::<Log>::Eip2930(receipt_with_bloom),
-                    OpReceipt::Eip1559(_) => OpReceiptEnvelope::<Log>::Eip1559(receipt_with_bloom),
-                    OpReceipt::Eip7702(_) => OpReceiptEnvelope::<Log>::Eip7702(receipt_with_bloom),
-                    OpReceipt::Deposit(receipt) => {
-                        OpReceiptEnvelope::<Log>::Deposit(OpDepositReceiptWithBloom::<Log> {
-                            receipt: OpDepositReceipt::<Log> {
-                                inner: receipt_with_bloom.receipt,
-                                deposit_nonce: receipt.deposit_nonce,
-                                deposit_receipt_version: receipt.deposit_receipt_version,
-                            },
-                            logs_bloom: receipt_with_bloom.logs_bloom,
-                        })
-                    }
+        let core_receipt = build_receipt(
+            transaction,
+            meta,
+            receipt,
+            all_receipts,
+            None,
+            |receipt_with_bloom| match receipt {
+                OpReceipt::Legacy(_) => OpReceiptEnvelope::<Log>::Legacy(receipt_with_bloom),
+                OpReceipt::Eip2930(_) => OpReceiptEnvelope::<Log>::Eip2930(receipt_with_bloom),
+                OpReceipt::Eip1559(_) => OpReceiptEnvelope::<Log>::Eip1559(receipt_with_bloom),
+                OpReceipt::Eip7702(_) => OpReceiptEnvelope::<Log>::Eip7702(receipt_with_bloom),
+                OpReceipt::Deposit(receipt) => {
+                    OpReceiptEnvelope::<Log>::Deposit(OpDepositReceiptWithBloom::<Log> {
+                        receipt: OpDepositReceipt::<Log> {
+                            inner: receipt_with_bloom.receipt,
+                            deposit_nonce: receipt.deposit_nonce,
+                            deposit_receipt_version: receipt.deposit_receipt_version,
+                        },
+                        logs_bloom: receipt_with_bloom.logs_bloom,
+                    })
                 }
-            })?;
+            },
+        )?;
 
         let op_receipt_fields = OpReceiptFieldsBuilder::new(timestamp, block_number)
             .l1_block_info(chain_spec, transaction, l1_block_info)?
             .build();
 
-        Ok(Self { core_receipt, op_receipt_fields })
+        Ok(Self {
+            core_receipt,
+            op_receipt_fields,
+        })
     }
 
     /// Builds [`OpTransactionReceipt`] by combing core (l1) receipt fields and additional OP
     /// receipt fields.
     pub fn build(self) -> OpTransactionReceipt {
-        let Self { core_receipt: inner, op_receipt_fields } = self;
+        let Self {
+            core_receipt: inner,
+            op_receipt_fields,
+        } = self;
 
         let OpTransactionReceiptFields { l1_block_info, .. } = op_receipt_fields;
 
-        OpTransactionReceipt { inner, l1_block_info }
+        OpTransactionReceipt {
+            inner,
+            l1_block_info,
+        }
     }
 }
 
@@ -327,7 +353,10 @@ mod test {
                 .unwrap();
 
         let block: Block<OpTransactionSigned> = Block {
-            body: BlockBody { transactions: [tx_0, tx_1.clone()].to_vec(), ..Default::default() },
+            body: BlockBody {
+                transactions: [tx_0, tx_1.clone()].to_vec(),
+                ..Default::default()
+            },
             ..Default::default()
         };
 
@@ -355,11 +384,17 @@ mod test {
         } = receipt_meta.l1_block_info;
 
         assert_eq!(
-            l1_gas_price, TX_META_TX_1_OP_MAINNET_BLOCK_124665056.l1_block_info.l1_gas_price,
+            l1_gas_price,
+            TX_META_TX_1_OP_MAINNET_BLOCK_124665056
+                .l1_block_info
+                .l1_gas_price,
             "incorrect l1 base fee (former gas price)"
         );
         assert_eq!(
-            l1_gas_used, TX_META_TX_1_OP_MAINNET_BLOCK_124665056.l1_block_info.l1_gas_used,
+            l1_gas_used,
+            TX_META_TX_1_OP_MAINNET_BLOCK_124665056
+                .l1_block_info
+                .l1_gas_used,
             "incorrect l1 gas used"
         );
         assert_eq!(
@@ -367,32 +402,45 @@ mod test {
             "incorrect l1 fee"
         );
         assert_eq!(
-            l1_fee_scalar, TX_META_TX_1_OP_MAINNET_BLOCK_124665056.l1_block_info.l1_fee_scalar,
+            l1_fee_scalar,
+            TX_META_TX_1_OP_MAINNET_BLOCK_124665056
+                .l1_block_info
+                .l1_fee_scalar,
             "incorrect l1 fee scalar"
         );
         assert_eq!(
             l1_base_fee_scalar,
-            TX_META_TX_1_OP_MAINNET_BLOCK_124665056.l1_block_info.l1_base_fee_scalar,
+            TX_META_TX_1_OP_MAINNET_BLOCK_124665056
+                .l1_block_info
+                .l1_base_fee_scalar,
             "incorrect l1 base fee scalar"
         );
         assert_eq!(
             l1_blob_base_fee,
-            TX_META_TX_1_OP_MAINNET_BLOCK_124665056.l1_block_info.l1_blob_base_fee,
+            TX_META_TX_1_OP_MAINNET_BLOCK_124665056
+                .l1_block_info
+                .l1_blob_base_fee,
             "incorrect l1 blob base fee"
         );
         assert_eq!(
             l1_blob_base_fee_scalar,
-            TX_META_TX_1_OP_MAINNET_BLOCK_124665056.l1_block_info.l1_blob_base_fee_scalar,
+            TX_META_TX_1_OP_MAINNET_BLOCK_124665056
+                .l1_block_info
+                .l1_blob_base_fee_scalar,
             "incorrect l1 blob base fee scalar"
         );
         assert_eq!(
             operator_fee_scalar,
-            TX_META_TX_1_OP_MAINNET_BLOCK_124665056.l1_block_info.operator_fee_scalar,
+            TX_META_TX_1_OP_MAINNET_BLOCK_124665056
+                .l1_block_info
+                .operator_fee_scalar,
             "incorrect operator fee scalar"
         );
         assert_eq!(
             operator_fee_constant,
-            TX_META_TX_1_OP_MAINNET_BLOCK_124665056.l1_block_info.operator_fee_constant,
+            TX_META_TX_1_OP_MAINNET_BLOCK_124665056
+                .l1_block_info
+                .operator_fee_constant,
             "incorrect operator fee constant"
         );
     }
@@ -413,11 +461,22 @@ mod test {
             .expect("should parse revm l1 info")
             .build();
 
-        let L1BlockInfo { operator_fee_scalar, operator_fee_constant, .. } =
-            receipt_meta.l1_block_info;
+        let L1BlockInfo {
+            operator_fee_scalar,
+            operator_fee_constant,
+            ..
+        } = receipt_meta.l1_block_info;
 
-        assert_eq!(operator_fee_scalar, Some(0), "incorrect operator fee scalar");
-        assert_eq!(operator_fee_constant, Some(2), "incorrect operator fee constant");
+        assert_eq!(
+            operator_fee_scalar,
+            Some(0),
+            "incorrect operator fee scalar"
+        );
+        assert_eq!(
+            operator_fee_constant,
+            Some(2),
+            "incorrect operator fee constant"
+        );
     }
 
     #[test]
@@ -436,11 +495,17 @@ mod test {
             .expect("should parse revm l1 info")
             .build();
 
-        let L1BlockInfo { operator_fee_scalar, operator_fee_constant, .. } =
-            receipt_meta.l1_block_info;
+        let L1BlockInfo {
+            operator_fee_scalar,
+            operator_fee_constant,
+            ..
+        } = receipt_meta.l1_block_info;
 
         assert_eq!(operator_fee_scalar, None, "incorrect operator fee scalar");
-        assert_eq!(operator_fee_constant, None, "incorrect operator fee constant");
+        assert_eq!(
+            operator_fee_constant, None,
+            "incorrect operator fee constant"
+        );
     }
 
     // <https://github.com/paradigmxyz/reth/issues/12177>
@@ -451,7 +516,10 @@ mod test {
         let tx_0 = OpTransactionSigned::decode_2718(&mut &system[..]).unwrap();
 
         let block: alloy_consensus::Block<OpTransactionSigned> = Block {
-            body: BlockBody { transactions: vec![tx_0], ..Default::default() },
+            body: BlockBody {
+                transactions: vec![tx_0],
+                ..Default::default()
+            },
             ..Default::default()
         };
         let mut l1_block_info =
@@ -478,14 +546,33 @@ mod test {
             operator_fee_constant,
         } = receipt_meta.l1_block_info;
 
-        assert_eq!(l1_gas_price, Some(14121491676), "incorrect l1 base fee (former gas price)");
+        assert_eq!(
+            l1_gas_price,
+            Some(14121491676),
+            "incorrect l1 base fee (former gas price)"
+        );
         assert_eq!(l1_gas_used, Some(1600), "incorrect l1 gas used");
         assert_eq!(l1_fee, Some(191150293412), "incorrect l1 fee");
         assert!(l1_fee_scalar.is_none(), "incorrect l1 fee scalar");
-        assert_eq!(l1_base_fee_scalar, Some(2269), "incorrect l1 base fee scalar");
-        assert_eq!(l1_blob_base_fee, Some(1324954204), "incorrect l1 blob base fee");
-        assert_eq!(l1_blob_base_fee_scalar, Some(1055762), "incorrect l1 blob base fee scalar");
+        assert_eq!(
+            l1_base_fee_scalar,
+            Some(2269),
+            "incorrect l1 base fee scalar"
+        );
+        assert_eq!(
+            l1_blob_base_fee,
+            Some(1324954204),
+            "incorrect l1 blob base fee"
+        );
+        assert_eq!(
+            l1_blob_base_fee_scalar,
+            Some(1055762),
+            "incorrect l1 blob base fee scalar"
+        );
         assert_eq!(operator_fee_scalar, None, "incorrect operator fee scalar");
-        assert_eq!(operator_fee_constant, None, "incorrect operator fee constant");
+        assert_eq!(
+            operator_fee_constant, None,
+            "incorrect operator fee constant"
+        );
     }
 }

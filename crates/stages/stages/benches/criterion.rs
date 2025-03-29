@@ -76,7 +76,9 @@ fn senders(c: &mut Criterion, runtime: &Runtime) {
 
     let db = setup::txs_testdata(DEFAULT_NUM_BLOCKS);
 
-    let stage = SenderRecoveryStage { commit_threshold: DEFAULT_NUM_BLOCKS };
+    let stage = SenderRecoveryStage {
+        commit_threshold: DEFAULT_NUM_BLOCKS,
+    };
 
     measure_stage(
         runtime,
@@ -94,7 +96,9 @@ fn transaction_lookup(c: &mut Criterion, runtime: &Runtime) {
     // don't need to run each stage for that many times
     group.sample_size(10);
     let stage = TransactionLookupStage::new(
-        TransactionLookupConfig { chunk_size: DEFAULT_NUM_BLOCKS },
+        TransactionLookupConfig {
+            chunk_size: DEFAULT_NUM_BLOCKS,
+        },
         EtlConfig::default(),
         None,
     );
@@ -119,7 +123,9 @@ fn merkle(c: &mut Criterion, runtime: &Runtime) {
 
     let db = setup::txs_testdata(DEFAULT_NUM_BLOCKS);
 
-    let stage = MerkleStage::Both { clean_threshold: u64::MAX };
+    let stage = MerkleStage::Both {
+        clean_threshold: u64::MAX,
+    };
     measure_stage(
         runtime,
         &mut group,

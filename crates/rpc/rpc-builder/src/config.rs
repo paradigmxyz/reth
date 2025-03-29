@@ -135,8 +135,10 @@ impl RethRpcServerConfig for RpcServerArgs {
     }
 
     fn transport_rpc_module_config(&self) -> TransportRpcModuleConfig {
-        let mut config = TransportRpcModuleConfig::default()
-            .with_config(RpcModuleConfig::new(self.eth_config(), self.flashbots_config()));
+        let mut config = TransportRpcModuleConfig::default().with_config(RpcModuleConfig::new(
+            self.eth_config(),
+            self.flashbots_config(),
+        ));
 
         if self.http {
             config = config.with_http(
@@ -198,12 +200,15 @@ impl RethRpcServerConfig for RpcServerArgs {
 
         if self.ws {
             let socket_address = SocketAddr::new(self.ws_addr, self.ws_port);
-            config = config.with_ws_address(socket_address).with_ws(self.http_ws_server_builder());
+            config = config
+                .with_ws_address(socket_address)
+                .with_ws(self.http_ws_server_builder());
         }
 
         if self.is_ipc_enabled() {
-            config =
-                config.with_ipc(self.ipc_server_builder()).with_ipc_endpoint(self.ipcpath.clone());
+            config = config
+                .with_ipc(self.ipc_server_builder())
+                .with_ipc_endpoint(self.ipcpath.clone());
         }
 
         config
@@ -279,8 +284,15 @@ mod tests {
         ])
         .args;
         let config = args.transport_rpc_module_config();
-        let expected = [RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
-        assert_eq!(config.http().cloned().unwrap().into_selection(), expected.into());
+        let expected = [
+            RethRpcModule::Eth,
+            RethRpcModule::Admin,
+            RethRpcModule::Debug,
+        ];
+        assert_eq!(
+            config.http().cloned().unwrap().into_selection(),
+            expected.into()
+        );
         assert_eq!(
             config.ws().cloned().unwrap().into_selection(),
             RpcModuleSelection::standard_modules()
@@ -298,8 +310,15 @@ mod tests {
         ])
         .args;
         let config = args.transport_rpc_module_config();
-        let expected = [RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
-        assert_eq!(config.http().cloned().unwrap().into_selection(), expected.into());
+        let expected = [
+            RethRpcModule::Eth,
+            RethRpcModule::Admin,
+            RethRpcModule::Debug,
+        ];
+        assert_eq!(
+            config.http().cloned().unwrap().into_selection(),
+            expected.into()
+        );
         assert_eq!(
             config.ws().cloned().unwrap().into_selection(),
             RpcModuleSelection::standard_modules()
@@ -317,8 +336,15 @@ mod tests {
         ])
         .args;
         let config = args.transport_rpc_module_config();
-        let expected = [RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
-        assert_eq!(config.http().cloned().unwrap().into_selection(), expected.into());
+        let expected = [
+            RethRpcModule::Eth,
+            RethRpcModule::Admin,
+            RethRpcModule::Debug,
+        ];
+        assert_eq!(
+            config.http().cloned().unwrap().into_selection(),
+            expected.into()
+        );
         assert_eq!(
             config.ws().cloned().unwrap().into_selection(),
             RpcModuleSelection::standard_modules()
@@ -351,7 +377,10 @@ mod tests {
             config.ws_address().unwrap(),
             SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8888))
         );
-        assert_eq!(config.ipc_endpoint().unwrap(), constants::DEFAULT_IPC_ENDPOINT);
+        assert_eq!(
+            config.ipc_endpoint().unwrap(),
+            constants::DEFAULT_IPC_ENDPOINT
+        );
     }
 
     #[test]

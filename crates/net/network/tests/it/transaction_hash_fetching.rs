@@ -14,7 +14,10 @@ use tokio::time::Duration;
 async fn transaction_hash_fetching() {
     init_test_tracing();
 
-    let mut config = TransactionsManagerConfig { propagation_mode: Max(0), ..Default::default() };
+    let mut config = TransactionsManagerConfig {
+        propagation_mode: Max(0),
+        ..Default::default()
+    };
     config.transaction_fetcher_config.max_inflight_requests = 1;
 
     let provider = MockEthProvider::default();
@@ -29,8 +32,10 @@ async fn transaction_hash_fetching() {
     handle.connect_peers().await;
 
     let listening_peer = &handle.peers()[num_peers - 1];
-    let mut listening_peer_tx_listener =
-        listening_peer.pool().unwrap().pending_transactions_listener();
+    let mut listening_peer_tx_listener = listening_peer
+        .pool()
+        .unwrap()
+        .pending_transactions_listener();
 
     let num_tx_per_peer = 10;
 

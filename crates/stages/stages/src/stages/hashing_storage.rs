@@ -75,7 +75,7 @@ where
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         let tx = provider.tx_ref();
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()))
+            return Ok(ExecOutput::done(input.checkpoint()));
         }
 
         let (from_block, to_block) = input.next_block_range().into_inner();
@@ -157,7 +157,10 @@ where
                 ..Default::default()
             });
 
-        Ok(ExecOutput { checkpoint, done: true })
+        Ok(ExecOutput {
+            checkpoint,
+            done: true,
+        })
     }
 
     /// Unwind the stage.
@@ -171,8 +174,10 @@ where
 
         provider.unwind_storage_hashing_range(BlockNumberAddress::range(range))?;
 
-        let mut stage_checkpoint =
-            input.checkpoint.storage_hashing_stage_checkpoint().unwrap_or_default();
+        let mut stage_checkpoint = input
+            .checkpoint
+            .storage_hashing_stage_checkpoint()
+            .unwrap_or_default();
 
         stage_checkpoint.progress = stage_checkpoint_progress(provider)?;
 
@@ -248,7 +253,9 @@ mod tests {
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
 
-        runner.seed_execution(input).expect("failed to seed execution");
+        runner
+            .seed_execution(input)
+            .expect("failed to seed execution");
 
         loop {
             if let Ok(result @ ExecOutput { checkpoint, done }) =
@@ -270,7 +277,7 @@ mod tests {
 
                     // Continue from checkpoint
                     input.checkpoint = Some(checkpoint);
-                    continue
+                    continue;
                 }
                 assert_eq!(checkpoint.block_number, previous_stage);
                 assert_matches!(checkpoint.storage_hashing_stage_checkpoint(), Some(StorageHashingCheckpoint {
@@ -288,7 +295,7 @@ mod tests {
                     "execution validation"
                 );
 
-                break
+                break;
             }
             panic!("Failed execution");
         }
@@ -342,10 +349,15 @@ mod tests {
             let blocks = random_block_range(
                 &mut rng,
                 stage_progress..=end,
-                BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..3, ..Default::default() },
+                BlockRangeParams {
+                    parent: Some(B256::ZERO),
+                    tx_count: 0..3,
+                    ..Default::default()
+                },
             );
 
-            self.db.insert_headers(blocks.iter().map(|block| block.sealed_header()))?;
+            self.db
+                .insert_headers(blocks.iter().map(|block| block.sealed_header()))?;
 
             let iter = blocks.iter();
             let mut next_tx_num = 0;
@@ -362,8 +374,9 @@ mod tests {
                             )?;
                             tx.put::<tables::Transactions>(next_tx_num, transaction.clone())?;
 
-                            let (addr, _) =
-                                accounts.get_mut(rng.gen::<usize>() % n_accounts as usize).unwrap();
+                            let (addr, _) = accounts
+                                .get_mut(rng.gen::<usize>() % n_accounts as usize)
+                                .unwrap();
 
                             for _ in 0..2 {
                                 let new_entry = StorageEntry {
@@ -421,7 +434,7 @@ mod tests {
                 let start_block = input.checkpoint().block_number + 1;
                 let end_block = output.checkpoint.block_number;
                 if start_block > end_block {
-                    return Ok(())
+                    return Ok(());
                 }
             }
             self.check_hashed_storage()
@@ -464,7 +477,10 @@ mod tests {
                         );
                         expected += 1;
                     }
-                    let count = tx.cursor_dup_read::<tables::HashedStorages>()?.walk(None)?.count();
+                    let count = tx
+                        .cursor_dup_read::<tables::HashedStorages>()?
+                        .walk(None)?
+                        .count();
 
                     assert_eq!(count, expected);
                     Ok(())
@@ -487,13 +503,19 @@ mod tests {
                             .expect("failed to delete entry");
                         e
                     }
-                    _ => StorageEntry { key: entry.key, value: U256::from(0) },
+                    _ => StorageEntry {
+                        key: entry.key,
+                        value: U256::from(0),
+                    },
                 };
             tx.put::<tables::PlainStorageState>(bn_address.address(), entry)?;
 
             if hash {
                 let hashed_address = keccak256(bn_address.address());
-                let hashed_entry = StorageEntry { key: keccak256(entry.key), value: entry.value };
+                let hashed_entry = StorageEntry {
+                    key: keccak256(entry.key),
+                    value: entry.value,
+                };
 
                 if let Some(e) = tx
                     .cursor_dup_write::<tables::HashedStorages>()?
@@ -522,7 +544,7 @@ mod tests {
 
                 while let Some((bn_address, entry)) = rev_changeset_walker.next().transpose()? {
                     if bn_address.block_number() < target_block {
-                        break
+                        break;
                     }
 
                     if storage_cursor

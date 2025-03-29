@@ -51,13 +51,18 @@ where
         // for the other receipts it's as if they had a `PruneMode::Distance()` of
         // `MINIMUM_PRUNING_DISTANCE`.
         let to_block = PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)
-            .prune_target_block(input.to_block, PruneSegment::ContractLogs, PrunePurpose::User)?
+            .prune_target_block(
+                input.to_block,
+                PruneSegment::ContractLogs,
+                PrunePurpose::User,
+            )?
             .map(|(bn, _)| bn)
             .unwrap_or_default();
 
         // Get status checkpoint from latest run
-        let mut last_pruned_block =
-            input.previous_checkpoint.and_then(|checkpoint| checkpoint.block_number);
+        let mut last_pruned_block = input
+            .previous_checkpoint
+            .and_then(|checkpoint| checkpoint.block_number);
 
         let initial_last_pruned_block = last_pruned_block;
 
@@ -71,7 +76,9 @@ where
 
         // Figure out what receipts have already been pruned, so we can have an accurate
         // `address_filter`
-        let address_filter = self.config.group_by_block(input.to_block, last_pruned_block)?;
+        let address_filter = self
+            .config
+            .group_by_block(input.to_block, last_pruned_block)?;
 
         // Splits all transactions in different block ranges. Each block range will have its own
         // filter address list and will check it while going through the table
@@ -109,8 +116,10 @@ where
                 }
             }
 
-            let end_block =
-                blocks_iter.peek().map(|(next_block, _)| *next_block - 1).unwrap_or(to_block);
+            let end_block = blocks_iter
+                .peek()
+                .map(|(next_block, _)| *next_block - 1)
+                .unwrap_or(to_block);
 
             // Addresses in lower block ranges, are still included in the inclusion list for future
             // ranges.
@@ -141,7 +150,7 @@ where
                         ?block_range,
                         "No receipts to prune."
                     );
-                    continue
+                    continue;
                 }
             };
             let tx_range = from_tx_number..=tx_range_end;
@@ -155,10 +164,11 @@ where
                 tx_range,
                 &mut limiter,
                 |(tx_num, receipt)| {
-                    let skip = num_addresses > 0 &&
-                        receipt.logs().iter().any(|log| {
-                            filtered_addresses[..num_addresses].contains(&&log.address)
-                        });
+                    let skip = num_addresses > 0
+                        && receipt
+                            .logs()
+                            .iter()
+                            .any(|log| filtered_addresses[..num_addresses].contains(&&log.address));
 
                     if skip {
                         last_skipped_transaction = *tx_num;
@@ -175,13 +185,18 @@ where
             // For accurate checkpoints we need to know that we have checked every transaction.
             // Example: we reached the end of the range, and the last receipt is supposed to skip
             // its deletion.
-            let last_pruned_transaction = *last_pruned_transaction
-                .insert(last_pruned_transaction.unwrap_or_default().max(last_skipped_transaction));
+            let last_pruned_transaction = *last_pruned_transaction.insert(
+                last_pruned_transaction
+                    .unwrap_or_default()
+                    .max(last_skipped_transaction),
+            );
 
             last_pruned_block = Some(
                 provider
                     .transaction_block(last_pruned_transaction)?
-                    .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?
+                    .ok_or(PrunerError::InconsistentData(
+                        "Block for transaction is not found",
+                    ))?
                     // If there's more receipts to prune, set the checkpoint block number to
                     // previous, so we could finish pruning its receipts on the
                     // next run.
@@ -190,7 +205,7 @@ where
 
             if limiter.is_limit_reached() {
                 done &= end_block == to_block;
-                break
+                break;
             }
 
             from_tx_number = last_pruned_transaction + 1;
@@ -221,7 +236,11 @@ where
 
         let progress = limiter.progress(done);
 
-        Ok(SegmentOutput { progress, pruned, checkpoint: None })
+        Ok(SegmentOutput {
+            progress,
+            pruned,
+            checkpoint: None,
+        })
     }
 }
 
@@ -252,21 +271,34 @@ mod tests {
             random_block_range(
                 &mut rng,
                 0..=100,
-                BlockRangeParams { parent: Some(B256::ZERO), tx_count: 1..5, ..Default::default() },
+                BlockRangeParams {
+                    parent: Some(B256::ZERO),
+                    tx_count: 1..5,
+                    ..Default::default()
+                },
             ),
             random_block_range(
                 &mut rng,
                 (100 + 1)..=(tip - 100),
-                BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
+                BlockRangeParams {
+                    parent: Some(B256::ZERO),
+                    tx_count: 0..1,
+                    ..Default::default()
+                },
             ),
             random_block_range(
                 &mut rng,
                 (tip - 100 + 1)..=tip,
-                BlockRangeParams { parent: Some(B256::ZERO), tx_count: 1..5, ..Default::default() },
+                BlockRangeParams {
+                    parent: Some(B256::ZERO),
+                    tx_count: 1..5,
+                    ..Default::default()
+                },
             ),
         ]
         .concat();
-        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None))
+            .expect("insert blocks");
 
         let mut receipts = Vec::new();
 
@@ -287,7 +319,10 @@ mod tests {
 
         assert_eq!(
             db.table::<tables::Transactions>().unwrap().len(),
-            blocks.iter().map(|block| block.transaction_count()).sum::<usize>()
+            blocks
+                .iter()
+                .map(|block| block.transaction_count())
+                .sum::<usize>()
         );
         assert_eq!(
             db.table::<tables::Transactions>().unwrap().len(),
@@ -328,7 +363,12 @@ mod tests {
                 .unwrap()
                 .get_prune_checkpoint(PruneSegment::ContractLogs)
                 .unwrap()
-                .map(|checkpoint| (checkpoint.block_number.unwrap(), checkpoint.tx_number.unwrap()))
+                .map(|checkpoint| {
+                    (
+                        checkpoint.block_number.unwrap(),
+                        checkpoint.tx_number.unwrap(),
+                    )
+                })
                 .unwrap_or_default();
 
             // All receipts are in the end of the block
@@ -336,8 +376,11 @@ mod tests {
 
             assert_eq!(
                 db.table::<tables::Receipts>().unwrap().len(),
-                blocks.iter().map(|block| block.transaction_count()).sum::<usize>() -
-                    ((pruned_tx + 1) - unprunable) as usize
+                blocks
+                    .iter()
+                    .map(|block| block.transaction_count())
+                    .sum::<usize>()
+                    - ((pruned_tx + 1) - unprunable) as usize
             );
 
             output.progress.is_finished()
@@ -354,8 +397,11 @@ mod tests {
             // Either we only find our contract, or the receipt is part of the unprunable receipts
             // set by tip - 128
             assert!(
-                receipt.logs.iter().any(|l| l.address == deposit_contract_addr) ||
-                    provider.transaction_block(tx_num).unwrap().unwrap() > tip - 128,
+                receipt
+                    .logs
+                    .iter()
+                    .any(|l| l.address == deposit_contract_addr)
+                    || provider.transaction_block(tx_num).unwrap().unwrap() > tip - 128,
             );
         }
     }

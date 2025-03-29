@@ -119,7 +119,11 @@ impl<T: TransactionOrdering> PendingPool<T> {
         base_fee: u64,
         base_fee_per_blob_gas: u64,
     ) -> BestTransactionsWithFees<T> {
-        BestTransactionsWithFees { best: self.best(), base_fee, base_fee_per_blob_gas }
+        BestTransactionsWithFees {
+            best: self.best(),
+            base_fee,
+            base_fee_per_blob_gas,
+        }
     }
 
     /// Same as `best` but also includes the given unlocked transactions.
@@ -141,10 +145,17 @@ impl<T: TransactionOrdering> PendingPool<T> {
         let mut submission_id = self.submission_id;
         for tx in unlocked {
             submission_id += 1;
-            debug_assert!(!best.all.contains_key(tx.id()), "transaction already included");
+            debug_assert!(
+                !best.all.contains_key(tx.id()),
+                "transaction already included"
+            );
             let priority = self.ordering.priority(&tx.transaction, base_fee);
             let tx_id = *tx.id();
-            let transaction = PendingTransaction { submission_id, transaction: tx, priority };
+            let transaction = PendingTransaction {
+                submission_id,
+                transaction: tx,
+                priority,
+            };
             if best.ancestor(&tx_id).is_none() {
                 best.independent.insert(transaction.clone());
             }
@@ -188,7 +199,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 // Remove all dependent transactions.
                 'this: while let Some((next_id, next_tx)) = transactions_iter.peek() {
                     if next_id.sender != id.sender {
-                        break 'this
+                        break 'this;
                     }
                     removed.push(Arc::clone(&next_tx.transaction));
                     transactions_iter.next();
@@ -230,14 +241,16 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 // Remove all dependent transactions.
                 'this: while let Some((next_id, next_tx)) = transactions_iter.peek() {
                     if next_id.sender != id.sender {
-                        break 'this
+                        break 'this;
                     }
                     removed.push(Arc::clone(&next_tx.transaction));
                     transactions_iter.next();
                 }
             } else {
                 // Re-insert the transaction with new priority.
-                tx.priority = self.ordering.priority(&tx.transaction.transaction, base_fee);
+                tx.priority = self
+                    .ordering
+                    .priority(&tx.transaction.transaction, base_fee);
 
                 self.size_of += tx.transaction.size();
                 self.update_independents_and_highest_nonces(&tx);
@@ -261,7 +274,10 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 entry.insert(tx.clone());
             }
         }
-        match self.independent_transactions.entry(tx.transaction.sender_id()) {
+        match self
+            .independent_transactions
+            .entry(tx.transaction.sender_id())
+        {
             Entry::Occupied(mut entry) => {
                 if entry.get().transaction.nonce() > tx.transaction.nonce() {
                     *entry.get_mut() = tx.clone();
@@ -304,7 +320,11 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
         let submission_id = self.next_id();
         let priority = self.ordering.priority(&tx.transaction, base_fee);
-        let tx = PendingTransaction { submission_id, transaction: tx, priority };
+        let tx = PendingTransaction {
+            submission_id,
+            transaction: tx,
+            priority,
+        };
 
         self.update_independents_and_highest_nonces(&tx);
 
@@ -329,7 +349,8 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 self.independent_transactions.remove(&id.sender);
                 // mark the next as independent if it exists
                 if let Some(unlocked) = self.get(&id.descendant()) {
-                    self.independent_transactions.insert(id.sender, unlocked.clone());
+                    self.independent_transactions
+                        .insert(id.sender, unlocked.clone());
                 }
             }
         }
@@ -418,8 +439,8 @@ impl<T: TransactionOrdering> PendingPool<T> {
             // loop through the highest nonces set, removing transactions until we reach the limit
             for tx in worst_transactions {
                 // return early if the pool is under limits
-                if !limit.is_exceeded(original_length - total_removed, original_size - total_size) ||
-                    non_local_senders == 0
+                if !limit.is_exceeded(original_length - total_removed, original_size - total_size)
+                    || non_local_senders == 0
                 {
                     // need to remove remaining transactions before exiting
                     for id in &removed {
@@ -428,7 +449,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                         }
                     }
 
-                    return
+                    return;
                 }
 
                 if !remove_locals && tx.transaction.is_local() {
@@ -436,7 +457,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                     if local_senders.insert(sender_id) {
                         non_local_senders -= 1;
                     }
-                    continue
+                    continue;
                 }
 
                 total_size += tx.transaction.size();
@@ -454,7 +475,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             // return if either the pool is under limits or there are no more _eligible_
             // transactions to remove
             if !self.exceeds(limit) || non_local_senders == 0 {
-                return
+                return;
             }
         }
     }
@@ -476,13 +497,13 @@ impl<T: TransactionOrdering> PendingPool<T> {
         let mut removed = Vec::new();
         // return early if the pool is already under the limits
         if !self.exceeds(&limit) {
-            return removed
+            return removed;
         }
 
         // first truncate only non-local transactions, returning if the pool end up under the limit
         self.remove_to_limit(&limit, false, &mut removed);
         if !self.exceeds(&limit) {
-            return removed
+            return removed;
         }
 
         // now repeat for local transactions, since local transactions must be removed now for the
@@ -693,12 +714,18 @@ mod tests {
 
         // First transaction should be evicted.
         assert_eq!(
-            pool.highest_nonces.values().min().map(|tx| *tx.transaction.hash()),
+            pool.highest_nonces
+                .values()
+                .min()
+                .map(|tx| *tx.transaction.hash()),
             Some(*t.hash())
         );
 
         // truncate pool with max size = 1, ensure it's the same transaction
-        let removed = pool.truncate_pool(SubPoolLimit { max_txs: 1, max_size: usize::MAX });
+        let removed = pool.truncate_pool(SubPoolLimit {
+            max_txs: 1,
+            max_size: usize::MAX,
+        });
         assert_eq!(removed.len(), 1);
         assert_eq!(removed[0].hash(), t.hash());
     }
@@ -795,8 +822,13 @@ mod tests {
         .collect::<HashSet<_>>();
 
         // Consolidate all transactions into a single vector.
-        let all_txs =
-            [a_txs.into_vec(), b_txs.into_vec(), c_txs.into_vec(), d_txs.into_vec()].concat();
+        let all_txs = [
+            a_txs.into_vec(),
+            b_txs.into_vec(),
+            c_txs.into_vec(),
+            d_txs.into_vec(),
+        ]
+        .concat();
 
         // Add all the transactions to the pool.
         for tx in all_txs {
@@ -815,7 +847,10 @@ mod tests {
         // * a1, a2
         // * b1
         // * c1
-        let pool_limit = SubPoolLimit { max_txs: 4, max_size: usize::MAX };
+        let pool_limit = SubPoolLimit {
+            max_txs: 4,
+            max_size: usize::MAX,
+        };
 
         // Truncate the pool based on the defined limit.
         let removed = pool.truncate_pool(pool_limit);
@@ -823,8 +858,10 @@ mod tests {
         assert_eq!(removed.len(), expected_removed.len());
 
         // Get the set of removed transactions and compare with the expected set.
-        let removed =
-            removed.into_iter().map(|tx| (tx.sender(), tx.nonce())).collect::<HashSet<_>>();
+        let removed = removed
+            .into_iter()
+            .map(|tx| (tx.sender(), tx.nonce()))
+            .collect::<HashSet<_>>();
         assert_eq!(removed, expected_removed);
 
         // Retrieve the current pending transactions after truncation.
@@ -832,8 +869,10 @@ mod tests {
         assert_eq!(pending.len(), expected_pending.len());
 
         // Get the set of pending transactions and compare with the expected set.
-        let pending =
-            pending.into_iter().map(|tx| (tx.sender(), tx.nonce())).collect::<HashSet<_>>();
+        let pending = pending
+            .into_iter()
+            .map(|tx| (tx.sender(), tx.nonce()))
+            .collect::<HashSet<_>>();
         assert_eq!(pending, expected_pending);
     }
 
@@ -848,8 +887,10 @@ mod tests {
         let first_txs: Vec<_> = (0..num_senders) //
             .map(|_| MockTransaction::eip1559())
             .collect();
-        let second_txs: Vec<_> =
-            first_txs.iter().map(|tx| tx.clone().rng_hash().inc_nonce()).collect();
+        let second_txs: Vec<_> = first_txs
+            .iter()
+            .map(|tx| tx.clone().rng_hash().inc_nonce())
+            .collect();
 
         for tx in first_txs {
             let valid_tx = f.validated(tx);
@@ -890,7 +931,10 @@ mod tests {
         assert_eq!(pool.size(), 0);
 
         // Verify that attempting to truncate an empty pool does not panic and returns an empty vec
-        let removed = pool.truncate_pool(SubPoolLimit { max_txs: 10, max_size: 1000 });
+        let removed = pool.truncate_pool(SubPoolLimit {
+            max_txs: 10,
+            max_size: 1000,
+        });
         assert!(removed.is_empty());
 
         // Verify that retrieving transactions from an empty pool yields nothing
@@ -1017,7 +1061,10 @@ mod tests {
         // Sanity check, ensuring everything is consistent.
         pool.assert_invariants();
 
-        let pool_limit = SubPoolLimit { max_txs: 10, max_size: usize::MAX };
+        let pool_limit = SubPoolLimit {
+            max_txs: 10,
+            max_size: usize::MAX,
+        };
         pool.truncate_pool(pool_limit);
     }
 }

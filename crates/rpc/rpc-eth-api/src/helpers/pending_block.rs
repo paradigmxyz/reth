@@ -78,8 +78,10 @@ pub trait LoadPendingBlock:
         >,
         Self::Error,
     > {
-        if let Some(block) =
-            self.provider().pending_block_with_senders().map_err(Self::Error::from_eth_err)?
+        if let Some(block) = self
+            .provider()
+            .pending_block_with_senders()
+            .map_err(Self::Error::from_eth_err)?
         {
             if let Some(receipts) = self
                 .provider()
@@ -112,7 +114,10 @@ pub trait LoadPendingBlock:
             .map_err(RethError::other)
             .map_err(Self::Error::from_eth_err)?;
 
-        Ok(PendingBlockEnv::new(evm_env, PendingBlockEnvOrigin::DerivedFromLatest(latest)))
+        Ok(PendingBlockEnv::new(
+            evm_env,
+            PendingBlockEnvOrigin::DerivedFromLatest(latest),
+        ))
     }
 
     /// Returns [`ConfigureEvm::NextBlockEnvCtx`] for building a local pending block.
@@ -154,11 +159,14 @@ pub trait LoadPendingBlock:
             // check if the block is still good
             if let Some(pending_block) = lock.as_ref() {
                 // this is guaranteed to be the `latest` header
-                if pending.evm_env.block_env.number == pending_block.block.number() &&
-                    parent.hash() == pending_block.block.parent_hash() &&
-                    now <= pending_block.expires_at
+                if pending.evm_env.block_env.number == pending_block.block.number()
+                    && parent.hash() == pending_block.block.parent_hash()
+                    && now <= pending_block.expires_at
                 {
-                    return Ok(Some((pending_block.block.clone(), pending_block.receipts.clone())));
+                    return Ok(Some((
+                        pending_block.block.clone(),
+                        pending_block.receipts.clone(),
+                    )));
                 }
             }
 
@@ -173,7 +181,7 @@ pub trait LoadPendingBlock:
                 Ok(block) => block,
                 Err(err) => {
                     debug!(target: "rpc", "Failed to build pending block: {:?}", err);
-                    return Ok(None)
+                    return Ok(None);
                 }
             };
 
@@ -199,7 +207,10 @@ pub trait LoadPendingBlock:
         &self,
         parent: &SealedHeader<ProviderHeader<Self::Provider>>,
     ) -> Result<
-        (RecoveredBlock<ProviderBlock<Self::Provider>>, Vec<ProviderReceipt<Self::Provider>>),
+        (
+            RecoveredBlock<ProviderBlock<Self::Provider>>,
+            Vec<ProviderReceipt<Self::Provider>>,
+        ),
         Self::Error,
     >
     where
@@ -210,7 +221,10 @@ pub trait LoadPendingBlock:
             .history_by_block_hash(parent.hash())
             .map_err(Self::Error::from_eth_err)?;
         let state = StateProviderDatabase::new(&state_provider);
-        let mut db = State::builder().with_database(state).with_bundle_update().build();
+        let mut db = State::builder()
+            .with_database(state)
+            .with_bundle_update()
+            .build();
 
         let mut builder = self
             .evm_config()
@@ -218,7 +232,9 @@ pub trait LoadPendingBlock:
             .map_err(RethError::other)
             .map_err(Self::Error::from_eth_err)?;
 
-        builder.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
+        builder
+            .apply_pre_execution_changes()
+            .map_err(Self::Error::from_eth_err)?;
 
         let block_env = builder.evm_mut().block().clone();
 
@@ -227,10 +243,11 @@ pub trait LoadPendingBlock:
         let block_gas_limit: u64 = block_env.gas_limit;
 
         let mut best_txs =
-            self.pool().best_transactions_with_attributes(BestTransactionsAttributes::new(
-                block_env.basefee,
-                block_env.blob_gasprice().map(|gasprice| gasprice as u64),
-            ));
+            self.pool()
+                .best_transactions_with_attributes(BestTransactionsAttributes::new(
+                    block_env.basefee,
+                    block_env.blob_gasprice().map(|gasprice| gasprice as u64),
+                ));
 
         while let Some(pool_tx) = best_txs.next() {
             // ensure we still have capacity for this transaction
@@ -245,7 +262,7 @@ pub trait LoadPendingBlock:
                         block_gas_limit,
                     ),
                 );
-                continue
+                continue;
             }
 
             if pool_tx.origin.is_private() {
@@ -258,7 +275,7 @@ pub trait LoadPendingBlock:
                         InvalidTransactionError::TxTypeNotSupported,
                     ),
                 );
-                continue
+                continue;
             }
 
             // convert tx to a signed transaction
@@ -279,7 +296,7 @@ pub trait LoadPendingBlock:
                             MAX_DATA_GAS_PER_BLOCK,
                         ),
                     );
-                    continue
+                    continue;
                 }
             }
 
@@ -301,7 +318,7 @@ pub trait LoadPendingBlock:
                             ),
                         );
                     }
-                    continue
+                    continue;
                 }
                 // this is an error that we should treat as fatal for this attempt
                 Err(err) => return Err(Self::Error::from_eth_err(err)),
@@ -321,8 +338,13 @@ pub trait LoadPendingBlock:
             cumulative_gas_used += gas_used;
         }
 
-        let BlockBuilderOutcome { execution_result, block, .. } =
-            builder.finish(&state_provider).map_err(Self::Error::from_eth_err)?;
+        let BlockBuilderOutcome {
+            execution_result,
+            block,
+            ..
+        } = builder
+            .finish(&state_provider)
+            .map_err(Self::Error::from_eth_err)?;
 
         Ok((block, execution_result.receipts))
     }

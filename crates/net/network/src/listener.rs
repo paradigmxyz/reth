@@ -31,7 +31,10 @@ impl ConnectionListener {
 
     /// Creates a new connection listener stream.
     pub(crate) const fn new(listener: TcpListener, local_address: SocketAddr) -> Self {
-        Self { local_address, incoming: TcpListenerStream { inner: listener } }
+        Self {
+            local_address,
+            incoming: TcpListenerStream { inner: listener },
+        }
     }
 
     /// Polls the type to make progress.
@@ -42,12 +45,15 @@ impl ConnectionListener {
                 if let Err(err) = stream.set_nodelay(true) {
                     tracing::warn!(target: "net", "set nodelay failed: {:?}", err);
                 }
-                Poll::Ready(ListenerEvent::Incoming { stream, remote_addr })
+                Poll::Ready(ListenerEvent::Incoming {
+                    stream,
+                    remote_addr,
+                })
             }
             Some(Err(err)) => Poll::Ready(ListenerEvent::Error(err)),
-            None => {
-                Poll::Ready(ListenerEvent::ListenerClosed { local_address: this.local_address })
-            }
+            None => Poll::Ready(ListenerEvent::ListenerClosed {
+                local_address: this.local_address,
+            }),
         }
     }
 

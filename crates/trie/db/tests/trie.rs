@@ -33,7 +33,8 @@ fn insert_account(
     storage: &BTreeMap<B256, U256>,
 ) {
     let hashed_address = keccak256(address);
-    tx.put::<tables::HashedAccounts>(hashed_address, account).unwrap();
+    tx.put::<tables::HashedAccounts>(hashed_address, account)
+        .unwrap();
     insert_storage(tx, hashed_address, storage);
 }
 
@@ -41,7 +42,10 @@ fn insert_storage(tx: &impl DbTxMut, hashed_address: B256, storage: &BTreeMap<B2
     for (k, v) in storage {
         tx.put::<tables::HashedStorages>(
             hashed_address,
-            StorageEntry { key: keccak256(k), value: *v },
+            StorageEntry {
+                key: keccak256(k),
+                value: *v,
+            },
         )
         .unwrap();
     }
@@ -52,26 +56,41 @@ fn incremental_vs_full_root(inputs: &[&str], modified: &str) {
     let tx = factory.provider_rw().unwrap();
     let hashed_address = B256::with_last_byte(1);
 
-    let mut hashed_storage_cursor =
-        tx.tx_ref().cursor_dup_write::<tables::HashedStorages>().unwrap();
+    let mut hashed_storage_cursor = tx
+        .tx_ref()
+        .cursor_dup_write::<tables::HashedStorages>()
+        .unwrap();
     let data = inputs.iter().map(|x| B256::from_str(x).unwrap());
     let value = U256::from(0);
     for key in data {
-        hashed_storage_cursor.upsert(hashed_address, &StorageEntry { key, value }).unwrap();
+        hashed_storage_cursor
+            .upsert(hashed_address, &StorageEntry { key, value })
+            .unwrap();
     }
 
     // Generate the intermediate nodes on the receiving end of the channel
-    let (_, _, trie_updates) =
-        StorageRoot::from_tx_hashed(tx.tx_ref(), hashed_address).root_with_updates().unwrap();
+    let (_, _, trie_updates) = StorageRoot::from_tx_hashed(tx.tx_ref(), hashed_address)
+        .root_with_updates()
+        .unwrap();
 
     // 1. Some state transition happens, update the hashed storage to the new value
     let modified_key = B256::from_str(modified).unwrap();
     let value = U256::from(1);
-    if hashed_storage_cursor.seek_by_key_subkey(hashed_address, modified_key).unwrap().is_some() {
+    if hashed_storage_cursor
+        .seek_by_key_subkey(hashed_address, modified_key)
+        .unwrap()
+        .is_some()
+    {
         hashed_storage_cursor.delete_current().unwrap();
     }
     hashed_storage_cursor
-        .upsert(hashed_address, &StorageEntry { key: modified_key, value })
+        .upsert(
+            hashed_address,
+            &StorageEntry {
+                key: modified_key,
+                value,
+            },
+        )
         .unwrap();
 
     // 2. Calculate full merkle root
@@ -79,7 +98,8 @@ fn incremental_vs_full_root(inputs: &[&str], modified: &str) {
     let modified_root = loader.root().unwrap();
 
     // Update the intermediate roots table so that we can run the incremental verification
-    tx.write_individual_storage_trie_updates(hashed_address, &trie_updates).unwrap();
+    tx.write_individual_storage_trie_updates(hashed_address, &trie_updates)
+        .unwrap();
 
     // 3. Calculate the incremental root
     let mut storage_changes = PrefixSetMut::default();
@@ -137,14 +157,22 @@ fn test_empty_account() {
         (
             Address::random(),
             (
-                Account { nonce: 0, balance: U256::from(0), bytecode_hash: None },
+                Account {
+                    nonce: 0,
+                    balance: U256::from(0),
+                    bytecode_hash: None,
+                },
                 BTreeMap::from([(B256::with_last_byte(0x4), U256::from(12))]),
             ),
         ),
         (
             Address::random(),
             (
-                Account { nonce: 0, balance: U256::from(0), bytecode_hash: None },
+                Account {
+                    nonce: 0,
+                    balance: U256::from(0),
+                    bytecode_hash: None,
+                },
                 BTreeMap::default(),
             ),
         ),
@@ -194,8 +222,10 @@ fn test_storage_root() {
     let tx = factory.provider_rw().unwrap();
 
     let address = Address::random();
-    let storage =
-        BTreeMap::from([(B256::ZERO, U256::from(3)), (B256::with_last_byte(2), U256::from(1))]);
+    let storage = BTreeMap::from([
+        (B256::ZERO, U256::from(3)),
+        (B256::with_last_byte(2), U256::from(1)),
+    ]);
 
     let code = "el buen fla";
     let account = Account {
@@ -302,18 +332,40 @@ fn storage_root_regression() {
 
     let storage = BTreeMap::from(
         [
-            ("1200000000000000000000000000000000000000000000000000000000000000", 0x42),
-            ("1400000000000000000000000000000000000000000000000000000000000000", 0x01),
-            ("3000000000000000000000000000000000000000000000000000000000E00000", 0x127a89),
-            ("3000000000000000000000000000000000000000000000000000000000E00001", 0x05),
+            (
+                "1200000000000000000000000000000000000000000000000000000000000000",
+                0x42,
+            ),
+            (
+                "1400000000000000000000000000000000000000000000000000000000000000",
+                0x01,
+            ),
+            (
+                "3000000000000000000000000000000000000000000000000000000000E00000",
+                0x127a89,
+            ),
+            (
+                "3000000000000000000000000000000000000000000000000000000000E00001",
+                0x05,
+            ),
         ]
         .map(|(slot, val)| (B256::from_str(slot).unwrap(), U256::from(val))),
     );
 
-    let mut hashed_storage_cursor =
-        tx.tx_ref().cursor_dup_write::<tables::HashedStorages>().unwrap();
+    let mut hashed_storage_cursor = tx
+        .tx_ref()
+        .cursor_dup_write::<tables::HashedStorages>()
+        .unwrap();
     for (hashed_slot, value) in storage.clone() {
-        hashed_storage_cursor.upsert(key3, &StorageEntry { key: hashed_slot, value }).unwrap();
+        hashed_storage_cursor
+            .upsert(
+                key3,
+                &StorageEntry {
+                    key: hashed_slot,
+                    value,
+                },
+            )
+            .unwrap();
     }
     tx.commit().unwrap();
     let tx = factory.provider_rw().unwrap();
@@ -328,10 +380,22 @@ fn account_and_storage_trie() {
     let ether = U256::from(1e18);
     let storage = BTreeMap::from(
         [
-            ("1200000000000000000000000000000000000000000000000000000000000000", 0x42),
-            ("1400000000000000000000000000000000000000000000000000000000000000", 0x01),
-            ("3000000000000000000000000000000000000000000000000000000000E00000", 0x127a89),
-            ("3000000000000000000000000000000000000000000000000000000000E00001", 0x05),
+            (
+                "1200000000000000000000000000000000000000000000000000000000000000",
+                0x42,
+            ),
+            (
+                "1400000000000000000000000000000000000000000000000000000000000000",
+                0x01,
+            ),
+            (
+                "3000000000000000000000000000000000000000000000000000000000E00000",
+                0x127a89,
+            ),
+            (
+                "3000000000000000000000000000000000000000000000000000000000E00001",
+                0x05,
+            ),
         ]
         .map(|(slot, val)| (B256::from_str(slot).unwrap(), U256::from(val))),
     );
@@ -339,16 +403,25 @@ fn account_and_storage_trie() {
     let factory = create_test_provider_factory();
     let tx = factory.provider_rw().unwrap();
 
-    let mut hashed_account_cursor = tx.tx_ref().cursor_write::<tables::HashedAccounts>().unwrap();
-    let mut hashed_storage_cursor =
-        tx.tx_ref().cursor_dup_write::<tables::HashedStorages>().unwrap();
+    let mut hashed_account_cursor = tx
+        .tx_ref()
+        .cursor_write::<tables::HashedAccounts>()
+        .unwrap();
+    let mut hashed_storage_cursor = tx
+        .tx_ref()
+        .cursor_dup_write::<tables::HashedStorages>()
+        .unwrap();
 
     let mut hash_builder = HashBuilder::default();
 
     // Insert first account
     let key1 =
         B256::from_str("b000000000000000000000000000000000000000000000000000000000000000").unwrap();
-    let account1 = Account { nonce: 0, balance: U256::from(3).mul(ether), bytecode_hash: None };
+    let account1 = Account {
+        nonce: 0,
+        balance: U256::from(3).mul(ether),
+        bytecode_hash: None,
+    };
     hashed_account_cursor.upsert(key1, &account1).unwrap();
     hash_builder.add_leaf(Nibbles::unpack(key1), &encode_account(account1, None));
 
@@ -357,7 +430,11 @@ fn account_and_storage_trie() {
     let key2 = keccak256(address2);
     assert_eq!(key2[0], 0xB0);
     assert_eq!(key2[1], 0x40);
-    let account2 = Account { nonce: 0, balance: ether, ..Default::default() };
+    let account2 = Account {
+        nonce: 0,
+        balance: ether,
+        ..Default::default()
+    };
     hashed_account_cursor.upsert(key2, &account2).unwrap();
     hash_builder.add_leaf(Nibbles::unpack(key2), &encode_account(account2, None));
 
@@ -368,8 +445,11 @@ fn account_and_storage_trie() {
     assert_eq!(key3[1], 0x41);
     let code_hash =
         B256::from_str("5be74cad16203c4905c068b012a2e9fb6d19d036c410f16fd177f337541440dd").unwrap();
-    let account3 =
-        Account { nonce: 0, balance: U256::from(2).mul(ether), bytecode_hash: Some(code_hash) };
+    let account3 = Account {
+        nonce: 0,
+        balance: U256::from(2).mul(ether),
+        bytecode_hash: Some(code_hash),
+    };
     hashed_account_cursor.upsert(key3, &account3).unwrap();
     for (hashed_slot, value) in storage {
         if hashed_storage_cursor
@@ -380,27 +460,49 @@ fn account_and_storage_trie() {
         {
             hashed_storage_cursor.delete_current().unwrap();
         }
-        hashed_storage_cursor.upsert(key3, &StorageEntry { key: hashed_slot, value }).unwrap();
+        hashed_storage_cursor
+            .upsert(
+                key3,
+                &StorageEntry {
+                    key: hashed_slot,
+                    value,
+                },
+            )
+            .unwrap();
     }
     let account3_storage_root = StorageRoot::from_tx(tx.tx_ref(), address3).root().unwrap();
-    hash_builder
-        .add_leaf(Nibbles::unpack(key3), &encode_account(account3, Some(account3_storage_root)));
+    hash_builder.add_leaf(
+        Nibbles::unpack(key3),
+        &encode_account(account3, Some(account3_storage_root)),
+    );
 
     let key4a =
         B256::from_str("B1A0000000000000000000000000000000000000000000000000000000000000").unwrap();
-    let account4a = Account { nonce: 0, balance: U256::from(4).mul(ether), ..Default::default() };
+    let account4a = Account {
+        nonce: 0,
+        balance: U256::from(4).mul(ether),
+        ..Default::default()
+    };
     hashed_account_cursor.upsert(key4a, &account4a).unwrap();
     hash_builder.add_leaf(Nibbles::unpack(key4a), &encode_account(account4a, None));
 
     let key5 =
         B256::from_str("B310000000000000000000000000000000000000000000000000000000000000").unwrap();
-    let account5 = Account { nonce: 0, balance: U256::from(8).mul(ether), ..Default::default() };
+    let account5 = Account {
+        nonce: 0,
+        balance: U256::from(8).mul(ether),
+        ..Default::default()
+    };
     hashed_account_cursor.upsert(key5, &account5).unwrap();
     hash_builder.add_leaf(Nibbles::unpack(key5), &encode_account(account5, None));
 
     let key6 =
         B256::from_str("B340000000000000000000000000000000000000000000000000000000000000").unwrap();
-    let account6 = Account { nonce: 0, balance: U256::from(1).mul(ether), ..Default::default() };
+    let account6 = Account {
+        nonce: 0,
+        balance: U256::from(1).mul(ether),
+        ..Default::default()
+    };
     hashed_account_cursor.upsert(key6, &account6).unwrap();
     hash_builder.add_leaf(Nibbles::unpack(key6), &encode_account(account6, None));
 
@@ -451,7 +553,11 @@ fn account_and_storage_trie() {
     let address4b = Address::from_str("4f61f2d5ebd991b85aa1677db97307caf5215c91").unwrap();
     let key4b = keccak256(address4b);
     assert_eq!(key4b.0[0], key4a.0[0]);
-    let account4b = Account { nonce: 0, balance: U256::from(5).mul(ether), bytecode_hash: None };
+    let account4b = Account {
+        nonce: 0,
+        balance: U256::from(5).mul(ether),
+        bytecode_hash: None,
+    };
     hashed_account_cursor.upsert(key4b, &account4b).unwrap();
 
     let mut prefix_set = PrefixSetMut::default();
@@ -490,8 +596,10 @@ fn account_and_storage_trie() {
 
     {
         let tx = factory.provider_rw().unwrap();
-        let mut hashed_account_cursor =
-            tx.tx_ref().cursor_write::<tables::HashedAccounts>().unwrap();
+        let mut hashed_account_cursor = tx
+            .tx_ref()
+            .cursor_write::<tables::HashedAccounts>()
+            .unwrap();
 
         let account = hashed_account_cursor.seek_exact(key2).unwrap().unwrap();
         hashed_account_cursor.delete_current().unwrap();
@@ -541,8 +649,10 @@ fn account_and_storage_trie() {
 
     {
         let tx = factory.provider_rw().unwrap();
-        let mut hashed_account_cursor =
-            tx.tx_ref().cursor_write::<tables::HashedAccounts>().unwrap();
+        let mut hashed_account_cursor = tx
+            .tx_ref()
+            .cursor_write::<tables::HashedAccounts>()
+            .unwrap();
 
         let account2 = hashed_account_cursor.seek_exact(key2).unwrap().unwrap();
         hashed_account_cursor.delete_current().unwrap();
@@ -678,8 +788,9 @@ fn storage_trie_around_extension_node() {
     let hashed_address = B256::random();
     let (expected_root, expected_updates) = extension_node_storage_trie(&tx, hashed_address);
 
-    let (got, _, updates) =
-        StorageRoot::from_tx_hashed(tx.tx_ref(), hashed_address).root_with_updates().unwrap();
+    let (got, _, updates) = StorageRoot::from_tx_hashed(tx.tx_ref(), hashed_address)
+        .root_with_updates()
+        .unwrap();
     assert_eq!(expected_root, got);
     assert_eq!(expected_updates, updates);
     assert_trie_updates(updates.storage_nodes_ref());
@@ -691,7 +802,10 @@ fn extension_node_storage_trie<N: ProviderNodeTypes>(
 ) -> (B256, StorageTrieUpdates) {
     let value = U256::from(1);
 
-    let mut hashed_storage = tx.tx_ref().cursor_write::<tables::HashedStorages>().unwrap();
+    let mut hashed_storage = tx
+        .tx_ref()
+        .cursor_write::<tables::HashedStorages>()
+        .unwrap();
 
     let mut hb = HashBuilder::default().with_updates(true);
 
@@ -704,7 +818,13 @@ fn extension_node_storage_trie<N: ProviderNodeTypes>(
         hex!("3100000000000000000000000000000000000000000000000000000000000000"),
     ] {
         hashed_storage
-            .upsert(hashed_address, &StorageEntry { key: B256::new(key), value })
+            .upsert(
+                hashed_address,
+                &StorageEntry {
+                    key: B256::new(key),
+                    value,
+                },
+            )
             .unwrap();
         hb.add_leaf(Nibbles::unpack(key), &alloy_rlp::encode_fixed_size(&value));
     }
@@ -718,10 +838,17 @@ fn extension_node_storage_trie<N: ProviderNodeTypes>(
 fn extension_node_trie<N: ProviderNodeTypes>(
     tx: &DatabaseProviderRW<Arc<TempDatabase<DatabaseEnv>>, N>,
 ) -> B256 {
-    let a = Account { nonce: 0, balance: U256::from(1u64), bytecode_hash: Some(B256::random()) };
+    let a = Account {
+        nonce: 0,
+        balance: U256::from(1u64),
+        bytecode_hash: Some(B256::random()),
+    };
     let val = encode_account(a, None);
 
-    let mut hashed_accounts = tx.tx_ref().cursor_write::<tables::HashedAccounts>().unwrap();
+    let mut hashed_accounts = tx
+        .tx_ref()
+        .cursor_write::<tables::HashedAccounts>()
+        .unwrap();
     let mut hb = HashBuilder::default();
 
     for key in [

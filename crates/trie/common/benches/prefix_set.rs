@@ -116,16 +116,25 @@ fn prefix_set_bench<T>(
 fn generate_test_data(size: usize) -> (Vec<Nibbles>, Vec<Nibbles>, Vec<bool>) {
     use prop::collection::vec;
 
-    let config = ProptestConfig { result_cache: basic_result_cache, ..Default::default() };
+    let config = ProptestConfig {
+        result_cache: basic_result_cache,
+        ..Default::default()
+    };
     let rng = TestRng::deterministic_rng(config.rng_algorithm);
     let mut runner = TestRunner::new_with_rng(config, rng);
 
     let vec_of_nibbles = |range| vec(any_with::<Nibbles>(range), size);
-    let mut preload = vec_of_nibbles(32usize.into()).new_tree(&mut runner).unwrap().current();
+    let mut preload = vec_of_nibbles(32usize.into())
+        .new_tree(&mut runner)
+        .unwrap()
+        .current();
     preload.sort();
     preload.dedup();
 
-    let mut input = vec_of_nibbles((0..=32usize).into()).new_tree(&mut runner).unwrap().current();
+    let mut input = vec_of_nibbles((0..=32usize).into())
+        .new_tree(&mut runner)
+        .unwrap()
+        .current();
     input.sort();
     input.dedup();
 
@@ -195,12 +204,12 @@ mod implementations {
             for key in self.keys.range::<Nibbles, _>(range) {
                 if key.has_prefix(&prefix) {
                     self.last_checked = Some(prefix);
-                    return true
+                    return true;
                 }
 
                 if key > &prefix {
                     self.last_checked = Some(prefix);
-                    return false
+                    return false;
                 }
             }
 
@@ -280,12 +289,12 @@ mod implementations {
             for (idx, key) in self.keys[self.index..].iter().enumerate() {
                 if key.has_prefix(&prefix) {
                     self.index += idx;
-                    return true
+                    return true;
                 }
 
                 if key > &prefix {
                     self.index += idx;
-                    return false
+                    return false;
                 }
             }
 

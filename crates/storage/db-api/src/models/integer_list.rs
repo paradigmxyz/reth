@@ -57,12 +57,17 @@ impl IntegerList {
 
     /// Appends a list of integers to the current list.
     pub fn append(&mut self, list: impl IntoIterator<Item = u64>) -> Result<u64, IntegerListError> {
-        self.0.append(list).map_err(|_| IntegerListError::UnsortedInput)
+        self.0
+            .append(list)
+            .map_err(|_| IntegerListError::UnsortedInput)
     }
 
     /// Pushes a new integer to the list.
     pub fn push(&mut self, value: u64) -> Result<(), IntegerListError> {
-        self.0.push(value).then_some(()).ok_or(IntegerListError::UnsortedInput)
+        self.0
+            .push(value)
+            .then_some(())
+            .ok_or(IntegerListError::UnsortedInput)
     }
 
     /// Clears the list.
@@ -73,7 +78,9 @@ impl IntegerList {
     /// Serializes a [`IntegerList`] into a sequence of bytes.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut vec = Vec::with_capacity(self.0.serialized_size());
-        self.0.serialize_into(&mut vec).expect("not able to encode IntegerList");
+        self.0
+            .serialize_into(&mut vec)
+            .expect("not able to encode IntegerList");
         vec
     }
 

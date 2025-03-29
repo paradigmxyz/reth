@@ -40,7 +40,11 @@ impl ConnectionHandler for CustomRlpxConnectionHandler {
         let (tx, rx) = mpsc::unbounded_channel();
         self.state
             .events
-            .send(ProtocolEvent::Established { direction, peer_id, to_connection: tx })
+            .send(ProtocolEvent::Established {
+                direction,
+                peer_id,
+                to_connection: tx,
+            })
             .ok();
         CustomRlpxConnection {
             conn,

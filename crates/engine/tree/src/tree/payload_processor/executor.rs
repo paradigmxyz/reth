@@ -19,7 +19,9 @@ pub struct WorkloadExecutor {
 
 impl Default for WorkloadExecutor {
     fn default() -> Self {
-        Self { inner: WorkloadExecutorInner::new(rayon::ThreadPoolBuilder::new().build().unwrap()) }
+        Self {
+            inner: WorkloadExecutorInner::new(rayon::ThreadPoolBuilder::new().build().unwrap()),
+        }
     }
 }
 
@@ -29,7 +31,10 @@ impl WorkloadExecutor {
     pub(super) fn with_num_cpu_threads(cpu_threads: usize) -> Self {
         Self {
             inner: WorkloadExecutorInner::new(
-                rayon::ThreadPoolBuilder::new().num_threads(cpu_threads).build().unwrap(),
+                rayon::ThreadPoolBuilder::new()
+                    .num_threads(cpu_threads)
+                    .build()
+                    .unwrap(),
             ),
         }
     }
@@ -74,6 +79,9 @@ impl WorkloadExecutorInner {
             })
         }
 
-        Self { handle: get_runtime_handle(), rayon_pool: Arc::new(rayon_pool) }
+        Self {
+            handle: get_runtime_handle(),
+            rayon_pool: Arc::new(rayon_pool),
+        }
     }
 }

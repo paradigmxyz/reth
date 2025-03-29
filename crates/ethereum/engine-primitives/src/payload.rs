@@ -45,7 +45,13 @@ impl EthBuiltPayload {
         fees: U256,
         requests: Option<Requests>,
     ) -> Self {
-        Self { id, block, fees, sidecars: Vec::new(), requests }
+        Self {
+            id,
+            block,
+            fees,
+            sidecars: Vec::new(),
+            requests,
+        }
     }
 
     /// Returns the identifier of the payload.
@@ -126,7 +132,12 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV2 {
 
 impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV3 {
     fn from(value: EthBuiltPayload) -> Self {
-        let EthBuiltPayload { block, fees, sidecars, .. } = value;
+        let EthBuiltPayload {
+            block,
+            fees,
+            sidecars,
+            ..
+        } = value;
 
         Self {
             execution_payload: ExecutionPayloadV3::from_block_unchecked(

@@ -25,7 +25,9 @@ pub struct InvalidBlockHooks<N: NodePrimitives>(pub Vec<Box<dyn InvalidBlockHook
 
 impl<N: NodePrimitives> std::fmt::Debug for InvalidBlockHooks<N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("InvalidBlockHooks").field("len", &self.0.len()).finish()
+        f.debug_struct("InvalidBlockHooks")
+            .field("len", &self.0.len())
+            .finish()
     }
 }
 

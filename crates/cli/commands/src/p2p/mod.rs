@@ -82,7 +82,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         // Load configuration
         let mut config = Config::from_path(&config_path).unwrap_or_default();
 
-        config.peers.trusted_nodes.extend(self.network.trusted_peers.clone());
+        config
+            .peers
+            .trusted_nodes
+            .extend(self.network.trusted_peers.clone());
 
         if config.peers.trusted_nodes.is_empty() && self.network.trusted_only {
             eyre::bail!("No trusted nodes. Set trusted peer with `--trusted-peer <enode record>` or set `--trusted-only` to `false`")
@@ -91,8 +94,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         config.peers.trusted_nodes_only = self.network.trusted_only;
 
         let default_secret_key_path = data_dir.p2p_secret();
-        let secret_key_path =
-            self.network.p2p_secret_key.clone().unwrap_or(default_secret_key_path);
+        let secret_key_path = self
+            .network
+            .p2p_secret_key
+            .clone()
+            .unwrap_or(default_secret_key_path);
         let p2p_secret_key = get_secret_key(&secret_key_path)?;
         let rlpx_socket = (self.network.addr, self.network.port).into();
         let boot_nodes = self.chain.bootnodes().unwrap_or_default();
@@ -103,7 +109,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             .disable_discv4_discovery_if(self.chain.chain().is_optimism())
             .boot_nodes(boot_nodes.clone())
             .apply(|builder| {
-                self.network.discovery.apply_to_builder(builder, rlpx_socket, boot_nodes)
+                self.network
+                    .discovery
+                    .apply_to_builder(builder, rlpx_socket, boot_nodes)
             })
             .build_with_noop_provider(self.chain)
             .manager()

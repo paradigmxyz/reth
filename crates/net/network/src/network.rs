@@ -84,7 +84,9 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
             event_sender,
             nat,
         };
-        Self { inner: Arc::new(inner) }
+        Self {
+            inner: Arc::new(inner),
+        }
     }
 
     /// Returns the [`PeerId`] used in the network.
@@ -148,7 +150,9 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
     /// Returns `None` if no transaction task is installed.
     pub async fn transactions_handle(&self) -> Option<TransactionsHandle<N>> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.manager().send(NetworkHandleMessage::GetTransactionsHandle(tx));
+        let _ = self
+            .manager()
+            .send(NetworkHandleMessage::GetTransactionsHandle(tx));
         rx.await.unwrap()
     }
 
@@ -197,10 +201,14 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
 impl<N: NetworkPrimitives> NetworkPeersEvents for NetworkHandle<N> {
     /// Returns an event stream of peer-specific network events.
     fn peer_events(&self) -> PeerEventStream {
-        let peer_events = self.inner.event_sender.new_listener().map(|event| match event {
-            NetworkEvent::Peer(peer_event) => peer_event,
-            NetworkEvent::ActivePeerSession { info, .. } => PeerEvent::SessionEstablished(info),
-        });
+        let peer_events = self
+            .inner
+            .event_sender
+            .new_listener()
+            .map(|event| match event {
+                NetworkEvent::Peer(peer_event) => peer_event,
+                NetworkEvent::ActivePeerSession { info, .. } => PeerEvent::SessionEstablished(info),
+            });
         PeerEventStream::new(peer_events)
     }
 }
@@ -214,7 +222,9 @@ impl<N: NetworkPrimitives> NetworkEventListenerProvider for NetworkHandle<N> {
 
     fn discovery_listener(&self) -> UnboundedReceiverStream<DiscoveryEvent> {
         let (tx, rx) = mpsc::unbounded_channel();
-        let _ = self.manager().send(NetworkHandleMessage::DiscoveryListener(tx));
+        let _ = self
+            .manager()
+            .send(NetworkHandleMessage::DiscoveryListener(tx));
         UnboundedReceiverStream::new(rx)
     }
 }
@@ -290,7 +300,9 @@ impl<N: NetworkPrimitives> Peers for NetworkHandle<N> {
 
     async fn get_peers_by_kind(&self, kind: PeerKind) -> Result<Vec<PeerInfo>, NetworkError> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.manager().send(NetworkHandleMessage::GetPeerInfosByPeerKind(kind, tx));
+        let _ = self
+            .manager()
+            .send(NetworkHandleMessage::GetPeerInfosByPeerKind(kind, tx));
         Ok(rx.await?)
     }
 
@@ -302,13 +314,17 @@ impl<N: NetworkPrimitives> Peers for NetworkHandle<N> {
 
     async fn get_peer_by_id(&self, peer_id: PeerId) -> Result<Option<PeerInfo>, NetworkError> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.manager().send(NetworkHandleMessage::GetPeerInfoById(peer_id, tx));
+        let _ = self
+            .manager()
+            .send(NetworkHandleMessage::GetPeerInfoById(peer_id, tx));
         Ok(rx.await?)
     }
 
     async fn get_peers_by_id(&self, peer_ids: Vec<PeerId>) -> Result<Vec<PeerInfo>, NetworkError> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.manager().send(NetworkHandleMessage::GetPeerInfosByIds(peer_ids, tx));
+        let _ = self
+            .manager()
+            .send(NetworkHandleMessage::GetPeerInfosByIds(peer_ids, tx));
         Ok(rx.await?)
     }
 
@@ -353,7 +369,9 @@ impl<N: NetworkPrimitives> Peers for NetworkHandle<N> {
 
     async fn reputation_by_id(&self, peer_id: PeerId) -> Result<Option<Reputation>, NetworkError> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.manager().send(NetworkHandleMessage::GetReputationById(peer_id, tx));
+        let _ = self
+            .manager()
+            .send(NetworkHandleMessage::GetReputationById(peer_id, tx));
         Ok(rx.await?)
     }
 }
@@ -395,7 +413,7 @@ impl<N: NetworkPrimitives> SyncStateProvider for NetworkHandle<N> {
     // used to guard the txpool
     fn is_initially_syncing(&self) -> bool {
         if self.inner.initial_sync_done.load(Ordering::Relaxed) {
-            return false
+            return false;
         }
         self.inner.is_syncing.load(Ordering::Relaxed)
     }

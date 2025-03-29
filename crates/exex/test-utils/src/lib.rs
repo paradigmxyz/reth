@@ -200,7 +200,9 @@ impl TestExExHandle {
     /// Send a notification to the Execution Extension that the chain has been committed
     pub async fn send_notification_chain_committed(&self, chain: Chain) -> eyre::Result<()> {
         self.notifications_tx
-            .send(ExExNotification::ChainCommitted { new: Arc::new(chain) })
+            .send(ExExNotification::ChainCommitted {
+                new: Arc::new(chain),
+            })
             .await?;
         Ok(())
     }
@@ -212,7 +214,10 @@ impl TestExExHandle {
         new: Chain,
     ) -> eyre::Result<()> {
         self.notifications_tx
-            .send(ExExNotification::ChainReorged { old: Arc::new(old), new: Arc::new(new) })
+            .send(ExExNotification::ChainReorged {
+                old: Arc::new(old),
+                new: Arc::new(new),
+            })
             .await?;
         Ok(())
     }
@@ -220,7 +225,9 @@ impl TestExExHandle {
     /// Send a notification to the Execution Extension that the chain has been reverted
     pub async fn send_notification_chain_reverted(&self, chain: Chain) -> eyre::Result<()> {
         self.notifications_tx
-            .send(ExExNotification::ChainReverted { old: Arc::new(chain) })
+            .send(ExExNotification::ChainReverted {
+                old: Arc::new(chain),
+            })
             .await?;
         Ok(())
     }

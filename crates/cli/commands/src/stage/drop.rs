@@ -37,7 +37,9 @@ impl<C: ChainSpecParser> Command<C> {
     where
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
-        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
+        let Environment {
+            provider_factory, ..
+        } = self.env.init::<N>(AccessRights::RW)?;
 
         let tool = DbTool::new(provider_factory)?;
 

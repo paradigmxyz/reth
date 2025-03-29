@@ -95,8 +95,11 @@ where
         V: EngineValidator<N::Payload, Block = BlockTy<N>>,
         C: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
-        let engine_kind =
-            if chain_spec.is_optimism() { EngineApiKind::OpStack } else { EngineApiKind::Ethereum };
+        let engine_kind = if chain_spec.is_optimism() {
+            EngineApiKind::OpStack
+        } else {
+            EngineApiKind::Ethereum
+        };
 
         let downloader = BasicBlockDownloader::new(client, consensus.clone().as_consensus());
 

@@ -72,7 +72,12 @@ impl EvmFactory for MyEvmFactory {
         input: EvmEnv,
         inspector: I,
     ) -> Self::Evm<DB, I> {
-        EthEvm::new(self.create_evm(db, input).into_inner().with_inspector(inspector), true)
+        EthEvm::new(
+            self.create_evm(db, input)
+                .into_inner()
+                .with_inspector(inspector),
+            true,
+        )
     }
 }
 
@@ -94,7 +99,10 @@ where
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
         let evm_config =
             EthEvmConfig::new_with_evm_factory(ctx.chain_spec(), MyEvmFactory::default());
-        Ok((evm_config.clone(), BasicBlockExecutorProvider::new(evm_config)))
+        Ok((
+            evm_config.clone(),
+            BasicBlockExecutorProvider::new(evm_config),
+        ))
     }
 }
 
@@ -145,7 +153,9 @@ impl CustomPrecompiles {
     /// Given a [`PrecompileProvider`] and cache for a specific precompiles, create a
     /// wrapper that can be used inside Evm.
     fn new() -> Self {
-        Self { precompiles: EthPrecompiles::default() }
+        Self {
+            precompiles: EthPrecompiles::default(),
+        }
     }
 }
 
@@ -172,7 +182,10 @@ impl<CTX: ContextTr> PrecompileProvider<CTX> for CustomPrecompiles {
     fn set_spec(&mut self, spec: <CTX::Cfg as Cfg>::Spec) -> bool {
         let spec_id = spec.clone().into();
         if spec_id == SpecId::PRAGUE {
-            self.precompiles = EthPrecompiles { precompiles: prague_custom(), spec: spec.into() }
+            self.precompiles = EthPrecompiles {
+                precompiles: prague_custom(),
+                spec: spec.into(),
+            }
         } else {
             PrecompileProvider::<CTX>::set_spec(&mut self.precompiles, spec);
         }
@@ -187,7 +200,8 @@ impl<CTX: ContextTr> PrecompileProvider<CTX> for CustomPrecompiles {
         is_static: bool,
         gas_limit: u64,
     ) -> Result<Option<Self::Output>, String> {
-        self.precompiles.run(context, address, inputs, is_static, gas_limit)
+        self.precompiles
+            .run(context, address, inputs, is_static, gas_limit)
     }
 
     fn warm_addresses(&self) -> Box<impl Iterator<Item = Address>> {
@@ -215,8 +229,9 @@ async fn main() -> eyre::Result<()> {
         .cancun_activated()
         .build();
 
-    let node_config =
-        NodeConfig::test().with_rpc(RpcServerArgs::default().with_http()).with_chain(spec);
+    let node_config = NodeConfig::test()
+        .with_rpc(RpcServerArgs::default().with_http())
+        .with_chain(spec);
 
     let handle = NodeBuilder::new(node_config)
         .testing_node(tasks.executor())

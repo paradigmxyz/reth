@@ -28,7 +28,9 @@ pub struct Headers<N> {
 
 impl<N> Headers<N> {
     pub const fn new(static_file_provider: StaticFileProvider<N>) -> Self {
-        Self { static_file_provider }
+        Self {
+            static_file_provider,
+        }
     }
 }
 
@@ -54,20 +56,25 @@ impl<Provider: StaticFileProviderFactory + DBProvider<Tx: DbTxMut>> Segment<Prov
             Some(range) => (*range.start(), *range.end()),
             None => {
                 trace!(target: "pruner", "No headers to prune");
-                return Ok(SegmentOutput::done())
+                return Ok(SegmentOutput::done());
             }
         };
 
-        let last_pruned_block =
-            if block_range_start == 0 { None } else { Some(block_range_start - 1) };
+        let last_pruned_block = if block_range_start == 0 {
+            None
+        } else {
+            Some(block_range_start - 1)
+        };
 
         let range = last_pruned_block.map_or(0, |block| block + 1)..=block_range_end;
 
         let mut headers_cursor = provider.tx_ref().cursor_write::<tables::Headers>()?;
-        let mut header_tds_cursor =
-            provider.tx_ref().cursor_write::<tables::HeaderTerminalDifficulties>()?;
-        let mut canonical_headers_cursor =
-            provider.tx_ref().cursor_write::<tables::CanonicalHeaders>()?;
+        let mut header_tds_cursor = provider
+            .tx_ref()
+            .cursor_write::<tables::HeaderTerminalDifficulties>()?;
+        let mut canonical_headers_cursor = provider
+            .tx_ref()
+            .cursor_write::<tables::CanonicalHeaders>()?;
 
         let mut limiter = input.limiter.floor_deleted_entries_limit_to_multiple_of(
             NonZeroUsize::new(HEADER_TABLES_TO_PRUNE).unwrap(),
@@ -84,7 +91,10 @@ impl<Provider: StaticFileProviderFactory + DBProvider<Tx: DbTxMut>> Segment<Prov
         let mut last_pruned_block: Option<u64> = None;
         let mut pruned = 0;
         for res in tables_iter {
-            let HeaderTablesIterItem { pruned_block, entries_pruned } = res?;
+            let HeaderTablesIterItem {
+                pruned_block,
+                entries_pruned,
+            } = res?;
             last_pruned_block = Some(pruned_block);
             pruned += entries_pruned;
         }
@@ -133,7 +143,13 @@ where
         header_tds_walker: Walker<'a, Provider, tables::HeaderTerminalDifficulties>,
         canonical_headers_walker: Walker<'a, Provider, tables::CanonicalHeaders>,
     ) -> Self {
-        Self { provider, limiter, headers_walker, header_tds_walker, canonical_headers_walker }
+        Self {
+            provider,
+            limiter,
+            headers_walker,
+            header_tds_walker,
+            canonical_headers_walker,
+        }
     }
 }
 
@@ -144,7 +160,7 @@ where
     type Item = Result<HeaderTablesIterItem, PrunerError>;
     fn next(&mut self) -> Option<Self::Item> {
         if self.limiter.is_limit_reached() {
-            return None
+            return None;
         }
 
         let mut pruned_block_headers = None;
@@ -157,7 +173,7 @@ where
             &mut |_| false,
             &mut |row| pruned_block_headers = Some(row.0),
         ) {
-            return Some(Err(err.into()))
+            return Some(Err(err.into()));
         }
 
         if let Err(err) = self.provider.tx_ref().prune_table_with_range_step(
@@ -166,7 +182,7 @@ where
             &mut |_| false,
             &mut |row| pruned_block_td = Some(row.0),
         ) {
-            return Some(Err(err.into()))
+            return Some(Err(err.into()));
         }
 
         if let Err(err) = self.provider.tx_ref().prune_table_with_range_step(
@@ -175,17 +191,27 @@ where
             &mut |_| false,
             &mut |row| pruned_block_canonical = Some(row.0),
         ) {
-            return Some(Err(err.into()))
+            return Some(Err(err.into()));
         }
 
-        if ![pruned_block_headers, pruned_block_td, pruned_block_canonical].iter().all_equal() {
+        if ![
+            pruned_block_headers,
+            pruned_block_td,
+            pruned_block_canonical,
+        ]
+        .iter()
+        .all_equal()
+        {
             return Some(Err(PrunerError::InconsistentData(
                 "All headers-related tables should be pruned up to the same height",
-            )))
+            )));
         }
 
         pruned_block_headers.map(move |block| {
-            Ok(HeaderTablesIterItem { pruned_block: block, entries_pruned: HEADER_TABLES_TO_PRUNE })
+            Ok(HeaderTablesIterItem {
+                pruned_block: block,
+                entries_pruned: HEADER_TABLES_TO_PRUNE,
+            })
         })
     }
 }
@@ -225,9 +251,17 @@ mod tests {
         }
         tx.commit().unwrap();
 
-        assert_eq!(db.table::<tables::CanonicalHeaders>().unwrap().len(), headers.len());
+        assert_eq!(
+            db.table::<tables::CanonicalHeaders>().unwrap().len(),
+            headers.len()
+        );
         assert_eq!(db.table::<tables::Headers>().unwrap().len(), headers.len());
-        assert_eq!(db.table::<tables::HeaderTerminalDifficulties>().unwrap().len(), headers.len());
+        assert_eq!(
+            db.table::<tables::HeaderTerminalDifficulties>()
+                .unwrap()
+                .len(),
+            headers.len()
+        );
 
         let test_prune = |to_block: BlockNumber, expected_result: (PruneProgress, usize)| {
             let segment = super::Headers::new(db.factory.static_file_provider());
@@ -278,8 +312,8 @@ mod tests {
             provider.commit().expect("commit");
 
             let last_pruned_block_number = to_block.min(
-                next_block_number_to_prune +
-                    (input.limiter.deleted_entries_limit().unwrap() / HEADER_TABLES_TO_PRUNE - 1)
+                next_block_number_to_prune
+                    + (input.limiter.deleted_entries_limit().unwrap() / HEADER_TABLES_TO_PRUNE - 1)
                         as u64,
             );
 
@@ -292,11 +326,17 @@ mod tests {
                 headers.len() - (last_pruned_block_number + 1) as usize
             );
             assert_eq!(
-                db.table::<tables::HeaderTerminalDifficulties>().unwrap().len(),
+                db.table::<tables::HeaderTerminalDifficulties>()
+                    .unwrap()
+                    .len(),
                 headers.len() - (last_pruned_block_number + 1) as usize
             );
             assert_eq!(
-                db.factory.provider().unwrap().get_prune_checkpoint(PruneSegment::Headers).unwrap(),
+                db.factory
+                    .provider()
+                    .unwrap()
+                    .get_prune_checkpoint(PruneSegment::Headers)
+                    .unwrap(),
                 Some(PruneCheckpoint {
                     block_number: Some(last_pruned_block_number),
                     tx_number: None,
@@ -307,7 +347,10 @@ mod tests {
 
         test_prune(
             3,
-            (PruneProgress::HasMoreData(PruneInterruptReason::DeletedEntriesLimitReached), 9),
+            (
+                PruneProgress::HasMoreData(PruneInterruptReason::DeletedEntriesLimitReached),
+                9,
+            ),
         );
         test_prune(3, (PruneProgress::Finished, 3));
     }

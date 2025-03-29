@@ -224,7 +224,9 @@ pub struct SenderRecoveryConfig {
 
 impl Default for SenderRecoveryConfig {
     fn default() -> Self {
-        Self { commit_threshold: 5_000_000 }
+        Self {
+            commit_threshold: 5_000_000,
+        }
     }
 }
 
@@ -285,7 +287,9 @@ pub struct PruneStageConfig {
 
 impl Default for PruneStageConfig {
     fn default() -> Self {
-        Self { commit_threshold: 1_000_000 }
+        Self {
+            commit_threshold: 1_000_000,
+        }
     }
 }
 
@@ -303,7 +307,10 @@ pub struct HashingConfig {
 
 impl Default for HashingConfig {
     fn default() -> Self {
-        Self { clean_threshold: 500_000, commit_threshold: 100_000 }
+        Self {
+            clean_threshold: 500_000,
+            commit_threshold: 100_000,
+        }
     }
 }
 
@@ -319,7 +326,9 @@ pub struct MerkleConfig {
 
 impl Default for MerkleConfig {
     fn default() -> Self {
-        Self { clean_threshold: 5_000 }
+        Self {
+            clean_threshold: 5_000,
+        }
     }
 }
 
@@ -334,7 +343,9 @@ pub struct TransactionLookupConfig {
 
 impl Default for TransactionLookupConfig {
     fn default() -> Self {
-        Self { chunk_size: 5_000_000 }
+        Self {
+            chunk_size: 5_000_000,
+        }
     }
 }
 
@@ -351,7 +362,10 @@ pub struct EtlConfig {
 
 impl Default for EtlConfig {
     fn default() -> Self {
-        Self { dir: None, file_size: Self::default_file_size() }
+        Self {
+            dir: None,
+            file_size: Self::default_file_size(),
+        }
     }
 }
 
@@ -384,7 +398,9 @@ pub struct IndexHistoryConfig {
 
 impl Default for IndexHistoryConfig {
     fn default() -> Self {
-        Self { commit_threshold: 100_000 }
+        Self {
+            commit_threshold: 100_000,
+        }
     }
 }
 
@@ -402,7 +418,10 @@ pub struct PruneConfig {
 
 impl Default for PruneConfig {
     fn default() -> Self {
-        Self { block_interval: DEFAULT_BLOCK_INTERVAL, segments: PruneModes::none() }
+        Self {
+            block_interval: DEFAULT_BLOCK_INTERVAL,
+            segments: PruneModes::none(),
+        }
     }
 }
 
@@ -489,8 +508,11 @@ mod tests {
         // Create a temporary directory for the config file
         let config_dir = tempfile::tempdir().expect("creating test fixture failed");
         // Create the config file path
-        let config_path =
-            config_dir.path().join("example-app").join("example-config").with_extension("toml");
+        let config_path = config_dir
+            .path()
+            .join("example-app")
+            .join("example-config")
+            .with_extension("toml");
         // Run the test function with the config path
         test_fn(&config_path);
         config_dir.close().expect("removing test fixture failed");
@@ -828,7 +850,10 @@ secs = 120
 nanos = 0
 #";
         let conf: Config = toml::from_str(alpha_0_0_18).unwrap();
-        assert_eq!(conf.stages.execution.max_duration, Some(Duration::from_secs(10 * 60)));
+        assert_eq!(
+            conf.stages.execution.max_duration,
+            Some(Duration::from_secs(10 * 60))
+        );
 
         let alpha_0_0_19 = r"#
 [stages.headers]
@@ -991,8 +1016,14 @@ receipts = 'full'
         assert_eq!(config1.segments.sender_recovery, Some(PruneMode::Full));
         assert_eq!(config1.segments.transaction_lookup, Some(PruneMode::Full));
         assert_eq!(config1.segments.receipts, Some(PruneMode::Distance(1000)));
-        assert_eq!(config1.segments.account_history, Some(PruneMode::Distance(2000)));
-        assert_eq!(config1.segments.storage_history, Some(PruneMode::Before(5000)));
+        assert_eq!(
+            config1.segments.account_history,
+            Some(PruneMode::Distance(2000))
+        );
+        assert_eq!(
+            config1.segments.storage_history,
+            Some(PruneMode::Before(5000))
+        );
         assert_eq!(config1.segments.receipts_log_filter, original_filter);
     }
 

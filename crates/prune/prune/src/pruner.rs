@@ -120,16 +120,17 @@ where
         let Some(tip_block_number) =
             self.adjust_tip_block_number_to_finished_exex_height(tip_block_number)
         else {
-            return Ok(PruneProgress::Finished.into())
+            return Ok(PruneProgress::Finished.into());
         };
         if tip_block_number == 0 {
             self.previous_tip_block_number = Some(tip_block_number);
 
             debug!(target: "pruner", %tip_block_number, "Nothing to prune yet");
-            return Ok(PruneProgress::Finished.into())
+            return Ok(PruneProgress::Finished.into());
         }
 
-        self.event_sender.notify(PrunerEvent::Started { tip_block_number });
+        self.event_sender
+            .notify(PrunerEvent::Started { tip_block_number });
 
         debug!(target: "pruner", %tip_block_number, "Pruner started");
         let start = Instant::now();
@@ -163,7 +164,11 @@ where
             "{message}",
         );
 
-        self.event_sender.notify(PrunerEvent::Finished { tip_block_number, elapsed, stats });
+        self.event_sender.notify(PrunerEvent::Finished {
+            tip_block_number,
+            elapsed,
+            stats,
+        });
 
         Ok(output)
     }
@@ -189,7 +194,7 @@ where
 
         for segment in &self.segments {
             if limiter.is_limit_reached() {
-                break
+                break;
             }
 
             if let Some((to_block, prune_mode)) = segment
@@ -213,7 +218,11 @@ where
                 let previous_checkpoint = provider.get_prune_checkpoint(segment.segment())?;
                 let segment_output = segment.prune(
                     provider,
-                    PruneInput { previous_checkpoint, to_block, limiter: limiter.clone() },
+                    PruneInput {
+                        previous_checkpoint,
+                        to_block,
+                        limiter: limiter.clone(),
+                    },
                 )?;
                 if let Some(checkpoint) = segment_output.checkpoint {
                     segment
@@ -223,8 +232,9 @@ where
                     .get_prune_segment_metrics(segment.segment())
                     .duration_seconds
                     .record(segment_start.elapsed());
-                if let Some(highest_pruned_block) =
-                    segment_output.checkpoint.and_then(|checkpoint| checkpoint.block_number)
+                if let Some(highest_pruned_block) = segment_output
+                    .checkpoint
+                    .and_then(|checkpoint| checkpoint.block_number)
                 {
                     self.metrics
                         .get_prune_segment_metrics(segment.segment())
@@ -270,14 +280,14 @@ where
         let Some(tip_block_number) =
             self.adjust_tip_block_number_to_finished_exex_height(tip_block_number)
         else {
-            return false
+            return false;
         };
 
         // Saturating subtraction is needed for the case when the chain was reverted, meaning
         // current block number might be less than the previous tip block number.
         // If that's the case, no pruning is needed as outdated data is also reverted.
-        if tip_block_number.saturating_sub(self.previous_tip_block_number.unwrap_or_default()) >=
-            self.min_block_interval as u64
+        if tip_block_number.saturating_sub(self.previous_tip_block_number.unwrap_or_default())
+            >= self.min_block_interval as u64
         {
             debug!(
                 target: "pruner",
@@ -346,8 +356,14 @@ mod tests {
         let (finished_exex_height_tx, finished_exex_height_rx) =
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
 
-        let mut pruner =
-            Pruner::new_with_factory(provider_factory, vec![], 5, 0, None, finished_exex_height_rx);
+        let mut pruner = Pruner::new_with_factory(
+            provider_factory,
+            vec![],
+            5,
+            0,
+            None,
+            finished_exex_height_rx,
+        );
 
         // No last pruned block number was set before
         let first_block_number = 1;
@@ -367,15 +383,21 @@ mod tests {
         assert!(pruner.is_pruning_needed(third_block_number));
 
         // Not all ExExs have emitted a `FinishedHeight` event yet
-        finished_exex_height_tx.send(FinishedExExHeight::NotReady).unwrap();
+        finished_exex_height_tx
+            .send(FinishedExExHeight::NotReady)
+            .unwrap();
         assert!(!pruner.is_pruning_needed(third_block_number));
 
         // Adjust tip block number to the finished ExEx height that doesn't reach the threshold
-        finished_exex_height_tx.send(FinishedExExHeight::Height(second_block_number)).unwrap();
+        finished_exex_height_tx
+            .send(FinishedExExHeight::Height(second_block_number))
+            .unwrap();
         assert!(!pruner.is_pruning_needed(third_block_number));
 
         // Adjust tip block number to the finished ExEx height that reaches the threshold
-        finished_exex_height_tx.send(FinishedExExHeight::Height(third_block_number)).unwrap();
+        finished_exex_height_tx
+            .send(FinishedExExHeight::Height(third_block_number))
+            .unwrap();
         assert!(pruner.is_pruning_needed(third_block_number));
     }
 }

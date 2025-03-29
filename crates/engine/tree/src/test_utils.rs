@@ -24,7 +24,10 @@ pub struct TestPipelineBuilder {
 impl TestPipelineBuilder {
     /// Create a new [`TestPipelineBuilder`].
     pub const fn new() -> Self {
-        Self { pipeline_exec_outputs: VecDeque::new(), executor_results: Vec::new() }
+        Self {
+            pipeline_exec_outputs: VecDeque::new(),
+            executor_results: Vec::new(),
+        }
     }
 
     /// Set the pipeline execution outputs to use for the test consensus engine.
@@ -50,7 +53,10 @@ impl TestPipelineBuilder {
         // Setup pipeline
         let (tip_tx, _tip_rx) = watch::channel(B256::default());
         let pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
-            .add_stages(TestStages::new(self.pipeline_exec_outputs, Default::default()))
+            .add_stages(TestStages::new(
+                self.pipeline_exec_outputs,
+                Default::default(),
+            ))
             .with_tip_sender(tip_tx);
 
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);

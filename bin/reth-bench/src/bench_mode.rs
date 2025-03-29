@@ -30,7 +30,9 @@ impl BenchMode {
             (None, None) => Ok(Self::Continuous),
             _ => {
                 // both or neither are allowed, everything else is ambiguous
-                Err(eyre::eyre!("`from` and `to` must be provided together, or not at all."))
+                Err(eyre::eyre!(
+                    "`from` and `to` must be provided together, or not at all."
+                ))
             }
         }
     }

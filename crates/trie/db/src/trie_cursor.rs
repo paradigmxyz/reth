@@ -35,7 +35,9 @@ impl<TX: DbTx> TrieCursorFactory for DatabaseTrieCursorFactory<'_, TX> {
         DatabaseStorageTrieCursor<<TX as DbTx>::DupCursor<tables::StoragesTrie>>;
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, DatabaseError> {
-        Ok(DatabaseAccountTrieCursor::new(self.0.cursor_read::<tables::AccountsTrie>()?))
+        Ok(DatabaseAccountTrieCursor::new(
+            self.0.cursor_read::<tables::AccountsTrie>()?,
+        ))
     }
 
     fn storage_trie_cursor(
@@ -69,7 +71,10 @@ where
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        Ok(self.0.seek_exact(StoredNibbles(key))?.map(|value| (value.0 .0, value.1)))
+        Ok(self
+            .0
+            .seek_exact(StoredNibbles(key))?
+            .map(|value| (value.0 .0, value.1)))
     }
 
     /// Seeks a key in the account trie that matches or is greater than the provided key.
@@ -77,7 +82,10 @@ where
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        Ok(self.0.seek(StoredNibbles(key))?.map(|value| (value.0 .0, value.1)))
+        Ok(self
+            .0
+            .seek(StoredNibbles(key))?
+            .map(|value| (value.0 .0, value.1)))
     }
 
     /// Move the cursor to the next entry and return it.
@@ -103,7 +111,10 @@ pub struct DatabaseStorageTrieCursor<C> {
 impl<C> DatabaseStorageTrieCursor<C> {
     /// Create a new storage trie cursor.
     pub const fn new(cursor: C, hashed_address: B256) -> Self {
-        Self { cursor, hashed_address }
+        Self {
+            cursor,
+            hashed_address,
+        }
     }
 }
 
@@ -131,7 +142,10 @@ where
             .filter_map(|n| (!updates.storage_nodes_ref().contains_key(n)).then_some((n, None)))
             .collect::<Vec<_>>();
         storage_updates.extend(
-            updates.storage_nodes_ref().iter().map(|(nibbles, node)| (nibbles, Some(node))),
+            updates
+                .storage_nodes_ref()
+                .iter()
+                .map(|(nibbles, node)| (nibbles, Some(node))),
         );
 
         // Sort trie node updates.
@@ -155,7 +169,10 @@ where
             if let Some(node) = maybe_updated {
                 self.cursor.upsert(
                     self.hashed_address,
-                    &StorageTrieEntry { nibbles, node: node.clone() },
+                    &StorageTrieEntry {
+                        nibbles,
+                        node: node.clone(),
+                    },
                 )?;
             }
         }
@@ -213,7 +230,10 @@ mod tests {
     fn test_account_trie_order() {
         let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
-        let mut cursor = provider.tx_ref().cursor_write::<tables::AccountsTrie>().unwrap();
+        let mut cursor = provider
+            .tx_ref()
+            .cursor_write::<tables::AccountsTrie>()
+            .unwrap();
 
         let data = vec![
             hex!("0303040e").to_vec(),
@@ -237,14 +257,21 @@ mod tests {
                 .unwrap();
         }
 
-        let db_data = cursor.walk_range(..).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+        let db_data = cursor
+            .walk_range(..)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
         assert_eq!(db_data[0].0 .0.to_vec(), data[0]);
         assert_eq!(db_data[1].0 .0.to_vec(), data[1]);
         assert_eq!(db_data[2].0 .0.to_vec(), data[2]);
         assert_eq!(db_data[3].0 .0.to_vec(), data[3]);
 
         assert_eq!(
-            cursor.seek(hex!("0303040f").to_vec().into()).unwrap().map(|(k, _)| k.0.to_vec()),
+            cursor
+                .seek(hex!("0303040f").to_vec().into())
+                .unwrap()
+                .map(|(k, _)| k.0.to_vec()),
             Some(data[1].clone())
         );
     }
@@ -254,14 +281,23 @@ mod tests {
     fn test_storage_cursor_abstraction() {
         let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
-        let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
+        let mut cursor = provider
+            .tx_ref()
+            .cursor_dup_write::<tables::StoragesTrie>()
+            .unwrap();
 
         let hashed_address = B256::random();
         let key = StoredNibblesSubKey::from(vec![0x2, 0x3]);
         let value = BranchNodeCompact::new(1, 1, 1, vec![B256::random()], None);
 
         cursor
-            .upsert(hashed_address, &StorageTrieEntry { nibbles: key.clone(), node: value.clone() })
+            .upsert(
+                hashed_address,
+                &StorageTrieEntry {
+                    nibbles: key.clone(),
+                    node: value.clone(),
+                },
+            )
             .unwrap();
 
         let mut cursor = DatabaseStorageTrieCursor::new(cursor, hashed_address);

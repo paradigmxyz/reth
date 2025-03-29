@@ -349,7 +349,10 @@ mod tests {
             finalized_block_hash: B256::from_slice(&[123; 32]), // Non-zero finalized hash
         };
         tracker.last_valid = Some(valid_finalized_state);
-        assert_eq!(tracker.last_valid_finalized(), Some(B256::from_slice(&[123; 32])));
+        assert_eq!(
+            tracker.last_valid_finalized(),
+            Some(B256::from_slice(&[123; 32]))
+        );
 
         // Reset the last valid state to None
         tracker.last_valid = None;
@@ -379,7 +382,10 @@ mod tests {
             finalized_block_hash: B256::from_slice(&[22; 32]), // Non-zero finalized hash
         };
         tracker.last_syncing = Some(valid_sync_target);
-        assert_eq!(tracker.sync_target_finalized(), Some(B256::from_slice(&[22; 32])));
+        assert_eq!(
+            tracker.sync_target_finalized(),
+            Some(B256::from_slice(&[22; 32]))
+        );
 
         // Reset the last sync target state to None
         tracker.last_syncing = None;

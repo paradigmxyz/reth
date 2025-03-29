@@ -47,7 +47,10 @@ impl Peer {
 
     /// Returns a new trusted peer for given [`PeerAddr`].
     pub fn trusted(addr: PeerAddr) -> Self {
-        Self { kind: PeerKind::Trusted, ..Self::new(addr) }
+        Self {
+            kind: PeerKind::Trusted,
+            ..Self::new(addr)
+        }
     }
 
     /// Returns the reputation of the peer
@@ -71,7 +74,10 @@ impl Peer {
 
     /// Returns a new peer for given [`PeerAddr`] and [`PeerKind`].
     pub fn with_kind(addr: PeerAddr, kind: PeerKind) -> Self {
-        Self { kind, ..Self::new(addr) }
+        Self {
+            kind,
+            ..Self::new(addr)
+        }
     }
 
     /// Resets the reputation of the peer to the default value. This always returns
@@ -92,15 +98,15 @@ impl Peer {
 
         if self.state.is_connected() && self.is_banned() {
             self.state.disconnect();
-            return ReputationChangeOutcome::DisconnectAndBan
+            return ReputationChangeOutcome::DisconnectAndBan;
         }
 
         if self.is_banned() && !is_banned_reputation(previous) {
-            return ReputationChangeOutcome::Ban
+            return ReputationChangeOutcome::Ban;
         }
 
         if !self.is_banned() && is_banned_reputation(previous) {
-            return ReputationChangeOutcome::Unban
+            return ReputationChangeOutcome::Unban;
         }
 
         ReputationChangeOutcome::None

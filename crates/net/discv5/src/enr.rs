@@ -11,7 +11,7 @@ use secp256k1::{PublicKey, SecretKey};
 pub fn enr_to_discv4_id(enr: &discv5::Enr) -> Option<PeerId> {
     let pk = enr.public_key();
     if !matches!(pk, CombinedPublicKey::Secp256k1(_)) {
-        return None
+        return None;
     }
 
     let pk = PublicKey::from_slice(&pk.encode()).unwrap();
@@ -30,7 +30,9 @@ pub fn discv4_id_to_multiaddr_id(
 ) -> Result<discv5::libp2p_identity::PeerId, secp256k1::Error> {
     let pk = id2pk(peer_id)?.encode();
     let pk: discv5::libp2p_identity::PublicKey =
-        discv5::libp2p_identity::secp256k1::PublicKey::try_from_bytes(&pk).unwrap().into();
+        discv5::libp2p_identity::secp256k1::PublicKey::try_from_bytes(&pk)
+            .unwrap()
+            .into();
 
     Ok(pk.to_peer_id())
 }

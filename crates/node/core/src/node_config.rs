@@ -301,7 +301,10 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         let max_block = if let Some(block) = self.debug.max_block {
             Some(block)
         } else if let Some(tip) = self.debug.tip {
-            Some(self.lookup_or_fetch_tip(provider, network_client, tip).await?)
+            Some(
+                self.lookup_or_fetch_tip(provider, network_client, tip)
+                    .await?,
+            )
         } else {
             None
         };
@@ -320,7 +323,10 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     {
         let provider = factory.database_provider_ro()?;
 
-        let head = provider.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default().block_number;
+        let head = provider
+            .get_stage_checkpoint(StageId::Finish)?
+            .unwrap_or_default()
+            .block_number;
 
         let header = provider
             .header_by_number(head)?
@@ -364,10 +370,13 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         // try to look up the header in the database
         if let Some(header) = header {
             info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
-            return Ok(header.number())
+            return Ok(header.number());
         }
 
-        Ok(self.fetch_tip_from_network(client, tip.into()).await.number())
+        Ok(self
+            .fetch_tip_from_network(client, tip.into())
+            .await
+            .number())
     }
 
     /// Attempt to look up the block with the given number and return the header.
@@ -387,7 +396,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             match get_single_header(&client, tip).await {
                 Ok(tip_header) => {
                     info!(target: "reth::cli", ?tip, "Successfully fetched tip");
-                    return tip_header
+                    return tip_header;
                 }
                 Err(error) => {
                     fetch_failures += 1;

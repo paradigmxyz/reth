@@ -36,7 +36,10 @@ impl<'a, TX: DbTx> DatabaseProof<'a, TX>
 {
     /// Create a new [Proof] instance from database transaction.
     fn from_tx(tx: &'a TX) -> Self {
-        Self::new(DatabaseTrieCursorFactory::new(tx), DatabaseHashedCursorFactory::new(tx))
+        Self::new(
+            DatabaseTrieCursorFactory::new(tx),
+            DatabaseHashedCursorFactory::new(tx),
+        )
     }
 
     fn overlay_account_proof(
@@ -107,7 +110,11 @@ impl<'a, TX: DbTx> DatabaseStorageProof<'a, TX>
     for StorageProof<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>
 {
     fn from_tx(tx: &'a TX, address: Address) -> Self {
-        Self::new(DatabaseTrieCursorFactory::new(tx), DatabaseHashedCursorFactory::new(tx), address)
+        Self::new(
+            DatabaseTrieCursorFactory::new(tx),
+            DatabaseHashedCursorFactory::new(tx),
+            address,
+        )
     }
 
     fn overlay_storage_proof(

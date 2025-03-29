@@ -112,10 +112,13 @@ where
         let mut actions_to_queue: Vec<BlobTransactionEvent> = Vec::new();
 
         if txs.is_empty() {
-            return
+            return;
         }
 
-        match self.pool.get_all_blobs_exact(txs.iter().map(|(tx, _)| *tx.tx_hash()).collect()) {
+        match self
+            .pool
+            .get_all_blobs_exact(txs.iter().map(|(tx, _)| *tx.tx_hash()).collect())
+        {
             Ok(blobs) => {
                 actions_to_queue.reserve_exact(txs.len());
                 for ((tx, _), sidecar) in txs.iter().zip(blobs.into_iter()) {
@@ -149,8 +152,12 @@ where
             let block_root = block.hash();
             let block_clone = block.clone();
             let sidecar_url = self.beacon_config.sidecar_url(block_root);
-            let query =
-                Box::pin(fetch_blobs_for_block(client_clone, sidecar_url, block_clone, txs));
+            let query = Box::pin(fetch_blobs_for_block(
+                client_clone,
+                sidecar_url,
+                block_clone,
+                txs,
+            ));
             self.pending_requests.push(query);
         }
     }
@@ -170,7 +177,7 @@ where
         // Request locally first, otherwise request from CL
         loop {
             if let Some(mined_sidecar) = this.queued_actions.pop_front() {
-                return Poll::Ready(Some(Ok(mined_sidecar)))
+                return Poll::Ready(Some(Ok(mined_sidecar)));
             }
 
             // Check if any pending requests are ready and append to buffer
@@ -235,27 +242,32 @@ async fn fetch_blobs_for_block(
     block: RecoveredBlock<reth::primitives::Block>,
     txs: Vec<(reth::primitives::TransactionSigned, usize)>,
 ) -> Result<Vec<BlobTransactionEvent>, SideCarError> {
-    let response = match client.get(url).header("Accept", "application/json").send().await {
+    let response = match client
+        .get(url)
+        .header("Accept", "application/json")
+        .send()
+        .await
+    {
         Ok(response) => response,
         Err(err) => return Err(SideCarError::ReqwestError(err)),
     };
 
     if !response.status().is_success() {
         return match response.status() {
-            StatusCode::BAD_REQUEST => {
-                Err(SideCarError::InvalidBlockID("Invalid request to server.".to_string()))
-            }
-            StatusCode::NOT_FOUND => {
-                Err(SideCarError::BlockNotFound("Requested block not found.".to_string()))
-            }
-            StatusCode::INTERNAL_SERVER_ERROR => {
-                Err(SideCarError::InternalError("Server encountered an error.".to_string()))
-            }
+            StatusCode::BAD_REQUEST => Err(SideCarError::InvalidBlockID(
+                "Invalid request to server.".to_string(),
+            )),
+            StatusCode::NOT_FOUND => Err(SideCarError::BlockNotFound(
+                "Requested block not found.".to_string(),
+            )),
+            StatusCode::INTERNAL_SERVER_ERROR => Err(SideCarError::InternalError(
+                "Server encountered an error.".to_string(),
+            )),
             _ => Err(SideCarError::UnknownError(
                 response.status().as_u16(),
                 "Unhandled HTTP status.".to_string(),
             )),
-        }
+        };
     }
 
     let bytes = match response.bytes().await {
@@ -273,22 +285,27 @@ async fn fetch_blobs_for_block(
     let sidecars: Vec<BlobTransactionEvent> = txs
         .iter()
         .filter_map(|(tx, blob_len)| {
-            sidecar_iterator.next_sidecar(*blob_len).and_then(|sidecar| {
-                if let PooledTransaction::Eip4844(transaction) = tx
-                    .clone()
-                    .try_into_pooled_eip4844(sidecar)
-                    .expect("should not fail to convert blob tx if it is already eip4844")
-                {
-                    let block_metadata = BlockMetadata {
-                        block_hash: block.hash(),
-                        block_number: block.number,
-                        gas_used: block.gas_used,
-                    };
-                    Some(BlobTransactionEvent::Mined(MinedBlob { transaction, block_metadata }))
-                } else {
-                    None
-                }
-            })
+            sidecar_iterator
+                .next_sidecar(*blob_len)
+                .and_then(|sidecar| {
+                    if let PooledTransaction::Eip4844(transaction) = tx
+                        .clone()
+                        .try_into_pooled_eip4844(sidecar)
+                        .expect("should not fail to convert blob tx if it is already eip4844")
+                    {
+                        let block_metadata = BlockMetadata {
+                            block_hash: block.hash(),
+                            block_number: block.number,
+                            gas_used: block.gas_used,
+                        };
+                        Some(BlobTransactionEvent::Mined(MinedBlob {
+                            transaction,
+                            block_metadata,
+                        }))
+                    } else {
+                        None
+                    }
+                })
         })
         .collect();
 

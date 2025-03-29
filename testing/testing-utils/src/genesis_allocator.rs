@@ -54,7 +54,10 @@ impl<'a> GenesisAllocator<'a> {
     where
         R: RngCore,
     {
-        Self { alloc: HashMap::default(), rng: Box::new(rng) }
+        Self {
+            alloc: HashMap::default(),
+            rng: Box::new(rng),
+        }
     }
 
     /// Use the provided rng for generating key pairs.
@@ -74,7 +77,8 @@ impl<'a> GenesisAllocator<'a> {
         let pair = Keypair::new(&secp, &mut self.rng);
         let address = public_key_to_address(pair.public_key());
 
-        self.alloc.insert(address, GenesisAccount::default().with_balance(balance));
+        self.alloc
+            .insert(address, GenesisAccount::default().with_balance(balance));
 
         (pair, address)
     }
@@ -91,8 +95,12 @@ impl<'a> GenesisAllocator<'a> {
         let pair = Keypair::new(&secp, &mut self.rng);
         let address = public_key_to_address(pair.public_key());
 
-        self.alloc
-            .insert(address, GenesisAccount::default().with_balance(balance).with_code(Some(code)));
+        self.alloc.insert(
+            address,
+            GenesisAccount::default()
+                .with_balance(balance)
+                .with_code(Some(code)),
+        );
 
         (pair, address)
     }
@@ -111,7 +119,9 @@ impl<'a> GenesisAllocator<'a> {
 
         self.alloc.insert(
             address,
-            GenesisAccount::default().with_balance(balance).with_storage(Some(storage)),
+            GenesisAccount::default()
+                .with_balance(balance)
+                .with_storage(Some(storage)),
         );
 
         (pair, address)
@@ -131,7 +141,9 @@ impl<'a> GenesisAllocator<'a> {
 
         self.alloc.insert(
             address,
-            GenesisAccount::default().with_code(Some(code)).with_storage(Some(storage)),
+            GenesisAccount::default()
+                .with_code(Some(code))
+                .with_storage(Some(storage)),
         );
 
         (pair, address)
@@ -145,7 +157,8 @@ impl<'a> GenesisAllocator<'a> {
         let pair = Keypair::new(&secp, &mut self.rng);
         let address = public_key_to_address(pair.public_key());
 
-        self.alloc.insert(address, GenesisAccount::default().with_code(Some(code)));
+        self.alloc
+            .insert(address, GenesisAccount::default().with_code(Some(code)));
 
         (pair, address)
     }
@@ -155,7 +168,8 @@ impl<'a> GenesisAllocator<'a> {
     /// Neither the key pair nor the account will be returned, since the address is provided by
     /// the user and the signer may be unknown.
     pub fn add_funded_account_with_address(&mut self, address: Address, balance: U256) {
-        self.alloc.insert(address, GenesisAccount::default().with_balance(balance));
+        self.alloc
+            .insert(address, GenesisAccount::default().with_balance(balance));
     }
 
     /// Adds the given [`GenesisAccount`] to the genesis alloc.
@@ -196,12 +210,17 @@ impl<'a> GenesisAllocator<'a> {
 
 impl Default for GenesisAllocator<'_> {
     fn default() -> Self {
-        Self { alloc: HashMap::default(), rng: Box::new(thread_rng()) }
+        Self {
+            alloc: HashMap::default(),
+            rng: Box::new(thread_rng()),
+        }
     }
 }
 
 impl fmt::Debug for GenesisAllocator<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("GenesisAllocator").field("alloc", &self.alloc).finish_non_exhaustive()
+        f.debug_struct("GenesisAllocator")
+            .field("alloc", &self.alloc)
+            .finish_non_exhaustive()
     }
 }

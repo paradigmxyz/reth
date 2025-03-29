@@ -24,9 +24,9 @@ impl Command {
         provider_factory: ProviderFactory<N>,
     ) -> eyre::Result<()> {
         match self.subcommand {
-            Subcommands::Mdbx { table } => {
-                table.view(&ClearViewer { db: provider_factory.db_ref() })?
-            }
+            Subcommands::Mdbx { table } => table.view(&ClearViewer {
+                db: provider_factory.db_ref(),
+            })?,
             Subcommands::StaticFile { segment } => {
                 let static_file_provider = provider_factory.static_file_provider();
                 let static_files = iter_static_files(static_file_provider.directory())?;

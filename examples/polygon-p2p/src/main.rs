@@ -58,7 +58,9 @@ async fn main() {
     // Set Discv4 lookup interval to 1 second
     let mut discv4_cfg = Discv4ConfigBuilder::default();
     let interval = Duration::from_secs(1);
-    discv4_cfg.add_boot_nodes(boot_nodes()).lookup_interval(interval);
+    discv4_cfg
+        .add_boot_nodes(boot_nodes())
+        .lookup_interval(interval);
     let net_cfg = net_cfg.set_discovery_v4(discv4_cfg.build());
 
     let net_manager = NetworkManager::eth(net_cfg).await.unwrap();
@@ -75,9 +77,17 @@ async fn main() {
         // For the sake of the example we only print the session established event
         // with the chain specific details
         if let NetworkEvent::ActivePeerSession { info, .. } = evt {
-            let SessionInfo { status, client_version, .. } = info;
+            let SessionInfo {
+                status,
+                client_version,
+                ..
+            } = info;
             let chain = status.chain;
-            info!(?chain, ?client_version, "Session established with a new peer.");
+            info!(
+                ?chain,
+                ?client_version,
+                "Session established with a new peer."
+            );
         }
         // More events here
     }

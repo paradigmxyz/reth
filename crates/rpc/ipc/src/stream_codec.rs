@@ -62,7 +62,10 @@ impl StreamCodec {
 
     /// New custom stream codec
     pub const fn new(incoming_separator: Separator, outgoing_separator: Separator) -> Self {
-        Self { incoming_separator, outgoing_separator }
+        Self {
+            incoming_separator,
+            outgoing_separator,
+        }
     }
 }
 
@@ -117,7 +120,7 @@ impl tokio_util::codec::Decoder for StreamCodec {
                     return match String::from_utf8(bts.into()) {
                         Ok(val) => Ok(Some(val)),
                         Err(_) => Ok(None),
-                    }
+                    };
                 }
             }
             Ok(None)
@@ -219,7 +222,9 @@ mod tests {
             .expect("There should be a request in 3rd whitespace test");
         assert_eq!(request3, "\n\r{\n test: 3 }");
 
-        let request4 = codec.decode(&mut buf).expect("There should be no error in first 4th test");
+        let request4 = codec
+            .decode(&mut buf)
+            .expect("There should be no error in first 4th test");
         assert!(
             request4.is_none(),
             "There should be no 4th request because it contains only whitespaces"

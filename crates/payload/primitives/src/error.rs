@@ -157,7 +157,9 @@ impl NewPayloadError {
 
 impl From<NewPayloadError> for PayloadStatusEnum {
     fn from(error: NewPayloadError) -> Self {
-        Self::Invalid { validation_error: error.to_string() }
+        Self::Invalid {
+            validation_error: error.to_string(),
+        }
     }
 }
 

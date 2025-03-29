@@ -204,7 +204,7 @@ impl FromStr for RpcModuleSelection {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.is_empty() {
-            return Ok(Self::Selection(Default::default()))
+            return Ok(Self::Selection(Default::default()));
         }
         let mut modules = s.split(',').map(str::trim).peekable();
         let first = modules.peek().copied().ok_or(ParseError::VariantNotFound)?;
@@ -224,7 +224,10 @@ impl fmt::Display for RpcModuleSelection {
         write!(
             f,
             "[{}]",
-            self.iter_selection().map(|s| s.to_string()).collect::<Vec<_>>().join(", ")
+            self.iter_selection()
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
         )
     }
 }
@@ -379,7 +382,10 @@ mod test {
     fn test_try_from_selection_success() {
         let selection = vec!["eth", "admin"];
         let config = RpcModuleSelection::try_from_selection(selection).unwrap();
-        assert_eq!(config, RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Admin]));
+        assert_eq!(
+            config,
+            RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Admin])
+        );
     }
 
     #[test]
@@ -408,7 +414,10 @@ mod test {
         let standard = RpcModuleSelection::Standard;
         let selection = RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Admin]);
 
-        assert_eq!(all_modules.iter_selection().count(), RethRpcModule::variant_count());
+        assert_eq!(
+            all_modules.iter_selection().count(),
+            RethRpcModule::variant_count()
+        );
         assert_eq!(standard.iter_selection().count(), 3);
         assert_eq!(selection.iter_selection().count(), 2);
     }
@@ -419,8 +428,14 @@ mod test {
         let standard = RpcModuleSelection::Standard;
         let selection = RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Admin]);
 
-        assert_eq!(all_modules.to_selection(), RpcModuleSelection::all_modules());
-        assert_eq!(standard.to_selection(), RpcModuleSelection::standard_modules());
+        assert_eq!(
+            all_modules.to_selection(),
+            RpcModuleSelection::all_modules()
+        );
+        assert_eq!(
+            standard.to_selection(),
+            RpcModuleSelection::standard_modules()
+        );
         assert_eq!(
             selection.to_selection(),
             HashSet::from([RethRpcModule::Eth, RethRpcModule::Admin])
@@ -434,7 +449,10 @@ mod test {
         // Since both selections include all possible RPC modules, they should be considered
         // identical.
         let all_modules = RpcModuleSelection::All;
-        assert!(RpcModuleSelection::are_identical(Some(&all_modules), Some(&all_modules)));
+        assert!(RpcModuleSelection::are_identical(
+            Some(&all_modules),
+            Some(&all_modules)
+        ));
 
         // Test scenario: both `http` and `ws` are `None`
         //
@@ -448,7 +466,10 @@ mod test {
         // so they should be considered identical.
         let selection1 = RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Admin]);
         let selection2 = RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Admin]);
-        assert!(RpcModuleSelection::are_identical(Some(&selection1), Some(&selection2)));
+        assert!(RpcModuleSelection::are_identical(
+            Some(&selection1),
+            Some(&selection2)
+        ));
 
         // Test scenario: one selection is `All`, the other is `Standard`
         //
@@ -456,15 +477,24 @@ mod test {
         // Since `Standard` does not cover all modules, these two selections should not be
         // considered identical.
         let standard = RpcModuleSelection::Standard;
-        assert!(!RpcModuleSelection::are_identical(Some(&all_modules), Some(&standard)));
+        assert!(!RpcModuleSelection::are_identical(
+            Some(&all_modules),
+            Some(&standard)
+        ));
 
         // Test scenario: one is `None`, the other is an empty selection
         //
         // When one selection is `None` and the other is an empty selection (no modules),
         // they should be considered identical because neither selects any modules.
         let empty_selection = RpcModuleSelection::Selection(HashSet::new());
-        assert!(RpcModuleSelection::are_identical(None, Some(&empty_selection)));
-        assert!(RpcModuleSelection::are_identical(Some(&empty_selection), None));
+        assert!(RpcModuleSelection::are_identical(
+            None,
+            Some(&empty_selection)
+        ));
+        assert!(RpcModuleSelection::are_identical(
+            Some(&empty_selection),
+            None
+        ));
 
         // Test scenario: one is `None`, the other is a non-empty selection
         //
@@ -472,15 +502,24 @@ mod test {
         // identical because `None` represents no selection, while the other explicitly
         // selects modules.
         let non_empty_selection = RpcModuleSelection::from([RethRpcModule::Eth]);
-        assert!(!RpcModuleSelection::are_identical(None, Some(&non_empty_selection)));
-        assert!(!RpcModuleSelection::are_identical(Some(&non_empty_selection), None));
+        assert!(!RpcModuleSelection::are_identical(
+            None,
+            Some(&non_empty_selection)
+        ));
+        assert!(!RpcModuleSelection::are_identical(
+            Some(&non_empty_selection),
+            None
+        ));
 
         // Test scenario: `All` vs. non-full selection
         //
         // If one selection is `All` (which includes all modules) and the other contains only a
         // subset of modules, they should not be considered identical.
         let partial_selection = RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Net]);
-        assert!(!RpcModuleSelection::are_identical(Some(&all_modules), Some(&partial_selection)));
+        assert!(!RpcModuleSelection::are_identical(
+            Some(&all_modules),
+            Some(&partial_selection)
+        ));
 
         // Test scenario: full selection vs `All`
         //
@@ -488,7 +527,10 @@ mod test {
         // to `All`.
         let full_selection =
             RpcModuleSelection::from(RethRpcModule::modules().into_iter().collect::<HashSet<_>>());
-        assert!(RpcModuleSelection::are_identical(Some(&all_modules), Some(&full_selection)));
+        assert!(RpcModuleSelection::are_identical(
+            Some(&all_modules),
+            Some(&full_selection)
+        ));
 
         // Test scenario: different non-empty selections
         //
@@ -496,14 +538,20 @@ mod test {
         // identical.
         let selection3 = RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Net]);
         let selection4 = RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Web3]);
-        assert!(!RpcModuleSelection::are_identical(Some(&selection3), Some(&selection4)));
+        assert!(!RpcModuleSelection::are_identical(
+            Some(&selection3),
+            Some(&selection4)
+        ));
 
         // Test scenario: `Standard` vs an equivalent selection
         // The `Standard` selection includes a predefined set of modules. If we explicitly create
         // a selection with the same set of modules, they should be considered identical.
         let matching_standard =
             RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Net, RethRpcModule::Web3]);
-        assert!(RpcModuleSelection::are_identical(Some(&standard), Some(&matching_standard)));
+        assert!(RpcModuleSelection::are_identical(
+            Some(&standard),
+            Some(&matching_standard)
+        ));
 
         // Test scenario: `Standard` vs non-matching selection
         //
@@ -511,7 +559,10 @@ mod test {
         // considered identical.
         let non_matching_standard =
             RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Net]);
-        assert!(!RpcModuleSelection::are_identical(Some(&standard), Some(&non_matching_standard)));
+        assert!(!RpcModuleSelection::are_identical(
+            Some(&standard),
+            Some(&non_matching_standard)
+        ));
     }
 
     #[test]
@@ -519,7 +570,10 @@ mod test {
         // Test empty string returns default selection
         let result = RpcModuleSelection::from_str("");
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), RpcModuleSelection::Selection(Default::default()));
+        assert_eq!(
+            result.unwrap(),
+            RpcModuleSelection::Selection(Default::default())
+        );
 
         // Test "all" (case insensitive) returns All variant
         let result = RpcModuleSelection::from_str("all");
@@ -537,15 +591,24 @@ mod test {
         // Test "none" (case insensitive) returns empty selection
         let result = RpcModuleSelection::from_str("none");
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), RpcModuleSelection::Selection(Default::default()));
+        assert_eq!(
+            result.unwrap(),
+            RpcModuleSelection::Selection(Default::default())
+        );
 
         let result = RpcModuleSelection::from_str("None");
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), RpcModuleSelection::Selection(Default::default()));
+        assert_eq!(
+            result.unwrap(),
+            RpcModuleSelection::Selection(Default::default())
+        );
 
         let result = RpcModuleSelection::from_str("NONE");
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), RpcModuleSelection::Selection(Default::default()));
+        assert_eq!(
+            result.unwrap(),
+            RpcModuleSelection::Selection(Default::default())
+        );
 
         // Test valid selections: "eth,admin"
         let result = RpcModuleSelection::from_str("eth,admin");

@@ -69,10 +69,17 @@ impl PoolConfig {
     /// Returns whether the size and amount constraints in any sub-pools are exceeded.
     #[inline]
     pub const fn is_exceeded(&self, pool_size: PoolSize) -> bool {
-        self.blob_limit.is_exceeded(pool_size.blob, pool_size.blob_size) ||
-            self.pending_limit.is_exceeded(pool_size.pending, pool_size.pending_size) ||
-            self.basefee_limit.is_exceeded(pool_size.basefee, pool_size.basefee_size) ||
-            self.queued_limit.is_exceeded(pool_size.queued, pool_size.queued_size)
+        self.blob_limit
+            .is_exceeded(pool_size.blob, pool_size.blob_size)
+            || self
+                .pending_limit
+                .is_exceeded(pool_size.pending, pool_size.pending_size)
+            || self
+                .basefee_limit
+                .is_exceeded(pool_size.basefee, pool_size.basefee_size)
+            || self
+                .queued_limit
+                .is_exceeded(pool_size.queued, pool_size.queued_size)
     }
 }
 
@@ -124,7 +131,10 @@ impl Mul<usize> for SubPoolLimit {
 
     fn mul(self, rhs: usize) -> Self::Output {
         let Self { max_txs, max_size } = self;
-        Self { max_txs: max_txs * rhs, max_size: max_size * rhs }
+        Self {
+            max_txs: max_txs * rhs,
+            max_size: max_size * rhs,
+        }
     }
 }
 
@@ -152,7 +162,7 @@ impl PriceBumpConfig {
     #[inline]
     pub(crate) const fn price_bump(&self, tx_type: u8) -> u128 {
         if tx_type == EIP4844_TX_TYPE_ID {
-            return self.replace_blob_tx_price_bump
+            return self.replace_blob_tx_price_bump;
         }
         self.default_price_bump
     }
@@ -213,7 +223,7 @@ impl LocalTransactionConfig {
     #[inline]
     pub fn is_local(&self, origin: TransactionOrigin, sender: &Address) -> bool {
         if self.no_local_exemptions() {
-            return false
+            return false;
         }
         origin.is_local() || self.contains_local_address(sender)
     }
@@ -280,7 +290,10 @@ mod tests {
 
     #[test]
     fn test_no_local_exemptions() {
-        let config = LocalTransactionConfig { no_exemptions: true, ..Default::default() };
+        let config = LocalTransactionConfig {
+            no_exemptions: true,
+            ..Default::default()
+        };
         assert!(config.no_local_exemptions());
     }
 
@@ -290,7 +303,10 @@ mod tests {
         let mut local_addresses = HashSet::default();
         local_addresses.insert(address);
 
-        let config = LocalTransactionConfig { local_addresses, ..Default::default() };
+        let config = LocalTransactionConfig {
+            local_addresses,
+            ..Default::default()
+        };
 
         // Should contain the inserted address
         assert!(config.contains_local_address(&address));
@@ -318,8 +334,11 @@ mod tests {
         let mut local_addresses = HashSet::default();
         local_addresses.insert(address);
 
-        let config =
-            LocalTransactionConfig { no_exemptions: false, local_addresses, ..Default::default() };
+        let config = LocalTransactionConfig {
+            no_exemptions: false,
+            local_addresses,
+            ..Default::default()
+        };
 
         // Should return true as the transaction origin is local
         assert!(config.is_local(TransactionOrigin::Local, &Address::new([2; 20])));
@@ -346,7 +365,10 @@ mod tests {
         let double = limit * 2;
         assert_eq!(
             double,
-            SubPoolLimit { max_txs: limit.max_txs * 2, max_size: limit.max_size * 2 }
+            SubPoolLimit {
+                max_txs: limit.max_txs * 2,
+                max_size: limit.max_size * 2
+            }
         )
     }
 }

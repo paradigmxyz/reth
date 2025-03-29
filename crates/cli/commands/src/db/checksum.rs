@@ -66,7 +66,12 @@ pub(crate) struct ChecksumViewer<'a, N: NodeTypesWithDB> {
 
 impl<N: NodeTypesWithDB> ChecksumViewer<'_, N> {
     pub(crate) const fn new(tool: &'_ DbTool<N>) -> ChecksumViewer<'_, N> {
-        ChecksumViewer { tool, start_key: None, end_key: None, limit: None }
+        ChecksumViewer {
+            tool,
+            start_key: None,
+            end_key: None,
+            limit: None,
+        }
     }
 }
 
@@ -74,8 +79,11 @@ impl<N: ProviderNodeTypes> TableViewer<(u64, Duration)> for ChecksumViewer<'_, N
     type Error = eyre::Report;
 
     fn view<T: Table>(&self) -> Result<(u64, Duration), Self::Error> {
-        let provider =
-            self.tool.provider_factory.provider()?.disable_long_read_transaction_safety();
+        let provider = self
+            .tool
+            .provider_factory
+            .provider()?
+            .disable_long_read_transaction_safety();
         let tx = provider.tx_ref();
         info!(
             "Start computing checksum, start={:?}, end={:?}, limit={:?}",
@@ -125,20 +133,31 @@ impl<N: ProviderNodeTypes> TableViewer<(u64, Duration)> for ChecksumViewer<'_, N
 
             total = index + 1;
             if total >= limit {
-                break
+                break;
             }
         }
 
         info!("Hashed {total} entries.");
         if let (Some(s), Some(e)) = (enumerate_start_key, enumerate_end_key) {
-            info!("start-key: {}", serde_json::to_string(&s.key()?).unwrap_or_default());
-            info!("end-key: {}", serde_json::to_string(&e.key()?).unwrap_or_default());
+            info!(
+                "start-key: {}",
+                serde_json::to_string(&s.key()?).unwrap_or_default()
+            );
+            info!(
+                "end-key: {}",
+                serde_json::to_string(&e.key()?).unwrap_or_default()
+            );
         }
 
         let checksum = hasher.finish();
         let elapsed = start_time.elapsed();
 
-        info!("Checksum for table `{}`: {:#x} (elapsed: {:?})", T::NAME, checksum, elapsed);
+        info!(
+            "Checksum for table `{}`: {:#x} (elapsed: {:?})",
+            T::NAME,
+            checksum,
+            elapsed
+        );
 
         Ok((checksum, elapsed))
     }

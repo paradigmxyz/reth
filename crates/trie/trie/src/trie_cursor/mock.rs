@@ -28,10 +28,16 @@ impl MockTrieCursorFactory {
         account_trie_nodes: BTreeMap<Nibbles, BranchNodeCompact>,
         storage_tries: B256Map<BTreeMap<Nibbles, BranchNodeCompact>>,
     ) -> Self {
-        let visited_storage_keys = storage_tries.keys().map(|k| (*k, Default::default())).collect();
+        let visited_storage_keys = storage_tries
+            .keys()
+            .map(|k| (*k, Default::default()))
+            .collect();
         Self {
             account_trie_nodes: Arc::new(account_trie_nodes),
-            storage_tries: storage_tries.into_iter().map(|(k, v)| (k, Arc::new(v))).collect(),
+            storage_tries: storage_tries
+                .into_iter()
+                .map(|(k, v)| (k, Arc::new(v)))
+                .collect(),
             visited_account_keys: Default::default(),
             visited_storage_keys,
         }
@@ -47,7 +53,10 @@ impl MockTrieCursorFactory {
         &self,
         hashed_address: B256,
     ) -> MutexGuard<'_, Vec<KeyVisit<Nibbles>>> {
-        self.visited_storage_keys.get(&hashed_address).expect("storage trie should exist").lock()
+        self.visited_storage_keys
+            .get(&hashed_address)
+            .expect("storage trie should exist")
+            .lock()
     }
 }
 
@@ -57,7 +66,10 @@ impl TrieCursorFactory for MockTrieCursorFactory {
 
     /// Generates a mock account trie cursor.
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, DatabaseError> {
-        Ok(MockTrieCursor::new(self.account_trie_nodes.clone(), self.visited_account_keys.clone()))
+        Ok(MockTrieCursor::new(
+            self.account_trie_nodes.clone(),
+            self.visited_account_keys.clone(),
+        ))
     }
 
     /// Generates a mock storage trie cursor.
@@ -97,7 +109,11 @@ impl MockTrieCursor {
         trie_nodes: Arc<BTreeMap<Nibbles, BranchNodeCompact>>,
         visited_keys: Arc<Mutex<Vec<KeyVisit<Nibbles>>>>,
     ) -> Self {
-        Self { current_key: None, trie_nodes, visited_keys }
+        Self {
+            current_key: None,
+            trie_nodes,
+            visited_keys,
+        }
     }
 }
 
@@ -107,7 +123,11 @@ impl TrieCursor for MockTrieCursor {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let entry = self.trie_nodes.get(&key).cloned().map(|value| (key.clone(), value));
+        let entry = self
+            .trie_nodes
+            .get(&key)
+            .cloned()
+            .map(|value| (key.clone(), value));
         if let Some((key, _)) = &entry {
             self.current_key = Some(key.clone());
         }
@@ -124,8 +144,10 @@ impl TrieCursor for MockTrieCursor {
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         // Find the first key that is greater than or equal to the given key.
-        let entry =
-            self.trie_nodes.iter().find_map(|(k, v)| (k >= &key).then(|| (k.clone(), v.clone())));
+        let entry = self
+            .trie_nodes
+            .iter()
+            .find_map(|(k, v)| (k >= &key).then(|| (k.clone(), v.clone())));
         if let Some((key, _)) = &entry {
             self.current_key = Some(key.clone());
         }
@@ -141,8 +163,12 @@ impl TrieCursor for MockTrieCursor {
         let mut iter = self.trie_nodes.iter();
         // Jump to the first key that has a prefix of the current key if it's set, or to the first
         // key otherwise.
-        iter.find(|(k, _)| self.current_key.as_ref().is_none_or(|current| k.starts_with(current)))
-            .expect("current key should exist in trie nodes");
+        iter.find(|(k, _)| {
+            self.current_key
+                .as_ref()
+                .is_none_or(|current| k.starts_with(current))
+        })
+        .expect("current key should exist in trie nodes");
         // Get the next key-value pair.
         let entry = iter.next().map(|(k, v)| (k.clone(), v.clone()));
         if let Some((key, _)) = &entry {

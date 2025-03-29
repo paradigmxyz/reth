@@ -80,11 +80,11 @@ pub fn derive_zstd(input: TokenStream) -> TokenStream {
                     let path: syn::Path = value.parse()?;
                     decompressor = Some(path);
                 } else {
-                    return Err(meta.error("unsupported attribute"))
+                    return Err(meta.error("unsupported attribute"));
                 }
                 Ok(())
             }) {
-                return err.to_compile_error().into()
+                return err.to_compile_error().into();
             }
         }
     }
@@ -93,10 +93,16 @@ pub fn derive_zstd(input: TokenStream) -> TokenStream {
         return quote! {
             compile_error!("missing compressor or decompressor attribute");
         }
-        .into()
+        .into();
     };
 
-    compact::derive(input, Some(ZstdConfig { compressor, decompressor }))
+    compact::derive(
+        input,
+        Some(ZstdConfig {
+            compressor,
+            decompressor,
+        }),
+    )
 }
 
 /// Generates tests for given type.
@@ -144,7 +150,11 @@ impl Parse for GenerateTestsInput {
         input.parse::<Token![,]>()?;
         let mod_name = input.parse()?;
 
-        Ok(Self { args: args.into(), ty, mod_name })
+        Ok(Self {
+            args: args.into(),
+            ty,
+            mod_name,
+        })
     }
 }
 

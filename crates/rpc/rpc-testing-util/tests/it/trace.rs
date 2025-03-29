@@ -20,7 +20,7 @@ use std::time::Instant;
 async fn trace_many_blocks() {
     let url = parse_env_url("RETH_RPC_TEST_NODE_URL");
     if url.is_err() {
-        return
+        return;
     }
     let url = url.unwrap();
 
@@ -41,8 +41,12 @@ async fn replay_transactions() {
     let client = HttpClientBuilder::default().build(url).unwrap();
 
     let tx_hashes = vec![
-        "0x4e08fe36db723a338e852f89f613e606b0c9a17e649b18b01251f86236a2cef3".parse().unwrap(),
-        "0xea2817f1aeeb587b82f4ab87a6dbd3560fc35ed28de1be280cb40b2a24ab48bb".parse().unwrap(),
+        "0x4e08fe36db723a338e852f89f613e606b0c9a17e649b18b01251f86236a2cef3"
+            .parse()
+            .unwrap(),
+        "0xea2817f1aeeb587b82f4ab87a6dbd3560fc35ed28de1be280cb40b2a24ab48bb"
+            .parse()
+            .unwrap(),
     ];
 
     let trace_types = HashSet::from_iter([TraceType::StateDiff, TraceType::VmTrace]);
@@ -107,7 +111,7 @@ async fn trace_call() {
 async fn debug_trace_block_entire_chain() {
     let url = parse_env_url("RETH_RPC_TEST_NODE_URL");
     if url.is_err() {
-        return
+        return;
     }
     let url = url.unwrap();
 
@@ -136,7 +140,7 @@ async fn debug_trace_block_opcodes_entire_chain() {
     let opcodes7702 = ["EXTCODESIZE", "EXTCODECOPY", "EXTCODEHASH"];
     let url = parse_env_url("RETH_RPC_TEST_NODE_URL");
     if url.is_err() {
-        return
+        return;
     }
     let url = url.unwrap();
 
@@ -149,7 +153,9 @@ async fn debug_trace_block_opcodes_entire_chain() {
             .unwrap();
     let range = 0..=current_block;
     println!("Tracing blocks {range:?} for opcodes");
-    let mut stream = client.trace_block_opcode_gas_unordered(range, 2).enumerate();
+    let mut stream = client
+        .trace_block_opcode_gas_unordered(range, 2)
+        .enumerate();
     let now = Instant::now();
     while let Some((num, next)) = stream.next().await {
         match next {

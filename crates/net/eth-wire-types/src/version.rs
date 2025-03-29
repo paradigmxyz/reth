@@ -215,7 +215,10 @@ mod tests {
         assert_eq!(EthVersion::Eth67, EthVersion::try_from("67").unwrap());
         assert_eq!(EthVersion::Eth68, EthVersion::try_from("68").unwrap());
         assert_eq!(EthVersion::Eth69, EthVersion::try_from("69").unwrap());
-        assert_eq!(Err(ParseVersionError("70".to_string())), EthVersion::try_from("70"));
+        assert_eq!(
+            Err(ParseVersionError("70".to_string())),
+            EthVersion::try_from("70")
+        );
     }
 
     #[test]
@@ -224,12 +227,20 @@ mod tests {
         assert_eq!(EthVersion::Eth67, "67".parse().unwrap());
         assert_eq!(EthVersion::Eth68, "68".parse().unwrap());
         assert_eq!(EthVersion::Eth69, "69".parse().unwrap());
-        assert_eq!(Err(ParseVersionError("70".to_string())), "70".parse::<EthVersion>());
+        assert_eq!(
+            Err(ParseVersionError("70".to_string())),
+            "70".parse::<EthVersion>()
+        );
     }
 
     #[test]
     fn test_eth_version_rlp_encode() {
-        let versions = [EthVersion::Eth66, EthVersion::Eth67, EthVersion::Eth68, EthVersion::Eth69];
+        let versions = [
+            EthVersion::Eth66,
+            EthVersion::Eth67,
+            EthVersion::Eth68,
+            EthVersion::Eth69,
+        ];
 
         for version in versions {
             let mut encoded = BytesMut::new();

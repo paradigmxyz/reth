@@ -38,7 +38,10 @@ pub struct StaticFileProducer<Provider>(Arc<Mutex<StaticFileProducerInner<Provid
 impl<Provider> StaticFileProducer<Provider> {
     /// Creates a new [`StaticFileProducer`].
     pub fn new(provider: Provider, prune_modes: PruneModes) -> Self {
-        Self(Arc::new(Mutex::new(StaticFileProducerInner::new(provider, prune_modes))))
+        Self(Arc::new(Mutex::new(StaticFileProducerInner::new(
+            provider,
+            prune_modes,
+        ))))
     }
 }
 
@@ -71,7 +74,11 @@ pub struct StaticFileProducerInner<Provider> {
 
 impl<Provider> StaticFileProducerInner<Provider> {
     fn new(provider: Provider, prune_modes: PruneModes) -> Self {
-        Self { provider, prune_modes, event_sender: Default::default() }
+        Self {
+            provider,
+            prune_modes,
+            event_sender: Default::default(),
+        }
     }
 }
 
@@ -81,7 +88,9 @@ where
 {
     /// Returns the last finalized block number on disk.
     pub fn last_finalized_block(&self) -> ProviderResult<Option<BlockNumber>> {
-        self.provider.database_provider_ro()?.last_finalized_block_number()
+        self.provider
+            .database_provider_ro()?
+            .last_finalized_block_number()
     }
 }
 
@@ -116,20 +125,26 @@ where
     pub fn run(&self, targets: StaticFileTargets) -> StaticFileProducerResult {
         // If there are no targets, do not produce any static files and return early
         if !targets.any() {
-            return Ok(targets)
+            return Ok(targets);
         }
 
         debug_assert!(targets.is_contiguous_to_highest_static_files(
-            self.provider.static_file_provider().get_highest_static_files()
+            self.provider
+                .static_file_provider()
+                .get_highest_static_files()
         ));
 
-        self.event_sender.notify(StaticFileProducerEvent::Started { targets: targets.clone() });
+        self.event_sender.notify(StaticFileProducerEvent::Started {
+            targets: targets.clone(),
+        });
 
         debug!(target: "static_file", ?targets, "StaticFileProducer started");
         let start = Instant::now();
 
-        let mut segments =
-            Vec::<(Box<dyn Segment<Provider::Provider>>, RangeInclusive<BlockNumber>)>::new();
+        let mut segments = Vec::<(
+            Box<dyn Segment<Provider::Provider>>,
+            RangeInclusive<BlockNumber>,
+        )>::new();
 
         if let Some(block_range) = targets.transactions.clone() {
             segments.push((Box::new(segments::Transactions), block_range));
@@ -166,8 +181,10 @@ where
         let elapsed = start.elapsed(); // TODO(alexey): track in metrics
         debug!(target: "static_file", ?targets, ?elapsed, "StaticFileProducer finished");
 
-        self.event_sender
-            .notify(StaticFileProducerEvent::Finished { targets: targets.clone(), elapsed });
+        self.event_sender.notify(StaticFileProducerEvent::Finished {
+            targets: targets.clone(),
+            elapsed,
+        });
 
         Ok(targets)
     }
@@ -180,7 +197,11 @@ where
         let provider = self.provider.database_provider_ro()?;
         let stages_checkpoints = [StageId::Headers, StageId::Execution, StageId::Bodies]
             .into_iter()
-            .map(|stage| provider.get_stage_checkpoint(stage).map(|c| c.map(|c| c.block_number)))
+            .map(|stage| {
+                provider
+                    .get_stage_checkpoint(stage)
+                    .map(|c| c.map(|c| c.block_number))
+            })
             .collect::<Result<Vec<_>, _>>()?;
 
         let highest_static_files = HighestStaticFiles {
@@ -202,34 +223,51 @@ where
         &self,
         finalized_block_numbers: HighestStaticFiles,
     ) -> ProviderResult<StaticFileTargets> {
-        let highest_static_files = self.provider.static_file_provider().get_highest_static_files();
+        let highest_static_files = self
+            .provider
+            .static_file_provider()
+            .get_highest_static_files();
 
         let targets = StaticFileTargets {
-            headers: finalized_block_numbers.headers.and_then(|finalized_block_number| {
-                self.get_static_file_target(highest_static_files.headers, finalized_block_number)
-            }),
-            // StaticFile receipts only if they're not pruned according to the user configuration
-            receipts: if self.prune_modes.receipts.is_none() &&
-                self.prune_modes.receipts_log_filter.is_empty()
-            {
-                finalized_block_numbers.receipts.and_then(|finalized_block_number| {
+            headers: finalized_block_numbers
+                .headers
+                .and_then(|finalized_block_number| {
                     self.get_static_file_target(
-                        highest_static_files.receipts,
+                        highest_static_files.headers,
                         finalized_block_number,
                     )
-                })
+                }),
+            // StaticFile receipts only if they're not pruned according to the user configuration
+            receipts: if self.prune_modes.receipts.is_none()
+                && self.prune_modes.receipts_log_filter.is_empty()
+            {
+                finalized_block_numbers
+                    .receipts
+                    .and_then(|finalized_block_number| {
+                        self.get_static_file_target(
+                            highest_static_files.receipts,
+                            finalized_block_number,
+                        )
+                    })
             } else {
                 None
             },
-            transactions: finalized_block_numbers.transactions.and_then(|finalized_block_number| {
-                self.get_static_file_target(
-                    highest_static_files.transactions,
-                    finalized_block_number,
-                )
-            }),
-            block_meta: finalized_block_numbers.block_meta.and_then(|finalized_block_number| {
-                self.get_static_file_target(highest_static_files.block_meta, finalized_block_number)
-            }),
+            transactions: finalized_block_numbers
+                .transactions
+                .and_then(|finalized_block_number| {
+                    self.get_static_file_target(
+                        highest_static_files.transactions,
+                        finalized_block_number,
+                    )
+                }),
+            block_meta: finalized_block_numbers
+                .block_meta
+                .and_then(|finalized_block_number| {
+                    self.get_static_file_target(
+                        highest_static_files.block_meta,
+                        finalized_block_number,
+                    )
+                }),
         };
 
         trace!(
@@ -282,16 +320,23 @@ mod tests {
         let blocks = random_block_range(
             &mut rng,
             0..=3,
-            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
+            BlockRangeParams {
+                parent: Some(B256::ZERO),
+                tx_count: 2..3,
+                ..Default::default()
+            },
         );
-        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None))
+            .expect("insert blocks");
         // Unwind headers from static_files and manually insert them into the database, so we're
         // able to check that static_file_producer works
         let static_file_provider = db.factory.static_file_provider();
         let mut static_file_writer = static_file_provider
             .latest_writer(StaticFileSegment::Headers)
             .expect("get static file writer for headers");
-        static_file_writer.prune_headers(blocks.len() as u64).unwrap();
+        static_file_writer
+            .prune_headers(blocks.len() as u64)
+            .unwrap();
         static_file_writer.commit().expect("prune headers");
 
         let tx = db.factory.db_ref().tx_mut().expect("init tx");
@@ -304,8 +349,10 @@ mod tests {
         let mut receipts = Vec::new();
         for block in &blocks {
             for transaction in &block.body().transactions {
-                receipts
-                    .push((receipts.len() as u64, random_receipt(&mut rng, transaction, Some(0))));
+                receipts.push((
+                    receipts.len() as u64,
+                    random_receipt(&mut rng, transaction, Some(0)),
+                ));
             }
         }
         db.insert_receipts(receipts).expect("insert receipts");
@@ -340,7 +387,9 @@ mod tests {
         );
         assert_matches!(static_file_producer.run(targets), Ok(_));
         assert_eq!(
-            provider_factory.static_file_provider().get_highest_static_files(),
+            provider_factory
+                .static_file_provider()
+                .get_highest_static_files(),
             HighestStaticFiles {
                 headers: Some(1),
                 receipts: Some(1),
@@ -368,7 +417,9 @@ mod tests {
         );
         assert_matches!(static_file_producer.run(targets), Ok(_));
         assert_eq!(
-            provider_factory.static_file_provider().get_highest_static_files(),
+            provider_factory
+                .static_file_provider()
+                .get_highest_static_files(),
             HighestStaticFiles {
                 headers: Some(3),
                 receipts: Some(3),
@@ -399,7 +450,9 @@ mod tests {
             Err(ProviderError::BlockBodyIndicesNotFound(4))
         );
         assert_eq!(
-            provider_factory.static_file_provider().get_highest_static_files(),
+            provider_factory
+                .static_file_provider()
+                .get_highest_static_files(),
             HighestStaticFiles {
                 headers: Some(3),
                 receipts: Some(3),

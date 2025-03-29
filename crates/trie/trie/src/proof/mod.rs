@@ -121,8 +121,10 @@ where
 
         // Initialize all storage multiproofs as empty.
         // Storage multiproofs for non empty tries will be overwritten if necessary.
-        let mut storages: B256Map<_> =
-            targets.keys().map(|key| (*key, StorageMultiProof::empty())).collect();
+        let mut storages: B256Map<_> = targets
+            .keys()
+            .map(|key| (*key, StorageMultiProof::empty()))
+            .collect();
         let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
         let mut account_node_iter = TrieNodeIter::new(walker, hashed_account_cursor);
         while let Some(account_node) = account_node_iter.try_next()? {
@@ -180,7 +182,12 @@ where
             (HashMap::default(), HashMap::default())
         };
 
-        Ok(MultiProof { account_subtree, branch_node_hash_masks, branch_node_tree_masks, storages })
+        Ok(MultiProof {
+            account_subtree,
+            branch_node_hash_masks,
+            branch_node_tree_masks,
+            storages,
+        })
     }
 }
 
@@ -270,18 +277,21 @@ where
         mut self,
         targets: B256Set,
     ) -> Result<StorageMultiProof, StateProofError> {
-        let mut hashed_storage_cursor =
-            self.hashed_cursor_factory.hashed_storage_cursor(self.hashed_address)?;
+        let mut hashed_storage_cursor = self
+            .hashed_cursor_factory
+            .hashed_storage_cursor(self.hashed_address)?;
 
         // short circuit on empty storage
         if hashed_storage_cursor.is_storage_empty()? {
-            return Ok(StorageMultiProof::empty())
+            return Ok(StorageMultiProof::empty());
         }
 
         let target_nibbles = targets.into_iter().map(Nibbles::unpack).collect::<Vec<_>>();
         self.prefix_set.extend_keys(target_nibbles.clone());
 
-        let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?;
+        let trie_cursor = self
+            .trie_cursor_factory
+            .storage_trie_cursor(self.hashed_address)?;
         let walker = TrieWalker::new(trie_cursor, self.prefix_set.freeze());
 
         let retainer = ProofRetainer::from_iter(target_nibbles);
@@ -321,6 +331,11 @@ where
             (HashMap::default(), HashMap::default())
         };
 
-        Ok(StorageMultiProof { root, subtree, branch_node_hash_masks, branch_node_tree_masks })
+        Ok(StorageMultiProof {
+            root,
+            subtree,
+            branch_node_hash_masks,
+            branch_node_tree_masks,
+        })
     }
 }

@@ -27,10 +27,16 @@ pub fn assert_genesis_block<DB: Database, N: NodeTypes>(
     let tx = provider;
 
     // check if all tables are empty
-    assert_eq!(tx.table::<tables::Headers>().unwrap(), vec![(g.number, g.header().clone())]);
+    assert_eq!(
+        tx.table::<tables::Headers>().unwrap(),
+        vec![(g.number, g.header().clone())]
+    );
 
     assert_eq!(tx.table::<tables::HeaderNumbers>().unwrap(), vec![(h, n)]);
-    assert_eq!(tx.table::<tables::CanonicalHeaders>().unwrap(), vec![(n, h)]);
+    assert_eq!(
+        tx.table::<tables::CanonicalHeaders>().unwrap(),
+        vec![(n, h)]
+    );
     assert_eq!(
         tx.table::<tables::HeaderTerminalDifficulties>().unwrap(),
         vec![(n, g.difficulty.into())]
@@ -43,7 +49,10 @@ pub fn assert_genesis_block<DB: Database, N: NodeTypes>(
     assert_eq!(tx.table::<tables::BlockWithdrawals>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::Transactions>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::TransactionBlocks>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::TransactionHashNumbers>().unwrap(), vec![]);
+    assert_eq!(
+        tx.table::<tables::TransactionHashNumbers>().unwrap(),
+        vec![]
+    );
     assert_eq!(tx.table::<tables::Receipts>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::PlainAccountState>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::PlainStorageState>().unwrap(), vec![]);
@@ -126,7 +135,10 @@ pub struct BlockchainTestData {
     /// Genesis
     pub genesis: SealedBlock<reth_ethereum_primitives::Block>,
     /// Blocks with its execution result
-    pub blocks: Vec<(RecoveredBlock<reth_ethereum_primitives::Block>, ExecutionOutcome)>,
+    pub blocks: Vec<(
+        RecoveredBlock<reth_ethereum_primitives::Block>,
+        ExecutionOutcome,
+    )>,
 }
 
 impl BlockchainTestData {
@@ -141,7 +153,10 @@ impl BlockchainTestData {
         let four = block4(first + 3, three.0.hash(), &extended_execution_outcome);
         extended_execution_outcome.extend(four.1.clone());
         let five = block5(first + 4, four.0.hash(), &extended_execution_outcome);
-        Self { genesis: genesis(), blocks: vec![one, two, three, four, five] }
+        Self {
+            genesis: genesis(),
+            blocks: vec![one, two, three, four, five],
+        }
     }
 }
 
@@ -156,7 +171,10 @@ impl Default for BlockchainTestData {
         let four = block4(4, three.0.hash(), &extended_execution_outcome);
         extended_execution_outcome.extend(four.1.clone());
         let five = block5(5, four.0.hash(), &extended_execution_outcome);
-        Self { genesis: genesis(), blocks: vec![one, two, three, four, five] }
+        Self {
+            genesis: genesis(),
+            blocks: vec![one, two, three, four, five],
+        }
     }
 }
 
@@ -164,7 +182,11 @@ impl Default for BlockchainTestData {
 pub fn genesis() -> SealedBlock<reth_ethereum_primitives::Block> {
     SealedBlock::from_sealed_parts(
         SealedHeader::new(
-            Header { number: 0, difficulty: U256::from(1), ..Default::default() },
+            Header {
+                number: 0,
+                difficulty: U256::from(1),
+                ..Default::default()
+            },
             B256::ZERO,
         ),
         Default::default(),
@@ -193,12 +215,19 @@ fn bundle_state_root(execution_outcome: &ExecutionOutcome) -> B256 {
 /// Block one that points to genesis
 fn block1(
     number: BlockNumber,
-) -> (RecoveredBlock<reth_ethereum_primitives::Block>, ExecutionOutcome) {
+) -> (
+    RecoveredBlock<reth_ethereum_primitives::Block>,
+    ExecutionOutcome,
+) {
     // block changes
     let account1: Address = [0x60; 20].into();
     let account2: Address = [0x61; 20].into();
     let slot = U256::from(5);
-    let info = AccountInfo { nonce: 1, balance: U256::from(10), ..Default::default() };
+    let info = AccountInfo {
+        nonce: 1,
+        balance: U256::from(10),
+        ..Default::default()
+    };
 
     let execution_outcome = ExecutionOutcome::new(
         BundleState::builder(number..=number)
@@ -206,7 +235,10 @@ fn block1(
             .revert_account_info(number, account1, Some(None))
             .state_present_account_info(account2, info)
             .revert_account_info(number, account2, Some(None))
-            .state_storage(account1, HashMap::from_iter([(slot, (U256::ZERO, U256::from(10)))]))
+            .state_storage(
+                account1,
+                HashMap::from_iter([(slot, (U256::ZERO, U256::from(10)))]),
+            )
             .build(),
         vec![vec![Receipt {
             tx_type: TxType::Eip2930,
@@ -235,7 +267,10 @@ fn block1(
     header.parent_hash = B256::ZERO;
     let block = SealedBlock::seal_parts(header, body);
 
-    (RecoveredBlock::new_sealed(block, vec![Address::new([0x30; 20])]), execution_outcome)
+    (
+        RecoveredBlock::new_sealed(block, vec![Address::new([0x30; 20])]),
+        execution_outcome,
+    )
 }
 
 /// Block two that points to block 1
@@ -243,7 +278,10 @@ fn block2(
     number: BlockNumber,
     parent_hash: B256,
     prev_execution_outcome: &ExecutionOutcome,
-) -> (RecoveredBlock<reth_ethereum_primitives::Block>, ExecutionOutcome) {
+) -> (
+    RecoveredBlock<reth_ethereum_primitives::Block>,
+    ExecutionOutcome,
+) {
     // block changes
     let account: Address = [0x60; 20].into();
     let slot = U256::from(5);
@@ -252,13 +290,24 @@ fn block2(
         BundleState::builder(number..=number)
             .state_present_account_info(
                 account,
-                AccountInfo { nonce: 3, balance: U256::from(20), ..Default::default() },
+                AccountInfo {
+                    nonce: 3,
+                    balance: U256::from(20),
+                    ..Default::default()
+                },
             )
-            .state_storage(account, HashMap::from_iter([(slot, (U256::ZERO, U256::from(15)))]))
+            .state_storage(
+                account,
+                HashMap::from_iter([(slot, (U256::ZERO, U256::from(15)))]),
+            )
             .revert_account_info(
                 number,
                 account,
-                Some(Some(AccountInfo { nonce: 1, balance: U256::from(10), ..Default::default() })),
+                Some(Some(AccountInfo {
+                    nonce: 1,
+                    balance: U256::from(10),
+                    ..Default::default()
+                })),
             )
             .revert_storage(number, account, Vec::from([(slot, U256::from(10))]))
             .build(),
@@ -293,7 +342,10 @@ fn block2(
     header.parent_hash = parent_hash;
     let block = SealedBlock::seal_parts(header, body);
 
-    (RecoveredBlock::new_sealed(block, vec![Address::new([0x31; 20])]), execution_outcome)
+    (
+        RecoveredBlock::new_sealed(block, vec![Address::new([0x31; 20])]),
+        execution_outcome,
+    )
 }
 
 /// Block three that points to block 2
@@ -301,7 +353,10 @@ fn block3(
     number: BlockNumber,
     parent_hash: B256,
     prev_execution_outcome: &ExecutionOutcome,
-) -> (RecoveredBlock<reth_ethereum_primitives::Block>, ExecutionOutcome) {
+) -> (
+    RecoveredBlock<reth_ethereum_primitives::Block>,
+    ExecutionOutcome,
+) {
     let address_range = 1..=20;
     let slot_range = 1..=100;
 
@@ -311,7 +366,11 @@ fn block3(
         bundle_state_builder = bundle_state_builder
             .state_present_account_info(
                 address,
-                AccountInfo { nonce: 1, balance: U256::from(idx), ..Default::default() },
+                AccountInfo {
+                    nonce: 1,
+                    balance: U256::from(idx),
+                    ..Default::default()
+                },
             )
             .state_storage(
                 address,
@@ -351,7 +410,10 @@ fn block3(
     header.parent_hash = parent_hash;
     let block = SealedBlock::seal_parts(header, body);
 
-    (RecoveredBlock::new_sealed(block, vec![Address::new([0x31; 20])]), execution_outcome)
+    (
+        RecoveredBlock::new_sealed(block, vec![Address::new([0x31; 20])]),
+        execution_outcome,
+    )
 }
 
 /// Block four that points to block 3
@@ -359,7 +421,10 @@ fn block4(
     number: BlockNumber,
     parent_hash: B256,
     prev_execution_outcome: &ExecutionOutcome,
-) -> (RecoveredBlock<reth_ethereum_primitives::Block>, ExecutionOutcome) {
+) -> (
+    RecoveredBlock<reth_ethereum_primitives::Block>,
+    ExecutionOutcome,
+) {
     let address_range = 1..=20;
     let slot_range = 1..=100;
 
@@ -371,7 +436,11 @@ fn block4(
             bundle_state_builder
                 .state_present_account_info(
                     address,
-                    AccountInfo { nonce: 1, balance: U256::from(idx * 2), ..Default::default() },
+                    AccountInfo {
+                        nonce: 1,
+                        balance: U256::from(idx * 2),
+                        ..Default::default()
+                    },
                 )
                 .state_storage(
                     address,
@@ -403,7 +472,10 @@ fn block4(
             .revert_storage(
                 number,
                 address,
-                slot_range.clone().map(|slot| (U256::from(slot), U256::from(slot))).collect(),
+                slot_range
+                    .clone()
+                    .map(|slot| (U256::from(slot), U256::from(slot)))
+                    .collect(),
             );
     }
     let execution_outcome = ExecutionOutcome::new(
@@ -434,7 +506,10 @@ fn block4(
     header.parent_hash = parent_hash;
     let block = SealedBlock::seal_parts(header, body);
 
-    (RecoveredBlock::new_sealed(block, vec![Address::new([0x31; 20])]), execution_outcome)
+    (
+        RecoveredBlock::new_sealed(block, vec![Address::new([0x31; 20])]),
+        execution_outcome,
+    )
 }
 
 /// Block five that points to block 4
@@ -442,7 +517,10 @@ fn block5(
     number: BlockNumber,
     parent_hash: B256,
     prev_execution_outcome: &ExecutionOutcome,
-) -> (RecoveredBlock<reth_ethereum_primitives::Block>, ExecutionOutcome) {
+) -> (
+    RecoveredBlock<reth_ethereum_primitives::Block>,
+    ExecutionOutcome,
+) {
     let address_range = 1..=20;
     let slot_range = 1..=100;
 
@@ -453,7 +531,11 @@ fn block5(
         bundle_state_builder = bundle_state_builder
             .state_present_account_info(
                 address,
-                AccountInfo { nonce: 1, balance: U256::from(idx * 2), ..Default::default() },
+                AccountInfo {
+                    nonce: 1,
+                    balance: U256::from(idx * 2),
+                    ..Default::default()
+                },
             )
             .state_storage(
                 address,
@@ -514,5 +596,8 @@ fn block5(
     header.parent_hash = parent_hash;
     let block = SealedBlock::seal_parts(header, body);
 
-    (RecoveredBlock::new_sealed(block, vec![Address::new([0x31; 20])]), execution_outcome)
+    (
+        RecoveredBlock::new_sealed(block, vec![Address::new([0x31; 20])]),
+        execution_outcome,
+    )
 }

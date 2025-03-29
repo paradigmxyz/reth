@@ -105,7 +105,11 @@ where
         }
 
         let TransactionInfo {
-            block_hash, block_number, index: transaction_index, base_fee, ..
+            block_hash,
+            block_number,
+            index: transaction_index,
+            base_fee,
+            ..
         } = tx_info;
 
         let effective_gas_price = if tx.is_deposit() {
@@ -140,7 +144,7 @@ where
     ) -> Result<OpTransactionSigned, Self::Error> {
         let request: OpTransactionRequest = request.into();
         let Ok(tx) = request.build_typed_tx() else {
-            return Err(OpEthApiError::Eth(EthApiError::TransactionConversionError))
+            return Err(OpEthApiError::Eth(EthApiError::TransactionConversionError));
         };
 
         // Create an empty signature for the transaction.
@@ -163,7 +167,7 @@ where
                 deposit.input = deposit.input.slice(..4);
                 let mut deposit = deposit.seal_unchecked(hash);
                 std::mem::swap(tx, &mut deposit);
-                return
+                return;
             }
         };
         *input = input.slice(..4);

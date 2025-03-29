@@ -15,7 +15,10 @@ pub struct HashedPostStateCursorFactory<'a, CF> {
 impl<'a, CF> HashedPostStateCursorFactory<'a, CF> {
     /// Create a new factory.
     pub const fn new(cursor_factory: CF, post_state: &'a HashedPostStateSorted) -> Self {
-        Self { cursor_factory, post_state }
+        Self {
+            cursor_factory,
+            post_state,
+        }
     }
 }
 
@@ -25,7 +28,10 @@ impl<'a, CF: HashedCursorFactory> HashedCursorFactory for HashedPostStateCursorF
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, DatabaseError> {
         let cursor = self.cursor_factory.hashed_account_cursor()?;
-        Ok(HashedPostStateAccountCursor::new(cursor, &self.post_state.accounts))
+        Ok(HashedPostStateAccountCursor::new(
+            cursor,
+            &self.post_state.accounts,
+        ))
     }
 
     fn hashed_storage_cursor(
@@ -33,7 +39,10 @@ impl<'a, CF: HashedCursorFactory> HashedCursorFactory for HashedPostStateCursorF
         hashed_address: B256,
     ) -> Result<Self::StorageCursor, DatabaseError> {
         let cursor = self.cursor_factory.hashed_storage_cursor(hashed_address)?;
-        Ok(HashedPostStateStorageCursor::new(cursor, self.post_state.storages.get(&hashed_address)))
+        Ok(HashedPostStateStorageCursor::new(
+            cursor,
+            self.post_state.storages.get(&hashed_address),
+        ))
     }
 }
 
@@ -60,7 +69,12 @@ where
     pub fn new(cursor: C, post_state_accounts: &'a HashedAccountsSorted) -> Self {
         let post_state_cursor = ForwardInMemoryCursor::new(&post_state_accounts.accounts);
         let destroyed_accounts = &post_state_accounts.destroyed_accounts;
-        Self { cursor, post_state_cursor, destroyed_accounts, last_account: None }
+        Self {
+            cursor,
+            post_state_cursor,
+            destroyed_accounts,
+            last_account: None,
+        }
     }
 
     /// Returns `true` if the account has been destroyed.
@@ -80,13 +94,16 @@ where
         // It's an exact match, return the account from post state without looking up in the
         // database.
         if post_state_entry.is_some_and(|entry| entry.0 == key) {
-            return Ok(post_state_entry)
+            return Ok(post_state_entry);
         }
 
         // It's not an exact match, reposition to the first greater or equal account that wasn't
         // cleared.
         let mut db_entry = self.cursor.seek(key)?;
-        while db_entry.as_ref().is_some_and(|(address, _)| self.is_account_cleared(address)) {
+        while db_entry
+            .as_ref()
+            .is_some_and(|(address, _)| self.is_account_cleared(address))
+        {
             db_entry = self.cursor.next()?;
         }
 
@@ -121,7 +138,11 @@ where
         if let Some((post_state_entry, db_entry)) = post_state_item.zip(db_item) {
             // If both are not empty, return the smallest of the two
             // Post state is given precedence if keys are equal
-            Some(if post_state_entry.0 <= db_entry.0 { post_state_entry } else { db_entry })
+            Some(if post_state_entry.0 <= db_entry.0 {
+                post_state_entry
+            } else {
+                db_entry
+            })
         } else {
             // Return either non-empty entry
             db_item.or(post_state_item)
@@ -198,7 +219,13 @@ where
             post_state_storage.map(|s| ForwardInMemoryCursor::new(&s.non_zero_valued_slots));
         let cleared_slots = post_state_storage.map(|s| &s.zero_valued_slots);
         let storage_wiped = post_state_storage.is_some_and(|s| s.wiped);
-        Self { cursor, post_state_cursor, cleared_slots, storage_wiped, last_slot: None }
+        Self {
+            cursor,
+            post_state_cursor,
+            cleared_slots,
+            storage_wiped,
+            last_slot: None,
+        }
     }
 
     /// Check if the slot was zeroed out in the post state.
@@ -210,18 +237,24 @@ where
     /// Find the storage entry in post state or database that's greater or equal to provided subkey.
     fn seek_inner(&mut self, subkey: B256) -> Result<Option<(B256, U256)>, DatabaseError> {
         // Attempt to find the account's storage in post state.
-        let post_state_entry = self.post_state_cursor.as_mut().and_then(|c| c.seek(&subkey));
+        let post_state_entry = self
+            .post_state_cursor
+            .as_mut()
+            .and_then(|c| c.seek(&subkey));
 
         // If database storage was wiped or it's an exact match,
         // return the storage slot from post state without looking up in the database.
         if self.storage_wiped || post_state_entry.is_some_and(|entry| entry.0 == subkey) {
-            return Ok(post_state_entry)
+            return Ok(post_state_entry);
         }
 
         // It's not an exact match and storage was not wiped,
         // reposition to the first greater or equal account.
         let mut db_entry = self.cursor.seek(subkey)?;
-        while db_entry.as_ref().is_some_and(|entry| self.is_slot_zero_valued(&entry.0)) {
+        while db_entry
+            .as_ref()
+            .is_some_and(|entry| self.is_slot_zero_valued(&entry.0))
+        {
             db_entry = self.cursor.next()?;
         }
 
@@ -232,12 +265,14 @@ where
     /// Find the storage entry that is right after current cursor position.
     fn next_inner(&mut self, last_slot: B256) -> Result<Option<(B256, U256)>, DatabaseError> {
         // Attempt to find the account's storage in post state.
-        let post_state_entry =
-            self.post_state_cursor.as_mut().and_then(|c| c.first_after(&last_slot));
+        let post_state_entry = self
+            .post_state_cursor
+            .as_mut()
+            .and_then(|c| c.first_after(&last_slot));
 
         // Return post state entry immediately if database was wiped.
         if self.storage_wiped {
-            return Ok(post_state_entry)
+            return Ok(post_state_entry);
         }
 
         // If post state was given precedence, move the cursor forward.
@@ -265,7 +300,11 @@ where
         if let Some((post_state_entry, db_entry)) = post_state_item.zip(db_item) {
             // If both are not empty, return the smallest of the two
             // Post state is given precedence if keys are equal
-            Some(if post_state_entry.0 <= db_entry.0 { post_state_entry } else { db_entry })
+            Some(if post_state_entry.0 <= db_entry.0 {
+                post_state_entry
+            } else {
+                db_entry
+            })
         } else {
             // Return either non-empty entry
             db_item.or(post_state_item)

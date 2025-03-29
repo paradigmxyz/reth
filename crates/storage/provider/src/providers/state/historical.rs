@@ -64,7 +64,11 @@ impl<'b, Provider: DBProvider + BlockNumReader + StateCommitmentProvider>
 {
     /// Create new `StateProvider` for historical block number
     pub fn new(provider: &'b Provider, block_number: BlockNumber) -> Self {
-        Self { provider, block_number, lowest_available_blocks: Default::default() }
+        Self {
+            provider,
+            block_number,
+            lowest_available_blocks: Default::default(),
+        }
     }
 
     /// Create new `StateProvider` for historical block number and lowest block numbers at which
@@ -74,13 +78,20 @@ impl<'b, Provider: DBProvider + BlockNumReader + StateCommitmentProvider>
         block_number: BlockNumber,
         lowest_available_blocks: LowestAvailableBlocks,
     ) -> Self {
-        Self { provider, block_number, lowest_available_blocks }
+        Self {
+            provider,
+            block_number,
+            lowest_available_blocks,
+        }
     }
 
     /// Lookup an account in the `AccountsHistory` table
     pub fn account_history_lookup(&self, address: Address) -> ProviderResult<HistoryInfo> {
-        if !self.lowest_available_blocks.is_account_history_available(self.block_number) {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number))
+        if !self
+            .lowest_available_blocks
+            .is_account_history_available(self.block_number)
+        {
+            return Err(ProviderError::StateAtBlockPruned(self.block_number));
         }
 
         // history key to search IntegerList of block number changesets.
@@ -98,8 +109,11 @@ impl<'b, Provider: DBProvider + BlockNumReader + StateCommitmentProvider>
         address: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<HistoryInfo> {
-        if !self.lowest_available_blocks.is_storage_history_available(self.block_number) {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number))
+        if !self
+            .lowest_available_blocks
+            .is_storage_history_available(self.block_number)
+        {
+            return Err(ProviderError::StateAtBlockPruned(self.block_number));
         }
 
         // history key to search IntegerList of block number changesets.
@@ -120,10 +134,14 @@ impl<'b, Provider: DBProvider + BlockNumReader + StateCommitmentProvider>
 
     /// Retrieve revert hashed state for this history provider.
     fn revert_state(&self) -> ProviderResult<HashedPostState> {
-        if !self.lowest_available_blocks.is_account_history_available(self.block_number) ||
-            !self.lowest_available_blocks.is_storage_history_available(self.block_number)
+        if !self
+            .lowest_available_blocks
+            .is_account_history_available(self.block_number)
+            || !self
+                .lowest_available_blocks
+                .is_storage_history_available(self.block_number)
         {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number))
+            return Err(ProviderError::StateAtBlockPruned(self.block_number));
         }
 
         if self.check_distance_against_limit(EPOCH_SLOTS)? {
@@ -141,8 +159,11 @@ impl<'b, Provider: DBProvider + BlockNumReader + StateCommitmentProvider>
 
     /// Retrieve revert hashed storage for this history provider and target address.
     fn revert_storage(&self, address: Address) -> ProviderResult<HashedStorage> {
-        if !self.lowest_available_blocks.is_storage_history_available(self.block_number) {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number))
+        if !self
+            .lowest_available_blocks
+            .is_storage_history_available(self.block_number)
+        {
+            return Err(ProviderError::StateAtBlockPruned(self.block_number));
         }
 
         if self.check_distance_against_limit(EPOCH_SLOTS * 10)? {
@@ -153,7 +174,11 @@ impl<'b, Provider: DBProvider + BlockNumReader + StateCommitmentProvider>
             );
         }
 
-        Ok(HashedStorage::from_reverts(self.tx(), address, self.block_number)?)
+        Ok(HashedStorage::from_reverts(
+            self.tx(),
+            address,
+            self.block_number,
+        )?)
     }
 
     fn history_info<T, K>(
@@ -170,7 +195,11 @@ impl<'b, Provider: DBProvider + BlockNumReader + StateCommitmentProvider>
         // Lookup the history chunk in the history index. If they key does not appear in the
         // index, the first chunk for the next key will be returned so we filter out chunks that
         // have a different key.
-        if let Some(chunk) = cursor.seek(key)?.filter(|(key, _)| key_filter(key)).map(|x| x.1 .0) {
+        if let Some(chunk) = cursor
+            .seek(key)?
+            .filter(|(key, _)| key_filter(key))
+            .map(|x| x.1 .0)
+        {
             // Get the rank of the first entry before or equal to our block.
             let mut rank = chunk.rank(self.block_number);
 
@@ -188,9 +217,9 @@ impl<'b, Provider: DBProvider + BlockNumReader + StateCommitmentProvider>
             // This check is worth it, the `cursor.prev()` check is rarely triggered (the if will
             // short-circuit) and when it passes we save a full seek into the changeset/plain state
             // table.
-            if rank == 0 &&
-                block_number != Some(self.block_number) &&
-                !cursor.prev()?.is_some_and(|(key, _)| key_filter(&key))
+            if rank == 0
+                && block_number != Some(self.block_number)
+                && !cursor.prev()?.is_some_and(|(key, _)| key_filter(&key))
             {
                 if let (Some(_), Some(block_number)) = (lowest_available_block_number, block_number)
                 {
@@ -262,7 +291,9 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> AccountRea
                 })?
                 .info),
             HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
-                Ok(self.tx().get_by_encoded_key::<tables::PlainAccountState>(address)?)
+                Ok(self
+                    .tx()
+                    .get_by_encoded_key::<tables::PlainAccountState>(address)?)
             }
         }
     }
@@ -436,7 +467,9 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader + StateCommitmentPr
 
     /// Get account code by its hash
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
-        self.tx().get_by_encoded_key::<tables::Bytecodes>(code_hash).map_err(Into::into)
+        self.tx()
+            .get_by_encoded_key::<tables::Bytecodes>(code_hash)
+            .map_err(Into::into)
     }
 }
 
@@ -463,7 +496,11 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider>
 {
     /// Create new `StateProvider` for historical block number
     pub fn new(provider: Provider, block_number: BlockNumber) -> Self {
-        Self { provider, block_number, lowest_available_blocks: Default::default() }
+        Self {
+            provider,
+            block_number,
+            lowest_available_blocks: Default::default(),
+        }
     }
 
     /// Set the lowest block number at which the account history is available.
@@ -522,13 +559,17 @@ impl LowestAvailableBlocks {
     /// Check if account history is available at the provided block number, i.e. lowest available
     /// block number for account history is less than or equal to the provided block number.
     pub fn is_account_history_available(&self, at: BlockNumber) -> bool {
-        self.account_history_block_number.map(|block_number| block_number <= at).unwrap_or(true)
+        self.account_history_block_number
+            .map(|block_number| block_number <= at)
+            .unwrap_or(true)
     }
 
     /// Check if storage history is available at the provided block number, i.e. lowest available
     /// block number for storage history is less than or equal to the provided block number.
     pub fn is_storage_history_available(&self, at: BlockNumber) -> bool {
-        self.storage_history_block_number.map(|block_number| block_number <= at).unwrap_or(true)
+        self.storage_history_block_number
+            .map(|block_number| block_number <= at)
+            .unwrap_or(true)
     }
 }
 
@@ -572,61 +613,117 @@ mod tests {
         let tx = factory.provider_rw().unwrap().into_tx();
 
         tx.put::<tables::AccountsHistory>(
-            ShardedKey { key: ADDRESS, highest_block_number: 7 },
+            ShardedKey {
+                key: ADDRESS,
+                highest_block_number: 7,
+            },
             BlockNumberList::new([1, 3, 7]).unwrap(),
         )
         .unwrap();
         tx.put::<tables::AccountsHistory>(
-            ShardedKey { key: ADDRESS, highest_block_number: u64::MAX },
+            ShardedKey {
+                key: ADDRESS,
+                highest_block_number: u64::MAX,
+            },
             BlockNumberList::new([10, 15]).unwrap(),
         )
         .unwrap();
         tx.put::<tables::AccountsHistory>(
-            ShardedKey { key: HIGHER_ADDRESS, highest_block_number: u64::MAX },
+            ShardedKey {
+                key: HIGHER_ADDRESS,
+                highest_block_number: u64::MAX,
+            },
             BlockNumberList::new([4]).unwrap(),
         )
         .unwrap();
 
-        let acc_plain = Account { nonce: 100, balance: U256::ZERO, bytecode_hash: None };
-        let acc_at15 = Account { nonce: 15, balance: U256::ZERO, bytecode_hash: None };
-        let acc_at10 = Account { nonce: 10, balance: U256::ZERO, bytecode_hash: None };
-        let acc_at7 = Account { nonce: 7, balance: U256::ZERO, bytecode_hash: None };
-        let acc_at3 = Account { nonce: 3, balance: U256::ZERO, bytecode_hash: None };
+        let acc_plain = Account {
+            nonce: 100,
+            balance: U256::ZERO,
+            bytecode_hash: None,
+        };
+        let acc_at15 = Account {
+            nonce: 15,
+            balance: U256::ZERO,
+            bytecode_hash: None,
+        };
+        let acc_at10 = Account {
+            nonce: 10,
+            balance: U256::ZERO,
+            bytecode_hash: None,
+        };
+        let acc_at7 = Account {
+            nonce: 7,
+            balance: U256::ZERO,
+            bytecode_hash: None,
+        };
+        let acc_at3 = Account {
+            nonce: 3,
+            balance: U256::ZERO,
+            bytecode_hash: None,
+        };
 
-        let higher_acc_plain = Account { nonce: 4, balance: U256::ZERO, bytecode_hash: None };
+        let higher_acc_plain = Account {
+            nonce: 4,
+            balance: U256::ZERO,
+            bytecode_hash: None,
+        };
 
         // setup
-        tx.put::<tables::AccountChangeSets>(1, AccountBeforeTx { address: ADDRESS, info: None })
-            .unwrap();
+        tx.put::<tables::AccountChangeSets>(
+            1,
+            AccountBeforeTx {
+                address: ADDRESS,
+                info: None,
+            },
+        )
+        .unwrap();
         tx.put::<tables::AccountChangeSets>(
             3,
-            AccountBeforeTx { address: ADDRESS, info: Some(acc_at3) },
+            AccountBeforeTx {
+                address: ADDRESS,
+                info: Some(acc_at3),
+            },
         )
         .unwrap();
         tx.put::<tables::AccountChangeSets>(
             4,
-            AccountBeforeTx { address: HIGHER_ADDRESS, info: None },
+            AccountBeforeTx {
+                address: HIGHER_ADDRESS,
+                info: None,
+            },
         )
         .unwrap();
         tx.put::<tables::AccountChangeSets>(
             7,
-            AccountBeforeTx { address: ADDRESS, info: Some(acc_at7) },
+            AccountBeforeTx {
+                address: ADDRESS,
+                info: Some(acc_at7),
+            },
         )
         .unwrap();
         tx.put::<tables::AccountChangeSets>(
             10,
-            AccountBeforeTx { address: ADDRESS, info: Some(acc_at10) },
+            AccountBeforeTx {
+                address: ADDRESS,
+                info: Some(acc_at10),
+            },
         )
         .unwrap();
         tx.put::<tables::AccountChangeSets>(
             15,
-            AccountBeforeTx { address: ADDRESS, info: Some(acc_at15) },
+            AccountBeforeTx {
+                address: ADDRESS,
+                info: Some(acc_at15),
+            },
         )
         .unwrap();
 
         // setup plain state
-        tx.put::<tables::PlainAccountState>(ADDRESS, acc_plain).unwrap();
-        tx.put::<tables::PlainAccountState>(HIGHER_ADDRESS, higher_acc_plain).unwrap();
+        tx.put::<tables::PlainAccountState>(ADDRESS, acc_plain)
+            .unwrap();
+        tx.put::<tables::PlainAccountState>(HIGHER_ADDRESS, higher_acc_plain)
+            .unwrap();
         tx.commit().unwrap();
 
         let db = factory.provider().unwrap();
@@ -687,7 +784,10 @@ mod tests {
         tx.put::<tables::StoragesHistory>(
             StorageShardedKey {
                 address: ADDRESS,
-                sharded_key: ShardedKey { key: STORAGE, highest_block_number: 7 },
+                sharded_key: ShardedKey {
+                    key: STORAGE,
+                    highest_block_number: 7,
+                },
             },
             BlockNumberList::new([3, 7]).unwrap(),
         )
@@ -695,7 +795,10 @@ mod tests {
         tx.put::<tables::StoragesHistory>(
             StorageShardedKey {
                 address: ADDRESS,
-                sharded_key: ShardedKey { key: STORAGE, highest_block_number: u64::MAX },
+                sharded_key: ShardedKey {
+                    key: STORAGE,
+                    highest_block_number: u64::MAX,
+                },
             },
             BlockNumberList::new([10, 15]).unwrap(),
         )
@@ -703,30 +806,61 @@ mod tests {
         tx.put::<tables::StoragesHistory>(
             StorageShardedKey {
                 address: HIGHER_ADDRESS,
-                sharded_key: ShardedKey { key: STORAGE, highest_block_number: u64::MAX },
+                sharded_key: ShardedKey {
+                    key: STORAGE,
+                    highest_block_number: u64::MAX,
+                },
             },
             BlockNumberList::new([4]).unwrap(),
         )
         .unwrap();
 
-        let higher_entry_plain = StorageEntry { key: STORAGE, value: U256::from(1000) };
-        let higher_entry_at4 = StorageEntry { key: STORAGE, value: U256::from(0) };
-        let entry_plain = StorageEntry { key: STORAGE, value: U256::from(100) };
-        let entry_at15 = StorageEntry { key: STORAGE, value: U256::from(15) };
-        let entry_at10 = StorageEntry { key: STORAGE, value: U256::from(10) };
-        let entry_at7 = StorageEntry { key: STORAGE, value: U256::from(7) };
-        let entry_at3 = StorageEntry { key: STORAGE, value: U256::from(0) };
+        let higher_entry_plain = StorageEntry {
+            key: STORAGE,
+            value: U256::from(1000),
+        };
+        let higher_entry_at4 = StorageEntry {
+            key: STORAGE,
+            value: U256::from(0),
+        };
+        let entry_plain = StorageEntry {
+            key: STORAGE,
+            value: U256::from(100),
+        };
+        let entry_at15 = StorageEntry {
+            key: STORAGE,
+            value: U256::from(15),
+        };
+        let entry_at10 = StorageEntry {
+            key: STORAGE,
+            value: U256::from(10),
+        };
+        let entry_at7 = StorageEntry {
+            key: STORAGE,
+            value: U256::from(7),
+        };
+        let entry_at3 = StorageEntry {
+            key: STORAGE,
+            value: U256::from(0),
+        };
 
         // setup
-        tx.put::<tables::StorageChangeSets>((3, ADDRESS).into(), entry_at3).unwrap();
-        tx.put::<tables::StorageChangeSets>((4, HIGHER_ADDRESS).into(), higher_entry_at4).unwrap();
-        tx.put::<tables::StorageChangeSets>((7, ADDRESS).into(), entry_at7).unwrap();
-        tx.put::<tables::StorageChangeSets>((10, ADDRESS).into(), entry_at10).unwrap();
-        tx.put::<tables::StorageChangeSets>((15, ADDRESS).into(), entry_at15).unwrap();
+        tx.put::<tables::StorageChangeSets>((3, ADDRESS).into(), entry_at3)
+            .unwrap();
+        tx.put::<tables::StorageChangeSets>((4, HIGHER_ADDRESS).into(), higher_entry_at4)
+            .unwrap();
+        tx.put::<tables::StorageChangeSets>((7, ADDRESS).into(), entry_at7)
+            .unwrap();
+        tx.put::<tables::StorageChangeSets>((10, ADDRESS).into(), entry_at10)
+            .unwrap();
+        tx.put::<tables::StorageChangeSets>((15, ADDRESS).into(), entry_at15)
+            .unwrap();
 
         // setup plain state
-        tx.put::<tables::PlainStorageState>(ADDRESS, entry_plain).unwrap();
-        tx.put::<tables::PlainStorageState>(HIGHER_ADDRESS, higher_entry_plain).unwrap();
+        tx.put::<tables::PlainStorageState>(ADDRESS, entry_plain)
+            .unwrap();
+        tx.put::<tables::PlainStorageState>(HIGHER_ADDRESS, higher_entry_plain)
+            .unwrap();
         tx.commit().unwrap();
 
         let db = factory.provider().unwrap();

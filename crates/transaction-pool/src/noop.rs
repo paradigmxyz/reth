@@ -55,7 +55,10 @@ impl TransactionPool for NoopTransactionPool {
         transaction: Self::Transaction,
     ) -> PoolResult<TransactionEvents> {
         let hash = *transaction.hash();
-        Err(PoolError::other(hash, Box::new(NoopInsertError::new(transaction))))
+        Err(PoolError::other(
+            hash,
+            Box::new(NoopInsertError::new(transaction)),
+        ))
     }
 
     async fn add_transaction(
@@ -64,7 +67,10 @@ impl TransactionPool for NoopTransactionPool {
         transaction: Self::Transaction,
     ) -> PoolResult<TxHash> {
         let hash = *transaction.hash();
-        Err(PoolError::other(hash, Box::new(NoopInsertError::new(transaction))))
+        Err(PoolError::other(
+            hash,
+            Box::new(NoopInsertError::new(transaction)),
+        ))
     }
 
     async fn add_transactions(
@@ -76,7 +82,10 @@ impl TransactionPool for NoopTransactionPool {
             .into_iter()
             .map(|transaction| {
                 let hash = *transaction.hash();
-                Err(PoolError::other(hash, Box::new(NoopInsertError::new(transaction))))
+                Err(PoolError::other(
+                    hash,
+                    Box::new(NoopInsertError::new(transaction)),
+                ))
             })
             .collect()
     }
@@ -302,7 +311,7 @@ impl TransactionPool for NoopTransactionPool {
         tx_hashes: Vec<TxHash>,
     ) -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError> {
         if tx_hashes.is_empty() {
-            return Ok(vec![])
+            return Ok(vec![]);
         }
         Err(BlobStoreError::MissingSidecar(tx_hashes[0]))
     }
@@ -351,13 +360,19 @@ impl<T> MockTransactionValidator<T> {
     /// Creates a new [`MockTransactionValidator`] that does not allow local transactions to be
     /// propagated.
     pub fn no_propagate_local() -> Self {
-        Self { propagate_local: false, _marker: Default::default() }
+        Self {
+            propagate_local: false,
+            _marker: Default::default(),
+        }
     }
 }
 
 impl<T> Default for MockTransactionValidator<T> {
     fn default() -> Self {
-        Self { propagate_local: true, _marker: Default::default() }
+        Self {
+            propagate_local: true,
+            _marker: Default::default(),
+        }
     }
 }
 

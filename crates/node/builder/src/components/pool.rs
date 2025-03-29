@@ -93,7 +93,10 @@ impl PoolBuilderConfigOverrides {
         if let Some(minimal_protocol_basefee) = minimal_protocol_basefee {
             config.minimal_protocol_basefee = minimal_protocol_basefee;
         }
-        config.local_transactions_config.local_addresses.extend(local_addresses);
+        config
+            .local_transactions_config
+            .local_addresses
+            .extend(local_addresses);
 
         config
     }

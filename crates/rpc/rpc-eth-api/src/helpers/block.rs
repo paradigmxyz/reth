@@ -41,7 +41,12 @@ pub trait EthBlocks: LoadBlock {
     where
         Self: FullEthApiTypes,
     {
-        async move { Ok(self.rpc_block(block_id, false).await?.map(|block| block.header)) }
+        async move {
+            Ok(self
+                .rpc_block(block_id, false)
+                .await?
+                .map(|block| block.header))
+        }
     }
 
     /// Returns the populated rpc block object for the given block id.
@@ -57,7 +62,9 @@ pub trait EthBlocks: LoadBlock {
         Self: FullEthApiTypes,
     {
         async move {
-            let Some(block) = self.recovered_block(block_id).await? else { return Ok(None) };
+            let Some(block) = self.recovered_block(block_id).await? else {
+                return Ok(None);
+            };
 
             let block = from_block((*block).clone(), full.into(), self.tx_resp_builder())?;
             Ok(Some(block))
@@ -78,7 +85,7 @@ pub trait EthBlocks: LoadBlock {
                     .provider()
                     .pending_block()
                     .map_err(Self::Error::from_eth_err)?
-                    .map(|block| block.body().transactions().len()))
+                    .map(|block| block.body().transactions().len()));
             }
 
             let block_hash = match self
@@ -137,15 +144,17 @@ pub trait EthBlocks: LoadBlock {
                 }
             }
 
-            if let Some(block_hash) =
-                self.provider().block_hash_for_id(block_id).map_err(Self::Error::from_eth_err)?
+            if let Some(block_hash) = self
+                .provider()
+                .block_hash_for_id(block_id)
+                .map_err(Self::Error::from_eth_err)?
             {
                 return self
                     .cache()
                     .get_block_and_receipts(block_hash)
                     .await
                     .map_err(Self::Error::from_eth_err)
-                    .map(|b| b.map(|(b, r)| (b.clone_sealed_block(), r)))
+                    .map(|b| b.map(|(b, r)| (b.clone_sealed_block(), r)));
             }
 
             Ok(None)
@@ -160,7 +169,9 @@ pub trait EthBlocks: LoadBlock {
         &self,
         block_id: BlockId,
     ) -> Result<Option<Vec<ProviderHeader<Self::Provider>>>, Self::Error> {
-        self.provider().ommers_by_id(block_id).map_err(Self::Error::from_eth_err)
+        self.provider()
+            .ommers_by_id(block_id)
+            .map_err(Self::Error::from_eth_err)
     }
 
     /// Returns uncle block at given index in given block.
@@ -180,7 +191,9 @@ pub trait EthBlocks: LoadBlock {
                     .map_err(Self::Error::from_eth_err)?
                     .and_then(|block| block.body().ommers().map(|o| o.to_vec()))
             } else {
-                self.provider().ommers_by_id(block_id).map_err(Self::Error::from_eth_err)?
+                self.provider()
+                    .ommers_by_id(block_id)
+                    .map_err(Self::Error::from_eth_err)?
             }
             .unwrap_or_default();
 
@@ -240,7 +253,10 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
                 None => return Ok(None),
             };
 
-            self.cache().get_recovered_block(block_hash).await.map_err(Self::Error::from_eth_err)
+            self.cache()
+                .get_recovered_block(block_hash)
+                .await
+                .map_err(Self::Error::from_eth_err)
         }
     }
 }

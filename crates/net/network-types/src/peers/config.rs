@@ -97,7 +97,11 @@ impl Default for PeerBackoffDurations {
 
 /// Tracks stats about connected nodes
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(default))]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(default)
+)]
 pub struct ConnectionsConfig {
     /// Maximum allowed outbound connections.
     pub max_outbound: usize,
@@ -286,7 +290,9 @@ impl PeersConfig {
         self,
         optional_file: Option<impl AsRef<Path>>,
     ) -> Result<Self, io::Error> {
-        let Some(file_path) = optional_file else { return Ok(self) };
+        let Some(file_path) = optional_file else {
+            return Ok(self);
+        };
         let reader = match std::fs::File::open(file_path.as_ref()) {
             Ok(file) => io::BufReader::new(file),
             Err(e) if e.kind() == ErrorKind::NotFound => return Ok(self),

@@ -35,7 +35,9 @@ async fn test_session_established_with_highest_version() {
                 assert_eq!(handle1.peer_id(), &peer_id);
             }
             NetworkEvent::ActivePeerSession { info, .. } => {
-                let SessionInfo { peer_id, status, .. } = info;
+                let SessionInfo {
+                    peer_id, status, ..
+                } = info;
                 assert_eq!(handle1.peer_id(), &peer_id);
                 assert_eq!(status.version, EthVersion::Eth68);
             }
@@ -74,7 +76,9 @@ async fn test_session_established_with_different_capability() {
                 assert_eq!(handle1.peer_id(), &peer_id);
             }
             NetworkEvent::ActivePeerSession { info, .. } => {
-                let SessionInfo { peer_id, status, .. } = info;
+                let SessionInfo {
+                    peer_id, status, ..
+                } = info;
                 assert_eq!(handle1.peer_id(), &peer_id);
                 assert_eq!(status.version, EthVersion::Eth66);
             }

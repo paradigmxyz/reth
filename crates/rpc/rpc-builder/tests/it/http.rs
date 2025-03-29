@@ -33,8 +33,8 @@ use std::collections::HashSet;
 fn is_unimplemented(err: jsonrpsee::core::client::Error) -> bool {
     match err {
         jsonrpsee::core::client::Error::Call(error_obj) => {
-            error_obj.code() == ErrorCode::InternalError.code() &&
-                error_obj.message() == "unimplemented"
+            error_obj.code() == ErrorCode::InternalError.code()
+                && error_obj.message() == "unimplemented"
         }
         _ => false,
     }
@@ -82,7 +82,8 @@ impl RawRpcParamsBuilder {
 
     /// Adds a parameter to the JSON-RPC request.
     pub fn add_param<S: Serialize>(mut self, param: S) -> Self {
-        self.params.push(serde_json::to_value(param).expect("Failed to serialize parameter"));
+        self.params
+            .push(serde_json::to_value(param).expect("Failed to serialize parameter"));
         self
     }
 
@@ -109,7 +110,11 @@ impl RawRpcParamsBuilder {
 
 impl Default for RawRpcParamsBuilder {
     fn default() -> Self {
-        Self { method: None, params: Vec::new(), id: 1 }
+        Self {
+            method: None,
+            params: Vec::new(),
+            id: 1,
+        }
     }
 }
 
@@ -117,21 +122,36 @@ async fn test_filter_calls<C>(client: &C)
 where
     C: ClientT + SubscriptionClientT + Sync,
 {
-    EthFilterApiClient::<Transaction>::new_filter(client, Filter::default()).await.unwrap();
-    EthFilterApiClient::<Transaction>::new_pending_transaction_filter(client, None).await.unwrap();
+    EthFilterApiClient::<Transaction>::new_filter(client, Filter::default())
+        .await
+        .unwrap();
+    EthFilterApiClient::<Transaction>::new_pending_transaction_filter(client, None)
+        .await
+        .unwrap();
     EthFilterApiClient::<Transaction>::new_pending_transaction_filter(
         client,
         Some(PendingTransactionFilterKind::Full),
     )
     .await
     .unwrap();
-    let id = EthFilterApiClient::<Transaction>::new_block_filter(client).await.unwrap();
-    EthFilterApiClient::<Transaction>::filter_changes(client, id.clone()).await.unwrap();
-    EthFilterApiClient::<Transaction>::logs(client, Filter::default()).await.unwrap();
-    let id =
-        EthFilterApiClient::<Transaction>::new_filter(client, Filter::default()).await.unwrap();
-    EthFilterApiClient::<Transaction>::filter_logs(client, id.clone()).await.unwrap();
-    EthFilterApiClient::<Transaction>::uninstall_filter(client, id).await.unwrap();
+    let id = EthFilterApiClient::<Transaction>::new_block_filter(client)
+        .await
+        .unwrap();
+    EthFilterApiClient::<Transaction>::filter_changes(client, id.clone())
+        .await
+        .unwrap();
+    EthFilterApiClient::<Transaction>::logs(client, Filter::default())
+        .await
+        .unwrap();
+    let id = EthFilterApiClient::<Transaction>::new_filter(client, Filter::default())
+        .await
+        .unwrap();
+    EthFilterApiClient::<Transaction>::filter_logs(client, id.clone())
+        .await
+        .unwrap();
+    EthFilterApiClient::<Transaction>::uninstall_filter(client, id)
+        .await
+        .unwrap();
 }
 
 async fn test_basic_admin_calls<C>(client: &C)
@@ -142,9 +162,15 @@ where
     let node: NodeRecord = url.parse().unwrap();
 
     AdminApiClient::add_peer(client, node).await.unwrap();
-    AdminApiClient::remove_peer(client, node.into()).await.unwrap();
-    AdminApiClient::add_trusted_peer(client, node.into()).await.unwrap();
-    AdminApiClient::remove_trusted_peer(client, node.into()).await.unwrap();
+    AdminApiClient::remove_peer(client, node.into())
+        .await
+        .unwrap();
+    AdminApiClient::add_trusted_peer(client, node.into())
+        .await
+        .unwrap();
+    AdminApiClient::remove_trusted_peer(client, node.into())
+        .await
+        .unwrap();
     AdminApiClient::node_info(client).await.unwrap();
 }
 
@@ -174,9 +200,15 @@ where
     .unwrap();
 
     // Implemented
-    EthApiClient::<Transaction, Block, Receipt, Header>::protocol_version(client).await.unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::chain_id(client).await.unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::accounts(client).await.unwrap();
+    EthApiClient::<Transaction, Block, Receipt, Header>::protocol_version(client)
+        .await
+        .unwrap();
+    EthApiClient::<Transaction, Block, Receipt, Header>::chain_id(client)
+        .await
+        .unwrap();
+    EthApiClient::<Transaction, Block, Receipt, Header>::accounts(client)
+        .await
+        .unwrap();
     EthApiClient::<Transaction, Block, Receipt, Header>::get_account(
         client,
         address,
@@ -184,7 +216,9 @@ where
     )
     .await
     .unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::block_number(client).await.unwrap();
+    EthApiClient::<Transaction, Block, Receipt, Header>::block_number(client)
+        .await
+        .unwrap();
     EthApiClient::<Transaction, Block, Receipt, Header>::get_code(client, address, None)
         .await
         .unwrap();
@@ -302,7 +336,9 @@ where
     )
     .await
     .unwrap_err();
-    EthApiClient::<Transaction, Block, Receipt, Header>::syncing(client).await.unwrap();
+    EthApiClient::<Transaction, Block, Receipt, Header>::syncing(client)
+        .await
+        .unwrap();
     EthApiClient::<Transaction, Block, Receipt, Header>::send_transaction(
         client,
         transaction_request.clone(),
@@ -315,7 +351,9 @@ where
     )
     .await
     .unwrap_err();
-    EthApiClient::<Transaction, Block, Receipt, Header>::hashrate(client).await.unwrap();
+    EthApiClient::<Transaction, Block, Receipt, Header>::hashrate(client)
+        .await
+        .unwrap();
     EthApiClient::<Transaction, Block, Receipt, Header>::submit_hashrate(
         client,
         U256::default(),
@@ -323,7 +361,9 @@ where
     )
     .await
     .unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::gas_price(client).await.unwrap_err();
+    EthApiClient::<Transaction, Block, Receipt, Header>::gas_price(client)
+        .await
+        .unwrap_err();
     EthApiClient::<Transaction, Block, Receipt, Header>::max_priority_fee_per_gas(client)
         .await
         .unwrap_err();
@@ -333,13 +373,22 @@ where
 
     // Unimplemented
     assert!(is_unimplemented(
-        EthApiClient::<Transaction, Block, Receipt, Header>::author(client).await.err().unwrap()
+        EthApiClient::<Transaction, Block, Receipt, Header>::author(client)
+            .await
+            .err()
+            .unwrap()
     ));
     assert!(is_unimplemented(
-        EthApiClient::<Transaction, Block, Receipt, Header>::is_mining(client).await.err().unwrap()
+        EthApiClient::<Transaction, Block, Receipt, Header>::is_mining(client)
+            .await
+            .err()
+            .unwrap()
     ));
     assert!(is_unimplemented(
-        EthApiClient::<Transaction, Block, Receipt, Header>::get_work(client).await.err().unwrap()
+        EthApiClient::<Transaction, Block, Receipt, Header>::get_work(client)
+            .await
+            .err()
+            .unwrap()
     ));
     assert!(is_unimplemented(
         EthApiClient::<Transaction, Block, Receipt, Header>::submit_work(
@@ -352,7 +401,9 @@ where
         .err()
         .unwrap()
     ));
-    EthCallBundleApiClient::call_bundle(client, Default::default()).await.unwrap_err();
+    EthCallBundleApiClient::call_bundle(client, Default::default())
+        .await
+        .unwrap_err();
 }
 
 async fn test_basic_debug_calls<C>(client: &C)
@@ -362,10 +413,18 @@ where
     let block_id = BlockId::Number(BlockNumberOrTag::default());
 
     DebugApiClient::raw_header(client, block_id).await.unwrap();
-    DebugApiClient::raw_block(client, block_id).await.unwrap_err();
-    DebugApiClient::raw_transaction(client, B256::default()).await.unwrap();
-    DebugApiClient::raw_receipts(client, block_id).await.unwrap();
-    assert!(is_unimplemented(DebugApiClient::bad_blocks(client).await.err().unwrap()));
+    DebugApiClient::raw_block(client, block_id)
+        .await
+        .unwrap_err();
+    DebugApiClient::raw_transaction(client, B256::default())
+        .await
+        .unwrap();
+    DebugApiClient::raw_receipts(client, block_id)
+        .await
+        .unwrap();
+    assert!(is_unimplemented(
+        DebugApiClient::bad_blocks(client).await.err().unwrap()
+    ));
 }
 
 async fn test_basic_net_calls<C>(client: &C)
@@ -402,12 +461,16 @@ where
         .await
         .err()
         .unwrap();
-    TraceApiClient::trace_block(client, block_id).await.unwrap_err();
+    TraceApiClient::trace_block(client, block_id)
+        .await
+        .unwrap_err();
     TraceApiClient::replay_block_transactions(client, block_id, HashSet::default())
         .await
         .unwrap_err();
 
-    TraceApiClient::trace_filter(client, trace_filter).await.unwrap();
+    TraceApiClient::trace_filter(client, trace_filter)
+        .await
+        .unwrap();
 }
 
 async fn test_basic_web3_calls<C>(client: &C)
@@ -435,18 +498,28 @@ where
         .await
         .unwrap();
 
-    OtterscanClient::<Transaction, Header>::has_code(client, address, None).await.unwrap();
+    OtterscanClient::<Transaction, Header>::has_code(client, address, None)
+        .await
+        .unwrap();
     OtterscanClient::<Transaction, Header>::has_code(client, address, Some(block_number.into()))
         .await
         .unwrap();
 
-    OtterscanClient::<Transaction, Header>::get_api_level(client).await.unwrap();
+    OtterscanClient::<Transaction, Header>::get_api_level(client)
+        .await
+        .unwrap();
 
-    OtterscanClient::<Transaction, Header>::get_internal_operations(client, tx_hash).await.unwrap();
+    OtterscanClient::<Transaction, Header>::get_internal_operations(client, tx_hash)
+        .await
+        .unwrap();
 
-    OtterscanClient::<Transaction, Header>::get_transaction_error(client, tx_hash).await.unwrap();
+    OtterscanClient::<Transaction, Header>::get_transaction_error(client, tx_hash)
+        .await
+        .unwrap();
 
-    OtterscanClient::<Transaction, Header>::trace_transaction(client, tx_hash).await.unwrap();
+    OtterscanClient::<Transaction, Header>::trace_transaction(client, tx_hash)
+        .await
+        .unwrap();
 
     OtterscanClient::<Transaction, Header>::get_block_details(client, block_number)
         .await
@@ -488,16 +561,20 @@ where
         .err()
         .unwrap()
     ));
-    assert!(OtterscanClient::<Transaction, Header>::get_transaction_by_sender_and_nonce(
-        client, sender, nonce
-    )
-    .await
-    .err()
-    .is_none());
-    assert!(OtterscanClient::<Transaction, Header>::get_contract_creator(client, address)
+    assert!(
+        OtterscanClient::<Transaction, Header>::get_transaction_by_sender_and_nonce(
+            client, sender, nonce
+        )
         .await
-        .unwrap()
-        .is_none());
+        .err()
+        .is_none()
+    );
+    assert!(
+        OtterscanClient::<Transaction, Header>::get_contract_creator(client, address)
+            .await
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -754,7 +831,10 @@ async fn test_eth_get_block_by_hash_rpc_call() {
     test_rpc_call_ok::<Option<Block>>(
         &client,
         "eth_getBlockByHash",
-        rpc_params!["0xdc0818cf78f21a8e70579cb46a43643f78291264dda342ae31049421c82d21ae", false],
+        rpc_params![
+            "0xdc0818cf78f21a8e70579cb46a43643f78291264dda342ae31049421c82d21ae",
+            false
+        ],
     )
     .await;
 
@@ -762,7 +842,10 @@ async fn test_eth_get_block_by_hash_rpc_call() {
     test_rpc_call_err::<Option<Block>>(
         &client,
         "eth_getBlockByHash",
-        rpc_params!["0xdc0818cf78f21a8e70579cb46a43643f78291264dda342ae31049421c82d21ae", "0x1b4"],
+        rpc_params![
+            "0xdc0818cf78f21a8e70579cb46a43643f78291264dda342ae31049421c82d21ae",
+            "0x1b4"
+        ],
     )
     .await;
 
@@ -926,7 +1009,10 @@ async fn test_eth_coinbase_rpc_call() {
     let client = handle.http_client().unwrap();
 
     // Requesting coinbase address without any parameter should return Unimplemented
-    match client.request::<Address, _>("eth_coinbase", rpc_params![]).await {
+    match client
+        .request::<Address, _>("eth_coinbase", rpc_params![])
+        .await
+    {
         Ok(_) => {
             // If there's a response, it's unexpected, panic
             panic!("Expected Unimplemented error, got successful response");
@@ -978,7 +1064,10 @@ async fn test_eth_get_block_transaction_count_by_hash_rpc_call() {
     test_rpc_call_ok::<Option<U256>>(
         &client,
         "eth_getBlockTransactionCountByHash",
-        rpc_params!["0xb903239f8543d04b5dc1ba6579132b143087c68db1b2168786408fcbce568238", true],
+        rpc_params![
+            "0xb903239f8543d04b5dc1ba6579132b143087c68db1b2168786408fcbce568238",
+            true
+        ],
     )
     .await;
 
@@ -1056,7 +1145,10 @@ async fn test_eth_get_uncle_count_by_block_hash_rpc_call() {
     test_rpc_call_ok::<Option<U256>>(
         &client,
         "eth_getUncleCountByBlockHash",
-        rpc_params!["0xb903239f8543d04b5dc1ba6579132b143087c68db1b2168786408fcbce568238", true],
+        rpc_params![
+            "0xb903239f8543d04b5dc1ba6579132b143087c68db1b2168786408fcbce568238",
+            true
+        ],
     )
     .await;
 
@@ -1154,7 +1246,10 @@ async fn test_eth_get_uncle_by_block_hash_and_index_rpc_call() {
     test_rpc_call_ok::<Option<Block>>(
         &client,
         "eth_getUncleByBlockHashAndIndex",
-        rpc_params!["0xc6ef2fc5426d6ad6fd9e2a26abeab0aa2411b7ab17f30a99d3cb96aed1d1055b", "0x0"],
+        rpc_params![
+            "0xc6ef2fc5426d6ad6fd9e2a26abeab0aa2411b7ab17f30a99d3cb96aed1d1055b",
+            "0x0"
+        ],
     )
     .await;
 
@@ -1240,7 +1335,10 @@ async fn test_eth_get_transaction_by_hash_rpc_call() {
     test_rpc_call_ok::<Option<Transaction>>(
         &client,
         "eth_getTransactionByHash",
-        rpc_params!["0x88df016429689c079f3b2f6ad39fa052532c56795b733da78a91ebe6a713944b", true],
+        rpc_params![
+            "0x88df016429689c079f3b2f6ad39fa052532c56795b733da78a91ebe6a713944b",
+            true
+        ],
     )
     .await;
 
@@ -1269,7 +1367,10 @@ async fn test_eth_get_transaction_by_block_hash_and_index_rpc_call() {
     test_rpc_call_ok::<Option<Transaction>>(
         &client,
         "eth_getTransactionByBlockHashAndIndex",
-        rpc_params!["0x1dad0df7c027bcc86d06b3a6709ff78decd732c37b73123453ba7d9463eae60d", "0x0"],
+        rpc_params![
+            "0x1dad0df7c027bcc86d06b3a6709ff78decd732c37b73123453ba7d9463eae60d",
+            "0x0"
+        ],
     )
     .await;
 
@@ -1363,7 +1464,10 @@ async fn test_eth_get_transaction_receipt_rpc_call() {
     test_rpc_call_ok::<Option<TransactionReceipt>>(
         &client,
         "eth_getTransactionReceipt",
-        rpc_params!["0x85d995eba9763907fdf35cd2034144dd9d53ce32cbec21349d4b12823c6860c5", true],
+        rpc_params![
+            "0x85d995eba9763907fdf35cd2034144dd9d53ce32cbec21349d4b12823c6860c5",
+            true
+        ],
     )
     .await;
 
@@ -1554,7 +1658,10 @@ async fn test_eth_get_transaction_count_rpc_call() {
     test_rpc_call_err::<U256>(
         &client,
         "eth_getTransactionCount",
-        rpc_params!["0x407d73d8a49eeb85d32cf465507dd71d507100c1", "not_valid_block_number"], // Incorrect parameters
+        rpc_params![
+            "0x407d73d8a49eeb85d32cf465507dd71d507100c1",
+            "not_valid_block_number"
+        ], // Incorrect parameters
     )
     .await;
 }
@@ -1569,7 +1676,10 @@ fn test_rpc_builder_basic() {
         .build();
 
     let expected = r#"{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["0xaa00000000000000000000000000000000000000","0x898753d8fdd8d92c1907ca21e68c7970abd290c647a202091181deec3f30a0b2"]}"#;
-    assert_eq!(rpc_string, expected, "RPC string did not match expected format.");
+    assert_eq!(
+        rpc_string, expected,
+        "RPC string did not match expected format."
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -60,7 +60,10 @@ where
             >,
         >,
     ) -> Self {
-        let ValidationApiConfig { disallow, validation_window } = config;
+        let ValidationApiConfig {
+            disallow,
+            validation_window,
+        } = config;
 
         let inner = Arc::new(ValidationApiInner {
             provider,
@@ -116,31 +119,37 @@ where
     ) -> Result<(), ValidationApiError> {
         self.validate_message_against_header(block.sealed_header(), &message)?;
 
-        self.consensus.validate_header_with_total_difficulty(block.sealed_header(), U256::MAX)?;
+        self.consensus
+            .validate_header_with_total_difficulty(block.sealed_header(), U256::MAX)?;
         self.consensus.validate_header(block.sealed_header())?;
-        self.consensus.validate_block_pre_execution(block.sealed_block())?;
+        self.consensus
+            .validate_block_pre_execution(block.sealed_block())?;
 
         if !self.disallow.is_empty() {
             if self.disallow.contains(&block.beneficiary()) {
-                return Err(ValidationApiError::Blacklist(block.beneficiary()))
+                return Err(ValidationApiError::Blacklist(block.beneficiary()));
             }
             if self.disallow.contains(&message.proposer_fee_recipient) {
-                return Err(ValidationApiError::Blacklist(message.proposer_fee_recipient))
+                return Err(ValidationApiError::Blacklist(
+                    message.proposer_fee_recipient,
+                ));
             }
             for (sender, tx) in block.senders_iter().zip(block.body().transactions()) {
                 if self.disallow.contains(sender) {
-                    return Err(ValidationApiError::Blacklist(*sender))
+                    return Err(ValidationApiError::Blacklist(*sender));
                 }
                 if let Some(to) = tx.to() {
                     if self.disallow.contains(&to) {
-                        return Err(ValidationApiError::Blacklist(to))
+                        return Err(ValidationApiError::Blacklist(to));
                     }
                 }
             }
         }
 
-        let latest_header =
-            self.provider.latest_header()?.ok_or_else(|| ValidationApiError::MissingLatestBlock)?;
+        let latest_header = self
+            .provider
+            .latest_header()?
+            .ok_or_else(|| ValidationApiError::MissingLatestBlock)?;
 
         let parent_header = if block.parent_hash() == latest_header.hash() {
             latest_header
@@ -151,15 +160,18 @@ where
                 .sealed_header_by_hash(block.parent_hash())?
                 .ok_or_else(|| ValidationApiError::MissingParentBlock)?;
 
-            if latest_header.number().saturating_sub(parent_header.number()) >
-                self.validation_window
+            if latest_header
+                .number()
+                .saturating_sub(parent_header.number())
+                > self.validation_window
             {
-                return Err(ValidationApiError::BlockTooOld)
+                return Err(ValidationApiError::BlockTooOld);
             }
             parent_header
         };
 
-        self.consensus.validate_header_against_parent(block.sealed_header(), &parent_header)?;
+        self.consensus
+            .validate_header_against_parent(block.sealed_header(), &parent_header)?;
         self.validate_gas_limit(registered_gas_limit, &parent_header, block.sealed_header())?;
         let parent_header_hash = parent_header.hash();
         let state_provider = self.provider.state_by_block_hash(parent_header_hash)?;
@@ -181,13 +193,15 @@ where
         })?;
 
         // update the cached reads
-        self.update_cached_reads(parent_header_hash, request_cache).await;
+        self.update_cached_reads(parent_header_hash, request_cache)
+            .await;
 
         if let Some(account) = accessed_blacklisted {
-            return Err(ValidationApiError::Blacklist(account))
+            return Err(ValidationApiError::Blacklist(account));
         }
 
-        self.consensus.validate_block_post_execution(&block, &output)?;
+        self.consensus
+            .validate_block_post_execution(&block, &output)?;
 
         self.ensure_payment(&block, &output, &message)?;
 
@@ -196,9 +210,13 @@ where
 
         if state_root != block.header().state_root() {
             return Err(ConsensusError::BodyStateRootDiff(
-                GotExpected { got: state_root, expected: block.header().state_root() }.into(),
+                GotExpected {
+                    got: state_root,
+                    expected: block.header().state_root(),
+                }
+                .into(),
             )
-            .into())
+            .into());
         }
 
         Ok(())
@@ -229,7 +247,7 @@ where
             return Err(ValidationApiError::GasUsedMismatch(GotExpected {
                 got: message.gas_used,
                 expected: header.gas_used(),
-            }))
+            }));
         } else {
             Ok(())
         }
@@ -250,14 +268,16 @@ where
         let min_gas_limit =
             parent_header.gas_limit() - parent_header.gas_limit() / GAS_LIMIT_BOUND_DIVISOR + 1;
 
-        let best_gas_limit =
-            std::cmp::max(min_gas_limit, std::cmp::min(max_gas_limit, registered_gas_limit));
+        let best_gas_limit = std::cmp::max(
+            min_gas_limit,
+            std::cmp::min(max_gas_limit, registered_gas_limit),
+        );
 
         if best_gas_limit != header.gas_limit() {
             return Err(ValidationApiError::GasLimitMismatch(GotExpected {
                 got: header.gas_limit(),
                 expected: best_gas_limit,
-            }))
+            }));
         }
 
         Ok(())
@@ -273,18 +293,21 @@ where
         output: &BlockExecutionOutput<<E::Primitives as NodePrimitives>::Receipt>,
         message: &BidTrace,
     ) -> Result<(), ValidationApiError> {
-        let (mut balance_before, balance_after) = if let Some(acc) =
-            output.state.state.get(&message.proposer_fee_recipient)
-        {
-            let balance_before = acc.original_info.as_ref().map(|i| i.balance).unwrap_or_default();
-            let balance_after = acc.info.as_ref().map(|i| i.balance).unwrap_or_default();
+        let (mut balance_before, balance_after) =
+            if let Some(acc) = output.state.state.get(&message.proposer_fee_recipient) {
+                let balance_before = acc
+                    .original_info
+                    .as_ref()
+                    .map(|i| i.balance)
+                    .unwrap_or_default();
+                let balance_after = acc.info.as_ref().map(|i| i.balance).unwrap_or_default();
 
-            (balance_before, balance_after)
-        } else {
-            // account might have balance but considering it zero is fine as long as we know
-            // that balance have not changed
-            (U256::ZERO, U256::ZERO)
-        };
+                (balance_before, balance_after)
+            } else {
+                // account might have balance but considering it zero is fine as long as we know
+                // that balance have not changed
+                (U256::ZERO, U256::ZERO)
+            };
 
         if let Some(withdrawals) = block.body().withdrawals() {
             for withdrawal in withdrawals {
@@ -295,7 +318,7 @@ where
         }
 
         if balance_after >= balance_before + message.value {
-            return Ok(())
+            return Ok(());
         }
 
         let (receipt, tx) = output
@@ -305,24 +328,24 @@ where
             .ok_or(ValidationApiError::ProposerPayment)?;
 
         if !receipt.status() {
-            return Err(ValidationApiError::ProposerPayment)
+            return Err(ValidationApiError::ProposerPayment);
         }
 
         if tx.to() != Some(message.proposer_fee_recipient) {
-            return Err(ValidationApiError::ProposerPayment)
+            return Err(ValidationApiError::ProposerPayment);
         }
 
         if tx.value() != message.value {
-            return Err(ValidationApiError::ProposerPayment)
+            return Err(ValidationApiError::ProposerPayment);
         }
 
         if !tx.input().is_empty() {
-            return Err(ValidationApiError::ProposerPayment)
+            return Err(ValidationApiError::ProposerPayment);
         }
 
         if let Some(block_base_fee) = block.header().base_fee_per_gas() {
             if tx.effective_tip_per_gas(block_base_fee).unwrap_or_default() != 0 {
-                return Err(ValidationApiError::ProposerPayment)
+                return Err(ValidationApiError::ProposerPayment);
             }
         }
 
@@ -334,10 +357,10 @@ where
         &self,
         mut blobs_bundle: BlobsBundleV1,
     ) -> Result<Vec<B256>, ValidationApiError> {
-        if blobs_bundle.commitments.len() != blobs_bundle.proofs.len() ||
-            blobs_bundle.commitments.len() != blobs_bundle.blobs.len()
+        if blobs_bundle.commitments.len() != blobs_bundle.proofs.len()
+            || blobs_bundle.commitments.len() != blobs_bundle.blobs.len()
         {
-            return Err(ValidationApiError::InvalidBlobsBundle)
+            return Err(ValidationApiError::InvalidBlobsBundle);
         }
 
         let versioned_hashes = blobs_bundle
@@ -358,13 +381,15 @@ where
         &self,
         request: BuilderBlockValidationRequestV3,
     ) -> Result<(), ValidationApiError> {
-        let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
-            payload: ExecutionPayload::V3(request.request.execution_payload),
-            sidecar: ExecutionPayloadSidecar::v3(CancunPayloadFields {
-                parent_beacon_block_root: request.parent_beacon_block_root,
-                versioned_hashes: self.validate_blobs_bundle(request.request.blobs_bundle)?,
-            }),
-        })?;
+        let block = self
+            .payload_validator
+            .ensure_well_formed_payload(ExecutionData {
+                payload: ExecutionPayload::V3(request.request.execution_payload),
+                sidecar: ExecutionPayloadSidecar::v3(CancunPayloadFields {
+                    parent_beacon_block_root: request.parent_beacon_block_root,
+                    versioned_hashes: self.validate_blobs_bundle(request.request.blobs_bundle)?,
+                }),
+            })?;
 
         self.validate_message_against_block(
             block,
@@ -379,20 +404,23 @@ where
         &self,
         request: BuilderBlockValidationRequestV4,
     ) -> Result<(), ValidationApiError> {
-        let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
-            payload: ExecutionPayload::V3(request.request.execution_payload),
-            sidecar: ExecutionPayloadSidecar::v4(
-                CancunPayloadFields {
-                    parent_beacon_block_root: request.parent_beacon_block_root,
-                    versioned_hashes: self.validate_blobs_bundle(request.request.blobs_bundle)?,
-                },
-                PraguePayloadFields {
-                    requests: RequestsOrHash::Requests(
-                        request.request.execution_requests.to_requests(),
-                    ),
-                },
-            ),
-        })?;
+        let block = self
+            .payload_validator
+            .ensure_well_formed_payload(ExecutionData {
+                payload: ExecutionPayload::V3(request.request.execution_payload),
+                sidecar: ExecutionPayloadSidecar::v4(
+                    CancunPayloadFields {
+                        parent_beacon_block_root: request.parent_beacon_block_root,
+                        versioned_hashes: self
+                            .validate_blobs_bundle(request.request.blobs_bundle)?,
+                    },
+                    PraguePayloadFields {
+                        requests: RequestsOrHash::Requests(
+                            request.request.execution_requests.to_requests(),
+                        ),
+                    },
+                ),
+            })?;
 
         self.validate_message_against_block(
             block,
@@ -442,7 +470,8 @@ where
             let _ = tx.send(result);
         }));
 
-        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+        rx.await
+            .map_err(|_| internal_rpc_err("Internal blocking task error"))?
     }
 
     /// Validates a block submitted to the relay
@@ -460,7 +489,8 @@ where
             let _ = tx.send(result);
         }));
 
-        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+        rx.await
+            .map_err(|_| internal_rpc_err("Internal blocking task error"))?
     }
 }
 
@@ -515,7 +545,10 @@ impl ValidationApiConfig {
 
 impl Default for ValidationApiConfig {
     fn default() -> Self {
-        Self { disallow: Default::default(), validation_window: Self::DEFAULT_VALIDATION_WINDOW }
+        Self {
+            disallow: Default::default(),
+            validation_window: Self::DEFAULT_VALIDATION_WINDOW,
+        }
     }
 }
 

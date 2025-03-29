@@ -184,7 +184,9 @@ impl Database for DatabaseEnv {
 
     fn tx(&self) -> Result<Self::TX, DatabaseError> {
         Tx::new_with_metrics(
-            self.inner.begin_ro_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
+            self.inner
+                .begin_ro_txn()
+                .map_err(|e| DatabaseError::InitTx(e.into()))?,
             self.metrics.clone(),
         )
         .map_err(|e| DatabaseError::InitTx(e.into()))
@@ -192,7 +194,9 @@ impl Database for DatabaseEnv {
 
     fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
         Tx::new_with_metrics(
-            self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
+            self.inner
+                .begin_rw_txn()
+                .map_err(|e| DatabaseError::InitTx(e.into()))?,
             self.metrics.clone(),
         )
         .map_err(|e| DatabaseError::InitTx(e.into()))
@@ -212,7 +216,10 @@ impl DatabaseMetrics for DatabaseEnv {
         let _ = self
             .view(|tx| {
                 for table in Tables::ALL.iter().map(Tables::name) {
-                    let table_db = tx.inner.open_db(Some(table)).wrap_err("Could not open db.")?;
+                    let table_db = tx
+                        .inner
+                        .open_db(Some(table))
+                        .wrap_err("Could not open db.")?;
 
                     let stats = tx
                         .inner
@@ -258,13 +265,17 @@ impl DatabaseMetrics for DatabaseEnv {
             })
             .map_err(|error| error!(%error, "Failed to read db table stats"));
 
-        if let Ok(freelist) =
-            self.freelist().map_err(|error| error!(%error, "Failed to read db.freelist"))
+        if let Ok(freelist) = self
+            .freelist()
+            .map_err(|error| error!(%error, "Failed to read db.freelist"))
         {
             metrics.push(("db.freelist", freelist as f64, vec![]));
         }
 
-        if let Ok(stat) = self.stat().map_err(|error| error!(%error, "Failed to read db.stat")) {
+        if let Ok(stat) = self
+            .stat()
+            .map_err(|error| error!(%error, "Failed to read db.stat"))
+        {
             metrics.push(("db.page_size", stat.page_size() as f64, vec![]));
         }
 
@@ -302,7 +313,9 @@ impl DatabaseEnv {
             DatabaseEnvKind::RW => {
                 // enable writemap mode in RW mode
                 inner_env.write_map();
-                Mode::ReadWrite { sync_mode: SyncMode::Durable }
+                Mode::ReadWrite {
+                    sync_mode: SyncMode::Durable,
+                }
             }
         };
 
@@ -417,7 +430,7 @@ impl DatabaseEnv {
                     LogLevel::Extra => 7,
                 });
             } else {
-                return Err(DatabaseError::LogLevelUnavailable(log_level))
+                return Err(DatabaseError::LogLevelUnavailable(log_level));
             }
         }
 
@@ -426,7 +439,9 @@ impl DatabaseEnv {
         }
 
         let env = Self {
-            inner: inner_env.open(path).map_err(|e| DatabaseError::Open(e.into()))?,
+            inner: inner_env
+                .open(path)
+                .map_err(|e| DatabaseError::Open(e.into()))?,
             metrics: None,
             _lock_file,
         };
@@ -447,11 +462,17 @@ impl DatabaseEnv {
 
     /// Creates all the tables defined in the given [`TableSet`], if necessary.
     pub fn create_tables_for<TS: TableSet>(&self) -> Result<(), DatabaseError> {
-        let tx = self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?;
+        let tx = self
+            .inner
+            .begin_rw_txn()
+            .map_err(|e| DatabaseError::InitTx(e.into()))?;
 
         for table in TS::tables() {
-            let flags =
-                if table.is_dupsort() { DatabaseFlags::DUP_SORT } else { DatabaseFlags::default() };
+            let flags = if table.is_dupsort() {
+                DatabaseFlags::DUP_SORT
+            } else {
+                DatabaseFlags::default()
+            };
 
             tx.create_db(Some(table.name()), flags)
                 .map_err(|e| DatabaseError::CreateTable(e.into()))?;
@@ -465,7 +486,7 @@ impl DatabaseEnv {
     /// Records version that accesses the database with write privileges.
     pub fn record_client_version(&self, version: ClientVersion) -> Result<(), DatabaseError> {
         if version.is_empty() {
-            return Ok(())
+            return Ok(());
         }
 
         let tx = self.tx_mut()?;
@@ -474,7 +495,10 @@ impl DatabaseEnv {
         let last_version = version_cursor.last()?.map(|(_, v)| v);
         if Some(&version) != last_version.as_ref() {
             version_cursor.upsert(
-                SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
                 &version,
             )?;
             tx.commit()?;
@@ -573,21 +597,40 @@ mod tests {
 
         let mut dup_cursor = tx.cursor_dup_write::<PlainStorageState>().unwrap();
 
-        let entry_0 = StorageEntry { key: B256::with_last_byte(1), value: U256::from(0) };
-        let entry_1 = StorageEntry { key: B256::with_last_byte(1), value: U256::from(1) };
+        let entry_0 = StorageEntry {
+            key: B256::with_last_byte(1),
+            value: U256::from(0),
+        };
+        let entry_1 = StorageEntry {
+            key: B256::with_last_byte(1),
+            value: U256::from(1),
+        };
 
-        dup_cursor.upsert(Address::with_last_byte(1), &entry_0).expect(ERROR_UPSERT);
-        dup_cursor.upsert(Address::with_last_byte(1), &entry_1).expect(ERROR_UPSERT);
+        dup_cursor
+            .upsert(Address::with_last_byte(1), &entry_0)
+            .expect(ERROR_UPSERT);
+        dup_cursor
+            .upsert(Address::with_last_byte(1), &entry_1)
+            .expect(ERROR_UPSERT);
 
         assert_eq!(
-            dup_cursor.walk(None).unwrap().collect::<Result<Vec<_>, _>>(),
-            Ok(vec![(Address::with_last_byte(1), entry_0), (Address::with_last_byte(1), entry_1),])
+            dup_cursor
+                .walk(None)
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>(),
+            Ok(vec![
+                (Address::with_last_byte(1), entry_0),
+                (Address::with_last_byte(1), entry_1),
+            ])
         );
 
         let mut walker = dup_cursor.walk(None).unwrap();
         walker.delete_current().expect(ERROR_DEL);
 
-        assert_eq!(walker.next(), Some(Ok((Address::with_last_byte(1), entry_1))));
+        assert_eq!(
+            walker.next(),
+            Some(Ok((Address::with_last_byte(1), entry_1)))
+        );
 
         // Check the tx view - it correctly holds entry_1
         assert_eq!(
@@ -703,35 +746,135 @@ mod tests {
         let address2 = Address::with_last_byte(2);
 
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
-        tx.put::<AccountChangeSets>(0, AccountBeforeTx { address: address0, info: None })
-            .expect(ERROR_PUT);
-        tx.put::<AccountChangeSets>(0, AccountBeforeTx { address: address1, info: None })
-            .expect(ERROR_PUT);
-        tx.put::<AccountChangeSets>(0, AccountBeforeTx { address: address2, info: None })
-            .expect(ERROR_PUT);
-        tx.put::<AccountChangeSets>(1, AccountBeforeTx { address: address0, info: None })
-            .expect(ERROR_PUT);
-        tx.put::<AccountChangeSets>(1, AccountBeforeTx { address: address1, info: None })
-            .expect(ERROR_PUT);
-        tx.put::<AccountChangeSets>(1, AccountBeforeTx { address: address2, info: None })
-            .expect(ERROR_PUT);
-        tx.put::<AccountChangeSets>(2, AccountBeforeTx { address: address0, info: None }) // <- should not be returned by the walker
-            .expect(ERROR_PUT);
+        tx.put::<AccountChangeSets>(
+            0,
+            AccountBeforeTx {
+                address: address0,
+                info: None,
+            },
+        )
+        .expect(ERROR_PUT);
+        tx.put::<AccountChangeSets>(
+            0,
+            AccountBeforeTx {
+                address: address1,
+                info: None,
+            },
+        )
+        .expect(ERROR_PUT);
+        tx.put::<AccountChangeSets>(
+            0,
+            AccountBeforeTx {
+                address: address2,
+                info: None,
+            },
+        )
+        .expect(ERROR_PUT);
+        tx.put::<AccountChangeSets>(
+            1,
+            AccountBeforeTx {
+                address: address0,
+                info: None,
+            },
+        )
+        .expect(ERROR_PUT);
+        tx.put::<AccountChangeSets>(
+            1,
+            AccountBeforeTx {
+                address: address1,
+                info: None,
+            },
+        )
+        .expect(ERROR_PUT);
+        tx.put::<AccountChangeSets>(
+            1,
+            AccountBeforeTx {
+                address: address2,
+                info: None,
+            },
+        )
+        .expect(ERROR_PUT);
+        tx.put::<AccountChangeSets>(
+            2,
+            AccountBeforeTx {
+                address: address0,
+                info: None,
+            },
+        ) // <- should not be returned by the walker
+        .expect(ERROR_PUT);
         tx.commit().expect(ERROR_COMMIT);
 
         let tx = db.tx().expect(ERROR_INIT_TX);
         let mut cursor = tx.cursor_read::<AccountChangeSets>().unwrap();
 
-        let entries = cursor.walk_range(..).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+        let entries = cursor
+            .walk_range(..)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
         assert_eq!(entries.len(), 7);
 
         let mut walker = cursor.walk_range(0..=1).unwrap();
-        assert_eq!(walker.next(), Some(Ok((0, AccountBeforeTx { address: address0, info: None }))));
-        assert_eq!(walker.next(), Some(Ok((0, AccountBeforeTx { address: address1, info: None }))));
-        assert_eq!(walker.next(), Some(Ok((0, AccountBeforeTx { address: address2, info: None }))));
-        assert_eq!(walker.next(), Some(Ok((1, AccountBeforeTx { address: address0, info: None }))));
-        assert_eq!(walker.next(), Some(Ok((1, AccountBeforeTx { address: address1, info: None }))));
-        assert_eq!(walker.next(), Some(Ok((1, AccountBeforeTx { address: address2, info: None }))));
+        assert_eq!(
+            walker.next(),
+            Some(Ok((
+                0,
+                AccountBeforeTx {
+                    address: address0,
+                    info: None
+                }
+            )))
+        );
+        assert_eq!(
+            walker.next(),
+            Some(Ok((
+                0,
+                AccountBeforeTx {
+                    address: address1,
+                    info: None
+                }
+            )))
+        );
+        assert_eq!(
+            walker.next(),
+            Some(Ok((
+                0,
+                AccountBeforeTx {
+                    address: address2,
+                    info: None
+                }
+            )))
+        );
+        assert_eq!(
+            walker.next(),
+            Some(Ok((
+                1,
+                AccountBeforeTx {
+                    address: address0,
+                    info: None
+                }
+            )))
+        );
+        assert_eq!(
+            walker.next(),
+            Some(Ok((
+                1,
+                AccountBeforeTx {
+                    address: address1,
+                    info: None
+                }
+            )))
+        );
+        assert_eq!(
+            walker.next(),
+            Some(Ok((
+                1,
+                AccountBeforeTx {
+                    address: address2,
+                    info: None
+                }
+            )))
+        );
         assert_eq!(walker.next(), None);
     }
 
@@ -927,7 +1070,11 @@ mod tests {
         // Confirm the result
         let tx = db.tx().expect(ERROR_INIT_TX);
         let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
-        let res = cursor.walk(None).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
+        let res = cursor
+            .walk(None)
+            .unwrap()
+            .map(|res| res.unwrap().0)
+            .collect::<Vec<_>>();
         assert_eq!(res, vec![0, 1, 2, 3, 4, 5]);
         tx.commit().expect(ERROR_COMMIT);
     }
@@ -942,11 +1089,17 @@ mod tests {
         let subkey1 = B256::random();
         let subkey2 = B256::random();
 
-        let entry1 = StorageEntry { key: subkey1, value: U256::ZERO };
+        let entry1 = StorageEntry {
+            key: subkey1,
+            value: U256::ZERO,
+        };
         assert!(dup_cursor.insert(key, &entry1).is_ok());
 
         // Can't insert
-        let entry2 = StorageEntry { key: subkey2, value: U256::ZERO };
+        let entry2 = StorageEntry {
+            key: subkey2,
+            value: U256::ZERO,
+        };
         assert!(dup_cursor.insert(key, &entry2).is_err());
     }
 
@@ -973,7 +1126,10 @@ mod tests {
         assert_eq!(cursor.seek_exact(key2), Ok(None));
         assert_eq!(cursor.delete_current(), Ok(()));
         // Assert that key1 is still there
-        assert_eq!(cursor.seek_exact(key1), Ok(Some((key1, Account::default()))));
+        assert_eq!(
+            cursor.seek_exact(key1),
+            Ok(Some((key1, Account::default())))
+        );
         // Assert that key3 was deleted
         assert_eq!(cursor.seek_exact(key3), Ok(None));
     }
@@ -1006,7 +1162,11 @@ mod tests {
         // Confirm the result
         let tx = db.tx().expect(ERROR_INIT_TX);
         let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
-        let res = cursor.walk(None).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
+        let res = cursor
+            .walk(None)
+            .unwrap()
+            .map(|res| res.unwrap().0)
+            .collect::<Vec<_>>();
         assert_eq!(res, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
         tx.commit().expect(ERROR_COMMIT);
     }
@@ -1033,7 +1193,11 @@ mod tests {
         // Confirm the result
         let tx = db.tx().expect(ERROR_INIT_TX);
         let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
-        let res = cursor.walk(None).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
+        let res = cursor
+            .walk(None)
+            .unwrap()
+            .map(|res| res.unwrap().0)
+            .collect::<Vec<_>>();
         assert_eq!(res, vec![0, 1, 2, 3, 4, 5]);
         tx.commit().expect(ERROR_COMMIT);
     }
@@ -1070,7 +1234,11 @@ mod tests {
         // Confirm the result
         let tx = db.tx().expect(ERROR_INIT_TX);
         let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
-        let res = cursor.walk(None).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
+        let res = cursor
+            .walk(None)
+            .unwrap()
+            .map(|res| res.unwrap().0)
+            .collect::<Vec<_>>();
         assert_eq!(res, vec![0, 1, 3, 4, 5]);
         tx.commit().expect(ERROR_COMMIT);
     }
@@ -1087,11 +1255,17 @@ mod tests {
         cursor.upsert(key, &account).expect(ERROR_UPSERT);
         assert_eq!(cursor.seek_exact(key), Ok(Some((key, account))));
 
-        let account = Account { nonce: 1, ..Default::default() };
+        let account = Account {
+            nonce: 1,
+            ..Default::default()
+        };
         cursor.upsert(key, &account).expect(ERROR_UPSERT);
         assert_eq!(cursor.seek_exact(key), Ok(Some((key, account))));
 
-        let account = Account { nonce: 2, ..Default::default() };
+        let account = Account {
+            nonce: 2,
+            ..Default::default()
+        };
         cursor.upsert(key, &account).expect(ERROR_UPSERT);
         assert_eq!(cursor.seek_exact(key), Ok(Some((key, account))));
 
@@ -1123,7 +1297,10 @@ mod tests {
             .try_for_each(|val| {
                 cursor.append(
                     transition_id,
-                    &AccountBeforeTx { address: Address::with_last_byte(val), info: None },
+                    &AccountBeforeTx {
+                        address: Address::with_last_byte(val),
+                        info: None,
+                    },
                 )
             })
             .expect(ERROR_APPEND);
@@ -1136,7 +1313,10 @@ mod tests {
         assert_eq!(
             cursor.append_dup(
                 transition_id,
-                AccountBeforeTx { address: Address::with_last_byte(subkey_to_append), info: None }
+                AccountBeforeTx {
+                    address: Address::with_last_byte(subkey_to_append),
+                    info: None
+                }
             ),
             Err(DatabaseWriteError {
                 info: Error::KeyMismatch.into(),
@@ -1149,7 +1329,10 @@ mod tests {
         assert_eq!(
             cursor.append(
                 transition_id - 1,
-                &AccountBeforeTx { address: Address::with_last_byte(subkey_to_append), info: None }
+                &AccountBeforeTx {
+                    address: Address::with_last_byte(subkey_to_append),
+                    info: None
+                }
             ),
             Err(DatabaseWriteError {
                 info: Error::KeyMismatch.into(),
@@ -1162,7 +1345,10 @@ mod tests {
         assert_eq!(
             cursor.append(
                 transition_id,
-                &AccountBeforeTx { address: Address::with_last_byte(subkey_to_append), info: None }
+                &AccountBeforeTx {
+                    address: Address::with_last_byte(subkey_to_append),
+                    info: None
+                }
             ),
             Ok(())
         );
@@ -1199,8 +1385,9 @@ mod tests {
         .expect(ERROR_DB_CREATION);
 
         // GET
-        let result =
-            env.view(|tx| tx.get::<PlainAccountState>(key).expect(ERROR_GET)).expect(ERROR_GET);
+        let result = env
+            .view(|tx| tx.get::<PlainAccountState>(key).expect(ERROR_GET))
+            .expect(ERROR_GET);
 
         assert_eq!(result, Some(value))
     }
@@ -1213,15 +1400,24 @@ mod tests {
 
         // PUT (0,0)
         let value00 = StorageEntry::default();
-        env.update(|tx| tx.put::<PlainStorageState>(key, value00).expect(ERROR_PUT)).unwrap();
+        env.update(|tx| tx.put::<PlainStorageState>(key, value00).expect(ERROR_PUT))
+            .unwrap();
 
         // PUT (2,2)
-        let value22 = StorageEntry { key: B256::with_last_byte(2), value: U256::from(2) };
-        env.update(|tx| tx.put::<PlainStorageState>(key, value22).expect(ERROR_PUT)).unwrap();
+        let value22 = StorageEntry {
+            key: B256::with_last_byte(2),
+            value: U256::from(2),
+        };
+        env.update(|tx| tx.put::<PlainStorageState>(key, value22).expect(ERROR_PUT))
+            .unwrap();
 
         // PUT (1,1)
-        let value11 = StorageEntry { key: B256::with_last_byte(1), value: U256::from(1) };
-        env.update(|tx| tx.put::<PlainStorageState>(key, value11).expect(ERROR_PUT)).unwrap();
+        let value11 = StorageEntry {
+            key: B256::with_last_byte(1),
+            value: U256::from(1),
+        };
+        env.update(|tx| tx.put::<PlainStorageState>(key, value11).expect(ERROR_PUT))
+            .unwrap();
 
         // Iterate with cursor
         {
@@ -1238,7 +1434,9 @@ mod tests {
         {
             let tx = env.tx().expect(ERROR_INIT_TX);
             let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
-            let mut walker = cursor.walk_dup(Some(key), Some(B256::with_last_byte(1))).unwrap();
+            let mut walker = cursor
+                .walk_dup(Some(key), Some(B256::with_last_byte(1)))
+                .unwrap();
             assert_eq!(
                 (key, value11),
                 walker
@@ -1259,15 +1457,24 @@ mod tests {
 
         // PUT key1 (0,0)
         let value00 = StorageEntry::default();
-        env.update(|tx| tx.put::<PlainStorageState>(key1, value00).expect(ERROR_PUT)).unwrap();
+        env.update(|tx| tx.put::<PlainStorageState>(key1, value00).expect(ERROR_PUT))
+            .unwrap();
 
         // PUT key1 (1,1)
-        let value11 = StorageEntry { key: B256::with_last_byte(1), value: U256::from(1) };
-        env.update(|tx| tx.put::<PlainStorageState>(key1, value11).expect(ERROR_PUT)).unwrap();
+        let value11 = StorageEntry {
+            key: B256::with_last_byte(1),
+            value: U256::from(1),
+        };
+        env.update(|tx| tx.put::<PlainStorageState>(key1, value11).expect(ERROR_PUT))
+            .unwrap();
 
         // PUT key2 (2,2)
-        let value22 = StorageEntry { key: B256::with_last_byte(2), value: U256::from(2) };
-        env.update(|tx| tx.put::<PlainStorageState>(key2, value22).expect(ERROR_PUT)).unwrap();
+        let value22 = StorageEntry {
+            key: B256::with_last_byte(2),
+            value: U256::from(2),
+        };
+        env.update(|tx| tx.put::<PlainStorageState>(key2, value22).expect(ERROR_PUT))
+            .unwrap();
 
         // Iterate with walk_dup
         {
@@ -1302,16 +1509,25 @@ mod tests {
         let key2 = Address::new([0x22; 20]);
 
         // PUT key1 (0,1)
-        let value01 = StorageEntry { key: B256::with_last_byte(0), value: U256::from(1) };
-        env.update(|tx| tx.put::<PlainStorageState>(key1, value01).expect(ERROR_PUT)).unwrap();
+        let value01 = StorageEntry {
+            key: B256::with_last_byte(0),
+            value: U256::from(1),
+        };
+        env.update(|tx| tx.put::<PlainStorageState>(key1, value01).expect(ERROR_PUT))
+            .unwrap();
 
         // PUT key1 (0,0)
         let value00 = StorageEntry::default();
-        env.update(|tx| tx.put::<PlainStorageState>(key1, value00).expect(ERROR_PUT)).unwrap();
+        env.update(|tx| tx.put::<PlainStorageState>(key1, value00).expect(ERROR_PUT))
+            .unwrap();
 
         // PUT key2 (2,2)
-        let value22 = StorageEntry { key: B256::with_last_byte(2), value: U256::from(2) };
-        env.update(|tx| tx.put::<PlainStorageState>(key2, value22).expect(ERROR_PUT)).unwrap();
+        let value22 = StorageEntry {
+            key: B256::with_last_byte(2),
+            value: U256::from(2),
+        };
+        env.update(|tx| tx.put::<PlainStorageState>(key2, value22).expect(ERROR_PUT))
+            .unwrap();
 
         // Iterate with walk
         {
@@ -1332,7 +1548,10 @@ mod tests {
             let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
 
             // NOTE: There are two values with same SubKey but only first one is shown
-            assert_eq!(Ok(Some(value00)), cursor.seek_by_key_subkey(key1, value00.key));
+            assert_eq!(
+                Ok(Some(value00)),
+                cursor.seek_by_key_subkey(key1, value00.key)
+            );
             // key1 but value is greater than the one in the DB
             assert_eq!(Ok(None), cursor.seek_by_key_subkey(key1, value22.key));
         }
@@ -1347,8 +1566,11 @@ mod tests {
             let key = ShardedKey::new(real_key, i * 100);
             let list = IntegerList::new_pre_sorted([i * 100u64]);
 
-            db.update(|tx| tx.put::<AccountsHistory>(key.clone(), list.clone()).expect(""))
-                .unwrap();
+            db.update(|tx| {
+                tx.put::<AccountsHistory>(key.clone(), list.clone())
+                    .expect("")
+            })
+            .unwrap();
         }
 
         // Seek value with non existing key.
@@ -1376,7 +1598,9 @@ mod tests {
 
             // It will seek the MAX value of transition index and try to use prev to get first
             // biggers.
-            let _unknown = cursor.seek_exact(ShardedKey::new(real_key, u64::MAX)).unwrap();
+            let _unknown = cursor
+                .seek_exact(ShardedKey::new(real_key, u64::MAX))
+                .unwrap();
             let (key, list) = cursor
                 .prev()
                 .expect("element should exist.")

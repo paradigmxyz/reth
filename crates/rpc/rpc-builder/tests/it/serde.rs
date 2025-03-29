@@ -26,5 +26,8 @@ async fn test_eth_balance_serde() {
 
     let params = RawRpcParams(RawValue::from_string(req.params.unwrap().to_string()).unwrap());
 
-    client.request::<U256, _>("eth_getBalance", params).await.unwrap();
+    client
+        .request::<U256, _>("eth_getBalance", params)
+        .await
+        .unwrap();
 }

@@ -49,10 +49,13 @@ impl InvalidInboxEntry {
         // Check if it's invalid message call, message example:
         // `failed to check message: failed to check log: unknown chain: 14417`
         if err_msg.contains(UNKNOWN_CHAIN_MSG) {
-            if let Ok(chain_id) =
-                err_msg.split(' ').next_back().expect("message contains chain id").parse::<u64>()
+            if let Ok(chain_id) = err_msg
+                .split(' ')
+                .next_back()
+                .expect("message contains chain id")
+                .parse::<u64>()
             {
-                return Some(Self::UnknownChain(chain_id))
+                return Some(Self::UnknownChain(chain_id));
             }
         // Check if it's `does not meet the minimum safety` error, message example:
         // `message {0x4200000000000000000000000000000000000023 4 1 1728507701 901}
@@ -70,7 +73,7 @@ impl InvalidInboxEntry {
                 SafetyLevel::Invalid
             } else {
                 // Unexpected level name
-                return None
+                return None;
             };
             let expected_safety = if err_msg.contains("safety finalized") {
                 SafetyLevel::Finalized
@@ -84,10 +87,13 @@ impl InvalidInboxEntry {
                 SafetyLevel::Unsafe
             } else {
                 // Unexpected level name
-                return None
+                return None;
             };
 
-            return Some(Self::MinimumSafety { expected: expected_safety, got: message_safety })
+            return Some(Self::MinimumSafety {
+                expected: expected_safety,
+                got: message_safety,
+            });
         }
 
         None
@@ -184,8 +190,11 @@ mod tests {
 
     #[test]
     fn test_client_error_parsing() {
-        let err =
-            ErrorPayload { code: 0, message: MIN_SAFETY_CROSS_UNSAFE_ERROR.into(), data: None };
+        let err = ErrorPayload {
+            code: 0,
+            message: MIN_SAFETY_CROSS_UNSAFE_ERROR.into(),
+            data: None,
+        };
         let rpc_err = RpcError::<InvalidInboxEntry>::ErrorResp(err);
         let error = InteropTxValidatorError::client(rpc_err);
 
@@ -198,7 +207,11 @@ mod tests {
         ));
 
         // Testing with Unknown message
-        let err = ErrorPayload { code: 0, message: "unknown error".into(), data: None };
+        let err = ErrorPayload {
+            code: 0,
+            message: "unknown error".into(),
+            data: None,
+        };
         let rpc_err = RpcError::<InvalidInboxEntry>::ErrorResp(err);
         let error = InteropTxValidatorError::client(rpc_err);
         assert!(matches!(error, InteropTxValidatorError::RpcClientError(_)));

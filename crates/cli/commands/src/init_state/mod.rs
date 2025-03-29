@@ -76,18 +76,25 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateC
     {
         info!(target: "reth::cli", "Reth init-state starting");
 
-        let Environment { config, provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
+        let Environment {
+            config,
+            provider_factory,
+            ..
+        } = self.env.init::<N>(AccessRights::RW)?;
 
         let static_file_provider = provider_factory.static_file_provider();
         let provider_rw = provider_factory.database_provider_rw()?;
 
         if self.without_evm {
             // ensure header, total difficulty and header hash are provided
-            let header = self.header.ok_or_else(|| eyre::eyre!("Header file must be provided"))?;
+            let header = self
+                .header
+                .ok_or_else(|| eyre::eyre!("Header file must be provided"))?;
             let header = without_evm::read_header_from_file(header)?;
 
-            let header_hash =
-                self.header_hash.ok_or_else(|| eyre::eyre!("Header hash must be provided"))?;
+            let header_hash = self
+                .header_hash
+                .ok_or_else(|| eyre::eyre!("Header hash must be provided"))?;
             let header_hash = B256::from_str(&header_hash)?;
 
             let total_difficulty = self

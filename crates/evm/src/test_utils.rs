@@ -22,7 +22,9 @@ pub struct MockExecutorProvider {
 impl MockExecutorProvider {
     /// Extend the mocked execution results
     pub fn extend(&self, results: impl IntoIterator<Item = impl Into<ExecutionOutcome>>) {
-        self.exec_results.lock().extend(results.into_iter().map(Into::into));
+        self.exec_results
+            .lock()
+            .extend(results.into_iter().map(Into::into));
     }
 }
 
@@ -48,14 +50,20 @@ impl<DB: Database> Executor<DB> for MockExecutorProvider {
         _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        let ExecutionOutcome { bundle: _, receipts, requests, first_block: _ } =
-            self.exec_results.lock().pop().unwrap();
+        let ExecutionOutcome {
+            bundle: _,
+            receipts,
+            requests,
+            first_block: _,
+        } = self.exec_results.lock().pop().unwrap();
         Ok(BlockExecutionResult {
             receipts: receipts.into_iter().flatten().collect(),
-            requests: requests.into_iter().fold(Requests::default(), |mut reqs, req| {
-                reqs.extend(req);
-                reqs
-            }),
+            requests: requests
+                .into_iter()
+                .fold(Requests::default(), |mut reqs, req| {
+                    reqs.extend(req);
+                    reqs
+                }),
             gas_used: 0,
         })
     }
@@ -76,16 +84,22 @@ impl<DB: Database> Executor<DB> for MockExecutorProvider {
         _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        let ExecutionOutcome { bundle, receipts, requests, first_block: _ } =
-            self.exec_results.lock().pop().unwrap();
+        let ExecutionOutcome {
+            bundle,
+            receipts,
+            requests,
+            first_block: _,
+        } = self.exec_results.lock().pop().unwrap();
         Ok(BlockExecutionOutput {
             state: bundle,
             result: BlockExecutionResult {
                 receipts: receipts.into_iter().flatten().collect(),
-                requests: requests.into_iter().fold(Requests::default(), |mut reqs, req| {
-                    reqs.extend(req);
-                    reqs
-                }),
+                requests: requests
+                    .into_iter()
+                    .fold(Requests::default(), |mut reqs, req| {
+                        reqs.extend(req);
+                        reqs
+                    }),
                 gas_used: 0,
             },
         })

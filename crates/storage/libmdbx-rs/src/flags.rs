@@ -114,13 +114,18 @@ pub enum Mode {
 
 impl Default for Mode {
     fn default() -> Self {
-        Self::ReadWrite { sync_mode: SyncMode::default() }
+        Self::ReadWrite {
+            sync_mode: SyncMode::default(),
+        }
     }
 }
 
 impl From<Mode> for EnvironmentFlags {
     fn from(mode: Mode) -> Self {
-        Self { mode, ..Default::default() }
+        Self {
+            mode,
+            ..Default::default()
+        }
     }
 }
 

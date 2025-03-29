@@ -35,7 +35,11 @@ impl TryFrom<AnyRpcTransaction> for TransactionSigned {
                 let (tx, signature, hash) = tx.into_parts();
                 (Transaction::Eip7702(tx), signature, hash)
             }
-            _ => return Err(ConversionError::Custom("unknown transaction type".to_string())),
+            _ => {
+                return Err(ConversionError::Custom(
+                    "unknown transaction type".to_string(),
+                ))
+            }
         };
 
         Ok(Self::new(transaction, signature, hash))

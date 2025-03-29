@@ -66,8 +66,14 @@ impl<B: Block> BlockBuffer<B> {
     pub fn insert_block(&mut self, block: RecoveredBlock<B>) {
         let hash = block.hash();
 
-        self.parent_to_child.entry(block.parent_hash()).or_default().insert(hash);
-        self.earliest_blocks.entry(block.number()).or_default().insert(hash);
+        self.parent_to_child
+            .entry(block.parent_hash())
+            .or_default()
+            .insert(hash);
+        self.earliest_blocks
+            .entry(block.number())
+            .or_default()
+            .insert(hash);
         self.blocks.insert(hash, block);
 
         // Add block to FIFO queue and handle eviction if needed
@@ -109,7 +115,7 @@ impl<B: Block> BlockBuffer<B> {
         // discard all blocks that are before the finalized number.
         while let Some(entry) = self.earliest_blocks.first_entry() {
             if *entry.key() > block_number {
-                break
+                break;
             }
             let block_hashes = entry.remove();
             block_hashes_to_remove.extend(block_hashes);
@@ -196,8 +202,14 @@ mod tests {
         number: u64,
         parent: BlockHash,
     ) -> RecoveredBlock<reth_ethereum_primitives::Block> {
-        let block =
-            random_block(rng, number, BlockParams { parent: Some(parent), ..Default::default() });
+        let block = random_block(
+            rng,
+            number,
+            BlockParams {
+                parent: Some(parent),
+                ..Default::default()
+            },
+        );
         block.try_recover().unwrap()
     }
 
@@ -206,11 +218,17 @@ mod tests {
         assert_eq!(buffer.blocks.len(), expected);
         assert_eq!(buffer.block_queue.len(), expected);
         assert_eq!(
-            buffer.parent_to_child.iter().fold(0, |acc, (_, hashes)| acc + hashes.len()),
+            buffer
+                .parent_to_child
+                .iter()
+                .fold(0, |acc, (_, hashes)| acc + hashes.len()),
             expected
         );
         assert_eq!(
-            buffer.earliest_blocks.iter().fold(0, |acc, (_, hashes)| acc + hashes.len()),
+            buffer
+                .earliest_blocks
+                .iter()
+                .fold(0, |acc, (_, hashes)| acc + hashes.len()),
             expected
         );
     }
@@ -418,9 +436,18 @@ mod tests {
         buffer.insert_block(random_block3.clone());
 
         // check that random blocks are their own ancestor, and that chains have proper ancestors
-        assert_eq!(buffer.lowest_ancestor(&random_block1.hash()), Some(&random_block1));
-        assert_eq!(buffer.lowest_ancestor(&random_block2.hash()), Some(&random_block2));
-        assert_eq!(buffer.lowest_ancestor(&random_block3.hash()), Some(&random_block3));
+        assert_eq!(
+            buffer.lowest_ancestor(&random_block1.hash()),
+            Some(&random_block1)
+        );
+        assert_eq!(
+            buffer.lowest_ancestor(&random_block2.hash()),
+            Some(&random_block2)
+        );
+        assert_eq!(
+            buffer.lowest_ancestor(&random_block3.hash()),
+            Some(&random_block3)
+        );
 
         // descendants have ancestors
         assert_eq!(buffer.lowest_ancestor(&block2a.hash()), Some(&block1));

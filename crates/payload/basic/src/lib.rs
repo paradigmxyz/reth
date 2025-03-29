@@ -119,7 +119,10 @@ impl<Client, Tasks, Builder> BasicPayloadJobGenerator<Client, Tasks, Builder> {
     /// Returns the pre-cached reads for the given parent header if it matches the cached state's
     /// block.
     fn maybe_pre_cached(&self, parent: B256) -> Option<CachedReads> {
-        self.pre_cached.as_ref().filter(|pc| pc.block == parent).map(|pc| pc.cached.clone())
+        self.pre_cached
+            .as_ref()
+            .filter(|pc| pc.block == parent)
+            .map(|pc| pc.cached.clone())
     }
 }
 
@@ -195,13 +198,19 @@ where
             if let Some(info) = acc.info.clone() {
                 // we want pre cache existing accounts and their storage
                 // this only includes changed accounts and storage but is better than nothing
-                let storage =
-                    acc.storage.iter().map(|(key, slot)| (*key, slot.present_value)).collect();
+                let storage = acc
+                    .storage
+                    .iter()
+                    .map(|(key, slot)| (*key, slot.present_value))
+                    .collect();
                 cached.insert_account(addr, info, storage);
             }
         }
 
-        self.pre_cached = Some(PrecachedState { block: committed.tip().hash(), cached });
+        self.pre_cached = Some(PrecachedState {
+            block: committed.tip().hash(),
+            cached,
+        });
     }
 }
 
@@ -271,7 +280,10 @@ impl BasicPayloadJobGeneratorConfig {
     ///
     /// If `max_payload_tasks` is 0.
     pub fn max_payload_tasks(mut self, max_payload_tasks: usize) -> Self {
-        assert!(max_payload_tasks > 0, "max_payload_tasks must be greater than 0");
+        assert!(
+            max_payload_tasks > 0,
+            "max_payload_tasks must be greater than 0"
+        );
         self.max_payload_tasks = max_payload_tasks;
         self
     }
@@ -352,13 +364,20 @@ where
         self.executor.spawn_blocking(Box::pin(async move {
             // acquire the permit for executing the task
             let _permit = guard.acquire().await;
-            let args =
-                BuildArguments { cached_reads, config: payload_config, cancel, best_payload };
+            let args = BuildArguments {
+                cached_reads,
+                config: payload_config,
+                cancel,
+                best_payload,
+            };
             let result = builder.try_build(args);
             let _ = tx.send(result);
         }));
 
-        self.pending_block = Some(PendingPayload { _cancel, payload: rx });
+        self.pending_block = Some(PendingPayload {
+            _cancel,
+            payload: rx,
+        });
     }
 }
 
@@ -377,7 +396,7 @@ where
         // check if the deadline is reached
         if this.deadline.as_mut().poll(cx).is_ready() {
             trace!(target: "payload_builder", "payload building deadline reached");
-            return Poll::Ready(Ok(()))
+            return Poll::Ready(Ok(()));
         }
 
         // check if the interval is reached
@@ -393,7 +412,10 @@ where
         if let Some(mut fut) = this.pending_block.take() {
             match fut.poll_unpin(cx) {
                 Poll::Ready(Ok(outcome)) => match outcome {
-                    BuildOutcome::Better { payload, cached_reads } => {
+                    BuildOutcome::Better {
+                        payload,
+                        cached_reads,
+                    } => {
                         this.cached_reads = Some(cached_reads);
                         debug!(target: "payload_builder", value = %payload.fees(), "built better payload");
                         this.best_payload = PayloadState::Best(payload);
@@ -597,7 +619,7 @@ where
 
         if let Some(best) = this.best_payload.take() {
             debug!(target: "payload_builder", "resolving best payload");
-            return Poll::Ready(Ok(best))
+            return Poll::Ready(Ok(best));
         }
 
         if let Some(fut) = Pin::new(&mut this.empty_payload).as_pin_mut() {
@@ -613,12 +635,12 @@ where
                         Poll::Ready(res)
                     }
                     Err(err) => Poll::Ready(Err(err.into())),
-                }
+                };
             }
         }
 
         if this.is_empty() {
-            return Poll::Ready(Err(PayloadBuilderError::MissingPayload))
+            return Poll::Ready(Err(PayloadBuilderError::MissingPayload));
         }
 
         Poll::Pending
@@ -640,7 +662,10 @@ impl<P> PendingPayload<P> {
         cancel: CancelOnDrop,
         payload: oneshot::Receiver<Result<BuildOutcome<P>, PayloadBuilderError>>,
     ) -> Self {
-        Self { _cancel: cancel, payload }
+        Self {
+            _cancel: cancel,
+            payload,
+        }
     }
 }
 
@@ -668,7 +693,10 @@ where
 {
     /// Create new payload config.
     pub const fn new(parent_header: Arc<SealedHeader<Header>>, attributes: Attributes) -> Self {
-        Self { parent_header, attributes }
+        Self {
+            parent_header,
+            attributes,
+        }
     }
 
     /// Returns the payload id.
@@ -731,9 +759,13 @@ impl<Payload> BuildOutcome<Payload> {
         F: FnOnce(Payload) -> P,
     {
         match self {
-            Self::Better { payload, cached_reads } => {
-                BuildOutcome::Better { payload: f(payload), cached_reads }
-            }
+            Self::Better {
+                payload,
+                cached_reads,
+            } => BuildOutcome::Better {
+                payload: f(payload),
+                cached_reads,
+            },
             Self::Aborted { fees, cached_reads } => BuildOutcome::Aborted { fees, cached_reads },
             Self::Cancelled => BuildOutcome::Cancelled,
             Self::Freeze(payload) => BuildOutcome::Freeze(f(payload)),
@@ -764,7 +796,10 @@ impl<Payload> BuildOutcomeKind<Payload> {
     /// Attaches the [`CachedReads`] to the outcome.
     pub fn with_cached_reads(self, cached_reads: CachedReads) -> BuildOutcome<Payload> {
         match self {
-            Self::Better { payload } => BuildOutcome::Better { payload, cached_reads },
+            Self::Better { payload } => BuildOutcome::Better {
+                payload,
+                cached_reads,
+            },
             Self::Aborted { fees } => BuildOutcome::Aborted { fees, cached_reads },
             Self::Cancelled => BuildOutcome::Cancelled,
             Self::Freeze(payload) => BuildOutcome::Freeze(payload),
@@ -797,7 +832,12 @@ impl<Attributes, Payload: BuiltPayload> BuildArguments<Attributes, Payload> {
         cancel: CancelOnDrop,
         best_payload: Option<Payload>,
     ) -> Self {
-        Self { cached_reads, config, cancel, best_payload }
+        Self {
+            cached_reads,
+            config,
+            cancel,
+            best_payload,
+        }
     }
 }
 
@@ -895,7 +935,9 @@ pub fn is_better_payload<T: BuiltPayload>(best_payload: Option<&T>, new_fees: U2
 ///
 /// Returns `Duration::ZERO` if the given timestamp is in the past.
 fn duration_until(unix_timestamp_secs: u64) -> Duration {
-    let unix_now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let unix_now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
     let timestamp = Duration::from_secs(unix_timestamp_secs);
     timestamp.saturating_sub(unix_now)
 }

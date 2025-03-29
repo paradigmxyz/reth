@@ -13,7 +13,9 @@ impl AnyError {
     where
         E: Error + Send + Sync + 'static,
     {
-        Self { inner: Arc::new(error) }
+        Self {
+            inner: Arc::new(error),
+        }
     }
 
     /// Returns a reference to the underlying error value.

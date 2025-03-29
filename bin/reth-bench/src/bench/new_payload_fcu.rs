@@ -39,13 +39,20 @@ pub struct Command {
 impl Command {
     /// Execute `benchmark new-payload-fcu` command
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
-        let BenchContext { benchmark_mode, block_provider, auth_provider, mut next_block } =
-            BenchContext::new(&self.benchmark, self.rpc_url).await?;
+        let BenchContext {
+            benchmark_mode,
+            block_provider,
+            auth_provider,
+            mut next_block,
+        } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
         let (sender, mut receiver) = tokio::sync::mpsc::channel(1000);
         tokio::task::spawn(async move {
             while benchmark_mode.contains(next_block) {
-                let block_res = block_provider.get_block_by_number(next_block.into()).full().await;
+                let block_res = block_provider
+                    .get_block_by_number(next_block.into())
+                    .full()
+                    .await;
                 let block = block_res.unwrap().unwrap();
 
                 let block = block
@@ -58,8 +65,11 @@ impl Command {
                     .unwrap()
                     .into_consensus();
 
-                let blob_versioned_hashes =
-                    block.body.blob_versioned_hashes_iter().copied().collect::<Vec<_>>();
+                let blob_versioned_hashes = block
+                    .body
+                    .blob_versioned_hashes_iter()
+                    .copied()
+                    .collect::<Vec<_>>();
 
                 // Convert to execution payload
                 let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
@@ -74,8 +84,11 @@ impl Command {
                 let (safe, finalized) = tokio::join!(safe_block_hash, finalized_block_hash,);
 
                 let safe_block_hash = safe.unwrap().expect("finalized block exists").header.hash;
-                let finalized_block_hash =
-                    finalized.unwrap().expect("finalized block exists").header.hash;
+                let finalized_block_hash = finalized
+                    .unwrap()
+                    .expect("finalized block exists")
+                    .header
+                    .hash;
 
                 next_block += 1;
                 sender
@@ -127,7 +140,10 @@ impl Command {
             )
             .await?;
 
-            let new_payload_result = NewPayloadResult { gas_used, latency: start.elapsed() };
+            let new_payload_result = NewPayloadResult {
+                gas_used,
+                latency: start.elapsed(),
+            };
 
             call_forkchoice_updated(&auth_provider, message_version, forkchoice_state, None)
                 .await?;
@@ -135,8 +151,12 @@ impl Command {
             // calculate the total duration and the fcu latency, record
             let total_latency = start.elapsed();
             let fcu_latency = total_latency - new_payload_result.latency;
-            let combined_result =
-                CombinedResult { block_number, new_payload_result, fcu_latency, total_latency };
+            let combined_result = CombinedResult {
+                block_number,
+                new_payload_result,
+                fcu_latency,
+                total_latency,
+            };
 
             // current duration since the start of the benchmark minus the time
             // waiting for blocks
@@ -151,7 +171,11 @@ impl Command {
             }
 
             // record the current result
-            let gas_row = TotalGasRow { block_number, gas_used, time: current_duration };
+            let gas_row = TotalGasRow {
+                block_number,
+                gas_used,
+                time: current_duration,
+            };
             results.push((gas_row, combined_result));
         }
 
@@ -162,7 +186,10 @@ impl Command {
         if let Some(path) = self.benchmark.output {
             // first write the combined results to a file
             let output_path = path.join(COMBINED_OUTPUT_SUFFIX);
-            info!("Writing engine api call latency output to file: {:?}", output_path);
+            info!(
+                "Writing engine api call latency output to file: {:?}",
+                output_path
+            );
             let mut writer = Writer::from_path(output_path)?;
             for result in combined_results {
                 writer.serialize(result)?;

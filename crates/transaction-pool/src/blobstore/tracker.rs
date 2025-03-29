@@ -21,7 +21,8 @@ impl BlobStoreCanonTracker {
         block_number: BlockNumber,
         blob_txs: impl IntoIterator<Item = B256>,
     ) {
-        self.blob_txs_in_blocks.insert(block_number, blob_txs.into_iter().collect());
+        self.blob_txs_in_blocks
+            .insert(block_number, blob_txs.into_iter().collect());
     }
 
     /// Adds all blocks to the tracked list of blocks.
@@ -65,7 +66,7 @@ impl BlobStoreCanonTracker {
             if *entry.key() <= finalized_block {
                 finalized.extend(entry.remove_entry().1);
             } else {
-                break
+                break;
             }
         }
 
@@ -107,7 +108,10 @@ mod tests {
         tracker.add_block(3, block3.clone());
 
         assert_eq!(tracker.on_finalized_block(0), BlobStoreUpdates::None);
-        assert_eq!(tracker.on_finalized_block(1), BlobStoreUpdates::Finalized(block1));
+        assert_eq!(
+            tracker.on_finalized_block(1),
+            BlobStoreUpdates::Finalized(block1)
+        );
         assert_eq!(
             tracker.on_finalized_block(3),
             BlobStoreUpdates::Finalized(block2.into_iter().chain(block3).collect::<Vec<_>>())
@@ -132,7 +136,13 @@ mod tests {
         // Creating a first block with EIP-4844 transactions
         let block1 = RecoveredBlock::new_sealed(
             SealedBlock::from_sealed_parts(
-                SealedHeader::new(Header { number: 10, ..Default::default() }, B256::random()),
+                SealedHeader::new(
+                    Header {
+                        number: 10,
+                        ..Default::default()
+                    },
+                    B256::random(),
+                ),
                 alloy_consensus::BlockBody {
                     transactions: vec![
                         tx1_signed.into(),
@@ -154,7 +164,13 @@ mod tests {
         // Note: This block does not contain any EIP-4844 transactions
         let block2 = RecoveredBlock::new_sealed(
             SealedBlock::from_sealed_parts(
-                SealedHeader::new(Header { number: 11, ..Default::default() }, B256::random()),
+                SealedHeader::new(
+                    Header {
+                        number: 11,
+                        ..Default::default()
+                    },
+                    B256::random(),
+                ),
                 alloy_consensus::BlockBody {
                     transactions: vec![
                         Signed::new_unhashed(
@@ -182,7 +198,10 @@ mod tests {
         tracker.add_new_chain_blocks(&blocks);
 
         // Tx1 and tx2 should be in the block containing EIP-4844 transactions
-        assert_eq!(tracker.blob_txs_in_blocks.get(&10).unwrap(), &vec![tx1_hash, tx2_hash]);
+        assert_eq!(
+            tracker.blob_txs_in_blocks.get(&10).unwrap(),
+            &vec![tx1_hash, tx2_hash]
+        );
         // No transactions should be in the block containing non-EIP-4844 transactions
         assert!(tracker.blob_txs_in_blocks.get(&11).unwrap().is_empty());
     }

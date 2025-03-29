@@ -47,7 +47,10 @@ mod tests {
         let mut ommer = StoredBlockOmmers::default();
         ommer.ommers.push(Header::default());
         ommer.ommers.push(Header::default());
-        assert_eq!(ommer.clone(), StoredBlockOmmers::decompress(&ommer.compress()).unwrap());
+        assert_eq!(
+            ommer.clone(),
+            StoredBlockOmmers::decompress(&ommer.compress()).unwrap()
+        );
     }
 
     #[test]

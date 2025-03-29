@@ -91,8 +91,12 @@ mod tests {
 
     #[test]
     fn eip_4788_non_genesis_call() {
-        let mut header =
-            Header { timestamp: 1, number: 1, excess_blob_gas: Some(0), ..Header::default() };
+        let mut header = Header {
+            timestamp: 1,
+            number: 1,
+            excess_blob_gas: Some(0),
+            ..Header::default()
+        };
 
         let db = create_database_with_beacon_root_contract();
 
@@ -112,7 +116,11 @@ mod tests {
             .execute_one(&RecoveredBlock::new_unhashed(
                 Block {
                     header: header.clone(),
-                    body: BlockBody { transactions: vec![], ommers: vec![], withdrawals: None },
+                    body: BlockBody {
+                        transactions: vec![],
+                        ommers: vec![],
+                        withdrawals: None,
+                    },
                 },
                 vec![],
             ))
@@ -133,7 +141,11 @@ mod tests {
             .execute_one(&RecoveredBlock::new_unhashed(
                 Block {
                     header: header.clone(),
-                    body: BlockBody { transactions: vec![], ommers: vec![], withdrawals: None },
+                    body: BlockBody {
+                        transactions: vec![],
+                        ommers: vec![],
+                        withdrawals: None,
+                    },
                 },
                 vec![],
             ))
@@ -150,14 +162,19 @@ mod tests {
             timestamp_index % history_buffer_length + history_buffer_length;
 
         let timestamp_storage = executor.with_state_mut(|state| {
-            state.storage(BEACON_ROOTS_ADDRESS, U256::from(timestamp_index)).unwrap()
+            state
+                .storage(BEACON_ROOTS_ADDRESS, U256::from(timestamp_index))
+                .unwrap()
         });
         assert_eq!(timestamp_storage, U256::from(header.timestamp));
 
         // get parent beacon block root storage and compare
         let parent_beacon_block_root_storage = executor.with_state_mut(|state| {
             state
-                .storage(BEACON_ROOTS_ADDRESS, U256::from(parent_beacon_block_root_index))
+                .storage(
+                    BEACON_ROOTS_ADDRESS,
+                    U256::from(parent_beacon_block_root_index),
+                )
                 .expect("storage value should exist")
         });
         assert_eq!(parent_beacon_block_root_storage, U256::from(0x69));
@@ -193,7 +210,11 @@ mod tests {
             .execute_one(&RecoveredBlock::new_unhashed(
                 Block {
                     header,
-                    body: BlockBody { transactions: vec![], ommers: vec![], withdrawals: None },
+                    body: BlockBody {
+                        transactions: vec![],
+                        ommers: vec![],
+                        withdrawals: None,
+                    },
                 },
                 vec![],
             ))
@@ -237,7 +258,11 @@ mod tests {
             .execute_one(&RecoveredBlock::new_unhashed(
                 Block {
                     header,
-                    body: BlockBody { transactions: vec![], ommers: vec![], withdrawals: None },
+                    body: BlockBody {
+                        transactions: vec![],
+                        ommers: vec![],
+                        withdrawals: None,
+                    },
                 },
                 vec![],
             ))
@@ -271,7 +296,10 @@ mod tests {
         header.parent_beacon_block_root = Some(B256::with_last_byte(0x69));
         let _err = executor
             .execute_one(&RecoveredBlock::new_unhashed(
-                Block { header: header.clone(), body: Default::default() },
+                Block {
+                    header: header.clone(),
+                    body: Default::default(),
+                },
                 vec![],
             ))
             .expect_err(
@@ -286,7 +314,10 @@ mod tests {
         // call does not occur
         executor
             .execute_one(&RecoveredBlock::new_unhashed(
-                Block { header, body: Default::default() },
+                Block {
+                    header,
+                    body: Default::default(),
+                },
                 vec![],
             ))
             .unwrap();
@@ -334,7 +365,10 @@ mod tests {
         // Now execute a block with the fixed header, ensure that it does not fail
         executor
             .execute_one(&RecoveredBlock::new_unhashed(
-                Block { header: header.clone(), body: Default::default() },
+                Block {
+                    header: header.clone(),
+                    body: Default::default(),
+                },
                 vec![],
             ))
             .unwrap();
@@ -351,13 +385,20 @@ mod tests {
 
         // get timestamp storage and compare
         let timestamp_storage = executor.with_state_mut(|state| {
-            state.storage(BEACON_ROOTS_ADDRESS, U256::from(timestamp_index)).unwrap()
+            state
+                .storage(BEACON_ROOTS_ADDRESS, U256::from(timestamp_index))
+                .unwrap()
         });
         assert_eq!(timestamp_storage, U256::from(header.timestamp));
 
         // get parent beacon block root storage and compare
         let parent_beacon_block_root_storage = executor.with_state_mut(|state| {
-            state.storage(BEACON_ROOTS_ADDRESS, U256::from(parent_beacon_block_root_index)).unwrap()
+            state
+                .storage(
+                    BEACON_ROOTS_ADDRESS,
+                    U256::from(parent_beacon_block_root_index),
+                )
+                .unwrap()
         });
         assert_eq!(parent_beacon_block_root_storage, U256::from(0x69));
     }
@@ -366,9 +407,10 @@ mod tests {
     fn create_database_with_block_hashes(latest_block: u64) -> CacheDB<EmptyDB> {
         let mut db = CacheDB::new(Default::default());
         for block_number in 0..=latest_block {
-            db.cache
-                .block_hashes
-                .insert(U256::from(block_number), keccak256(block_number.to_string()));
+            db.cache.block_hashes.insert(
+                U256::from(block_number),
+                keccak256(block_number.to_string()),
+            );
         }
 
         let blockhashes_contract_account = AccountInfo {
@@ -397,12 +439,19 @@ mod tests {
         let mut executor = provider.executor(db);
 
         // construct the header for block one
-        let header = Header { timestamp: 1, number: 1, ..Header::default() };
+        let header = Header {
+            timestamp: 1,
+            number: 1,
+            ..Header::default()
+        };
 
         // attempt to execute an empty block, this should not fail
         executor
             .execute_one(&RecoveredBlock::new_unhashed(
-                Block { header, body: Default::default() },
+                Block {
+                    header,
+                    body: Default::default(),
+                },
                 vec![],
             ))
             .expect(
@@ -440,7 +489,10 @@ mod tests {
         // attempt to execute genesis block, this should not fail
         executor
             .execute_one(&RecoveredBlock::new_unhashed(
-                Block { header, body: Default::default() },
+                Block {
+                    header,
+                    body: Default::default(),
+                },
                 vec![],
             ))
             .expect(
@@ -487,7 +539,10 @@ mod tests {
         // attempt to execute the fork activation block, this should not fail
         executor
             .execute_one(&RecoveredBlock::new_unhashed(
-                Block { header, body: Default::default() },
+                Block {
+                    header,
+                    body: Default::default(),
+                },
                 vec![],
             ))
             .expect(
@@ -499,7 +554,10 @@ mod tests {
             .with_state_mut(|state| state.basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some()));
         assert_ne!(
             executor.with_state_mut(|state| state
-                .storage(HISTORY_STORAGE_ADDRESS, U256::from(fork_activation_block - 1))
+                .storage(
+                    HISTORY_STORAGE_ADDRESS,
+                    U256::from(fork_activation_block - 1)
+                )
                 .unwrap()),
             U256::ZERO
         );
@@ -541,7 +599,10 @@ mod tests {
         // attempt to execute the fork activation block, this should not fail
         executor
             .execute_one(&RecoveredBlock::new_unhashed(
-                Block { header, body: Default::default() },
+                Block {
+                    header,
+                    body: Default::default(),
+                },
                 vec![],
             ))
             .expect(
@@ -574,7 +635,10 @@ mod tests {
         // attempt to execute the genesis block, this should not fail
         executor
             .execute_one(&RecoveredBlock::new_unhashed(
-                Block { header, body: Default::default() },
+                Block {
+                    header,
+                    body: Default::default(),
+                },
                 vec![],
             ))
             .expect(
@@ -605,7 +669,10 @@ mod tests {
 
         executor
             .execute_one(&RecoveredBlock::new_unhashed(
-                Block { header, body: Default::default() },
+                Block {
+                    header,
+                    body: Default::default(),
+                },
                 vec![],
             ))
             .expect(
@@ -639,7 +706,10 @@ mod tests {
 
         executor
             .execute_one(&RecoveredBlock::new_unhashed(
-                Block { header, body: Default::default() },
+                Block {
+                    header,
+                    body: Default::default(),
+                },
                 vec![],
             ))
             .expect(
@@ -685,13 +755,19 @@ mod tests {
 
         db.insert_account_info(
             sender_address,
-            AccountInfo { nonce: 1, balance: U256::from(ETH_TO_WEI), ..Default::default() },
+            AccountInfo {
+                nonce: 1,
+                balance: U256::from(ETH_TO_WEI),
+                ..Default::default()
+            },
         );
 
         // https://github.com/lightclient/sys-asm/blob/9282bdb9fd64e024e27f60f507486ffb2183cba2/test/Withdrawal.t.sol.in#L36
         let validator_public_key = fixed_bytes!("111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111");
         let withdrawal_amount = fixed_bytes!("0203040506070809");
-        let input: Bytes = [&validator_public_key[..], &withdrawal_amount[..]].concat().into();
+        let input: Bytes = [&validator_public_key[..], &withdrawal_amount[..]]
+            .concat()
+            .into();
         assert_eq!(input.len(), 56);
 
         let mut header = chain_spec.genesis_header().clone();
@@ -719,11 +795,19 @@ mod tests {
 
         let mut executor = provider.executor(db);
 
-        let BlockExecutionResult { receipts, requests, .. } = executor
+        let BlockExecutionResult {
+            receipts, requests, ..
+        } = executor
             .execute_one(
-                &Block { header, body: BlockBody { transactions: vec![tx], ..Default::default() } }
-                    .try_into_recovered()
-                    .unwrap(),
+                &Block {
+                    header,
+                    body: BlockBody {
+                        transactions: vec![tx],
+                        ..Default::default()
+                    },
+                }
+                .try_into_recovered()
+                .unwrap(),
             )
             .unwrap();
 
@@ -758,14 +842,20 @@ mod tests {
         // Insert the sender account into the state with a nonce of 1 and a balance of 1 ETH in Wei
         db.insert_account_info(
             sender_address,
-            AccountInfo { nonce: 1, balance: U256::from(ETH_TO_WEI), ..Default::default() },
+            AccountInfo {
+                nonce: 1,
+                balance: U256::from(ETH_TO_WEI),
+                ..Default::default()
+            },
         );
 
         // Define the validator public key and withdrawal amount as fixed bytes
         let validator_public_key = fixed_bytes!("111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111");
         let withdrawal_amount = fixed_bytes!("2222222222222222");
         // Concatenate the validator public key and withdrawal amount into a single byte array
-        let input: Bytes = [&validator_public_key[..], &withdrawal_amount[..]].concat().into();
+        let input: Bytes = [&validator_public_key[..], &withdrawal_amount[..]]
+            .concat()
+            .into();
         // Ensure the input length is 56 bytes
         assert_eq!(input.len(), 56);
 
@@ -795,9 +885,15 @@ mod tests {
 
         // Execute the block and capture the result
         let exec_result = executor.execute_one(
-            &Block { header, body: BlockBody { transactions: vec![tx], ..Default::default() } }
-                .try_into_recovered()
-                .unwrap(),
+            &Block {
+                header,
+                body: BlockBody {
+                    transactions: vec![tx],
+                    ..Default::default()
+                },
+            }
+            .try_into_recovered()
+            .unwrap(),
         );
 
         // Check if the execution result is an error and assert the specific error type
@@ -829,11 +925,19 @@ mod tests {
         let initial_balance = 100;
         db.insert_account_info(
             withdrawal_recipient,
-            AccountInfo { balance: U256::from(initial_balance), nonce: 1, ..Default::default() },
+            AccountInfo {
+                balance: U256::from(initial_balance),
+                nonce: 1,
+                ..Default::default()
+            },
         );
 
-        let withdrawal =
-            Withdrawal { index: 0, validator_index: 0, address: withdrawal_recipient, amount: 1 };
+        let withdrawal = Withdrawal {
+            index: 0,
+            validator_index: 0,
+            address: withdrawal_recipient,
+            amount: 1,
+        };
 
         let header = Header {
             timestamp: 1,

@@ -292,7 +292,10 @@ where
         payload_attributes: Option<EngineT::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV2");
-        Ok(self.inner.fork_choice_updated_v2_metered(fork_choice_state, payload_attributes).await?)
+        Ok(self
+            .inner
+            .fork_choice_updated_v2_metered(fork_choice_state, payload_attributes)
+            .await?)
     }
 
     async fn fork_choice_updated_v3(
@@ -301,7 +304,10 @@ where
         payload_attributes: Option<EngineT::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV3");
-        Ok(self.inner.fork_choice_updated_v3_metered(fork_choice_state, payload_attributes).await?)
+        Ok(self
+            .inner
+            .fork_choice_updated_v3_metered(fork_choice_state, payload_attributes)
+            .await?)
     }
 
     async fn get_payload_v2(
@@ -333,7 +339,10 @@ where
         block_hashes: Vec<BlockHash>,
     ) -> RpcResult<ExecutionPayloadBodiesV1> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByHashV1");
-        Ok(self.inner.get_payload_bodies_by_hash_v1_metered(block_hashes).await?)
+        Ok(self
+            .inner
+            .get_payload_bodies_by_hash_v1_metered(block_hashes)
+            .await?)
     }
 
     async fn get_payload_bodies_by_range_v1(
@@ -342,7 +351,10 @@ where
         count: U64,
     ) -> RpcResult<ExecutionPayloadBodiesV1> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByRangeV1");
-        Ok(self.inner.get_payload_bodies_by_range_v1_metered(start.to(), count.to()).await?)
+        Ok(self
+            .inner
+            .get_payload_bodies_by_range_v1_metered(start.to(), count.to())
+            .await?)
     }
 
     async fn signal_superchain_v1(&self, signal: SuperchainSignal) -> RpcResult<ProtocolVersion> {

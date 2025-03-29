@@ -180,7 +180,9 @@ impl<R: Resolver> DnsDiscoveryService<R> {
 
     /// Returns a new [`DnsDiscoveryHandle`] that can send commands to this type.
     pub fn handle(&self) -> DnsDiscoveryHandle {
-        DnsDiscoveryHandle { to_service: self.command_tx.clone() }
+        DnsDiscoveryHandle {
+            to_service: self.command_tx.clone(),
+        }
     }
 
     /// Creates a new channel for [`NodeRecord`]s.
@@ -194,13 +196,14 @@ impl<R: Resolver> DnsDiscoveryService<R> {
     ///
     /// Remove channels that got closed.
     fn notify(&mut self, record: DnsNodeRecordUpdate) {
-        self.node_record_listeners.retain_mut(|listener| match listener.try_send(record.clone()) {
-            Ok(()) => true,
-            Err(err) => match err {
-                TrySendError::Full(_) => true,
-                TrySendError::Closed(_) => false,
-            },
-        });
+        self.node_record_listeners
+            .retain_mut(|listener| match listener.try_send(record.clone()) {
+                Ok(()) => true,
+                Err(err) => match err {
+                    TrySendError::Full(_) => true,
+                    TrySendError::Closed(_) => false,
+                },
+            });
     }
 
     /// Starts syncing the given link to a tree.
@@ -218,9 +221,14 @@ impl<R: Resolver> DnsDiscoveryService<R> {
     fn resolve_entry(&mut self, link: LinkEntry<SecretKey>, hash: String, kind: ResolveKind) {
         if let Some(entry) = self.dns_record_cache.get(&hash).cloned() {
             // already resolved
-            let cached = ResolveEntryResult { entry: Some(Ok(entry)), link, hash, kind };
+            let cached = ResolveEntryResult {
+                entry: Some(Ok(entry)),
+                link,
+                hash,
+                kind,
+            };
             self.on_resolved_entry(cached);
-            return
+            return;
         }
         self.queries.resolve_entry(link, hash, kind)
     }
@@ -249,7 +257,12 @@ impl<R: Resolver> DnsDiscoveryService<R> {
     }
 
     fn on_resolved_entry(&mut self, resp: ResolveEntryResult<SecretKey>) {
-        let ResolveEntryResult { entry, link, hash, kind } = resp;
+        let ResolveEntryResult {
+            entry,
+            link,
+            hash,
+            kind,
+        } = resp;
 
         match entry {
             Some(Err(err)) => {
@@ -298,7 +311,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
         loop {
             // drain buffered events first
             if let Some(event) = self.queued_events.pop_front() {
-                return Poll::Ready(event)
+                return Poll::Ready(event);
             }
 
             // process all incoming commands
@@ -351,7 +364,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
             }
 
             if !progress && self.queued_events.is_empty() {
-                return Poll::Pending
+                return Poll::Pending;
             }
         }
     }
@@ -394,17 +407,28 @@ pub enum DnsDiscoveryEvent {
 /// Converts an [Enr] into a [`NodeRecord`]
 fn convert_enr_node_record(enr: &Enr<SecretKey>) -> Option<DnsNodeRecordUpdate> {
     let node_record = NodeRecord {
-        address: enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))?,
+        address: enr
+            .ip4()
+            .map(IpAddr::from)
+            .or_else(|| enr.ip6().map(IpAddr::from))?,
         tcp_port: enr.tcp4().or_else(|| enr.tcp6())?,
         udp_port: enr.udp4().or_else(|| enr.udp6())?,
         id: pk2id(&enr.public_key()),
     }
     .into_ipv4_mapped();
 
-    let fork_id =
-        enr.get_decodable::<EnrForkIdEntry>(b"eth").transpose().ok().flatten().map(Into::into);
+    let fork_id = enr
+        .get_decodable::<EnrForkIdEntry>(b"eth")
+        .transpose()
+        .ok()
+        .flatten()
+        .map(Into::into);
 
-    Some(DnsNodeRecordUpdate { node_record, fork_id, enr: enr.clone() })
+    Some(DnsNodeRecordUpdate {
+        node_record,
+        fork_id,
+        enr: enr.clone(),
+    })
 }
 
 #[cfg(test)]
@@ -434,7 +458,10 @@ mod tests {
         // test
         let node_record_update = convert_enr_node_record(&enr).unwrap();
 
-        assert_eq!(node_record_update.node_record.address, "127.0.0.1".parse::<IpAddr>().unwrap());
+        assert_eq!(
+            node_record_update.node_record.address,
+            "127.0.0.1".parse::<IpAddr>().unwrap()
+        );
         assert_eq!(node_record_update.node_record.tcp_port, 30303);
         assert_eq!(node_record_update.node_record.udp_port, 9000);
         assert_eq!(node_record_update.fork_id, Some(MAINNET.latest_fork_id()));
@@ -451,7 +478,13 @@ mod tests {
             .udp4(9000)
             .tcp4(30303)
             .add_value(b"eth", &EnrForkIdEntry::from(MAINNET.latest_fork_id()))
-            .add_value(b"opstack", &ForkId { hash: ForkHash(rand::random()), next: rand::random() })
+            .add_value(
+                b"opstack",
+                &ForkId {
+                    hash: ForkHash(rand::random()),
+                    next: rand::random(),
+                },
+            )
             .build(&secret_key)
             .unwrap();
 
@@ -463,7 +496,10 @@ mod tests {
 
         let node_record_update = convert_enr_node_record(&decoded_enr).unwrap();
 
-        assert_eq!(node_record_update.node_record.address, "127.0.0.1".parse::<IpAddr>().unwrap());
+        assert_eq!(
+            node_record_update.node_record.address,
+            "127.0.0.1".parse::<IpAddr>().unwrap()
+        );
         assert_eq!(node_record_update.node_record.tcp_port, 30303);
         assert_eq!(node_record_update.node_record.udp_port, 9000);
         assert_eq!(node_record_update.fork_id, Some(MAINNET.latest_fork_id()));
@@ -480,8 +516,10 @@ mod tests {
         let mut root: TreeRootEntry = s.parse().unwrap();
         root.sign(&secret_key).unwrap();
 
-        let link =
-            LinkEntry { domain: "nodes.example.org".to_string(), pubkey: secret_key.public() };
+        let link = LinkEntry {
+            domain: "nodes.example.org".to_string(),
+            pubkey: secret_key.public(),
+        };
         resolver.insert(link.domain.clone(), root.to_string());
 
         let mut service = DnsDiscoveryService::new(Arc::new(resolver), Default::default());
@@ -508,12 +546,16 @@ mod tests {
         let mut root: TreeRootEntry = s.parse().unwrap();
         root.sign(&secret_key).unwrap();
 
-        let link =
-            LinkEntry { domain: "nodes.example.org".to_string(), pubkey: secret_key.public() };
+        let link = LinkEntry {
+            domain: "nodes.example.org".to_string(),
+            pubkey: secret_key.public(),
+        };
         resolver.insert(link.domain.clone(), root.to_string());
 
         let mut builder = Enr::builder();
-        let fork_id = MAINNET.hardfork_fork_id(EthereumHardfork::Frontier).unwrap();
+        let fork_id = MAINNET
+            .hardfork_fork_id(EthereumHardfork::Frontier)
+            .unwrap();
         builder
             .ip4(Ipv4Addr::LOCALHOST)
             .udp4(30303)
@@ -521,7 +563,10 @@ mod tests {
             .add_value(b"eth", &EnrForkIdEntry::from(fork_id));
         let enr = builder.build(&secret_key).unwrap();
 
-        resolver.insert(format!("{}.{}", root.enr_root.clone(), link.domain), enr.to_base64());
+        resolver.insert(
+            format!("{}.{}", root.enr_root.clone(), link.domain),
+            enr.to_base64(),
+        );
 
         let mut service = DnsDiscoveryService::new(Arc::new(resolver), Default::default());
 
@@ -566,8 +611,10 @@ mod tests {
         let mut root: TreeRootEntry = s.parse().unwrap();
         root.sign(&secret_key).unwrap();
 
-        let link =
-            LinkEntry { domain: "nodes.example.org".to_string(), pubkey: secret_key.public() };
+        let link = LinkEntry {
+            domain: "nodes.example.org".to_string(),
+            pubkey: secret_key.public(),
+        };
         resolver.insert(link.domain.clone(), root.to_string());
 
         let mut service = DnsDiscoveryService::new(Arc::clone(&resolver), config.clone());
@@ -584,7 +631,10 @@ mod tests {
         tokio::time::sleep(config.recheck_interval).await;
 
         let enr = Enr::empty(&secret_key).unwrap();
-        resolver.insert(format!("{}.{}", root.enr_root.clone(), link.domain), enr.to_base64());
+        resolver.insert(
+            format!("{}.{}", root.enr_root.clone(), link.domain),
+            enr.to_base64(),
+        );
 
         let event = poll_fn(|cx| service.poll(cx)).await;
 
@@ -611,7 +661,9 @@ mod tests {
             Default::default(),
         );
 
-        service.sync_tree(&Chain::mainnet().public_dns_network_protocol().unwrap()).unwrap();
+        service
+            .sync_tree(&Chain::mainnet().public_dns_network_protocol().unwrap())
+            .unwrap();
 
         while let Some(event) = service.next().await {
             match event {

@@ -14,9 +14,19 @@ unsafe impl Send for TxnPtr {}
 unsafe impl Sync for TxnPtr {}
 
 pub(crate) enum TxnManagerMessage {
-    Begin { parent: TxnPtr, flags: ffi::MDBX_txn_flags_t, sender: SyncSender<Result<TxnPtr>> },
-    Abort { tx: TxnPtr, sender: SyncSender<Result<bool>> },
-    Commit { tx: TxnPtr, sender: SyncSender<Result<(bool, CommitLatency)>> },
+    Begin {
+        parent: TxnPtr,
+        flags: ffi::MDBX_txn_flags_t,
+        sender: SyncSender<Result<TxnPtr>>,
+    },
+    Abort {
+        tx: TxnPtr,
+        sender: SyncSender<Result<bool>>,
+    },
+    Commit {
+        tx: TxnPtr,
+        sender: SyncSender<Result<(bool, CommitLatency)>>,
+    },
 }
 
 /// Manages transactions by doing two things:
@@ -58,7 +68,11 @@ impl TxnManager {
             loop {
                 match rx.recv() {
                     Ok(msg) => match msg {
-                        TxnManagerMessage::Begin { parent, flags, sender } => {
+                        TxnManagerMessage::Begin {
+                            parent,
+                            flags,
+                            sender,
+                        } => {
                             let mut txn: *mut ffi::MDBX_txn = ptr::null_mut();
                             let res = mdbx_result(unsafe {
                                 ffi::mdbx_txn_begin_ex(
@@ -73,7 +87,9 @@ impl TxnManager {
                             sender.send(res).unwrap();
                         }
                         TxnManagerMessage::Abort { tx, sender } => {
-                            sender.send(mdbx_result(unsafe { ffi::mdbx_txn_abort(tx.0) })).unwrap();
+                            sender
+                                .send(mdbx_result(unsafe { ffi::mdbx_txn_abort(tx.0) }))
+                                .unwrap();
                         }
                         TxnManagerMessage::Commit { tx, sender } => {
                             sender
@@ -91,7 +107,10 @@ impl TxnManager {
                 }
             }
         };
-        std::thread::Builder::new().name("mdbx-rs-txn-manager".to_string()).spawn(task).unwrap();
+        std::thread::Builder::new()
+            .name("mdbx-rs-txn-manager".to_string())
+            .spawn(task)
+            .unwrap();
     }
 
     pub(crate) fn send_message(&self, message: TxnManagerMessage) {
@@ -127,7 +146,10 @@ mod read_transactions {
 
             let (tx, rx) = sync_channel(0);
 
-            let txn_manager = Self { sender: tx, read_transactions: Some(read_transactions) };
+            let txn_manager = Self {
+                sender: tx,
+                read_transactions: Some(read_transactions),
+            };
 
             txn_manager.start_message_listener(env, rx);
 
@@ -149,7 +171,9 @@ mod read_transactions {
         ///
         /// Returns `true` if the transaction was found and removed.
         pub(crate) fn remove_active_read_transaction(&self, ptr: *mut ffi::MDBX_txn) -> bool {
-            self.read_transactions.as_ref().is_some_and(|txs| txs.remove_active(ptr))
+            self.read_transactions
+                .as_ref()
+                .is_some_and(|txs| txs.remove_active(ptr))
         }
 
         /// Returns the number of timed out transactions that were not aborted by the user yet.
@@ -180,7 +204,10 @@ mod read_transactions {
 
     impl ReadTransactions {
         pub(super) fn new(max_duration: Duration) -> Self {
-            Self { max_duration, ..Default::default() }
+            Self {
+                max_duration,
+                ..Default::default()
+            }
         }
 
         /// Adds a new transaction to the list of active read transactions.

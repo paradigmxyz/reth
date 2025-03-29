@@ -26,11 +26,18 @@ where
     where
         Tasks: TaskSpawner + Clone + 'static,
     {
-        let filter =
-            EthFilter::new(eth_api.clone(), config.filter_config(), Box::new(executor.clone()));
+        let filter = EthFilter::new(
+            eth_api.clone(),
+            config.filter_config(),
+            Box::new(executor.clone()),
+        );
 
         let pubsub = EthPubSub::with_spawner(eth_api.clone(), Box::new(executor));
 
-        Self { api: eth_api, filter, pubsub }
+        Self {
+            api: eth_api,
+            filter,
+            pubsub,
+        }
     }
 }

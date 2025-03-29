@@ -137,7 +137,10 @@ where
 
     if extra_elements > 0 {
         // write to file
-        writeln!(file, "Found {extra_elements} extra elements in table {table}")?;
+        writeln!(
+            file,
+            "Found {extra_elements} extra elements in table {table}"
+        )?;
 
         // also print to info
         info!("Found {extra_elements} extra elements in table {table}");
@@ -167,7 +170,10 @@ where
     }
 
     let full_file_name = output_dir.as_ref().join(file_name);
-    info!("Done writing diff results for {table} to {}", full_file_name.display());
+    info!(
+        "Done writing diff results for {table} to {}",
+        full_file_name.display()
+    );
     Ok(())
 }
 
@@ -182,21 +188,25 @@ where
     T::Key: Hash,
 {
     // initialize the zipped walker
-    let mut primary_zip_cursor =
-        primary_tx.cursor_read::<T>().expect("Was not able to obtain a cursor.");
+    let mut primary_zip_cursor = primary_tx
+        .cursor_read::<T>()
+        .expect("Was not able to obtain a cursor.");
     let primary_walker = primary_zip_cursor.walk(None)?;
 
-    let mut secondary_zip_cursor =
-        secondary_tx.cursor_read::<T>().expect("Was not able to obtain a cursor.");
+    let mut secondary_zip_cursor = secondary_tx
+        .cursor_read::<T>()
+        .expect("Was not able to obtain a cursor.");
     let secondary_walker = secondary_zip_cursor.walk(None)?;
     let zipped_cursor = primary_walker.zip(secondary_walker);
 
     // initialize the cursors for seeking when we are cross checking elements
-    let mut primary_cursor =
-        primary_tx.cursor_read::<T>().expect("Was not able to obtain a cursor.");
+    let mut primary_cursor = primary_tx
+        .cursor_read::<T>()
+        .expect("Was not able to obtain a cursor.");
 
-    let mut secondary_cursor =
-        secondary_tx.cursor_read::<T>().expect("Was not able to obtain a cursor.");
+    let mut secondary_cursor = secondary_tx
+        .cursor_read::<T>()
+        .expect("Was not able to obtain a cursor.");
 
     let mut result = TableDiffResult::<T>::default();
 
@@ -210,8 +220,9 @@ where
 
         if primary_key != secondary_key {
             // if the keys are different, we need to check if the key is in the other table
-            let crossed_secondary =
-                secondary_cursor.seek_exact(primary_key.clone())?.map(|(_, value)| value);
+            let crossed_secondary = secondary_cursor
+                .seek_exact(primary_key.clone())?
+                .map(|(_, value)| value);
             result.try_push_discrepancy(
                 primary_key.clone(),
                 Some(primary_value),
@@ -219,8 +230,9 @@ where
             );
 
             // now do the same for the primary table
-            let crossed_primary =
-                primary_cursor.seek_exact(secondary_key.clone())?.map(|(_, value)| value);
+            let crossed_primary = primary_cursor
+                .seek_exact(secondary_key.clone())?
+                .map(|(_, value)| value);
             result.try_push_discrepancy(
                 secondary_key.clone(),
                 crossed_primary,
@@ -269,7 +281,10 @@ where
     T::Key: Hash,
 {
     fn default() -> Self {
-        Self { discrepancies: HashMap::default(), extra_elements: HashMap::default() }
+        Self {
+            discrepancies: HashMap::default(),
+            extra_elements: HashMap::default(),
+        }
     }
 }
 
@@ -279,7 +294,8 @@ where
 {
     /// Push a diff result into the discrepancies set.
     fn push_discrepancy(&mut self, discrepancy: TableDiffElement<T>) {
-        self.discrepancies.insert(discrepancy.key.clone(), discrepancy);
+        self.discrepancies
+            .insert(discrepancy.key.clone(), discrepancy);
     }
 
     /// Push an extra element into the extra elements set.
@@ -304,12 +320,12 @@ where
     ) {
         // do not bother comparing if the key is already in the discrepancies map
         if self.discrepancies.contains_key(&key) {
-            return
+            return;
         }
 
         // do not bother comparing if the key is already in the extra elements map
         if self.extra_elements.contains_key(&key) {
-            return
+            return;
         }
 
         match (first, second) {

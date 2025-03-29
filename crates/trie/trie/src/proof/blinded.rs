@@ -27,7 +27,11 @@ impl<T, H> ProofBlindedProviderFactory<T, H> {
         hashed_cursor_factory: H,
         prefix_sets: Arc<TriePrefixSetsMut>,
     ) -> Self {
-        Self { trie_cursor_factory, hashed_cursor_factory, prefix_sets }
+        Self {
+            trie_cursor_factory,
+            hashed_cursor_factory,
+            prefix_sets,
+        }
     }
 }
 
@@ -75,7 +79,11 @@ impl<T, H> ProofBlindedAccountProvider<T, H> {
         hashed_cursor_factory: H,
         prefix_sets: Arc<TriePrefixSetsMut>,
     ) -> Self {
-        Self { trie_cursor_factory, hashed_cursor_factory, prefix_sets }
+        Self {
+            trie_cursor_factory,
+            hashed_cursor_factory,
+            prefix_sets,
+        }
     }
 }
 
@@ -88,12 +96,14 @@ where
         let start = enabled!(target: "trie::proof::blinded", Level::TRACE).then(Instant::now);
 
         let targets = MultiProofTargets::from_iter([(pad_path_to_key(path), HashSet::default())]);
-        let mut proof =
-            Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
-                .with_prefix_sets_mut(self.prefix_sets.as_ref().clone())
-                .with_branch_node_masks(true)
-                .multiproof(targets)
-                .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
+        let mut proof = Proof::new(
+            self.trie_cursor_factory.clone(),
+            self.hashed_cursor_factory.clone(),
+        )
+        .with_prefix_sets_mut(self.prefix_sets.as_ref().clone())
+        .with_branch_node_masks(true)
+        .multiproof(targets)
+        .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
         let node = proof.account_subtree.into_inner().remove(path);
         let tree_mask = proof.branch_node_tree_masks.remove(path);
         let hash_mask = proof.branch_node_hash_masks.remove(path);
@@ -107,7 +117,11 @@ where
             ?hash_mask,
             "Blinded node for account trie"
         );
-        Ok(node.map(|node| RevealedNode { node, tree_mask, hash_mask }))
+        Ok(node.map(|node| RevealedNode {
+            node,
+            tree_mask,
+            hash_mask,
+        }))
     }
 }
 
@@ -132,7 +146,12 @@ impl<T, H> ProofBlindedStorageProvider<T, H> {
         prefix_sets: Arc<TriePrefixSetsMut>,
         account: B256,
     ) -> Self {
-        Self { trie_cursor_factory, hashed_cursor_factory, prefix_sets, account }
+        Self {
+            trie_cursor_factory,
+            hashed_cursor_factory,
+            prefix_sets,
+            account,
+        }
     }
 }
 
@@ -145,8 +164,12 @@ where
         let start = enabled!(target: "trie::proof::blinded", Level::TRACE).then(Instant::now);
 
         let targets = HashSet::from_iter([pad_path_to_key(path)]);
-        let storage_prefix_set =
-            self.prefix_sets.storage_prefix_sets.get(&self.account).cloned().unwrap_or_default();
+        let storage_prefix_set = self
+            .prefix_sets
+            .storage_prefix_sets
+            .get(&self.account)
+            .cloned()
+            .unwrap_or_default();
         let mut proof = StorageProof::new_hashed(
             self.trie_cursor_factory.clone(),
             self.hashed_cursor_factory.clone(),
@@ -170,6 +193,10 @@ where
             ?hash_mask,
             "Blinded node for storage trie"
         );
-        Ok(node.map(|node| RevealedNode { node, tree_mask, hash_mask }))
+        Ok(node.map(|node| RevealedNode {
+            node,
+            tree_mask,
+            hash_mask,
+        }))
     }
 }

@@ -42,13 +42,19 @@ impl<B: Block> SealedBlock<B> {
     #[inline]
     pub fn new_unchecked(block: B, hash: BlockHash) -> Self {
         let (header, body) = block.split();
-        Self { header: SealedHeader::new(header, hash), body }
+        Self {
+            header: SealedHeader::new(header, hash),
+            body,
+        }
     }
 
     /// Creates a `SealedBlock` from the block without the available hash
     pub fn new_unhashed(block: B) -> Self {
         let (header, body) = block.split();
-        Self { header: SealedHeader::new_unhashed(header), body }
+        Self {
+            header: SealedHeader::new_unhashed(header),
+            body,
+        }
     }
 
     /// Creates the [`SealedBlock`] from the block's parts by hashing the header.
@@ -191,7 +197,10 @@ impl<B: Block> SealedBlock<B> {
 
     /// Return a [`BlockWithParent`] for this header.
     pub fn block_with_parent(&self) -> BlockWithParent {
-        BlockWithParent { parent: self.parent_hash(), block: self.num_hash() }
+        BlockWithParent {
+            parent: self.parent_hash(),
+            block: self.num_hash(),
+        }
     }
 
     /// Returns the Sealed header.
@@ -266,7 +275,7 @@ impl<B: Block> SealedBlock<B> {
             return Err(GotExpected {
                 got: calculated_root,
                 expected: self.header().transactions_root(),
-            })
+            });
         }
 
         Ok(())
@@ -421,7 +430,10 @@ pub(super) mod serde_bincode_compat {
         From<&'a super::SealedBlock<T>> for SealedBlock<'a, T>
     {
         fn from(value: &'a super::SealedBlock<T>) -> Self {
-            Self { header: value.header.as_repr(), body: value.body.as_repr() }
+            Self {
+                header: value.header.as_repr(),
+                body: value.body.as_repr(),
+            }
         }
     }
 
@@ -429,7 +441,10 @@ pub(super) mod serde_bincode_compat {
         From<SealedBlock<'a, T>> for super::SealedBlock<T>
     {
         fn from(value: SealedBlock<'a, T>) -> Self {
-            Self::from_sealed_parts(value.header.into(), SerdeBincodeCompat::from_repr(value.body))
+            Self::from_sealed_parts(
+                value.header.into(),
+                SerdeBincodeCompat::from_repr(value.body),
+            )
         }
     }
 

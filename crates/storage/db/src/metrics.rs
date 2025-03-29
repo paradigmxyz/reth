@@ -318,14 +318,22 @@ impl TransactionOutcomeMetrics {
         }
 
         if let Some(commit_latency) = commit_latency {
-            self.commit_preparation_duration_seconds.record(commit_latency.preparation());
-            self.commit_gc_wallclock_duration_seconds.record(commit_latency.gc_wallclock());
-            self.commit_audit_duration_seconds.record(commit_latency.audit());
-            self.commit_write_duration_seconds.record(commit_latency.write());
-            self.commit_sync_duration_seconds.record(commit_latency.sync());
-            self.commit_ending_duration_seconds.record(commit_latency.ending());
-            self.commit_whole_duration_seconds.record(commit_latency.whole());
-            self.commit_gc_cputime_duration_seconds.record(commit_latency.gc_cputime());
+            self.commit_preparation_duration_seconds
+                .record(commit_latency.preparation());
+            self.commit_gc_wallclock_duration_seconds
+                .record(commit_latency.gc_wallclock());
+            self.commit_audit_duration_seconds
+                .record(commit_latency.audit());
+            self.commit_write_duration_seconds
+                .record(commit_latency.write());
+            self.commit_sync_duration_seconds
+                .record(commit_latency.sync());
+            self.commit_ending_duration_seconds
+                .record(commit_latency.ending());
+            self.commit_whole_duration_seconds
+                .record(commit_latency.whole());
+            self.commit_gc_cputime_duration_seconds
+                .record(commit_latency.gc_cputime());
         }
     }
 }

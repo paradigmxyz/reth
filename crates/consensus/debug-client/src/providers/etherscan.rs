@@ -92,7 +92,7 @@ where
                         %err,
                         "Failed to fetch a block from Etherscan",
                     );
-                    continue
+                    continue;
                 }
             };
             let block_number = block.header().number();
@@ -110,7 +110,8 @@ where
     }
 
     async fn get_block(&self, block_number: u64) -> eyre::Result<Self::Block> {
-        self.load_block(BlockNumberOrTag::Number(block_number)).await
+        self.load_block(BlockNumberOrTag::Number(block_number))
+            .await
     }
 }
 

@@ -160,7 +160,10 @@ mod tests {
 
         // Ancestor is the previous nonce if transaction nonce is higher than 0
         let tx_id = TransactionId::new(sender, 5);
-        assert_eq!(tx_id.unchecked_ancestor(), Some(TransactionId::new(sender, 4)));
+        assert_eq!(
+            tx_id.unchecked_ancestor(),
+            Some(TransactionId::new(sender, 4))
+        );
 
         // No ancestor if transaction nonce is 0
         let tx_id = TransactionId::new(sender, 0);
@@ -237,7 +240,10 @@ mod tests {
 
     #[test]
     fn test_next_id_wrapping() {
-        let mut identifiers = SenderIdentifiers { id: u64::MAX, ..Default::default() };
+        let mut identifiers = SenderIdentifiers {
+            id: u64::MAX,
+            ..Default::default()
+        };
 
         // The current ID is `u64::MAX`, the next ID should wrap around to 0.
         let id1 = identifiers.next_id();

@@ -90,7 +90,9 @@ where
 {
     /// Create a new instance
     pub fn new(inner: PayloadBuilderHandle<T>) -> Self {
-        Self { inner: Arc::new(inner) }
+        Self {
+            inner: Arc::new(inner),
+        }
     }
 }
 
@@ -129,7 +131,9 @@ impl<T: PayloadTypes> PayloadBuilderHandle<T> {
         attr: T::PayloadBuilderAttributes,
     ) -> Receiver<Result<PayloadId, PayloadBuilderError>> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.to_service.send(PayloadServiceCommand::BuildNewPayload(attr, tx));
+        let _ = self
+            .to_service
+            .send(PayloadServiceCommand::BuildNewPayload(attr, tx));
         rx
     }
 
@@ -140,7 +144,9 @@ impl<T: PayloadTypes> PayloadBuilderHandle<T> {
         id: PayloadId,
     ) -> Option<Result<T::BuiltPayload, PayloadBuilderError>> {
         let (tx, rx) = oneshot::channel();
-        self.to_service.send(PayloadServiceCommand::BestPayload(id, tx)).ok()?;
+        self.to_service
+            .send(PayloadServiceCommand::BestPayload(id, tx))
+            .ok()?;
         rx.await.ok()?
     }
 
@@ -151,7 +157,9 @@ impl<T: PayloadTypes> PayloadBuilderHandle<T> {
         kind: PayloadKind,
     ) -> Option<Result<T::BuiltPayload, PayloadBuilderError>> {
         let (tx, rx) = oneshot::channel();
-        self.to_service.send(PayloadServiceCommand::Resolve(id, kind, tx)).ok()?;
+        self.to_service
+            .send(PayloadServiceCommand::Resolve(id, kind, tx))
+            .ok()?;
         match rx.await.transpose()? {
             Ok(fut) => Some(fut.await),
             Err(e) => Some(Err(e.into())),
@@ -163,7 +171,9 @@ impl<T: PayloadTypes> PayloadBuilderHandle<T> {
     pub async fn subscribe(&self) -> Result<PayloadEvents<T>, PayloadBuilderError> {
         let (tx, rx) = oneshot::channel();
         let _ = self.to_service.send(PayloadServiceCommand::Subscribe(tx));
-        Ok(PayloadEvents { receiver: rx.await? })
+        Ok(PayloadEvents {
+            receiver: rx.await?,
+        })
     }
 
     /// Returns the payload attributes associated with the given identifier.
@@ -174,7 +184,9 @@ impl<T: PayloadTypes> PayloadBuilderHandle<T> {
         id: PayloadId,
     ) -> Option<Result<T::PayloadBuilderAttributes, PayloadBuilderError>> {
         let (tx, rx) = oneshot::channel();
-        self.to_service.send(PayloadServiceCommand::PayloadAttributes(id, tx)).ok()?;
+        self.to_service
+            .send(PayloadServiceCommand::PayloadAttributes(id, tx))
+            .ok()?;
         rx.await.ok()?
     }
 }
@@ -184,7 +196,9 @@ where
     T: PayloadTypes,
 {
     fn clone(&self) -> Self {
-        Self { to_service: self.to_service.clone() }
+        Self {
+            to_service: self.to_service.clone(),
+        }
     }
 }
 
@@ -273,7 +287,8 @@ where
             .find(|(_, job_id)| *job_id == id)
             .map(|(j, _)| j.best_payload().map(|p| p.into()));
         if let Some(Ok(ref best)) = res {
-            self.metrics.set_best_revenue(best.block().number(), f64::from(best.fees()));
+            self.metrics
+                .set_best_revenue(best.block().number(), f64::from(best.fees()));
         }
 
         res
@@ -288,7 +303,10 @@ where
     ) -> Option<PayloadFuture<T::BuiltPayload>> {
         trace!(%id, "resolving payload job");
 
-        let job = self.payload_jobs.iter().position(|(_, job_id)| *job_id == id)?;
+        let job = self
+            .payload_jobs
+            .iter()
+            .position(|(_, job_id)| *job_id == id)?;
         let (fut, keep_alive) = self.payload_jobs[job].0.resolve_kind(kind);
 
         if keep_alive == KeepPayloadJobAlive::No {
@@ -304,7 +322,9 @@ where
         let fut = async move {
             let res = fut.await;
             if let Ok(ref payload) = res {
-                payload_events.send(Events::BuiltPayload(payload.clone().into())).ok();
+                payload_events
+                    .send(Events::BuiltPayload(payload.clone().into()))
+                    .ok();
 
                 resolved_metrics
                     .set_resolved_revenue(payload.block().number(), f64::from(payload.fees()));
@@ -407,7 +427,9 @@ where
                                     this.metrics.inc_initiated_jobs();
                                     new_job = true;
                                     this.payload_jobs.push((job, id));
-                                    this.payload_events.send(Events::Attributes(attr.clone())).ok();
+                                    this.payload_events
+                                        .send(Events::Attributes(attr.clone()))
+                                        .ok();
                                 }
                                 Err(err) => {
                                     this.metrics.inc_failed_jobs();
@@ -438,7 +460,7 @@ where
             }
 
             if !new_job {
-                return Poll::Pending
+                return Poll::Pending;
             }
         }
     }
@@ -452,7 +474,10 @@ pub enum PayloadServiceCommand<T: PayloadTypes> {
         oneshot::Sender<Result<PayloadId, PayloadBuilderError>>,
     ),
     /// Get the best payload so far
-    BestPayload(PayloadId, oneshot::Sender<Option<Result<T::BuiltPayload, PayloadBuilderError>>>),
+    BestPayload(
+        PayloadId,
+        oneshot::Sender<Option<Result<T::BuiltPayload, PayloadBuilderError>>>,
+    ),
     /// Get the payload attributes for the given payload
     PayloadAttributes(
         PayloadId,
@@ -474,15 +499,19 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::BuildNewPayload(f0, f1) => {
-                f.debug_tuple("BuildNewPayload").field(&f0).field(&f1).finish()
-            }
+            Self::BuildNewPayload(f0, f1) => f
+                .debug_tuple("BuildNewPayload")
+                .field(&f0)
+                .field(&f1)
+                .finish(),
             Self::BestPayload(f0, f1) => {
                 f.debug_tuple("BestPayload").field(&f0).field(&f1).finish()
             }
-            Self::PayloadAttributes(f0, f1) => {
-                f.debug_tuple("PayloadAttributes").field(&f0).field(&f1).finish()
-            }
+            Self::PayloadAttributes(f0, f1) => f
+                .debug_tuple("PayloadAttributes")
+                .field(&f0)
+                .field(&f1)
+                .finish(),
             Self::Resolve(f0, f1, _f2) => f.debug_tuple("Resolve").field(&f0).field(&f1).finish(),
             Self::Subscribe(f0) => f.debug_tuple("Subscribe").field(&f0).finish(),
         }

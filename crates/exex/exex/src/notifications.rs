@@ -170,9 +170,9 @@ where
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
         match &mut self.get_mut().inner {
-            ExExNotificationsInner::WithoutHead(notifications) => {
-                notifications.poll_next_unpin(cx).map(|result| result.map(Ok))
-            }
+            ExExNotificationsInner::WithoutHead(notifications) => notifications
+                .poll_next_unpin(cx)
+                .map(|result| result.map(Ok)),
             ExExNotificationsInner::WithHead(notifications) => notifications.poll_next_unpin(cx),
             ExExNotificationsInner::Invalid => unreachable!(),
         }
@@ -216,7 +216,13 @@ where
         notifications: Receiver<ExExNotification<E::Primitives>>,
         wal_handle: WalHandle<E::Primitives>,
     ) -> Self {
-        Self { node_head, provider, executor, notifications, wal_handle }
+        Self {
+            node_head,
+            provider,
+            executor,
+            notifications,
+            wal_handle,
+        }
     }
 
     /// Subscribe to notifications with the given head.
@@ -316,12 +322,12 @@ where
     /// we're not on the canonical chain and we need to revert the notification with the ExEx
     /// head block.
     fn check_canonical(&mut self) -> eyre::Result<Option<ExExNotification<E::Primitives>>> {
-        if self.provider.is_known(&self.initial_exex_head.block.hash)? &&
-            self.initial_exex_head.block.number <= self.initial_local_head.number
+        if self.provider.is_known(&self.initial_exex_head.block.hash)?
+            && self.initial_exex_head.block.number <= self.initial_local_head.number
         {
             // we have the targeted block and that block is below the current head
             debug!(target: "exex::notifications", "ExEx head is on the canonical chain");
-            return Ok(None)
+            return Ok(None);
         }
 
         // If the head block is not found in the database, it means we're not on the canonical
@@ -341,13 +347,16 @@ where
             return Err(eyre::eyre!(
                 "Could not find notification for block hash {:?} in the WAL",
                 self.initial_exex_head.block.hash
-            ))
+            ));
         };
 
         // Update the head block hash to the parent hash of the first committed block.
         let committed_chain = notification.committed_chain().unwrap();
-        let new_exex_head =
-            (committed_chain.first().parent_hash(), committed_chain.first().number() - 1).into();
+        let new_exex_head = (
+            committed_chain.first().parent_hash(),
+            committed_chain.first().number() - 1,
+        )
+            .into();
         debug!(target: "exex::notifications", old_exex_head = ?self.initial_exex_head.block, new_exex_head = ?new_exex_head, "ExEx head updated");
         self.initial_exex_head.block = new_exex_head;
 
@@ -369,7 +378,12 @@ where
     fn check_backfill(&mut self) -> eyre::Result<()> {
         let backfill_job_factory =
             BackfillJobFactory::new(self.executor.clone(), self.provider.clone());
-        match self.initial_exex_head.block.number.cmp(&self.initial_local_head.number) {
+        match self
+            .initial_exex_head
+            .block
+            .number
+            .cmp(&self.initial_local_head.number)
+        {
             std::cmp::Ordering::Less => {
                 // ExEx is behind the node head, start backfill
                 debug!(target: "exex::notifications", "ExEx is behind the node head and on the canonical chain, starting backfill");
@@ -408,7 +422,7 @@ where
         // 1. Check once whether we need to retrieve a notification gap from the WAL.
         if this.pending_check_canonical {
             if let Some(canonical_notification) = this.check_canonical()? {
-                return Poll::Ready(Some(Ok(canonical_notification)))
+                return Poll::Ready(Some(Ok(canonical_notification)));
             }
 
             // ExEx head is on the canonical chain, we no longer need to check it
@@ -428,7 +442,7 @@ where
                 debug!(target: "exex::notifications", range = ?chain.range(), "Backfill job returned a chain");
                 return Poll::Ready(Some(Ok(ExExNotification::ChainCommitted {
                     new: Arc::new(chain),
-                })))
+                })));
             }
 
             // Backfill job is done, remove it
@@ -438,18 +452,18 @@ where
         // 4. Otherwise advance the regular event stream
         loop {
             let Some(notification) = ready!(this.notifications.poll_recv(cx)) else {
-                return Poll::Ready(None)
+                return Poll::Ready(None);
             };
 
             // 5. In case the exex is ahead of the new tip, we must skip it
             if let Some(committed) = notification.committed_chain() {
                 // inclusive check because we should start with `exex.head + 1`
                 if this.initial_exex_head.block.number >= committed.tip().number() {
-                    continue
+                    continue;
                 }
             }
 
-            return Poll::Ready(Some(Ok(notification)))
+            return Poll::Ready(Some(Ok(notification)));
         }
     }
 }
@@ -491,23 +505,36 @@ mod tests {
         let node_head_block = random_block(
             &mut rng,
             genesis_block.number + 1,
-            BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
+            BlockParams {
+                parent: Some(genesis_hash),
+                tx_count: Some(0),
+                ..Default::default()
+            },
         );
         let provider_rw = provider_factory.provider_rw()?;
-        provider_rw
-            .insert_block(node_head_block.clone().try_recover()?, StorageLocation::Database)?;
+        provider_rw.insert_block(
+            node_head_block.clone().try_recover()?,
+            StorageLocation::Database,
+        )?;
         provider_rw.commit()?;
 
         let node_head = node_head_block.num_hash();
-        let exex_head =
-            ExExHead { block: BlockNumHash { number: genesis_block.number, hash: genesis_hash } };
+        let exex_head = ExExHead {
+            block: BlockNumHash {
+                number: genesis_block.number,
+                hash: genesis_hash,
+            },
+        };
 
         let notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
                 vec![random_block(
                     &mut rng,
                     node_head.number + 1,
-                    BlockParams { parent: Some(node_head.hash), ..Default::default() },
+                    BlockParams {
+                        parent: Some(node_head.hash),
+                        ..Default::default()
+                    },
                 )
                 .try_recover()?],
                 Default::default(),
@@ -563,7 +590,10 @@ mod tests {
 
         let provider = BlockchainProvider::new(provider_factory)?;
 
-        let node_head = BlockNumHash { number: genesis_block.number, hash: genesis_hash };
+        let node_head = BlockNumHash {
+            number: genesis_block.number,
+            hash: genesis_hash,
+        };
         let exex_head = ExExHead { block: node_head };
 
         let notification = ExExNotification::ChainCommitted {
@@ -620,7 +650,11 @@ mod tests {
         let node_head_block = random_block(
             &mut rng,
             genesis_block.number + 1,
-            BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
+            BlockParams {
+                parent: Some(genesis_hash),
+                tx_count: Some(0),
+                ..Default::default()
+            },
         )
         .try_recover()?;
         let node_head = node_head_block.num_hash();
@@ -639,9 +673,15 @@ mod tests {
         let exex_head_block = random_block(
             &mut rng,
             genesis_block.number + 1,
-            BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
+            BlockParams {
+                parent: Some(genesis_hash),
+                tx_count: Some(0),
+                ..Default::default()
+            },
         );
-        let exex_head = ExExHead { block: exex_head_block.num_hash() };
+        let exex_head = ExExHead {
+            block: exex_head_block.num_hash(),
+        };
         let exex_head_notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
                 vec![exex_head_block.clone().try_recover()?],
@@ -656,7 +696,10 @@ mod tests {
                 vec![random_block(
                     &mut rng,
                     node_head.number + 1,
-                    BlockParams { parent: Some(node_head.hash), ..Default::default() },
+                    BlockParams {
+                        parent: Some(node_head.hash),
+                        ..Default::default()
+                    },
                 )
                 .try_recover()?],
                 Default::default(),
@@ -685,9 +728,15 @@ mod tests {
         );
         // Second notification is the backfilled block from the canonical chain to get back to the
         // canonical tip
-        assert_eq!(notifications.next().await.transpose()?, Some(node_head_notification));
+        assert_eq!(
+            notifications.next().await.transpose()?,
+            Some(node_head_notification)
+        );
         // Third notification is the actual notification that we sent before
-        assert_eq!(notifications.next().await.transpose()?, Some(new_notification));
+        assert_eq!(
+            notifications.next().await.transpose()?,
+            Some(new_notification)
+        );
 
         Ok(())
     }
@@ -711,7 +760,11 @@ mod tests {
         let exex_head_block = random_block(
             &mut rng,
             genesis_block.number + 1,
-            BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
+            BlockParams {
+                parent: Some(genesis_hash),
+                tx_count: Some(0),
+                ..Default::default()
+            },
         );
         let exex_head_notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
@@ -722,9 +775,15 @@ mod tests {
         };
         wal.commit(&exex_head_notification)?;
 
-        let node_head = BlockNumHash { number: genesis_block.number, hash: genesis_hash };
+        let node_head = BlockNumHash {
+            number: genesis_block.number,
+            hash: genesis_hash,
+        };
         let exex_head = ExExHead {
-            block: BlockNumHash { number: exex_head_block.number, hash: exex_head_block.hash() },
+            block: BlockNumHash {
+                number: exex_head_block.number,
+                hash: exex_head_block.hash(),
+            },
         };
 
         let new_notification = ExExNotification::ChainCommitted {
@@ -732,7 +791,10 @@ mod tests {
                 vec![random_block(
                     &mut rng,
                     genesis_block.number + 1,
-                    BlockParams { parent: Some(genesis_hash), ..Default::default() },
+                    BlockParams {
+                        parent: Some(genesis_hash),
+                        ..Default::default()
+                    },
                 )
                 .try_recover()?],
                 Default::default(),
@@ -761,7 +823,10 @@ mod tests {
         );
 
         // Second notification is the actual notification that we sent before
-        assert_eq!(notifications.next().await.transpose()?, Some(new_notification));
+        assert_eq!(
+            notifications.next().await.transpose()?,
+            Some(new_notification)
+        );
 
         Ok(())
     }

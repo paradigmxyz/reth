@@ -21,8 +21,13 @@ fn main() {
     if let Err(err) =
         Cli::<EthereumChainSpecParser, RessArgs>::parse().run(async move |builder, ress_args| {
             info!(target: "reth::cli", "Launching node");
-            let NodeHandle { node, node_exit_future } =
-                builder.node(EthereumNode::default()).launch_with_debug_capabilities().await?;
+            let NodeHandle {
+                node,
+                node_exit_future,
+            } = builder
+                .node(EthereumNode::default())
+                .launch_with_debug_capabilities()
+                .await?;
 
             // Install ress subprotocol.
             if ress_args.enabled {

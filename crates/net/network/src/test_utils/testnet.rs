@@ -67,7 +67,9 @@ where
 
     /// Creates a new [`Testnet`] with the given number of peers and the provider.
     pub async fn try_create_with(num_peers: usize, provider: C) -> Result<Self, NetworkError> {
-        let mut this = Self { peers: Vec::with_capacity(num_peers) };
+        let mut this = Self {
+            peers: Vec::with_capacity(num_peers),
+        };
         for _ in 0..num_peers {
             let config = PeerConfig::new(provider.clone());
             this.add_peer_with_config(config).await?;
@@ -128,7 +130,11 @@ where
         &mut self,
         config: PeerConfig<C>,
     ) -> Result<(), NetworkError> {
-        let PeerConfig { config, client, secret_key } = config;
+        let PeerConfig {
+            config,
+            client,
+            secret_key,
+        } = config;
 
         let network = NetworkManager::new(config).await?;
         let peer = Peer {
@@ -154,7 +160,9 @@ where
         F: Fn(Peer<C, Pool>) -> Peer<C, P>,
         P: TransactionPool,
     {
-        Testnet { peers: self.peers.into_iter().map(f).collect() }
+        Testnet {
+            peers: self.peers.into_iter().map(f).collect(),
+        }
     }
 
     /// Apply a closure on each peer
@@ -240,7 +248,11 @@ where
     /// Spawns the testnet to a separate task
     pub fn spawn(self) -> TestnetHandle<C, Pool> {
         let (tx, rx) = oneshot::channel::<oneshot::Sender<Self>>();
-        let peers = self.peers.iter().map(|peer| peer.peer_handle()).collect::<Vec<_>>();
+        let peers = self
+            .peers
+            .iter()
+            .map(|peer| peer.peer_handle())
+            .collect::<Vec<_>>();
         let mut net = self;
         let handle = tokio::task::spawn(async move {
             let mut tx = None;
@@ -255,7 +267,11 @@ where
             }
         });
 
-        TestnetHandle { _handle: handle, peers, terminate: tx }
+        TestnetHandle {
+            _handle: handle,
+            peers,
+            terminate: tx,
+        }
     }
 }
 
@@ -269,7 +285,8 @@ impl Testnet<NoopProvider, TestPool> {
     pub async fn try_create(num_peers: usize) -> Result<Self, NetworkError> {
         let mut this = Self::default();
 
-        this.extend_peer_with_config((0..num_peers).map(|_| Default::default())).await?;
+        this.extend_peer_with_config((0..num_peers).map(|_| Default::default()))
+            .await?;
         Ok(this)
     }
 
@@ -346,18 +363,22 @@ impl<C, Pool> TestnetHandle<C, Pool> {
     /// Returns once all sessions are established.
     pub async fn connect_peers(&self) {
         if self.peers.len() < 2 {
-            return
+            return;
         }
 
         // add an event stream for _each_ peer
-        let streams =
-            self.peers.iter().map(|handle| NetworkEventStream::new(handle.event_listener()));
+        let streams = self
+            .peers
+            .iter()
+            .map(|handle| NetworkEventStream::new(handle.event_listener()));
 
         // add all peers to each other
         for (idx, handle) in self.peers.iter().enumerate().take(self.peers.len() - 1) {
             for idx in (idx + 1)..self.peers.len() {
                 let neighbour = &self.peers[idx];
-                handle.network.add_peer(*neighbour.peer_id(), neighbour.local_addr());
+                handle
+                    .network
+                    .add_peer(*neighbour.peer_id(), neighbour.local_addr());
             }
         }
 
@@ -465,7 +486,13 @@ where
     where
         P: TransactionPool,
     {
-        let Self { mut network, request_handler, client, secret_key, .. } = self;
+        let Self {
+            mut network,
+            request_handler,
+            client,
+            secret_key,
+            ..
+        } = self;
         let (tx, rx) = unbounded_channel();
         network.set_transactions(tx);
         let transactions_manager = TransactionsManager::new(
@@ -493,7 +520,13 @@ where
     where
         P: TransactionPool,
     {
-        let Self { mut network, request_handler, client, secret_key, .. } = self;
+        let Self {
+            mut network,
+            request_handler,
+            client,
+            secret_key,
+            ..
+        } = self;
         let (tx, rx) = unbounded_channel();
         network.set_transactions(tx);
 
@@ -619,7 +652,11 @@ where
 {
     /// Launches the network and returns the [Peer] that manages it
     pub async fn launch(self) -> Result<Peer<C>, NetworkError> {
-        let Self { config, client, secret_key } = self;
+        let Self {
+            config,
+            client,
+            secret_key,
+        } = self;
         let network = NetworkManager::new(config).await?;
         let peer = Peer {
             network,
@@ -640,7 +677,11 @@ where
     {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
         let config = Self::network_config_builder(secret_key).build(client.clone());
-        Self { config, client, secret_key }
+        Self {
+            config,
+            client,
+            secret_key,
+        }
     }
 
     /// Initialize the network with a given secret key, allowing devp2p and discovery to bind any
@@ -650,7 +691,11 @@ where
         C: ChainSpecProvider<ChainSpec: Hardforks>,
     {
         let config = Self::network_config_builder(secret_key).build(client.clone());
-        Self { config, client, secret_key }
+        Self {
+            config,
+            client,
+            secret_key,
+        }
     }
 
     /// Initialize the network with a given capabilities.
@@ -661,11 +706,16 @@ where
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
         let builder = Self::network_config_builder(secret_key);
-        let hello_message =
-            HelloMessageWithProtocols::builder(builder.get_peer_id()).protocols(protocols).build();
+        let hello_message = HelloMessageWithProtocols::builder(builder.get_peer_id())
+            .protocols(protocols)
+            .build();
         let config = builder.hello_message(hello_message).build(client.clone());
 
-        Self { config, client, secret_key }
+        Self {
+            config,
+            client,
+            secret_key,
+        }
     }
 
     fn network_config_builder(secret_key: SecretKey) -> NetworkConfigBuilder {
@@ -703,7 +753,7 @@ impl NetworkEventStream {
     pub async fn next_session_closed(&mut self) -> Option<(PeerId, Option<DisconnectReason>)> {
         while let Some(ev) = self.inner.next().await {
             if let NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, reason }) = ev {
-                return Some((peer_id, reason))
+                return Some((peer_id, reason));
             }
         }
         None
@@ -713,8 +763,8 @@ impl NetworkEventStream {
     pub async fn next_session_established(&mut self) -> Option<PeerId> {
         while let Some(ev) = self.inner.next().await {
             match ev {
-                NetworkEvent::ActivePeerSession { info, .. } |
-                NetworkEvent::Peer(PeerEvent::SessionEstablished(info)) => {
+                NetworkEvent::ActivePeerSession { info, .. }
+                | NetworkEvent::Peer(PeerEvent::SessionEstablished(info)) => {
                     return Some(info.peer_id)
                 }
                 _ => {}
@@ -730,7 +780,11 @@ impl NetworkEventStream {
         }
         let mut peers = Vec::with_capacity(num);
         while let Some(ev) = self.inner.next().await {
-            if let NetworkEvent::ActivePeerSession { info: SessionInfo { peer_id, .. }, .. } = ev {
+            if let NetworkEvent::ActivePeerSession {
+                info: SessionInfo { peer_id, .. },
+                ..
+            } = ev
+            {
                 peers.push(peer_id);
                 num -= 1;
                 if num == 0 {
@@ -752,7 +806,9 @@ impl NetworkEventStream {
 
         match self.inner.next().await {
             Some(NetworkEvent::ActivePeerSession {
-                info: SessionInfo { peer_id: peer_id2, .. },
+                info: SessionInfo {
+                    peer_id: peer_id2, ..
+                },
                 ..
             }) => {
                 debug_assert_eq!(

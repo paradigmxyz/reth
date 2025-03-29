@@ -16,7 +16,12 @@ fn blob_validation(c: &mut Criterion) {
 
     for num_blobs in 1..=MAX_BLOBS_PER_BLOCK {
         println!("Benchmarking validation for tx with {num_blobs} blobs");
-        validate_blob_tx(&mut group, "ValidateBlob", num_blobs as u64, EnvKzgSettings::Default);
+        validate_blob_tx(
+            &mut group,
+            "ValidateBlob",
+            num_blobs as u64,
+            EnvKzgSettings::Default,
+        );
     }
 }
 
@@ -31,17 +36,23 @@ fn validate_blob_tx(
 
         // generate tx and sidecar
         let mut tx = arb::<TxEip4844>().new_tree(&mut runner).unwrap().current();
-        let mut blob_sidecar =
-            arb::<BlobTransactionSidecar>().new_tree(&mut runner).unwrap().current();
+        let mut blob_sidecar = arb::<BlobTransactionSidecar>()
+            .new_tree(&mut runner)
+            .unwrap()
+            .current();
 
         while blob_sidecar.blobs.len() < num_blobs as usize {
-            let blob_sidecar_ext =
-                arb::<BlobTransactionSidecar>().new_tree(&mut runner).unwrap().current();
+            let blob_sidecar_ext = arb::<BlobTransactionSidecar>()
+                .new_tree(&mut runner)
+                .unwrap()
+                .current();
 
             // extend the sidecar with the new blobs
             blob_sidecar.blobs.extend(blob_sidecar_ext.blobs);
             blob_sidecar.proofs.extend(blob_sidecar_ext.proofs);
-            blob_sidecar.commitments.extend(blob_sidecar_ext.commitments);
+            blob_sidecar
+                .commitments
+                .extend(blob_sidecar_ext.commitments);
 
             if blob_sidecar.blobs.len() > num_blobs as usize {
                 blob_sidecar.blobs.truncate(num_blobs as usize);

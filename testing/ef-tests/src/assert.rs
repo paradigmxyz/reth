@@ -11,6 +11,8 @@ where
     if left == right {
         Ok(())
     } else {
-        Err(Error::Assertion(format!("{msg}\n  left `{left:?}`,\n right `{right:?}`")))
+        Err(Error::Assertion(format!(
+            "{msg}\n  left `{left:?}`,\n right `{right:?}`"
+        )))
     }
 }

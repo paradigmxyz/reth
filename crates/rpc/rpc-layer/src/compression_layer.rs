@@ -20,7 +20,11 @@ impl CompressionLayer {
     /// Creates a new compression layer with zstd, gzip, brotli and deflate enabled.
     pub fn new() -> Self {
         Self {
-            inner_layer: TowerCompressionLayer::new().gzip(true).br(true).deflate(true).zstd(true),
+            inner_layer: TowerCompressionLayer::new()
+                .gzip(true)
+                .br(true)
+                .deflate(true)
+                .zstd(true),
         }
     }
 }
@@ -37,7 +41,9 @@ impl<S> Layer<S> for CompressionLayer {
     type Service = CompressionService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        CompressionService { compression: self.inner_layer.layer(inner) }
+        CompressionService {
+            compression: self.inner_layer.layer(inner),
+        }
     }
 }
 
@@ -116,14 +122,22 @@ mod tests {
 
     async fn get_response_size(response: HttpResponse) -> usize {
         // Get the total size of the response body
-        response.into_body().collect().await.unwrap().to_bytes().len()
+        response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .len()
     }
 
     #[tokio::test]
     async fn test_gzip_compression() {
         let mut service = setup_compression_service();
-        let request =
-            HttpRequest::builder().header(ACCEPT_ENCODING, "gzip").body(HttpBody::empty()).unwrap();
+        let request = HttpRequest::builder()
+            .header(ACCEPT_ENCODING, "gzip")
+            .body(HttpBody::empty())
+            .unwrap();
 
         let uncompressed_len = TEST_DATA.repeat(REPEAT_COUNT).len();
 

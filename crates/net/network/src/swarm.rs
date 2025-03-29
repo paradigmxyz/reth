@@ -66,7 +66,11 @@ impl<N: NetworkPrimitives> Swarm<N> {
         sessions: SessionManager<N>,
         state: NetworkState<N>,
     ) -> Self {
-        Self { incoming, sessions, state }
+        Self {
+            incoming,
+            sessions,
+            state,
+        }
     }
 
     /// Adds a protocol handler to the `RLPx` sub-protocol list.
@@ -141,7 +145,11 @@ impl<N: NetworkPrimitives> Swarm<N> {
                     direction,
                 })
             }
-            SessionEvent::AlreadyConnected { peer_id, remote_addr, direction } => {
+            SessionEvent::AlreadyConnected {
+                peer_id,
+                remote_addr,
+                direction,
+            } => {
                 trace!(target: "net", ?peer_id, ?remote_addr, ?direction, "already connected");
                 self.state.peers_mut().on_already_connected(direction);
                 None
@@ -152,20 +160,47 @@ impl<N: NetworkPrimitives> Swarm<N> {
             SessionEvent::IncomingPendingSessionClosed { remote_addr, error } => {
                 Some(SwarmEvent::IncomingPendingSessionClosed { remote_addr, error })
             }
-            SessionEvent::OutgoingPendingSessionClosed { remote_addr, peer_id, error } => {
-                Some(SwarmEvent::OutgoingPendingSessionClosed { remote_addr, peer_id, error })
-            }
-            SessionEvent::Disconnected { peer_id, remote_addr } => {
+            SessionEvent::OutgoingPendingSessionClosed {
+                remote_addr,
+                peer_id,
+                error,
+            } => Some(SwarmEvent::OutgoingPendingSessionClosed {
+                remote_addr,
+                peer_id,
+                error,
+            }),
+            SessionEvent::Disconnected {
+                peer_id,
+                remote_addr,
+            } => {
                 self.state.on_session_closed(peer_id);
-                Some(SwarmEvent::SessionClosed { peer_id, remote_addr, error: None })
+                Some(SwarmEvent::SessionClosed {
+                    peer_id,
+                    remote_addr,
+                    error: None,
+                })
             }
-            SessionEvent::SessionClosedOnConnectionError { peer_id, remote_addr, error } => {
+            SessionEvent::SessionClosedOnConnectionError {
+                peer_id,
+                remote_addr,
+                error,
+            } => {
                 self.state.on_session_closed(peer_id);
-                Some(SwarmEvent::SessionClosed { peer_id, remote_addr, error: Some(error) })
+                Some(SwarmEvent::SessionClosed {
+                    peer_id,
+                    remote_addr,
+                    error: Some(error),
+                })
             }
-            SessionEvent::OutgoingConnectionError { remote_addr, peer_id, error } => {
-                Some(SwarmEvent::OutgoingConnectionError { peer_id, remote_addr, error })
-            }
+            SessionEvent::OutgoingConnectionError {
+                remote_addr,
+                peer_id,
+                error,
+            } => Some(SwarmEvent::OutgoingConnectionError {
+                peer_id,
+                remote_addr,
+                error,
+            }),
             SessionEvent::BadMessage { peer_id } => Some(SwarmEvent::BadMessage { peer_id }),
             SessionEvent::ProtocolBreach { peer_id } => {
                 Some(SwarmEvent::ProtocolBreach { peer_id })
@@ -179,17 +214,26 @@ impl<N: NetworkPrimitives> Swarm<N> {
     fn on_connection(&mut self, event: ListenerEvent) -> Option<SwarmEvent<N>> {
         match event {
             ListenerEvent::Error(err) => return Some(SwarmEvent::TcpListenerError(err)),
-            ListenerEvent::ListenerClosed { local_address: address } => {
-                return Some(SwarmEvent::TcpListenerClosed { remote_addr: address })
+            ListenerEvent::ListenerClosed {
+                local_address: address,
+            } => {
+                return Some(SwarmEvent::TcpListenerClosed {
+                    remote_addr: address,
+                })
             }
-            ListenerEvent::Incoming { stream, remote_addr } => {
+            ListenerEvent::Incoming {
+                stream,
+                remote_addr,
+            } => {
                 // Reject incoming connection if node is shutting down.
                 if self.is_shutting_down() {
-                    return None
+                    return None;
                 }
                 // ensure we can handle an incoming connection from this address
-                if let Err(err) =
-                    self.state_mut().peers_mut().on_incoming_pending_session(remote_addr.ip())
+                if let Err(err) = self
+                    .state_mut()
+                    .peers_mut()
+                    .on_incoming_pending_session(remote_addr.ip())
                 {
                     match err {
                         InboundConnectionError::IpBanned => {
@@ -203,13 +247,16 @@ impl<N: NetworkPrimitives> Swarm<N> {
                             );
                         }
                     }
-                    return None
+                    return None;
                 }
 
                 match self.sessions.on_incoming(stream, remote_addr) {
                     Ok(session_id) => {
                         trace!(target: "net", ?remote_addr, "Incoming connection");
-                        return Some(SwarmEvent::IncomingTcpConnection { session_id, remote_addr })
+                        return Some(SwarmEvent::IncomingTcpConnection {
+                            session_id,
+                            remote_addr,
+                        });
                     }
                     Err(err) => {
                         trace!(target: "net", %err, "Incoming connection rejected, capacity already reached.");
@@ -226,14 +273,23 @@ impl<N: NetworkPrimitives> Swarm<N> {
     /// Hook for actions pulled from the state
     fn on_state_action(&mut self, event: StateAction<N>) -> Option<SwarmEvent<N>> {
         match event {
-            StateAction::Connect { remote_addr, peer_id } => {
+            StateAction::Connect {
+                remote_addr,
+                peer_id,
+            } => {
                 self.dial_outbound(remote_addr, peer_id);
-                return Some(SwarmEvent::OutgoingTcpConnection { remote_addr, peer_id })
+                return Some(SwarmEvent::OutgoingTcpConnection {
+                    remote_addr,
+                    peer_id,
+                });
             }
             StateAction::Disconnect { peer_id, reason } => {
                 self.sessions.disconnect(peer_id, reason);
             }
-            StateAction::NewBlock { peer_id, block: msg } => {
+            StateAction::NewBlock {
+                peer_id,
+                block: msg,
+            } => {
                 let msg = PeerMessage::NewBlock(msg);
                 self.sessions.send_message(&peer_id, msg);
             }
@@ -243,19 +299,27 @@ impl<N: NetworkPrimitives> Swarm<N> {
             }
             StateAction::PeerAdded(peer_id) => return Some(SwarmEvent::PeerAdded(peer_id)),
             StateAction::PeerRemoved(peer_id) => return Some(SwarmEvent::PeerRemoved(peer_id)),
-            StateAction::DiscoveredNode { peer_id, addr, fork_id } => {
+            StateAction::DiscoveredNode {
+                peer_id,
+                addr,
+                fork_id,
+            } => {
                 // Don't try to connect to peer if node is shutting down
                 if self.is_shutting_down() {
-                    return None
+                    return None;
                 }
                 // Insert peer only if no fork id or a valid fork id
                 if fork_id.map_or_else(|| true, |f| self.sessions.is_valid_fork_id(f)) {
-                    self.state_mut().peers_mut().add_peer(peer_id, addr, fork_id);
+                    self.state_mut()
+                        .peers_mut()
+                        .add_peer(peer_id, addr, fork_id);
                 }
             }
             StateAction::DiscoveredEnrForkId { peer_id, fork_id } => {
                 if self.sessions.is_valid_fork_id(fork_id) {
-                    self.state_mut().peers_mut().set_discovered_fork_id(peer_id, fork_id);
+                    self.state_mut()
+                        .peers_mut()
+                        .set_discovered_fork_id(peer_id, fork_id);
                 } else {
                     self.state_mut().peers_mut().remove_peer(peer_id);
                 }
@@ -277,7 +341,9 @@ impl<N: NetworkPrimitives> Swarm<N> {
 
     /// Set network connection state to `Hibernate` or `Active`
     pub(crate) fn on_network_state_change(&mut self, network_state: NetworkConnectionState) {
-        self.state_mut().peers_mut().on_network_state_change(network_state);
+        self.state_mut()
+            .peers_mut()
+            .on_network_state_change(network_state);
     }
 }
 
@@ -300,7 +366,7 @@ impl<N: NetworkPrimitives> Stream for Swarm<N> {
         loop {
             while let Poll::Ready(action) = this.state.poll(cx) {
                 if let Some(event) = this.on_state_action(action) {
-                    return Poll::Ready(Some(event))
+                    return Poll::Ready(Some(event));
                 }
             }
 
@@ -309,9 +375,9 @@ impl<N: NetworkPrimitives> Stream for Swarm<N> {
                 Poll::Pending => {}
                 Poll::Ready(event) => {
                     if let Some(event) = this.on_session_event(event) {
-                        return Poll::Ready(Some(event))
+                        return Poll::Ready(Some(event));
                     }
-                    continue
+                    continue;
                 }
             }
 
@@ -320,13 +386,13 @@ impl<N: NetworkPrimitives> Stream for Swarm<N> {
                 Poll::Pending => {}
                 Poll::Ready(event) => {
                     if let Some(event) = this.on_connection(event) {
-                        return Poll::Ready(Some(event))
+                        return Poll::Ready(Some(event));
                     }
-                    continue
+                    continue;
                 }
             }
 
-            return Poll::Pending
+            return Poll::Pending;
         }
     }
 }
@@ -407,7 +473,11 @@ pub(crate) enum SwarmEvent<N: NetworkPrimitives = EthNetworkPrimitives> {
         error: Option<PendingSessionHandshakeError>,
     },
     /// Failed to establish a tcp stream to the given address/node
-    OutgoingConnectionError { remote_addr: SocketAddr, peer_id: PeerId, error: io::Error },
+    OutgoingConnectionError {
+        remote_addr: SocketAddr,
+        peer_id: PeerId,
+        error: io::Error,
+    },
 }
 
 /// Represents the state of the connection of the node. If shutting down,

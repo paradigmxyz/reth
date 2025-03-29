@@ -4,7 +4,10 @@ pub use nybbles::Nibbles;
 
 /// The representation of nibbles of the merkle trie stored in the database.
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, derive_more::Index)]
-#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    any(test, feature = "serde"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
 #[cfg_attr(feature = "test-utils", derive(arbitrary::Arbitrary))]
 pub struct StoredNibbles(pub Nibbles);
 
@@ -64,7 +67,10 @@ impl reth_codecs::Compact for StoredNibbles {
 
 /// The representation of nibbles of the merkle trie stored in the database.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deref)]
-#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    any(test, feature = "serde"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
 #[cfg_attr(feature = "test-utils", derive(arbitrary::Arbitrary))]
 pub struct StoredNibblesSubKey(pub Nibbles);
 
@@ -108,7 +114,10 @@ impl reth_codecs::Compact for StoredNibblesSubKey {
 
     fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
         let len = buf[64] as usize;
-        (Self(Nibbles::from_nibbles_unchecked(&buf[..len])), &buf[65..])
+        (
+            Self(Nibbles::from_nibbles_unchecked(&buf[..len])),
+            &buf[65..],
+        )
     }
 }
 

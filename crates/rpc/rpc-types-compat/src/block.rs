@@ -101,12 +101,22 @@ fn from_block_with_transactions<T, B: BlockTrait>(
     body: B::Body,
     transactions: BlockTransactions<T>,
 ) -> Block<T, Header<B::Header>> {
-    let withdrawals =
-        header.withdrawals_root().is_some().then(|| body.withdrawals().cloned()).flatten();
+    let withdrawals = header
+        .withdrawals_root()
+        .is_some()
+        .then(|| body.withdrawals().cloned())
+        .flatten();
 
-    let uncles =
-        body.ommers().map(|o| o.iter().map(|h| h.hash_slow()).collect()).unwrap_or_default();
+    let uncles = body
+        .ommers()
+        .map(|o| o.iter().map(|h| h.hash_slow()).collect())
+        .unwrap_or_default();
     let header = Header::from_consensus(header.into(), None, Some(U256::from(block_length)));
 
-    Block { header, uncles, transactions, withdrawals }
+    Block {
+        header,
+        uncles,
+        transactions,
+        withdrawals,
+    }
 }

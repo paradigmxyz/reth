@@ -47,14 +47,20 @@ impl<B: Block> RecoveredBlock<B> {
     ///
     /// Note: This expects that the given senders match the transactions in the block.
     pub fn new(block: B, senders: Vec<Address>, hash: BlockHash) -> Self {
-        Self { block: SealedBlock::new_unchecked(block, hash), senders }
+        Self {
+            block: SealedBlock::new_unchecked(block, hash),
+            senders,
+        }
     }
 
     /// Creates a new recovered block instance with the given senders as provided.
     ///
     /// Note: This expects that the given senders match the transactions in the block.
     pub fn new_unhashed(block: B, senders: Vec<Address>) -> Self {
-        Self { block: SealedBlock::new_unhashed(block), senders }
+        Self {
+            block: SealedBlock::new_unhashed(block),
+            senders,
+        }
     }
 
     /// Returns the recovered senders.
@@ -96,7 +102,9 @@ impl<B: Block> RecoveredBlock<B> {
             senders
         } else {
             let Ok(senders) = block.body().try_recover_signers() else {
-                return Err(SealedBlockRecoveryError::new(SealedBlock::new_unchecked(block, hash)));
+                return Err(SealedBlockRecoveryError::new(SealedBlock::new_unchecked(
+                    block, hash,
+                )));
             };
             senders
         };
@@ -116,7 +124,9 @@ impl<B: Block> RecoveredBlock<B> {
             senders
         } else {
             let Ok(senders) = block.body().try_recover_signers_unchecked() else {
-                return Err(SealedBlockRecoveryError::new(SealedBlock::new_unchecked(block, hash)));
+                return Err(SealedBlockRecoveryError::new(SealedBlock::new_unchecked(
+                    block, hash,
+                )));
             };
             senders
         };
@@ -239,7 +249,10 @@ impl<B: Block> RecoveredBlock<B> {
 
     /// Return a [`BlockWithParent`] for this header.
     pub fn block_with_parent(&self) -> BlockWithParent {
-        BlockWithParent { parent: self.header().parent_hash(), block: self.num_hash() }
+        BlockWithParent {
+            parent: self.header().parent_hash(),
+            block: self.num_hash(),
+        }
     }
 
     /// Clone the header.
@@ -305,7 +318,8 @@ impl<B: Block> RecoveredBlock<B> {
     pub fn transactions_recovered(
         &self,
     ) -> impl Iterator<Item = Recovered<&'_ <B::Body as BlockBody>::Transaction>> + '_ {
-        self.transactions_with_sender().map(|(sender, tx)| Recovered::new_unchecked(tx, *sender))
+        self.transactions_with_sender()
+            .map(|(sender, tx)| Recovered::new_unchecked(tx, *sender))
     }
 
     /// Consumes the type and returns an iterator over all [`Recovered`] transactions in the block.
@@ -420,9 +434,9 @@ impl<B: Block> Eq for RecoveredBlock<B> {}
 
 impl<B: Block> PartialEq for RecoveredBlock<B> {
     fn eq(&self, other: &Self) -> bool {
-        self.hash_ref().eq(other.hash_ref()) &&
-            self.block.eq(&other.block) &&
-            self.senders.eq(&other.senders)
+        self.hash_ref().eq(other.hash_ref())
+            && self.block.eq(&other.block)
+            && self.senders.eq(&other.senders)
     }
 }
 
@@ -571,7 +585,10 @@ pub(super) mod serde_bincode_compat {
         From<&'a super::RecoveredBlock<T>> for RecoveredBlock<'a, T>
     {
         fn from(value: &'a super::RecoveredBlock<T>) -> Self {
-            Self { block: (&value.block).into(), senders: Cow::Borrowed(&value.senders) }
+            Self {
+                block: (&value.block).into(),
+                senders: Cow::Borrowed(&value.senders),
+            }
         }
     }
 

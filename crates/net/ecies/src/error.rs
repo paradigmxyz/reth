@@ -101,7 +101,9 @@ pub enum ECIESErrorImpl {
 
 impl From<ECIESErrorImpl> for ECIESError {
     fn from(source: ECIESErrorImpl) -> Self {
-        Self { inner: Box::new(source) }
+        Self {
+            inner: Box::new(source),
+        }
     }
 }
 

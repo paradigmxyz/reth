@@ -87,14 +87,16 @@ where
     /// `state` - state transition containing both modified and touched accounts and storage slots.
     pub fn compute(mut self, state: HashedPostState) -> Result<B256Map<Bytes>, TrieWitnessError> {
         if state.is_empty() {
-            return Ok(self.witness)
+            return Ok(self.witness);
         }
 
         let proof_targets = self.get_proof_targets(&state)?;
-        let multiproof =
-            Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
-                .with_prefix_sets_mut(self.prefix_sets.clone())
-                .multiproof(proof_targets.clone())?;
+        let multiproof = Proof::new(
+            self.trie_cursor_factory.clone(),
+            self.hashed_cursor_factory.clone(),
+        )
+        .with_prefix_sets_mut(self.prefix_sets.clone())
+        .multiproof(proof_targets.clone())?;
 
         // Record all nodes from multiproof in the witness
         for account_node in multiproof.account_subtree.values() {
@@ -102,7 +104,11 @@ where
                 entry.insert(account_node.clone());
             }
         }
-        for storage_node in multiproof.storages.values().flat_map(|s| s.subtree.values()) {
+        for storage_node in multiproof
+            .storages
+            .values()
+            .flat_map(|s| s.subtree.values())
+        {
             if let Entry::Vacant(entry) = self.witness.entry(keccak256(storage_node.as_ref())) {
                 entry.insert(storage_node.clone());
             }
@@ -121,8 +127,9 @@ where
         sparse_trie.reveal_multiproof(multiproof)?;
 
         // Attempt to update state trie to gather additional information for the witness.
-        for (hashed_address, hashed_slots) in
-            proof_targets.into_iter().sorted_unstable_by_key(|(ha, _)| *ha)
+        for (hashed_address, hashed_slots) in proof_targets
+            .into_iter()
+            .sorted_unstable_by_key(|(ha, _)| *ha)
         {
             // Update storage trie first.
             let storage = state.storages.get(&hashed_address);
@@ -140,9 +147,14 @@ where
                     .map(|v| alloy_rlp::encode_fixed_size(v).to_vec());
 
                 if let Some(value) = maybe_leaf_value {
-                    storage_trie.update_leaf(storage_nibbles, value).map_err(|err| {
-                        SparseStateTrieErrorKind::SparseStorageTrie(hashed_address, err.into_kind())
-                    })?;
+                    storage_trie
+                        .update_leaf(storage_nibbles, value)
+                        .map_err(|err| {
+                            SparseStateTrieErrorKind::SparseStorageTrie(
+                                hashed_address,
+                                err.into_kind(),
+                            )
+                        })?;
                 } else {
                     storage_trie.remove_leaf(&storage_nibbles).map_err(|err| {
                         SparseStateTrieErrorKind::SparseStorageTrie(hashed_address, err.into_kind())
@@ -183,8 +195,9 @@ where
             let mut storage_keys = storage.storage.keys().copied().collect::<B256Set>();
             if storage.wiped {
                 // storage for this account was destroyed, gather all slots from the current state
-                let mut storage_cursor =
-                    self.hashed_cursor_factory.hashed_storage_cursor(*hashed_address)?;
+                let mut storage_cursor = self
+                    .hashed_cursor_factory
+                    .hashed_storage_cursor(*hashed_address)?;
                 // position cursor at the start
                 let mut current_entry = storage_cursor.seek(B256::ZERO)?;
                 while let Some((hashed_slot, _)) = current_entry {
@@ -208,7 +221,10 @@ struct WitnessBlindedProviderFactory<F> {
 
 impl<F> WitnessBlindedProviderFactory<F> {
     const fn new(provider_factory: F, tx: mpsc::Sender<Bytes>) -> Self {
-        Self { provider_factory, tx }
+        Self {
+            provider_factory,
+            tx,
+        }
     }
 }
 

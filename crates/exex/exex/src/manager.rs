@@ -146,7 +146,7 @@ impl<N: NodePrimitives> ExExHandle<N> {
                         );
 
                         self.next_notification_id = notification_id + 1;
-                        return Poll::Ready(Ok(()))
+                        return Poll::Ready(Ok(()));
                     }
                 }
                 // Do not handle [ExExNotification::ChainReorged] and
@@ -377,7 +377,10 @@ where
             })
             // We collect here to be able to log the unfinalized ExExes below
             .collect::<Result<Vec<_>, _>>()?;
-        if exex_finished_heights.iter().all(|(_, _, is_canonical)| *is_canonical) {
+        if exex_finished_heights
+            .iter()
+            .all(|(_, _, is_canonical)| *is_canonical)
+        {
             // If there is a finalized header and all ExExs are on the canonical chain, finalize
             // the WAL with either the lowest finished height among all ExExes, or finalized header
             // – whichever is lower.
@@ -464,9 +467,12 @@ where
         // Drain handle notifications
         while this.buffer.len() < this.max_capacity {
             if let Poll::Ready(Some((source, notification))) = this.handle_rx.poll_recv(cx) {
-                let committed_tip =
-                    notification.committed_chain().map(|chain| chain.tip().number());
-                let reverted_tip = notification.reverted_chain().map(|chain| chain.tip().number());
+                let committed_tip = notification
+                    .committed_chain()
+                    .map(|chain| chain.tip().number());
+                let reverted_tip = notification
+                    .reverted_chain()
+                    .map(|chain| chain.tip().number());
                 debug!(target: "exex::manager", ?committed_tip, ?reverted_tip, "Received new notification");
 
                 // Commit to WAL only notifications from blockchain tree. Pipeline notifications
@@ -482,9 +488,9 @@ where
                 }
 
                 this.push_notification(notification);
-                continue
+                continue;
             }
-            break
+            break;
         }
 
         // Update capacity
@@ -504,7 +510,7 @@ where
             if let Some(notification) = this.buffer.get(notification_index) {
                 if let Poll::Ready(Err(err)) = exex.send(cx, notification) {
                     // The channel was closed, which is irrecoverable for the manager
-                    return Poll::Ready(Err(err.into()))
+                    return Poll::Ready(Err(err.into()));
                 }
             }
             min_id = min_id.min(exex.next_notification_id);
@@ -520,11 +526,17 @@ where
         this.update_capacity();
 
         // Update watch channel block number
-        let finished_height = this.exex_handles.iter_mut().try_fold(u64::MAX, |curr, exex| {
-            exex.finished_height.map_or(Err(()), |height| Ok(height.number.min(curr)))
-        });
+        let finished_height = this
+            .exex_handles
+            .iter_mut()
+            .try_fold(u64::MAX, |curr, exex| {
+                exex.finished_height
+                    .map_or(Err(()), |height| Ok(height.number.min(curr)))
+            });
         if let Ok(finished_height) = finished_height {
-            let _ = this.finished_height.send(FinishedExExHeight::Height(finished_height));
+            let _ = this
+                .finished_height
+                .send(FinishedExExHeight::Height(finished_height));
         }
 
         Poll::Pending
@@ -712,13 +724,21 @@ mod tests {
             wal.handle(),
         );
 
-        assert!(!ExExManager::new((), vec![], 0, wal.clone(), empty_finalized_header_stream())
-            .handle
-            .has_exexs());
+        assert!(
+            !ExExManager::new((), vec![], 0, wal.clone(), empty_finalized_header_stream())
+                .handle
+                .has_exexs()
+        );
 
-        assert!(ExExManager::new((), vec![exex_handle_1], 0, wal, empty_finalized_header_stream())
-            .handle
-            .has_exexs());
+        assert!(ExExManager::new(
+            (),
+            vec![exex_handle_1],
+            0,
+            wal,
+            empty_finalized_header_stream()
+        )
+        .handle
+        .has_exexs());
     }
 
     #[tokio::test]
@@ -734,9 +754,11 @@ mod tests {
             wal.handle(),
         );
 
-        assert!(!ExExManager::new((), vec![], 0, wal.clone(), empty_finalized_header_stream())
-            .handle
-            .has_capacity());
+        assert!(
+            !ExExManager::new((), vec![], 0, wal.clone(), empty_finalized_header_stream())
+                .handle
+                .has_capacity()
+        );
 
         assert!(ExExManager::new(
             (),
@@ -763,8 +785,13 @@ mod tests {
         );
 
         // Create a mock ExExManager and add the exex_handle to it
-        let mut exex_manager =
-            ExExManager::new((), vec![exex_handle], 10, wal, empty_finalized_header_stream());
+        let mut exex_manager = ExExManager::new(
+            (),
+            vec![exex_handle],
+            10,
+            wal,
+            empty_finalized_header_stream(),
+        );
 
         // Define the notification for testing
         let mut block1: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
@@ -772,7 +799,11 @@ mod tests {
         block1.set_block_number(10);
 
         let notification1 = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(vec![block1.clone()], Default::default(), Default::default())),
+            new: Arc::new(Chain::new(
+                vec![block1.clone()],
+                Default::default(),
+                Default::default(),
+            )),
         };
 
         // Push the first notification
@@ -790,7 +821,11 @@ mod tests {
         block2.set_block_number(20);
 
         let notification2 = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(vec![block2.clone()], Default::default(), Default::default())),
+            new: Arc::new(Chain::new(
+                vec![block2.clone()],
+                Default::default(),
+                Default::default(),
+            )),
         };
 
         exex_manager.push_notification(notification2.clone());
@@ -833,7 +868,11 @@ mod tests {
         block1.set_block_number(10);
 
         let notification1 = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(vec![block1.clone()], Default::default(), Default::default())),
+            new: Arc::new(Chain::new(
+                vec![block1.clone()],
+                Default::default(),
+                Default::default(),
+            )),
         };
 
         exex_manager.push_notification(notification1.clone());
@@ -843,14 +882,20 @@ mod tests {
         exex_manager.update_capacity();
 
         // Verify current capacity and metrics
-        assert_eq!(exex_manager.current_capacity.load(Ordering::Relaxed), max_capacity - 2);
+        assert_eq!(
+            exex_manager.current_capacity.load(Ordering::Relaxed),
+            max_capacity - 2
+        );
 
         // Clear the buffer and update capacity
         exex_manager.buffer.clear();
         exex_manager.update_capacity();
 
         // Verify current capacity
-        assert_eq!(exex_manager.current_capacity.load(Ordering::Relaxed), max_capacity);
+        assert_eq!(
+            exex_manager.current_capacity.load(Ordering::Relaxed),
+            max_capacity
+        );
     }
 
     #[tokio::test]
@@ -1175,7 +1220,11 @@ mod tests {
         block1.set_block_number(10);
 
         let notification = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(vec![block1.clone()], Default::default(), Default::default())),
+            new: Arc::new(Chain::new(
+                vec![block1.clone()],
+                Default::default(),
+                Default::default(),
+            )),
         };
 
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
@@ -1260,7 +1309,9 @@ mod tests {
             wal.handle(),
         );
 
-        let notification = ExExNotification::ChainReverted { old: Arc::new(Chain::default()) };
+        let notification = ExExNotification::ChainReverted {
+            old: Arc::new(Chain::default()),
+        };
 
         // Even if the finished height is higher than the tip of the new chain, the reorg
         // notification should be received
@@ -1299,12 +1350,17 @@ mod tests {
         let block = random_block(
             &mut rng,
             genesis_block.number + 1,
-            BlockParams { parent: Some(genesis_hash), ..Default::default() },
+            BlockParams {
+                parent: Some(genesis_hash),
+                ..Default::default()
+            },
         )
         .try_recover()
         .unwrap();
         let provider_rw = provider_factory.database_provider_rw().unwrap();
-        provider_rw.insert_block(block.clone(), StorageLocation::Database).unwrap();
+        provider_rw
+            .insert_block(block.clone(), StorageLocation::Database)
+            .unwrap();
         provider_rw.commit().unwrap();
 
         let provider = BlockchainProvider::new(provider_factory).unwrap();
@@ -1321,7 +1377,11 @@ mod tests {
         );
 
         let genesis_notification = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(vec![genesis_block.clone()], Default::default(), None)),
+            new: Arc::new(Chain::new(
+                vec![genesis_block.clone()],
+                Default::default(),
+                None,
+            )),
         };
         let notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(vec![block.clone()], Default::default(), None)),
@@ -1341,10 +1401,13 @@ mod tests {
 
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
+        exex_manager.handle().send(
+            ExExNotificationSource::Pipeline,
+            genesis_notification.clone(),
+        )?;
         exex_manager
             .handle()
-            .send(ExExNotificationSource::Pipeline, genesis_notification.clone())?;
-        exex_manager.handle().send(ExExNotificationSource::BlockchainTree, notification.clone())?;
+            .send(ExExNotificationSource::BlockchainTree, notification.clone())?;
 
         assert!(exex_manager.as_mut().poll(&mut cx)?.is_pending());
         assert_eq!(
@@ -1358,7 +1421,10 @@ mod tests {
         );
         // WAL shouldn't contain the genesis notification, because it's finalized
         assert_eq!(
-            exex_manager.wal.iter_notifications()?.collect::<WalResult<Vec<_>>>()?,
+            exex_manager
+                .wal
+                .iter_notifications()?
+                .collect::<WalResult<Vec<_>>>()?,
             [notification.clone()]
         );
 
@@ -1366,13 +1432,18 @@ mod tests {
         assert!(exex_manager.as_mut().poll(&mut cx).is_pending());
         // WAL isn't finalized because the ExEx didn't emit the `FinishedHeight` event
         assert_eq!(
-            exex_manager.wal.iter_notifications()?.collect::<WalResult<Vec<_>>>()?,
+            exex_manager
+                .wal
+                .iter_notifications()?
+                .collect::<WalResult<Vec<_>>>()?,
             [notification.clone()]
         );
 
         // Send a `FinishedHeight` event with a non-canonical block
         events_tx
-            .send(ExExEvent::FinishedHeight((rng.gen::<u64>(), rng.gen::<B256>()).into()))
+            .send(ExExEvent::FinishedHeight(
+                (rng.gen::<u64>(), rng.gen::<B256>()).into(),
+            ))
             .unwrap();
 
         finalized_headers_tx.send(Some(block.clone_sealed_header()))?;
@@ -1380,17 +1451,25 @@ mod tests {
         // WAL isn't finalized because the ExEx emitted a `FinishedHeight` event with a
         // non-canonical block
         assert_eq!(
-            exex_manager.wal.iter_notifications()?.collect::<WalResult<Vec<_>>>()?,
+            exex_manager
+                .wal
+                .iter_notifications()?
+                .collect::<WalResult<Vec<_>>>()?,
             [notification]
         );
 
         // Send a `FinishedHeight` event with a canonical block
-        events_tx.send(ExExEvent::FinishedHeight(block.num_hash())).unwrap();
+        events_tx
+            .send(ExExEvent::FinishedHeight(block.num_hash()))
+            .unwrap();
 
         finalized_headers_tx.send(Some(block.clone_sealed_header()))?;
         assert!(exex_manager.as_mut().poll(&mut cx).is_pending());
         // WAL is finalized
-        assert_eq!(exex_manager.wal.iter_notifications()?.next().transpose()?, None);
+        assert_eq!(
+            exex_manager.wal.iter_notifications()?.next().transpose()?,
+            None
+        );
 
         Ok(())
     }

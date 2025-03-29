@@ -81,8 +81,10 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     ) -> RethResult<Arc<SealedBlock<BlockTy<N>>>> {
         let provider = factory.provider()?;
 
-        let best_number =
-            provider.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default().block_number;
+        let best_number = provider
+            .get_stage_checkpoint(StageId::Finish)?
+            .unwrap_or_default()
+            .block_number;
         let best_hash = provider
             .block_hash(best_number)?
             .expect("the hash for the latest block is missing, database is corrupt");
@@ -105,7 +107,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         self,
         ctx: CliContext,
     ) -> eyre::Result<()> {
-        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
+        let Environment {
+            provider_factory, ..
+        } = self.env.init::<N>(AccessRights::RW)?;
 
         let consensus: Arc<dyn FullConsensus<EthPrimitives, Error = ConsensusError>> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
@@ -147,7 +151,10 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 .map_err(|e| eyre::eyre!("failed to recover tx: {e}"))?;
 
             let encoded_length = match transaction.transaction() {
-                Transaction::Eip4844(TxEip4844 { blob_versioned_hashes, .. }) => {
+                Transaction::Eip4844(TxEip4844 {
+                    blob_versioned_hashes,
+                    ..
+                }) => {
                     let blobs_bundle = blobs_bundle.as_mut().ok_or_else(|| {
                         eyre::eyre!("encountered a blob tx. `--blobs-bundle-path` must be provided")
                     })?;
@@ -191,7 +198,10 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 .then(Vec::new),
         };
         let payload_config = PayloadConfig::new(
-            Arc::new(SealedHeader::new(best_block.header().clone(), best_block.hash())),
+            Arc::new(SealedHeader::new(
+                best_block.header().clone(),
+                best_block.hash(),
+            )),
             reth_payload_builder::EthPayloadBuilderAttributes::try_new(
                 best_block.hash(),
                 payload_attrs,

@@ -171,8 +171,8 @@ where
     ) -> Result<bool, StageError> {
         // We can only prune changesets if we're not executing MerkleStage from scratch (by
         // threshold or first-sync)
-        Ok(max_block - start_block > self.external_clean_threshold ||
-            provider.count_entries::<tables::AccountsTrie>()?.is_zero())
+        Ok(max_block - start_block > self.external_clean_threshold
+            || provider.count_entries::<tables::AccountsTrie>()?.is_zero())
     }
 
     /// Performs consistency check on static files.
@@ -195,12 +195,14 @@ where
         // If there's any receipts pruning configured, receipts are written directly to database and
         // inconsistencies are expected.
         if provider.prune_modes_ref().has_receipts_pruning() {
-            return Ok(())
+            return Ok(());
         }
 
         // Get next expected receipt number
-        let next_receipt_num =
-            provider.block_body_indices(checkpoint)?.map(|b| b.next_tx_num()).unwrap_or(0);
+        let next_receipt_num = provider
+            .block_body_indices(checkpoint)?
+            .map(|b| b.next_tx_num())
+            .unwrap_or(0);
 
         let static_file_provider = provider.static_file_provider();
 
@@ -236,7 +238,7 @@ where
                     if next_receipt_num_after_unwind > next_static_file_receipt_num {
                         // This means we need a deeper unwind.
                     } else {
-                        return Ok(())
+                        return Ok(());
                     }
                 }
 
@@ -245,7 +247,7 @@ where
                     &static_file_provider,
                     provider,
                     StaticFileSegment::Receipts,
-                )?)
+                )?);
             }
         }
 
@@ -284,7 +286,7 @@ where
     /// Execute the stage
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()))
+            return Ok(ExecOutput::done(input.checkpoint()));
         }
 
         let start_block = input.next_block();
@@ -342,17 +344,22 @@ where
             let execute_start = Instant::now();
 
             let result = self.metrics.metered_one(&block, |input| {
-                executor.execute_one(input).map_err(|error| StageError::Block {
-                    block: Box::new(block.block_with_parent()),
-                    error: BlockErrorKind::Execution(error),
-                })
+                executor
+                    .execute_one(input)
+                    .map_err(|error| StageError::Block {
+                        block: Box::new(block.block_with_parent()),
+                        error: BlockErrorKind::Execution(error),
+                    })
             })?;
 
-            if let Err(err) = self.consensus.validate_block_post_execution(&block, &result) {
+            if let Err(err) = self
+                .consensus
+                .validate_block_post_execution(&block, &result)
+            {
                 return Err(StageError::Block {
                     block: Box::new(block.block_with_parent()),
                     error: BlockErrorKind::Validation(err),
-                })
+                });
             }
             results.push(result);
 
@@ -389,7 +396,7 @@ where
                 cumulative_gas,
                 batch_start.elapsed(),
             ) {
-                break
+                break;
             }
         }
 
@@ -417,14 +424,15 @@ where
         // the `has_exexs` check here as well
         if !blocks.is_empty() {
             let previous_input =
-                self.post_execute_commit_input.replace(Chain::new(blocks, state.clone(), None));
+                self.post_execute_commit_input
+                    .replace(Chain::new(blocks, state.clone(), None));
 
             if previous_input.is_some() {
                 // Not processing the previous post execute commit input is a critical error, as it
                 // means that we didn't send the notification to ExExes
                 return Err(StageError::PostExecuteCommit(
                     "Previous post execute commit input wasn't processed",
-                ))
+                ));
             }
         }
 
@@ -435,18 +443,20 @@ where
 
             // Iterate over all reverts and clear them if pruning is configured.
             for block_number in start_block..=max_block {
-                let Some(reverts) =
-                    state.bundle.reverts.get_mut((block_number - start_block) as usize)
+                let Some(reverts) = state
+                    .bundle
+                    .reverts
+                    .get_mut((block_number - start_block) as usize)
                 else {
-                    break
+                    break;
                 };
 
                 // If both account history and storage history pruning is configured, clear reverts
                 // for this block.
                 if prune_modes
                     .account_history
-                    .is_some_and(|m| m.should_prune(block_number, max_block)) &&
-                    prune_modes
+                    .is_some_and(|m| m.should_prune(block_number, max_block))
+                    && prune_modes
                         .storage_history
                         .is_some_and(|m| m.should_prune(block_number, max_block))
                 {
@@ -456,7 +466,11 @@ where
         }
 
         // write output
-        provider.write_state(&state, OriginalValuesKnown::Yes, StorageLocation::StaticFiles)?;
+        provider.write_state(
+            &state,
+            OriginalValuesKnown::Yes,
+            StorageLocation::StaticFiles,
+        )?;
 
         let db_write_duration = time.elapsed();
         debug!(
@@ -477,13 +491,17 @@ where
     }
 
     fn post_execute_commit(&mut self) -> Result<(), StageError> {
-        let Some(chain) = self.post_execute_commit_input.take() else { return Ok(()) };
+        let Some(chain) = self.post_execute_commit_input.take() else {
+            return Ok(());
+        };
 
         // NOTE: We can ignore the error here, since an error means that the channel is closed,
         // which means the manager has died, which then in turn means the node is shutting down.
         let _ = self.exex_manager_handle.send(
             ExExNotificationSource::Pipeline,
-            ExExNotification::ChainCommitted { new: Arc::new(chain) },
+            ExExNotification::ChainCommitted {
+                new: Arc::new(chain),
+            },
         );
 
         Ok(())
@@ -500,7 +518,7 @@ where
         if range.is_empty() {
             return Ok(UnwindOutput {
                 checkpoint: input.checkpoint.with_block_number(input.unwind_to),
-            })
+            });
         }
 
         self.ensure_consistency(provider, input.checkpoint.block_number, Some(unwind_to))?;
@@ -551,13 +569,17 @@ where
     }
 
     fn post_unwind_commit(&mut self) -> Result<(), StageError> {
-        let Some(chain) = self.post_unwind_commit_input.take() else { return Ok(()) };
+        let Some(chain) = self.post_unwind_commit_input.take() else {
+            return Ok(());
+        };
 
         // NOTE: We can ignore the error here, since an error means that the channel is closed,
         // which means the manager has died, which then in turn means the node is shutting down.
         let _ = self.exex_manager_handle.send(
             ExExNotificationSource::Pipeline,
-            ExExNotification::ChainReverted { old: Arc::new(chain) },
+            ExExNotification::ChainReverted {
+                old: Arc::new(chain),
+            },
         );
 
         Ok(())
@@ -584,7 +606,10 @@ fn execution_checkpoint<N: NodePrimitives>(
             block_range: CheckpointBlockRange { to, .. },
             progress: EntitiesCheckpoint { processed, total },
         }) if to == start_block - 1 => ExecutionCheckpoint {
-            block_range: CheckpointBlockRange { from: start_block, to: max_block },
+            block_range: CheckpointBlockRange {
+                from: start_block,
+                to: max_block,
+            },
             progress: EntitiesCheckpoint {
                 processed,
                 total: total + calculate_gas_used_from_headers(provider, start_block..=max_block)?,
@@ -592,22 +617,30 @@ fn execution_checkpoint<N: NodePrimitives>(
         },
         // If checkpoint block range ends on the same block as our range, we take the previously
         // used stage checkpoint.
-        Some(ExecutionCheckpoint { block_range: CheckpointBlockRange { to, .. }, progress })
-            if to == max_block =>
-        {
-            ExecutionCheckpoint {
-                block_range: CheckpointBlockRange { from: start_block, to: max_block },
-                progress,
-            }
-        }
+        Some(ExecutionCheckpoint {
+            block_range: CheckpointBlockRange { to, .. },
+            progress,
+        }) if to == max_block => ExecutionCheckpoint {
+            block_range: CheckpointBlockRange {
+                from: start_block,
+                to: max_block,
+            },
+            progress,
+        },
         // If there's any other non-empty checkpoint, we calculate the remaining amount of total gas
         // to be processed not including the checkpoint range.
-        Some(ExecutionCheckpoint { progress: EntitiesCheckpoint { processed, .. }, .. }) => {
+        Some(ExecutionCheckpoint {
+            progress: EntitiesCheckpoint { processed, .. },
+            ..
+        }) => {
             let after_checkpoint_block_number =
                 calculate_gas_used_from_headers(provider, checkpoint.block_number + 1..=max_block)?;
 
             ExecutionCheckpoint {
-                block_range: CheckpointBlockRange { from: start_block, to: max_block },
+                block_range: CheckpointBlockRange {
+                    from: start_block,
+                    to: max_block,
+                },
                 progress: EntitiesCheckpoint {
                     processed,
                     total: processed + after_checkpoint_block_number,
@@ -620,11 +653,14 @@ fn execution_checkpoint<N: NodePrimitives>(
             let processed = calculate_gas_used_from_headers(provider, 0..=start_block - 1)?;
 
             ExecutionCheckpoint {
-                block_range: CheckpointBlockRange { from: start_block, to: max_block },
+                block_range: CheckpointBlockRange {
+                    from: start_block,
+                    to: max_block,
+                },
                 progress: EntitiesCheckpoint {
                     processed,
-                    total: processed +
-                        calculate_gas_used_from_headers(provider, start_block..=max_block)?,
+                    total: processed
+                        + calculate_gas_used_from_headers(provider, start_block..=max_block)?,
                 },
             }
         }
@@ -683,8 +719,9 @@ mod tests {
     use std::collections::BTreeMap;
 
     fn stage() -> ExecutionStage<BasicBlockExecutorProvider<EthEvmConfig>> {
-        let strategy_factory =
-            EthEvmConfig::new(Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build()));
+        let strategy_factory = EthEvmConfig::new(Arc::new(
+            ChainSpecBuilder::mainnet().berlin_activated().build(),
+        ));
         let executor_provider = BasicBlockExecutorProvider::new(strategy_factory);
         let consensus = Arc::new(EthBeaconConsensus::new(Arc::new(
             ChainSpecBuilder::mainnet().berlin_activated().build(),
@@ -709,7 +746,10 @@ mod tests {
 
         let previous_stage_checkpoint = ExecutionCheckpoint {
             block_range: CheckpointBlockRange { from: 0, to: 0 },
-            progress: EntitiesCheckpoint { processed: 1, total: 2 },
+            progress: EntitiesCheckpoint {
+                processed: 1,
+                total: 2,
+            },
         };
         let previous_checkpoint = StageCheckpoint {
             block_number: 0,
@@ -737,8 +777,12 @@ mod tests {
         let genesis = SealedBlock::<Block>::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::<Block>::decode(&mut block_rlp).unwrap();
-        provider.insert_historical_block(genesis.try_recover().unwrap()).unwrap();
-        provider.insert_historical_block(block.clone().try_recover().unwrap()).unwrap();
+        provider
+            .insert_historical_block(genesis.try_recover().unwrap())
+            .unwrap();
+        provider
+            .insert_historical_block(block.clone().try_recover().unwrap())
+            .unwrap();
         provider
             .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
@@ -749,7 +793,10 @@ mod tests {
 
         let previous_stage_checkpoint = ExecutionCheckpoint {
             block_range: CheckpointBlockRange { from: 0, to: 0 },
-            progress: EntitiesCheckpoint { processed: 1, total: 1 },
+            progress: EntitiesCheckpoint {
+                processed: 1,
+                total: 1,
+            },
         };
         let previous_checkpoint = StageCheckpoint {
             block_number: 1,
@@ -778,8 +825,12 @@ mod tests {
         let genesis = SealedBlock::<Block>::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::<Block>::decode(&mut block_rlp).unwrap();
-        provider.insert_historical_block(genesis.try_recover().unwrap()).unwrap();
-        provider.insert_historical_block(block.clone().try_recover().unwrap()).unwrap();
+        provider
+            .insert_historical_block(genesis.try_recover().unwrap())
+            .unwrap();
+        provider
+            .insert_historical_block(block.clone().try_recover().unwrap())
+            .unwrap();
         provider
             .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
@@ -790,7 +841,10 @@ mod tests {
 
         let previous_stage_checkpoint = ExecutionCheckpoint {
             block_range: CheckpointBlockRange { from: 0, to: 0 },
-            progress: EntitiesCheckpoint { processed: 1, total: 1 },
+            progress: EntitiesCheckpoint {
+                processed: 1,
+                total: 1,
+            },
         };
         let previous_checkpoint = StageCheckpoint {
             block_number: 1,
@@ -819,8 +873,12 @@ mod tests {
         let genesis = SealedBlock::<Block>::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::<Block>::decode(&mut block_rlp).unwrap();
-        provider.insert_historical_block(genesis.try_recover().unwrap()).unwrap();
-        provider.insert_historical_block(block.clone().try_recover().unwrap()).unwrap();
+        provider
+            .insert_historical_block(genesis.try_recover().unwrap())
+            .unwrap();
+        provider
+            .insert_historical_block(block.clone().try_recover().unwrap())
+            .unwrap();
         provider
             .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
@@ -829,7 +887,10 @@ mod tests {
             .unwrap();
         provider.commit().unwrap();
 
-        let previous_checkpoint = StageCheckpoint { block_number: 1, stage_checkpoint: None };
+        let previous_checkpoint = StageCheckpoint {
+            block_number: 1,
+            stage_checkpoint: None,
+        };
 
         let stage_checkpoint =
             execution_checkpoint(&factory.static_file_provider(), 1, 1, previous_checkpoint);
@@ -847,13 +908,20 @@ mod tests {
     async fn sanity_execution_of_block() {
         let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
-        let input = ExecInput { target: Some(1), checkpoint: None };
+        let input = ExecInput {
+            target: Some(1),
+            checkpoint: None,
+        };
         let mut genesis_rlp = hex!("f901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
         let genesis = SealedBlock::<Block>::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::<Block>::decode(&mut block_rlp).unwrap();
-        provider.insert_historical_block(genesis.try_recover().unwrap()).unwrap();
-        provider.insert_historical_block(block.clone().try_recover().unwrap()).unwrap();
+        provider
+            .insert_historical_block(genesis.try_recover().unwrap())
+            .unwrap();
+        provider
+            .insert_historical_block(block.clone().try_recover().unwrap())
+            .unwrap();
         provider
             .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
@@ -862,8 +930,9 @@ mod tests {
             .unwrap();
         {
             let static_file_provider = provider.static_file_provider();
-            let mut receipts_writer =
-                static_file_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
+            let mut receipts_writer = static_file_provider
+                .latest_writer(StaticFileSegment::Receipts)
+                .unwrap();
             receipts_writer.increment_block(0).unwrap();
             receipts_writer.commit().unwrap();
         }
@@ -881,16 +950,26 @@ mod tests {
         db_tx
             .put::<tables::PlainAccountState>(
                 acc1,
-                Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) },
+                Account {
+                    nonce: 0,
+                    balance: U256::ZERO,
+                    bytecode_hash: Some(code_hash),
+                },
             )
             .unwrap();
         db_tx
             .put::<tables::PlainAccountState>(
                 acc2,
-                Account { nonce: 0, balance, bytecode_hash: None },
+                Account {
+                    nonce: 0,
+                    balance,
+                    bytecode_hash: None,
+                },
             )
             .unwrap();
-        db_tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.to_vec().into())).unwrap();
+        db_tx
+            .put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.to_vec().into()))
+            .unwrap();
         provider.commit().unwrap();
 
         // execute
@@ -939,8 +1018,11 @@ mod tests {
 
             // check post state
             let account1 = address!("0x1000000000000000000000000000000000000000");
-            let account1_info =
-                Account { balance: U256::ZERO, nonce: 0x00, bytecode_hash: Some(code_hash) };
+            let account1_info = Account {
+                balance: U256::ZERO,
+                nonce: 0x00,
+                bytecode_hash: Some(code_hash),
+            };
             let account2 = address!("0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba");
             let account2_info = Account {
                 balance: U256::from(0x1bc16d674ece94bau128),
@@ -978,7 +1060,11 @@ mod tests {
             let _result = stage
                 .unwind(
                     &provider,
-                    UnwindInput { checkpoint: output.checkpoint, unwind_to: 0, bad_block: None },
+                    UnwindInput {
+                        checkpoint: output.checkpoint,
+                        unwind_to: 0,
+                        bad_block: None,
+                    },
                 )
                 .unwrap();
             provider.commit().unwrap();
@@ -989,13 +1075,20 @@ mod tests {
     async fn sanity_execute_unwind() {
         let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
-        let input = ExecInput { target: Some(1), checkpoint: None };
+        let input = ExecInput {
+            target: Some(1),
+            checkpoint: None,
+        };
         let mut genesis_rlp = hex!("f901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
         let genesis = SealedBlock::<Block>::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::<Block>::decode(&mut block_rlp).unwrap();
-        provider.insert_historical_block(genesis.try_recover().unwrap()).unwrap();
-        provider.insert_historical_block(block.clone().try_recover().unwrap()).unwrap();
+        provider
+            .insert_historical_block(genesis.try_recover().unwrap())
+            .unwrap();
+        provider
+            .insert_historical_block(block.clone().try_recover().unwrap())
+            .unwrap();
         provider
             .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
@@ -1004,8 +1097,9 @@ mod tests {
             .unwrap();
         {
             let static_file_provider = provider.static_file_provider();
-            let mut receipts_writer =
-                static_file_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
+            let mut receipts_writer = static_file_provider
+                .latest_writer(StaticFileSegment::Receipts)
+                .unwrap();
             receipts_writer.increment_block(0).unwrap();
             receipts_writer.commit().unwrap();
         }
@@ -1020,13 +1114,27 @@ mod tests {
 
         let db_tx = provider.tx_ref();
         let acc1 = address!("0x1000000000000000000000000000000000000000");
-        let acc1_info = Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) };
+        let acc1_info = Account {
+            nonce: 0,
+            balance: U256::ZERO,
+            bytecode_hash: Some(code_hash),
+        };
         let acc2 = address!("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b");
-        let acc2_info = Account { nonce: 0, balance, bytecode_hash: None };
+        let acc2_info = Account {
+            nonce: 0,
+            balance,
+            bytecode_hash: None,
+        };
 
-        db_tx.put::<tables::PlainAccountState>(acc1, acc1_info).unwrap();
-        db_tx.put::<tables::PlainAccountState>(acc2, acc2_info).unwrap();
-        db_tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.to_vec().into())).unwrap();
+        db_tx
+            .put::<tables::PlainAccountState>(acc1, acc1_info)
+            .unwrap();
+        db_tx
+            .put::<tables::PlainAccountState>(acc2, acc2_info)
+            .unwrap();
+        db_tx
+            .put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.to_vec().into()))
+            .unwrap();
         provider.commit().unwrap();
 
         // execute
@@ -1062,7 +1170,11 @@ mod tests {
             let result = stage
                 .unwind(
                     &provider,
-                    UnwindInput { checkpoint: result.checkpoint, unwind_to: 0, bad_block: None },
+                    UnwindInput {
+                        checkpoint: result.checkpoint,
+                        unwind_to: 0,
+                        bad_block: None,
+                    },
                 )
                 .unwrap();
 
@@ -1097,13 +1209,20 @@ mod tests {
     async fn test_selfdestruct() {
         let test_db = TestStageDB::default();
         let provider = test_db.factory.database_provider_rw().unwrap();
-        let input = ExecInput { target: Some(1), checkpoint: None };
+        let input = ExecInput {
+            target: Some(1),
+            checkpoint: None,
+        };
         let mut genesis_rlp = hex!("f901f8f901f3a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa0c9ceb8372c88cb461724d8d3d87e8b933f6fc5f679d4841800e662f4428ffd0da056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000080830f4240808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
         let genesis = SealedBlock::<Block>::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f9025ff901f7a0c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa050554882fbbda2c2fd93fdc466db9946ea262a67f7a76cc169e714f105ab583da00967f09ef1dfed20c0eacfaa94d5cd4002eda3242ac47eae68972d07b106d192a0e3c8b47fbfc94667ef4cceb17e5cc21e3b1eebd442cebb27f07562b33836290db90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000001830f42408238108203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f862f860800a83061a8094095e7baea6a6c7c4c2dfeb977efac326af552d8780801ba072ed817487b84ba367d15d2f039b5fc5f087d0a8882fbdf73e8cb49357e1ce30a0403d800545b8fc544f92ce8124e2255f8c3c6af93f28243a120585d4c4c6a2a3c0").as_slice();
         let block = SealedBlock::<Block>::decode(&mut block_rlp).unwrap();
-        provider.insert_historical_block(genesis.try_recover().unwrap()).unwrap();
-        provider.insert_historical_block(block.clone().try_recover().unwrap()).unwrap();
+        provider
+            .insert_historical_block(genesis.try_recover().unwrap())
+            .unwrap();
+        provider
+            .insert_historical_block(block.clone().try_recover().unwrap())
+            .unwrap();
         provider
             .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
@@ -1112,8 +1231,9 @@ mod tests {
             .unwrap();
         {
             let static_file_provider = provider.static_file_provider();
-            let mut receipts_writer =
-                static_file_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
+            let mut receipts_writer = static_file_provider
+                .latest_writer(StaticFileSegment::Receipts)
+                .unwrap();
             receipts_writer.increment_block(0).unwrap();
             receipts_writer.commit().unwrap();
         }
@@ -1129,13 +1249,23 @@ mod tests {
         let code_hash = keccak256(code);
 
         // pre state
-        let caller_info = Account { nonce: 0, balance, bytecode_hash: None };
-        let destroyed_info =
-            Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) };
+        let caller_info = Account {
+            nonce: 0,
+            balance,
+            bytecode_hash: None,
+        };
+        let destroyed_info = Account {
+            nonce: 0,
+            balance: U256::ZERO,
+            bytecode_hash: Some(code_hash),
+        };
 
         // set account
         let provider = test_db.factory.provider_rw().unwrap();
-        provider.tx_ref().put::<tables::PlainAccountState>(caller_address, caller_info).unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::PlainAccountState>(caller_address, caller_info)
+            .unwrap();
         provider
             .tx_ref()
             .put::<tables::PlainAccountState>(destroyed_address, destroyed_info)
@@ -1149,14 +1279,20 @@ mod tests {
             .tx_ref()
             .put::<tables::PlainStorageState>(
                 destroyed_address,
-                StorageEntry { key: B256::ZERO, value: U256::ZERO },
+                StorageEntry {
+                    key: B256::ZERO,
+                    value: U256::ZERO,
+                },
             )
             .unwrap();
         provider
             .tx_ref()
             .put::<tables::PlainStorageState>(
                 destroyed_address,
-                StorageEntry { key: B256::with_last_byte(1), value: U256::from(1u64) },
+                StorageEntry {
+                    key: B256::with_last_byte(1),
+                    value: U256::from(1u64),
+                },
             )
             .unwrap();
 
@@ -1170,10 +1306,15 @@ mod tests {
 
         // assert unwind stage
         let provider = test_db.factory.database_provider_rw().unwrap();
-        assert!(matches!(provider.basic_account(&destroyed_address), Ok(None)));
+        assert!(matches!(
+            provider.basic_account(&destroyed_address),
+            Ok(None)
+        ));
 
         assert!(matches!(
-            provider.tx_ref().get::<tables::PlainStorageState>(destroyed_address),
+            provider
+                .tx_ref()
+                .get::<tables::PlainStorageState>(destroyed_address),
             Ok(None)
         ));
         // drops tx so that it returns write privilege to test_tx
@@ -1212,12 +1353,24 @@ mod tests {
             vec![
                 (
                     block.number,
-                    AccountBeforeTx { address: destroyed_address, info: Some(destroyed_info) },
+                    AccountBeforeTx {
+                        address: destroyed_address,
+                        info: Some(destroyed_info)
+                    },
                 ),
-                (block.number, AccountBeforeTx { address: beneficiary_address, info: None }),
                 (
                     block.number,
-                    AccountBeforeTx { address: caller_address, info: Some(caller_info) }
+                    AccountBeforeTx {
+                        address: beneficiary_address,
+                        info: None
+                    }
+                ),
+                (
+                    block.number,
+                    AccountBeforeTx {
+                        address: caller_address,
+                        info: Some(caller_info)
+                    }
                 ),
             ]
         );
@@ -1227,11 +1380,17 @@ mod tests {
             vec![
                 (
                     (block.number, destroyed_address).into(),
-                    StorageEntry { key: B256::ZERO, value: U256::ZERO }
+                    StorageEntry {
+                        key: B256::ZERO,
+                        value: U256::ZERO
+                    }
                 ),
                 (
                     (block.number, destroyed_address).into(),
-                    StorageEntry { key: B256::with_last_byte(1), value: U256::from(1u64) }
+                    StorageEntry {
+                        key: B256::with_last_byte(1),
+                        value: U256::from(1u64)
+                    }
                 )
             ]
         );

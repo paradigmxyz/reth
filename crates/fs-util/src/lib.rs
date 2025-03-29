@@ -151,62 +151,99 @@ pub enum FsPathError {
 impl FsPathError {
     /// Returns the complementary error variant for [`std::fs::write`].
     pub fn write(source: io::Error, path: impl Into<PathBuf>) -> Self {
-        Self::Write { source, path: path.into() }
+        Self::Write {
+            source,
+            path: path.into(),
+        }
     }
 
     /// Returns the complementary error variant for [`std::fs::read`].
     pub fn read(source: io::Error, path: impl Into<PathBuf>) -> Self {
-        Self::Read { source, path: path.into() }
+        Self::Read {
+            source,
+            path: path.into(),
+        }
     }
 
     /// Returns the complementary error variant for [`std::fs::read_link`].
     pub fn read_link(source: io::Error, path: impl Into<PathBuf>) -> Self {
-        Self::ReadLink { source, path: path.into() }
+        Self::ReadLink {
+            source,
+            path: path.into(),
+        }
     }
 
     /// Returns the complementary error variant for [`std::fs::File::create`].
     pub fn create_file(source: io::Error, path: impl Into<PathBuf>) -> Self {
-        Self::CreateFile { source, path: path.into() }
+        Self::CreateFile {
+            source,
+            path: path.into(),
+        }
     }
 
     /// Returns the complementary error variant for [`std::fs::remove_file`].
     pub fn remove_file(source: io::Error, path: impl Into<PathBuf>) -> Self {
-        Self::RemoveFile { source, path: path.into() }
+        Self::RemoveFile {
+            source,
+            path: path.into(),
+        }
     }
 
     /// Returns the complementary error variant for [`std::fs::create_dir`].
     pub fn create_dir(source: io::Error, path: impl Into<PathBuf>) -> Self {
-        Self::CreateDir { source, path: path.into() }
+        Self::CreateDir {
+            source,
+            path: path.into(),
+        }
     }
 
     /// Returns the complementary error variant for [`std::fs::remove_dir`].
     pub fn remove_dir(source: io::Error, path: impl Into<PathBuf>) -> Self {
-        Self::RemoveDir { source, path: path.into() }
+        Self::RemoveDir {
+            source,
+            path: path.into(),
+        }
     }
 
     /// Returns the complementary error variant for [`std::fs::read_dir`].
     pub fn read_dir(source: io::Error, path: impl Into<PathBuf>) -> Self {
-        Self::ReadDir { source, path: path.into() }
+        Self::ReadDir {
+            source,
+            path: path.into(),
+        }
     }
 
     /// Returns the complementary error variant for [`std::fs::File::open`].
     pub fn open(source: io::Error, path: impl Into<PathBuf>) -> Self {
-        Self::Open { source, path: path.into() }
+        Self::Open {
+            source,
+            path: path.into(),
+        }
     }
 
     /// Returns the complementary error variant for [`std::fs::rename`].
     pub fn rename(source: io::Error, from: impl Into<PathBuf>, to: impl Into<PathBuf>) -> Self {
-        Self::Rename { source, from: from.into(), to: to.into() }
+        Self::Rename {
+            source,
+            from: from.into(),
+            to: to.into(),
+        }
     }
 
     /// Returns the complementary error variant for [`std::fs::File::metadata`].
     pub fn metadata(source: io::Error, path: impl Into<PathBuf>) -> Self {
-        Self::Metadata { source, path: path.into() }
+        Self::Metadata {
+            source,
+            path: path.into(),
+        }
     }
 
     /// Returns the complementary error variant for `fsync`.
     pub fn fsync(source: io::Error, path: impl Into<PathBuf>) -> Self {
-        Self::Fsync { source, path: path.into() }
+        Self::Fsync {
+            source,
+            path: path.into(),
+        }
     }
 }
 
@@ -284,16 +321,20 @@ pub fn read_json_file<T: DeserializeOwned>(path: &Path) -> Result<T> {
     // read the file into a byte array first
     // https://github.com/serde-rs/json/issues/160
     let bytes = read(path)?;
-    serde_json::from_slice(&bytes)
-        .map_err(|source| FsPathError::ReadJson { source, path: path.into() })
+    serde_json::from_slice(&bytes).map_err(|source| FsPathError::ReadJson {
+        source,
+        path: path.into(),
+    })
 }
 
 /// Writes the object as a JSON object.
 pub fn write_json_file<T: Serialize>(path: &Path, obj: &T) -> Result<()> {
     let file = create_file(path)?;
     let mut writer = BufWriter::new(file);
-    serde_json::to_writer_pretty(&mut writer, obj)
-        .map_err(|source| FsPathError::WriteJson { source, path: path.into() })?;
+    serde_json::to_writer_pretty(&mut writer, obj).map_err(|source| FsPathError::WriteJson {
+        source,
+        path: path.into(),
+    })?;
     writer.flush().map_err(|e| FsPathError::write(e, path))
 }
 
@@ -329,7 +370,8 @@ where
     })?;
 
     // fsync() file
-    file.sync_all().map_err(|err| FsPathError::fsync(err, &tmp_path))?;
+    file.sync_all()
+        .map_err(|err| FsPathError::fsync(err, &tmp_path))?;
 
     // Rename file, not move
     rename(&tmp_path, file_path)?;

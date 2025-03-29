@@ -41,7 +41,8 @@ async fn can_run_eth_node() -> eyre::Result<()> {
     let block_number = payload.block().number;
 
     // assert the block has been committed to the blockchain
-    node.assert_new_block(tx_hash, block_hash, block_number).await?;
+    node.assert_new_block(tx_hash, block_hash, block_number)
+        .await?;
 
     Ok(())
 }
@@ -64,11 +65,17 @@ async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
     );
 
     // Node setup
-    let node_config = NodeConfig::test()
-        .with_chain(chain_spec)
-        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http().with_auth_ipc());
+    let node_config = NodeConfig::test().with_chain(chain_spec).with_rpc(
+        RpcServerArgs::default()
+            .with_unused_ports()
+            .with_http()
+            .with_auth_ipc(),
+    );
 
-    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
+    let NodeHandle {
+        node,
+        node_exit_future: _,
+    } = NodeBuilder::new(node_config)
         .testing_node(exec)
         .node(EthereumNode::default())
         .launch()
@@ -89,7 +96,8 @@ async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
     let block_number = payload.block().number;
 
     // assert the block has been committed to the blockchain
-    node.assert_new_block(tx_hash, block_hash, block_number).await?;
+    node.assert_new_block(tx_hash, block_hash, block_number)
+        .await?;
 
     Ok(())
 }
@@ -113,7 +121,10 @@ async fn test_failed_run_eth_node_with_no_auth_engine_api_over_ipc_opts() -> eyr
 
     // Node setup
     let node_config = NodeConfig::test().with_chain(chain_spec);
-    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
+    let NodeHandle {
+        node,
+        node_exit_future: _,
+    } = NodeBuilder::new(node_config)
         .testing_node(exec)
         .node(EthereumNode::default())
         .launch()

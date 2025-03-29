@@ -28,7 +28,11 @@ impl HeadersRequest {
     /// # Arguments
     /// * `start` - The block hash or number to start from
     pub const fn one(start: BlockHashOrNumber) -> Self {
-        Self { direction: HeadersDirection::Rising, limit: 1, start }
+        Self {
+            direction: HeadersDirection::Rising,
+            limit: 1,
+            start,
+        }
     }
 
     /// Creates a request for headers in rising direction (ascending block numbers).
@@ -37,7 +41,11 @@ impl HeadersRequest {
     /// * `start` - The block hash or number to start from
     /// * `limit` - Maximum number of headers to retrieve
     pub const fn rising(start: BlockHashOrNumber, limit: u64) -> Self {
-        Self { direction: HeadersDirection::Rising, limit, start }
+        Self {
+            direction: HeadersDirection::Rising,
+            limit,
+            start,
+        }
     }
 
     /// Creates a request for headers in falling direction (descending block numbers).
@@ -46,7 +54,11 @@ impl HeadersRequest {
     /// * `start` - The block hash or number to start from
     /// * `limit` - Maximum number of headers to retrieve
     pub const fn falling(start: BlockHashOrNumber, limit: u64) -> Self {
-        Self { direction: HeadersDirection::Falling, limit, start }
+        Self {
+            direction: HeadersDirection::Falling,
+            limit,
+            start,
+        }
     }
 }
 

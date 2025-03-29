@@ -28,7 +28,10 @@ impl<Provider> RethApi<Provider> {
 
     /// Create a new instance of the [`RethApi`]
     pub fn new(provider: Provider, task_spawner: Box<dyn TaskSpawner>) -> Self {
-        let inner = Arc::new(RethApiInner { provider, task_spawner });
+        let inner = Arc::new(RethApiInner {
+            provider,
+            task_spawner,
+        });
         Self { inner }
     }
 }
@@ -65,7 +68,7 @@ where
 
     fn try_balance_changes_in_block(&self, block_id: BlockId) -> EthResult<HashMap<Address, U256>> {
         let Some(block_number) = self.provider().block_number_for_id(block_id)? else {
-            return Err(EthApiError::HeaderNotFound(block_id))
+            return Err(EthApiError::HeaderNotFound(block_id));
         };
 
         let state = self.provider().state_by_block_id(block_id)?;
@@ -107,7 +110,9 @@ impl<Provider> std::fmt::Debug for RethApi<Provider> {
 
 impl<Provider> Clone for RethApi<Provider> {
     fn clone(&self) -> Self {
-        Self { inner: Arc::clone(&self.inner) }
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
     }
 }
 

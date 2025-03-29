@@ -198,7 +198,8 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         DB: Database,
         I: InspectorFor<Self, DB>,
     {
-        self.evm_factory().create_evm_with_inspector(db, evm_env, inspector)
+        self.evm_factory()
+            .create_evm_with_inspector(db, evm_env, inspector)
     }
 
     /// Creates a strategy with given EVM and execution context.

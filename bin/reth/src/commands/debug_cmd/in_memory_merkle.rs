@@ -78,7 +78,12 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let secret_key = get_secret_key(&network_secret_path)?;
         let network = self
             .network
-            .network_config(config, provider_factory.chain_spec(), secret_key, default_peers_path)
+            .network_config(
+                config,
+                provider_factory.chain_spec(),
+                secret_key,
+                default_peers_path,
+            )
             .with_task_executor(Box::new(task_executor))
             .build(provider_factory)
             .start_network()
@@ -93,8 +98,11 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         self,
         ctx: CliContext,
     ) -> eyre::Result<()> {
-        let Environment { provider_factory, config, data_dir } =
-            self.env.init::<N>(AccessRights::RW)?;
+        let Environment {
+            provider_factory,
+            config,
+            data_dir,
+        } = self.env.init::<N>(AccessRights::RW)?;
 
         let provider = provider_factory.provider()?;
 
@@ -106,8 +114,11 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let merkle_block_number = merkle_checkpoint.block_number;
 
         // Configure and build network
-        let network_secret_path =
-            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret());
+        let network_secret_path = self
+            .network
+            .p2p_secret_key
+            .clone()
+            .unwrap_or_else(|| data_dir.p2p_secret());
         let network = self
             .build_network(
                 &config,
@@ -128,7 +139,10 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
         let client = fetch_client.clone();
         let header = (move || {
-            get_single_header(client.clone(), BlockHashOrNumber::Number(target_block_number))
+            get_single_header(
+                client.clone(),
+                BlockHashOrNumber::Number(target_block_number),
+            )
         })
         .retry(backoff)
         .notify(|err, _| warn!(target: "reth::cli", "Error requesting header: {err}. Retrying..."))
@@ -159,7 +173,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
         if in_memory_state_root == block.state_root() {
             info!(target: "reth::cli", state_root = ?in_memory_state_root, "Computed in-memory state root matches");
-            return Ok(())
+            return Ok(());
         }
 
         let provider_rw = provider_factory.database_provider_rw()?;
@@ -196,15 +210,17 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let mut in_mem_mismatched = Vec::new();
         let mut incremental_mismatched = Vec::new();
         let mut in_mem_updates_iter = in_memory_updates.account_nodes_ref().iter().peekable();
-        let mut incremental_updates_iter =
-            incremental_trie_updates.account_nodes_ref().iter().peekable();
+        let mut incremental_updates_iter = incremental_trie_updates
+            .account_nodes_ref()
+            .iter()
+            .peekable();
 
         while in_mem_updates_iter.peek().is_some() || incremental_updates_iter.peek().is_some() {
             match (in_mem_updates_iter.next(), incremental_updates_iter.next()) {
                 (Some(in_mem), Some(incr)) => {
                     similar_asserts::assert_eq!(in_mem.0, incr.0, "Nibbles don't match");
-                    if in_mem.1 != incr.1 &&
-                        in_mem.0.len() > self.skip_node_depth.unwrap_or_default()
+                    if in_mem.1 != incr.1
+                        && in_mem.0.len() > self.skip_node_depth.unwrap_or_default()
                     {
                         in_mem_mismatched.push(in_mem);
                         incremental_mismatched.push(incr);

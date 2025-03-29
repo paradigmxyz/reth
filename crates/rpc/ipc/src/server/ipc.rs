@@ -70,7 +70,7 @@ where
 
         while let Some(response) = pending_calls.next().await {
             if let Err(too_large) = batch_response.append(&response) {
-                return Some(too_large.to_result())
+                return Some(too_large.to_result());
             }
         }
 
@@ -81,7 +81,10 @@ where
             Some(MethodResponse::from_batch(batch_resp).to_result())
         }
     } else {
-        Some(batch_response_error(Id::Null, ErrorObject::from(ErrorCode::ParseError)))
+        Some(batch_response_error(
+            Id::Null,
+            ErrorObject::from(ErrorCode::ParseError),
+        ))
     }
 }
 
@@ -116,8 +119,11 @@ where
 #[instrument(name = "notification", fields(method = notif.method.as_ref()), skip(notif, max_log_length), level = "TRACE")]
 fn execute_notification(notif: &Notif<'_>, max_log_length: u32) -> MethodResponse {
     rx_log_from_json(notif, max_log_length);
-    let response =
-        MethodResponse::response(Id::Null, ResponsePayload::success(String::new()), usize::MAX);
+    let response = MethodResponse::response(
+        Id::Null,
+        ResponsePayload::success(String::new()),
+        usize::MAX,
+    );
     tx_log_from_str(response.as_result(), max_log_length);
     response
 }
@@ -151,7 +157,7 @@ where
         return Some(batch_response_error(
             Id::Null,
             reject_too_big_request(max_request_body_size as u32),
-        ))
+        ));
     }
 
     // Single request or notification

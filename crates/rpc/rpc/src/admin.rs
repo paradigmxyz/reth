@@ -27,7 +27,10 @@ pub struct AdminApi<N, ChainSpec> {
 impl<N, ChainSpec> AdminApi<N, ChainSpec> {
     /// Creates a new instance of `AdminApi`.
     pub const fn new(network: N, chain_spec: Arc<ChainSpec>) -> Self {
-        Self { network, chain_spec }
+        Self {
+            network,
+            chain_spec,
+        }
     }
 }
 
@@ -39,7 +42,8 @@ where
 {
     /// Handler for `admin_addPeer`
     fn add_peer(&self, record: NodeRecord) -> RpcResult<bool> {
-        self.network.add_peer_with_udp(record.id, record.tcp_addr(), record.udp_addr());
+        self.network
+            .add_peer_with_udp(record.id, record.tcp_addr(), record.udp_addr());
         Ok(true)
     }
 
@@ -52,7 +56,8 @@ where
     /// Handler for `admin_addTrustedPeer`
     fn add_trusted_peer(&self, record: AnyNode) -> RpcResult<bool> {
         if let Some(record) = record.node_record() {
-            self.network.add_trusted_peer_with_udp(record.id, record.tcp_addr(), record.udp_addr())
+            self.network
+                .add_trusted_peer_with_udp(record.id, record.tcp_addr(), record.udp_addr())
         }
         self.network.add_trusted_peer_id(record.peer_id());
         Ok(true)
@@ -60,7 +65,8 @@ where
 
     /// Handler for `admin_removeTrustedPeer`
     fn remove_trusted_peer(&self, record: AnyNode) -> RpcResult<bool> {
-        self.network.remove_peer(record.peer_id(), PeerKind::Trusted);
+        self.network
+            .remove_peer(record.peer_id(), PeerKind::Trusted);
         Ok(true)
     }
 
@@ -166,7 +172,10 @@ where
             enode: enode.to_string(),
             enr: self.network.local_enr().to_string(),
             ip: enode.address,
-            ports: Ports { discovery: enode.udp_port, listener: enode.tcp_port },
+            ports: Ports {
+                discovery: enode.udp_port,
+                listener: enode.tcp_port,
+            },
             listen_addr: enode.tcp_addr(),
             #[expect(deprecated)]
             protocols: ProtocolInfo {

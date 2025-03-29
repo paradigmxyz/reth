@@ -26,7 +26,10 @@ pub struct RessProtocolMessage {
 impl<'a> arbitrary::Arbitrary<'a> for RessProtocolMessage {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let message: RessMessage = u.arbitrary()?;
-        Ok(Self { message_type: message.message_id(), message })
+        Ok(Self {
+            message_type: message.message_id(),
+            message,
+        })
     }
 }
 
@@ -48,47 +51,74 @@ impl RessProtocolMessage {
 
     /// Headers request.
     pub fn get_headers(request_id: u64, request: GetHeaders) -> Self {
-        RessMessage::GetHeaders(RequestPair { request_id, message: request })
-            .into_protocol_message()
+        RessMessage::GetHeaders(RequestPair {
+            request_id,
+            message: request,
+        })
+        .into_protocol_message()
     }
 
     /// Headers response.
     pub fn headers(request_id: u64, headers: Vec<Header>) -> Self {
-        RessMessage::Headers(RequestPair { request_id, message: headers }).into_protocol_message()
+        RessMessage::Headers(RequestPair {
+            request_id,
+            message: headers,
+        })
+        .into_protocol_message()
     }
 
     /// Block bodies request.
     pub fn get_block_bodies(request_id: u64, block_hashes: Vec<B256>) -> Self {
-        RessMessage::GetBlockBodies(RequestPair { request_id, message: block_hashes })
-            .into_protocol_message()
+        RessMessage::GetBlockBodies(RequestPair {
+            request_id,
+            message: block_hashes,
+        })
+        .into_protocol_message()
     }
 
     /// Block bodies response.
     pub fn block_bodies(request_id: u64, bodies: Vec<BlockBody>) -> Self {
-        RessMessage::BlockBodies(RequestPair { request_id, message: bodies })
-            .into_protocol_message()
+        RessMessage::BlockBodies(RequestPair {
+            request_id,
+            message: bodies,
+        })
+        .into_protocol_message()
     }
 
     /// Bytecode request.
     pub fn get_bytecode(request_id: u64, code_hash: B256) -> Self {
-        RessMessage::GetBytecode(RequestPair { request_id, message: code_hash })
-            .into_protocol_message()
+        RessMessage::GetBytecode(RequestPair {
+            request_id,
+            message: code_hash,
+        })
+        .into_protocol_message()
     }
 
     /// Bytecode response.
     pub fn bytecode(request_id: u64, bytecode: Bytes) -> Self {
-        RessMessage::Bytecode(RequestPair { request_id, message: bytecode }).into_protocol_message()
+        RessMessage::Bytecode(RequestPair {
+            request_id,
+            message: bytecode,
+        })
+        .into_protocol_message()
     }
 
     /// Execution witness request.
     pub fn get_witness(request_id: u64, block_hash: BlockHash) -> Self {
-        RessMessage::GetWitness(RequestPair { request_id, message: block_hash })
-            .into_protocol_message()
+        RessMessage::GetWitness(RequestPair {
+            request_id,
+            message: block_hash,
+        })
+        .into_protocol_message()
     }
 
     /// Execution witness response.
     pub fn witness(request_id: u64, witness: Vec<Bytes>) -> Self {
-        RessMessage::Witness(RequestPair { request_id, message: witness }).into_protocol_message()
+        RessMessage::Witness(RequestPair {
+            request_id,
+            message: witness,
+        })
+        .into_protocol_message()
     }
 
     /// Return RLP encoded message.
@@ -112,7 +142,10 @@ impl RessProtocolMessage {
             RessMessageID::GetWitness => RessMessage::GetWitness(RequestPair::decode(buf)?),
             RessMessageID::Witness => RessMessage::Witness(RequestPair::decode(buf)?),
         };
-        Ok(Self { message_type, message })
+        Ok(Self {
+            message_type,
+            message,
+        })
     }
 }
 
@@ -233,7 +266,10 @@ impl RessMessage {
     /// Convert message into [`RessProtocolMessage`].
     pub fn into_protocol_message(self) -> RessProtocolMessage {
         let message_type = self.message_id();
-        RessProtocolMessage { message_type, message: self }
+        RessProtocolMessage {
+            message_type,
+            message: self,
+        }
     }
 }
 

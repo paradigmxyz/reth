@@ -48,10 +48,14 @@ impl Case for BlockchainTestCase {
     fn load(path: &Path) -> Result<Self, Error> {
         Ok(Self {
             tests: {
-                let s = fs::read_to_string(path)
-                    .map_err(|error| Error::Io { path: path.into(), error })?;
-                serde_json::from_str(&s)
-                    .map_err(|error| Error::CouldNotDeserialize { path: path.into(), error })?
+                let s = fs::read_to_string(path).map_err(|error| Error::Io {
+                    path: path.into(),
+                    error,
+                })?;
+                serde_json::from_str(&s).map_err(|error| Error::CouldNotDeserialize {
+                    path: path.into(),
+                    error,
+                })?
             },
             skip: should_skip(path),
         })
@@ -64,7 +68,7 @@ impl Case for BlockchainTestCase {
     fn run(&self) -> Result<(), Error> {
         // If the test is marked for skipping, return a Skipped error immediately.
         if self.skip {
-            return Err(Error::Skipped)
+            return Err(Error::Skipped);
         }
 
         // Iterate through test cases, filtering by the network type to exclude specific forks.
@@ -73,13 +77,13 @@ impl Case for BlockchainTestCase {
             .filter(|case| {
                 !matches!(
                     case.network,
-                    ForkSpec::ByzantiumToConstantinopleAt5 |
-                        ForkSpec::Constantinople |
-                        ForkSpec::ConstantinopleFix |
-                        ForkSpec::MergeEOF |
-                        ForkSpec::MergeMeterInitCode |
-                        ForkSpec::MergePush0 |
-                        ForkSpec::Unknown
+                    ForkSpec::ByzantiumToConstantinopleAt5
+                        | ForkSpec::Constantinople
+                        | ForkSpec::ConstantinopleFix
+                        | ForkSpec::MergeEOF
+                        | ForkSpec::MergeMeterInitCode
+                        | ForkSpec::MergePush0
+                        | ForkSpec::Unknown
                 )
             })
             .par_bridge()
@@ -104,8 +108,9 @@ impl Case for BlockchainTestCase {
                 // Initialize receipts static file with genesis
                 {
                     let static_file_provider = provider.static_file_provider();
-                    let mut receipts_writer =
-                        static_file_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
+                    let mut receipts_writer = static_file_provider
+                        .latest_writer(StaticFileSegment::Receipts)
+                        .unwrap();
                     receipts_writer.increment_block(0).unwrap();
                     receipts_writer.commit_without_sync_all().unwrap();
                 }
@@ -132,7 +137,10 @@ impl Case for BlockchainTestCase {
                 )
                 .execute(
                     &provider,
-                    ExecInput { target: last_block.as_ref().map(|b| b.number), checkpoint: None },
+                    ExecInput {
+                        target: last_block.as_ref().map(|b| b.number),
+                        checkpoint: None,
+                    },
                 );
 
                 // Validate the post-state for the test case.

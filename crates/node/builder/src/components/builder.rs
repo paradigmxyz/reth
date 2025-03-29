@@ -341,8 +341,9 @@ where
         let (evm_config, executor) = evm_builder.build_evm(context).await?;
         let pool = pool_builder.build_pool(context).await?;
         let network = network_builder.build_network(context, pool.clone()).await?;
-        let payload_builder_handle =
-            payload_builder.spawn_payload_builder_service(context, pool.clone()).await?;
+        let payload_builder_handle = payload_builder
+            .spawn_payload_builder_service(context, pool.clone())
+            .await?;
         let consensus = consensus_builder.build_consensus(context).await?;
 
         Ok(Components {

@@ -10,7 +10,9 @@ pub(crate) fn generate_flag_struct(
     fields: &FieldList,
     is_zstd: bool,
 ) -> TokenStream2 {
-    let is_enum = fields.iter().any(|field| matches!(field, FieldTypes::EnumVariant(_)));
+    let is_enum = fields
+        .iter()
+        .any(|field| matches!(field, FieldTypes::EnumVariant(_)));
 
     let flags_ident = format_ident!("{ident}Flags");
     let mod_flags_ident = format_ident!("{ident}_flags");
@@ -30,7 +32,7 @@ pub(crate) fn generate_flag_struct(
                 .iter()
                 .filter_map(|f| {
                     if let FieldTypes::StructField(f) = f {
-                        return Some(f)
+                        return Some(f);
                     }
                     None
                 })
@@ -41,7 +43,7 @@ pub(crate) fn generate_flag_struct(
     };
 
     if total_bits == 0 {
-        return placeholder_flag_struct(ident, &flags_ident)
+        return placeholder_flag_struct(ident, &flags_ident);
     }
 
     let (total_bytes, unused_bits) = pad_flag_struct(total_bits, &mut field_flags);
@@ -127,8 +129,13 @@ fn build_struct_field_flags(
 
     // Find out the adequate bit size for the length of each field, if applicable.
     for field in fields {
-        let StructFieldDescriptor { name, ftype, is_compact, use_alt_impl: _, is_reference: _ } =
-            field;
+        let StructFieldDescriptor {
+            name,
+            ftype,
+            is_compact,
+            use_alt_impl: _,
+            is_reference: _,
+        } = field;
         // This happens when dealing with a wrapper struct eg. Struct(pub U256).
         let name = if name.is_empty() { "placeholder" } else { name };
 

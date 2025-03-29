@@ -46,7 +46,11 @@ where
         let tx = tx.convert::<TxEnvelope>();
 
         let TransactionInfo {
-            block_hash, block_number, index: transaction_index, base_fee, ..
+            block_hash,
+            block_number,
+            index: transaction_index,
+            base_fee,
+            ..
         } = tx_info;
 
         let effective_gas_price = base_fee
@@ -69,7 +73,7 @@ where
         request: TransactionRequest,
     ) -> Result<TransactionSigned, Self::Error> {
         let Ok(tx) = request.build_typed_tx() else {
-            return Err(EthApiError::TransactionConversionError)
+            return Err(EthApiError::TransactionConversionError);
         };
 
         // Create an empty signature for the transaction.

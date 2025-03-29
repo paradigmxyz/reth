@@ -163,7 +163,10 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
             ($response:ident, $item:ident, $request_id:ident) => {
                 match $response {
                     Ok(res) => {
-                        let request = RequestPair { request_id: $request_id, message: $item(res) };
+                        let request = RequestPair {
+                            request_id: $request_id,
+                            message: $item(res),
+                        };
                         Ok(EthMessage::$item(request))
                     }
                     Err(err) => Err(err),

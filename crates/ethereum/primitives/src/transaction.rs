@@ -57,7 +57,10 @@ macro_rules! impl_from_signed {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
+#[cfg_attr(
+    any(test, feature = "reth-codec"),
+    reth_codecs::add_arbitrary_tests(compact)
+)]
 pub enum Transaction {
     /// Legacy transaction (type `0x0`).
     ///
@@ -329,7 +332,10 @@ impl RlpEcdsaEncodableTx for Transaction {
 /// Signed Ethereum transaction.
 #[derive(Debug, Clone, Eq, derive_more::AsRef, derive_more::Deref)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
+#[cfg_attr(
+    any(test, feature = "reth-codec"),
+    reth_codecs::add_arbitrary_tests(rlp)
+)]
 #[cfg_attr(feature = "test-utils", derive(derive_more::DerefMut))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 pub struct TransactionSigned {
@@ -347,7 +353,10 @@ pub struct TransactionSigned {
 
 impl Default for TransactionSigned {
     fn default() -> Self {
-        Self::new_unhashed(Transaction::Legacy(Default::default()), Signature::test_signature())
+        Self::new_unhashed(
+            Transaction::Legacy(Default::default()),
+            Signature::test_signature(),
+        )
     }
 }
 
@@ -371,16 +380,20 @@ impl Hash for TransactionSigned {
 
 impl PartialEq for TransactionSigned {
     fn eq(&self, other: &Self) -> bool {
-        self.signature == other.signature &&
-            self.transaction == other.transaction &&
-            self.tx_hash() == other.tx_hash()
+        self.signature == other.signature
+            && self.transaction == other.transaction
+            && self.tx_hash() == other.tx_hash()
     }
 }
 
 impl TransactionSigned {
     /// Creates a new signed transaction from the given transaction, signature and hash.
     pub fn new(transaction: Transaction, signature: Signature, hash: B256) -> Self {
-        Self { hash: hash.into(), signature, transaction }
+        Self {
+            hash: hash.into(),
+            signature,
+            transaction,
+        }
     }
 
     /// Consumes the type and returns the transaction.
@@ -405,7 +418,11 @@ impl TransactionSigned {
     ///
     /// Note: this only calculates the hash on the first [`TransactionSigned::hash`] call.
     pub fn new_unhashed(transaction: Transaction, signature: Signature) -> Self {
-        Self { hash: Default::default(), signature, transaction }
+        Self {
+            hash: Default::default(),
+            signature,
+            transaction,
+        }
     }
 
     /// Splits the `TransactionSigned` into its transaction and signature.
@@ -424,7 +441,11 @@ impl TransactionSigned {
         let hash = *self.tx_hash();
         Ok(match self {
             // If the transaction is an EIP-4844 transaction...
-            Self { transaction: Transaction::Eip4844(tx), signature, .. } => {
+            Self {
+                transaction: Transaction::Eip4844(tx),
+                signature,
+                ..
+            } => {
                 // Construct a pooled eip488 tx with the provided sidecar.
                 PooledTransaction::Eip4844(Signed::new_unchecked(
                     TxEip4844WithSidecar { tx, sidecar },
@@ -535,7 +556,14 @@ impl alloy_consensus::Transaction for TransactionSigned {
     }
 }
 
-impl_from_signed!(TxLegacy, TxEip2930, TxEip1559, TxEip7702, TxEip4844, TypedTransaction);
+impl_from_signed!(
+    TxLegacy,
+    TxEip2930,
+    TxEip1559,
+    TxEip7702,
+    TxEip4844,
+    TypedTransaction
+);
 
 impl From<Signed<Transaction>> for TransactionSigned {
     fn from(value: Signed<Transaction>) -> Self {
@@ -628,13 +656,21 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
         )
         .unwrap();
 
-        Ok(Self { transaction, signature, hash: Default::default() })
+        Ok(Self {
+            transaction,
+            signature,
+            hash: Default::default(),
+        })
     }
 }
 
 impl InMemorySize for TransactionSigned {
     fn size(&self) -> usize {
-        let Self { hash: _, signature, transaction } = self;
+        let Self {
+            hash: _,
+            signature,
+            transaction,
+        } = self;
         self.tx_hash().size() + signature.size() + transaction.size()
     }
 }
@@ -659,7 +695,10 @@ impl Encodable2718 for TransactionSigned {
 
 impl Decodable2718 for TransactionSigned {
     fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
-        match ty.try_into().map_err(|_| Eip2718Error::UnexpectedType(ty))? {
+        match ty
+            .try_into()
+            .map_err(|_| Eip2718Error::UnexpectedType(ty))?
+        {
             TxType::Legacy => Err(Eip2718Error::UnexpectedType(0)),
             TxType::Eip2930 => {
                 let (tx, signature) = TxEip2930::rlp_decode_with_signature(buf)?;
@@ -698,7 +737,11 @@ impl Decodable2718 for TransactionSigned {
 
     fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
         let (tx, signature) = TxLegacy::rlp_decode_with_signature(buf)?;
-        Ok(Self { transaction: Transaction::Legacy(tx), signature, hash: Default::default() })
+        Ok(Self {
+            transaction: Transaction::Legacy(tx),
+            signature,
+            hash: Default::default(),
+        })
     }
 }
 
@@ -796,7 +839,14 @@ impl reth_codecs::Compact for TransactionSigned {
             Transaction::from_compact(buf, transaction_type)
         };
 
-        (Self { signature, transaction, hash: Default::default() }, buf)
+        (
+            Self {
+                signature,
+                transaction,
+                hash: Default::default(),
+            },
+            buf,
+        )
     }
 }
 
@@ -913,22 +963,31 @@ impl TryFrom<TransactionSigned> for PooledTransaction {
     fn try_from(tx: TransactionSigned) -> Result<Self, Self::Error> {
         let hash = *tx.tx_hash();
         match tx {
-            TransactionSigned { transaction: Transaction::Legacy(tx), signature, .. } => {
-                Ok(Self::Legacy(Signed::new_unchecked(tx, signature, hash)))
-            }
-            TransactionSigned { transaction: Transaction::Eip2930(tx), signature, .. } => {
-                Ok(Self::Eip2930(Signed::new_unchecked(tx, signature, hash)))
-            }
-            TransactionSigned { transaction: Transaction::Eip1559(tx), signature, .. } => {
-                Ok(Self::Eip1559(Signed::new_unchecked(tx, signature, hash)))
-            }
-            TransactionSigned { transaction: Transaction::Eip7702(tx), signature, .. } => {
-                Ok(Self::Eip7702(Signed::new_unchecked(tx, signature, hash)))
-            }
+            TransactionSigned {
+                transaction: Transaction::Legacy(tx),
+                signature,
+                ..
+            } => Ok(Self::Legacy(Signed::new_unchecked(tx, signature, hash))),
+            TransactionSigned {
+                transaction: Transaction::Eip2930(tx),
+                signature,
+                ..
+            } => Ok(Self::Eip2930(Signed::new_unchecked(tx, signature, hash))),
+            TransactionSigned {
+                transaction: Transaction::Eip1559(tx),
+                signature,
+                ..
+            } => Ok(Self::Eip1559(Signed::new_unchecked(tx, signature, hash))),
+            TransactionSigned {
+                transaction: Transaction::Eip7702(tx),
+                signature,
+                ..
+            } => Ok(Self::Eip7702(Signed::new_unchecked(tx, signature, hash))),
             // Not supported because missing blob sidecar
-            TransactionSigned { transaction: Transaction::Eip4844(_), .. } => {
-                Err(TransactionConversionError::UnsupportedForP2P)
-            }
+            TransactionSigned {
+                transaction: Transaction::Eip4844(_),
+                ..
+            } => Err(TransactionConversionError::UnsupportedForP2P),
         }
     }
 }
@@ -1052,7 +1111,9 @@ pub(super) mod serde_bincode_compat {
             let mut bytes = [0u8; 1024];
             generators::rng().fill(bytes.as_mut_slice());
             let tx = Transaction::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
-            let data = Data { transaction: (&tx).into() };
+            let data = Data {
+                transaction: (&tx).into(),
+            };
 
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data<'_> = bincode::deserialize(&encoded).unwrap();
@@ -1070,7 +1131,9 @@ pub(super) mod serde_bincode_compat {
             generators::rng().fill(bytes.as_mut_slice());
             let tx =
                 TransactionSigned::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
-            let data = Data { transaction: (&tx).into() };
+            let data = Data {
+                transaction: (&tx).into(),
+            };
 
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data<'_> = bincode::deserialize(&encoded).unwrap();
@@ -1228,7 +1291,10 @@ mod tests {
 
         let tx = decoded.transaction;
 
-        assert_eq!(tx.to(), Some(address!("0x11E9CA82A3a762b4B5bd264d4173a242e7a77064")));
+        assert_eq!(
+            tx.to(),
+            Some(address!("0x11E9CA82A3a762b4B5bd264d4173a242e7a77064"))
+        );
 
         assert_eq!(
             tx.blob_versioned_hashes(),
@@ -1264,7 +1330,9 @@ mod tests {
             nonce: 2,
             gas_price: 1000000000,
             gas_limit: 100000,
-            to: Address::from_str("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap().into(),
+            to: Address::from_str("d3e8763675e4c425df46cc3b5c0f6cbdac396046")
+                .unwrap()
+                .into(),
             value: U256::from(1000000000000000u64),
             input: Bytes::default(),
         });
@@ -1434,7 +1502,10 @@ mod tests {
         let tx = TransactionSigned::fallback_decode(&mut data.as_slice()).unwrap();
         assert_eq!(tx.ty(), LEGACY_TX_TYPE_ID);
         let sender = tx.recover_signer().unwrap();
-        assert_eq!(sender, address!("0xa12e1462d0ceD572f396F58B6E2D03894cD7C8a4"));
+        assert_eq!(
+            sender,
+            address!("0xa12e1462d0ceD572f396F58B6E2D03894cD7C8a4")
+        );
     }
 
     // <https://github.com/alloy-rs/alloy/issues/141>
@@ -1444,8 +1515,14 @@ mod tests {
         let data = hex!("02f86f0102843b9aca0085029e7822d68298f094d9e1459a7a482635700cbc20bbaf52d495ab9c9680841b55ba3ac080a0c199674fcb29f353693dd779c017823b954b3c69dffa3cd6b2a6ff7888798039a028ca912de909e7e6cdef9cdcaf24c54dd8c1032946dfa1d85c206b32a9064fe8");
         let tx = TransactionSigned::decode_2718(&mut data.as_slice()).unwrap();
         let sender = tx.recover_signer().unwrap();
-        assert_eq!(sender, address!("0x001e2b7dE757bA469a57bF6b23d982458a07eFcE"));
-        assert_eq!(tx.to(), Some(address!("0xD9e1459A7A482635700cBc20BBAF52D495Ab9C96")));
+        assert_eq!(
+            sender,
+            address!("0x001e2b7dE757bA469a57bF6b23d982458a07eFcE")
+        );
+        assert_eq!(
+            tx.to(),
+            Some(address!("0xD9e1459A7A482635700cBc20BBAF52D495Ab9C96"))
+        );
         assert_eq!(tx.input().as_ref(), hex!("1b55ba3a"));
         let encoded = tx.encoded_2718();
         assert_eq!(encoded.as_ref(), data.to_vec());
@@ -1461,7 +1538,10 @@ mod tests {
         assert!(sender.is_err());
         let sender = tx.recover_signer_unchecked().unwrap();
 
-        assert_eq!(sender, address!("0x7e9e359edf0dbacf96a9952fa63092d919b0842b"));
+        assert_eq!(
+            sender,
+            address!("0x7e9e359edf0dbacf96a9952fa63092d919b0842b")
+        );
     }
 
     #[test]
@@ -1494,7 +1574,9 @@ mod tests {
                 nonce: 2,
                 gas_price: 1000000000,
                 gas_limit: 100000,
-                to: Address::from_str("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap().into(),
+                to: Address::from_str("d3e8763675e4c425df46cc3b5c0f6cbdac396046")
+                    .unwrap()
+                    .into(),
                 value: U256::from(1000000000000000u64),
                 input: Bytes::from(input),
             });
@@ -1514,8 +1596,9 @@ mod tests {
 
     #[test]
     fn create_txs_disallowed_for_eip4844() {
-        let data =
-            [3, 208, 128, 128, 123, 128, 120, 128, 129, 129, 128, 192, 129, 129, 192, 128, 128, 9];
+        let data = [
+            3, 208, 128, 128, 123, 128, 120, 128, 129, 129, 128, 192, 129, 129, 192, 128, 128, 9,
+        ];
         let res = TransactionSigned::decode_2718(&mut &data[..]);
 
         assert!(res.is_err());

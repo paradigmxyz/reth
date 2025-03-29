@@ -58,7 +58,9 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> ImportReceiptsOpCommand<C> {
             "Chunking receipts import"
         );
 
-        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
+        let Environment {
+            provider_factory, ..
+        } = self.env.init::<N>(AccessRights::RW)?;
 
         import_receipts_from_file(
             provider_factory,
@@ -93,7 +95,9 @@ where
     F: FnMut(u64, &mut Vec<Vec<OpReceipt>>) -> usize,
 {
     for stage in StageId::ALL {
-        let checkpoint = provider_factory.database_provider_ro()?.get_stage_checkpoint(stage)?;
+        let checkpoint = provider_factory
+            .database_provider_ro()?
+            .get_stage_checkpoint(stage)?;
         trace!(target: "reth::cli",
             ?stage,
             ?checkpoint,
@@ -160,12 +164,13 @@ where
         .get_highest_static_file_block(StaticFileSegment::Transactions)
         .expect("transaction static files must exist before importing receipts");
 
-    while let Some(file_client) =
-        reader.next_receipts_chunk::<ReceiptFileClient<OpGethReceiptFileCodec<OpReceipt>>>().await?
+    while let Some(file_client) = reader
+        .next_receipts_chunk::<ReceiptFileClient<OpGethReceiptFileCodec<OpReceipt>>>()
+        .await?
     {
         if highest_block_receipts == highest_block_transactions {
             warn!(target: "reth::cli",  highest_block_receipts, highest_block_transactions, "Ignoring all other blocks in the file since we have reached the desired height");
-            break
+            break;
         }
 
         // create a new file client from chunk read from file
@@ -218,8 +223,12 @@ where
         // We're reusing receipt writing code internal to
         // `UnifiedStorageWriter::append_receipts_from_blocks`, so we just use a default empty
         // `BundleState`.
-        let execution_outcome =
-            ExecutionOutcome::new(Default::default(), receipts, first_block, Default::default());
+        let execution_outcome = ExecutionOutcome::new(
+            Default::default(),
+            receipts,
+            first_block,
+            Default::default(),
+        );
 
         // finally, write the receipts
         provider.write_state(
@@ -244,12 +253,17 @@ where
     }
 
     // Required or any access-write provider factory will attempt to unwind to 0.
-    provider
-        .save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(highest_block_receipts))?;
+    provider.save_stage_checkpoint(
+        StageId::Execution,
+        StageCheckpoint::new(highest_block_receipts),
+    )?;
 
     UnifiedStorageWriter::commit(provider)?;
 
-    Ok(ImportReceiptsResult { total_decoded_receipts, total_filtered_out_dup_txns })
+    Ok(ImportReceiptsResult {
+        total_decoded_receipts,
+        total_filtered_out_dup_txns,
+    })
 }
 
 /// Result of importing receipts in chunks.
@@ -295,8 +309,9 @@ mod test {
         f.flush().await.unwrap();
         f.seek(SeekFrom::Start(0)).await.unwrap();
 
-        let reader =
-            ChunkedFileReader::from_file(f, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE).await.unwrap();
+        let reader = ChunkedFileReader::from_file(f, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE)
+            .await
+            .unwrap();
 
         let db = TestStageDB::default();
         init_genesis(&db.factory).unwrap();
@@ -304,8 +319,12 @@ mod test {
         // todo: where does import command init receipts ? probably somewhere in pipeline
         let provider_factory =
             create_test_provider_factory_with_node_types::<OpNode>(OP_MAINNET.clone());
-        let ImportReceiptsResult { total_decoded_receipts, total_filtered_out_dup_txns } =
-            import_receipts_from_reader(&provider_factory, reader, |_, _| 0).await.unwrap();
+        let ImportReceiptsResult {
+            total_decoded_receipts,
+            total_filtered_out_dup_txns,
+        } = import_receipts_from_reader(&provider_factory, reader, |_, _| 0)
+            .await
+            .unwrap();
 
         assert_eq!(total_decoded_receipts, 3);
         assert_eq!(total_filtered_out_dup_txns, 0);

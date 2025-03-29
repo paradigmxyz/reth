@@ -73,7 +73,10 @@ where
     Provider: BlockReader,
 {
     fn clone(&self) -> Self {
-        Self { inner: self.inner.clone(), tx_resp_builder: EthTxBuilder }
+        Self {
+            inner: self.inner.clone(),
+            tx_resp_builder: EthTxBuilder,
+        }
     }
 }
 
@@ -147,7 +150,10 @@ where
             proof_permits,
         );
 
-        Self { inner: Arc::new(inner), tx_resp_builder: EthTxBuilder }
+        Self {
+            inner: Arc::new(inner),
+            tx_resp_builder: EthTxBuilder,
+        }
     }
 }
 
@@ -509,7 +515,11 @@ mod tests {
         mut oldest_block: Option<B256>,
         block_count: u64,
         mock_provider: MockEthProvider,
-    ) -> (EthApi<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig>, Vec<u128>, Vec<f64>) {
+    ) -> (
+        EthApi<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig>,
+        Vec<u128>,
+        Vec<f64>,
+    ) {
         let mut rng = generators::rng();
 
         // Build mock data
@@ -568,7 +578,10 @@ mod tests {
                 hash,
                 Block {
                     header: header.clone(),
-                    body: BlockBody { transactions, ..Default::default() },
+                    body: BlockBody {
+                        transactions,
+                        ..Default::default()
+                    },
                 },
             );
             mock_provider.add_header(hash, header);
@@ -613,8 +626,12 @@ mod tests {
         let newest_block = 1337;
         let oldest_block = None;
 
-        let (eth_api, _, _) =
-            prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
+        let (eth_api, _, _) = prepare_eth_api(
+            newest_block,
+            oldest_block,
+            block_count,
+            MockEthProvider::default(),
+        );
 
         let response = <EthApi<_, _, _, _> as EthApiServer<_, _, _, _>>::fee_history(
             &eth_api,
@@ -636,8 +653,12 @@ mod tests {
         let newest_block = 1337;
         let oldest_block = None;
 
-        let (eth_api, _, _) =
-            prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
+        let (eth_api, _, _) = prepare_eth_api(
+            newest_block,
+            oldest_block,
+            block_count,
+            MockEthProvider::default(),
+        );
 
         let response = <EthApi<_, _, _, _> as EthApiServer<_, _, _, _>>::fee_history(
             &eth_api,
@@ -659,8 +680,12 @@ mod tests {
         let newest_block = 1337;
         let oldest_block = None;
 
-        let (eth_api, _, _) =
-            prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
+        let (eth_api, _, _) = prepare_eth_api(
+            newest_block,
+            oldest_block,
+            block_count,
+            MockEthProvider::default(),
+        );
 
         let response = <EthApi<_, _, _, _> as EthApiServer<_, _, _, _>>::fee_history(
             &eth_api,
@@ -684,11 +709,17 @@ mod tests {
         let newest_block = 1337;
         let oldest_block = None;
 
-        let (eth_api, base_fees_per_gas, gas_used_ratios) =
-            prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
+        let (eth_api, base_fees_per_gas, gas_used_ratios) = prepare_eth_api(
+            newest_block,
+            oldest_block,
+            block_count,
+            MockEthProvider::default(),
+        );
 
-        let fee_history =
-            eth_api.fee_history(U64::from(1), newest_block.into(), None).await.unwrap();
+        let fee_history = eth_api
+            .fee_history(U64::from(1), newest_block.into(), None)
+            .await
+            .unwrap();
         assert_eq!(
             fee_history.base_fee_per_gas,
             &base_fees_per_gas[base_fees_per_gas.len() - 2..],
@@ -704,7 +735,10 @@ mod tests {
             &gas_used_ratios[gas_used_ratios.len() - 1..],
             "one: gas used ratio is incorrect"
         );
-        assert_eq!(fee_history.oldest_block, newest_block, "one: oldest block is incorrect");
+        assert_eq!(
+            fee_history.oldest_block, newest_block,
+            "one: oldest block is incorrect"
+        );
         assert!(
             fee_history.reward.is_none(),
             "one: no percentiles were requested, so there should be no rewards result"
@@ -718,11 +752,17 @@ mod tests {
         let newest_block = 1337;
         let oldest_block = None;
 
-        let (eth_api, base_fees_per_gas, gas_used_ratios) =
-            prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
+        let (eth_api, base_fees_per_gas, gas_used_ratios) = prepare_eth_api(
+            newest_block,
+            oldest_block,
+            block_count,
+            MockEthProvider::default(),
+        );
 
-        let fee_history =
-            eth_api.fee_history(U64::from(block_count), newest_block.into(), None).await.unwrap();
+        let fee_history = eth_api
+            .fee_history(U64::from(block_count), newest_block.into(), None)
+            .await
+            .unwrap();
 
         assert_eq!(
             &fee_history.base_fee_per_gas, &base_fees_per_gas,

@@ -30,7 +30,12 @@ pub struct GasPriceOracleArgs {
 impl GasPriceOracleArgs {
     /// Returns a [`GasPriceOracleConfig`] from the arguments.
     pub fn gas_price_oracle_config(&self) -> GasPriceOracleConfig {
-        let Self { blocks, ignore_price, max_price, percentile } = self;
+        let Self {
+            blocks,
+            ignore_price,
+            max_price,
+            percentile,
+        } = self;
         GasPriceOracleConfig {
             max_price: Some(U256::from(*max_price)),
             ignore_price: Some(U256::from(*ignore_price)),

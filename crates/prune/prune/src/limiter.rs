@@ -42,7 +42,10 @@ struct PruneTimeLimit {
 
 impl PruneTimeLimit {
     fn new(limit: Duration) -> Self {
-        Self { limit, start: Instant::now() }
+        Self {
+            limit,
+            start: Instant::now(),
+        }
     }
 
     fn is_limit_reached(&self) -> bool {
@@ -79,7 +82,9 @@ impl PruneLimiter {
     /// Returns `true` if the limit on the number of deleted entries (rows in the database) is
     /// reached.
     pub fn is_deleted_entries_limit_reached(&self) -> bool {
-        self.deleted_entries_limit.as_ref().is_some_and(|limit| limit.is_limit_reached())
+        self.deleted_entries_limit
+            .as_ref()
+            .is_some_and(|limit| limit.is_limit_reached())
     }
 
     /// Increments the number of deleted entries by the given number.
@@ -96,7 +101,9 @@ impl PruneLimiter {
 
     /// Returns the number of deleted entries left before the limit is reached.
     pub fn deleted_entries_limit_left(&self) -> Option<usize> {
-        self.deleted_entries_limit.as_ref().map(|limit| limit.limit - limit.deleted)
+        self.deleted_entries_limit
+            .as_ref()
+            .map(|limit| limit.limit - limit.deleted)
     }
 
     /// Returns the limit on the number of deleted entries (rows in the database).
@@ -113,7 +120,9 @@ impl PruneLimiter {
 
     /// Returns `true` if time limit is reached.
     pub fn is_time_limit_reached(&self) -> bool {
-        self.time_limit.as_ref().is_some_and(|limit| limit.is_limit_reached())
+        self.time_limit
+            .as_ref()
+            .is_some_and(|limit| limit.is_limit_reached())
     }
 
     /// Returns `true` if any limit is reached.
@@ -296,7 +305,10 @@ mod tests {
         // Increment when no limit is set
         let mut limiter = PruneLimiter::default();
         limiter.increment_deleted_entries_count_by(5);
-        assert_eq!(limiter.deleted_entries_limit.as_ref().map(|l| l.deleted), None); // Still None
+        assert_eq!(
+            limiter.deleted_entries_limit.as_ref().map(|l| l.deleted),
+            None
+        ); // Still None
 
         // Increment when limit is set
         let mut limiter = PruneLimiter::default().set_deleted_entries_limit(10);
@@ -359,17 +371,26 @@ mod tests {
         let mut limiter = PruneLimiter::default();
 
         // Time limit should not be reached initially
-        assert!(!limiter.is_time_limit_reached(), "Time limit should not be reached yet");
+        assert!(
+            !limiter.is_time_limit_reached(),
+            "Time limit should not be reached yet"
+        );
 
         limiter = limiter.set_time_limit(Duration::new(0, 10_000_000)); // 10 milliseconds
 
         // Sleep for 5 milliseconds (less than the time limit)
         sleep(Duration::new(0, 5_000_000)); // 5 milliseconds
-        assert!(!limiter.is_time_limit_reached(), "Time limit should not be reached yet");
+        assert!(
+            !limiter.is_time_limit_reached(),
+            "Time limit should not be reached yet"
+        );
 
         // Sleep for an additional 10 milliseconds (totaling 15 milliseconds)
         sleep(Duration::new(0, 10_000_000)); // 10 milliseconds
-        assert!(limiter.is_time_limit_reached(), "Time limit should be reached now");
+        assert!(
+            limiter.is_time_limit_reached(),
+            "Time limit should be reached now"
+        );
     }
 
     #[test]
@@ -378,7 +399,10 @@ mod tests {
         let mut limiter = PruneLimiter::default();
 
         // Test when no limits are set
-        assert!(!limiter.is_limit_reached(), "Limit should not be reached with no limits set");
+        assert!(
+            !limiter.is_limit_reached(),
+            "Limit should not be reached with no limits set"
+        );
 
         // Set a deleted entries limit
         limiter = limiter.set_deleted_entries_limit(5);
@@ -409,6 +433,9 @@ mod tests {
 
         // Sleep for another 10 milliseconds (totaling 15 milliseconds)
         sleep(Duration::new(0, 10_000_000)); // 10 milliseconds
-        assert!(limiter.is_limit_reached(), "Limit should be reached when time limit is reached");
+        assert!(
+            limiter.is_limit_reached(),
+            "Limit should be reached when time limit is reached"
+        );
     }
 }

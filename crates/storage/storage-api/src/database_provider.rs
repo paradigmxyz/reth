@@ -61,7 +61,10 @@ pub trait DBProvider: Send + Sync + Sized + 'static {
         &self,
         range: impl RangeBounds<T::Key>,
     ) -> Result<Vec<KeyValue<T>>, DatabaseError> {
-        self.tx_ref().cursor_read::<T>()?.walk_range(range)?.collect::<Result<Vec<_>, _>>()
+        self.tx_ref()
+            .cursor_read::<T>()?
+            .walk_range(range)?
+            .collect::<Result<Vec<_>, _>>()
     }
 
     /// Iterates over read only values in the given table and collects them into a vector.

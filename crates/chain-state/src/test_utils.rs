@@ -149,7 +149,11 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
             base_fee_per_gas: Some(INITIAL_BASE_FEE),
             transactions_root: calculate_transaction_root(
-                &transactions.clone().into_iter().map(|tx| tx.into_inner()).collect::<Vec<_>>(),
+                &transactions
+                    .clone()
+                    .into_iter()
+                    .map(|tx| tx.into_inner())
+                    .collect::<Vec<_>>(),
             ),
             receipts_root: calculate_receipt_root(&receipts),
             beneficiary: Address::random(),
@@ -163,8 +167,10 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
                 .into_trie_account(EMPTY_ROOT_HASH),
             )])),
             // use the number as the timestamp so it is monotonically increasing
-            timestamp: number +
-                EthereumHardfork::Cancun.activation_timestamp(self.chain_spec.chain).unwrap(),
+            timestamp: number
+                + EthereumHardfork::Cancun
+                    .activation_timestamp(self.chain_spec.chain)
+                    .unwrap(),
             withdrawals_root: Some(calculate_withdrawals_root(&[])),
             blob_gas_used: Some(0),
             excess_blob_gas: Some(0),
@@ -322,14 +328,22 @@ impl TestCanonStateSubscriptions {
     /// [`TestCanonStateSubscriptions::subscribe_to_canonical_state`]
     pub fn add_next_commit(&self, new: Arc<Chain>) {
         let event = CanonStateNotification::Commit { new };
-        self.canon_notif_tx.lock().as_mut().unwrap().retain(|tx| tx.send(event.clone()).is_ok())
+        self.canon_notif_tx
+            .lock()
+            .as_mut()
+            .unwrap()
+            .retain(|tx| tx.send(event.clone()).is_ok())
     }
 
     /// Adds reorg to the queue that can be consumed with
     /// [`TestCanonStateSubscriptions::subscribe_to_canonical_state`]
     pub fn add_next_reorg(&self, old: Arc<Chain>, new: Arc<Chain>) {
         let event = CanonStateNotification::Reorg { old, new };
-        self.canon_notif_tx.lock().as_mut().unwrap().retain(|tx| tx.send(event.clone()).is_ok())
+        self.canon_notif_tx
+            .lock()
+            .as_mut()
+            .unwrap()
+            .retain(|tx| tx.send(event.clone()).is_ok())
     }
 }
 
@@ -341,7 +355,11 @@ impl CanonStateSubscriptions for TestCanonStateSubscriptions {
     /// Sets up a broadcast channel with a buffer size of 100.
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
         let (canon_notif_tx, canon_notif_rx) = broadcast::channel(100);
-        self.canon_notif_tx.lock().as_mut().unwrap().push(canon_notif_tx);
+        self.canon_notif_tx
+            .lock()
+            .as_mut()
+            .unwrap()
+            .push(canon_notif_tx);
 
         canon_notif_rx
     }

@@ -25,28 +25,30 @@ async fn test_testsuite_op_assert_mine_block() -> Result<()> {
         .with_network(NetworkSetup::single_node());
 
     let test =
-        TestBuilder::new().with_setup(setup).with_action(AssertMineBlock::<OpEngineTypes>::new(
-            0,
-            vec![],
-            Some(B256::ZERO),
-            // TODO: refactor once we have actions to generate payload attributes.
-            OpPayloadAttributes {
-                payload_attributes: alloy_rpc_types_engine::PayloadAttributes {
-                    timestamp: std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs(),
-                    prev_randao: B256::random(),
-                    suggested_fee_recipient: Address::random(),
-                    withdrawals: None,
-                    parent_beacon_block_root: None,
+        TestBuilder::new()
+            .with_setup(setup)
+            .with_action(AssertMineBlock::<OpEngineTypes>::new(
+                0,
+                vec![],
+                Some(B256::ZERO),
+                // TODO: refactor once we have actions to generate payload attributes.
+                OpPayloadAttributes {
+                    payload_attributes: alloy_rpc_types_engine::PayloadAttributes {
+                        timestamp: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs(),
+                        prev_randao: B256::random(),
+                        suggested_fee_recipient: Address::random(),
+                        withdrawals: None,
+                        parent_beacon_block_root: None,
+                    },
+                    transactions: None,
+                    no_tx_pool: None,
+                    eip_1559_params: None,
+                    gas_limit: Some(30_000_000),
                 },
-                transactions: None,
-                no_tx_pool: None,
-                eip_1559_params: None,
-                gas_limit: Some(30_000_000),
-            },
-        ));
+            ));
 
     test.run::<OpNode>().await?;
 

@@ -325,7 +325,10 @@ mod tests {
             )
             .unwrap(),
             genesis: MAINNET_GENESIS_HASH,
-            forkid: ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 },
+            forkid: ForkId {
+                hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]),
+                next: 0,
+            },
         };
 
         let mut rlp_status = vec![];
@@ -345,7 +348,10 @@ mod tests {
             )
             .unwrap(),
             genesis: MAINNET_GENESIS_HASH,
-            forkid: ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 },
+            forkid: ForkId {
+                hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]),
+                next: 0,
+            },
         };
         let status = Status::decode(&mut &data[..]).unwrap();
         assert_eq!(status, expected);
@@ -361,7 +367,10 @@ mod tests {
             )
             .unwrap(),
             genesis: MAINNET_GENESIS_HASH,
-            forkid: ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 },
+            forkid: ForkId {
+                hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]),
+                next: 0,
+            },
         };
         let status_converted: StatusEth69 = Status {
             version: EthVersion::Eth69,
@@ -372,7 +381,10 @@ mod tests {
             )
             .unwrap(),
             genesis: MAINNET_GENESIS_HASH,
-            forkid: ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 },
+            forkid: ForkId {
+                hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]),
+                next: 0,
+            },
         }
         .into();
         assert_eq!(status, status_converted);
@@ -389,7 +401,10 @@ mod tests {
             )
             .unwrap(),
             genesis: MAINNET_GENESIS_HASH,
-            forkid: ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 },
+            forkid: ForkId {
+                hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]),
+                next: 0,
+            },
         };
 
         let mut rlp_status = vec![];
@@ -403,7 +418,10 @@ mod tests {
                     .unwrap(),
             )
             .genesis(MAINNET_GENESIS_HASH)
-            .forkid(ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 })
+            .forkid(ForkId {
+                hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]),
+                next: 0,
+            })
             .build()
             .into();
         let mut rlp_status = vec![];
@@ -422,7 +440,10 @@ mod tests {
             )
             .unwrap(),
             genesis: MAINNET_GENESIS_HASH,
-            forkid: ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 },
+            forkid: ForkId {
+                hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]),
+                next: 0,
+            },
         };
         let status = StatusEth69::decode(&mut &data[..]).unwrap();
         assert_eq!(status, expected);
@@ -443,7 +464,10 @@ mod tests {
                 "0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b",
             )
             .unwrap(),
-            forkid: ForkId { hash: ForkHash([0x5d, 0x43, 0xd2, 0xfd]), next: 0 },
+            forkid: ForkId {
+                hash: ForkHash([0x5d, 0x43, 0xd2, 0xfd]),
+                next: 0,
+            },
         };
 
         let mut rlp_status = vec![];
@@ -466,7 +490,10 @@ mod tests {
                 "0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b",
             )
             .unwrap(),
-            forkid: ForkId { hash: ForkHash([0x5d, 0x43, 0xd2, 0xfd]), next: 0 },
+            forkid: ForkId {
+                hash: ForkHash([0x5d, 0x43, 0xd2, 0xfd]),
+                next: 0,
+            },
         };
         let status = Status::decode(&mut &data[..]).unwrap();
         assert_eq!(status, expected);
@@ -490,7 +517,10 @@ mod tests {
                 "6499dccdc7c7def3ebb1ce4c6ee27ec6bd02aee570625ca391919faf77ef27bd",
             )
             .unwrap(),
-            forkid: ForkId { hash: ForkHash([0x1a, 0x67, 0xcc, 0xd8]), next: 0 },
+            forkid: ForkId {
+                hash: ForkHash([0x1a, 0x67, 0xcc, 0xd8]),
+                next: 0,
+            },
         };
         let status = Status::decode(&mut &data[..]).unwrap();
         assert_eq!(status, expected);
@@ -503,7 +533,10 @@ mod tests {
         let total_difficulty = U256::from(rng.gen::<u64>());
 
         // create a genesis that has a random part, so we can check that the hash is preserved
-        let genesis = Genesis { nonce: rng.gen(), ..Default::default() };
+        let genesis = Genesis {
+            nonce: rng.gen(),
+            ..Default::default()
+        };
 
         // build head
         let head = Head {
@@ -524,7 +557,9 @@ mod tests {
             (EthereumHardfork::Shanghai, ForkCondition::Timestamp(13)),
         ];
 
-        let mut chainspec = ChainSpec::builder().genesis(genesis).chain(Chain::from_id(1337));
+        let mut chainspec = ChainSpec::builder()
+            .genesis(genesis)
+            .chain(Chain::from_id(1337));
 
         for (fork, condition) in &hardforks {
             chainspec = chainspec.with_fork(*fork, *condition);
@@ -542,7 +577,10 @@ mod tests {
             }
         }
 
-        let forkid = ForkId { hash: forkhash, next: 0 };
+        let forkid = ForkId {
+            hash: forkhash,
+            next: 0,
+        };
 
         let status = Status::spec_builder(&spec, &head).build();
 

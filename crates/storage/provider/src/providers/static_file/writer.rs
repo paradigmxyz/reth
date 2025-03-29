@@ -85,7 +85,9 @@ pub struct StaticFileProviderRWRefMut<'a, N>(
 impl<N> std::ops::DerefMut for StaticFileProviderRWRefMut<'_, N> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         // This is always created by [`StaticFileWriters::get_or_create`]
-        self.0.as_mut().expect("static file writer provider should be init")
+        self.0
+            .as_mut()
+            .expect("static file writer provider should be init")
     }
 }
 
@@ -94,7 +96,9 @@ impl<N> std::ops::Deref for StaticFileProviderRWRefMut<'_, N> {
 
     fn deref(&self) -> &Self::Target {
         // This is always created by [`StaticFileWriters::get_or_create`]
-        self.0.as_ref().expect("static file writer provider should be init")
+        self.0
+            .as_ref()
+            .expect("static file writer provider should be init")
     }
 }
 
@@ -165,7 +169,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 provider.data_path().into(),
             ),
             Err(ProviderError::MissingStaticFileBlock(_, _)) => {
-                let path = static_file_provider.directory().join(segment.filename(&block_range));
+                let path = static_file_provider
+                    .directory()
+                    .join(segment.filename(&block_range));
                 (create_jar(segment, &path, block_range), path)
             }
             Err(err) => return Err(err),
@@ -269,7 +275,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         let start = Instant::now();
 
         // Commits offsets and new user_header to disk
-        self.writer.commit_without_sync_all().map_err(ProviderError::other)?;
+        self.writer
+            .commit_without_sync_all()
+            .map_err(ProviderError::other)?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
@@ -313,7 +321,8 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                     .then(|| self.writer.user_header().expected_block_start() - 1)
             });
 
-        self.reader().update_index(self.writer.user_header().segment(), segment_max_block)
+        self.reader()
+            .update_index(self.writer.user_header().segment(), segment_max_block)
     }
 
     /// Allows to increment the [`SegmentHeader`] end block. It will commit the current static file,
@@ -333,8 +342,12 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 self.commit()?;
 
                 // Opens the new static file
-                let (writer, data_path) =
-                    Self::open(segment, last_block + 1, self.reader.clone(), self.metrics.clone())?;
+                let (writer, data_path) = Self::open(
+                    segment,
+                    last_block + 1,
+                    self.reader.clone(),
+                    self.metrics.clone(),
+                )?;
                 self.writer = writer;
                 self.data_path = data_path;
 
@@ -377,7 +390,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 self.writer.user_header().segment(),
                 expected_block_number,
                 next_static_file_block,
-            ))
+            ));
         }
         Ok(())
     }
@@ -409,15 +422,17 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 // * it's a tx-based segment AND `last_block` is lower than the first block of this
                 //   file's block range. Otherwise, having no rows simply means that this block
                 //   range has no transactions, but the file should remain.
-                if block_start != 0 &&
-                    (segment.is_headers() || last_block.is_some_and(|b| b < block_start))
+                if block_start != 0
+                    && (segment.is_headers() || last_block.is_some_and(|b| b < block_start))
                 {
                     self.delete_current_and_open_previous()?;
                 } else {
                     // Update `SegmentHeader`
                     self.writer.user_header_mut().prune(len);
-                    self.writer.prune_rows(len as usize).map_err(ProviderError::other)?;
-                    break
+                    self.writer
+                        .prune_rows(len as usize)
+                        .map_err(ProviderError::other)?;
+                    break;
                 }
 
                 remaining_rows -= len;
@@ -426,7 +441,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 self.writer.user_header_mut().prune(remaining_rows);
 
                 // Truncate data
-                self.writer.prune_rows(remaining_rows as usize).map_err(ProviderError::other)?;
+                self.writer
+                    .prune_rows(remaining_rows as usize)
+                    .map_err(ProviderError::other)?;
                 remaining_rows = 0;
             }
         }
@@ -444,7 +461,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                     expected_block_start = self.writer.user_header().expected_block_start();
                 }
             }
-            self.writer.user_header_mut().set_block_range(expected_block_start, last_block);
+            self.writer
+                .user_header_mut()
+                .set_block_range(expected_block_start, last_block);
         }
 
         // Commits new changes to disk.
@@ -478,7 +497,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         self.buf.clear();
         column.to_compact(&mut self.buf);
 
-        self.writer.append_column(Some(Ok(&self.buf))).map_err(ProviderError::other)?;
+        self.writer
+            .append_column(Some(Ok(&self.buf)))
+            .map_err(ProviderError::other)?;
         Ok(())
     }
 
@@ -497,7 +518,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                     self.writer.user_header().segment(),
                     tx_num,
                     next_tx,
-                ))
+                ));
             }
             self.writer.user_header_mut().increment_tx();
         } else {
@@ -706,7 +727,10 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         to_delete: u64,
         last_block: BlockNumber,
     ) -> ProviderResult<()> {
-        debug_assert_eq!(self.writer.user_header().segment(), StaticFileSegment::Transactions);
+        debug_assert_eq!(
+            self.writer.user_header().segment(),
+            StaticFileSegment::Transactions
+        );
         self.queue_prune(to_delete, Some(last_block))
     }
 
@@ -718,19 +742,28 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         to_delete: u64,
         last_block: BlockNumber,
     ) -> ProviderResult<()> {
-        debug_assert_eq!(self.writer.user_header().segment(), StaticFileSegment::Receipts);
+        debug_assert_eq!(
+            self.writer.user_header().segment(),
+            StaticFileSegment::Receipts
+        );
         self.queue_prune(to_delete, Some(last_block))
     }
 
     /// Adds an instruction to prune `to_delete` headers during commit.
     pub fn prune_headers(&mut self, to_delete: u64) -> ProviderResult<()> {
-        debug_assert_eq!(self.writer.user_header().segment(), StaticFileSegment::Headers);
+        debug_assert_eq!(
+            self.writer.user_header().segment(),
+            StaticFileSegment::Headers
+        );
         self.queue_prune(to_delete, None)
     }
 
     /// Adds an instruction to prune `to_delete` bloc_ meta rows during commit.
     pub fn prune_block_meta(&mut self, to_delete: u64) -> ProviderResult<()> {
-        debug_assert_eq!(self.writer.user_header().segment(), StaticFileSegment::BlockMeta);
+        debug_assert_eq!(
+            self.writer.user_header().segment(),
+            StaticFileSegment::BlockMeta
+        );
         self.queue_prune(to_delete, None)
     }
 
@@ -838,7 +871,10 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     fn upgrade_provider_to_strong_reference(
         provider: &Weak<StaticFileProviderInner<N>>,
     ) -> StaticFileProvider<N> {
-        provider.upgrade().map(StaticFileProvider).expect("StaticFileProvider is dropped")
+        provider
+            .upgrade()
+            .map(StaticFileProvider)
+            .expect("StaticFileProvider is dropped")
     }
 
     /// Helper function to access [`SegmentHeader`].
@@ -854,7 +890,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// Helper function to override block range for testing.
     #[cfg(any(test, feature = "test-utils"))]
     pub fn set_block_range(&mut self, block_range: std::ops::RangeInclusive<BlockNumber>) {
-        self.writer.user_header_mut().set_block_range(*block_range.start(), *block_range.end())
+        self.writer
+            .user_header_mut()
+            .set_block_range(*block_range.start(), *block_range.end())
     }
 
     /// Helper function to override block range for testing.

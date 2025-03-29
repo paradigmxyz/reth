@@ -42,12 +42,16 @@ impl<T: PayloadTypes> PayloadEvents<T> {
 
     /// Returns a new stream that yields all built payloads.
     pub fn into_built_payload_stream(self) -> BuiltPayloadStream<T> {
-        BuiltPayloadStream { st: self.into_stream() }
+        BuiltPayloadStream {
+            st: self.into_stream(),
+        }
     }
 
     /// Returns a new stream that yields received payload attributes
     pub fn into_attributes_stream(self) -> PayloadAttributeStream<T> {
-        PayloadAttributeStream { st: self.into_stream() }
+        PayloadAttributeStream {
+            st: self.into_stream(),
+        }
     }
 }
 
@@ -69,14 +73,14 @@ impl<T: PayloadTypes> Stream for BuiltPayloadStream<T> {
                 Some(Ok(Events::BuiltPayload(payload))) => Poll::Ready(Some(payload)),
                 Some(Ok(Events::Attributes(_))) => {
                     // ignoring attributes
-                    continue
+                    continue;
                 }
                 Some(Err(err)) => {
                     debug!(%err, "payload event stream lagging behind");
-                    continue
+                    continue;
                 }
                 None => Poll::Ready(None),
-            }
+            };
         }
     }
 }
@@ -99,14 +103,14 @@ impl<T: PayloadTypes> Stream for PayloadAttributeStream<T> {
                 Some(Ok(Events::Attributes(attr))) => Poll::Ready(Some(attr)),
                 Some(Ok(Events::BuiltPayload(_))) => {
                     // ignoring payloads
-                    continue
+                    continue;
                 }
                 Some(Err(err)) => {
                     debug!(%err, "payload event stream stream lagging behind");
-                    continue
+                    continue;
                 }
                 None => Poll::Ready(None),
-            }
+            };
         }
     }
 }

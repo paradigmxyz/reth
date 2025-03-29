@@ -133,7 +133,9 @@ impl Stream for MockDiscovery {
         let this = self.get_mut();
         // process all incoming commands
         while let Poll::Ready(maybe_cmd) = this.command_rx.poll_recv(cx) {
-            let Some(cmd) = maybe_cmd else { return Poll::Ready(None) };
+            let Some(cmd) = maybe_cmd else {
+                return Poll::Ready(None);
+            };
             match cmd {
                 MockCommand::MockPong { node_id } => {
                     this.queue_pong(node_id);
@@ -165,7 +167,7 @@ impl Stream for MockDiscovery {
                                 ping,
                                 pong,
                                 to: remote_addr,
-                            }))
+                            }));
                         }
                     }
                     Message::Pong(_) | Message::Neighbours(_) => {}
@@ -179,7 +181,7 @@ impl Stream for MockDiscovery {
                             return Poll::Ready(Some(MockEvent::Neighbours {
                                 nodes,
                                 to: remote_addr,
-                            }))
+                            }));
                         }
                     }
                     Message::EnrRequest(_) | Message::EnrResponse(_) => todo!(),
@@ -233,8 +235,16 @@ pub enum MockCommand {
 
 /// Creates a new testing instance for [`Discv4`] and its service
 pub async fn create_discv4() -> (Discv4, Discv4Service) {
-    let fork_id = ForkId { hash: ForkHash(hex!("743f3d89")), next: 16191202 };
-    create_discv4_with_config(Discv4Config::builder().add_eip868_pair("eth", fork_id).build()).await
+    let fork_id = ForkId {
+        hash: ForkHash(hex!("743f3d89")),
+        next: 16191202,
+    };
+    create_discv4_with_config(
+        Discv4Config::builder()
+            .add_eip868_pair("eth", fork_id)
+            .build(),
+    )
+    .await
 }
 
 /// Creates a new testing instance for [`Discv4`] and its service with the given config.
@@ -243,9 +253,15 @@ pub async fn create_discv4_with_config(config: Discv4Config) -> (Discv4, Discv4S
     let socket = SocketAddr::from_str("0.0.0.0:0").unwrap();
     let (secret_key, pk) = SECP256K1.generate_keypair(&mut rng);
     let id = pk2id(&pk);
-    let local_enr =
-        NodeRecord { address: socket.ip(), tcp_port: socket.port(), udp_port: socket.port(), id };
-    Discv4::bind(socket, local_enr, secret_key, config).await.unwrap()
+    let local_enr = NodeRecord {
+        address: socket.ip(),
+        tcp_port: socket.port(),
+        udp_port: socket.port(),
+        id,
+    };
+    Discv4::bind(socket, local_enr, secret_key, config)
+        .await
+        .unwrap()
 }
 
 /// Generates a random [`NodeEndpoint`] using the provided random number generator.
@@ -259,13 +275,26 @@ pub fn rng_endpoint(rng: &mut impl Rng) -> NodeEndpoint {
         rng.fill_bytes(&mut ip);
         IpAddr::V6(ip.into())
     };
-    NodeEndpoint { address, tcp_port: rng.gen(), udp_port: rng.gen() }
+    NodeEndpoint {
+        address,
+        tcp_port: rng.gen(),
+        udp_port: rng.gen(),
+    }
 }
 
 /// Generates a random [`NodeRecord`] using the provided random number generator.
 pub fn rng_record(rng: &mut impl RngCore) -> NodeRecord {
-    let NodeEndpoint { address, udp_port, tcp_port } = rng_endpoint(rng);
-    NodeRecord { address, tcp_port, udp_port, id: rng.gen() }
+    let NodeEndpoint {
+        address,
+        udp_port,
+        tcp_port,
+    } = rng_endpoint(rng);
+    NodeRecord {
+        address,
+        tcp_port,
+        udp_port,
+        id: rng.gen(),
+    }
 }
 
 /// Generates a random IPv6 [`NodeRecord`] using the provided random number generator.
@@ -273,7 +302,12 @@ pub fn rng_ipv6_record(rng: &mut impl RngCore) -> NodeRecord {
     let mut ip = [0u8; 16];
     rng.fill_bytes(&mut ip);
     let address = IpAddr::V6(ip.into());
-    NodeRecord { address, tcp_port: rng.gen(), udp_port: rng.gen(), id: rng.gen() }
+    NodeRecord {
+        address,
+        tcp_port: rng.gen(),
+        udp_port: rng.gen(),
+        id: rng.gen(),
+    }
 }
 
 /// Generates a random IPv4 [`NodeRecord`] using the provided random number generator.
@@ -281,7 +315,12 @@ pub fn rng_ipv4_record(rng: &mut impl RngCore) -> NodeRecord {
     let mut ip = [0u8; 4];
     rng.fill_bytes(&mut ip);
     let address = IpAddr::V4(ip.into());
-    NodeRecord { address, tcp_port: rng.gen(), udp_port: rng.gen(), id: rng.gen() }
+    NodeRecord {
+        address,
+        tcp_port: rng.gen(),
+        udp_port: rng.gen(),
+        id: rng.gen(),
+    }
 }
 
 /// Generates a random [`Message`] using the provided random number generator.
@@ -299,11 +338,16 @@ pub fn rng_message(rng: &mut impl RngCore) -> Message {
             expire: rng.gen(),
             enr_sq: None,
         }),
-        3 => Message::FindNode(FindNode { id: rng.gen(), expire: rng.gen() }),
+        3 => Message::FindNode(FindNode {
+            id: rng.gen(),
+            expire: rng.gen(),
+        }),
         4 => {
             let num: usize = rng.gen_range(1..=SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS);
             Message::Neighbours(Neighbours {
-                nodes: std::iter::repeat_with(|| rng_record(rng)).take(num).collect(),
+                nodes: std::iter::repeat_with(|| rng_record(rng))
+                    .take(num)
+                    .collect(),
                 expire: rng.gen(),
             })
         }
@@ -344,8 +388,15 @@ mod tests {
         // process the mock pong
         let event = mockv4.next().await.unwrap();
         match event {
-            MockEvent::Pong { ping: _, pong: _, to } => {
-                assert_eq!(to, SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), discv_addr.port()));
+            MockEvent::Pong {
+                ping: _,
+                pong: _,
+                to,
+            } => {
+                assert_eq!(
+                    to,
+                    SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), discv_addr.port())
+                );
             }
             MockEvent::Neighbours { .. } => {
                 unreachable!("invalid response")
@@ -358,8 +409,9 @@ mod tests {
 
         assert!(service.contains_node(mock_enr.id));
 
-        let mock_nodes =
-            std::iter::repeat_with(|| rng_record(&mut rng)).take(5).collect::<Vec<_>>();
+        let mock_nodes = std::iter::repeat_with(|| rng_record(&mut rng))
+            .take(5)
+            .collect::<Vec<_>>();
 
         mockv4.queue_neighbours(discv_enr.id, mock_nodes.clone());
 
@@ -372,7 +424,10 @@ mod tests {
                 unreachable!("invalid response")
             }
             MockEvent::Neighbours { nodes, to } => {
-                assert_eq!(to, SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), discv_addr.port()));
+                assert_eq!(
+                    to,
+                    SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), discv_addr.port())
+                );
                 assert_eq!(nodes, mock_nodes);
             }
         }

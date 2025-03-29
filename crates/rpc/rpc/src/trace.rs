@@ -49,7 +49,11 @@ impl<Eth> TraceApi<Eth> {
         blocking_task_guard: BlockingTaskGuard,
         eth_config: EthConfig,
     ) -> Self {
-        let inner = Arc::new(TraceApiInner { eth_api, blocking_task_guard, eth_config });
+        let inner = Arc::new(TraceApiInner {
+            eth_api,
+            blocking_task_guard,
+            eth_config,
+        });
         Self { inner }
     }
 
@@ -91,18 +95,25 @@ where
         let mut inspector = TracingInspector::new(config);
         let this = self.clone();
         self.eth_api()
-            .spawn_with_call_at(trace_request.call, at, overrides, move |db, evm_env, tx_env| {
-                // wrapper is hack to get around 'higher-ranked lifetime error', see
-                // <https://github.com/rust-lang/rust/issues/100013>
-                let db = db.0;
+            .spawn_with_call_at(
+                trace_request.call,
+                at,
+                overrides,
+                move |db, evm_env, tx_env| {
+                    // wrapper is hack to get around 'higher-ranked lifetime error', see
+                    // <https://github.com/rust-lang/rust/issues/100013>
+                    let db = db.0;
 
-                let (res, _) = this.eth_api().inspect(&mut *db, evm_env, tx_env, &mut inspector)?;
-                let trace_res = inspector
-                    .into_parity_builder()
-                    .into_trace_results_with_state(&res, &trace_request.trace_types, &db)
-                    .map_err(Eth::Error::from_eth_err)?;
-                Ok(trace_res)
-            })
+                    let (res, _) =
+                        this.eth_api()
+                            .inspect(&mut *db, evm_env, tx_env, &mut inspector)?;
+                    let trace_res = inspector
+                        .into_parity_builder()
+                        .into_trace_results_with_state(&res, &trace_request.trace_types, &db)
+                        .map_err(Eth::Error::from_eth_err)?;
+                    Ok(trace_res)
+                },
+            )
             .await
     }
 
@@ -116,7 +127,10 @@ where
         let tx = recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(&tx)?
             .map(<Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus);
 
-        let (evm_env, at) = self.eth_api().evm_env_at(block_id.unwrap_or_default()).await?;
+        let (evm_env, at) = self
+            .eth_api()
+            .evm_env_at(block_id.unwrap_or_default())
+            .await?;
         let tx_env = self.eth_api().evm_config().tx_env(tx);
 
         let config = TracingInspectorConfig::from_parity_config(&trace_types);
@@ -162,7 +176,8 @@ where
                     let config = TracingInspectorConfig::from_parity_config(&trace_types);
                     let mut inspector = TracingInspector::new(config);
                     let (res, _) =
-                        this.eth_api().inspect(&mut db, evm_env, tx_env, &mut inspector)?;
+                        this.eth_api()
+                            .inspect(&mut db, evm_env, tx_env, &mut inspector)?;
 
                     let trace_res = inspector
                         .into_parity_builder()
@@ -218,7 +233,7 @@ where
     ) -> Result<Option<LocalizedTransactionTrace>, Eth::Error> {
         if indices.len() != 1 {
             // The OG impl failed if it gets more than a single index
-            return Ok(None)
+            return Ok(None);
         }
         self.trace_get_index(hash, indices[0]).await
     }
@@ -231,7 +246,10 @@ where
         hash: B256,
         index: usize,
     ) -> Result<Option<LocalizedTransactionTrace>, Eth::Error> {
-        Ok(self.trace_transaction(hash).await?.and_then(|traces| traces.into_iter().nth(index)))
+        Ok(self
+            .trace_transaction(hash)
+            .await?
+            .and_then(|traces| traces.into_iter().nth(index)))
     }
 
     /// Returns all transaction traces that match the given filter.
@@ -244,19 +262,27 @@ where
     ) -> Result<Vec<LocalizedTransactionTrace>, Eth::Error> {
         // We'll reuse the matcher across multiple blocks that are traced in parallel
         let matcher = Arc::new(filter.matcher());
-        let TraceFilter { from_block, to_block, after, count, .. } = filter;
+        let TraceFilter {
+            from_block,
+            to_block,
+            after,
+            count,
+            ..
+        } = filter;
         let start = from_block.unwrap_or(0);
         let end = if let Some(to_block) = to_block {
             to_block
         } else {
-            self.provider().best_block_number().map_err(Eth::Error::from_eth_err)?
+            self.provider()
+                .best_block_number()
+                .map_err(Eth::Error::from_eth_err)?
         };
 
         if start > end {
             return Err(EthApiError::InvalidParams(
                 "invalid parameters: fromBlock cannot be greater than toBlock".to_string(),
             )
-            .into())
+            .into());
         }
 
         // ensure that the range is not too large, since we need to fetch all blocks in the range
@@ -265,7 +291,7 @@ where
             return Err(EthApiError::InvalidParams(
                 "Block range too large; currently limited to 100 blocks".to_string(),
             )
-            .into())
+            .into());
         }
 
         // fetch all blocks in that range
@@ -287,8 +313,9 @@ where
                 None,
                 TracingInspectorConfig::default_parity(),
                 move |tx_info, inspector, _, _, _| {
-                    let mut traces =
-                        inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
+                    let mut traces = inspector
+                        .into_parity_builder()
+                        .into_localized_transaction_traces(tx_info);
                     traces.retain(|trace| matcher.matches(&trace.trace));
                     Ok(Some(traces))
                 },
@@ -300,7 +327,12 @@ where
         let mut all_traces = block_traces
             .into_iter()
             .flatten()
-            .flat_map(|traces| traces.into_iter().flatten().flat_map(|traces| traces.into_iter()))
+            .flat_map(|traces| {
+                traces
+                    .into_iter()
+                    .flatten()
+                    .flat_map(|traces| traces.into_iter())
+            })
             .collect::<Vec<_>>();
 
         // add reward traces for all blocks
@@ -318,7 +350,7 @@ where
             } else {
                 // no block reward, means we're past the Paris hardfork and don't expect any rewards
                 // because the blocks in ascending order
-                break
+                break;
             }
         }
 
@@ -329,7 +361,7 @@ where
             if after < all_traces.len() {
                 all_traces.drain(..after);
             } else {
-                return Ok(vec![])
+                return Ok(vec![]);
             }
         }
 
@@ -354,8 +386,9 @@ where
                 hash,
                 TracingInspectorConfig::default_parity(),
                 move |tx_info, inspector, _, _| {
-                    let traces =
-                        inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
+                    let traces = inspector
+                        .into_parity_builder()
+                        .into_localized_transaction_traces(tx_info);
                     Ok(traces)
                 },
             )
@@ -372,8 +405,9 @@ where
             None,
             TracingInspectorConfig::default_parity(),
             |tx_info, inspector, _, _, _| {
-                let traces =
-                    inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
+                let traces = inspector
+                    .into_parity_builder()
+                    .into_localized_transaction_traces(tx_info);
                 Ok(traces)
             },
         );
@@ -409,8 +443,9 @@ where
                 None,
                 TracingInspectorConfig::from_parity_config(&trace_types),
                 move |tx_info, inspector, res, state, db| {
-                    let mut full_trace =
-                        inspector.into_parity_builder().into_trace_results(&res, &trace_types);
+                    let mut full_trace = inspector
+                        .into_parity_builder()
+                        .into_trace_results(&res, &trace_types);
 
                     // If statediffs were requested, populate them with the account balance and
                     // nonce from pre-state
@@ -474,9 +509,13 @@ where
             )
             .await?;
 
-        let Some(transactions) = res else { return Ok(None) };
+        let Some(transactions) = res else {
+            return Ok(None);
+        };
 
-        let Some(block) = self.eth_api().recovered_block(block_id).await? else { return Ok(None) };
+        let Some(block) = self.eth_api().recovered_block(block_id).await? else {
+            return Ok(None);
+        };
 
         Ok(Some(BlockOpcodeGas {
             block_hash: block.hash(),
@@ -504,10 +543,13 @@ where
         };
 
         if is_paris_activated {
-            return Ok(None)
+            return Ok(None);
         }
 
-        Ok(Some(base_block_reward_pre_merge(&chain_spec, header.number())))
+        Ok(Some(base_block_reward_pre_merge(
+            &chain_spec,
+            header.number(),
+        )))
     }
 
     /// Extracts the reward traces for the given block:
@@ -566,8 +608,13 @@ where
         block_overrides: Option<Box<BlockOverrides>>,
     ) -> RpcResult<TraceResults> {
         let _permit = self.acquire_trace_permit().await;
-        let request =
-            TraceCallRequest { call, trace_types, block_id, state_overrides, block_overrides };
+        let request = TraceCallRequest {
+            call,
+            trace_types,
+            block_id,
+            state_overrides,
+            block_overrides,
+        };
         Ok(Self::trace_call(self, request).await.map_err(Into::into)?)
     }
 
@@ -578,7 +625,9 @@ where
         block_id: Option<BlockId>,
     ) -> RpcResult<Vec<TraceResults>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_call_many(self, calls, block_id).await.map_err(Into::into)?)
+        Ok(Self::trace_call_many(self, calls, block_id)
+            .await
+            .map_err(Into::into)?)
     }
 
     /// Handler for `trace_rawTransaction`
@@ -589,9 +638,11 @@ where
         block_id: Option<BlockId>,
     ) -> RpcResult<TraceResults> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_raw_transaction(self, data, trace_types, block_id)
-            .await
-            .map_err(Into::into)?)
+        Ok(
+            Self::trace_raw_transaction(self, data, trace_types, block_id)
+                .await
+                .map_err(Into::into)?,
+        )
     }
 
     /// Handler for `trace_replayBlockTransactions`
@@ -613,7 +664,9 @@ where
         trace_types: HashSet<TraceType>,
     ) -> RpcResult<TraceResults> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::replay_transaction(self, transaction, trace_types).await.map_err(Into::into)?)
+        Ok(Self::replay_transaction(self, transaction, trace_types)
+            .await
+            .map_err(Into::into)?)
     }
 
     /// Handler for `trace_block`
@@ -622,7 +675,9 @@ where
         block_id: BlockId,
     ) -> RpcResult<Option<Vec<LocalizedTransactionTrace>>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_block(self, block_id).await.map_err(Into::into)?)
+        Ok(Self::trace_block(self, block_id)
+            .await
+            .map_err(Into::into)?)
     }
 
     /// Handler for `trace_filter`
@@ -643,9 +698,11 @@ where
         indices: Vec<Index>,
     ) -> RpcResult<Option<LocalizedTransactionTrace>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_get(self, hash, indices.into_iter().map(Into::into).collect())
-            .await
-            .map_err(Into::into)?)
+        Ok(
+            Self::trace_get(self, hash, indices.into_iter().map(Into::into).collect())
+                .await
+                .map_err(Into::into)?,
+        )
     }
 
     /// Handler for `trace_transaction`
@@ -654,7 +711,9 @@ where
         hash: B256,
     ) -> RpcResult<Option<Vec<LocalizedTransactionTrace>>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_transaction(self, hash).await.map_err(Into::into)?)
+        Ok(Self::trace_transaction(self, hash)
+            .await
+            .map_err(Into::into)?)
     }
 
     /// Handler for `trace_transactionOpcodeGas`
@@ -663,13 +722,17 @@ where
         tx_hash: B256,
     ) -> RpcResult<Option<TransactionOpcodeGas>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_transaction_opcode_gas(self, tx_hash).await.map_err(Into::into)?)
+        Ok(Self::trace_transaction_opcode_gas(self, tx_hash)
+            .await
+            .map_err(Into::into)?)
     }
 
     /// Handler for `trace_blockOpcodeGas`
     async fn trace_block_opcode_gas(&self, block_id: BlockId) -> RpcResult<Option<BlockOpcodeGas>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_block_opcode_gas(self, block_id).await.map_err(Into::into)?)
+        Ok(Self::trace_block_opcode_gas(self, block_id)
+            .await
+            .map_err(Into::into)?)
     }
 }
 
@@ -680,7 +743,9 @@ impl<Eth> std::fmt::Debug for TraceApi<Eth> {
 }
 impl<Eth> Clone for TraceApi<Eth> {
     fn clone(&self) -> Self {
-        Self { inner: Arc::clone(&self.inner) }
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
     }
 }
 

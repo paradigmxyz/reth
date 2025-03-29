@@ -44,7 +44,11 @@ pub struct Command<C: ChainSpecParser> {
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
     /// Execute `db stage unwind` command
     pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(self) -> eyre::Result<()> {
-        let Environment { provider_factory, config, .. } = self.env.init::<N>(AccessRights::RW)?;
+        let Environment {
+            provider_factory,
+            config,
+            ..
+        } = self.env.init::<N>(AccessRights::RW)?;
 
         let target = self.command.unwind_target(provider_factory.clone())?;
 
@@ -106,7 +110,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         provider_factory: ProviderFactory<N>,
     ) -> Result<Pipeline<N>, eyre::Error> {
         let stage_conf = &config.stages;
-        let prune_modes = config.prune.clone().map(|prune| prune.segments).unwrap_or_default();
+        let prune_modes = config
+            .prune
+            .clone()
+            .map(|prune| prune.segments)
+            .unwrap_or_default();
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
 
@@ -211,7 +219,12 @@ mod tests {
             "to-block",
             "100",
         ]);
-        assert_eq!(cmd.command, Subcommands::ToBlock { target: BlockHashOrNumber::Number(100) });
+        assert_eq!(
+            cmd.command,
+            Subcommands::ToBlock {
+                target: BlockHashOrNumber::Number(100)
+            }
+        );
 
         let cmd = Command::<EthereumChainSpecParser>::parse_from([
             "reth",

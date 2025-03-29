@@ -63,7 +63,10 @@ pub struct BodyStage<D: BodyDownloader> {
 impl<D: BodyDownloader> BodyStage<D> {
     /// Create new bodies stage from downloader.
     pub const fn new(downloader: D) -> Self {
-        Self { downloader, buffer: None }
+        Self {
+            downloader,
+            buffer: None,
+        }
     }
 
     /// Ensures that static files and database are in sync.
@@ -126,7 +129,7 @@ impl<D: BodyDownloader> BodyStage<D> {
                             &static_file_provider,
                             provider,
                             StaticFileSegment::Transactions,
-                        )?)
+                        )?);
                     }
                 } else {
                     return Err(missing_static_data_error(
@@ -134,7 +137,7 @@ impl<D: BodyDownloader> BodyStage<D> {
                         &static_file_provider,
                         provider,
                         StaticFileSegment::Transactions,
-                    )?)
+                    )?);
                 }
             }
             Ordering::Equal => {}
@@ -164,11 +167,12 @@ where
         input: ExecInput,
     ) -> Poll<Result<(), StageError>> {
         if input.target_reached() || self.buffer.is_some() {
-            return Poll::Ready(Ok(()))
+            return Poll::Ready(Ok(()));
         }
 
         // Update the header range on the downloader
-        self.downloader.set_download_range(input.next_block_range())?;
+        self.downloader
+            .set_download_range(input.next_block_range())?;
 
         // Poll next downloader item.
         let maybe_next_result = ready!(self.downloader.try_poll_next_unpin(cx));
@@ -190,7 +194,7 @@ where
     /// header, limited by the stage's batch size.
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()))
+            return Ok(ExecOutput::done(input.checkpoint()));
         }
         let (from_block, to_block) = input.next_block_range().into_inner();
 
@@ -198,9 +202,15 @@ where
 
         debug!(target: "sync::stages::bodies", stage_progress = from_block, target = to_block, "Commencing sync");
 
-        let buffer = self.buffer.take().ok_or(StageError::MissingDownloadBuffer)?;
+        let buffer = self
+            .buffer
+            .take()
+            .ok_or(StageError::MissingDownloadBuffer)?;
         trace!(target: "sync::stages::bodies", bodies_len = buffer.len(), "Writing blocks");
-        let highest_block = buffer.last().map(|r| r.block_number()).unwrap_or(from_block);
+        let highest_block = buffer
+            .last()
+            .map(|r| r.block_number())
+            .unwrap_or(from_block);
 
         // Write bodies to database.
         provider.append_block_bodies(
@@ -253,7 +263,9 @@ where
         // Count only static files entries. If we count the database entries too, we may have
         // duplicates. We're sure that the static files have all entries that database has,
         // because we run the `StaticFileProducer` before starting the pipeline.
-        total: provider.static_file_provider().count_entries::<tables::Headers>()? as u64,
+        total: provider
+            .static_file_provider()
+            .count_entries::<tables::Headers>()? as u64,
     })
 }
 
@@ -281,7 +293,9 @@ mod tests {
             target: Some(previous_stage),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
-        runner.seed_execution(input).expect("failed to seed execution");
+        runner
+            .seed_execution(input)
+            .expect("failed to seed execution");
 
         // Set the batch size (max we sync per stage execution) to less than the number of blocks
         // the previous stage synced (10 vs 20)
@@ -306,7 +320,10 @@ mod tests {
             }, done: false }) if block_number < 200 &&
                 processed == batch_size + 1 && total == previous_stage + 1
         );
-        assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
+        assert!(
+            runner.validate_execution(input, output.ok()).is_ok(),
+            "execution validation"
+        );
     }
 
     /// Same as [partial_body_download] except the `batch_size` is not hit.
@@ -320,7 +337,9 @@ mod tests {
             target: Some(previous_stage),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
-        runner.seed_execution(input).expect("failed to seed execution");
+        runner
+            .seed_execution(input)
+            .expect("failed to seed execution");
 
         // Set the batch size to more than what the previous stage synced (40 vs 20)
         runner.set_batch_size(40);
@@ -345,7 +364,10 @@ mod tests {
                 done: true
             }) if processed + 1 == total && total == previous_stage + 1
         );
-        assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
+        assert!(
+            runner.validate_execution(input, output.ok()).is_ok(),
+            "execution validation"
+        );
     }
 
     /// Same as [full_body_download] except we have made progress before
@@ -359,7 +381,9 @@ mod tests {
             target: Some(previous_stage),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
-        runner.seed_execution(input).expect("failed to seed execution");
+        runner
+            .seed_execution(input)
+            .expect("failed to seed execution");
 
         let batch_size = 10;
         runner.set_batch_size(batch_size);
@@ -384,8 +408,10 @@ mod tests {
         let first_run_checkpoint = first_run.unwrap().checkpoint;
 
         // Execute again on top of the previous run
-        let input =
-            ExecInput { target: Some(previous_stage), checkpoint: Some(first_run_checkpoint) };
+        let input = ExecInput {
+            target: Some(previous_stage),
+            checkpoint: Some(first_run_checkpoint),
+        };
         let rx = runner.execute(input);
 
         // Check that we synced more blocks
@@ -420,7 +446,9 @@ mod tests {
             target: Some(previous_stage),
             checkpoint: Some(StageCheckpoint::new(stage_progress)),
         };
-        runner.seed_execution(input).expect("failed to seed execution");
+        runner
+            .seed_execution(input)
+            .expect("failed to seed execution");
 
         // Set the batch size to more than what the previous stage synced (40 vs 20)
         runner.set_batch_size(40);
@@ -451,14 +479,21 @@ mod tests {
         // Delete a transaction
         let static_file_provider = runner.db().factory.static_file_provider();
         {
-            let mut static_file_producer =
-                static_file_provider.latest_writer(StaticFileSegment::Transactions).unwrap();
-            static_file_producer.prune_transactions(1, checkpoint.block_number).unwrap();
+            let mut static_file_producer = static_file_provider
+                .latest_writer(StaticFileSegment::Transactions)
+                .unwrap();
+            static_file_producer
+                .prune_transactions(1, checkpoint.block_number)
+                .unwrap();
             static_file_producer.commit().unwrap();
         }
         // Unwind all of it
         let unwind_to = 1;
-        let input = UnwindInput { bad_block: None, checkpoint, unwind_to };
+        let input = UnwindInput {
+            bad_block: None,
+            checkpoint,
+            unwind_to,
+        };
         let res = runner.unwind(input).await;
         assert_matches!(
             res,
@@ -533,7 +568,11 @@ mod tests {
 
         impl Default for BodyTestRunner {
             fn default() -> Self {
-                Self { responses: HashMap::default(), db: TestStageDB::default(), batch_size: 1000 }
+                Self {
+                    responses: HashMap::default(),
+                    db: TestStageDB::default(),
+                    batch_size: 1000,
+                }
             }
         }
 
@@ -584,7 +623,8 @@ mod tests {
                         ..Default::default()
                     },
                 );
-                self.db.insert_headers_with_td(blocks.iter().map(|block| block.sealed_header()))?;
+                self.db
+                    .insert_headers_with_td(blocks.iter().map(|block| block.sealed_header()))?;
                 if let Some(progress) = blocks.get(start as usize) {
                     // Insert last progress data
                     {
@@ -601,7 +641,9 @@ mod tests {
 
                         body.tx_num_range().try_for_each(|tx_num| {
                             let transaction = random_signed_tx(&mut rng);
-                            static_file_producer.append_transaction(tx_num, &transaction).map(drop)
+                            static_file_producer
+                                .append_transaction(tx_num, &transaction)
+                                .map(drop)
                         })?;
 
                         if body.tx_count != 0 {
@@ -616,7 +658,9 @@ mod tests {
                         if !progress.ommers_hash_is_empty() {
                             tx.put::<tables::BlockOmmers>(
                                 progress.number,
-                                StoredBlockOmmers { ommers: progress.body().ommers.clone() },
+                                StoredBlockOmmers {
+                                    ommers: progress.body().ommers.clone(),
+                                },
                             )?;
                         }
 
@@ -644,19 +688,21 @@ mod tests {
 
         impl UnwindStageTestRunner for BodyTestRunner {
             fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
-                self.db.ensure_no_entry_above::<tables::BlockBodyIndices, _>(
-                    input.unwind_to,
-                    |key| key,
-                )?;
+                self.db
+                    .ensure_no_entry_above::<tables::BlockBodyIndices, _>(
+                        input.unwind_to,
+                        |key| key,
+                    )?;
                 self.db
                     .ensure_no_entry_above::<tables::BlockOmmers, _>(input.unwind_to, |key| key)?;
                 if let Some(last_tx_id) = self.get_last_tx_id()? {
                     self.db
                         .ensure_no_entry_above::<tables::Transactions, _>(last_tx_id, |key| key)?;
-                    self.db.ensure_no_entry_above::<tables::TransactionBlocks, _>(
-                        last_tx_id,
-                        |key| key,
-                    )?;
+                    self.db
+                        .ensure_no_entry_above::<tables::TransactionBlocks, _>(
+                            last_tx_id,
+                            |key| key,
+                        )?;
                 }
                 Ok(())
             }
@@ -759,7 +805,12 @@ mod tests {
                 responses: HashMap<B256, BlockBody>,
                 batch_size: u64,
             ) -> Self {
-                Self { provider_factory, responses, headers: VecDeque::default(), batch_size }
+                Self {
+                    provider_factory,
+                    responses,
+                    headers: VecDeque::default(),
+                    batch_size,
+                }
             }
         }
 
@@ -791,7 +842,7 @@ mod tests {
                 let this = self.get_mut();
 
                 if this.headers.is_empty() {
-                    return Poll::Ready(None)
+                    return Poll::Ready(None);
                 }
 
                 let mut response =
@@ -800,20 +851,22 @@ mod tests {
                     if header.is_empty() {
                         response.push(BlockResponse::Empty(header))
                     } else {
-                        let body =
-                            this.responses.remove(&header.hash()).expect("requested unknown body");
+                        let body = this
+                            .responses
+                            .remove(&header.hash())
+                            .expect("requested unknown body");
                         response.push(BlockResponse::Full(SealedBlock::from_sealed_parts(
                             header, body,
                         )));
                     }
 
                     if response.len() as u64 >= this.batch_size {
-                        break
+                        break;
                     }
                 }
 
                 if !response.is_empty() {
-                    return Poll::Ready(Some(Ok(response)))
+                    return Poll::Ready(Some(Ok(response)));
                 }
 
                 panic!("requested bodies without setting headers")

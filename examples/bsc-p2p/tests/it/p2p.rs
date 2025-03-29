@@ -39,7 +39,9 @@ async fn can_connect() {
             .lookup_interval(Duration::from_millis(500))
             .build(),
     );
-    let net_manager = NetworkManager::<EthNetworkPrimitives>::new(net_cfg).await.unwrap();
+    let net_manager = NetworkManager::<EthNetworkPrimitives>::new(net_cfg)
+        .await
+        .unwrap();
 
     let net_handle = net_manager.handle().clone();
     let mut events = net_handle.event_listener();
@@ -60,5 +62,8 @@ async fn can_connect() {
     })
     .await;
 
-    assert!(result.is_ok(), "Test timed out without receiving the expected event");
+    assert!(
+        result.is_ok(),
+        "Test timed out without receiving the expected event"
+    );
 }

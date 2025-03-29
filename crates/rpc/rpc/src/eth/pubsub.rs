@@ -53,7 +53,10 @@ impl<Eth> EthPubSub<Eth> {
     /// Creates a new, shareable instance.
     pub fn with_spawner(eth_api: Eth, subscription_task_spawner: Box<dyn TaskSpawner>) -> Self {
         let inner = EthPubSubInner { eth_api };
-        Self { inner: Arc::new(inner), subscription_task_spawner }
+        Self {
+            inner: Arc::new(inner),
+            subscription_task_spawner,
+        }
     }
 }
 
@@ -135,7 +138,7 @@ where
                             };
                             std::future::ready(tx_value)
                         });
-                        return pipe_from_stream(accepted_sink, stream).await
+                        return pipe_from_stream(accepted_sink, stream).await;
                     }
                     Params::Bool(false) | Params::None => {
                         // only hashes requested
@@ -162,7 +165,7 @@ where
             let msg = SubscriptionMessage::from_json(&current_sub_res)
                 .map_err(SubscriptionSerializeError::new)?;
             if accepted_sink.send(msg).await.is_err() {
-                return Ok(())
+                return Ok(());
             }
 
             while canon_state.next().await.is_some() {
@@ -177,7 +180,7 @@ where
                     let msg = SubscriptionMessage::from_json(&sync_status)
                         .map_err(SubscriptionSerializeError::new)?;
                     if accepted_sink.send(msg).await.is_err() {
-                        break
+                        break;
                     }
                 }
             }
@@ -299,26 +302,36 @@ where
 {
     /// Returns a stream that yields all new RPC blocks.
     fn new_headers_stream(&self) -> impl Stream<Item = Header<N::BlockHeader>> {
-        self.eth_api.provider().canonical_state_stream().flat_map(|new_chain| {
-            let headers = new_chain.committed().headers().collect::<Vec<_>>();
-            futures::stream::iter(
-                headers.into_iter().map(|h| Header::from_consensus(h.into(), None, None)),
-            )
-        })
+        self.eth_api
+            .provider()
+            .canonical_state_stream()
+            .flat_map(|new_chain| {
+                let headers = new_chain.committed().headers().collect::<Vec<_>>();
+                futures::stream::iter(
+                    headers
+                        .into_iter()
+                        .map(|h| Header::from_consensus(h.into(), None, None)),
+                )
+            })
     }
 
     /// Returns a stream that yields all logs that match the given filter.
     fn log_stream(&self, filter: FilteredParams) -> impl Stream<Item = Log> {
         BroadcastStream::new(self.eth_api.provider().subscribe_to_canonical_state())
             .map(move |canon_state| {
-                canon_state.expect("new block subscription never ends").block_receipts()
+                canon_state
+                    .expect("new block subscription never ends")
+                    .block_receipts()
             })
             .flat_map(futures::stream::iter)
             .flat_map(move |(block_receipts, removed)| {
                 let all_logs = logs_utils::matching_block_logs_with_tx_hashes(
                     &filter,
                     block_receipts.block,
-                    block_receipts.tx_receipts.iter().map(|(tx, receipt)| (*tx, receipt)),
+                    block_receipts
+                        .tx_receipts
+                        .iter()
+                        .map(|(tx, receipt)| (*tx, receipt)),
                     removed,
                 );
                 futures::stream::iter(all_logs)

@@ -26,7 +26,9 @@ pub fn unused_port() -> u16 {
 pub fn unused_tcp_addr() -> SocketAddr {
     let listener = std::net::TcpListener::bind("127.0.0.1:0")
         .expect("Failed to create TCP listener to find unused port");
-    listener.local_addr().expect("Failed to read TCP listener local_addr to find unused port")
+    listener
+        .local_addr()
+        .expect("Failed to read TCP listener local_addr to find unused port")
 }
 
 /// Finds an unused udp port
@@ -37,7 +39,9 @@ pub fn unused_udp_port() -> u16 {
 pub fn unused_udp_addr() -> SocketAddr {
     let udp_listener = std::net::UdpSocket::bind("127.0.0.1:0")
         .expect("Failed to create UDP listener to find unused port");
-    udp_listener.local_addr().expect("Failed to read UDP listener local_addr to find unused port")
+    udp_listener
+        .local_addr()
+        .expect("Failed to read UDP listener local_addr to find unused port")
 }
 
 /// Finds a single port that is unused for both TCP and UDP.
@@ -45,7 +49,7 @@ pub fn unused_tcp_and_udp_port() -> u16 {
     loop {
         let port = unused_port();
         if std::net::UdpSocket::bind(format!("127.0.0.1:{port}")).is_ok() {
-            return port
+            return port;
         }
     }
 }

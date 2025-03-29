@@ -46,12 +46,16 @@ where
 {
     /// Creates a new instance of [`Wal`].
     pub fn new(directory: impl AsRef<Path>) -> WalResult<Self> {
-        Ok(Self { inner: Arc::new(WalInner::new(directory)?) })
+        Ok(Self {
+            inner: Arc::new(WalInner::new(directory)?),
+        })
     }
 
     /// Returns a read-only handle to the WAL.
     pub fn handle(&self) -> WalHandle<N> {
-        WalHandle { wal: self.inner.clone() }
+        WalHandle {
+            wal: self.inner.clone(),
+        }
     }
 
     /// Commits the notification to WAL.
@@ -113,8 +117,11 @@ where
     /// Fills the block cache with the notifications from the storage.
     #[instrument(skip(self))]
     fn fill_block_cache(&mut self) -> WalResult<()> {
-        let Some(files_range) = self.storage.files_range()? else { return Ok(()) };
-        self.next_file_id.store(files_range.end() + 1, Ordering::Relaxed);
+        let Some(files_range) = self.storage.files_range()? else {
+            return Ok(());
+        };
+        self.next_file_id
+            .store(files_range.end() + 1, Ordering::Relaxed);
 
         let mut block_cache = self.block_cache.write();
         let mut notifications_size = 0;
@@ -169,7 +176,7 @@ where
         // Remove notifications from the storage.
         if file_ids.is_empty() {
             debug!(target: "exex::wal", "No notifications were finalized from the storage");
-            return Ok(())
+            return Ok(());
         }
 
         let (removed_notifications, removed_size) = self.storage.remove_notifications(file_ids)?;
@@ -182,15 +189,23 @@ where
 
     fn update_metrics(&self, block_cache: &BlockCache, size_delta: i64) {
         self.metrics.size_bytes.increment(size_delta as f64);
-        self.metrics.notifications_count.set(block_cache.notification_max_blocks.len() as f64);
-        self.metrics.committed_blocks_count.set(block_cache.committed_blocks.len() as f64);
+        self.metrics
+            .notifications_count
+            .set(block_cache.notification_max_blocks.len() as f64);
+        self.metrics
+            .committed_blocks_count
+            .set(block_cache.committed_blocks.len() as f64);
 
         if let Some(lowest_committed_block_height) = block_cache.lowest_committed_block_height {
-            self.metrics.lowest_committed_block_height.set(lowest_committed_block_height as f64);
+            self.metrics
+                .lowest_committed_block_height
+                .set(lowest_committed_block_height as f64);
         }
 
         if let Some(highest_committed_block_height) = block_cache.highest_committed_block_height {
-            self.metrics.highest_committed_block_height.set(highest_committed_block_height as f64);
+            self.metrics
+                .highest_committed_block_height
+                .set(highest_committed_block_height as f64);
         }
     }
 
@@ -199,10 +214,14 @@ where
         &self,
     ) -> WalResult<Box<dyn Iterator<Item = WalResult<ExExNotification<N>>> + '_>> {
         let Some(range) = self.storage.files_range()? else {
-            return Ok(Box::new(std::iter::empty()))
+            return Ok(Box::new(std::iter::empty()));
         };
 
-        Ok(Box::new(self.storage.iter_notifications(range).map(|entry| Ok(entry?.2))))
+        Ok(Box::new(
+            self.storage
+                .iter_notifications(range)
+                .map(|entry| Ok(entry?.2)),
+        ))
     }
 }
 
@@ -221,9 +240,12 @@ where
         &self,
         block_hash: &B256,
     ) -> WalResult<Option<ExExNotification<N>>> {
-        let Some(file_id) = self.wal.block_cache().get_file_id_by_committed_block_hash(block_hash)
+        let Some(file_id) = self
+            .wal
+            .block_cache()
+            .get_file_id_by_committed_block_hash(block_hash)
         else {
-            return Ok(None)
+            return Ok(None);
         };
 
         self.wal
@@ -246,13 +268,16 @@ mod tests {
     use std::sync::Arc;
 
     fn read_notifications(wal: &Wal) -> WalResult<Vec<ExExNotification>> {
-        wal.inner.storage.files_range()?.map_or(Ok(Vec::new()), |range| {
-            wal.inner
-                .storage
-                .iter_notifications(range)
-                .map(|entry| entry.map(|(_, _, n)| n))
-                .collect()
-        })
+        wal.inner
+            .storage
+            .files_range()?
+            .map_or(Ok(Vec::new()), |range| {
+                wal.inner
+                    .storage
+                    .iter_notifications(range)
+                    .map(|entry| entry.map(|(_, _, n)| n))
+                    .collect()
+            })
     }
 
     fn sort_committed_blocks(
@@ -283,13 +308,19 @@ mod tests {
         let block_1_reorged = random_block(
             &mut rng,
             1,
-            BlockParams { parent: Some(blocks[0].hash()), ..Default::default() },
+            BlockParams {
+                parent: Some(blocks[0].hash()),
+                ..Default::default()
+            },
         )
         .try_recover()?;
         let block_2_reorged = random_block(
             &mut rng,
             2,
-            BlockParams { parent: Some(blocks[1].hash()), ..Default::default() },
+            BlockParams {
+                parent: Some(blocks[1].hash()),
+                ..Default::default()
+            },
         )
         .try_recover()?;
 
@@ -307,7 +338,11 @@ mod tests {
             )),
         };
         let reverted_notification = ExExNotification::ChainReverted {
-            old: Arc::new(Chain::new(vec![blocks[1].clone()], Default::default(), None)),
+            old: Arc::new(Chain::new(
+                vec![blocks[1].clone()],
+                Default::default(),
+                None,
+            )),
         };
         let committed_notification_2 = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
@@ -317,7 +352,11 @@ mod tests {
             )),
         };
         let reorged_notification = ExExNotification::ChainReorged {
-            old: Arc::new(Chain::new(vec![blocks[2].clone()], Default::default(), None)),
+            old: Arc::new(Chain::new(
+                vec![blocks[2].clone()],
+                Default::default(),
+                None,
+            )),
             new: Arc::new(Chain::new(
                 vec![block_2_reorged.clone(), blocks[3].clone()],
                 Default::default(),
@@ -358,7 +397,10 @@ mod tests {
             wal.inner.block_cache().committed_blocks_sorted(),
             committed_notification_1_cache_committed_blocks
         );
-        assert_eq!(read_notifications(&wal)?, vec![committed_notification_1.clone()]);
+        assert_eq!(
+            read_notifications(&wal)?,
+            vec![committed_notification_1.clone()]
+        );
 
         // Second notification (revert block 1)
         wal.commit(&reverted_notification)?;
@@ -366,7 +408,10 @@ mod tests {
         let reverted_notification_cache_blocks = (blocks[1].number, file_id);
         assert_eq!(
             wal.inner.block_cache().blocks_sorted(),
-            [reverted_notification_cache_blocks, committed_notification_1_cache_blocks]
+            [
+                reverted_notification_cache_blocks,
+                committed_notification_1_cache_blocks
+            ]
         );
         assert_eq!(
             wal.inner.block_cache().committed_blocks_sorted(),
@@ -374,7 +419,10 @@ mod tests {
         );
         assert_eq!(
             read_notifications(&wal)?,
-            vec![committed_notification_1.clone(), reverted_notification.clone()]
+            vec![
+                committed_notification_1.clone(),
+                reverted_notification.clone()
+            ]
         );
 
         // Third notification (commit block 1, 2)
@@ -485,7 +533,10 @@ mod tests {
         wal.finalize((block_1_reorged.number, block_1_reorged.hash()).into())?;
         assert_eq!(
             wal.inner.block_cache().blocks_sorted(),
-            [reorged_notification_cache_blocks, committed_notification_2_cache_blocks]
+            [
+                reorged_notification_cache_blocks,
+                committed_notification_2_cache_blocks
+            ]
         );
         assert_eq!(
             wal.inner.block_cache().committed_blocks_sorted(),
@@ -499,14 +550,20 @@ mod tests {
         );
         assert_eq!(
             read_notifications(&wal)?,
-            vec![committed_notification_2.clone(), reorged_notification.clone()]
+            vec![
+                committed_notification_2.clone(),
+                reorged_notification.clone()
+            ]
         );
 
         // Re-open the WAL and verify that the cache population works correctly
         let wal = Wal::new(&temp_dir)?;
         assert_eq!(
             wal.inner.block_cache().blocks_sorted(),
-            [reorged_notification_cache_blocks, committed_notification_2_cache_blocks]
+            [
+                reorged_notification_cache_blocks,
+                committed_notification_2_cache_blocks
+            ]
         );
         assert_eq!(
             wal.inner.block_cache().committed_blocks_sorted(),
@@ -518,7 +575,10 @@ mod tests {
                 .concat()
             )
         );
-        assert_eq!(read_notifications(&wal)?, vec![committed_notification_2, reorged_notification]);
+        assert_eq!(
+            read_notifications(&wal)?,
+            vec![committed_notification_2, reorged_notification]
+        );
 
         Ok(())
     }

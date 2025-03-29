@@ -80,7 +80,7 @@ pub trait PartiallyFilterMessage {
                 msg=?msg,
                 "empty payload"
             );
-            return (FilterOutcome::ReportPeer, PartiallyValidData::empty_eth66())
+            return (FilterOutcome::ReportPeer, PartiallyValidData::empty_eth66());
         }
 
         // 2. checks if announcement is spam packed with duplicate hashes
@@ -179,7 +179,7 @@ impl ValidateTx68 for EthMessageFilter {
                     "invalid tx type in eth68 announcement"
                 );
 
-                return ValidationOutcome::ReportPeer
+                return ValidationOutcome::ReportPeer;
             }
         };
         tx_types_counter.increase_by_tx_type(tx_type);
@@ -201,7 +201,7 @@ impl ValidateTx68 for EthMessageFilter {
                     "invalid tx size in eth68 announcement"
                 );
 
-                return ValidationOutcome::Ignore
+                return ValidationOutcome::Ignore;
             }
         }
         if let Some(reasonable_min_encoded_tx_length) = self.min_encoded_tx_length(tx_type) {
@@ -310,9 +310,14 @@ impl FilterAnnouncement for EthMessageFilter {
                 }
             }
         });
-        self.announced_tx_types_metrics.update_eth68_announcement_metrics(tx_types_counter);
+        self.announced_tx_types_metrics
+            .update_eth68_announcement_metrics(tx_types_counter);
         (
-            if should_report_peer { FilterOutcome::ReportPeer } else { FilterOutcome::Ok },
+            if should_report_peer {
+                FilterOutcome::ReportPeer
+            } else {
+                FilterOutcome::Ok
+            },
             ValidAnnouncementData::from_partially_valid_data(msg),
         )
     }
@@ -327,7 +332,10 @@ impl FilterAnnouncement for EthMessageFilter {
             "validating eth66 announcement data.."
         );
 
-        (FilterOutcome::Ok, ValidAnnouncementData::from_partially_valid_data(partially_valid_data))
+        (
+            FilterOutcome::Ok,
+            ValidAnnouncementData::from_partially_valid_data(partially_valid_data),
+        )
     }
 }
 
@@ -344,7 +352,11 @@ mod test {
         let sizes = vec![];
         let hashes = vec![];
 
-        let announcement = NewPooledTransactionHashes68 { types, sizes, hashes };
+        let announcement = NewPooledTransactionHashes68 {
+            types,
+            sizes,
+            hashes,
+        };
 
         let filter = EthMessageFilter::default();
 
@@ -391,7 +403,11 @@ mod test {
 
     #[test]
     fn eth68_announcement_too_small_tx() {
-        let types = vec![TxType::Eip7702 as u8, TxType::Legacy as u8, TxType::Eip2930 as u8];
+        let types = vec![
+            TxType::Eip7702 as u8,
+            TxType::Legacy as u8,
+            TxType::Eip2930 as u8,
+        ];
         let sizes = vec![
             0, // the first length isn't valid
             0, // neither is the second
@@ -546,7 +562,11 @@ mod test {
 
     #[test]
     fn eth68_announcement_eip7702_tx_size_validation() {
-        let types = vec![TxType::Eip7702 as u8, TxType::Eip7702 as u8, TxType::Eip7702 as u8];
+        let types = vec![
+            TxType::Eip7702 as u8,
+            TxType::Eip7702 as u8,
+            TxType::Eip7702 as u8,
+        ];
         // Test with different sizes: too small, reasonable, too large
         let sizes = vec![
             1,                    // too small
@@ -593,7 +613,12 @@ mod test {
             TxType::Eip1559 as u8,
             TxType::Eip4844 as u8,
         ];
-        let sizes = vec![MAX_MESSAGE_SIZE, MAX_MESSAGE_SIZE, MAX_MESSAGE_SIZE, MAX_MESSAGE_SIZE];
+        let sizes = vec![
+            MAX_MESSAGE_SIZE,
+            MAX_MESSAGE_SIZE,
+            MAX_MESSAGE_SIZE,
+            MAX_MESSAGE_SIZE,
+        ];
         let hashes = vec![
             B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafa")
                 .unwrap(),

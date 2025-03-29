@@ -22,9 +22,16 @@ impl RateLimit {
     /// Create a new rate limiter
     pub fn new(rate: Rate) -> Self {
         let until = tokio::time::Instant::now();
-        let state = State::Ready { until, remaining: rate.limit() };
+        let state = State::Ready {
+            until,
+            remaining: rate.limit(),
+        };
 
-        Self { rate, state, sleep: Box::pin(tokio::time::sleep_until(until)) }
+        Self {
+            rate,
+            state,
+            sleep: Box::pin(tokio::time::sleep_until(until)),
+        }
     }
 
     /// Returns the configured limit of the [`RateLimit`]
@@ -38,7 +45,7 @@ impl RateLimit {
             State::Ready { .. } => return Poll::Ready(()),
             State::Limited => {
                 if Pin::new(&mut self.sleep).poll(cx).is_pending() {
-                    return Poll::Pending
+                    return Poll::Pending;
                 }
             }
         }
@@ -63,7 +70,10 @@ impl RateLimit {
     /// Panics if [`RateLimit::poll_ready`] returned [`Poll::Pending`]
     pub fn tick(&mut self) {
         match self.state {
-            State::Ready { mut until, remaining: mut rem } => {
+            State::Ready {
+                mut until,
+                remaining: mut rem,
+            } => {
                 let now = tokio::time::Instant::now();
 
                 // If the period has elapsed, reset it.
@@ -74,7 +84,10 @@ impl RateLimit {
 
                 if rem > 1 {
                     rem -= 1;
-                    self.state = State::Ready { until, remaining: rem };
+                    self.state = State::Ready {
+                        until,
+                        remaining: rem,
+                    };
                 } else {
                     // rate limited until elapsed
                     self.sleep.as_mut().reset(until);

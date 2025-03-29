@@ -101,8 +101,12 @@ where
 
     /// Retrieve header hashes for the next request.
     fn next_request(&self) -> Option<Vec<B256>> {
-        let mut hashes =
-            self.pending_headers.iter().filter(|h| !h.is_empty()).map(|h| h.hash()).peekable();
+        let mut hashes = self
+            .pending_headers
+            .iter()
+            .filter(|h| !h.is_empty())
+            .map(|h| h.hash())
+            .peekable();
         hashes.peek().is_some().then(|| hashes.collect())
     }
 
@@ -134,14 +138,14 @@ where
         // next one exceed the soft response limit, if not then peer either does not have the next
         // block or deliberately sent a single block.
         if bodies.is_empty() {
-            return Err(DownloadError::EmptyResponse)
+            return Err(DownloadError::EmptyResponse);
         }
 
         if response_len > request_len {
             return Err(DownloadError::TooManyBodies(GotExpected {
                 got: response_len,
                 expected: request_len,
-            }))
+            }));
         }
 
         // Buffer block responses
@@ -198,7 +202,7 @@ where
                         hash,
                         number,
                         error: Box::new(error),
-                    })
+                    });
                 }
 
                 self.buffer.push(BlockResponse::Full(block));
@@ -206,7 +210,9 @@ where
         }
 
         // Increment per-response metric
-        self.response_metrics.response_size_bytes.set(total_size as f64);
+        self.response_metrics
+            .response_size_bytes
+            .set(total_size as f64);
         self.response_metrics.response_length.set(bodies_len as f64);
 
         Ok(())
@@ -225,7 +231,7 @@ where
 
         loop {
             if this.pending_headers.is_empty() {
-                return Poll::Ready(Ok(std::mem::take(&mut this.buffer)))
+                return Poll::Ready(Ok(std::mem::take(&mut this.buffer)));
             }
 
             // Check if there is a pending requests. It might not exist if all
@@ -240,7 +246,7 @@ where
                     }
                     Err(error) => {
                         if error.is_channel_closed() {
-                            return Poll::Ready(Err(error.into()))
+                            return Poll::Ready(Err(error.into()));
                         }
 
                         this.on_error(error.into(), None);
@@ -284,7 +290,10 @@ mod tests {
 
         assert_eq!(
             fut.await.unwrap(),
-            headers.into_iter().map(BlockResponse::Empty).collect::<Vec<_>>()
+            headers
+                .into_iter()
+                .map(BlockResponse::Empty)
+                .collect::<Vec<_>>()
         );
         assert_eq!(client.times_requested(), 0);
     }
@@ -297,7 +306,9 @@ mod tests {
 
         let batch_size = 2;
         let client = Arc::new(
-            TestBodiesClient::default().with_bodies(bodies.clone()).with_max_batch_size(batch_size),
+            TestBodiesClient::default()
+                .with_bodies(bodies.clone())
+                .with_max_batch_size(batch_size),
         );
         let fut = BodiesRequestFuture::<Block, _>::new(
             client.clone(),

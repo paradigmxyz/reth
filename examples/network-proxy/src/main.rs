@@ -118,7 +118,10 @@ async fn run_peer(handle: NetworkHandle) -> eyre::Result<()> {
     // obtain the client that can emit requests
     let client: FetchClient = peer.fetch_client().await?;
 
-    let header = client.get_header(BlockHashOrNumber::Number(0)).await.unwrap();
+    let header = client
+        .get_header(BlockHashOrNumber::Number(0))
+        .await
+        .unwrap();
     println!("Got header: {:?}", header);
 
     // send a (bogus) hashes message

@@ -40,12 +40,18 @@ mod tests {
     fn create_op_state_provider() -> StateProviderTest {
         let mut db = StateProviderTest::default();
 
-        let l1_block_contract_account =
-            Account { balance: U256::ZERO, bytecode_hash: None, nonce: 1 };
+        let l1_block_contract_account = Account {
+            balance: U256::ZERO,
+            bytecode_hash: None,
+            nonce: 1,
+        };
 
         let mut l1_block_storage = HashMap::default();
         // base fee
-        l1_block_storage.insert(StorageKey::with_last_byte(1), StorageValue::from(1000000000));
+        l1_block_storage.insert(
+            StorageKey::with_last_byte(1),
+            StorageValue::from(1000000000),
+        );
         // l1 fee overhead
         l1_block_storage.insert(StorageKey::with_last_byte(5), StorageValue::from(188));
         // l1 fee scalar
@@ -59,7 +65,12 @@ mod tests {
             .unwrap(),
         );
 
-        db.insert_account(L1_BLOCK_CONTRACT, l1_block_contract_account, None, l1_block_storage);
+        db.insert_account(
+            L1_BLOCK_CONTRACT,
+            l1_block_contract_account,
+            None,
+            l1_block_storage,
+        );
 
         db
     }
@@ -87,10 +98,17 @@ mod tests {
         let mut db = create_op_state_provider();
 
         let addr = Address::ZERO;
-        let account = Account { balance: U256::MAX, ..Account::default() };
+        let account = Account {
+            balance: U256::MAX,
+            ..Account::default()
+        };
         db.insert_account(addr, account, None, HashMap::default());
 
-        let chain_spec = Arc::new(OpChainSpecBuilder::base_mainnet().regolith_activated().build());
+        let chain_spec = Arc::new(
+            OpChainSpecBuilder::base_mainnet()
+                .regolith_activated()
+                .build(),
+        );
 
         let tx = OpTransactionSigned::new_unhashed(
             OpTypedTransaction::Eip1559(TxEip1559 {
@@ -126,7 +144,10 @@ mod tests {
             .execute(&RecoveredBlock::new_unhashed(
                 Block {
                     header,
-                    body: BlockBody { transactions: vec![tx, tx_deposit], ..Default::default() },
+                    body: BlockBody {
+                        transactions: vec![tx, tx_deposit],
+                        ..Default::default()
+                    },
                 },
                 vec![addr, addr],
             ))
@@ -162,11 +183,18 @@ mod tests {
 
         let mut db = create_op_state_provider();
         let addr = Address::ZERO;
-        let account = Account { balance: U256::MAX, ..Account::default() };
+        let account = Account {
+            balance: U256::MAX,
+            ..Account::default()
+        };
 
         db.insert_account(addr, account, None, HashMap::default());
 
-        let chain_spec = Arc::new(OpChainSpecBuilder::base_mainnet().canyon_activated().build());
+        let chain_spec = Arc::new(
+            OpChainSpecBuilder::base_mainnet()
+                .canyon_activated()
+                .build(),
+        );
 
         let tx = OpTransactionSigned::new_unhashed(
             OpTypedTransaction::Eip1559(TxEip1559 {
@@ -202,7 +230,10 @@ mod tests {
             .execute(&RecoveredBlock::new_unhashed(
                 Block {
                     header,
-                    body: BlockBody { transactions: vec![tx, tx_deposit], ..Default::default() },
+                    body: BlockBody {
+                        transactions: vec![tx, tx_deposit],
+                        ..Default::default()
+                    },
                 },
                 vec![addr, addr],
             ))

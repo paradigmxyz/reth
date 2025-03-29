@@ -114,8 +114,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         // Does not do anything on windows.
         let _ = fdlimit::raise_fd_limit();
 
-        let Environment { provider_factory, config, data_dir } =
-            self.env.init::<N>(AccessRights::RW)?;
+        let Environment {
+            provider_factory,
+            config,
+            data_dir,
+        } = self.env.init::<N>(AccessRights::RW)?;
 
         let mut provider_rw = provider_factory.database_provider_rw()?;
         let components = components(provider_factory.chain_spec());
@@ -153,10 +156,16 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             MetricServer::new(config).serve().await?;
         }
 
-        let batch_size = self.batch_size.unwrap_or(self.to.saturating_sub(self.from) + 1);
+        let batch_size = self
+            .batch_size
+            .unwrap_or(self.to.saturating_sub(self.from) + 1);
 
         let etl_config = config.stages.etl.clone();
-        let prune_modes = config.prune.clone().map(|prune| prune.segments).unwrap_or_default();
+        let prune_modes = config
+            .prune
+            .clone()
+            .map(|prune| prune.segments)
+            .unwrap_or_default();
 
         let (mut exec_stage, mut unwind_stage): (Box<dyn Stage<_>>, Option<Box<dyn Stage<_>>>) =
             match self.stage {
@@ -187,10 +196,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
                     // Use `to` as the tip for the stage
                     let tip: P::BlockHeader = loop {
-                        match fetch_client.get_header(BlockHashOrNumber::Number(self.to)).await {
+                        match fetch_client
+                            .get_header(BlockHashOrNumber::Number(self.to))
+                            .await
+                        {
                             Ok(header) => {
                                 if let Some(header) = header.into_data() {
-                                    break header
+                                    break header;
                                 }
                             }
                             Err(error) if error.is_retryable() => {
@@ -217,7 +229,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
                     let mut config = config;
                     config.peers.trusted_nodes_only = self.network.trusted_only;
-                    config.peers.trusted_nodes.extend(self.network.trusted_peers.clone());
+                    config
+                        .peers
+                        .trusted_nodes
+                        .extend(self.network.trusted_peers.clone());
 
                     let network_secret_path = self
                         .network
@@ -246,11 +261,14 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             .with_stream_batch_size(batch_size as usize)
                             .with_request_limit(config.stages.bodies.downloader_request_limit)
                             .with_max_buffered_blocks_size_bytes(
-                                config.stages.bodies.downloader_max_buffered_blocks_size_bytes,
+                                config
+                                    .stages
+                                    .bodies
+                                    .downloader_max_buffered_blocks_size_bytes,
                             )
                             .with_concurrent_requests_range(
-                                config.stages.bodies.downloader_min_concurrent_requests..=
-                                    config.stages.bodies.downloader_max_concurrent_requests,
+                                config.stages.bodies.downloader_min_concurrent_requests
+                                    ..=config.stages.bodies.downloader_max_concurrent_requests,
                             )
                             .build(fetch_client, consensus.clone(), provider_factory.clone()),
                     );
@@ -279,7 +297,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 ),
                 StageEnum::TxLookup => (
                     Box::new(TransactionLookupStage::new(
-                        TransactionLookupConfig { chunk_size: batch_size },
+                        TransactionLookupConfig {
+                            chunk_size: batch_size,
+                        },
                         etl_config,
                         prune_modes.transaction_lookup,
                     )),
@@ -287,20 +307,28 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 ),
                 StageEnum::AccountHashing => (
                     Box::new(AccountHashingStage::new(
-                        HashingConfig { clean_threshold: 1, commit_threshold: batch_size },
+                        HashingConfig {
+                            clean_threshold: 1,
+                            commit_threshold: batch_size,
+                        },
                         etl_config,
                     )),
                     None,
                 ),
                 StageEnum::StorageHashing => (
                     Box::new(StorageHashingStage::new(
-                        HashingConfig { clean_threshold: 1, commit_threshold: batch_size },
+                        HashingConfig {
+                            clean_threshold: 1,
+                            commit_threshold: batch_size,
+                        },
                         etl_config,
                     )),
                     None,
                 ),
                 StageEnum::Merkle => (
-                    Box::new(MerkleStage::new_execution(config.stages.merkle.clean_threshold)),
+                    Box::new(MerkleStage::new_execution(
+                        config.stages.merkle.clean_threshold,
+                    )),
                     Some(Box::new(MerkleStage::default_unwind())),
                 ),
                 StageEnum::AccountHistory => (
@@ -325,7 +353,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             assert_eq!((*exec_stage).type_id(), (**unwind_stage).type_id());
         }
 
-        let checkpoint = provider_rw.get_stage_checkpoint(exec_stage.id())?.unwrap_or_default();
+        let checkpoint = provider_rw
+            .get_stage_checkpoint(exec_stage.id())?
+            .unwrap_or_default();
 
         let unwind_stage = unwind_stage.as_mut().unwrap_or(&mut exec_stage);
 
@@ -373,7 +403,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             }
 
             if done {
-                break
+                break;
             }
         }
         info!(target: "reth::cli", stage = %self.stage, time = ?start.elapsed(), "Finished stage");

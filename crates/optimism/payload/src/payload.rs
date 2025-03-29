@@ -103,7 +103,11 @@ impl<T: Decodable2718 + Send + Sync + Debug> PayloadBuilderAttributes
             timestamp: attributes.payload_attributes.timestamp,
             suggested_fee_recipient: attributes.payload_attributes.suggested_fee_recipient,
             prev_randao: attributes.payload_attributes.prev_randao,
-            withdrawals: attributes.payload_attributes.withdrawals.unwrap_or_default().into(),
+            withdrawals: attributes
+                .payload_attributes
+                .withdrawals
+                .unwrap_or_default()
+                .into(),
             parent_beacon_block_root: attributes.payload_attributes.parent_beacon_block_root,
         };
 
@@ -149,7 +153,10 @@ impl<OpTransactionSigned> From<EthPayloadBuilderAttributes>
     for OpPayloadBuilderAttributes<OpTransactionSigned>
 {
     fn from(value: EthPayloadBuilderAttributes) -> Self {
-        Self { payload_attributes: value, ..Default::default() }
+        Self {
+            payload_attributes: value,
+            ..Default::default()
+        }
     }
 }
 
@@ -176,7 +183,12 @@ impl<N: NodePrimitives> OpBuiltPayload<N> {
         fees: U256,
         executed_block: Option<ExecutedBlockWithTrieUpdates<N>>,
     ) -> Self {
-        Self { id, block, fees, executed_block }
+        Self {
+            id,
+            block,
+            fees,
+            executed_block,
+        }
     }
 
     /// Returns the identifier of the payload.
@@ -279,7 +291,11 @@ where
             // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
             should_override_builder: false,
             // No blobs for OP.
-            blobs_bundle: BlobsBundleV1 { blobs: vec![], commitments: vec![], proofs: vec![] },
+            blobs_bundle: BlobsBundleV1 {
+                blobs: vec![],
+                commitments: vec![],
+                proofs: vec![],
+            },
             parent_beacon_block_root,
         }
     }
@@ -317,7 +333,11 @@ where
             // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
             should_override_builder: false,
             // No blobs for OP.
-            blobs_bundle: BlobsBundleV1 { blobs: vec![], commitments: vec![], proofs: vec![] },
+            blobs_bundle: BlobsBundleV1 {
+                blobs: vec![],
+                commitments: vec![],
+                proofs: vec![],
+            },
             parent_beacon_block_root,
             execution_requests: vec![],
         }
@@ -337,7 +357,12 @@ pub(crate) fn payload_id_optimism(
     hasher.update(parent.as_slice());
     hasher.update(&attributes.payload_attributes.timestamp.to_be_bytes()[..]);
     hasher.update(attributes.payload_attributes.prev_randao.as_slice());
-    hasher.update(attributes.payload_attributes.suggested_fee_recipient.as_slice());
+    hasher.update(
+        attributes
+            .payload_attributes
+            .suggested_fee_recipient
+            .as_slice(),
+    );
     if let Some(withdrawals) = &attributes.payload_attributes.withdrawals {
         let mut buf = Vec::new();
         withdrawals.encode(&mut buf);
@@ -349,9 +374,18 @@ pub(crate) fn payload_id_optimism(
     }
 
     let no_tx_pool = attributes.no_tx_pool.unwrap_or_default();
-    if no_tx_pool || attributes.transactions.as_ref().is_some_and(|txs| !txs.is_empty()) {
+    if no_tx_pool
+        || attributes
+            .transactions
+            .as_ref()
+            .is_some_and(|txs| !txs.is_empty())
+    {
         hasher.update([no_tx_pool as u8]);
-        let txs_len = attributes.transactions.as_ref().map(|txs| txs.len()).unwrap_or_default();
+        let txs_len = attributes
+            .transactions
+            .as_ref()
+            .map(|txs| txs.len())
+            .unwrap_or_default();
         hasher.update(&txs_len.to_be_bytes()[..]);
         if let Some(txs) = &attributes.transactions {
             for tx in txs {
@@ -391,8 +425,11 @@ mod tests {
     fn test_payload_id_parity_op_geth() {
         // INFO rollup_boost::server:received fork_choice_updated_v3 from builder and l2_client
         // payload_id_builder="0x6ef26ca02318dcf9" payload_id_l2="0x03d2dae446d2a86a"
-        let expected =
-            PayloadId::new(FixedBytes::<8>::from_str("0x03d2dae446d2a86a").unwrap().into());
+        let expected = PayloadId::new(
+            FixedBytes::<8>::from_str("0x03d2dae446d2a86a")
+                .unwrap()
+                .into(),
+        );
         let attrs = OpPayloadAttributes {
             payload_attributes: PayloadAttributes {
                 timestamp: 1728933301,
@@ -426,14 +463,23 @@ mod tests {
                 ..Default::default()
             };
         let extra_data = attributes.get_holocene_extra_data(BaseFeeParams::new(80, 60));
-        assert_eq!(extra_data.unwrap(), Bytes::copy_from_slice(&[0, 0, 0, 0, 8, 0, 0, 0, 8]));
+        assert_eq!(
+            extra_data.unwrap(),
+            Bytes::copy_from_slice(&[0, 0, 0, 0, 8, 0, 0, 0, 8])
+        );
     }
 
     #[test]
     fn test_get_extra_data_post_holocene_default() {
         let attributes: OpPayloadBuilderAttributes<OpTransactionSigned> =
-            OpPayloadBuilderAttributes { eip_1559_params: Some(B64::ZERO), ..Default::default() };
+            OpPayloadBuilderAttributes {
+                eip_1559_params: Some(B64::ZERO),
+                ..Default::default()
+            };
         let extra_data = attributes.get_holocene_extra_data(BaseFeeParams::new(80, 60));
-        assert_eq!(extra_data.unwrap(), Bytes::copy_from_slice(&[0, 0, 0, 0, 80, 0, 0, 0, 60]));
+        assert_eq!(
+            extra_data.unwrap(),
+            Bytes::copy_from_slice(&[0, 0, 0, 0, 80, 0, 0, 0, 60])
+        );
     }
 }

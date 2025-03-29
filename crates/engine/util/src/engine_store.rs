@@ -60,7 +60,10 @@ impl EngineMessageStore {
         T: PayloadTypes,
     {
         fs::create_dir_all(&self.path)?; // ensure that store path had been created
-        let timestamp = received_at.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis();
+        let timestamp = received_at
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
         match msg {
             BeaconEngineMessage::ForkchoiceUpdated {
                 state,
@@ -100,7 +103,10 @@ impl EngineMessageStore {
             let filename = entry.file_name();
             if let Some(filename) = filename.to_str().filter(|n| n.ends_with(".json")) {
                 if let Some(Ok(timestamp)) = filename.split('-').next().map(|n| n.parse::<u64>()) {
-                    filenames_by_ts.entry(timestamp).or_default().push(entry.path());
+                    filenames_by_ts
+                        .entry(timestamp)
+                        .or_default()
+                        .push(entry.path());
                     tracing::debug!(target: "engine::store", timestamp, filename, "Queued engine API message");
                 } else {
                     tracing::warn!(target: "engine::store", %filename, "Could not parse timestamp from filename")
@@ -128,7 +134,10 @@ pub struct EngineStoreStream<S> {
 impl<S> EngineStoreStream<S> {
     /// Create new engine store stream wrapper.
     pub const fn new(stream: S, path: PathBuf) -> Self {
-        Self { stream, store: EngineMessageStore::new(path) }
+        Self {
+            stream,
+            store: EngineMessageStore::new(path),
+        }
     }
 }
 

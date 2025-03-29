@@ -212,7 +212,10 @@ impl<T: DupSort> DbDupCursorRO<T> for CursorMock {
         _key: Option<<T>::Key>,
         _subkey: Option<<T as DupSort>::SubKey>,
     ) -> Result<DupWalker<'_, T, Self>, DatabaseError> {
-        Ok(DupWalker { cursor: self, start: None })
+        Ok(DupWalker {
+            cursor: self,
+            start: None,
+        })
     }
 }
 

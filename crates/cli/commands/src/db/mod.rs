@@ -55,7 +55,9 @@ pub enum Subcommands {
 /// `db_ro_exec` opens a database in read-only mode, and then execute with the provided command
 macro_rules! db_ro_exec {
     ($env:expr, $tool:ident, $N:ident, $command:block) => {
-        let Environment { provider_factory, .. } = $env.init::<$N>(AccessRights::RO)?;
+        let Environment {
+            provider_factory, ..
+        } = $env.init::<$N>(AccessRights::RO)?;
 
         let $tool = DbTool::new(provider_factory.clone())?;
         $command;
@@ -65,7 +67,11 @@ macro_rules! db_ro_exec {
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
     /// Execute `db` command
     pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(self) -> eyre::Result<()> {
-        let data_dir = self.env.datadir.clone().resolve_datadir(self.env.chain.chain());
+        let data_dir = self
+            .env
+            .datadir
+            .clone()
+            .resolve_datadir(self.env.chain.chain());
         let db_path = data_dir.db();
         let static_files_path = data_dir.static_files();
         let exex_wal_path = data_dir.exex_wal();
@@ -115,20 +121,26 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                     io::stdout().flush().unwrap();
 
                     let mut input = String::new();
-                    io::stdin().read_line(&mut input).expect("Failed to read line");
+                    io::stdin()
+                        .read_line(&mut input)
+                        .expect("Failed to read line");
 
                     if !input.trim().eq_ignore_ascii_case("y") {
                         println!("Database drop aborted!");
-                        return Ok(())
+                        return Ok(());
                     }
                 }
 
-                let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
+                let Environment {
+                    provider_factory, ..
+                } = self.env.init::<N>(AccessRights::RW)?;
                 let tool = DbTool::new(provider_factory)?;
                 tool.drop(db_path, static_files_path, exex_wal_path)?;
             }
             Subcommands::Clear(command) => {
-                let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
+                let Environment {
+                    provider_factory, ..
+                } = self.env.init::<N>(AccessRights::RW)?;
                 command.execute(provider_factory)?;
             }
             Subcommands::Version => {
@@ -171,6 +183,12 @@ mod tests {
             "stats",
         ])
         .unwrap();
-        assert_eq!(cmd.env.datadir.resolve_datadir(cmd.env.chain.chain).as_ref(), Path::new(&path));
+        assert_eq!(
+            cmd.env
+                .datadir
+                .resolve_datadir(cmd.env.chain.chain)
+                .as_ref(),
+            Path::new(&path)
+        );
     }
 }

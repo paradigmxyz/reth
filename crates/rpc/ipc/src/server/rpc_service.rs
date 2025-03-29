@@ -42,7 +42,12 @@ impl RpcService {
         conn_id: ConnectionId,
         cfg: RpcServiceCfg,
     ) -> Self {
-        Self { methods, max_response_body_size, conn_id, cfg }
+        Self {
+            methods,
+            max_response_body_size,
+            conn_id,
+            cfg,
+        }
     }
 }
 

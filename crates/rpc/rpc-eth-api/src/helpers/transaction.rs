@@ -107,10 +107,12 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     ) -> impl Future<Output = Result<Option<Bytes>, Self::Error>> + Send {
         async move {
             // Note: this is mostly used to fetch pooled transactions so we check the pool first
-            if let Some(tx) =
-                self.pool().get_pooled_transaction_element(hash).map(|tx| tx.encoded_2718().into())
+            if let Some(tx) = self
+                .pool()
+                .get_pooled_transaction_element(hash)
+                .map(|tx| tx.encoded_2718().into())
             {
-                return Ok(Some(tx))
+                return Ok(Some(tx));
             }
 
             self.spawn_blocking_io(move |ref this| {
@@ -153,9 +155,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     {
         async move {
             match self.load_transaction_and_receipt(hash).await? {
-                Some((tx, meta, receipt)) => {
-                    self.build_transaction_receipt(tx, meta, receipt).await.map(Some)
-                }
+                Some((tx, meta, receipt)) => self
+                    .build_transaction_receipt(tx, meta, receipt)
+                    .await
+                    .map(Some),
                 None => Ok(None),
             }
         }
@@ -168,7 +171,11 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         hash: TxHash,
     ) -> impl Future<
         Output = Result<
-            Option<(ProviderTx<Self::Provider>, TransactionMeta, ProviderReceipt<Self::Provider>)>,
+            Option<(
+                ProviderTx<Self::Provider>,
+                TransactionMeta,
+                ProviderReceipt<Self::Provider>,
+            )>,
             Self::Error,
         >,
     > + Send
@@ -185,7 +192,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 None => return Ok(None),
             };
 
-            let receipt = match provider.receipt_by_hash(hash).map_err(Self::Error::from_eth_err)? {
+            let receipt = match provider
+                .receipt_by_hash(hash)
+                .map_err(Self::Error::from_eth_err)?
+            {
                 Some(recpt) => recpt,
                 None => return Ok(None),
             };
@@ -220,8 +230,9 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     };
 
                     return Ok(Some(
-                        self.tx_resp_builder().fill(tx.clone().with_signer(*signer), tx_info)?,
-                    ))
+                        self.tx_resp_builder()
+                            .fill(tx.clone().with_signer(*signer), tx_info)?,
+                    ));
                 }
             }
 
@@ -255,7 +266,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 return Ok(None);
             }
 
-            let highest = self.transaction_count(sender, None).await?.saturating_to::<u64>();
+            let highest = self
+                .transaction_count(sender, None)
+                .await?
+                .saturating_to::<u64>();
 
             // If the nonce is higher or equal to the highest nonce, the transaction is pending or
             // not exists.
@@ -270,8 +284,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             // Perform a binary search over the block range to find the block in which the sender's
             // nonce reached the requested nonce.
             let num = binary_search::<_, _, Self::Error>(1, high, |mid| async move {
-                let mid_nonce =
-                    self.transaction_count(sender, Some(mid.into())).await?.saturating_to::<u64>();
+                let mid_nonce = self
+                    .transaction_count(sender, Some(mid.into()))
+                    .await?
+                    .saturating_to::<u64>();
 
                 Ok(mid_nonce > nonce)
             })
@@ -297,7 +313,8 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                                 base_fee: base_fee_per_gas,
                                 index: Some(index as u64),
                             };
-                            self.tx_resp_builder().fill(tx.clone().with_signer(*signer), tx_info)
+                            self.tx_resp_builder()
+                                .fill(tx.clone().with_signer(*signer), tx_info)
                         })
                 })
                 .ok_or(EthApiError::HeaderNotFound(block_id))?
@@ -319,7 +336,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         async move {
             if let Some(block) = self.recovered_block(block_id).await? {
                 if let Some(tx) = block.body().transactions().get(index) {
-                    return Ok(Some(tx.encoded_2718().into()))
+                    return Ok(Some(tx.encoded_2718().into()));
                 }
             }
 
@@ -343,7 +360,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             };
 
             if self.find_signer(&from).is_err() {
-                return Err(SignError::NoAccount.into_eth_err())
+                return Err(SignError::NoAccount.into_eth_err());
             }
 
             // set nonce if not already set before
@@ -355,8 +372,9 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             let chain_id = self.chain_id();
             request.chain_id = Some(chain_id.to());
 
-            let estimated_gas =
-                self.estimate_gas_at(request.clone(), BlockId::pending(), None).await?;
+            let estimated_gas = self
+                .estimate_gas_at(request.clone(), BlockId::pending(), None)
+                .await?;
             let gas_limit = estimated_gas;
             request.set_gas_limit(gas_limit.to());
 
@@ -422,7 +440,11 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 None => return Err(SignError::NoAccount.into_eth_err()),
             };
 
-            Ok(self.sign_request(&from, request).await?.encoded_2718().into())
+            Ok(self
+                .sign_request(&from, request)
+                .await?
+                .encoded_2718()
+                .into())
         }
     }
 
@@ -501,8 +523,10 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
 
             if resp.is_none() {
                 // tx not found on disk, check pool
-                if let Some(tx) =
-                    self.pool().get(&hash).map(|tx| tx.transaction.clone().into_consensus())
+                if let Some(tx) = self
+                    .pool()
+                    .get(&hash)
+                    .map(|tx| tx.transaction.clone().into_consensus())
                 {
                     resp = Some(TransactionSource::Pool(tx.into()));
                 }
@@ -526,12 +550,15 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
         >,
     > + Send {
         async move {
-            Ok(self.transaction_by_hash(transaction_hash).await?.map(|tx| match tx {
-                tx @ TransactionSource::Pool(_) => (tx, BlockId::pending()),
-                tx @ TransactionSource::Block { block_hash, .. } => {
-                    (tx, BlockId::Hash(block_hash.into()))
-                }
-            }))
+            Ok(self
+                .transaction_by_hash(transaction_hash)
+                .await?
+                .map(|tx| match tx {
+                    tx @ TransactionSource::Pool(_) => (tx, BlockId::pending()),
+                    tx @ TransactionSource::Block { block_hash, .. } => {
+                        (tx, BlockId::Hash(block_hash.into()))
+                    }
+                }))
         }
     }
 

@@ -32,7 +32,12 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
         extensions: Vec<(String, Box<dyn BoxedLaunchExEx<Node>>)>,
         config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
     ) -> Self {
-        Self { head, extensions, components, config_container }
+        Self {
+            head,
+            extensions,
+            components,
+            config_container,
+        }
     }
 
     /// Launches all execution extensions.
@@ -42,12 +47,17 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
     pub async fn launch(
         self,
     ) -> eyre::Result<Option<ExExManagerHandle<PrimitivesTy<Node::Types>>>> {
-        let Self { head, extensions, components, config_container } = self;
+        let Self {
+            head,
+            extensions,
+            components,
+            config_container,
+        } = self;
         let head = BlockNumHash::new(head.number, head.hash);
 
         if extensions.is_empty() {
             // nothing to launch
-            return Ok(None)
+            return Ok(None);
         }
 
         info!(target: "reth::cli", "Loading ExEx Write-Ahead Log...");
@@ -119,9 +129,11 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
             components.provider().finalized_block_stream(),
         );
         let exex_manager_handle = exex_manager.handle();
-        components.task_executor().spawn_critical("exex manager", async move {
-            exex_manager.await.expect("exex manager crashed");
-        });
+        components
+            .task_executor()
+            .spawn_critical("exex manager", async move {
+                exex_manager.await.expect("exex manager crashed");
+            });
 
         // send notifications from the blockchain tree to exex manager
         let mut canon_state_notifications = components.provider().subscribe_to_canonical_state();
@@ -148,7 +160,10 @@ impl<Node: FullNodeComponents> Debug for ExExLauncher<Node> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ExExLauncher")
             .field("head", &self.head)
-            .field("extensions", &self.extensions.iter().map(|(id, _)| id).collect::<Vec<_>>())
+            .field(
+                "extensions",
+                &self.extensions.iter().map(|(id, _)| id).collect::<Vec<_>>(),
+            )
             .field("components", &"...")
             .field("config_container", &self.config_container)
             .finish()

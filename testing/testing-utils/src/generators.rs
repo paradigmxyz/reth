@@ -99,7 +99,12 @@ pub fn random_header_range<R: Rng>(
         headers.push(random_header(
             rng,
             idx,
-            Some(headers.last().map(|h: &SealedHeader| h.hash()).unwrap_or(head)),
+            Some(
+                headers
+                    .last()
+                    .map(|h: &SealedHeader| h.hash())
+                    .unwrap_or(head),
+            ),
         ));
     }
     headers
@@ -111,7 +116,10 @@ pub fn random_block_with_parent<R: Rng>(
     number: u64,
     parent: Option<B256>,
 ) -> BlockWithParent {
-    BlockWithParent { parent: parent.unwrap_or_default(), block: NumHash::new(number, rng.gen()) }
+    BlockWithParent {
+        parent: parent.unwrap_or_default(),
+        block: NumHash::new(number, rng.gen()),
+    }
 }
 
 /// Generate a random [`SealedHeader`].
@@ -165,8 +173,11 @@ pub fn sign_tx_with_random_key_pair<R: Rng>(rng: &mut R, tx: Transaction) -> Tra
 
 /// Signs the [Transaction] with the given key pair.
 pub fn sign_tx_with_key_pair(key_pair: Keypair, tx: Transaction) -> TransactionSigned {
-    let signature =
-        sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
+    let signature = sign_message(
+        B256::from_slice(&key_pair.secret_bytes()[..]),
+        tx.signature_hash(),
+    )
+    .unwrap();
 
     TransactionSigned::new_unhashed(tx, signature)
 }
@@ -196,10 +207,14 @@ pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams)
     let tx_count = block_params.tx_count.unwrap_or_else(|| rng.gen::<u8>());
     let transactions: Vec<TransactionSigned> =
         (0..tx_count).map(|_| random_signed_tx(rng)).collect();
-    let total_gas = transactions.iter().fold(0, |sum, tx| sum + tx.transaction().gas_limit());
+    let total_gas = transactions
+        .iter()
+        .fold(0, |sum, tx| sum + tx.transaction().gas_limit());
 
     // Generate ommers
-    let ommers_count = block_params.ommers_count.unwrap_or_else(|| rng.gen_range(0..2));
+    let ommers_count = block_params
+        .ommers_count
+        .unwrap_or_else(|| rng.gen_range(0..2));
     let ommers = (0..ommers_count)
         .map(|_| random_header(rng, number, block_params.parent).unseal())
         .collect::<Vec<_>>();
@@ -218,7 +233,9 @@ pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams)
             })
             .collect::<Vec<_>>()
     });
-    let withdrawals_root = withdrawals.as_ref().map(|w| proofs::calculate_withdrawals_root(w));
+    let withdrawals_root = withdrawals
+        .as_ref()
+        .map(|w| proofs::calculate_withdrawals_root(w));
 
     let header = Header {
         parent_hash: block_params.parent.unwrap_or_default(),
@@ -236,7 +253,11 @@ pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams)
 
     Block {
         header,
-        body: BlockBody { transactions, ommers, withdrawals: withdrawals.map(Withdrawals::new) },
+        body: BlockBody {
+            transactions,
+            ommers,
+            withdrawals: withdrawals.map(Withdrawals::new),
+        },
     }
     .seal_slow()
 }
@@ -256,17 +277,24 @@ pub fn random_block_range<R: Rng>(
         Vec::with_capacity(block_numbers.end().saturating_sub(*block_numbers.start()) as usize);
     for idx in block_numbers {
         let tx_count = block_range_params.tx_count.clone().sample_single(rng);
-        let requests_count =
-            block_range_params.requests_count.clone().map(|r| r.sample_single(rng));
-        let withdrawals_count =
-            block_range_params.withdrawals_count.clone().map(|r| r.sample_single(rng));
+        let requests_count = block_range_params
+            .requests_count
+            .clone()
+            .map(|r| r.sample_single(rng));
+        let withdrawals_count = block_range_params
+            .withdrawals_count
+            .clone()
+            .map(|r| r.sample_single(rng));
         let parent = block_range_params.parent.unwrap_or_default();
         blocks.push(random_block(
             rng,
             idx,
             BlockParams {
                 parent: Some(
-                    blocks.last().map(|block: &SealedBlock| block.hash()).unwrap_or(parent),
+                    blocks
+                        .last()
+                        .map(|block: &SealedBlock| block.hash())
+                        .unwrap_or(parent),
                 ),
                 tx_count: Some(tx_count),
                 ommers_count: None,
@@ -299,7 +327,12 @@ where
 {
     let mut state: BTreeMap<_, _> = accounts
         .into_iter()
-        .map(|(addr, (acc, st))| (addr, (acc, st.into_iter().map(|e| (e.key, e.value)).collect())))
+        .map(|(addr, (acc, st))| {
+            (
+                addr,
+                (acc, st.into_iter().map(|e| (e.key, e.value)).collect()),
+            )
+        })
         .collect();
 
     let valid_addresses = state.keys().copied().collect::<Vec<_>>();
@@ -331,13 +364,16 @@ where
                 let old = if entry.value.is_zero() {
                     let old = storage.remove(&entry.key);
                     if matches!(old, Some(U256::ZERO)) {
-                        return None
+                        return None;
                     }
                     old
                 } else {
                     storage.insert(entry.key, entry.value)
                 };
-                Some(StorageEntry { value: old.unwrap_or(U256::ZERO), ..entry })
+                Some(StorageEntry {
+                    value: old.unwrap_or(U256::ZERO),
+                    ..entry
+                })
             })
             .collect();
         old_entries.sort_by_key(|entry| entry.key);
@@ -406,7 +442,14 @@ pub fn random_eoa_account<R: Rng>(rng: &mut R) -> (Address, Account) {
     let balance = U256::from(rng.gen::<u32>());
     let addr = rng.gen();
 
-    (addr, Account { nonce, balance, bytecode_hash: None })
+    (
+        addr,
+        Account {
+            nonce,
+            balance,
+            bytecode_hash: None,
+        },
+    )
 }
 
 /// Generate random Externally Owned Accounts
@@ -427,7 +470,10 @@ pub fn random_contract_account_range<R: Rng>(
     for _ in acc_range {
         let (address, eoa_account) = random_eoa_account(rng);
         // todo: can a non-eoa account have a nonce > 0?
-        let account = Account { bytecode_hash: Some(rng.gen()), ..eoa_account };
+        let account = Account {
+            bytecode_hash: Some(rng.gen()),
+            ..eoa_account
+        };
         accounts.push((address, account))
     }
     accounts
@@ -447,7 +493,9 @@ pub fn random_receipt<R: Rng>(
         success,
         cumulative_gas_used: rng.gen_range(0..=transaction.gas_limit()),
         logs: if success {
-            (0..logs_count).map(|_| random_log(rng, None, None)).collect()
+            (0..logs_count)
+                .map(|_| random_log(rng, None, None))
+                .collect()
         } else {
             vec![]
         },
@@ -461,8 +509,13 @@ pub fn random_log<R: Rng>(rng: &mut R, address: Option<Address>, topics_count: O
     let topics_count = topics_count.unwrap_or_else(|| rng.gen()) as usize;
     Log::new_unchecked(
         address.unwrap_or_else(|| rng.gen()),
-        std::iter::repeat_with(|| rng.gen()).take(topics_count).collect(),
-        std::iter::repeat_with(|| rng.gen()).take(data_byte_count).collect::<Vec<_>>().into(),
+        std::iter::repeat_with(|| rng.gen())
+            .take(topics_count)
+            .collect(),
+        std::iter::repeat_with(|| rng.gen())
+            .take(data_byte_count)
+            .collect::<Vec<_>>()
+            .into(),
     )
 }
 
@@ -498,9 +551,11 @@ mod tests {
         for _ in 0..100 {
             let key_pair = Keypair::new(&secp, &mut rand::thread_rng());
 
-            let signature =
-                sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), signature_hash)
-                    .unwrap();
+            let signature = sign_message(
+                B256::from_slice(&key_pair.secret_bytes()[..]),
+                signature_hash,
+            )
+            .unwrap();
 
             let signed = TransactionSigned::new_unhashed(tx.clone(), signature);
             let recovered = signed.recover_signer().unwrap();

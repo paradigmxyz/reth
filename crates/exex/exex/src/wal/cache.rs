@@ -59,7 +59,7 @@ impl BlockCache {
                 debug_assert_eq!(popped_block, block);
                 file_ids.insert(file_id);
             } else {
-                break
+                break;
             }
         }
 
@@ -73,8 +73,9 @@ impl BlockCache {
                         .map_or(block.block.number, |lowest| block.block.number.min(lowest)),
                 );
                 highest_committed_block_height = Some(
-                    highest_committed_block_height
-                        .map_or(block.block.number, |highest| block.block.number.max(highest)),
+                    highest_committed_block_height.map_or(block.block.number, |highest| {
+                        block.block.number.max(highest)
+                    }),
                 );
             }
 
@@ -101,10 +102,14 @@ impl BlockCache {
         let reverted_chain = notification.reverted_chain();
         let committed_chain = notification.committed_chain();
 
-        let max_block =
-            reverted_chain.iter().chain(&committed_chain).map(|chain| chain.tip().number()).max();
+        let max_block = reverted_chain
+            .iter()
+            .chain(&committed_chain)
+            .map(|chain| chain.tip().number())
+            .max();
         if let Some(max_block) = max_block {
-            self.notification_max_blocks.push(Reverse((max_block, file_id)));
+            self.notification_max_blocks
+                .push(Reverse((max_block, file_id)));
         }
 
         if let Some(committed_chain) = &committed_chain {
@@ -113,7 +118,8 @@ impl BlockCache {
                     block: (block.number(), block.hash()).into(),
                     parent_hash: block.parent_hash(),
                 };
-                self.committed_blocks.insert(block.hash(), (file_id, cached_block));
+                self.committed_blocks
+                    .insert(block.hash(), (file_id, cached_block));
             }
 
             self.highest_committed_block_height = Some(committed_chain.tip().number());

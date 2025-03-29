@@ -50,10 +50,10 @@ pub trait StateProvider:
 
         if let Some(code_hash) = acc.bytecode_hash {
             if code_hash == KECCAK_EMPTY {
-                return Ok(None)
+                return Ok(None);
             }
             // Get the code from the code hash
-            return self.bytecode_by_hash(&code_hash)
+            return self.bytecode_by_hash(&code_hash);
         }
 
         // Return `None` if no code hash is set
@@ -67,7 +67,8 @@ pub trait StateProvider:
         // Get basic account information
         // Returns None if acc doesn't exist
 
-        self.basic_account(addr)?.map_or_else(|| Ok(None), |acc| Ok(Some(acc.balance)))
+        self.basic_account(addr)?
+            .map_or_else(|| Ok(None), |acc| Ok(Some(acc.balance)))
     }
 
     /// Get account nonce by its address.
@@ -76,7 +77,8 @@ pub trait StateProvider:
     fn account_nonce(&self, addr: &Address) -> ProviderResult<Option<u64>> {
         // Get basic account information
         // Returns None if acc doesn't exist
-        self.basic_account(addr)?.map_or_else(|| Ok(None), |acc| Ok(Some(acc.nonce)))
+        self.basic_account(addr)?
+            .map_or_else(|| Ok(None), |acc| Ok(Some(acc.nonce)))
     }
 }
 

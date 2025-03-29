@@ -157,8 +157,11 @@ impl<H: NippyJarHeader> NippyJar<H> {
 
     /// Adds [`compression::Zstd`] compression.
     pub fn with_zstd(mut self, use_dict: bool, max_dict_size: usize) -> Self {
-        self.compressor =
-            Some(Compressors::Zstd(compression::Zstd::new(use_dict, max_dict_size, self.columns)));
+        self.compressor = Some(Compressors::Zstd(compression::Zstd::new(
+            use_dict,
+            max_dict_size,
+            self.columns,
+        )));
         self
     }
 
@@ -236,9 +239,12 @@ impl<H: NippyJarHeader> NippyJar<H> {
     pub fn delete(self) -> Result<(), NippyJarError> {
         // TODO(joshie): ensure consistency on unexpected shutdown
 
-        for path in
-            [self.data_path().into(), self.index_path(), self.offsets_path(), self.config_path()]
-        {
+        for path in [
+            self.data_path().into(),
+            self.index_path(),
+            self.offsets_path(),
+            self.config_path(),
+        ] {
             if path.exists() {
                 reth_fs_util::remove_file(path)?;
             }
@@ -254,9 +260,10 @@ impl<H: NippyJarHeader> NippyJar<H> {
 
     /// Writes all necessary configuration to file.
     fn freeze_config(&self) -> Result<(), NippyJarError> {
-        Ok(reth_fs_util::atomic_write_file(&self.config_path(), |file| {
-            bincode::serialize_into(file, &self)
-        })?)
+        Ok(reth_fs_util::atomic_write_file(
+            &self.config_path(),
+            |file| bincode::serialize_into(file, &self),
+        )?)
     }
 }
 
@@ -305,12 +312,15 @@ impl<H: NippyJarHeader> NippyJar<H> {
         columns: &[impl IntoIterator<Item = ColumnResult<Vec<u8>>>],
     ) -> Result<(), NippyJarError> {
         if columns.len() != self.columns {
-            return Err(NippyJarError::ColumnLenMismatch(self.columns, columns.len()))
+            return Err(NippyJarError::ColumnLenMismatch(
+                self.columns,
+                columns.len(),
+            ));
         }
 
         if let Some(compression) = &self.compressor {
             if !compression.is_ready() {
-                return Err(NippyJarError::CompressorNotReady)
+                return Err(NippyJarError::CompressorNotReady);
             }
         }
 
@@ -353,12 +363,18 @@ impl DataReader {
 
         // Ensure that the size of an offset is at most 8 bytes.
         if offset_size > 8 {
-            return Err(NippyJarError::OffsetSizeTooBig { offset_size })
+            return Err(NippyJarError::OffsetSizeTooBig { offset_size });
         } else if offset_size == 0 {
-            return Err(NippyJarError::OffsetSizeTooSmall { offset_size })
+            return Err(NippyJarError::OffsetSizeTooSmall { offset_size });
         }
 
-        Ok(Self { data_file, data_mmap, offset_file, offset_size, offset_mmap })
+        Ok(Self {
+            data_file,
+            data_mmap,
+            offset_file,
+            offset_size,
+            offset_mmap,
+        })
     }
 
     /// Returns the offset for the requested data index
@@ -385,8 +401,10 @@ impl DataReader {
     /// Returns total number of offsets in the file.
     /// The size of one offset is determined by the file itself.
     pub fn offsets_count(&self) -> Result<usize, NippyJarError> {
-        Ok((self.offset_file.metadata()?.len().saturating_sub(1) / self.offset_size as u64)
-            as usize)
+        Ok(
+            (self.offset_file.metadata()?.len().saturating_sub(1) / self.offset_size as u64)
+                as usize,
+        )
     }
 
     /// Reads one offset-sized (determined by the offset file) u64 at the provided index.
@@ -395,7 +413,7 @@ impl DataReader {
 
         let offset_end = index.saturating_add(self.offset_size as usize);
         if offset_end > self.offset_mmap.len() {
-            return Err(NippyJarError::OffsetOutOfBounds { index })
+            return Err(NippyJarError::OffsetOutOfBounds { index });
         }
 
         buffer[..self.offset_size as usize].copy_from_slice(&self.offset_mmap[index..offset_end]);
@@ -433,7 +451,9 @@ mod tests {
         let num_rows = 100;
 
         let mut vec: Vec<u8> = vec![0; value_length];
-        let mut rng = seed.map(SmallRng::seed_from_u64).unwrap_or_else(SmallRng::from_entropy);
+        let mut rng = seed
+            .map(SmallRng::seed_from_u64)
+            .unwrap_or_else(SmallRng::from_entropy);
 
         let mut gen = || {
             (0..num_rows)
@@ -457,7 +477,10 @@ mod tests {
         let jar = NippyJar::new_without_header(23, file.path()).with_lz4();
         jar.freeze_config().unwrap();
 
-        let mut config_file = OpenOptions::new().read(true).open(jar.config_path()).unwrap();
+        let mut config_file = OpenOptions::new()
+            .read(true)
+            .open(jar.config_path())
+            .unwrap();
         let config_file_len = config_file.metadata().unwrap().len();
         assert_eq!(config_file_len, 37);
 
@@ -493,7 +516,10 @@ mod tests {
         assert!(nippy.compressor().is_some());
 
         if let Some(Compressors::Zstd(zstd)) = &mut nippy.compressor_mut() {
-            assert!(matches!(zstd.compressors(), Err(NippyJarError::CompressorNotReady)));
+            assert!(matches!(
+                zstd.compressors(),
+                Err(NippyJarError::CompressorNotReady)
+            ));
 
             // Make sure the number of column iterators match the initial set up ones.
             assert!(matches!(
@@ -505,7 +531,10 @@ mod tests {
         // If ZSTD is enabled, do not write to the file unless the column dictionaries have been
         // calculated.
         assert!(matches!(
-            nippy.freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows),
+            nippy.freeze(
+                vec![clone_with_result(&col1), clone_with_result(&col2)],
+                num_rows
+            ),
             Err(NippyJarError::CompressorNotReady)
         ));
 
@@ -513,7 +542,9 @@ mod tests {
             NippyJar::new_without_header(num_columns, file_path.path()).with_zstd(true, 5000);
         assert!(nippy.compressor().is_some());
 
-        nippy.prepare_compression(vec![col1.clone(), col2.clone()]).unwrap();
+        nippy
+            .prepare_compression(vec![col1.clone(), col2.clone()])
+            .unwrap();
 
         if let Some(Compressors::Zstd(zstd)) = &nippy.compressor() {
             assert!(matches!(
@@ -523,7 +554,10 @@ mod tests {
         }
 
         let nippy = nippy
-            .freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows)
+            .freeze(
+                vec![clone_with_result(&col1), clone_with_result(&col2)],
+                num_rows,
+            )
             .unwrap();
 
         let loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
@@ -566,7 +600,10 @@ mod tests {
         assert!(nippy.compressor().is_some());
 
         let nippy = nippy
-            .freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows)
+            .freeze(
+                vec![clone_with_result(&col1), clone_with_result(&col2)],
+                num_rows,
+            )
             .unwrap();
 
         let loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
@@ -604,7 +641,10 @@ mod tests {
         assert!(nippy.compressor().is_some());
 
         let nippy = nippy
-            .freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows)
+            .freeze(
+                vec![clone_with_result(&col1), clone_with_result(&col2)],
+                num_rows,
+            )
             .unwrap();
 
         let loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
@@ -647,13 +687,19 @@ mod tests {
 
         // Create file
         {
-            let mut nippy =
-                NippyJar::new(num_columns, file_path.path(), BlockJarHeader { block_start })
-                    .with_zstd(true, 5000);
+            let mut nippy = NippyJar::new(
+                num_columns,
+                file_path.path(),
+                BlockJarHeader { block_start },
+            )
+            .with_zstd(true, 5000);
 
             nippy.prepare_compression(data.clone()).unwrap();
             nippy
-                .freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows)
+                .freeze(
+                    vec![clone_with_result(&col1), clone_with_result(&col2)],
+                    num_rows,
+                )
                 .unwrap();
         }
 
@@ -704,7 +750,10 @@ mod tests {
                 NippyJar::new_without_header(num_columns, file_path.path()).with_zstd(true, 5000);
             nippy.prepare_compression(data).unwrap();
             nippy
-                .freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows)
+                .freeze(
+                    vec![clone_with_result(&col1), clone_with_result(&col2)],
+                    num_rows,
+                )
                 .unwrap();
         }
 
@@ -729,7 +778,10 @@ mod tests {
                         .row_by_number_with_cols(*row_num, BLOCKS_FULL_MASK)
                         .unwrap()
                         .unwrap();
-                    assert_eq!((&row_by_num[0].to_vec(), &row_by_num[1].to_vec()), (*v0, *v1));
+                    assert_eq!(
+                        (&row_by_num[0].to_vec(), &row_by_num[1].to_vec()),
+                        (*v0, *v1)
+                    );
                 }
 
                 // Read first column only: `Block`
@@ -824,10 +876,16 @@ mod tests {
 
         // Set the baseline that should be unwinded to
         let initial_rows = nippy.rows;
-        let initial_data_size =
-            File::open(nippy.data_path()).unwrap().metadata().unwrap().len() as usize;
-        let initial_offset_size =
-            File::open(nippy.offsets_path()).unwrap().metadata().unwrap().len() as usize;
+        let initial_data_size = File::open(nippy.data_path())
+            .unwrap()
+            .metadata()
+            .unwrap()
+            .len() as usize;
+        let initial_offset_size = File::open(nippy.offsets_path())
+            .unwrap()
+            .metadata()
+            .unwrap()
+            .len() as usize;
         assert!(initial_data_size > 0);
         assert!(initial_offset_size > 0);
 
@@ -850,14 +908,24 @@ mod tests {
         assert_eq!(initial_rows, nippy.rows);
 
         // Data was written successfully
-        let new_data_size =
-            File::open(nippy.data_path()).unwrap().metadata().unwrap().len() as usize;
-        assert_eq!(new_data_size, initial_data_size + col1[2].len() + col2[2].len());
+        let new_data_size = File::open(nippy.data_path())
+            .unwrap()
+            .metadata()
+            .unwrap()
+            .len() as usize;
+        assert_eq!(
+            new_data_size,
+            initial_data_size + col1[2].len() + col2[2].len()
+        );
 
         // It should be + 16 (two columns were added), but there's a missing one (the one we pop)
         assert_eq!(
             initial_offset_size + 8,
-            File::open(nippy.offsets_path()).unwrap().metadata().unwrap().len() as usize
+            File::open(nippy.offsets_path())
+                .unwrap()
+                .metadata()
+                .unwrap()
+                .len() as usize
         );
 
         // Writer will execute a consistency check and verify first that the offset list on disk
@@ -867,11 +935,19 @@ mod tests {
         assert_eq!(initial_rows, writer.rows());
         assert_eq!(
             initial_offset_size,
-            File::open(writer.offsets_path()).unwrap().metadata().unwrap().len() as usize
+            File::open(writer.offsets_path())
+                .unwrap()
+                .metadata()
+                .unwrap()
+                .len() as usize
         );
         assert_eq!(
             initial_data_size,
-            File::open(writer.data_path()).unwrap().metadata().unwrap().len() as usize
+            File::open(writer.data_path())
+                .unwrap()
+                .metadata()
+                .unwrap()
+                .len() as usize
         );
     }
 
@@ -880,10 +956,16 @@ mod tests {
 
         // Set the baseline that should be unwinded to
         let initial_rows = nippy.rows;
-        let initial_data_size =
-            File::open(nippy.data_path()).unwrap().metadata().unwrap().len() as usize;
-        let initial_offset_size =
-            File::open(nippy.offsets_path()).unwrap().metadata().unwrap().len() as usize;
+        let initial_data_size = File::open(nippy.data_path())
+            .unwrap()
+            .metadata()
+            .unwrap()
+            .len() as usize;
+        let initial_offset_size = File::open(nippy.offsets_path())
+            .unwrap()
+            .metadata()
+            .unwrap()
+            .len() as usize;
         assert!(initial_data_size > 0);
         assert!(initial_offset_size > 0);
 
@@ -900,14 +982,24 @@ mod tests {
         assert_eq!(initial_rows, nippy.rows);
 
         // Data was written successfully
-        let new_data_size =
-            File::open(nippy.data_path()).unwrap().metadata().unwrap().len() as usize;
-        assert_eq!(new_data_size, initial_data_size + col1[2].len() + col2[2].len());
+        let new_data_size = File::open(nippy.data_path())
+            .unwrap()
+            .metadata()
+            .unwrap()
+            .len() as usize;
+        assert_eq!(
+            new_data_size,
+            initial_data_size + col1[2].len() + col2[2].len()
+        );
 
         // Since offsets only get written on commit(), this remains the same
         assert_eq!(
             initial_offset_size,
-            File::open(nippy.offsets_path()).unwrap().metadata().unwrap().len() as usize
+            File::open(nippy.offsets_path())
+                .unwrap()
+                .metadata()
+                .unwrap()
+                .len() as usize
         );
 
         // Writer will execute a consistency check and verify that the data file has more data than
@@ -916,7 +1008,11 @@ mod tests {
         assert_eq!(initial_rows, writer.rows());
         assert_eq!(
             initial_data_size,
-            File::open(writer.data_path()).unwrap().metadata().unwrap().len() as usize
+            File::open(writer.data_path())
+                .unwrap()
+                .metadata()
+                .unwrap()
+                .len() as usize
         );
     }
 
@@ -950,11 +1046,19 @@ mod tests {
             assert_eq!(writer.max_row_size(), col1[0].len() + col2[0].len());
             assert_eq!(writer.rows(), 1);
             assert_eq!(
-                File::open(writer.offsets_path()).unwrap().metadata().unwrap().len(),
+                File::open(writer.offsets_path())
+                    .unwrap()
+                    .metadata()
+                    .unwrap()
+                    .len(),
                 1 + num_columns as u64 * 8 + 8
             );
             assert_eq!(
-                File::open(writer.data_path()).unwrap().metadata().unwrap().len(),
+                File::open(writer.data_path())
+                    .unwrap()
+                    .metadata()
+                    .unwrap()
+                    .len(),
                 expected_data_file_size
             );
         }
@@ -985,11 +1089,19 @@ mod tests {
             assert_eq!(writer.max_row_size(), col1[0].len() + col2[0].len());
             assert_eq!(writer.rows(), 2);
             assert_eq!(
-                File::open(writer.offsets_path()).unwrap().metadata().unwrap().len(),
+                File::open(writer.offsets_path())
+                    .unwrap()
+                    .metadata()
+                    .unwrap()
+                    .len(),
                 1 + writer.rows() as u64 * num_columns as u64 * 8 + 8
             );
             assert_eq!(
-                File::open(writer.data_path()).unwrap().metadata().unwrap().len(),
+                File::open(writer.data_path())
+                    .unwrap()
+                    .metadata()
+                    .unwrap()
+                    .len(),
                 expected_data_file_size
             );
         }
@@ -1009,13 +1121,21 @@ mod tests {
         assert_eq!(writer.rows(), 1);
 
         assert_eq!(
-            File::open(writer.offsets_path()).unwrap().metadata().unwrap().len(),
+            File::open(writer.offsets_path())
+                .unwrap()
+                .metadata()
+                .unwrap()
+                .len(),
             1 + writer.rows() as u64 * num_columns as u64 * 8 + 8
         );
 
         let expected_data_size = col1[0].len() + col2[0].len();
         assert_eq!(
-            File::open(writer.data_path()).unwrap().metadata().unwrap().len() as usize,
+            File::open(writer.data_path())
+                .unwrap()
+                .metadata()
+                .unwrap()
+                .len() as usize,
             expected_data_size
         );
 
@@ -1034,10 +1154,21 @@ mod tests {
 
         assert_eq!(writer.rows(), 0);
         assert_eq!(writer.max_row_size(), 0);
-        assert_eq!(File::open(writer.data_path()).unwrap().metadata().unwrap().len() as usize, 0);
+        assert_eq!(
+            File::open(writer.data_path())
+                .unwrap()
+                .metadata()
+                .unwrap()
+                .len() as usize,
+            0
+        );
         // Only the byte that indicates how many bytes per offset should be left
         assert_eq!(
-            File::open(writer.offsets_path()).unwrap().metadata().unwrap().len() as usize,
+            File::open(writer.offsets_path())
+                .unwrap()
+                .metadata()
+                .unwrap()
+                .len() as usize,
             1
         );
         writer.commit().unwrap();
@@ -1052,12 +1183,19 @@ mod tests {
     ) {
         let nippy = NippyJar::load_without_header(file_path).unwrap();
         let reader = nippy.open_data_reader().unwrap();
-        let offsets_file =
-            OpenOptions::new().read(true).write(true).open(nippy.offsets_path()).unwrap();
+        let offsets_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(nippy.offsets_path())
+            .unwrap();
         let offsets_len = 1 + num_rows * num_columns as u64 * 8 + 8;
         assert_eq!(offsets_len, offsets_file.metadata().unwrap().len());
 
-        let data_file = OpenOptions::new().read(true).write(true).open(nippy.data_path()).unwrap();
+        let data_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(nippy.data_path())
+            .unwrap();
         let data_len = reader.reverse_offset(0).unwrap();
         assert_eq!(data_len, data_file.metadata().unwrap().len());
 

@@ -49,7 +49,13 @@ impl AuthServerConfig {
 
     /// Convenience function to start a server in one step.
     pub async fn start(self, module: AuthRpcModule) -> Result<AuthServerHandle, RpcError> {
-        let Self { socket_addr, secret, server_config, ipc_server_config, ipc_endpoint } = self;
+        let Self {
+            socket_addr,
+            secret,
+            server_config,
+            ipc_server_config,
+            ipc_endpoint,
+        } = self;
 
         // Create auth middleware.
         let middleware =
@@ -78,7 +84,13 @@ impl AuthServerConfig {
             ipc_handle = Some(res);
         }
 
-        Ok(AuthServerHandle { handle, local_addr, secret, ipc_endpoint, ipc_handle })
+        Ok(AuthServerHandle {
+            handle,
+            local_addr,
+            secret,
+            ipc_endpoint,
+            ipc_handle,
+        })
     }
 }
 
@@ -151,7 +163,10 @@ impl AuthServerConfigBuilder {
     pub fn build(self) -> AuthServerConfig {
         AuthServerConfig {
             socket_addr: self.socket_addr.unwrap_or_else(|| {
-                SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), constants::DEFAULT_AUTH_PORT)
+                SocketAddr::new(
+                    IpAddr::V4(Ipv4Addr::LOCALHOST),
+                    constants::DEFAULT_AUTH_PORT,
+                )
             }),
             secret: self.secret,
             server_config: self.server_config.unwrap_or_else(|| {
@@ -191,7 +206,9 @@ pub struct AuthRpcModule {
 impl AuthRpcModule {
     /// Create a new `AuthRpcModule` with the given `engine_api`.
     pub fn new(engine: impl IntoEngineApiRpcModule) -> Self {
-        Self { inner: engine.into_rpc_module() }
+        Self {
+            inner: engine.into_rpc_module(),
+        }
     }
 
     /// Get a reference to the inner `RpcModule`.
@@ -316,7 +333,7 @@ impl AuthServerHandle {
                     .build(ipc_endpoint)
                     .await
                     .expect("Failed to create ipc client"),
-            )
+            );
         }
         None
     }

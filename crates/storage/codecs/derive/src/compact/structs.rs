@@ -44,8 +44,13 @@ impl<'a> StructHandler<'a> {
 
     /// Generates `to_compact` code for a struct field.
     fn to(&mut self, field_descriptor: &StructFieldDescriptor) {
-        let StructFieldDescriptor { name, ftype, is_compact, use_alt_impl, is_reference: _ } =
-            field_descriptor;
+        let StructFieldDescriptor {
+            name,
+            ftype,
+            is_compact,
+            use_alt_impl,
+            is_reference: _,
+        } = field_descriptor;
 
         let to_compact_ident = if *use_alt_impl {
             format_ident!("specialized_to_compact")
@@ -67,7 +72,7 @@ impl<'a> StructHandler<'a> {
                 })
             }
 
-            return
+            return;
         }
 
         let name = format_ident!("{name}");
@@ -98,13 +103,22 @@ impl<'a> StructHandler<'a> {
 
     /// Generates `from_compact` code for a struct field.
     fn from(&mut self, field_descriptor: &StructFieldDescriptor, known_types: &[&str]) {
-        let StructFieldDescriptor { name, ftype, is_compact, use_alt_impl, .. } = field_descriptor;
+        let StructFieldDescriptor {
+            name,
+            ftype,
+            is_compact,
+            use_alt_impl,
+            ..
+        } = field_descriptor;
 
         let (name, len) = if name.is_empty() {
             self.is_wrapper = true;
 
             // Should only happen on wrapper structs like `Struct(pub Field)`
-            (format_ident!("placeholder"), format_ident!("placeholder_len"))
+            (
+                format_ident!("placeholder"),
+                format_ident!("placeholder_len"),
+            )
         } else {
             (format_ident!("{name}"), format_ident!("{name}_len"))
         };

@@ -70,7 +70,12 @@ pub struct EthSimBundle<Eth> {
 impl<Eth> EthSimBundle<Eth> {
     /// Create a new `EthSimBundle` instance.
     pub fn new(eth_api: Eth, blocking_task_guard: BlockingTaskGuard) -> Self {
-        Self { inner: Arc::new(EthSimBundleInner { eth_api, blocking_task_guard }) }
+        Self {
+            inner: Arc::new(EthSimBundleInner {
+                eth_api,
+                blocking_task_guard,
+            }),
+        }
     }
 
     /// Access the underlying `Eth` API.
@@ -102,7 +107,9 @@ where
         while let Some((current_bundle, mut idx, depth)) = stack.pop() {
             // Check max depth
             if depth > MAX_NESTED_BUNDLE_DEPTH {
-                return Err(EthApiError::InvalidParams(EthSimBundleError::MaxDepth.to_string()));
+                return Err(EthApiError::InvalidParams(
+                    EthSimBundleError::MaxDepth.to_string(),
+                ));
             }
 
             // Determine inclusion, validity, and privacy
@@ -172,8 +179,10 @@ where
                             <Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus,
                         );
 
-                        let refund_percent =
-                            validity.as_ref().and_then(|v| v.refund.as_ref()).and_then(|refunds| {
+                        let refund_percent = validity
+                            .as_ref()
+                            .and_then(|v| v.refund.as_ref())
+                            .and_then(|refunds| {
                                 refunds.iter().find_map(|refund| {
                                     (refund.body_idx as usize == idx).then_some(refund.percent)
                                 })
@@ -224,7 +233,11 @@ where
         overrides: SimBundleOverrides,
         logs: bool,
     ) -> Result<SimBundleResponse, Eth::Error> {
-        let SimBundleOverrides { parent_block, block_overrides, .. } = overrides;
+        let SimBundleOverrides {
+            parent_block,
+            block_overrides,
+            ..
+        } = overrides;
 
         // Parse and validate bundle
         // Also, flatten the bundle here so that its easier to process
@@ -270,8 +283,8 @@ where
                     let max_block_number =
                         item.inclusion.max_block_number().unwrap_or(block_number);
 
-                    if current_block_number < block_number ||
-                        current_block_number > max_block_number
+                    if current_block_number < block_number
+                        || current_block_number > max_block_number
                     {
                         return Err(EthApiError::InvalidParams(
                             EthSimBundleError::InvalidInclusion.to_string(),
@@ -294,8 +307,10 @@ where
                     total_gas_used += gas_used;
 
                     // coinbase is always present in the result state
-                    let coinbase_balance_after_tx =
-                        state.get(&coinbase).map(|acc| acc.info.balance).unwrap_or_default();
+                    let coinbase_balance_after_tx = state
+                        .get(&coinbase)
+                        .map(|acc| acc.info.balance)
+                        .unwrap_or_default();
 
                     let coinbase_diff =
                         coinbase_balance_after_tx.saturating_sub(coinbase_balance_before_tx);
@@ -331,8 +346,10 @@ where
                                 full_log
                             })
                             .collect();
-                        let sim_bundle_logs =
-                            SimBundleLogs { tx_logs: Some(tx_logs), bundle_logs: None };
+                        let sim_bundle_logs = SimBundleLogs {
+                            tx_logs: Some(tx_logs),
+                            bundle_logs: None,
+                        };
                         body_logs.push(sim_bundle_logs);
                     }
 
@@ -345,13 +362,16 @@ where
                     if let Some(refund_percent) = item.refund_percent {
                         // Get refund configurations
                         let refund_configs = item.refund_configs.clone().unwrap_or_else(|| {
-                            vec![RefundConfig { address: item.tx.signer(), percent: 100 }]
+                            vec![RefundConfig {
+                                address: item.tx.signer(),
+                                percent: 100,
+                            }]
                         });
 
                         // Calculate payout transaction fee
-                        let payout_tx_fee = U256::from(basefee) *
-                            U256::from(SBUNDLE_PAYOUT_MAX_COST) *
-                            U256::from(refund_configs.len() as u64);
+                        let payout_tx_fee = U256::from(basefee)
+                            * U256::from(SBUNDLE_PAYOUT_MAX_COST)
+                            * U256::from(refund_configs.len() as u64);
 
                         // Add gas used for payout transactions
                         total_gas_used += SBUNDLE_PAYOUT_MAX_COST * refund_configs.len() as u64;
@@ -419,7 +439,11 @@ where
         request: SendBundleRequest,
         overrides: SimBundleOverrides,
     ) -> RpcResult<SimBundleResponse> {
-        trace!("mev_simBundle called, request: {:?}, overrides: {:?}", request, overrides);
+        trace!(
+            "mev_simBundle called, request: {:?}, overrides: {:?}",
+            request,
+            overrides
+        );
 
         let override_timeout = overrides.timeout;
 
@@ -428,12 +452,12 @@ where
             .filter(|&custom_duration| custom_duration <= MAX_SIM_TIMEOUT)
             .unwrap_or(DEFAULT_SIM_TIMEOUT);
 
-        let bundle_res =
-            tokio::time::timeout(timeout, Self::sim_bundle_inner(self, request, overrides, true))
-                .await
-                .map_err(|_| {
-                    EthApiError::InvalidParams(EthSimBundleError::BundleTimeout.to_string())
-                })?;
+        let bundle_res = tokio::time::timeout(
+            timeout,
+            Self::sim_bundle_inner(self, request, overrides, true),
+        )
+        .await
+        .map_err(|_| EthApiError::InvalidParams(EthSimBundleError::BundleTimeout.to_string()))?;
 
         bundle_res.map_err(Into::into)
     }
@@ -458,7 +482,9 @@ impl<Eth> std::fmt::Debug for EthSimBundle<Eth> {
 
 impl<Eth> Clone for EthSimBundle<Eth> {
     fn clone(&self) -> Self {
-        Self { inner: Arc::clone(&self.inner) }
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
     }
 }
 

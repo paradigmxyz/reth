@@ -78,8 +78,9 @@ fn calculate_root_from_leaves_repeated(c: &mut Criterion) {
             }
 
             for num_updates in [1, 3, 5, 10] {
-                let updates =
-                    (0..num_updates).map(|_| generate_test_data(update_size)).collect::<Vec<_>>();
+                let updates = (0..num_updates)
+                    .map(|_| generate_test_data(update_size))
+                    .collect::<Vec<_>>();
 
                 // hash builder
                 let benchmark_id = BenchmarkId::new(
@@ -225,5 +226,9 @@ fn generate_test_data(size: usize) -> B256Map<U256> {
         .collect()
 }
 
-criterion_group!(root, calculate_root_from_leaves, calculate_root_from_leaves_repeated);
+criterion_group!(
+    root,
+    calculate_root_from_leaves,
+    calculate_root_from_leaves_repeated
+);
 criterion_main!(root);

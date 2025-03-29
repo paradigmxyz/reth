@@ -27,8 +27,10 @@ impl MockHashedCursorFactory {
         hashed_accounts: BTreeMap<B256, Account>,
         hashed_storage_tries: B256Map<BTreeMap<B256, U256>>,
     ) -> Self {
-        let visited_storage_keys =
-            hashed_storage_tries.keys().map(|k| (*k, Default::default())).collect();
+        let visited_storage_keys = hashed_storage_tries
+            .keys()
+            .map(|k| (*k, Default::default()))
+            .collect();
         Self {
             hashed_accounts: Arc::new(hashed_accounts),
             hashed_storage_tries: hashed_storage_tries
@@ -50,7 +52,10 @@ impl MockHashedCursorFactory {
         &self,
         hashed_address: B256,
     ) -> MutexGuard<'_, Vec<KeyVisit<B256>>> {
-        self.visited_storage_keys.get(&hashed_address).expect("storage trie should exist").lock()
+        self.visited_storage_keys
+            .get(&hashed_address)
+            .expect("storage trie should exist")
+            .lock()
     }
 }
 
@@ -59,7 +64,10 @@ impl HashedCursorFactory for MockHashedCursorFactory {
     type StorageCursor = MockHashedCursor<U256>;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, DatabaseError> {
-        Ok(MockHashedCursor::new(self.hashed_accounts.clone(), self.visited_account_keys.clone()))
+        Ok(MockHashedCursor::new(
+            self.hashed_accounts.clone(),
+            self.visited_account_keys.clone(),
+        ))
     }
 
     fn hashed_storage_cursor(
@@ -94,7 +102,11 @@ pub struct MockHashedCursor<T> {
 
 impl<T> MockHashedCursor<T> {
     fn new(values: Arc<BTreeMap<B256, T>>, visited_keys: Arc<Mutex<Vec<KeyVisit<B256>>>>) -> Self {
-        Self { current_key: None, values, visited_keys }
+        Self {
+            current_key: None,
+            values,
+            visited_keys,
+        }
     }
 }
 
@@ -104,7 +116,10 @@ impl<T: Debug + Clone> HashedCursor for MockHashedCursor<T> {
     #[instrument(level = "trace", skip(self), ret)]
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         // Find the first key that is greater than or equal to the given key.
-        let entry = self.values.iter().find_map(|(k, v)| (k >= &key).then(|| (*k, v.clone())));
+        let entry = self
+            .values
+            .iter()
+            .find_map(|(k, v)| (k >= &key).then(|| (*k, v.clone())));
         if let Some((key, _)) = &entry {
             self.current_key = Some(*key);
         }
@@ -121,7 +136,9 @@ impl<T: Debug + Clone> HashedCursor for MockHashedCursor<T> {
         // Jump to the first key that has a prefix of the current key if it's set, or to the first
         // key otherwise.
         iter.find(|(k, _)| {
-            self.current_key.as_ref().is_none_or(|current| k.starts_with(current.as_slice()))
+            self.current_key
+                .as_ref()
+                .is_none_or(|current| k.starts_with(current.as_slice()))
         })
         .expect("current key should exist in values");
         // Get the next key-value pair.

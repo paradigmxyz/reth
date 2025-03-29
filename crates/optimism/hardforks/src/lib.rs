@@ -25,10 +25,19 @@ pub static DEV_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
         (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Dao.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::SpuriousDragon.boxed(), ForkCondition::Block(0)),
+        (
+            EthereumHardfork::SpuriousDragon.boxed(),
+            ForkCondition::Block(0),
+        ),
         (EthereumHardfork::Byzantium.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::Constantinople.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::Petersburg.boxed(), ForkCondition::Block(0)),
+        (
+            EthereumHardfork::Constantinople.boxed(),
+            ForkCondition::Block(0),
+        ),
+        (
+            EthereumHardfork::Petersburg.boxed(),
+            ForkCondition::Block(0),
+        ),
         (EthereumHardfork::Istanbul.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::London.boxed(), ForkCondition::Block(0)),
@@ -41,13 +50,34 @@ pub static DEV_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
             },
         ),
         (crate::OpHardfork::Bedrock.boxed(), ForkCondition::Block(0)),
-        (crate::OpHardfork::Regolith.boxed(), ForkCondition::Timestamp(0)),
-        (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(0)),
-        (crate::OpHardfork::Canyon.boxed(), ForkCondition::Timestamp(0)),
-        (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(0)),
-        (crate::OpHardfork::Ecotone.boxed(), ForkCondition::Timestamp(0)),
-        (crate::OpHardfork::Fjord.boxed(), ForkCondition::Timestamp(0)),
-        (crate::OpHardfork::Granite.boxed(), ForkCondition::Timestamp(0)),
+        (
+            crate::OpHardfork::Regolith.boxed(),
+            ForkCondition::Timestamp(0),
+        ),
+        (
+            EthereumHardfork::Shanghai.boxed(),
+            ForkCondition::Timestamp(0),
+        ),
+        (
+            crate::OpHardfork::Canyon.boxed(),
+            ForkCondition::Timestamp(0),
+        ),
+        (
+            EthereumHardfork::Cancun.boxed(),
+            ForkCondition::Timestamp(0),
+        ),
+        (
+            crate::OpHardfork::Ecotone.boxed(),
+            ForkCondition::Timestamp(0),
+        ),
+        (
+            crate::OpHardfork::Fjord.boxed(),
+            ForkCondition::Timestamp(0),
+        ),
+        (
+            crate::OpHardfork::Granite.boxed(),
+            ForkCondition::Timestamp(0),
+        ),
     ])
 });
 
@@ -57,16 +87,40 @@ pub static OP_MAINNET_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
         (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::SpuriousDragon.boxed(), ForkCondition::Block(0)),
+        (
+            EthereumHardfork::SpuriousDragon.boxed(),
+            ForkCondition::Block(0),
+        ),
         (EthereumHardfork::Byzantium.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::Constantinople.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::Petersburg.boxed(), ForkCondition::Block(0)),
+        (
+            EthereumHardfork::Constantinople.boxed(),
+            ForkCondition::Block(0),
+        ),
+        (
+            EthereumHardfork::Petersburg.boxed(),
+            ForkCondition::Block(0),
+        ),
         (EthereumHardfork::Istanbul.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::MuirGlacier.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(3950000)),
-        (EthereumHardfork::London.boxed(), ForkCondition::Block(105235063)),
-        (EthereumHardfork::ArrowGlacier.boxed(), ForkCondition::Block(105235063)),
-        (EthereumHardfork::GrayGlacier.boxed(), ForkCondition::Block(105235063)),
+        (
+            EthereumHardfork::MuirGlacier.boxed(),
+            ForkCondition::Block(0),
+        ),
+        (
+            EthereumHardfork::Berlin.boxed(),
+            ForkCondition::Block(3950000),
+        ),
+        (
+            EthereumHardfork::London.boxed(),
+            ForkCondition::Block(105235063),
+        ),
+        (
+            EthereumHardfork::ArrowGlacier.boxed(),
+            ForkCondition::Block(105235063),
+        ),
+        (
+            EthereumHardfork::GrayGlacier.boxed(),
+            ForkCondition::Block(105235063),
+        ),
         (
             EthereumHardfork::Paris.boxed(),
             ForkCondition::TTD {
@@ -77,13 +131,34 @@ pub static OP_MAINNET_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
         ),
         (OpHardfork::Bedrock.boxed(), ForkCondition::Block(105235063)),
         (OpHardfork::Regolith.boxed(), ForkCondition::Timestamp(0)),
-        (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(1704992401)),
-        (OpHardfork::Canyon.boxed(), ForkCondition::Timestamp(1704992401)),
-        (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(1710374401)),
-        (OpHardfork::Ecotone.boxed(), ForkCondition::Timestamp(1710374401)),
-        (OpHardfork::Fjord.boxed(), ForkCondition::Timestamp(1720627201)),
-        (OpHardfork::Granite.boxed(), ForkCondition::Timestamp(1726070401)),
-        (OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(1736445601)),
+        (
+            EthereumHardfork::Shanghai.boxed(),
+            ForkCondition::Timestamp(1704992401),
+        ),
+        (
+            OpHardfork::Canyon.boxed(),
+            ForkCondition::Timestamp(1704992401),
+        ),
+        (
+            EthereumHardfork::Cancun.boxed(),
+            ForkCondition::Timestamp(1710374401),
+        ),
+        (
+            OpHardfork::Ecotone.boxed(),
+            ForkCondition::Timestamp(1710374401),
+        ),
+        (
+            OpHardfork::Fjord.boxed(),
+            ForkCondition::Timestamp(1720627201),
+        ),
+        (
+            OpHardfork::Granite.boxed(),
+            ForkCondition::Timestamp(1726070401),
+        ),
+        (
+            OpHardfork::Holocene.boxed(),
+            ForkCondition::Timestamp(1736445601),
+        ),
     ])
 });
 /// Optimism Sepolia list of hardforks.
@@ -92,16 +167,34 @@ pub static OP_SEPOLIA_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
         (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::SpuriousDragon.boxed(), ForkCondition::Block(0)),
+        (
+            EthereumHardfork::SpuriousDragon.boxed(),
+            ForkCondition::Block(0),
+        ),
         (EthereumHardfork::Byzantium.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::Constantinople.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::Petersburg.boxed(), ForkCondition::Block(0)),
+        (
+            EthereumHardfork::Constantinople.boxed(),
+            ForkCondition::Block(0),
+        ),
+        (
+            EthereumHardfork::Petersburg.boxed(),
+            ForkCondition::Block(0),
+        ),
         (EthereumHardfork::Istanbul.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::MuirGlacier.boxed(), ForkCondition::Block(0)),
+        (
+            EthereumHardfork::MuirGlacier.boxed(),
+            ForkCondition::Block(0),
+        ),
         (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::London.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::ArrowGlacier.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::GrayGlacier.boxed(), ForkCondition::Block(0)),
+        (
+            EthereumHardfork::ArrowGlacier.boxed(),
+            ForkCondition::Block(0),
+        ),
+        (
+            EthereumHardfork::GrayGlacier.boxed(),
+            ForkCondition::Block(0),
+        ),
         (
             EthereumHardfork::Paris.boxed(),
             ForkCondition::TTD {
@@ -112,13 +205,34 @@ pub static OP_SEPOLIA_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
         ),
         (OpHardfork::Bedrock.boxed(), ForkCondition::Block(0)),
         (OpHardfork::Regolith.boxed(), ForkCondition::Timestamp(0)),
-        (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(1699981200)),
-        (OpHardfork::Canyon.boxed(), ForkCondition::Timestamp(1699981200)),
-        (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(1708534800)),
-        (OpHardfork::Ecotone.boxed(), ForkCondition::Timestamp(1708534800)),
-        (OpHardfork::Fjord.boxed(), ForkCondition::Timestamp(1716998400)),
-        (OpHardfork::Granite.boxed(), ForkCondition::Timestamp(1723478400)),
-        (OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(1732633200)),
+        (
+            EthereumHardfork::Shanghai.boxed(),
+            ForkCondition::Timestamp(1699981200),
+        ),
+        (
+            OpHardfork::Canyon.boxed(),
+            ForkCondition::Timestamp(1699981200),
+        ),
+        (
+            EthereumHardfork::Cancun.boxed(),
+            ForkCondition::Timestamp(1708534800),
+        ),
+        (
+            OpHardfork::Ecotone.boxed(),
+            ForkCondition::Timestamp(1708534800),
+        ),
+        (
+            OpHardfork::Fjord.boxed(),
+            ForkCondition::Timestamp(1716998400),
+        ),
+        (
+            OpHardfork::Granite.boxed(),
+            ForkCondition::Timestamp(1723478400),
+        ),
+        (
+            OpHardfork::Holocene.boxed(),
+            ForkCondition::Timestamp(1732633200),
+        ),
     ])
 });
 
@@ -128,16 +242,34 @@ pub static BASE_SEPOLIA_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
         (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::SpuriousDragon.boxed(), ForkCondition::Block(0)),
+        (
+            EthereumHardfork::SpuriousDragon.boxed(),
+            ForkCondition::Block(0),
+        ),
         (EthereumHardfork::Byzantium.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::Constantinople.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::Petersburg.boxed(), ForkCondition::Block(0)),
+        (
+            EthereumHardfork::Constantinople.boxed(),
+            ForkCondition::Block(0),
+        ),
+        (
+            EthereumHardfork::Petersburg.boxed(),
+            ForkCondition::Block(0),
+        ),
         (EthereumHardfork::Istanbul.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::MuirGlacier.boxed(), ForkCondition::Block(0)),
+        (
+            EthereumHardfork::MuirGlacier.boxed(),
+            ForkCondition::Block(0),
+        ),
         (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::London.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::ArrowGlacier.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::GrayGlacier.boxed(), ForkCondition::Block(0)),
+        (
+            EthereumHardfork::ArrowGlacier.boxed(),
+            ForkCondition::Block(0),
+        ),
+        (
+            EthereumHardfork::GrayGlacier.boxed(),
+            ForkCondition::Block(0),
+        ),
         (
             EthereumHardfork::Paris.boxed(),
             ForkCondition::TTD {
@@ -148,13 +280,34 @@ pub static BASE_SEPOLIA_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
         ),
         (OpHardfork::Bedrock.boxed(), ForkCondition::Block(0)),
         (OpHardfork::Regolith.boxed(), ForkCondition::Timestamp(0)),
-        (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(1699981200)),
-        (OpHardfork::Canyon.boxed(), ForkCondition::Timestamp(1699981200)),
-        (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(1708534800)),
-        (OpHardfork::Ecotone.boxed(), ForkCondition::Timestamp(1708534800)),
-        (OpHardfork::Fjord.boxed(), ForkCondition::Timestamp(1716998400)),
-        (OpHardfork::Granite.boxed(), ForkCondition::Timestamp(1723478400)),
-        (OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(1732633200)),
+        (
+            EthereumHardfork::Shanghai.boxed(),
+            ForkCondition::Timestamp(1699981200),
+        ),
+        (
+            OpHardfork::Canyon.boxed(),
+            ForkCondition::Timestamp(1699981200),
+        ),
+        (
+            EthereumHardfork::Cancun.boxed(),
+            ForkCondition::Timestamp(1708534800),
+        ),
+        (
+            OpHardfork::Ecotone.boxed(),
+            ForkCondition::Timestamp(1708534800),
+        ),
+        (
+            OpHardfork::Fjord.boxed(),
+            ForkCondition::Timestamp(1716998400),
+        ),
+        (
+            OpHardfork::Granite.boxed(),
+            ForkCondition::Timestamp(1723478400),
+        ),
+        (
+            OpHardfork::Holocene.boxed(),
+            ForkCondition::Timestamp(1732633200),
+        ),
     ])
 });
 
@@ -164,16 +317,34 @@ pub static BASE_MAINNET_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
         (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::SpuriousDragon.boxed(), ForkCondition::Block(0)),
+        (
+            EthereumHardfork::SpuriousDragon.boxed(),
+            ForkCondition::Block(0),
+        ),
         (EthereumHardfork::Byzantium.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::Constantinople.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::Petersburg.boxed(), ForkCondition::Block(0)),
+        (
+            EthereumHardfork::Constantinople.boxed(),
+            ForkCondition::Block(0),
+        ),
+        (
+            EthereumHardfork::Petersburg.boxed(),
+            ForkCondition::Block(0),
+        ),
         (EthereumHardfork::Istanbul.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::MuirGlacier.boxed(), ForkCondition::Block(0)),
+        (
+            EthereumHardfork::MuirGlacier.boxed(),
+            ForkCondition::Block(0),
+        ),
         (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::London.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::ArrowGlacier.boxed(), ForkCondition::Block(0)),
-        (EthereumHardfork::GrayGlacier.boxed(), ForkCondition::Block(0)),
+        (
+            EthereumHardfork::ArrowGlacier.boxed(),
+            ForkCondition::Block(0),
+        ),
+        (
+            EthereumHardfork::GrayGlacier.boxed(),
+            ForkCondition::Block(0),
+        ),
         (
             EthereumHardfork::Paris.boxed(),
             ForkCondition::TTD {
@@ -184,12 +355,33 @@ pub static BASE_MAINNET_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
         ),
         (OpHardfork::Bedrock.boxed(), ForkCondition::Block(0)),
         (OpHardfork::Regolith.boxed(), ForkCondition::Timestamp(0)),
-        (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(1704992401)),
-        (OpHardfork::Canyon.boxed(), ForkCondition::Timestamp(1704992401)),
-        (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(1710374401)),
-        (OpHardfork::Ecotone.boxed(), ForkCondition::Timestamp(1710374401)),
-        (OpHardfork::Fjord.boxed(), ForkCondition::Timestamp(1720627201)),
-        (OpHardfork::Granite.boxed(), ForkCondition::Timestamp(1726070401)),
-        (OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(1736445601)),
+        (
+            EthereumHardfork::Shanghai.boxed(),
+            ForkCondition::Timestamp(1704992401),
+        ),
+        (
+            OpHardfork::Canyon.boxed(),
+            ForkCondition::Timestamp(1704992401),
+        ),
+        (
+            EthereumHardfork::Cancun.boxed(),
+            ForkCondition::Timestamp(1710374401),
+        ),
+        (
+            OpHardfork::Ecotone.boxed(),
+            ForkCondition::Timestamp(1710374401),
+        ),
+        (
+            OpHardfork::Fjord.boxed(),
+            ForkCondition::Timestamp(1720627201),
+        ),
+        (
+            OpHardfork::Granite.boxed(),
+            ForkCondition::Timestamp(1726070401),
+        ),
+        (
+            OpHardfork::Holocene.boxed(),
+            ForkCondition::Timestamp(1736445601),
+        ),
     ])
 });

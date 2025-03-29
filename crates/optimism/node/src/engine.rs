@@ -130,9 +130,13 @@ where
         &self,
         payload: Self::ExecutionData,
     ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
-        let sealed_block =
-            self.inner.ensure_well_formed_payload(payload).map_err(NewPayloadError::other)?;
-        sealed_block.try_recover().map_err(|e| NewPayloadError::Other(e.into()))
+        let sealed_block = self
+            .inner
+            .ensure_well_formed_payload(payload)
+            .map_err(NewPayloadError::other)?;
+        sealed_block
+            .try_recover()
+            .map_err(|e| NewPayloadError::Other(e.into()))
     }
 
     fn validate_block_post_execution_with_hashed_state(
@@ -140,10 +144,16 @@ where
         state_updates: &HashedPostState,
         block: &RecoveredBlock<Self::Block>,
     ) -> Result<(), ConsensusError> {
-        if self.chain_spec().is_isthmus_active_at_timestamp(block.timestamp()) {
-            let state = self.provider.state_by_block_hash(block.parent_hash()).map_err(|err| {
-                ConsensusError::Other(format!("failed to verify block post-execution: {err}"))
-            })?;
+        if self
+            .chain_spec()
+            .is_isthmus_active_at_timestamp(block.timestamp())
+        {
+            let state = self
+                .provider
+                .state_by_block_hash(block.parent_hash())
+                .map_err(|err| {
+                    ConsensusError::Other(format!("failed to verify block post-execution: {err}"))
+                })?;
             let predeploy_storage_updates = state_updates
                 .storages
                 .get(&self.hashed_addr_l2tol1_msg_passer)
@@ -205,7 +215,7 @@ where
         if attributes.gas_limit.is_none() {
             return Err(EngineObjectValidationError::InvalidParams(
                 "MissingGasLimitInPayloadAttributes".to_string().into(),
-            ))
+            ));
         }
 
         if self
@@ -221,7 +231,7 @@ where
             if elasticity != 0 && denominator == 0 {
                 return Err(EngineObjectValidationError::InvalidParams(
                     "Eip1559ParamsDenominatorZero".to_string().into(),
-                ))
+                ));
             }
         }
 
@@ -243,27 +253,29 @@ pub fn validate_withdrawals_presence(
     timestamp: u64,
     has_withdrawals: bool,
 ) -> Result<(), EngineObjectValidationError> {
-    let is_shanghai = chain_spec.fork(OpHardfork::Canyon).active_at_timestamp(timestamp);
+    let is_shanghai = chain_spec
+        .fork(OpHardfork::Canyon)
+        .active_at_timestamp(timestamp);
 
     match version {
         EngineApiMessageVersion::V1 => {
             if has_withdrawals {
                 return Err(message_validation_kind
-                    .to_error(VersionSpecificValidationError::WithdrawalsNotSupportedInV1))
+                    .to_error(VersionSpecificValidationError::WithdrawalsNotSupportedInV1));
             }
             if is_shanghai {
                 return Err(message_validation_kind
-                    .to_error(VersionSpecificValidationError::NoWithdrawalsPostShanghai))
+                    .to_error(VersionSpecificValidationError::NoWithdrawalsPostShanghai));
             }
         }
         EngineApiMessageVersion::V2 | EngineApiMessageVersion::V3 | EngineApiMessageVersion::V4 => {
             if is_shanghai && !has_withdrawals {
                 return Err(message_validation_kind
-                    .to_error(VersionSpecificValidationError::NoWithdrawalsPostShanghai))
+                    .to_error(VersionSpecificValidationError::NoWithdrawalsPostShanghai));
             }
             if !is_shanghai && has_withdrawals {
                 return Err(message_validation_kind
-                    .to_error(VersionSpecificValidationError::HasWithdrawalsPreShanghai))
+                    .to_error(VersionSpecificValidationError::HasWithdrawalsPreShanghai));
             }
         }
     };
@@ -341,7 +353,10 @@ mod test {
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
         );
-        assert!(matches!(result, Err(EngineObjectValidationError::InvalidParams(_))));
+        assert!(matches!(
+            result,
+            Err(EngineObjectValidationError::InvalidParams(_))
+        ));
     }
 
     #[test]
@@ -355,7 +370,10 @@ mod test {
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
         );
-        assert!(matches!(result, Err(EngineObjectValidationError::InvalidParams(_))));
+        assert!(matches!(
+            result,
+            Err(EngineObjectValidationError::InvalidParams(_))
+        ));
     }
 
     #[test]

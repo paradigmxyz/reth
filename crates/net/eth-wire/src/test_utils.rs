@@ -55,7 +55,10 @@ pub async fn connect_passthrough(
 ) -> P2pPassthroughTcpStream {
     let outgoing = TcpStream::connect(addr).await.unwrap();
     let sink = crate::PassthroughCodec::default().framed(outgoing);
-    let (p2p_stream, _) = UnauthedP2PStream::new(sink).handshake(client_hello).await.unwrap();
+    let (p2p_stream, _) = UnauthedP2PStream::new(sink)
+        .handshake(client_hello)
+        .await
+        .unwrap();
 
     p2p_stream
 }
@@ -108,12 +111,18 @@ pub mod proto {
 
         /// Creates a ping message
         pub const fn ping() -> Self {
-            Self { message_type: TestProtoMessageId::Ping, message: TestProtoMessageKind::Ping }
+            Self {
+                message_type: TestProtoMessageId::Ping,
+                message: TestProtoMessageKind::Ping,
+            }
         }
 
         /// Creates a pong message
         pub const fn pong() -> Self {
-            Self { message_type: TestProtoMessageId::Pong, message: TestProtoMessageKind::Pong }
+            Self {
+                message_type: TestProtoMessageId::Pong,
+                message: TestProtoMessageKind::Pong,
+            }
         }
 
         /// Creates a message
@@ -140,7 +149,7 @@ pub mod proto {
         /// Decodes a `TestProtoMessage` from the given message buffer.
         pub fn decode_message(buf: &mut &[u8]) -> Option<Self> {
             if buf.is_empty() {
-                return None
+                return None;
             }
             let id = buf[0];
             buf.advance(1);
@@ -157,7 +166,10 @@ pub mod proto {
                     TestProtoMessageKind::Message(String::from_utf8_lossy(&buf[..]).into_owned())
                 }
             };
-            Some(Self { message_type, message })
+            Some(Self {
+                message_type,
+                message,
+            })
         }
     }
 }

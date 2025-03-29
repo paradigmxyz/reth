@@ -26,14 +26,16 @@ impl PartialEq for InMemoryBlobStoreInner {
 impl BlobStore for InMemoryBlobStore {
     fn insert(&self, tx: B256, data: BlobTransactionSidecar) -> Result<(), BlobStoreError> {
         let mut store = self.inner.store.write();
-        self.inner.size_tracker.add_size(insert_size(&mut store, tx, data));
+        self.inner
+            .size_tracker
+            .add_size(insert_size(&mut store, tx, data));
         self.inner.size_tracker.update_len(store.len());
         Ok(())
     }
 
     fn insert_all(&self, txs: Vec<(B256, BlobTransactionSidecar)>) -> Result<(), BlobStoreError> {
         if txs.is_empty() {
-            return Ok(())
+            return Ok(());
         }
         let mut store = self.inner.store.write();
         let mut total_add = 0;
@@ -56,7 +58,7 @@ impl BlobStore for InMemoryBlobStore {
 
     fn delete_all(&self, txs: Vec<B256>) -> Result<(), BlobStoreError> {
         if txs.is_empty() {
-            return Ok(())
+            return Ok(());
         }
         let mut store = self.inner.store.write();
         let mut total_sub = 0;
@@ -86,7 +88,10 @@ impl BlobStore for InMemoryBlobStore {
         txs: Vec<B256>,
     ) -> Result<Vec<(B256, Arc<BlobTransactionSidecar>)>, BlobStoreError> {
         let store = self.inner.store.read();
-        Ok(txs.into_iter().filter_map(|tx| store.get(&tx).map(|item| (tx, item.clone()))).collect())
+        Ok(txs
+            .into_iter()
+            .filter_map(|tx| store.get(&tx).map(|item| (tx, item.clone())))
+            .collect())
     }
 
     fn get_exact(
@@ -94,7 +99,10 @@ impl BlobStore for InMemoryBlobStore {
         txs: Vec<B256>,
     ) -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError> {
         let store = self.inner.store.read();
-        Ok(txs.into_iter().filter_map(|tx| store.get(&tx).cloned()).collect())
+        Ok(txs
+            .into_iter()
+            .filter_map(|tx| store.get(&tx).cloned())
+            .collect())
     }
 
     fn get_by_versioned_hashes(

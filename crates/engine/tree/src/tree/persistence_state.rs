@@ -13,8 +13,11 @@ pub struct PersistenceState {
     pub(crate) last_persisted_block: BlockNumHash,
     /// Receiver end of channel where the result of the persistence task will be
     /// sent when done. A None value means there's no persistence task in progress.
-    pub(crate) rx:
-        Option<(oneshot::Receiver<Option<BlockNumHash>>, Instant, CurrentPersistenceAction)>,
+    pub(crate) rx: Option<(
+        oneshot::Receiver<Option<BlockNumHash>>,
+        Instant,
+        CurrentPersistenceAction,
+    )>,
 }
 
 impl PersistenceState {
@@ -30,8 +33,11 @@ impl PersistenceState {
         new_tip_num: u64,
         rx: oneshot::Receiver<Option<BlockNumHash>>,
     ) {
-        self.rx =
-            Some((rx, Instant::now(), CurrentPersistenceAction::RemovingBlocks { new_tip_num }));
+        self.rx = Some((
+            rx,
+            Instant::now(),
+            CurrentPersistenceAction::RemovingBlocks { new_tip_num },
+        ));
     }
 
     /// Sets the state for a block save operation.
@@ -40,7 +46,11 @@ impl PersistenceState {
         highest: BlockNumHash,
         rx: oneshot::Receiver<Option<BlockNumHash>>,
     ) {
-        self.rx = Some((rx, Instant::now(), CurrentPersistenceAction::SavingBlocks { highest }));
+        self.rx = Some((
+            rx,
+            Instant::now(),
+            CurrentPersistenceAction::SavingBlocks { highest },
+        ));
     }
 
     /// Returns the current persistence action. If there is no persistence task in progress, then

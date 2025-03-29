@@ -67,7 +67,9 @@ mod tests {
     fn test_revm_spec_by_timestamp_after_merge() {
         #[inline(always)]
         fn op_cs(f: impl FnOnce(OpChainSpecBuilder) -> OpChainSpecBuilder) -> OpChainSpec {
-            let cs = ChainSpecBuilder::mainnet().chain(reth_chainspec::Chain::from_id(10)).into();
+            let cs = ChainSpecBuilder::mainnet()
+                .chain(reth_chainspec::Chain::from_id(10))
+                .into();
             f(cs).build()
         }
         assert_eq!(
@@ -112,7 +114,9 @@ mod tests {
     fn test_to_revm_spec() {
         #[inline(always)]
         fn op_cs(f: impl FnOnce(OpChainSpecBuilder) -> OpChainSpecBuilder) -> OpChainSpec {
-            let cs = ChainSpecBuilder::mainnet().chain(reth_chainspec::Chain::from_id(10)).into();
+            let cs = ChainSpecBuilder::mainnet()
+                .chain(reth_chainspec::Chain::from_id(10))
+                .into();
             f(cs).build()
         }
         assert_eq!(
@@ -127,7 +131,10 @@ mod tests {
             revm_spec(op_cs(|cs| cs.granite_activated()), Header::default()),
             OpSpecId::GRANITE
         );
-        assert_eq!(revm_spec(op_cs(|cs| cs.fjord_activated()), Header::default()), OpSpecId::FJORD);
+        assert_eq!(
+            revm_spec(op_cs(|cs| cs.fjord_activated()), Header::default()),
+            OpSpecId::FJORD
+        );
         assert_eq!(
             revm_spec(op_cs(|cs| cs.ecotone_activated()), Header::default()),
             OpSpecId::ECOTONE

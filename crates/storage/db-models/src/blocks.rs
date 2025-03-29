@@ -12,7 +12,10 @@ pub type NumTransactions = u64;
 #[derive(Debug, Default, Eq, PartialEq, Clone, Copy)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
+#[cfg_attr(
+    any(test, feature = "reth-codec"),
+    reth_codecs::add_arbitrary_tests(compact)
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StoredBlockBodyIndices {
     /// The number of the first transaction in this block
@@ -37,7 +40,9 @@ impl StoredBlockBodyIndices {
     /// is empty in which case it refers to the last transaction in a previous
     /// non-empty block
     pub const fn last_tx_num(&self) -> TxNumber {
-        self.first_tx_num.saturating_add(self.tx_count).saturating_sub(1)
+        self.first_tx_num
+            .saturating_add(self.tx_count)
+            .saturating_sub(1)
     }
 
     /// First transaction index.
@@ -70,7 +75,10 @@ impl StoredBlockBodyIndices {
 #[derive(Debug, Default, Eq, PartialEq, Clone)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
+#[cfg_attr(
+    any(test, feature = "reth-codec"),
+    reth_codecs::add_arbitrary_tests(compact)
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StoredBlockWithdrawals {
     /// The block withdrawals.
@@ -81,7 +89,10 @@ pub struct StoredBlockWithdrawals {
 /// represents a pre-merge block.
 #[derive(Debug, Default, Eq, PartialEq, Clone)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
+#[cfg_attr(
+    any(test, feature = "reth-codec"),
+    reth_codecs::add_arbitrary_tests(compact)
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StaticFileBlockWithdrawals {
     /// The block withdrawals. A `None` value represents a pre-merge block.
@@ -104,7 +115,12 @@ impl reth_codecs::Compact for StaticFileBlockWithdrawals {
         use bytes::Buf;
         if buf.get_u8() == 1 {
             let (w, buf) = Withdrawals::from_compact(buf, buf.len());
-            (Self { withdrawals: Some(w) }, buf)
+            (
+                Self {
+                    withdrawals: Some(w),
+                },
+                buf,
+            )
         } else {
             (Self { withdrawals: None }, buf)
         }
@@ -119,12 +135,18 @@ mod tests {
     fn block_indices() {
         let first_tx_num = 10;
         let tx_count = 6;
-        let block_indices = StoredBlockBodyIndices { first_tx_num, tx_count };
+        let block_indices = StoredBlockBodyIndices {
+            first_tx_num,
+            tx_count,
+        };
 
         assert_eq!(block_indices.first_tx_num(), first_tx_num);
         assert_eq!(block_indices.last_tx_num(), first_tx_num + tx_count - 1);
         assert_eq!(block_indices.next_tx_num(), first_tx_num + tx_count);
         assert_eq!(block_indices.tx_count(), tx_count);
-        assert_eq!(block_indices.tx_num_range(), first_tx_num..first_tx_num + tx_count);
+        assert_eq!(
+            block_indices.tx_num_range(),
+            first_tx_num..first_tx_num + tx_count
+        );
     }
 }

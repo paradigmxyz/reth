@@ -20,7 +20,10 @@ pub fn metered_unbounded_channel<T>(
     scope: &'static str,
 ) -> (UnboundedMeteredSender<T>, UnboundedMeteredReceiver<T>) {
     let (tx, rx) = mpsc::unbounded_channel();
-    (UnboundedMeteredSender::new(tx, scope), UnboundedMeteredReceiver::new(rx, scope))
+    (
+        UnboundedMeteredSender::new(tx, scope),
+        UnboundedMeteredReceiver::new(rx, scope),
+    )
 }
 
 /// Wrapper around [`mpsc::channel`] that returns a new bounded metered channel with the given
@@ -30,7 +33,10 @@ pub fn metered_channel<T>(
     scope: &'static str,
 ) -> (MeteredSender<T>, MeteredReceiver<T>) {
     let (tx, rx) = mpsc::channel(buffer);
-    (MeteredSender::new(tx, scope), MeteredReceiver::new(rx, scope))
+    (
+        MeteredSender::new(tx, scope),
+        MeteredReceiver::new(rx, scope),
+    )
 }
 
 /// A wrapper type around [`UnboundedSender`](mpsc::UnboundedSender) that updates metrics on send.
@@ -46,7 +52,10 @@ impl<T> UnboundedMeteredSender<T> {
     /// Creates a new [`MeteredSender`] wrapping around the provided  that updates metrics on send.
     // #[derive(Debug)]
     pub fn new(sender: mpsc::UnboundedSender<T>, scope: &'static str) -> Self {
-        Self { sender, metrics: MeteredSenderMetrics::new(scope) }
+        Self {
+            sender,
+            metrics: MeteredSenderMetrics::new(scope),
+        }
     }
 
     /// Calls the underlying  that updates metrics on send.
@@ -68,7 +77,10 @@ impl<T> UnboundedMeteredSender<T> {
 
 impl<T> Clone for UnboundedMeteredSender<T> {
     fn clone(&self) -> Self {
-        Self { sender: self.sender.clone(), metrics: self.metrics.clone() }
+        Self {
+            sender: self.sender.clone(),
+            metrics: self.metrics.clone(),
+        }
     }
 }
 
@@ -87,7 +99,10 @@ impl<T> UnboundedMeteredReceiver<T> {
     /// Creates a new [`UnboundedMeteredReceiver`] wrapping around the provided
     /// [Receiver](mpsc::UnboundedReceiver)
     pub fn new(receiver: mpsc::UnboundedReceiver<T>, scope: &'static str) -> Self {
-        Self { receiver, metrics: MeteredReceiverMetrics::new(scope) }
+        Self {
+            receiver,
+            metrics: MeteredReceiverMetrics::new(scope),
+        }
     }
 
     /// Receives the next value for this receiver.
@@ -141,7 +156,10 @@ pub struct MeteredSender<T> {
 impl<T> MeteredSender<T> {
     /// Creates a new [`MeteredSender`] wrapping around the provided [Sender](mpsc::Sender)
     pub fn new(sender: mpsc::Sender<T>, scope: &'static str) -> Self {
-        Self { sender, metrics: MeteredSenderMetrics::new(scope) }
+        Self {
+            sender,
+            metrics: MeteredSenderMetrics::new(scope),
+        }
     }
 
     /// Tries to acquire a permit to send a message.
@@ -189,7 +207,10 @@ impl<T> MeteredSender<T> {
 
 impl<T> Clone for MeteredSender<T> {
     fn clone(&self) -> Self {
-        Self { sender: self.sender.clone(), metrics: self.metrics.clone() }
+        Self {
+            sender: self.sender.clone(),
+            metrics: self.metrics.clone(),
+        }
     }
 }
 
@@ -207,7 +228,10 @@ pub struct MeteredReceiver<T> {
 impl<T> MeteredReceiver<T> {
     /// Creates a new [`MeteredReceiver`] wrapping around the provided [Receiver](mpsc::Receiver)
     pub fn new(receiver: mpsc::Receiver<T>, scope: &'static str) -> Self {
-        Self { receiver, metrics: MeteredReceiverMetrics::new(scope) }
+        Self {
+            receiver,
+            metrics: MeteredReceiverMetrics::new(scope),
+        }
     }
 
     /// Receives the next value for this receiver.
@@ -279,7 +303,10 @@ pub struct MeteredPollSender<T> {
 impl<T: Send + 'static> MeteredPollSender<T> {
     /// Creates a new [`MeteredPollSender`] wrapping around the provided [`PollSender`].
     pub fn new(sender: PollSender<T>, scope: &'static str) -> Self {
-        Self { sender, metrics: MeteredPollSenderMetrics::new(scope) }
+        Self {
+            sender,
+            metrics: MeteredPollSenderMetrics::new(scope),
+        }
     }
 
     /// Returns the underlying [`PollSender`].
@@ -315,7 +342,10 @@ impl<T: Send + 'static> MeteredPollSender<T> {
 
 impl<T> Clone for MeteredPollSender<T> {
     fn clone(&self) -> Self {
-        Self { sender: self.sender.clone(), metrics: self.metrics.clone() }
+        Self {
+            sender: self.sender.clone(),
+            metrics: self.metrics.clone(),
+        }
     }
 }
 

@@ -93,31 +93,40 @@ impl<ChainSpec: EthChainSpec + OpHardforks, B: Block> Consensus<B>
                     expected: block.ommers_hash(),
                 }
                 .into(),
-            ))
+            ));
         }
 
         // Check transaction root
         if let Err(error) = block.ensure_transaction_root_valid() {
-            return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
+            return Err(ConsensusError::BodyTransactionRootDiff(error.into()));
         }
 
         // Check empty shanghai-withdrawals
-        if self.chain_spec.is_shanghai_active_at_timestamp(block.timestamp()) {
+        if self
+            .chain_spec
+            .is_shanghai_active_at_timestamp(block.timestamp())
+        {
             shanghai::ensure_empty_shanghai_withdrawals(block.body()).map_err(|err| {
                 ConsensusError::Other(format!("failed to verify block {}: {err}", block.number()))
             })?
         } else {
-            return Ok(())
+            return Ok(());
         }
 
-        if self.chain_spec.is_cancun_active_at_timestamp(block.timestamp()) {
+        if self
+            .chain_spec
+            .is_cancun_active_at_timestamp(block.timestamp())
+        {
             validate_cancun_gas(block)?;
         } else {
-            return Ok(())
+            return Ok(());
         }
 
         // Check withdrawals root field in header
-        if self.chain_spec.is_isthmus_active_at_timestamp(block.timestamp()) {
+        if self
+            .chain_spec
+            .is_isthmus_active_at_timestamp(block.timestamp())
+        {
             // storage root of withdrawals pre-deploy is verified post-execution
             isthmus::ensure_withdrawals_storage_root_is_some(block.header()).map_err(|err| {
                 ConsensusError::Other(format!("failed to verify block {}: {err}", block.number()))
@@ -154,9 +163,13 @@ impl<ChainSpec: EthChainSpec + OpHardforks, H: BlockHeader> HeaderValidator<H>
         // <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#base-fee-computation>
         // > if Holocene is active in parent_header.timestamp, then the parameters from
         // > parent_header.extraData are used.
-        if self.chain_spec.is_holocene_active_at_timestamp(parent.timestamp()) {
-            let header_base_fee =
-                header.base_fee_per_gas().ok_or(ConsensusError::BaseFeeMissing)?;
+        if self
+            .chain_spec
+            .is_holocene_active_at_timestamp(parent.timestamp())
+        {
+            let header_base_fee = header
+                .base_fee_per_gas()
+                .ok_or(ConsensusError::BaseFeeMissing)?;
             let expected_base_fee =
                 decode_holocene_base_fee(&self.chain_spec, parent.header(), header.timestamp())
                     .map_err(|_| ConsensusError::BaseFeeMissing)?;
@@ -164,7 +177,7 @@ impl<ChainSpec: EthChainSpec + OpHardforks, H: BlockHeader> HeaderValidator<H>
                 return Err(ConsensusError::BaseFeeDiff(GotExpected {
                     expected: expected_base_fee,
                     got: header_base_fee,
-                }))
+                }));
             }
         } else {
             validate_against_parent_eip1559_base_fee(
@@ -194,11 +207,11 @@ impl<ChainSpec: EthChainSpec + OpHardforks, H: BlockHeader> HeaderValidator<H>
         );
 
         if header.nonce() != Some(B64::ZERO) {
-            return Err(ConsensusError::TheMergeNonceIsNotZero)
+            return Err(ConsensusError::TheMergeNonceIsNotZero);
         }
 
         if header.ommers_hash() != EMPTY_OMMER_ROOT_HASH {
-            return Err(ConsensusError::TheMergeOmmerRootIsNotEmpty)
+            return Err(ConsensusError::TheMergeOmmerRootIsNotEmpty);
         }
 
         // Post-merge, the consensus layer is expected to perform checks such that the block

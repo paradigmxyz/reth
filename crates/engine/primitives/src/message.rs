@@ -73,7 +73,9 @@ impl OnForkChoiceUpdated {
     pub fn invalid_state() -> Self {
         Self {
             forkchoice_status: ForkchoiceStatus::Invalid,
-            fut: Either::Left(futures::future::ready(Err(ForkchoiceUpdateError::InvalidState))),
+            fut: Either::Left(futures::future::ready(Err(
+                ForkchoiceUpdateError::InvalidState,
+            ))),
         }
     }
 
@@ -177,7 +179,11 @@ impl<Payload: PayloadTypes> Display for BeaconEngineMessage<Payload> {
                     payload.block_hash()
                 )
             }
-            Self::ForkchoiceUpdated { state, payload_attrs, .. } => {
+            Self::ForkchoiceUpdated {
+                state,
+                payload_attrs,
+                ..
+            } => {
                 // we don't want to print the entire payload attributes, because for OP this
                 // includes all txs
                 write!(
@@ -221,8 +227,11 @@ where
         payload: Payload::ExecutionData,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.to_engine.send(BeaconEngineMessage::NewPayload { payload, tx });
-        rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
+        let _ = self
+            .to_engine
+            .send(BeaconEngineMessage::NewPayload { payload, tx });
+        rx.await
+            .map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
     }
 
     /// Sends a forkchoice update message to the beacon consensus engine and waits for a response.
@@ -267,6 +276,8 @@ where
     /// This only notifies about the exchange. The actual exchange is done by the engine API impl
     /// itself.
     pub fn transition_configuration_exchanged(&self) {
-        let _ = self.to_engine.send(BeaconEngineMessage::TransitionConfigurationExchanged);
+        let _ = self
+            .to_engine
+            .send(BeaconEngineMessage::TransitionConfigurationExchanged);
     }
 }

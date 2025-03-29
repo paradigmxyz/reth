@@ -75,7 +75,9 @@ where
         self,
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
-        let evm_config = CustomEvmConfig { inner: EthEvmConfig::new(ctx.chain_spec()) };
+        let evm_config = CustomEvmConfig {
+            inner: EthEvmConfig::new(ctx.chain_spec()),
+        };
         let executor = BasicBlockExecutorProvider::new(evm_config.clone());
 
         Ok((evm_config, executor))
@@ -226,9 +228,11 @@ pub fn apply_withdrawals_contract_call(
     ) {
         Ok(res) => res.state,
         Err(e) => {
-            return Err(BlockExecutionError::Internal(InternalBlockExecutionError::Other(
-                format!("withdrawal contract system call revert: {}", e).into(),
-            )))
+            return Err(BlockExecutionError::Internal(
+                InternalBlockExecutionError::Other(
+                    format!("withdrawal contract system call revert: {}", e).into(),
+                ),
+            ))
         }
     };
 

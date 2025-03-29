@@ -31,7 +31,10 @@ impl FromIterator<(B256, B256Set)> for MultiProofTargets {
 impl MultiProofTargets {
     /// Creates an empty `MultiProofTargets` with at least the specified capacity.
     pub fn with_capacity(capacity: usize) -> Self {
-        Self(B256Map::with_capacity_and_hasher(capacity, Default::default()))
+        Self(B256Map::with_capacity_and_hasher(
+            capacity,
+            Default::default(),
+        ))
     }
 
     /// Create `MultiProofTargets` with a single account as a target.
@@ -44,12 +47,19 @@ impl MultiProofTargets {
         hashed_address: B256,
         slots_iter: I,
     ) -> Self {
-        Self(B256Map::from_iter([(hashed_address, slots_iter.into_iter().collect())]))
+        Self(B256Map::from_iter([(
+            hashed_address,
+            slots_iter.into_iter().collect(),
+        )]))
     }
 
     /// Create `MultiProofTargets` only from accounts.
     pub fn accounts<I: IntoIterator<Item = B256>>(iter: I) -> Self {
-        Self(iter.into_iter().map(|hashed_address| (hashed_address, Default::default())).collect())
+        Self(
+            iter.into_iter()
+                .map(|hashed_address| (hashed_address, Default::default()))
+                .collect(),
+        )
     }
 
     /// Retains the targets representing the difference,
@@ -79,7 +89,9 @@ impl MultiProofTargets {
 
     fn extend_inner(&mut self, other: Cow<'_, Self>) {
         for (hashed_address, hashed_slots) in other.iter() {
-            self.entry(*hashed_address).or_default().extend(hashed_slots);
+            self.entry(*hashed_address)
+                .or_default()
+                .extend(hashed_slots);
         }
     }
 
@@ -134,7 +146,10 @@ impl ChunkedMultiProofTargets {
                 }
             })
             .sorted();
-        Self { flattened_targets, size }
+        Self {
+            flattened_targets,
+            size,
+        }
     }
 }
 
@@ -179,10 +194,10 @@ pub struct MultiProof {
 impl MultiProof {
     /// Returns true if the multiproof is empty.
     pub fn is_empty(&self) -> bool {
-        self.account_subtree.is_empty() &&
-            self.branch_node_hash_masks.is_empty() &&
-            self.branch_node_tree_masks.is_empty() &&
-            self.storages.is_empty()
+        self.account_subtree.is_empty()
+            && self.branch_node_hash_masks.is_empty()
+            && self.branch_node_tree_masks.is_empty()
+            && self.storages.is_empty()
     }
 
     /// Return the account proof nodes for the given account path.
@@ -238,7 +253,7 @@ impl MultiProof {
                             nonce: account.nonce,
                             bytecode_hash: (account.code_hash != KECCAK_EMPTY)
                                 .then_some(account.code_hash),
-                        })
+                        });
                     }
                 }
             }
@@ -247,7 +262,9 @@ impl MultiProof {
 
         // Retrieve proofs for requested storage slots.
         let storage_multiproof = self.storages.get(&hashed_address);
-        let storage_root = storage_multiproof.map(|m| m.root).unwrap_or(EMPTY_ROOT_HASH);
+        let storage_root = storage_multiproof
+            .map(|m| m.root)
+            .unwrap_or(EMPTY_ROOT_HASH);
         let mut storage_proofs = Vec::with_capacity(slots.len());
         for slot in slots {
             let proof = if let Some(multiproof) = &storage_multiproof {
@@ -257,7 +274,13 @@ impl MultiProof {
             };
             storage_proofs.push(proof);
         }
-        Ok(AccountProof { address, info, proof, storage_root, storage_proofs })
+        Ok(AccountProof {
+            address,
+            info,
+            proof,
+            storage_root,
+            storage_proofs,
+        })
     }
 
     /// Extends this multiproof with another one, merging both account and storage
@@ -265,8 +288,10 @@ impl MultiProof {
     pub fn extend(&mut self, other: Self) {
         self.account_subtree.extend_from(other.account_subtree);
 
-        self.branch_node_hash_masks.extend(other.branch_node_hash_masks);
-        self.branch_node_tree_masks.extend(other.branch_node_tree_masks);
+        self.branch_node_hash_masks
+            .extend(other.branch_node_hash_masks);
+        self.branch_node_tree_masks
+            .extend(other.branch_node_tree_masks);
 
         for (hashed_address, storage) in other.storages {
             match self.storages.entry(hashed_address) {
@@ -274,8 +299,12 @@ impl MultiProof {
                     debug_assert_eq!(entry.get().root, storage.root);
                     let entry = entry.get_mut();
                     entry.subtree.extend_from(storage.subtree);
-                    entry.branch_node_hash_masks.extend(storage.branch_node_hash_masks);
-                    entry.branch_node_tree_masks.extend(storage.branch_node_tree_masks);
+                    entry
+                        .branch_node_hash_masks
+                        .extend(storage.branch_node_hash_masks);
+                    entry
+                        .branch_node_tree_masks
+                        .extend(storage.branch_node_tree_masks);
                 }
                 hash_map::Entry::Vacant(entry) => {
                     entry.insert(storage);
@@ -352,7 +381,7 @@ impl DecodedMultiProof {
                         nonce: account.nonce,
                         bytecode_hash: (account.code_hash != KECCAK_EMPTY)
                             .then_some(account.code_hash),
-                    })
+                    });
                 }
             }
             None
@@ -360,7 +389,9 @@ impl DecodedMultiProof {
 
         // Retrieve proofs for requested storage slots.
         let storage_multiproof = self.storages.get(&hashed_address);
-        let storage_root = storage_multiproof.map(|m| m.root).unwrap_or(EMPTY_ROOT_HASH);
+        let storage_root = storage_multiproof
+            .map(|m| m.root)
+            .unwrap_or(EMPTY_ROOT_HASH);
         let mut storage_proofs = Vec::with_capacity(slots.len());
         for slot in slots {
             let proof = if let Some(multiproof) = &storage_multiproof {
@@ -370,7 +401,13 @@ impl DecodedMultiProof {
             };
             storage_proofs.push(proof);
         }
-        Ok(DecodedAccountProof { address, info, proof, storage_root, storage_proofs })
+        Ok(DecodedAccountProof {
+            address,
+            info,
+            proof,
+            storage_root,
+            storage_proofs,
+        })
     }
 
     /// Extends this multiproof with another one, merging both account and storage
@@ -378,8 +415,10 @@ impl DecodedMultiProof {
     pub fn extend(&mut self, other: Self) {
         self.account_subtree.extend_from(other.account_subtree);
 
-        self.branch_node_hash_masks.extend(other.branch_node_hash_masks);
-        self.branch_node_tree_masks.extend(other.branch_node_tree_masks);
+        self.branch_node_hash_masks
+            .extend(other.branch_node_hash_masks);
+        self.branch_node_tree_masks
+            .extend(other.branch_node_tree_masks);
 
         for (hashed_address, storage) in other.storages {
             match self.storages.entry(hashed_address) {
@@ -387,8 +426,12 @@ impl DecodedMultiProof {
                     debug_assert_eq!(entry.get().root, storage.root);
                     let entry = entry.get_mut();
                     entry.subtree.extend_from(storage.subtree);
-                    entry.branch_node_hash_masks.extend(storage.branch_node_hash_masks);
-                    entry.branch_node_tree_masks.extend(storage.branch_node_tree_masks);
+                    entry
+                        .branch_node_hash_masks
+                        .extend(storage.branch_node_hash_masks);
+                    entry
+                        .branch_node_tree_masks
+                        .extend(storage.branch_node_tree_masks);
                 }
                 hash_map::Entry::Vacant(entry) => {
                     entry.insert(storage);
@@ -443,14 +486,19 @@ impl StorageMultiProof {
             if let Some(last) = proof.last() {
                 if let TrieNode::Leaf(leaf) = TrieNode::decode(&mut &last[..])? {
                     if nibbles.ends_with(&leaf.key) {
-                        break 'value U256::decode(&mut &leaf.value[..])?
+                        break 'value U256::decode(&mut &leaf.value[..])?;
                     }
                 }
             }
             U256::ZERO
         };
 
-        Ok(StorageProof { key: slot, nibbles, value, proof })
+        Ok(StorageProof {
+            key: slot,
+            nibbles,
+            value,
+            proof,
+        })
     }
 }
 
@@ -495,19 +543,27 @@ impl DecodedStorageMultiProof {
         let value = 'value: {
             if let Some(TrieNode::Leaf(leaf)) = proof.last() {
                 if nibbles.ends_with(&leaf.key) {
-                    break 'value U256::decode(&mut &leaf.value[..])?
+                    break 'value U256::decode(&mut &leaf.value[..])?;
                 }
             }
             U256::ZERO
         };
 
-        Ok(DecodedStorageProof { key: slot, nibbles, value, proof })
+        Ok(DecodedStorageProof {
+            key: slot,
+            nibbles,
+            value,
+            proof,
+        })
     }
 }
 
 /// The merkle proof with the relevant account info.
 #[derive(Clone, PartialEq, Eq, Debug)]
-#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    any(test, feature = "serde"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
 #[cfg_attr(any(test, feature = "serde"), serde(rename_all = "camelCase"))]
 pub struct AccountProof {
     /// The address associated with the account.
@@ -567,19 +623,32 @@ impl AccountProof {
         } = proof;
         let storage_proofs = storage_proof.into_iter().map(Into::into).collect();
 
-        let (storage_root, info) = if nonce == 0 &&
-            balance.is_zero() &&
-            storage_hash.is_zero() &&
-            code_hash == KECCAK_EMPTY
+        let (storage_root, info) = if nonce == 0
+            && balance.is_zero()
+            && storage_hash.is_zero()
+            && code_hash == KECCAK_EMPTY
         {
             // Account does not exist in state. Return `None` here to prevent proof
             // verification.
             (EMPTY_ROOT_HASH, None)
         } else {
-            (storage_hash, Some(Account { nonce, balance, bytecode_hash: code_hash.into() }))
+            (
+                storage_hash,
+                Some(Account {
+                    nonce,
+                    balance,
+                    bytecode_hash: code_hash.into(),
+                }),
+            )
         };
 
-        Self { address, info, proof: account_proof, storage_root, storage_proofs }
+        Self {
+            address,
+            info,
+            proof: account_proof,
+            storage_root,
+            storage_proofs,
+        }
     }
 }
 
@@ -620,7 +689,9 @@ impl AccountProof {
             None
         } else {
             Some(alloy_rlp::encode(
-                self.info.unwrap_or_default().into_trie_account(self.storage_root),
+                self.info
+                    .unwrap_or_default()
+                    .into_trie_account(self.storage_root),
             ))
         };
         let nibbles = Nibbles::unpack(keccak256(self.address));
@@ -665,7 +736,10 @@ impl DecodedAccountProof {
 
 /// The merkle proof of the storage entry.
 #[derive(Clone, PartialEq, Eq, Default, Debug)]
-#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    any(test, feature = "serde"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub struct StorageProof {
     /// The raw storage key.
     pub key: B256,
@@ -682,17 +756,29 @@ impl StorageProof {
     /// Create new storage proof from the storage slot.
     pub fn new(key: B256) -> Self {
         let nibbles = Nibbles::unpack(keccak256(key));
-        Self { key, nibbles, ..Default::default() }
+        Self {
+            key,
+            nibbles,
+            ..Default::default()
+        }
     }
 
     /// Create new storage proof from the storage slot and its pre-hashed image.
     pub fn new_with_hashed(key: B256, hashed_key: B256) -> Self {
-        Self { key, nibbles: Nibbles::unpack(hashed_key), ..Default::default() }
+        Self {
+            key,
+            nibbles: Nibbles::unpack(hashed_key),
+            ..Default::default()
+        }
     }
 
     /// Create new storage proof from the storage slot and its pre-hashed image.
     pub fn new_with_nibbles(key: B256, nibbles: Nibbles) -> Self {
-        Self { key, nibbles, ..Default::default() }
+        Self {
+            key,
+            nibbles,
+            ..Default::default()
+        }
     }
 
     /// Set proof nodes on storage proof.
@@ -703,8 +789,11 @@ impl StorageProof {
 
     /// Verify the proof against the provided storage root.
     pub fn verify(&self, root: B256) -> Result<(), ProofVerificationError> {
-        let expected =
-            if self.value.is_zero() { None } else { Some(encode_fixed_size(&self.value).to_vec()) };
+        let expected = if self.value.is_zero() {
+            None
+        } else {
+            Some(encode_fixed_size(&self.value).to_vec())
+        };
         verify_proof(root, self.nibbles.clone(), expected, &self.proof)
     }
 }
@@ -716,7 +805,11 @@ impl StorageProof {
         self,
         slot: alloy_serde::JsonStorageKey,
     ) -> alloy_rpc_types_eth::EIP1186StorageProof {
-        alloy_rpc_types_eth::EIP1186StorageProof { key: slot, value: self.value, proof: self.proof }
+        alloy_rpc_types_eth::EIP1186StorageProof {
+            key: slot,
+            value: self.value,
+            proof: self.proof,
+        }
     }
 
     /// Convert from an
@@ -757,17 +850,29 @@ impl DecodedStorageProof {
     /// Create new storage proof from the storage slot.
     pub fn new(key: B256) -> Self {
         let nibbles = Nibbles::unpack(keccak256(key));
-        Self { key, nibbles, ..Default::default() }
+        Self {
+            key,
+            nibbles,
+            ..Default::default()
+        }
     }
 
     /// Create new storage proof from the storage slot and its pre-hashed image.
     pub fn new_with_hashed(key: B256, hashed_key: B256) -> Self {
-        Self { key, nibbles: Nibbles::unpack(hashed_key), ..Default::default() }
+        Self {
+            key,
+            nibbles: Nibbles::unpack(hashed_key),
+            ..Default::default()
+        }
     }
 
     /// Create new storage proof from the storage slot and its pre-hashed image.
     pub fn new_with_nibbles(key: B256, nibbles: Nibbles) -> Self {
-        Self { key, nibbles, ..Default::default() }
+        Self {
+            key,
+            nibbles,
+            ..Default::default()
+        }
     }
 
     /// Set proof nodes on storage proof.
@@ -818,11 +923,15 @@ mod tests {
 
         proof1.account_subtree.insert(
             Nibbles::unpack(addr1),
-            alloy_rlp::encode_fixed_size(&U256::from(42)).to_vec().into(),
+            alloy_rlp::encode_fixed_size(&U256::from(42))
+                .to_vec()
+                .into(),
         );
         proof2.account_subtree.insert(
             Nibbles::unpack(addr2),
-            alloy_rlp::encode_fixed_size(&U256::from(43)).to_vec().into(),
+            alloy_rlp::encode_fixed_size(&U256::from(43))
+                .to_vec()
+                .into(),
         );
 
         proof1.extend(proof2);
@@ -842,7 +951,9 @@ mod tests {
         let mut subtree1 = ProofNodes::default();
         subtree1.insert(
             Nibbles::from_nibbles(vec![0]),
-            alloy_rlp::encode_fixed_size(&U256::from(42)).to_vec().into(),
+            alloy_rlp::encode_fixed_size(&U256::from(42))
+                .to_vec()
+                .into(),
         );
         proof1.storages.insert(
             addr,
@@ -857,7 +968,9 @@ mod tests {
         let mut subtree2 = ProofNodes::default();
         subtree2.insert(
             Nibbles::from_nibbles(vec![1]),
-            alloy_rlp::encode_fixed_size(&U256::from(43)).to_vec().into(),
+            alloy_rlp::encode_fixed_size(&U256::from(43))
+                .to_vec()
+                .into(),
         );
         proof2.storages.insert(
             addr,
@@ -873,8 +986,12 @@ mod tests {
 
         let storage = proof1.storages.get(&addr).unwrap();
         assert_eq!(storage.root, root);
-        assert!(storage.subtree.contains_key(&Nibbles::from_nibbles(vec![0])));
-        assert!(storage.subtree.contains_key(&Nibbles::from_nibbles(vec![1])));
+        assert!(storage
+            .subtree
+            .contains_key(&Nibbles::from_nibbles(vec![0])));
+        assert!(storage
+            .subtree
+            .contains_key(&Nibbles::from_nibbles(vec![1])));
     }
 
     #[test]
@@ -889,8 +1006,13 @@ mod tests {
         diffed.retain_difference(&MultiProofTargets::account(B256::with_last_byte(11)));
         assert_eq!(diffed, targets);
 
-        diffed.retain_difference(&MultiProofTargets::accounts((0..5).map(B256::with_last_byte)));
-        assert_eq!(diffed, MultiProofTargets::accounts((5..10).map(B256::with_last_byte)));
+        diffed.retain_difference(&MultiProofTargets::accounts(
+            (0..5).map(B256::with_last_byte),
+        ));
+        assert_eq!(
+            diffed,
+            MultiProofTargets::accounts((5..10).map(B256::with_last_byte))
+        );
 
         diffed.retain_difference(&targets);
         assert!(diffed.is_empty());
@@ -904,7 +1026,9 @@ mod tests {
         targets.insert(account3, B256Set::from_iter([B256::with_last_byte(1)]));
 
         let mut diffed = targets.clone();
-        diffed.retain_difference(&MultiProofTargets::accounts((1..=3).map(B256::with_last_byte)));
+        diffed.retain_difference(&MultiProofTargets::accounts(
+            (1..=3).map(B256::with_last_byte),
+        ));
         assert_eq!(diffed, targets);
 
         // remove last 3 slots for account 2
@@ -992,7 +1116,11 @@ mod tests {
             address: Address::random(),
             info: Some(
                 // non-empty account
-                Account { nonce: 100, balance: U256::ZERO, bytecode_hash: Some(KECCAK_EMPTY) },
+                Account {
+                    nonce: 100,
+                    balance: U256::ZERO,
+                    bytecode_hash: Some(KECCAK_EMPTY),
+                },
             ),
             proof: vec![],
             storage_root: B256::ZERO,

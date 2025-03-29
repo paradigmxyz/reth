@@ -34,20 +34,27 @@ use tracing::info;
 fn main() -> eyre::Result<()> {
     reth::cli::Cli::parse_args().run(|builder, _args| async move {
         // launch the node
-        let NodeHandle { node, node_exit_future } =
-            builder.node(EthereumNode::default()).launch().await?;
+        let NodeHandle {
+            node,
+            node_exit_future,
+        } = builder.node(EthereumNode::default()).launch().await?;
         let peer_id = node.network.peer_id();
         let peer_addr = node.network.local_addr();
 
         // add the custom network subprotocol to the launched node
         let (tx, mut from_peer0) = mpsc::unbounded_channel();
-        let custom_rlpx_handler = CustomRlpxProtoHandler { state: ProtocolState { events: tx } };
-        node.network.add_rlpx_sub_protocol(custom_rlpx_handler.into_rlpx_sub_protocol());
+        let custom_rlpx_handler = CustomRlpxProtoHandler {
+            state: ProtocolState { events: tx },
+        };
+        node.network
+            .add_rlpx_sub_protocol(custom_rlpx_handler.into_rlpx_sub_protocol());
 
         // creates a separate network instance and adds the custom network subprotocol
         let secret_key = SecretKey::new(&mut rand::thread_rng());
         let (tx, mut from_peer1) = mpsc::unbounded_channel();
-        let custom_rlpx_handler_2 = CustomRlpxProtoHandler { state: ProtocolState { events: tx } };
+        let custom_rlpx_handler_2 = CustomRlpxProtoHandler {
+            state: ProtocolState { events: tx },
+        };
         let net_cfg = NetworkConfig::builder(secret_key)
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
             .disable_discovery()
@@ -62,7 +69,9 @@ fn main() -> eyre::Result<()> {
         node.task_executor.spawn(subnetwork);
 
         // connect the launched node to the subnetwork
-        node.network.peers_handle().add_peer(subnetwork_peer_id, subnetwork_peer_addr);
+        node.network
+            .peers_handle()
+            .add_peer(subnetwork_peer_id, subnetwork_peer_addr);
 
         // connect the subnetwork to the launched node
         subnetwork_handle.add_peer(*peer_id, peer_addr);
@@ -70,7 +79,11 @@ fn main() -> eyre::Result<()> {
         // establish connection between peer0 and peer1
         let peer0_to_peer1 = from_peer0.recv().await.expect("peer0 connecting to peer1");
         let peer0_conn = match peer0_to_peer1 {
-            ProtocolEvent::Established { direction: _, peer_id, to_connection } => {
+            ProtocolEvent::Established {
+                direction: _,
+                peer_id,
+                to_connection,
+            } => {
                 assert_eq!(peer_id, subnetwork_peer_id);
                 to_connection
             }
@@ -79,7 +92,11 @@ fn main() -> eyre::Result<()> {
         // establish connection between peer1 and peer0
         let peer1_to_peer0 = from_peer1.recv().await.expect("peer1 connecting to peer0");
         let peer1_conn = match peer1_to_peer0 {
-            ProtocolEvent::Established { direction: _, peer_id: peer1_id, to_connection } => {
+            ProtocolEvent::Established {
+                direction: _,
+                peer_id: peer1_id,
+                to_connection,
+            } => {
                 assert_eq!(peer1_id, *peer_id);
                 to_connection
             }
@@ -88,14 +105,20 @@ fn main() -> eyre::Result<()> {
 
         // send a ping message from peer0 to peer1
         let (tx, rx) = oneshot::channel();
-        peer0_conn.send(CustomCommand::Message { msg: "hello!".to_string(), response: tx })?;
+        peer0_conn.send(CustomCommand::Message {
+            msg: "hello!".to_string(),
+            response: tx,
+        })?;
         let response = rx.await?;
         assert_eq!(response, "hello!");
         info!(target:"rlpx-subprotocol", ?response, "New message received");
 
         // send a ping message from peer1 to peer0
         let (tx, rx) = oneshot::channel();
-        peer1_conn.send(CustomCommand::Message { msg: "world!".to_string(), response: tx })?;
+        peer1_conn.send(CustomCommand::Message {
+            msg: "world!".to_string(),
+            response: tx,
+        })?;
         let response = rx.await?;
         assert_eq!(response, "world!");
         info!(target:"rlpx-subprotocol", ?response, "New message received");

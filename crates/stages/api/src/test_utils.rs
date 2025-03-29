@@ -80,7 +80,8 @@ impl<Provider> Stage<Provider> for TestStage {
     }
 
     fn post_execute_commit(&mut self) -> Result<(), StageError> {
-        self.post_execute_commit_counter.fetch_add(1, Ordering::Relaxed);
+        self.post_execute_commit_counter
+            .fetch_add(1, Ordering::Relaxed);
 
         Ok(())
     }
@@ -92,7 +93,8 @@ impl<Provider> Stage<Provider> for TestStage {
     }
 
     fn post_unwind_commit(&mut self) -> Result<(), StageError> {
-        self.post_unwind_commit_counter.fetch_add(1, Ordering::Relaxed);
+        self.post_unwind_commit_counter
+            .fetch_add(1, Ordering::Relaxed);
 
         Ok(())
     }

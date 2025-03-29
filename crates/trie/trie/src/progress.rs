@@ -27,7 +27,11 @@ impl From<MerkleCheckpoint> for IntermediateStateRootState {
     fn from(value: MerkleCheckpoint) -> Self {
         Self {
             hash_builder: HashBuilder::from(value.state),
-            walker_stack: value.walker_stack.into_iter().map(CursorSubNode::from).collect(),
+            walker_stack: value
+                .walker_stack
+                .into_iter()
+                .map(CursorSubNode::from)
+                .collect(),
             last_account_key: value.last_account_key,
         }
     }

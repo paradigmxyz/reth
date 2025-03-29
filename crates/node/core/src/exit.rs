@@ -33,7 +33,10 @@ impl NodeExitFuture {
     where
         F: Future<Output = eyre::Result<()>> + 'static + Send,
     {
-        Self { consensus_engine_fut: Some(Box::pin(consensus_engine_fut)), terminate }
+        Self {
+            consensus_engine_fut: Some(Box::pin(consensus_engine_fut)),
+            terminate,
+        }
     }
 }
 

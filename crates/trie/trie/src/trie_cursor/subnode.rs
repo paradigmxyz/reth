@@ -43,14 +43,23 @@ impl From<StoredSubNode> for CursorSubNode {
         let nibble = value.nibble.map_or(-1, |n| n as i8);
         let key = Nibbles::from_nibbles_unchecked(value.key);
         let full_key = full_key(key.clone(), nibble);
-        Self { key, nibble, node: value.node, full_key }
+        Self {
+            key,
+            nibble,
+            node: value.node,
+            full_key,
+        }
     }
 }
 
 impl From<CursorSubNode> for StoredSubNode {
     fn from(value: CursorSubNode) -> Self {
         let nibble = (value.nibble >= 0).then_some(value.nibble as u8);
-        Self { key: value.key.to_vec(), nibble, node: value.node }
+        Self {
+            key: value.key.to_vec(),
+            nibble,
+            node: value.node,
+        }
     }
 }
 
@@ -58,11 +67,22 @@ impl CursorSubNode {
     /// Creates a new `CursorSubNode` from a key and an optional node.
     pub fn new(key: Nibbles, node: Option<BranchNodeCompact>) -> Self {
         // Find the first nibble that is set in the state mask of the node.
-        let nibble = node.as_ref().filter(|n| n.root_hash.is_none()).map_or(-1, |n| {
-            CHILD_INDEX_RANGE.clone().find(|i| n.state_mask.is_bit_set(*i)).unwrap() as i8
-        });
+        let nibble = node
+            .as_ref()
+            .filter(|n| n.root_hash.is_none())
+            .map_or(-1, |n| {
+                CHILD_INDEX_RANGE
+                    .clone()
+                    .find(|i| n.state_mask.is_bit_set(*i))
+                    .unwrap() as i8
+            });
         let full_key = full_key(key.clone(), nibble);
-        Self { key, node, nibble, full_key }
+        Self {
+            key,
+            node,
+            nibble,
+            full_key,
+        }
     }
 
     /// Returns the full key of the current node.

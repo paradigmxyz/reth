@@ -32,7 +32,10 @@ pub type ReplayTransactionResult = Result<(TraceResults, TxHash), (RpcError, TxH
 
 /// A type representing the result of calling `trace_call_many` method.
 pub type CallManyTraceResult = Result<
-    (Vec<TraceResults>, Vec<(TransactionRequest, HashSet<TraceType>)>),
+    (
+        Vec<TraceResults>,
+        Vec<(TransactionRequest, HashSet<TraceType>)>,
+    ),
     (RpcError, Vec<(TransactionRequest, HashSet<TraceType>)>),
 >;
 
@@ -266,7 +269,9 @@ impl<T: TraceApiClient + Sync> TraceApiExt for T {
             }
         }))
         .buffered(n);
-        TraceBlockStream { stream: Box::pin(stream) }
+        TraceBlockStream {
+            stream: Box::pin(stream),
+        }
     }
 
     fn trace_block_buffered_unordered<I, B>(&self, params: I, n: usize) -> TraceBlockStream<'_>
@@ -282,7 +287,9 @@ impl<T: TraceApiClient + Sync> TraceApiExt for T {
             }
         }))
         .buffer_unordered(n);
-        TraceBlockStream { stream: Box::pin(stream) }
+        TraceBlockStream {
+            stream: Box::pin(stream),
+        }
     }
 
     fn trace_block_opcode_gas_unordered<I, B>(
@@ -302,7 +309,9 @@ impl<T: TraceApiClient + Sync> TraceApiExt for T {
             }
         }))
         .buffered(n);
-        TraceBlockOpcodeGasStream { stream: Box::pin(stream) }
+        TraceBlockOpcodeGasStream {
+            stream: Box::pin(stream),
+        }
     }
 
     fn replay_transactions<I>(
@@ -324,7 +333,9 @@ impl<T: TraceApiClient + Sync> TraceApiExt for T {
             }
         }))
         .buffered(10);
-        ReplayTransactionStream { stream: Box::pin(stream) }
+        ReplayTransactionStream {
+            stream: Box::pin(stream),
+        }
     }
 
     fn trace_raw_transaction_stream(
@@ -334,12 +345,17 @@ impl<T: TraceApiClient + Sync> TraceApiExt for T {
         block_id: Option<BlockId>,
     ) -> RawTransactionTraceStream<'_> {
         let stream = futures::stream::once(async move {
-            match self.trace_raw_transaction(data.clone(), trace_types, block_id).await {
+            match self
+                .trace_raw_transaction(data.clone(), trace_types, block_id)
+                .await
+            {
                 Ok(result) => Ok((result, data)),
                 Err(err) => Err((err, data)),
             }
         });
-        RawTransactionTraceStream { stream: Box::pin(stream) }
+        RawTransactionTraceStream {
+            stream: Box::pin(stream),
+        }
     }
 
     fn trace_call_many_stream<I>(
@@ -357,7 +373,9 @@ impl<T: TraceApiClient + Sync> TraceApiExt for T {
                 Err(err) => Err((err, call_set)),
             }
         });
-        CallManyTraceStream { stream: Box::pin(stream) }
+        CallManyTraceStream {
+            stream: Box::pin(stream),
+        }
     }
 
     fn trace_get_stream<I>(&self, hash: B256, indices: I) -> TraceGetStream<'_>
@@ -372,7 +390,9 @@ impl<T: TraceApiClient + Sync> TraceApiExt for T {
             }
         }))
         .buffered(10);
-        TraceGetStream { stream: Box::pin(stream) }
+        TraceGetStream {
+            stream: Box::pin(stream),
+        }
     }
 
     fn trace_filter_stream<I>(&self, filters: I) -> TraceFilterStream<'_>
@@ -387,7 +407,9 @@ impl<T: TraceApiClient + Sync> TraceApiExt for T {
             }
         }))
         .buffered(10);
-        TraceFilterStream { stream: Box::pin(stream) }
+        TraceFilterStream {
+            stream: Box::pin(stream),
+        }
     }
 
     fn trace_call_stream(&self, request: TraceCallRequest) -> TraceCallStream<'_> {
@@ -406,7 +428,9 @@ impl<T: TraceApiClient + Sync> TraceApiExt for T {
                 Err(err) => Err((err, request)),
             }
         });
-        TraceCallStream { stream: Box::pin(stream) }
+        TraceCallStream {
+            stream: Box::pin(stream),
+        }
     }
 }
 
@@ -470,7 +494,8 @@ impl Stream for TraceBlockOpcodeGasStream<'_> {
 
 impl std::fmt::Debug for TraceBlockOpcodeGasStream<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TraceBlockOpcodeGasStream").finish_non_exhaustive()
+        f.debug_struct("TraceBlockOpcodeGasStream")
+            .finish_non_exhaustive()
     }
 }
 
@@ -549,9 +574,12 @@ where
         transaction_hashes: Vec<TxHash>,
         trace_types: HashSet<TraceType>,
     ) {
-        let stream1 =
-            self.client1.replay_transactions(transaction_hashes.clone(), trace_types.clone());
-        let stream2 = self.client2.replay_transactions(transaction_hashes, trace_types);
+        let stream1 = self
+            .client1
+            .replay_transactions(transaction_hashes.clone(), trace_types.clone());
+        let stream2 = self
+            .client2
+            .replay_transactions(transaction_hashes, trace_types);
 
         let mut zipped_streams = stream1.zip(stream2);
 
@@ -589,8 +617,13 @@ mod tests {
 
     #[tokio::test]
     async fn can_create_block_stream() {
-        let client = HttpClientBuilder::default().build("http://localhost:8545").unwrap();
-        let block = vec![BlockId::Number(5u64.into()), BlockNumberOrTag::Latest.into()];
+        let client = HttpClientBuilder::default()
+            .build("http://localhost:8545")
+            .unwrap();
+        let block = vec![
+            BlockId::Number(5u64.into()),
+            BlockNumberOrTag::Latest.into(),
+        ];
         let stream = client.trace_block_buffered(block, 2);
         assert_is_stream(&stream);
     }
@@ -598,12 +631,18 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn can_create_replay_transaction_stream() {
-        let client = HttpClientBuilder::default().build("http://localhost:8545").unwrap();
+        let client = HttpClientBuilder::default()
+            .build("http://localhost:8545")
+            .unwrap();
 
         // Assuming you have some transactions you want to test, replace with actual hashes.
         let transactions = vec![
-            "0x4e08fe36db723a338e852f89f613e606b0c9a17e649b18b01251f86236a2cef3".parse().unwrap(),
-            "0xea2817f1aeeb587b82f4ab87a6dbd3560fc35ed28de1be280cb40b2a24ab48bb".parse().unwrap(),
+            "0x4e08fe36db723a338e852f89f613e606b0c9a17e649b18b01251f86236a2cef3"
+                .parse()
+                .unwrap(),
+            "0xea2817f1aeeb587b82f4ab87a6dbd3560fc35ed28de1be280cb40b2a24ab48bb"
+                .parse()
+                .unwrap(),
         ];
 
         let trace_types = HashSet::from_iter([TraceType::StateDiff, TraceType::VmTrace]);
@@ -634,12 +673,17 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn can_create_trace_call_many_stream() {
-        let client = HttpClientBuilder::default().build("http://localhost:8545").unwrap();
+        let client = HttpClientBuilder::default()
+            .build("http://localhost:8545")
+            .unwrap();
 
         let call_request_1 = TransactionRequest::default();
         let call_request_2 = TransactionRequest::default();
         let trace_types = HashSet::from_iter([TraceType::StateDiff, TraceType::VmTrace]);
-        let calls = vec![(call_request_1, trace_types.clone()), (call_request_2, trace_types)];
+        let calls = vec![
+            (call_request_1, trace_types.clone()),
+            (call_request_2, trace_types),
+        ];
 
         let mut stream = client.trace_call_many_stream(calls, None);
 
@@ -659,7 +703,9 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn can_create_trace_get_stream() {
-        let client = HttpClientBuilder::default().build("http://localhost:8545").unwrap();
+        let client = HttpClientBuilder::default()
+            .build("http://localhost:8545")
+            .unwrap();
 
         let tx_hash: B256 = "".parse().unwrap();
 
@@ -682,7 +728,9 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn can_create_trace_filter() {
-        let client = HttpClientBuilder::default().build("http://localhost:8545").unwrap();
+        let client = HttpClientBuilder::default()
+            .build("http://localhost:8545")
+            .unwrap();
 
         let filter = TraceFilter {
             from_block: None,
@@ -712,7 +760,9 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn can_create_trace_call_stream() {
-        let client = HttpClientBuilder::default().build("http://localhost:8545").unwrap();
+        let client = HttpClientBuilder::default()
+            .build("http://localhost:8545")
+            .unwrap();
 
         let trace_call_request = TraceCallRequest::default();
 
@@ -742,7 +792,9 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn block_opcode_gas_stream() {
-        let client = HttpClientBuilder::default().build("http://localhost:8545").unwrap();
+        let client = HttpClientBuilder::default()
+            .build("http://localhost:8545")
+            .unwrap();
         let block = vec![BlockNumberOrTag::Latest];
         let mut stream = client.trace_block_opcode_gas_unordered(block, 2);
         assert_is_stream(&stream);

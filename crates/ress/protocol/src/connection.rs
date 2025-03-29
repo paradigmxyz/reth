@@ -85,7 +85,8 @@ impl<P> RessProtocolConnection<P> {
 
     /// Report bad message from current peer.
     fn report_bad_message(&self) {
-        self.peers_handle.reputation_change(self.peer_id, ReputationChangeKind::BadMessage);
+        self.peers_handle
+            .reputation_change(self.peer_id, ReputationChangeKind::BadMessage);
     }
 
     fn on_command(&mut self, command: RessPeerRequest) -> RessProtocolMessage {
@@ -250,7 +251,9 @@ impl<P> Drop for RessProtocolConnection<P> {
     fn drop(&mut self) {
         let _ = self
             .active_connections
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |c| Some(c.saturating_sub(1)));
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |c| {
+                Some(c.saturating_sub(1))
+            });
     }
 }
 
@@ -264,12 +267,14 @@ where
         let this = self.get_mut();
 
         if this.terminated {
-            return Poll::Ready(None)
+            return Poll::Ready(None);
         }
 
         if !this.node_type_sent {
             this.node_type_sent = true;
-            return Poll::Ready(Some(RessProtocolMessage::node_type(this.node_type).encoded()))
+            return Poll::Ready(Some(
+                RessProtocolMessage::node_type(this.node_type).encoded(),
+            ));
         }
 
         'conn: loop {

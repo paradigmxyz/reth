@@ -56,12 +56,21 @@ impl TransactionTestContext {
         delegate_to: Address,
         wallet: PrivateKeySigner,
     ) -> TxEnvelope {
-        let authorization =
-            Authorization { chain_id: U256::from(chain_id), address: delegate_to, nonce: 0 };
+        let authorization = Authorization {
+            chain_id: U256::from(chain_id),
+            address: delegate_to,
+            nonce: 0,
+        };
         let signature = wallet
             .sign_hash_sync(&authorization.signature_hash())
             .expect("could not sign authorization");
-        let tx = tx(chain_id, 48100, None, Some(authorization.into_signed(signature)), 0);
+        let tx = tx(
+            chain_id,
+            48100,
+            None,
+            Some(authorization.into_signed(signature)),
+            0,
+        );
         Self::sign_tx(wallet, tx).await
     }
 
@@ -96,7 +105,9 @@ impl TransactionTestContext {
     /// Signs an arbitrary [`TransactionRequest`] using the provided wallet
     pub async fn sign_tx(wallet: PrivateKeySigner, tx: TransactionRequest) -> TxEnvelope {
         let signer = EthereumWallet::from(wallet);
-        <TransactionRequest as TransactionBuilder<Ethereum>>::build(tx, &signer).await.unwrap()
+        <TransactionRequest as TransactionBuilder<Ethereum>>::build(tx, &signer)
+            .await
+            .unwrap()
     }
 
     /// Creates a tx with blob sidecar and sign it, returning bytes

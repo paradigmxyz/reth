@@ -36,16 +36,19 @@ where
             )?;
         let headers_walker = headers_cursor.walk_range(block_range.clone())?;
 
-        let mut header_td_cursor =
-            provider.tx_ref().cursor_read::<tables::HeaderTerminalDifficulties>()?;
+        let mut header_td_cursor = provider
+            .tx_ref()
+            .cursor_read::<tables::HeaderTerminalDifficulties>()?;
         let header_td_walker = header_td_cursor.walk_range(block_range.clone())?;
 
-        let mut canonical_headers_cursor =
-            provider.tx_ref().cursor_read::<tables::CanonicalHeaders>()?;
+        let mut canonical_headers_cursor = provider
+            .tx_ref()
+            .cursor_read::<tables::CanonicalHeaders>()?;
         let canonical_headers_walker = canonical_headers_cursor.walk_range(block_range)?;
 
-        for ((header_entry, header_td_entry), canonical_header_entry) in
-            headers_walker.zip(header_td_walker).zip(canonical_headers_walker)
+        for ((header_entry, header_td_entry), canonical_header_entry) in headers_walker
+            .zip(header_td_walker)
+            .zip(canonical_headers_walker)
         {
             let (header_block, header) = header_entry?;
             let (header_td_block, header_td) = header_td_entry?;

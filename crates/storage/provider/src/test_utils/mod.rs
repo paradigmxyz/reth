@@ -72,19 +72,28 @@ pub fn insert_genesis<N: ProviderNodeTypes<ChainSpec = ChainSpec>>(
 
     // Hash accounts and insert them into hashing table.
     let genesis = chain_spec.genesis();
-    let alloc_accounts =
-        genesis.alloc.iter().map(|(addr, account)| (*addr, Some(Account::from(account))));
+    let alloc_accounts = genesis
+        .alloc
+        .iter()
+        .map(|(addr, account)| (*addr, Some(Account::from(account))));
     provider.insert_account_for_hashing(alloc_accounts).unwrap();
 
-    let alloc_storage = genesis.alloc.clone().into_iter().filter_map(|(addr, account)| {
-        // Only return `Some` if there is storage.
-        account.storage.map(|storage| {
-            (
-                addr,
-                storage.into_iter().map(|(key, value)| StorageEntry { key, value: value.into() }),
-            )
-        })
-    });
+    let alloc_storage = genesis
+        .alloc
+        .clone()
+        .into_iter()
+        .filter_map(|(addr, account)| {
+            // Only return `Some` if there is storage.
+            account.storage.map(|storage| {
+                (
+                    addr,
+                    storage.into_iter().map(|(key, value)| StorageEntry {
+                        key,
+                        value: value.into(),
+                    }),
+                )
+            })
+        });
     provider.insert_storage_for_hashing(alloc_storage)?;
 
     let (root, updates) = StateRoot::from_tx(provider.tx_ref())

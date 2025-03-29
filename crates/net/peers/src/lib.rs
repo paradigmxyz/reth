@@ -178,17 +178,17 @@ impl FromStr for AnyNode {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Some(rem) = s.strip_prefix("enode://") {
             if let Ok(record) = NodeRecord::from_str(s) {
-                return Ok(Self::NodeRecord(record))
+                return Ok(Self::NodeRecord(record));
             }
             // incomplete enode
             if let Ok(peer_id) = PeerId::from_str(rem) {
-                return Ok(Self::PeerId(peer_id))
+                return Ok(Self::PeerId(peer_id));
             }
-            return Err(format!("invalid public key: {rem}"))
+            return Err(format!("invalid public key: {rem}"));
         }
         #[cfg(feature = "secp256k1")]
         if s.starts_with("enr:") {
-            return Enr::from_str(s).map(AnyNode::Enr)
+            return Enr::from_str(s).map(AnyNode::Enr);
         }
         Err("missing 'enr:' prefix for base64-encoded record".to_string())
     }
@@ -201,7 +201,11 @@ impl core::fmt::Display for AnyNode {
             #[cfg(feature = "secp256k1")]
             Self::Enr(enr) => write!(f, "{enr}"),
             Self::PeerId(peer_id) => {
-                write!(f, "enode://{}", alloy_primitives::hex::encode(peer_id.as_slice()))
+                write!(
+                    f,
+                    "enode://{}",
+                    alloy_primitives::hex::encode(peer_id.as_slice())
+                )
             }
         }
     }

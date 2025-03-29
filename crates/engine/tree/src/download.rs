@@ -142,7 +142,7 @@ where
     /// given hash.
     fn download_full_block(&mut self, hash: B256) -> bool {
         if self.is_inflight_request(hash) {
-            return false
+            return false;
         }
         self.push_pending_event(DownloadOutcome::NewDownloadStarted {
             remaining_blocks: 1,
@@ -165,13 +165,19 @@ where
 
     /// Returns true if there's already a request for the given hash.
     fn is_inflight_request(&self, hash: B256) -> bool {
-        self.inflight_full_block_requests.iter().any(|req| *req.hash() == hash)
+        self.inflight_full_block_requests
+            .iter()
+            .any(|req| *req.hash() == hash)
     }
 
     /// Sets the metrics for the active downloads
     fn update_block_download_metrics(&self) {
-        let blocks = self.inflight_full_block_requests.len() +
-            self.inflight_block_range_requests.iter().map(|r| r.count() as usize).sum::<usize>();
+        let blocks = self.inflight_full_block_requests.len()
+            + self
+                .inflight_block_range_requests
+                .iter()
+                .map(|r| r.count() as usize)
+                .sum::<usize>();
         self.metrics.active_block_downloads.set(blocks as f64);
     }
 
@@ -254,7 +260,7 @@ where
                 if peek.0 .0.hash() == block.0 .0.hash() {
                     PeekMut::pop(peek);
                 } else {
-                    break
+                    break;
                 }
             }
             downloaded_blocks.push(block.0.into());
@@ -349,14 +355,20 @@ mod tests {
             let consensus = Arc::new(EthBeaconConsensus::new(chain_spec));
 
             let block_downloader = BasicBlockDownloader::new(client.clone(), consensus);
-            Self { block_downloader, client }
+            Self {
+                block_downloader,
+                client,
+            }
         }
     }
 
     #[tokio::test]
     async fn block_downloader_range_request() {
         const TOTAL_BLOCKS: usize = 10;
-        let TestHarness { mut block_downloader, client } = TestHarness::new(TOTAL_BLOCKS);
+        let TestHarness {
+            mut block_downloader,
+            client,
+        } = TestHarness::new(TOTAL_BLOCKS);
         let tip = client.highest_block().expect("there should be blocks here");
 
         // send block range download request
@@ -369,7 +381,10 @@ mod tests {
         assert_eq!(block_downloader.inflight_block_range_requests.len(), 1);
 
         // ensure the range request is made correctly
-        let first_req = block_downloader.inflight_block_range_requests.first().unwrap();
+        let first_req = block_downloader
+            .inflight_block_range_requests
+            .first()
+            .unwrap();
         assert_eq!(first_req.start_hash(), tip.hash());
         assert_eq!(first_req.count(), tip.number);
 
@@ -398,7 +413,10 @@ mod tests {
     #[tokio::test]
     async fn block_downloader_set_request() {
         const TOTAL_BLOCKS: usize = 2;
-        let TestHarness { mut block_downloader, client } = TestHarness::new(TOTAL_BLOCKS);
+        let TestHarness {
+            mut block_downloader,
+            client,
+        } = TestHarness::new(TOTAL_BLOCKS);
 
         let tip = client.highest_block().expect("there should be blocks here");
 
@@ -408,7 +426,10 @@ mod tests {
         )));
 
         // ensure we have TOTAL_BLOCKS in flight full block request
-        assert_eq!(block_downloader.inflight_full_block_requests.len(), TOTAL_BLOCKS);
+        assert_eq!(
+            block_downloader.inflight_full_block_requests.len(),
+            TOTAL_BLOCKS
+        );
 
         // poll downloader
         for _ in 0..TOTAL_BLOCKS {
@@ -436,7 +457,10 @@ mod tests {
     #[tokio::test]
     async fn block_downloader_clear_request() {
         const TOTAL_BLOCKS: usize = 10;
-        let TestHarness { mut block_downloader, client } = TestHarness::new(TOTAL_BLOCKS);
+        let TestHarness {
+            mut block_downloader,
+            client,
+        } = TestHarness::new(TOTAL_BLOCKS);
 
         let tip = client.highest_block().expect("there should be blocks here");
 
@@ -448,19 +472,26 @@ mod tests {
 
         // send block set download request
         let download_set = HashSet::from([tip.hash(), tip.parent_hash]);
-        block_downloader
-            .on_action(DownloadAction::Download(DownloadRequest::BlockSet(download_set.clone())));
+        block_downloader.on_action(DownloadAction::Download(DownloadRequest::BlockSet(
+            download_set.clone(),
+        )));
 
         // ensure we have one in flight range request
         assert_eq!(block_downloader.inflight_block_range_requests.len(), 1);
 
         // ensure the range request is made correctly
-        let first_req = block_downloader.inflight_block_range_requests.first().unwrap();
+        let first_req = block_downloader
+            .inflight_block_range_requests
+            .first()
+            .unwrap();
         assert_eq!(first_req.start_hash(), tip.hash());
         assert_eq!(first_req.count(), tip.number);
 
         // ensure we have download_set.len() in flight full block request
-        assert_eq!(block_downloader.inflight_full_block_requests.len(), download_set.len());
+        assert_eq!(
+            block_downloader.inflight_full_block_requests.len(),
+            download_set.len()
+        );
 
         // send clear request
         block_downloader.on_action(DownloadAction::Clear);

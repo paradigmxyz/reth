@@ -51,15 +51,22 @@ pub trait Trace:
         tx_env: TxEnvFor<Self::Evm>,
         inspector: I,
     ) -> Result<
-        (ResultAndState<HaltReasonFor<Self::Evm>>, (EvmEnvFor<Self::Evm>, TxEnvFor<Self::Evm>)),
+        (
+            ResultAndState<HaltReasonFor<Self::Evm>>,
+            (EvmEnvFor<Self::Evm>, TxEnvFor<Self::Evm>),
+        ),
         Self::Error,
     >
     where
         DB: Database<Error = ProviderError>,
         I: InspectorFor<Self::Evm, DB>,
     {
-        let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env.clone(), inspector);
-        let res = evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err)?;
+        let mut evm = self
+            .evm_config()
+            .evm_with_env_and_inspector(db, evm_env.clone(), inspector);
+        let res = evm
+            .transact(tx_env.clone())
+            .map_err(Self::Error::from_evm_err)?;
         Ok((res, (evm_env, tx_env)))
     }
 
@@ -297,7 +304,7 @@ pub trait Trace:
         async move {
             let block = async {
                 if block.is_some() {
-                    return Ok(block)
+                    return Ok(block);
                 }
                 self.recovered_block(block_id).await
             };
@@ -308,7 +315,7 @@ pub trait Trace:
 
             if block.body().transactions().is_empty() {
                 // nothing to trace
-                return Ok(Some(Vec::new()))
+                return Ok(Some(Vec::new()));
             }
 
             // replay all transactions of the block
@@ -323,8 +330,9 @@ pub trait Trace:
 
                 // now get the state
                 let state = this.state_at_block_id(state_at.into())?;
-                let mut db =
-                    CacheDB::new(StateProviderDatabase::new(StateProviderTraitObjWrapper(&state)));
+                let mut db = CacheDB::new(StateProviderDatabase::new(
+                    StateProviderTraitObjWrapper(&state),
+                ));
 
                 this.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 
@@ -471,9 +479,11 @@ pub trait Trace:
 
         // apply relevant system calls
         let mut evm = self.evm_config().evm_with_env(db, evm_env.clone());
-        system_caller.apply_pre_execution_changes(block.header(), &mut evm).map_err(|err| {
-            EthApiError::EvmCustom(format!("failed to apply 4788 system call {err}"))
-        })?;
+        system_caller
+            .apply_pre_execution_changes(block.header(), &mut evm)
+            .map_err(|err| {
+                EthApiError::EvmCustom(format!("failed to apply 4788 system call {err}"))
+            })?;
 
         Ok(())
     }

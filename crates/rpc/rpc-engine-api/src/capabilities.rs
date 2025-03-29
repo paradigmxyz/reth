@@ -31,12 +31,16 @@ pub struct EngineCapabilities {
 impl EngineCapabilities {
     /// Creates a new `EngineCapabilities` instance with the given capabilities.
     pub fn new(capabilities: impl IntoIterator<Item: Into<String>>) -> Self {
-        Self { inner: capabilities.into_iter().map(Into::into).collect() }
+        Self {
+            inner: capabilities.into_iter().map(Into::into).collect(),
+        }
     }
 
     /// Returns the list of all supported Engine capabilities for Prague spec.
     fn prague() -> Self {
-        Self { inner: CAPABILITIES.iter().copied().map(str::to_owned).collect() }
+        Self {
+            inner: CAPABILITIES.iter().copied().map(str::to_owned).collect(),
+        }
     }
 
     /// Returns the list of all supported Engine capabilities.

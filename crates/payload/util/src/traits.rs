@@ -63,7 +63,10 @@ where
 {
     /// Create a new `BestPayloadTransactions` with the given iterator.
     pub fn new(best: I) -> Self {
-        Self { invalid: Default::default(), best }
+        Self {
+            invalid: Default::default(),
+            best,
+        }
     }
 }
 
@@ -78,9 +81,9 @@ where
         loop {
             let tx = self.best.next()?;
             if self.invalid.contains(&tx.sender()) {
-                continue
+                continue;
             }
-            return Some(tx.transaction.clone())
+            return Some(tx.transaction.clone());
         }
     }
 
@@ -134,13 +137,16 @@ mod tests {
 
         // Add transactions to the main pool
         {
-            let prioritized_tx_a =
-                MockTransaction::eip1559().with_gas_price(5).with_sender(address_a);
+            let prioritized_tx_a = MockTransaction::eip1559()
+                .with_gas_price(5)
+                .with_sender(address_a);
             // without our custom logic, B would be prioritized over A due to gas price:
-            let prioritized_tx_b =
-                MockTransaction::eip1559().with_gas_price(10).with_sender(address_b);
-            let regular_tx =
-                MockTransaction::eip1559().with_gas_price(15).with_sender(address_regular);
+            let prioritized_tx_b = MockTransaction::eip1559()
+                .with_gas_price(10)
+                .with_sender(address_b);
+            let regular_tx = MockTransaction::eip1559()
+                .with_gas_price(15)
+                .with_sender(address_regular);
             pool.add_transaction(Arc::new(f.validated(prioritized_tx_a)), 0);
             pool.add_transaction(Arc::new(f.validated(prioritized_tx_b)), 0);
             pool.add_transaction(Arc::new(f.validated(regular_tx)), 0);
@@ -148,8 +154,9 @@ mod tests {
 
         // Add transactions to the priority pool
         {
-            let prioritized_tx =
-                MockTransaction::eip1559().with_gas_price(0).with_sender(address_in_priority_pool);
+            let prioritized_tx = MockTransaction::eip1559()
+                .with_gas_price(0)
+                .with_sender(address_in_priority_pool);
             let valid_prioritized_tx = f.validated(prioritized_tx);
             priority_pool.add_transaction(Arc::new(valid_prioritized_tx), 0);
         }

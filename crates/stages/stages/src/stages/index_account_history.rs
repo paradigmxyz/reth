@@ -31,13 +31,21 @@ impl IndexAccountHistoryStage {
         etl_config: EtlConfig,
         prune_mode: Option<PruneMode>,
     ) -> Self {
-        Self { commit_threshold: config.commit_threshold, etl_config, prune_mode }
+        Self {
+            commit_threshold: config.commit_threshold,
+            etl_config,
+            prune_mode,
+        }
     }
 }
 
 impl Default for IndexAccountHistoryStage {
     fn default() -> Self {
-        Self { commit_threshold: 100_000, prune_mode: None, etl_config: EtlConfig::default() }
+        Self {
+            commit_threshold: 100_000,
+            prune_mode: None,
+            etl_config: EtlConfig::default(),
+        }
     }
 }
 
@@ -74,7 +82,10 @@ where
 
                 // Save prune checkpoint only if we don't have one already.
                 // Otherwise, pruner may skip the unpruned range of blocks.
-                if provider.get_prune_checkpoint(PruneSegment::AccountHistory)?.is_none() {
+                if provider
+                    .get_prune_checkpoint(PruneSegment::AccountHistory)?
+                    .is_none()
+                {
                     provider.save_prune_checkpoint(
                         PruneSegment::AccountHistory,
                         PruneCheckpoint {
@@ -88,7 +99,7 @@ where
         }
 
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()))
+            return Ok(ExecOutput::done(input.checkpoint()));
         }
 
         let mut range = input.next_block_range();
@@ -121,7 +132,10 @@ where
             |key| key.key,
         )?;
 
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: true })
+        Ok(ExecOutput {
+            checkpoint: StageCheckpoint::new(*range.end()),
+            done: true,
+        })
     }
 
     /// Unwind the stage.
@@ -136,7 +150,9 @@ where
         provider.unwind_account_history_indices_range(range)?;
 
         // from HistoryIndex higher than that number.
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_progress) })
+        Ok(UnwindOutput {
+            checkpoint: StageCheckpoint::new(unwind_progress),
+        })
     }
 }
 
@@ -171,12 +187,18 @@ mod tests {
     const MAX_BLOCK: BlockNumber = NUM_OF_INDICES_IN_SHARD as BlockNumber + 2;
 
     const fn acc() -> AccountBeforeTx {
-        AccountBeforeTx { address: ADDRESS, info: None }
+        AccountBeforeTx {
+            address: ADDRESS,
+            info: None,
+        }
     }
 
     /// Shard for account
     const fn shard(shard_index: u64) -> ShardedKey<Address> {
-        ShardedKey { key: ADDRESS, highest_block_number: shard_index }
+        ShardedKey {
+            key: ADDRESS,
+            highest_block_number: shard_index,
+        }
     }
 
     fn list(list: &[u64]) -> BlockNumberList {
@@ -201,7 +223,10 @@ mod tests {
             for block in 0..=MAX_BLOCK {
                 tx.put::<tables::BlockBodyIndices>(
                     block,
-                    StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
+                    StoredBlockBodyIndices {
+                        tx_count: 3,
+                        ..Default::default()
+                    },
                 )?;
                 // setup changeset that is going to be applied to history index
                 tx.put::<tables::AccountChangeSets>(block, acc())?;
@@ -214,13 +239,21 @@ mod tests {
     fn run(db: &TestStageDB, run_to: u64, input_checkpoint: Option<BlockNumber>) {
         let input = ExecInput {
             target: Some(run_to),
-            checkpoint: input_checkpoint
-                .map(|block_number| StageCheckpoint { block_number, stage_checkpoint: None }),
+            checkpoint: input_checkpoint.map(|block_number| StageCheckpoint {
+                block_number,
+                stage_checkpoint: None,
+            }),
         };
         let mut stage = IndexAccountHistoryStage::default();
         let provider = db.factory.database_provider_rw().unwrap();
         let out = stage.execute(&provider, input).unwrap();
-        assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(run_to), done: true });
+        assert_eq!(
+            out,
+            ExecOutput {
+                checkpoint: StageCheckpoint::new(run_to),
+                done: true
+            }
+        );
         provider.commit().unwrap();
     }
 
@@ -233,7 +266,12 @@ mod tests {
         let mut stage = IndexAccountHistoryStage::default();
         let provider = db.factory.database_provider_rw().unwrap();
         let out = stage.unwind(&provider, input).unwrap();
-        assert_eq!(out, UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) });
+        assert_eq!(
+            out,
+            UnwindOutput {
+                checkpoint: StageCheckpoint::new(unwind_to)
+            }
+        );
         provider.commit().unwrap();
     }
 
@@ -268,7 +306,8 @@ mod tests {
         // setup
         partial_setup(&db);
         db.commit(|tx| {
-            tx.put::<tables::AccountsHistory>(shard(u64::MAX), list(&[1, 2, 3])).unwrap();
+            tx.put::<tables::AccountsHistory>(shard(u64::MAX), list(&[1, 2, 3]))
+                .unwrap();
             Ok(())
         })
         .unwrap();
@@ -278,7 +317,10 @@ mod tests {
 
         // verify
         let table = cast(db.table::<tables::AccountsHistory>().unwrap());
-        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![1, 2, 3, 4, 5])]));
+        assert_eq!(
+            table,
+            BTreeMap::from([(shard(u64::MAX), vec![1, 2, 3, 4, 5])])
+        );
 
         // unwind
         unwind(&db, 5, 3);
@@ -298,13 +340,18 @@ mod tests {
         // setup
         partial_setup(&db);
         db.commit(|tx| {
-            tx.put::<tables::AccountsHistory>(shard(u64::MAX), list(&full_list)).unwrap();
+            tx.put::<tables::AccountsHistory>(shard(u64::MAX), list(&full_list))
+                .unwrap();
             Ok(())
         })
         .unwrap();
 
         // run
-        run(&db, LAST_BLOCK_IN_FULL_SHARD + 2, Some(LAST_BLOCK_IN_FULL_SHARD));
+        run(
+            &db,
+            LAST_BLOCK_IN_FULL_SHARD + 2,
+            Some(LAST_BLOCK_IN_FULL_SHARD),
+        );
 
         // verify
         let table = cast(db.table::<tables::AccountsHistory>().unwrap());
@@ -312,7 +359,10 @@ mod tests {
             table,
             BTreeMap::from([
                 (shard(LAST_BLOCK_IN_FULL_SHARD), full_list.clone()),
-                (shard(u64::MAX), vec![LAST_BLOCK_IN_FULL_SHARD + 1, LAST_BLOCK_IN_FULL_SHARD + 2])
+                (
+                    shard(u64::MAX),
+                    vec![LAST_BLOCK_IN_FULL_SHARD + 1, LAST_BLOCK_IN_FULL_SHARD + 2]
+                )
             ])
         );
 
@@ -333,19 +383,27 @@ mod tests {
         // setup
         partial_setup(&db);
         db.commit(|tx| {
-            tx.put::<tables::AccountsHistory>(shard(u64::MAX), list(&almost_full_list)).unwrap();
+            tx.put::<tables::AccountsHistory>(shard(u64::MAX), list(&almost_full_list))
+                .unwrap();
             Ok(())
         })
         .unwrap();
 
         // run
-        run(&db, LAST_BLOCK_IN_FULL_SHARD, Some(LAST_BLOCK_IN_FULL_SHARD - 2));
+        run(
+            &db,
+            LAST_BLOCK_IN_FULL_SHARD,
+            Some(LAST_BLOCK_IN_FULL_SHARD - 2),
+        );
 
         // verify
         almost_full_list.push(LAST_BLOCK_IN_FULL_SHARD - 1);
         almost_full_list.push(LAST_BLOCK_IN_FULL_SHARD);
         let table = cast(db.table::<tables::AccountsHistory>().unwrap());
-        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), almost_full_list.clone())]));
+        assert_eq!(
+            table,
+            BTreeMap::from([(shard(u64::MAX), almost_full_list.clone())])
+        );
 
         // unwind
         unwind(&db, LAST_BLOCK_IN_FULL_SHARD, LAST_BLOCK_IN_FULL_SHARD - 2);
@@ -368,13 +426,18 @@ mod tests {
         // setup
         partial_setup(&db);
         db.commit(|tx| {
-            tx.put::<tables::AccountsHistory>(shard(u64::MAX), list(&almost_full_list)).unwrap();
+            tx.put::<tables::AccountsHistory>(shard(u64::MAX), list(&almost_full_list))
+                .unwrap();
             Ok(())
         })
         .unwrap();
 
         // run
-        run(&db, LAST_BLOCK_IN_FULL_SHARD + 1, Some(LAST_BLOCK_IN_FULL_SHARD - 1));
+        run(
+            &db,
+            LAST_BLOCK_IN_FULL_SHARD + 1,
+            Some(LAST_BLOCK_IN_FULL_SHARD - 1),
+        );
 
         // verify
         almost_full_list.push(LAST_BLOCK_IN_FULL_SHARD);
@@ -405,8 +468,10 @@ mod tests {
         // setup
         partial_setup(&db);
         db.commit(|tx| {
-            tx.put::<tables::AccountsHistory>(shard(1), list(&full_list)).unwrap();
-            tx.put::<tables::AccountsHistory>(shard(2), list(&full_list)).unwrap();
+            tx.put::<tables::AccountsHistory>(shard(1), list(&full_list))
+                .unwrap();
+            tx.put::<tables::AccountsHistory>(shard(2), list(&full_list))
+                .unwrap();
             tx.put::<tables::AccountsHistory>(
                 shard(u64::MAX),
                 list(&[LAST_BLOCK_IN_FULL_SHARD + 1]),
@@ -416,7 +481,11 @@ mod tests {
         })
         .unwrap();
 
-        run(&db, LAST_BLOCK_IN_FULL_SHARD + 2, Some(LAST_BLOCK_IN_FULL_SHARD + 1));
+        run(
+            &db,
+            LAST_BLOCK_IN_FULL_SHARD + 2,
+            Some(LAST_BLOCK_IN_FULL_SHARD + 1),
+        );
 
         // verify
         let table = cast(db.table::<tables::AccountsHistory>().unwrap());
@@ -425,12 +494,19 @@ mod tests {
             BTreeMap::from([
                 (shard(1), full_list.clone()),
                 (shard(2), full_list.clone()),
-                (shard(u64::MAX), vec![LAST_BLOCK_IN_FULL_SHARD + 1, LAST_BLOCK_IN_FULL_SHARD + 2])
+                (
+                    shard(u64::MAX),
+                    vec![LAST_BLOCK_IN_FULL_SHARD + 1, LAST_BLOCK_IN_FULL_SHARD + 2]
+                )
             ])
         );
 
         // unwind
-        unwind(&db, LAST_BLOCK_IN_FULL_SHARD + 2, LAST_BLOCK_IN_FULL_SHARD + 1);
+        unwind(
+            &db,
+            LAST_BLOCK_IN_FULL_SHARD + 2,
+            LAST_BLOCK_IN_FULL_SHARD + 1,
+        );
 
         // verify initial state
         let table = cast(db.table::<tables::AccountsHistory>().unwrap());
@@ -454,13 +530,19 @@ mod tests {
             // we just need first and last
             tx.put::<tables::BlockBodyIndices>(
                 0,
-                StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
+                StoredBlockBodyIndices {
+                    tx_count: 3,
+                    ..Default::default()
+                },
             )
             .unwrap();
 
             tx.put::<tables::BlockBodyIndices>(
                 100,
-                StoredBlockBodyIndices { tx_count: 5, ..Default::default() },
+                StoredBlockBodyIndices {
+                    tx_count: 5,
+                    ..Default::default()
+                },
             )
             .unwrap();
 
@@ -473,14 +555,23 @@ mod tests {
         .unwrap();
 
         // run
-        let input = ExecInput { target: Some(20000), ..Default::default() };
+        let input = ExecInput {
+            target: Some(20000),
+            ..Default::default()
+        };
         let mut stage = IndexAccountHistoryStage {
             prune_mode: Some(PruneMode::Before(36)),
             ..Default::default()
         };
         let provider = db.factory.database_provider_rw().unwrap();
         let out = stage.execute(&provider, input).unwrap();
-        assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(20000), done: true });
+        assert_eq!(
+            out,
+            ExecOutput {
+                checkpoint: StageCheckpoint::new(20000),
+                done: true
+            }
+        );
         provider.commit().unwrap();
 
         // verify
@@ -505,7 +596,11 @@ mod tests {
 
     impl Default for IndexAccountHistoryTestRunner {
         fn default() -> Self {
-            Self { db: TestStageDB::default(), commit_threshold: 1000, prune_mode: None }
+            Self {
+                db: TestStageDB::default(),
+                commit_threshold: 1000,
+                prune_mode: None,
+            }
         }
     }
 
@@ -542,13 +637,19 @@ mod tests {
             let blocks = random_block_range(
                 &mut rng,
                 start..=end,
-                BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..3, ..Default::default() },
+                BlockRangeParams {
+                    parent: Some(B256::ZERO),
+                    tx_count: 0..3,
+                    ..Default::default()
+                },
             );
 
             let (changesets, _) = random_changeset_range(
                 &mut rng,
                 blocks.iter(),
-                accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
+                accounts
+                    .into_iter()
+                    .map(|(addr, acc)| (addr, (acc, Vec::new()))),
                 0..3,
                 0..256,
             );
@@ -568,20 +669,25 @@ mod tests {
                 let start_block = input.next_block();
                 let end_block = output.checkpoint.block_number;
                 if start_block > end_block {
-                    return Ok(())
+                    return Ok(());
                 }
 
                 assert_eq!(
                     output,
-                    ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true }
+                    ExecOutput {
+                        checkpoint: StageCheckpoint::new(input.target()),
+                        done: true
+                    }
                 );
 
                 let provider = self.db.factory.provider()?;
-                let mut changeset_cursor =
-                    provider.tx_ref().cursor_read::<tables::AccountChangeSets>()?;
+                let mut changeset_cursor = provider
+                    .tx_ref()
+                    .cursor_read::<tables::AccountChangeSets>()?;
 
-                let account_transitions =
-                    changeset_cursor.walk_range(start_block..=end_block)?.try_fold(
+                let account_transitions = changeset_cursor
+                    .walk_range(start_block..=end_block)?
+                    .try_fold(
                         BTreeMap::new(),
                         |mut accounts: BTreeMap<Address, Vec<u64>>,
                          entry|

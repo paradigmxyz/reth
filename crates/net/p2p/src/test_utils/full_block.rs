@@ -133,13 +133,15 @@ impl TestFullBlockClient {
 
     /// Get the block with the highest block number.
     pub fn highest_block(&self) -> Option<SealedBlock<Block>> {
-        self.headers.lock().iter().max_by_key(|(_, header)| header.number).and_then(
-            |(hash, header)| {
+        self.headers
+            .lock()
+            .iter()
+            .max_by_key(|(_, header)| header.number)
+            .and_then(|(hash, header)| {
                 self.bodies.lock().get(hash).map(|body| {
                     SealedBlock::from_parts_unchecked(header.clone(), body.clone(), *hash)
                 })
-            },
-        )
+            })
     }
 }
 
@@ -191,15 +193,15 @@ impl HeadersClient for TestFullBlockClient {
             .filter_map(|_| {
                 headers.iter().find_map(|(hash, header)| {
                     // Checks if the header matches the specified block or number.
-                    BlockNumHash::new(header.number, *hash).matches_block_or_num(&block).then(
-                        || {
+                    BlockNumHash::new(header.number, *hash)
+                        .matches_block_or_num(&block)
+                        .then(|| {
                             match request.direction {
                                 HeadersDirection::Falling => block = header.parent_hash.into(),
                                 HeadersDirection::Rising => block = (header.number + 1).into(),
                             }
                             header.clone()
-                        },
-                    )
+                        })
                 })
             })
             .collect::<Vec<_>>();

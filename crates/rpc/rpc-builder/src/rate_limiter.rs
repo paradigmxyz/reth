@@ -57,7 +57,10 @@ pub struct RpcRequestRateLimitingService<S> {
 impl<S> RpcRequestRateLimitingService<S> {
     /// Create a new rate limited service.
     pub const fn new(service: S, rate_limiter: RpcRequestRateLimiter) -> Self {
-        Self { inner: service, rate_limiter }
+        Self {
+            inner: service,
+            rate_limiter,
+        }
     }
 }
 
@@ -78,7 +81,11 @@ where
         } else {
             // if we don't need to rate limit, then there
             // is no need to get a semaphore permit
-            RateLimitingRequestFuture { fut: self.inner.call(req), guard: None, permit: None }
+            RateLimitingRequestFuture {
+                fut: self.inner.call(req),
+                guard: None,
+                permit: None,
+            }
         }
     }
 }

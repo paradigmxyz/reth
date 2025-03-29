@@ -76,7 +76,12 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let secret_key = get_secret_key(&network_secret_path)?;
         let network = self
             .network
-            .network_config(config, provider_factory.chain_spec(), secret_key, default_peers_path)
+            .network_config(
+                config,
+                provider_factory.chain_spec(),
+                secret_key,
+                default_peers_path,
+            )
             .with_task_executor(Box::new(task_executor))
             .build(provider_factory)
             .start_network()
@@ -91,14 +96,20 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         self,
         ctx: CliContext,
     ) -> eyre::Result<()> {
-        let Environment { provider_factory, config, data_dir } =
-            self.env.init::<N>(AccessRights::RW)?;
+        let Environment {
+            provider_factory,
+            config,
+            data_dir,
+        } = self.env.init::<N>(AccessRights::RW)?;
 
         let provider_rw = provider_factory.database_provider_rw()?;
 
         // Configure and build network
-        let network_secret_path =
-            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret());
+        let network_secret_path = self
+            .network
+            .p2p_secret_key
+            .clone()
+            .unwrap_or_else(|| data_dir.p2p_secret());
         let network = self
             .build_network(
                 &config,
@@ -153,15 +164,17 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
         for block in blocks.into_iter().rev() {
             let block_number = block.number;
-            let sealed_block =
-                block.try_recover().map_err(|_| eyre::eyre!("Error sealing block with senders"))?;
+            let sealed_block = block
+                .try_recover()
+                .map_err(|_| eyre::eyre!("Error sealing block with senders"))?;
             trace!(target: "reth::cli", block_number, "Executing block");
 
             provider_rw.insert_block(sealed_block.clone(), StorageLocation::Database)?;
 
             td += sealed_block.difficulty();
-            let executor = executor_provider
-                .executor(StateProviderDatabase::new(LatestStateProviderRef::new(&provider_rw)));
+            let executor = executor_provider.executor(StateProviderDatabase::new(
+                LatestStateProviderRef::new(&provider_rw),
+            ));
             let output = executor.execute(&sealed_block)?;
 
             provider_rw.write_state(
@@ -178,24 +191,39 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
             let mut account_hashing_done = false;
             while !account_hashing_done {
-                let output = account_hashing_stage
-                    .execute(&provider_rw, ExecInput { target: Some(block_number), checkpoint })?;
+                let output = account_hashing_stage.execute(
+                    &provider_rw,
+                    ExecInput {
+                        target: Some(block_number),
+                        checkpoint,
+                    },
+                )?;
                 account_hashing_done = output.done;
             }
 
             let mut storage_hashing_done = false;
             while !storage_hashing_done {
-                let output = storage_hashing_stage
-                    .execute(&provider_rw, ExecInput { target: Some(block_number), checkpoint })?;
+                let output = storage_hashing_stage.execute(
+                    &provider_rw,
+                    ExecInput {
+                        target: Some(block_number),
+                        checkpoint,
+                    },
+                )?;
                 storage_hashing_done = output.done;
             }
 
-            let incremental_result = merkle_stage
-                .execute(&provider_rw, ExecInput { target: Some(block_number), checkpoint });
+            let incremental_result = merkle_stage.execute(
+                &provider_rw,
+                ExecInput {
+                    target: Some(block_number),
+                    checkpoint,
+                },
+            );
 
             if incremental_result.is_ok() {
                 debug!(target: "reth::cli", block_number, "Successfully computed incremental root");
-                continue
+                continue;
             }
 
             warn!(target: "reth::cli", block_number, "Incremental calculation failed, retrying from scratch");
@@ -210,7 +238,10 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 .walk_range(..)?
                 .collect::<Result<Vec<_>, _>>()?;
 
-            let clean_input = ExecInput { target: Some(sealed_block.number), checkpoint: None };
+            let clean_input = ExecInput {
+                target: Some(sealed_block.number),
+                checkpoint: None,
+            };
             loop {
                 let clean_result = merkle_stage
                     .execute(&provider_rw, clean_input)
@@ -238,14 +269,17 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             let mut clean_account_mismatched = Vec::new();
             let mut incremental_account_trie_iter = incremental_account_trie.into_iter().peekable();
             let mut clean_account_trie_iter = clean_account_trie.into_iter().peekable();
-            while incremental_account_trie_iter.peek().is_some() ||
-                clean_account_trie_iter.peek().is_some()
+            while incremental_account_trie_iter.peek().is_some()
+                || clean_account_trie_iter.peek().is_some()
             {
-                match (incremental_account_trie_iter.next(), clean_account_trie_iter.next()) {
+                match (
+                    incremental_account_trie_iter.next(),
+                    clean_account_trie_iter.next(),
+                ) {
                     (Some(incremental), Some(clean)) => {
                         similar_asserts::assert_eq!(incremental.0, clean.0, "Nibbles don't match");
-                        if incremental.1 != clean.1 &&
-                            clean.0 .0.len() > self.skip_node_depth.unwrap_or_default()
+                        if incremental.1 != clean.1
+                            && clean.0 .0.len() > self.skip_node_depth.unwrap_or_default()
                         {
                             incremental_account_mismatched.push(incremental);
                             clean_account_mismatched.push(clean);
@@ -267,16 +301,19 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             let mut first_mismatched_storage = None;
             let mut incremental_storage_trie_iter = incremental_storage_trie.into_iter().peekable();
             let mut clean_storage_trie_iter = clean_storage_trie.into_iter().peekable();
-            while incremental_storage_trie_iter.peek().is_some() ||
-                clean_storage_trie_iter.peek().is_some()
+            while incremental_storage_trie_iter.peek().is_some()
+                || clean_storage_trie_iter.peek().is_some()
             {
-                match (incremental_storage_trie_iter.next(), clean_storage_trie_iter.next()) {
+                match (
+                    incremental_storage_trie_iter.next(),
+                    clean_storage_trie_iter.next(),
+                ) {
                     (Some(incremental), Some(clean)) => {
-                        if incremental != clean &&
-                            clean.1.nibbles.len() > self.skip_node_depth.unwrap_or_default()
+                        if incremental != clean
+                            && clean.1.nibbles.len() > self.skip_node_depth.unwrap_or_default()
                         {
                             first_mismatched_storage = Some((incremental, clean));
-                            break
+                            break;
                         }
                     }
                     (Some(incremental), None) => {
@@ -294,7 +331,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             similar_asserts::assert_eq!(
                 (
                     incremental_account_mismatched,
-                    first_mismatched_storage.as_ref().map(|(incremental, _)| incremental)
+                    first_mismatched_storage
+                        .as_ref()
+                        .map(|(incremental, _)| incremental)
                 ),
                 (
                     clean_account_mismatched,

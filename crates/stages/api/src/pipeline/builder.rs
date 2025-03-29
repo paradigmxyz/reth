@@ -79,7 +79,13 @@ impl<Provider> PipelineBuilder<Provider> {
         N: ProviderNodeTypes,
         ProviderFactory<N>: DatabaseProviderFactory<ProviderRW = Provider>,
     {
-        let Self { stages, max_block, tip_tx, metrics_tx, fail_on_unwind } = self;
+        let Self {
+            stages,
+            max_block,
+            tip_tx,
+            metrics_tx,
+            fail_on_unwind,
+        } = self;
         Pipeline {
             provider_factory,
             stages,
@@ -109,7 +115,14 @@ impl<Provider> Default for PipelineBuilder<Provider> {
 impl<Provider> std::fmt::Debug for PipelineBuilder<Provider> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PipelineBuilder")
-            .field("stages", &self.stages.iter().map(|stage| stage.id()).collect::<Vec<StageId>>())
+            .field(
+                "stages",
+                &self
+                    .stages
+                    .iter()
+                    .map(|stage| stage.id())
+                    .collect::<Vec<StageId>>(),
+            )
             .field("max_block", &self.max_block)
             .field("fail_on_unwind", &self.fail_on_unwind)
             .finish()

@@ -73,7 +73,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     ) -> impl Future<Output = SimulatedBlocksResult<Self::NetworkTypes, Self::Error>> + Send {
         async move {
             if payload.block_state_calls.len() > self.max_simulate_blocks() as usize {
-                return Err(EthApiError::InvalidParams("too many blocks.".to_string()).into())
+                return Err(EthApiError::InvalidParams("too many blocks.".to_string()).into());
             }
 
             let block = block.unwrap_or_default();
@@ -86,20 +86,23 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             } = payload;
 
             if block_state_calls.is_empty() {
-                return Err(EthApiError::InvalidParams(String::from("calls are empty.")).into())
+                return Err(EthApiError::InvalidParams(String::from("calls are empty.")).into());
             }
 
             // Gas cap for entire operation
             let total_gas_limit = self.call_gas_limit();
 
-            let base_block =
-                self.recovered_block(block).await?.ok_or(EthApiError::HeaderNotFound(block))?;
+            let base_block = self
+                .recovered_block(block)
+                .await?
+                .ok_or(EthApiError::HeaderNotFound(block))?;
             let mut parent = base_block.sealed_header().clone();
 
             let this = self.clone();
             self.spawn_with_state_at_block(block, move |state| {
-                let mut db =
-                    State::builder().with_database(StateProviderDatabase::new(state)).build();
+                let mut db = State::builder()
+                    .with_database(StateProviderDatabase::new(state))
+                    .build();
                 let mut gas_used = 0;
                 let mut blocks: Vec<SimulatedBlock<RpcBlock<Self::NetworkTypes>>> =
                     Vec::with_capacity(block_state_calls.len());
@@ -118,7 +121,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         evm_env.block_env.basefee = 0;
                     }
 
-                    let SimBlock { block_overrides, state_overrides, calls } = block;
+                    let SimBlock {
+                        block_overrides,
+                        state_overrides,
+                        calls,
+                    } = block;
 
                     if let Some(block_overrides) = block_overrides {
                         apply_block_overrides(block_overrides, &mut db, &mut evm_env.block_env);
@@ -131,9 +138,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     let chain_id = evm_env.cfg_env.chain_id;
 
                     if (total_gas_limit - gas_used) < evm_env.block_env.gas_limit {
-                        return Err(
-                            EthApiError::Other(Box::new(EthSimulateError::GasLimitReached)).into()
-                        )
+                        return Err(EthApiError::Other(Box::new(
+                            EthSimulateError::GasLimitReached,
+                        ))
+                        .into());
                     }
 
                     let default_gas_limit = {
@@ -145,12 +153,12 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             return Err(EthApiError::Other(Box::new(
                                 EthSimulateError::BlockGasLimitExceeded,
                             ))
-                            .into())
+                            .into());
                         }
 
                         if txs_without_gas_limit > 0 {
-                            (block_env.gas_limit - total_specified_gas) /
-                                txs_without_gas_limit as u64
+                            (block_env.gas_limit - total_specified_gas)
+                                / txs_without_gas_limit as u64
                         } else {
                             0
                         }
@@ -218,8 +226,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         overrides: EvmOverrides,
     ) -> impl Future<Output = Result<Bytes, Self::Error>> + Send {
         async move {
-            let (res, _env) =
-                self.transact_call_at(request, block_number.unwrap_or_default(), overrides).await?;
+            let (res, _env) = self
+                .transact_call_at(request, block_number.unwrap_or_default(), overrides)
+                .await?;
 
             ensure_success(res.result)
         }
@@ -234,15 +243,20 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         mut state_override: Option<StateOverride>,
     ) -> impl Future<Output = Result<Vec<EthCallResponse>, Self::Error>> + Send {
         async move {
-            let Bundle { transactions, block_override } = bundle;
+            let Bundle {
+                transactions,
+                block_override,
+            } = bundle;
             if transactions.is_empty() {
                 return Err(
-                    EthApiError::InvalidParams(String::from("transactions are empty.")).into()
-                )
+                    EthApiError::InvalidParams(String::from("transactions are empty.")).into(),
+                );
             }
 
-            let StateContext { transaction_index, block_number } =
-                state_context.unwrap_or_default();
+            let StateContext {
+                transaction_index,
+                block_number,
+            } = state_context.unwrap_or_default();
             let transaction_index = transaction_index.unwrap_or_default();
 
             let mut target_block = block_number.unwrap_or_default();
@@ -272,8 +286,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             let mut at = block.parent_hash();
             let mut replay_block_txs = true;
 
-            let num_txs =
-                transaction_index.index().unwrap_or_else(|| block.body().transactions().len());
+            let num_txs = transaction_index
+                .index()
+                .unwrap_or_else(|| block.body().transactions().len());
             // but if all transactions are to be replayed, we can use the state at the block itself,
             // however only if we're not targeting the pending block, because for pending we can't
             // rely on the block's state being available
@@ -312,7 +327,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                     match ensure_success::<_, Self::Error>(res.result) {
                         Ok(output) => {
-                            results.push(EthCallResponse { value: Some(output), error: None });
+                            results.push(EthCallResponse {
+                                value: Some(output),
+                                error: None,
+                            });
                         }
                         Err(err) => {
                             results.push(EthCallResponse {
@@ -398,11 +416,19 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             ExecutionResult::Halt { reason, gas_used } => {
                 let error =
                     Some(Self::Error::from_evm_halt(reason, tx_env.gas_limit()).to_string());
-                return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
+                return Ok(AccessListResult {
+                    access_list,
+                    gas_used: U256::from(gas_used),
+                    error,
+                });
             }
             ExecutionResult::Revert { output, gas_used } => {
                 let error = Some(RevertError::new(output).to_string());
-                return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
+                return Ok(AccessListResult {
+                    access_list,
+                    gas_used: U256::from(gas_used),
+                    error,
+                });
             }
             ExecutionResult::Success { .. } => {}
         };
@@ -413,15 +439,25 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             ExecutionResult::Halt { reason, gas_used } => {
                 let error =
                     Some(Self::Error::from_evm_halt(reason, tx_env.gas_limit()).to_string());
-                AccessListResult { access_list, gas_used: U256::from(gas_used), error }
+                AccessListResult {
+                    access_list,
+                    gas_used: U256::from(gas_used),
+                    error,
+                }
             }
             ExecutionResult::Revert { output, gas_used } => {
                 let error = Some(RevertError::new(output).to_string());
-                AccessListResult { access_list, gas_used: U256::from(gas_used), error }
+                AccessListResult {
+                    access_list,
+                    gas_used: U256::from(gas_used),
+                    error,
+                }
             }
-            ExecutionResult::Success { gas_used, .. } => {
-                AccessListResult { access_list, gas_used: U256::from(gas_used), error: None }
-            }
+            ExecutionResult::Success { gas_used, .. } => AccessListResult {
+                access_list,
+                gas_used: U256::from(gas_used),
+                error: None,
+            },
         };
 
         Ok(res)
@@ -466,14 +502,19 @@ pub trait Call:
         evm_env: EvmEnvFor<Self::Evm>,
         tx_env: TxEnvFor<Self::Evm>,
     ) -> Result<
-        (ResultAndState<HaltReasonFor<Self::Evm>>, (EvmEnvFor<Self::Evm>, TxEnvFor<Self::Evm>)),
+        (
+            ResultAndState<HaltReasonFor<Self::Evm>>,
+            (EvmEnvFor<Self::Evm>, TxEnvFor<Self::Evm>),
+        ),
         Self::Error,
     >
     where
         DB: Database<Error = ProviderError>,
     {
         let mut evm = self.evm_config().evm_with_env(db, evm_env.clone());
-        let res = evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err)?;
+        let res = evm
+            .transact(tx_env.clone())
+            .map_err(Self::Error::from_evm_err)?;
 
         Ok((res, (evm_env, tx_env)))
     }
@@ -488,15 +529,22 @@ pub trait Call:
         tx_env: TxEnvFor<Self::Evm>,
         inspector: I,
     ) -> Result<
-        (ResultAndState<HaltReasonFor<Self::Evm>>, (EvmEnvFor<Self::Evm>, TxEnvFor<Self::Evm>)),
+        (
+            ResultAndState<HaltReasonFor<Self::Evm>>,
+            (EvmEnvFor<Self::Evm>, TxEnvFor<Self::Evm>),
+        ),
         Self::Error,
     >
     where
         DB: Database<Error = ProviderError>,
         I: InspectorFor<Self::Evm, DB>,
     {
-        let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env.clone(), inspector);
-        let res = evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err)?;
+        let mut evm = self
+            .evm_config()
+            .evm_with_env_and_inspector(db, evm_env.clone(), inspector);
+        let res = evm
+            .transact(tx_env.clone())
+            .map_err(Self::Error::from_evm_err)?;
 
         Ok((res, (evm_env, tx_env)))
     }
@@ -510,7 +558,10 @@ pub trait Call:
         overrides: EvmOverrides,
     ) -> impl Future<
         Output = Result<
-            (ResultAndState<HaltReasonFor<Self::Evm>>, (EvmEnvFor<Self::Evm>, TxEnvFor<Self::Evm>)),
+            (
+                ResultAndState<HaltReasonFor<Self::Evm>>,
+                (EvmEnvFor<Self::Evm>, TxEnvFor<Self::Evm>),
+            ),
             Self::Error,
         >,
     > + Send
@@ -577,8 +628,9 @@ pub trait Call:
             let this = self.clone();
             self.spawn_blocking_io(move |_| {
                 let state = this.state_at_block_id(at)?;
-                let mut db =
-                    CacheDB::new(StateProviderDatabase::new(StateProviderTraitObjWrapper(&state)));
+                let mut db = CacheDB::new(StateProviderDatabase::new(
+                    StateProviderTraitObjWrapper(&state),
+                ));
 
                 let (evm_env, tx_env) =
                     this.prepare_call_env(evm_env, request, &mut db, overrides)?;
@@ -668,11 +720,12 @@ pub trait Call:
         for tx in transactions {
             if *tx.tx_hash() == target_tx_hash {
                 // reached the target transaction
-                break
+                break;
             }
 
             let tx_env = self.evm_config().tx_env(tx);
-            evm.transact_commit(tx_env).map_err(Self::Error::from_evm_err)?;
+            evm.transact_commit(tx_env)
+                .map_err(Self::Error::from_evm_err)?;
             index += 1;
         }
         Ok(index)
@@ -717,8 +770,8 @@ pub trait Call:
         if request.gas > Some(self.call_gas_limit()) {
             // configured gas exceeds limit
             return Err(
-                EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh).into()
-            )
+                EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh).into(),
+            );
         }
 
         // apply configured gas cap

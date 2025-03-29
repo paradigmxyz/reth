@@ -103,9 +103,16 @@ pub(super) mod serde_bincode_compat {
     where
         N: NodePrimitives,
     {
-        ChainCommitted { new: Chain<'a, N> },
-        ChainReorged { old: Chain<'a, N>, new: Chain<'a, N> },
-        ChainReverted { old: Chain<'a, N> },
+        ChainCommitted {
+            new: Chain<'a, N>,
+        },
+        ChainReorged {
+            old: Chain<'a, N>,
+            new: Chain<'a, N>,
+        },
+        ChainReverted {
+            old: Chain<'a, N>,
+        },
     }
 
     impl<'a, N> From<&'a super::ExExNotification<N>> for ExExNotification<'a, N>
@@ -115,7 +122,9 @@ pub(super) mod serde_bincode_compat {
         fn from(value: &'a super::ExExNotification<N>) -> Self {
             match value {
                 super::ExExNotification::ChainCommitted { new } => {
-                    ExExNotification::ChainCommitted { new: Chain::from(new.as_ref()) }
+                    ExExNotification::ChainCommitted {
+                        new: Chain::from(new.as_ref()),
+                    }
                 }
                 super::ExExNotification::ChainReorged { old, new } => {
                     ExExNotification::ChainReorged {
@@ -123,9 +132,9 @@ pub(super) mod serde_bincode_compat {
                         new: Chain::from(new.as_ref()),
                     }
                 }
-                super::ExExNotification::ChainReverted { old } => {
-                    ExExNotification::ChainReverted { old: Chain::from(old.as_ref()) }
-                }
+                super::ExExNotification::ChainReverted { old } => ExExNotification::ChainReverted {
+                    old: Chain::from(old.as_ref()),
+                },
             }
         }
     }
@@ -136,15 +145,16 @@ pub(super) mod serde_bincode_compat {
     {
         fn from(value: ExExNotification<'a, N>) -> Self {
             match value {
-                ExExNotification::ChainCommitted { new } => {
-                    Self::ChainCommitted { new: Arc::new(new.into()) }
-                }
-                ExExNotification::ChainReorged { old, new } => {
-                    Self::ChainReorged { old: Arc::new(old.into()), new: Arc::new(new.into()) }
-                }
-                ExExNotification::ChainReverted { old } => {
-                    Self::ChainReverted { old: Arc::new(old.into()) }
-                }
+                ExExNotification::ChainCommitted { new } => Self::ChainCommitted {
+                    new: Arc::new(new.into()),
+                },
+                ExExNotification::ChainReorged { old, new } => Self::ChainReorged {
+                    old: Arc::new(old.into()),
+                    new: Arc::new(new.into()),
+                },
+                ExExNotification::ChainReverted { old } => Self::ChainReverted {
+                    old: Arc::new(old.into()),
+                },
             }
         }
     }
@@ -203,14 +213,18 @@ pub(super) mod serde_bincode_compat {
             let data = Data {
                 notification: ExExNotification::ChainReorged {
                     old: Arc::new(Chain::new(
-                        vec![RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
-                            .unwrap()],
+                        vec![
+                            RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
+                                .unwrap(),
+                        ],
                         Default::default(),
                         None,
                     )),
                     new: Arc::new(Chain::new(
-                        vec![RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
-                            .unwrap()],
+                        vec![
+                            RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
+                                .unwrap(),
+                        ],
                         Default::default(),
                         None,
                     )),

@@ -114,7 +114,10 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
         attributes: CustomPayloadAttributes,
         _version: u8,
     ) -> Result<Self, Infallible> {
-        Ok(Self(EthPayloadBuilderAttributes::new(parent, attributes.inner)))
+        Ok(Self(EthPayloadBuilderAttributes::new(
+            parent,
+            attributes.inner,
+        )))
     }
 
     fn payload_id(&self) -> PayloadId {
@@ -185,7 +188,9 @@ pub struct CustomEngineValidator {
 impl CustomEngineValidator {
     /// Instantiates a new validator.
     pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { inner: EthereumExecutionPayloadValidator::new(chain_spec) }
+        Self {
+            inner: EthereumExecutionPayloadValidator::new(chain_spec),
+        }
     }
 
     /// Returns the chain spec used by the validator.
@@ -204,7 +209,9 @@ impl PayloadValidator for CustomEngineValidator {
         payload: ExecutionData,
     ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
         let sealed_block = self.inner.ensure_well_formed_payload(payload)?;
-        sealed_block.try_recover().map_err(|e| NewPayloadError::Other(e.into()))
+        sealed_block
+            .try_recover()
+            .map_err(|e| NewPayloadError::Other(e.into()))
     }
 }
 
@@ -237,7 +244,7 @@ where
         if attributes.custom == 0 {
             return Err(EngineObjectValidationError::invalid_params(
                 CustomError::CustomFieldIsNotZero,
-            ))
+            ));
         }
 
         Ok(())
@@ -388,14 +395,25 @@ where
         &self,
         args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
-        let BuildArguments { cached_reads, config, cancel, best_payload } = args;
-        let PayloadConfig { parent_header, attributes } = config;
+        let BuildArguments {
+            cached_reads,
+            config,
+            cancel,
+            best_payload,
+        } = args;
+        let PayloadConfig {
+            parent_header,
+            attributes,
+        } = config;
 
         // This reuses the default EthereumPayloadBuilder to build the payload
         // but any custom logic can be implemented here
         self.inner.try_build(BuildArguments {
             cached_reads,
-            config: PayloadConfig { parent_header, attributes: attributes.0 },
+            config: PayloadConfig {
+                parent_header,
+                attributes: attributes.0,
+            },
             cancel,
             best_payload,
         })
@@ -405,8 +423,14 @@ where
         &self,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
-        let PayloadConfig { parent_header, attributes } = config;
-        self.inner.build_empty_payload(PayloadConfig { parent_header, attributes: attributes.0 })
+        let PayloadConfig {
+            parent_header,
+            attributes,
+        } = config;
+        self.inner.build_empty_payload(PayloadConfig {
+            parent_header,
+            attributes: attributes.0,
+        })
     }
 }
 
@@ -426,8 +450,9 @@ async fn main() -> eyre::Result<()> {
         .build();
 
     // create node config
-    let node_config =
-        NodeConfig::test().with_rpc(RpcServerArgs::default().with_http()).with_chain(spec);
+    let node_config = NodeConfig::test()
+        .with_rpc(RpcServerArgs::default().with_http())
+        .with_chain(spec);
 
     let handle = NodeBuilder::new(node_config)
         .testing_node(tasks.executor())

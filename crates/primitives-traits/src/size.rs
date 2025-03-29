@@ -66,10 +66,14 @@ impl_in_mem_size_size_of!(op_alloy_consensus::OpTxType);
 
 impl InMemorySize for alloy_consensus::Receipt {
     fn size(&self) -> usize {
-        let Self { status, cumulative_gas_used, logs } = self;
-        core::mem::size_of_val(status) +
-            core::mem::size_of_val(cumulative_gas_used) +
-            logs.capacity() * core::mem::size_of::<Log>()
+        let Self {
+            status,
+            cumulative_gas_used,
+            logs,
+        } = self;
+        core::mem::size_of_val(status)
+            + core::mem::size_of_val(cumulative_gas_used)
+            + logs.capacity() * core::mem::size_of::<Log>()
     }
 }
 
@@ -101,13 +105,14 @@ impl<T: InMemorySize, H: InMemorySize> InMemorySize for alloy_consensus::BlockBo
     /// Calculates a heuristic for the in-memory size of the block body
     #[inline]
     fn size(&self) -> usize {
-        self.transactions.iter().map(T::size).sum::<usize>() +
-            self.transactions.capacity() * core::mem::size_of::<T>() +
-            self.ommers.iter().map(H::size).sum::<usize>() +
-            self.ommers.capacity() * core::mem::size_of::<Header>() +
-            self.withdrawals
-                .as_ref()
-                .map_or(core::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
+        self.transactions.iter().map(T::size).sum::<usize>()
+            + self.transactions.capacity() * core::mem::size_of::<T>()
+            + self.ommers.iter().map(H::size).sum::<usize>()
+            + self.ommers.capacity() * core::mem::size_of::<Header>()
+            + self.withdrawals.as_ref().map_or(
+                core::mem::size_of::<Option<Withdrawals>>(),
+                Withdrawals::total_size,
+            )
     }
 }
 
@@ -138,10 +143,14 @@ mod op {
 
     impl InMemorySize for op_alloy_consensus::OpDepositReceipt {
         fn size(&self) -> usize {
-            let Self { inner, deposit_nonce, deposit_receipt_version } = self;
-            inner.size() +
-                core::mem::size_of_val(deposit_nonce) +
-                core::mem::size_of_val(deposit_receipt_version)
+            let Self {
+                inner,
+                deposit_nonce,
+                deposit_receipt_version,
+            } = self;
+            inner.size()
+                + core::mem::size_of_val(deposit_nonce)
+                + core::mem::size_of_val(deposit_receipt_version)
         }
     }
 

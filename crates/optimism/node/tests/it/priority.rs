@@ -107,8 +107,12 @@ where
         >,
     >,
 {
-    let RollupArgs { disable_txpool_gossip, compute_pending_block, discovery_v4, .. } =
-        RollupArgs::default();
+    let RollupArgs {
+        disable_txpool_gossip,
+        compute_pending_block,
+        discovery_v4,
+        ..
+    } = RollupArgs::default();
     ComponentsBuilder::default()
         .node_types::<Node>()
         .pool(OpPoolBuilder::default())
@@ -116,7 +120,10 @@ where
             OpPayloadBuilder::new(compute_pending_block)
                 .with_transactions(CustomTxPriority { chain_id }),
         ))
-        .network(OpNetworkBuilder { disable_txpool_gossip, disable_discovery_v4: !discovery_v4 })
+        .network(OpNetworkBuilder {
+            disable_txpool_gossip,
+            disable_discovery_v4: !discovery_v4,
+        })
         .executor(OpExecutorBuilder::default())
         .consensus(OpConsensusBuilder::default())
 }
@@ -126,13 +133,19 @@ async fn test_custom_block_priority_config() {
     reth_tracing::init_test_tracing();
 
     let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
-    let chain_spec =
-        Arc::new(OpChainSpecBuilder::base_mainnet().genesis(genesis).ecotone_activated().build());
+    let chain_spec = Arc::new(
+        OpChainSpecBuilder::base_mainnet()
+            .genesis(genesis)
+            .ecotone_activated()
+            .build(),
+    );
 
     // This wallet is going to send:
     // 1. L1 block info tx
     // 2. End-of-block custom tx
-    let wallet = Arc::new(Mutex::new(Wallet::default().with_chain_id(chain_spec.chain().into())));
+    let wallet = Arc::new(Mutex::new(
+        Wallet::default().with_chain_id(chain_spec.chain().into()),
+    ));
 
     // Configure and launch the node.
     let config = NodeConfig::new(chain_spec).with_datadir_args(DatadirArgs {

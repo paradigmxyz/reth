@@ -20,7 +20,9 @@ pub struct NippyJarCursor<'a, H = ()> {
 
 impl<H: NippyJarHeader> std::fmt::Debug for NippyJarCursor<'_, H> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("NippyJarCursor").field("config", &self.jar).finish_non_exhaustive()
+        f.debug_struct("NippyJarCursor")
+            .field("config", &self.jar)
+            .finish_non_exhaustive()
     }
 }
 
@@ -80,7 +82,7 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
 
         if self.row as usize >= self.jar.rows {
             // Has reached the end
-            return Ok(None)
+            return Ok(None);
         }
 
         let mut row = Vec::with_capacity(self.jar.columns);
@@ -120,7 +122,7 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
 
         if self.row as usize >= self.jar.rows {
             // Has reached the end
-            return Ok(None)
+            return Ok(None);
         }
 
         let columns = self.jar.columns;

@@ -19,7 +19,10 @@ pub struct InMemoryTrieCursorFactory<'a, CF> {
 impl<'a, CF> InMemoryTrieCursorFactory<'a, CF> {
     /// Create a new trie cursor factory.
     pub const fn new(cursor_factory: CF, trie_updates: &'a TrieUpdatesSorted) -> Self {
-        Self { cursor_factory, trie_updates }
+        Self {
+            cursor_factory,
+            trie_updates,
+        }
     }
 }
 
@@ -79,12 +82,15 @@ impl<'a, C: TrieCursor> InMemoryAccountTrieCursor<'a, C> {
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let in_memory = self.in_memory_cursor.seek(&key);
         if in_memory.as_ref().is_some_and(|entry| entry.0 == key) {
-            return Ok(in_memory)
+            return Ok(in_memory);
         }
 
         // Reposition the cursor to the first greater or equal node that wasn't removed.
         let mut db_entry = self.cursor.seek(key.clone())?;
-        while db_entry.as_ref().is_some_and(|entry| self.removed_nodes.contains(&entry.0)) {
+        while db_entry
+            .as_ref()
+            .is_some_and(|entry| self.removed_nodes.contains(&entry.0))
+        {
             db_entry = self.cursor.next()?;
         }
 
@@ -203,15 +209,16 @@ impl<C: TrieCursor> InMemoryStorageTrieCursor<'_, C> {
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let in_memory = self.in_memory_cursor.as_mut().and_then(|c| c.seek(&key));
         if self.storage_trie_cleared || in_memory.as_ref().is_some_and(|entry| entry.0 == key) {
-            return Ok(in_memory.filter(|(nibbles, _)| !exact || nibbles == &key))
+            return Ok(in_memory.filter(|(nibbles, _)| !exact || nibbles == &key));
         }
 
         // Reposition the cursor to the first greater or equal node that wasn't removed.
         let mut db_entry = self.cursor.seek(key.clone())?;
-        while db_entry
-            .as_ref()
-            .is_some_and(|entry| self.removed_nodes.as_ref().is_some_and(|r| r.contains(&entry.0)))
-        {
+        while db_entry.as_ref().is_some_and(|entry| {
+            self.removed_nodes
+                .as_ref()
+                .is_some_and(|r| r.contains(&entry.0))
+        }) {
             db_entry = self.cursor.next()?;
         }
 
@@ -225,15 +232,22 @@ impl<C: TrieCursor> InMemoryStorageTrieCursor<'_, C> {
         &mut self,
         last: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let in_memory = self.in_memory_cursor.as_mut().and_then(|c| c.first_after(&last));
+        let in_memory = self
+            .in_memory_cursor
+            .as_mut()
+            .and_then(|c| c.first_after(&last));
         if self.storage_trie_cleared {
-            return Ok(in_memory)
+            return Ok(in_memory);
         }
 
         // Reposition the cursor to the first greater or equal node that wasn't removed.
         let mut db_entry = self.cursor.seek(last.clone())?;
         while db_entry.as_ref().is_some_and(|entry| {
-            entry.0 < last || self.removed_nodes.as_ref().is_some_and(|r| r.contains(&entry.0))
+            entry.0 < last
+                || self
+                    .removed_nodes
+                    .as_ref()
+                    .is_some_and(|r| r.contains(&entry.0))
         }) {
             db_entry = self.cursor.next()?;
         }

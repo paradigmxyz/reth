@@ -152,7 +152,10 @@ where
                         Err(eyre::eyre!("No payload ID returned from forkchoiceUpdated"))
                     }
                 }
-                _ => Err(eyre::eyre!("Payload status not valid: {:?}", fcu_result.payload_status)),
+                _ => Err(eyre::eyre!(
+                    "Payload status not valid: {:?}",
+                    fcu_result.payload_status
+                )),
             }
         })
     }
@@ -242,7 +245,8 @@ where
                 parent_beacon_block_root: Some(B256::ZERO),
             };
 
-            env.payload_attributes.insert(latest_block.number + 1, payload_attributes);
+            env.payload_attributes
+                .insert(latest_block.number + 1, payload_attributes);
             debug!("Stored payload attributes for block {}", block_number + 1);
             Ok(())
         })
@@ -302,7 +306,8 @@ where
                 EngineApiClient::<Engine>::get_payload_v3(&env.node_clients[0].engine, payload_id)
                     .await?
                     .into();
-            env.payload_id_history.insert(latest_block.number + 1, payload_id);
+            env.payload_id_history
+                .insert(latest_block.number + 1, payload_id);
             env.latest_payload_built = Some(built_payload);
 
             Ok(())
@@ -321,7 +326,10 @@ pub struct ProduceBlocks<Engine> {
 impl<Engine> ProduceBlocks<Engine> {
     /// Create a new `ProduceBlocks` action
     pub fn new(num_blocks: u64) -> Self {
-        Self { num_blocks, _phantom: Default::default() }
+        Self {
+            num_blocks,
+            _phantom: Default::default(),
+        }
     }
 }
 

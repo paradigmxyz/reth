@@ -15,7 +15,10 @@ pub(crate) struct StateWitnessRecorderDatabase<D> {
 
 impl<D> StateWitnessRecorderDatabase<D> {
     pub(crate) fn new(database: D) -> Self {
-        Self { database, state: Default::default() }
+        Self {
+            database,
+            state: Default::default(),
+        }
     }
 
     pub(crate) fn into_state(self) -> HashedPostState {
@@ -29,7 +32,9 @@ impl<D: Database> Database for StateWitnessRecorderDatabase<D> {
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         let maybe_account = self.database.basic(address)?;
         let hashed_address = keccak256(address);
-        self.state.accounts.insert(hashed_address, maybe_account.as_ref().map(|acc| acc.into()));
+        self.state
+            .accounts
+            .insert(hashed_address, maybe_account.as_ref().map(|acc| acc.into()));
         Ok(maybe_account)
     }
 

@@ -110,7 +110,7 @@ impl SharedCapability {
         messages: u8,
     ) -> Result<Self, SharedCapabilityError> {
         if offset <= MAX_RESERVED_MESSAGE_ID {
-            return Err(SharedCapabilityError::ReservedMessageIdOffset(offset))
+            return Err(SharedCapabilityError::ReservedMessageIdOffset(offset));
         }
 
         match name {
@@ -186,7 +186,9 @@ impl SharedCapability {
     /// Returns the number of protocol messages supported by this capability.
     pub const fn num_messages(&self) -> u8 {
         match self {
-            Self::Eth { version: _version, .. } => EthMessageID::max() + 1,
+            Self::Eth {
+                version: _version, ..
+            } => EthMessageID::max() + 1,
             Self::UnknownCapability { messages, .. } => *messages,
         }
     }
@@ -217,7 +219,9 @@ impl SharedCapabilities {
     /// Returns the eth capability if it is shared.
     #[inline]
     pub fn eth(&self) -> Result<&SharedCapability, P2PStreamError> {
-        self.iter_caps().find(|c| c.is_eth()).ok_or(P2PStreamError::CapabilityNotShared)
+        self.iter_caps()
+            .find(|c| c.is_eth())
+            .ok_or(P2PStreamError::CapabilityNotShared)
     }
 
     /// Returns the negotiated eth version if it is shared.
@@ -237,7 +241,9 @@ impl SharedCapabilities {
     /// Returns the shared capability for the given capability.
     #[inline]
     pub fn find(&self, cap: &Capability) -> Option<&SharedCapability> {
-        self.0.iter().find(|c| c.version() == cap.version as u8 && c.name() == cap.name)
+        self.0
+            .iter()
+            .find(|c| c.version() == cap.version as u8 && c.name() == cap.name)
     }
 
     /// Returns the matching shared capability for the given capability offset.
@@ -266,12 +272,12 @@ impl SharedCapabilities {
         let mut cap = iter.next()?;
         if offset < cap.message_id_offset() {
             // reserved message id space
-            return None
+            return None;
         }
 
         for next in iter {
             if offset < next.message_id_offset() {
-                return Some(cap)
+                return Some(cap);
             }
             cap = next
         }
@@ -285,7 +291,9 @@ impl SharedCapabilities {
         &self,
         cap: &Capability,
     ) -> Result<&SharedCapability, UnsupportedCapabilityError> {
-        self.find(cap).ok_or_else(|| UnsupportedCapabilityError { capability: cap.clone() })
+        self.find(cap).ok_or_else(|| UnsupportedCapabilityError {
+            capability: cap.clone(),
+        })
     }
 
     /// Returns the number of shared capabilities.
@@ -315,8 +323,10 @@ pub fn shared_capability_offsets(
     peer_capabilities: Vec<Capability>,
 ) -> Result<Vec<SharedCapability>, P2PStreamError> {
     // find intersection of capabilities
-    let our_capabilities =
-        local_protocols.into_iter().map(Protocol::split).collect::<HashMap<_, _>>();
+    let our_capabilities = local_protocols
+        .into_iter()
+        .map(Protocol::split)
+        .collect::<HashMap<_, _>>();
 
     // map of capability name to version
     let mut shared_capabilities: HashMap<_, ProtoVersion> = HashMap::default();
@@ -346,7 +356,10 @@ pub fn shared_capability_offsets(
             {
                 shared_capabilities.insert(
                     peer_capability.name.clone(),
-                    ProtoVersion { version: peer_capability.version, messages },
+                    ProtoVersion {
+                        version: peer_capability.version,
+                        messages,
+                    },
                 );
                 shared_capability_names.insert(peer_capability.name);
             }
@@ -355,7 +368,9 @@ pub fn shared_capability_offsets(
 
     // disconnect if we don't share any capabilities
     if shared_capabilities.is_empty() {
-        return Err(P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities))
+        return Err(P2PStreamError::HandshakeError(
+            P2PHandshakeError::NoSharedCapabilities,
+        ));
     }
 
     // order versions based on capability name (alphabetical) and select offsets based on
@@ -379,7 +394,9 @@ pub fn shared_capability_offsets(
     }
 
     if shared_with_offsets.is_empty() {
-        return Err(P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities))
+        return Err(P2PStreamError::HandshakeError(
+            P2PHandshakeError::NoSharedCapabilities,
+        ));
     }
 
     Ok(shared_with_offsets)
@@ -481,19 +498,32 @@ mod tests {
     #[test]
     fn test_peer_capability_version_zero() {
         let cap = Capability::new_static("TestName", 0);
-        let local_capabilities: Vec<Protocol> =
-            vec![Protocol::new(cap.clone(), 0), EthVersion::Eth67.into(), EthVersion::Eth68.into()];
+        let local_capabilities: Vec<Protocol> = vec![
+            Protocol::new(cap.clone(), 0),
+            EthVersion::Eth67.into(),
+            EthVersion::Eth68.into(),
+        ];
         let peer_capabilities = vec![cap.clone()];
 
         let shared = shared_capability_offsets(local_capabilities, peer_capabilities).unwrap();
         assert_eq!(shared.len(), 1);
-        assert_eq!(shared[0], SharedCapability::UnknownCapability { cap, offset: 16, messages: 0 })
+        assert_eq!(
+            shared[0],
+            SharedCapability::UnknownCapability {
+                cap,
+                offset: 16,
+                messages: 0
+            }
+        )
     }
 
     #[test]
     fn test_peer_lower_capability_version() {
-        let local_capabilities: Vec<Protocol> =
-            vec![EthVersion::Eth66.into(), EthVersion::Eth67.into(), EthVersion::Eth68.into()];
+        let local_capabilities: Vec<Protocol> = vec![
+            EthVersion::Eth66.into(),
+            EthVersion::Eth67.into(),
+            EthVersion::Eth68.into(),
+        ];
         let peer_capabilities: Vec<Capability> = vec![EthVersion::Eth66.into()];
 
         let shared_capability =
@@ -517,7 +547,9 @@ mod tests {
 
         assert!(matches!(
             shared_capability,
-            Err(P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities))
+            Err(P2PStreamError::HandshakeError(
+                P2PHandshakeError::NoSharedCapabilities
+            ))
         ))
     }
 
@@ -530,7 +562,9 @@ mod tests {
 
         assert!(matches!(
             shared_capability,
-            Err(P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities))
+            Err(P2PStreamError::HandshakeError(
+                P2PHandshakeError::NoSharedCapabilities
+            ))
         ))
     }
 
@@ -573,13 +607,18 @@ mod tests {
         assert_eq!(shared_eth.name(), proto.cap.name);
 
         // the 6th shared message is the first message of the eth capability
-        let shared_eth = shared.find_by_relative_offset(1 + proto.messages()).unwrap();
+        let shared_eth = shared
+            .find_by_relative_offset(1 + proto.messages())
+            .unwrap();
         assert_eq!(shared_eth.name(), "eth");
     }
 
     #[test]
     fn test_raw_capability_rlp() {
-        let msg = RawCapabilityMessage { id: 1, payload: Bytes::from(vec![0x01, 0x02, 0x03]) };
+        let msg = RawCapabilityMessage {
+            id: 1,
+            payload: Bytes::from(vec![0x01, 0x02, 0x03]),
+        };
 
         // Encode the message into bytes
         let mut encoded = Vec::new();

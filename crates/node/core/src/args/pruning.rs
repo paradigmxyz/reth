@@ -228,8 +228,9 @@ pub(crate) fn parse_receipts_log_filter(
                 if parts.len() < 3 {
                     return Err(ReceiptsLogError::InvalidFilterFormat(filter.to_string()));
                 }
-                let distance =
-                    parts[2].parse::<u64>().map_err(ReceiptsLogError::InvalidDistance)?;
+                let distance = parts[2]
+                    .parse::<u64>()
+                    .map_err(ReceiptsLogError::InvalidDistance)?;
                 PruneMode::Distance(distance)
             }
             s if s.starts_with("before") => {
@@ -281,9 +282,15 @@ mod tests {
         assert_eq!(config.0.len(), 3);
 
         // Check that the args were parsed correctly.
-        let addr1: Address = "0x0000000000000000000000000000000000000001".parse().unwrap();
-        let addr2: Address = "0x0000000000000000000000000000000000000002".parse().unwrap();
-        let addr3: Address = "0x0000000000000000000000000000000000000003".parse().unwrap();
+        let addr1: Address = "0x0000000000000000000000000000000000000001"
+            .parse()
+            .unwrap();
+        let addr2: Address = "0x0000000000000000000000000000000000000002"
+            .parse()
+            .unwrap();
+        let addr3: Address = "0x0000000000000000000000000000000000000003"
+            .parse()
+            .unwrap();
 
         assert_eq!(config.0.get(&addr1), Some(&PruneMode::Full));
         assert_eq!(config.0.get(&addr2), Some(&PruneMode::Distance(1000)));
@@ -293,7 +300,10 @@ mod tests {
     #[test]
     fn test_parse_receipts_log_filter_invalid_filter_format() {
         let result = parse_receipts_log_filter("invalid_format");
-        assert!(matches!(result, Err(ReceiptsLogError::InvalidFilterFormat(_))));
+        assert!(matches!(
+            result,
+            Err(ReceiptsLogError::InvalidFilterFormat(_))
+        ));
     }
 
     #[test]
@@ -322,6 +332,9 @@ mod tests {
         let result = parse_receipts_log_filter(
             "0x0000000000000000000000000000000000000000:before:invalid_block",
         );
-        assert!(matches!(result, Err(ReceiptsLogError::InvalidBlockNumber(_))));
+        assert!(matches!(
+            result,
+            Err(ReceiptsLogError::InvalidBlockNumber(_))
+        ));
     }
 }

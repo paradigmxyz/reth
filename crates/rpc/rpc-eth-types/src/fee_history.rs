@@ -42,7 +42,9 @@ impl FeeHistoryCache {
             config,
             entries: Default::default(),
         };
-        Self { inner: Arc::new(inner) }
+        Self {
+            inner: Arc::new(inner),
+        }
     }
 
     /// How the cache is configured.
@@ -106,10 +108,13 @@ impl FeeHistoryCache {
         if entries.is_empty() {
             self.inner.upper_bound.store(0, SeqCst);
             self.inner.lower_bound.store(0, SeqCst);
-            return
+            return;
         }
 
-        let upper_bound = *entries.last_entry().expect("Contains at least one entry").key();
+        let upper_bound = *entries
+            .last_entry()
+            .expect("Contains at least one entry")
+            .key();
 
         // also enforce proper lower bound in case we have gaps
         let target_lower = upper_bound.saturating_sub(self.inner.config.max_blocks);
@@ -117,7 +122,10 @@ impl FeeHistoryCache {
             entries.pop_first();
         }
 
-        let lower_bound = *entries.first_entry().expect("Contains at least one entry").key();
+        let lower_bound = *entries
+            .first_entry()
+            .expect("Contains at least one entry")
+            .key();
         self.inner.upper_bound.store(upper_bound, SeqCst);
         self.inner.lower_bound.store(lower_bound, SeqCst);
     }
@@ -153,7 +161,7 @@ impl FeeHistoryCache {
                 .collect::<Vec<_>>();
 
             if result.is_empty() {
-                return None
+                return None;
             }
 
             Some(result)
@@ -167,7 +175,9 @@ impl FeeHistoryCache {
     /// This returns 100 * resolution points
     pub fn predefined_percentiles(&self) -> Vec<f64> {
         let res = self.resolution() as f64;
-        (0..=100 * self.resolution()).map(|p| p as f64 / res).collect()
+        (0..=100 * self.resolution())
+            .map(|p| p as f64 / res)
+            .collect()
     }
 }
 
@@ -188,7 +198,10 @@ pub struct FeeHistoryCacheConfig {
 
 impl Default for FeeHistoryCacheConfig {
     fn default() -> Self {
-        Self { max_blocks: MAX_HEADER_HISTORY + 100, resolution: 4 }
+        Self {
+            max_blocks: MAX_HEADER_HISTORY + 100,
+            resolution: 4,
+        }
     }
 }
 
@@ -298,7 +311,9 @@ where
 
             Some(TxGasAndReward {
                 gas_used,
-                reward: tx.effective_tip_per_gas(base_fee_per_gas).unwrap_or_default(),
+                reward: tx
+                    .effective_tip_per_gas(base_fee_per_gas)
+                    .unwrap_or_default(),
             })
         })
         .collect::<Vec<_>>();
@@ -311,13 +326,16 @@ where
     // We use a `tx_index` here that is shared across all percentiles, since we know
     // the percentiles are monotonically increasing.
     let mut tx_index = 0;
-    let mut cumulative_gas_used = transactions.first().map(|tx| tx.gas_used).unwrap_or_default();
+    let mut cumulative_gas_used = transactions
+        .first()
+        .map(|tx| tx.gas_used)
+        .unwrap_or_default();
     let mut rewards_in_block = Vec::with_capacity(percentiles.len());
     for percentile in percentiles {
         // Empty blocks should return in a zero row
         if transactions.is_empty() {
             rewards_in_block.push(0);
-            continue
+            continue;
         }
 
         let threshold = (gas_used as f64 * percentile / 100.) as u64;
@@ -377,8 +395,8 @@ impl FeeHistoryEntry {
                 .header()
                 .excess_blob_gas()
                 .and_then(|excess_blob_gas| Some(blob_params?.calc_blob_fee(excess_blob_gas))),
-            blob_gas_used_ratio: block.body().blob_gas_used() as f64 /
-                alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
+            blob_gas_used_ratio: block.body().blob_gas_used() as f64
+                / alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
             excess_blob_gas: block.header().excess_blob_gas(),
             blob_gas_used: block.header().blob_gas_used(),
             gas_used: block.header().gas_used(),
@@ -415,7 +433,10 @@ impl FeeHistoryEntry {
     /// Returns a `None` if no excess blob gas is set, no EIP-4844 support
     pub fn next_block_excess_blob_gas(&self) -> Option<u64> {
         self.excess_blob_gas.and_then(|excess_blob_gas| {
-            Some(self.blob_params?.next_block_excess_blob_gas(excess_blob_gas, self.blob_gas_used?))
+            Some(
+                self.blob_params?
+                    .next_block_excess_blob_gas(excess_blob_gas, self.blob_gas_used?),
+            )
         })
     }
 }

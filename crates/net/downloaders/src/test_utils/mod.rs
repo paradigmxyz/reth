@@ -26,11 +26,21 @@ pub(crate) fn generate_bodies(
     let blocks = random_block_range(
         &mut rng,
         range,
-        BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..2, ..Default::default() },
+        BlockRangeParams {
+            parent: Some(B256::ZERO),
+            tx_count: 0..2,
+            ..Default::default()
+        },
     );
 
-    let headers = blocks.iter().map(|block| block.clone_sealed_header()).collect();
-    let bodies = blocks.into_iter().map(|block| (block.hash(), block.into_body())).collect();
+    let headers = blocks
+        .iter()
+        .map(|block| block.clone_sealed_header())
+        .collect();
+    let bodies = blocks
+        .into_iter()
+        .map(|block| (block.hash(), block.into_body()))
+        .collect();
 
     (headers, bodies)
 }

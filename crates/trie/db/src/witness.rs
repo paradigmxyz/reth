@@ -24,7 +24,10 @@ impl<'a, TX: DbTx> DatabaseTrieWitness<'a, TX>
     for TrieWitness<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>
 {
     fn from_tx(tx: &'a TX) -> Self {
-        Self::new(DatabaseTrieCursorFactory::new(tx), DatabaseHashedCursorFactory::new(tx))
+        Self::new(
+            DatabaseTrieCursorFactory::new(tx),
+            DatabaseHashedCursorFactory::new(tx),
+        )
     }
 
     fn overlay_witness(

@@ -55,7 +55,11 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> ImportOpCommand<C> {
             "Chunking chain import"
         );
 
-        let Environment { provider_factory, config, .. } = self.env.init::<N>(AccessRights::RW)?;
+        let Environment {
+            provider_factory,
+            config,
+            ..
+        } = self.env.init::<N>(AccessRights::RW)?;
 
         // we use noop here because we expect the inputs to be valid
         let consensus = Arc::new(NoopConsensus::default());
@@ -71,15 +75,18 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> ImportOpCommand<C> {
             .sealed_header(provider_factory.last_block_number()?)?
             .expect("should have genesis");
 
-        while let Some(mut file_client) =
-            reader.next_chunk::<BlockTy<N>>(consensus.clone(), Some(sealed_header)).await?
+        while let Some(mut file_client) = reader
+            .next_chunk::<BlockTy<N>>(consensus.clone(), Some(sealed_header))
+            .await?
         {
             // create a new FileClient from chunk read from file
             info!(target: "reth::cli",
                 "Importing chain file chunk"
             );
 
-            let tip = file_client.tip().ok_or_else(|| eyre::eyre!("file client has no tip"))?;
+            let tip = file_client
+                .tip()
+                .ok_or_else(|| eyre::eyre!("file client has no tip"))?;
             info!(target: "reth::cli", "Chain file chunk read");
 
             total_decoded_blocks += file_client.headers_len();
@@ -89,7 +96,7 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> ImportOpCommand<C> {
                 body.transactions.retain(|_| {
                     if is_dup_tx(block_number) {
                         total_filtered_out_dup_txns += 1;
-                        return false
+                        return false;
                     }
                     true
                 })
@@ -111,9 +118,14 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> ImportOpCommand<C> {
 
             let provider = provider_factory.provider()?;
 
-            let latest_block_number =
-                provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
-            tokio::spawn(reth_node_events::node::handle_events(None, latest_block_number, events));
+            let latest_block_number = provider
+                .get_stage_checkpoint(StageId::Finish)?
+                .map(|ch| ch.block_number);
+            tokio::spawn(reth_node_events::node::handle_events(
+                None,
+                latest_block_number,
+                events,
+            ));
 
             // Run pipeline
             info!(target: "reth::cli", "Starting sync pipeline");
@@ -130,10 +142,12 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> ImportOpCommand<C> {
         let provider = provider_factory.provider()?;
 
         let total_imported_blocks = provider.tx_ref().entries::<tables::HeaderNumbers>()?;
-        let total_imported_txns = provider.tx_ref().entries::<tables::TransactionHashNumbers>()?;
+        let total_imported_txns = provider
+            .tx_ref()
+            .entries::<tables::TransactionHashNumbers>()?;
 
-        if total_decoded_blocks != total_imported_blocks ||
-            total_decoded_txns != total_imported_txns + total_filtered_out_dup_txns
+        if total_decoded_blocks != total_imported_blocks
+            || total_decoded_txns != total_imported_txns + total_filtered_out_dup_txns
         {
             error!(target: "reth::cli",
                 total_decoded_blocks,

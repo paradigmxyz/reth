@@ -64,7 +64,8 @@ where
         status: Status,
         fork_filter: ForkFilter,
     ) -> Result<(EthStream<S, N>, Status), EthStreamError> {
-        self.handshake_with_timeout(status, fork_filter, HANDSHAKE_TIMEOUT).await
+        self.handshake_with_timeout(status, fork_filter, HANDSHAKE_TIMEOUT)
+            .await
     }
 
     /// Wrapper around handshake which enforces a timeout.
@@ -74,9 +75,12 @@ where
         fork_filter: ForkFilter,
         timeout_limit: Duration,
     ) -> Result<(EthStream<S, N>, Status), EthStreamError> {
-        timeout(timeout_limit, Self::handshake_without_timeout(self, status, fork_filter))
-            .await
-            .map_err(|_| EthStreamError::StreamTimeout)?
+        timeout(
+            timeout_limit,
+            Self::handshake_without_timeout(self, status, fork_filter),
+        )
+        .await
+        .map_err(|_| EthStreamError::StreamTimeout)?
     }
 
     /// Handshake with no timeout
@@ -89,7 +93,9 @@ where
             %status,
             "sending eth status to peer"
         );
-        EthereumEthHandshake(&mut self.inner).eth_handshake(status, fork_filter).await?;
+        EthereumEthHandshake(&mut self.inner)
+            .eth_handshake(status, fork_filter)
+            .await?;
 
         // now we can create the `EthStream` because the peer has successfully completed
         // the handshake
@@ -117,7 +123,11 @@ impl<S, N> EthStream<S, N> {
     /// to manually handshake a peer.
     #[inline]
     pub const fn new(version: EthVersion, inner: S) -> Self {
-        Self { version, inner, _pd: std::marker::PhantomData }
+        Self {
+            version,
+            inner,
+            _pd: std::marker::PhantomData,
+        }
     }
 
     /// Returns the eth version.
@@ -192,7 +202,7 @@ where
         };
 
         if bytes.len() > MAX_MESSAGE_SIZE {
-            return Poll::Ready(Some(Err(EthStreamError::MessageTooBig(bytes.len()))))
+            return Poll::Ready(Some(Err(EthStreamError::MessageTooBig(bytes.len()))));
         }
 
         let msg = match ProtocolMessage::decode_message(*this.version, &mut bytes.as_ref()) {
@@ -208,14 +218,14 @@ where
                     %msg,
                     "failed to decode protocol message"
                 );
-                return Poll::Ready(Some(Err(EthStreamError::InvalidMessage(err))))
+                return Poll::Ready(Some(Err(EthStreamError::InvalidMessage(err))));
             }
         };
 
         if matches!(msg.message, EthMessage::Status(_)) {
             return Poll::Ready(Some(Err(EthStreamError::EthHandshakeError(
                 EthHandshakeError::StatusNotInHandshake,
-            ))))
+            ))));
         }
 
         Poll::Ready(Some(Ok(msg.message)))
@@ -245,7 +255,9 @@ where
             // allowing for its start_disconnect method to be called.
             //
             // self.project().inner.start_disconnect(DisconnectReason::ProtocolBreach);
-            return Err(EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake))
+            return Err(EthStreamError::EthHandshakeError(
+                EthHandshakeError::StatusNotInHandshake,
+            ));
         }
 
         self.project()
@@ -433,7 +445,10 @@ mod tests {
             assert!(matches!(
                 handshake_res,
                 Err(EthStreamError::EthHandshakeError(
-                    EthHandshakeError::TotalDifficultyBitLenTooLarge { got: 165, maximum: 160 }
+                    EthHandshakeError::TotalDifficultyBitLenTooLarge {
+                        got: 165,
+                        maximum: 160
+                    }
                 ))
             ));
         });
@@ -450,7 +465,10 @@ mod tests {
         assert!(matches!(
             handshake_res,
             Err(EthStreamError::EthHandshakeError(
-                EthHandshakeError::TotalDifficultyBitLenTooLarge { got: 165, maximum: 160 }
+                EthHandshakeError::TotalDifficultyBitLenTooLarge {
+                    got: 165,
+                    maximum: 160
+                }
             ))
         ));
 
@@ -464,8 +482,14 @@ mod tests {
         let local_addr = listener.local_addr().unwrap();
         let test_msg = EthMessage::<EthNetworkPrimitives>::NewBlockHashes(
             vec![
-                BlockHashNumber { hash: B256::random(), number: 5 },
-                BlockHashNumber { hash: B256::random(), number: 6 },
+                BlockHashNumber {
+                    hash: B256::random(),
+                    number: 5,
+                },
+                BlockHashNumber {
+                    hash: B256::random(),
+                    number: 6,
+                },
             ]
             .into(),
         );
@@ -499,8 +523,14 @@ mod tests {
         let server_key = SecretKey::new(&mut rand::thread_rng());
         let test_msg = EthMessage::<EthNetworkPrimitives>::NewBlockHashes(
             vec![
-                BlockHashNumber { hash: B256::random(), number: 5 },
-                BlockHashNumber { hash: B256::random(), number: 6 },
+                BlockHashNumber {
+                    hash: B256::random(),
+                    number: 5,
+                },
+                BlockHashNumber {
+                    hash: B256::random(),
+                    number: 6,
+                },
             ]
             .into(),
         );
@@ -523,7 +553,9 @@ mod tests {
         let client_key = SecretKey::new(&mut rand::thread_rng());
 
         let outgoing = TcpStream::connect(local_addr).await.unwrap();
-        let outgoing = ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
+        let outgoing = ECIESStream::connect(outgoing, client_key, server_id)
+            .await
+            .unwrap();
         let mut client_stream = EthStream::new(EthVersion::Eth67, outgoing);
 
         client_stream.send(test_msg).await.unwrap();
@@ -541,8 +573,14 @@ mod tests {
         let server_key = SecretKey::new(&mut rand::thread_rng());
         let test_msg = EthMessage::<EthNetworkPrimitives>::NewBlockHashes(
             vec![
-                BlockHashNumber { hash: B256::random(), number: 5 },
-                BlockHashNumber { hash: B256::random(), number: 6 },
+                BlockHashNumber {
+                    hash: B256::random(),
+                    number: 5,
+                },
+                BlockHashNumber {
+                    hash: B256::random(),
+                    number: 6,
+                },
             ]
             .into(),
         );
@@ -594,7 +632,9 @@ mod tests {
         let client_key = SecretKey::new(&mut rand::thread_rng());
 
         let outgoing = TcpStream::connect(local_addr).await.unwrap();
-        let sink = ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
+        let sink = ECIESStream::connect(outgoing, client_key, server_id)
+            .await
+            .unwrap();
 
         let client_hello = HelloMessageWithProtocols {
             protocol_version: ProtocolVersion::V5,
@@ -607,8 +647,10 @@ mod tests {
         let unauthed_stream = UnauthedP2PStream::new(sink);
         let (p2p_stream, _) = unauthed_stream.handshake(client_hello).await.unwrap();
 
-        let (mut client_stream, _) =
-            UnauthedEthStream::new(p2p_stream).handshake(status, fork_filter).await.unwrap();
+        let (mut client_stream, _) = UnauthedEthStream::new(p2p_stream)
+            .handshake(status, fork_filter)
+            .await
+            .unwrap();
 
         client_stream.send(test_msg).await.unwrap();
 
@@ -674,7 +716,10 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();
 
-        let test_msg = RawCapabilityMessage { id: 0x1234, payload: Bytes::from(vec![1, 2, 3, 4]) };
+        let test_msg = RawCapabilityMessage {
+            id: 0x1234,
+            payload: Bytes::from(vec![1, 2, 3, 4]),
+        };
 
         let test_msg_clone = test_msg.clone();
         let handle = tokio::spawn(async move {

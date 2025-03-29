@@ -53,7 +53,10 @@ impl TransportReceiverT for Receiver {
 
     /// Returns a Future resolving when the server sent us something back.
     async fn receive(&mut self) -> Result<ReceivedMessage, Self::Error> {
-        self.inner.next().await.map_or(Err(IpcError::Closed), |val| Ok(ReceivedMessage::Text(val?)))
+        self.inner
+            .next()
+            .await
+            .map_or(Err(IpcError::Closed), |val| Ok(ReceivedMessage::Text(val?)))
     }
 }
 
@@ -67,13 +70,18 @@ impl IpcTransportClientBuilder {
         let conn = async { path.to_fs_name::<GenericFilePath>() }
             .and_then(LocalSocketStream::connect)
             .await
-            .map_err(|err| IpcError::FailedToConnect { path: path.to_string(), err })?;
+            .map_err(|err| IpcError::FailedToConnect {
+                path: path.to_string(),
+                err,
+            })?;
 
         let (recv, send) = conn.split();
 
         Ok((
             Sender { inner: send },
-            Receiver { inner: FramedRead::new(recv, StreamCodec::stream_incoming()) },
+            Receiver {
+                inner: FramedRead::new(recv, StreamCodec::stream_incoming()),
+            },
         ))
     }
 }
@@ -87,7 +95,9 @@ pub struct IpcClientBuilder {
 
 impl Default for IpcClientBuilder {
     fn default() -> Self {
-        Self { request_timeout: Duration::from_secs(60) }
+        Self {
+            request_timeout: Duration::from_secs(60),
+        }
     }
 }
 
@@ -168,7 +178,10 @@ mod tests {
             let _x = binding.accept().await;
         });
 
-        let (tx, rx) = IpcTransportClientBuilder::default().build(name).await.unwrap();
+        let (tx, rx) = IpcTransportClientBuilder::default()
+            .build(name)
+            .await
+            .unwrap();
         let _ = IpcClientBuilder::default().build_with_tokio(tx, rx);
     }
 }

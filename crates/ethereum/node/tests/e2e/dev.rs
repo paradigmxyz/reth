@@ -22,7 +22,10 @@ async fn can_run_dev_node() -> eyre::Result<()> {
 
     let node_config = NodeConfig::test()
         .with_chain(custom_chain())
-        .with_dev(DevArgs { dev: true, ..Default::default() });
+        .with_dev(DevArgs {
+            dev: true,
+            ..Default::default()
+        });
     let NodeHandle { node, .. } = NodeBuilder::new(node_config.clone())
         .testing_node(exec.clone())
         .with_types_and_provider::<EthereumNode, BlockchainProvider<_>>()

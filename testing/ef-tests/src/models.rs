@@ -174,16 +174,22 @@ impl State {
 
             for (k, v) in &account.storage {
                 if v.is_zero() {
-                    continue
+                    continue;
                 }
                 let storage_key = B256::from_slice(&k.to_be_bytes::<32>());
                 tx.put::<tables::PlainStorageState>(
                     address,
-                    StorageEntry { key: storage_key, value: *v },
+                    StorageEntry {
+                        key: storage_key,
+                        value: *v,
+                    },
                 )?;
                 tx.put::<tables::HashedStorages>(
                     hashed_address,
-                    StorageEntry { key: keccak256(storage_key), value: *v },
+                    StorageEntry {
+                        key: keccak256(storage_key),
+                        value: *v,
+                    },
                 )?;
             }
         }
@@ -218,8 +224,9 @@ impl Account {
     ///
     /// In case of a mismatch, `Err(Error::Assertion)` is returned.
     pub fn assert_db(&self, address: Address, tx: &impl DbTx) -> Result<(), Error> {
-        let account =
-            tx.get_by_encoded_key::<tables::PlainAccountState>(&address)?.ok_or_else(|| {
+        let account = tx
+            .get_by_encoded_key::<tables::PlainAccountState>(&address)?
+            .ok_or_else(|| {
                 Error::Assertion(format!(
                     "Expected account ({address}) is missing from DB: {self:?}"
                 ))
@@ -229,7 +236,11 @@ impl Account {
         assert_equal(self.nonce.to(), account.nonce, "Nonce does not match")?;
 
         if let Some(bytecode_hash) = account.bytecode_hash {
-            assert_equal(keccak256(&self.code), bytecode_hash, "Bytecode does not match")?;
+            assert_equal(
+                keccak256(&self.code),
+                bytecode_hash,
+                "Bytecode does not match",
+            )?;
         } else {
             assert_equal(
                 self.code.is_empty(),
@@ -252,12 +263,12 @@ impl Account {
                 } else {
                     return Err(Error::Assertion(format!(
                         "Slot {slot:?} is missing from the database. Expected {value:?}"
-                    )))
+                    )));
                 }
             } else {
                 return Err(Error::Assertion(format!(
                     "Slot {slot:?} is missing from the database. Expected {value:?}"
-                )))
+                )));
             }
         }
 
@@ -335,17 +346,17 @@ impl From<ForkSpec> for ChainSpec {
                 spec_builder.tangerine_whistle_activated()
             }
             ForkSpec::EIP158 => spec_builder.spurious_dragon_activated(),
-            ForkSpec::Byzantium |
-            ForkSpec::EIP158ToByzantiumAt5 |
-            ForkSpec::ConstantinopleFix |
-            ForkSpec::ByzantiumToConstantinopleFixAt5 => spec_builder.byzantium_activated(),
+            ForkSpec::Byzantium
+            | ForkSpec::EIP158ToByzantiumAt5
+            | ForkSpec::ConstantinopleFix
+            | ForkSpec::ByzantiumToConstantinopleFixAt5 => spec_builder.byzantium_activated(),
             ForkSpec::Istanbul => spec_builder.istanbul_activated(),
             ForkSpec::Berlin => spec_builder.berlin_activated(),
             ForkSpec::London | ForkSpec::BerlinToLondonAt5 => spec_builder.london_activated(),
-            ForkSpec::Merge |
-            ForkSpec::MergeEOF |
-            ForkSpec::MergeMeterInitCode |
-            ForkSpec::MergePush0 => spec_builder.paris_activated(),
+            ForkSpec::Merge
+            | ForkSpec::MergeEOF
+            | ForkSpec::MergeMeterInitCode
+            | ForkSpec::MergePush0 => spec_builder.paris_activated(),
             ForkSpec::Shanghai => spec_builder.shanghai_activated(),
             ForkSpec::Cancun => spec_builder.cancun_activated(),
             ForkSpec::ByzantiumToConstantinopleAt5 | ForkSpec::Constantinople => {
@@ -441,7 +452,10 @@ mod tests {
             "uncleHash" : "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"
         }"#;
         let res = serde_json::from_str::<Header>(test);
-        assert!(res.is_ok(), "Failed to deserialize Header with error: {res:?}");
+        assert!(
+            res.is_ok(),
+            "Failed to deserialize Header with error: {res:?}"
+        );
     }
 
     #[test]
@@ -467,6 +481,9 @@ mod tests {
         ]"#;
 
         let res = serde_json::from_str::<Vec<Transaction>>(test);
-        assert!(res.is_ok(), "Failed to deserialize transaction with error: {res:?}");
+        assert!(
+            res.is_ok(),
+            "Failed to deserialize transaction with error: {res:?}"
+        );
     }
 }

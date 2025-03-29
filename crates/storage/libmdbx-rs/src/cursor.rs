@@ -42,7 +42,10 @@ where
 
             let res = ffi::mdbx_cursor_copy(other.cursor(), cursor);
 
-            let s = Self { txn: other.txn.clone(), cursor };
+            let s = Self {
+                txn: other.txn.clone(),
+                cursor,
+            };
 
             mdbx_result(res)?;
 
@@ -371,7 +374,7 @@ where
     {
         let res: Result<Option<((), ())>> = self.set_range(key);
         if let Err(error) = res {
-            return Iter::Err(Some(error))
+            return Iter::Err(Some(error));
         };
         Iter::new(self, ffi::MDBX_GET_CURRENT, ffi::MDBX_NEXT)
     }
@@ -406,7 +409,7 @@ where
     {
         let res: Result<Option<((), ())>> = self.set_range(key);
         if let Err(error) = res {
-            return IterDup::Err(Some(error))
+            return IterDup::Err(Some(error));
         };
         IterDup::new(self, ffi::MDBX_GET_CURRENT)
     }
@@ -422,7 +425,7 @@ where
             Ok(Some(_)) => (),
             Ok(None) => {
                 let _: Result<Option<((), ())>> = self.last();
-                return Iter::new(self, ffi::MDBX_NEXT, ffi::MDBX_NEXT)
+                return Iter::new(self, ffi::MDBX_NEXT, ffi::MDBX_NEXT);
             }
             Err(error) => return Iter::Err(Some(error)),
         };
@@ -434,10 +437,14 @@ impl Cursor<RW> {
     /// Puts a key/data pair into the database. The cursor will be positioned at
     /// the new data item, or on failure usually near it.
     pub fn put(&mut self, key: &[u8], data: &[u8], flags: WriteFlags) -> Result<()> {
-        let key_val: ffi::MDBX_val =
-            ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
-        let mut data_val: ffi::MDBX_val =
-            ffi::MDBX_val { iov_len: data.len(), iov_base: data.as_ptr() as *mut c_void };
+        let key_val: ffi::MDBX_val = ffi::MDBX_val {
+            iov_len: key.len(),
+            iov_base: key.as_ptr() as *mut c_void,
+        };
+        let mut data_val: ffi::MDBX_val = ffi::MDBX_val {
+            iov_len: data.len(),
+            iov_base: data.as_ptr() as *mut c_void,
+        };
         mdbx_result(unsafe {
             self.txn.txn_execute(|_| {
                 ffi::mdbx_cursor_put(self.cursor, &key_val, &mut data_val, flags.bits())
@@ -455,7 +462,8 @@ impl Cursor<RW> {
     /// current key, if the database was opened with [`DatabaseFlags::DUP_SORT`].
     pub fn del(&mut self, flags: WriteFlags) -> Result<()> {
         mdbx_result(unsafe {
-            self.txn.txn_execute(|_| ffi::mdbx_cursor_del(self.cursor, flags.bits()))?
+            self.txn
+                .txn_execute(|_| ffi::mdbx_cursor_del(self.cursor, flags.bits()))?
         })?;
 
         Ok(())
@@ -467,7 +475,9 @@ where
     K: TransactionKind,
 {
     fn clone(&self) -> Self {
-        self.txn.txn_execute(|_| Self::new_at_position(self).unwrap()).unwrap()
+        self.txn
+            .txn_execute(|_| Self::new_at_position(self).unwrap())
+            .unwrap()
     }
 }
 
@@ -495,10 +505,14 @@ where
 
 const unsafe fn slice_to_val(slice: Option<&[u8]>) -> ffi::MDBX_val {
     match slice {
-        Some(slice) => {
-            ffi::MDBX_val { iov_len: slice.len(), iov_base: slice.as_ptr() as *mut c_void }
-        }
-        None => ffi::MDBX_val { iov_len: 0, iov_base: ptr::null_mut() },
+        Some(slice) => ffi::MDBX_val {
+            iov_len: slice.len(),
+            iov_base: slice.as_ptr() as *mut c_void,
+        },
+        None => ffi::MDBX_val {
+            iov_len: 0,
+            iov_base: ptr::null_mut(),
+        },
     }
 }
 
@@ -546,7 +560,12 @@ where
 {
     /// Creates a new iterator backed by the given cursor.
     fn new(cursor: Cursor<K>, op: ffi::MDBX_cursor_op, next_op: ffi::MDBX_cursor_op) -> Self {
-        Self::Ok { cursor, op, next_op, _marker: Default::default() }
+        Self::Ok {
+            cursor,
+            op,
+            next_op,
+            _marker: Default::default(),
+        }
     }
 }
 
@@ -560,9 +579,20 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
-            Self::Ok { cursor, op, next_op, .. } => {
-                let mut key = ffi::MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
-                let mut data = ffi::MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
+            Self::Ok {
+                cursor,
+                op,
+                next_op,
+                ..
+            } => {
+                let mut key = ffi::MDBX_val {
+                    iov_len: 0,
+                    iov_base: ptr::null_mut(),
+                };
+                let mut data = ffi::MDBX_val {
+                    iov_len: 0,
+                    iov_base: ptr::null_mut(),
+                };
                 let op = mem::replace(op, *next_op);
                 unsafe {
                     let result = cursor.txn.txn_execute(|txn| {
@@ -641,7 +671,12 @@ where
         op: ffi::MDBX_cursor_op,
         next_op: ffi::MDBX_cursor_op,
     ) -> Self {
-        Iter::Ok { cursor, op, next_op, _marker: Default::default() }
+        Iter::Ok {
+            cursor,
+            op,
+            next_op,
+            _marker: Default::default(),
+        }
     }
 }
 
@@ -655,9 +690,20 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
-            Iter::Ok { cursor, op, next_op, .. } => {
-                let mut key = ffi::MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
-                let mut data = ffi::MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
+            Iter::Ok {
+                cursor,
+                op,
+                next_op,
+                ..
+            } => {
+                let mut key = ffi::MDBX_val {
+                    iov_len: 0,
+                    iov_base: ptr::null_mut(),
+                };
+                let mut data = ffi::MDBX_val {
+                    iov_len: 0,
+                    iov_base: ptr::null_mut(),
+                };
                 let op = mem::replace(op, *next_op);
                 unsafe {
                     let result = cursor.txn.txn_execute(|txn| {
@@ -731,7 +777,11 @@ where
 {
     /// Creates a new iterator backed by the given cursor.
     fn new(cursor: &'cur mut Cursor<K>, op: MDBX_cursor_op) -> Self {
-        IterDup::Ok { cursor, op, _marker: Default::default() }
+        IterDup::Ok {
+            cursor,
+            op,
+            _marker: Default::default(),
+        }
     }
 }
 
@@ -757,8 +807,14 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         match self {
             IterDup::Ok { cursor, op, .. } => {
-                let mut key = ffi::MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
-                let mut data = ffi::MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
+                let mut key = ffi::MDBX_val {
+                    iov_len: 0,
+                    iov_base: ptr::null_mut(),
+                };
+                let mut data = ffi::MDBX_val {
+                    iov_len: 0,
+                    iov_base: ptr::null_mut(),
+                };
                 let op = mem::replace(op, ffi::MDBX_NEXT_NODUP);
 
                 let result = cursor.txn.txn_execute(|_| {

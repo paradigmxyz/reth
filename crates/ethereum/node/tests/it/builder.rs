@@ -69,6 +69,8 @@ async fn test_eth_launcher() {
 fn test_node_setup() {
     let config = NodeConfig::test();
     let db = create_test_rw_db();
-    let _builder =
-        NodeBuilder::new(config).with_database(db).node(EthereumNode::default()).check_launch();
+    let _builder = NodeBuilder::new(config)
+        .with_database(db)
+        .node(EthereumNode::default())
+        .check_launch();
 }

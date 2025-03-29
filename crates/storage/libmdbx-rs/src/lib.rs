@@ -53,8 +53,10 @@ mod test_utils {
         let env = {
             let mut builder = Environment::builder();
             builder.set_max_dbs(2);
-            builder
-                .set_geometry(Geometry { size: Some(1_000_000..1_000_000), ..Default::default() });
+            builder.set_geometry(Geometry {
+                size: Some(1_000_000..1_000_000),
+                ..Default::default()
+            });
             builder.open(dir.path()).expect("open mdbx env")
         };
 
@@ -62,8 +64,11 @@ mod test_utils {
             let mut value = [0u8; 8];
             LittleEndian::write_u64(&mut value, height);
             let tx = env.begin_rw_txn().expect("begin_rw_txn");
-            let index = tx.create_db(None, DatabaseFlags::DUP_SORT).expect("open index db");
-            tx.put(index.dbi(), HEIGHT_KEY, value, WriteFlags::empty()).expect("tx.put");
+            let index = tx
+                .create_db(None, DatabaseFlags::DUP_SORT)
+                .expect("open index db");
+            tx.put(index.dbi(), HEIGHT_KEY, value, WriteFlags::empty())
+                .expect("tx.put");
             tx.commit().expect("tx.commit");
         }
     }

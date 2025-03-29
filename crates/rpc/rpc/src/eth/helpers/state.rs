@@ -104,7 +104,10 @@ mod tests {
         // === Noop ===
         let eth_api = noop_eth_api();
         let address = Address::random();
-        let storage = eth_api.storage_at(address, U256::ZERO.into(), None).await.unwrap();
+        let storage = eth_api
+            .storage_at(address, U256::ZERO.into(), None)
+            .await
+            .unwrap();
         assert_eq!(storage, U256::ZERO.to_be_bytes());
 
         // === Mock ===
@@ -112,12 +115,17 @@ mod tests {
         let storage_key = StorageKey::random();
         let storage = HashMap::from([(storage_key, storage_value)]);
 
-        let accounts =
-            HashMap::from([(address, ExtendedAccount::new(0, U256::ZERO).extend_storage(storage))]);
+        let accounts = HashMap::from([(
+            address,
+            ExtendedAccount::new(0, U256::ZERO).extend_storage(storage),
+        )]);
         let eth_api = mock_eth_api(accounts);
 
         let storage_key: U256 = storage_key.into();
-        let storage = eth_api.storage_at(address, storage_key.into(), None).await.unwrap();
+        let storage = eth_api
+            .storage_at(address, storage_key.into(), None)
+            .await
+            .unwrap();
         assert_eq!(storage, storage_value.to_be_bytes());
     }
 
@@ -125,7 +133,10 @@ mod tests {
     async fn test_get_account_missing() {
         let eth_api = noop_eth_api();
         let address = Address::random();
-        let account = eth_api.get_account(address, Default::default()).await.unwrap();
+        let account = eth_api
+            .get_account(address, Default::default())
+            .await
+            .unwrap();
         assert!(account.is_none());
     }
 }

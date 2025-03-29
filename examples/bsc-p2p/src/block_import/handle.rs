@@ -27,7 +27,10 @@ impl<T: PayloadTypes> ImportHandle<T> {
         to_import: UnboundedSender<IncomingBlock<T>>,
         import_outcome: UnboundedReceiver<ImportEvent<T>>,
     ) -> Self {
-        Self { to_import, import_outcome }
+        Self {
+            to_import,
+            import_outcome,
+        }
     }
 
     /// Sends the block to import to the service.

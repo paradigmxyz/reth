@@ -226,7 +226,9 @@ where
 {
     /// Create a new transaction pool instance.
     pub fn new(validator: V, ordering: T, blob_store: S, config: PoolConfig) -> Self {
-        Self { pool: Arc::new(PoolInner::new(validator, ordering, blob_store, config)) }
+        Self {
+            pool: Arc::new(PoolInner::new(validator, ordering, blob_store, config)),
+        }
     }
 
     /// Returns the wrapped pool.
@@ -259,7 +261,11 @@ where
     ) -> (TxHash, TransactionValidationOutcome<V::Transaction>) {
         let hash = *transaction.hash();
 
-        let outcome = self.pool.validator().validate_transaction(origin, transaction).await;
+        let outcome = self
+            .pool
+            .validator()
+            .validate_transaction(origin, transaction)
+            .await;
 
         (hash, outcome)
     }
@@ -325,7 +331,12 @@ where
         blob_store: S,
         config: PoolConfig,
     ) -> Self {
-        Self::new(validator, CoinbaseTipOrdering::default(), blob_store, config)
+        Self::new(
+            validator,
+            CoinbaseTipOrdering::default(),
+            blob_store,
+            config,
+        )
     }
 }
 
@@ -363,7 +374,9 @@ where
     ) -> PoolResult<TxHash> {
         let (_, tx) = self.validate(origin, transaction).await;
         let mut results = self.pool.add_transactions(origin, std::iter::once(tx));
-        results.pop().expect("result length is the same as the input")
+        results
+            .pop()
+            .expect("result length is the same as the input")
     }
 
     async fn add_transactions(
@@ -372,11 +385,12 @@ where
         transactions: Vec<Self::Transaction>,
     ) -> Vec<PoolResult<TxHash>> {
         if transactions.is_empty() {
-            return Vec::new()
+            return Vec::new();
         }
         let validated = self.validate_all(origin, transactions).await;
 
-        self.pool.add_transactions(origin, validated.into_iter().map(|(_, tx)| tx))
+        self.pool
+            .add_transactions(origin, validated.into_iter().map(|(_, tx)| tx))
     }
 
     fn transaction_event_listener(&self, tx_hash: TxHash) -> Option<TransactionEvents> {
@@ -407,7 +421,10 @@ where
     }
 
     fn pooled_transaction_hashes_max(&self, max: usize) -> Vec<TxHash> {
-        self.pooled_transaction_hashes().into_iter().take(max).collect()
+        self.pooled_transaction_hashes()
+            .into_iter()
+            .take(max)
+            .collect()
     }
 
     fn pooled_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
@@ -447,7 +464,8 @@ where
         &self,
         best_transactions_attributes: BestTransactionsAttributes,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
-        self.pool.best_transactions_with_attributes(best_transactions_attributes)
+        self.pool
+            .best_transactions_with_attributes(best_transactions_attributes)
     }
 
     fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
@@ -549,7 +567,8 @@ where
         sender: Address,
         on_chain_nonce: u64,
     ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
-        self.pool.get_highest_consecutive_transaction_by_sender(sender, on_chain_nonce)
+        self.pool
+            .get_highest_consecutive_transaction_by_sender(sender, on_chain_nonce)
     }
 
     fn get_transaction_by_sender_and_nonce(
@@ -559,7 +578,11 @@ where
     ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
         let transaction_id = TransactionId::new(self.pool.get_sender_id(sender), nonce);
 
-        self.inner().get_pool_data().all().get(&transaction_id).map(|tx| tx.transaction.clone())
+        self.inner()
+            .get_pool_data()
+            .all()
+            .get(&transaction_id)
+            .map(|tx| tx.transaction.clone())
     }
 
     fn get_transactions_by_origin(
@@ -606,7 +629,9 @@ where
         &self,
         versioned_hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
-        self.pool.blob_store().get_by_versioned_hashes(versioned_hashes)
+        self.pool
+            .blob_store()
+            .get_by_versioned_hashes(versioned_hashes)
     }
 }
 
@@ -649,6 +674,8 @@ where
 
 impl<V, T: TransactionOrdering, S> Clone for Pool<V, T, S> {
     fn clone(&self) -> Self {
-        Self { pool: Arc::clone(&self.pool) }
+        Self {
+            pool: Arc::clone(&self.pool),
+        }
     }
 }

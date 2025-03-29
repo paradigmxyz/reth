@@ -122,8 +122,10 @@ impl<I> Setup<I> {
             <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
         >,
     {
-        let chain_spec =
-            self.chain_spec.clone().ok_or_else(|| eyre!("Chain specification is required"))?;
+        let chain_spec = self
+            .chain_spec
+            .clone()
+            .ok_or_else(|| eyre!("Chain specification is required"))?;
 
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
 

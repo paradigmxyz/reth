@@ -64,8 +64,8 @@ async fn test_establish_connections() {
                 NetworkEvent::Peer(PeerEvent::SessionClosed { .. } | PeerEvent::PeerRemoved(_)) => {
                     panic!("unexpected event")
                 }
-                NetworkEvent::ActivePeerSession { info, .. } |
-                NetworkEvent::Peer(PeerEvent::SessionEstablished(info)) => {
+                NetworkEvent::ActivePeerSession { info, .. }
+                | NetworkEvent::Peer(PeerEvent::SessionEstablished(info)) => {
                     let SessionInfo { peer_id, .. } = info;
                     assert!(expected_connections.remove(&peer_id));
                 }
@@ -208,8 +208,9 @@ async fn test_connect_with_boot_nodes() {
     let mut discv4 = Discv4Config::builder();
     discv4.add_boot_nodes(mainnet_nodes());
 
-    let config =
-        NetworkConfigBuilder::eth(secret_key).discovery(discv4).build(NoopProvider::default());
+    let config = NetworkConfigBuilder::eth(secret_key)
+        .discovery(discv4)
+        .build(NoopProvider::default());
     let network = NetworkManager::new(config).await.unwrap();
 
     let handle = network.handle().clone();
@@ -230,7 +231,9 @@ async fn test_connect_with_builder() {
     discv4.add_boot_nodes(mainnet_nodes());
 
     let client = NoopProvider::default();
-    let config = NetworkConfigBuilder::eth(secret_key).discovery(discv4).build(client.clone());
+    let config = NetworkConfigBuilder::eth(secret_key)
+        .discovery(discv4)
+        .build(client.clone());
     let (handle, network, _, requests) = NetworkManager::new(config)
         .await
         .unwrap()
@@ -266,7 +269,9 @@ async fn test_connect_to_trusted_peer() {
     let discv4 = Discv4Config::builder();
 
     let client = NoopProvider::default();
-    let config = NetworkConfigBuilder::eth(secret_key).discovery(discv4).build(client.clone());
+    let config = NetworkConfigBuilder::eth(secret_key)
+        .discovery(discv4)
+        .build(client.clone());
     let transactions_manager_config = config.transactions_manager_config.clone();
     let (handle, network, transactions, requests) = NetworkManager::new(config)
         .await
@@ -323,7 +328,11 @@ async fn test_incoming_node_id_blacklist() {
 
         // instantiate geth and add ourselves as a peer
         let temp_dir = tempfile::tempdir().unwrap().into_path();
-        let geth = Geth::new().data_dir(temp_dir).disable_discovery().authrpc_port(0).spawn();
+        let geth = Geth::new()
+            .data_dir(temp_dir)
+            .disable_discovery()
+            .authrpc_port(0)
+            .spawn();
         let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port());
 
         let provider =
@@ -378,7 +387,11 @@ async fn test_incoming_connect_with_single_geth() {
 
         // instantiate geth and add ourselves as a peer
         let temp_dir = tempfile::tempdir().unwrap().into_path();
-        let geth = Geth::new().data_dir(temp_dir).disable_discovery().authrpc_port(0).spawn();
+        let geth = Geth::new()
+            .data_dir(temp_dir)
+            .disable_discovery()
+            .authrpc_port(0)
+            .spawn();
         let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port());
         let provider =
             ProviderBuilder::new().on_http(format!("http://{geth_endpoint}").parse().unwrap());
@@ -436,7 +449,11 @@ async fn test_outgoing_connect_with_single_geth() {
 
         // instantiate geth and add ourselves as a peer
         let temp_dir = tempfile::tempdir().unwrap().into_path();
-        let geth = Geth::new().disable_discovery().data_dir(temp_dir).authrpc_port(0).spawn();
+        let geth = Geth::new()
+            .disable_discovery()
+            .data_dir(temp_dir)
+            .authrpc_port(0)
+            .spawn();
 
         let geth_p2p_port = geth.p2p_port().unwrap();
         let geth_socket = SocketAddr::new([127, 0, 0, 1].into(), geth_p2p_port);
@@ -482,7 +499,11 @@ async fn test_geth_disconnect() {
 
         // instantiate geth and add ourselves as a peer
         let temp_dir = tempfile::tempdir().unwrap().into_path();
-        let geth = Geth::new().disable_discovery().data_dir(temp_dir).authrpc_port(0).spawn();
+        let geth = Geth::new()
+            .disable_discovery()
+            .data_dir(temp_dir)
+            .authrpc_port(0)
+            .spawn();
 
         let geth_p2p_port = geth.p2p_port().unwrap();
         let geth_socket = SocketAddr::new([127, 0, 0, 1].into(), geth_p2p_port);
@@ -839,8 +860,9 @@ async fn new_random_peer(
     trusted_nodes: Vec<TrustedPeer>,
 ) -> NetworkManager<EthNetworkPrimitives> {
     let secret_key = SecretKey::new(&mut rand::thread_rng());
-    let peers_config =
-        PeersConfig::default().with_max_inbound(max_in_bound).with_trusted_nodes(trusted_nodes);
+    let peers_config = PeersConfig::default()
+        .with_max_inbound(max_in_bound)
+        .with_trusted_nodes(trusted_nodes);
 
     let config = NetworkConfigBuilder::new(secret_key)
         .listener_port(0)

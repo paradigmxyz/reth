@@ -20,12 +20,17 @@ where
         reverts: impl IntoIterator<IntoIter = R>,
         wiped: impl IntoIterator<IntoIter = W>,
     ) -> Self {
-        Self { reverts: reverts.into_iter().peekable(), wiped: wiped.into_iter().peekable() }
+        Self {
+            reverts: reverts.into_iter().peekable(),
+            wiped: wiped.into_iter().peekable(),
+        }
     }
 
     /// Consume next revert and return it.
     fn next_revert(&mut self) -> Option<(B256, U256)> {
-        self.reverts.next().map(|(key, revert)| (key, revert.to_previous_value()))
+        self.reverts
+            .next()
+            .map(|(key, revert)| (key, revert.to_previous_value()))
     }
 
     /// Consume next wiped storage and return it.
@@ -102,7 +107,10 @@ mod tests {
         // Create sample data for only reverts.
         let reverts = vec![
             (B256::from_slice(&[4; 32]), RevertToSlot::Destroyed),
-            (B256::from_slice(&[5; 32]), RevertToSlot::Some(U256::from(40))),
+            (
+                B256::from_slice(&[5; 32]),
+                RevertToSlot::Some(U256::from(40)),
+            ),
         ];
 
         // Create the iterator with only reverts and no wiped entries.
@@ -149,10 +157,19 @@ mod tests {
     fn test_storage_reverts_iter_interleaved() {
         // Create sample data for interleaved reverts and wiped entries.
         let reverts = vec![
-            (B256::from_slice(&[8; 32]), RevertToSlot::Some(U256::from(70))),
-            (B256::from_slice(&[9; 32]), RevertToSlot::Some(U256::from(80))),
+            (
+                B256::from_slice(&[8; 32]),
+                RevertToSlot::Some(U256::from(70)),
+            ),
+            (
+                B256::from_slice(&[9; 32]),
+                RevertToSlot::Some(U256::from(80)),
+            ),
             // Some higher key than wiped
-            (B256::from_slice(&[15; 32]), RevertToSlot::Some(U256::from(90))),
+            (
+                B256::from_slice(&[15; 32]),
+                RevertToSlot::Some(U256::from(90)),
+            ),
         ];
 
         let wiped = vec![

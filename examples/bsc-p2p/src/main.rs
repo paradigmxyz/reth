@@ -67,7 +67,9 @@ async fn main() {
             .lookup_interval(Duration::from_millis(500))
             .build(),
     );
-    let net_manager = NetworkManager::<EthNetworkPrimitives>::new(net_cfg).await.unwrap();
+    let net_manager = NetworkManager::<EthNetworkPrimitives>::new(net_cfg)
+        .await
+        .unwrap();
 
     let net_handle = net_manager.handle().clone();
     let mut events = net_handle.event_listener();
@@ -77,7 +79,12 @@ async fn main() {
     while let Some(evt) = events.next().await {
         match evt {
             NetworkEvent::ActivePeerSession { info, .. } => {
-                let SessionInfo { status, client_version, peer_id, .. } = info;
+                let SessionInfo {
+                    status,
+                    client_version,
+                    peer_id,
+                    ..
+                } = info;
                 info!(peers=%net_handle.num_connected_peers() , %peer_id, chain = %status.chain, ?client_version, "Session established with a new peer.");
             }
             NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, reason }) => {

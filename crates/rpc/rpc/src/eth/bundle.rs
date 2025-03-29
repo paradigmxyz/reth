@@ -29,7 +29,12 @@ pub struct EthBundle<Eth> {
 impl<Eth> EthBundle<Eth> {
     /// Create a new `EthBundle` instance.
     pub fn new(eth_api: Eth, blocking_task_guard: BlockingTaskGuard) -> Self {
-        Self { inner: Arc::new(EthBundleInner { eth_api, blocking_task_guard }) }
+        Self {
+            inner: Arc::new(EthBundleInner {
+                eth_api,
+                blocking_task_guard,
+            }),
+        }
     }
 
     /// Access the underlying `Eth` API.
@@ -66,13 +71,13 @@ where
             return Err(EthApiError::InvalidParams(
                 EthBundleError::EmptyBundleTransactions.to_string(),
             )
-            .into())
+            .into());
         }
         if block_number == 0 {
             return Err(EthApiError::InvalidParams(
                 EthBundleError::BundleMissingBlockNumber.to_string(),
             )
-            .into())
+            .into());
         }
 
         let transactions = txs
@@ -84,13 +89,16 @@ where
 
         // Validate that the bundle does not contain more than MAX_BLOB_NUMBER_PER_BLOCK blob
         // transactions.
-        if transactions.iter().filter_map(|tx| tx.blob_gas_used()).sum::<u64>() >
-            MAX_DATA_GAS_PER_BLOCK
+        if transactions
+            .iter()
+            .filter_map(|tx| tx.blob_gas_used())
+            .sum::<u64>()
+            > MAX_DATA_GAS_PER_BLOCK
         {
             return Err(EthApiError::InvalidParams(
                 EthBundleError::Eip4844BlobGasExceeded.to_string(),
             )
-            .into())
+            .into());
         }
 
         let block_id: alloy_rpc_types_eth::BlockId = state_block_number.into();
@@ -116,9 +124,10 @@ where
         evm_env.block_env.gas_limit = self.inner.eth_api.call_gas_limit();
         if let Some(gas_limit) = gas_limit {
             if gas_limit > evm_env.block_env.gas_limit {
-                return Err(
-                    EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh).into()
+                return Err(EthApiError::InvalidTransaction(
+                    RpcInvalidTransactionError::GasTooHigh,
                 )
+                .into());
             }
             evm_env.block_env.gas_limit = gas_limit;
         }
@@ -161,13 +170,12 @@ where
                         let mut tx = <Eth::Pool as TransactionPool>::Transaction::from_pooled(tx);
 
                         if let EthBlobTransactionSidecar::Present(sidecar) = tx.take_blob() {
-                            tx.validate_blob(&sidecar, EnvKzgSettings::Default.get()).map_err(
-                                |e| {
+                            tx.validate_blob(&sidecar, EnvKzgSettings::Default.get())
+                                .map_err(|e| {
                                     Eth::Error::from_eth_err(EthApiError::InvalidParams(
                                         e.to_string(),
                                     ))
-                                },
-                            )?;
+                                })?;
                         }
 
                         tx.into_consensus()
@@ -188,8 +196,10 @@ where
                     total_gas_fees += gas_fees;
 
                     // coinbase is always present in the result state
-                    coinbase_balance_after_tx =
-                        state.get(&coinbase).map(|acc| acc.info.balance).unwrap_or_default();
+                    coinbase_balance_after_tx = state
+                        .get(&coinbase)
+                        .map(|acc| acc.info.balance)
+                        .unwrap_or_default();
                     let coinbase_diff =
                         coinbase_balance_after_tx.saturating_sub(coinbase_balance_before_tx);
                     let eth_sent_to_coinbase = coinbase_diff.saturating_sub(gas_fees);
@@ -233,8 +243,9 @@ where
 
                 let coinbase_diff = coinbase_balance_after_tx.saturating_sub(initial_coinbase);
                 let eth_sent_to_coinbase = coinbase_diff.saturating_sub(total_gas_fees);
-                let bundle_gas_price =
-                    coinbase_diff.checked_div(U256::from(total_gas_used)).unwrap_or_default();
+                let bundle_gas_price = coinbase_diff
+                    .checked_div(U256::from(total_gas_used))
+                    .unwrap_or_default();
                 let res = EthCallBundleResponse {
                     bundle_gas_price,
                     bundle_hash: hasher.finalize(),
@@ -280,7 +291,9 @@ impl<Eth> std::fmt::Debug for EthBundle<Eth> {
 
 impl<Eth> Clone for EthBundle<Eth> {
     fn clone(&self) -> Self {
-        Self { inner: Arc::clone(&self.inner) }
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
     }
 }
 

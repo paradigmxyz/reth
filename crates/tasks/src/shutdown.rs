@@ -21,7 +21,10 @@ pub struct GracefulShutdown {
 
 impl GracefulShutdown {
     pub(crate) const fn new(shutdown: Shutdown, guard: GracefulShutdownGuard) -> Self {
-        Self { shutdown, guard: Some(guard) }
+        Self {
+            shutdown,
+            guard: Some(guard),
+        }
     }
 
     /// Returns a new shutdown future that is ignores the returned [`GracefulShutdownGuard`].
@@ -37,7 +40,12 @@ impl Future for GracefulShutdown {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         ready!(self.shutdown.poll_unpin(cx));
-        Poll::Ready(self.get_mut().guard.take().expect("Future polled after completion"))
+        Poll::Ready(
+            self.get_mut()
+                .guard
+                .take()
+                .expect("Future polled after completion"),
+        )
     }
 }
 
@@ -45,7 +53,10 @@ impl Clone for GracefulShutdown {
     fn clone(&self) -> Self {
         Self {
             shutdown: self.shutdown.clone(),
-            guard: self.guard.as_ref().map(|g| GracefulShutdownGuard::new(Arc::clone(&g.0))),
+            guard: self
+                .guard
+                .as_ref()
+                .map(|g| GracefulShutdownGuard::new(Arc::clone(&g.0))),
         }
     }
 }

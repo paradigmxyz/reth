@@ -88,10 +88,12 @@ mod tests {
         // Data sources
         let factory = create_test_provider_factory();
         let static_files_path = tempfile::tempdir().unwrap();
-        let static_file = static_files_path.path().join(
-            StaticFileSegment::Headers
-                .filename(&find_fixed_range(*range.end(), DEFAULT_BLOCKS_PER_STATIC_FILE)),
-        );
+        let static_file = static_files_path
+            .path()
+            .join(StaticFileSegment::Headers.filename(&find_fixed_range(
+                *range.end(),
+                DEFAULT_BLOCKS_PER_STATIC_FILE,
+            )));
 
         // Setup data
         let mut headers = random_header_range(
@@ -108,8 +110,10 @@ mod tests {
             let hash = header.hash();
 
             tx.put::<CanonicalHeaders>(header.number, hash).unwrap();
-            tx.put::<Headers>(header.number, header.clone_header()).unwrap();
-            tx.put::<HeaderTerminalDifficulties>(header.number, td.into()).unwrap();
+            tx.put::<Headers>(header.number, header.clone_header())
+                .unwrap();
+            tx.put::<HeaderTerminalDifficulties>(header.number, td.into())
+                .unwrap();
             tx.put::<HeaderNumbers>(hash, header.number).unwrap();
         }
         provider_rw.commit().unwrap();
@@ -147,12 +151,21 @@ mod tests {
 
                 // Compare Header
                 assert_eq!(header, db_provider.header(&header_hash).unwrap().unwrap());
-                assert_eq!(header, jar_provider.header_by_number(header.number).unwrap().unwrap());
+                assert_eq!(
+                    header,
+                    jar_provider
+                        .header_by_number(header.number)
+                        .unwrap()
+                        .unwrap()
+                );
 
                 // Compare HeaderTerminalDifficulties
                 assert_eq!(
                     db_provider.header_td(&header_hash).unwrap().unwrap(),
-                    jar_provider.header_td_by_number(header.number).unwrap().unwrap()
+                    jar_provider
+                        .header_td_by_number(header.number)
+                        .unwrap()
+                        .unwrap()
                 );
             }
         }
@@ -238,13 +251,21 @@ mod tests {
             // Case 1: Pruning remaining rows from file should result in its deletion
             {
                 tmp_tip -= blocks_per_file - 1;
-                (blocks_per_file - 1, Some(tmp_tip), initial_file_count - files_per_range)
+                (
+                    blocks_per_file - 1,
+                    Some(tmp_tip),
+                    initial_file_count - files_per_range,
+                )
             },
             // Case 2: Pruning more headers than a single file has (tip reduced by
             // blocks_per_file + 1) should result in a file set deletion
             {
                 tmp_tip -= blocks_per_file + 1;
-                (blocks_per_file + 1, Some(tmp_tip), initial_file_count - files_per_range * 2)
+                (
+                    blocks_per_file + 1,
+                    Some(tmp_tip),
+                    initial_file_count - files_per_range * 2,
+                )
             },
             // Case 3: Pruning all remaining headers from the file except the genesis header
             {
@@ -270,7 +291,10 @@ mod tests {
                 .expect("Failed to create static file provider")
                 .with_custom_blocks_per_file(blocks_per_file);
 
-            assert_eq!(sf_rw.get_highest_static_file_block(StaticFileSegment::Headers), Some(tip));
+            assert_eq!(
+                sf_rw.get_highest_static_file_block(StaticFileSegment::Headers),
+                Some(tip)
+            );
             assert_eq!(
                 count_files_without_lockfile(static_dir.as_ref()).unwrap(),
                 initial_file_count as usize
@@ -339,10 +363,17 @@ mod tests {
 
             // Calculate expected values based on the range and transactions
             let expected_block = block_range.end - 1;
-            let expected_tx = if tx_count == 0 { *next_tx_num - 1 } else { *next_tx_num };
+            let expected_tx = if tx_count == 0 {
+                *next_tx_num - 1
+            } else {
+                *next_tx_num
+            };
 
             // Perform assertions after processing the blocks
-            assert_eq!(sf_rw.get_highest_static_file_block(segment), Some(expected_block),);
+            assert_eq!(
+                sf_rw.get_highest_static_file_block(segment),
+                Some(expected_block),
+            );
             assert_eq!(sf_rw.get_highest_static_file_tx(segment), Some(expected_tx),);
         }
 
@@ -381,23 +412,30 @@ mod tests {
             Some(SegmentRangeInclusive::new(9, 9)),
         ];
 
-        block_ranges.iter().zip(expected_tx_ranges).for_each(|(block_range, expected_tx_range)| {
-            assert_eq!(
-                sf_rw
-                    .get_segment_provider_from_block(segment, block_range.start, None)
-                    .unwrap()
-                    .user_header()
-                    .tx_range(),
-                expected_tx_range.as_ref()
-            );
-        });
+        block_ranges
+            .iter()
+            .zip(expected_tx_ranges)
+            .for_each(|(block_range, expected_tx_range)| {
+                assert_eq!(
+                    sf_rw
+                        .get_segment_provider_from_block(segment, block_range.start, None)
+                        .unwrap()
+                        .user_header()
+                        .tx_range(),
+                    expected_tx_range.as_ref()
+                );
+            });
 
         // Ensure transaction index
         let tx_index = sf_rw.tx_index().read();
-        let expected_tx_index =
-            vec![(8, SegmentRangeInclusive::new(0, 9)), (9, SegmentRangeInclusive::new(20, 29))];
+        let expected_tx_index = vec![
+            (8, SegmentRangeInclusive::new(0, 9)),
+            (9, SegmentRangeInclusive::new(20, 29)),
+        ];
         assert_eq!(
-            tx_index.get(&segment).map(|index| index.iter().map(|(k, v)| (*k, *v)).collect()),
+            tx_index
+                .get(&segment)
+                .map(|index| index.iter().map(|(k, v)| (*k, *v)).collect()),
             (!expected_tx_index.is_empty()).then_some(expected_tx_index),
             "tx index mismatch",
         );
@@ -438,7 +476,11 @@ mod tests {
                 Some(last_block),
                 "block mismatch",
             )?;
-            assert_eyre(sf_rw.get_highest_static_file_tx(segment), expected_tx_tip, "tx mismatch")?;
+            assert_eyre(
+                sf_rw.get_highest_static_file_tx(segment),
+                expected_tx_tip,
+                "tx mismatch",
+            )?;
 
             // Verify that transactions and receipts are returned correctly. Uses
             // cumulative_gas_used & nonce as ids.
@@ -468,7 +510,9 @@ mod tests {
             // Ensure that the inner tx index (max_tx -> block range) is as expected
             let tx_index = sf_rw.tx_index().read();
             assert_eyre(
-                tx_index.get(&segment).map(|index| index.iter().map(|(k, v)| (*k, *v)).collect()),
+                tx_index
+                    .get(&segment)
+                    .map(|index| index.iter().map(|(k, v)| (*k, *v)).collect()),
                 (!expected_tx_index.is_empty()).then_some(expected_tx_index),
                 "tx index mismatch",
             )?;
@@ -551,7 +595,11 @@ mod tests {
     /// Returns the number of files in the provided path, excluding ".lock" files.
     fn count_files_without_lockfile(path: impl AsRef<Path>) -> eyre::Result<usize> {
         let is_lockfile = |entry: &fs::DirEntry| {
-            entry.path().file_name().map(|name| name == "lock").unwrap_or(false)
+            entry
+                .path()
+                .file_name()
+                .map(|name| name == "lock")
+                .unwrap_or(false)
         };
         let count = fs::read_dir(path)?
             .filter_map(|entry| entry.ok())

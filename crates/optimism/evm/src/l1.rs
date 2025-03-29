@@ -22,7 +22,9 @@ pub fn extract_l1_info<B: BlockBody>(body: &B) -> Result<L1BlockInfo, OpBlockExe
     let l1_info_tx = body
         .transactions()
         .first()
-        .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::MissingTransaction))?;
+        .ok_or(OpBlockExecutionError::L1BlockInfo(
+            L1BlockInfoError::MissingTransaction,
+        ))?;
     extract_l1_info_from_tx(l1_info_tx)
 }
 
@@ -35,7 +37,9 @@ pub fn extract_l1_info_from_tx<T: Transaction>(
 ) -> Result<L1BlockInfo, OpBlockExecutionError> {
     let l1_info_tx_data = tx.input();
     if l1_info_tx_data.len() < 4 {
-        return Err(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::InvalidCalldata));
+        return Err(OpBlockExecutionError::L1BlockInfo(
+            L1BlockInfoError::InvalidCalldata,
+        ));
     }
 
     parse_l1_info(l1_info_tx_data)
@@ -78,15 +82,20 @@ pub fn parse_l1_info_tx_bedrock(data: &[u8]) -> Result<L1BlockInfo, OpBlockExecu
     // + 32 bytes for the fee overhead
     // + 32 bytes for the fee scalar
     if data.len() != 256 {
-        return Err(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::UnexpectedCalldataLength));
+        return Err(OpBlockExecutionError::L1BlockInfo(
+            L1BlockInfoError::UnexpectedCalldataLength,
+        ));
     }
 
-    let l1_base_fee = U256::try_from_be_slice(&data[64..96])
-        .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BaseFeeConversion))?;
-    let l1_fee_overhead = U256::try_from_be_slice(&data[192..224])
-        .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::FeeOverheadConversion))?;
-    let l1_fee_scalar = U256::try_from_be_slice(&data[224..256])
-        .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::FeeScalarConversion))?;
+    let l1_base_fee = U256::try_from_be_slice(&data[64..96]).ok_or(
+        OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BaseFeeConversion),
+    )?;
+    let l1_fee_overhead = U256::try_from_be_slice(&data[192..224]).ok_or(
+        OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::FeeOverheadConversion),
+    )?;
+    let l1_fee_scalar = U256::try_from_be_slice(&data[224..256]).ok_or(
+        OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::FeeScalarConversion),
+    )?;
 
     let mut l1block = L1BlockInfo::default();
     l1block.l1_base_fee = l1_base_fee;
@@ -112,7 +121,9 @@ pub fn parse_l1_info_tx_bedrock(data: &[u8]) -> Result<L1BlockInfo, OpBlockExecu
 /// <https://github.com/ethereum-optimism/optimism/blob/957e13dd504fb336a4be40fb5dd0d8ba0276be34/packages/contracts-bedrock/src/L2/L1Block.sol#L136>
 pub fn parse_l1_info_tx_ecotone(data: &[u8]) -> Result<L1BlockInfo, OpBlockExecutionError> {
     if data.len() != 160 {
-        return Err(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::UnexpectedCalldataLength));
+        return Err(OpBlockExecutionError::L1BlockInfo(
+            L1BlockInfoError::UnexpectedCalldataLength,
+        ));
     }
 
     // https://github.com/ethereum-optimism/op-geth/blob/60038121c7571a59875ff9ed7679c48c9f73405d/core/types/rollup_cost.go#L317-L328
@@ -130,15 +141,18 @@ pub fn parse_l1_info_tx_ecotone(data: &[u8]) -> Result<L1BlockInfo, OpBlockExecu
     // 100   bytes32 _hash,
     // 132   bytes32 _batcherHash,
 
-    let l1_base_fee_scalar = U256::try_from_be_slice(&data[..4])
-        .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BaseFeeScalarConversion))?;
+    let l1_base_fee_scalar = U256::try_from_be_slice(&data[..4]).ok_or(
+        OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BaseFeeScalarConversion),
+    )?;
     let l1_blob_base_fee_scalar = U256::try_from_be_slice(&data[4..8]).ok_or({
         OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BlobBaseFeeScalarConversion)
     })?;
-    let l1_base_fee = U256::try_from_be_slice(&data[32..64])
-        .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BaseFeeConversion))?;
-    let l1_blob_base_fee = U256::try_from_be_slice(&data[64..96])
-        .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BlobBaseFeeConversion))?;
+    let l1_base_fee = U256::try_from_be_slice(&data[32..64]).ok_or(
+        OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BaseFeeConversion),
+    )?;
+    let l1_blob_base_fee = U256::try_from_be_slice(&data[64..96]).ok_or(
+        OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BlobBaseFeeConversion),
+    )?;
 
     let mut l1block = L1BlockInfo::default();
     l1block.l1_base_fee = l1_base_fee;
@@ -165,7 +179,9 @@ pub fn parse_l1_info_tx_ecotone(data: &[u8]) -> Result<L1BlockInfo, OpBlockExecu
 ///  11. _operatorFeeConstant Operator fee constant
 pub fn parse_l1_info_tx_isthmus(data: &[u8]) -> Result<L1BlockInfo, OpBlockExecutionError> {
     if data.len() != 172 {
-        return Err(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::UnexpectedCalldataLength));
+        return Err(OpBlockExecutionError::L1BlockInfo(
+            L1BlockInfoError::UnexpectedCalldataLength,
+        ));
     }
 
     // https://github.com/ethereum-optimism/op-geth/blob/60038121c7571a59875ff9ed7679c48c9f73405d/core/types/rollup_cost.go#L317-L328
@@ -185,15 +201,18 @@ pub fn parse_l1_info_tx_isthmus(data: &[u8]) -> Result<L1BlockInfo, OpBlockExecu
     // 164   uint32 _operatorFeeScalar
     // 168   uint64 _operatorFeeConstant
 
-    let l1_base_fee_scalar = U256::try_from_be_slice(&data[..4])
-        .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BaseFeeScalarConversion))?;
+    let l1_base_fee_scalar = U256::try_from_be_slice(&data[..4]).ok_or(
+        OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BaseFeeScalarConversion),
+    )?;
     let l1_blob_base_fee_scalar = U256::try_from_be_slice(&data[4..8]).ok_or({
         OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BlobBaseFeeScalarConversion)
     })?;
-    let l1_base_fee = U256::try_from_be_slice(&data[32..64])
-        .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BaseFeeConversion))?;
-    let l1_blob_base_fee = U256::try_from_be_slice(&data[64..96])
-        .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BlobBaseFeeConversion))?;
+    let l1_base_fee = U256::try_from_be_slice(&data[32..64]).ok_or(
+        OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BaseFeeConversion),
+    )?;
+    let l1_blob_base_fee = U256::try_from_be_slice(&data[64..96]).ok_or(
+        OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BlobBaseFeeConversion),
+    )?;
     let operator_fee_scalar = U256::try_from_be_slice(&data[160..164]).ok_or({
         OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::OperatorFeeScalarConversion)
     })?;
@@ -269,7 +288,7 @@ impl RethL1BlockInfo for L1BlockInfo {
             OpSpecId::BEDROCK
         } else {
             return Err(
-                OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::HardforksNotActive).into()
+                OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::HardforksNotActive).into(),
             );
         };
         Ok(self.calculate_tx_l1_cost(input, spec_id))
@@ -290,7 +309,7 @@ impl RethL1BlockInfo for L1BlockInfo {
             OpSpecId::BEDROCK
         } else {
             return Err(
-                OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::HardforksNotActive).into()
+                OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::HardforksNotActive).into(),
             );
         };
         Ok(self.data_gas(input, spec_id))
@@ -315,7 +334,10 @@ mod tests {
         let l1_info_tx = OpTransactionSigned::decode_2718(&mut bytes.as_ref()).unwrap();
         let mock_block = Block {
             header: Header::default(),
-            body: BlockBody { transactions: vec![l1_info_tx], ..Default::default() },
+            body: BlockBody {
+                transactions: vec![l1_info_tx],
+                ..Default::default()
+            },
         };
 
         let l1_info: L1BlockInfo = extract_l1_info(&mock_block.body).unwrap();
@@ -342,7 +364,10 @@ mod tests {
 
         let tx = OpTransactionSigned::decode_2718(&mut TX.as_slice()).unwrap();
         let block: Block<OpTransactionSigned> = Block {
-            body: BlockBody { transactions: vec![tx], ..Default::default() },
+            body: BlockBody {
+                transactions: vec![tx],
+                ..Default::default()
+            },
             ..Default::default()
         };
 
@@ -361,9 +386,18 @@ mod tests {
         let l1_block_info: L1BlockInfo = extract_l1_info(&block.body).unwrap();
 
         assert_eq!(l1_block_info.l1_base_fee, expected_l1_base_fee);
-        assert_eq!(l1_block_info.l1_base_fee_scalar, expected_l1_base_fee_scalar);
-        assert_eq!(l1_block_info.l1_blob_base_fee, Some(expected_l1_blob_base_fee));
-        assert_eq!(l1_block_info.l1_blob_base_fee_scalar, Some(expected_l1_blob_base_fee_scalar));
+        assert_eq!(
+            l1_block_info.l1_base_fee_scalar,
+            expected_l1_base_fee_scalar
+        );
+        assert_eq!(
+            l1_block_info.l1_blob_base_fee,
+            Some(expected_l1_blob_base_fee)
+        );
+        assert_eq!(
+            l1_block_info.l1_blob_base_fee_scalar,
+            Some(expected_l1_blob_base_fee_scalar)
+        );
     }
 
     #[test]
@@ -391,7 +425,10 @@ mod tests {
         assert_eq!(l1_block_info.l1_base_fee, l1_base_fee);
         assert_eq!(l1_block_info.l1_base_fee_scalar, l1_base_fee_scalar);
         assert_eq!(l1_block_info.l1_blob_base_fee, l1_blob_base_fee);
-        assert_eq!(l1_block_info.l1_blob_base_fee_scalar, l1_blob_base_fee_scalar);
+        assert_eq!(
+            l1_block_info.l1_blob_base_fee_scalar,
+            l1_blob_base_fee_scalar
+        );
     }
 
     #[test]
@@ -416,7 +453,10 @@ mod tests {
         assert_eq!(l1_block_info.l1_base_fee, l1_base_fee);
         assert_eq!(l1_block_info.l1_base_fee_scalar, l1_base_fee_scalar);
         assert_eq!(l1_block_info.l1_blob_base_fee, l1_blob_base_fee);
-        assert_eq!(l1_block_info.l1_blob_base_fee_scalar, l1_blob_base_fee_scalar);
+        assert_eq!(
+            l1_block_info.l1_blob_base_fee_scalar,
+            l1_blob_base_fee_scalar
+        );
         assert_eq!(l1_block_info.operator_fee_scalar, operator_fee_scalar);
         assert_eq!(l1_block_info.operator_fee_constant, operator_fee_constant);
     }

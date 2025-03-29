@@ -40,7 +40,8 @@ pub struct FetchClient<N: NetworkPrimitives = EthNetworkPrimitives> {
 
 impl<N: NetworkPrimitives> DownloadClient for FetchClient<N> {
     fn report_bad_message(&self, peer_id: PeerId) {
-        self.peers_handle.reputation_change(peer_id, ReputationChangeKind::BadMessage);
+        self.peers_handle
+            .reputation_change(peer_id, ReputationChangeKind::BadMessage);
     }
 
     fn num_connected_peers(&self) -> usize {
@@ -65,7 +66,11 @@ impl<N: NetworkPrimitives> HeadersClient for FetchClient<N> {
         let (response, rx) = oneshot::channel();
         if self
             .request_tx
-            .send(DownloadRequest::GetBlockHeaders { request, response, priority })
+            .send(DownloadRequest::GetBlockHeaders {
+                request,
+                response,
+                priority,
+            })
             .is_ok()
         {
             Either::Left(FlattenedResponse::from(rx))
@@ -88,7 +93,11 @@ impl<N: NetworkPrimitives> BodiesClient for FetchClient<N> {
         let (response, rx) = oneshot::channel();
         if self
             .request_tx
-            .send(DownloadRequest::GetBlockBodies { request, response, priority })
+            .send(DownloadRequest::GetBlockBodies {
+                request,
+                response,
+                priority,
+            })
             .is_ok()
         {
             Box::pin(FlattenedResponse::from(rx))

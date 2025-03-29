@@ -319,11 +319,17 @@ mod tests {
         let mut buf = Vec::new();
         let direction = HeadersDirection::Falling;
         direction.encode(&mut buf);
-        assert_eq!(direction, HeadersDirection::decode(&mut buf.as_slice()).unwrap());
+        assert_eq!(
+            direction,
+            HeadersDirection::decode(&mut buf.as_slice()).unwrap()
+        );
 
         let mut buf = Vec::new();
         let direction = HeadersDirection::Rising;
         direction.encode(&mut buf);
-        assert_eq!(direction, HeadersDirection::decode(&mut buf.as_slice()).unwrap());
+        assert_eq!(
+            direction,
+            HeadersDirection::decode(&mut buf.as_slice()).unwrap()
+        );
     }
 }

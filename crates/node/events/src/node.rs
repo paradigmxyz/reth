@@ -64,7 +64,10 @@ impl NodeState {
     }
 
     fn num_connected_peers(&self) -> usize {
-        self.peers_info.as_ref().map(|info| info.num_connected_peers()).unwrap_or_default()
+        self.peers_info
+            .as_ref()
+            .map(|info| info.num_connected_peers())
+            .unwrap_or_default()
     }
 
     fn build_current_stage(
@@ -82,13 +85,24 @@ impl NodeState {
                 |current_stage| (current_stage.eta, current_stage.entities_checkpoint),
             );
 
-        CurrentStage { stage_id, eta, checkpoint, entities_checkpoint, target }
+        CurrentStage {
+            stage_id,
+            eta,
+            checkpoint,
+            entities_checkpoint,
+            target,
+        }
     }
 
     /// Processes an event emitted by the pipeline
     fn handle_pipeline_event(&mut self, event: PipelineEvent) {
         match event {
-            PipelineEvent::Prepare { pipeline_stages_progress, stage_id, checkpoint, target } => {
+            PipelineEvent::Prepare {
+                pipeline_stages_progress,
+                stage_id,
+                checkpoint,
+                target,
+            } => {
                 let checkpoint = checkpoint.unwrap_or_default();
                 let current_stage = self.build_current_stage(stage_id, checkpoint, target);
 
@@ -102,7 +116,12 @@ impl NodeState {
 
                 self.current_stage = Some(current_stage);
             }
-            PipelineEvent::Run { pipeline_stages_progress, stage_id, checkpoint, target } => {
+            PipelineEvent::Run {
+                pipeline_stages_progress,
+                stage_id,
+                checkpoint,
+                target,
+            } => {
                 let checkpoint = checkpoint.unwrap_or_default();
                 let current_stage = self.build_current_stage(stage_id, checkpoint, target);
 
@@ -147,7 +166,11 @@ impl NodeState {
                         .and_then(|entities| entities.fmt_percentage());
                     let stage_eta = current_stage.eta.fmt_for_stage(stage_id);
 
-                    let message = if done { "Finished stage" } else { "Committed stage progress" };
+                    let message = if done {
+                        "Finished stage"
+                    } else {
+                        "Committed stage progress"
+                    };
 
                     match (stage_progress, stage_eta) {
                         (Some(stage_progress), Some(stage_eta)) => {
@@ -218,10 +241,13 @@ impl NodeState {
     ) {
         match event {
             BeaconConsensusEngineEvent::ForkchoiceUpdated(state, status) => {
-                let ForkchoiceState { head_block_hash, safe_block_hash, finalized_block_hash } =
-                    state;
-                if self.safe_block_hash != Some(safe_block_hash) &&
-                    self.finalized_block_hash != Some(finalized_block_hash)
+                let ForkchoiceState {
+                    head_block_hash,
+                    safe_block_hash,
+                    finalized_block_hash,
+                } = state;
+                if self.safe_block_hash != Some(safe_block_hash)
+                    && self.finalized_block_hash != Some(finalized_block_hash)
                 {
                     let msg = match status {
                         ForkchoiceStatus::Valid => "Forkchoice updated",
@@ -230,7 +256,13 @@ impl NodeState {
                             "Received forkchoice updated message when syncing"
                         }
                     };
-                    info!(?head_block_hash, ?safe_block_hash, ?finalized_block_hash, "{}", msg);
+                    info!(
+                        ?head_block_hash,
+                        ?safe_block_hash,
+                        ?finalized_block_hash,
+                        "{}",
+                        msg
+                    );
                 }
                 self.head_block_hash = Some(head_block_hash);
                 self.safe_block_hash = Some(safe_block_hash);
@@ -309,10 +341,18 @@ impl NodeState {
             PrunerEvent::Started { tip_block_number } => {
                 debug!(tip_block_number, "Pruner started");
             }
-            PrunerEvent::Finished { tip_block_number, elapsed, stats } => {
+            PrunerEvent::Finished {
+                tip_block_number,
+                elapsed,
+                stats,
+            } => {
                 let stats = format!(
                     "[{}]",
-                    stats.iter().map(|item| item.to_string()).collect::<Vec<_>>().join(", ")
+                    stats
+                        .iter()
+                        .map(|item| item.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 );
                 debug!(tip_block_number, ?elapsed, pruned_segments = %stats, "Pruner finished");
             }
@@ -391,7 +431,11 @@ pub async fn handle_events<E, N: NodePrimitives>(
     let mut info_interval = tokio::time::interval_at(start, INFO_MESSAGE_INTERVAL);
     info_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
-    let handler = EventHandler { state, events, info_interval };
+    let handler = EventHandler {
+        state,
+        events,
+        info_interval,
+    };
     handler.await
 }
 
@@ -415,8 +459,13 @@ where
         let mut this = self.project();
 
         while this.info_interval.poll_tick(cx).is_ready() {
-            if let Some(CurrentStage { stage_id, eta, checkpoint, entities_checkpoint, target }) =
-                &this.state.current_stage
+            if let Some(CurrentStage {
+                stage_id,
+                eta,
+                checkpoint,
+                entities_checkpoint,
+                target,
+            }) = &this.state.current_stage
             {
                 let stage_progress =
                     entities_checkpoint.and_then(|entities| entities.fmt_percentage());
@@ -469,8 +518,10 @@ where
                     }
                 }
             } else if let Some(latest_block) = this.state.latest_block {
-                let now =
-                    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
                 if now.saturating_sub(this.state.latest_block_time.unwrap_or(0)) > 60 {
                     // Once we start receiving consensus nodes, don't emit status unless stalled for
                     // 1 minute
@@ -534,15 +585,18 @@ struct Eta {
 impl Eta {
     /// Update the ETA given the checkpoint, if possible.
     fn update(&mut self, stage: StageId, checkpoint: StageCheckpoint) {
-        let Some(current) = checkpoint.entities() else { return };
+        let Some(current) = checkpoint.entities() else {
+            return;
+        };
 
         if let Some(last_checkpoint_time) = &self.last_checkpoint_time {
-            let Some(processed_since_last) =
-                current.processed.checked_sub(self.last_checkpoint.processed)
+            let Some(processed_since_last) = current
+                .processed
+                .checked_sub(self.last_checkpoint.processed)
             else {
                 self.eta = None;
                 debug!(target: "reth::cli", %stage, ?current, ?self.last_checkpoint, "Failed to calculate the ETA: processed entities is less than the last checkpoint");
-                return
+                return;
             };
             let elapsed = last_checkpoint_time.elapsed();
             let per_second = processed_since_last as f64 / elapsed.as_secs_f64();
@@ -550,7 +604,7 @@ impl Eta {
             let Some(remaining) = current.total.checked_sub(current.processed) else {
                 self.eta = None;
                 debug!(target: "reth::cli", %stage, ?current, "Failed to calculate the ETA: total entities is less than processed entities");
-                return
+                return;
             };
 
             self.eta = Duration::try_from_secs_f64(remaining as f64 / per_second).ok();
@@ -571,8 +625,11 @@ impl Eta {
     /// It's not the case for network-dependent ([`StageId::Headers`] and [`StageId::Bodies`]) and
     /// [`StageId::Execution`] stages.
     fn fmt_for_stage(&self, stage: StageId) -> Option<String> {
-        if !self.is_available() ||
-            matches!(stage, StageId::Headers | StageId::Bodies | StageId::Execution)
+        if !self.is_available()
+            || matches!(
+                stage,
+                StageId::Headers | StageId::Bodies | StageId::Execution
+            )
         {
             None
         } else {
@@ -591,7 +648,7 @@ impl Display for Eta {
                     f,
                     "{}",
                     humantime::format_duration(Duration::from_secs(remaining.as_secs()))
-                )
+                );
             }
         }
 

@@ -45,7 +45,11 @@ impl<'a, N: NodePrimitives> MemoryOverlayStateProviderRef<'a, N> {
         historical: Box<dyn StateProvider + 'a>,
         in_memory: Vec<ExecutedBlockWithTrieUpdates<N>>,
     ) -> Self {
-        Self { historical, in_memory, trie_state: OnceLock::new() }
+        Self {
+            historical,
+            in_memory,
+            trie_state: OnceLock::new(),
+        }
     }
 
     /// Turn this state provider into a state provider
@@ -92,8 +96,9 @@ impl<N: NodePrimitives> BlockHashReader for MemoryOverlayStateProviderRef<'_, N>
             }
         }
 
-        let mut hashes =
-            self.historical.canonical_hashes_range(start, earliest_block_number.unwrap_or(end))?;
+        let mut hashes = self
+            .historical
+            .canonical_hashes_range(start, earliest_block_number.unwrap_or(end))?;
         hashes.append(&mut in_memory_hashes);
         Ok(hashes)
     }
@@ -143,8 +148,11 @@ impl<N: NodePrimitives> StorageRootProvider for MemoryOverlayStateProviderRef<'_
     // TODO: Currently this does not reuse available in-memory trie nodes.
     fn storage_root(&self, address: Address, storage: HashedStorage) -> ProviderResult<B256> {
         let state = &self.trie_state().state;
-        let mut hashed_storage =
-            state.storages.get(&keccak256(address)).cloned().unwrap_or_default();
+        let mut hashed_storage = state
+            .storages
+            .get(&keccak256(address))
+            .cloned()
+            .unwrap_or_default();
         hashed_storage.extend(&storage);
         self.historical.storage_root(address, hashed_storage)
     }
@@ -157,8 +165,11 @@ impl<N: NodePrimitives> StorageRootProvider for MemoryOverlayStateProviderRef<'_
         storage: HashedStorage,
     ) -> ProviderResult<reth_trie::StorageProof> {
         let state = &self.trie_state().state;
-        let mut hashed_storage =
-            state.storages.get(&keccak256(address)).cloned().unwrap_or_default();
+        let mut hashed_storage = state
+            .storages
+            .get(&keccak256(address))
+            .cloned()
+            .unwrap_or_default();
         hashed_storage.extend(&storage);
         self.historical.storage_proof(address, slot, hashed_storage)
     }
@@ -171,10 +182,14 @@ impl<N: NodePrimitives> StorageRootProvider for MemoryOverlayStateProviderRef<'_
         storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
         let state = &self.trie_state().state;
-        let mut hashed_storage =
-            state.storages.get(&keccak256(address)).cloned().unwrap_or_default();
+        let mut hashed_storage = state
+            .storages
+            .get(&keccak256(address))
+            .cloned()
+            .unwrap_or_default();
         hashed_storage.extend(&storage);
-        self.historical.storage_multiproof(address, slots, hashed_storage)
+        self.historical
+            .storage_multiproof(address, slots, hashed_storage)
     }
 }
 

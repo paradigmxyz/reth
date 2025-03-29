@@ -13,13 +13,21 @@ pub(crate) struct PongTable {
 impl PongTable {
     /// Updates the timestamp we received a `Pong` from the given node.
     pub(crate) fn on_pong(&mut self, remote_id: PeerId, remote_ip: IpAddr) {
-        let key = NodeKey { remote_id, remote_ip };
+        let key = NodeKey {
+            remote_id,
+            remote_ip,
+        };
         self.nodes.insert(key, Instant::now());
     }
 
     /// Returns the timestamp we received a `Pong` from the given node.
     pub(crate) fn last_pong(&self, remote_id: PeerId, remote_ip: IpAddr) -> Option<Instant> {
-        self.nodes.get(&NodeKey { remote_id, remote_ip }).copied()
+        self.nodes
+            .get(&NodeKey {
+                remote_id,
+                remote_ip,
+            })
+            .copied()
     }
 
     /// Removes all nodes from the table that have not sent a `Pong` for at least `timeout`.

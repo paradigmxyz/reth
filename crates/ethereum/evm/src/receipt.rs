@@ -16,7 +16,12 @@ impl ReceiptBuilder for RethReceiptBuilder {
         &self,
         ctx: ReceiptBuilderCtx<'_, Self::Transaction, E>,
     ) -> Self::Receipt {
-        let ReceiptBuilderCtx { tx, result, cumulative_gas_used, .. } = ctx;
+        let ReceiptBuilderCtx {
+            tx,
+            result,
+            cumulative_gas_used,
+            ..
+        } = ctx;
         Receipt {
             tx_type: tx.tx_type(),
             // Success flag was added in `EIP-658: Embedding transaction status code in

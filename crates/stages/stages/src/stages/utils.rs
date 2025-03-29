@@ -259,19 +259,20 @@ pub(crate) fn missing_static_data_error<Provider>(
 where
     Provider: BlockReader + StaticFileProviderFactory,
 {
-    let mut last_block =
-        static_file_provider.get_highest_static_file_block(segment).unwrap_or_default();
+    let mut last_block = static_file_provider
+        .get_highest_static_file_block(segment)
+        .unwrap_or_default();
 
     // To be extra safe, we make sure that the last tx num matches the last block from its indices.
     // If not, get it.
     loop {
         if let Some(indices) = provider.block_body_indices(last_block)? {
             if indices.last_tx_num() <= last_tx_num {
-                break
+                break;
             }
         }
         if last_block == 0 {
-            break
+            break;
         }
         last_block -= 1;
     }

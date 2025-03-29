@@ -36,8 +36,15 @@ impl<Pool, Provider, EvmConfig> OpDebugWitnessApi<Pool, Provider, EvmConfig> {
         builder: OpPayloadBuilder<Pool, Provider, EvmConfig>,
     ) -> Self {
         let semaphore = Arc::new(Semaphore::new(3));
-        let inner = OpDebugWitnessApiInner { provider, builder, task_spawner, semaphore };
-        Self { inner: Arc::new(inner) }
+        let inner = OpDebugWitnessApiInner {
+            provider,
+            builder,
+            task_spawner,
+            semaphore,
+        };
+        Self {
+            inner: Arc::new(inner),
+        }
     }
 }
 
@@ -83,7 +90,10 @@ where
         let (tx, rx) = oneshot::channel();
         let this = self.clone();
         self.inner.task_spawner.spawn_blocking(Box::pin(async move {
-            let res = this.inner.builder.payload_witness(parent_header, attributes);
+            let res = this
+                .inner
+                .builder
+                .payload_witness(parent_header, attributes);
             let _ = tx.send(res);
         }));
 
@@ -95,7 +105,9 @@ where
 
 impl<Pool, Provider, EvmConfig> Clone for OpDebugWitnessApi<Pool, Provider, EvmConfig> {
     fn clone(&self) -> Self {
-        Self { inner: Arc::clone(&self.inner) }
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
     }
 }
 impl<Pool, Provider, EvmConfig> Debug for OpDebugWitnessApi<Pool, Provider, EvmConfig> {

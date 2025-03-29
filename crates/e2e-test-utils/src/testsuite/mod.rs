@@ -94,7 +94,11 @@ pub struct TestBuilder<I> {
 impl<I: 'static> TestBuilder<I> {
     /// Create a new test builder
     pub fn new() -> Self {
-        Self { setup: None, actions: Vec::new(), env: Default::default() }
+        Self {
+            setup: None,
+            actions: Vec::new(),
+            env: Default::default(),
+        }
     }
 
     /// Set the test setup

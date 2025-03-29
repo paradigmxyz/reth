@@ -55,7 +55,9 @@ impl Layers {
     /// An `eyre::Result<()>` indicating the success or failure of the operation.
     pub(crate) fn journald(&mut self, filter: &str) -> eyre::Result<()> {
         let journald_filter = build_env_filter(None, filter)?;
-        let layer = tracing_journald::layer()?.with_filter(journald_filter).boxed();
+        let layer = tracing_journald::layer()?
+            .with_filter(journald_filter)
+            .boxed();
         self.inner.push(layer);
         Ok(())
     }
@@ -123,7 +125,12 @@ pub struct FileInfo {
 impl FileInfo {
     /// Creates a new `FileInfo` instance.
     pub fn new(dir: PathBuf, max_size_bytes: u64, max_files: usize) -> Self {
-        Self { dir, file_name: RETH_LOG_FILE_NAME.to_string(), max_size_bytes, max_files }
+        Self {
+            dir,
+            file_name: RETH_LOG_FILE_NAME.to_string(),
+            max_size_bytes,
+            max_files,
+        }
     }
 
     /// Creates the log directory if it doesn't exist.
@@ -171,7 +178,9 @@ fn build_env_filter(
     directives: &str,
 ) -> eyre::Result<EnvFilter> {
     let env_filter = if let Some(default_directive) = default_directive {
-        EnvFilter::builder().with_default_directive(default_directive).from_env_lossy()
+        EnvFilter::builder()
+            .with_default_directive(default_directive)
+            .from_env_lossy()
     } else {
         EnvFilter::builder().from_env_lossy()
     };

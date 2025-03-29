@@ -30,9 +30,12 @@ pub fn calculate_state_root(c: &mut Criterion) {
         let provider_factory = create_test_provider_factory();
         {
             let provider_rw = provider_factory.provider_rw().unwrap();
-            provider_rw.write_hashed_state(&db_state.into_sorted()).unwrap();
-            let (_, updates) =
-                StateRoot::from_tx(provider_rw.tx_ref()).root_with_updates().unwrap();
+            provider_rw
+                .write_hashed_state(&db_state.into_sorted())
+                .unwrap();
+            let (_, updates) = StateRoot::from_tx(provider_rw.tx_ref())
+                .root_with_updates()
+                .unwrap();
             provider_rw.write_trie_updates(&updates).unwrap();
             provider_rw.commit().unwrap();
         }
@@ -98,15 +101,20 @@ fn generate_test_data(size: usize) -> (HashedPostState, HashedPostState) {
     .current();
 
     let keys = db_state.keys().copied().collect::<Vec<_>>();
-    let keys_to_update = subsequence(keys, size / 2).new_tree(&mut runner).unwrap().current();
+    let keys_to_update = subsequence(keys, size / 2)
+        .new_tree(&mut runner)
+        .unwrap()
+        .current();
 
     let updated_storages = keys_to_update
         .into_iter()
         .map(|address| {
             let (_, storage) = db_state.get(&address).unwrap();
             let slots = storage.keys().copied().collect::<Vec<_>>();
-            let slots_to_update =
-                subsequence(slots, storage_size / 2).new_tree(&mut runner).unwrap().current();
+            let slots_to_update = subsequence(slots, storage_size / 2)
+                .new_tree(&mut runner)
+                .unwrap()
+                .current();
             (
                 address,
                 slots_to_update
@@ -120,7 +128,9 @@ fn generate_test_data(size: usize) -> (HashedPostState, HashedPostState) {
     (
         HashedPostState::default()
             .with_accounts(
-                db_state.iter().map(|(address, (account, _))| (*address, Some(*account))),
+                db_state
+                    .iter()
+                    .map(|(address, (account, _))| (*address, Some(*account))),
             )
             .with_storages(db_state.into_iter().map(|(address, (_, storage))| {
                 (address, HashedStorage::from_iter(false, storage))

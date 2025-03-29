@@ -20,7 +20,10 @@ impl Default for EthereumBuilderConfig {
 impl EthereumBuilderConfig {
     /// Create new payload builder config.
     pub const fn new() -> Self {
-        Self { desired_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M, await_payload_on_missing: true }
+        Self {
+            desired_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
+            await_payload_on_missing: true,
+        }
     }
 
     /// Set desired gas limit.

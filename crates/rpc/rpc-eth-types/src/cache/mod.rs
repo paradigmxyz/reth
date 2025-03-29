@@ -67,7 +67,9 @@ pub struct EthStateCache<B: Block, R> {
 
 impl<B: Block, R> Clone for EthStateCache<B, R> {
     fn clone(&self) -> Self {
-        Self { to_service: self.to_service.clone() }
+        Self {
+            to_service: self.to_service.clone(),
+        }
     }
 }
 
@@ -149,8 +151,12 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
         block_hash: B256,
     ) -> ProviderResult<Option<Arc<RecoveredBlock<B>>>> {
         let (response_tx, rx) = oneshot::channel();
-        let _ = self.to_service.send(CacheAction::GetBlockWithSenders { block_hash, response_tx });
-        rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
+        let _ = self.to_service.send(CacheAction::GetBlockWithSenders {
+            block_hash,
+            response_tx,
+        });
+        rx.await
+            .map_err(|_| ProviderError::CacheServiceUnavailable)?
     }
 
     /// Requests the receipts for the block hash
@@ -158,8 +164,12 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
     /// Returns `None` if the block was not found.
     pub async fn get_receipts(&self, block_hash: B256) -> ProviderResult<Option<Arc<Vec<R>>>> {
         let (response_tx, rx) = oneshot::channel();
-        let _ = self.to_service.send(CacheAction::GetReceipts { block_hash, response_tx });
-        rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
+        let _ = self.to_service.send(CacheAction::GetReceipts {
+            block_hash,
+            response_tx,
+        });
+        rx.await
+            .map_err(|_| ProviderError::CacheServiceUnavailable)?
     }
 
     /// Fetches both receipts and block for the given block hash.
@@ -180,8 +190,12 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
     /// Returns an error if the header is not found.
     pub async fn get_header(&self, block_hash: B256) -> ProviderResult<B::Header> {
         let (response_tx, rx) = oneshot::channel();
-        let _ = self.to_service.send(CacheAction::GetHeader { block_hash, response_tx });
-        rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
+        let _ = self.to_service.send(CacheAction::GetHeader {
+            block_hash,
+            response_tx,
+        });
+        rx.await
+            .map_err(|_| ProviderError::CacheServiceUnavailable)?
     }
 }
 
@@ -361,39 +375,49 @@ where
                 }
                 Some(action) => {
                     match action {
-                        CacheAction::GetBlockWithSenders { block_hash, response_tx } => {
+                        CacheAction::GetBlockWithSenders {
+                            block_hash,
+                            response_tx,
+                        } => {
                             if let Some(block) = this.full_block_cache.get(&block_hash).cloned() {
                                 let _ = response_tx.send(Ok(Some(block)));
-                                continue
+                                continue;
                             }
 
                             // block is not in the cache, request it if this is the first consumer
-                            if this.full_block_cache.queue(block_hash, Either::Left(response_tx)) {
+                            if this
+                                .full_block_cache
+                                .queue(block_hash, Either::Left(response_tx))
+                            {
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
                                 let rate_limiter = this.rate_limiter.clone();
                                 let mut action_sender =
                                     ActionSender::new(CacheKind::Block, block_hash, action_tx);
-                                this.action_task_spawner.spawn_blocking(Box::pin(async move {
-                                    // Acquire permit
-                                    let _permit = rate_limiter.acquire().await;
-                                    // Only look in the database to prevent situations where we
-                                    // looking up the tree is blocking
-                                    let block_sender = provider
-                                        .sealed_block_with_senders(
-                                            BlockHashOrNumber::Hash(block_hash),
-                                            TransactionVariant::WithHash,
-                                        )
-                                        .map(|maybe_block| maybe_block.map(Arc::new));
-                                    action_sender.send_block(block_sender);
-                                }));
+                                this.action_task_spawner
+                                    .spawn_blocking(Box::pin(async move {
+                                        // Acquire permit
+                                        let _permit = rate_limiter.acquire().await;
+                                        // Only look in the database to prevent situations where we
+                                        // looking up the tree is blocking
+                                        let block_sender = provider
+                                            .sealed_block_with_senders(
+                                                BlockHashOrNumber::Hash(block_hash),
+                                                TransactionVariant::WithHash,
+                                            )
+                                            .map(|maybe_block| maybe_block.map(Arc::new));
+                                        action_sender.send_block(block_sender);
+                                    }));
                             }
                         }
-                        CacheAction::GetReceipts { block_hash, response_tx } => {
+                        CacheAction::GetReceipts {
+                            block_hash,
+                            response_tx,
+                        } => {
                             // check if block is cached
                             if let Some(receipts) = this.receipts_cache.get(&block_hash).cloned() {
                                 let _ = response_tx.send(Ok(Some(receipts)));
-                                continue
+                                continue;
                             }
 
                             // block is not in the cache, request it if this is the first consumer
@@ -403,28 +427,32 @@ where
                                 let rate_limiter = this.rate_limiter.clone();
                                 let mut action_sender =
                                     ActionSender::new(CacheKind::Receipt, block_hash, action_tx);
-                                this.action_task_spawner.spawn_blocking(Box::pin(async move {
-                                    // Acquire permit
-                                    let _permit = rate_limiter.acquire().await;
-                                    let res = provider
-                                        .receipts_by_block(block_hash.into())
-                                        .map(|maybe_receipts| maybe_receipts.map(Arc::new));
+                                this.action_task_spawner
+                                    .spawn_blocking(Box::pin(async move {
+                                        // Acquire permit
+                                        let _permit = rate_limiter.acquire().await;
+                                        let res = provider
+                                            .receipts_by_block(block_hash.into())
+                                            .map(|maybe_receipts| maybe_receipts.map(Arc::new));
 
-                                    action_sender.send_receipts(res);
-                                }));
+                                        action_sender.send_receipts(res);
+                                    }));
                             }
                         }
-                        CacheAction::GetHeader { block_hash, response_tx } => {
+                        CacheAction::GetHeader {
+                            block_hash,
+                            response_tx,
+                        } => {
                             // check if the header is cached
                             if let Some(header) = this.headers_cache.get(&block_hash).cloned() {
                                 let _ = response_tx.send(Ok(header));
-                                continue
+                                continue;
                             }
 
                             // it's possible we have the entire block cached
                             if let Some(block) = this.full_block_cache.get(&block_hash) {
                                 let _ = response_tx.send(Ok(block.clone_header()));
-                                continue
+                                continue;
                             }
 
                             // header is not in the cache, request it if this is the first
@@ -435,16 +463,18 @@ where
                                 let rate_limiter = this.rate_limiter.clone();
                                 let mut action_sender =
                                     ActionSender::new(CacheKind::Header, block_hash, action_tx);
-                                this.action_task_spawner.spawn_blocking(Box::pin(async move {
-                                    // Acquire permit
-                                    let _permit = rate_limiter.acquire().await;
-                                    let header = provider.header(&block_hash).and_then(|header| {
-                                        header.ok_or_else(|| {
-                                            ProviderError::HeaderNotFound(block_hash.into())
-                                        })
-                                    });
-                                    action_sender.send_header(header);
-                                }));
+                                this.action_task_spawner
+                                    .spawn_blocking(Box::pin(async move {
+                                        // Acquire permit
+                                        let _permit = rate_limiter.acquire().await;
+                                        let header =
+                                            provider.header(&block_hash).and_then(|header| {
+                                                header.ok_or_else(|| {
+                                                    ProviderError::HeaderNotFound(block_hash.into())
+                                                })
+                                            });
+                                        action_sender.send_header(header);
+                                    }));
                             }
                         }
                         CacheAction::ReceiptsResult { block_hash, res } => {
@@ -509,14 +539,36 @@ where
 
 /// All message variants sent through the channel
 enum CacheAction<B: Block, R> {
-    GetBlockWithSenders { block_hash: B256, response_tx: BlockWithSendersResponseSender<B> },
-    GetHeader { block_hash: B256, response_tx: HeaderResponseSender<B::Header> },
-    GetReceipts { block_hash: B256, response_tx: ReceiptsResponseSender<R> },
-    BlockWithSendersResult { block_hash: B256, res: ProviderResult<Option<Arc<RecoveredBlock<B>>>> },
-    ReceiptsResult { block_hash: B256, res: ProviderResult<Option<Arc<Vec<R>>>> },
-    HeaderResult { block_hash: B256, res: Box<ProviderResult<B::Header>> },
-    CacheNewCanonicalChain { chain_change: ChainChange<B, R> },
-    RemoveReorgedChain { chain_change: ChainChange<B, R> },
+    GetBlockWithSenders {
+        block_hash: B256,
+        response_tx: BlockWithSendersResponseSender<B>,
+    },
+    GetHeader {
+        block_hash: B256,
+        response_tx: HeaderResponseSender<B::Header>,
+    },
+    GetReceipts {
+        block_hash: B256,
+        response_tx: ReceiptsResponseSender<R>,
+    },
+    BlockWithSendersResult {
+        block_hash: B256,
+        res: ProviderResult<Option<Arc<RecoveredBlock<B>>>>,
+    },
+    ReceiptsResult {
+        block_hash: B256,
+        res: ProviderResult<Option<Arc<Vec<R>>>>,
+    },
+    HeaderResult {
+        block_hash: B256,
+        res: Box<ProviderResult<B::Header>>,
+    },
+    CacheNewCanonicalChain {
+        chain_change: ChainChange<B, R>,
+    },
+    RemoveReorgedChain {
+        chain_change: ChainChange<B, R>,
+    },
 }
 
 struct BlockReceipts<R> {
@@ -538,8 +590,10 @@ impl<B: Block, R: Clone> ChainChange<B, R> {
         let (blocks, receipts): (Vec<_>, Vec<_>) = chain
             .blocks_and_receipts()
             .map(|(block, receipts)| {
-                let block_receipts =
-                    BlockReceipts { block_hash: block.hash(), receipts: receipts.clone() };
+                let block_receipts = BlockReceipts {
+                    block_hash: block.hash(),
+                    receipts: receipts.clone(),
+                };
                 (block.clone(), block_receipts)
             })
             .unzip();
@@ -568,7 +622,11 @@ struct ActionSender<B: Block, R: Send + Sync> {
 
 impl<R: Send + Sync, B: Block> ActionSender<B, R> {
     const fn new(kind: CacheKind, blockhash: B256, tx: UnboundedSender<CacheAction<B, R>>) -> Self {
-        Self { kind, blockhash, tx: Some(tx) }
+        Self {
+            kind,
+            blockhash,
+            tx: Some(tx),
+        }
     }
 
     fn send_block(&mut self, block_sender: Result<Option<Arc<RecoveredBlock<B>>>, ProviderError>) {
@@ -582,8 +640,10 @@ impl<R: Send + Sync, B: Block> ActionSender<B, R> {
 
     fn send_receipts(&mut self, receipts: Result<Option<Arc<Vec<R>>>, ProviderError>) {
         if let Some(tx) = self.tx.take() {
-            let _ =
-                tx.send(CacheAction::ReceiptsResult { block_hash: self.blockhash, res: receipts });
+            let _ = tx.send(CacheAction::ReceiptsResult {
+                block_hash: self.blockhash,
+                res: receipts,
+            });
         }
     }
 
@@ -632,13 +692,15 @@ pub async fn cache_new_blocks_task<St, N: NodePrimitives>(
         if let Some(reverted) = event.reverted() {
             let chain_change = ChainChange::new(reverted);
 
-            let _ =
-                eth_state_cache.to_service.send(CacheAction::RemoveReorgedChain { chain_change });
+            let _ = eth_state_cache
+                .to_service
+                .send(CacheAction::RemoveReorgedChain { chain_change });
         }
 
         let chain_change = ChainChange::new(event.committed());
 
-        let _ =
-            eth_state_cache.to_service.send(CacheAction::CacheNewCanonicalChain { chain_change });
+        let _ = eth_state_cache
+            .to_service
+            .send(CacheAction::CacheNewCanonicalChain { chain_change });
     }
 }

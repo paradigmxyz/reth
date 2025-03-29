@@ -86,7 +86,12 @@ impl EvmFactory for MyEvmFactory {
         input: EvmEnv,
         inspector: I,
     ) -> Self::Evm<DB, I> {
-        EthEvm::new(self.create_evm(db, input).into_inner().with_inspector(inspector), true)
+        EthEvm::new(
+            self.create_evm(db, input)
+                .into_inner()
+                .with_inspector(inspector),
+            true,
+        )
     }
 }
 
@@ -105,7 +110,11 @@ impl<P> WrappedPrecompile<P> {
     /// Given a [`PrecompileProvider`] and cache for a specific precompiles, create a
     /// wrapper that can be used inside Evm.
     fn new(precompile: P, cache: Arc<RwLock<PrecompileCache>>) -> Self {
-        WrappedPrecompile { precompile, cache: cache.clone(), spec: SpecId::default() }
+        WrappedPrecompile {
+            precompile,
+            cache: cache.clone(),
+            spec: SpecId::default(),
+        }
     }
 }
 
@@ -134,12 +143,14 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
         // get the result if it exists
         if let Some(precompiles) = cache.cache.get_mut(address) {
             if let Some(result) = precompiles.get(&key) {
-                return result.clone().map(Some)
+                return result.clone().map(Some);
             }
         }
 
         // call the precompile if cache miss
-        let output = self.precompile.run(context, address, inputs, is_static, gas_limit);
+        let output = self
+            .precompile
+            .run(context, address, inputs, is_static, gas_limit);
 
         if let Some(output) = output.clone().transpose() {
             // insert the result into the cache
@@ -183,9 +194,14 @@ where
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
         let evm_config = EthEvmConfig::new_with_evm_factory(
             ctx.chain_spec(),
-            MyEvmFactory { precompile_cache: self.precompile_cache.clone() },
+            MyEvmFactory {
+                precompile_cache: self.precompile_cache.clone(),
+            },
         );
-        Ok((evm_config.clone(), BasicBlockExecutorProvider::new(evm_config)))
+        Ok((
+            evm_config.clone(),
+            BasicBlockExecutorProvider::new(evm_config),
+        ))
     }
 }
 
@@ -205,8 +221,9 @@ async fn main() -> eyre::Result<()> {
         .cancun_activated()
         .build();
 
-    let node_config =
-        NodeConfig::test().with_rpc(RpcServerArgs::default().with_http()).with_chain(spec);
+    let node_config = NodeConfig::test()
+        .with_rpc(RpcServerArgs::default().with_http())
+        .with_chain(spec);
 
     let handle = NodeBuilder::new(node_config)
         .testing_node(tasks.executor())

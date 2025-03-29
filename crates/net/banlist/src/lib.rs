@@ -16,7 +16,7 @@ use std::{collections::HashMap, net::IpAddr, time::Instant};
 /// Should be replaced with [`IpAddr::is_global`](std::net::IpAddr::is_global) once it is stable.
 pub const fn is_global(ip: &IpAddr) -> bool {
     if ip.is_unspecified() || ip.is_loopback() {
-        return false
+        return false;
     }
 
     match ip {
@@ -52,7 +52,10 @@ impl BanList {
         banned_peers: HashMap<PeerId, Option<Instant>>,
         banned_ips: HashMap<IpAddr, Option<Instant>>,
     ) -> Self {
-        Self { banned_ips, banned_peers }
+        Self {
+            banned_ips,
+            banned_peers,
+        }
     }
 
     /// Removes all peers that are no longer banned.
@@ -62,7 +65,7 @@ impl BanList {
             if let Some(until) = until {
                 if now > *until {
                     evicted.push(*peer);
-                    return false
+                    return false;
                 }
             }
             true
@@ -77,7 +80,7 @@ impl BanList {
             if let Some(until) = until {
                 if now > *until {
                     evicted.push(*peer);
-                    return false
+                    return false;
                 }
             }
             true

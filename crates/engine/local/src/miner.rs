@@ -58,13 +58,13 @@ impl Future for MiningMode {
             Self::Instant(rx) => {
                 // drain all transactions notifications
                 if let Poll::Ready(Some(_)) = rx.poll_next_unpin(cx) {
-                    return Poll::Ready(())
+                    return Poll::Ready(());
                 }
                 Poll::Pending
             }
             Self::Interval(interval) => {
                 if interval.poll_tick(cx).is_ready() {
-                    return Poll::Ready(())
+                    return Poll::Ready(());
                 }
                 Poll::Pending
             }
@@ -102,8 +102,10 @@ where
         mode: MiningMode,
         payload_builder: PayloadBuilderHandle<T>,
     ) {
-        let latest_header =
-            provider.sealed_header(provider.best_block_number().unwrap()).unwrap().unwrap();
+        let latest_header = provider
+            .sealed_header(provider.best_block_number().unwrap())
+            .unwrap()
+            .unwrap();
 
         let miner = Self {
             payload_attributes_builder,
@@ -142,7 +144,10 @@ where
     /// Returns current forkchoice state.
     fn forkchoice_state(&self) -> ForkchoiceState {
         ForkchoiceState {
-            head_block_hash: *self.last_block_hashes.last().expect("at least 1 block exists"),
+            head_block_hash: *self
+                .last_block_hashes
+                .last()
+                .expect("at least 1 block exists"),
             safe_block_hash: *self
                 .last_block_hashes
                 .get(self.last_block_hashes.len().saturating_sub(32))
@@ -157,12 +162,13 @@ where
     /// Sends a FCU to the engine.
     async fn update_forkchoice_state(&self) -> eyre::Result<()> {
         let (tx, rx) = oneshot::channel();
-        self.to_engine.send(BeaconEngineMessage::ForkchoiceUpdated {
-            state: self.forkchoice_state(),
-            payload_attrs: None,
-            tx,
-            version: EngineApiMessageVersion::default(),
-        })?;
+        self.to_engine
+            .send(BeaconEngineMessage::ForkchoiceUpdated {
+                state: self.forkchoice_state(),
+                payload_attrs: None,
+                tx,
+                version: EngineApiMessageVersion::default(),
+            })?;
 
         let res = rx.await??;
         if !res.forkchoice_status().is_valid() {
@@ -184,12 +190,13 @@ where
         );
 
         let (tx, rx) = oneshot::channel();
-        self.to_engine.send(BeaconEngineMessage::ForkchoiceUpdated {
-            state: self.forkchoice_state(),
-            payload_attrs: Some(self.payload_attributes_builder.build(timestamp)),
-            tx,
-            version: EngineApiMessageVersion::default(),
-        })?;
+        self.to_engine
+            .send(BeaconEngineMessage::ForkchoiceUpdated {
+                state: self.forkchoice_state(),
+                payload_attrs: Some(self.payload_attributes_builder.build(timestamp)),
+                tx,
+                version: EngineApiMessageVersion::default(),
+            })?;
 
         let res = rx.await??.await?;
         if !res.payload_status.is_valid() {
@@ -198,8 +205,10 @@ where
 
         let payload_id = res.payload_id.ok_or_eyre("No payload id")?;
 
-        let Some(Ok(payload)) =
-            self.payload_builder.resolve_kind(payload_id, PayloadKind::WaitForPending).await
+        let Some(Ok(payload)) = self
+            .payload_builder
+            .resolve_kind(payload_id, PayloadKind::WaitForPending)
+            .await
         else {
             eyre::bail!("No payload")
         };
@@ -208,7 +217,8 @@ where
 
         let (tx, rx) = oneshot::channel();
         let payload = T::block_to_payload(payload.block().clone());
-        self.to_engine.send(BeaconEngineMessage::NewPayload { payload, tx })?;
+        self.to_engine
+            .send(BeaconEngineMessage::NewPayload { payload, tx })?;
 
         let res = rx.await??;
 
@@ -220,8 +230,9 @@ where
         self.last_block_hashes.push(block.hash());
         // ensure we keep at most 64 blocks
         if self.last_block_hashes.len() > 64 {
-            self.last_block_hashes =
-                self.last_block_hashes.split_off(self.last_block_hashes.len() - 64);
+            self.last_block_hashes = self
+                .last_block_hashes
+                .split_off(self.last_block_hashes.len() - 64);
         }
 
         Ok(())

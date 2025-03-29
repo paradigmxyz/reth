@@ -78,7 +78,9 @@ pub struct LocalTransactionBackupConfig {
 impl LocalTransactionBackupConfig {
     /// Receive path to transactions backup and return initialized config
     pub const fn with_local_txs_backup(transactions_path: PathBuf) -> Self {
-        Self { transactions_path: Some(transactions_path) }
+        Self {
+            transactions_path: Some(transactions_path),
+        }
     }
 }
 
@@ -120,7 +122,11 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
     Tasks: TaskSpawner + 'static,
 {
     let metrics = MaintainPoolMetrics::default();
-    let MaintainPoolConfig { max_update_depth, max_reload_accounts, .. } = config;
+    let MaintainPoolConfig {
+        max_update_depth,
+        max_reload_accounts,
+        ..
+    } = config;
     // ensure the pool points to latest state
     if let Ok(Some(latest)) = client.header_by_number_or_tag(BlockNumberOrTag::Latest) {
         let latest = SealedHeader::seal_slow(latest);
@@ -186,8 +192,11 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
             let at = pool_info.last_seen_block_hash;
             let fut = if dirty_addresses.len() > max_reload_accounts {
                 // need to chunk accounts to reload
-                let accs_to_reload =
-                    dirty_addresses.iter().copied().take(max_reload_accounts).collect::<Vec<_>>();
+                let accs_to_reload = dirty_addresses
+                    .iter()
+                    .copied()
+                    .take(max_reload_accounts)
+                    .collect::<Vec<_>>();
                 for acc in &accs_to_reload {
                     // make sure we remove them from the dirty set
                     dirty_addresses.remove(acc);
@@ -268,7 +277,10 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
         }
         // handle the result of the account reload
         match reloaded {
-            Some(Ok(Ok(LoadedAccounts { accounts, failed_to_load }))) => {
+            Some(Ok(Ok(LoadedAccounts {
+                accounts,
+                failed_to_load,
+            }))) => {
                 // reloaded accounts successfully
                 // extend accounts we failed to load from database
                 dirty_addresses.extend(failed_to_load);
@@ -299,8 +311,8 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                 let old_first = old_blocks.first();
 
                 // check if the reorg is not canonical with the pool's block
-                if !(old_first.parent_hash() == pool_info.last_seen_block_hash ||
-                    new_first.parent_hash() == pool_info.last_seen_block_hash)
+                if !(old_first.parent_hash() == pool_info.last_seen_block_hash
+                    || new_first.parent_hash() == pool_info.last_seen_block_hash)
                 {
                     // the new block points to a higher block than the oldest block in the old chain
                     maintained_state = MaintainedPoolState::Drifted;
@@ -320,8 +332,10 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                 );
 
                 // we know all changed account in the new chain
-                let new_changed_accounts: HashSet<_> =
-                    new_state.changed_accounts().map(ChangedAccountEntry).collect();
+                let new_changed_accounts: HashSet<_> = new_state
+                    .changed_accounts()
+                    .map(ChangedAccountEntry)
+                    .collect();
 
                 // find all accounts that were changed in the old chain but _not_ in the new chain
                 let missing_changed_acc = old_state
@@ -332,7 +346,10 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                 // for these we need to fetch the nonce+balance from the db at the new tip
                 let mut changed_accounts =
                     match load_accounts(client.clone(), new_tip.hash(), missing_changed_acc) {
-                        Ok(LoadedAccounts { accounts, failed_to_load }) => {
+                        Ok(LoadedAccounts {
+                            accounts,
+                            failed_to_load,
+                        }) => {
                             // extend accounts we failed to load from database
                             dirty_addresses.extend(failed_to_load);
 
@@ -404,7 +421,9 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                 // Because the transactions are not finalized, the corresponding blobs are still in
                 // blob store (if we previously received them from the network)
                 metrics.inc_reinserted_transactions(pruned_old_transactions.len());
-                let _ = pool.add_external_transactions(pruned_old_transactions).await;
+                let _ = pool
+                    .add_external_transactions(pruned_old_transactions)
+                    .await;
 
                 // keep track of new mined blob transactions
                 blob_store_tracker.add_new_chain_blocks(&new_blocks);
@@ -450,7 +469,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                     // keep track of mined blob transactions
                     blob_store_tracker.add_new_chain_blocks(&blocks);
 
-                    continue
+                    continue;
                 }
 
                 let mut changed_accounts = Vec::with_capacity(state.state().len());
@@ -494,7 +513,9 @@ struct FinalizedBlockTracker {
 
 impl FinalizedBlockTracker {
     const fn new(last_finalized_block: Option<BlockNumber>) -> Self {
-        Self { last_finalized_block }
+        Self {
+            last_finalized_block,
+        }
     }
 
     /// Updates the tracked finalized block and returns the new finalized block if it changed
@@ -579,7 +600,11 @@ where
     for addr in addresses {
         if let Ok(maybe_acc) = state.basic_account(&addr) {
             let acc = maybe_acc
-                .map(|acc| ChangedAccount { address: addr, nonce: acc.nonce, balance: acc.balance })
+                .map(|acc| ChangedAccount {
+                    address: addr,
+                    nonce: acc.nonce,
+                    balance: acc.balance,
+                })
                 .unwrap_or_else(|| ChangedAccount::empty(addr));
             res.accounts.push(acc)
         } else {
@@ -601,14 +626,14 @@ where
     P: TransactionPool<Transaction: PoolTransaction<Consensus: SignedTransaction>>,
 {
     if !file_path.exists() {
-        return Ok(())
+        return Ok(());
     }
 
     debug!(target: "txpool", txs_file =?file_path, "Check local persistent storage for saved transactions");
     let data = reth_fs_util::read(file_path)?;
 
     if data.is_empty() {
-        return Ok(())
+        return Ok(());
     }
 
     let txs_signed: Vec<<P::Transaction as PoolTransaction>::Consensus> =
@@ -623,7 +648,9 @@ where
         })
         .collect();
 
-    let outcome = pool.add_transactions(crate::TransactionOrigin::Local, pool_transactions).await;
+    let outcome = pool
+        .add_transactions(crate::TransactionOrigin::Local, pool_transactions)
+        .await;
 
     info!(target: "txpool", txs_file =?file_path, num_txs=%outcome.len(), "Successfully reinserted local transactions from file");
     reth_fs_util::remove_file(file_path)?;
@@ -637,7 +664,7 @@ where
     let local_transactions = pool.get_local_transactions();
     if local_transactions.is_empty() {
         trace!(target: "txpool", "no local transactions to save");
-        return
+        return;
     }
 
     let local_transactions = local_transactions
@@ -686,7 +713,7 @@ pub async fn backup_local_transactions_task<P>(
 {
     let Some(transactions_path) = config.transactions_path else {
         // nothing to do
-        return
+        return;
     };
 
     if let Err(err) = load_and_reinsert_transactions(pool.clone(), &transactions_path).await {
@@ -748,14 +775,19 @@ mod tests {
             Default::default(),
         );
 
-        txpool.add_transaction(TransactionOrigin::Local, transaction.clone()).await.unwrap();
+        txpool
+            .add_transaction(TransactionOrigin::Local, transaction.clone())
+            .await
+            .unwrap();
 
         let handle = tokio::runtime::Handle::current();
         let manager = TaskManager::new(handle);
         let config = LocalTransactionBackupConfig::with_local_txs_backup(transactions_path.clone());
-        manager.executor().spawn_critical_with_graceful_shutdown_signal("test task", |shutdown| {
-            backup_local_transactions_task(shutdown, txpool.clone(), config)
-        });
+        manager
+            .executor()
+            .spawn_critical_with_graceful_shutdown_signal("test task", |shutdown| {
+                backup_local_transactions_task(shutdown, txpool.clone(), config)
+            });
 
         let mut txns = txpool.get_local_transactions();
         let tx_on_finish = txns.pop().expect("there should be 1 transaction");

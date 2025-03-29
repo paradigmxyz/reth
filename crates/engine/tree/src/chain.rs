@@ -48,7 +48,10 @@ where
 {
     /// Creates a new [`ChainOrchestrator`] with the given handler and backfill sync.
     pub const fn new(handler: T, backfill_sync: P) -> Self {
-        Self { handler, backfill_sync }
+        Self {
+            handler,
+            backfill_sync,
+        }
     }
 
     /// Returns the handler
@@ -65,7 +68,8 @@ where
     ///
     /// CAUTION: This function should be used with care and with a valid target.
     pub fn start_backfill_sync(&mut self, target: impl Into<PipelineTarget>) {
-        self.backfill_sync.on_action(BackfillAction::Start(target.into()));
+        self.backfill_sync
+            .on_action(BackfillAction::Start(target.into()));
     }
 
     /// Internal function used to advance the chain.
@@ -93,14 +97,15 @@ where
                             Ok(ctrl) => {
                                 tracing::debug!(?ctrl, "backfill sync finished");
                                 // notify handler that backfill sync finished
-                                this.handler.on_event(FromOrchestrator::BackfillSyncFinished(ctrl));
+                                this.handler
+                                    .on_event(FromOrchestrator::BackfillSyncFinished(ctrl));
                                 Poll::Ready(ChainEvent::BackfillSyncFinished)
                             }
                             Err(err) => {
                                 tracing::error!( %err, "backfill sync failed");
                                 Poll::Ready(ChainEvent::FatalError)
                             }
-                        }
+                        };
                     }
                     BackfillEvent::TaskDropped(err) => {
                         tracing::error!( %err, "backfill sync task dropped");
@@ -124,13 +129,13 @@ where
                         }
                         HandlerEvent::FatalError => {
                             error!(target: "engine::tree", "Fatal error");
-                            return Poll::Ready(ChainEvent::FatalError)
+                            return Poll::Ready(ChainEvent::FatalError);
                         }
                     }
                 }
                 Poll::Pending => {
                     // no more events to process
-                    break 'outer
+                    break 'outer;
                 }
             }
         }

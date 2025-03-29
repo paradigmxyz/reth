@@ -45,8 +45,10 @@ pub(crate) fn create_raw_bodies(
 pub(crate) fn insert_headers(db: &DatabaseEnv, headers: &[SealedHeader]) {
     db.update(|tx| {
         for header in headers {
-            tx.put::<tables::CanonicalHeaders>(header.number, header.hash()).unwrap();
-            tx.put::<tables::Headers>(header.number, header.clone_header()).unwrap();
+            tx.put::<tables::CanonicalHeaders>(header.number, header.hash())
+                .unwrap();
+            tx.put::<tables::Headers>(header.number, header.clone_header())
+                .unwrap();
         }
     })
     .expect("failed to commit")

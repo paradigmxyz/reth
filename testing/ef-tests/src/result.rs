@@ -66,7 +66,11 @@ pub struct CaseResult {
 impl CaseResult {
     /// Create a new test result.
     pub fn new(path: &Path, case: &impl Case, result: Result<(), Error>) -> Self {
-        Self { desc: case.description(), path: path.into(), result }
+        Self {
+            desc: case.description(),
+            path: path.into(),
+            result,
+        }
     }
 }
 
@@ -121,6 +125,11 @@ pub(crate) fn print_results(
 
     for case in failed {
         let error = case.result.as_ref().unwrap_err();
-        println!("[!] Case {} failed (description: {}): {}", case.path.display(), case.desc, error);
+        println!(
+            "[!] Case {} failed (description: {}): {}",
+            case.path.display(),
+            case.desc,
+            error
+        );
     }
 }

@@ -63,9 +63,12 @@ impl EthRlpxHandshake for EthHandshake {
         timeout_limit: Duration,
     ) -> Pin<Box<dyn Future<Output = Result<Status, EthStreamError>> + 'a + Send>> {
         Box::pin(async move {
-            timeout(timeout_limit, EthereumEthHandshake(unauth).eth_handshake(status, fork_filter))
-                .await
-                .map_err(|_| EthStreamError::StreamTimeout)?
+            timeout(
+                timeout_limit,
+                EthereumEthHandshake(unauth).eth_handshake(status, fork_filter),
+            )
+            .await
+            .map_err(|_| EthStreamError::StreamTimeout)?
         })
     }
 }
@@ -94,7 +97,10 @@ where
                 status
             )))
             .into();
-        unauth.send(status_msg).await.map_err(EthStreamError::from)?;
+        unauth
+            .send(status_msg)
+            .await
+            .map_err(EthStreamError::from)?;
 
         // Receive peer's response
         let their_msg_res = unauth.next().await;
@@ -106,7 +112,9 @@ where
                     .disconnect(DisconnectReason::DisconnectRequested)
                     .await
                     .map_err(EthStreamError::from)?;
-                return Err(EthStreamError::EthHandshakeError(EthHandshakeError::NoResponse));
+                return Err(EthStreamError::EthHandshakeError(
+                    EthHandshakeError::NoResponse,
+                ));
             }
         };
 
@@ -145,7 +153,11 @@ where
                         .await
                         .map_err(EthStreamError::from)?;
                     return Err(EthHandshakeError::MismatchedGenesis(
-                        GotExpected { expected: status.genesis, got: their_status.genesis }.into(),
+                        GotExpected {
+                            expected: status.genesis,
+                            got: their_status.genesis,
+                        }
+                        .into(),
                     )
                     .into());
                 }

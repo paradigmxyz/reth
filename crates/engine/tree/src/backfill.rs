@@ -124,7 +124,7 @@ impl<N: ProviderNodeTypes> PipelineSync<N> {
                 "Pipeline target cannot be zero hash."
             );
             // precaution to never sync to the zero hash
-            return
+            return;
         }
         self.pending_pipeline_target = Some(target);
     }
@@ -187,14 +187,14 @@ impl<N: ProviderNodeTypes> BackfillSync for PipelineSync<N> {
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<BackfillEvent> {
         // try to spawn a pipeline if a target is set
         if let Some(event) = self.try_spawn_pipeline() {
-            return Poll::Ready(event)
+            return Poll::Ready(event);
         }
 
         // make sure we poll the pipeline if it's active, and return any ready pipeline events
         if self.is_pipeline_active() {
             // advance the pipeline
             if let Poll::Ready(event) = self.poll_pipeline(cx) {
-                return Poll::Ready(event)
+                return Poll::Ready(event);
             }
         }
 
@@ -278,7 +278,10 @@ mod tests {
             let header = SealedHeader::seal_slow(header);
             insert_headers_into_client(&client, header, 0..total_blocks);
 
-            let tip = client.highest_block().expect("there should be blocks here").hash();
+            let tip = client
+                .highest_block()
+                .expect("there should be blocks here")
+                .hash();
 
             Self { pipeline_sync, tip }
         }
@@ -288,8 +291,10 @@ mod tests {
     async fn pipeline_started_and_finished() {
         const TOTAL_BLOCKS: usize = 10;
         const PIPELINE_DONE_AFTER: u64 = 5;
-        let TestHarness { mut pipeline_sync, tip } =
-            TestHarness::new(TOTAL_BLOCKS, PIPELINE_DONE_AFTER);
+        let TestHarness {
+            mut pipeline_sync,
+            tip,
+        } = TestHarness::new(TOTAL_BLOCKS, PIPELINE_DONE_AFTER);
 
         let sync_future = poll_fn(|cx| pipeline_sync.poll(cx));
         let next_event = poll!(sync_future);

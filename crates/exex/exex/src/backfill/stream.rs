@@ -79,19 +79,21 @@ where
     /// Spawns a new task calling the [`BackfillTaskIterator::next`] method and pushes it to the end
     /// of the [`BackfillTasks`] queue.
     fn push_back(&mut self, mut job: BackfillTaskIterator<T>) {
-        self.tasks.push_back(tokio::task::spawn_blocking(move || BackfillTaskOutput {
-            result: job.next(),
-            job,
-        }));
+        self.tasks
+            .push_back(tokio::task::spawn_blocking(move || BackfillTaskOutput {
+                result: job.next(),
+                job,
+            }));
     }
 
     /// Spawns a new task calling the [`BackfillTaskIterator::next`] method and pushes it to the
     /// front of the  [`BackfillTasks`] queue.
     fn push_front(&mut self, mut job: BackfillTaskIterator<T>) {
-        self.tasks.push_front(tokio::task::spawn_blocking(move || BackfillTaskOutput {
-            result: job.next(),
-            job,
-        }));
+        self.tasks
+            .push_front(tokio::task::spawn_blocking(move || BackfillTaskOutput {
+                result: job.next(),
+                job,
+            }));
     }
 
     /// Polls the next task in the [`BackfillTasks`] queue until it returns a non-empty result.
@@ -99,13 +101,17 @@ where
         while let Some(res) = ready!(self.tasks.poll_next_unpin(cx)) {
             let task_result = res.map_err(BlockExecutionError::other)?;
 
-            if let BackfillTaskOutput { result: Some(job_result), job } = task_result {
+            if let BackfillTaskOutput {
+                result: Some(job_result),
+                job,
+            } = task_result
+            {
                 // If the task returned a non-empty result, a new task advancing the job is created
                 // and pushed to the __front__ of the queue, so that the next item of this returned
                 // next.
                 self.push_front(job);
 
-                return Poll::Ready(Some(job_result))
+                return Poll::Ready(Some(job_result));
             };
         }
 
@@ -207,7 +213,10 @@ impl<E, P> From<SingleBlockBackfillJob<E, P>> for StreamBackfillJob<E, P, Single
             tasks: FuturesOrdered::new(),
             parallelism: job.stream_parallelism,
             batch_size: 1,
-            thresholds: ExecutionStageThresholds { max_blocks: Some(1), ..Default::default() },
+            thresholds: ExecutionStageThresholds {
+                max_blocks: Some(1),
+                ..Default::default()
+            },
         }
     }
 }
@@ -217,7 +226,10 @@ where
     E: BlockExecutorProvider,
 {
     fn from(job: BackfillJob<E, P>) -> Self {
-        let batch_size = job.thresholds.max_blocks.map_or(DEFAULT_BATCH_SIZE, |max| max as usize);
+        let batch_size = job
+            .thresholds
+            .max_blocks
+            .map_or(DEFAULT_BATCH_SIZE, |max| max as usize);
         Self {
             executor: job.executor,
             provider: job.provider,
@@ -311,7 +323,10 @@ mod tests {
 
         // Backfill the same range
         let factory = BackfillJobFactory::new(executor.clone(), blockchain_db.clone())
-            .with_thresholds(ExecutionStageThresholds { max_blocks: Some(2), ..Default::default() })
+            .with_thresholds(ExecutionStageThresholds {
+                max_blocks: Some(2),
+                ..Default::default()
+            })
             .with_stream_parallelism(1);
         let mut backfill_stream = factory.backfill(1..=2).into_stream();
         let mut chain = backfill_stream.next().await.unwrap().unwrap();

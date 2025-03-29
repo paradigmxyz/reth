@@ -294,7 +294,9 @@ impl<N: NetworkPrimitives> SessionManager<N> {
             let hello_message = self.hello_message.clone();
             let fork_filter = self.fork_filter.clone();
             let status = self.status;
-            let extra_handlers = self.extra_protocols.on_outgoing(remote_addr, remote_peer_id);
+            let extra_handlers = self
+                .extra_protocols
+                .on_outgoing(remote_addr, remote_peer_id);
             self.spawn(pending_session_with_timeout(
                 self.pending_session_timeout,
                 session_id,
@@ -355,18 +357,21 @@ impl<N: NetworkPrimitives> SessionManager<N> {
     /// Sends a message to the peer's session
     pub fn send_message(&self, peer_id: &PeerId, msg: PeerMessage<N>) {
         if let Some(session) = self.active_sessions.get(peer_id) {
-            let _ = session.commands_to_session.try_send(SessionCommand::Message(msg)).inspect_err(
-                |e| {
+            let _ = session
+                .commands_to_session
+                .try_send(SessionCommand::Message(msg))
+                .inspect_err(|e| {
                     if let TrySendError::Full(_) = e {
                         debug!(
                             target: "net::session",
                             ?peer_id,
                             "session command buffer full, dropping message"
                         );
-                        self.metrics.total_outgoing_peer_messages_dropped.increment(1);
+                        self.metrics
+                            .total_outgoing_peer_messages_dropped
+                            .increment(1);
                     }
-                },
-            );
+                });
         }
     }
 
@@ -394,7 +399,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
     ) {
         if !self.disconnections_counter.has_capacity() {
             // drop the connection if we don't have capacity for gracefully disconnecting
-            return
+            return;
         }
 
         let guard = self.disconnections_counter.clone();
@@ -425,14 +430,20 @@ impl<N: NetworkPrimitives> SessionManager<N> {
             }
             Poll::Ready(Some(event)) => {
                 return match event {
-                    ActiveSessionMessage::Disconnected { peer_id, remote_addr } => {
+                    ActiveSessionMessage::Disconnected {
+                        peer_id,
+                        remote_addr,
+                    } => {
                         trace!(
                             target: "net::session",
                             ?peer_id,
                             "gracefully disconnected active session."
                         );
                         self.remove_active_session(&peer_id);
-                        Poll::Ready(SessionEvent::Disconnected { peer_id, remote_addr })
+                        Poll::Ready(SessionEvent::Disconnected {
+                            peer_id,
+                            remote_addr,
+                        })
                     }
                     ActiveSessionMessage::ClosedOnConnectionError {
                         peer_id,
@@ -494,15 +505,17 @@ impl<N: NetworkPrimitives> SessionManager<N> {
 
                     self.spawn(async move {
                         // send a disconnect message
-                        let _ =
-                            conn.into_inner().disconnect(DisconnectReason::AlreadyConnected).await;
+                        let _ = conn
+                            .into_inner()
+                            .disconnect(DisconnectReason::AlreadyConnected)
+                            .await;
                     });
 
                     return Poll::Ready(SessionEvent::AlreadyConnected {
                         peer_id,
                         remote_addr,
                         direction,
-                    })
+                    });
                 }
 
                 let (commands_to_session, commands_rx) = mpsc::channel(self.session_command_buffer);
@@ -578,7 +591,12 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     timeout,
                 })
             }
-            PendingSessionEvent::Disconnected { remote_addr, session_id, direction, error } => {
+            PendingSessionEvent::Disconnected {
+                remote_addr,
+                session_id,
+                direction,
+                error,
+            } => {
                 trace!(
                     target: "net::session",
                     ?session_id,
@@ -618,9 +636,18 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     "connection refused"
                 );
                 self.remove_pending_session(&session_id);
-                Poll::Ready(SessionEvent::OutgoingConnectionError { remote_addr, peer_id, error })
+                Poll::Ready(SessionEvent::OutgoingConnectionError {
+                    remote_addr,
+                    peer_id,
+                    error,
+                })
             }
-            PendingSessionEvent::EciesAuthError { remote_addr, session_id, error, direction } => {
+            PendingSessionEvent::EciesAuthError {
+                remote_addr,
+                session_id,
+                error,
+                direction,
+            } => {
                 trace!(
                     target: "net::session",
                     %error,
@@ -881,7 +908,7 @@ async fn start_pending_outbound_session<N: NetworkPrimitives>(
                     error,
                 })
                 .await;
-            return
+            return;
         }
     };
     authenticate(
@@ -929,7 +956,7 @@ async fn authenticate<N: NetworkPrimitives>(
                     direction,
                 })
                 .await;
-            return
+            return;
         }
     };
 
@@ -1064,7 +1091,12 @@ async fn authenticate_stream<N: NetworkPrimitives>(
 
         // perform the eth protocol handshake
         match handshake
-            .handshake(&mut p2p_stream, status, fork_filter.clone(), HANDSHAKE_TIMEOUT)
+            .handshake(
+                &mut p2p_stream,
+                status,
+                fork_filter.clone(),
+                HANDSHAKE_TIMEOUT,
+            )
             .await
         {
             Ok(their_status) => {
@@ -1096,18 +1128,20 @@ async fn authenticate_stream<N: NetworkPrimitives>(
                 .ok();
         }
 
-        let (multiplex_stream, their_status) =
-            match multiplex_stream.into_eth_satellite_stream(status, fork_filter).await {
-                Ok((multiplex_stream, their_status)) => (multiplex_stream, their_status),
-                Err(err) => {
-                    return PendingSessionEvent::Disconnected {
-                        remote_addr,
-                        session_id,
-                        direction,
-                        error: Some(PendingSessionHandshakeError::Eth(err)),
-                    }
+        let (multiplex_stream, their_status) = match multiplex_stream
+            .into_eth_satellite_stream(status, fork_filter)
+            .await
+        {
+            Ok((multiplex_stream, their_status)) => (multiplex_stream, their_status),
+            Err(err) => {
+                return PendingSessionEvent::Disconnected {
+                    remote_addr,
+                    session_id,
+                    direction,
+                    error: Some(PendingSessionHandshakeError::Eth(err)),
                 }
-            };
+            }
+        };
 
         (multiplex_stream.into(), their_status)
     };

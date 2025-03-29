@@ -73,7 +73,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportComm
             "Chunking chain import"
         );
 
-        let Environment { provider_factory, config, .. } = self.env.init::<N>(AccessRights::RW)?;
+        let Environment {
+            provider_factory,
+            config,
+            ..
+        } = self.env.init::<N>(AccessRights::RW)?;
 
         let components = components(provider_factory.chain_spec());
         let executor = components.executor().clone();
@@ -90,15 +94,18 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportComm
             .sealed_header(provider_factory.last_block_number()?)?
             .expect("should have genesis");
 
-        while let Some(file_client) =
-            reader.next_chunk::<BlockTy<N>>(consensus.clone(), Some(sealed_header)).await?
+        while let Some(file_client) = reader
+            .next_chunk::<BlockTy<N>>(consensus.clone(), Some(sealed_header))
+            .await?
         {
             // create a new FileClient from chunk read from file
             info!(target: "reth::cli",
                 "Importing chain file chunk"
             );
 
-            let tip = file_client.tip().ok_or(eyre::eyre!("file client has no tip"))?;
+            let tip = file_client
+                .tip()
+                .ok_or(eyre::eyre!("file client has no tip"))?;
             info!(target: "reth::cli", "Chain file chunk read");
 
             total_decoded_blocks += file_client.headers_len();
@@ -120,9 +127,14 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportComm
 
             let provider = provider_factory.provider()?;
 
-            let latest_block_number =
-                provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
-            tokio::spawn(reth_node_events::node::handle_events(None, latest_block_number, events));
+            let latest_block_number = provider
+                .get_stage_checkpoint(StageId::Finish)?
+                .map(|ch| ch.block_number);
+            tokio::spawn(reth_node_events::node::handle_events(
+                None,
+                latest_block_number,
+                events,
+            ));
 
             // Run pipeline
             info!(target: "reth::cli", "Starting sync pipeline");
@@ -139,10 +151,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportComm
         let provider = provider_factory.provider()?;
 
         let total_imported_blocks = provider.tx_ref().entries::<tables::HeaderNumbers>()?;
-        let total_imported_txns = provider.tx_ref().entries::<tables::TransactionHashNumbers>()?;
+        let total_imported_txns = provider
+            .tx_ref()
+            .entries::<tables::TransactionHashNumbers>()?;
 
-        if total_decoded_blocks != total_imported_blocks ||
-            total_decoded_txns != total_imported_txns
+        if total_decoded_blocks != total_imported_blocks
+            || total_decoded_txns != total_imported_txns
         {
             error!(target: "reth::cli",
                 total_decoded_blocks,
@@ -200,7 +214,11 @@ where
     header_downloader.update_sync_target(SyncTarget::Tip(file_client.tip().unwrap()));
 
     let mut body_downloader = BodiesDownloaderBuilder::new(config.stages.bodies)
-        .build(file_client.clone(), consensus.clone(), provider_factory.clone())
+        .build(
+            file_client.clone(),
+            consensus.clone(),
+            provider_factory.clone(),
+        )
         .into_task();
     // TODO: The pipeline should correctly configure the downloader on its own.
     // Find the possibility to remove unnecessary pre-configuration.

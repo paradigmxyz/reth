@@ -17,7 +17,9 @@ pub const ADDRESS_L2_TO_L1_MESSAGE_PASSER: Address =
 pub fn ensure_withdrawals_storage_root_is_some<H: BlockHeader>(
     header: H,
 ) -> Result<(), OpConsensusError> {
-    header.withdrawals_root().ok_or(OpConsensusError::L2WithdrawalsRootMissing)?;
+    header
+        .withdrawals_root()
+        .ok_or(OpConsensusError::L2WithdrawalsRootMissing)?;
 
     Ok(())
 }
@@ -38,7 +40,9 @@ pub fn withdrawals_root<DB: StorageRootProvider>(
             .map(|acc| {
                 HashedStorage::from_plain_storage(
                     acc.status,
-                    acc.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
+                    acc.storage
+                        .iter()
+                        .map(|(slot, value)| (slot, &value.present_value)),
                 )
             })
             .unwrap_or_default(),
@@ -72,8 +76,9 @@ where
     DB: StorageRootProvider,
     H: BlockHeader + Debug,
 {
-    let header_storage_root =
-        header.withdrawals_root().ok_or(OpConsensusError::L2WithdrawalsRootMissing)?;
+    let header_storage_root = header
+        .withdrawals_root()
+        .ok_or(OpConsensusError::L2WithdrawalsRootMissing)?;
 
     let storage_root = withdrawals_root(state_updates, state)
         .map_err(OpConsensusError::L2WithdrawalsRootCalculationFail)?;
@@ -82,7 +87,7 @@ where
         return Err(OpConsensusError::L2WithdrawalsRootMismatch {
             header: header_storage_root,
             exec_res: storage_root,
-        })
+        });
     }
 
     Ok(())
@@ -104,8 +109,9 @@ where
     DB: StorageRootProvider,
     H: BlockHeader + core::fmt::Debug,
 {
-    let header_storage_root =
-        header.withdrawals_root().ok_or(OpConsensusError::L2WithdrawalsRootMissing)?;
+    let header_storage_root = header
+        .withdrawals_root()
+        .ok_or(OpConsensusError::L2WithdrawalsRootMissing)?;
 
     let storage_root = withdrawals_root_prehashed(hashed_storage_updates, state)
         .map_err(OpConsensusError::L2WithdrawalsRootCalculationFail)?;
@@ -114,7 +120,7 @@ where
         return Err(OpConsensusError::L2WithdrawalsRootMismatch {
             header: header_storage_root,
             exec_res: storage_root,
-        })
+        });
     }
 
     Ok(())
@@ -163,13 +169,18 @@ mod test {
         // note: must be empty (default) chain spec to ensure storage is empty after init genesis,
         // otherwise can't use `storage_root_prehashed` to determine storage root later
         let provider_factory = create_test_provider_factory_with_node_types::<OpNode>(Arc::new(
-            OpChainSpecBuilder::default().chain(Chain::dev()).genesis(Default::default()).build(),
+            OpChainSpecBuilder::default()
+                .chain(Chain::dev())
+                .genesis(Default::default())
+                .build(),
         ));
         let _ = init_genesis(&provider_factory).unwrap();
 
         // write account storage to database
         let provider_rw = provider_factory.provider_rw().unwrap();
-        provider_rw.write_hashed_state(&state.clone().into_sorted()).unwrap();
+        provider_rw
+            .write_hashed_state(&state.clone().into_sorted())
+            .unwrap();
         provider_rw.commit().unwrap();
 
         // create block header with withdrawals root set to storage root of l2tol1-msg-passer

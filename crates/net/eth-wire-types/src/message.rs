@@ -89,20 +89,23 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
             }
             EthMessageID::GetNodeData => {
                 if version >= EthVersion::Eth67 {
-                    return Err(MessageError::Invalid(version, EthMessageID::GetNodeData))
+                    return Err(MessageError::Invalid(version, EthMessageID::GetNodeData));
                 }
                 EthMessage::GetNodeData(RequestPair::decode(buf)?)
             }
             EthMessageID::NodeData => {
                 if version >= EthVersion::Eth67 {
-                    return Err(MessageError::Invalid(version, EthMessageID::GetNodeData))
+                    return Err(MessageError::Invalid(version, EthMessageID::GetNodeData));
                 }
                 EthMessage::NodeData(RequestPair::decode(buf)?)
             }
             EthMessageID::GetReceipts => EthMessage::GetReceipts(RequestPair::decode(buf)?),
             EthMessageID::Receipts => EthMessage::Receipts(RequestPair::decode(buf)?),
         };
-        Ok(Self { message_type, message })
+        Ok(Self {
+            message_type,
+            message,
+        })
     }
 }
 
@@ -120,7 +123,10 @@ impl<N: NetworkPrimitives> Encodable for ProtocolMessage<N> {
 
 impl<N: NetworkPrimitives> From<EthMessage<N>> for ProtocolMessage<N> {
     fn from(message: EthMessage<N>) -> Self {
-        Self { message_type: message.message_id(), message }
+        Self {
+            message_type: message.message_id(),
+            message,
+        }
     }
 }
 
@@ -148,7 +154,10 @@ impl<N: NetworkPrimitives> Encodable for ProtocolBroadcastMessage<N> {
 
 impl<N: NetworkPrimitives> From<EthBroadcastMessage<N>> for ProtocolBroadcastMessage<N> {
     fn from(message: EthBroadcastMessage<N>) -> Self {
-        Self { message_type: message.message_id(), message }
+        Self {
+            message_type: message.message_id(),
+            message,
+        }
     }
 }
 
@@ -259,11 +268,11 @@ impl<N: NetworkPrimitives> EthMessage<N> {
     pub const fn is_request(&self) -> bool {
         matches!(
             self,
-            Self::GetBlockBodies(_) |
-                Self::GetBlockHeaders(_) |
-                Self::GetReceipts(_) |
-                Self::GetPooledTransactions(_) |
-                Self::GetNodeData(_)
+            Self::GetBlockBodies(_)
+                | Self::GetBlockHeaders(_)
+                | Self::GetReceipts(_)
+                | Self::GetPooledTransactions(_)
+                | Self::GetNodeData(_)
         )
     }
 
@@ -271,11 +280,11 @@ impl<N: NetworkPrimitives> EthMessage<N> {
     pub const fn is_response(&self) -> bool {
         matches!(
             self,
-            Self::PooledTransactions(_) |
-                Self::Receipts(_) |
-                Self::BlockHeaders(_) |
-                Self::BlockBodies(_) |
-                Self::NodeData(_)
+            Self::PooledTransactions(_)
+                | Self::Receipts(_)
+                | Self::BlockHeaders(_)
+                | Self::BlockBodies(_)
+                | Self::NodeData(_)
         )
     }
 }
@@ -489,8 +498,10 @@ where
     T: Encodable,
 {
     fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
-        let header =
-            Header { list: true, payload_length: self.request_id.length() + self.message.length() };
+        let header = Header {
+            list: true,
+            payload_length: self.request_id.length() + self.message.length(),
+        };
 
         header.encode(out);
         self.request_id.encode(out);
@@ -522,10 +533,13 @@ where
         // RequestPair
         let consumed_len = initial_length - buf.len();
         if consumed_len != header.payload_length {
-            return Err(alloy_rlp::Error::UnexpectedLength)
+            return Err(alloy_rlp::Error::UnexpectedLength);
         }
 
-        Ok(Self { request_id, message })
+        Ok(Self {
+            request_id,
+            message,
+        })
     }
 }
 
@@ -566,8 +580,10 @@ mod tests {
             request_id: 1337,
             message: NodeData(vec![]),
         });
-        let buf =
-            encode(ProtocolMessage { message_type: EthMessageID::NodeData, message: node_data });
+        let buf = encode(ProtocolMessage {
+            message_type: EthMessageID::NodeData,
+            message: node_data,
+        });
         let msg = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
             crate::EthVersion::Eth67,
             &mut &buf[..],
@@ -577,7 +593,10 @@ mod tests {
 
     #[test]
     fn request_pair_encode() {
-        let request_pair = RequestPair { request_id: 1337, message: vec![5u8] };
+        let request_pair = RequestPair {
+            request_id: 1337,
+            message: vec![5u8],
+        };
 
         // c5: start of list (c0) + len(full_list) (length is <55 bytes)
         // 82: 0x80 + len(1337)
@@ -594,7 +613,10 @@ mod tests {
     fn request_pair_decode() {
         let raw_pair = &hex!("c5820539c105")[..];
 
-        let expected = RequestPair { request_id: 1337, message: vec![5u8] };
+        let expected = RequestPair {
+            request_id: 1337,
+            message: vec![5u8],
+        };
 
         let got = RequestPair::<Vec<u8>>::decode(&mut &*raw_pair).unwrap();
         assert_eq!(expected.length(), raw_pair.len());
@@ -620,11 +642,12 @@ mod tests {
 
     #[test]
     fn empty_block_bodies_protocol() {
-        let empty_block_bodies =
-            ProtocolMessage::from(EthMessage::<EthNetworkPrimitives>::BlockBodies(RequestPair {
+        let empty_block_bodies = ProtocolMessage::from(
+            EthMessage::<EthNetworkPrimitives>::BlockBodies(RequestPair {
                 request_id: 0,
                 message: Default::default(),
-            }));
+            }),
+        );
         let mut buf = Vec::new();
         empty_block_bodies.encode(&mut buf);
         let decoded =
@@ -634,8 +657,8 @@ mod tests {
 
     #[test]
     fn empty_block_body_protocol() {
-        let empty_block_bodies =
-            ProtocolMessage::from(EthMessage::<EthNetworkPrimitives>::BlockBodies(RequestPair {
+        let empty_block_bodies = ProtocolMessage::from(
+            EthMessage::<EthNetworkPrimitives>::BlockBodies(RequestPair {
                 request_id: 0,
                 message: vec![BlockBody {
                     transactions: vec![],
@@ -643,7 +666,8 @@ mod tests {
                     withdrawals: Some(Default::default()),
                 }]
                 .into(),
-            }));
+            }),
+        );
         let mut buf = Vec::new();
         empty_block_bodies.encode(&mut buf);
         let decoded =
@@ -659,6 +683,9 @@ mod tests {
             &mut &buf[..],
         )
         .unwrap_err();
-        assert!(matches!(msg, MessageError::RlpError(alloy_rlp::Error::InputTooShort)));
+        assert!(matches!(
+            msg,
+            MessageError::RlpError(alloy_rlp::Error::InputTooShort)
+        ));
     }
 }

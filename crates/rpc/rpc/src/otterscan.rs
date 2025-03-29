@@ -58,7 +58,11 @@ where
             })
             .sum::<u128>();
 
-        Ok(BlockDetails::new(block, Default::default(), U256::from(total_fees)))
+        Ok(BlockDetails::new(
+            block,
+            Default::default(),
+            U256::from(total_fees),
+        ))
     }
 }
 
@@ -80,12 +84,16 @@ where
         &self,
         block_number: u64,
     ) -> RpcResult<Option<RpcHeader<Eth::NetworkTypes>>> {
-        self.eth.header_by_number(BlockNumberOrTag::Number(block_number)).await
+        self.eth
+            .header_by_number(BlockNumberOrTag::Number(block_number))
+            .await
     }
 
     /// Handler for `ots_hasCode`
     async fn has_code(&self, address: Address, block_id: Option<BlockId>) -> RpcResult<bool> {
-        EthApiServer::get_code(&self.eth, address, block_id).await.map(|code| !code.is_empty())
+        EthApiServer::get_code(&self.eth, address, block_id)
+            .await
+            .map(|code| !code.is_empty())
     }
 
     /// Handler for `ots_getApiLevel`
@@ -226,7 +234,7 @@ where
         if tx_len != receipts.len() {
             return Err(internal_rpc_err(
                 "the number of transactions does not match the number of receipts",
-            ))
+            ));
         }
 
         // make sure the block is full
@@ -284,7 +292,10 @@ where
             .collect();
 
         // use `transaction_count` to indicate the paginate information
-        let mut block = OtsBlockTransactions { fullblock: block.into(), receipts };
+        let mut block = OtsBlockTransactions {
+            fullblock: block.into(),
+            receipts,
+        };
         block.fullblock.transaction_count = tx_len;
         Ok(block)
     }
@@ -334,9 +345,11 @@ where
             self.eth.block_number()?.saturating_to(),
             |mid| {
                 Box::pin(async move {
-                    Ok(!EthApiServer::get_code(&self.eth, address, Some(mid.into()))
-                        .await?
-                        .is_empty())
+                    Ok(
+                        !EthApiServer::get_code(&self.eth, address, Some(mid.into()))
+                            .await?
+                            .is_empty(),
+                    )
                 })
             },
         )
@@ -349,7 +362,9 @@ where
                 None,
                 TracingInspectorConfig::default_parity(),
                 |tx_info, inspector, _, _, _| {
-                    Ok(inspector.into_parity_builder().into_localized_transaction_traces(tx_info))
+                    Ok(inspector
+                        .into_parity_builder()
+                        .into_localized_transaction_traces(tx_info))
                 },
             )
             .await

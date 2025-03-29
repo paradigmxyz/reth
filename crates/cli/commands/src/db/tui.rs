@@ -62,8 +62,10 @@ impl<T: Table> Entries<T> {
     fn set(&mut self, new_entries: Vec<TableRow<T>>) {
         match self {
             Self::RawValues(old_entries) => {
-                *old_entries =
-                    new_entries.into_iter().map(|(key, value)| (key, value.into())).collect()
+                *old_entries = new_entries
+                    .into_iter()
+                    .map(|(key, value)| (key, value.into()))
+                    .collect()
             }
             Self::Values(old_entries) => *old_entries = new_entries,
         }
@@ -80,7 +82,10 @@ impl<T: Table> Entries<T> {
     /// Returns an iterator over keys of the internal [Vec]. For both [`Entries::RawValues`] and
     /// [`Entries::Values`], this iterator will yield [`Table::Key`].
     const fn iter_keys(&self) -> EntriesKeyIter<'_, T> {
-        EntriesKeyIter { entries: self, index: 0 }
+        EntriesKeyIter {
+            entries: self,
+            index: 0,
+        }
     }
 }
 
@@ -157,7 +162,13 @@ where
         self.list_state.select(Some(
             self.list_state
                 .selected()
-                .map(|i| if i >= self.entries.len() - 1 { 0 } else { i + 1 })
+                .map(|i| {
+                    if i >= self.entries.len() - 1 {
+                        0
+                    } else {
+                        i + 1
+                    }
+                })
                 .unwrap_or(0),
         ));
     }
@@ -167,7 +178,13 @@ where
         self.list_state.select(Some(
             self.list_state
                 .selected()
-                .map(|i| if i == 0 { self.entries.len() - 1 } else { i - 1 })
+                .map(|i| {
+                    if i == 0 {
+                        self.entries.len() - 1
+                    } else {
+                        i - 1
+                    }
+                })
                 .unwrap_or(0),
         ));
     }
@@ -249,8 +266,9 @@ where
         terminal.draw(|f| ui(f, app))?;
 
         // Calculate timeout
-        let timeout =
-            tick_rate.checked_sub(last_tick.elapsed()).unwrap_or_else(|| Duration::from_secs(0));
+        let timeout = tick_rate
+            .checked_sub(last_tick.elapsed())
+            .unwrap_or_else(|| Duration::from_secs(0));
 
         // Poll events
         if crossterm::event::poll(timeout)? {
@@ -291,7 +309,7 @@ where
             }
         }
 
-        return Ok(false)
+        return Ok(false);
     }
 
     match event {
@@ -352,7 +370,11 @@ where
             .iter_keys()
             .enumerate()
             .map(|(i, k)| {
-                ListItem::new(format!("[{:0>width$}]: {k:?}", i + app.skip, width = key_length))
+                ListItem::new(format!(
+                    "[{:0>width$}]: {k:?}",
+                    i + app.skip,
+                    width = key_length
+                ))
             })
             .collect::<Vec<_>>();
 
@@ -364,7 +386,11 @@ where
                 app.total_entries
             )))
             .style(Style::default().fg(Color::White))
-            .highlight_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::ITALIC))
+            .highlight_style(
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::ITALIC),
+            )
             .highlight_symbol("➜ ");
         f.render_stateful_widget(key_list, inner_chunks[0], &mut app.list_state);
 
@@ -373,12 +399,12 @@ where
                 .selected()
                 .and_then(|selected| {
                     let maybe_serialized = match &app.entries {
-                        Entries::RawValues(entries) => {
-                            entries.get(selected).map(|(_, v)| serde_json::to_string(v.raw_value()))
-                        }
-                        Entries::Values(entries) => {
-                            entries.get(selected).map(|(_, v)| serde_json::to_string_pretty(v))
-                        }
+                        Entries::RawValues(entries) => entries
+                            .get(selected)
+                            .map(|(_, v)| serde_json::to_string(v.raw_value())),
+                        Entries::Values(entries) => entries
+                            .get(selected)
+                            .map(|(_, v)| serde_json::to_string_pretty(v)),
                     };
                     maybe_serialized.map(|ser| {
                         ser.unwrap_or_else(|error| format!("Error serializing value: {error}"))
@@ -395,7 +421,10 @@ where
     // Footer
     let footer = match app.mode {
         ViewMode::Normal => Paragraph::new(
-            CMDS.iter().map(|(k, v)| format!("[{k}] {v}")).collect::<Vec<_>>().join(" | "),
+            CMDS.iter()
+                .map(|(k, v)| format!("[{k}] {v}"))
+                .collect::<Vec<_>>()
+                .join(" | "),
         ),
         ViewMode::GoToPage => Paragraph::new(format!(
             "Go to page (max {}): {}",
@@ -408,6 +437,10 @@ where
         ViewMode::Normal => Alignment::Center,
         ViewMode::GoToPage => Alignment::Left,
     })
-    .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+    .style(
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    );
     f.render_widget(footer, outer_chunks[1]);
 }

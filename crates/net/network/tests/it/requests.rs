@@ -107,13 +107,20 @@ async fn test_get_header() {
     // request some headers
     for idx in 0..100 {
         // Set a new random header to the mock storage and request it via the network
-        let header = Header { number: start + idx, parent_hash: hash, ..Default::default() };
+        let header = Header {
+            number: start + idx,
+            parent_hash: hash,
+            ..Default::default()
+        };
         hash = rng.gen();
 
         mock_provider.add_header(hash, header.clone());
 
-        let req =
-            HeadersRequest { start: hash.into(), limit: 1, direction: HeadersDirection::Falling };
+        let req = HeadersRequest {
+            start: hash.into(),
+            limit: 1,
+            direction: HeadersDirection::Falling,
+        };
 
         let res = fetch0.get_headers(req).await;
         assert!(res.is_ok(), "{res:?}");

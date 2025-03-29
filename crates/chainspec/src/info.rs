@@ -12,6 +12,9 @@ pub struct ChainInfo {
 
 impl From<ChainInfo> for BlockNumHash {
     fn from(value: ChainInfo) -> Self {
-        Self { number: value.best_number, hash: value.best_hash }
+        Self {
+            number: value.best_number,
+            hash: value.best_hash,
+        }
     }
 }

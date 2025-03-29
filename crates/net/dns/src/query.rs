@@ -59,7 +59,8 @@ impl<R: Resolver, K: EnrKeyUnambiguous> QueryPool<R, K> {
     pub(crate) fn resolve_root(&mut self, link: LinkEntry<K>) {
         let resolver = Arc::clone(&self.resolver);
         let timeout = self.lookup_timeout;
-        self.queued_queries.push_back(Query::Root(Box::pin(resolve_root(resolver, link, timeout))))
+        self.queued_queries
+            .push_back(Query::Root(Box::pin(resolve_root(resolver, link, timeout))))
     }
 
     /// Resolves the [`DnsEntry`] for `<hash.domain>`
@@ -67,7 +68,9 @@ impl<R: Resolver, K: EnrKeyUnambiguous> QueryPool<R, K> {
         let resolver = Arc::clone(&self.resolver);
         let timeout = self.lookup_timeout;
         self.queued_queries
-            .push_back(Query::Entry(Box::pin(resolve_entry(resolver, link, hash, kind, timeout))))
+            .push_back(Query::Entry(Box::pin(resolve_entry(
+                resolver, link, hash, kind, timeout,
+            ))))
     }
 
     /// Advances the state of the queries
@@ -75,7 +78,7 @@ impl<R: Resolver, K: EnrKeyUnambiguous> QueryPool<R, K> {
         loop {
             // drain buffered events first
             if let Some(event) = self.queued_outcomes.pop_front() {
-                return Poll::Ready(event)
+                return Poll::Ready(event);
             }
 
             // queue in new queries if we have capacity
@@ -84,10 +87,10 @@ impl<R: Resolver, K: EnrKeyUnambiguous> QueryPool<R, K> {
                     if let Some(query) = self.queued_queries.pop_front() {
                         self.rate_limit.tick();
                         self.active_queries.push(query);
-                        continue 'queries
+                        continue 'queries;
                     }
                 }
-                break
+                break;
             }
 
             // advance all queries
@@ -102,7 +105,7 @@ impl<R: Resolver, K: EnrKeyUnambiguous> QueryPool<R, K> {
             }
 
             if self.queued_outcomes.is_empty() {
-                return Poll::Pending
+                return Poll::Pending;
             }
         }
     }
@@ -162,7 +165,12 @@ async fn resolve_entry<K: EnrKeyUnambiguous, R: Resolver>(
     timeout: Duration,
 ) -> ResolveEntryResult<K> {
     let fqn = format!("{hash}.{}", link.domain);
-    let mut resp = ResolveEntryResult { entry: None, link, hash, kind };
+    let mut resp = ResolveEntryResult {
+        entry: None,
+        link,
+        hash,
+        kind,
+    };
     match lookup_with_timeout::<R>(&resolver, &fqn, timeout).await {
         Ok(Some(entry)) => {
             resp.entry = Some(entry.parse::<DnsEntry<K>>().map_err(|err| err.into()))
@@ -250,8 +258,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_timeouts() {
-        let config =
-            DnsDiscoveryConfig { lookup_timeout: Duration::from_millis(500), ..Default::default() };
+        let config = DnsDiscoveryConfig {
+            lookup_timeout: Duration::from_millis(500),
+            ..Default::default()
+        };
         let resolver = Arc::new(TimeoutResolver(config.lookup_timeout * 2));
         let mut pool = QueryPool::new(resolver, config.max_requests_per_sec, config.lookup_timeout);
 

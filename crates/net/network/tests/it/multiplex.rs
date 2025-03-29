@@ -103,8 +103,8 @@ mod proto {
             buf.put_u8(self.message_type as u8);
             match &self.message {
                 PingPongProtoMessageKind::Ping | PingPongProtoMessageKind::Pong => {}
-                PingPongProtoMessageKind::PingMessage(msg) |
-                PingPongProtoMessageKind::PongMessage(msg) => {
+                PingPongProtoMessageKind::PingMessage(msg)
+                | PingPongProtoMessageKind::PongMessage(msg) => {
                     buf.put(msg.as_bytes());
                 }
             }
@@ -114,7 +114,7 @@ mod proto {
         /// Decodes a `TestProtoMessage` from the given message buffer.
         pub fn decode_message(buf: &mut &[u8]) -> Option<Self> {
             if buf.is_empty() {
-                return None
+                return None;
             }
             let id = buf[0];
             buf.advance(1);
@@ -135,7 +135,10 @@ mod proto {
                     String::from_utf8_lossy(&buf[..]).into_owned(),
                 ),
             };
-            Some(Self { message_type, message })
+            Some(Self {
+                message_type,
+                message,
+            })
         }
     }
 }
@@ -149,7 +152,9 @@ impl ProtocolHandler for PingPongProtoHandler {
     type ConnectionHandler = PingPongConnectionHandler;
 
     fn on_incoming(&self, _socket_addr: SocketAddr) -> Option<Self::ConnectionHandler> {
-        Some(PingPongConnectionHandler { state: self.state.clone() })
+        Some(PingPongConnectionHandler {
+            state: self.state.clone(),
+        })
     }
 
     fn on_outgoing(
@@ -157,7 +162,9 @@ impl ProtocolHandler for PingPongProtoHandler {
         _socket_addr: SocketAddr,
         _peer_id: PeerId,
     ) -> Option<Self::ConnectionHandler> {
-        Some(PingPongConnectionHandler { state: self.state.clone() })
+        Some(PingPongConnectionHandler {
+            state: self.state.clone(),
+        })
     }
 }
 
@@ -214,7 +221,11 @@ impl ConnectionHandler for PingPongConnectionHandler {
         let (tx, rx) = mpsc::unbounded_channel();
         self.state
             .events
-            .send(ProtocolEvent::Established { direction, peer_id: _peer_id, to_connection: tx })
+            .send(ProtocolEvent::Established {
+                direction,
+                peer_id: _peer_id,
+                to_connection: tx,
+            })
             .ok();
         PingPongProtoConnection {
             conn,
@@ -238,7 +249,7 @@ impl Stream for PingPongProtoConnection {
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
         if let Some(initial_ping) = this.initial_ping.take() {
-            return Poll::Ready(Some(initial_ping.encoded()))
+            return Poll::Ready(Some(initial_ping.encoded()));
         }
 
         loop {
@@ -248,12 +259,14 @@ impl Stream for PingPongProtoConnection {
                         this.pending_pong = Some(response);
                         Poll::Ready(Some(PingPongProtoMessage::ping_message(msg).encoded()))
                     }
-                }
+                };
             }
-            let Some(msg) = ready!(this.conn.poll_next_unpin(cx)) else { return Poll::Ready(None) };
+            let Some(msg) = ready!(this.conn.poll_next_unpin(cx)) else {
+                return Poll::Ready(None);
+            };
 
             let Some(msg) = PingPongProtoMessage::decode_message(&mut &msg[..]) else {
-                return Poll::Ready(None)
+                return Poll::Ready(None);
             };
 
             match msg.message {
@@ -268,11 +281,11 @@ impl Stream for PingPongProtoConnection {
                     if let Some(sender) = this.pending_pong.take() {
                         sender.send(msg).ok();
                     }
-                    continue
+                    continue;
                 }
             }
 
-            return Poll::Pending
+            return Poll::Pending;
         }
     }
 }
@@ -293,7 +306,9 @@ async fn test_connect_to_non_multiplex_peer() {
     let mut network = NetworkManager::new(config).await.unwrap();
 
     let (tx, _) = mpsc::unbounded_channel();
-    network.add_rlpx_sub_protocol(PingPongProtoHandler { state: ProtocolState { events: tx } });
+    network.add_rlpx_sub_protocol(PingPongProtoHandler {
+        state: ProtocolState { events: tx },
+    });
 
     let handle = network.handle().clone();
     tokio::task::spawn(network);
@@ -325,12 +340,14 @@ async fn test_proto_multiplex() {
     let mut net = Testnet::create_with(2, provider.clone()).await;
 
     let (tx, mut from_peer0) = mpsc::unbounded_channel();
-    net.peers_mut()[0]
-        .add_rlpx_sub_protocol(PingPongProtoHandler { state: ProtocolState { events: tx } });
+    net.peers_mut()[0].add_rlpx_sub_protocol(PingPongProtoHandler {
+        state: ProtocolState { events: tx },
+    });
 
     let (tx, mut from_peer1) = mpsc::unbounded_channel();
-    net.peers_mut()[1]
-        .add_rlpx_sub_protocol(PingPongProtoHandler { state: ProtocolState { events: tx } });
+    net.peers_mut()[1].add_rlpx_sub_protocol(PingPongProtoHandler {
+        state: ProtocolState { events: tx },
+    });
 
     let handle = net.spawn();
     // connect all the peers
@@ -338,7 +355,11 @@ async fn test_proto_multiplex() {
 
     let peer0_to_peer1 = from_peer0.recv().await.unwrap();
     let peer0_conn = match peer0_to_peer1 {
-        ProtocolEvent::Established { direction: _, peer_id, to_connection } => {
+        ProtocolEvent::Established {
+            direction: _,
+            peer_id,
+            to_connection,
+        } => {
             assert_eq!(peer_id, *handle.peers()[1].peer_id());
             to_connection
         }
@@ -346,7 +367,11 @@ async fn test_proto_multiplex() {
 
     let peer1_to_peer0 = from_peer1.recv().await.unwrap();
     let peer1_conn = match peer1_to_peer0 {
-        ProtocolEvent::Established { direction: _, peer_id, to_connection } => {
+        ProtocolEvent::Established {
+            direction: _,
+            peer_id,
+            to_connection,
+        } => {
             assert_eq!(peer_id, *handle.peers()[0].peer_id());
             to_connection
         }
@@ -354,7 +379,12 @@ async fn test_proto_multiplex() {
 
     let (tx, rx) = oneshot::channel();
     // send a ping message from peer0 to peer1
-    peer0_conn.send(Command::PingMessage { msg: "hello!".to_string(), response: tx }).unwrap();
+    peer0_conn
+        .send(Command::PingMessage {
+            msg: "hello!".to_string(),
+            response: tx,
+        })
+        .unwrap();
 
     let response = rx.await.unwrap();
     assert_eq!(response, "hello!");
@@ -362,7 +392,10 @@ async fn test_proto_multiplex() {
     let (tx, rx) = oneshot::channel();
     // send a ping message from peer1 to peer0
     peer1_conn
-        .send(Command::PingMessage { msg: "hello from peer1!".to_string(), response: tx })
+        .send(Command::PingMessage {
+            msg: "hello from peer1!".to_string(),
+            response: tx,
+        })
         .unwrap();
 
     let response = rx.await.unwrap();

@@ -158,7 +158,13 @@ impl reth_codecs::Compact for CustomHeader {
     fn from_compact(buf: &[u8], identifier: usize) -> (Self, &[u8]) {
         let (eth_header, buf) = Compact::from_compact(buf, identifier);
         let (extension, buf) = Compact::from_compact(buf, buf.len());
-        (Self { inner: eth_header, extension }, buf)
+        (
+            Self {
+                inner: eth_header,
+                extension,
+            },
+            buf,
+        )
     }
 }
 
@@ -177,7 +183,10 @@ mod serde_bincode_compat {
 
     impl From<CustomHeader<'_>> for super::CustomHeader {
         fn from(value: CustomHeader) -> Self {
-            Self { inner: value.inner.into(), extension: value.extension }
+            Self {
+                inner: value.inner.into(),
+                extension: value.extension,
+            }
         }
     }
 
@@ -185,7 +194,10 @@ mod serde_bincode_compat {
         type BincodeRepr<'a> = CustomHeader<'a>;
 
         fn as_repr(&self) -> Self::BincodeRepr<'_> {
-            CustomHeader { inner: self.inner.as_repr(), extension: self.extension }
+            CustomHeader {
+                inner: self.inner.as_repr(),
+                extension: self.extension,
+            }
         }
 
         fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {

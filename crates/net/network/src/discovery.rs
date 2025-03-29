@@ -84,13 +84,15 @@ impl Discovery {
             NodeRecord::from_secret_key(discovery_v4_addr, &sk).with_tcp_port(tcp_addr.port());
 
         let discv4_future = async {
-            let Some(disc_config) = discv4_config else { return Ok((None, None, None)) };
+            let Some(disc_config) = discv4_config else {
+                return Ok((None, None, None));
+            };
             let (discv4, mut discv4_service) =
-                Discv4::bind(discovery_v4_addr, local_enr, sk, disc_config).await.map_err(
-                    |err| {
+                Discv4::bind(discovery_v4_addr, local_enr, sk, disc_config)
+                    .await
+                    .map_err(|err| {
                         NetworkError::from_io_error(err, ServiceKind::Discovery(discovery_v4_addr))
-                    },
-                )?;
+                    })?;
             let discv4_updates = discv4_service.update_stream();
             // spawn the service
             let discv4_service = discv4_service.spawn();
@@ -99,7 +101,9 @@ impl Discovery {
         };
 
         let discv5_future = async {
-            let Some(config) = discv5_config else { return Ok::<_, NetworkError>((None, None)) };
+            let Some(config) = discv5_config else {
+                return Ok::<_, NetworkError>((None, None));
+            };
             let (discv5, discv5_updates, _local_enr_discv5) = Discv5::start(&sk, config).await?;
             Ok((Some(discv5), Some(discv5_updates.into())))
         };
@@ -116,7 +120,11 @@ impl Discovery {
                 );
                 let dns_discovery_updates = service.node_record_stream();
                 let dns_disc_service = service.spawn();
-                (Some(dns_disc), Some(dns_discovery_updates), Some(dns_disc_service))
+                (
+                    Some(dns_disc),
+                    Some(dns_discovery_updates),
+                    Some(dns_disc_service),
+                )
             } else {
                 (None, None, None)
             };
@@ -145,7 +153,8 @@ impl Discovery {
     /// Notifies all registered listeners with the provided `event`.
     #[inline]
     fn notify_listeners(&mut self, event: &DiscoveryEvent) {
-        self.discovery_listeners.retain_mut(|listener| listener.send(event.clone()).is_ok());
+        self.discovery_listeners
+            .retain_mut(|listener| listener.send(event.clone()).is_ok());
     }
 
     /// Updates the `eth:ForkId` field in discv4.
@@ -214,18 +223,20 @@ impl Discovery {
         let tcp_addr = record.tcp_addr();
         if tcp_addr.port() == 0 {
             // useless peer for p2p
-            return
+            return;
         }
         let udp_addr = record.udp_addr();
         let addr = PeerAddr::new(tcp_addr, Some(udp_addr));
-        _ =
-            self.discovered_nodes.get_or_insert(peer_id, || {
-                self.queued_events.push_back(DiscoveryEvent::NewNode(
-                    DiscoveredEvent::EventQueued { peer_id, addr, fork_id },
-                ));
+        _ = self.discovered_nodes.get_or_insert(peer_id, || {
+            self.queued_events
+                .push_back(DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued {
+                    peer_id,
+                    addr,
+                    fork_id,
+                }));
 
-                addr
-            })
+            addr
+        })
     }
 
     fn on_discv4_update(&mut self, update: DiscoveryUpdate) {
@@ -233,9 +244,9 @@ impl Discovery {
             DiscoveryUpdate::Added(record) | DiscoveryUpdate::DiscoveredAtCapacity(record) => {
                 self.on_node_record_update(record, None);
             }
-            DiscoveryUpdate::EnrForkId(node, fork_id) => {
-                self.queued_events.push_back(DiscoveryEvent::EnrForkId(node.id, fork_id))
-            }
+            DiscoveryUpdate::EnrForkId(node, fork_id) => self
+                .queued_events
+                .push_back(DiscoveryEvent::EnrForkId(node.id, fork_id)),
             DiscoveryUpdate::Removed(peer_id) => {
                 self.discovered_nodes.remove(&peer_id);
             }
@@ -252,23 +263,29 @@ impl Discovery {
             // Drain all buffered events first
             if let Some(event) = self.queued_events.pop_front() {
                 self.notify_listeners(&event);
-                return Poll::Ready(event)
+                return Poll::Ready(event);
             }
 
             // drain the discv4 update stream
-            while let Some(Poll::Ready(Some(update))) =
-                self.discv4_updates.as_mut().map(|updates| updates.poll_next_unpin(cx))
+            while let Some(Poll::Ready(Some(update))) = self
+                .discv4_updates
+                .as_mut()
+                .map(|updates| updates.poll_next_unpin(cx))
             {
                 self.on_discv4_update(update)
             }
 
             // drain the discv5 update stream
-            while let Some(Poll::Ready(Some(update))) =
-                self.discv5_updates.as_mut().map(|updates| updates.poll_next_unpin(cx))
+            while let Some(Poll::Ready(Some(update))) = self
+                .discv5_updates
+                .as_mut()
+                .map(|updates| updates.poll_next_unpin(cx))
             {
                 if let Some(discv5) = self.discv5.as_mut() {
-                    if let Some(DiscoveredPeer { node_record, fork_id }) =
-                        discv5.on_discv5_update(update)
+                    if let Some(DiscoveredPeer {
+                        node_record,
+                        fork_id,
+                    }) = discv5.on_discv5_update(update)
                     {
                         self.on_node_record_update(node_record, fork_id);
                     }
@@ -276,8 +293,10 @@ impl Discovery {
             }
 
             // drain the dns update stream
-            while let Some(Poll::Ready(Some(update))) =
-                self.dns_discovery_updates.as_mut().map(|updates| updates.poll_next_unpin(cx))
+            while let Some(Poll::Ready(Some(update))) = self
+                .dns_discovery_updates
+                .as_mut()
+                .map(|updates| updates.poll_next_unpin(cx))
             {
                 self.add_discv4_node(update.node_record);
                 if let Err(err) = self.add_discv5_node(update.enr) {
@@ -290,7 +309,7 @@ impl Discovery {
             }
 
             if self.queued_events.is_empty() {
-                return Poll::Pending
+                return Poll::Pending;
             }
         }
     }
@@ -370,7 +389,9 @@ mod tests {
         let discv5_addr: SocketAddr = format!("127.0.0.1:{udp_port_discv5}").parse().unwrap();
 
         // disable `NatResolver`
-        let discv4_config = Discv4ConfigBuilder::default().external_ip_resolver(None).build();
+        let discv4_config = Discv4ConfigBuilder::default()
+            .external_ip_resolver(None)
+            .build();
 
         let discv5_listen_config = discv5::ListenConfig::from(discv5_addr);
         let discv5_config = reth_discv5::Config::builder(discv5_addr)
@@ -396,15 +417,21 @@ mod tests {
         // set up test
         let mut node_1 = start_discovery_node(40014, 40015).await;
         let discv4_enr_1 = node_1.discv4.as_ref().unwrap().node_record();
-        let discv5_enr_node_1 =
-            node_1.discv5.as_ref().unwrap().with_discv5(|discv5| discv5.local_enr());
+        let discv5_enr_node_1 = node_1
+            .discv5
+            .as_ref()
+            .unwrap()
+            .with_discv5(|discv5| discv5.local_enr());
         let discv4_id_1 = discv4_enr_1.id;
         let discv5_id_1 = discv5_enr_node_1.node_id();
 
         let mut node_2 = start_discovery_node(40024, 40025).await;
         let discv4_enr_2 = node_2.discv4.as_ref().unwrap().node_record();
-        let discv5_enr_node_2 =
-            node_2.discv5.as_ref().unwrap().with_discv5(|discv5| discv5.local_enr());
+        let discv5_enr_node_2 = node_2
+            .discv5
+            .as_ref()
+            .unwrap()
+            .with_discv5(|discv5| discv5.local_enr());
         let discv4_id_2 = discv4_enr_2.id;
         let discv5_id_2 = discv5_enr_node_2.node_id();
 
@@ -448,7 +475,9 @@ mod tests {
         assert_eq!(1, node_2.discovered_nodes.len());
 
         // add node_2:discv5 to node_1:discv5, manual insertion won't emit an event
-        node_1.add_discv5_node(EnrCombinedKeyWrapper(discv5_enr_node_2.clone()).into()).unwrap();
+        node_1
+            .add_discv5_node(EnrCombinedKeyWrapper(discv5_enr_node_2.clone()).into())
+            .unwrap();
         // verify node_2 is in KBuckets of node_1:discv5
         assert!(node_1
             .discv5

@@ -42,26 +42,27 @@ impl<N: NodeTypesWithDB> DbTool<N> {
         let mut hits = 0;
 
         let data = self.provider_factory.db_ref().view(|tx| {
-            let mut cursor =
-                tx.cursor_read::<RawTable<T>>().expect("Was not able to obtain a cursor.");
+            let mut cursor = tx
+                .cursor_read::<RawTable<T>>()
+                .expect("Was not able to obtain a cursor.");
 
             let map_filter = |row: Result<TableRawRow<T>, _>| {
                 if let Ok((k, v)) = row {
                     let (key, value) = (k.into_key(), v.into_value());
 
                     if key.len() + value.len() < filter.min_row_size {
-                        return None
+                        return None;
                     }
                     if key.len() < filter.min_key_size {
-                        return None
+                        return None;
                     }
                     if value.len() < filter.min_value_size {
-                        return None
+                        return None;
                     }
 
                     let result = || {
                         if filter.only_count {
-                            return None
+                            return None;
                         }
                         Some((
                             <T as Table>::Key::decode(&key).unwrap(),
@@ -71,16 +72,16 @@ impl<N: NodeTypesWithDB> DbTool<N> {
 
                     match &*bmb {
                         Some(searcher) => {
-                            if searcher.find_first_in(&value).is_some() ||
-                                searcher.find_first_in(&key).is_some()
+                            if searcher.find_first_in(&value).is_some()
+                                || searcher.find_first_in(&key).is_some()
                             {
                                 hits += 1;
-                                return result()
+                                return result();
                             }
                         }
                         None => {
                             hits += 1;
-                            return result()
+                            return result();
                         }
                     }
                 }
@@ -113,13 +114,18 @@ impl<N: ProviderNodeTypes> DbTool<N> {
     pub fn new(provider_factory: ProviderFactory<N>) -> eyre::Result<Self> {
         // Disable timeout because we are entering a TUI which might read for a long time. We
         // disable on the [`DbTool`] level since it's only used in the CLI.
-        provider_factory.provider()?.disable_long_read_transaction_safety();
+        provider_factory
+            .provider()?
+            .disable_long_read_transaction_safety();
         Ok(Self { provider_factory })
     }
 
     /// Grabs the content of the table for the given key
     pub fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>> {
-        self.provider_factory.db_ref().view(|tx| tx.get::<T>(key))?.map_err(|e| eyre::eyre!(e))
+        self.provider_factory
+            .db_ref()
+            .view(|tx| tx.get::<T>(key))?
+            .map_err(|e| eyre::eyre!(e))
     }
 
     /// Grabs the content of the `DupSort` table for the given key and subkey
@@ -155,7 +161,9 @@ impl<N: ProviderNodeTypes> DbTool<N> {
 
     /// Drops the provided table from the database.
     pub fn drop_table<T: Table>(&self) -> Result<()> {
-        self.provider_factory.db_ref().update(|tx| tx.clear::<T>())??;
+        self.provider_factory
+            .db_ref()
+            .update(|tx| tx.clear::<T>())??;
         Ok(())
     }
 }

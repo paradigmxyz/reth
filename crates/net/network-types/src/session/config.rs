@@ -151,7 +151,10 @@ mod tests {
     #[test]
     fn scale_session_event_buffer() {
         let config = SessionsConfig::default().with_upscaled_event_buffer(10);
-        assert_eq!(config.session_event_buffer, DEFAULT_SESSION_EVENT_BUFFER_SIZE);
+        assert_eq!(
+            config.session_event_buffer,
+            DEFAULT_SESSION_EVENT_BUFFER_SIZE
+        );
         let default_ration = config.session_event_buffer / DEFAULT_MAX_PEERS;
 
         let config = SessionsConfig::default().with_upscaled_event_buffer(DEFAULT_MAX_PEERS * 2);

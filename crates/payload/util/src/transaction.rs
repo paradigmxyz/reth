@@ -17,12 +17,18 @@ pub struct PayloadTransactionsFixed<T> {
 impl<T> PayloadTransactionsFixed<T> {
     /// Constructs a new [`PayloadTransactionsFixed`].
     pub fn new(transactions: Vec<T>) -> Self {
-        Self { transactions, index: Default::default() }
+        Self {
+            transactions,
+            index: Default::default(),
+        }
     }
 
     /// Constructs a new [`PayloadTransactionsFixed`] with a single transaction.
     pub fn single(transaction: T) -> Self {
-        Self { transactions: vec![transaction], index: Default::default() }
+        Self {
+            transactions: vec![transaction],
+            index: Default::default(),
+        }
     }
 }
 

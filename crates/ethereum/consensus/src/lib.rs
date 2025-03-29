@@ -54,11 +54,12 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
         parent: &SealedHeader<H>,
     ) -> Result<(), ConsensusError> {
         // Determine the parent gas limit, considering elasticity multiplier on the London fork.
-        let parent_gas_limit = if !self.chain_spec.is_london_active_at_block(parent.number()) &&
-            self.chain_spec.is_london_active_at_block(header.number())
+        let parent_gas_limit = if !self.chain_spec.is_london_active_at_block(parent.number())
+            && self.chain_spec.is_london_active_at_block(header.number())
         {
-            parent.gas_limit() *
-                self.chain_spec
+            parent.gas_limit()
+                * self
+                    .chain_spec
                     .base_fee_params_at_timestamp(header.timestamp())
                     .elasticity_multiplier as u64
         } else {
@@ -71,23 +72,23 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
                 return Err(ConsensusError::GasLimitInvalidIncrease {
                     parent_gas_limit,
                     child_gas_limit: header.gas_limit(),
-                })
+                });
             }
         }
         // Check for a decrease in gas limit beyond the allowed threshold.
-        else if parent_gas_limit - header.gas_limit() >=
-            parent_gas_limit / GAS_LIMIT_BOUND_DIVISOR
+        else if parent_gas_limit - header.gas_limit()
+            >= parent_gas_limit / GAS_LIMIT_BOUND_DIVISOR
         {
             return Err(ConsensusError::GasLimitInvalidDecrease {
                 parent_gas_limit,
                 child_gas_limit: header.gas_limit(),
-            })
+            });
         }
         // Check if the self gas limit is below the minimum required limit.
         else if header.gas_limit() < MINIMUM_GAS_LIMIT {
             return Err(ConsensusError::GasLimitInvalidMinimum {
                 child_gas_limit: header.gas_limit(),
-            })
+            });
         }
 
         Ok(())
@@ -138,33 +139,43 @@ where
         validate_header_base_fee(header.header(), &self.chain_spec)?;
 
         // EIP-4895: Beacon chain push withdrawals as operations
-        if self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp()) &&
-            header.withdrawals_root().is_none()
+        if self
+            .chain_spec
+            .is_shanghai_active_at_timestamp(header.timestamp())
+            && header.withdrawals_root().is_none()
         {
-            return Err(ConsensusError::WithdrawalsRootMissing)
-        } else if !self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp()) &&
-            header.withdrawals_root().is_some()
+            return Err(ConsensusError::WithdrawalsRootMissing);
+        } else if !self
+            .chain_spec
+            .is_shanghai_active_at_timestamp(header.timestamp())
+            && header.withdrawals_root().is_some()
         {
-            return Err(ConsensusError::WithdrawalsRootUnexpected)
+            return Err(ConsensusError::WithdrawalsRootUnexpected);
         }
 
         // Ensures that EIP-4844 fields are valid once cancun is active.
-        if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp()) {
+        if self
+            .chain_spec
+            .is_cancun_active_at_timestamp(header.timestamp())
+        {
             validate_4844_header_standalone(header.header())?;
         } else if header.blob_gas_used().is_some() {
-            return Err(ConsensusError::BlobGasUsedUnexpected)
+            return Err(ConsensusError::BlobGasUsedUnexpected);
         } else if header.excess_blob_gas().is_some() {
-            return Err(ConsensusError::ExcessBlobGasUnexpected)
+            return Err(ConsensusError::ExcessBlobGasUnexpected);
         } else if header.parent_beacon_block_root().is_some() {
-            return Err(ConsensusError::ParentBeaconBlockRootUnexpected)
+            return Err(ConsensusError::ParentBeaconBlockRootUnexpected);
         }
 
-        if self.chain_spec.is_prague_active_at_timestamp(header.timestamp()) {
+        if self
+            .chain_spec
+            .is_prague_active_at_timestamp(header.timestamp())
+        {
             if header.requests_hash().is_none() {
-                return Err(ConsensusError::RequestsHashMissing)
+                return Err(ConsensusError::RequestsHashMissing);
             }
         } else if header.requests_hash().is_some() {
-            return Err(ConsensusError::RequestsHashUnexpected)
+            return Err(ConsensusError::RequestsHashUnexpected);
         }
 
         Ok(())
@@ -206,15 +217,15 @@ where
 
         if is_post_merge {
             if !header.difficulty().is_zero() {
-                return Err(ConsensusError::TheMergeDifficultyIsNotZero)
+                return Err(ConsensusError::TheMergeDifficultyIsNotZero);
             }
 
             if !header.nonce().is_some_and(|nonce| nonce.is_zero()) {
-                return Err(ConsensusError::TheMergeNonceIsNotZero)
+                return Err(ConsensusError::TheMergeNonceIsNotZero);
             }
 
             if header.ommers_hash() != EMPTY_OMMER_ROOT_HASH {
-                return Err(ConsensusError::TheMergeOmmerRootIsNotEmpty)
+                return Err(ConsensusError::TheMergeOmmerRootIsNotEmpty);
             }
 
             // Post-merge, the consensus layer is expected to perform checks such that the block
@@ -236,14 +247,16 @@ where
             // order, making those checks obsolete.
 
             // Check if timestamp is in the future. Clock can drift but this can be consensus issue.
-            let present_timestamp =
-                SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
+            let present_timestamp = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
 
             if header.timestamp() > present_timestamp + ALLOWED_FUTURE_BLOCK_TIME_SECONDS {
                 return Err(ConsensusError::TimestampIsInFuture {
                     timestamp: header.timestamp(),
                     present_timestamp,
-                })
+                });
             }
 
             validate_header_extra_data(header)?;
@@ -261,7 +274,10 @@ mod tests {
     use reth_primitives_traits::proofs;
 
     fn header_with_gas_limit(gas_limit: u64) -> SealedHeader {
-        let header = reth_primitives_traits::Header { gas_limit, ..Default::default() };
+        let header = reth_primitives_traits::Header {
+            gas_limit,
+            ..Default::default()
+        };
         SealedHeader::new(header, B256::ZERO)
     }
 
@@ -285,7 +301,9 @@ mod tests {
         assert_eq!(
             EthBeaconConsensus::new(Arc::new(ChainSpec::default()))
                 .validate_against_parent_gas_limit(&child, &parent),
-            Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: child.gas_limit as u64 })
+            Err(ConsensusError::GasLimitInvalidMinimum {
+                child_gas_limit: child.gas_limit as u64
+            })
         );
     }
 

@@ -27,7 +27,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         self,
         _ctx: CliContext,
     ) -> eyre::Result<()> {
-        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
+        let Environment {
+            provider_factory, ..
+        } = self.env.init::<N>(AccessRights::RW)?;
 
         let mut provider = provider_factory.provider_rw()?;
         let best_block = provider.best_block_number()?;

@@ -47,6 +47,9 @@ pub(crate) struct UpdateOutcome<T: PoolTransaction> {
 
 impl<T: PoolTransaction> Default for UpdateOutcome<T> {
     fn default() -> Self {
-        Self { promoted: vec![], discarded: vec![] }
+        Self {
+            promoted: vec![],
+            discarded: vec![],
+        }
     }
 }

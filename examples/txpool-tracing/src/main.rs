@@ -24,8 +24,10 @@ fn main() {
     Cli::<EthereumChainSpecParser, RethCliTxpoolExt>::parse()
         .run(|builder, args| async move {
             // launch the node
-            let NodeHandle { node, node_exit_future } =
-                builder.node(EthereumNode::default()).launch().await?;
+            let NodeHandle {
+                node,
+                node_exit_future,
+            } = builder.node(EthereumNode::default()).launch().await?;
 
             // create a new subscription to pending transactions
             let mut pending_transactions = node.pool.new_pending_pool_transactions_listener();

@@ -46,7 +46,14 @@ impl TestHeaderDownloader {
         limit: u64,
         batch_size: usize,
     ) -> Self {
-        Self { client, consensus, limit, download: None, batch_size, queued_headers: Vec::new() }
+        Self {
+            client,
+            consensus,
+            limit,
+            download: None,
+            batch_size,
+            queued_headers: Vec::new(),
+        }
     }
 
     fn create_download(&self) -> TestDownload {
@@ -80,7 +87,7 @@ impl Stream for TestHeaderDownloader {
         let this = self.get_mut();
         loop {
             if this.queued_headers.len() == this.batch_size {
-                return Poll::Ready(Some(Ok(std::mem::take(&mut this.queued_headers))))
+                return Poll::Ready(Some(Ok(std::mem::take(&mut this.queued_headers))));
             }
             if this.download.is_none() {
                 this.download = Some(this.create_download());
@@ -140,26 +147,33 @@ impl Stream for TestDownload {
 
         loop {
             if let Some(header) = this.buffer.pop() {
-                return Poll::Ready(Some(Ok(header)))
+                return Poll::Ready(Some(Ok(header)));
             } else if this.done {
-                return Poll::Ready(None)
+                return Poll::Ready(None);
             }
 
             let empty: SealedHeader = SealedHeader::default();
-            if let Err(error) = this.consensus.validate_header_against_parent(&empty, &empty) {
+            if let Err(error) = this
+                .consensus
+                .validate_header_against_parent(&empty, &empty)
+            {
                 this.done = true;
                 return Poll::Ready(Some(Err(DownloadError::HeaderValidation {
                     hash: empty.hash(),
                     number: empty.number,
                     error: Box::new(error),
-                })))
+                })));
             }
 
             match ready!(this.get_or_init_fut().poll_unpin(cx)) {
                 Ok(resp) => {
                     // Skip head and seal headers
-                    let mut headers =
-                        resp.1.into_iter().skip(1).map(SealedHeader::seal_slow).collect::<Vec<_>>();
+                    let mut headers = resp
+                        .1
+                        .into_iter()
+                        .skip(1)
+                        .map(SealedHeader::seal_slow)
+                        .collect::<Vec<_>>();
                     headers.sort_unstable_by_key(|h| h.number);
                     headers.into_iter().for_each(|h| this.buffer.push(h));
                     this.done = true;
@@ -169,7 +183,7 @@ impl Stream for TestDownload {
                     return Poll::Ready(Some(Err(match err {
                         RequestError::Timeout => DownloadError::Timeout,
                         _ => DownloadError::RequestError(err),
-                    })))
+                    })));
                 }
             }
         }
@@ -235,7 +249,7 @@ impl HeadersClient for TestHeadersClient {
 
         Box::pin(async move {
             if let Some(err) = &mut *error.lock().await {
-                return Err(err.clone())
+                return Err(err.clone());
             }
 
             let mut lock = responses.lock().await;

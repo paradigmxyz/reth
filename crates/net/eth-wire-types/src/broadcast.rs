@@ -33,7 +33,11 @@ impl NewBlockHashes {
     pub fn latest(&self) -> Option<&BlockHashNumber> {
         self.0.iter().fold(None, |latest, block| {
             if let Some(latest) = latest {
-                return if latest.number > block.number { Some(latest) } else { Some(block) }
+                return if latest.number > block.number {
+                    Some(latest)
+                } else {
+                    Some(block)
+                };
             }
             Some(block)
         })
@@ -358,12 +362,19 @@ impl proptest::prelude::Arbitrary for NewPooledTransactionHashes68 {
                 );
 
                 // Map the usize values to the range 0..131072(0x20000)
-                let sizes_vec = vec(proptest::num::usize::ANY.prop_map(|x| x % 131072), len..=len);
+                let sizes_vec = vec(
+                    proptest::num::usize::ANY.prop_map(|x| x % 131072),
+                    len..=len,
+                );
                 let hashes_vec = vec(any::<B256>(), len..=len);
 
                 (types_vec, sizes_vec, hashes_vec)
             })
-            .prop_map(|(types, sizes, hashes)| Self { types, sizes, hashes })
+            .prop_map(|(types, sizes, hashes)| Self {
+                types,
+                sizes,
+                hashes,
+            })
             .boxed()
     }
 
@@ -373,7 +384,9 @@ impl proptest::prelude::Arbitrary for NewPooledTransactionHashes68 {
 impl NewPooledTransactionHashes68 {
     /// Returns an iterator over tx hashes zipped with corresponding metadata.
     pub fn metadata_iter(&self) -> impl Iterator<Item = (&B256, (u8, usize))> {
-        self.hashes.iter().zip(self.types.iter().copied().zip(self.sizes.iter().copied()))
+        self.hashes
+            .iter()
+            .zip(self.types.iter().copied().zip(self.sizes.iter().copied()))
     }
 
     /// Appends a transaction
@@ -461,13 +474,13 @@ impl Decodable for NewPooledTransactionHashes68 {
             return Err(alloy_rlp::Error::ListLengthMismatch {
                 expected: msg.hashes.len(),
                 got: msg.types.len(),
-            })
+            });
         }
         if msg.hashes.len() != msg.sizes.len() {
             return Err(alloy_rlp::Error::ListLengthMismatch {
                 expected: msg.hashes.len(),
                 got: msg.sizes.len(),
-            })
+            });
         }
 
         Ok(msg)
@@ -523,7 +536,11 @@ impl DedupPayload for NewPooledTransactionHashes68 {
     }
 
     fn dedup(self) -> PartiallyValidData<Self::Value> {
-        let Self { hashes, mut sizes, mut types } = self;
+        let Self {
+            hashes,
+            mut sizes,
+            mut types,
+        } = self;
 
         let mut deduped_data = HashMap::with_capacity_and_hasher(hashes.len(), Default::default());
 
@@ -728,7 +745,10 @@ impl RequestTxHashes {
     /// be stored in its entirety like in the future waiting for a
     /// [`GetPooledTransactions`](crate::GetPooledTransactions) request to resolve.
     pub fn with_capacity(capacity: usize) -> Self {
-        Self::new(HashSet::with_capacity_and_hasher(capacity, Default::default()))
+        Self::new(HashSet::with_capacity_and_hasher(
+            capacity,
+            Default::default(),
+        ))
     }
 
     /// Returns an new empty instance.
@@ -740,7 +760,7 @@ impl RequestTxHashes {
     pub fn retain_count(&mut self, count: usize) -> Self {
         let rest_capacity = self.hashes.len().saturating_sub(count);
         if rest_capacity == 0 {
-            return Self::empty()
+            return Self::empty();
         }
         let mut rest = Self::with_capacity(rest_capacity);
 
@@ -748,7 +768,7 @@ impl RequestTxHashes {
         self.hashes.retain(|hash| {
             if i >= count {
                 rest.insert(*hash);
-                return false
+                return false;
             }
             i += 1;
 
@@ -791,12 +811,21 @@ mod tests {
 
     #[test]
     fn can_return_latest_block() {
-        let mut blocks = NewBlockHashes(vec![BlockHashNumber { hash: B256::random(), number: 0 }]);
+        let mut blocks = NewBlockHashes(vec![BlockHashNumber {
+            hash: B256::random(),
+            number: 0,
+        }]);
         let latest = blocks.latest().unwrap();
         assert_eq!(latest.number, 0);
 
-        blocks.0.push(BlockHashNumber { hash: B256::random(), number: 100 });
-        blocks.0.push(BlockHashNumber { hash: B256::random(), number: 2 });
+        blocks.0.push(BlockHashNumber {
+            hash: B256::random(),
+            number: 100,
+        });
+        blocks.0.push(BlockHashNumber {
+            hash: B256::random(),
+            number: 2,
+        });
         let latest = blocks.latest().unwrap();
         assert_eq!(latest.number, 100);
     }
@@ -1001,8 +1030,11 @@ mod tests {
     #[test]
     fn test_pooled_tx_hashes_68_push() {
         let tx = signed_transaction();
-        let mut tx_hashes =
-            NewPooledTransactionHashes68 { types: vec![], sizes: vec![], hashes: vec![] };
+        let mut tx_hashes = NewPooledTransactionHashes68 {
+            types: vec![],
+            sizes: vec![],
+            hashes: vec![],
+        };
         tx_hashes.push(&tx);
         assert_eq!(tx_hashes.types.len(), 1);
         assert_eq!(tx_hashes.sizes.len(), 1);
@@ -1016,8 +1048,11 @@ mod tests {
     fn test_pooled_tx_hashes_68_extend() {
         let tx = signed_transaction();
         let txs = vec![tx.clone(), tx.clone()];
-        let mut tx_hashes =
-            NewPooledTransactionHashes68 { types: vec![], sizes: vec![], hashes: vec![] };
+        let mut tx_hashes = NewPooledTransactionHashes68 {
+            types: vec![],
+            sizes: vec![],
+            hashes: vec![],
+        };
         tx_hashes.extend(&txs);
         assert_eq!(tx_hashes.types.len(), 2);
         assert_eq!(tx_hashes.sizes.len(), 2);
@@ -1033,9 +1068,12 @@ mod tests {
     #[test]
     fn test_pooled_tx_hashes_68_with_transaction() {
         let tx = signed_transaction();
-        let tx_hashes =
-            NewPooledTransactionHashes68 { types: vec![], sizes: vec![], hashes: vec![] }
-                .with_transaction(&tx);
+        let tx_hashes = NewPooledTransactionHashes68 {
+            types: vec![],
+            sizes: vec![],
+            hashes: vec![],
+        }
+        .with_transaction(&tx);
         assert_eq!(tx_hashes.types.len(), 1);
         assert_eq!(tx_hashes.sizes.len(), 1);
         assert_eq!(tx_hashes.hashes.len(), 1);
@@ -1048,9 +1086,12 @@ mod tests {
     fn test_pooled_tx_hashes_68_with_transactions() {
         let tx = signed_transaction();
         let txs = vec![tx.clone(), tx.clone()];
-        let tx_hashes =
-            NewPooledTransactionHashes68 { types: vec![], sizes: vec![], hashes: vec![] }
-                .with_transactions(&txs);
+        let tx_hashes = NewPooledTransactionHashes68 {
+            types: vec![],
+            sizes: vec![],
+            hashes: vec![],
+        }
+        .with_transactions(&txs);
         assert_eq!(tx_hashes.types.len(), 2);
         assert_eq!(tx_hashes.sizes.len(), 2);
         assert_eq!(tx_hashes.hashes.len(), 2);

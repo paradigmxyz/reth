@@ -48,7 +48,10 @@ where
     /// Returns a client with Test consensus
     #[cfg(any(test, feature = "test-utils"))]
     pub fn test_client(client: Client) -> Self {
-        Self::new(client, Arc::new(reth_consensus::test_utils::TestConsensus::default()))
+        Self::new(
+            client,
+            Arc::new(reth_consensus::test_utils::TestConsensus::default()),
+        )
     }
 }
 
@@ -142,7 +145,7 @@ where
     /// Returns the [`SealedBlock`] if the request is complete and valid.
     fn take_block(&mut self) -> Option<SealedBlock<Client::Block>> {
         if self.header.is_none() || self.body.is_none() {
-            return None
+            return None;
         }
 
         let header = self.header.take().unwrap();
@@ -151,13 +154,15 @@ where
             BodyResponse::Validated(body) => Some(SealedBlock::from_sealed_parts(header, body)),
             BodyResponse::PendingValidation(resp) => {
                 // ensure the block is valid, else retry
-                if let Err(err) = self.consensus.validate_body_against_header(resp.data(), &header)
+                if let Err(err) = self
+                    .consensus
+                    .validate_body_against_header(resp.data(), &header)
                 {
                     debug!(target: "downloaders", %err, hash=?header.hash(), "Received wrong body");
                     self.client.report_bad_message(resp.peer_id());
                     self.header = Some(header);
                     self.request.body = Some(self.client.get_block_body(self.hash));
-                    return None
+                    return None;
                 }
                 Some(SealedBlock::from_sealed_parts(header, resp.into_data()))
             }
@@ -166,13 +171,16 @@ where
 
     fn on_block_response(&mut self, resp: WithPeerId<Client::Body>) {
         if let Some(ref header) = self.header {
-            if let Err(err) = self.consensus.validate_body_against_header(resp.data(), header) {
+            if let Err(err) = self
+                .consensus
+                .validate_body_against_header(resp.data(), header)
+            {
                 debug!(target: "downloaders", %err, hash=?header.hash(), "Received wrong body");
                 self.client.report_bad_message(resp.peer_id());
-                return
+                return;
             }
             self.body = Some(BodyResponse::Validated(resp.into_data()));
-            return
+            return;
         }
         self.body = Some(BodyResponse::PendingValidation(resp));
     }
@@ -236,7 +244,7 @@ where
             }
 
             if let Some(res) = this.take_block() {
-                return Poll::Ready(res)
+                return Poll::Ready(res);
             }
 
             // ensure we still have enough budget for another iteration
@@ -244,7 +252,7 @@ where
             if budget == 0 {
                 // make sure we're woken up again
                 cx.waker().wake_by_ref();
-                return Poll::Pending
+                return Poll::Pending;
             }
         }
     }
@@ -279,14 +287,14 @@ where
         if let Some(fut) = Pin::new(&mut self.header).as_pin_mut() {
             if let Poll::Ready(res) = fut.poll(cx) {
                 self.header = None;
-                return Poll::Ready(ResponseResult::Header(res))
+                return Poll::Ready(ResponseResult::Header(res));
             }
         }
 
         if let Some(fut) = Pin::new(&mut self.body).as_pin_mut() {
             if let Poll::Ready(res) = fut.poll(cx) {
                 self.body = None;
-                return Poll::Ready(ResponseResult::Body(res))
+                return Poll::Ready(ResponseResult::Body(res));
             }
         }
 
@@ -351,7 +359,9 @@ where
 {
     /// Returns the block hashes for the given range, if they are available.
     pub fn range_block_hashes(&self) -> Option<Vec<B256>> {
-        self.headers.as_ref().map(|h| h.iter().map(|h| h.hash()).collect())
+        self.headers
+            .as_ref()
+            .map(|h| h.iter().map(|h| h.hash()).collect())
     }
 
     /// Returns whether or not the bodies map is fully populated with requested headers and bodies.
@@ -391,7 +401,7 @@ where
     fn take_blocks(&mut self) -> Option<Vec<SealedBlock<Client::Block>>> {
         if !self.is_bodies_complete() {
             // not done with bodies yet
-            return None
+            return None;
         }
 
         let headers = self.headers.take()?;
@@ -405,8 +415,9 @@ where
                     BodyResponse::Validated(body) => body,
                     BodyResponse::PendingValidation(resp) => {
                         // ensure the block is valid, else retry
-                        if let Err(err) =
-                            self.consensus.validate_body_against_header(resp.data(), header)
+                        if let Err(err) = self
+                            .consensus
+                            .validate_body_against_header(resp.data(), header)
                         {
                             debug!(target: "downloaders", %err, hash=?header.hash(), "Received wrong body in range response");
                             self.client.report_bad_message(resp.peer_id());
@@ -414,15 +425,17 @@ where
                             // get body that doesn't match, put back into vecdeque, and retry it
                             self.pending_headers.push_back(header.clone());
                             needs_retry = true;
-                            continue
+                            continue;
                         }
 
                         resp.into_data()
                     }
                 };
 
-                valid_responses
-                    .push(SealedBlock::<Client::Block>::from_sealed_parts(header.clone(), body));
+                valid_responses.push(SealedBlock::<Client::Block>::from_sealed_parts(
+                    header.clone(),
+                    body,
+                ));
             }
         }
 
@@ -440,15 +453,20 @@ where
             // create response for failing bodies
             let hashes = self.remaining_bodies_hashes();
             self.request.bodies = Some(self.client.get_block_bodies(hashes));
-            return None
+            return None;
         }
 
         Some(valid_responses)
     }
 
     fn on_headers_response(&mut self, headers: WithPeerId<Vec<Client::Header>>) {
-        let (peer, mut headers_falling) =
-            headers.map(|h| h.into_iter().map(SealedHeader::seal_slow).collect::<Vec<_>>()).split();
+        let (peer, mut headers_falling) = headers
+            .map(|h| {
+                h.into_iter()
+                    .map(SealedHeader::seal_slow)
+                    .collect::<Vec<_>>()
+            })
+            .split();
 
         // fill in the response if it's the correct length
         if headers_falling.len() == self.count as usize {
@@ -592,7 +610,7 @@ where
             }
 
             if let Some(res) = this.take_blocks() {
-                return Poll::Ready(res)
+                return Poll::Ready(res);
             }
         }
     }
@@ -620,14 +638,14 @@ where
         if let Some(fut) = Pin::new(&mut self.headers).as_pin_mut() {
             if let Poll::Ready(res) = fut.poll(cx) {
                 self.headers = None;
-                return Poll::Ready(RangeResponseResult::Header(res))
+                return Poll::Ready(RangeResponseResult::Header(res));
             }
         }
 
         if let Some(fut) = Pin::new(&mut self.bodies).as_pin_mut() {
             if let Poll::Ready(res) = fut.poll(cx) {
                 self.bodies = None;
-                return Poll::Ready(RangeResponseResult::Body(res))
+                return Poll::Ready(RangeResponseResult::Body(res));
             }
         }
 
@@ -704,7 +722,10 @@ mod tests {
 
         let received = client.get_full_block_range(header.hash(), 1).await;
         let received = received.first().expect("response should include a block");
-        assert_eq!(*received, SealedBlock::from_sealed_parts(header.clone(), body));
+        assert_eq!(
+            *received,
+            SealedBlock::from_sealed_parts(header.clone(), body)
+        );
 
         let received = client.get_full_block_range(header.hash(), 10).await;
         assert_eq!(received.len(), 10);
@@ -723,7 +744,10 @@ mod tests {
 
         let received = client.get_full_block_range(header.hash(), 1).await;
         let received = received.first().expect("response should include a block");
-        assert_eq!(*received, SealedBlock::from_sealed_parts(header.clone(), body));
+        assert_eq!(
+            *received,
+            SealedBlock::from_sealed_parts(header.clone(), body)
+        );
 
         let received = client.get_full_block_range(header.hash(), 50).await;
         assert_eq!(received.len(), 50);
@@ -744,7 +768,9 @@ mod tests {
         test_consensus.set_fail_body_against_header(false);
         let client = FullBlockClient::new(client, Arc::new(test_consensus));
 
-        let received = client.get_full_block_range(header.hash(), range_length as u64).await;
+        let received = client
+            .get_full_block_range(header.hash(), range_length as u64)
+            .await;
 
         assert_eq!(received.len(), range_length);
         for (i, block) in received.iter().enumerate() {

@@ -131,7 +131,8 @@ impl NewPayloadStatusResponseMetrics {
                 PayloadStatusEnum::Valid => {
                     self.new_payload_valid.increment(1);
                     self.new_payload_total_gas.record(gas_used as f64);
-                    self.new_payload_gas_per_second.record(gas_used as f64 / time.as_secs_f64());
+                    self.new_payload_gas_per_second
+                        .record(gas_used as f64 / time.as_secs_f64());
                 }
                 PayloadStatusEnum::Syncing => self.new_payload_syncing.increment(1),
                 PayloadStatusEnum::Accepted => self.new_payload_accepted.increment(1),

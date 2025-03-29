@@ -12,18 +12,32 @@ use tracing::debug;
 #[derive(Debug)]
 pub(crate) enum WorkerResponse {
     /// Worker has been spawned and awaiting work.
-    Ready { worker_id: u64, tx: UnboundedSender<WorkerRequest> },
+    Ready {
+        worker_id: u64,
+        tx: UnboundedSender<WorkerRequest>,
+    },
     /// Worker has downloaded
-    DownloadedChunk { worker_id: u64, chunk_index: usize, written_bytes: usize },
+    DownloadedChunk {
+        worker_id: u64,
+        chunk_index: usize,
+        written_bytes: usize,
+    },
     /// Worker has encountered an error.
-    Err { worker_id: u64, error: DownloaderError },
+    Err {
+        worker_id: u64,
+        error: DownloaderError,
+    },
 }
 
 /// Requests sent to a worker.
 #[derive(Debug)]
 pub(crate) enum WorkerRequest {
     /// Requests a range to be downloaded.
-    Download { chunk_index: usize, start: usize, end: usize },
+    Download {
+        chunk_index: usize,
+        start: usize,
+        end: usize,
+    },
     /// Signals a worker exit.
     Finish,
 }
@@ -67,9 +81,11 @@ async fn worker_fetch(
 
     // Signals readiness to download
     let (tx, mut rx) = unbounded_channel::<WorkerRequest>();
-    orchestrator_tx.send(WorkerResponse::Ready { worker_id, tx }).unwrap_or_else(|_| {
-        debug!("Failed to notify orchestrator of readiness");
-    });
+    orchestrator_tx
+        .send(WorkerResponse::Ready { worker_id, tx })
+        .unwrap_or_else(|_| {
+            debug!("Failed to notify orchestrator of readiness");
+        });
 
     while let Some(req) = rx.recv().await {
         debug!(
@@ -80,8 +96,14 @@ async fn worker_fetch(
         );
 
         match req {
-            WorkerRequest::Download { chunk_index, start, end } => {
-                data_file.seek(tokio::io::SeekFrom::Start(start as u64)).await?;
+            WorkerRequest::Download {
+                chunk_index,
+                start,
+                end,
+            } => {
+                data_file
+                    .seek(tokio::io::SeekFrom::Start(start as u64))
+                    .await?;
 
                 let mut response = client
                     .get(&url)

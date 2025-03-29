@@ -22,16 +22,25 @@ impl OnStateHook for MeteredStateHook {
     fn on_state(&mut self, source: StateChangeSource, state: &EvmState) {
         // Update the metrics for the number of accounts, storage slots and bytecodes loaded
         let accounts = state.keys().len();
-        let storage_slots = state.values().map(|account| account.storage.len()).sum::<usize>();
+        let storage_slots = state
+            .values()
+            .map(|account| account.storage.len())
+            .sum::<usize>();
         let bytecodes = state
             .values()
             .filter(|account| !account.info.is_empty_code_hash())
             .collect::<Vec<_>>()
             .len();
 
-        self.metrics.accounts_loaded_histogram.record(accounts as f64);
-        self.metrics.storage_slots_loaded_histogram.record(storage_slots as f64);
-        self.metrics.bytecodes_loaded_histogram.record(bytecodes as f64);
+        self.metrics
+            .accounts_loaded_histogram
+            .record(accounts as f64);
+        self.metrics
+            .storage_slots_loaded_histogram
+            .record(storage_slots as f64);
+        self.metrics
+            .bytecodes_loaded_histogram
+            .record(bytecodes as f64);
 
         // Call the original state hook
         self.inner_hook.on_state(source, state);
@@ -80,8 +89,10 @@ impl ExecutorMetrics {
         let execution_duration = execute_start.elapsed().as_secs_f64();
 
         // Update gas metrics.
-        self.gas_processed_total.increment(block.header().gas_used());
-        self.gas_per_second.set(block.header().gas_used() as f64 / execution_duration);
+        self.gas_processed_total
+            .increment(block.header().gas_used());
+        self.gas_per_second
+            .set(block.header().gas_used() as f64 / execution_duration);
         self.execution_histogram.record(execution_duration);
         self.execution_duration.set(execution_duration);
 
@@ -108,19 +119,27 @@ impl ExecutorMetrics {
         // clone here is cheap, all the metrics are Option<Arc<_>>. additionally
         // they are gloally registered so that the data recorded in the hook will
         // be accessible.
-        let wrapper = MeteredStateHook { metrics: self.clone(), inner_hook: state_hook };
+        let wrapper = MeteredStateHook {
+            metrics: self.clone(),
+            inner_hook: state_hook,
+        };
 
         // Use metered to execute and track timing/gas metrics
         let output = self.metered(input, || executor.execute_with_state_hook(input, wrapper))?;
 
         // Update the metrics for the number of accounts, storage slots and bytecodes updated
         let accounts = output.state.state.len();
-        let storage_slots =
-            output.state.state.values().map(|account| account.storage.len()).sum::<usize>();
+        let storage_slots = output
+            .state
+            .state
+            .values()
+            .map(|account| account.storage.len())
+            .sum::<usize>();
         let bytecodes = output.state.contracts.len();
 
         self.accounts_updated_histogram.record(accounts as f64);
-        self.storage_slots_updated_histogram.record(storage_slots as f64);
+        self.storage_slots_updated_histogram
+            .record(storage_slots as f64);
         self.bytecodes_updated_histogram.record(bytecodes as f64);
 
         Ok(output)
@@ -225,7 +244,10 @@ mod tests {
 
         let (tx, _rx) = mpsc::channel();
         let expected_output = 42;
-        let state_hook = Box::new(ChannelStateHook { sender: tx, output: expected_output });
+        let state_hook = Box::new(ChannelStateHook {
+            sender: tx,
+            output: expected_output,
+        });
 
         let state = {
             let mut state = EvmState::default();
@@ -247,15 +269,17 @@ mod tests {
             state
         };
         let executor = MockExecutor { state };
-        let _result = metrics.execute_metered::<_, EmptyDB>(executor, &input, state_hook).unwrap();
+        let _result = metrics
+            .execute_metered::<_, EmptyDB>(executor, &input, state_hook)
+            .unwrap();
 
         let snapshot = snapshotter.snapshot().into_vec();
 
         for metric in snapshot {
             let metric_name = metric.0.key().name();
-            if metric_name == "sync.execution.accounts_loaded_histogram" ||
-                metric_name == "sync.execution.storage_slots_loaded_histogram" ||
-                metric_name == "sync.execution.bytecodes_loaded_histogram"
+            if metric_name == "sync.execution.accounts_loaded_histogram"
+                || metric_name == "sync.execution.storage_slots_loaded_histogram"
+                || metric_name == "sync.execution.bytecodes_loaded_histogram"
             {
                 if let DebugValue::Histogram(vs) = metric.3 {
                     assert!(
@@ -274,12 +298,17 @@ mod tests {
 
         let (tx, rx) = mpsc::channel();
         let expected_output = 42;
-        let state_hook = Box::new(ChannelStateHook { sender: tx, output: expected_output });
+        let state_hook = Box::new(ChannelStateHook {
+            sender: tx,
+            output: expected_output,
+        });
 
         let state = EvmState::default();
 
         let executor = MockExecutor { state };
-        let _result = metrics.execute_metered::<_, EmptyDB>(executor, &input, state_hook).unwrap();
+        let _result = metrics
+            .execute_metered::<_, EmptyDB>(executor, &input, state_hook)
+            .unwrap();
 
         let actual_output = rx.try_recv().unwrap();
         assert_eq!(actual_output, expected_output);

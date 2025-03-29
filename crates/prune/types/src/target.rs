@@ -9,14 +9,23 @@ pub const MINIMUM_PRUNING_DISTANCE: u64 = 32 * 2 + 10_000;
 
 /// Pruning configuration for every segment of the data that can be pruned.
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
-#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    any(test, feature = "serde"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
 #[cfg_attr(any(test, feature = "serde"), serde(default))]
 pub struct PruneModes {
     /// Sender Recovery pruning configuration.
-    #[cfg_attr(any(test, feature = "serde"), serde(skip_serializing_if = "Option::is_none"))]
+    #[cfg_attr(
+        any(test, feature = "serde"),
+        serde(skip_serializing_if = "Option::is_none")
+    )]
     pub sender_recovery: Option<PruneMode>,
     /// Transaction Lookup pruning configuration.
-    #[cfg_attr(any(test, feature = "serde"), serde(skip_serializing_if = "Option::is_none"))]
+    #[cfg_attr(
+        any(test, feature = "serde"),
+        serde(skip_serializing_if = "Option::is_none")
+    )]
     pub transaction_lookup: Option<PruneMode>,
     /// Receipts pruning configuration. This setting overrides `receipts_log_filter`
     /// and offers improved performance.

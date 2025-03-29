@@ -53,7 +53,9 @@ where
     }
 
     fn call(&mut self, mut request: http::Request<B>) -> Self::Future {
-        request.headers_mut().insert(AUTHORIZATION, secret_to_bearer_header(&self.secret));
+        request
+            .headers_mut()
+            .insert(AUTHORIZATION, secret_to_bearer_header(&self.secret));
         self.inner.call(request)
     }
 }
@@ -66,8 +68,8 @@ pub fn secret_to_bearer_header(secret: &JwtSecret) -> HeaderValue {
         "Bearer {}",
         secret
             .encode(&Claims {
-                iat: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() +
-                    Duration::from_secs(60))
+                iat: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap()
+                    + Duration::from_secs(60))
                 .as_secs(),
                 exp: None,
             })

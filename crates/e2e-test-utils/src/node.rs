@@ -67,7 +67,9 @@ where
             )
             .await?,
             network: NetworkTestContext::new(node.network.clone()),
-            rpc: RpcTestContext { inner: node.add_ons_handle.rpc_registry },
+            rpc: RpcTestContext {
+                inner: node.add_ons_handle.rpc_registry,
+            },
             canonical_stream: node.provider.canonical_state_stream(),
         })
     }
@@ -99,7 +101,8 @@ where
             let payload = self.advance_block().await?;
             let block_hash = payload.block().hash();
             let block_number = payload.block().number();
-            self.assert_new_block(tx_hash, block_hash, block_number).await?;
+            self.assert_new_block(tx_hash, block_hash, block_number)
+                .await?;
             chain.push(payload);
         }
         Ok(chain)
@@ -115,7 +118,9 @@ where
         // first event is the payload attributes
         self.payload.expect_attr_event(eth_attr.clone()).await?;
         // wait for the payload builder to have finished building
-        self.payload.wait_for_built_payload(eth_attr.payload_id()).await;
+        self.payload
+            .wait_for_built_payload(eth_attr.payload_id())
+            .await;
         // ensure we're also receiving the built payload as event
         Ok(self.payload.expect_built_payload().await?)
     }
@@ -134,7 +139,8 @@ where
         let payload = self.build_and_submit_payload().await?;
 
         // trigger forkchoice update via engine api to commit the block to the blockchain
-        self.update_forkchoice(payload.block().hash(), payload.block().hash()).await?;
+        self.update_forkchoice(payload.block().hash(), payload.block().hash())
+            .await?;
 
         Ok(payload)
     }
@@ -163,7 +169,7 @@ where
             if check {
                 if let Some(latest_block) = self.inner.provider.block_by_number(number)? {
                     assert_eq!(latest_block.header().hash_slow(), expected_block_hash);
-                    break
+                    break;
                 }
                 assert!(
                     !wait_finish_checkpoint,
@@ -180,7 +186,7 @@ where
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             if let Some(checkpoint) = self.inner.provider.get_stage_checkpoint(StageId::Headers)? {
                 if checkpoint.block_number == number {
-                    break
+                    break;
                 }
             }
         }
@@ -206,14 +212,16 @@ where
         loop {
             // wait for the block to commit
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            if let Some(latest_block) =
-                self.inner.provider.block_by_number_or_tag(BlockNumberOrTag::Latest)?
+            if let Some(latest_block) = self
+                .inner
+                .provider
+                .block_by_number_or_tag(BlockNumberOrTag::Latest)?
             {
                 if latest_block.header().number() == block_number {
                     // make sure the block hash we submitted via FCU engine api is the new latest
                     // block using an RPC call
                     assert_eq!(latest_block.header().hash_slow(), block_hash);
-                    break
+                    break;
                 }
             }
         }
@@ -243,7 +251,10 @@ where
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             self.update_forkchoice(block, block).await?;
 
-            assert!(start.elapsed() <= std::time::Duration::from_secs(40), "timed out");
+            assert!(
+                start.elapsed() <= std::time::Duration::from_secs(40),
+                "timed out"
+            );
         }
 
         // Hack to make sure that all components have time to process canonical state update.

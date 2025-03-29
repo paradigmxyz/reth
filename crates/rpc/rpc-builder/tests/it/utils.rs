@@ -33,7 +33,9 @@ pub const fn test_address() -> SocketAddr {
 
 /// Launches a new server for the auth module
 pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
-    let config = AuthServerConfig::builder(secret).socket_addr(test_address()).build();
+    let config = AuthServerConfig::builder(secret)
+        .socket_addr(test_address())
+        .build();
     let (tx, _rx) = unbounded_channel();
     let beacon_engine_handle = BeaconConsensusEngineHandle::<EthEngineTypes>::new(tx);
     let client = ClientVersionV1 {
@@ -88,8 +90,10 @@ pub async fn launch_http_ws(modules: impl Into<RpcModuleSelection>) -> RpcServer
     let builder = test_rpc_builder();
     let eth_api = builder.bootstrap_eth_api();
     let modules = modules.into();
-    let server = builder
-        .build(TransportRpcModuleConfig::set_ws(modules.clone()).with_http(modules), eth_api);
+    let server = builder.build(
+        TransportRpcModuleConfig::set_ws(modules.clone()).with_http(modules),
+        eth_api,
+    );
     RpcServerConfig::ws(Default::default())
         .with_ws_address(test_address())
         .with_ws_address(test_address())
@@ -105,8 +109,10 @@ pub async fn launch_http_ws_same_port(modules: impl Into<RpcModuleSelection>) ->
     let builder = test_rpc_builder();
     let modules = modules.into();
     let eth_api = builder.bootstrap_eth_api();
-    let server = builder
-        .build(TransportRpcModuleConfig::set_ws(modules.clone()).with_http(modules), eth_api);
+    let server = builder.build(
+        TransportRpcModuleConfig::set_ws(modules.clone()).with_http(modules),
+        eth_api,
+    );
     let addr = test_address();
     RpcServerConfig::ws(Default::default())
         .with_ws_address(addr)

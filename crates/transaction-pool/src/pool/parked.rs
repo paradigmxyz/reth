@@ -69,7 +69,10 @@ impl<T: ParkedOrd> ParkedPool<T> {
 
         // update or create sender entry
         self.add_sender_count(tx.sender_id(), submission_id);
-        let transaction = ParkedPoolTransaction { submission_id, transaction: tx.into() };
+        let transaction = ParkedPoolTransaction {
+            submission_id,
+            transaction: tx.into(),
+        };
 
         self.by_id.insert(id, transaction.clone());
         self.best.insert(transaction);
@@ -89,12 +92,15 @@ impl<T: ParkedOrd> ParkedPool<T> {
                 value.last_submission_id = submission_id;
             }
             Entry::Vacant(entry) => {
-                entry
-                    .insert(SenderTransactionCount { count: 1, last_submission_id: submission_id });
+                entry.insert(SenderTransactionCount {
+                    count: 1,
+                    last_submission_id: submission_id,
+                });
             }
         }
         // insert a new entry
-        self.last_sender_submission.insert(SubmissionSenderId::new(sender, submission_id));
+        self.last_sender_submission
+            .insert(SubmissionSenderId::new(sender, submission_id));
     }
 
     /// Decrements the count of transactions for the given sender.
@@ -111,7 +117,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
                 if value.count == 0 {
                     entry.remove()
                 } else {
-                    return
+                    return;
                 }
             }
             Entry::Vacant(_) => {
@@ -122,8 +128,10 @@ impl<T: ParkedOrd> ParkedPool<T> {
 
         // all transactions for this sender have been removed
         assert!(
-            self.last_sender_submission
-                .remove(&SubmissionSenderId::new(sender_id, removed_sender.last_submission_id)),
+            self.last_sender_submission.remove(&SubmissionSenderId::new(
+                sender_id,
+                removed_sender.last_submission_id
+            )),
             "last sender transaction not found {sender_id:?}"
         );
     }
@@ -190,7 +198,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         if !self.exceeds(&limit) {
             // if we are below the limits, we don't need to drop anything
-            return Vec::new()
+            return Vec::new();
         }
 
         let mut removed = Vec::new();
@@ -198,7 +206,11 @@ impl<T: ParkedOrd> ParkedPool<T> {
         while limit.is_exceeded(self.len(), self.size()) && !self.last_sender_submission.is_empty()
         {
             // NOTE: This will not panic due to `!last_sender_transaction.is_empty()`
-            let sender_id = self.last_sender_submission.last().expect("not empty").sender_id;
+            let sender_id = self
+                .last_sender_submission
+                .last()
+                .expect("not empty")
+                .sender_id;
             let list = self.get_txs_by_sender(sender_id);
 
             // Drop transactions from this sender until the pool is under limits
@@ -208,7 +220,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
                 }
 
                 if !self.exceeds(&limit) {
-                    break
+                    break;
                 }
             }
         }
@@ -258,7 +270,11 @@ impl<T: ParkedOrd> ParkedPool<T> {
     /// Asserts that the bijection between `by_id` and `best` is valid.
     #[cfg(any(test, feature = "test-utils"))]
     pub(crate) fn assert_invariants(&self) {
-        assert_eq!(self.by_id.len(), self.best.len(), "by_id.len() != best.len()");
+        assert_eq!(
+            self.by_id.len(),
+            self.best.len(),
+            "by_id.len() != best.len()"
+        );
 
         assert_eq!(
             self.last_sender_submission.len(),
@@ -280,7 +296,13 @@ impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
         let ids = self.satisfy_base_fee_ids(basefee);
         let mut txs = Vec::with_capacity(ids.len());
         for id in ids {
-            txs.push(self.get(&id).expect("transaction exists").transaction.clone().into());
+            txs.push(
+                self.get(&id)
+                    .expect("transaction exists")
+                    .transaction
+                    .clone()
+                    .into(),
+            );
         }
         txs
     }
@@ -296,7 +318,7 @@ impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
                     // still parked -> skip descendant transactions
                     'this: while let Some((peek, _)) = iter.peek() {
                         if peek.sender != id.sender {
-                            break 'this
+                            break 'this;
                         }
                         iter.next();
                     }
@@ -355,7 +377,10 @@ struct ParkedPoolTransaction<T: ParkedOrd> {
 
 impl<T: ParkedOrd> Clone for ParkedPoolTransaction<T> {
     fn clone(&self) -> Self {
-        Self { submission_id: self.submission_id, transaction: self.transaction.clone() }
+        Self {
+            submission_id: self.submission_id,
+            transaction: self.transaction.clone(),
+        }
     }
 }
 
@@ -397,7 +422,10 @@ pub(crate) struct SubmissionSenderId {
 impl SubmissionSenderId {
     /// Creates a new [`SubmissionSenderId`] based on the [`SenderId`] and `submission_id`.
     const fn new(sender_id: SenderId, submission_id: u64) -> Self {
-        Self { sender_id, submission_id }
+        Self {
+            sender_id,
+            submission_id,
+        }
     }
 }
 
@@ -488,7 +516,10 @@ impl_ord_wrapper!(BasefeeOrd);
 
 impl<T: PoolTransaction> Ord for BasefeeOrd<T> {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.0.transaction.max_fee_per_gas().cmp(&other.0.transaction.max_fee_per_gas())
+        self.0
+            .transaction
+            .max_fee_per_gas()
+            .cmp(&other.0.transaction.max_fee_per_gas())
     }
 }
 
@@ -510,7 +541,9 @@ impl_ord_wrapper!(QueuedOrd);
 impl<T: PoolTransaction> Ord for QueuedOrd<T> {
     fn cmp(&self, other: &Self) -> Ordering {
         // Higher price is better
-        self.max_fee_per_gas().cmp(&self.max_fee_per_gas()).then_with(||
+        self.max_fee_per_gas()
+            .cmp(&self.max_fee_per_gas())
+            .then_with(||
             // Lower timestamp is better
             other.timestamp.cmp(&self.timestamp))
     }
@@ -634,15 +667,20 @@ mod tests {
         }
 
         // we should end up with the most recently submitted transactions
-        let pool_limit = SubPoolLimit { max_txs: 4, max_size: usize::MAX };
+        let pool_limit = SubPoolLimit {
+            max_txs: 4,
+            max_size: usize::MAX,
+        };
 
         // truncate the pool
         let removed = pool.truncate_pool(pool_limit);
         assert_eq!(removed.len(), expected_removed.len());
 
         // get the inner txs from the removed txs
-        let removed =
-            removed.into_iter().map(|tx| (tx.sender(), tx.nonce())).collect::<HashSet<_>>();
+        let removed = removed
+            .into_iter()
+            .map(|tx| (tx.sender(), tx.nonce()))
+            .collect::<HashSet<_>>();
         assert_eq!(removed, expected_removed);
 
         // get the parked pool
@@ -650,7 +688,10 @@ mod tests {
         assert_eq!(parked.len(), expected_parked.len());
 
         // get the inner txs from the parked txs
-        let parked = parked.into_iter().map(|tx| (tx.sender(), tx.nonce())).collect::<HashSet<_>>();
+        let parked = parked
+            .into_iter()
+            .map(|tx| (tx.sender(), tx.nonce()))
+            .collect::<HashSet<_>>();
         assert_eq!(parked, expected_parked);
     }
 
@@ -716,7 +757,10 @@ mod tests {
         }
 
         // get senders by submission id - a4, b3, c3, d1, reversed
-        let senders = pool.get_senders_by_submission_id().map(|s| s.sender_id).collect::<Vec<_>>();
+        let senders = pool
+            .get_senders_by_submission_id()
+            .map(|s| s.sender_id)
+            .collect::<Vec<_>>();
         assert_eq!(senders.len(), 4);
         let expected_senders = vec![d_sender, c_sender, b_sender, a_sender]
             .into_iter()
@@ -733,7 +777,10 @@ mod tests {
             pool.add_transaction(f.validated_arc(tx));
         }
 
-        let senders = pool.get_senders_by_submission_id().map(|s| s.sender_id).collect::<Vec<_>>();
+        let senders = pool
+            .get_senders_by_submission_id()
+            .map(|s| s.sender_id)
+            .collect::<Vec<_>>();
         assert_eq!(senders.len(), 4);
         let expected_senders = vec![a_sender, c_sender, b_sender, d_sender]
             .into_iter()
@@ -842,13 +889,18 @@ mod tests {
         assert_eq!(pool.last_sender_submission.len(), 3);
 
         // Verify that sender 1 is not in the last sender submission
-        let submission_info1 =
-            pool.last_sender_submission.iter().find(|info| info.sender_id == sender1);
+        let submission_info1 = pool
+            .last_sender_submission
+            .iter()
+            .find(|info| info.sender_id == sender1);
         assert!(submission_info1.is_none());
 
         // Verify that sender 2 is in the last sender submission
-        let submission_info2 =
-            pool.last_sender_submission.iter().find(|info| info.sender_id == sender2).unwrap();
+        let submission_info2 = pool
+            .last_sender_submission
+            .iter()
+            .find(|info| info.sender_id == sender2)
+            .unwrap();
         assert_eq!(submission_info2.sender_id, sender2);
         assert_eq!(submission_info2.submission_id, 2);
     }
@@ -881,7 +933,10 @@ mod tests {
         assert!(pool.sender_transaction_count.contains_key(&sender1));
 
         // We should have 1 sender transaction count for sender 1 before removing the sender count
-        assert_eq!(pool.sender_transaction_count.get(&sender1).unwrap().count, 1);
+        assert_eq!(
+            pool.sender_transaction_count.get(&sender1).unwrap().count,
+            1
+        );
 
         // Remove the sender count for sender 1
         pool.remove_sender_count(sender1);
@@ -893,7 +948,10 @@ mod tests {
         // Check the sender transaction count for sender 2 before removing the sender count
         assert_eq!(
             *pool.sender_transaction_count.get(&sender2).unwrap(),
-            SenderTransactionCount { count: 2, last_submission_id: 3 }
+            SenderTransactionCount {
+                count: 2,
+                last_submission_id: 3
+            }
         );
 
         // Remove the sender count for sender 2
@@ -909,7 +967,10 @@ mod tests {
         // Sender transaction count for sender 2 should be updated correctly
         assert_eq!(
             *pool.sender_transaction_count.get(&sender2).unwrap(),
-            SenderTransactionCount { count: 1, last_submission_id: 3 }
+            SenderTransactionCount {
+                count: 1,
+                last_submission_id: 3
+            }
         );
     }
 
@@ -968,7 +1029,9 @@ mod tests {
         pool.add_transaction(tx.clone());
 
         // Retrieve the transaction using `get()` and assert it matches the added transaction
-        let retrieved = pool.get(&tx_id).expect("Transaction should exist in the pool");
+        let retrieved = pool
+            .get(&tx_id)
+            .expect("Transaction should exist in the pool");
         assert_eq!(retrieved.transaction.id(), tx.id());
     }
 
@@ -1004,14 +1067,20 @@ mod tests {
         pool.add_transaction(tx2);
 
         // Set a limit that matches the current number of transactions
-        let limit = SubPoolLimit { max_txs: 2, max_size: usize::MAX };
+        let limit = SubPoolLimit {
+            max_txs: 2,
+            max_size: usize::MAX,
+        };
         let removed = pool.truncate_pool(limit);
 
         // No transactions should be removed
         assert!(removed.is_empty());
 
         // Set a stricter limit that requires truncating one transaction
-        let limit = SubPoolLimit { max_txs: 1, max_size: usize::MAX };
+        let limit = SubPoolLimit {
+            max_txs: 1,
+            max_size: usize::MAX,
+        };
         let removed = pool.truncate_pool(limit);
 
         // One transaction should be removed, and the pool should have one left

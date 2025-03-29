@@ -27,18 +27,27 @@ pub struct BundleStateProvider<SP: StateProvider, EDP: ExecutionDataProvider> {
 impl<SP: StateProvider, EDP: ExecutionDataProvider> BundleStateProvider<SP, EDP> {
     /// Create new bundle state provider
     pub const fn new(state_provider: SP, block_execution_data_provider: EDP) -> Self {
-        Self { state_provider, block_execution_data_provider }
+        Self {
+            state_provider,
+            block_execution_data_provider,
+        }
     }
 
     /// Retrieve hashed storage for target address.
     fn get_hashed_storage(&self, address: Address) -> HashedStorage {
-        let bundle_state = self.block_execution_data_provider.execution_outcome().state();
+        let bundle_state = self
+            .block_execution_data_provider
+            .execution_outcome()
+            .state();
         bundle_state
             .account(&address)
             .map(|account| {
                 HashedStorage::from_plain_storage(
                     account.status,
-                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
+                    account
+                        .storage
+                        .iter()
+                        .map(|(slot, value)| (slot, &value.present_value)),
                 )
             })
             .unwrap_or_default()
@@ -53,7 +62,7 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> BlockHashReader
     fn block_hash(&self, block_number: BlockNumber) -> ProviderResult<Option<B256>> {
         let block_hash = self.block_execution_data_provider.block_hash(block_number);
         if block_hash.is_some() {
-            return Ok(block_hash)
+            return Ok(block_hash);
         }
         self.state_provider.block_hash(block_number)
     }
@@ -69,8 +78,10 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> BlockHashReader
 
 impl<SP: StateProvider, EDP: ExecutionDataProvider> AccountReader for BundleStateProvider<SP, EDP> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        if let Some(account) =
-            self.block_execution_data_provider.execution_outcome().account(address)
+        if let Some(account) = self
+            .block_execution_data_provider
+            .execution_outcome()
+            .account(address)
         {
             Ok(account)
         } else {
@@ -83,7 +94,10 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateRootProvider
     for BundleStateProvider<SP, EDP>
 {
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
-        let bundle_state = self.block_execution_data_provider.execution_outcome().state();
+        let bundle_state = self
+            .block_execution_data_provider
+            .execution_outcome()
+            .state();
         let mut state = self.hashed_post_state(bundle_state);
         state.extend(hashed_state);
         self.state_provider.state_root(state)
@@ -97,7 +111,10 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateRootProvider
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        let bundle_state = self.block_execution_data_provider.execution_outcome().state();
+        let bundle_state = self
+            .block_execution_data_provider
+            .execution_outcome()
+            .state();
         let mut state = self.hashed_post_state(bundle_state);
         state.extend(hashed_state);
         self.state_provider.state_root_with_updates(state)
@@ -107,9 +124,13 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateRootProvider
         &self,
         mut input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        let bundle_state = self.block_execution_data_provider.execution_outcome().state();
+        let bundle_state = self
+            .block_execution_data_provider
+            .execution_outcome()
+            .state();
         input.prepend(self.hashed_post_state(bundle_state));
-        self.state_provider.state_root_from_nodes_with_updates(input)
+        self.state_provider
+            .state_root_from_nodes_with_updates(input)
     }
 }
 
@@ -145,7 +166,8 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StorageRootProvider
     ) -> ProviderResult<StorageMultiProof> {
         let mut storage = self.get_hashed_storage(address);
         storage.extend(&hashed_storage);
-        self.state_provider.storage_multiproof(address, slots, storage)
+        self.state_provider
+            .storage_multiproof(address, slots, storage)
     }
 }
 
@@ -158,7 +180,10 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateProofProvider
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
-        let bundle_state = self.block_execution_data_provider.execution_outcome().state();
+        let bundle_state = self
+            .block_execution_data_provider
+            .execution_outcome()
+            .state();
         input.prepend(self.hashed_post_state(bundle_state));
         self.state_provider.proof(input, address, slots)
     }
@@ -168,13 +193,19 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateProofProvider
         mut input: reth_trie::TrieInput,
         targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
-        let bundle_state = self.block_execution_data_provider.execution_outcome().state();
+        let bundle_state = self
+            .block_execution_data_provider
+            .execution_outcome()
+            .state();
         input.prepend(self.hashed_post_state(bundle_state));
         self.state_provider.multiproof(input, targets)
     }
 
     fn witness(&self, mut input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
-        let bundle_state = self.block_execution_data_provider.execution_outcome().state();
+        let bundle_state = self
+            .block_execution_data_provider
+            .execution_outcome()
+            .state();
         input.prepend(self.hashed_post_state(bundle_state));
         self.state_provider.witness(input, target)
     }
@@ -200,17 +231,19 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateProvider for BundleStat
             .execution_outcome()
             .storage(&account, u256_storage_key)
         {
-            return Ok(Some(value))
+            return Ok(Some(value));
         }
 
         self.state_provider.storage(account, storage_key)
     }
 
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
-        if let Some(bytecode) =
-            self.block_execution_data_provider.execution_outcome().bytecode(code_hash)
+        if let Some(bytecode) = self
+            .block_execution_data_provider
+            .execution_outcome()
+            .bytecode(code_hash)
         {
-            return Ok(Some(bytecode))
+            return Ok(Some(bytecode));
         }
 
         self.state_provider.bytecode_by_hash(code_hash)

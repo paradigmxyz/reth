@@ -40,7 +40,13 @@ impl StorageShardedKey {
         storage_key: B256,
         highest_block_number: BlockNumber,
     ) -> Self {
-        Self { address, sharded_key: ShardedKey { key: storage_key, highest_block_number } }
+        Self {
+            address,
+            sharded_key: ShardedKey {
+                key: storage_key,
+                highest_block_number,
+            },
+        }
     }
 
     /// Creates a new key with the highest block number set to maximum.
@@ -48,7 +54,10 @@ impl StorageShardedKey {
     pub const fn last(address: Address, storage_key: B256) -> Self {
         Self {
             address,
-            sharded_key: ShardedKey { key: storage_key, highest_block_number: u64::MAX },
+            sharded_key: ShardedKey {
+                key: storage_key,
+                highest_block_number: u64::MAX,
+            },
         }
     }
 }
@@ -68,16 +77,21 @@ impl Encode for StorageShardedKey {
 impl Decode for StorageShardedKey {
     fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
         if value.len() != STORAGE_SHARD_KEY_BYTES_SIZE {
-            return Err(DatabaseError::Decode)
+            return Err(DatabaseError::Decode);
         }
         let tx_num_index = value.len() - 8;
 
         let highest_tx_number = u64::from_be_bytes(
-            value[tx_num_index..].try_into().map_err(|_| DatabaseError::Decode)?,
+            value[tx_num_index..]
+                .try_into()
+                .map_err(|_| DatabaseError::Decode)?,
         );
         let address = Address::decode(&value[..20])?;
         let storage_key = B256::decode(&value[20..52])?;
 
-        Ok(Self { address, sharded_key: ShardedKey::new(storage_key, highest_tx_number) })
+        Ok(Self {
+            address,
+            sharded_key: ShardedKey::new(storage_key, highest_tx_number),
+        })
     }
 }

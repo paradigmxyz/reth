@@ -102,17 +102,17 @@ where
                 // make sure that our database has been written to, and throw error if it's empty.
                 if factory.get_stage_checkpoint(StageId::Headers)?.is_none() {
                     error!(target: "reth::storage", "Genesis header found on static files, but database is uninitialized.");
-                    return Err(InitStorageError::UninitializedDatabase)
+                    return Err(InitStorageError::UninitializedDatabase);
                 }
 
                 debug!("Genesis already written, skipping.");
-                return Ok(hash)
+                return Ok(hash);
             }
 
             return Err(InitStorageError::GenesisHashMismatch {
                 chainspec_hash: hash,
                 storage_hash: block_hash,
-            })
+            });
         }
         Err(e) => {
             debug!(?e);
@@ -142,10 +142,14 @@ where
     let static_file_provider = provider_rw.static_file_provider();
     // Static file segments start empty, so we need to initialize the genesis block.
     let segment = StaticFileSegment::Receipts;
-    static_file_provider.latest_writer(segment)?.increment_block(0)?;
+    static_file_provider
+        .latest_writer(segment)?
+        .increment_block(0)?;
 
     let segment = StaticFileSegment::Transactions;
-    static_file_provider.latest_writer(segment)?.increment_block(0)?;
+    static_file_provider
+        .latest_writer(segment)?
+        .increment_block(0)?;
 
     // `commit_unwind`` will first commit the DB and then the static file provider, which is
     // necessary on `init_genesis`.
@@ -222,7 +226,13 @@ where
 
         reverts_init.insert(
             *address,
-            (Some(None), storage.keys().map(|k| StorageEntry::new(*k, U256::ZERO)).collect()),
+            (
+                Some(None),
+                storage
+                    .keys()
+                    .map(|k| StorageEntry::new(*k, U256::ZERO))
+                    .collect(),
+            ),
         );
 
         state_init.insert(
@@ -269,7 +279,9 @@ where
     Provider: DBProvider<Tx: DbTxMut> + HashingWriter,
 {
     // insert and hash accounts to hashing table
-    let alloc_accounts = alloc.clone().map(|(addr, account)| (*addr, Some(Account::from(account))));
+    let alloc_accounts = alloc
+        .clone()
+        .map(|(addr, account)| (*addr, Some(Account::from(account))));
     provider.insert_account_for_hashing(alloc_accounts)?;
 
     trace!(target: "reth::cli", "Inserted account hashes");
@@ -277,7 +289,13 @@ where
     let alloc_storage = alloc.filter_map(|(addr, account)| {
         // only return Some if there is storage
         account.storage.as_ref().map(|storage| {
-            (*addr, storage.iter().map(|(&key, &value)| StorageEntry { key, value: value.into() }))
+            (
+                *addr,
+                storage.iter().map(|(&key, &value)| StorageEntry {
+                    key,
+                    value: value.into(),
+                }),
+            )
         })
     });
     provider.insert_storage_for_hashing(alloc_storage)?;
@@ -345,8 +363,12 @@ where
         Err(e) => return Err(e),
     }
 
-    provider.tx_ref().put::<tables::HeaderNumbers>(block_hash, 0)?;
-    provider.tx_ref().put::<tables::BlockBodyIndices>(0, Default::default())?;
+    provider
+        .tx_ref()
+        .put::<tables::HeaderNumbers>(block_hash, 0)?;
+    provider
+        .tx_ref()
+        .put::<tables::BlockBodyIndices>(0, Default::default())?;
 
     Ok(())
 }
@@ -377,7 +399,7 @@ where
         + AsRef<Provider>,
 {
     if etl_config.file_size == 0 {
-        return Err(eyre::eyre!("ETL file size cannot be zero"))
+        return Err(eyre::eyre!("ETL file size cannot be zero"));
     }
 
     let block = provider_rw.last_block_number()?;
@@ -399,7 +421,7 @@ where
             got: dump_state_root,
             expected: expected_state_root,
         })
-        .into())
+        .into());
     }
 
     debug!(target: "reth::cli",
@@ -432,7 +454,7 @@ where
             got: computed_state_root,
             expected: expected_state_root,
         })
-        .into())
+        .into());
     }
 
     // insert sync stages for stages that require state
@@ -466,10 +488,13 @@ fn parse_accounts(
 
     while let Ok(n) = reader.read_line(&mut line) {
         if n == 0 {
-            break
+            break;
         }
 
-        let GenesisAccountWithAddress { genesis_account, address } = serde_json::from_str(&line)?;
+        let GenesisAccountWithAddress {
+            genesis_account,
+            address,
+        } = serde_json::from_str(&line)?;
         collector.insert(address, genesis_account)?;
 
         if !collector.is_empty() && collector.len() % AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP == 0
@@ -511,8 +536,8 @@ where
 
         accounts.push((address, account));
 
-        if (index > 0 && index % AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP == 0) ||
-            index == accounts_len - 1
+        if (index > 0 && index % AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP == 0)
+            || index == accounts_len - 1
         {
             total_inserted_accounts += accounts.len();
 
@@ -594,7 +619,7 @@ where
                     "State root has been computed"
                 );
 
-                return Ok(root)
+                return Ok(root);
             }
         }
     }
@@ -646,13 +671,18 @@ mod tests {
         DB: Database,
         T: Table,
     {
-        Ok(tx.cursor_read::<T>()?.walk_range(..)?.collect::<Result<Vec<_>, _>>()?)
+        Ok(tx
+            .cursor_read::<T>()?
+            .walk_range(..)?
+            .collect::<Result<Vec<_>, _>>()?)
     }
 
     #[test]
     fn success_init_genesis_mainnet() {
-        let genesis_hash =
-            init_genesis(&create_test_provider_factory_with_chain_spec(MAINNET.clone())).unwrap();
+        let genesis_hash = init_genesis(&create_test_provider_factory_with_chain_spec(
+            MAINNET.clone(),
+        ))
+        .unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, MAINNET_GENESIS_HASH);
@@ -660,8 +690,10 @@ mod tests {
 
     #[test]
     fn success_init_genesis_sepolia() {
-        let genesis_hash =
-            init_genesis(&create_test_provider_factory_with_chain_spec(SEPOLIA.clone())).unwrap();
+        let genesis_hash = init_genesis(&create_test_provider_factory_with_chain_spec(
+            SEPOLIA.clone(),
+        ))
+        .unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, SEPOLIA_GENESIS_HASH);
@@ -669,8 +701,10 @@ mod tests {
 
     #[test]
     fn success_init_genesis_holesky() {
-        let genesis_hash =
-            init_genesis(&create_test_provider_factory_with_chain_spec(HOLESKY.clone())).unwrap();
+        let genesis_hash = init_genesis(&create_test_provider_factory_with_chain_spec(
+            HOLESKY.clone(),
+        ))
+        .unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, HOLESKY_GENESIS_HASH);
@@ -709,7 +743,10 @@ mod tests {
                 alloc: BTreeMap::from([
                     (
                         address_with_balance,
-                        GenesisAccount { balance: U256::from(1), ..Default::default() },
+                        GenesisAccount {
+                            balance: U256::from(1),
+                            ..Default::default()
+                        },
                     ),
                     (
                         address_with_storage,
@@ -738,8 +775,14 @@ mod tests {
             collect_table_entries::<Arc<DatabaseEnv>, tables::AccountsHistory>(tx)
                 .expect("failed to collect"),
             vec![
-                (ShardedKey::new(address_with_balance, u64::MAX), IntegerList::new([0]).unwrap()),
-                (ShardedKey::new(address_with_storage, u64::MAX), IntegerList::new([0]).unwrap())
+                (
+                    ShardedKey::new(address_with_balance, u64::MAX),
+                    IntegerList::new([0]).unwrap()
+                ),
+                (
+                    ShardedKey::new(address_with_storage, u64::MAX),
+                    IntegerList::new([0]).unwrap()
+                )
             ],
         );
 

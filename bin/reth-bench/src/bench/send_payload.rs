@@ -56,7 +56,9 @@ impl Command {
         Ok(match &self.path {
             Some(path) => reth_fs_util::read_to_string(path)?,
             None => String::from_utf8(
-                BufReader::new(std::io::stdin()).bytes().collect::<Result<Vec<_>, _>>()?,
+                BufReader::new(std::io::stdin())
+                    .bytes()
+                    .collect::<Result<Vec<_>, _>>()?,
             )?,
         })
     }
@@ -98,8 +100,11 @@ impl Command {
         let parent_beacon_block_root = block.header.parent_beacon_block_root;
 
         // Extract blob versioned hashes
-        let blob_versioned_hashes =
-            block.body.blob_versioned_hashes_iter().copied().collect::<Vec<_>>();
+        let blob_versioned_hashes = block
+            .body
+            .blob_versioned_hashes_iter()
+            .copied()
+            .collect::<Vec<_>>();
 
         // Convert to execution payload
         let execution_payload = ExecutionPayload::from_block_slow(&block).0;

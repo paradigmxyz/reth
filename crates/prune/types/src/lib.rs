@@ -34,7 +34,10 @@ pub use target::{PruneModes, MINIMUM_PRUNING_DISTANCE};
 
 /// Configuration for pruning receipts not associated with logs emitted by the specified contracts.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    any(test, feature = "serde"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub struct ReceiptsLogPruneConfig(pub BTreeMap<Address, PruneMode>);
 
 impl ReceiptsLogPruneConfig {
@@ -77,8 +80,8 @@ impl ReceiptsLogPruneConfig {
             let block = base_block.max(
                 mode.prune_target_block(tip, PruneSegment::ContractLogs, PrunePurpose::User)?
                     .map(|(block, _)| block)
-                    .unwrap_or_default() +
-                    1,
+                    .unwrap_or_default()
+                    + 1,
             );
 
             map.entry(block).or_insert_with(Vec::new).push(address)
@@ -128,7 +131,10 @@ mod tests {
         let pruned_block = None;
 
         let result = config.group_by_block(tip, pruned_block).unwrap();
-        assert!(result.is_empty(), "The result should be empty when the config is empty");
+        assert!(
+            result.is_empty(),
+            "The result should be empty when the config is empty"
+        );
     }
 
     #[test]
@@ -147,7 +153,11 @@ mod tests {
 
         // Expect one entry with block 500 and the corresponding address
         assert_eq!(result.len(), 1);
-        assert_eq!(result[&500], vec![&address], "Address should be grouped under block 500");
+        assert_eq!(
+            result[&500],
+            vec![&address],
+            "Address should be grouped under block 500"
+        );
 
         // Tip smaller than the target block, so that we have nothing to prune for the block
         let tip = 300;
@@ -157,7 +167,11 @@ mod tests {
 
         // Expect one entry with block 400 and the corresponding address
         assert_eq!(result.len(), 1);
-        assert_eq!(result[&401], vec![&address], "Address should be grouped under block 400");
+        assert_eq!(
+            result[&401],
+            vec![&address],
+            "Address should be grouped under block 400"
+        );
     }
 
     #[test]
@@ -178,8 +192,16 @@ mod tests {
 
         // Expect two entries: one for block 600 and another for block 800
         assert_eq!(result.len(), 2);
-        assert_eq!(result[&600], vec![&address1], "Address1 should be grouped under block 600");
-        assert_eq!(result[&800], vec![&address2], "Address2 should be grouped under block 800");
+        assert_eq!(
+            result[&600],
+            vec![&address1],
+            "Address1 should be grouped under block 600"
+        );
+        assert_eq!(
+            result[&800],
+            vec![&address2],
+            "Address2 should be grouped under block 800"
+        );
     }
 
     #[test]
@@ -198,7 +220,11 @@ mod tests {
 
         // Expect the entry to be grouped under block 100 (tip - distance)
         assert_eq!(result.len(), 1);
-        assert_eq!(result[&101], vec![&address], "Address should be grouped under block 100");
+        assert_eq!(
+            result[&101],
+            vec![&address],
+            "Address should be grouped under block 100"
+        );
 
         let tip = 100100;
         // Pruned block is larger than the target block
@@ -208,7 +234,11 @@ mod tests {
 
         // Expect the entry to be grouped under block 800 which is larger than tip - distance
         assert_eq!(result.len(), 1);
-        assert_eq!(result[&801], vec![&address], "Address should be grouped under block 800");
+        assert_eq!(
+            result[&801],
+            vec![&address],
+            "Address should be grouped under block 800"
+        );
     }
 
     #[test]
@@ -217,8 +247,13 @@ mod tests {
         let tip = 1000;
         let pruned_block = None;
 
-        let result = config.lowest_block_with_distance(tip, pruned_block).unwrap();
-        assert_eq!(result, None, "The result should be None when the config is empty");
+        let result = config
+            .lowest_block_with_distance(tip, pruned_block)
+            .unwrap();
+        assert_eq!(
+            result, None,
+            "The result should be None when the config is empty"
+        );
     }
 
     #[test]
@@ -232,8 +267,13 @@ mod tests {
         let tip = 1000;
         let pruned_block = None;
 
-        let result = config.lowest_block_with_distance(tip, pruned_block).unwrap();
-        assert_eq!(result, None, "The result should be None when there are no Distance modes");
+        let result = config
+            .lowest_block_with_distance(tip, pruned_block)
+            .unwrap();
+        assert_eq!(
+            result, None,
+            "The result should be None when there are no Distance modes"
+        );
     }
 
     #[test]
@@ -250,7 +290,9 @@ mod tests {
 
         // Expect the lowest block to be 400 as 400 > 100100 - 100000 (tip - distance)
         assert_eq!(
-            config.lowest_block_with_distance(tip, pruned_block).unwrap(),
+            config
+                .lowest_block_with_distance(tip, pruned_block)
+                .unwrap(),
             Some(400),
             "The lowest block should be 400"
         );
@@ -260,7 +302,9 @@ mod tests {
 
         // Expect the lowest block to be 100 as 100 > 50 (pruned block)
         assert_eq!(
-            config.lowest_block_with_distance(tip, pruned_block).unwrap(),
+            config
+                .lowest_block_with_distance(tip, pruned_block)
+                .unwrap(),
             Some(100),
             "The lowest block should be 100"
         );
@@ -284,7 +328,12 @@ mod tests {
         // - First iteration will return 100200 => 200300 - 100100 = 100200
         // - Second iteration will return 100000 => 200300 - 100300 = 100000 < 100200
         // - Final result is 100000
-        assert_eq!(config.lowest_block_with_distance(tip, pruned_block).unwrap(), Some(100000));
+        assert_eq!(
+            config
+                .lowest_block_with_distance(tip, pruned_block)
+                .unwrap(),
+            Some(100000)
+        );
     }
 
     #[test]
@@ -305,7 +354,12 @@ mod tests {
         // - First iteration, lowest block is 200300 - 100400 = 99900
         // - Second iteration, lowest block is still 99900 < 200300 - 100300 = 100000
         // - Final result is 99900
-        assert_eq!(config.lowest_block_with_distance(tip, pruned_block).unwrap(), Some(99900));
+        assert_eq!(
+            config
+                .lowest_block_with_distance(tip, pruned_block)
+                .unwrap(),
+            Some(99900)
+        );
     }
 
     #[test]
@@ -326,6 +380,11 @@ mod tests {
         // - Lowest is 200300 - 100400 = 99900 < 200300 - 100300 = 100000
         // - Lowest is compared to the pruned block 100000: 100000 > 99900
         // - Finally the lowest block is 100000
-        assert_eq!(config.lowest_block_with_distance(tip, pruned_block).unwrap(), Some(100000));
+        assert_eq!(
+            config
+                .lowest_block_with_distance(tip, pruned_block)
+                .unwrap(),
+            Some(100000)
+        );
     }
 }

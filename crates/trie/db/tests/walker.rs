@@ -12,9 +12,18 @@ use reth_trie_db::{DatabaseAccountTrieCursor, DatabaseStorageTrieCursor};
 #[test]
 fn walk_nodes_with_common_prefix() {
     let inputs = vec![
-        (vec![0x5u8], BranchNodeCompact::new(0b1_0000_0101, 0b1_0000_0100, 0, vec![], None)),
-        (vec![0x5u8, 0x2, 0xC], BranchNodeCompact::new(0b1000_0111, 0, 0, vec![], None)),
-        (vec![0x5u8, 0x8], BranchNodeCompact::new(0b0110, 0b0100, 0, vec![], None)),
+        (
+            vec![0x5u8],
+            BranchNodeCompact::new(0b1_0000_0101, 0b1_0000_0100, 0, vec![], None),
+        ),
+        (
+            vec![0x5u8, 0x2, 0xC],
+            BranchNodeCompact::new(0b1000_0111, 0, 0, vec![], None),
+        ),
+        (
+            vec![0x5u8, 0x8],
+            BranchNodeCompact::new(0b0110, 0b0100, 0, vec![], None),
+        ),
     ];
     let expected = vec![
         vec![0x5, 0x0],
@@ -43,12 +52,18 @@ fn walk_nodes_with_common_prefix() {
     test_cursor(account_trie, &expected);
 
     let hashed_address = B256::random();
-    let mut storage_cursor = tx.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
+    let mut storage_cursor = tx
+        .tx_ref()
+        .cursor_dup_write::<tables::StoragesTrie>()
+        .unwrap();
     for (k, v) in &inputs {
         storage_cursor
             .upsert(
                 hashed_address,
-                &StorageTrieEntry { nibbles: k.clone().into(), node: v.clone() },
+                &StorageTrieEntry {
+                    nibbles: k.clone().into(),
+                    node: v.clone(),
+                },
             )
             .unwrap();
     }
@@ -67,7 +82,10 @@ where
     for expected in expected {
         walker.advance().unwrap();
         let got = walker.key().cloned();
-        assert_eq!(got.unwrap(), Nibbles::from_nibbles_unchecked(expected.clone()));
+        assert_eq!(
+            got.unwrap(),
+            Nibbles::from_nibbles_unchecked(expected.clone())
+        );
     }
 
     // There should be 8 paths traversed in total from 3 branches.
@@ -79,7 +97,10 @@ where
 fn cursor_rootnode_with_changesets() {
     let factory = create_test_provider_factory();
     let tx = factory.provider_rw().unwrap();
-    let mut cursor = tx.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
+    let mut cursor = tx
+        .tx_ref()
+        .cursor_dup_write::<tables::StoragesTrie>()
+        .unwrap();
 
     let nodes = vec![
         (
@@ -108,7 +129,15 @@ fn cursor_rootnode_with_changesets() {
 
     let hashed_address = B256::random();
     for (k, v) in nodes {
-        cursor.upsert(hashed_address, &StorageTrieEntry { nibbles: k.into(), node: v }).unwrap();
+        cursor
+            .upsert(
+                hashed_address,
+                &StorageTrieEntry {
+                    nibbles: k.into(),
+                    node: v,
+                },
+            )
+            .unwrap();
     }
 
     let mut trie = DatabaseStorageTrieCursor::new(cursor, hashed_address);
@@ -132,7 +161,10 @@ fn cursor_rootnode_with_changesets() {
     cursor.advance().unwrap();
     assert_eq!(cursor.key().cloned(), Some(Nibbles::from_nibbles([0x2])));
     cursor.advance().unwrap();
-    assert_eq!(cursor.key().cloned(), Some(Nibbles::from_nibbles([0x2, 0x1])));
+    assert_eq!(
+        cursor.key().cloned(),
+        Some(Nibbles::from_nibbles([0x2, 0x1]))
+    );
     cursor.advance().unwrap();
     assert_eq!(cursor.key().cloned(), Some(Nibbles::from_nibbles([0x4])));
 

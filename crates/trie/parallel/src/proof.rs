@@ -106,8 +106,9 @@ where
         );
 
         let (sender, receiver) = std::sync::mpsc::channel();
-        let _ =
-            self.storage_proof_task_handle.queue_task(ProofTaskKind::StorageProof(input, sender));
+        let _ = self
+            .storage_proof_task_handle
+            .queue_task(ProofTaskKind::StorageProof(input, sender));
         receiver
     }
 
@@ -160,7 +161,10 @@ where
                 .iter()
                 .filter(|&(_hashed_address, slots)| !slots.is_empty())
                 .map(|(hashed_address, slots)| {
-                    (*hashed_address, PrefixSetMut::from(slots.iter().map(Nibbles::unpack)))
+                    (
+                        *hashed_address,
+                        PrefixSetMut::from(slots.iter().map(Nibbles::unpack)),
+                    )
                 })
                 .collect(),
             destroyed_accounts: Default::default(),
@@ -168,7 +172,10 @@ where
         let prefix_sets = prefix_sets.freeze();
 
         let storage_root_targets = StorageRootTargets::new(
-            prefix_sets.account_prefix_set.iter().map(|nibbles| B256::from_slice(&nibbles.pack())),
+            prefix_sets
+                .account_prefix_set
+                .iter()
+                .map(|nibbles| B256::from_slice(&nibbles.pack())),
             prefix_sets.storage_prefix_sets.clone(),
         );
         let storage_root_targets_len = storage_root_targets.len();
@@ -187,8 +194,9 @@ where
         let mut storage_proofs =
             B256Map::with_capacity_and_hasher(storage_root_targets.len(), Default::default());
 
-        for (hashed_address, prefix_set) in
-            storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
+        for (hashed_address, prefix_set) in storage_root_targets
+            .into_iter()
+            .sorted_unstable_by_key(|(address, _)| *address)
         {
             let target_slots = targets.get(&hashed_address).cloned().unwrap_or_default();
             let receiver = self.spawn_storage_proof(hashed_address, prefix_set, target_slots);
@@ -210,7 +218,9 @@ where
 
         // Create the walker.
         let walker = TrieWalker::new(
-            trie_cursor_factory.account_trie_cursor().map_err(ProviderError::Database)?,
+            trie_cursor_factory
+                .account_trie_cursor()
+                .map_err(ProviderError::Database)?,
             prefix_sets.account_prefix_set,
         )
         .with_deletions_retained(true);
@@ -223,15 +233,20 @@ where
 
         // Initialize all storage multiproofs as empty.
         // Storage multiproofs for non empty tries will be overwritten if necessary.
-        let mut storages: B256Map<_> =
-            targets.keys().map(|key| (*key, StorageMultiProof::empty())).collect();
+        let mut storages: B256Map<_> = targets
+            .keys()
+            .map(|key| (*key, StorageMultiProof::empty()))
+            .collect();
         let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
         let mut account_node_iter = TrieNodeIter::new(
             walker,
-            hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?,
+            hashed_cursor_factory
+                .hashed_account_cursor()
+                .map_err(ProviderError::Database)?,
         );
-        while let Some(account_node) =
-            account_node_iter.try_next().map_err(ProviderError::Database)?
+        while let Some(account_node) = account_node_iter
+            .try_next()
+            .map_err(ProviderError::Database)?
         {
             match account_node {
                 TrieElement::Branch(node) => {
@@ -315,7 +330,12 @@ where
             "Calculated proof"
         );
 
-        Ok(MultiProof { account_subtree, branch_node_hash_masks, branch_node_tree_masks, storages })
+        Ok(MultiProof {
+            account_subtree,
+            branch_node_hash_masks,
+            branch_node_tree_masks,
+            storages,
+        })
     }
 }
 
@@ -343,8 +363,10 @@ mod tests {
         let state = (0..100)
             .map(|_| {
                 let address = Address::random();
-                let account =
-                    Account { balance: U256::from(rng.gen::<u64>()), ..Default::default() };
+                let account = Account {
+                    balance: U256::from(rng.gen::<u64>()),
+                    ..Default::default()
+                };
                 let mut storage = HashMap::<B256, U256, DefaultHashBuilder>::default();
                 let has_storage = rng.gen_bool(0.7);
                 if has_storage {
@@ -363,16 +385,19 @@ mod tests {
             let provider_rw = factory.provider_rw().unwrap();
             provider_rw
                 .insert_account_for_hashing(
-                    state.iter().map(|(address, (account, _))| (*address, Some(*account))),
+                    state
+                        .iter()
+                        .map(|(address, (account, _))| (*address, Some(*account))),
                 )
                 .unwrap();
             provider_rw
                 .insert_storage_for_hashing(state.iter().map(|(address, (_, storage))| {
                     (
                         *address,
-                        storage
-                            .iter()
-                            .map(|(slot, value)| StorageEntry { key: *slot, value: *value }),
+                        storage.iter().map(|(slot, value)| StorageEntry {
+                            key: *slot,
+                            value: *value,
+                        }),
                     )
                 }))
                 .unwrap();
@@ -419,14 +444,21 @@ mod tests {
         .multiproof(targets.clone())
         .unwrap();
 
-        let sequential_result =
-            Proof::new(trie_cursor_factory, hashed_cursor_factory).multiproof(targets).unwrap();
+        let sequential_result = Proof::new(trie_cursor_factory, hashed_cursor_factory)
+            .multiproof(targets)
+            .unwrap();
 
         // to help narrow down what is wrong - first compare account subtries
-        assert_eq!(parallel_result.account_subtree, sequential_result.account_subtree);
+        assert_eq!(
+            parallel_result.account_subtree,
+            sequential_result.account_subtree
+        );
 
         // then compare length of all storage subtries
-        assert_eq!(parallel_result.storages.len(), sequential_result.storages.len());
+        assert_eq!(
+            parallel_result.storages.len(),
+            sequential_result.storages.len()
+        );
 
         // then compare each storage subtrie
         for (hashed_address, storage_proof) in &parallel_result.storages {
@@ -440,6 +472,8 @@ mod tests {
         // drop the handle to terminate the task and then block on the proof task handle to make
         // sure it does not return any errors
         drop(proof_task_handle);
-        rt.block_on(join_handle).unwrap().expect("The proof task should not return an error");
+        rt.block_on(join_handle)
+            .unwrap()
+            .expect("The proof task should not return an error");
     }
 }

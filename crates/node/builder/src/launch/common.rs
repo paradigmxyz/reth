@@ -73,12 +73,18 @@ pub struct LaunchContext {
 impl LaunchContext {
     /// Create a new instance of the default node launcher.
     pub const fn new(task_executor: TaskExecutor, data_dir: ChainPath<DataDirPath>) -> Self {
-        Self { task_executor, data_dir }
+        Self {
+            task_executor,
+            data_dir,
+        }
     }
 
     /// Create launch context with attachment.
     pub const fn with<T>(self, attachment: T) -> LaunchContextWith<T> {
-        LaunchContextWith { inner: self, attachment }
+        LaunchContextWith {
+            inner: self,
+            attachment,
+        }
     }
 
     /// Loads the reth config with the configured `data_dir` and overrides settings according to the
@@ -90,7 +96,10 @@ impl LaunchContext {
         config: NodeConfig<ChainSpec>,
     ) -> eyre::Result<LaunchContextWith<WithConfigs<ChainSpec>>> {
         let toml_config = self.load_toml_config(&config)?;
-        Ok(self.with(WithConfigs { config, toml_config }))
+        Ok(self.with(WithConfigs {
+            config,
+            toml_config,
+        }))
     }
 
     /// Loads the reth config with the configured `data_dir` and overrides settings according to the
@@ -101,7 +110,10 @@ impl LaunchContext {
         &self,
         config: &NodeConfig<ChainSpec>,
     ) -> eyre::Result<reth_config::Config> {
-        let config_path = config.config.clone().unwrap_or_else(|| self.data_dir.config());
+        let config_path = config
+            .config
+            .clone()
+            .unwrap_or_else(|| self.data_dir.config());
 
         let mut toml_config = reth_config::Config::from_path(&config_path)
             .wrap_err_with(|| format!("Could not load config file {config_path:?}"))?;
@@ -343,7 +355,9 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
 
     /// Returns the configured [`PruneModes`], returning the default if no config was available.
     pub fn prune_modes(&self) -> PruneModes {
-        self.prune_config().map(|config| config.segments).unwrap_or_default()
+        self.prune_config()
+            .map(|config| config.segments)
+            .unwrap_or_default()
     }
 
     /// Returns an initialized [`PrunerBuilder`] based on the configured [`PruneConfig`]
@@ -390,8 +404,11 @@ where
         .with_prune_modes(self.prune_modes())
         .with_static_files_metrics();
 
-        let has_receipt_pruning =
-            self.toml_config().prune.as_ref().is_some_and(|a| a.has_receipts_pruning());
+        let has_receipt_pruning = self
+            .toml_config()
+            .prune
+            .as_ref()
+            .is_some_and(|a| a.has_receipts_pruning());
 
         // Check for consistency between database and static files. If it fails, it unwinds to
         // the first block that's consistent between database and static files.
@@ -548,12 +565,15 @@ where
     ) -> LaunchContextWith<Attached<WithConfigs<T::ChainSpec>, WithMeteredProvider<T>>> {
         let (metrics_sender, metrics_receiver) = unbounded_channel();
 
-        let with_metrics =
-            WithMeteredProvider { provider_factory: self.right().clone(), metrics_sender };
+        let with_metrics = WithMeteredProvider {
+            provider_factory: self.right().clone(),
+            metrics_sender,
+        };
 
         debug!(target: "reth::cli", "Spawning stages metrics listener task");
         let sync_metrics_listener = reth_stages::MetricsListener::new(metrics_receiver);
-        self.task_executor().spawn_critical("stages metrics listener task", sync_metrics_listener);
+        self.task_executor()
+            .spawn_critical("stages metrics listener task", sync_metrics_listener);
 
         LaunchContextWith {
             inner: self.inner,
@@ -725,7 +745,9 @@ where
     where
         C: HeadersClient<Header: BlockHeader>,
     {
-        self.node_config().max_block(client, self.provider_factory().clone()).await
+        self.node_config()
+            .max_block(client, self.provider_factory().clone())
+            .await
     }
 
     /// Returns the static file provider to interact with the static files.
@@ -789,15 +811,15 @@ where
     /// This checks for OP-Mainnet and ensures we have all the necessary data to progress (past
     /// bedrock height)
     fn ensure_chain_specific_db_checks(&self) -> ProviderResult<()> {
-        if self.chain_spec().is_optimism() &&
-            !self.is_dev() &&
-            self.chain_id() == Chain::optimism_mainnet()
+        if self.chain_spec().is_optimism()
+            && !self.is_dev()
+            && self.chain_id() == Chain::optimism_mainnet()
         {
             let latest = self.blockchain_db().last_block_number()?;
             // bedrock height
             if latest < 105235063 {
                 error!("Op-mainnet has been launched without importing the pre-Bedrock state. The chain can't progress without this. See also https://reth.rs/run/sync-op-mainnet.html?minimal-bootstrap-recommended");
-                return Err(ProviderError::BestBlockNotFound)
+                return Err(ProviderError::BestBlockNotFound);
             }
         }
 
@@ -879,7 +901,7 @@ where
         &self,
     ) -> eyre::Result<Box<dyn InvalidBlockHook<<T::Types as NodeTypes>::Primitives>>> {
         let Some(ref hook) = self.node_config().debug.invalid_block_hook else {
-            return Ok(Box::new(NoopInvalidBlockHook::default()))
+            return Ok(Box::new(NoopInvalidBlockHook::default()));
         };
         let healthy_node_rpc_client = self.get_healthy_node_client()?;
 
@@ -1000,7 +1022,10 @@ pub struct WithConfigs<ChainSpec> {
 
 impl<ChainSpec> Clone for WithConfigs<ChainSpec> {
     fn clone(&self) -> Self {
-        Self { config: self.config.clone(), toml_config: self.toml_config.clone() }
+        Self {
+            config: self.config.clone(),
+            toml_config: self.toml_config.clone(),
+        }
     }
 }
 

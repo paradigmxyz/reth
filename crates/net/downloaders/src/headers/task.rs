@@ -80,7 +80,10 @@ impl<H: Sealable + Send + Sync + Unpin + 'static> TaskDownloader<H> {
         };
         spawner.spawn(downloader.boxed());
 
-        Self { from_downloader: ReceiverStream::new(headers_rx), to_downloader }
+        Self {
+            from_downloader: ReceiverStream::new(headers_rx),
+            to_downloader,
+        }
     }
 }
 
@@ -88,19 +91,27 @@ impl<H: Sealable + Debug + Send + Sync + Unpin + 'static> HeaderDownloader for T
     type Header = H;
 
     fn update_sync_gap(&mut self, head: SealedHeader<H>, target: SyncTarget) {
-        let _ = self.to_downloader.send(DownloaderUpdates::UpdateSyncGap(head, target));
+        let _ = self
+            .to_downloader
+            .send(DownloaderUpdates::UpdateSyncGap(head, target));
     }
 
     fn update_local_head(&mut self, head: SealedHeader<H>) {
-        let _ = self.to_downloader.send(DownloaderUpdates::UpdateLocalHead(head));
+        let _ = self
+            .to_downloader
+            .send(DownloaderUpdates::UpdateLocalHead(head));
     }
 
     fn update_sync_target(&mut self, target: SyncTarget) {
-        let _ = self.to_downloader.send(DownloaderUpdates::UpdateSyncTarget(target));
+        let _ = self
+            .to_downloader
+            .send(DownloaderUpdates::UpdateSyncTarget(target));
     }
 
     fn set_batch_size(&mut self, limit: usize) {
-        let _ = self.to_downloader.send(DownloaderUpdates::SetBatchSize(limit));
+        let _ = self
+            .to_downloader
+            .send(DownloaderUpdates::SetBatchSize(limit));
     }
 }
 
@@ -133,7 +144,7 @@ impl<T: HeaderDownloader> Future for SpawnedDownloader<T> {
                     Poll::Ready(None) => {
                         // channel closed, this means [TaskDownloader] was dropped, so we can also
                         // exit
-                        return Poll::Ready(())
+                        return Poll::Ready(());
                     }
                     Poll::Ready(Some(update)) => match update {
                         DownloaderUpdates::UpdateSyncGap(head, target) => {
@@ -159,7 +170,7 @@ impl<T: HeaderDownloader> Future for SpawnedDownloader<T> {
                             if this.headers_tx.send_item(headers).is_err() {
                                 // channel closed, this means [TaskDownloader] was dropped, so we
                                 // can also exit
-                                return Poll::Ready(())
+                                return Poll::Ready(());
                             }
                         }
                         None => return Poll::Pending,
@@ -168,7 +179,7 @@ impl<T: HeaderDownloader> Future for SpawnedDownloader<T> {
                 Err(_) => {
                     // channel closed, this means [TaskDownloader] was dropped, so
                     // we can also exit
-                    return Poll::Ready(())
+                    return Poll::Ready(());
                 }
             }
         }

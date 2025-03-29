@@ -41,7 +41,10 @@ pub fn get_secret_key(secret_key_path: &Path) -> Result<SecretKey, SecretKeyErro
     match exists {
         Ok(true) => {
             let contents = fs::read_to_string(secret_key_path)?;
-            Ok(contents.as_str().parse().map_err(SecretKeyError::SecretKeyDecodeError)?)
+            Ok(contents
+                .as_str()
+                .parse()
+                .map_err(SecretKeyError::SecretKeyDecodeError)?)
         }
         Ok(false) => {
             if let Some(dir) = secret_key_path.parent() {

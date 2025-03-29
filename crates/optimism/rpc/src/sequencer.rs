@@ -33,7 +33,9 @@ impl SequencerClient {
             http_client,
             id: AtomicUsize::new(0),
         };
-        Self { inner: Arc::new(inner) }
+        Self {
+            inner: Arc::new(inner),
+        }
     }
 
     /// Returns the network of the client
@@ -77,7 +79,10 @@ impl SequencerClient {
     /// Forwards a transaction to the sequencer endpoint.
     pub async fn forward_raw_transaction(&self, tx: &[u8]) -> Result<(), SequencerClientError> {
         let body = self
-            .request_body("eth_sendRawTransaction", json!([format!("0x{}", hex::encode(tx))]))
+            .request_body(
+                "eth_sendRawTransaction",
+                json!([format!("0x{}", hex::encode(tx))]),
+            )
             .map_err(|_| {
                 warn!(
                     target: "rpc::eth",
@@ -104,8 +109,9 @@ impl SequencerClient {
         condition: TransactionConditional,
     ) -> Result<(), SequencerClientError> {
         let params = json!([format!("0x{}", hex::encode(tx)), condition]);
-        let body =
-            self.request_body("eth_sendRawTransactionConditional", params).map_err(|_| {
+        let body = self
+            .request_body("eth_sendRawTransactionConditional", params)
+            .map_err(|_| {
                 warn!(
                     target: "rpc::eth",
                     "Failed to serialize transaction for forwarding to sequencer"
@@ -154,7 +160,9 @@ mod tests {
         let condition = TransactionConditional::default();
         let params = json!([format!("0x{}", hex::encode("abcd")), condition]);
 
-        let body = client.request_body("eth_sendRawTransactionConditional", params).unwrap();
+        let body = client
+            .request_body("eth_sendRawTransactionConditional", params)
+            .unwrap();
 
         assert_eq!(
             body,

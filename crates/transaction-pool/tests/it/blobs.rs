@@ -19,14 +19,20 @@ async fn blobs_exclusive() {
     assert_eq!(hash, *blob_tx.transaction.get_hash());
 
     let mut best_txns = txpool.best_transactions();
-    assert_eq!(best_txns.next().unwrap().transaction.get_hash(), blob_tx.transaction.get_hash());
+    assert_eq!(
+        best_txns.next().unwrap().transaction.get_hash(),
+        blob_tx.transaction.get_hash()
+    );
     assert!(best_txns.next().is_none());
 
-    let eip1559_tx =
-        MockTransaction::eip1559().set_sender(blob_tx.transaction.sender()).inc_price_by(10_000);
+    let eip1559_tx = MockTransaction::eip1559()
+        .set_sender(blob_tx.transaction.sender())
+        .inc_price_by(10_000);
 
-    let res =
-        txpool.add_transaction(TransactionOrigin::External, eip1559_tx.clone()).await.unwrap_err();
+    let res = txpool
+        .add_transaction(TransactionOrigin::External, eip1559_tx.clone())
+        .await
+        .unwrap_err();
 
     assert_eq!(res.hash, *eip1559_tx.get_hash());
     match res.kind {

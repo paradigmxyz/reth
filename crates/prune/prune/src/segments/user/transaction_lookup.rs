@@ -43,13 +43,18 @@ where
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No transaction lookup entries to prune");
-                return Ok(SegmentOutput::done())
+                return Ok(SegmentOutput::done());
             }
         }
         .into_inner();
-        let tx_range = start..=
-            Some(end)
-                .min(input.limiter.deleted_entries_limit_left().map(|left| start + left as u64 - 1))
+        let tx_range = start
+            ..=Some(end)
+                .min(
+                    input
+                        .limiter
+                        .deleted_entries_limit_left()
+                        .map(|left| start + left as u64 - 1),
+                )
                 .unwrap();
         let tx_range_end = *tx_range.end();
 
@@ -65,14 +70,15 @@ where
         if hashes.len() != tx_count {
             return Err(PrunerError::InconsistentData(
                 "Unexpected number of transaction hashes retrieved by transaction number range",
-            ))
+            ));
         }
 
         let mut limiter = input.limiter;
 
         let mut last_pruned_transaction = None;
-        let (pruned, done) =
-            provider.tx_ref().prune_table_with_iterator::<tables::TransactionHashNumbers>(
+        let (pruned, done) = provider
+            .tx_ref()
+            .prune_table_with_iterator::<tables::TransactionHashNumbers>(
                 hashes,
                 &mut limiter,
                 |row| {
@@ -88,7 +94,9 @@ where
 
         let last_pruned_block = provider
             .transaction_block(last_pruned_transaction)?
-            .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?
+            .ok_or(PrunerError::InconsistentData(
+                "Block for transaction is not found",
+            ))?
             // If there's more transaction lookup entries to prune, set the checkpoint block number
             // to previous, so we could finish pruning its transaction lookup entries on the next
             // run.
@@ -134,9 +142,14 @@ mod tests {
         let blocks = random_block_range(
             &mut rng,
             1..=10,
-            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
+            BlockRangeParams {
+                parent: Some(B256::ZERO),
+                tx_count: 2..3,
+                ..Default::default()
+            },
         );
-        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None))
+            .expect("insert blocks");
 
         let mut tx_hash_numbers = Vec::new();
         for block in &blocks {
@@ -146,11 +159,15 @@ mod tests {
             }
         }
         let tx_hash_numbers_len = tx_hash_numbers.len();
-        db.insert_tx_hash_numbers(tx_hash_numbers).expect("insert tx hash numbers");
+        db.insert_tx_hash_numbers(tx_hash_numbers)
+            .expect("insert tx hash numbers");
 
         assert_eq!(
             db.table::<tables::Transactions>().unwrap().len(),
-            blocks.iter().map(|block| block.transaction_count()).sum::<usize>()
+            blocks
+                .iter()
+                .map(|block| block.transaction_count())
+                .sum::<usize>()
         );
         assert_eq!(
             db.table::<tables::Transactions>().unwrap().len(),
@@ -188,8 +205,8 @@ mod tests {
                 .map(|block| block.transaction_count())
                 .sum::<usize>()
                 .min(
-                    next_tx_number_to_prune as usize +
-                        input.limiter.deleted_entries_limit().unwrap(),
+                    next_tx_number_to_prune as usize
+                        + input.limiter.deleted_entries_limit().unwrap(),
                 )
                 .sub(1);
 
@@ -248,7 +265,10 @@ mod tests {
 
         test_prune(
             6,
-            (PruneProgress::HasMoreData(PruneInterruptReason::DeletedEntriesLimitReached), 10),
+            (
+                PruneProgress::HasMoreData(PruneInterruptReason::DeletedEntriesLimitReached),
+                10,
+            ),
         );
         test_prune(6, (PruneProgress::Finished, 2));
         test_prune(10, (PruneProgress::Finished, 8));

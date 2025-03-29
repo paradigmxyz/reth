@@ -62,11 +62,17 @@ impl<N: NodePrimitives> Chain<N> {
         execution_outcome: ExecutionOutcome<N::Receipt>,
         trie_updates: Option<TrieUpdates>,
     ) -> Self {
-        let blocks =
-            blocks.into_iter().map(|b| (b.header().number(), b)).collect::<BTreeMap<_, _>>();
+        let blocks = blocks
+            .into_iter()
+            .map(|b| (b.header().number(), b))
+            .collect::<BTreeMap<_, _>>();
         debug_assert!(!blocks.is_empty(), "Chain should have at least one block");
 
-        Self { blocks, execution_outcome, trie_updates }
+        Self {
+            blocks,
+            execution_outcome,
+            trie_updates,
+        }
     }
 
     /// Create new Chain from a single block and its state.
@@ -90,7 +96,9 @@ impl<N: NodePrimitives> Chain<N> {
 
     /// Returns an iterator over all headers in the block with increasing block numbers.
     pub fn headers(&self) -> impl Iterator<Item = SealedHeader<N::BlockHeader>> + '_ {
-        self.blocks.values().map(|block| block.clone_sealed_header())
+        self.blocks
+            .values()
+            .map(|block| block.clone_sealed_header())
     }
 
     /// Get cached trie updates for this chain.
@@ -126,12 +134,16 @@ impl<N: NodePrimitives> Chain<N> {
 
     /// Return block number of the block hash.
     pub fn block_number(&self, block_hash: BlockHash) -> Option<BlockNumber> {
-        self.blocks.iter().find_map(|(num, block)| (block.hash() == block_hash).then_some(*num))
+        self.blocks
+            .iter()
+            .find_map(|(num, block)| (block.hash() == block_hash).then_some(*num))
     }
 
     /// Returns the block with matching hash.
     pub fn recovered_block(&self, block_hash: BlockHash) -> Option<&RecoveredBlock<N::Block>> {
-        self.blocks.iter().find_map(|(_num, block)| (block.hash() == block_hash).then_some(block))
+        self.blocks
+            .iter()
+            .find_map(|(_num, block)| (block.hash() == block_hash).then_some(block))
     }
 
     /// Return execution outcome at the `block_number` or None if block is not known
@@ -140,13 +152,13 @@ impl<N: NodePrimitives> Chain<N> {
         block_number: BlockNumber,
     ) -> Option<ExecutionOutcome<N::Receipt>> {
         if self.tip().number() == block_number {
-            return Some(self.execution_outcome.clone())
+            return Some(self.execution_outcome.clone());
         }
 
         if self.blocks.contains_key(&block_number) {
             let mut execution_outcome = self.execution_outcome.clone();
             execution_outcome.revert_to(block_number);
-            return Some(execution_outcome)
+            return Some(execution_outcome);
         }
         None
     }
@@ -157,15 +169,30 @@ impl<N: NodePrimitives> Chain<N> {
     /// 3. The optional trie updates.
     pub fn into_inner(
         self,
-    ) -> (ChainBlocks<'static, N::Block>, ExecutionOutcome<N::Receipt>, Option<TrieUpdates>) {
-        (ChainBlocks { blocks: Cow::Owned(self.blocks) }, self.execution_outcome, self.trie_updates)
+    ) -> (
+        ChainBlocks<'static, N::Block>,
+        ExecutionOutcome<N::Receipt>,
+        Option<TrieUpdates>,
+    ) {
+        (
+            ChainBlocks {
+                blocks: Cow::Owned(self.blocks),
+            },
+            self.execution_outcome,
+            self.trie_updates,
+        )
     }
 
     /// Destructure the chain into its inner components:
     /// 1. A reference to the blocks contained in the chain.
     /// 2. A reference to the execution outcome representing the final state.
     pub const fn inner(&self) -> (ChainBlocks<'_, N::Block>, &ExecutionOutcome<N::Receipt>) {
-        (ChainBlocks { blocks: Cow::Borrowed(&self.blocks) }, &self.execution_outcome)
+        (
+            ChainBlocks {
+                blocks: Cow::Borrowed(&self.blocks),
+            },
+            &self.execution_outcome,
+        )
     }
 
     /// Returns an iterator over all the receipts of the blocks in the chain.
@@ -202,7 +229,10 @@ impl<N: NodePrimitives> Chain<N> {
     /// If chain doesn't have any blocks.
     #[track_caller]
     pub fn first(&self) -> &RecoveredBlock<N::Block> {
-        self.blocks.first_key_value().expect("Chain should have at least one block").1
+        self.blocks
+            .first_key_value()
+            .expect("Chain should have at least one block")
+            .1
     }
 
     /// Get the tip of the chain.
@@ -212,7 +242,10 @@ impl<N: NodePrimitives> Chain<N> {
     /// If chain doesn't have any blocks.
     #[track_caller]
     pub fn tip(&self) -> &RecoveredBlock<N::Block> {
-        self.blocks.last_key_value().expect("Chain should have at least one block").1
+        self.blocks
+            .last_key_value()
+            .expect("Chain should have at least one block")
+            .1
     }
 
     /// Returns length of the chain.
@@ -232,7 +265,12 @@ impl<N: NodePrimitives> Chain<N> {
     /// Get all receipts for the given block.
     pub fn receipts_by_block_hash(&self, block_hash: BlockHash) -> Option<Vec<&N::Receipt>> {
         let num = self.block_number(block_hash)?;
-        Some(self.execution_outcome.receipts_by_block(num).iter().collect())
+        Some(
+            self.execution_outcome
+                .receipts_by_block(num)
+                .iter()
+                .collect(),
+        )
     }
 
     /// Get all receipts with attachment.
@@ -243,15 +281,20 @@ impl<N: NodePrimitives> Chain<N> {
         N::SignedTx: Encodable2718,
     {
         let mut receipt_attach = Vec::with_capacity(self.blocks().len());
-        for ((block_num, block), receipts) in
-            self.blocks().iter().zip(self.execution_outcome.receipts().iter())
+        for ((block_num, block), receipts) in self
+            .blocks()
+            .iter()
+            .zip(self.execution_outcome.receipts().iter())
         {
             let mut tx_receipts = Vec::with_capacity(receipts.len());
             for (tx, receipt) in block.body().transactions().iter().zip(receipts.iter()) {
                 tx_receipts.push((tx.trie_hash(), receipt.clone()));
             }
             let block_num_hash = BlockNumHash::new(*block_num, block.hash());
-            receipt_attach.push(BlockReceipts { block: block_num_hash, tx_receipts });
+            receipt_attach.push(BlockReceipts {
+                block: block_num_hash,
+                tx_receipts,
+            });
         }
         receipt_attach
     }
@@ -278,7 +321,7 @@ impl<N: NodePrimitives> Chain<N> {
         let chain_tip = self.tip();
         let other_fork_block = other.fork_block();
         if chain_tip.hash() != other_fork_block.hash {
-            return Err(other)
+            return Err(other);
         }
 
         // Insert blocks from other chain
@@ -311,27 +354,37 @@ impl<N: NodePrimitives> Chain<N> {
     /// If chain doesn't have any blocks.
     #[track_caller]
     pub fn split(mut self, split_at: ChainSplitTarget) -> ChainSplit<N> {
-        let chain_tip = *self.blocks.last_entry().expect("chain is never empty").key();
+        let chain_tip = *self
+            .blocks
+            .last_entry()
+            .expect("chain is never empty")
+            .key();
         let block_number = match split_at {
             ChainSplitTarget::Hash(block_hash) => {
                 let Some(block_number) = self.block_number(block_hash) else {
-                    return ChainSplit::NoSplitPending(self)
+                    return ChainSplit::NoSplitPending(self);
                 };
                 // If block number is same as tip whole chain is becoming canonical.
                 if block_number == chain_tip {
-                    return ChainSplit::NoSplitCanonical(self)
+                    return ChainSplit::NoSplitCanonical(self);
                 }
                 block_number
             }
             ChainSplitTarget::Number(block_number) => {
                 if block_number > chain_tip {
-                    return ChainSplit::NoSplitPending(self)
+                    return ChainSplit::NoSplitPending(self);
                 }
                 if block_number == chain_tip {
-                    return ChainSplit::NoSplitCanonical(self)
+                    return ChainSplit::NoSplitCanonical(self);
                 }
-                if block_number < *self.blocks.first_entry().expect("chain is never empty").key() {
-                    return ChainSplit::NoSplitPending(self)
+                if block_number
+                    < *self
+                        .blocks
+                        .first_entry()
+                        .expect("chain is never empty")
+                        .key()
+                {
+                    return ChainSplit::NoSplitPending(self);
                 }
                 block_number
             }
@@ -410,7 +463,10 @@ impl<B: Block<Body: BlockBody<Transaction: SignedTransaction>>> ChainBlocks<'_, 
     /// Chains always have at least one block.
     #[inline]
     pub fn tip(&self) -> &RecoveredBlock<B> {
-        self.blocks.last_key_value().expect("Chain should have at least one block").1
+        self.blocks
+            .last_key_value()
+            .expect("Chain should have at least one block")
+            .1
     }
 
     /// Get the _first_ block of the chain.
@@ -420,13 +476,18 @@ impl<B: Block<Body: BlockBody<Transaction: SignedTransaction>>> ChainBlocks<'_, 
     /// Chains always have at least one block.
     #[inline]
     pub fn first(&self) -> &RecoveredBlock<B> {
-        self.blocks.first_key_value().expect("Chain should have at least one block").1
+        self.blocks
+            .first_key_value()
+            .expect("Chain should have at least one block")
+            .1
     }
 
     /// Returns an iterator over all transactions in the chain.
     #[inline]
     pub fn transactions(&self) -> impl Iterator<Item = &<B::Body as BlockBody>::Transaction> + '_ {
-        self.blocks.values().flat_map(|block| block.body().transactions_iter())
+        self.blocks
+            .values()
+            .flat_map(|block| block.body().transactions_iter())
     }
 
     /// Returns an iterator over all transactions and their senders.
@@ -434,7 +495,9 @@ impl<B: Block<Body: BlockBody<Transaction: SignedTransaction>>> ChainBlocks<'_, 
     pub fn transactions_with_sender(
         &self,
     ) -> impl Iterator<Item = (&Address, &<B::Body as BlockBody>::Transaction)> + '_ {
-        self.blocks.values().flat_map(|block| block.transactions_with_sender())
+        self.blocks
+            .values()
+            .flat_map(|block| block.transactions_with_sender())
     }
 
     /// Returns an iterator over all [`Recovered`] in the blocks
@@ -444,7 +507,8 @@ impl<B: Block<Body: BlockBody<Transaction: SignedTransaction>>> ChainBlocks<'_, 
     pub fn transactions_ecrecovered(
         &self,
     ) -> impl Iterator<Item = Recovered<<B::Body as BlockBody>::Transaction>> + '_ {
-        self.transactions_with_sender().map(|(signer, tx)| tx.clone().with_signer(*signer))
+        self.transactions_with_sender()
+            .map(|(signer, tx)| tx.clone().with_signer(*signer))
     }
 
     /// Returns an iterator over all transaction hashes in the block
@@ -684,8 +748,10 @@ pub(super) mod serde_bincode_compat {
             rand::thread_rng().fill(bytes.as_mut_slice());
             let data = Data {
                 chain: Chain::new(
-                    vec![RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
-                        .unwrap()],
+                    vec![
+                        RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
+                            .unwrap(),
+                    ],
                     Default::default(),
                     None,
                 ),
@@ -726,11 +792,15 @@ mod tests {
 
         block3.set_parent_hash(block2_hash);
 
-        let mut chain1: Chain =
-            Chain { blocks: BTreeMap::from([(1, block1), (2, block2)]), ..Default::default() };
+        let mut chain1: Chain = Chain {
+            blocks: BTreeMap::from([(1, block1), (2, block2)]),
+            ..Default::default()
+        };
 
-        let chain2 =
-            Chain { blocks: BTreeMap::from([(3, block3), (4, block4)]), ..Default::default() };
+        let chain2 = Chain {
+            blocks: BTreeMap::from([(3, block3), (4, block4)]),
+            ..Default::default()
+        };
 
         assert!(chain1.append_chain(chain2.clone()).is_ok());
 
@@ -787,8 +857,11 @@ mod tests {
         let mut block_state_extended = execution_outcome1;
         block_state_extended.extend(execution_outcome2);
 
-        let chain: Chain =
-            Chain::new(vec![block1.clone(), block2.clone()], block_state_extended, None);
+        let chain: Chain = Chain::new(
+            vec![block1.clone(), block2.clone()],
+            block_state_extended,
+            None,
+        );
 
         let (split1_execution_outcome, split2_execution_outcome) =
             chain.execution_outcome.clone().split_at(2);
@@ -820,7 +893,10 @@ mod tests {
         // split in two
         assert_eq!(
             chain.clone().split(block1_hash.into()),
-            ChainSplit::Split { canonical: chain_split1, pending: chain_split2 }
+            ChainSplit::Split {
+                canonical: chain_split1,
+                pending: chain_split2
+            }
         );
 
         // split at unknown block hash
@@ -830,10 +906,16 @@ mod tests {
         );
 
         // split at higher number
-        assert_eq!(chain.clone().split(10u64.into()), ChainSplit::NoSplitPending(chain.clone()));
+        assert_eq!(
+            chain.clone().split(10u64.into()),
+            ChainSplit::NoSplitPending(chain.clone())
+        );
 
         // split at lower number
-        assert_eq!(chain.clone().split(0u64.into()), ChainSplit::NoSplitPending(chain));
+        assert_eq!(
+            chain.clone().split(0u64.into()),
+            ChainSplit::NoSplitPending(chain)
+        );
     }
 
     #[test]
@@ -890,7 +972,10 @@ mod tests {
         };
 
         // Assert that the proper receipt vector is returned for block1_hash
-        assert_eq!(chain.receipts_by_block_hash(block1_hash), Some(vec![&receipt1]));
+        assert_eq!(
+            chain.receipts_by_block_hash(block1_hash),
+            Some(vec![&receipt1])
+        );
 
         // Create an ExecutionOutcome object with a single receipt vector containing receipt1
         let execution_outcome1 = ExecutionOutcome {
@@ -901,9 +986,15 @@ mod tests {
         };
 
         // Assert that the execution outcome at the first block contains only the first receipt
-        assert_eq!(chain.execution_outcome_at_block(10), Some(execution_outcome1));
+        assert_eq!(
+            chain.execution_outcome_at_block(10),
+            Some(execution_outcome1)
+        );
 
         // Assert that the execution outcome at the tip block contains the whole execution outcome
-        assert_eq!(chain.execution_outcome_at_block(11), Some(execution_outcome));
+        assert_eq!(
+            chain.execution_outcome_at_block(11),
+            Some(execution_outcome)
+        );
     }
 }

@@ -36,7 +36,10 @@ impl<T: PayloadTypes> PayloadTestContext<T> {
     pub async fn new_payload(&mut self) -> eyre::Result<T::PayloadBuilderAttributes> {
         self.timestamp += 1;
         let attributes = (self.attributes_generator)(self.timestamp);
-        self.payload_builder.send_new_payload(attributes.clone()).await.unwrap()?;
+        self.payload_builder
+            .send_new_payload(attributes.clone())
+            .await
+            .unwrap()?;
         Ok(attributes)
     }
 
@@ -57,10 +60,15 @@ impl<T: PayloadTypes> PayloadTestContext<T> {
     /// Wait until the best built payload is ready
     pub async fn wait_for_built_payload(&self, payload_id: PayloadId) {
         loop {
-            let payload = self.payload_builder.best_payload(payload_id).await.unwrap().unwrap();
+            let payload = self
+                .payload_builder
+                .best_payload(payload_id)
+                .await
+                .unwrap()
+                .unwrap();
             if payload.block().body().transactions().is_empty() {
                 tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                continue
+                continue;
             }
             // Resolve payload once its built
             self.payload_builder

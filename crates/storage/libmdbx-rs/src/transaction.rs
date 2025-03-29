@@ -89,7 +89,8 @@ where
 
         #[cfg(feature = "read-tx-timeouts")]
         if K::IS_READ_ONLY {
-            env.txn_manager().add_active_read_transaction(txn_ptr, txn.clone())
+            env.txn_manager()
+                .add_active_read_transaction(txn_ptr, txn.clone())
         }
 
         let inner = TransactionInner {
@@ -100,7 +101,9 @@ where
             _marker: Default::default(),
         };
 
-        Self { inner: Arc::new(inner) }
+        Self {
+            inner: Arc::new(inner),
+        }
     }
 
     /// Executes the given closure once the lock on the transaction is acquired.
@@ -156,9 +159,14 @@ where
     where
         Key: TableObject,
     {
-        let key_val: ffi::MDBX_val =
-            ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
-        let mut data_val: ffi::MDBX_val = ffi::MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
+        let key_val: ffi::MDBX_val = ffi::MDBX_val {
+            iov_len: key.len(),
+            iov_base: key.as_ptr() as *mut c_void,
+        };
+        let mut data_val: ffi::MDBX_val = ffi::MDBX_val {
+            iov_len: 0,
+            iov_base: ptr::null_mut(),
+        };
 
         self.txn_execute(|txn| unsafe {
             match ffi::mdbx_get(txn, dbi, &key_val, &mut data_val) {
@@ -197,7 +205,10 @@ where
                     let (sender, rx) = sync_channel(0);
                     self.env()
                         .txn_manager()
-                        .send_message(TxnManagerMessage::Commit { tx: TxnPtr(txn), sender });
+                        .send_message(TxnManagerMessage::Commit {
+                            tx: TxnPtr(txn),
+                            sender,
+                        });
                     rx.recv().unwrap()
                 }
             })?;
@@ -239,7 +250,12 @@ where
         let mut flags: c_uint = 0;
         unsafe {
             self.txn_execute(|txn| {
-                mdbx_result(ffi::mdbx_dbi_flags_ex(txn, db.dbi(), &mut flags, ptr::null_mut()))
+                mdbx_result(ffi::mdbx_dbi_flags_ex(
+                    txn,
+                    db.dbi(),
+                    &mut flags,
+                    ptr::null_mut(),
+                ))
             })??;
         }
 
@@ -258,7 +274,12 @@ where
         unsafe {
             let mut stat = Stat::new();
             self.txn_execute(|txn| {
-                mdbx_result(ffi::mdbx_dbi_stat(txn, dbi, stat.mdb_stat(), size_of::<Stat>()))
+                mdbx_result(ffi::mdbx_dbi_stat(
+                    txn,
+                    dbi,
+                    stat.mdb_stat(),
+                    size_of::<Stat>(),
+                ))
             })??;
             Ok(stat)
         }
@@ -278,7 +299,9 @@ where
     #[cfg(feature = "read-tx-timeouts")]
     pub fn disable_timeout(&self) {
         if K::IS_READ_ONLY {
-            self.env().txn_manager().remove_active_read_transaction(self.inner.txn.txn);
+            self.env()
+                .txn_manager()
+                .remove_active_read_transaction(self.inner.txn.txn);
         }
     }
 }
@@ -288,7 +311,9 @@ where
     K: TransactionKind,
 {
     fn clone(&self) -> Self {
-        Self { inner: Arc::clone(&self.inner) }
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
     }
 }
 
@@ -322,7 +347,8 @@ where
 {
     /// Marks the transaction as committed.
     fn set_committed(&self) {
-        self.committed.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.committed
+            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     fn has_committed(&self) -> bool {
@@ -367,7 +393,10 @@ where
                         let (sender, rx) = sync_channel(0);
                         self.env
                             .txn_manager()
-                            .send_message(TxnManagerMessage::Abort { tx: TxnPtr(txn), sender });
+                            .send_message(TxnManagerMessage::Abort {
+                                tx: TxnPtr(txn),
+                                sender,
+                            });
                         rx.recv().unwrap().unwrap();
                     }
                 }
@@ -412,10 +441,14 @@ impl Transaction<RW> {
     ) -> Result<()> {
         let key = key.as_ref();
         let data = data.as_ref();
-        let key_val: ffi::MDBX_val =
-            ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
-        let mut data_val: ffi::MDBX_val =
-            ffi::MDBX_val { iov_len: data.len(), iov_base: data.as_ptr() as *mut c_void };
+        let key_val: ffi::MDBX_val = ffi::MDBX_val {
+            iov_len: key.len(),
+            iov_base: key.as_ptr() as *mut c_void,
+        };
+        let mut data_val: ffi::MDBX_val = ffi::MDBX_val {
+            iov_len: data.len(),
+            iov_base: data.as_ptr() as *mut c_void,
+        };
         mdbx_result(self.txn_execute(|txn| unsafe {
             ffi::mdbx_put(txn, dbi, &key_val, &mut data_val, flags.bits())
         })?)?;
@@ -434,10 +467,14 @@ impl Transaction<RW> {
         flags: WriteFlags,
     ) -> Result<&mut [u8]> {
         let key = key.as_ref();
-        let key_val: ffi::MDBX_val =
-            ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
-        let mut data_val: ffi::MDBX_val =
-            ffi::MDBX_val { iov_len: len, iov_base: ptr::null_mut::<c_void>() };
+        let key_val: ffi::MDBX_val = ffi::MDBX_val {
+            iov_len: key.len(),
+            iov_base: key.as_ptr() as *mut c_void,
+        };
+        let mut data_val: ffi::MDBX_val = ffi::MDBX_val {
+            iov_len: len,
+            iov_base: ptr::null_mut::<c_void>(),
+        };
         unsafe {
             mdbx_result(self.txn_execute(|txn| {
                 ffi::mdbx_put(
@@ -448,7 +485,10 @@ impl Transaction<RW> {
                     flags.bits() | ffi::MDBX_RESERVE,
                 )
             })?)?;
-            Ok(slice::from_raw_parts_mut(data_val.iov_base as *mut u8, data_val.iov_len))
+            Ok(slice::from_raw_parts_mut(
+                data_val.iov_base as *mut u8,
+                data_val.iov_len,
+            ))
         }
     }
 
@@ -468,8 +508,10 @@ impl Transaction<RW> {
         data: Option<&[u8]>,
     ) -> Result<bool> {
         let key = key.as_ref();
-        let key_val: ffi::MDBX_val =
-            ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
+        let key_val: ffi::MDBX_val = ffi::MDBX_val {
+            iov_len: key.len(),
+            iov_base: key.as_ptr() as *mut c_void,
+        };
         let data_val: Option<ffi::MDBX_val> = data.map(|data| ffi::MDBX_val {
             iov_len: data.len(),
             iov_base: data.as_ptr() as *mut c_void,
@@ -527,17 +569,21 @@ impl Transaction<RW> {
     /// Begins a new nested transaction inside of this transaction.
     pub fn begin_nested_txn(&mut self) -> Result<Self> {
         if self.inner.env.is_write_map() {
-            return Err(Error::NestedTransactionsUnsupportedWithWriteMap)
+            return Err(Error::NestedTransactionsUnsupportedWithWriteMap);
         }
         self.txn_execute(|txn| {
             let (tx, rx) = sync_channel(0);
-            self.env().txn_manager().send_message(TxnManagerMessage::Begin {
-                parent: TxnPtr(txn),
-                flags: RW::OPEN_FLAGS,
-                sender: tx,
-            });
+            self.env()
+                .txn_manager()
+                .send_message(TxnManagerMessage::Begin {
+                    parent: TxnPtr(txn),
+                    flags: RW::OPEN_FLAGS,
+                    sender: tx,
+                });
 
-            rx.recv().unwrap().map(|ptr| Self::new_from_ptr(self.env().clone(), ptr.0))
+            rx.recv()
+                .unwrap()
+                .map(|ptr| Self::new_from_ptr(self.env().clone(), ptr.0))
         })?
     }
 }
@@ -576,7 +622,8 @@ impl TransactionPtr {
 
     #[cfg(feature = "read-tx-timeouts")]
     pub(crate) fn set_timed_out(&self) {
-        self.timed_out.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.timed_out
+            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// Acquires the inner transaction lock to guarantee exclusive access to the transaction
@@ -611,7 +658,7 @@ impl TransactionPtr {
         // to the `mdbx_txn_reset`.
         #[cfg(feature = "read-tx-timeouts")]
         if self.is_timed_out() {
-            return Err(Error::ReadTransactionTimeout)
+            return Err(Error::ReadTransactionTimeout);
         }
 
         Ok((f)(self.txn))

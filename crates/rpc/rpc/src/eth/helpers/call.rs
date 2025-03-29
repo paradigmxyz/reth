@@ -53,8 +53,12 @@ where
         mut db: impl Database<Error: Into<EthApiError>>,
     ) -> Result<TxEnv, Self::Error> {
         // Ensure that if versioned hashes are set, they're not empty
-        if request.blob_versioned_hashes.as_ref().is_some_and(|hashes| hashes.is_empty()) {
-            return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into_eth_err())
+        if request
+            .blob_versioned_hashes
+            .as_ref()
+            .is_some_and(|hashes| hashes.is_empty())
+        {
+            return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into_eth_err());
         }
 
         let tx_type = if request.authorization_list.is_some() {
@@ -88,16 +92,19 @@ where
             sidecar: _,
         } = request;
 
-        let CallFees { max_priority_fee_per_gas, gas_price, max_fee_per_blob_gas } =
-            CallFees::ensure_fees(
-                gas_price.map(U256::from),
-                max_fee_per_gas.map(U256::from),
-                max_priority_fee_per_gas.map(U256::from),
-                U256::from(evm_env.block_env.basefee),
-                blob_versioned_hashes.as_deref(),
-                max_fee_per_blob_gas.map(U256::from),
-                evm_env.block_env.blob_gasprice().map(U256::from),
-            )?;
+        let CallFees {
+            max_priority_fee_per_gas,
+            gas_price,
+            max_fee_per_blob_gas,
+        } = CallFees::ensure_fees(
+            gas_price.map(U256::from),
+            max_fee_per_gas.map(U256::from),
+            max_priority_fee_per_gas.map(U256::from),
+            U256::from(evm_env.block_env.basefee),
+            blob_versioned_hashes.as_deref(),
+            max_fee_per_blob_gas.map(U256::from),
+            evm_env.block_env.blob_gasprice().map(U256::from),
+        )?;
 
         let gas_limit = gas.unwrap_or(
             // Use maximum allowed gas limit. The reason for this
@@ -115,7 +122,10 @@ where
         let nonce = if let Some(nonce) = nonce {
             nonce
         } else {
-            db.basic(caller).map_err(Into::into)?.map(|acc| acc.nonce).unwrap_or_default()
+            db.basic(caller)
+                .map_err(Into::into)?
+                .map(|acc| acc.nonce)
+                .unwrap_or_default()
         };
 
         let env = TxEnv {

@@ -57,7 +57,10 @@ pub struct NodeTypesWithDBAdapter<Types, DB> {
 impl<Types, DB> NodeTypesWithDBAdapter<Types, DB> {
     /// Create a new adapter with the configured types.
     pub fn new() -> Self {
-        Self { types: Default::default(), db: Default::default() }
+        Self {
+            types: Default::default(),
+            db: Default::default(),
+        }
     }
 }
 
@@ -94,7 +97,13 @@ pub struct AnyNodeTypes<P = (), C = (), SC = (), S = (), PL = ()>(
 impl<P, C, SC, S, PL> AnyNodeTypes<P, C, SC, S, PL> {
     /// Creates a new instance of [`AnyNodeTypes`].
     pub const fn new() -> Self {
-        Self(PhantomData, PhantomData, PhantomData, PhantomData, PhantomData)
+        Self(
+            PhantomData,
+            PhantomData,
+            PhantomData,
+            PhantomData,
+            PhantomData,
+        )
     }
 
     /// Sets the `Primitives` associated type.
@@ -150,7 +159,10 @@ pub struct AnyNodeTypesWithEngine<P = (), E = (), C = (), SC = (), S = (), PL = 
 impl<P, E, C, SC, S, PL> AnyNodeTypesWithEngine<P, E, C, SC, S, PL> {
     /// Creates a new instance of [`AnyNodeTypesWithEngine`].
     pub const fn new() -> Self {
-        Self { _base: AnyNodeTypes::new(), _engine: PhantomData }
+        Self {
+            _base: AnyNodeTypes::new(),
+            _engine: PhantomData,
+        }
     }
 
     /// Sets the `Primitives` associated type.

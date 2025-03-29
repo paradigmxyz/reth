@@ -136,8 +136,12 @@ where
     };
 
     if tx.nonce.is_none() {
-        tx.nonce =
-            Some(db.basic(from).map_err(Into::into)?.map(|acc| acc.nonce).unwrap_or_default());
+        tx.nonce = Some(
+            db.basic(from)
+                .map_err(Into::into)?
+                .map(|acc| acc.nonce)
+                .unwrap_or_default(),
+        );
     }
 
     if tx.gas.is_none() {
@@ -216,7 +220,12 @@ where
                     logs: Vec::new(),
                 }
             }
-            ExecutionResult::Success { output, gas_used, logs, .. } => SimCallResult {
+            ExecutionResult::Success {
+                output,
+                gas_used,
+                logs,
+                ..
+            } => SimCallResult {
                 return_data: output.clone().into_data(),
                 error: None,
                 gas_used: *gas_used,
@@ -242,9 +251,15 @@ where
         calls.push(call);
     }
 
-    let txs_kind =
-        if full_transactions { BlockTransactionsKind::Full } else { BlockTransactionsKind::Hashes };
+    let txs_kind = if full_transactions {
+        BlockTransactionsKind::Full
+    } else {
+        BlockTransactionsKind::Hashes
+    };
 
     let block = from_block(block, txs_kind, tx_resp_builder)?;
-    Ok(SimulatedBlock { inner: block, calls })
+    Ok(SimulatedBlock {
+        inner: block,
+        calls,
+    })
 }

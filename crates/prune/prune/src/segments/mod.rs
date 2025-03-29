@@ -95,7 +95,7 @@ impl PruneInput {
                     // Prevents a scenario where the pruner correctly starts at a finalized block,
                     // but the first transaction (tx_num = 0) only appears on a non-finalized one.
                     // Should only happen on a test/hive scenario.
-                    return Ok(None)
+                    return Ok(None);
                 }
                 last_tx
             }
@@ -104,7 +104,7 @@ impl PruneInput {
 
         let range = from_tx_number..=to_tx_number;
         if range.is_empty() {
-            return Ok(None)
+            return Ok(None);
         }
 
         Ok(Some(range))
@@ -122,7 +122,7 @@ impl PruneInput {
         let from_block = self.get_start_next_block_range();
         let range = from_block..=self.to_block;
         if range.is_empty() {
-            return None
+            return None;
         }
 
         Some(range)
@@ -164,7 +164,9 @@ mod tests {
         let provider = MockEthProvider::default();
 
         // No block body for block 10, expected None
-        let range = input.get_next_tx_num_range(&provider).expect("Expected range");
+        let range = input
+            .get_next_tx_num_range(&provider)
+            .expect("Expected range");
         assert!(range.is_none());
     }
 
@@ -183,7 +185,11 @@ mod tests {
         let blocks = random_block_range(
             &mut rng,
             0..=10,
-            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
+            BlockRangeParams {
+                parent: Some(B256::ZERO),
+                tx_count: 0..1,
+                ..Default::default()
+            },
         );
 
         // Insert the blocks into the database
@@ -191,7 +197,10 @@ mod tests {
         for block in &blocks {
             provider_rw
                 .insert_historical_block(
-                    block.clone().try_recover().expect("failed to seal block with senders"),
+                    block
+                        .clone()
+                        .try_recover()
+                        .expect("failed to seal block with senders"),
                 )
                 .expect("failed to insert block");
         }
@@ -201,7 +210,9 @@ mod tests {
         let provider = BlockchainProvider::new(factory).unwrap();
 
         // Since there are no transactions, expected None
-        let range = input.get_next_tx_num_range(&provider).expect("Expected range");
+        let range = input
+            .get_next_tx_num_range(&provider)
+            .expect("Expected range");
         assert!(range.is_none());
     }
 
@@ -221,7 +232,11 @@ mod tests {
         let blocks = random_block_range(
             &mut rng,
             0..=10,
-            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..5, ..Default::default() },
+            BlockRangeParams {
+                parent: Some(B256::ZERO),
+                tx_count: 0..5,
+                ..Default::default()
+            },
         );
 
         // Insert the blocks into the database
@@ -229,7 +244,10 @@ mod tests {
         for block in &blocks {
             provider_rw
                 .insert_historical_block(
-                    block.clone().try_recover().expect("failed to seal block with senders"),
+                    block
+                        .clone()
+                        .try_recover()
+                        .expect("failed to seal block with senders"),
                 )
                 .expect("failed to insert block");
         }
@@ -239,10 +257,16 @@ mod tests {
         let provider = BlockchainProvider::new(factory).unwrap();
 
         // Get the next tx number range
-        let range = input.get_next_tx_num_range(&provider).expect("Expected range").unwrap();
+        let range = input
+            .get_next_tx_num_range(&provider)
+            .expect("Expected range")
+            .unwrap();
 
         // Calculate the total number of transactions
-        let num_txs = blocks.iter().map(|block| block.transaction_count() as u64).sum::<u64>();
+        let num_txs = blocks
+            .iter()
+            .map(|block| block.transaction_count() as u64)
+            .sum::<u64>();
 
         assert_eq!(range, 0..=num_txs - 1);
     }
@@ -267,7 +291,11 @@ mod tests {
         let blocks = random_block_range(
             &mut rng,
             0..=10,
-            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..5, ..Default::default() },
+            BlockRangeParams {
+                parent: Some(B256::ZERO),
+                tx_count: 0..5,
+                ..Default::default()
+            },
         );
 
         // Insert the blocks into the database
@@ -275,7 +303,10 @@ mod tests {
         for block in &blocks {
             provider_rw
                 .insert_historical_block(
-                    block.clone().try_recover().expect("failed to seal block with senders"),
+                    block
+                        .clone()
+                        .try_recover()
+                        .expect("failed to seal block with senders"),
                 )
                 .expect("failed to insert block");
         }
@@ -285,10 +316,16 @@ mod tests {
         let provider = BlockchainProvider::new(factory).unwrap();
 
         // Fetch the range and check if it is correct
-        let range = input.get_next_tx_num_range(&provider).expect("Expected range").unwrap();
+        let range = input
+            .get_next_tx_num_range(&provider)
+            .expect("Expected range")
+            .unwrap();
 
         // Calculate the total number of transactions
-        let num_txs = blocks.iter().map(|block| block.transaction_count() as u64).sum::<u64>();
+        let num_txs = blocks
+            .iter()
+            .map(|block| block.transaction_count() as u64)
+            .sum::<u64>();
 
         assert_eq!(range, 0..=num_txs - 1,);
     }
@@ -303,7 +340,11 @@ mod tests {
         let blocks = random_block_range(
             &mut rng,
             0..=10,
-            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..5, ..Default::default() },
+            BlockRangeParams {
+                parent: Some(B256::ZERO),
+                tx_count: 0..5,
+                ..Default::default()
+            },
         );
 
         // Insert the blocks into the database
@@ -311,7 +352,10 @@ mod tests {
         for block in &blocks {
             provider_rw
                 .insert_historical_block(
-                    block.clone().try_recover().expect("failed to seal block with senders"),
+                    block
+                        .clone()
+                        .try_recover()
+                        .expect("failed to seal block with senders"),
                 )
                 .expect("failed to insert block");
         }
@@ -322,7 +366,10 @@ mod tests {
 
         // Get the last tx number
         // Calculate the total number of transactions
-        let num_txs = blocks.iter().map(|block| block.transaction_count() as u64).sum::<u64>();
+        let num_txs = blocks
+            .iter()
+            .map(|block| block.transaction_count() as u64)
+            .sum::<u64>();
         let max_range = num_txs - 1;
 
         // Create a prune input with a previous checkpoint that is the last tx number
@@ -337,7 +384,9 @@ mod tests {
         };
 
         // We expect an empty range since the previous checkpoint is the last tx number
-        let range = input.get_next_tx_num_range(&provider).expect("Expected range");
+        let range = input
+            .get_next_tx_num_range(&provider)
+            .expect("Expected range");
         assert!(range.is_none());
     }
 }

@@ -160,7 +160,13 @@ pub struct HelloMessageBuilder {
 impl HelloMessageBuilder {
     /// Create a new builder to configure a [`HelloMessage`]
     pub const fn new(id: PeerId) -> Self {
-        Self { protocol_version: None, client_version: None, protocols: None, port: None, id }
+        Self {
+            protocol_version: None,
+            client_version: None,
+            protocols: None,
+            port: None,
+            id,
+        }
     }
 
     /// Sets the port the client is listening on
@@ -171,13 +177,17 @@ impl HelloMessageBuilder {
 
     /// Adds a new protocol to use.
     pub fn protocol(mut self, protocols: impl Into<Protocol>) -> Self {
-        self.protocols.get_or_insert_with(Vec::new).push(protocols.into());
+        self.protocols
+            .get_or_insert_with(Vec::new)
+            .push(protocols.into());
         self
     }
 
     /// Sets protocols to use.
     pub fn protocols(mut self, protocols: impl IntoIterator<Item = Protocol>) -> Self {
-        self.protocols.get_or_insert_with(Vec::new).extend(protocols);
+        self.protocols
+            .get_or_insert_with(Vec::new)
+            .extend(protocols);
         self
     }
 
@@ -200,12 +210,22 @@ impl HelloMessageBuilder {
     /// - `client_version`: [`RETH_CLIENT_VERSION`]
     /// - `capabilities`: All [`EthVersion`]
     pub fn build(self) -> HelloMessageWithProtocols {
-        let Self { protocol_version, client_version, protocols, port, id } = self;
+        let Self {
+            protocol_version,
+            client_version,
+            protocols,
+            port,
+            id,
+        } = self;
         HelloMessageWithProtocols {
             protocol_version: protocol_version.unwrap_or_default(),
             client_version: client_version.unwrap_or_else(|| RETH_CLIENT_VERSION.to_string()),
             protocols: protocols.unwrap_or_else(|| {
-                vec![EthVersion::Eth68.into(), EthVersion::Eth67.into(), EthVersion::Eth66.into()]
+                vec![
+                    EthVersion::Eth68.into(),
+                    EthVersion::Eth67.into(),
+                    EthVersion::Eth66.into(),
+                ]
             }),
             port: port.unwrap_or(DEFAULT_TCP_PORT),
             id,

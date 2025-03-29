@@ -228,9 +228,12 @@ impl TaskManager {
         drop(self.signal);
         let when = timeout.map(|t| std::time::Instant::now() + t);
         while self.graceful_tasks.load(Ordering::Relaxed) > 0 {
-            if when.map(|when| std::time::Instant::now() > when).unwrap_or(false) {
+            if when
+                .map(|when| std::time::Instant::now() > when)
+                .unwrap_or(false)
+            {
                 debug!("graceful shutdown timed out");
-                return false
+                return false;
             }
             std::hint::spin_loop();
         }
@@ -670,7 +673,9 @@ mod tests {
         let manager = TaskManager::new(handle);
         let executor = manager.executor();
 
-        executor.spawn_critical("this is a critical task", async { panic!("intentionally panic") });
+        executor.spawn_critical("this is a critical task", async {
+            panic!("intentionally panic")
+        });
 
         runtime.block_on(async move {
             let err = manager.await;

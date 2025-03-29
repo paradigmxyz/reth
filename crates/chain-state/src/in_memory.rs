@@ -86,7 +86,9 @@ impl<N: NodePrimitives> InMemoryState<N> {
     pub(crate) fn update_metrics(&self) {
         let numbers = self.numbers.read();
         if let Some((earliest_block_number, _)) = numbers.first_key_value() {
-            self.metrics.earliest_block.set(*earliest_block_number as f64);
+            self.metrics
+                .earliest_block
+                .set(*earliest_block_number as f64);
         }
         if let Some((latest_block_number, _)) = numbers.last_key_value() {
             self.metrics.latest_block.set(*latest_block_number as f64);
@@ -158,8 +160,10 @@ impl<N: NodePrimitives> CanonicalInMemoryStateInner<N> {
     }
 }
 
-type PendingBlockAndReceipts<N> =
-    (SealedBlock<<N as NodePrimitives>::Block>, Vec<reth_primitives_traits::ReceiptTy<N>>);
+type PendingBlockAndReceipts<N> = (
+    SealedBlock<<N as NodePrimitives>::Block>,
+    Vec<reth_primitives_traits::ReceiptTy<N>>,
+);
 
 /// This type is responsible for providing the blocks, receipts, and state for
 /// all canonical blocks not on disk yet and keeps track of the block range that
@@ -180,9 +184,11 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         safe: Option<SealedHeader<N::BlockHeader>>,
     ) -> Self {
         let in_memory_state = InMemoryState::new(blocks, numbers, pending);
-        let header = in_memory_state.head_state().map_or_else(SealedHeader::default, |state| {
-            state.block_ref().recovered_block().clone_sealed_header()
-        });
+        let header = in_memory_state
+            .head_state()
+            .map_or_else(SealedHeader::default, |state| {
+                state.block_ref().recovered_block().clone_sealed_header()
+            });
         let chain_info_tracker = ChainInfoTracker::new(header, finalized, safe);
         let (canon_state_notification_sender, _) =
             broadcast::channel(CANON_STATE_NOTIFICATION_CHANNEL_SIZE);
@@ -218,7 +224,9 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             canon_state_notification_sender,
         };
 
-        Self { inner: Arc::new(inner) }
+        Self {
+            inner: Arc::new(inner),
+        }
     }
 
     /// Returns the block hash corresponding to the given number.
@@ -314,9 +322,16 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         //
         // This can happen if the persistence task takes a long time, while a reorg is happening.
         {
-            if self.inner.in_memory_state.blocks.read().get(&persisted_num_hash.hash).is_none() {
+            if self
+                .inner
+                .in_memory_state
+                .blocks
+                .read()
+                .get(&persisted_num_hash.hash)
+                .is_none()
+            {
                 // do nothing
-                return
+                return;
             }
         }
 
@@ -325,7 +340,10 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             let mut numbers = self.inner.in_memory_state.numbers.write();
             let mut blocks = self.inner.in_memory_state.blocks.write();
 
-            let BlockNumHash { number: persisted_height, hash: _ } = persisted_num_hash;
+            let BlockNumHash {
+                number: persisted_height,
+                hash: _,
+            } = persisted_num_hash;
 
             // clear all numbers
             numbers.clear();
@@ -356,7 +374,9 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             // also shift the pending state if it exists
             self.inner.in_memory_state.pending.send_modify(|p| {
                 if let Some(p) = p.as_mut() {
-                    p.parent = blocks.get(&p.block_ref().recovered_block().parent_hash()).cloned();
+                    p.parent = blocks
+                        .get(&p.block_ref().recovered_block().parent_hash())
+                        .cloned();
                 }
             });
         }
@@ -388,7 +408,10 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         self.inner
             .in_memory_state
             .pending_state()
-            .map(|state| BlockNumHash { number: state.number(), hash: state.hash() })
+            .map(|state| BlockNumHash {
+                number: state.number(),
+                hash: state.hash(),
+            })
     }
 
     /// Returns the current `ChainInfo`.
@@ -413,22 +436,30 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 
     /// Hook for new fork choice update.
     pub fn on_forkchoice_update_received(&self) {
-        self.inner.chain_info_tracker.on_forkchoice_update_received();
+        self.inner
+            .chain_info_tracker
+            .on_forkchoice_update_received();
     }
 
     /// Returns the timestamp of the last received update.
     pub fn last_received_update_timestamp(&self) -> Option<Instant> {
-        self.inner.chain_info_tracker.last_forkchoice_update_received_at()
+        self.inner
+            .chain_info_tracker
+            .last_forkchoice_update_received_at()
     }
 
     /// Hook for transition configuration exchanged.
     pub fn on_transition_configuration_exchanged(&self) {
-        self.inner.chain_info_tracker.on_transition_configuration_exchanged();
+        self.inner
+            .chain_info_tracker
+            .on_transition_configuration_exchanged();
     }
 
     /// Returns the timestamp of the last transition configuration exchanged,
     pub fn last_exchanged_transition_configuration_timestamp(&self) -> Option<Instant> {
-        self.inner.chain_info_tracker.last_transition_configuration_exchanged_at()
+        self.inner
+            .chain_info_tracker
+            .last_transition_configuration_exchanged_at()
     }
 
     /// Canonical head setter.
@@ -463,18 +494,25 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 
     /// Returns the `SealedHeader` corresponding to the pending state.
     pub fn pending_sealed_header(&self) -> Option<SealedHeader<N::BlockHeader>> {
-        self.pending_state().map(|h| h.block_ref().recovered_block().clone_sealed_header())
+        self.pending_state()
+            .map(|h| h.block_ref().recovered_block().clone_sealed_header())
     }
 
     /// Returns the `Header` corresponding to the pending state.
     pub fn pending_header(&self) -> Option<N::BlockHeader> {
-        self.pending_sealed_header().map(|sealed_header| sealed_header.unseal())
+        self.pending_sealed_header()
+            .map(|sealed_header| sealed_header.unseal())
     }
 
     /// Returns the `SealedBlock` corresponding to the pending state.
     pub fn pending_block(&self) -> Option<SealedBlock<N::Block>> {
-        self.pending_state()
-            .map(|block_state| block_state.block_ref().recovered_block().sealed_block().clone())
+        self.pending_state().map(|block_state| {
+            block_state
+                .block_ref()
+                .recovered_block()
+                .sealed_block()
+                .clone()
+        })
     }
 
     /// Returns the `RecoveredBlock` corresponding to the pending state.
@@ -482,7 +520,8 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     where
         N::SignedTx: SignedTransaction,
     {
-        self.pending_state().map(|block_state| block_state.block_ref().recovered_block().clone())
+        self.pending_state()
+            .map(|block_state| block_state.block_ref().recovered_block().clone())
     }
 
     /// Returns a tuple with the `SealedBlock` corresponding to the pending
@@ -490,7 +529,11 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     pub fn pending_block_and_receipts(&self) -> Option<PendingBlockAndReceipts<N>> {
         self.pending_state().map(|block_state| {
             (
-                block_state.block_ref().recovered_block().sealed_block().clone(),
+                block_state
+                    .block_ref()
+                    .recovered_block()
+                    .sealed_block()
+                    .clone(),
                 block_state.executed_block_receipts(),
             )
         })
@@ -528,7 +571,10 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         historical: StateProviderBox,
     ) -> MemoryOverlayStateProvider<N> {
         let in_memory = if let Some(state) = self.state_by_hash(hash) {
-            state.chain().map(|block_state| block_state.block()).collect()
+            state
+                .chain()
+                .map(|block_state| block_state.block())
+                .collect()
         } else {
             Vec::new()
         };
@@ -541,16 +587,23 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     ///
     /// This iterator contains a snapshot of the in-memory state at the time of the call.
     pub fn canonical_chain(&self) -> impl Iterator<Item = Arc<BlockState<N>>> {
-        self.inner.in_memory_state.head_state().into_iter().flat_map(|head| head.iter())
+        self.inner
+            .in_memory_state
+            .head_state()
+            .into_iter()
+            .flat_map(|head| head.iter())
     }
 
     /// Returns [`SignedTransaction`] type for the given `TxHash` if found.
     pub fn transaction_by_hash(&self, hash: TxHash) -> Option<N::SignedTx> {
         for block_state in self.canonical_chain() {
-            if let Some(tx) =
-                block_state.block_ref().recovered_block().body().transaction_by_hash(&hash)
+            if let Some(tx) = block_state
+                .block_ref()
+                .recovered_block()
+                .body()
+                .transaction_by_hash(&hash)
             {
-                return Some(tx.clone())
+                return Some(tx.clone());
             }
         }
         None
@@ -580,7 +633,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
                     timestamp: block_state.block_ref().recovered_block().timestamp(),
                     excess_blob_gas: block_state.block_ref().recovered_block().excess_blob_gas(),
                 };
-                return Some((tx.clone(), meta))
+                return Some((tx.clone(), meta));
             }
         }
         None
@@ -601,7 +654,10 @@ pub struct BlockState<N: NodePrimitives = EthPrimitives> {
 impl<N: NodePrimitives> BlockState<N> {
     /// [`BlockState`] constructor.
     pub const fn new(block: ExecutedBlockWithTrieUpdates<N>) -> Self {
-        Self { block, parent: None }
+        Self {
+            block,
+            parent: None,
+        }
     }
 
     /// [`BlockState`] constructor with parent.
@@ -710,7 +766,10 @@ impl<N: NodePrimitives> BlockState<N> {
     /// This merges the state of all blocks that are part of the chain that the this block is
     /// the head of. This includes all blocks that connect back to the canonical block on disk.
     pub fn state_provider(&self, historical: StateProviderBox) -> MemoryOverlayStateProvider<N> {
-        let in_memory = self.chain().map(|block_state| block_state.block()).collect();
+        let in_memory = self
+            .chain()
+            .map(|block_state| block_state.block())
+            .collect();
 
         MemoryOverlayStateProvider::new(historical, in_memory)
     }
@@ -726,7 +785,12 @@ impl<N: NodePrimitives> BlockState<N> {
     /// Tries to find a transaction by [`TxHash`] in the chain ending at this block.
     pub fn transaction_on_chain(&self, hash: TxHash) -> Option<N::SignedTx> {
         self.chain().find_map(|block_state| {
-            block_state.block_ref().recovered_block().body().transaction_by_hash(&hash).cloned()
+            block_state
+                .block_ref()
+                .recovered_block()
+                .body()
+                .transaction_by_hash(&hash)
+                .cloned()
         })
     }
 
@@ -841,7 +905,14 @@ impl<N: NodePrimitives> ExecutedBlockWithTrieUpdates<N> {
         hashed_state: Arc<HashedPostState>,
         trie: Arc<TrieUpdates>,
     ) -> Self {
-        Self { block: ExecutedBlock { recovered_block, execution_output, hashed_state }, trie }
+        Self {
+            block: ExecutedBlock {
+                recovered_block,
+                execution_output,
+                hashed_state,
+            },
+            trie,
+        }
     }
 
     /// Returns a reference to the trie updates for the block
@@ -1117,7 +1188,11 @@ mod tests {
         let mut state_by_hash = HashMap::default();
         let number = rand::thread_rng().gen::<u64>();
         let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
-        let state = Arc::new(create_mock_state(&mut test_block_builder, number, B256::random()));
+        let state = Arc::new(create_mock_state(
+            &mut test_block_builder,
+            number,
+            B256::random(),
+        ));
         state_by_hash.insert(state.hash(), state.clone());
 
         let in_memory_state = InMemoryState::new(state_by_hash, BTreeMap::new(), None);
@@ -1133,7 +1208,11 @@ mod tests {
 
         let number = rand::thread_rng().gen::<u64>();
         let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
-        let state = Arc::new(create_mock_state(&mut test_block_builder, number, B256::random()));
+        let state = Arc::new(create_mock_state(
+            &mut test_block_builder,
+            number,
+            B256::random(),
+        ));
         let hash = state.hash();
 
         state_by_hash.insert(hash, state.clone());
@@ -1150,7 +1229,11 @@ mod tests {
         let mut state_by_hash = HashMap::default();
         let mut hash_by_number = BTreeMap::new();
         let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
-        let state1 = Arc::new(create_mock_state(&mut test_block_builder, 1, B256::random()));
+        let state1 = Arc::new(create_mock_state(
+            &mut test_block_builder,
+            1,
+            B256::random(),
+        ));
         let hash1 = state1.hash();
         let state2 = Arc::new(create_mock_state(&mut test_block_builder, 2, hash1));
         let hash2 = state2.hash();
@@ -1180,8 +1263,14 @@ mod tests {
         let result = in_memory_state.pending_state();
         assert!(result.is_some());
         let actual_pending_state = result.unwrap();
-        assert_eq!(actual_pending_state.block.recovered_block().hash(), pending_hash);
-        assert_eq!(actual_pending_state.block.recovered_block().number, pending_number);
+        assert_eq!(
+            actual_pending_state.block.recovered_block().hash(),
+            pending_hash
+        );
+        assert_eq!(
+            actual_pending_state.block.recovered_block().number,
+            pending_number
+        );
     }
 
     #[test]
@@ -1265,25 +1354,50 @@ mod tests {
         let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
         let block1 = test_block_builder.get_executed_block_with_number(0, B256::random());
         let block2 = test_block_builder.get_executed_block_with_number(0, B256::random());
-        let chain = NewCanonicalChain::Commit { new: vec![block1.clone()] };
+        let chain = NewCanonicalChain::Commit {
+            new: vec![block1.clone()],
+        };
         state.update_chain(chain);
         assert_eq!(
-            state.head_state().unwrap().block_ref().recovered_block().hash(),
+            state
+                .head_state()
+                .unwrap()
+                .block_ref()
+                .recovered_block()
+                .hash(),
             block1.recovered_block().hash()
         );
         assert_eq!(
-            state.state_by_number(0).unwrap().block_ref().recovered_block().hash(),
+            state
+                .state_by_number(0)
+                .unwrap()
+                .block_ref()
+                .recovered_block()
+                .hash(),
             block1.recovered_block().hash()
         );
 
-        let chain = NewCanonicalChain::Reorg { new: vec![block2.clone()], old: vec![block1.block] };
+        let chain = NewCanonicalChain::Reorg {
+            new: vec![block2.clone()],
+            old: vec![block1.block],
+        };
         state.update_chain(chain);
         assert_eq!(
-            state.head_state().unwrap().block_ref().recovered_block().hash(),
+            state
+                .head_state()
+                .unwrap()
+                .block_ref()
+                .recovered_block()
+                .hash(),
             block2.recovered_block().hash()
         );
         assert_eq!(
-            state.state_by_number(0).unwrap().block_ref().recovered_block().hash(),
+            state
+                .state_by_number(0)
+                .unwrap()
+                .block_ref()
+                .recovered_block()
+                .hash(),
             block2.recovered_block().hash()
         );
 
@@ -1303,7 +1417,9 @@ mod tests {
             test_block_builder.get_executed_block_with_number(1, block1.recovered_block().hash());
 
         // Commit the two blocks
-        let chain = NewCanonicalChain::Commit { new: vec![block1.clone(), block2.clone()] };
+        let chain = NewCanonicalChain::Commit {
+            new: vec![block1.clone(), block2.clone()],
+        };
         state.update_chain(chain);
 
         // Assert that the pending state is None before setting it
@@ -1319,16 +1435,25 @@ mod tests {
         );
 
         // Check the pending block
-        assert_eq!(state.pending_block().unwrap(), block2.recovered_block().sealed_block().clone());
+        assert_eq!(
+            state.pending_block().unwrap(),
+            block2.recovered_block().sealed_block().clone()
+        );
 
         // Check the pending block number and hash
         assert_eq!(
             state.pending_block_num_hash().unwrap(),
-            BlockNumHash { number: 1, hash: block2.recovered_block().hash() }
+            BlockNumHash {
+                number: 1,
+                hash: block2.recovered_block().hash()
+            }
         );
 
         // Check the pending header
-        assert_eq!(state.pending_header().unwrap(), block2.recovered_block().header().clone());
+        assert_eq!(
+            state.pending_header().unwrap(),
+            block2.recovered_block().header().clone()
+        );
 
         // Check the pending sealed header
         assert_eq!(
@@ -1337,7 +1462,10 @@ mod tests {
         );
 
         // Check the pending block with senders
-        assert_eq!(state.pending_recovered_block().unwrap(), block2.recovered_block().clone());
+        assert_eq!(
+            state.pending_recovered_block().unwrap(),
+            block2.recovered_block().clone()
+        );
 
         // Check the pending block and receipts
         assert_eq!(
@@ -1356,8 +1484,14 @@ mod tests {
             test_block_builder.get_executed_block_with_number(3, block2.recovered_block().hash());
 
         let state1 = Arc::new(BlockState::new(block1.clone()));
-        let state2 = Arc::new(BlockState::with_parent(block2.clone(), Some(state1.clone())));
-        let state3 = Arc::new(BlockState::with_parent(block3.clone(), Some(state2.clone())));
+        let state2 = Arc::new(BlockState::with_parent(
+            block2.clone(),
+            Some(state1.clone()),
+        ));
+        let state3 = Arc::new(BlockState::with_parent(
+            block3.clone(),
+            Some(state2.clone()),
+        ));
 
         let mut blocks = HashMap::default();
         blocks.insert(block1.recovered_block().hash(), state1);
@@ -1497,8 +1631,14 @@ mod tests {
 
         let block_state_chain = single_block.chain().collect::<Vec<_>>();
         assert_eq!(block_state_chain.len(), 1);
-        assert_eq!(block_state_chain[0].block().recovered_block().number, single_block_number);
-        assert_eq!(block_state_chain[0].block().recovered_block().hash(), single_block_hash);
+        assert_eq!(
+            block_state_chain[0].block().recovered_block().number,
+            single_block_number
+        );
+        assert_eq!(
+            block_state_chain[0].block().recovered_block().hash(),
+            single_block_hash
+        );
     }
 
     #[test]
@@ -1543,13 +1683,18 @@ mod tests {
         };
 
         // Test commit notification
-        let chain_commit = NewCanonicalChain::Commit { new: vec![block0.clone(), block1.clone()] };
+        let chain_commit = NewCanonicalChain::Commit {
+            new: vec![block0.clone(), block1.clone()],
+        };
 
         assert_eq!(
             chain_commit.to_chain_notification(),
             CanonStateNotification::Commit {
                 new: Arc::new(Chain::new(
-                    vec![block0.recovered_block().clone(), block1.recovered_block().clone()],
+                    vec![
+                        block0.recovered_block().clone(),
+                        block1.recovered_block().clone()
+                    ],
                     sample_execution_outcome.clone(),
                     None
                 ))
@@ -1566,12 +1711,18 @@ mod tests {
             chain_reorg.to_chain_notification(),
             CanonStateNotification::Reorg {
                 old: Arc::new(Chain::new(
-                    vec![block1.recovered_block().clone(), block2.recovered_block().clone()],
+                    vec![
+                        block1.recovered_block().clone(),
+                        block2.recovered_block().clone()
+                    ],
                     sample_execution_outcome.clone(),
                     None
                 )),
                 new: Arc::new(Chain::new(
-                    vec![block1a.recovered_block().clone(), block2a.recovered_block().clone()],
+                    vec![
+                        block1a.recovered_block().clone(),
+                        block2a.recovered_block().clone()
+                    ],
                     sample_execution_outcome,
                     None
                 ))

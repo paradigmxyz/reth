@@ -32,7 +32,9 @@ impl SuperChainRegistryManager {
 
     /// Get the path to a genesis file for the given network (`mainnet`, `base`).
     pub fn genesis_path(&self, network_type: &str, network: &str) -> PathBuf {
-        self.base_path.join(network_type).join(format!("{}.json.zst", network))
+        self.base_path
+            .join(network_type)
+            .join(format!("{}.json.zst", network))
     }
 
     /// Read file from the given path
@@ -81,7 +83,12 @@ impl SuperChainRegistryManager {
 
         let dictionary = DecoderDictionary::copy(&dict_bytes);
 
-        let url = format!("{}/{}/{}.json.zst", Self::GENESIS_BASE_URL, network_type, network);
+        let url = format!(
+            "{}/{}/{}.json.zst",
+            Self::GENESIS_BASE_URL,
+            network_type,
+            network
+        );
         let path = self.genesis_path(network_type, network);
 
         let compressed_bytes = self.download_file(&url, &path)?;
@@ -117,7 +124,10 @@ mod tests {
 
         // Test using cached data
         let cached_json_data = manager.get_genesis("mainnet", "base")?;
-        assert!(cached_json_data.is_object(), "Cached JSON should be an object");
+        assert!(
+            cached_json_data.is_object(),
+            "Cached JSON should be an object"
+        );
 
         Ok(())
     }

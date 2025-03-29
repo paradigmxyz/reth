@@ -14,10 +14,13 @@ impl<C: ChainSpecParser> TypedValueParser for Parser<C> {
         arg: Option<&clap::Arg>,
         value: &std::ffi::OsStr,
     ) -> Result<Self::Value, clap::Error> {
-        let val =
-            value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
+        let val = value
+            .to_str()
+            .ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
         C::parse(val).map_err(|err| {
-            let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
+            let arg = arg
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| "...".to_owned());
             let possible_values = C::SUPPORTED_CHAINS.join(",");
             let msg = format!(
                 "Invalid value '{val}' for {arg}: {err}.\n    [possible values: {possible_values}]"
@@ -72,7 +75,7 @@ pub fn parse_genesis(s: &str) -> eyre::Result<alloy_genesis::Genesis> {
             if s.contains('{') {
                 s.to_string()
             } else {
-                return Err(io_err.into()) // assume invalid path
+                return Err(io_err.into()); // assume invalid path
             }
         }
     };

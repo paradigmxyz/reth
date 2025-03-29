@@ -98,7 +98,14 @@ impl<Pool, Client, Evm, Txs> OpPayloadBuilder<Pool, Client, Evm, Txs> {
         self,
         best_transactions: T,
     ) -> OpPayloadBuilder<Pool, Client, Evm, T> {
-        let Self { pool, client, compute_pending_block, evm_config, config, .. } = self;
+        let Self {
+            pool,
+            client,
+            compute_pending_block,
+            evm_config,
+            config,
+            ..
+        } = self;
         OpPayloadBuilder {
             pool,
             client,
@@ -145,7 +152,12 @@ where
             Transaction: PoolTransaction<Consensus = N::SignedTx> + MaybeInteropTransaction,
         >,
     {
-        let BuildArguments { mut cached_reads, config, cancel, best_payload } = args;
+        let BuildArguments {
+            mut cached_reads,
+            config,
+            cancel,
+            best_payload,
+        } = args;
 
         let ctx = OpPayloadBuilderCtx {
             evm_config: self.evm_config.clone(),
@@ -179,7 +191,10 @@ where
         let attributes = OpPayloadBuilderAttributes::try_new(parent.hash(), attributes, 3)
             .map_err(PayloadBuilderError::other)?;
 
-        let config = PayloadConfig { parent_header: Arc::new(parent), attributes };
+        let config = PayloadConfig {
+            parent_header: Arc::new(parent),
+            attributes,
+        };
         let ctx = OpPayloadBuilderCtx {
             evm_config: self.evm_config.clone(),
             da_config: self.config.da_config.clone(),
@@ -213,7 +228,9 @@ where
         args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
         let pool = self.pool.clone();
-        self.build_payload(args, |attrs| self.best_transactions.best_transactions(pool, attrs))
+        self.build_payload(args, |attrs| {
+            self.best_transactions.best_transactions(pool, attrs)
+        })
     }
 
     fn on_missing_payload(
@@ -237,9 +254,11 @@ where
             cancel: Default::default(),
             best_payload: None,
         };
-        self.build_payload(args, |_| NoopPayloadTransactions::<Pool::Transaction>::default())?
-            .into_payload()
-            .ok_or_else(|| PayloadBuilderError::MissingPayload)
+        self.build_payload(args, |_| {
+            NoopPayloadTransactions::<Pool::Transaction>::default()
+        })?
+        .into_payload()
+        .ok_or_else(|| PayloadBuilderError::MissingPayload)
     }
 }
 
@@ -268,7 +287,9 @@ pub struct OpBuilder<'a, Txs> {
 impl<'a, Txs> OpBuilder<'a, Txs> {
     /// Creates a new [`OpBuilder`].
     pub fn new(best: impl FnOnce(BestTransactionsAttributes) -> Txs + Send + Sync + 'a) -> Self {
-        Self { best: Box::new(best) }
+        Self {
+            best: Box::new(best),
+        }
     }
 }
 
@@ -291,7 +312,10 @@ impl<Txs> OpBuilder<'_, Txs> {
         let Self { best } = self;
         debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
 
-        let mut db = State::builder().with_database(db).with_bundle_update().build();
+        let mut db = State::builder()
+            .with_database(db)
+            .with_bundle_update()
+            .build();
 
         let mut builder = ctx.block_builder(&mut db)?;
 
@@ -307,19 +331,28 @@ impl<Txs> OpBuilder<'_, Txs> {
         // 3. if mem pool transactions are requested we execute them
         if !ctx.attributes().no_tx_pool {
             let best_txs = best(ctx.best_transaction_attributes(builder.evm_mut().block()));
-            if ctx.execute_best_transactions(&mut info, &mut builder, best_txs)?.is_some() {
-                return Ok(BuildOutcomeKind::Cancelled)
+            if ctx
+                .execute_best_transactions(&mut info, &mut builder, best_txs)?
+                .is_some()
+            {
+                return Ok(BuildOutcomeKind::Cancelled);
             }
 
             // check if the new payload is even more valuable
             if !ctx.is_better_payload(info.total_fees) {
                 // can skip building the block
-                return Ok(BuildOutcomeKind::Aborted { fees: info.total_fees })
+                return Ok(BuildOutcomeKind::Aborted {
+                    fees: info.total_fees,
+                });
             }
         }
 
-        let BlockBuilderOutcome { execution_result, hashed_state, trie_updates, block } =
-            builder.finish(state_provider)?;
+        let BlockBuilderOutcome {
+            execution_result,
+            hashed_state,
+            trie_updates,
+            block,
+        } = builder.finish(state_provider)?;
 
         let sealed_block = Arc::new(block.sealed_block().clone());
         debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), sealed_block_header = ?sealed_block.header(), "sealed built block");
@@ -343,8 +376,12 @@ impl<Txs> OpBuilder<'_, Txs> {
 
         let no_tx_pool = ctx.attributes().no_tx_pool;
 
-        let payload =
-            OpBuiltPayload::new(ctx.payload_id(), sealed_block, info.total_fees, Some(executed));
+        let payload = OpBuiltPayload::new(
+            ctx.payload_id(),
+            sealed_block,
+            info.total_fees,
+            Some(executed),
+        );
 
         if no_tx_pool {
             // if `no_tx_pool` is set only transactions from the payload attributes will be included
@@ -378,10 +415,17 @@ impl<Txs> OpBuilder<'_, Txs> {
         ctx.execute_sequencer_transactions(&mut builder)?;
         builder.into_executor().apply_post_execution_changes()?;
 
-        let ExecutionWitnessRecord { hashed_state, codes, keys } =
-            ExecutionWitnessRecord::from_executed_state(&db);
+        let ExecutionWitnessRecord {
+            hashed_state,
+            codes,
+            keys,
+        } = ExecutionWitnessRecord::from_executed_state(&db);
         let state = state_provider.witness(Default::default(), hashed_state)?;
-        Ok(ExecutionWitness { state: state.into_iter().collect(), codes, keys })
+        Ok(ExecutionWitness {
+            state: state.into_iter().collect(),
+            codes,
+            keys,
+        })
     }
 }
 
@@ -433,7 +477,11 @@ pub struct ExecutionInfo {
 impl ExecutionInfo {
     /// Create a new instance with allocated slots.
     pub fn new() -> Self {
-        Self { cumulative_gas_used: 0, cumulative_da_bytes_used: 0, total_fees: U256::ZERO }
+        Self {
+            cumulative_gas_used: 0,
+            cumulative_da_bytes_used: 0,
+            total_fees: U256::ZERO,
+        }
     }
 
     /// Returns true if the transaction would exceed the block limits:
@@ -527,7 +575,8 @@ where
 
     /// Returns true if holocene is active for the payload.
     pub fn is_holocene_active(&self) -> bool {
-        self.chain_spec.is_holocene_active_at_timestamp(self.attributes().timestamp())
+        self.chain_spec
+            .is_holocene_active_at_timestamp(self.attributes().timestamp())
     }
 
     /// Returns true if the fees are higher than the previous payload.
@@ -548,7 +597,10 @@ where
                     timestamp: self.attributes().timestamp(),
                     suggested_fee_recipient: self.attributes().suggested_fee_recipient(),
                     prev_randao: self.attributes().prev_randao(),
-                    gas_limit: self.attributes().gas_limit.unwrap_or(self.parent().gas_limit),
+                    gas_limit: self
+                        .attributes()
+                        .gas_limit
+                        .unwrap_or(self.parent().gas_limit),
                     parent_beacon_block_root: self.attributes().parent_beacon_block_root(),
                     extra_data: self.extra_data()?,
                 },
@@ -574,16 +626,19 @@ where
             if sequencer_tx.value().is_eip4844() {
                 return Err(PayloadBuilderError::other(
                     OpPayloadBuilderError::BlobTransactionRejected,
-                ))
+                ));
             }
 
             // Convert the transaction to a [RecoveredTx]. This is
             // purely for the purposes of utilizing the `evm_config.tx_env`` function.
             // Deposit transactions do not have signatures, so if the tx is a deposit, this
             // will just pull in its `from` address.
-            let sequencer_tx = sequencer_tx.value().try_clone_into_recovered().map_err(|_| {
-                PayloadBuilderError::other(OpPayloadBuilderError::TransactionEcRecoverFailed)
-            })?;
+            let sequencer_tx = sequencer_tx
+                .value()
+                .try_clone_into_recovered()
+                .map_err(|_| {
+                    PayloadBuilderError::other(OpPayloadBuilderError::TransactionEcRecoverFailed)
+                })?;
 
             let gas_used = match builder.execute_transaction(sequencer_tx.clone()) {
                 Ok(gas_used) => gas_used,
@@ -592,11 +647,11 @@ where
                     ..
                 })) => {
                     trace!(target: "payload_builder", %error, ?sequencer_tx, "Error in sequencer transaction, skipping.");
-                    continue
+                    continue;
                 }
                 Err(err) => {
                     // this is an error that we should treat as fatal for this attempt
-                    return Err(PayloadBuilderError::EvmExecutionError(Box::new(err)))
+                    return Err(PayloadBuilderError::EvmExecutionError(Box::new(err)));
                 }
             };
 
@@ -632,13 +687,13 @@ where
                 // invalid which also removes all dependent transaction from
                 // the iterator before we can continue
                 best_txs.mark_invalid(tx.signer(), tx.nonce());
-                continue
+                continue;
             }
 
             // A sequencer's block should never contain blob or deposit transactions from the pool.
             if tx.is_eip4844() || tx.is_deposit() {
                 best_txs.mark_invalid(tx.signer(), tx.nonce());
-                continue
+                continue;
             }
 
             // We skip invalid cross chain txs, they would be removed on the next block update in
@@ -646,12 +701,12 @@ where
             if let Some(interop) = interop {
                 if !interop.is_valid(self.config.attributes.timestamp()) {
                     best_txs.mark_invalid(tx.signer(), tx.nonce());
-                    continue
+                    continue;
                 }
             }
             // check if the job was cancelled, if so we can exit early
             if self.cancel.is_cancelled() {
-                return Ok(Some(()))
+                return Ok(Some(()));
             }
 
             let gas_used = match builder.execute_transaction(tx.clone()) {
@@ -669,11 +724,11 @@ where
                         trace!(target: "payload_builder", %error, ?tx, "skipping invalid transaction and its descendants");
                         best_txs.mark_invalid(tx.signer(), tx.nonce());
                     }
-                    continue
+                    continue;
                 }
                 Err(err) => {
                     // this is an error that we should treat as fatal for this attempt
-                    return Err(PayloadBuilderError::EvmExecutionError(Box::new(err)))
+                    return Err(PayloadBuilderError::EvmExecutionError(Box::new(err)));
                 }
             };
 

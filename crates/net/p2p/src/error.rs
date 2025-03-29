@@ -34,13 +34,13 @@ impl<H: BlockHeader> EthResponseValidator for RequestResult<Vec<H>> {
                 let request_length = headers.len() as u64;
 
                 if request_length <= 1 && request.limit != request_length {
-                    return true
+                    return true;
                 }
 
                 match request.start {
-                    BlockHashOrNumber::Number(block_number) => {
-                        headers.first().is_some_and(|header| block_number != header.number())
-                    }
+                    BlockHashOrNumber::Number(block_number) => headers
+                        .first()
+                        .is_some_and(|header| block_number != header.number()),
                     BlockHashOrNumber::Hash(_) => {
                         // we don't want to hash the header
                         false
@@ -62,10 +62,10 @@ impl<H: BlockHeader> EthResponseValidator for RequestResult<Vec<H>> {
     fn reputation_change_err(&self) -> Option<ReputationChangeKind> {
         if let Err(err) = self {
             match err {
-                RequestError::ChannelClosed |
-                RequestError::ConnectionDropped |
-                RequestError::UnsupportedCapability |
-                RequestError::BadResponse => None,
+                RequestError::ChannelClosed
+                | RequestError::ConnectionDropped
+                | RequestError::UnsupportedCapability
+                | RequestError::BadResponse => None,
                 RequestError::Timeout => Some(ReputationChangeKind::Timeout),
             }
         } else {
@@ -223,13 +223,19 @@ mod tests {
 
     #[test]
     fn test_is_likely_bad_headers_response() {
-        let request =
-            HeadersRequest { start: 0u64.into(), limit: 0, direction: Default::default() };
+        let request = HeadersRequest {
+            start: 0u64.into(),
+            limit: 0,
+            direction: Default::default(),
+        };
         let headers: Vec<Header> = vec![];
         assert!(!Ok(headers).is_likely_bad_headers_response(&request));
 
-        let request =
-            HeadersRequest { start: 0u64.into(), limit: 1, direction: Default::default() };
+        let request = HeadersRequest {
+            start: 0u64.into(),
+            limit: 1,
+            direction: Default::default(),
+        };
         let headers: Vec<Header> = vec![];
         assert!(Ok(headers).is_likely_bad_headers_response(&request));
     }

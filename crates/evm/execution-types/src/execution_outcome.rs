@@ -10,8 +10,14 @@ use revm::{
 };
 
 /// Type used to initialize revms bundle state.
-pub type BundleStateInit =
-    HashMap<Address, (Option<Account>, Option<Account>, HashMap<B256, (U256, U256)>)>;
+pub type BundleStateInit = HashMap<
+    Address,
+    (
+        Option<Account>,
+        Option<Account>,
+        HashMap<B256, (U256, U256)>,
+    ),
+>;
 
 /// Types used inside `RevertsInit` to initialize revms reverts.
 pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
@@ -33,7 +39,11 @@ pub struct ChangedAccount {
 impl ChangedAccount {
     /// Creates a new [`ChangedAccount`] with the given address and 0 balance and nonce.
     pub const fn empty(address: Address) -> Self {
-        Self { address, nonce: 0, balance: U256::ZERO }
+        Self {
+            address,
+            nonce: 0,
+            balance: U256::ZERO,
+        }
     }
 }
 
@@ -83,7 +93,12 @@ impl<T> ExecutionOutcome<T> {
         first_block: BlockNumber,
         requests: Vec<Requests>,
     ) -> Self {
-        Self { bundle, receipts, first_block, requests }
+        Self {
+            bundle,
+            receipts,
+            first_block,
+            requests,
+        }
     }
 
     /// Creates a new `ExecutionOutcome` from initialization parameters.
@@ -104,28 +119,39 @@ impl<T> ExecutionOutcome<T> {
 
         // initialize revm bundle
         let bundle = BundleState::new(
-            state_init.into_iter().map(|(address, (original, present, storage))| {
-                (
-                    address,
-                    original.map(Into::into),
-                    present.map(Into::into),
-                    storage.into_iter().map(|(k, s)| (k.into(), s)).collect(),
-                )
-            }),
+            state_init
+                .into_iter()
+                .map(|(address, (original, present, storage))| {
+                    (
+                        address,
+                        original.map(Into::into),
+                        present.map(Into::into),
+                        storage.into_iter().map(|(k, s)| (k.into(), s)).collect(),
+                    )
+                }),
             reverts.into_iter().map(|(_, reverts)| {
                 // does not needs to be sorted, it is done when taking reverts.
                 reverts.into_iter().map(|(address, (original, storage))| {
                     (
                         address,
                         original.map(|i| i.map(Into::into)),
-                        storage.into_iter().map(|entry| (entry.key.into(), entry.value)),
+                        storage
+                            .into_iter()
+                            .map(|entry| (entry.key.into(), entry.value)),
                     )
                 })
             }),
-            contracts_init.into_iter().map(|(code_hash, bytecode)| (code_hash, bytecode.0)),
+            contracts_init
+                .into_iter()
+                .map(|(code_hash, bytecode)| (code_hash, bytecode.0)),
         );
 
-        Self { bundle, receipts, first_block, requests }
+        Self {
+            bundle,
+            receipts,
+            first_block,
+            requests,
+        }
     }
 
     /// Creates a new `ExecutionOutcome` from a single block execution result.
@@ -144,7 +170,12 @@ impl<T> ExecutionOutcome<T> {
         bundle: BundleState,
         results: Vec<BlockExecutionResult<T>>,
     ) -> Self {
-        let mut value = Self { bundle, first_block, receipts: Vec::new(), requests: Vec::new() };
+        let mut value = Self {
+            bundle,
+            first_block,
+            receipts: Vec::new(),
+            requests: Vec::new(),
+        };
         for result in results {
             value.receipts.push(result.receipts);
             value.requests.push(result.requests);
@@ -169,7 +200,10 @@ impl<T> ExecutionOutcome<T> {
 
     /// Return iterator over all accounts
     pub fn accounts_iter(&self) -> impl Iterator<Item = (Address, Option<&AccountInfo>)> {
-        self.bundle.state().iter().map(|(a, acc)| (*a, acc.info.as_ref()))
+        self.bundle
+            .state()
+            .iter()
+            .map(|(a, acc)| (*a, acc.info.as_ref()))
     }
 
     /// Return iterator over all [`BundleAccount`]s in the bundle
@@ -179,14 +213,18 @@ impl<T> ExecutionOutcome<T> {
 
     /// Get account if account is known.
     pub fn account(&self, address: &Address) -> Option<Option<Account>> {
-        self.bundle.account(address).map(|a| a.info.as_ref().map(Into::into))
+        self.bundle
+            .account(address)
+            .map(|a| a.info.as_ref().map(Into::into))
     }
 
     /// Get storage if value is known.
     ///
     /// This means that depending on status we can potentially return `U256::ZERO`.
     pub fn storage(&self, address: &Address, storage_key: U256) -> Option<U256> {
-        self.bundle.account(address).and_then(|a| a.storage_slot(storage_key))
+        self.bundle
+            .account(address)
+            .and_then(|a| a.storage_slot(storage_key))
     }
 
     /// Return bytecode if known.
@@ -203,11 +241,11 @@ impl<T> ExecutionOutcome<T> {
     /// Transform block number to the index of block.
     pub fn block_number_to_index(&self, block_number: BlockNumber) -> Option<usize> {
         if self.first_block > block_number {
-            return None
+            return None;
         }
         let index = block_number - self.first_block;
         if index >= self.receipts.len() as u64 {
-            return None
+            return None;
         }
         Some(index as usize)
     }
@@ -220,7 +258,9 @@ impl<T> ExecutionOutcome<T> {
         block_number: BlockNumber,
         f: impl FnOnce(&[T]) -> B256,
     ) -> Option<B256> {
-        Some(f(self.receipts.get(self.block_number_to_index(block_number)?)?))
+        Some(f(self
+            .receipts
+            .get(self.block_number_to_index(block_number)?)?))
     }
 
     /// Returns reference to receipts.
@@ -235,7 +275,9 @@ impl<T> ExecutionOutcome<T> {
 
     /// Return all block receipts
     pub fn receipts_by_block(&self, block_number: BlockNumber) -> &[T] {
-        let Some(index) = self.block_number_to_index(block_number) else { return &[] };
+        let Some(index) = self.block_number_to_index(block_number) else {
+            return &[];
+        };
         &self.receipts[index]
     }
 
@@ -267,7 +309,9 @@ impl<T> ExecutionOutcome<T> {
     ///
     /// The provided block number will stay inside the bundle state.
     pub fn revert_to(&mut self, block_number: BlockNumber) -> bool {
-        let Some(index) = self.block_number_to_index(block_number) else { return false };
+        let Some(index) = self.block_number_to_index(block_number) else {
+            return false;
+        };
 
         // +1 is for number of blocks that we have as index is included.
         let new_len = index + 1;
@@ -296,7 +340,7 @@ impl<T> ExecutionOutcome<T> {
         T: Clone,
     {
         if at == self.first_block {
-            return (None, self)
+            return (None, self);
         }
 
         let (mut lower_state, mut higher_state) = (self.clone(), self);
@@ -363,9 +407,13 @@ impl<T> ExecutionOutcome<T> {
     /// and maps them into `ChangedAccount` instances, which include the address, nonce, and
     /// balance.
     pub fn changed_accounts(&self) -> impl Iterator<Item = ChangedAccount> + '_ {
-        self.accounts_iter().filter_map(|(addr, acc)| acc.map(|acc| (addr, acc))).map(
-            |(address, acc)| ChangedAccount { address, nonce: acc.nonce, balance: acc.balance },
-        )
+        self.accounts_iter()
+            .filter_map(|(addr, acc)| acc.map(|acc| (addr, acc)))
+            .map(|(address, acc)| ChangedAccount {
+                address,
+                nonce: acc.nonce,
+                balance: acc.balance,
+            })
     }
 }
 
@@ -468,7 +516,11 @@ pub(super) mod serde_bincode_compat {
                 receipts: value
                     .receipts
                     .into_iter()
-                    .map(|vec| vec.into_iter().map(|receipt| T::from_repr(receipt)).collect())
+                    .map(|vec| {
+                        vec.into_iter()
+                            .map(|receipt| T::from_repr(receipt))
+                            .collect()
+                    })
                     .collect(),
                 first_block: value.first_block,
                 requests: value.requests.into_owned(),
@@ -561,7 +613,12 @@ mod tests {
     fn test_initialisation() {
         // Create a new BundleState object with initial data
         let bundle = BundleState::new(
-            vec![(Address::new([2; 20]), None, Some(AccountInfo::default()), HashMap::default())],
+            vec![(
+                Address::new([2; 20]),
+                None,
+                Some(AccountInfo::default()),
+                HashMap::default(),
+            )],
             vec![vec![(Address::new([2; 20]), None, vec![])]],
             vec![],
         );
@@ -575,7 +632,11 @@ mod tests {
         })]];
 
         // Create a Requests object with a vector of requests
-        let requests = vec![Requests::new(vec![bytes!("dead"), bytes!("beef"), bytes!("beebee")])];
+        let requests = vec![Requests::new(vec![
+            bytes!("dead"),
+            bytes!("beef"),
+            bytes!("beebee"),
+        ])];
 
         // Define the first block number
         let first_block = 123;
@@ -597,8 +658,10 @@ mod tests {
 
         // Create a BundleStateInit object and insert initial data
         let mut state_init: BundleStateInit = HashMap::default();
-        state_init
-            .insert(Address::new([2; 20]), (None, Some(Account::default()), HashMap::default()));
+        state_init.insert(
+            Address::new([2; 20]),
+            (None, Some(Account::default()), HashMap::default()),
+        );
 
         // Create a HashMap for account reverts and insert initial data
         let mut revert_inner: HashMap<Address, AccountRevertInit> = HashMap::default();
@@ -787,13 +850,19 @@ mod tests {
         let request = bytes!("deadbeef");
 
         // Create a vector of Requests containing the request.
-        let requests =
-            vec![Requests::new(vec![request.clone()]), Requests::new(vec![request.clone()])];
+        let requests = vec![
+            Requests::new(vec![request.clone()]),
+            Requests::new(vec![request.clone()]),
+        ];
 
         // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
         // first_block
-        let mut exec_res =
-            ExecutionOutcome { bundle: Default::default(), receipts, requests, first_block };
+        let mut exec_res = ExecutionOutcome {
+            bundle: Default::default(),
+            receipts,
+            requests,
+            first_block,
+        };
 
         // Assert that the revert_to method returns true when reverting to the initial block number.
         assert!(exec_res.revert_to(123));
@@ -836,8 +905,12 @@ mod tests {
         let first_block = 123;
 
         // Create an ExecutionOutcome object.
-        let mut exec_res =
-            ExecutionOutcome { bundle: Default::default(), receipts, requests, first_block };
+        let mut exec_res = ExecutionOutcome {
+            bundle: Default::default(),
+            receipts,
+            requests,
+            first_block,
+        };
 
         // Extend the ExecutionOutcome object by itself.
         exec_res.extend(exec_res.clone());
@@ -848,7 +921,10 @@ mod tests {
             ExecutionOutcome {
                 bundle: Default::default(),
                 receipts: vec![vec![Some(receipt.clone())], vec![Some(receipt)]],
-                requests: vec![Requests::new(vec![request.clone()]), Requests::new(vec![request])],
+                requests: vec![
+                    Requests::new(vec![request.clone()]),
+                    Requests::new(vec![request])
+                ],
                 first_block: 123,
             }
         );
@@ -886,8 +962,12 @@ mod tests {
 
         // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
         // first_block
-        let exec_res =
-            ExecutionOutcome { bundle: Default::default(), receipts, requests, first_block };
+        let exec_res = ExecutionOutcome {
+            bundle: Default::default(),
+            receipts,
+            requests,
+            first_block,
+        };
 
         // Split the ExecutionOutcome at block number 124
         let result = exec_res.clone().split_at(124);
@@ -904,7 +984,10 @@ mod tests {
         let higher_execution_outcome = ExecutionOutcome {
             bundle: Default::default(),
             receipts: vec![vec![Some(receipt.clone())], vec![Some(receipt)]],
-            requests: vec![Requests::new(vec![request.clone()]), Requests::new(vec![request])],
+            requests: vec![
+                Requests::new(vec![request.clone()]),
+                Requests::new(vec![request]),
+            ],
             first_block: 124,
         };
 
@@ -924,10 +1007,18 @@ mod tests {
         let address3 = Address::random();
 
         // Set up account info with some changes
-        let account_info1 =
-            AccountInfo { nonce: 1, balance: U256::from(100), code_hash: B256::ZERO, code: None };
-        let account_info2 =
-            AccountInfo { nonce: 2, balance: U256::from(200), code_hash: B256::ZERO, code: None };
+        let account_info1 = AccountInfo {
+            nonce: 1,
+            balance: U256::from(100),
+            code_hash: B256::ZERO,
+            code: None,
+        };
+        let account_info2 = AccountInfo {
+            nonce: 2,
+            balance: U256::from(200),
+            code_hash: B256::ZERO,
+            code: None,
+        };
 
         // Set up the bundle state with these accounts
         let mut bundle_state = BundleState::default();

@@ -119,7 +119,13 @@ mod tests {
             pool.len()
         );
 
-        assert!(pool.get(&tx_1_result).is_some(), "tx1 not found in the pool");
-        assert!(pool.get(&tx_2_result).is_some(), "tx2 not found in the pool");
+        assert!(
+            pool.get(&tx_1_result).is_some(),
+            "tx1 not found in the pool"
+        );
+        assert!(
+            pool.get(&tx_2_result).is_some(),
+            "tx2 not found in the pool"
+        );
     }
 }

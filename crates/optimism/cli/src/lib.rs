@@ -144,8 +144,10 @@ where
         Fut: Future<Output = eyre::Result<()>>,
     {
         // add network name to logs dir
-        self.logs.log_file_directory =
-            self.logs.log_file_directory.join(self.chain.chain().to_string());
+        self.logs.log_file_directory = self
+            .logs
+            .log_file_directory
+            .join(self.chain.chain().to_string());
 
         let _guard = self.init_tracing()?;
         info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
@@ -173,7 +175,10 @@ where
             Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute::<OpNode>()),
             Commands::Stage(command) => runner.run_command_until_exit(|ctx| {
                 command.execute::<OpNode, _, _, OpNetworkPrimitives>(ctx, |spec| {
-                    (OpExecutorProvider::optimism(spec.clone()), OpBeaconConsensus::new(spec))
+                    (
+                        OpExecutorProvider::optimism(spec.clone()),
+                        OpBeaconConsensus::new(spec),
+                    )
                 })
             }),
             Commands::P2P(command) => {

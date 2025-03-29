@@ -19,7 +19,10 @@ impl TriePrefixSetsMut {
     pub fn extend(&mut self, other: Self) {
         self.account_prefix_set.extend(other.account_prefix_set);
         for (hashed_address, prefix_set) in other.storage_prefix_sets {
-            self.storage_prefix_sets.entry(hashed_address).or_default().extend(prefix_set);
+            self.storage_prefix_sets
+                .entry(hashed_address)
+                .or_default()
+                .extend(prefix_set);
         }
         self.destroyed_accounts.extend(other.destroyed_accounts);
     }
@@ -92,19 +95,28 @@ where
     I: IntoIterator<Item = Nibbles>,
 {
     fn from(value: I) -> Self {
-        Self { all: false, keys: value.into_iter().collect() }
+        Self {
+            all: false,
+            keys: value.into_iter().collect(),
+        }
     }
 }
 
 impl PrefixSetMut {
     /// Create [`PrefixSetMut`] with pre-allocated capacity.
     pub fn with_capacity(capacity: usize) -> Self {
-        Self { all: false, keys: Vec::with_capacity(capacity) }
+        Self {
+            all: false,
+            keys: Vec::with_capacity(capacity),
+        }
     }
 
     /// Create [`PrefixSetMut`] that considers all key changed.
     pub const fn all() -> Self {
-        Self { all: true, keys: Vec::new() }
+        Self {
+            all: true,
+            keys: Vec::new(),
+        }
     }
 
     /// Inserts the given `nibbles` into the set.
@@ -141,14 +153,22 @@ impl PrefixSetMut {
     /// If not yet sorted, the elements will be sorted and deduplicated.
     pub fn freeze(mut self) -> PrefixSet {
         if self.all {
-            PrefixSet { index: 0, all: true, keys: Arc::new(Vec::new()) }
+            PrefixSet {
+                index: 0,
+                all: true,
+                keys: Arc::new(Vec::new()),
+            }
         } else {
             self.keys.sort_unstable();
             self.keys.dedup();
             // We need to shrink in both the sorted and non-sorted cases because deduping may have
             // occurred either on `freeze`, or during `contains`.
             self.keys.shrink_to_fit();
-            PrefixSet { index: 0, all: false, keys: Arc::new(self.keys) }
+            PrefixSet {
+                index: 0,
+                all: false,
+                keys: Arc::new(self.keys),
+            }
         }
     }
 }
@@ -169,7 +189,7 @@ impl PrefixSet {
     #[inline]
     pub fn contains(&mut self, prefix: &[u8]) -> bool {
         if self.all {
-            return true
+            return true;
         }
 
         while self.index > 0 && &self.keys[self.index] > prefix {
@@ -179,12 +199,12 @@ impl PrefixSet {
         for (idx, key) in self.keys[self.index..].iter().enumerate() {
             if key.has_prefix(prefix) {
                 self.index += idx;
-                return true
+                return true;
             }
 
             if key > prefix {
                 self.index += idx;
-                return false
+                return false;
             }
         }
 

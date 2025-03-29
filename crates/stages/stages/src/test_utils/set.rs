@@ -14,7 +14,10 @@ impl TestStages {
         exec_outputs: VecDeque<Result<ExecOutput, StageError>>,
         unwind_outputs: VecDeque<Result<UnwindOutput, StageError>>,
     ) -> Self {
-        Self { exec_outputs, unwind_outputs }
+        Self {
+            exec_outputs,
+            unwind_outputs,
+        }
     }
 }
 

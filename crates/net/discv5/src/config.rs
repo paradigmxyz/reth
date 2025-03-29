@@ -36,8 +36,10 @@ pub const DEFAULT_DISCOVERY_V5_PORT: u16 = 9200;
 /// The default [`discv5::ListenConfig`].
 ///
 /// This is different from the upstream default.
-pub const DEFAULT_DISCOVERY_V5_LISTEN_CONFIG: ListenConfig =
-    ListenConfig::Ipv4 { ip: DEFAULT_DISCOVERY_V5_ADDR, port: DEFAULT_DISCOVERY_V5_PORT };
+pub const DEFAULT_DISCOVERY_V5_LISTEN_CONFIG: ListenConfig = ListenConfig::Ipv4 {
+    ip: DEFAULT_DISCOVERY_V5_ADDR,
+    port: DEFAULT_DISCOVERY_V5_PORT,
+};
 
 /// Default interval in seconds at which to run a lookup up query.
 ///
@@ -123,7 +125,8 @@ impl ConfigBuilder {
 
     /// Adds multiple boot nodes from a list of [`Enr`](discv5::Enr)s.
     pub fn add_signed_boot_nodes(mut self, nodes: impl IntoIterator<Item = discv5::Enr>) -> Self {
-        self.bootstrap_nodes.extend(nodes.into_iter().map(BootNode::Enr));
+        self.bootstrap_nodes
+            .extend(nodes.into_iter().map(BootNode::Enr));
         self
     }
 
@@ -132,7 +135,10 @@ impl ConfigBuilder {
     /// CL format since [`discv5`] is originally a CL library.
     pub fn add_cl_serialized_signed_boot_nodes(mut self, enrs: &str) -> Self {
         let bootstrap_nodes = &mut self.bootstrap_nodes;
-        for node in enrs.split(&[',']).flat_map(|record| record.trim().parse::<discv5::Enr>()) {
+        for node in enrs
+            .split(&[','])
+            .flat_map(|record| record.trim().parse::<discv5::Enr>())
+        {
             bootstrap_nodes.insert(BootNode::Enr(node));
         }
         self
@@ -336,7 +342,9 @@ impl Config {
         match self.discv5_config.listen_config {
             ListenConfig::Ipv4 { ip, port } => (ip, port).into(),
             ListenConfig::Ipv6 { ip, port } => (ip, port).into(),
-            ListenConfig::DualStack { ipv6, ipv6_port, .. } => (ipv6, ipv6_port).into(),
+            ListenConfig::DualStack {
+                ipv6, ipv6_port, ..
+            } => (ipv6, ipv6_port).into(),
         }
     }
 
@@ -350,10 +358,12 @@ impl Config {
 /// Returns the IPv4 discovery socket if one is configured.
 pub const fn ipv4(listen_config: &ListenConfig) -> Option<SocketAddrV4> {
     match listen_config {
-        ListenConfig::Ipv4 { ip, port } |
-        ListenConfig::DualStack { ipv4: ip, ipv4_port: port, .. } => {
-            Some(SocketAddrV4::new(*ip, *port))
-        }
+        ListenConfig::Ipv4 { ip, port }
+        | ListenConfig::DualStack {
+            ipv4: ip,
+            ipv4_port: port,
+            ..
+        } => Some(SocketAddrV4::new(*ip, *port)),
         ListenConfig::Ipv6 { .. } => None,
     }
 }
@@ -362,10 +372,12 @@ pub const fn ipv4(listen_config: &ListenConfig) -> Option<SocketAddrV4> {
 pub const fn ipv6(listen_config: &ListenConfig) -> Option<SocketAddrV6> {
     match listen_config {
         ListenConfig::Ipv4 { .. } => None,
-        ListenConfig::Ipv6 { ip, port } |
-        ListenConfig::DualStack { ipv6: ip, ipv6_port: port, .. } => {
-            Some(SocketAddrV6::new(*ip, *port, 0, 0))
-        }
+        ListenConfig::Ipv6 { ip, port }
+        | ListenConfig::DualStack {
+            ipv6: ip,
+            ipv6_port: port,
+            ..
+        } => Some(SocketAddrV6::new(*ip, *port, 0, 0)),
     }
 }
 
@@ -379,11 +391,13 @@ pub fn amend_listen_config_wrt_rlpx(
     let discv5_socket_ipv4 = ipv4(listen_config);
     let discv5_socket_ipv6 = ipv6(listen_config);
 
-    let discv5_port_ipv4 =
-        discv5_socket_ipv4.map(|socket| socket.port()).unwrap_or(DEFAULT_DISCOVERY_V5_PORT);
+    let discv5_port_ipv4 = discv5_socket_ipv4
+        .map(|socket| socket.port())
+        .unwrap_or(DEFAULT_DISCOVERY_V5_PORT);
     let discv5_addr_ipv4 = discv5_socket_ipv4.map(|socket| *socket.ip());
-    let discv5_port_ipv6 =
-        discv5_socket_ipv6.map(|socket| socket.port()).unwrap_or(DEFAULT_DISCOVERY_V5_PORT);
+    let discv5_port_ipv6 = discv5_socket_ipv6
+        .map(|socket| socket.port())
+        .unwrap_or(DEFAULT_DISCOVERY_V5_PORT);
     let discv5_addr_ipv6 = discv5_socket_ipv6.map(|socket| *socket.ip());
 
     let (discv5_socket_ipv4, discv5_socket_ipv6) = discv5_sockets_wrt_rlpx_addr(
@@ -424,7 +438,10 @@ pub fn discv5_sockets_wrt_rlpx_addr(
             // overwrite discv5 ipv4 addr with RLPx address. this is since there is no
             // spec'd way to advertise a different address for rlpx and discovery in the
             // ENR.
-            (Some(SocketAddrV4::new(rlpx_addr, discv5_port_ipv4)), discv5_socket_ipv6)
+            (
+                Some(SocketAddrV4::new(rlpx_addr, discv5_port_ipv4)),
+                discv5_socket_ipv6,
+            )
         }
         IpAddr::V6(rlpx_addr) => {
             let discv5_socket_ipv4 =
@@ -443,7 +460,10 @@ pub fn discv5_sockets_wrt_rlpx_addr(
             // overwrite discv5 ipv6 addr with RLPx address. this is since there is no
             // spec'd way to advertise a different address for rlpx and discovery in the
             // ENR.
-            (discv5_socket_ipv4, Some(SocketAddrV6::new(rlpx_addr, discv5_port_ipv6, 0, 0)))
+            (
+                discv5_socket_ipv4,
+                Some(SocketAddrV6::new(rlpx_addr, discv5_port_ipv6, 0, 0)),
+            )
         }
     }
 }
@@ -464,7 +484,12 @@ impl BootNode {
     /// Parses a [`NodeRecord`] and serializes according to CL format. Note: [`discv5`] is
     /// originally a CL library hence needs this format to add the node.
     pub fn from_unsigned(node_record: NodeRecord) -> Result<Self, secp256k1::Error> {
-        let NodeRecord { address, udp_port, id, .. } = node_record;
+        let NodeRecord {
+            address,
+            udp_port,
+            id,
+            ..
+        } = node_record;
         let mut multi_address = Multiaddr::empty();
         match address {
             IpAddr::V4(ip) => multi_address.push(Protocol::Ip4(ip)),
@@ -511,11 +536,14 @@ mod test {
         for node in config.bootstrap_nodes {
             let BootNode::Enr(node) = node else { panic!() };
             assert!(
-                socket_1 == node.udp4_socket().unwrap() && socket_1 == node.tcp4_socket().unwrap() ||
-                    socket_2 == node.udp4_socket().unwrap() &&
-                        socket_2 == node.tcp4_socket().unwrap()
+                socket_1 == node.udp4_socket().unwrap() && socket_1 == node.tcp4_socket().unwrap()
+                    || socket_2 == node.udp4_socket().unwrap()
+                        && socket_2 == node.tcp4_socket().unwrap()
             );
-            assert_eq!("84b4940500", hex::encode(node.get_raw_rlp("opstack").unwrap()));
+            assert_eq!(
+                "84b4940500",
+                hex::encode(node.get_raw_rlp("opstack").unwrap())
+            );
         }
     }
 
@@ -525,8 +553,11 @@ mod test {
             .add_serialized_unsigned_boot_nodes(BOOT_NODES_OP_MAINNET_AND_BASE_MAINNET)
             .build();
 
-        let bootstrap_nodes =
-            config.bootstrap_nodes.into_iter().map(|node| format!("{node}")).collect::<Vec<_>>();
+        let bootstrap_nodes = config
+            .bootstrap_nodes
+            .into_iter()
+            .map(|node| format!("{node}"))
+            .collect::<Vec<_>>();
 
         for node in MULTI_ADDRESSES.split(&[',']) {
             assert!(bootstrap_nodes.contains(&node.to_string()));

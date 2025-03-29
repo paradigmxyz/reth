@@ -61,8 +61,9 @@ impl OpChainSpecBuilder {
 
     /// Construct a new builder from the optimism mainnet chain spec.
     pub fn optimism_mainnet() -> Self {
-        let mut inner =
-            ChainSpecBuilder::default().chain(OP_MAINNET.chain).genesis(OP_MAINNET.genesis.clone());
+        let mut inner = ChainSpecBuilder::default()
+            .chain(OP_MAINNET.chain)
+            .genesis(OP_MAINNET.genesis.clone());
         let forks = OP_MAINNET.hardforks.clone();
         inner = inner.with_forks(forks);
 
@@ -104,14 +105,18 @@ impl OpChainSpecBuilder {
     /// Enable Bedrock at genesis
     pub fn bedrock_activated(mut self) -> Self {
         self.inner = self.inner.paris_activated();
-        self.inner = self.inner.with_fork(OpHardfork::Bedrock, ForkCondition::Block(0));
+        self.inner = self
+            .inner
+            .with_fork(OpHardfork::Bedrock, ForkCondition::Block(0));
         self
     }
 
     /// Enable Regolith at genesis
     pub fn regolith_activated(mut self) -> Self {
         self = self.bedrock_activated();
-        self.inner = self.inner.with_fork(OpHardfork::Regolith, ForkCondition::Timestamp(0));
+        self.inner = self
+            .inner
+            .with_fork(OpHardfork::Regolith, ForkCondition::Timestamp(0));
         self
     }
 
@@ -119,51 +124,69 @@ impl OpChainSpecBuilder {
     pub fn canyon_activated(mut self) -> Self {
         self = self.regolith_activated();
         // Canyon also activates changes from L1's Shanghai hardfork
-        self.inner = self.inner.with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(0));
-        self.inner = self.inner.with_fork(OpHardfork::Canyon, ForkCondition::Timestamp(0));
+        self.inner = self
+            .inner
+            .with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(0));
+        self.inner = self
+            .inner
+            .with_fork(OpHardfork::Canyon, ForkCondition::Timestamp(0));
         self
     }
 
     /// Enable Ecotone at genesis
     pub fn ecotone_activated(mut self) -> Self {
         self = self.canyon_activated();
-        self.inner = self.inner.with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(0));
-        self.inner = self.inner.with_fork(OpHardfork::Ecotone, ForkCondition::Timestamp(0));
+        self.inner = self
+            .inner
+            .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(0));
+        self.inner = self
+            .inner
+            .with_fork(OpHardfork::Ecotone, ForkCondition::Timestamp(0));
         self
     }
 
     /// Enable Fjord at genesis
     pub fn fjord_activated(mut self) -> Self {
         self = self.ecotone_activated();
-        self.inner = self.inner.with_fork(OpHardfork::Fjord, ForkCondition::Timestamp(0));
+        self.inner = self
+            .inner
+            .with_fork(OpHardfork::Fjord, ForkCondition::Timestamp(0));
         self
     }
 
     /// Enable Granite at genesis
     pub fn granite_activated(mut self) -> Self {
         self = self.fjord_activated();
-        self.inner = self.inner.with_fork(OpHardfork::Granite, ForkCondition::Timestamp(0));
+        self.inner = self
+            .inner
+            .with_fork(OpHardfork::Granite, ForkCondition::Timestamp(0));
         self
     }
 
     /// Enable Holocene at genesis
     pub fn holocene_activated(mut self) -> Self {
         self = self.granite_activated();
-        self.inner = self.inner.with_fork(OpHardfork::Holocene, ForkCondition::Timestamp(0));
+        self.inner = self
+            .inner
+            .with_fork(OpHardfork::Holocene, ForkCondition::Timestamp(0));
         self
     }
 
     /// Enable Isthmus at genesis
     pub fn isthmus_activated(mut self) -> Self {
         self = self.holocene_activated();
-        self.inner = self.inner.with_fork(OpHardfork::Isthmus, ForkCondition::Timestamp(0));
+        self.inner = self
+            .inner
+            .with_fork(OpHardfork::Isthmus, ForkCondition::Timestamp(0));
         self
     }
 
     /// Enable Interop at genesis
     pub fn interop_activated(mut self) -> Self {
         self = self.isthmus_activated();
-        self.inner = self.inner.with_fork(OpHardfork::Interop, ForkCondition::Timestamp(0));
+        self.inner = self
+            .inner
+            .with_fork(OpHardfork::Interop, ForkCondition::Timestamp(0));
         self
     }
 
@@ -230,7 +253,9 @@ impl EthChainSpec for OpChainSpec {
     fn display_hardforks(&self) -> Box<dyn core::fmt::Display> {
         // filter only op hardforks
         let op_forks = self.inner.hardforks.forks_iter().filter(|(fork, _)| {
-            !EthereumHardfork::VARIANTS.iter().any(|h| h.name() == (*fork).name())
+            !EthereumHardfork::VARIANTS
+                .iter()
+                .any(|h| h.name() == (*fork).name())
         });
 
         Box::new(DisplayHardforks::new(op_forks))
@@ -295,24 +320,62 @@ impl From<Genesis> for OpChainSpec {
     fn from(genesis: Genesis) -> Self {
         use reth_optimism_forks::OpHardfork;
         let optimism_genesis_info = OpGenesisInfo::extract_from(&genesis);
-        let genesis_info =
-            optimism_genesis_info.optimism_chain_info.genesis_info.unwrap_or_default();
+        let genesis_info = optimism_genesis_info
+            .optimism_chain_info
+            .genesis_info
+            .unwrap_or_default();
 
         // Block-based hardforks
         let hardfork_opts = [
             (EthereumHardfork::Frontier.boxed(), Some(0)),
-            (EthereumHardfork::Homestead.boxed(), genesis.config.homestead_block),
-            (EthereumHardfork::Tangerine.boxed(), genesis.config.eip150_block),
-            (EthereumHardfork::SpuriousDragon.boxed(), genesis.config.eip155_block),
-            (EthereumHardfork::Byzantium.boxed(), genesis.config.byzantium_block),
-            (EthereumHardfork::Constantinople.boxed(), genesis.config.constantinople_block),
-            (EthereumHardfork::Petersburg.boxed(), genesis.config.petersburg_block),
-            (EthereumHardfork::Istanbul.boxed(), genesis.config.istanbul_block),
-            (EthereumHardfork::MuirGlacier.boxed(), genesis.config.muir_glacier_block),
-            (EthereumHardfork::Berlin.boxed(), genesis.config.berlin_block),
-            (EthereumHardfork::London.boxed(), genesis.config.london_block),
-            (EthereumHardfork::ArrowGlacier.boxed(), genesis.config.arrow_glacier_block),
-            (EthereumHardfork::GrayGlacier.boxed(), genesis.config.gray_glacier_block),
+            (
+                EthereumHardfork::Homestead.boxed(),
+                genesis.config.homestead_block,
+            ),
+            (
+                EthereumHardfork::Tangerine.boxed(),
+                genesis.config.eip150_block,
+            ),
+            (
+                EthereumHardfork::SpuriousDragon.boxed(),
+                genesis.config.eip155_block,
+            ),
+            (
+                EthereumHardfork::Byzantium.boxed(),
+                genesis.config.byzantium_block,
+            ),
+            (
+                EthereumHardfork::Constantinople.boxed(),
+                genesis.config.constantinople_block,
+            ),
+            (
+                EthereumHardfork::Petersburg.boxed(),
+                genesis.config.petersburg_block,
+            ),
+            (
+                EthereumHardfork::Istanbul.boxed(),
+                genesis.config.istanbul_block,
+            ),
+            (
+                EthereumHardfork::MuirGlacier.boxed(),
+                genesis.config.muir_glacier_block,
+            ),
+            (
+                EthereumHardfork::Berlin.boxed(),
+                genesis.config.berlin_block,
+            ),
+            (
+                EthereumHardfork::London.boxed(),
+                genesis.config.london_block,
+            ),
+            (
+                EthereumHardfork::ArrowGlacier.boxed(),
+                genesis.config.arrow_glacier_block,
+            ),
+            (
+                EthereumHardfork::GrayGlacier.boxed(),
+                genesis.config.gray_glacier_block,
+            ),
             (OpHardfork::Bedrock.boxed(), genesis_info.bedrock_block),
         ];
         let mut block_hardforks = hardfork_opts
@@ -332,7 +395,10 @@ impl From<Genesis> for OpChainSpec {
 
         // Time-based hardforks
         let time_hardfork_opts = [
-            (EthereumHardfork::Shanghai.boxed(), genesis.config.shanghai_time),
+            (
+                EthereumHardfork::Shanghai.boxed(),
+                genesis.config.shanghai_time,
+            ),
             (EthereumHardfork::Cancun.boxed(), genesis.config.cancun_time),
             (EthereumHardfork::Prague.boxed(), genesis.config.prague_time),
             (OpHardfork::Regolith.boxed(), genesis_info.regolith_time),
@@ -447,11 +513,15 @@ pub fn make_op_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> 
 
     // If Isthmus is active, overwrite the withdrawals root with the storage root of predeploy
     // `L2ToL1MessagePasser.sol`
-    if hardforks.fork(OpHardfork::Isthmus).active_at_timestamp(header.timestamp) {
+    if hardforks
+        .fork(OpHardfork::Isthmus)
+        .active_at_timestamp(header.timestamp)
+    {
         if let Some(predeploy) = genesis.alloc.get(&ADDRESS_L2_TO_L1_MESSAGE_PASSER) {
             if let Some(storage) = &predeploy.storage {
-                header.withdrawals_root =
-                    Some(storage_root_unhashed(storage.iter().map(|(k, v)| (*k, (*v).into()))))
+                header.withdrawals_root = Some(storage_root_unhashed(
+                    storage.iter().map(|(k, v)| (*k, (*v).into())),
+                ))
             }
         }
     }
@@ -472,45 +542,110 @@ mod tests {
     #[test]
     fn base_mainnet_forkids() {
         let mut base_mainnet = OpChainSpecBuilder::base_mainnet().build();
-        base_mainnet.inner.genesis_header.set_hash(BASE_MAINNET.genesis_hash());
+        base_mainnet
+            .inner
+            .genesis_header
+            .set_hash(BASE_MAINNET.genesis_hash());
         test_fork_ids(
             &BASE_MAINNET,
             &[
                 (
-                    Head { number: 0, ..Default::default() },
-                    ForkId { hash: ForkHash([0x67, 0xda, 0x02, 0x60]), next: 1704992401 },
+                    Head {
+                        number: 0,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0x67, 0xda, 0x02, 0x60]),
+                        next: 1704992401,
+                    },
                 ),
                 (
-                    Head { number: 0, timestamp: 1704992400, ..Default::default() },
-                    ForkId { hash: ForkHash([0x67, 0xda, 0x02, 0x60]), next: 1704992401 },
+                    Head {
+                        number: 0,
+                        timestamp: 1704992400,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0x67, 0xda, 0x02, 0x60]),
+                        next: 1704992401,
+                    },
                 ),
                 (
-                    Head { number: 0, timestamp: 1704992401, ..Default::default() },
-                    ForkId { hash: ForkHash([0x3c, 0x28, 0x3c, 0xb3]), next: 1710374401 },
+                    Head {
+                        number: 0,
+                        timestamp: 1704992401,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0x3c, 0x28, 0x3c, 0xb3]),
+                        next: 1710374401,
+                    },
                 ),
                 (
-                    Head { number: 0, timestamp: 1710374400, ..Default::default() },
-                    ForkId { hash: ForkHash([0x3c, 0x28, 0x3c, 0xb3]), next: 1710374401 },
+                    Head {
+                        number: 0,
+                        timestamp: 1710374400,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0x3c, 0x28, 0x3c, 0xb3]),
+                        next: 1710374401,
+                    },
                 ),
                 (
-                    Head { number: 0, timestamp: 1710374401, ..Default::default() },
-                    ForkId { hash: ForkHash([0x51, 0xcc, 0x98, 0xb3]), next: 1720627201 },
+                    Head {
+                        number: 0,
+                        timestamp: 1710374401,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0x51, 0xcc, 0x98, 0xb3]),
+                        next: 1720627201,
+                    },
                 ),
                 (
-                    Head { number: 0, timestamp: 1720627200, ..Default::default() },
-                    ForkId { hash: ForkHash([0x51, 0xcc, 0x98, 0xb3]), next: 1720627201 },
+                    Head {
+                        number: 0,
+                        timestamp: 1720627200,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0x51, 0xcc, 0x98, 0xb3]),
+                        next: 1720627201,
+                    },
                 ),
                 (
-                    Head { number: 0, timestamp: 1720627201, ..Default::default() },
-                    ForkId { hash: ForkHash([0xe4, 0x01, 0x0e, 0xb9]), next: 1726070401 },
+                    Head {
+                        number: 0,
+                        timestamp: 1720627201,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0xe4, 0x01, 0x0e, 0xb9]),
+                        next: 1726070401,
+                    },
                 ),
                 (
-                    Head { number: 0, timestamp: 1726070401, ..Default::default() },
-                    ForkId { hash: ForkHash([0xbc, 0x38, 0xf9, 0xca]), next: 1736445601 },
+                    Head {
+                        number: 0,
+                        timestamp: 1726070401,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0xbc, 0x38, 0xf9, 0xca]),
+                        next: 1736445601,
+                    },
                 ),
                 (
-                    Head { number: 0, timestamp: 1736445601, ..Default::default() },
-                    ForkId { hash: ForkHash([0x3a, 0x2a, 0xf1, 0x83]), next: 0 },
+                    Head {
+                        number: 0,
+                        timestamp: 1736445601,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0x3a, 0x2a, 0xf1, 0x83]),
+                        next: 0,
+                    },
                 ),
             ],
         );
@@ -522,44 +657,113 @@ mod tests {
             &OP_SEPOLIA,
             &[
                 (
-                    Head { number: 0, ..Default::default() },
-                    ForkId { hash: ForkHash([0x67, 0xa4, 0x03, 0x28]), next: 1699981200 },
+                    Head {
+                        number: 0,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0x67, 0xa4, 0x03, 0x28]),
+                        next: 1699981200,
+                    },
                 ),
                 (
-                    Head { number: 0, timestamp: 1699981199, ..Default::default() },
-                    ForkId { hash: ForkHash([0x67, 0xa4, 0x03, 0x28]), next: 1699981200 },
+                    Head {
+                        number: 0,
+                        timestamp: 1699981199,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0x67, 0xa4, 0x03, 0x28]),
+                        next: 1699981200,
+                    },
                 ),
                 (
-                    Head { number: 0, timestamp: 1699981200, ..Default::default() },
-                    ForkId { hash: ForkHash([0xa4, 0x8d, 0x6a, 0x00]), next: 1708534800 },
+                    Head {
+                        number: 0,
+                        timestamp: 1699981200,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0xa4, 0x8d, 0x6a, 0x00]),
+                        next: 1708534800,
+                    },
                 ),
                 (
-                    Head { number: 0, timestamp: 1708534799, ..Default::default() },
-                    ForkId { hash: ForkHash([0xa4, 0x8d, 0x6a, 0x00]), next: 1708534800 },
+                    Head {
+                        number: 0,
+                        timestamp: 1708534799,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0xa4, 0x8d, 0x6a, 0x00]),
+                        next: 1708534800,
+                    },
                 ),
                 (
-                    Head { number: 0, timestamp: 1708534800, ..Default::default() },
-                    ForkId { hash: ForkHash([0xcc, 0x17, 0xc7, 0xeb]), next: 1716998400 },
+                    Head {
+                        number: 0,
+                        timestamp: 1708534800,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0xcc, 0x17, 0xc7, 0xeb]),
+                        next: 1716998400,
+                    },
                 ),
                 (
-                    Head { number: 0, timestamp: 1716998399, ..Default::default() },
-                    ForkId { hash: ForkHash([0xcc, 0x17, 0xc7, 0xeb]), next: 1716998400 },
+                    Head {
+                        number: 0,
+                        timestamp: 1716998399,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0xcc, 0x17, 0xc7, 0xeb]),
+                        next: 1716998400,
+                    },
                 ),
                 (
-                    Head { number: 0, timestamp: 1716998400, ..Default::default() },
-                    ForkId { hash: ForkHash([0x54, 0x0a, 0x8c, 0x5d]), next: 1723478400 },
+                    Head {
+                        number: 0,
+                        timestamp: 1716998400,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0x54, 0x0a, 0x8c, 0x5d]),
+                        next: 1723478400,
+                    },
                 ),
                 (
-                    Head { number: 0, timestamp: 1723478399, ..Default::default() },
-                    ForkId { hash: ForkHash([0x54, 0x0a, 0x8c, 0x5d]), next: 1723478400 },
+                    Head {
+                        number: 0,
+                        timestamp: 1723478399,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0x54, 0x0a, 0x8c, 0x5d]),
+                        next: 1723478400,
+                    },
                 ),
                 (
-                    Head { number: 0, timestamp: 1723478400, ..Default::default() },
-                    ForkId { hash: ForkHash([0x75, 0xde, 0xa4, 0x1e]), next: 1732633200 },
+                    Head {
+                        number: 0,
+                        timestamp: 1723478400,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0x75, 0xde, 0xa4, 0x1e]),
+                        next: 1732633200,
+                    },
                 ),
                 (
-                    Head { number: 0, timestamp: 1732633200, ..Default::default() },
-                    ForkId { hash: ForkHash([0x4a, 0x1c, 0x79, 0x2e]), next: 0 },
+                    Head {
+                        number: 0,
+                        timestamp: 1732633200,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0x4a, 0x1c, 0x79, 0x2e]),
+                        next: 0,
+                    },
                 ),
             ],
         );
@@ -570,55 +774,118 @@ mod tests {
         let mut op_mainnet = OpChainSpecBuilder::optimism_mainnet().build();
         // for OP mainnet we have to do this because the genesis header can't be properly computed
         // from the genesis.json file
-        op_mainnet.inner.genesis_header.set_hash(OP_MAINNET.genesis_hash());
+        op_mainnet
+            .inner
+            .genesis_header
+            .set_hash(OP_MAINNET.genesis_hash());
         test_fork_ids(
             &op_mainnet,
             &[
                 (
-                    Head { number: 0, ..Default::default() },
-                    ForkId { hash: ForkHash([0xca, 0xf5, 0x17, 0xed]), next: 3950000 },
+                    Head {
+                        number: 0,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0xca, 0xf5, 0x17, 0xed]),
+                        next: 3950000,
+                    },
                 ),
                 // London
                 (
-                    Head { number: 105235063, ..Default::default() },
-                    ForkId { hash: ForkHash([0xe3, 0x39, 0x8d, 0x7c]), next: 1704992401 },
+                    Head {
+                        number: 105235063,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0xe3, 0x39, 0x8d, 0x7c]),
+                        next: 1704992401,
+                    },
                 ),
                 // Bedrock
                 (
-                    Head { number: 105235063, ..Default::default() },
-                    ForkId { hash: ForkHash([0xe3, 0x39, 0x8d, 0x7c]), next: 1704992401 },
+                    Head {
+                        number: 105235063,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0xe3, 0x39, 0x8d, 0x7c]),
+                        next: 1704992401,
+                    },
                 ),
                 // Shanghai
                 (
-                    Head { number: 105235063, timestamp: 1704992401, ..Default::default() },
-                    ForkId { hash: ForkHash([0xbd, 0xd4, 0xfd, 0xb2]), next: 1710374401 },
+                    Head {
+                        number: 105235063,
+                        timestamp: 1704992401,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0xbd, 0xd4, 0xfd, 0xb2]),
+                        next: 1710374401,
+                    },
                 ),
                 // OP activation timestamps
                 // https://specs.optimism.io/protocol/superchain-upgrades.html#activation-timestamps
                 // Canyon
                 (
-                    Head { number: 105235063, timestamp: 1704992401, ..Default::default() },
-                    ForkId { hash: ForkHash([0xbd, 0xd4, 0xfd, 0xb2]), next: 1710374401 },
+                    Head {
+                        number: 105235063,
+                        timestamp: 1704992401,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0xbd, 0xd4, 0xfd, 0xb2]),
+                        next: 1710374401,
+                    },
                 ),
                 // Ecotone
                 (
-                    Head { number: 105235063, timestamp: 1710374401, ..Default::default() },
-                    ForkId { hash: ForkHash([0x19, 0xda, 0x4c, 0x52]), next: 1720627201 },
+                    Head {
+                        number: 105235063,
+                        timestamp: 1710374401,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0x19, 0xda, 0x4c, 0x52]),
+                        next: 1720627201,
+                    },
                 ),
                 // Fjord
                 (
-                    Head { number: 105235063, timestamp: 1720627201, ..Default::default() },
-                    ForkId { hash: ForkHash([0x49, 0xfb, 0xfe, 0x1e]), next: 1726070401 },
+                    Head {
+                        number: 105235063,
+                        timestamp: 1720627201,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0x49, 0xfb, 0xfe, 0x1e]),
+                        next: 1726070401,
+                    },
                 ),
                 // Granite
                 (
-                    Head { number: 105235063, timestamp: 1726070401, ..Default::default() },
-                    ForkId { hash: ForkHash([0x44, 0x70, 0x4c, 0xde]), next: 1736445601 },
+                    Head {
+                        number: 105235063,
+                        timestamp: 1726070401,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0x44, 0x70, 0x4c, 0xde]),
+                        next: 1736445601,
+                    },
                 ),
                 // Holocene
                 (
-                    Head { number: 105235063, timestamp: 1736445601, ..Default::default() },
-                    ForkId { hash: ForkHash([0x2b, 0xd9, 0x3d, 0xc8]), next: 0 },
+                    Head {
+                        number: 105235063,
+                        timestamp: 1736445601,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0x2b, 0xd9, 0x3d, 0xc8]),
+                        next: 0,
+                    },
                 ),
             ],
         );
@@ -630,44 +897,113 @@ mod tests {
             &BASE_SEPOLIA,
             &[
                 (
-                    Head { number: 0, ..Default::default() },
-                    ForkId { hash: ForkHash([0xb9, 0x59, 0xb9, 0xf7]), next: 1699981200 },
+                    Head {
+                        number: 0,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0xb9, 0x59, 0xb9, 0xf7]),
+                        next: 1699981200,
+                    },
                 ),
                 (
-                    Head { number: 0, timestamp: 1699981199, ..Default::default() },
-                    ForkId { hash: ForkHash([0xb9, 0x59, 0xb9, 0xf7]), next: 1699981200 },
+                    Head {
+                        number: 0,
+                        timestamp: 1699981199,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0xb9, 0x59, 0xb9, 0xf7]),
+                        next: 1699981200,
+                    },
                 ),
                 (
-                    Head { number: 0, timestamp: 1699981200, ..Default::default() },
-                    ForkId { hash: ForkHash([0x60, 0x7c, 0xd5, 0xa1]), next: 1708534800 },
+                    Head {
+                        number: 0,
+                        timestamp: 1699981200,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0x60, 0x7c, 0xd5, 0xa1]),
+                        next: 1708534800,
+                    },
                 ),
                 (
-                    Head { number: 0, timestamp: 1708534799, ..Default::default() },
-                    ForkId { hash: ForkHash([0x60, 0x7c, 0xd5, 0xa1]), next: 1708534800 },
+                    Head {
+                        number: 0,
+                        timestamp: 1708534799,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0x60, 0x7c, 0xd5, 0xa1]),
+                        next: 1708534800,
+                    },
                 ),
                 (
-                    Head { number: 0, timestamp: 1708534800, ..Default::default() },
-                    ForkId { hash: ForkHash([0xbe, 0x96, 0x9b, 0x17]), next: 1716998400 },
+                    Head {
+                        number: 0,
+                        timestamp: 1708534800,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0xbe, 0x96, 0x9b, 0x17]),
+                        next: 1716998400,
+                    },
                 ),
                 (
-                    Head { number: 0, timestamp: 1716998399, ..Default::default() },
-                    ForkId { hash: ForkHash([0xbe, 0x96, 0x9b, 0x17]), next: 1716998400 },
+                    Head {
+                        number: 0,
+                        timestamp: 1716998399,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0xbe, 0x96, 0x9b, 0x17]),
+                        next: 1716998400,
+                    },
                 ),
                 (
-                    Head { number: 0, timestamp: 1716998400, ..Default::default() },
-                    ForkId { hash: ForkHash([0x4e, 0x45, 0x7a, 0x49]), next: 1723478400 },
+                    Head {
+                        number: 0,
+                        timestamp: 1716998400,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0x4e, 0x45, 0x7a, 0x49]),
+                        next: 1723478400,
+                    },
                 ),
                 (
-                    Head { number: 0, timestamp: 1723478399, ..Default::default() },
-                    ForkId { hash: ForkHash([0x4e, 0x45, 0x7a, 0x49]), next: 1723478400 },
+                    Head {
+                        number: 0,
+                        timestamp: 1723478399,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0x4e, 0x45, 0x7a, 0x49]),
+                        next: 1723478400,
+                    },
                 ),
                 (
-                    Head { number: 0, timestamp: 1723478400, ..Default::default() },
-                    ForkId { hash: ForkHash([0x5e, 0xdf, 0xa3, 0xb6]), next: 1732633200 },
+                    Head {
+                        number: 0,
+                        timestamp: 1723478400,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0x5e, 0xdf, 0xa3, 0xb6]),
+                        next: 1732633200,
+                    },
                 ),
                 (
-                    Head { number: 0, timestamp: 1732633200, ..Default::default() },
-                    ForkId { hash: ForkHash([0x8b, 0x5e, 0x76, 0x29]), next: 0 },
+                    Head {
+                        number: 0,
+                        timestamp: 1732633200,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash([0x8b, 0x5e, 0x76, 0x29]),
+                        next: 0,
+                    },
                 ),
             ],
         );
@@ -718,7 +1054,10 @@ mod tests {
     #[test]
     fn latest_base_mainnet_fork_id() {
         assert_eq!(
-            ForkId { hash: ForkHash([0x3a, 0x2a, 0xf1, 0x83]), next: 0 },
+            ForkId {
+                hash: ForkHash([0x3a, 0x2a, 0xf1, 0x83]),
+                next: 0
+            },
             BASE_MAINNET.latest_fork_id()
         )
     }
@@ -727,7 +1066,10 @@ mod tests {
     fn latest_base_mainnet_fork_id_with_builder() {
         let base_mainnet = OpChainSpecBuilder::base_mainnet().build();
         assert_eq!(
-            ForkId { hash: ForkHash([0x3a, 0x2a, 0xf1, 0x83]), next: 0 },
+            ForkId {
+                hash: ForkHash([0x3a, 0x2a, 0xf1, 0x83]),
+                next: 0
+            },
             base_mainnet.latest_fork_id()
         )
     }
@@ -760,19 +1102,40 @@ mod tests {
         let genesis: Genesis = serde_json::from_str(geth_genesis).unwrap();
 
         let actual_bedrock_block = genesis.config.extra_fields.get("bedrockBlock");
-        assert_eq!(actual_bedrock_block, Some(serde_json::Value::from(10)).as_ref());
+        assert_eq!(
+            actual_bedrock_block,
+            Some(serde_json::Value::from(10)).as_ref()
+        );
         let actual_regolith_timestamp = genesis.config.extra_fields.get("regolithTime");
-        assert_eq!(actual_regolith_timestamp, Some(serde_json::Value::from(20)).as_ref());
+        assert_eq!(
+            actual_regolith_timestamp,
+            Some(serde_json::Value::from(20)).as_ref()
+        );
         let actual_canyon_timestamp = genesis.config.extra_fields.get("canyonTime");
-        assert_eq!(actual_canyon_timestamp, Some(serde_json::Value::from(30)).as_ref());
+        assert_eq!(
+            actual_canyon_timestamp,
+            Some(serde_json::Value::from(30)).as_ref()
+        );
         let actual_ecotone_timestamp = genesis.config.extra_fields.get("ecotoneTime");
-        assert_eq!(actual_ecotone_timestamp, Some(serde_json::Value::from(40)).as_ref());
+        assert_eq!(
+            actual_ecotone_timestamp,
+            Some(serde_json::Value::from(40)).as_ref()
+        );
         let actual_fjord_timestamp = genesis.config.extra_fields.get("fjordTime");
-        assert_eq!(actual_fjord_timestamp, Some(serde_json::Value::from(50)).as_ref());
+        assert_eq!(
+            actual_fjord_timestamp,
+            Some(serde_json::Value::from(50)).as_ref()
+        );
         let actual_granite_timestamp = genesis.config.extra_fields.get("graniteTime");
-        assert_eq!(actual_granite_timestamp, Some(serde_json::Value::from(51)).as_ref());
+        assert_eq!(
+            actual_granite_timestamp,
+            Some(serde_json::Value::from(51)).as_ref()
+        );
         let actual_holocene_timestamp = genesis.config.extra_fields.get("holoceneTime");
-        assert_eq!(actual_holocene_timestamp, Some(serde_json::Value::from(52)).as_ref());
+        assert_eq!(
+            actual_holocene_timestamp,
+            Some(serde_json::Value::from(52)).as_ref()
+        );
 
         let optimism_object = genesis.config.extra_fields.get("optimism").unwrap();
         assert_eq!(
@@ -830,19 +1193,40 @@ mod tests {
         let genesis: Genesis = serde_json::from_str(geth_genesis).unwrap();
 
         let actual_bedrock_block = genesis.config.extra_fields.get("bedrockBlock");
-        assert_eq!(actual_bedrock_block, Some(serde_json::Value::from(10)).as_ref());
+        assert_eq!(
+            actual_bedrock_block,
+            Some(serde_json::Value::from(10)).as_ref()
+        );
         let actual_regolith_timestamp = genesis.config.extra_fields.get("regolithTime");
-        assert_eq!(actual_regolith_timestamp, Some(serde_json::Value::from(20)).as_ref());
+        assert_eq!(
+            actual_regolith_timestamp,
+            Some(serde_json::Value::from(20)).as_ref()
+        );
         let actual_canyon_timestamp = genesis.config.extra_fields.get("canyonTime");
-        assert_eq!(actual_canyon_timestamp, Some(serde_json::Value::from(30)).as_ref());
+        assert_eq!(
+            actual_canyon_timestamp,
+            Some(serde_json::Value::from(30)).as_ref()
+        );
         let actual_ecotone_timestamp = genesis.config.extra_fields.get("ecotoneTime");
-        assert_eq!(actual_ecotone_timestamp, Some(serde_json::Value::from(40)).as_ref());
+        assert_eq!(
+            actual_ecotone_timestamp,
+            Some(serde_json::Value::from(40)).as_ref()
+        );
         let actual_fjord_timestamp = genesis.config.extra_fields.get("fjordTime");
-        assert_eq!(actual_fjord_timestamp, Some(serde_json::Value::from(50)).as_ref());
+        assert_eq!(
+            actual_fjord_timestamp,
+            Some(serde_json::Value::from(50)).as_ref()
+        );
         let actual_granite_timestamp = genesis.config.extra_fields.get("graniteTime");
-        assert_eq!(actual_granite_timestamp, Some(serde_json::Value::from(51)).as_ref());
+        assert_eq!(
+            actual_granite_timestamp,
+            Some(serde_json::Value::from(51)).as_ref()
+        );
         let actual_holocene_timestamp = genesis.config.extra_fields.get("holoceneTime");
-        assert_eq!(actual_holocene_timestamp, Some(serde_json::Value::from(52)).as_ref());
+        assert_eq!(
+            actual_holocene_timestamp,
+            Some(serde_json::Value::from(52)).as_ref()
+        );
 
         let optimism_object = genesis.config.extra_fields.get("optimism").unwrap();
         assert_eq!(
@@ -929,7 +1313,10 @@ mod tests {
         );
 
         let actual_bedrock_block = genesis.config.extra_fields.get("bedrockBlock");
-        assert_eq!(actual_bedrock_block, Some(serde_json::Value::from(0)).as_ref());
+        assert_eq!(
+            actual_bedrock_block,
+            Some(serde_json::Value::from(0)).as_ref()
+        );
         let actual_canyon_timestamp = genesis.config.extra_fields.get("canyonTime");
         assert_eq!(actual_canyon_timestamp, None);
 

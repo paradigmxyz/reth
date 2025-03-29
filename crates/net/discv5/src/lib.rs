@@ -99,7 +99,7 @@ impl Discv5 {
                 err="key not utf-8",
                 "failed to update local enr"
             );
-            return
+            return;
         };
         if let Err(err) = self.discv5.enr_insert(key_str, &rlp) {
             error!(target: "net::discv5",
@@ -217,7 +217,13 @@ impl Discv5 {
         );
 
         Ok((
-            Self { discv5, rlpx_ip_mode, fork_key, discovered_peer_filter, metrics },
+            Self {
+                discv5,
+                rlpx_ip_mode,
+                fork_key,
+                discovered_peer_filter,
+                metrics,
+            },
             discv5_updates,
             bc_enr,
         ))
@@ -291,7 +297,9 @@ impl Discv5 {
         enr: &discv5::Enr,
         socket: SocketAddr,
     ) -> Option<DiscoveredPeer> {
-        self.metrics.discovered_peers_advertised_networks.increment_once_by_network_type(enr);
+        self.metrics
+            .discovered_peers_advertised_networks
+            .increment_once_by_network_type(enr);
 
         let node_record = match self.try_into_reachable(enr, socket) {
             Ok(enr_bc) => enr_bc,
@@ -302,9 +310,11 @@ impl Discv5 {
                     "discovered peer is unreachable"
                 );
 
-                self.metrics.discovered_peers.increment_established_sessions_unreachable_enr(1);
+                self.metrics
+                    .discovered_peers
+                    .increment_established_sessions_unreachable_enr(1);
 
-                return None
+                return None;
             }
         };
         if let FilterOutcome::Ignore { reason } = self.filter_discovered_peer(enr) {
@@ -314,9 +324,11 @@ impl Discv5 {
                 "filtered out discovered peer"
             );
 
-            self.metrics.discovered_peers.increment_established_sessions_filtered(1);
+            self.metrics
+                .discovered_peers
+                .increment_established_sessions_filtered(1);
 
-            return None
+            return None;
         }
 
         // todo: extend for all network stacks in reth-network rlpx logic
@@ -330,7 +342,10 @@ impl Discv5 {
             "discovered peer"
         );
 
-        Some(DiscoveredPeer { node_record, fork_id })
+        Some(DiscoveredPeer {
+            node_record,
+            fork_id,
+        })
     }
 
     /// Tries to convert an [`Enr`](discv5::Enr) into the backwards compatible type [`NodeRecord`],
@@ -343,17 +358,22 @@ impl Discv5 {
         let id = enr_to_discv4_id(enr).ok_or(Error::IncompatibleKeyType)?;
 
         if enr.tcp4().is_none() && enr.tcp6().is_none() {
-            return Err(Error::UnreachableRlpx)
+            return Err(Error::UnreachableRlpx);
         }
         let Some(tcp_port) = (match self.rlpx_ip_mode {
             IpMode::Ip4 => enr.tcp4(),
             IpMode::Ip6 => enr.tcp6(),
             _ => unimplemented!("dual-stack support not implemented for rlpx"),
         }) else {
-            return Err(Error::IpVersionMismatchRlpx(self.rlpx_ip_mode))
+            return Err(Error::IpVersionMismatchRlpx(self.rlpx_ip_mode));
         };
 
-        Ok(NodeRecord { address: socket.ip(), tcp_port, udp_port: socket.port(), id })
+        Ok(NodeRecord {
+            address: socket.ip(),
+            tcp_port,
+            udp_port: socket.port(),
+            id,
+        })
     }
 
     /// Applies filtering rules on an ENR. Returns [`Ok`](FilterOutcome::Ok) if peer should be
@@ -368,7 +388,9 @@ impl Discv5 {
         &self,
         enr: &discv5::enr::Enr<K>,
     ) -> Result<ForkId, Error> {
-        let Some(key) = self.fork_key else { return Err(Error::NetworkStackIdNotConfigured) };
+        let Some(key) = self.fork_key else {
+            return Err(Error::NetworkStackIdNotConfigured);
+        };
         let fork_id = enr
             .get_decodable::<EnrForkIdEntry>(key)
             .ok_or(Error::ForkMissing(key))?
@@ -426,7 +448,13 @@ pub fn build_local_enr(
 ) -> (Enr<SecretKey>, NodeRecord, Option<&'static [u8]>, IpMode) {
     let mut builder = discv5::enr::Enr::builder();
 
-    let Config { discv5_config, fork, tcp_socket, other_enr_kv_pairs, .. } = config;
+    let Config {
+        discv5_config,
+        fork,
+        tcp_socket,
+        other_enr_kv_pairs,
+        ..
+    } = config;
 
     let socket = match discv5_config.listen_config {
         ListenConfig::Ipv4 { ip, port } => {
@@ -447,7 +475,12 @@ pub fn build_local_enr(
 
             (ip, port).into()
         }
-        ListenConfig::DualStack { ipv4, ipv4_port, ipv6, ipv6_port } => {
+        ListenConfig::DualStack {
+            ipv4,
+            ipv4_port,
+            ipv6,
+            ipv6_port,
+        } => {
             if ipv4 != Ipv4Addr::UNSPECIFIED {
                 builder.ip4(ipv4);
             }
@@ -463,7 +496,11 @@ pub fn build_local_enr(
         }
     };
 
-    let rlpx_ip_mode = if tcp_socket.is_ipv4() { IpMode::Ip4 } else { IpMode::Ip6 };
+    let rlpx_ip_mode = if tcp_socket.is_ipv4() {
+        IpMode::Ip4
+    } else {
+        IpMode::Ip6
+    };
 
     // identifies which network node is on
     let network_stack_id = fork.as_ref().map(|(network_stack_id, fork_value)| {
@@ -501,7 +538,7 @@ pub async fn bootstrap(
         match node {
             BootNode::Enr(node) => {
                 if let Err(err) = discv5.add_enr(node) {
-                    return Err(Error::AddNodeFailed(err))
+                    return Err(Error::AddNodeFailed(err));
                 }
             }
             BootNode::Enode(enode) => {
@@ -690,7 +727,9 @@ mod test {
             .discv5_config(discv5::ConfigBuilder::new(discv5_listen_config).build())
             .build();
 
-        Discv5::start(&secret_key, discv5_config).await.expect("should build discv5")
+        Discv5::start(&secret_key, discv5_config)
+            .await
+            .expect("should build discv5")
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -726,7 +765,10 @@ mod test {
         );
 
         // manually trigger connection from node_1 to node_2
-        node_1.with_discv5(|discv5| discv5.send_ping(node_2_enr.clone())).await.unwrap();
+        node_1
+            .with_discv5(|discv5| discv5.send_ping(node_2_enr.clone()))
+            .await
+            .unwrap();
 
         // verify node_1:discv5 is connected to node_2:discv5 and vv
         let event_1_v5 = stream_1.recv().await.unwrap();
@@ -752,7 +794,10 @@ mod test {
         const REMOTE_RLPX_PORT: u16 = 30303;
         let remote_socket = "104.28.44.25:9000".parse().unwrap();
         let remote_key = CombinedKey::generate_secp256k1();
-        let remote_enr = Enr::builder().tcp4(REMOTE_RLPX_PORT).build(&remote_key).unwrap();
+        let remote_enr = Enr::builder()
+            .tcp4(REMOTE_RLPX_PORT)
+            .build(&remote_key)
+            .unwrap();
 
         let discv5 = discv5_noop();
 
@@ -846,7 +891,10 @@ mod test {
 
         impl From<NodeId> for Key<NodeId> {
             fn from(node_id: NodeId) -> Self {
-                Self { preimage: node_id, hash: *GenericArray::from_slice(&node_id.raw()) }
+                Self {
+                    preimage: node_id,
+                    hash: *GenericArray::from_slice(&node_id.raw()),
+                }
             }
         }
 
@@ -865,7 +913,10 @@ mod test {
             let local_node_id = sigp::Key::from(local_node_id);
             let target = sigp::Key::from(target);
 
-            assert_eq!(local_node_id.log2_distance(&target), Some(bucket_index as u64 + 1));
+            assert_eq!(
+                local_node_id.log2_distance(&target),
+                Some(bucket_index as u64 + 1)
+            );
         }
     }
 

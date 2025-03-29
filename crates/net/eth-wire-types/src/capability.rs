@@ -21,12 +21,18 @@ pub struct Capability {
 impl Capability {
     /// Create a new `Capability` with the given name and version.
     pub const fn new(name: String, version: usize) -> Self {
-        Self { name: Cow::Owned(name), version }
+        Self {
+            name: Cow::Owned(name),
+            version,
+        }
     }
 
     /// Create a new `Capability` with the given static name and version.
     pub const fn new_static(name: &'static str, version: usize) -> Self {
-        Self { name: Cow::Borrowed(name), version }
+        Self {
+            name: Cow::Borrowed(name),
+            version,
+        }
     }
 
     /// Returns the corresponding eth capability for the given version.

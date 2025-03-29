@@ -71,7 +71,10 @@ impl<P: BlockProvider, T: PayloadTypes> DebugConsensusClient<P, T> {
     /// Create a new debug consensus client with the given handle to execution
     /// client and block provider.
     pub const fn new(engine_handle: BeaconConsensusEngineHandle<T>, block_provider: P) -> Self {
-        Self { engine_handle, block_provider }
+        Self {
+            engine_handle,
+            block_provider,
+        }
     }
 }
 

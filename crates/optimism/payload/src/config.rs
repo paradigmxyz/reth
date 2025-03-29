@@ -50,7 +50,10 @@ impl OpDAConfig {
 
     /// Returns the max allowed data availability size per transactions, if any.
     pub fn max_da_tx_size(&self) -> Option<u64> {
-        let val = self.inner.max_da_tx_size.load(std::sync::atomic::Ordering::Relaxed);
+        let val = self
+            .inner
+            .max_da_tx_size
+            .load(std::sync::atomic::Ordering::Relaxed);
         if val == 0 {
             None
         } else {
@@ -60,7 +63,10 @@ impl OpDAConfig {
 
     /// Returns the max allowed data availability size per block, if any.
     pub fn max_da_block_size(&self) -> Option<u64> {
-        let val = self.inner.max_da_block_size.load(std::sync::atomic::Ordering::Relaxed);
+        let val = self
+            .inner
+            .max_da_block_size
+            .load(std::sync::atomic::Ordering::Relaxed);
         if val == 0 {
             None
         } else {
@@ -77,13 +83,17 @@ impl OpDAConfig {
     /// Sets the maximum data availability size per transaction currently allowed for inclusion. 0
     /// means no maximum.
     pub fn set_max_tx_size(&self, max_da_tx_size: u64) {
-        self.inner.max_da_tx_size.store(max_da_tx_size, std::sync::atomic::Ordering::Relaxed);
+        self.inner
+            .max_da_tx_size
+            .store(max_da_tx_size, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Sets the maximum data availability size per block currently allowed for inclusion. 0 means
     /// no maximum.
     pub fn set_max_block_size(&self, max_da_block_size: u64) {
-        self.inner.max_da_block_size.store(max_da_block_size, std::sync::atomic::Ordering::Relaxed);
+        self.inner
+            .max_da_block_size
+            .store(max_da_block_size, std::sync::atomic::Ordering::Relaxed);
     }
 }
 

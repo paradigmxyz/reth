@@ -66,7 +66,10 @@ where
 {
     #[inline]
     fn from(error: E) -> Self {
-        Self { message: error.to_string().into(), code: error.into() }
+        Self {
+            message: error.to_string().into(),
+            code: error.into(),
+        }
     }
 }
 

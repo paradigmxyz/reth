@@ -87,7 +87,10 @@ where
         let hashed_state_sorted = Arc::new(self.input.state.into_sorted());
         let prefix_sets = self.input.prefix_sets.freeze();
         let storage_root_targets = StorageRootTargets::new(
-            prefix_sets.account_prefix_set.iter().map(|nibbles| B256::from_slice(&nibbles.pack())),
+            prefix_sets
+                .account_prefix_set
+                .iter()
+                .map(|nibbles| B256::from_slice(&nibbles.pack())),
             prefix_sets.storage_prefix_sets,
         );
 
@@ -95,8 +98,9 @@ where
         tracker.set_precomputed_storage_roots(storage_root_targets.len() as u64);
         debug!(target: "trie::parallel_state_root", len = storage_root_targets.len(), "pre-calculating storage roots");
         let mut storage_roots = HashMap::with_capacity(storage_root_targets.len());
-        for (hashed_address, prefix_set) in
-            storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
+        for (hashed_address, prefix_set) in storage_root_targets
+            .into_iter()
+            .sorted_unstable_by_key(|(address, _)| *address)
         {
             let view = self.view.clone();
             let hashed_state_sorted = hashed_state_sorted.clone();
@@ -146,18 +150,25 @@ where
         );
 
         let walker = TrieWalker::new(
-            trie_cursor_factory.account_trie_cursor().map_err(ProviderError::Database)?,
+            trie_cursor_factory
+                .account_trie_cursor()
+                .map_err(ProviderError::Database)?,
             prefix_sets.account_prefix_set,
         )
         .with_deletions_retained(retain_updates);
         let mut account_node_iter = TrieNodeIter::new(
             walker,
-            hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?,
+            hashed_cursor_factory
+                .hashed_account_cursor()
+                .map_err(ProviderError::Database)?,
         );
 
         let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
         let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
-        while let Some(node) = account_node_iter.try_next().map_err(ProviderError::Database)? {
+        while let Some(node) = account_node_iter
+            .try_next()
+            .map_err(ProviderError::Database)?
+        {
             match node {
                 TrieElement::Branch(node) => {
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
@@ -268,8 +279,10 @@ mod tests {
         let mut state = (0..100)
             .map(|_| {
                 let address = Address::random();
-                let account =
-                    Account { balance: U256::from(rng.gen::<u64>()), ..Default::default() };
+                let account = Account {
+                    balance: U256::from(rng.gen::<u64>()),
+                    ..Default::default()
+                };
                 let mut storage = HashMap::<B256, U256>::default();
                 let has_storage = rng.gen_bool(0.7);
                 if has_storage {
@@ -288,16 +301,19 @@ mod tests {
             let provider_rw = factory.provider_rw().unwrap();
             provider_rw
                 .insert_account_for_hashing(
-                    state.iter().map(|(address, (account, _))| (*address, Some(*account))),
+                    state
+                        .iter()
+                        .map(|(address, (account, _))| (*address, Some(*account))),
                 )
                 .unwrap();
             provider_rw
                 .insert_storage_for_hashing(state.iter().map(|(address, (_, storage))| {
                     (
                         *address,
-                        storage
-                            .iter()
-                            .map(|(slot, value)| StorageEntry { key: *slot, value: *value }),
+                        storage.iter().map(|(slot, value)| StorageEntry {
+                            key: *slot,
+                            value: *value,
+                        }),
                     )
                 }))
                 .unwrap();
@@ -317,7 +333,10 @@ mod tests {
 
             let should_update_account = rng.gen_bool(0.5);
             if should_update_account {
-                *account = Account { balance: U256::from(rng.gen::<u64>()), ..*account };
+                *account = Account {
+                    balance: U256::from(rng.gen::<u64>()),
+                    ..*account
+                };
                 hashed_state.accounts.insert(hashed_address, Some(*account));
             }
 

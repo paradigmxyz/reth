@@ -31,14 +31,16 @@ pub(crate) fn create_cors_layer(http_cors_domains: &str) -> Result<CorsLayer, Co
             if iter.clone().any(|o| o == "*") {
                 return Err(CorsDomainError::WildCardNotAllowed {
                     input: http_cors_domains.to_string(),
-                })
+                });
             }
 
             let origins = iter
                 .map(|domain| {
                     domain
                         .parse::<HeaderValue>()
-                        .map_err(|_| CorsDomainError::InvalidHeader { domain: domain.to_string() })
+                        .map_err(|_| CorsDomainError::InvalidHeader {
+                            domain: domain.to_string(),
+                        })
                 })
                 .collect::<Result<Vec<HeaderValue>, _>>()?;
 

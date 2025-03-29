@@ -63,12 +63,12 @@ where
         version: u8,
     ) -> Result<Self, Self::Error> {
         match rpc_payload_attributes {
-            Either::Left(attr) => {
-                L::try_new(parent, attr, version).map(Either::Left).map_err(Either::Left)
-            }
-            Either::Right(attr) => {
-                R::try_new(parent, attr, version).map(Either::Right).map_err(Either::Right)
-            }
+            Either::Left(attr) => L::try_new(parent, attr, version)
+                .map(Either::Left)
+                .map_err(Either::Left),
+            Either::Right(attr) => R::try_new(parent, attr, version)
+                .map(Either::Right)
+                .map_err(Either::Right),
         }
     }
 
@@ -212,7 +212,9 @@ where
                     }),
                 };
 
-                self.left.try_build(left_args).map(|out| out.map_payload(Either::Left))
+                self.left
+                    .try_build(left_args)
+                    .map(|out| out.map_payload(Either::Left))
             }
             Either::Right(ref right_attr) => {
                 let right_args = BuildArguments {
@@ -231,7 +233,9 @@ where
                     }),
                 };
 
-                self.right.try_build(right_args).map(|out| out.map_payload(Either::Right))
+                self.right
+                    .try_build(right_args)
+                    .map(|out| out.map_payload(Either::Right))
             }
         }
     }
@@ -253,7 +257,9 @@ where
                     parent_header: config.parent_header.clone(),
                     attributes: right_attr,
                 };
-                self.right.build_empty_payload(right_config).map(Either::Right)
+                self.right
+                    .build_empty_payload(right_config)
+                    .map(Either::Right)
             }
         }
     }

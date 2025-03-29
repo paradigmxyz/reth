@@ -24,7 +24,11 @@ pub struct EngineSkipNewPayload<S> {
 impl<S> EngineSkipNewPayload<S> {
     /// Creates new [`EngineSkipNewPayload`] stream wrapper.
     pub const fn new(stream: S, threshold: usize) -> Self {
-        Self { stream, threshold, skipped: 0 }
+        Self {
+            stream,
+            threshold,
+            skipped: 0,
+        }
     }
 }
 
@@ -53,14 +57,14 @@ where
                             skipped=this.skipped, "Skipping new payload"
                         );
                         let _ = tx.send(Ok(PayloadStatus::from_status(PayloadStatusEnum::Syncing)));
-                        continue
+                        continue;
                     }
                     *this.skipped = 0;
                     Some(BeaconEngineMessage::NewPayload { payload, tx })
                 }
                 next => next,
             };
-            return Poll::Ready(item)
+            return Poll::Ready(item);
         }
     }
 }

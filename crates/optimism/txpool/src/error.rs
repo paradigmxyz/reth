@@ -31,8 +31,8 @@ impl PoolTransactionError for InvalidCrossTx {
                         InvalidInboxEntry::UnknownChain(_) => true,
                     },
                     // Rpc error or supervisor haven't responded in time
-                    InteropTxValidatorError::RpcClientError(_) |
-                    InteropTxValidatorError::ValidationTimeout(_) => false,
+                    InteropTxValidatorError::RpcClientError(_)
+                    | InteropTxValidatorError::ValidationTimeout(_) => false,
                     // Transaction caused unknown (for parsing) error in supervisor
                     InteropTxValidatorError::SupervisorServerError(_) => true,
                 }

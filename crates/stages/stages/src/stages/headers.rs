@@ -133,7 +133,7 @@ where
 
             let (header, header_hash) = sealed_header.split();
             if header.number() == 0 {
-                continue
+                continue;
             }
             last_header_number = header.number();
 
@@ -141,15 +141,15 @@ where
             td += header.difficulty();
 
             // Header validation
-            self.consensus.validate_header_with_total_difficulty(&header, td).map_err(|error| {
-                StageError::Block {
+            self.consensus
+                .validate_header_with_total_difficulty(&header, td)
+                .map_err(|error| StageError::Block {
                     block: Box::new(BlockWithParent::new(
                         header.parent_hash(),
                         NumHash::new(header.number(), header_hash),
                     )),
                     error: BlockErrorKind::Validation(error),
-                }
-            })?;
+                })?;
 
             // Append to Headers segment
             writer.append_header(&header, td, &header_hash)?;
@@ -157,13 +157,18 @@ where
 
         info!(target: "sync::stages::headers", total = total_headers, "Writing headers hash index");
 
-        let mut cursor_header_numbers =
-            provider.tx_ref().cursor_write::<RawTable<tables::HeaderNumbers>>()?;
+        let mut cursor_header_numbers = provider
+            .tx_ref()
+            .cursor_write::<RawTable<tables::HeaderNumbers>>()?;
         let mut first_sync = false;
 
         // If we only have the genesis block hash, then we are at first sync, and we can remove it,
         // add it to the collector and use tx.append on all hashes.
-        if provider.tx_ref().entries::<RawTable<tables::HeaderNumbers>>()? == 1 {
+        if provider
+            .tx_ref()
+            .entries::<RawTable<tables::HeaderNumbers>>()?
+            == 1
+        {
             if let Some((hash, block_number)) = cursor_header_numbers.last()? {
                 if block_number.value()? == 0 {
                     self.hash_collector.insert(hash.key()?, 0)?;
@@ -220,11 +225,13 @@ where
 
         // Return if stage has already completed the gap on the ETL files
         if self.is_etl_ready {
-            return Poll::Ready(Ok(()))
+            return Poll::Ready(Ok(()));
         }
 
         // Lookup the head and tip of the sync range
-        let gap = self.provider.sync_gap(self.tip.clone(), current_checkpoint.block_number)?;
+        let gap = self
+            .provider
+            .sync_gap(self.tip.clone(), current_checkpoint.block_number)?;
         let tip = gap.target.tip();
         self.sync_gap = Some(gap.clone());
 
@@ -237,7 +244,7 @@ where
                 "Target block already reached"
             );
             self.is_etl_ready = true;
-            return Poll::Ready(Ok(()))
+            return Poll::Ready(Ok(()));
         }
 
         debug!(target: "sync::stages::headers", ?tip, head = ?gap.local_head.hash(), "Commencing sync");
@@ -269,17 +276,21 @@ where
                         // filled the gap.
                         if header_number == local_head_number + 1 {
                             self.is_etl_ready = true;
-                            return Poll::Ready(Ok(()))
+                            return Poll::Ready(Ok(()));
                         }
                     }
                 }
-                Some(Err(HeadersDownloaderError::DetachedHead { local_head, header, error })) => {
+                Some(Err(HeadersDownloaderError::DetachedHead {
+                    local_head,
+                    header,
+                    error,
+                })) => {
                     error!(target: "sync::stages::headers", %error, "Cannot attach header to head");
                     return Poll::Ready(Err(StageError::DetachedHead {
                         local_head: Box::new(local_head.block_with_parent()),
                         header: Box::new(header.block_with_parent()),
                         error,
-                    }))
+                    }));
                 }
                 None => return Poll::Ready(Err(StageError::ChannelClosed)),
             }
@@ -291,14 +302,19 @@ where
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         let current_checkpoint = input.checkpoint();
 
-        if self.sync_gap.as_ref().ok_or(StageError::MissingSyncGap)?.is_closed() {
+        if self
+            .sync_gap
+            .as_ref()
+            .ok_or(StageError::MissingSyncGap)?
+            .is_closed()
+        {
             self.is_etl_ready = false;
-            return Ok(ExecOutput::done(current_checkpoint))
+            return Ok(ExecOutput::done(current_checkpoint));
         }
 
         // We should be here only after we have downloaded all headers into the disk buffer (ETL).
         if !self.is_etl_ready {
-            return Err(StageError::MissingDownloadBuffer)
+            return Err(StageError::MissingDownloadBuffer);
         }
 
         // Reset flag
@@ -347,12 +363,15 @@ where
             .unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
                 (input.unwind_to + 1)..,
             )?;
-        provider.tx_ref().unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
+        provider
+            .tx_ref()
+            .unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
         provider
             .tx_ref()
             .unwind_table_by_num::<tables::HeaderTerminalDifficulties>(input.unwind_to)?;
-        let unfinalized_headers_unwound =
-            provider.tx_ref().unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
+        let unfinalized_headers_unwound = provider
+            .tx_ref()
+            .unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
 
         // determine how many headers to unwind from the static files based on the highest block and
         // the unwind_to block
@@ -369,7 +388,9 @@ where
             // so if we are unwinding past the lowest block in the db, we have to iterate through
             // the HeaderNumbers entries that we'll delete in static files below
             if let Some(header_hash) = hash {
-                provider.tx_ref().delete::<tables::HeaderNumbers>(header_hash, None)?;
+                provider
+                    .tx_ref()
+                    .delete::<tables::HeaderNumbers>(header_hash, None)?;
             }
         }
 
@@ -380,15 +401,18 @@ where
         // Set the stage checkpoint entities processed based on how much we unwound - we add the
         // headers unwound from static files and db
         let stage_checkpoint =
-            input.checkpoint.headers_stage_checkpoint().map(|stage_checkpoint| HeadersCheckpoint {
-                block_range: stage_checkpoint.block_range,
-                progress: EntitiesCheckpoint {
-                    processed: stage_checkpoint.progress.processed.saturating_sub(
-                        static_file_headers_to_unwind + unfinalized_headers_unwound as u64,
-                    ),
-                    total: stage_checkpoint.progress.total,
-                },
-            });
+            input
+                .checkpoint
+                .headers_stage_checkpoint()
+                .map(|stage_checkpoint| HeadersCheckpoint {
+                    block_range: stage_checkpoint.block_range,
+                    progress: EntitiesCheckpoint {
+                        processed: stage_checkpoint.progress.processed.saturating_sub(
+                            static_file_headers_to_unwind + unfinalized_headers_unwound as u64,
+                        ),
+                        total: stage_checkpoint.progress.total,
+                    },
+                });
 
         let mut checkpoint = StageCheckpoint::new(input.unwind_to);
         if let Some(stage_checkpoint) = stage_checkpoint {
@@ -491,7 +515,7 @@ mod tests {
                 let end = input.target.unwrap_or_default() + 1;
 
                 if start + 1 >= end {
-                    return Ok(Vec::default())
+                    return Ok(Vec::default());
                 }
 
                 let mut headers = random_header_range(&mut rng, start + 1..end, head.hash());
@@ -537,7 +561,9 @@ mod tests {
             }
 
             async fn after_execution(&self, headers: Self::Seed) -> Result<(), TestRunnerError> {
-                self.client.extend(headers.iter().map(|h| h.clone_header())).await;
+                self.client
+                    .extend(headers.iter().map(|h| h.clone_header()))
+                    .await;
                 let tip = if headers.is_empty() {
                     let tip = random_header(&mut generators::rng(), 0, None);
                     self.db.insert_headers(std::iter::once(&tip))?;
@@ -582,12 +608,15 @@ mod tests {
             ) -> Result<(), TestRunnerError> {
                 self.db
                     .ensure_no_entry_above_by_value::<tables::HeaderNumbers, _>(block, |val| val)?;
-                self.db.ensure_no_entry_above::<tables::CanonicalHeaders, _>(block, |key| key)?;
-                self.db.ensure_no_entry_above::<tables::Headers, _>(block, |key| key)?;
-                self.db.ensure_no_entry_above::<tables::HeaderTerminalDifficulties, _>(
-                    block,
-                    |num| num,
-                )?;
+                self.db
+                    .ensure_no_entry_above::<tables::CanonicalHeaders, _>(block, |key| key)?;
+                self.db
+                    .ensure_no_entry_above::<tables::Headers, _>(block, |key| key)?;
+                self.db
+                    .ensure_no_entry_above::<tables::HeaderTerminalDifficulties, _>(
+                        block,
+                        |num| num,
+                    )?;
                 Ok(())
             }
 
@@ -609,10 +638,15 @@ mod tests {
             target: Some(previous_stage),
             checkpoint: Some(StageCheckpoint::new(checkpoint)),
         };
-        let headers = runner.seed_execution(input).expect("failed to seed execution");
+        let headers = runner
+            .seed_execution(input)
+            .expect("failed to seed execution");
         let rx = runner.execute(input);
 
-        runner.client.extend(headers.iter().rev().map(|h| h.clone_header())).await;
+        runner
+            .client
+            .extend(headers.iter().rev().map(|h| h.clone_header()))
+            .await;
 
         // skip `after_execution` hook for linear downloader
         let tip = headers.last().unwrap();
@@ -637,13 +671,19 @@ mod tests {
             // -1 because we don't need to download the local head
             processed == checkpoint + headers.len() as u64 - 1 && total == tip.number
         );
-        assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
+        assert!(
+            runner.validate_execution(input, result.ok()).is_ok(),
+            "validation failed"
+        );
         assert!(runner.stage().hash_collector.is_empty());
         assert!(runner.stage().header_collector.is_empty());
 
         // let's insert some blocks using append_blocks_with_state
-        let sealed_headers =
-            random_header_range(&mut generators::rng(), tip.number..tip.number + 10, tip.hash());
+        let sealed_headers = random_header_range(
+            &mut generators::rng(),
+            tip.number..tip.number + 10,
+            tip.hash(),
+        );
 
         // make them sealed blocks with senders by converting them to empty blocks
         let sealed_blocks = sealed_headers
@@ -691,10 +731,15 @@ mod tests {
             target: Some(previous_stage),
             checkpoint: Some(StageCheckpoint::new(checkpoint)),
         };
-        let headers = runner.seed_execution(input).expect("failed to seed execution");
+        let headers = runner
+            .seed_execution(input)
+            .expect("failed to seed execution");
         let rx = runner.execute(input);
 
-        runner.client.extend(headers.iter().rev().map(|h| h.clone_header())).await;
+        runner
+            .client
+            .extend(headers.iter().rev().map(|h| h.clone_header()))
+            .await;
 
         // skip `after_execution` hook for linear downloader
         let tip = headers.last().unwrap();
@@ -719,7 +764,10 @@ mod tests {
             // -1 because we don't need to download the local head
             processed == checkpoint + headers.len() as u64 - 1 && total == tip.number
         );
-        assert!(runner.validate_execution(input, result.ok()).is_ok(), "validation failed");
+        assert!(
+            runner.validate_execution(input, result.ok()).is_ok(),
+            "validation failed"
+        );
         assert!(runner.stage().hash_collector.is_empty());
         assert!(runner.stage().header_collector.is_empty());
     }

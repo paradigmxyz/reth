@@ -91,7 +91,10 @@ impl Environment {
     /// Returns the number of timed out transactions that were not aborted by the user yet.
     #[cfg(feature = "read-tx-timeouts")]
     pub fn timed_out_not_aborted_transactions(&self) -> usize {
-        self.inner.txn_manager.timed_out_not_aborted_read_transactions().unwrap_or(0)
+        self.inner
+            .txn_manager
+            .timed_out_not_aborted_read_transactions()
+            .unwrap_or(0)
     }
 
     /// Create a read-only transaction for use with the environment.
@@ -118,10 +121,10 @@ impl Environment {
                     warn!(target: "libmdbx", "Process stalled, awaiting read-write transaction lock.");
                 }
                 sleep(Duration::from_millis(250));
-                continue
+                continue;
             }
 
-            break res
+            break res;
         }?;
         Ok(Transaction::new_from_ptr(self.clone(), txn.0))
     }
@@ -216,7 +219,7 @@ impl Environment {
         for result in cursor.iter_slices() {
             let (_key, value) = result?;
             if value.len() < size_of::<usize>() {
-                return Err(Error::Corrupted)
+                return Err(Error::Corrupted);
             }
 
             let s = &value[..size_of::<usize>()];
@@ -433,20 +436,30 @@ impl Info {
         if (mode & ffi::MDBX_RDONLY) != 0 {
             Mode::ReadOnly
         } else if (mode & ffi::MDBX_UTTERLY_NOSYNC) != 0 {
-            Mode::ReadWrite { sync_mode: SyncMode::UtterlyNoSync }
+            Mode::ReadWrite {
+                sync_mode: SyncMode::UtterlyNoSync,
+            }
         } else if (mode & ffi::MDBX_NOMETASYNC) != 0 {
-            Mode::ReadWrite { sync_mode: SyncMode::NoMetaSync }
+            Mode::ReadWrite {
+                sync_mode: SyncMode::NoMetaSync,
+            }
         } else if (mode & ffi::MDBX_SAFE_NOSYNC) != 0 {
-            Mode::ReadWrite { sync_mode: SyncMode::SafeNoSync }
+            Mode::ReadWrite {
+                sync_mode: SyncMode::SafeNoSync,
+            }
         } else {
-            Mode::ReadWrite { sync_mode: SyncMode::Durable }
+            Mode::ReadWrite {
+                sync_mode: SyncMode::Durable,
+            }
         }
     }
 }
 
 impl fmt::Debug for Environment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Environment").field("kind", &self.inner.env_kind).finish_non_exhaustive()
+        f.debug_struct("Environment")
+            .field("kind", &self.inner.env_kind)
+            .finish_non_exhaustive()
     }
 }
 
@@ -501,7 +514,12 @@ pub struct Geometry<R> {
 
 impl<R> Default for Geometry<R> {
     fn default() -> Self {
-        Self { size: None, growth_step: None, shrink_threshold: None, page_size: None }
+        Self {
+            size: None,
+            growth_step: None,
+            shrink_threshold: None,
+            page_size: None,
+        }
     }
 }
 
@@ -666,8 +684,14 @@ impl EnvironmentBuilder {
                     (ffi::MDBX_opt_loose_limit, self.loose_limit),
                     (ffi::MDBX_opt_dp_reserve_limit, self.dp_reserve_limit),
                     (ffi::MDBX_opt_txn_dp_limit, self.txn_dp_limit),
-                    (ffi::MDBX_opt_spill_max_denominator, self.spill_max_denominator),
-                    (ffi::MDBX_opt_spill_min_denominator, self.spill_min_denominator),
+                    (
+                        ffi::MDBX_opt_spill_max_denominator,
+                        self.spill_max_denominator,
+                    ),
+                    (
+                        ffi::MDBX_opt_spill_min_denominator,
+                        self.spill_min_denominator,
+                    ),
                 ] {
                     if let Some(v) = v {
                         mdbx_result(ffi::mdbx_env_set_option(env, opt, v))?;
@@ -728,7 +752,7 @@ impl EnvironmentBuilder {
             })() {
                 ffi::mdbx_env_close_ex(env, false);
 
-                return Err(e)
+                return Err(e);
             }
         }
 
@@ -751,9 +775,15 @@ impl EnvironmentBuilder {
             }
         };
 
-        let env = EnvironmentInner { env, txn_manager, env_kind: self.kind };
+        let env = EnvironmentInner {
+            env,
+            txn_manager,
+            env_kind: self.kind,
+        };
 
-        Ok(Environment { inner: Arc::new(env) })
+        Ok(Environment {
+            inner: Arc::new(env),
+        })
     }
 
     /// Configures how this environment will be opened.
@@ -854,7 +884,10 @@ impl EnvironmentBuilder {
         };
         self.geometry = Some(Geometry {
             size: geometry.size.map(|range| {
-                (convert_bound(range.start_bound()), convert_bound(range.end_bound()))
+                (
+                    convert_bound(range.start_bound()),
+                    convert_bound(range.end_bound()),
+                )
             }),
             growth_step: geometry.growth_step,
             shrink_threshold: geometry.shrink_threshold,
@@ -961,7 +994,8 @@ mod tests {
             let tx = env.begin_rw_txn().unwrap();
             let db = tx.open_db(None).unwrap();
             for i in 0usize..1_000 {
-                tx.put(db.dbi(), i.to_le_bytes(), b"0", WriteFlags::empty()).unwrap()
+                tx.put(db.dbi(), i.to_le_bytes(), b"0", WriteFlags::empty())
+                    .unwrap()
             }
             tx.commit().unwrap();
         }
@@ -974,7 +1008,8 @@ mod tests {
             let tx = env.begin_rw_txn().unwrap();
             let db = tx.open_db(None).unwrap();
             for i in 0usize..1_000 {
-                tx.put(db.dbi(), i.to_le_bytes(), b"1", WriteFlags::empty()).unwrap();
+                tx.put(db.dbi(), i.to_le_bytes(), b"1", WriteFlags::empty())
+                    .unwrap();
             }
             tx.commit().unwrap();
         }

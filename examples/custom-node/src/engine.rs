@@ -160,7 +160,11 @@ impl From<CustomBuiltPayload>
     for alloy_consensus::Block<<CustomNodePrimitives as NodePrimitives>::SignedTx>
 {
     fn from(value: CustomBuiltPayload) -> Self {
-        value.0.into_sealed_block().into_block().map_header(|header| header.inner)
+        value
+            .0
+            .into_sealed_block()
+            .into_block()
+            .map_header(|header| header.inner)
     }
 }
 
@@ -190,7 +194,11 @@ impl From<CustomBuiltPayload> for OpExecutionPayloadEnvelopeV3 {
             // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
             should_override_builder: false,
             // No blobs for OP.
-            blobs_bundle: BlobsBundleV1 { blobs: vec![], commitments: vec![], proofs: vec![] },
+            blobs_bundle: BlobsBundleV1 {
+                blobs: vec![],
+                commitments: vec![],
+                proofs: vec![],
+            },
             parent_beacon_block_root: value.0.block().parent_beacon_block_root.unwrap_or_default(),
             execution_payload: ExecutionPayloadV3::from_block_unchecked(
                 value.0.block().hash(),
@@ -229,7 +237,11 @@ impl From<CustomBuiltPayload> for OpExecutionPayloadEnvelopeV4 {
             // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
             should_override_builder: false,
             // No blobs for OP.
-            blobs_bundle: BlobsBundleV1 { blobs: vec![], commitments: vec![], proofs: vec![] },
+            blobs_bundle: BlobsBundleV1 {
+                blobs: vec![],
+                commitments: vec![],
+                proofs: vec![],
+            },
             parent_beacon_block_root,
             execution_requests: vec![],
         }
@@ -251,7 +263,10 @@ impl PayloadTypes for CustomEngineTypes {
         let block_hash = block.hash();
         let block = block.into_block().map_header(|header| header.inner);
         let (payload, sidecar) = OpExecutionPayload::from_block_unchecked(block_hash, &block);
-        CustomExecutionData { inner: OpExecutionData { payload, sidecar }, extension }
+        CustomExecutionData {
+            inner: OpExecutionData { payload, sidecar },
+            extension,
+        }
     }
 }
 

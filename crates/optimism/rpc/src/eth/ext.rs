@@ -38,7 +38,10 @@ where
     /// Creates a new [`OpEthExtApi`].
     pub fn new(sequencer_client: Option<SequencerClient>, pool: Pool, provider: Provider) -> Self {
         let inner = Arc::new(OpEthExtApiInner::new(pool, provider));
-        Self { sequencer_client, inner }
+        Self {
+            sequencer_client,
+            inner,
+        }
     }
 
     /// Returns the configured sequencer client, if any.
@@ -65,8 +68,12 @@ where
             return Ok(());
         }
 
-        let _permit =
-            self.inner.validation_semaphore.acquire().await.map_err(TxConditionalErr::internal)?;
+        let _permit = self
+            .inner
+            .validation_semaphore
+            .acquire()
+            .await
+            .map_err(TxConditionalErr::internal)?;
 
         let state = self
             .provider()
@@ -139,8 +146,8 @@ where
             .ok_or_else(header_not_found)?;
 
         // Ensure that the condition can still be met by checking the max bounds
-        if condition.has_exceeded_block_number(header.header().number()) ||
-            condition.has_exceeded_timestamp(header.header().timestamp())
+        if condition.has_exceeded_block_number(header.header().number())
+            || condition.has_exceeded_timestamp(header.header().timestamp())
         {
             return Err(TxConditionalErr::InvalidCondition.into());
         }
@@ -158,8 +165,11 @@ where
         } else {
             // otherwise, add to pool with the appended conditional
             tx.set_conditional(condition);
-            let hash =
-                self.pool().add_transaction(TransactionOrigin::Private, tx).await.map_err(|e| {
+            let hash = self
+                .pool()
+                .add_transaction(TransactionOrigin::Private, tx)
+                .await
+                .map_err(|e| {
                     OpEthApiError::Eth(reth_rpc_eth_types::EthApiError::PoolError(e.into()))
                 })?;
 

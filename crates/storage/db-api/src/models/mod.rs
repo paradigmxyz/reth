@@ -99,7 +99,9 @@ impl Encode for B256 {
 
 impl Decode for B256 {
     fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
-        Ok(Self::new(value.try_into().map_err(|_| DatabaseError::Decode)?))
+        Ok(Self::new(
+            value.try_into().map_err(|_| DatabaseError::Decode)?,
+        ))
     }
 }
 

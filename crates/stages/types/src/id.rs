@@ -117,8 +117,14 @@ mod tests {
         assert_eq!(StageId::AccountHashing.to_string(), "AccountHashing");
         assert_eq!(StageId::StorageHashing.to_string(), "StorageHashing");
         assert_eq!(StageId::MerkleExecute.to_string(), "MerkleExecute");
-        assert_eq!(StageId::IndexAccountHistory.to_string(), "IndexAccountHistory");
-        assert_eq!(StageId::IndexStorageHistory.to_string(), "IndexStorageHistory");
+        assert_eq!(
+            StageId::IndexAccountHistory.to_string(),
+            "IndexAccountHistory"
+        );
+        assert_eq!(
+            StageId::IndexStorageHistory.to_string(),
+            "IndexStorageHistory"
+        );
         assert_eq!(StageId::TransactionLookup.to_string(), "TransactionLookup");
         assert_eq!(StageId::Finish.to_string(), "Finish");
 

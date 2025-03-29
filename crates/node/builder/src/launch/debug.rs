@@ -71,9 +71,12 @@ where
                 handle.node.add_ons_handle.beacon_engine_handle.clone(),
                 Arc::new(block_provider),
             );
-            handle.node.task_executor.spawn_critical("etherscan consensus client", async move {
-                rpc_consensus_client.run().await
-            });
+            handle
+                .node
+                .task_executor
+                .spawn_critical("etherscan consensus client", async move {
+                    rpc_consensus_client.run().await
+                });
         }
 
         Ok(handle)

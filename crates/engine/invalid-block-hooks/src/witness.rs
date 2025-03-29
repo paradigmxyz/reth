@@ -36,7 +36,12 @@ impl<P, E> InvalidBlockWitnessHook<P, E> {
         output_directory: PathBuf,
         healthy_node_client: Option<jsonrpsee::http_client::HttpClient>,
     ) -> Self {
-        Self { provider, executor, output_directory, healthy_node_client }
+        Self {
+            provider,
+            executor,
+            output_directory,
+            healthy_node_client,
+        }
     }
 }
 
@@ -82,9 +87,10 @@ where
         let mut hashed_state = db.database.hashed_post_state(&bundle_state);
         for (address, account) in db.cache.accounts {
             let hashed_address = keccak256(address);
-            hashed_state
-                .accounts
-                .insert(hashed_address, account.account.as_ref().map(|a| a.info.clone().into()));
+            hashed_state.accounts.insert(
+                hashed_address,
+                account.account.as_ref().map(|a| a.info.clone().into()),
+            );
 
             let storage = hashed_state
                 .storages
@@ -110,9 +116,17 @@ where
         let state = state_provider.witness(Default::default(), hashed_state.clone())?;
 
         // Write the witness to the output directory.
-        let response = ExecutionWitness { state, codes: Default::default(), keys: state_preimages };
+        let response = ExecutionWitness {
+            state,
+            codes: Default::default(),
+            keys: state_preimages,
+        };
         let re_executed_witness_path = self.save_file(
-            format!("{}_{}.witness.re_executed.json", block.number(), block.hash()),
+            format!(
+                "{}_{}.witness.re_executed.json",
+                block.number(),
+                block.hash()
+            ),
             &response,
         )?;
         if let Some(healthy_node_client) = &self.healthy_node_client {
@@ -159,11 +173,19 @@ where
 
         if bundle_state != output.state {
             let original_path = self.save_file(
-                format!("{}_{}.bundle_state.original.json", block.number(), block.hash()),
+                format!(
+                    "{}_{}.bundle_state.original.json",
+                    block.number(),
+                    block.hash()
+                ),
                 &output.state,
             )?;
             let re_executed_path = self.save_file(
-                format!("{}_{}.bundle_state.re_executed.json", block.number(), block.hash()),
+                format!(
+                    "{}_{}.bundle_state.re_executed.json",
+                    block.number(),
+                    block.hash()
+                ),
                 &bundle_state,
             )?;
 
@@ -201,11 +223,19 @@ where
             if &trie_output != original_updates {
                 // Trie updates are too big to diff, so we just save the original and re-executed
                 let original_path = self.save_file(
-                    format!("{}_{}.trie_updates.original.json", block.number(), block.hash()),
+                    format!(
+                        "{}_{}.trie_updates.original.json",
+                        block.number(),
+                        block.hash()
+                    ),
                     original_updates,
                 )?;
                 let re_executed_path = self.save_file(
-                    format!("{}_{}.trie_updates.re_executed.json", block.number(), block.hash()),
+                    format!(
+                        "{}_{}.trie_updates.re_executed.json",
+                        block.number(),
+                        block.hash()
+                    ),
                     &trie_output,
                 )?;
                 warn!(

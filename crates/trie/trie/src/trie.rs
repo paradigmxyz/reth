@@ -229,9 +229,9 @@ where
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
 
                     // Decide if we need to return intermediate progress.
-                    let total_updates_len = updated_storage_nodes +
-                        account_node_iter.walker.removed_keys_len() +
-                        hash_builder.updates_len();
+                    let total_updates_len = updated_storage_nodes
+                        + account_node_iter.walker.removed_keys_len()
+                        + hash_builder.updates_len();
                     if retain_updates && total_updates_len as u64 >= self.threshold {
                         let (walker_stack, walker_deleted_keys) = account_node_iter.walker.split();
                         trie_updates.removed_nodes.extend(walker_deleted_keys);
@@ -248,7 +248,7 @@ where
                             Box::new(state),
                             hashed_entries_walked,
                             trie_updates,
-                        ))
+                        ));
                     }
                 }
             }
@@ -257,7 +257,11 @@ where
         let root = hash_builder.root();
 
         let removed_keys = account_node_iter.walker.take_removed_keys();
-        trie_updates.finalize(hash_builder, removed_keys, self.prefix_sets.destroyed_accounts);
+        trie_updates.finalize(
+            hash_builder,
+            removed_keys,
+            self.prefix_sets.destroyed_accounts,
+        );
 
         let stats = tracker.finish();
 
@@ -273,7 +277,11 @@ where
             "calculated state root"
         );
 
-        Ok(StateRootProgress::Complete(root, hashed_entries_walked, trie_updates))
+        Ok(StateRootProgress::Complete(
+            root,
+            hashed_entries_walked,
+            trie_updates,
+        ))
     }
 }
 
@@ -397,16 +405,19 @@ where
     ) -> Result<(B256, usize, StorageTrieUpdates), StorageRootError> {
         trace!(target: "trie::storage_root", hashed_address = ?self.hashed_address, "calculating storage root");
 
-        let mut hashed_storage_cursor =
-            self.hashed_cursor_factory.hashed_storage_cursor(self.hashed_address)?;
+        let mut hashed_storage_cursor = self
+            .hashed_cursor_factory
+            .hashed_storage_cursor(self.hashed_address)?;
 
         // short circuit on empty storage
         if hashed_storage_cursor.is_storage_empty()? {
-            return Ok((EMPTY_ROOT_HASH, 0, StorageTrieUpdates::deleted()))
+            return Ok((EMPTY_ROOT_HASH, 0, StorageTrieUpdates::deleted()));
         }
 
         let mut tracker = TrieTracker::default();
-        let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?;
+        let trie_cursor = self
+            .trie_cursor_factory
+            .storage_trie_cursor(self.hashed_address)?;
         let walker =
             TrieWalker::new(trie_cursor, self.prefix_set).with_deletions_retained(retain_updates);
 

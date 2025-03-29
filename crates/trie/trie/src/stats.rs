@@ -35,7 +35,11 @@ pub struct TrieTracker {
 
 impl Default for TrieTracker {
     fn default() -> Self {
-        Self { started_at: Instant::now(), branches_added: 0, leaves_added: 0 }
+        Self {
+            started_at: Instant::now(),
+            branches_added: 0,
+            leaves_added: 0,
+        }
     }
 }
 

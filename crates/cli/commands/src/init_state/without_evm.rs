@@ -79,15 +79,17 @@ where
 
     let sf_provider = provider_rw.static_file_provider();
 
-    sf_provider.latest_writer(StaticFileSegment::Headers)?.append_header(
-        header,
-        total_difficulty,
-        &header.hash(),
-    )?;
+    sf_provider
+        .latest_writer(StaticFileSegment::Headers)?
+        .append_header(header, total_difficulty, &header.hash())?;
 
-    sf_provider.latest_writer(StaticFileSegment::Receipts)?.increment_block(header.number())?;
+    sf_provider
+        .latest_writer(StaticFileSegment::Receipts)?
+        .increment_block(header.number())?;
 
-    sf_provider.latest_writer(StaticFileSegment::Transactions)?.increment_block(header.number())?;
+    sf_provider
+        .latest_writer(StaticFileSegment::Transactions)?
+        .increment_block(header.number())?;
 
     Ok(())
 }
@@ -123,14 +125,16 @@ fn append_dummy_chain<N: NodePrimitives<BlockHeader = Header>>(
     let provider = sf_provider.clone();
     std::thread::spawn(move || {
         let mut empty_header = Header::default();
-        let result = provider.latest_writer(StaticFileSegment::Headers).and_then(|mut writer| {
-            for block_num in 1..=target_height {
-                // TODO: should we fill with real parent_hash?
-                empty_header.number = block_num;
-                writer.append_header(&empty_header, U256::ZERO, &B256::ZERO)?;
-            }
-            Ok(())
-        });
+        let result = provider
+            .latest_writer(StaticFileSegment::Headers)
+            .and_then(|mut writer| {
+                for block_num in 1..=target_height {
+                    // TODO: should we fill with real parent_hash?
+                    empty_header.number = block_num;
+                    writer.append_header(&empty_header, U256::ZERO, &B256::ZERO)?;
+                }
+                Ok(())
+            });
 
         tx.send(result).unwrap();
     });
@@ -142,11 +146,16 @@ fn append_dummy_chain<N: NodePrimitives<BlockHeader = Header>>(
 
     // If, for any reason, rayon crashes this verifies if all segments are at the same
     // target_height.
-    for segment in
-        [StaticFileSegment::Headers, StaticFileSegment::Receipts, StaticFileSegment::Transactions]
-    {
+    for segment in [
+        StaticFileSegment::Headers,
+        StaticFileSegment::Receipts,
+        StaticFileSegment::Transactions,
+    ] {
         assert_eq!(
-            sf_provider.latest_writer(segment)?.user_header().block_end(),
+            sf_provider
+                .latest_writer(segment)?
+                .user_header()
+                .block_end(),
             Some(target_height),
             "Static file segment {segment} was unsuccessful advancing its block height."
         );

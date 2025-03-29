@@ -41,9 +41,12 @@ where
     let value = env.value();
     // Subtract transferred value from the caller balance. Return error if the caller has
     // insufficient funds.
-    let balance = balance
-        .checked_sub(env.value())
-        .ok_or_else(|| RpcInvalidTransactionError::InsufficientFunds { cost: value, balance })?;
+    let balance = balance.checked_sub(env.value()).ok_or_else(|| {
+        RpcInvalidTransactionError::InsufficientFunds {
+            cost: value,
+            balance,
+        }
+    })?;
 
     Ok(balance
         // Calculate the amount of gas the caller can afford with the specified gas price.
@@ -111,24 +114,26 @@ impl CallFees {
                     let max_priority_fee_per_gas = max_priority_fee_per_gas.unwrap_or(U256::ZERO);
 
                     // only enforce the fee cap if provided input is not zero
-                    if !(max_fee.is_zero() && max_priority_fee_per_gas.is_zero()) &&
-                        max_fee < block_base_fee
+                    if !(max_fee.is_zero() && max_priority_fee_per_gas.is_zero())
+                        && max_fee < block_base_fee
                     {
                         // `base_fee_per_gas` is greater than the `max_fee_per_gas`
-                        return Err(RpcInvalidTransactionError::FeeCapTooLow.into())
+                        return Err(RpcInvalidTransactionError::FeeCapTooLow.into());
                     }
                     if max_fee < max_priority_fee_per_gas {
                         return Err(
                             // `max_priority_fee_per_gas` is greater than the `max_fee_per_gas`
                             RpcInvalidTransactionError::TipAboveFeeCap.into(),
-                        )
+                        );
                     }
                     // ref <https://github.com/ethereum/go-ethereum/blob/0dd173a727dd2d2409b8e401b22e85d20c25b71f/internal/ethapi/transaction_args.go#L446-L446>
                     Ok(min(
                         max_fee,
-                        block_base_fee.checked_add(max_priority_fee_per_gas).ok_or_else(|| {
-                            EthApiError::from(RpcInvalidTransactionError::TipVeryHigh)
-                        })?,
+                        block_base_fee
+                            .checked_add(max_priority_fee_per_gas)
+                            .ok_or_else(|| {
+                                EthApiError::from(RpcInvalidTransactionError::TipVeryHigh)
+                            })?,
                     ))
                 }
                 None => Ok(block_base_fee
@@ -137,10 +142,17 @@ impl CallFees {
             }
         }
 
-        let has_blob_hashes =
-            blob_versioned_hashes.as_ref().map(|blobs| !blobs.is_empty()).unwrap_or(false);
+        let has_blob_hashes = blob_versioned_hashes
+            .as_ref()
+            .map(|blobs| !blobs.is_empty())
+            .unwrap_or(false);
 
-        match (call_gas_price, call_max_fee, call_priority_fee, max_fee_per_blob_gas) {
+        match (
+            call_gas_price,
+            call_max_fee,
+            call_priority_fee,
+            max_fee_per_blob_gas,
+        ) {
             (gas_price, None, None, None) => {
                 // either legacy transaction or no fee fields are specified
                 // when no fields are specified, set gas price to zero
@@ -176,7 +188,7 @@ impl CallFees {
                 // Ensure blob_hashes are present
                 if !has_blob_hashes {
                     // Blob transaction but no blob hashes
-                    return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into())
+                    return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into());
                 }
 
                 Ok(Self {
@@ -203,9 +215,11 @@ pub trait OverrideBlockHashes {
 
 impl<DB> OverrideBlockHashes for CacheDB<DB> {
     fn override_block_hashes(&mut self, block_hashes: BTreeMap<u64, B256>) {
-        self.cache
-            .block_hashes
-            .extend(block_hashes.into_iter().map(|(num, hash)| (U256::from(num), hash)))
+        self.cache.block_hashes.extend(
+            block_hashes
+                .into_iter()
+                .map(|(num, hash)| (U256::from(num), hash)),
+        )
     }
 }
 
@@ -298,8 +312,11 @@ where
     }
 
     // Create a new account marked as touched
-    let mut acc =
-        revm::state::Account { info, status: AccountStatus::Touched, storage: HashMap::default() };
+    let mut acc = revm::state::Account {
+        info,
+        status: AccountStatus::Touched,
+        storage: HashMap::default(),
+    };
 
     let storage_diff = match (account_override.state, account_override.state_diff) {
         (Some(_), Some(_)) => return Err(EthApiError::BothStateAndStateDiffInOverride(account)),
@@ -349,29 +366,58 @@ mod tests {
 
     #[test]
     fn test_ensure_0_fallback() {
-        let CallFees { gas_price, .. } =
-            CallFees::ensure_fees(None, None, None, U256::from(99), None, None, Some(U256::ZERO))
-                .unwrap();
+        let CallFees { gas_price, .. } = CallFees::ensure_fees(
+            None,
+            None,
+            None,
+            U256::from(99),
+            None,
+            None,
+            Some(U256::ZERO),
+        )
+        .unwrap();
         assert!(gas_price.is_zero());
     }
 
     #[test]
     fn test_ensure_max_fee_0_exception() {
-        let CallFees { gas_price, .. } =
-            CallFees::ensure_fees(None, Some(U256::ZERO), None, U256::from(99), None, None, None)
-                .unwrap();
+        let CallFees { gas_price, .. } = CallFees::ensure_fees(
+            None,
+            Some(U256::ZERO),
+            None,
+            U256::from(99),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         assert!(gas_price.is_zero());
     }
 
     #[test]
     fn test_blob_fees() {
-        let CallFees { gas_price, max_fee_per_blob_gas, .. } =
-            CallFees::ensure_fees(None, None, None, U256::from(99), None, None, Some(U256::ZERO))
-                .unwrap();
+        let CallFees {
+            gas_price,
+            max_fee_per_blob_gas,
+            ..
+        } = CallFees::ensure_fees(
+            None,
+            None,
+            None,
+            U256::from(99),
+            None,
+            None,
+            Some(U256::ZERO),
+        )
+        .unwrap();
         assert!(gas_price.is_zero());
         assert_eq!(max_fee_per_blob_gas, None);
 
-        let CallFees { gas_price, max_fee_per_blob_gas, .. } = CallFees::ensure_fees(
+        let CallFees {
+            gas_price,
+            max_fee_per_blob_gas,
+            ..
+        } = CallFees::ensure_fees(
             None,
             None,
             None,

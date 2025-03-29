@@ -56,9 +56,12 @@ where
         remote_id: PeerId,
         timeout_limit: Duration,
     ) -> Result<Self, ECIESError> {
-        timeout(timeout_limit, Self::connect_without_timeout(transport, secret_key, remote_id))
-            .await
-            .map_err(|_| ECIESError::from(ECIESErrorImpl::StreamTimeout))?
+        timeout(
+            timeout_limit,
+            Self::connect_without_timeout(transport, secret_key, remote_id),
+        )
+        .await
+        .map_err(|_| ECIESError::from(ECIESErrorImpl::StreamTimeout))?
     }
 
     /// Connect to an `ECIES` server with no timeout.
@@ -86,7 +89,10 @@ where
 
         trace!("parsing ecies ack ...");
         if matches!(msg, IngressECIESValue::Ack) {
-            Ok(Self { stream: transport, remote_id })
+            Ok(Self {
+                stream: transport,
+                remote_id,
+            })
         } else {
             Err(ECIESErrorImpl::InvalidHandshake {
                 expected: IngressECIESValue::Ack,
@@ -119,7 +125,10 @@ where
         trace!("sending ecies ack");
         transport.send(EgressECIESValue::Ack).await?;
 
-        Ok(Self { stream: transport, remote_id })
+        Ok(Self {
+            stream: transport,
+            remote_id,
+        })
     }
 
     /// Get the remote id
@@ -156,7 +165,9 @@ where
     }
 
     fn start_send(self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
-        self.project().stream.start_send(EgressECIESValue::Message(item))?;
+        self.project()
+            .stream
+            .start_send(EgressECIESValue::Message(item))?;
         Ok(())
     }
 
@@ -197,8 +208,9 @@ mod tests {
 
         let client_key = SecretKey::new(&mut rand::thread_rng());
         let outgoing = TcpStream::connect(addr).await.unwrap();
-        let mut client_stream =
-            ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
+        let mut client_stream = ECIESStream::connect(outgoing, client_key, server_id)
+            .await
+            .unwrap();
         client_stream.send(Bytes::from("hello")).await.unwrap();
 
         // make sure the server receives the message and asserts before ending the test

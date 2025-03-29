@@ -190,7 +190,11 @@ impl<C: TrieCursor> TrieWalker<C> {
     /// Retrieves the current root node from the DB, seeking either the exact node or the next one.
     fn node(&mut self, exact: bool) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let key = self.key().expect("key must exist").clone();
-        let entry = if exact { self.cursor.seek_exact(key)? } else { self.cursor.seek(key)? };
+        let entry = if exact {
+            self.cursor.seek_exact(key)?
+        } else {
+            self.cursor.seek(key)?
+        };
 
         if let Some((_, node)) = &entry {
             assert!(!node.state_mask.is_empty());
@@ -205,7 +209,7 @@ impl<C: TrieCursor> TrieWalker<C> {
         let Some((key, node)) = self.node(false)? else {
             // If no next node is found, clear the stack.
             self.stack.clear();
-            return Ok(())
+            return Ok(());
         };
 
         // Overwrite the root node's first nibble
@@ -224,7 +228,7 @@ impl<C: TrieCursor> TrieWalker<C> {
                 #[cfg(feature = "metrics")]
                 self.metrics.inc_out_of_order_subnode(1);
                 self.move_to_next_sibling(false)?;
-                return Ok(())
+                return Ok(());
             }
         }
 
@@ -251,20 +255,22 @@ impl<C: TrieCursor> TrieWalker<C> {
         &mut self,
         allow_root_to_child_nibble: bool,
     ) -> Result<(), DatabaseError> {
-        let Some(subnode) = self.stack.last_mut() else { return Ok(()) };
+        let Some(subnode) = self.stack.last_mut() else {
+            return Ok(());
+        };
 
         // Check if the walker needs to backtrack to the previous level in the trie during its
         // traversal.
         if subnode.nibble() >= 0xf || (subnode.nibble() < 0 && !allow_root_to_child_nibble) {
             self.stack.pop();
             self.move_to_next_sibling(false)?;
-            return Ok(())
+            return Ok(());
         }
 
         subnode.inc_nibble();
 
         if subnode.node.is_none() {
-            return self.consume_node()
+            return self.consume_node();
         }
 
         // Find the next sibling with state.
@@ -272,11 +278,11 @@ impl<C: TrieCursor> TrieWalker<C> {
             let nibble = subnode.nibble();
             if subnode.state_flag() {
                 trace!(target: "trie::walker", nibble, "found next sibling with state");
-                return Ok(())
+                return Ok(());
             }
             if nibble == 0xf {
                 trace!(target: "trie::walker", nibble, "checked all siblings");
-                break
+                break;
             }
             subnode.inc_nibble();
         }

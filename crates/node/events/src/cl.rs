@@ -28,7 +28,9 @@ pub struct ConsensusLayerHealthEvents<H = Header> {
 
 impl<H> fmt::Debug for ConsensusLayerHealthEvents<H> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ConsensusLayerHealthEvents").field("interval", &self.interval).finish()
+        f.debug_struct("ConsensusLayerHealthEvents")
+            .field("interval", &self.interval)
+            .finish()
     }
 }
 
@@ -37,7 +39,10 @@ impl<H> ConsensusLayerHealthEvents<H> {
     pub fn new(canon_chain: Box<dyn CanonChainTracker<Header = H>>) -> Self {
         // Skip the first tick to prevent the false `ConsensusLayerHealthEvent::NeverSeen` event.
         let interval = tokio::time::interval_at(Instant::now() + CHECK_INTERVAL, CHECK_INTERVAL);
-        Self { interval, canon_chain }
+        Self {
+            interval,
+            canon_chain,
+        }
     }
 }
 
@@ -53,18 +58,19 @@ impl<H: Send + Sync> Stream for ConsensusLayerHealthEvents<H> {
             if let Some(fork_choice) = this.canon_chain.last_received_update_timestamp() {
                 if fork_choice.elapsed() <= NO_FORKCHOICE_UPDATE_RECEIVED_PERIOD {
                     // We had an FCU, and it's recent. CL is healthy.
-                    continue
+                    continue;
                 }
                 // We had an FCU, but it's too old.
                 return Poll::Ready(Some(
                     ConsensusLayerHealthEvent::HaveNotReceivedUpdatesForAWhile(
                         fork_choice.elapsed(),
                     ),
-                ))
+                ));
             }
 
-            if let Some(transition_config) =
-                this.canon_chain.last_exchanged_transition_configuration_timestamp()
+            if let Some(transition_config) = this
+                .canon_chain
+                .last_exchanged_transition_configuration_timestamp()
             {
                 return if transition_config.elapsed() <= NO_TRANSITION_CONFIG_EXCHANGED_PERIOD {
                     // We never had an FCU, but had a transition config exchange, and it's recent.
@@ -74,11 +80,11 @@ impl<H: Send + Sync> Stream for ConsensusLayerHealthEvents<H> {
                     Poll::Ready(Some(ConsensusLayerHealthEvent::HasNotBeenSeenForAWhile(
                         transition_config.elapsed(),
                     )))
-                }
+                };
             }
 
             // We never had both FCU and transition config exchange.
-            return Poll::Ready(Some(ConsensusLayerHealthEvent::NeverSeen))
+            return Poll::Ready(Some(ConsensusLayerHealthEvent::NeverSeen));
         }
     }
 }

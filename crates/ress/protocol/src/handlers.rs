@@ -50,7 +50,10 @@ pub struct ProtocolState {
 impl ProtocolState {
     /// Create new protocol state.
     pub fn new(events_sender: mpsc::UnboundedSender<ProtocolEvent>) -> Self {
-        Self { events_sender, active_connections: Arc::default() }
+        Self {
+            events_sender,
+            active_connections: Arc::default(),
+        }
     }
 
     /// Returns the current number of active connections.
@@ -166,11 +169,17 @@ where
         // Emit connection established event.
         self.state
             .events_sender
-            .send(ProtocolEvent::Established { direction, peer_id, to_connection: tx })
+            .send(ProtocolEvent::Established {
+                direction,
+                peer_id,
+                to_connection: tx,
+            })
             .ok();
 
         // Increment the number of active sessions.
-        self.state.active_connections.fetch_add(1, Ordering::Relaxed);
+        self.state
+            .active_connections
+            .fetch_add(1, Ordering::Relaxed);
 
         RessProtocolConnection::new(
             self.provider.clone(),

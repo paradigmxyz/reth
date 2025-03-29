@@ -555,12 +555,16 @@ pub struct AllPoolTransactions<T: PoolTransaction> {
 impl<T: PoolTransaction> AllPoolTransactions<T> {
     /// Returns an iterator over all pending [`Recovered`] transactions.
     pub fn pending_recovered(&self) -> impl Iterator<Item = Recovered<T::Consensus>> + '_ {
-        self.pending.iter().map(|tx| tx.transaction.clone().into_consensus())
+        self.pending
+            .iter()
+            .map(|tx| tx.transaction.clone().into_consensus())
     }
 
     /// Returns an iterator over all queued [`Recovered`] transactions.
     pub fn queued_recovered(&self) -> impl Iterator<Item = Recovered<T::Consensus>> + '_ {
-        self.queued.iter().map(|tx| tx.transaction.clone().into_consensus())
+        self.queued
+            .iter()
+            .map(|tx| tx.transaction.clone().into_consensus())
     }
 
     /// Returns an iterator over all transactions, both pending and queued.
@@ -574,7 +578,10 @@ impl<T: PoolTransaction> AllPoolTransactions<T> {
 
 impl<T: PoolTransaction> Default for AllPoolTransactions<T> {
     fn default() -> Self {
-        Self { pending: Default::default(), queued: Default::default() }
+        Self {
+            pending: Default::default(),
+            queued: Default::default(),
+        }
     }
 }
 
@@ -958,7 +965,10 @@ pub trait PoolTransaction:
         tx: Recovered<Self::Consensus>,
     ) -> Result<Self, Self::TryFromConsensusError> {
         let (tx, signer) = tx.into_parts();
-        Ok(Self::from_pooled(Recovered::new_unchecked(tx.try_into()?, signer)))
+        Ok(Self::from_pooled(Recovered::new_unchecked(
+            tx.try_into()?,
+            signer,
+        )))
     }
 
     /// Clone the transaction into a consensus variant.
@@ -1020,7 +1030,10 @@ pub trait PoolTransaction:
     ) -> Result<(), InvalidPoolTransactionError> {
         let input_len = self.input().len();
         if self.is_create() && input_len > max_init_code_size {
-            Err(InvalidPoolTransactionError::ExceedsMaxInitCodeSize(input_len, max_init_code_size))
+            Err(InvalidPoolTransactionError::ExceedsMaxInitCodeSize(
+                input_len,
+                max_init_code_size,
+            ))
         } else {
             Ok(())
         }
@@ -1098,9 +1111,10 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
 
         let mut cost = gas_cost.saturating_add(transaction.value());
 
-        if let (Some(blob_gas_used), Some(max_fee_per_blob_gas)) =
-            (transaction.blob_gas_used(), transaction.max_fee_per_blob_gas())
-        {
+        if let (Some(blob_gas_used), Some(max_fee_per_blob_gas)) = (
+            transaction.blob_gas_used(),
+            transaction.max_fee_per_blob_gas(),
+        ) {
             // Add max blob cost using saturating math to avoid overflow
             cost = cost.saturating_add(U256::from(
                 max_fee_per_blob_gas.saturating_mul(blob_gas_used as u128),
@@ -1111,7 +1125,12 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
             blob_sidecar = EthBlobTransactionSidecar::Missing;
         }
 
-        Self { transaction, cost, encoded_length, blob_sidecar }
+        Self {
+            transaction,
+            cost,
+            encoded_length,
+            blob_sidecar,
+        }
     }
 
     /// Return the reference to the underlying transaction.
@@ -1285,8 +1304,9 @@ impl EthPoolTransaction for EthPooledTransaction {
         sidecar: Arc<BlobTransactionSidecar>,
     ) -> Option<Recovered<Self::Pooled>> {
         let (signed_transaction, signer) = self.into_consensus().into_parts();
-        let pooled_transaction =
-            signed_transaction.try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar)).ok()?;
+        let pooled_transaction = signed_transaction
+            .try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar))
+            .ok()?;
 
         Some(Recovered::new_unchecked(pooled_transaction, signer))
     }
@@ -1309,7 +1329,9 @@ impl EthPoolTransaction for EthPooledTransaction {
     ) -> Result<(), BlobTransactionValidationError> {
         match self.transaction.transaction() {
             Transaction::Eip4844(tx) => tx.validate_blob(sidecar, settings),
-            _ => Err(BlobTransactionValidationError::NotBlobTransaction(self.ty())),
+            _ => Err(BlobTransactionValidationError::NotBlobTransaction(
+                self.ty(),
+            )),
         }
     }
 }
@@ -1369,7 +1391,10 @@ impl PoolSize {
     /// Asserts that the invariants of the pool size are met.
     #[cfg(test)]
     pub(crate) fn assert_invariants(&self) {
-        assert_eq!(self.total, self.pending + self.basefee + self.queued + self.blob);
+        assert_eq!(
+            self.total,
+            self.pending + self.basefee + self.queued + self.blob
+        );
     }
 }
 
@@ -1438,7 +1463,7 @@ impl<Tx: PoolTransaction> NewSubpoolTransactionStream<Tx> {
             match self.st.try_recv() {
                 Ok(event) => {
                     if event.subpool == self.subpool {
-                        return Ok(event)
+                        return Ok(event);
                     }
                 }
                 Err(e) => return Err(e),
@@ -1455,7 +1480,7 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
             match ready!(self.st.poll_recv(cx)) {
                 Some(event) => {
                     if event.subpool == self.subpool {
-                        return Poll::Ready(Some(event))
+                        return Poll::Ready(Some(event));
                     }
                 }
                 None => return Poll::Ready(None),

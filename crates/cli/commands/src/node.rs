@@ -230,7 +230,10 @@ mod tests {
     fn parse_common_node_command_chain_args() {
         for chain in SUPPORTED_CHAINS {
             let args: NodeCommand = NodeCommand::parse_from(["reth", "--chain", chain]);
-            assert_eq!(args.chain.chain, chain.parse::<reth_chainspec::Chain>().unwrap());
+            assert_eq!(
+                args.chain.chain,
+                chain.parse::<reth_chainspec::Chain>().unwrap()
+            );
         }
     }
 
@@ -275,15 +278,24 @@ mod tests {
     fn parse_metrics_port() {
         let cmd: NodeCommand =
             NodeCommand::try_parse_args_from(["reth", "--metrics", "9001"]).unwrap();
-        assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
+        assert_eq!(
+            cmd.metrics,
+            Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001))
+        );
 
         let cmd: NodeCommand =
             NodeCommand::try_parse_args_from(["reth", "--metrics", ":9001"]).unwrap();
-        assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
+        assert_eq!(
+            cmd.metrics,
+            Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001))
+        );
 
         let cmd: NodeCommand =
             NodeCommand::try_parse_args_from(["reth", "--metrics", "localhost:9001"]).unwrap();
-        assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
+        assert_eq!(
+            cmd.metrics,
+            Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001))
+        );
     }
 
     #[test]

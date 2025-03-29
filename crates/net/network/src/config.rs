@@ -368,7 +368,9 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     ///
     /// By default, this is [`DEFAULT_DISCOVERY_PORT`](reth_discv4::DEFAULT_DISCOVERY_PORT)
     pub fn listener_port(mut self, port: u16) -> Self {
-        self.listener_addr.get_or_insert(DEFAULT_DISCOVERY_ADDRESS).set_port(port);
+        self.listener_addr
+            .get_or_insert(DEFAULT_DISCOVERY_ADDRESS)
+            .set_port(port);
         self
     }
 
@@ -382,14 +384,17 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     ///
     /// By default, this is [`DEFAULT_DISCOVERY_PORT`](reth_discv4::DEFAULT_DISCOVERY_PORT)
     pub fn discovery_port(mut self, port: u16) -> Self {
-        self.discovery_addr.get_or_insert(DEFAULT_DISCOVERY_ADDRESS).set_port(port);
+        self.discovery_addr
+            .get_or_insert(DEFAULT_DISCOVERY_ADDRESS)
+            .set_port(port);
         self
     }
 
     /// Launches the network with an unused network and discovery port
     /// This is useful for testing.
     pub fn with_unused_ports(self) -> Self {
-        self.with_unused_discovery_port().with_unused_listener_port()
+        self.with_unused_discovery_port()
+            .with_unused_listener_port()
     }
 
     /// Sets the discovery port to an unused port.
@@ -471,7 +476,9 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
 
     /// Disables all discovery.
     pub fn disable_discovery(self) -> Self {
-        self.disable_discv4_discovery().disable_discv5_discovery().disable_dns_discovery()
+        self.disable_discv4_discovery()
+            .disable_discv5_discovery()
+            .disable_dns_discovery()
     }
 
     /// Disables all discovery if the given condition is true.
@@ -631,8 +638,9 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         let chain_id = chain_spec.chain().id();
 
         // If default DNS config is used then we add the known dns network to bootstrap from
-        if let Some(dns_networks) =
-            dns_discovery_config.as_mut().and_then(|c| c.bootstrap_dns_networks.as_mut())
+        if let Some(dns_networks) = dns_discovery_config
+            .as_mut()
+            .and_then(|c| c.bootstrap_dns_networks.as_mut())
         {
             if dns_networks.is_empty() {
                 if let Some(link) = chain_spec.chain().public_dns_network_protocol() {
@@ -713,8 +721,11 @@ mod tests {
 
         let dns = config.dns_discovery_config.unwrap();
         let bootstrap_nodes = dns.bootstrap_dns_networks.unwrap();
-        let mainnet_dns: LinkEntry =
-            Chain::mainnet().public_dns_network_protocol().unwrap().parse().unwrap();
+        let mainnet_dns: LinkEntry = Chain::mainnet()
+            .public_dns_network_protocol()
+            .unwrap()
+            .parse()
+            .unwrap();
         assert!(bootstrap_nodes.contains(&mainnet_dns));
         assert_eq!(bootstrap_nodes.len(), 1);
     }

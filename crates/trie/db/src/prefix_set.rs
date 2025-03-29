@@ -54,7 +54,10 @@ impl<TX: DbTx, KH: KeyHasher> PrefixSetLoader<'_, TX, KH> {
             let hashed_address = KH::hash_key(address);
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
 
-            if account_hashed_state_cursor.seek_exact(hashed_address)?.is_none() {
+            if account_hashed_state_cursor
+                .seek_exact(hashed_address)?
+                .is_none()
+            {
                 destroyed_accounts.insert(hashed_address);
             }
         }

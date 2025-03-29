@@ -141,7 +141,7 @@ impl Message {
     /// Returns the decoded message and the public key of the sender.
     pub fn decode(packet: &[u8]) -> Result<Packet, DecodePacketError> {
         if packet.len() < MIN_PACKET_SIZE {
-            return Err(DecodePacketError::PacketTooShort)
+            return Err(DecodePacketError::PacketTooShort);
         }
 
         // parses the wire-protocol, every packet starts with a header:
@@ -152,7 +152,7 @@ impl Message {
         let header_hash = keccak256(&packet[32..]);
         let data_hash = B256::from_slice(&packet[..32]);
         if data_hash != header_hash {
-            return Err(DecodePacketError::HashMismatch)
+            return Err(DecodePacketError::HashMismatch);
         }
 
         let signature = &packet[32..96];
@@ -177,7 +177,11 @@ impl Message {
             MessageId::EnrResponse => Self::EnrResponse(EnrResponse::decode(payload)?),
         };
 
-        Ok(Packet { msg, node_id, hash: header_hash })
+        Ok(Packet {
+            msg,
+            node_id,
+            hash: header_hash,
+        })
     }
 }
 
@@ -201,7 +205,10 @@ struct PingNodeEndpoint(NodeEndpoint);
 impl alloy_rlp::Decodable for PingNodeEndpoint {
     #[inline]
     fn decode(b: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let alloy_rlp::Header { list, payload_length } = alloy_rlp::Header::decode(b)?;
+        let alloy_rlp::Header {
+            list,
+            payload_length,
+        } = alloy_rlp::Header::decode(b)?;
         if !list {
             return Err(alloy_rlp::Error::UnexpectedString);
         }
@@ -253,15 +260,30 @@ pub struct NodeEndpoint {
 }
 
 impl From<NodeRecord> for NodeEndpoint {
-    fn from(NodeRecord { address, tcp_port, udp_port, .. }: NodeRecord) -> Self {
-        Self { address, tcp_port, udp_port }
+    fn from(
+        NodeRecord {
+            address,
+            tcp_port,
+            udp_port,
+            ..
+        }: NodeRecord,
+    ) -> Self {
+        Self {
+            address,
+            tcp_port,
+            udp_port,
+        }
     }
 }
 
 impl NodeEndpoint {
     /// Creates a new [`NodeEndpoint`] from a given UDP address and TCP port.
     pub const fn from_udp_address(udp_address: &std::net::SocketAddr, tcp_port: u16) -> Self {
-        Self { address: udp_address.ip(), udp_port: udp_address.port(), tcp_port }
+        Self {
+            address: udp_address.ip(),
+            udp_port: udp_address.port(),
+            tcp_port,
+        }
     }
 }
 
@@ -282,11 +304,14 @@ impl Decodable for FindNode {
         let b = &mut &**buf;
         let rlp_head = Header::decode(b)?;
         if !rlp_head.list {
-            return Err(RlpError::UnexpectedString)
+            return Err(RlpError::UnexpectedString);
         }
         let started_len = b.len();
 
-        let this = Self { id: Decodable::decode(b)?, expire: Decodable::decode(b)? };
+        let this = Self {
+            id: Decodable::decode(b)?,
+            expire: Decodable::decode(b)?,
+        };
 
         // NOTE(onbjerg): Because of EIP-8, we only check that we did not consume *more* than the
         // payload length, i.e. it is ok if payload length is greater than what we consumed, as we
@@ -296,7 +321,7 @@ impl Decodable for FindNode {
             return Err(RlpError::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            })
+            });
         }
 
         let rem = rlp_head.payload_length - consumed;
@@ -324,11 +349,14 @@ impl Decodable for Neighbours {
         let b = &mut &**buf;
         let rlp_head = Header::decode(b)?;
         if !rlp_head.list {
-            return Err(RlpError::UnexpectedString)
+            return Err(RlpError::UnexpectedString);
         }
         let started_len = b.len();
 
-        let this = Self { nodes: Decodable::decode(b)?, expire: Decodable::decode(b)? };
+        let this = Self {
+            nodes: Decodable::decode(b)?,
+            expire: Decodable::decode(b)?,
+        };
 
         // NOTE(onbjerg): Because of EIP-8, we only check that we did not consume *more* than the
         // payload length, i.e. it is ok if payload length is greater than what we consumed, as we
@@ -338,7 +366,7 @@ impl Decodable for Neighbours {
             return Err(RlpError::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            })
+            });
         }
 
         let rem = rlp_head.payload_length - consumed;
@@ -367,11 +395,13 @@ impl Decodable for EnrRequest {
         let b = &mut &**buf;
         let rlp_head = Header::decode(b)?;
         if !rlp_head.list {
-            return Err(RlpError::UnexpectedString)
+            return Err(RlpError::UnexpectedString);
         }
         let started_len = b.len();
 
-        let this = Self { expire: Decodable::decode(b)? };
+        let this = Self {
+            expire: Decodable::decode(b)?,
+        };
 
         // NOTE(onbjerg): Because of EIP-8, we only check that we did not consume *more* than the
         // payload length, i.e. it is ok if payload length is greater than what we consumed, as we
@@ -381,7 +411,7 @@ impl Decodable for EnrRequest {
             return Err(RlpError::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            })
+            });
         }
 
         let rem = rlp_head.payload_length - consumed;
@@ -412,7 +442,9 @@ impl EnrResponse {
     /// See also <https://github.com/ethereum/go-ethereum/blob/9244d5cd61f3ea5a7645fdf2a1a96d53421e412f/eth/protocols/eth/discovery.go#L36>
     pub fn eth_fork_id(&self) -> Option<ForkId> {
         let mut maybe_fork_id = self.enr.get_raw_rlp(b"eth")?;
-        EnrForkIdEntry::decode(&mut maybe_fork_id).ok().map(Into::into)
+        EnrForkIdEntry::decode(&mut maybe_fork_id)
+            .ok()
+            .map(Into::into)
     }
 }
 
@@ -475,7 +507,7 @@ impl Decodable for Ping {
         let b = &mut &**buf;
         let rlp_head = Header::decode(b)?;
         if !rlp_head.list {
-            return Err(RlpError::UnexpectedString)
+            return Err(RlpError::UnexpectedString);
         }
         let started_len = b.len();
 
@@ -486,8 +518,12 @@ impl Decodable for Ping {
         // see `Decodable` implementation in `PingNodeEndpoint` for why this is needed
         let from = PingNodeEndpoint::decode(b)?.0;
 
-        let mut this =
-            Self { from, to: Decodable::decode(b)?, expire: Decodable::decode(b)?, enr_sq: None };
+        let mut this = Self {
+            from,
+            to: Decodable::decode(b)?,
+            expire: Decodable::decode(b)?,
+            enr_sq: None,
+        };
 
         // only decode the ENR sequence if there's more data in the datagram to decode else skip
         if b.has_remaining() {
@@ -499,7 +535,7 @@ impl Decodable for Ping {
             return Err(RlpError::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            })
+            });
         }
         let rem = rlp_head.payload_length - consumed;
         b.advance(rem);
@@ -541,10 +577,20 @@ impl Encodable for Pong {
         }
 
         if let Some(enr_seq) = self.enr_sq {
-            PongMessageEIP868 { to: &self.to, echo: &self.echo, expire: self.expire, enr_seq }
-                .encode(out);
+            PongMessageEIP868 {
+                to: &self.to,
+                echo: &self.echo,
+                expire: self.expire,
+                enr_seq,
+            }
+            .encode(out);
         } else {
-            PongMessage { to: &self.to, echo: &self.echo, expire: self.expire }.encode(out);
+            PongMessage {
+                to: &self.to,
+                echo: &self.echo,
+                expire: self.expire,
+            }
+            .encode(out);
         }
     }
 }
@@ -554,7 +600,7 @@ impl Decodable for Pong {
         let b = &mut &**buf;
         let rlp_head = Header::decode(b)?;
         if !rlp_head.list {
-            return Err(RlpError::UnexpectedString)
+            return Err(RlpError::UnexpectedString);
         }
         let started_len = b.len();
         let mut this = Self {
@@ -574,7 +620,7 @@ impl Decodable for Pong {
             return Err(RlpError::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            })
+            });
         }
         let rem = rlp_head.payload_length - consumed;
         b.advance(rem);
@@ -724,7 +770,9 @@ mod tests {
     fn neighbours_max_ipv4() {
         let mut rng = thread_rng();
         let msg = Message::Neighbours(Neighbours {
-            nodes: std::iter::repeat_with(|| rng_ipv4_record(&mut rng)).take(16).collect(),
+            nodes: std::iter::repeat_with(|| rng_ipv4_record(&mut rng))
+                .take(16)
+                .collect(),
             expire: rng.gen(),
         });
         let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);
@@ -747,7 +795,11 @@ mod tests {
             let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);
 
             let (encoded, _) = msg.encode(&secret_key);
-            assert!(encoded.len() <= MAX_PACKET_SIZE, "{} {msg:?}", encoded.len());
+            assert!(
+                encoded.len() <= MAX_PACKET_SIZE,
+                "{} {msg:?}",
+                encoded.len()
+            );
 
             let mut neighbours = Neighbours {
                 nodes: std::iter::repeat_with(|| rng_ipv6_record(&mut rng))
@@ -758,7 +810,11 @@ mod tests {
             neighbours.nodes.push(rng_ipv4_record(&mut rng));
             let msg = Message::Neighbours(neighbours);
             let (encoded, _) = msg.encode(&secret_key);
-            assert!(encoded.len() <= MAX_PACKET_SIZE, "{} {msg:?}", encoded.len());
+            assert!(
+                encoded.len() <= MAX_PACKET_SIZE,
+                "{} {msg:?}",
+                encoded.len()
+            );
         }
     }
 
@@ -803,7 +859,10 @@ mod tests {
         let ip = Ipv4Addr::new(127, 0, 0, 1);
         let tcp = 3000;
 
-        let fork_id: ForkId = ForkId { hash: ForkHash([220, 233, 108, 45]), next: 0u64 };
+        let fork_id: ForkId = ForkId {
+            hash: ForkHash([220, 233, 108, 45]),
+            next: 0u64,
+        };
 
         let enr = {
             let mut builder = Enr::builder();
@@ -816,7 +875,10 @@ mod tests {
             builder.build(&key).unwrap()
         };
 
-        let enr_response = EnrResponse { request_hash: rng.gen(), enr };
+        let enr_response = EnrResponse {
+            request_hash: rng.gen(),
+            enr,
+        };
 
         let mut buf = Vec::new();
         enr_response.encode(&mut buf);
@@ -949,7 +1011,11 @@ mod tests {
 
             // rlp header encoding
             let payload_length = expire.length() + junk.length();
-            alloy_rlp::Header { list: true, payload_length }.encode(&mut buf);
+            alloy_rlp::Header {
+                list: true,
+                payload_length,
+            }
+            .encode(&mut buf);
 
             // fields
             expire.encode(&mut buf);

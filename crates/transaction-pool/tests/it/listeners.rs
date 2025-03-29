@@ -23,7 +23,10 @@ async fn txpool_listener_by_hash() {
     assert_matches!(events.next().await, Some(TransactionEvent::Pending));
 
     let removed_txs = txpool.remove_transactions(vec![*transaction.transaction.hash()]);
-    assert_eq!(transaction.transaction.hash(), removed_txs[0].transaction.hash());
+    assert_eq!(
+        transaction.transaction.hash(),
+        removed_txs[0].transaction.hash()
+    );
 
     assert_matches!(events.next().await, Some(TransactionEvent::Discarded));
 }
@@ -73,8 +76,9 @@ async fn txpool_listener_all() {
 
     let mut all_tx_events = txpool.all_transactions_event_listener();
 
-    let added_result =
-        txpool.add_transaction(TransactionOrigin::External, transaction.transaction.clone()).await;
+    let added_result = txpool
+        .add_transaction(TransactionOrigin::External, transaction.transaction.clone())
+        .await;
     assert_matches!(added_result, Ok(hash) if hash == *transaction.transaction.get_hash());
 
     assert_matches!(
@@ -84,7 +88,10 @@ async fn txpool_listener_all() {
 
     let removed_txs = txpool.remove_transactions(vec![*transaction.transaction.hash()]);
 
-    assert_eq!(transaction.transaction.hash(), removed_txs[0].transaction.hash());
+    assert_eq!(
+        transaction.transaction.hash(),
+        removed_txs[0].transaction.hash()
+    );
 
     assert_matches!(all_tx_events.next().await, Some(FullTransactionEvent::Discarded(hash)) if hash == *transaction.transaction.get_hash());
 }
@@ -98,8 +105,9 @@ async fn txpool_listener_propagate_only() {
     let expected = *transaction.hash();
     let mut listener_network = txpool.pending_transactions_listener();
     let mut listener_all = txpool.pending_transactions_listener_for(TransactionListenerKind::All);
-    let result =
-        txpool.add_transaction(TransactionOrigin::Local, transaction.transaction.clone()).await;
+    let result = txpool
+        .add_transaction(TransactionOrigin::Local, transaction.transaction.clone())
+        .await;
     assert!(result.is_ok());
 
     let inserted = listener_all.recv().await.unwrap();
@@ -122,8 +130,9 @@ async fn txpool_listener_new_propagate_only() {
     let expected = *transaction.hash();
     let mut listener_network = txpool.new_transactions_listener();
     let mut listener_all = txpool.new_transactions_listener_for(TransactionListenerKind::All);
-    let result =
-        txpool.add_transaction(TransactionOrigin::Local, transaction.transaction.clone()).await;
+    let result = txpool
+        .add_transaction(TransactionOrigin::Local, transaction.transaction.clone())
+        .await;
     assert!(result.is_ok());
 
     let inserted = listener_all.recv().await.unwrap();
@@ -147,7 +156,10 @@ async fn txpool_listener_blob_sidecar() {
     let expected = *blob_transaction.hash();
     let mut listener_blob = txpool.blob_transaction_sidecars_listener();
     let result = txpool
-        .add_transaction(TransactionOrigin::Local, blob_transaction.transaction.clone())
+        .add_transaction(
+            TransactionOrigin::Local,
+            blob_transaction.transaction.clone(),
+        )
         .await;
     assert!(result.is_ok());
 

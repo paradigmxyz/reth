@@ -149,7 +149,10 @@ pub fn generate_vectors_with(gen: &[fn(&mut TestRunner) -> eyre::Result<()>]) ->
     // Prepare random seed for test (same method as used by proptest)
     let mut seed = [0u8; 32];
     getrandom(&mut seed)?;
-    println!("Seed for compact test vectors: {:?}", hex::encode_prefixed(seed));
+    println!(
+        "Seed for compact test vectors: {:?}",
+        hex::encode_prefixed(seed)
+    );
 
     // Start the runner with the seed
     let config = ProptestConfig::default();
@@ -216,7 +219,7 @@ where
                         tries += 1;
                         bytes.extend(std::iter::repeat_n(0u8, 256));
                     } else {
-                        return Err(err)?
+                        return Err(err)?;
                     }
                 }
             }
@@ -281,5 +284,9 @@ where
 }
 
 pub fn type_name<T>() -> String {
-    std::any::type_name::<T>().split("::").last().unwrap_or(std::any::type_name::<T>()).to_string()
+    std::any::type_name::<T>()
+        .split("::")
+        .last()
+        .unwrap_or(std::any::type_name::<T>())
+        .to_string()
 }

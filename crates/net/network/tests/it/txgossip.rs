@@ -80,21 +80,31 @@ async fn test_4844_tx_gossip_penalization() {
         provider.add_account(sender, ExtendedAccount::new(0, U256::from(100_000_000)));
     }
 
-    let signed_txs: Vec<Arc<TransactionSigned>> =
-        txs.iter().map(|tx| Arc::new(tx.transaction().clone().into_inner())).collect();
+    let signed_txs: Vec<Arc<TransactionSigned>> = txs
+        .iter()
+        .map(|tx| Arc::new(tx.transaction().clone().into_inner()))
+        .collect();
 
     let network_handle = peer0.network();
 
-    let peer0_reputation_before =
-        peer1.peer_handle().peer_by_id(*peer0.peer_id()).await.unwrap().reputation();
+    let peer0_reputation_before = peer1
+        .peer_handle()
+        .peer_by_id(*peer0.peer_id())
+        .await
+        .unwrap()
+        .reputation();
 
     // sends txs directly to peer1
     network_handle.send_transactions(*peer1.peer_id(), signed_txs);
 
     let received = peer1_tx_listener.recv().await.unwrap();
 
-    let peer0_reputation_after =
-        peer1.peer_handle().peer_by_id(*peer0.peer_id()).await.unwrap().reputation();
+    let peer0_reputation_after = peer1
+        .peer_handle()
+        .peer_by_id(*peer0.peer_id())
+        .await
+        .unwrap()
+        .reputation();
     assert_ne!(peer0_reputation_before, peer0_reputation_after);
     assert_eq!(received, *txs[1].transaction().tx_hash());
 
@@ -134,7 +144,9 @@ async fn test_sending_invalid_transactions() {
             input: Default::default(),
         };
         let tx = TransactionSigned::new_unhashed(tx.into(), Signature::test_signature());
-        peer0.network().send_transactions(*peer1.peer_id(), vec![Arc::new(tx)]);
+        peer0
+            .network()
+            .send_transactions(*peer1.peer_id(), vec![Arc::new(tx)]);
     }
 
     // await disconnect for bad tx spam
@@ -143,8 +155,8 @@ async fn test_sending_invalid_transactions() {
             NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, .. }) => {
                 assert_eq!(peer_id, *peer0.peer_id());
             }
-            NetworkEvent::ActivePeerSession { .. } |
-            NetworkEvent::Peer(PeerEvent::SessionEstablished { .. }) => {
+            NetworkEvent::ActivePeerSession { .. }
+            | NetworkEvent::Peer(PeerEvent::SessionEstablished { .. }) => {
                 panic!("unexpected SessionEstablished event")
             }
             NetworkEvent::Peer(PeerEvent::PeerAdded(_)) => {

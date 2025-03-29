@@ -84,7 +84,10 @@ where
 
     /// Handler for: `eth_getCode`
     async fn get_code(&self, address: Address, block_id: Option<BlockId>) -> Result<Bytes> {
-        self.eth.get_code(address, block_id).instrument(engine_span!()).await
+        self.eth
+            .get_code(address, block_id)
+            .instrument(engine_span!())
+            .await
     }
 
     /// Handler for: `eth_getBlockByHash`
@@ -93,7 +96,10 @@ where
         hash: B256,
         full: bool,
     ) -> Result<Option<RpcBlock<Eth::NetworkTypes>>> {
-        self.eth.block_by_hash(hash, full).instrument(engine_span!()).await
+        self.eth
+            .block_by_hash(hash, full)
+            .instrument(engine_span!())
+            .await
     }
 
     /// Handler for: `eth_getBlockByNumber`
@@ -102,31 +108,46 @@ where
         number: BlockNumberOrTag,
         full: bool,
     ) -> Result<Option<RpcBlock<Eth::NetworkTypes>>> {
-        self.eth.block_by_number(number, full).instrument(engine_span!()).await
+        self.eth
+            .block_by_number(number, full)
+            .instrument(engine_span!())
+            .await
     }
 
     async fn block_receipts(
         &self,
         block_id: BlockId,
     ) -> Result<Option<Vec<RpcReceipt<Eth::NetworkTypes>>>> {
-        self.eth.block_receipts(block_id).instrument(engine_span!()).await
+        self.eth
+            .block_receipts(block_id)
+            .instrument(engine_span!())
+            .await
     }
 
     /// Handler for: `eth_sendRawTransaction`
     async fn send_raw_transaction(&self, bytes: Bytes) -> Result<B256> {
-        self.eth.send_raw_transaction(bytes).instrument(engine_span!()).await
+        self.eth
+            .send_raw_transaction(bytes)
+            .instrument(engine_span!())
+            .await
     }
 
     async fn transaction_receipt(
         &self,
         hash: B256,
     ) -> Result<Option<RpcReceipt<Eth::NetworkTypes>>> {
-        self.eth.transaction_receipt(hash).instrument(engine_span!()).await
+        self.eth
+            .transaction_receipt(hash)
+            .instrument(engine_span!())
+            .await
     }
 
     /// Handler for `eth_getLogs`
     async fn logs(&self, filter: Filter) -> Result<Vec<Log>> {
-        self.eth_filter.logs(filter, QueryLimits::no_limits()).instrument(engine_span!()).await
+        self.eth_filter
+            .logs(filter, QueryLimits::no_limits())
+            .instrument(engine_span!())
+            .await
     }
 
     /// Handler for `eth_getProof`
@@ -136,6 +157,9 @@ where
         keys: Vec<JsonStorageKey>,
         block_number: Option<BlockId>,
     ) -> Result<EIP1186AccountProofResponse> {
-        self.eth.get_proof(address, keys, block_number).instrument(engine_span!()).await
+        self.eth
+            .get_proof(address, keys, block_number)
+            .instrument(engine_span!())
+            .await
     }
 }

@@ -37,18 +37,23 @@ pub fn validate_block_post_execution<R: DepositReceipt>(
             header.timestamp(),
         ) {
             tracing::debug!(%error, ?receipts, "receipts verification failed");
-            return Err(error)
+            return Err(error);
         }
     }
 
     // Check if gas used matches the value set in header.
-    let cumulative_gas_used =
-        receipts.last().map(|receipt| receipt.cumulative_gas_used()).unwrap_or(0);
+    let cumulative_gas_used = receipts
+        .last()
+        .map(|receipt| receipt.cumulative_gas_used())
+        .unwrap_or(0);
     if header.gas_used() != cumulative_gas_used {
         return Err(ConsensusError::BlockGasUsed {
-            gas: GotExpected { got: cumulative_gas_used, expected: header.gas_used() },
+            gas: GotExpected {
+                got: cumulative_gas_used,
+                expected: header.gas_used(),
+            },
             gas_spent_by_tx: gas_spent_by_transactions(receipts),
-        })
+        });
     }
 
     Ok(())
@@ -68,7 +73,9 @@ fn verify_receipts_optimism<R: DepositReceipt>(
         calculate_receipt_root_optimism(&receipts_with_bloom, chain_spec, timestamp);
 
     // Calculate header logs bloom.
-    let logs_bloom = receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom());
+    let logs_bloom = receipts_with_bloom
+        .iter()
+        .fold(Bloom::ZERO, |bloom, r| bloom | r.bloom());
 
     compare_receipts_root_and_logs_bloom(
         receipts_root,
@@ -90,14 +97,22 @@ fn compare_receipts_root_and_logs_bloom(
 ) -> Result<(), ConsensusError> {
     if calculated_receipts_root != expected_receipts_root {
         return Err(ConsensusError::BodyReceiptRootDiff(
-            GotExpected { got: calculated_receipts_root, expected: expected_receipts_root }.into(),
-        ))
+            GotExpected {
+                got: calculated_receipts_root,
+                expected: expected_receipts_root,
+            }
+            .into(),
+        ));
     }
 
     if calculated_logs_bloom != expected_logs_bloom {
         return Err(ConsensusError::BodyBloomLogDiff(
-            GotExpected { got: calculated_logs_bloom, expected: expected_logs_bloom }.into(),
-        ))
+            GotExpected {
+                got: calculated_logs_bloom,
+                expected: expected_logs_bloom,
+            }
+            .into(),
+        ));
     }
 
     Ok(())
@@ -120,7 +135,9 @@ pub fn decode_holocene_base_fee(
         BaseFeeParams::new(denominator as u128, elasticity as u128)
     };
 
-    Ok(parent.next_block_base_fee(base_fee_params).unwrap_or_default())
+    Ok(parent
+        .next_block_base_fee(base_fee_params)
+        .unwrap_or_default())
 }
 
 /// Read from parent to determine the base fee for the next block
@@ -155,7 +172,10 @@ mod tests {
 
     fn holocene_chainspec() -> Arc<OpChainSpec> {
         let mut hardforks = BASE_SEPOLIA_HARDFORKS.clone();
-        hardforks.insert(OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(1800000000));
+        hardforks.insert(
+            OpHardfork::Holocene.boxed(),
+            ForkCondition::Timestamp(1800000000),
+        );
         Arc::new(OpChainSpec {
             inner: ChainSpec {
                 chain: BASE_SEPOLIA.inner.chain,

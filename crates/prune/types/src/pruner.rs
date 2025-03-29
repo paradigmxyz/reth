@@ -14,7 +14,10 @@ pub struct PrunerOutput {
 
 impl From<PruneProgress> for PrunerOutput {
     fn from(progress: PruneProgress) -> Self {
-        Self { progress, segments: Vec::new() }
+        Self {
+            progress,
+            segments: Vec::new(),
+        }
     }
 }
 
@@ -45,7 +48,11 @@ impl SegmentOutput {
     /// Returns a [`SegmentOutput`] with `done = true`, `pruned = 0` and `checkpoint = None`.
     /// Use when no pruning is needed.
     pub const fn done() -> Self {
-        Self { progress: PruneProgress::Finished, pruned: 0, checkpoint: None }
+        Self {
+            progress: PruneProgress::Finished,
+            pruned: 0,
+            checkpoint: None,
+        }
     }
 
     /// Returns a [`SegmentOutput`] with `done = false`, `pruned = 0` and `checkpoint = None`.
@@ -54,7 +61,11 @@ impl SegmentOutput {
         reason: PruneInterruptReason,
         checkpoint: Option<SegmentOutputCheckpoint>,
     ) -> Self {
-        Self { progress: PruneProgress::HasMoreData(reason), pruned: 0, checkpoint }
+        Self {
+            progress: PruneProgress::HasMoreData(reason),
+            pruned: 0,
+            checkpoint,
+        }
     }
 }
 
@@ -70,12 +81,19 @@ pub struct SegmentOutputCheckpoint {
 impl SegmentOutputCheckpoint {
     /// Converts [`PruneCheckpoint`] to [`SegmentOutputCheckpoint`].
     pub const fn from_prune_checkpoint(checkpoint: PruneCheckpoint) -> Self {
-        Self { block_number: checkpoint.block_number, tx_number: checkpoint.tx_number }
+        Self {
+            block_number: checkpoint.block_number,
+            tx_number: checkpoint.tx_number,
+        }
     }
 
     /// Converts [`SegmentOutputCheckpoint`] to [`PruneCheckpoint`] with the provided [`PruneMode`]
     pub const fn as_prune_checkpoint(&self, prune_mode: PruneMode) -> PruneCheckpoint {
-        PruneCheckpoint { block_number: self.block_number, tx_number: self.tx_number, prune_mode }
+        PruneCheckpoint {
+            block_number: self.block_number,
+            tx_number: self.tx_number,
+            prune_mode,
+        }
     }
 }
 

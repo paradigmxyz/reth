@@ -27,7 +27,9 @@ pub trait HeaderProvider: Send + Sync {
         &self,
         block_hash: BlockHash,
     ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
-        Ok(self.header(&block_hash)?.map(|header| SealedHeader::new(header, block_hash)))
+        Ok(self
+            .header(&block_hash)?
+            .map(|header| SealedHeader::new(header, block_hash)))
     }
 
     /// Get header by block number

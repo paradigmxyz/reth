@@ -8,13 +8,19 @@ fn test_open() {
     let dir = tempdir().unwrap();
 
     // opening non-existent env with read-only should fail
-    assert!(Environment::builder().set_flags(Mode::ReadOnly.into()).open(dir.path()).is_err());
+    assert!(Environment::builder()
+        .set_flags(Mode::ReadOnly.into())
+        .open(dir.path())
+        .is_err());
 
     // opening non-existent env should succeed
     assert!(Environment::builder().open(dir.path()).is_ok());
 
     // opening env with read-only should succeed
-    assert!(Environment::builder().set_flags(Mode::ReadOnly.into()).open(dir.path()).is_ok());
+    assert!(Environment::builder()
+        .set_flags(Mode::ReadOnly.into())
+        .open(dir.path())
+        .is_ok());
 }
 
 #[test]
@@ -31,7 +37,10 @@ fn test_begin_txn() {
 
     {
         // read-only environment
-        let env = Environment::builder().set_flags(Mode::ReadOnly.into()).open(dir.path()).unwrap();
+        let env = Environment::builder()
+            .set_flags(Mode::ReadOnly.into())
+            .open(dir.path())
+            .unwrap();
 
         assert!(env.begin_rw_txn().is_err());
         assert!(env.begin_ro_txn().is_ok());
@@ -41,7 +50,10 @@ fn test_begin_txn() {
 #[test]
 fn test_open_db() {
     let dir = tempdir().unwrap();
-    let env = Environment::builder().set_max_dbs(1).open(dir.path()).unwrap();
+    let env = Environment::builder()
+        .set_max_dbs(1)
+        .open(dir.path())
+        .unwrap();
 
     let txn = env.begin_ro_txn().unwrap();
     assert!(txn.open_db(None).is_ok());
@@ -51,18 +63,26 @@ fn test_open_db() {
 #[test]
 fn test_create_db() {
     let dir = tempdir().unwrap();
-    let env = Environment::builder().set_max_dbs(11).open(dir.path()).unwrap();
+    let env = Environment::builder()
+        .set_max_dbs(11)
+        .open(dir.path())
+        .unwrap();
 
     let txn = env.begin_rw_txn().unwrap();
     assert!(txn.open_db(Some("testdb")).is_err());
-    assert!(txn.create_db(Some("testdb"), DatabaseFlags::empty()).is_ok());
+    assert!(txn
+        .create_db(Some("testdb"), DatabaseFlags::empty())
+        .is_ok());
     assert!(txn.open_db(Some("testdb")).is_ok())
 }
 
 #[test]
 fn test_close_database() {
     let dir = tempdir().unwrap();
-    let env = Environment::builder().set_max_dbs(10).open(dir.path()).unwrap();
+    let env = Environment::builder()
+        .set_max_dbs(10)
+        .open(dir.path())
+        .unwrap();
 
     let txn = env.begin_rw_txn().unwrap();
     txn.create_db(Some("db"), DatabaseFlags::empty()).unwrap();
@@ -77,7 +97,10 @@ fn test_sync() {
         env.sync(true).unwrap();
     }
     {
-        let env = Environment::builder().set_flags(Mode::ReadOnly.into()).open(dir.path()).unwrap();
+        let env = Environment::builder()
+            .set_flags(Mode::ReadOnly.into())
+            .open(dir.path())
+            .unwrap();
         env.sync(true).unwrap_err();
     }
 }
@@ -100,8 +123,13 @@ fn test_stat() {
         let mut value = [0u8; 8];
         LittleEndian::write_u64(&mut value, i);
         let tx = env.begin_rw_txn().expect("begin_rw_txn");
-        tx.put(tx.open_db(None).unwrap().dbi(), value, value, WriteFlags::default())
-            .expect("tx.put");
+        tx.put(
+            tx.open_db(None).unwrap().dbi(),
+            value,
+            value,
+            WriteFlags::default(),
+        )
+        .expect("tx.put");
         tx.commit().expect("tx.commit");
     }
 
@@ -119,7 +147,10 @@ fn test_info() {
     let map_size = 1024 * 1024;
     let dir = tempdir().unwrap();
     let env = Environment::builder()
-        .set_geometry(Geometry { size: Some(map_size..), ..Default::default() })
+        .set_geometry(Geometry {
+            size: Some(map_size..),
+            ..Default::default()
+        })
         .open(dir.path())
         .unwrap();
 
@@ -128,13 +159,24 @@ fn test_info() {
     // assert_eq!(info.last_pgno(), 1);
     // assert_eq!(info.last_txnid(), 0);
     assert_eq!(info.num_readers(), 0);
-    assert!(matches!(info.mode(), Mode::ReadWrite { sync_mode: SyncMode::Durable }));
+    assert!(matches!(
+        info.mode(),
+        Mode::ReadWrite {
+            sync_mode: SyncMode::Durable
+        }
+    ));
     assert!(env.is_read_write().unwrap());
 
     drop(env);
     let env = Environment::builder()
-        .set_geometry(Geometry { size: Some(map_size..), ..Default::default() })
-        .set_flags(EnvironmentFlags { mode: Mode::ReadOnly, ..Default::default() })
+        .set_geometry(Geometry {
+            size: Some(map_size..),
+            ..Default::default()
+        })
+        .set_flags(EnvironmentFlags {
+            mode: Mode::ReadOnly,
+            ..Default::default()
+        })
         .open(dir.path())
         .unwrap();
     let info = env.info().unwrap();
@@ -155,8 +197,13 @@ fn test_freelist() {
         let mut value = [0u8; 8];
         LittleEndian::write_u64(&mut value, i);
         let tx = env.begin_rw_txn().expect("begin_rw_txn");
-        tx.put(tx.open_db(None).unwrap().dbi(), value, value, WriteFlags::default())
-            .expect("tx.put");
+        tx.put(
+            tx.open_db(None).unwrap().dbi(),
+            value,
+            value,
+            WriteFlags::default(),
+        )
+        .expect("tx.put");
         tx.commit().expect("tx.commit");
     }
     let tx = env.begin_rw_txn().expect("begin_rw_txn");

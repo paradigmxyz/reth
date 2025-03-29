@@ -84,13 +84,19 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
         checkpoint: StageCheckpoint::new(tip_block_number),
         bad_block: None,
     };
-    let execute_input =
-        reth_stages::ExecInput { target: Some(to), checkpoint: Some(StageCheckpoint::new(from)) };
+    let execute_input = reth_stages::ExecInput {
+        target: Some(to),
+        checkpoint: Some(StageCheckpoint::new(from)),
+    };
 
     // Unwind hashes all the way to FROM
 
-    StorageHashingStage::default().unwind(&provider, unwind).unwrap();
-    AccountHashingStage::default().unwind(&provider, unwind).unwrap();
+    StorageHashingStage::default()
+        .unwind(&provider, unwind)
+        .unwrap();
+    AccountHashingStage::default()
+        .unwind(&provider, unwind)
+        .unwrap();
 
     MerkleStage::default_unwind().unwind(&provider, unwind)?;
 
@@ -166,7 +172,7 @@ where
             checkpoint: Some(StageCheckpoint::new(from)),
         };
         if stage.execute(&provider, input)?.done {
-            break
+            break;
         }
     }
 

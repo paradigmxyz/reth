@@ -101,10 +101,12 @@ fn import_tables_with_range<N: NodeTypesWithDB>(
     // Find range of transactions that need to be copied over
     let (from_tx, to_tx) = db_tool.provider_factory.db_ref().view(|read_tx| {
         let mut read_cursor = read_tx.cursor_read::<tables::BlockBodyIndices>()?;
-        let (_, from_block) =
-            read_cursor.seek(from)?.ok_or(eyre::eyre!("BlockBody {from} does not exist."))?;
-        let (_, to_block) =
-            read_cursor.seek(to)?.ok_or(eyre::eyre!("BlockBody {to} does not exist."))?;
+        let (_, from_block) = read_cursor
+            .seek(from)?
+            .ok_or(eyre::eyre!("BlockBody {from} does not exist."))?;
+        let (_, to_block) = read_cursor
+            .seek(to)?
+            .ok_or(eyre::eyre!("BlockBody {to} does not exist."))?;
 
         Ok::<(u64, u64), eyre::ErrReport>((
             from_block.first_tx_num,
@@ -183,8 +185,10 @@ where
 
     let mut exec_stage = ExecutionStage::new_with_executor(executor, Arc::new(consensus));
 
-    let input =
-        reth_stages::ExecInput { target: Some(to), checkpoint: Some(StageCheckpoint::new(from)) };
+    let input = reth_stages::ExecInput {
+        target: Some(to),
+        checkpoint: Some(StageCheckpoint::new(from)),
+    };
     exec_stage.execute(&output_provider_factory.database_provider_rw()?, input)?;
 
     info!(target: "reth::cli", "Success");

@@ -29,7 +29,7 @@ where
         Some(range) => range,
         None => {
             trace!(target: "pruner", "No receipts to prune");
-            return Ok(SegmentOutput::done())
+            return Ok(SegmentOutput::done());
         }
     };
     let tx_range_end = *tx_range.end();
@@ -49,7 +49,9 @@ where
 
     let last_pruned_block = provider
         .transaction_block(last_pruned_transaction)?
-        .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?
+        .ok_or(PrunerError::InconsistentData(
+            "Block for transaction is not found",
+        ))?
         // If there's more receipts to prune, set the checkpoint block number to previous,
         // so we could finish pruning its receipts on the next run.
         .checked_sub(if done { 0 } else { 1 });
@@ -107,16 +109,23 @@ mod tests {
         let blocks = random_block_range(
             &mut rng,
             1..=10,
-            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
+            BlockRangeParams {
+                parent: Some(B256::ZERO),
+                tx_count: 2..3,
+                ..Default::default()
+            },
         );
-        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None))
+            .expect("insert blocks");
 
         let mut receipts = Vec::new();
         for block in &blocks {
             receipts.reserve_exact(block.transaction_count());
             for transaction in &block.body().transactions {
-                receipts
-                    .push((receipts.len() as u64, random_receipt(&mut rng, transaction, Some(0))));
+                receipts.push((
+                    receipts.len() as u64,
+                    random_receipt(&mut rng, transaction, Some(0)),
+                ));
             }
         }
         let receipts_len = receipts.len();
@@ -124,7 +133,10 @@ mod tests {
 
         assert_eq!(
             db.table::<tables::Transactions>().unwrap().len(),
-            blocks.iter().map(|block| block.transaction_count()).sum::<usize>()
+            blocks
+                .iter()
+                .map(|block| block.transaction_count())
+                .sum::<usize>()
         );
         assert_eq!(
             db.table::<tables::Transactions>().unwrap().len(),
@@ -161,8 +173,8 @@ mod tests {
                 .map(|block| block.transaction_count())
                 .sum::<usize>()
                 .min(
-                    next_tx_number_to_prune as usize +
-                        input.limiter.deleted_entries_limit().unwrap(),
+                    next_tx_number_to_prune as usize
+                        + input.limiter.deleted_entries_limit().unwrap(),
                 )
                 .sub(1);
 
@@ -218,7 +230,10 @@ mod tests {
 
         test_prune(
             6,
-            (PruneProgress::HasMoreData(PruneInterruptReason::DeletedEntriesLimitReached), 10),
+            (
+                PruneProgress::HasMoreData(PruneInterruptReason::DeletedEntriesLimitReached),
+                10,
+            ),
         );
         test_prune(6, (PruneProgress::Finished, 2));
         test_prune(10, (PruneProgress::Finished, 8));

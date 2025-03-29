@@ -40,7 +40,9 @@ where
     Provider: FullProvider<NodeTypesWithDBAdapter<EthereumNode, TmpDB>>,
 {
     let provider = ProviderBuilder::new().on_http(node.rpc_url());
-    let signers = Wallet::new(1).with_chain_id(provider.get_chain_id().await?).gen();
+    let signers = Wallet::new(1)
+        .with_chain_id(provider.get_chain_id().await?)
+        .gen();
 
     // simple contract which writes to storage on any call
     let dummy_bytecode = bytes!("6080604052348015600f57600080fd5b50602880601d6000396000f3fe4360a09081523360c0526040608081905260e08152902080805500fea164736f6c6343000810000a");
@@ -59,17 +61,22 @@ where
                 .block_id(BlockId::Number(BlockNumberOrTag::Pending))
                 .await?;
 
-            let mut tx =
-                TransactionRequest::default().with_from(signer.address()).with_nonce(nonce);
+            let mut tx = TransactionRequest::default()
+                .with_from(signer.address())
+                .with_nonce(nonce);
 
             let should_create =
                 rng.gen::<bool>() && tx_type != TxType::Eip4844 && tx_type != TxType::Eip7702;
             if should_create {
                 tx = tx.into_create().with_input(dummy_bytecode.clone());
             } else {
-                tx = tx.with_to(*call_destinations.choose(rng).unwrap()).with_input(
-                    (0..rng.gen_range(0..10000)).map(|_| rng.gen()).collect::<Vec<u8>>(),
-                );
+                tx = tx
+                    .with_to(*call_destinations.choose(rng).unwrap())
+                    .with_input(
+                        (0..rng.gen_range(0..10000))
+                            .map(|_| rng.gen())
+                            .collect::<Vec<u8>>(),
+                    );
             }
 
             if matches!(tx_type, TxType::Legacy | TxType::Eip2930) {
@@ -108,7 +115,9 @@ where
 
             tx.set_gas_limit(gas);
 
-            let SendableTx::Builder(tx) = provider.fill(tx).await? else { unreachable!() };
+            let SendableTx::Builder(tx) = provider.fill(tx).await? else {
+                unreachable!()
+            };
             let tx =
                 NetworkWallet::<Ethereum>::sign_request(&EthereumWallet::new(signer.clone()), tx)
                     .await?;
@@ -118,11 +127,17 @@ where
 
         let payload = node.build_and_submit_payload().await?;
         if finalize {
-            node.update_forkchoice(payload.block().hash(), payload.block().hash()).await?;
+            node.update_forkchoice(payload.block().hash(), payload.block().hash())
+                .await?;
         } else {
-            let last_safe =
-                provider.get_block_by_number(BlockNumberOrTag::Safe).await?.unwrap().header.hash;
-            node.update_forkchoice(last_safe, payload.block().hash()).await?;
+            let last_safe = provider
+                .get_block_by_number(BlockNumberOrTag::Safe)
+                .await?
+                .unwrap()
+                .header
+                .hash;
+            node.update_forkchoice(last_safe, payload.block().hash())
+                .await?;
         }
 
         for pending in pending {

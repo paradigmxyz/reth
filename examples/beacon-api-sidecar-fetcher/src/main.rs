@@ -34,8 +34,10 @@ fn main() {
     Cli::<EthereumChainSpecParser, BeaconSidecarConfig>::parse()
         .run(|builder, beacon_config| async move {
             // launch the node
-            let NodeHandle { node, node_exit_future } =
-                builder.node(EthereumNode::default()).launch().await?;
+            let NodeHandle {
+                node,
+                node_exit_future,
+            } = builder.node(EthereumNode::default()).launch().await?;
 
             let notifications: reth::providers::CanonStateNotificationStream =
                 node.provider.canonical_state_stream();
@@ -100,6 +102,10 @@ impl BeaconSidecarConfig {
 
     /// Returns the URL to the beacon sidecars endpoint <https://ethereum.github.io/beacon-APIs/#/Beacon/getBlobSidecars>
     pub fn sidecar_url(&self, block_root: B256) -> String {
-        format!("{}/eth/v1/beacon/blob_sidecars/{}", self.http_base_url(), block_root)
+        format!(
+            "{}/eth/v1/beacon/blob_sidecars/{}",
+            self.http_base_url(),
+            block_root
+        )
     }
 }

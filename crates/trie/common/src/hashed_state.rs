@@ -53,7 +53,10 @@ impl HashedPostState {
                 let hashed_account = account.info.as_ref().map(Into::into);
                 let hashed_storage = HashedStorage::from_plain_storage(
                     account.status,
-                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
+                    account
+                        .storage
+                        .iter()
+                        .map(|(slot, value)| (slot, &value.present_value)),
                 );
                 (hashed_address, (hashed_account, hashed_storage))
             })
@@ -84,7 +87,10 @@ impl HashedPostState {
                 let hashed_account = account.info.as_ref().map(Into::into);
                 let hashed_storage = HashedStorage::from_plain_storage(
                     account.status,
-                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
+                    account
+                        .storage
+                        .iter()
+                        .map(|(slot, value)| (slot, &value.present_value)),
                 );
                 (hashed_address, (hashed_account, hashed_storage))
             })
@@ -155,7 +161,11 @@ impl HashedPostState {
             storage_prefix_sets.insert(*hashed_address, hashed_storage.construct_prefix_set());
         }
 
-        TriePrefixSetsMut { account_prefix_set, storage_prefix_sets, destroyed_accounts }
+        TriePrefixSetsMut {
+            account_prefix_set,
+            storage_prefix_sets,
+            destroyed_accounts,
+        }
     }
 
     /// Create multiproof targets for this state.
@@ -166,7 +176,10 @@ impl HashedPostState {
             targets.insert(*hashed_address, Default::default());
         }
         for (hashed_address, storage) in &self.storages {
-            targets.entry(*hashed_address).or_default().extend(storage.storage.keys().copied());
+            targets
+                .entry(*hashed_address)
+                .or_default()
+                .extend(storage.storage.keys().copied());
         }
         targets
     }
@@ -194,7 +207,10 @@ impl HashedPostState {
                 .filter(|slot| !maybe_excluded_storage.is_some_and(|f| f.contains(*slot)))
                 .peekable();
             if hashed_slots_targets.peek().is_some() {
-                targets.entry(*hashed_address).or_default().extend(hashed_slots_targets);
+                targets
+                    .entry(*hashed_address)
+                    .or_default()
+                    .extend(hashed_slots_targets);
             }
         }
         targets
@@ -215,7 +231,7 @@ impl HashedPostState {
                     let mut storage_not_in_targets = HashedStorage::default();
                     storage.storage.retain(|&slot, value| {
                         if storage_in_targets.contains(&slot) {
-                            return true
+                            return true;
                         }
 
                         storage_not_in_targets.storage.insert(slot, *value);
@@ -236,24 +252,31 @@ impl HashedPostState {
 
                     (
                         retain,
-                        storage_not_in_targets.is_empty().not().then_some(storage_not_in_targets),
+                        storage_not_in_targets
+                            .is_empty()
+                            .not()
+                            .then_some(storage_not_in_targets),
                     )
                 }
                 None => (false, Some(core::mem::take(storage))),
             };
 
             if let Some(storage_not_in_targets) = storage_not_in_targets {
-                state_updates_not_in_targets.storages.insert(address, storage_not_in_targets);
+                state_updates_not_in_targets
+                    .storages
+                    .insert(address, storage_not_in_targets);
             }
 
             retain
         });
         self.accounts.retain(|&address, account| {
             if targets.contains_key(&address) {
-                return true
+                return true;
             }
 
-            state_updates_not_in_targets.accounts.insert(address, *account);
+            state_updates_not_in_targets
+                .accounts
+                .insert(address, *account);
             false
         });
 
@@ -282,7 +305,8 @@ impl HashedPostState {
     }
 
     fn extend_inner(&mut self, other: Cow<'_, Self>) {
-        self.accounts.extend(other.accounts.iter().map(|(&k, &v)| (k, v)));
+        self.accounts
+            .extend(other.accounts.iter().map(|(&k, &v)| (k, v)));
 
         self.storages.reserve(other.storages.len());
         match other {
@@ -323,7 +347,10 @@ impl HashedPostState {
             }
         }
         updated_accounts.sort_unstable_by_key(|(address, _)| *address);
-        let accounts = HashedAccountsSorted { accounts: updated_accounts, destroyed_accounts };
+        let accounts = HashedAccountsSorted {
+            accounts: updated_accounts,
+            destroyed_accounts,
+        };
 
         let storages = self
             .storages
@@ -347,7 +374,10 @@ pub struct HashedStorage {
 impl HashedStorage {
     /// Create new instance of [`HashedStorage`].
     pub fn new(wiped: bool) -> Self {
-        Self { wiped, storage: HashMap::default() }
+        Self {
+            wiped,
+            storage: HashMap::default(),
+        }
     }
 
     /// Check if self is empty.
@@ -357,7 +387,10 @@ impl HashedStorage {
 
     /// Create new hashed storage from iterator.
     pub fn from_iter(wiped: bool, iter: impl IntoIterator<Item = (B256, U256)>) -> Self {
-        Self { wiped, storage: HashMap::from_iter(iter) }
+        Self {
+            wiped,
+            storage: HashMap::from_iter(iter),
+        }
     }
 
     /// Create new hashed storage from account status and plain storage.
@@ -367,7 +400,9 @@ impl HashedStorage {
     ) -> Self {
         Self::from_iter(
             status.was_destroyed(),
-            storage.into_iter().map(|(key, value)| (keccak256(B256::from(*key)), *value)),
+            storage
+                .into_iter()
+                .map(|(key, value)| (keccak256(B256::from(*key)), *value)),
         )
     }
 
@@ -391,7 +426,8 @@ impl HashedStorage {
             self.wiped = true;
             self.storage.clear();
         }
-        self.storage.extend(other.storage.iter().map(|(&k, &v)| (k, v)));
+        self.storage
+            .extend(other.storage.iter().map(|(&k, &v)| (k, v)));
     }
 
     /// Converts hashed storage into [`HashedStorageSorted`].
@@ -407,7 +443,11 @@ impl HashedStorage {
         }
         non_zero_valued_slots.sort_unstable_by_key(|(key, _)| *key);
 
-        HashedStorageSorted { non_zero_valued_slots, zero_valued_slots, wiped: self.wiped }
+        HashedStorageSorted {
+            non_zero_valued_slots,
+            zero_valued_slots,
+            wiped: self.wiped,
+        }
     }
 }
 
@@ -455,7 +495,11 @@ impl HashedAccountsSorted {
         self.accounts
             .iter()
             .map(|(address, account)| (*address, Some(*account)))
-            .chain(self.destroyed_accounts.iter().map(|address| (*address, None)))
+            .chain(
+                self.destroyed_accounts
+                    .iter()
+                    .map(|address| (*address, None)),
+            )
             .sorted_by_key(|entry| *entry.0)
     }
 }
@@ -482,7 +526,11 @@ impl HashedStorageSorted {
         self.non_zero_valued_slots
             .iter()
             .map(|(hashed_slot, value)| (*hashed_slot, *value))
-            .chain(self.zero_valued_slots.iter().map(|hashed_slot| (*hashed_slot, U256::ZERO)))
+            .chain(
+                self.zero_valued_slots
+                    .iter()
+                    .map(|hashed_slot| (*hashed_slot, U256::ZERO)),
+            )
             .sorted_by_key(|entry| *entry.0)
     }
 }
@@ -518,19 +566,26 @@ impl ChunkedHashedPostState {
                     .filter(|_| storage.wiped)
                     .into_iter()
                     .chain(
-                        storage.storage.into_iter().sorted_unstable_by_key(|(slot, _)| *slot).map(
-                            move |(slot, value)| {
+                        storage
+                            .storage
+                            .into_iter()
+                            .sorted_unstable_by_key(|(slot, _)| *slot)
+                            .map(move |(slot, value)| {
                                 (
                                     address,
                                     FlattenedHashedPostStateItem::StorageUpdate { slot, value },
                                 )
-                            },
-                        ),
+                            }),
                     )
             })
-            .chain(hashed_post_state.accounts.into_iter().map(|(address, account)| {
-                (address, FlattenedHashedPostStateItem::Account(account))
-            }))
+            .chain(
+                hashed_post_state
+                    .accounts
+                    .into_iter()
+                    .map(|(address, account)| {
+                        (address, FlattenedHashedPostStateItem::Account(account))
+                    }),
+            )
             // We need stable sort here to preserve the order for each address:
             // 1. Storage wipes
             // 2. Storage updates
@@ -549,7 +604,9 @@ impl Iterator for ChunkedHashedPostState {
 
         let mut current_size = 0;
         while current_size < self.size {
-            let Some((address, item)) = self.flattened.next() else { break };
+            let Some((address, item)) = self.flattened.next() else {
+                break;
+            };
 
             match item {
                 FlattenedHashedPostStateItem::Account(account) => {
@@ -559,7 +616,12 @@ impl Iterator for ChunkedHashedPostState {
                     chunk.storages.entry(address).or_default().wiped = true;
                 }
                 FlattenedHashedPostStateItem::StorageUpdate { slot, value } => {
-                    chunk.storages.entry(address).or_default().storage.insert(slot, value);
+                    chunk
+                        .storages
+                        .entry(address)
+                        .or_default()
+                        .storage
+                        .insert(slot, value);
                 }
             }
 
@@ -594,7 +656,10 @@ mod tests {
             hashed_address,
             HashedStorage::from_iter(
                 false,
-                [(hashed_slot, original_slot_value), (hashed_slot2, original_slot_value)],
+                [
+                    (hashed_slot, original_slot_value),
+                    (hashed_slot2, original_slot_value),
+                ],
             ),
         )]);
 
@@ -636,7 +701,10 @@ mod tests {
             account_storage.and_then(|st| st.storage.get(&hashed_slot)),
             Some(&original_slot_value)
         );
-        assert_eq!(account_storage.and_then(|st| st.storage.get(&hashed_slot2)), None);
+        assert_eq!(
+            account_storage.and_then(|st| st.storage.get(&hashed_slot2)),
+            None
+        );
         assert_eq!(account_storage.map(|st| st.wiped), Some(true));
 
         // Reinitialize single slot value
@@ -672,7 +740,10 @@ mod tests {
         let mut storage = StorageWithOriginalValues::default();
         storage.insert(
             U256::from(1),
-            StorageSlot { present_value: U256::from(4), ..Default::default() },
+            StorageSlot {
+                present_value: U256::from(4),
+                ..Default::default()
+            },
         );
 
         // Create a `BundleAccount` struct to represent the account and its storage.
@@ -751,8 +822,10 @@ mod tests {
         assert!(empty_state.is_empty());
 
         // Add an account and validate the state is no longer empty.
-        let non_empty_state = HashedPostState::default()
-            .with_accounts(vec![(keccak256(Address::random()), Some(Account::default()))]);
+        let non_empty_state = HashedPostState::default().with_accounts(vec![(
+            keccak256(Address::random()),
+            Some(Account::default()),
+        )]);
         assert!(!non_empty_state.is_empty());
     }
 

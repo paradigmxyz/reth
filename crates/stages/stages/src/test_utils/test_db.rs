@@ -235,7 +235,12 @@ impl TestStageDB {
                 .then(|| provider.latest_writer(StaticFileSegment::Headers).unwrap());
 
             blocks.iter().try_for_each(|block| {
-                Self::insert_header(headers_writer.as_mut(), &tx, block.sealed_header(), U256::ZERO)
+                Self::insert_header(
+                    headers_writer.as_mut(),
+                    &tx,
+                    block.sealed_header(),
+                    U256::ZERO,
+                )
             })?;
 
             if let Some(mut writer) = headers_writer {
@@ -244,9 +249,11 @@ impl TestStageDB {
         }
 
         {
-            let mut txs_writer = storage_kind
-                .is_static()
-                .then(|| provider.latest_writer(StaticFileSegment::Transactions).unwrap());
+            let mut txs_writer = storage_kind.is_static().then(|| {
+                provider
+                    .latest_writer(StaticFileSegment::Transactions)
+                    .unwrap()
+            });
 
             blocks.into_iter().try_for_each(|block| {
                 // Insert into body tables.
@@ -277,8 +284,8 @@ impl TestStageDB {
                     // Backfill: some tests start at a forward block number, but static files
                     // require no gaps.
                     let segment_header = txs_writer.user_header();
-                    if segment_header.block_end().is_none() &&
-                        segment_header.expected_block_start() == 0
+                    if segment_header.block_end().is_none()
+                        && segment_header.expected_block_start() == 0
                     {
                         for block in 0..block.number {
                             txs_writer.increment_block(block)?;
@@ -304,10 +311,12 @@ impl TestStageDB {
         I: IntoIterator<Item = (TxHash, TxNumber)>,
     {
         self.commit(|tx| {
-            tx_hash_numbers.into_iter().try_for_each(|(tx_hash, tx_num)| {
-                // Insert into tx hash numbers table.
-                Ok(tx.put::<tables::TransactionHashNumbers>(tx_hash, tx_num)?)
-            })
+            tx_hash_numbers
+                .into_iter()
+                .try_for_each(|(tx_hash, tx_num)| {
+                    // Insert into tx hash numbers table.
+                    Ok(tx.put::<tables::TransactionHashNumbers>(tx_hash, tx_num)?)
+                })
         })
     }
 
@@ -363,10 +372,12 @@ impl TestStageDB {
         I: IntoIterator<Item = (TxNumber, Address)>,
     {
         self.commit(|tx| {
-            transaction_senders.into_iter().try_for_each(|(tx_num, sender)| {
-                // Insert into receipts table.
-                Ok(tx.put::<tables::TransactionSenders>(tx_num, sender)?)
-            })
+            transaction_senders
+                .into_iter()
+                .try_for_each(|(tx_num, sender)| {
+                    // Insert into receipts table.
+                    Ok(tx.put::<tables::TransactionSenders>(tx_num, sender)?)
+                })
         })
     }
 
@@ -377,40 +388,48 @@ impl TestStageDB {
         S: IntoIterator<Item = StorageEntry>,
     {
         self.commit(|tx| {
-            accounts.into_iter().try_for_each(|(address, (account, storage))| {
-                let hashed_address = keccak256(address);
+            accounts
+                .into_iter()
+                .try_for_each(|(address, (account, storage))| {
+                    let hashed_address = keccak256(address);
 
-                // Insert into account tables.
-                tx.put::<tables::PlainAccountState>(address, account)?;
-                tx.put::<tables::HashedAccounts>(hashed_address, account)?;
+                    // Insert into account tables.
+                    tx.put::<tables::PlainAccountState>(address, account)?;
+                    tx.put::<tables::HashedAccounts>(hashed_address, account)?;
 
-                // Insert into storage tables.
-                storage.into_iter().filter(|e| !e.value.is_zero()).try_for_each(|entry| {
-                    let hashed_entry = StorageEntry { key: keccak256(entry.key), ..entry };
+                    // Insert into storage tables.
+                    storage
+                        .into_iter()
+                        .filter(|e| !e.value.is_zero())
+                        .try_for_each(|entry| {
+                            let hashed_entry = StorageEntry {
+                                key: keccak256(entry.key),
+                                ..entry
+                            };
 
-                    let mut cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
-                    if cursor
-                        .seek_by_key_subkey(address, entry.key)?
-                        .filter(|e| e.key == entry.key)
-                        .is_some()
-                    {
-                        cursor.delete_current()?;
-                    }
-                    cursor.upsert(address, &entry)?;
+                            let mut cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
+                            if cursor
+                                .seek_by_key_subkey(address, entry.key)?
+                                .filter(|e| e.key == entry.key)
+                                .is_some()
+                            {
+                                cursor.delete_current()?;
+                            }
+                            cursor.upsert(address, &entry)?;
 
-                    let mut cursor = tx.cursor_dup_write::<tables::HashedStorages>()?;
-                    if cursor
-                        .seek_by_key_subkey(hashed_address, hashed_entry.key)?
-                        .filter(|e| e.key == hashed_entry.key)
-                        .is_some()
-                    {
-                        cursor.delete_current()?;
-                    }
-                    cursor.upsert(hashed_address, &hashed_entry)?;
+                            let mut cursor = tx.cursor_dup_write::<tables::HashedStorages>()?;
+                            if cursor
+                                .seek_by_key_subkey(hashed_address, hashed_entry.key)?
+                                .filter(|e| e.key == hashed_entry.key)
+                                .is_some()
+                            {
+                                cursor.delete_current()?;
+                            }
+                            cursor.upsert(hashed_address, &hashed_entry)?;
 
-                    Ok(())
+                            Ok(())
+                        })
                 })
-            })
         })
     }
 
@@ -425,23 +444,31 @@ impl TestStageDB {
     {
         let offset = block_offset.unwrap_or_default();
         self.commit(|tx| {
-            changesets.into_iter().enumerate().try_for_each(|(block, changeset)| {
-                changeset.into_iter().try_for_each(|(address, old_account, old_storage)| {
-                    let block = offset + block as u64;
-                    // Insert into account changeset.
-                    tx.put::<tables::AccountChangeSets>(
-                        block,
-                        AccountBeforeTx { address, info: Some(old_account) },
-                    )?;
+            changesets
+                .into_iter()
+                .enumerate()
+                .try_for_each(|(block, changeset)| {
+                    changeset
+                        .into_iter()
+                        .try_for_each(|(address, old_account, old_storage)| {
+                            let block = offset + block as u64;
+                            // Insert into account changeset.
+                            tx.put::<tables::AccountChangeSets>(
+                                block,
+                                AccountBeforeTx {
+                                    address,
+                                    info: Some(old_account),
+                                },
+                            )?;
 
-                    let block_address = (block, address).into();
+                            let block_address = (block, address).into();
 
-                    // Insert into storage changeset.
-                    old_storage.into_iter().try_for_each(|entry| {
-                        Ok(tx.put::<tables::StorageChangeSets>(block_address, entry)?)
-                    })
+                            // Insert into storage changeset.
+                            old_storage.into_iter().try_for_each(|entry| {
+                                Ok(tx.put::<tables::StorageChangeSets>(block_address, entry)?)
+                            })
+                        })
                 })
-            })
         })
     }
 
@@ -456,7 +483,10 @@ impl TestStageDB {
             for (address, _, storage_entries) in changeset {
                 accounts.entry(address).or_default().push(block as u64);
                 for storage_entry in storage_entries {
-                    storages.entry((address, storage_entry.key)).or_default().push(block as u64);
+                    storages
+                        .entry((address, storage_entry.key))
+                        .or_default()
+                        .push(block as u64);
                 }
             }
         }

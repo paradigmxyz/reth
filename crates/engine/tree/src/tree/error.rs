@@ -65,7 +65,9 @@ pub struct InsertBlockError<B: Block> {
 impl<B: Block> InsertBlockError<B> {
     /// Create a new `InsertInvalidBlockErrorTwo`
     pub fn new(block: SealedBlock<B>, kind: InsertBlockErrorKind) -> Self {
-        Self { inner: InsertBlockErrorData::boxed(block, kind) }
+        Self {
+            inner: InsertBlockErrorData::boxed(block, kind),
+        }
     }
 
     /// Create a new `InsertInvalidBlockError` from a consensus error

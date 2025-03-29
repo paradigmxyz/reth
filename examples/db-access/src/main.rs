@@ -57,20 +57,25 @@ fn main() -> eyre::Result<()> {
 /// The `HeaderProvider` allows querying the headers-related tables.
 fn header_provider_example<T: HeaderProvider>(provider: T, number: u64) -> eyre::Result<()> {
     // Can query the header by number
-    let header = provider.header_by_number(number)?.ok_or(eyre::eyre!("header not found"))?;
+    let header = provider
+        .header_by_number(number)?
+        .ok_or(eyre::eyre!("header not found"))?;
 
     // We can convert a header to a sealed header which contains the hash w/o needing to re-compute
     // it every time.
     let sealed_header = SealedHeader::seal_slow(header);
 
     // Can also query the header by hash!
-    let header_by_hash =
-        provider.header(&sealed_header.hash())?.ok_or(eyre::eyre!("header by hash not found"))?;
+    let header_by_hash = provider
+        .header(&sealed_header.hash())?
+        .ok_or(eyre::eyre!("header by hash not found"))?;
     assert_eq!(sealed_header.header(), &header_by_hash);
 
     // The header's total difficulty is stored in a separate table, so we have a separate call for
     // it. This is not needed for post PoS transition chains.
-    let td = provider.header_td_by_number(number)?.ok_or(eyre::eyre!("header td not found"))?;
+    let td = provider
+        .header_td_by_number(number)?
+        .ok_or(eyre::eyre!("header td not found"))?;
     assert!(!td.is_zero());
 
     // Can query headers by range as well, already sealed!
@@ -88,11 +93,14 @@ fn txs_provider_example<T: TransactionsProvider<Transaction = TransactionSigned>
     let txid = 5;
 
     // Query a transaction by its primary ordered key in the db
-    let tx = provider.transaction_by_id(txid)?.ok_or(eyre::eyre!("transaction not found"))?;
+    let tx = provider
+        .transaction_by_id(txid)?
+        .ok_or(eyre::eyre!("transaction not found"))?;
 
     // Can query the tx by hash
-    let tx_by_hash =
-        provider.transaction_by_hash(*tx.tx_hash())?.ok_or(eyre::eyre!("txhash not found"))?;
+    let tx_by_hash = provider
+        .transaction_by_hash(*tx.tx_hash())?
+        .ok_or(eyre::eyre!("txhash not found"))?;
     assert_eq!(tx, tx_by_hash);
 
     // Can query the tx by hash with info about the block it was included in
@@ -102,7 +110,9 @@ fn txs_provider_example<T: TransactionsProvider<Transaction = TransactionSigned>
     assert_eq!(*tx.tx_hash(), meta.tx_hash);
 
     // Can reverse lookup the key too
-    let id = provider.transaction_id(*tx.tx_hash())?.ok_or(eyre::eyre!("txhash not found"))?;
+    let id = provider
+        .transaction_id(*tx.tx_hash())?
+        .ok_or(eyre::eyre!("txhash not found"))?;
     assert_eq!(id, txid);
 
     // Can find the block of a transaction given its key
@@ -122,13 +132,17 @@ fn block_provider_example<T: BlockReader<Block = reth_ethereum::Block>>(
     number: u64,
 ) -> eyre::Result<()> {
     // Can query a block by number
-    let block = provider.block(number.into())?.ok_or(eyre::eyre!("block num not found"))?;
+    let block = provider
+        .block(number.into())?
+        .ok_or(eyre::eyre!("block num not found"))?;
     assert_eq!(block.number, number);
 
     // Can query a block with its senders, this is useful when you'd want to execute a block and do
     // not want to manually recover the senders for each transaction (as each transaction is
     // stored on disk with its v,r,s but not its `from` field.).
-    let block = provider.block(number.into())?.ok_or(eyre::eyre!("block num not found"))?;
+    let block = provider
+        .block(number.into())?
+        .ok_or(eyre::eyre!("block num not found"))?;
 
     // Can seal the block to cache the hash, like the Header above.
     let sealed_block = SealedBlock::seal_slow(block.clone());
@@ -174,7 +188,9 @@ fn receipts_provider_example<
     let header_num = 100;
 
     // Query a receipt by txid
-    let receipt = provider.receipt(txid)?.ok_or(eyre::eyre!("tx receipt not found"))?;
+    let receipt = provider
+        .receipt(txid)?
+        .ok_or(eyre::eyre!("tx receipt not found"))?;
 
     // Can query receipt by txhash too
     let tx = provider.transaction_by_id(txid)?.unwrap();
@@ -210,13 +226,15 @@ fn receipts_provider_example<
     // 3. If the address & topics filters match do something. We use the outer check against the
     // bloom filter stored in the header to avoid having to query the receipts table when there
     // is no instance of any event that matches the filter in the header.
-    if FilteredParams::matches_address(bloom, &address_filter) &&
-        FilteredParams::matches_topics(bloom, &topics_filter)
+    if FilteredParams::matches_address(bloom, &address_filter)
+        && FilteredParams::matches_topics(bloom, &topics_filter)
     {
-        let receipts = provider.receipt(header_num)?.ok_or(eyre::eyre!("receipt not found"))?;
+        let receipts = provider
+            .receipt(header_num)?
+            .ok_or(eyre::eyre!("receipt not found"))?;
         for log in &receipts.logs {
-            if filter_params.filter_address(&log.address) &&
-                filter_params.filter_topics(log.topics())
+            if filter_params.filter_address(&log.address)
+                && filter_params.filter_topics(log.topics())
             {
                 // Do something with the log e.g. decode it.
                 println!("Matching log found! {log:?}")

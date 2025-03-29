@@ -196,7 +196,8 @@ mod implementations {
                 .as_ref()
                 .map(|bf| tx.effective_tip_per_gas(*bf).expect("set"))
                 .unwrap_or_default();
-            self.inner.push(MockTransactionWithPriority { tx, priority });
+            self.inner
+                .push(MockTransactionWithPriority { tx, priority });
         }
 
         fn reorder(&mut self, base_fee: u64) {
@@ -206,7 +207,10 @@ mod implementations {
             self.inner = drained
                 .map(|mock| {
                     let priority = mock.tx.effective_tip_per_gas(base_fee).expect("set");
-                    MockTransactionWithPriority { tx: mock.tx, priority }
+                    MockTransactionWithPriority {
+                        tx: mock.tx,
+                        priority,
+                    }
                 })
                 .collect();
         }

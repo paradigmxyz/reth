@@ -107,7 +107,10 @@ impl<T> ValidTransaction<T> {
     /// Creates a new valid transaction with an optional sidecar.
     pub fn new(transaction: T, sidecar: Option<BlobTransactionSidecar>) -> Self {
         if let Some(sidecar) = sidecar {
-            Self::ValidWithSidecar { transaction, sidecar }
+            Self::ValidWithSidecar {
+                transaction,
+                sidecar,
+            }
         } else {
             Self::Valid(transaction)
         }
@@ -196,7 +199,9 @@ pub trait TransactionValidator: Debug + Send + Sync {
     ) -> impl Future<Output = Vec<TransactionValidationOutcome<Self::Transaction>>> + Send {
         async {
             futures_util::future::join_all(
-                transactions.into_iter().map(|(origin, tx)| self.validate_transaction(origin, tx)),
+                transactions
+                    .into_iter()
+                    .map(|(origin, tx)| self.validate_transaction(origin, tx)),
             )
             .await
         }
@@ -412,32 +417,38 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
 
         // Check if the max fee per gas is underpriced.
         if maybe_replacement.max_fee_per_gas() < self.max_fee_per_gas() * (100 + price_bump) / 100 {
-            return true
+            return true;
         }
 
-        let existing_max_priority_fee_per_gas =
-            self.transaction.max_priority_fee_per_gas().unwrap_or_default();
-        let replacement_max_priority_fee_per_gas =
-            maybe_replacement.transaction.max_priority_fee_per_gas().unwrap_or_default();
+        let existing_max_priority_fee_per_gas = self
+            .transaction
+            .max_priority_fee_per_gas()
+            .unwrap_or_default();
+        let replacement_max_priority_fee_per_gas = maybe_replacement
+            .transaction
+            .max_priority_fee_per_gas()
+            .unwrap_or_default();
 
         // Check max priority fee per gas (relevant for EIP-1559 transactions only)
-        if existing_max_priority_fee_per_gas != 0 &&
-            replacement_max_priority_fee_per_gas != 0 &&
-            replacement_max_priority_fee_per_gas <
-                existing_max_priority_fee_per_gas * (100 + price_bump) / 100
+        if existing_max_priority_fee_per_gas != 0
+            && replacement_max_priority_fee_per_gas != 0
+            && replacement_max_priority_fee_per_gas
+                < existing_max_priority_fee_per_gas * (100 + price_bump) / 100
         {
-            return true
+            return true;
         }
 
         // Check max blob fee per gas
         if let Some(existing_max_blob_fee_per_gas) = self.transaction.max_fee_per_blob_gas() {
             // This enforces that blob txs can only be replaced by blob txs
-            let replacement_max_blob_fee_per_gas =
-                maybe_replacement.transaction.max_fee_per_blob_gas().unwrap_or_default();
-            if replacement_max_blob_fee_per_gas <
-                existing_max_blob_fee_per_gas * (100 + price_bump) / 100
+            let replacement_max_blob_fee_per_gas = maybe_replacement
+                .transaction
+                .max_fee_per_blob_gas()
+                .unwrap_or_default();
+            if replacement_max_blob_fee_per_gas
+                < existing_max_blob_fee_per_gas * (100 + price_bump) / 100
             {
-                return true
+                return true;
             }
         }
 

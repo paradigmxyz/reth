@@ -38,7 +38,9 @@ impl MockPool {
 
 impl Default for MockPool {
     fn default() -> Self {
-        Self { pool: TxPool::new(MockOrdering::default(), Default::default()) }
+        Self {
+            pool: TxPool::new(MockOrdering::default(), Default::default()),
+        }
     }
 }
 
@@ -122,7 +124,9 @@ impl<R: Rng> MockTransactionSimulator<R> {
                     .with_gas_price(self.base_fee);
                 let valid_tx = self.validator.validated(tx);
 
-                let res = pool.add_transaction(valid_tx, on_chain_balance, on_chain_nonce).unwrap();
+                let res = pool
+                    .add_transaction(valid_tx, on_chain_balance, on_chain_nonce)
+                    .unwrap();
 
                 // TODO(mattsse): need a way expect based on the current state of the pool and tx
                 // settings
@@ -161,7 +165,9 @@ pub(crate) struct MockSimulatorConfig {
 impl MockSimulatorConfig {
     /// Generates a set of random addresses
     pub(crate) fn addresses(&self, rng: &mut impl rand::Rng) -> Vec<Address> {
-        std::iter::repeat_with(|| Address::random_with(rng)).take(self.num_senders).collect()
+        std::iter::repeat_with(|| Address::random_with(rng))
+            .take(self.num_senders)
+            .collect()
     }
 }
 

@@ -59,13 +59,21 @@ pub struct DebugArgs {
     pub reorg_frequency: Option<usize>,
 
     /// The reorg depth for chain reorgs.
-    #[arg(long = "debug.reorg-depth", requires = "reorg_frequency", help_heading = "Debug")]
+    #[arg(
+        long = "debug.reorg-depth",
+        requires = "reorg_frequency",
+        help_heading = "Debug"
+    )]
     pub reorg_depth: Option<usize>,
 
     /// The path to store engine API messages at.
     /// If specified, all of the intercepted engine API messages
     /// will be written to specified location.
-    #[arg(long = "debug.engine-api-store", help_heading = "Debug", value_name = "PATH")]
+    #[arg(
+        long = "debug.engine-api-store",
+        help_heading = "Debug",
+        value_name = "PATH"
+    )]
     pub engine_api_store: Option<PathBuf>,
 
     /// Determines which type of invalid block hook to install
@@ -213,7 +221,7 @@ impl FromStr for InvalidBlockSelection {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.is_empty() {
-            return Ok(Self(Default::default()))
+            return Ok(Self(Default::default()));
         }
         let hooks = s.split(',').map(str::trim).peekable();
         Self::try_from_selection(hooks)
@@ -222,7 +230,15 @@ impl FromStr for InvalidBlockSelection {
 
 impl fmt::Display for InvalidBlockSelection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "[{}]", self.0.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(", "))
+        write!(
+            f,
+            "[{}]",
+            self.0
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
     }
 }
 
@@ -240,10 +256,13 @@ impl TypedValueParser for InvalidBlockSelectionValueParser {
         arg: Option<&Arg>,
         value: &OsStr,
     ) -> Result<Self::Value, clap::Error> {
-        let val =
-            value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
+        let val = value
+            .to_str()
+            .ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
         val.parse::<InvalidBlockSelection>().map_err(|err| {
-            let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
+            let arg = arg
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| "...".to_owned());
             let possible_values = InvalidBlockHookType::all_variant_names().to_vec().join(",");
             let msg = format!(
                 "Invalid value '{val}' for {arg}: {err}.\n    [possible values: {possible_values}]"
@@ -253,7 +272,9 @@ impl TypedValueParser for InvalidBlockSelectionValueParser {
     }
 
     fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
-        let values = InvalidBlockHookType::all_variant_names().iter().map(PossibleValue::new);
+        let values = InvalidBlockHookType::all_variant_names()
+            .iter()
+            .map(PossibleValue::new);
         Some(Box::new(values))
     }
 }

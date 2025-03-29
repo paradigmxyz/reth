@@ -43,7 +43,7 @@ where
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No transaction senders to prune");
-                return Ok(SegmentOutput::done())
+                return Ok(SegmentOutput::done());
             }
         };
         let tx_range_end = *tx_range.end();
@@ -51,8 +51,9 @@ where
         let mut limiter = input.limiter;
 
         let mut last_pruned_transaction = tx_range_end;
-        let (pruned, done) =
-            provider.tx_ref().prune_table_with_range::<tables::TransactionSenders>(
+        let (pruned, done) = provider
+            .tx_ref()
+            .prune_table_with_range::<tables::TransactionSenders>(
                 tx_range,
                 &mut limiter,
                 |_| false,
@@ -62,7 +63,9 @@ where
 
         let last_pruned_block = provider
             .transaction_block(last_pruned_transaction)?
-            .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?
+            .ok_or(PrunerError::InconsistentData(
+                "Block for transaction is not found",
+            ))?
             // If there's more transaction senders to prune, set the checkpoint block number to
             // previous, so we could finish pruning its transaction senders on the next run.
             .checked_sub(if done { 0 } else { 1 });
@@ -105,9 +108,14 @@ mod tests {
         let blocks = random_block_range(
             &mut rng,
             1..=10,
-            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
+            BlockRangeParams {
+                parent: Some(B256::ZERO),
+                tx_count: 2..3,
+                ..Default::default()
+            },
         );
-        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None))
+            .expect("insert blocks");
 
         let mut transaction_senders = Vec::new();
         for block in &blocks {
@@ -120,11 +128,15 @@ mod tests {
             }
         }
         let transaction_senders_len = transaction_senders.len();
-        db.insert_transaction_senders(transaction_senders).expect("insert transaction senders");
+        db.insert_transaction_senders(transaction_senders)
+            .expect("insert transaction senders");
 
         assert_eq!(
             db.table::<tables::Transactions>().unwrap().len(),
-            blocks.iter().map(|block| block.transaction_count()).sum::<usize>()
+            blocks
+                .iter()
+                .map(|block| block.transaction_count())
+                .sum::<usize>()
         );
         assert_eq!(
             db.table::<tables::Transactions>().unwrap().len(),
@@ -162,8 +174,8 @@ mod tests {
                 .map(|block| block.transaction_count())
                 .sum::<usize>()
                 .min(
-                    next_tx_number_to_prune as usize +
-                        input.limiter.deleted_entries_limit().unwrap(),
+                    next_tx_number_to_prune as usize
+                        + input.limiter.deleted_entries_limit().unwrap(),
                 )
                 .sub(1);
 

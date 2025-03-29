@@ -51,8 +51,16 @@ impl StaticFileProviderMetrics {
         files: usize,
         entries: usize,
     ) {
-        self.segments.get(&segment).expect("segment metrics should exist").size.set(size as f64);
-        self.segments.get(&segment).expect("segment metrics should exist").files.set(files as f64);
+        self.segments
+            .get(&segment)
+            .expect("segment metrics should exist")
+            .size
+            .set(size as f64);
+        self.segments
+            .get(&segment)
+            .expect("segment metrics should exist")
+            .files
+            .set(files as f64);
         self.segments
             .get(&segment)
             .expect("segment metrics should exist")

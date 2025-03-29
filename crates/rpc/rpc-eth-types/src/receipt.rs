@@ -77,7 +77,10 @@ where
     };
 
     Ok(TransactionReceipt {
-        inner: build_envelope(ReceiptWithBloom { receipt: rpc_receipt, logs_bloom }),
+        inner: build_envelope(ReceiptWithBloom {
+            receipt: rpc_receipt,
+            logs_bloom,
+        }),
         transaction_hash: meta.tx_hash,
         transaction_index: Some(meta.index),
         block_hash: Some(meta.block_hash),

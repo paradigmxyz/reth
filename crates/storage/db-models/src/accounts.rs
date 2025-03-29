@@ -7,7 +7,10 @@ use reth_primitives_traits::Account;
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
+#[cfg_attr(
+    any(test, feature = "reth-codec"),
+    reth_codecs::add_arbitrary_tests(compact)
+)]
 pub struct AccountBeforeTx {
     /// Address for the account. Acts as `DupSort::SubKey`.
     pub address: Address,

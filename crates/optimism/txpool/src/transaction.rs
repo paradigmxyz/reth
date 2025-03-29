@@ -70,7 +70,8 @@ impl<Cons: SignedTransaction, Pooled> OpPooledTransaction<Cons, Pooled> {
 
     /// Returns lazily computed EIP-2718 encoded bytes of the transaction.
     pub fn encoded_2718(&self) -> &Bytes {
-        self.encoded_2718.get_or_init(|| self.inner.transaction().encoded_2718().into())
+        self.encoded_2718
+            .get_or_init(|| self.inner.transaction().encoded_2718().into())
     }
 
     /// Conditional setter.
@@ -258,7 +259,9 @@ where
         _sidecar: &BlobTransactionSidecar,
         _settings: &KzgSettings,
     ) -> Result<(), BlobTransactionValidationError> {
-        Err(BlobTransactionValidationError::NotBlobTransaction(self.ty()))
+        Err(BlobTransactionValidationError::NotBlobTransaction(
+            self.ty(),
+        ))
     }
 }
 

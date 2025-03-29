@@ -41,12 +41,20 @@ impl<T: PoolTransaction> Clone for FullTransactionEvent<T> {
         match self {
             Self::Pending(hash) => Self::Pending(*hash),
             Self::Queued(hash) => Self::Queued(*hash),
-            Self::Mined { tx_hash, block_hash } => {
-                Self::Mined { tx_hash: *tx_hash, block_hash: *block_hash }
-            }
-            Self::Replaced { transaction, replaced_by } => {
-                Self::Replaced { transaction: Arc::clone(transaction), replaced_by: *replaced_by }
-            }
+            Self::Mined {
+                tx_hash,
+                block_hash,
+            } => Self::Mined {
+                tx_hash: *tx_hash,
+                block_hash: *block_hash,
+            },
+            Self::Replaced {
+                transaction,
+                replaced_by,
+            } => Self::Replaced {
+                transaction: Arc::clone(transaction),
+                replaced_by: *replaced_by,
+            },
             Self::Discarded(hash) => Self::Discarded(*hash),
             Self::Invalid(hash) => Self::Invalid(*hash),
             Self::Propagated(propagated) => Self::Propagated(Arc::clone(propagated)),
@@ -95,6 +103,9 @@ pub struct NewTransactionEvent<T: PoolTransaction> {
 
 impl<T: PoolTransaction> Clone for NewTransactionEvent<T> {
     fn clone(&self) -> Self {
-        Self { subpool: self.subpool, transaction: self.transaction.clone() }
+        Self {
+            subpool: self.subpool,
+            transaction: self.transaction.clone(),
+        }
     }
 }

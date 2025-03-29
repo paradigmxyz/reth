@@ -437,7 +437,14 @@ where
         EvmConfig: 'static,
     {
         let Self {
-            provider, pool, executor, network, block_executor, consensus, _primitives, ..
+            provider,
+            pool,
+            executor,
+            network,
+            block_executor,
+            consensus,
+            _primitives,
+            ..
         } = self;
         RpcModuleBuilder {
             provider,
@@ -459,8 +466,16 @@ where
     where
         BE: BlockExecutorProvider<Primitives = N> + 'static,
     {
-        let Self { provider, network, pool, executor, evm_config, consensus, _primitives, .. } =
-            self;
+        let Self {
+            provider,
+            network,
+            pool,
+            executor,
+            evm_config,
+            consensus,
+            _primitives,
+            ..
+        } = self;
         RpcModuleBuilder {
             provider,
             network,
@@ -479,7 +494,14 @@ where
         consensus: C,
     ) -> RpcModuleBuilder<N, Provider, Pool, Network, Tasks, EvmConfig, BlockExecutor, C> {
         let Self {
-            provider, network, pool, executor, evm_config, block_executor, _primitives, ..
+            provider,
+            network,
+            pool,
+            executor,
+            evm_config,
+            block_executor,
+            _primitives,
+            ..
         } = self;
         RpcModuleBuilder {
             provider,
@@ -567,7 +589,14 @@ where
         EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
     {
         let Self {
-            provider, pool, network, executor, evm_config, block_executor, consensus, ..
+            provider,
+            pool,
+            network,
+            executor,
+            evm_config,
+            block_executor,
+            consensus,
+            ..
         } = self;
 
         let config = module_config.config.clone().unwrap_or_default();
@@ -604,7 +633,14 @@ where
         EthApi: EthApiTypes + 'static,
     {
         let Self {
-            provider, pool, network, executor, evm_config, block_executor, consensus, ..
+            provider,
+            pool,
+            network,
+            executor,
+            evm_config,
+            block_executor,
+            consensus,
+            ..
         } = self;
         RpcRegistryInner::new(
             provider,
@@ -632,11 +668,23 @@ where
         let mut modules = TransportRpcModules::default();
 
         let Self {
-            provider, pool, network, executor, evm_config, block_executor, consensus, ..
+            provider,
+            pool,
+            network,
+            executor,
+            evm_config,
+            block_executor,
+            consensus,
+            ..
         } = self;
 
         if !module_config.is_empty() {
-            let TransportRpcModuleConfig { http, ws, ipc, config } = module_config.clone();
+            let TransportRpcModuleConfig {
+                http,
+                ws,
+                ipc,
+                config,
+            } = module_config.clone();
 
             let mut registry = RpcRegistryInner::new(
                 provider,
@@ -724,7 +772,10 @@ impl RpcModuleConfigBuilder {
     /// Consumes the type and creates the [`RpcModuleConfig`]
     pub fn build(self) -> RpcModuleConfig {
         let Self { eth, flashbots } = self;
-        RpcModuleConfig { eth: eth.unwrap_or_default(), flashbots: flashbots.unwrap_or_default() }
+        RpcModuleConfig {
+            eth: eth.unwrap_or_default(),
+            flashbots: flashbots.unwrap_or_default(),
+        }
     }
 
     /// Get a reference to the eth namespace config, if any
@@ -897,14 +948,16 @@ where
         Network: Peers,
     {
         let adminapi = self.admin_api();
-        self.modules.insert(RethRpcModule::Admin, adminapi.into_rpc().into());
+        self.modules
+            .insert(RethRpcModule::Admin, adminapi.into_rpc().into());
         self
     }
 
     /// Register Web3 Namespace
     pub fn register_web3(&mut self) -> &mut Self {
         let web3api = self.web3_api();
-        self.modules.insert(RethRpcModule::Web3, web3api.into_rpc().into());
+        self.modules
+            .insert(RethRpcModule::Web3, web3api.into_rpc().into());
         self
     }
 }
@@ -937,7 +990,8 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn register_eth(&mut self) -> &mut Self {
         let eth_api = self.eth_api().clone();
-        self.modules.insert(RethRpcModule::Eth, eth_api.into_rpc().into());
+        self.modules
+            .insert(RethRpcModule::Eth, eth_api.into_rpc().into());
         self
     }
 
@@ -951,7 +1005,8 @@ where
         EthApi: TraceExt + EthTransactions,
     {
         let otterscan_api = self.otterscan_api();
-        self.modules.insert(RethRpcModule::Ots, otterscan_api.into_rpc().into());
+        self.modules
+            .insert(RethRpcModule::Ots, otterscan_api.into_rpc().into());
         self
     }
 
@@ -966,7 +1021,8 @@ where
         BlockExecutor::Primitives: NodePrimitives<Block = ProviderBlock<EthApi::Provider>>,
     {
         let debug_api = self.debug_api();
-        self.modules.insert(RethRpcModule::Debug, debug_api.into_rpc().into());
+        self.modules
+            .insert(RethRpcModule::Debug, debug_api.into_rpc().into());
         self
     }
 
@@ -980,7 +1036,8 @@ where
         EthApi: TraceExt,
     {
         let trace_api = self.trace_api();
-        self.modules.insert(RethRpcModule::Trace, trace_api.into_rpc().into());
+        self.modules
+            .insert(RethRpcModule::Trace, trace_api.into_rpc().into());
         self
     }
 
@@ -996,7 +1053,8 @@ where
         EthApi: EthApiSpec + 'static,
     {
         let netapi = self.net_api();
-        self.modules.insert(RethRpcModule::Net, netapi.into_rpc().into());
+        self.modules
+            .insert(RethRpcModule::Net, netapi.into_rpc().into());
         self
     }
 
@@ -1009,7 +1067,8 @@ where
     /// If called outside of the tokio runtime.
     pub fn register_reth(&mut self) -> &mut Self {
         let rethapi = self.reth_api();
-        self.modules.insert(RethRpcModule::Reth, rethapi.into_rpc().into());
+        self.modules
+            .insert(RethRpcModule::Reth, rethapi.into_rpc().into());
         self
     }
 
@@ -1049,7 +1108,11 @@ where
     where
         EthApi: TraceExt,
     {
-        TraceApi::new(self.eth_api().clone(), self.blocking_pool_guard.clone(), self.eth_config)
+        TraceApi::new(
+            self.eth_api().clone(),
+            self.blocking_pool_guard.clone(),
+            self.eth_config,
+        )
     }
 
     /// Instantiates [`EthBundle`] Api
@@ -1128,7 +1191,9 @@ where
         let eth_handlers = self.eth_handlers();
         let engine_eth = EngineEthApi::new(eth_handlers.api.clone(), eth_handlers.filter.clone());
 
-        module.merge(engine_eth.into_rpc()).expect("No conflicting methods");
+        module
+            .merge(engine_eth.into_rpc())
+            .expect("No conflicting methods");
 
         AuthRpcModule { inner: module }
     }
@@ -1180,8 +1245,12 @@ where
         &mut self,
         namespaces: impl Iterator<Item = RethRpcModule>,
     ) -> Vec<Methods> {
-        let EthHandlers { api: eth_api, filter: eth_filter, pubsub: eth_pubsub, .. } =
-            self.eth_handlers().clone();
+        let EthHandlers {
+            api: eth_api,
+            filter: eth_filter,
+            pubsub: eth_pubsub,
+            ..
+        } = self.eth_handlers().clone();
 
         // Create a copy, so we can list out all the methods for rpc_ api
         let namespaces: Vec<_> = namespaces.collect();
@@ -1207,8 +1276,12 @@ where
                         RethRpcModule::Eth => {
                             // merge all eth handlers
                             let mut module = eth_api.clone().into_rpc();
-                            module.merge(eth_filter.clone().into_rpc()).expect("No conflicts");
-                            module.merge(eth_pubsub.clone().into_rpc()).expect("No conflicts");
+                            module
+                                .merge(eth_filter.clone().into_rpc())
+                                .expect("No conflicts");
+                            module
+                                .merge(eth_pubsub.clone().into_rpc())
+                                .expect("No conflicts");
                             module
                                 .merge(
                                     EthBundle::new(
@@ -1221,9 +1294,9 @@ where
 
                             module.into()
                         }
-                        RethRpcModule::Net => {
-                            NetApi::new(self.network.clone(), eth_api.clone()).into_rpc().into()
-                        }
+                        RethRpcModule::Net => NetApi::new(self.network.clone(), eth_api.clone())
+                            .into_rpc()
+                            .into(),
                         RethRpcModule::Trace => TraceApi::new(
                             eth_api.clone(),
                             self.blocking_pool_guard.clone(),
@@ -1388,7 +1461,8 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
 
     /// Configure the cors domains for http _and_ ws
     pub fn with_cors(self, cors_domain: Option<String>) -> Self {
-        self.with_http_cors(cors_domain.clone()).with_ws_cors(cors_domain)
+        self.with_http_cors(cors_domain.clone())
+            .with_ws_cors(cors_domain)
     }
 
     /// Configure the cors domains for WS
@@ -1459,9 +1533,9 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
     ///
     /// If no server is configured, no server will be launched on [`RpcServerConfig::start`].
     pub const fn has_server(&self) -> bool {
-        self.http_server_config.is_some() ||
-            self.ws_server_config.is_some() ||
-            self.ipc_server_config.is_some()
+        self.http_server_config.is_some()
+            || self.ws_server_config.is_some()
+            || self.ipc_server_config.is_some()
     }
 
     /// Returns the [`SocketAddr`] of the http server
@@ -1520,23 +1594,35 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
             constants::DEFAULT_WS_RPC_PORT,
         )));
 
-        let metrics = modules.ipc.as_ref().map(RpcRequestMetrics::ipc).unwrap_or_default();
-        let ipc_path =
-            self.ipc_endpoint.clone().unwrap_or_else(|| constants::DEFAULT_IPC_ENDPOINT.into());
+        let metrics = modules
+            .ipc
+            .as_ref()
+            .map(RpcRequestMetrics::ipc)
+            .unwrap_or_default();
+        let ipc_path = self
+            .ipc_endpoint
+            .clone()
+            .unwrap_or_else(|| constants::DEFAULT_IPC_ENDPOINT.into());
 
         if let Some(builder) = self.ipc_server_config {
             let ipc = builder
                 .set_rpc_middleware(IpcRpcServiceBuilder::new().layer(metrics))
                 .build(ipc_path);
-            ipc_handle = Some(ipc.start(modules.ipc.clone().expect("ipc server error")).await?);
+            ipc_handle = Some(
+                ipc.start(modules.ipc.clone().expect("ipc server error"))
+                    .await?,
+            );
         }
 
         // If both are configured on the same port, we combine them into one server.
-        if self.http_addr == self.ws_addr &&
-            self.http_server_config.is_some() &&
-            self.ws_server_config.is_some()
+        if self.http_addr == self.ws_addr
+            && self.http_server_config.is_some()
+            && self.ws_server_config.is_some()
         {
-            let cors = match (self.ws_cors_domains.as_ref(), self.http_cors_domains.as_ref()) {
+            let cors = match (
+                self.ws_cors_domains.as_ref(),
+                self.http_cors_domains.as_ref(),
+            ) {
                 (Some(ws_cors), Some(http_cors)) => {
                     if ws_cors.trim() != http_cors.trim() {
                         return Err(WsHttpSamePortError::ConflictingCorsDomains {
@@ -1611,9 +1697,13 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                         .option_layer(Self::maybe_jwt_layer(self.jwt_secret)),
                 )
                 .set_rpc_middleware(
-                    self.rpc_middleware
-                        .clone()
-                        .layer(modules.ws.as_ref().map(RpcRequestMetrics::ws).unwrap_or_default()),
+                    self.rpc_middleware.clone().layer(
+                        modules
+                            .ws
+                            .as_ref()
+                            .map(RpcRequestMetrics::ws)
+                            .unwrap_or_default(),
+                    ),
                 )
                 .build(ws_socket_addr)
                 .await
@@ -1638,7 +1728,11 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                 )
                 .set_rpc_middleware(
                     self.rpc_middleware.clone().layer(
-                        modules.http.as_ref().map(RpcRequestMetrics::http).unwrap_or_default(),
+                        modules
+                            .http
+                            .as_ref()
+                            .map(RpcRequestMetrics::http)
+                            .unwrap_or_default(),
                     ),
                 )
                 .build(http_socket_addr)
@@ -1803,20 +1897,28 @@ impl TransportRpcModuleConfig {
         if RpcModuleSelection::are_identical(self.http.as_ref(), self.ws.as_ref()) {
             Ok(())
         } else {
-            let http_modules =
-                self.http.as_ref().map(RpcModuleSelection::to_selection).unwrap_or_default();
-            let ws_modules =
-                self.ws.as_ref().map(RpcModuleSelection::to_selection).unwrap_or_default();
+            let http_modules = self
+                .http
+                .as_ref()
+                .map(RpcModuleSelection::to_selection)
+                .unwrap_or_default();
+            let ws_modules = self
+                .ws
+                .as_ref()
+                .map(RpcModuleSelection::to_selection)
+                .unwrap_or_default();
 
             let http_not_ws = http_modules.difference(&ws_modules).copied().collect();
             let ws_not_http = ws_modules.difference(&http_modules).copied().collect();
             let overlap = http_modules.intersection(&ws_modules).copied().collect();
 
-            Err(WsHttpSamePortError::ConflictingModules(Box::new(ConflictingModules {
-                overlap,
-                http_not_ws,
-                ws_not_http,
-            })))
+            Err(WsHttpSamePortError::ConflictingModules(Box::new(
+                ConflictingModules {
+                    overlap,
+                    http_not_ws,
+                    ws_not_http,
+                },
+            )))
         }
     }
 }
@@ -1900,7 +2002,7 @@ impl TransportRpcModules {
     /// Returns [Ok(false)] if no http transport is configured.
     pub fn merge_http(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
         if let Some(ref mut http) = self.http {
-            return http.merge(other.into()).map(|_| true)
+            return http.merge(other.into()).map(|_| true);
         }
         Ok(false)
     }
@@ -1912,7 +2014,7 @@ impl TransportRpcModules {
     /// Returns [Ok(false)] if no ws transport is configured.
     pub fn merge_ws(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
         if let Some(ref mut ws) = self.ws {
-            return ws.merge(other.into()).map(|_| true)
+            return ws.merge(other.into()).map(|_| true);
         }
         Ok(false)
     }
@@ -1924,7 +2026,7 @@ impl TransportRpcModules {
     /// Returns [Ok(false)] if no ipc transport is configured.
     pub fn merge_ipc(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
         if let Some(ref mut ipc) = self.ipc {
-            return ipc.merge(other.into()).map(|_| true)
+            return ipc.merge(other.into()).map(|_| true);
         }
         Ok(false)
     }
@@ -2192,8 +2294,8 @@ impl RpcServerHandle {
                 "Bearer {}",
                 secret
                     .encode(&Claims {
-                        iat: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() +
-                            Duration::from_secs(60))
+                        iat: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap()
+                            + Duration::from_secs(60))
                         .as_secs(),
                         exp: None,
                     })
@@ -2249,7 +2351,10 @@ impl RpcServerHandle {
 
         let client = if let Some(token) = self.bearer_token() {
             jsonrpsee::http_client::HttpClientBuilder::default()
-                .set_headers(HeaderMap::from_iter([(AUTHORIZATION, token.parse().unwrap())]))
+                .set_headers(HeaderMap::from_iter([(
+                    AUTHORIZATION,
+                    token.parse().unwrap(),
+                )]))
                 .build(url)
         } else {
             jsonrpsee::http_client::HttpClientBuilder::default().build(url)
@@ -2268,7 +2373,10 @@ impl RpcServerHandle {
             builder = builder.set_headers(headers);
         }
 
-        let client = builder.build(url).await.expect("failed to create ws client");
+        let client = builder
+            .build(url)
+            .await
+            .expect("failed to create ws client");
         Some(client)
     }
 
@@ -2355,7 +2463,12 @@ mod tests {
         assert_eq!(
             selection,
             RpcModuleSelection::Selection(
-                [RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug,].into()
+                [
+                    RethRpcModule::Eth,
+                    RethRpcModule::Admin,
+                    RethRpcModule::Debug,
+                ]
+                .into()
             )
         );
     }
@@ -2394,7 +2507,9 @@ mod tests {
             Some(&RpcModuleSelection::Standard),
         ));
         assert!(RpcModuleSelection::are_identical(
-            Some(&RpcModuleSelection::Selection(RpcModuleSelection::Standard.to_selection())),
+            Some(&RpcModuleSelection::Selection(
+                RpcModuleSelection::Standard.to_selection()
+            )),
             Some(&RpcModuleSelection::Standard),
         ));
         assert!(RpcModuleSelection::are_identical(
@@ -2440,7 +2555,10 @@ mod tests {
     #[test]
     fn test_default_selection() {
         let selection = RpcModuleSelection::Standard.to_selection();
-        assert_eq!(selection, [RethRpcModule::Eth, RethRpcModule::Net, RethRpcModule::Web3].into())
+        assert_eq!(
+            selection,
+            [RethRpcModule::Eth, RethRpcModule::Net, RethRpcModule::Web3].into()
+        )
     }
 
     #[test]
@@ -2486,14 +2604,18 @@ mod tests {
 
     fn create_test_module() -> RpcModule<()> {
         let mut module = RpcModule::new(());
-        module.register_method("anything", |_, _, _| "succeed").unwrap();
+        module
+            .register_method("anything", |_, _, _| "succeed")
+            .unwrap();
         module
     }
 
     #[test]
     fn test_remove_http_method() {
-        let mut modules =
-            TransportRpcModules { http: Some(create_test_module()), ..Default::default() };
+        let mut modules = TransportRpcModules {
+            http: Some(create_test_module()),
+            ..Default::default()
+        };
         // Remove a method that exists
         assert!(modules.remove_http_method("anything"));
 
@@ -2506,8 +2628,10 @@ mod tests {
 
     #[test]
     fn test_remove_ws_method() {
-        let mut modules =
-            TransportRpcModules { ws: Some(create_test_module()), ..Default::default() };
+        let mut modules = TransportRpcModules {
+            ws: Some(create_test_module()),
+            ..Default::default()
+        };
 
         // Remove a method that exists
         assert!(modules.remove_ws_method("anything"));
@@ -2521,8 +2645,10 @@ mod tests {
 
     #[test]
     fn test_remove_ipc_method() {
-        let mut modules =
-            TransportRpcModules { ipc: Some(create_test_module()), ..Default::default() };
+        let mut modules = TransportRpcModules {
+            ipc: Some(create_test_module()),
+            ..Default::default()
+        };
 
         // Remove a method that exists
         assert!(modules.remove_ipc_method("anything"));
@@ -2579,10 +2705,14 @@ mod tests {
 
         // Create another module
         let mut other_module = RpcModule::new(());
-        other_module.register_method("something", |_, _, _| "fails").unwrap();
+        other_module
+            .register_method("something", |_, _, _| "fails")
+            .unwrap();
 
         // Rename the method
-        modules.rename("anything", other_module).expect("rename failed");
+        modules
+            .rename("anything", other_module)
+            .expect("rename failed");
 
         // Verify that the old method was removed from all transports
         assert!(modules.http.as_ref().unwrap().method("anything").is_none());
@@ -2597,51 +2727,69 @@ mod tests {
 
     #[test]
     fn test_replace_http_method() {
-        let mut modules =
-            TransportRpcModules { http: Some(create_test_module()), ..Default::default() };
+        let mut modules = TransportRpcModules {
+            http: Some(create_test_module()),
+            ..Default::default()
+        };
 
         let mut other_module = RpcModule::new(());
-        other_module.register_method("something", |_, _, _| "fails").unwrap();
+        other_module
+            .register_method("something", |_, _, _| "fails")
+            .unwrap();
 
         assert!(modules.replace_http(other_module.clone()).unwrap());
 
         assert!(modules.http.as_ref().unwrap().method("something").is_some());
 
-        other_module.register_method("anything", |_, _, _| "fails").unwrap();
+        other_module
+            .register_method("anything", |_, _, _| "fails")
+            .unwrap();
         assert!(modules.replace_http(other_module.clone()).unwrap());
 
         assert!(modules.http.as_ref().unwrap().method("anything").is_some());
     }
     #[test]
     fn test_replace_ipc_method() {
-        let mut modules =
-            TransportRpcModules { ipc: Some(create_test_module()), ..Default::default() };
+        let mut modules = TransportRpcModules {
+            ipc: Some(create_test_module()),
+            ..Default::default()
+        };
 
         let mut other_module = RpcModule::new(());
-        other_module.register_method("something", |_, _, _| "fails").unwrap();
+        other_module
+            .register_method("something", |_, _, _| "fails")
+            .unwrap();
 
         assert!(modules.replace_ipc(other_module.clone()).unwrap());
 
         assert!(modules.ipc.as_ref().unwrap().method("something").is_some());
 
-        other_module.register_method("anything", |_, _, _| "fails").unwrap();
+        other_module
+            .register_method("anything", |_, _, _| "fails")
+            .unwrap();
         assert!(modules.replace_ipc(other_module.clone()).unwrap());
 
         assert!(modules.ipc.as_ref().unwrap().method("anything").is_some());
     }
     #[test]
     fn test_replace_ws_method() {
-        let mut modules =
-            TransportRpcModules { ws: Some(create_test_module()), ..Default::default() };
+        let mut modules = TransportRpcModules {
+            ws: Some(create_test_module()),
+            ..Default::default()
+        };
 
         let mut other_module = RpcModule::new(());
-        other_module.register_method("something", |_, _, _| "fails").unwrap();
+        other_module
+            .register_method("something", |_, _, _| "fails")
+            .unwrap();
 
         assert!(modules.replace_ws(other_module.clone()).unwrap());
 
         assert!(modules.ws.as_ref().unwrap().method("something").is_some());
 
-        other_module.register_method("anything", |_, _, _| "fails").unwrap();
+        other_module
+            .register_method("anything", |_, _, _| "fails")
+            .unwrap();
         assert!(modules.replace_ws(other_module.clone()).unwrap());
 
         assert!(modules.ws.as_ref().unwrap().method("anything").is_some());
@@ -2656,7 +2804,9 @@ mod tests {
             ..Default::default()
         };
         let mut other_module = RpcModule::new(());
-        other_module.register_method("something", |_, _, _| "fails").unwrap();
+        other_module
+            .register_method("something", |_, _, _| "fails")
+            .unwrap();
 
         assert!(modules.replace_configured(other_module).unwrap());
 

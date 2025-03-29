@@ -133,7 +133,10 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
     for StateRoot<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>
 {
     fn from_tx(tx: &'a TX) -> Self {
-        Self::new(DatabaseTrieCursorFactory::new(tx), DatabaseHashedCursorFactory::new(tx))
+        Self::new(
+            DatabaseTrieCursorFactory::new(tx),
+            DatabaseHashedCursorFactory::new(tx),
+        )
     }
 
     fn incremental_root_calculator(
@@ -240,8 +243,10 @@ impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
             account_storage.entry(storage.key).or_insert(storage.value);
         }
 
-        let hashed_accounts =
-            accounts.into_iter().map(|(address, info)| (KH::hash_key(address), info)).collect();
+        let hashed_accounts = accounts
+            .into_iter()
+            .map(|(address, info)| (KH::hash_key(address), info))
+            .collect();
 
         let hashed_storages = storages
             .into_iter()
@@ -253,13 +258,18 @@ impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
                         // should be looked up in db or not. For reverts it's a noop since all
                         // wiped changes had been written as storage reverts.
                         false,
-                        storage.into_iter().map(|(slot, value)| (KH::hash_key(slot), value)),
+                        storage
+                            .into_iter()
+                            .map(|(slot, value)| (KH::hash_key(slot), value)),
                     ),
                 )
             })
             .collect();
 
-        Ok(Self { accounts: hashed_accounts, storages: hashed_storages })
+        Ok(Self {
+            accounts: hashed_accounts,
+            storages: hashed_storages,
+        })
     }
 }
 
@@ -280,14 +290,26 @@ mod tests {
         let slot1 = U256::from(1015);
         let slot2 = U256::from(2015);
 
-        let account1 = AccountInfo { nonce: 1, ..Default::default() };
-        let account2 = AccountInfo { nonce: 2, ..Default::default() };
+        let account1 = AccountInfo {
+            nonce: 1,
+            ..Default::default()
+        };
+        let account2 = AccountInfo {
+            nonce: 2,
+            ..Default::default()
+        };
 
         let bundle_state = BundleState::builder(2..=2)
             .state_present_account_info(address1, account1)
             .state_present_account_info(address2, account2)
-            .state_storage(address1, HashMap::from_iter([(slot1, (U256::ZERO, U256::from(10)))]))
-            .state_storage(address2, HashMap::from_iter([(slot2, (U256::ZERO, U256::from(20)))]))
+            .state_storage(
+                address1,
+                HashMap::from_iter([(slot1, (U256::ZERO, U256::from(10)))]),
+            )
+            .state_storage(
+                address2,
+                HashMap::from_iter([(slot2, (U256::ZERO, U256::from(20)))]),
+            )
             .build();
         assert_eq!(bundle_state.reverts.len(), 1);
 

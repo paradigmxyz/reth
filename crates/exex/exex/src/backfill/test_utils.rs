@@ -38,7 +38,10 @@ pub(crate) fn chain_spec(address: Address) -> Arc<ChainSpec> {
             .genesis(Genesis {
                 alloc: [(
                     address,
-                    GenesisAccount { balance: U256::from(ETH_TO_WEI), ..Default::default() },
+                    GenesisAccount {
+                        balance: U256::from(ETH_TO_WEI),
+                        ..Default::default()
+                    },
                 )]
                 .into(),
                 ..MAINNET.genesis.clone()
@@ -66,7 +69,9 @@ where
 
     // Execute the block to produce a block execution output
     let mut block_execution_output = EthExecutorProvider::ethereum(chain_spec)
-        .executor(StateProviderDatabase::new(LatestStateProviderRef::new(&provider)))
+        .executor(StateProviderDatabase::new(LatestStateProviderRef::new(
+            &provider,
+        )))
         .execute(block)?;
     block_execution_output.state.reverts.sort();
 
@@ -100,7 +105,10 @@ fn blocks(
             receipts_root: b256!(
                 "0xd3a6acf9a244d78b33831df95d472c4128ea85bf079a1d41e32ed0b7d2244c9e"
             ),
-            difficulty: chain_spec.fork(EthereumHardfork::Paris).ttd().expect("Paris TTD"),
+            difficulty: chain_spec
+                .fork(EthereumHardfork::Paris)
+                .ttd()
+                .expect("Paris TTD"),
             number: 1,
             gas_limit: MIN_TRANSACTION_GAS,
             gas_used: MIN_TRANSACTION_GAS,
@@ -131,7 +139,10 @@ fn blocks(
             receipts_root: b256!(
                 "0xd3a6acf9a244d78b33831df95d472c4128ea85bf079a1d41e32ed0b7d2244c9e"
             ),
-            difficulty: chain_spec.fork(EthereumHardfork::Paris).ttd().expect("Paris TTD"),
+            difficulty: chain_spec
+                .fork(EthereumHardfork::Paris)
+                .ttd()
+                .expect("Paris TTD"),
             number: 2,
             gas_limit: MIN_TRANSACTION_GAS,
             gas_used: MIN_TRANSACTION_GAS,
@@ -163,7 +174,10 @@ pub(crate) fn blocks_and_execution_outputs<N>(
     chain_spec: Arc<ChainSpec>,
     key_pair: Keypair,
 ) -> eyre::Result<
-    Vec<(RecoveredBlock<reth_ethereum_primitives::Block>, BlockExecutionOutput<Receipt>)>,
+    Vec<(
+        RecoveredBlock<reth_ethereum_primitives::Block>,
+        BlockExecutionOutput<Receipt>,
+    )>,
 >
 where
     N: ProviderNodeTypes<
@@ -188,7 +202,10 @@ pub(crate) fn blocks_and_execution_outcome<N>(
     provider_factory: ProviderFactory<N>,
     chain_spec: Arc<ChainSpec>,
     key_pair: Keypair,
-) -> eyre::Result<(Vec<RecoveredBlock<reth_ethereum_primitives::Block>>, ExecutionOutcome)>
+) -> eyre::Result<(
+    Vec<RecoveredBlock<reth_ethereum_primitives::Block>>,
+    ExecutionOutcome,
+)>
 where
     N: ProviderNodeTypes,
     N::Primitives: FullNodePrimitives<
@@ -200,8 +217,9 @@ where
 
     let provider = provider_factory.provider()?;
 
-    let executor = EthExecutorProvider::ethereum(chain_spec)
-        .executor(StateProviderDatabase::new(LatestStateProviderRef::new(&provider)));
+    let executor = EthExecutorProvider::ethereum(chain_spec).executor(StateProviderDatabase::new(
+        LatestStateProviderRef::new(&provider),
+    ));
 
     let mut execution_outcome = executor.execute_batch(vec![&block1, &block2])?;
     execution_outcome.state_mut().reverts.sort();

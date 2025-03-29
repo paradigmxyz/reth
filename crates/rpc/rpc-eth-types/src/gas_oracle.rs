@@ -108,7 +108,9 @@ where
             warn!(prev_percentile = ?oracle_config.percentile, "Invalid configured gas price percentile, assuming 100.");
             oracle_config.percentile = 100;
         }
-        let ignore_price = oracle_config.ignore_price.map(|price| price.saturating_to());
+        let ignore_price = oracle_config
+            .ignore_price
+            .map(|price| price.saturating_to());
 
         // this is the number of blocks that we will cache the values for
         let cached_values = (oracle_config.blocks * 5).max(oracle_config.max_block_history as u32);
@@ -119,7 +121,13 @@ where
             ))),
         });
 
-        Self { provider, oracle_config, cache, ignore_price, inner }
+        Self {
+            provider,
+            oracle_config,
+            cache,
+            ignore_price,
+            inner,
+        }
     }
 
     /// Returns the configuration of the gas price oracle.
@@ -138,7 +146,7 @@ where
 
         // if we have stored a last price, then we check whether or not it was for the same head
         if inner.last_price.block_hash == header.hash() {
-            return Ok(inner.last_price.price)
+            return Ok(inner.last_price.price);
         }
 
         // if all responses are empty, then we can return a maximum of 2*check_block blocks' worth
@@ -183,7 +191,7 @@ where
 
             // break when we have enough populated blocks
             if populated_blocks >= self.oracle_config.blocks {
-                break
+                break;
             }
 
             current_hash = parent_hash;
@@ -206,7 +214,10 @@ where
             }
         }
 
-        inner.last_price = GasPriceOracleResult { block_hash: header.hash(), price };
+        inner.last_price = GasPriceOracleResult {
+            block_hash: header.hash(),
+            price,
+        };
 
         Ok(price)
     }
@@ -225,7 +236,7 @@ where
     ) -> EthResult<Option<(B256, Vec<U256>)>> {
         // check the cache (this will hit the disk if the block is not cached)
         let Some(block) = self.cache.get_recovered_block(block_hash).await? else {
-            return Ok(None)
+            return Ok(None);
         };
 
         let base_fee_per_gas = block.base_fee_per_gas();
@@ -252,24 +263,26 @@ where
             // ignore transactions with a tip under the configured threshold
             if let Some(ignore_under) = self.ignore_price {
                 if effective_tip < Some(ignore_under) {
-                    continue
+                    continue;
                 }
             }
 
             // check if the sender was the coinbase, if so, ignore
             if let Ok(sender) = tx.recover_signer() {
                 if sender == block.beneficiary() {
-                    continue
+                    continue;
                 }
             }
 
             // a `None` effective_gas_tip represents a transaction where the max_fee_per_gas is
             // less than the base fee which would be invalid
-            prices.push(U256::from(effective_tip.ok_or(RpcInvalidTransactionError::FeeCapTooLow)?));
+            prices.push(U256::from(
+                effective_tip.ok_or(RpcInvalidTransactionError::FeeCapTooLow)?,
+            ));
 
             // we have enough entries
             if prices.len() >= limit {
-                break
+                break;
             }
         }
 
@@ -308,7 +321,10 @@ pub struct GasPriceOracleResult {
 
 impl Default for GasPriceOracleResult {
     fn default() -> Self {
-        Self { block_hash: B256::ZERO, price: U256::from(GWEI_TO_WEI) }
+        Self {
+            block_hash: B256::ZERO,
+            price: U256::from(GWEI_TO_WEI),
+        }
     }
 }
 

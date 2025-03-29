@@ -11,7 +11,10 @@ impl TryFrom<AnyRpcTransaction> for OpTransactionSigned {
     type Error = ConversionError;
 
     fn try_from(tx: AnyRpcTransaction) -> Result<Self, Self::Error> {
-        let WithOtherFields { inner: AlloyRpcTransaction { inner, .. }, other: _ } = tx.0;
+        let WithOtherFields {
+            inner: AlloyRpcTransaction { inner, .. },
+            other: _,
+        } = tx.0;
         let from = inner.signer();
 
         let (transaction, signature, hash) = match inner.into_inner() {
@@ -39,9 +42,17 @@ impl TryFrom<AnyRpcTransaction> for OpTransactionSigned {
                     .insert_value("from".to_string(), from)
                     .map_err(|err| ConversionError::Custom(err.to_string()))?;
                 let hash = tx.hash;
-                (OpTypedTransaction::Deposit(tx.try_into()?), TxDeposit::signature(), hash)
+                (
+                    OpTypedTransaction::Deposit(tx.try_into()?),
+                    TxDeposit::signature(),
+                    hash,
+                )
             }
-            _ => return Err(ConversionError::Custom("unknown transaction type".to_string())),
+            _ => {
+                return Err(ConversionError::Custom(
+                    "unknown transaction type".to_string(),
+                ))
+            }
         };
 
         Ok(Self::new(transaction, signature, hash))

@@ -100,7 +100,7 @@ where
 
                         remaining_bytes = bytes;
 
-                        break
+                        break;
                     }
                     Err(err) => return Err(err),
                 };
@@ -109,7 +109,7 @@ where
                     Some(ReceiptWithBlockNumber { receipt, number }) => {
                         if block_number > number {
                             warn!(target: "downloaders::file", previous_block_number = block_number, "skipping receipt from a lower block: {number}");
-                            continue
+                            continue;
                         }
 
                         total_receipts += 1;
@@ -242,8 +242,13 @@ mod test {
     impl TryFrom<MockReceipt> for ReceiptWithBlockNumber<Receipt> {
         type Error = FileClientError;
         fn try_from(exported_receipt: MockReceipt) -> Result<Self, Self::Error> {
-            let MockReceipt { tx_type, status, cumulative_gas_used, logs, block_number: number } =
-                exported_receipt;
+            let MockReceipt {
+                tx_type,
+                status,
+                cumulative_gas_used,
+                logs,
+                block_number: number,
+            } = exported_receipt;
 
             let receipt = Receipt {
                 tx_type: TxType::try_from(tx_type.to_be_bytes()[0])
@@ -266,7 +271,7 @@ mod test {
 
         fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
             if src.is_empty() {
-                return Ok(None)
+                return Ok(None);
             }
 
             let buf_slice = &mut src.as_ref();
@@ -521,7 +526,13 @@ mod test {
         let reader = &mut &encoded_receipts[..];
 
         let DecodedFileChunk {
-            file_client: ReceiptFileClient { receipts, first_block, total_receipts, .. },
+            file_client:
+                ReceiptFileClient {
+                    receipts,
+                    first_block,
+                    total_receipts,
+                    ..
+                },
             ..
         } = ReceiptFileClient::<MockReceiptFileCodec>::from_receipt_reader(
             reader,
@@ -557,7 +568,13 @@ mod test {
         let reader = &mut &encoded_receipts[..];
 
         let DecodedFileChunk {
-            file_client: ReceiptFileClient { receipts, first_block, total_receipts, .. },
+            file_client:
+                ReceiptFileClient {
+                    receipts,
+                    first_block,
+                    total_receipts,
+                    ..
+                },
             ..
         } = ReceiptFileClient::<MockReceiptFileCodec>::from_receipt_reader(
             reader,
@@ -594,7 +611,13 @@ mod test {
         let reader = &mut &encoded_receipts[..];
 
         let DecodedFileChunk {
-            file_client: ReceiptFileClient { receipts, first_block, total_receipts, .. },
+            file_client:
+                ReceiptFileClient {
+                    receipts,
+                    first_block,
+                    total_receipts,
+                    ..
+                },
             ..
         } = ReceiptFileClient::<MockReceiptFileCodec>::from_receipt_reader(
             reader,

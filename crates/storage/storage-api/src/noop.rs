@@ -44,14 +44,20 @@ pub struct NoopProvider<ChainSpec = reth_chainspec::ChainSpec, N = EthPrimitives
 impl<ChainSpec, N> NoopProvider<ChainSpec, N> {
     /// Create a new instance for specific primitive types.
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { chain_spec, _phantom: Default::default() }
+        Self {
+            chain_spec,
+            _phantom: Default::default(),
+        }
     }
 }
 
 impl<ChainSpec> NoopProvider<ChainSpec> {
     /// Create a new instance of the `NoopBlockReader`.
     pub fn eth(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { chain_spec, _phantom: Default::default() }
+        Self {
+            chain_spec,
+            _phantom: Default::default(),
+        }
     }
 }
 
@@ -70,7 +76,10 @@ impl Default for NoopProvider {
 
 impl<ChainSpec, N> Clone for NoopProvider<ChainSpec, N> {
     fn clone(&self) -> Self {
-        Self { chain_spec: Arc::clone(&self.chain_spec), _phantom: Default::default() }
+        Self {
+            chain_spec: Arc::clone(&self.chain_spec),
+            _phantom: Default::default(),
+        }
     }
 }
 
@@ -475,15 +484,18 @@ impl<C: Send + Sync + 'static, N: NodePrimitives> StateProviderFactory for NoopP
             BlockNumberOrTag::Latest => self.latest(),
             BlockNumberOrTag::Finalized => {
                 // we can only get the finalized state by hash, not by num
-                let hash =
-                    self.finalized_block_hash()?.ok_or(ProviderError::FinalizedBlockNotFound)?;
+                let hash = self
+                    .finalized_block_hash()?
+                    .ok_or(ProviderError::FinalizedBlockNotFound)?;
 
                 // only look at historical state
                 self.history_by_block_hash(hash)
             }
             BlockNumberOrTag::Safe => {
                 // we can only get the safe state by hash, not by num
-                let hash = self.safe_block_hash()?.ok_or(ProviderError::SafeBlockNotFound)?;
+                let hash = self
+                    .safe_block_hash()?
+                    .ok_or(ProviderError::SafeBlockNotFound)?;
 
                 self.history_by_block_hash(hash)
             }

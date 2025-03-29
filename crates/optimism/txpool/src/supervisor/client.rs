@@ -38,7 +38,11 @@ impl SupervisorClient {
             .connect(supervisor_endpoint.into().as_str())
             .await
             .expect("building supervisor client");
-        Self { client, safety, timeout: DEFAULT_REQUEST_TIMOUT }
+        Self {
+            client,
+            safety,
+            timeout: DEFAULT_REQUEST_TIMOUT,
+        }
     }
 
     /// Configures a custom timeout
@@ -97,7 +101,7 @@ impl SupervisorClient {
         // Interop check
         if !is_interop_active {
             // No cross chain tx allowed before interop
-            return Some(Err(InvalidCrossTx::CrossChainTxPreInterop))
+            return Some(Err(InvalidCrossTx::CrossChainTxPreInterop));
         }
 
         if let Err(err) = self
@@ -143,7 +147,13 @@ impl<'a> IntoFuture for CheckAccessListRequest<'a> {
     type IntoFuture = BoxFuture<'a, Self::Output>;
 
     fn into_future(self) -> Self::IntoFuture {
-        let Self { client, inbox_entries, executing_descriptor, timeout, safety } = self;
+        let Self {
+            client,
+            inbox_entries,
+            executing_descriptor,
+            timeout,
+            safety,
+        } = self;
         Box::pin(async move {
             tokio::time::timeout(
                 timeout,

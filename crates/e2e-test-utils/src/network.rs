@@ -21,12 +21,17 @@ where
     /// Creates a new network helper
     pub fn new(network: Network) -> Self {
         let network_events = network.event_listener();
-        Self { network_events, network }
+        Self {
+            network_events,
+            network,
+        }
     }
 
     /// Adds a peer to the network node via network handle
     pub async fn add_peer(&mut self, node_record: NodeRecord) {
-        self.network.peers_handle().add_peer(node_record.id, node_record.tcp_addr());
+        self.network
+            .peers_handle()
+            .add_peer(node_record.id, node_record.tcp_addr());
 
         match self.network_events.next().await {
             Some(NetworkEvent::Peer(PeerEvent::PeerAdded(_))) => (),
@@ -43,11 +48,11 @@ where
     pub async fn next_session_established(&mut self) -> Option<PeerId> {
         while let Some(ev) = self.network_events.next().await {
             match ev {
-                NetworkEvent::ActivePeerSession { info, .. } |
-                NetworkEvent::Peer(PeerEvent::SessionEstablished(info)) => {
+                NetworkEvent::ActivePeerSession { info, .. }
+                | NetworkEvent::Peer(PeerEvent::SessionEstablished(info)) => {
                     let peer_id = info.peer_id;
                     info!("Session established with peer: {:?}", peer_id);
-                    return Some(peer_id)
+                    return Some(peer_id);
                 }
                 _ => {}
             }

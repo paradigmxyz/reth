@@ -20,7 +20,10 @@ impl<T: Hash + Eq + fmt::Debug> LruCache<T> {
     pub fn new(limit: u32) -> Self {
         // limit of lru map is one element more, so can give eviction feedback, which isn't
         // supported by LruMap
-        Self { inner: LruMap::new(limit + 1), limit }
+        Self {
+            inner: LruMap::new(limit + 1),
+            limit,
+        }
     }
 
     /// Insert an element into the set.
@@ -46,8 +49,9 @@ impl<T: Hash + Eq + fmt::Debug> LruCache<T> {
     /// value, if one was evicted.
     pub fn insert_and_get_evicted(&mut self, entry: T) -> (bool, Option<T>) {
         let new = self.inner.peek(&entry).is_none();
-        let evicted =
-            (new && (self.limit as usize) <= self.inner.len()).then(|| self.remove_lru()).flatten();
+        let evicted = (new && (self.limit as usize) <= self.inner.len())
+            .then(|| self.remove_lru())
+            .flatten();
         _ = self.inner.get_or_insert(entry, || ());
 
         (new, evicted)
@@ -128,7 +132,10 @@ where
 
         debug_struct.field(
             "ret %iter",
-            &format_args!("Iter: {{{} }}", self.iter().map(|k| format!(" {k:?}")).format(",")),
+            &format_args!(
+                "Iter: {{{} }}",
+                self.iter().map(|k| format!(" {k:?}")).format(",")
+            ),
         );
 
         debug_struct.finish()

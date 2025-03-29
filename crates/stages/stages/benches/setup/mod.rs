@@ -74,14 +74,22 @@ where
     let mut stage = stage;
     let provider = db.factory.database_provider_rw().unwrap();
 
-    StorageHashingStage::default().unwind(&provider, unwind).unwrap();
-    AccountHashingStage::default().unwind(&provider, unwind).unwrap();
+    StorageHashingStage::default()
+        .unwind(&provider, unwind)
+        .unwrap();
+    AccountHashingStage::default()
+        .unwind(&provider, unwind)
+        .unwrap();
 
     // Clear previous run
     stage.unwind(&provider, unwind).unwrap();
 
-    AccountHashingStage::default().execute(&provider, input).unwrap();
-    StorageHashingStage::default().execute(&provider, input).unwrap();
+    AccountHashingStage::default()
+        .execute(&provider, input)
+        .unwrap();
+    StorageHashingStage::default()
+        .execute(&provider, input)
+        .unwrap();
 
     provider.commit().unwrap();
 }
@@ -110,14 +118,19 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
     // rng
     let mut rng = generators::rng();
 
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join("txs-bench");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("testdata")
+        .join("txs-bench");
     let exists = path.exists();
     let db = TestStageDB::new(&path);
 
     if !exists {
         // create the dirs
         fs::create_dir_all(&path).unwrap();
-        println!("Transactions testdata not found, generating to {:?}", path.display());
+        println!(
+            "Transactions testdata not found, generating to {:?}",
+            path.display()
+        );
 
         let accounts: BTreeMap<Address, Account> = concat([
             random_eoa_accounts(&mut rng, n_eoa),
@@ -139,12 +152,15 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
         let (transitions, start_state) = random_changeset_range(
             &mut rng,
             blocks.iter().take(2),
-            accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
+            accounts
+                .into_iter()
+                .map(|(addr, acc)| (addr, (acc, Vec::new()))),
             n_changes.clone(),
             key_range.clone(),
         );
 
-        db.insert_accounts_and_storages(start_state.clone()).unwrap();
+        db.insert_accounts_and_storages(start_state.clone())
+            .unwrap();
 
         // make first block after genesis have valid state root
         let (root, updates) = StateRoot::from_tx(db.factory.provider_rw().unwrap().tx_ref())
@@ -195,11 +211,15 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
             cloned_last.into_body(),
         );
 
-        db.insert_blocks(blocks.iter(), StorageKind::Static).unwrap();
+        db.insert_blocks(blocks.iter(), StorageKind::Static)
+            .unwrap();
 
         // initialize TD
         db.commit(|tx| {
-            let (head, _) = tx.cursor_read::<tables::Headers>()?.first()?.unwrap_or_default();
+            let (head, _) = tx
+                .cursor_read::<tables::Headers>()?
+                .first()?
+                .unwrap_or_default();
             Ok(tx.put::<tables::HeaderTerminalDifficulties>(head, U256::from(0).into())?)
         })
         .unwrap();

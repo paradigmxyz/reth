@@ -55,8 +55,9 @@ impl<T: TransactionOrdering> Iterator for BestTransactionsWithFees<T> {
             let best = Iterator::next(&mut self.best)?;
             // If both the base fee and blob fee (if applicable for EIP-4844) are satisfied, return
             // the transaction
-            if best.transaction.max_fee_per_gas() >= self.base_fee as u128 &&
-                best.transaction
+            if best.transaction.max_fee_per_gas() >= self.base_fee as u128
+                && best
+                    .transaction
                     .max_fee_per_blob_gas()
                     .is_none_or(|fee| fee >= self.base_fee_per_blob_gas as u128)
             {
@@ -198,7 +199,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
                     "[{:?}] skipping invalid transaction",
                     best.transaction.hash()
                 );
-                continue
+                continue;
             }
 
             // Insert transactions that just got unlocked.
@@ -216,7 +217,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
                     ),
                 )
             } else {
-                return Some(best.transaction)
+                return Some(best.transaction);
             }
         }
     }
@@ -250,7 +251,7 @@ where
         loop {
             let best = self.best.next()?;
             if (self.predicate)(&best) {
-                return Some(best)
+                return Some(best);
             }
             self.best.mark_invalid(
                 &best,
@@ -284,7 +285,9 @@ where
 
 impl<I: fmt::Debug, P> fmt::Debug for BestTransactionFilter<I, P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("BestTransactionFilter").field("best", &self.best).finish()
+        f.debug_struct("BestTransactionFilter")
+            .field("best", &self.best)
+            .finish()
     }
 }
 
@@ -330,12 +333,14 @@ where
         // If we have space, try prioritizing transactions
         if self.prioritized_gas < self.max_prioritized_gas {
             for item in &mut self.inner {
-                if self.prioritized_senders.contains(&item.transaction.sender()) &&
-                    self.prioritized_gas + item.transaction.gas_limit() <=
-                        self.max_prioritized_gas
+                if self
+                    .prioritized_senders
+                    .contains(&item.transaction.sender())
+                    && self.prioritized_gas + item.transaction.gas_limit()
+                        <= self.max_prioritized_gas
                 {
                     self.prioritized_gas += item.transaction.gas_limit();
-                    return Some(item)
+                    return Some(item);
                 }
                 self.buffer.push_back(item);
             }
@@ -587,8 +592,10 @@ mod tests {
         let base_fee_per_blob_gas: u64 = 20;
 
         // Insert transactions with varying max_fee_per_gas and max_fee_per_blob_gas
-        let tx1 =
-            MockTransaction::eip1559().rng_hash().with_nonce(0).with_max_fee(base_fee as u128 + 5);
+        let tx1 = MockTransaction::eip1559()
+            .rng_hash()
+            .with_nonce(0)
+            .with_max_fee(base_fee as u128 + 5);
         let tx2 = MockTransaction::eip4844()
             .rng_hash()
             .with_nonce(1)
@@ -599,8 +606,10 @@ mod tests {
             .with_nonce(2)
             .with_max_fee(base_fee as u128 + 5)
             .with_blob_fee(base_fee_per_blob_gas as u128 - 5);
-        let tx4 =
-            MockTransaction::eip1559().rng_hash().with_nonce(3).with_max_fee(base_fee as u128 - 5);
+        let tx4 = MockTransaction::eip1559()
+            .rng_hash()
+            .with_nonce(3)
+            .with_max_fee(base_fee as u128 - 5);
 
         pool.add_transaction(Arc::new(f.validated(tx1.clone())), 0);
         pool.add_transaction(Arc::new(f.validated(tx2.clone())), 0);
@@ -778,7 +787,9 @@ mod tests {
         }
 
         // Add another transaction with 5 gas price that's going to be prioritized by sender
-        let prioritized_tx = MockTransaction::eip1559().with_gas_price(5).with_gas_limit(200);
+        let prioritized_tx = MockTransaction::eip1559()
+            .with_gas_price(5)
+            .with_gas_limit(200);
         let valid_prioritized_tx = f.validated(prioritized_tx.clone());
         pool.add_transaction(Arc::new(valid_prioritized_tx), 0);
 
@@ -851,8 +862,10 @@ mod tests {
         let base_fee_per_blob_gas: u64 = 15;
 
         // Add a non-blob transaction that satisfies the base fee
-        let tx_non_blob =
-            MockTransaction::eip1559().rng_hash().with_nonce(0).with_max_fee(base_fee as u128 + 5);
+        let tx_non_blob = MockTransaction::eip1559()
+            .rng_hash()
+            .with_nonce(0)
+            .with_max_fee(base_fee as u128 + 5);
         pool.add_transaction(Arc::new(f.validated(tx_non_blob.clone())), 0);
 
         // Add a blob transaction that satisfies both base fee and blob fee
@@ -883,12 +896,18 @@ mod tests {
         let mut f = MockTransactionFactory::default();
 
         // Add a blob transaction
-        let tx_blob = MockTransaction::eip4844().rng_hash().with_nonce(0).with_blob_fee(100);
+        let tx_blob = MockTransaction::eip4844()
+            .rng_hash()
+            .with_nonce(0)
+            .with_blob_fee(100);
         let valid_blob_tx = f.validated(tx_blob);
         pool.add_transaction(Arc::new(valid_blob_tx), 0);
 
         // Add a non-blob transaction
-        let tx_non_blob = MockTransaction::eip1559().rng_hash().with_nonce(1).with_max_fee(200);
+        let tx_non_blob = MockTransaction::eip1559()
+            .rng_hash()
+            .with_nonce(1)
+            .with_max_fee(200);
         let valid_non_blob_tx = f.validated(tx_non_blob.clone());
         pool.add_transaction(Arc::new(valid_non_blob_tx), 0);
 
@@ -911,7 +930,10 @@ mod tests {
         let mut f = MockTransactionFactory::default();
 
         // Add a transaction
-        let tx = MockTransaction::eip1559().rng_hash().with_nonce(0).with_max_fee(100);
+        let tx = MockTransaction::eip1559()
+            .rng_hash()
+            .with_nonce(0)
+            .with_max_fee(100);
         let valid_tx = f.validated(tx);
         pool.add_transaction(Arc::new(valid_tx), 0);
 

@@ -76,11 +76,17 @@ impl Command {
         ]);
 
         tool.provider_factory.db_ref().view(|tx| {
-            let mut db_tables = Tables::ALL.iter().map(|table| table.name()).collect::<Vec<_>>();
+            let mut db_tables = Tables::ALL
+                .iter()
+                .map(|table| table.name())
+                .collect::<Vec<_>>();
             db_tables.sort();
             let mut total_size = 0;
             for db_table in db_tables {
-                let table_db = tx.inner.open_db(Some(db_table)).wrap_err("Could not open db.")?;
+                let table_db = tx
+                    .inner
+                    .open_db(Some(db_table))
+                    .wrap_err("Could not open db.")?;
 
                 let stats = tx
                     .inner
@@ -125,7 +131,10 @@ impl Command {
             table.add_row(row);
 
             let freelist = tx.inner.env().freelist()?;
-            let pagesize = tx.inner.db_stat(&mdbx::Database::freelist_db())?.page_size() as usize;
+            let pagesize = tx
+                .inner
+                .db_stat(&mdbx::Database::freelist_db())?
+                .page_size() as usize;
             let freelist_size = freelist * pagesize;
 
             let mut row = Row::new();
@@ -181,7 +190,10 @@ impl Command {
         let mut total_offsets_size = 0;
         let mut total_config_size = 0;
 
-        for (segment, ranges) in static_files.into_iter().sorted_by_key(|(segment, _)| *segment) {
+        for (segment, ranges) in static_files
+            .into_iter()
+            .sorted_by_key(|(segment, _)| *segment)
+        {
             let (
                 mut segment_columns,
                 mut segment_rows,
@@ -272,8 +284,10 @@ impl Command {
                         .iter()
                         .find_map(|(_, tx_range)| tx_range.map(|r| r.start()))
                         .unwrap_or_default();
-                    let end =
-                        ranges.iter().rev().find_map(|(_, tx_range)| tx_range.map(|r| r.end()));
+                    let end = ranges
+                        .iter()
+                        .rev()
+                        .find_map(|(_, tx_range)| tx_range.map(|r| r.end()));
                     end.map(|end| SegmentRangeInclusive::new(start, end))
                 };
 
@@ -291,10 +305,10 @@ impl Command {
                         .add_cell(Cell::new(human_bytes(segment_config_size as f64)));
                 }
                 row.add_cell(Cell::new(human_bytes(
-                    (segment_data_size +
-                        segment_index_size +
-                        segment_offsets_size +
-                        segment_config_size) as f64,
+                    (segment_data_size
+                        + segment_index_size
+                        + segment_offsets_size
+                        + segment_config_size) as f64,
                 )));
                 table.add_row(row);
             }
@@ -329,7 +343,11 @@ impl Command {
     fn checksum_report<N: ProviderNodeTypes>(&self, tool: &DbTool<N>) -> eyre::Result<ComfyTable> {
         let mut table = ComfyTable::new();
         table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
-        table.set_header(vec![Cell::new("Table"), Cell::new("Checksum"), Cell::new("Elapsed")]);
+        table.set_header(vec![
+            Cell::new("Table"),
+            Cell::new("Checksum"),
+            Cell::new("Elapsed"),
+        ]);
 
         let db_tables = Tables::ALL;
         let mut total_elapsed = Duration::default();

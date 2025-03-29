@@ -175,8 +175,10 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
         Fut: Future<Output = eyre::Result<()>>,
     {
         // add network name to logs dir
-        self.logs.log_file_directory =
-            self.logs.log_file_directory.join(self.chain.chain.to_string());
+        self.logs.log_file_directory = self
+            .logs
+            .log_file_directory
+            .join(self.chain.chain.to_string());
 
         let _guard = self.init_tracing()?;
         info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
@@ -185,7 +187,10 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
         let _ = install_prometheus_recorder();
 
         let components = |spec: Arc<C::ChainSpec>| {
-            (EthExecutorProvider::ethereum(spec.clone()), EthBeaconConsensus::new(spec))
+            (
+                EthExecutorProvider::ethereum(spec.clone()),
+                EthBeaconConsensus::new(spec),
+            )
         };
         match self.command {
             Commands::Node(command) => {
@@ -315,8 +320,10 @@ mod tests {
     #[test]
     fn parse_logs_path() {
         let mut reth = Cli::try_parse_args_from(["reth", "node"]).unwrap();
-        reth.logs.log_file_directory =
-            reth.logs.log_file_directory.join(reth.chain.chain.to_string());
+        reth.logs.log_file_directory = reth
+            .logs
+            .log_file_directory
+            .join(reth.chain.chain.to_string());
         let log_dir = reth.logs.log_file_directory;
         let end = format!("reth/logs/{}", SUPPORTED_CHAINS[0]);
         assert!(log_dir.as_ref().ends_with(end), "{log_dir:?}");
@@ -325,8 +332,10 @@ mod tests {
         iter.next();
         for chain in iter {
             let mut reth = Cli::try_parse_args_from(["reth", "node", "--chain", chain]).unwrap();
-            reth.logs.log_file_directory =
-                reth.logs.log_file_directory.join(reth.chain.chain.to_string());
+            reth.logs.log_file_directory = reth
+                .logs
+                .log_file_directory
+                .join(reth.chain.chain.to_string());
             let log_dir = reth.logs.log_file_directory;
             let end = format!("reth/logs/{chain}");
             assert!(log_dir.as_ref().ends_with(end), "{log_dir:?}");

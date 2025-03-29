@@ -157,8 +157,12 @@ where
         // wire the multiproof task to the prewarm task
         let to_multi_proof = Some(multi_proof_task.state_root_message_sender());
 
-        let prewarm_handle =
-            self.spawn_caching_with(header, transactions, provider_builder, to_multi_proof.clone());
+        let prewarm_handle = self.spawn_caching_with(
+            header,
+            transactions,
+            provider_builder,
+            to_multi_proof.clone(),
+        );
 
         // spawn multi-proof task
         self.executor.spawn_blocking(move || {
@@ -191,7 +195,11 @@ where
             }
         });
 
-        PayloadHandle { to_multi_proof, prewarm_handle, state_root: Some(state_root_rx) }
+        PayloadHandle {
+            to_multi_proof,
+            prewarm_handle,
+            state_root: Some(state_root_rx),
+        }
     }
 
     /// Spawn cache prewarming exclusively.
@@ -212,7 +220,11 @@ where
             + 'static,
     {
         let prewarm_handle = self.spawn_caching_with(header, transactions, provider_builder, None);
-        PayloadHandle { to_multi_proof: None, prewarm_handle, state_root: None }
+        PayloadHandle {
+            to_multi_proof: None,
+            prewarm_handle,
+            state_root: None,
+        }
     }
 
     /// Spawn prewarming optionally wired to the multiproof task for target updates.
@@ -261,7 +273,11 @@ where
         self.executor.spawn_blocking(move || {
             prewarm_task.run();
         });
-        CacheTaskHandle { cache, to_prewarm_task: Some(to_prewarm_task), cache_metrics }
+        CacheTaskHandle {
+            cache,
+            to_prewarm_task: Some(to_prewarm_task),
+            cache_metrics,
+        }
     }
 
     /// Returns the cache for the given parent hash.
@@ -269,10 +285,13 @@ where
     /// If the given hash is different then what is recently cached, then this will create a new
     /// instance.
     fn cache_for(&self, parent_hash: B256) -> SavedCache {
-        self.execution_cache.get_cache_for(parent_hash).unwrap_or_else(|| {
-            let cache = ProviderCacheBuilder::default().build_caches(self.cross_block_cache_size);
-            SavedCache::new(parent_hash, cache, CachedStateMetrics::zeroed())
-        })
+        self.execution_cache
+            .get_cache_for(parent_hash)
+            .unwrap_or_else(|| {
+                let cache =
+                    ProviderCacheBuilder::default().build_caches(self.cross_block_cache_size);
+                SavedCache::new(parent_hash, cache, CachedStateMetrics::zeroed())
+            })
     }
 }
 
@@ -355,9 +374,10 @@ impl CacheTaskHandle {
     ///
     /// Note: This does not terminate the task yet.
     pub(super) fn stop_prewarming_execution(&self) {
-        self.to_prewarm_task
-            .as_ref()
-            .map(|tx| tx.send(PrewarmTaskEvent::TerminateTransactionExecution).ok());
+        self.to_prewarm_task.as_ref().map(|tx| {
+            tx.send(PrewarmTaskEvent::TerminateTransactionExecution)
+                .ok()
+        });
     }
 
     /// Terminates the entire pre-warming task.
@@ -505,9 +525,11 @@ mod tests {
                     .expect("failed to insert accounts");
 
                 let storage_updates = update.iter().map(|(address, account)| {
-                    let storage_entries = account.storage.iter().map(|(slot, value)| {
-                        StorageEntry { key: B256::from(*slot), value: value.present_value }
-                    });
+                    let storage_entries =
+                        account.storage.iter().map(|(slot, value)| StorageEntry {
+                            key: B256::from(*slot),
+                            value: value.present_value,
+                        });
                     (*address, storage_entries)
                 });
                 provider_rw

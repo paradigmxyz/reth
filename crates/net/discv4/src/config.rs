@@ -242,7 +242,9 @@ impl Discv4ConfigBuilder {
 
     /// Add another key value pair to include in the ENR
     pub fn add_eip868_rlp_pair(&mut self, key: impl Into<Vec<u8>>, rlp: Bytes) -> &mut Self {
-        self.config.additional_eip868_rlp_pairs.insert(key.into(), rlp);
+        self.config
+            .additional_eip868_rlp_pairs
+            .insert(key.into(), rlp);
         self
     }
 

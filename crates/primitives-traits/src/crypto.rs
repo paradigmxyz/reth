@@ -53,7 +53,7 @@ pub mod secp256k1 {
     /// If the S value is too large, then this will return `None`
     pub fn recover_signer(signature: &Signature, hash: B256) -> Result<Address, RecoveryError> {
         if signature.s() > SECP256K1N_HALF {
-            return Err(RecoveryError)
+            return Err(RecoveryError);
         }
         recover_signer_unchecked(signature, hash)
     }

@@ -32,7 +32,10 @@ pub struct PrometheusRecorder {
 
 impl PrometheusRecorder {
     const fn new(handle: PrometheusHandle) -> Self {
-        Self { handle, upkeep: AtomicBool::new(false) }
+        Self {
+            handle,
+            upkeep: AtomicBool::new(false),
+        }
     }
 
     /// Returns a reference to the [`PrometheusHandle`].

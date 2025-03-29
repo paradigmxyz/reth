@@ -31,7 +31,13 @@ impl MetricServerConfig {
         task_executor: TaskExecutor,
         hooks: Hooks,
     ) -> Self {
-        Self { listen_addr, hooks, task_executor, version_info, chain_spec_info }
+        Self {
+            listen_addr,
+            hooks,
+            task_executor,
+            version_info,
+            chain_spec_info,
+        }
     }
 }
 
@@ -49,8 +55,13 @@ impl MetricServer {
 
     /// Spawns the metrics server
     pub async fn serve(&self) -> eyre::Result<()> {
-        let MetricServerConfig { listen_addr, hooks, task_executor, version_info, chain_spec_info } =
-            &self.config;
+        let MetricServerConfig {
+            listen_addr,
+            hooks,
+            task_executor,
+            version_info,
+            chain_spec_info,
+        } = &self.config;
 
         let hooks = hooks.clone();
         self.start_endpoint(
@@ -128,11 +139,19 @@ impl MetricServer {
 }
 
 fn describe_db_metrics() {
-    describe_gauge!("db.table_size", Unit::Bytes, "The size of a database table (in bytes)");
+    describe_gauge!(
+        "db.table_size",
+        Unit::Bytes,
+        "The size of a database table (in bytes)"
+    );
     describe_gauge!("db.table_pages", "The number of database pages for a table");
     describe_gauge!("db.table_entries", "The number of entries for a table");
     describe_gauge!("db.freelist", "The number of pages on the freelist");
-    describe_gauge!("db.page_size", Unit::Bytes, "The size of a database page (in bytes)");
+    describe_gauge!(
+        "db.page_size",
+        Unit::Bytes,
+        "The size of a database page (in bytes)"
+    );
     describe_gauge!(
         "db.timed_out_not_aborted_transactions",
         "Number of timed out transactions that were not aborted by the user yet"
@@ -140,8 +159,15 @@ fn describe_db_metrics() {
 }
 
 fn describe_static_file_metrics() {
-    describe_gauge!("static_files.segment_size", Unit::Bytes, "The size of a static file segment");
-    describe_gauge!("static_files.segment_files", "The number of files for a static file segment");
+    describe_gauge!(
+        "static_files.segment_size",
+        Unit::Bytes,
+        "The size of a static file segment"
+    );
+    describe_gauge!(
+        "static_files.segment_files",
+        "The number of files for a static file segment"
+    );
     describe_gauge!(
         "static_files.segment_entries",
         "The number of entries for a static file segment"
@@ -196,7 +222,11 @@ fn describe_io_stats() {
     describe_counter!("io.syscw", "Write syscalls");
     describe_counter!("io.read_bytes", Unit::Bytes, "Bytes read");
     describe_counter!("io.write_bytes", Unit::Bytes, "Bytes written");
-    describe_counter!("io.cancelled_write_bytes", Unit::Bytes, "Cancelled write bytes");
+    describe_counter!(
+        "io.cancelled_write_bytes",
+        Unit::Bytes,
+        "Cancelled write bytes"
+    );
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -222,7 +252,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_metrics_endpoint() {
-        let chain_spec_info = ChainSpecInfo { name: "test".to_string() };
+        let chain_spec_info = ChainSpecInfo {
+            name: "test".to_string(),
+        };
         let version_info = VersionInfo {
             version: "test",
             build_timestamp: "test",

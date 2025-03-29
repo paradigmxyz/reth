@@ -108,7 +108,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                 .ok_or(EthApiError::HeaderNotFound(block_id))?;
             let max_window = self.max_proof_window();
             if chain_info.best_number.saturating_sub(block_number) > max_window {
-                return Err(EthApiError::ExceedsMaxProofWindow.into())
+                return Err(EthApiError::ExceedsMaxProofWindow.into());
             }
 
             self.spawn_blocking_io(move |this| {
@@ -131,11 +131,18 @@ pub trait EthState: LoadState + SpawnBlocking {
     ) -> impl Future<Output = Result<Option<Account>, Self::Error>> + Send {
         self.spawn_blocking_io(move |this| {
             let state = this.state_at_block_id(block_id)?;
-            let account = state.basic_account(&address).map_err(Self::Error::from_eth_err)?;
-            let Some(account) = account else { return Ok(None) };
+            let account = state
+                .basic_account(&address)
+                .map_err(Self::Error::from_eth_err)?;
+            let Some(account) = account else {
+                return Ok(None);
+            };
 
             // Check whether the distance to the block exceeds the maximum configured proof window.
-            let chain_info = this.provider().chain_info().map_err(Self::Error::from_eth_err)?;
+            let chain_info = this
+                .provider()
+                .chain_info()
+                .map_err(Self::Error::from_eth_err)?;
             let block_number = this
                 .provider()
                 .block_number_for_id(block_id)
@@ -143,7 +150,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                 .ok_or(EthApiError::HeaderNotFound(block_id))?;
             let max_window = this.max_proof_window();
             if chain_info.best_number.saturating_sub(block_number) > max_window {
-                return Err(EthApiError::ExceedsMaxProofWindow.into())
+                return Err(EthApiError::ExceedsMaxProofWindow.into());
             }
 
             let balance = account.balance;
@@ -156,7 +163,12 @@ pub trait EthState: LoadState + SpawnBlocking {
                 .storage_root(address, Default::default())
                 .map_err(Self::Error::from_eth_err)?;
 
-            Ok(Some(Account { balance, nonce, code_hash, storage_root }))
+            Ok(Some(Account {
+                balance,
+                nonce,
+                code_hash,
+                storage_root,
+            }))
         })
     }
 }
@@ -174,7 +186,9 @@ pub trait LoadState:
 {
     /// Returns the state at the given block number
     fn state_at_hash(&self, block_hash: B256) -> Result<StateProviderBox, Self::Error> {
-        self.provider().history_by_block_hash(block_hash).map_err(Self::Error::from_eth_err)
+        self.provider()
+            .history_by_block_hash(block_hash)
+            .map_err(Self::Error::from_eth_err)
     }
 
     /// Returns the state at the given [`BlockId`] enum.
@@ -182,7 +196,9 @@ pub trait LoadState:
     /// Note: if not [`BlockNumberOrTag::Pending`](alloy_eips::BlockNumberOrTag) then this
     /// will only return canonical state. See also <https://github.com/paradigmxyz/reth/issues/4515>
     fn state_at_block_id(&self, at: BlockId) -> Result<StateProviderBox, Self::Error> {
-        self.provider().state_by_block_id(at).map_err(Self::Error::from_eth_err)
+        self.provider()
+            .state_by_block_id(at)
+            .map_err(Self::Error::from_eth_err)
     }
 
     /// Returns the _latest_ state
@@ -228,8 +244,11 @@ pub trait LoadState:
                     .map_err(Self::Error::from_eth_err)?
                     .ok_or(EthApiError::HeaderNotFound(at))?;
 
-                let header =
-                    self.cache().get_header(block_hash).await.map_err(Self::Error::from_eth_err)?;
+                let header = self
+                    .cache()
+                    .get_header(block_hash)
+                    .await
+                    .map_err(Self::Error::from_eth_err)?;
                 let evm_env = self.evm_config().evm_env(&header);
 
                 Ok((evm_env, block_hash.into()))

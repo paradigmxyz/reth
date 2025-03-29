@@ -9,11 +9,13 @@ use reth_primitives_traits::BlockBody;
 #[inline]
 pub fn ensure_empty_shanghai_withdrawals<T: BlockBody>(body: &T) -> Result<(), OpConsensusError> {
     // Shanghai rule
-    let withdrawals = body.withdrawals().ok_or(ConsensusError::BodyWithdrawalsMissing)?;
+    let withdrawals = body
+        .withdrawals()
+        .ok_or(ConsensusError::BodyWithdrawalsMissing)?;
 
     //  Canyon rule
     if !withdrawals.as_ref().is_empty() {
-        return Err(OpConsensusError::WithdrawalsNonEmpty)
+        return Err(OpConsensusError::WithdrawalsNonEmpty);
     }
 
     Ok(())

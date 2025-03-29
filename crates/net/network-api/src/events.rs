@@ -110,9 +110,10 @@ impl<R> Clone for NetworkEvent<R> {
     fn clone(&self) -> Self {
         match self {
             Self::Peer(event) => Self::Peer(event.clone()),
-            Self::ActivePeerSession { info, messages } => {
-                Self::ActivePeerSession { info: info.clone(), messages: messages.clone() }
-            }
+            Self::ActivePeerSession { info, messages } => Self::ActivePeerSession {
+                info: info.clone(),
+                messages: messages.clone(),
+            },
         }
     }
 }
@@ -253,24 +254,28 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
     /// Returns the [`EthMessage`] for this type
     pub fn create_request_message(&self, request_id: u64) -> EthMessage<N> {
         match self {
-            Self::GetBlockHeaders { request, .. } => {
-                EthMessage::GetBlockHeaders(RequestPair { request_id, message: *request })
-            }
-            Self::GetBlockBodies { request, .. } => {
-                EthMessage::GetBlockBodies(RequestPair { request_id, message: request.clone() })
-            }
+            Self::GetBlockHeaders { request, .. } => EthMessage::GetBlockHeaders(RequestPair {
+                request_id,
+                message: *request,
+            }),
+            Self::GetBlockBodies { request, .. } => EthMessage::GetBlockBodies(RequestPair {
+                request_id,
+                message: request.clone(),
+            }),
             Self::GetPooledTransactions { request, .. } => {
                 EthMessage::GetPooledTransactions(RequestPair {
                     request_id,
                     message: request.clone(),
                 })
             }
-            Self::GetNodeData { request, .. } => {
-                EthMessage::GetNodeData(RequestPair { request_id, message: request.clone() })
-            }
-            Self::GetReceipts { request, .. } => {
-                EthMessage::GetReceipts(RequestPair { request_id, message: request.clone() })
-            }
+            Self::GetNodeData { request, .. } => EthMessage::GetNodeData(RequestPair {
+                request_id,
+                message: request.clone(),
+            }),
+            Self::GetReceipts { request, .. } => EthMessage::GetReceipts(RequestPair {
+                request_id,
+                message: request.clone(),
+            }),
         }
     }
 
@@ -293,7 +298,10 @@ pub struct PeerRequestSender<R = PeerRequest> {
 
 impl<R> Clone for PeerRequestSender<R> {
     fn clone(&self) -> Self {
-        Self { peer_id: self.peer_id, to_session_tx: self.to_session_tx.clone() }
+        Self {
+            peer_id: self.peer_id,
+            to_session_tx: self.to_session_tx.clone(),
+        }
     }
 }
 
@@ -302,7 +310,10 @@ impl<R> Clone for PeerRequestSender<R> {
 impl<R> PeerRequestSender<R> {
     /// Constructs a new sender instance that's wired to a session
     pub const fn new(peer_id: PeerId, to_session_tx: mpsc::Sender<R>) -> Self {
-        Self { peer_id, to_session_tx }
+        Self {
+            peer_id,
+            to_session_tx,
+        }
     }
 
     /// Attempts to immediately send a message on this Sender
@@ -318,6 +329,8 @@ impl<R> PeerRequestSender<R> {
 
 impl<R> fmt::Debug for PeerRequestSender<R> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PeerRequestSender").field("peer_id", &self.peer_id).finish_non_exhaustive()
+        f.debug_struct("PeerRequestSender")
+            .field("peer_id", &self.peer_id)
+            .finish_non_exhaustive()
     }
 }
