@@ -240,7 +240,6 @@ pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostStat
 }
 
 /// Input parameters for spawning a multiproof calculation.
-#[derive(Debug)]
 struct MultiproofInput<Factory> {
     config: MultiProofConfig<Factory>,
     source: Option<StateChangeSource>,
@@ -248,6 +247,17 @@ struct MultiproofInput<Factory> {
     proof_targets: MultiProofTargets,
     proof_sequence_number: u64,
     state_root_message_sender: Sender<MultiProofMessage>,
+}
+
+impl<Factory> std::fmt::Debug for MultiproofInput<Factory> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MultiproofInput")
+            .field("source", &self.source)
+            .field("hashed_state_update", &self.hashed_state_update)
+            .field("proof_targets", &self.proof_targets)
+            .field("proof_sequence_number", &self.proof_sequence_number)
+            .finish()
+    }
 }
 
 /// Manages concurrent multiproof calculations.
@@ -918,15 +928,21 @@ fn get_proof_targets(
     // then process storage slots for all accounts in the state update
     for (hashed_address, storage) in &state_update.storages {
         let fetched = fetched_proof_targets.get(hashed_address);
-        let mut changed_slots = storage
-            .storage
-            .keys()
-            .filter(|slot| !fetched.is_some_and(|f| f.contains(*slot)))
-            .peekable();
+        let changed_slots =
+            storage.storage.keys().filter(|slot| !fetched.is_some_and(|f| f.contains(*slot)));
 
-        if changed_slots.peek().is_some() {
-            targets.entry(*hashed_address).or_default().extend(changed_slots);
-        }
+        // While a HashedPostState that has a storage entry for an account, but no account entry is
+        // ill-formed, if we do run into this situation, we MUST add an entry to the proof targets.
+        //
+        // If we did have a storage entry in the hashed post state, but not in the proof targets,
+        // we would send a multiproof input that contains no storage proof targets, but the
+        // hashed post state would contain a storage entry for the account.
+        //
+        // When the multiproof finally returns and we update the sparse trie, this would lead to
+        // the sparse trie to attempt to update a blinded storage trie, resulting in an error that
+        // would cause us to fail to compute the state root and fall back to the regular state root
+        // algorithm.
+        targets.entry(*hashed_address).or_default().extend(changed_slots);
     }
 
     targets
@@ -1194,6 +1210,45 @@ mod tests {
         assert!(targets.contains_key(&addr2));
         assert!(!targets[&addr1].contains(&slot1));
         assert!(targets[&addr1].contains(&slot2));
+    }
+
+    #[test]
+    fn test_get_proof_targets_malformed_hashed_post_state() {
+        let mut state = HashedPostState::default();
+        let mut fetched = MultiProofTargets::default();
+
+        let addr = B256::random();
+
+        // add empty storage to the hashed post state but not the account
+        let storage = HashedStorage::default();
+        state.storages.insert(addr, storage);
+
+        let targets = get_proof_targets(&state, &fetched);
+
+        // verify that we still have an entry for this in the proof targets
+        assert!(targets.contains_key(&addr));
+
+        // add empty storage to the hashed post state but not the account
+        //
+        // this time wipe the storage
+        let storage = HashedStorage { wiped: true, ..Default::default() };
+        state.storages.insert(addr, storage);
+
+        let targets = get_proof_targets(&state, &fetched);
+
+        // verify that we still have an entry for this in the proof targets
+        assert!(targets.contains_key(&addr));
+
+        // now add a slot to fetched, so that no storage slots would be left
+        let slot = B256::random();
+        let mut fetched_slots = HashSet::default();
+        fetched_slots.insert(slot);
+        fetched.insert(addr, fetched_slots);
+
+        let targets = get_proof_targets(&state, &fetched);
+
+        // verify that we still have an entry for this in the proof targets
+        assert!(targets.contains_key(&addr));
     }
 
     #[test]
