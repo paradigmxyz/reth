@@ -6,6 +6,7 @@ use reth_db::version::{get_db_version, DatabaseVersionError, DB_VERSION};
 use reth_db_common::DbTool;
 use std::io::{self, Write};
 
+mod bootnode;
 mod checksum;
 mod clear;
 mod diff;
@@ -50,6 +51,8 @@ pub enum Subcommands {
     Version,
     /// Returns the full database path
     Path,
+    /// Runs a bootnode for the discovery protocol
+    Bootnode(bootnode::Command),
 }
 
 /// `db_ro_exec` opens a database in read-only mode, and then execute with the provided command
@@ -148,6 +151,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             }
             Subcommands::Path => {
                 println!("{}", db_path.display());
+            }
+            Subcommands::Bootnode(command) => {
+                command.execute().await;
             }
         }
 
