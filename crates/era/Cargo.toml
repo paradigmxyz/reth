@@ -11,6 +11,9 @@ exclude.workspace = true
 [dependencies]
 thiserror.workspace = true
 
+# alloy 
+alloy-primitives.workspace = true
+
 # ssz encoding - decoding
 snap.workspace = true
 ethereum_ssz.workspace = true

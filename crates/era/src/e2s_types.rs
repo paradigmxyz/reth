@@ -150,7 +150,7 @@ impl Entry {
         Ok(Some(Self { entry_type: header.header_type, data }))
     }
 
-    /// Write the entry to a writer
+    /// Write the entry to [`Entry`] writer
     pub fn write<W: Write>(&self, writer: &mut W) -> io::Result<()> {
         let header = Header::new(self.entry_type, self.data.len() as u32);
         header.write(writer)?;
