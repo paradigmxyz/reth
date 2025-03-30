@@ -130,8 +130,8 @@ pub type RethFullAdapter<DB, Types> =
 /// The node builder is fully type safe, it uses the [`NodeTypes`] trait to enforce that
 /// all components are configured with the correct types. However the database types and with that
 /// the provider trait implementations are currently created by the builder itself during the launch
-/// process, hence the database type is not part of the [`NodeTypes`] trait and the node's 
-/// components, that depend on the database, are configured separately. In order to have a nice 
+/// process, hence the database type is not part of the [`NodeTypes`] trait and the node's
+/// components, that depend on the database, are configured separately. In order to have a nice
 /// trait that encapsulates the entire node the
 /// [`FullNodeComponents`](reth_node_api::FullNodeComponents) trait was introduced. This
 /// trait has convenient associated types for all the components of the node. After
