@@ -1511,26 +1511,31 @@ mod tests {
 
     #[test]
     fn test_eth_pooled_transaction_new_legacy() {
-        // Create a legacy transaction with specific parameters
-        let tx = TxLegacy {
-            gas_price: 10,
-            gas_limit: 1000,
-            value: U256::from(100),
-            ..Default::default()
-        };
+    // Construct the underlying alloy legacy transaction.
+    let tx = TxLegacy {
+        gas_price: 10,
+        gas_limit: 1000,
+        value: U256::from(100),
+        ..Default::default()
+    };
 
-        let alloy_tx: EthereumTxEnvelope<TxLegacy> = tx.into();
-        let signature = Signature::test_signature();
-        let signed_tx: TransactionSigned = alloy_tx.sign_unhashed(signature).into();
-        let transaction = Recovered::new_unchecked(signed_tx, Default::default());
-        let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
+    let signature = Signature::test_signature();
+    // Sign the transaction using the established method.
+    let signed = Signed::new_unhashed(tx, signature);
+    // Wrap the signed transaction into the EthereumTxEnvelope enum.
+    let alloy_tx: EthereumTxEnvelope<TxLegacy> = EthereumTxEnvelope::Legacy(signed);
+    // Convert the alloy envelope into a TransactionSigned using `.into()`.
+    let transaction_signed: TransactionSigned = alloy_tx.into();
 
-        // Check that the pooled transaction is created correctly
-        assert_eq!(pooled_tx.transaction, transaction);
-        assert_eq!(pooled_tx.encoded_length, 200);
-        assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::None);
-        assert_eq!(pooled_tx.cost, U256::from(100) + U256::from(10 * 1000));
-    }
+    let transaction = Recovered::new_unchecked(transaction_signed, Default::default());
+    let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
+
+    // Validate the pooled transaction.
+    assert_eq!(pooled_tx.transaction, transaction);
+    assert_eq!(pooled_tx.encoded_length, 200);
+    assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::None);
+    assert_eq!(pooled_tx.cost, U256::from(100) + U256::from(10 * 1000));
+}
 
     #[test]
     fn test_eth_pooled_transaction_new_eip2930() {
