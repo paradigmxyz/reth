@@ -1520,16 +1520,27 @@ mod tests {
     };
 
     let signature = Signature::test_signature();
-    // Sign the transaction using the established method.
+    // Sign the transaction using the alloy signing method.
     let signed = Signed::new_unhashed(tx, signature);
-    // Wrap the signed transaction into the EthereumTxEnvelope enum.
+    // Wrap the signed transaction into the EthereumTxEnvelope variant.
     let alloy_tx: EthereumTxEnvelope<TxLegacy> = EthereumTxEnvelope::Legacy(signed);
-    // Convert the alloy envelope into a TransactionSigned using `.into()`.
-    let transaction_signed: TransactionSigned = alloy_tx.into();
+
+    // Manually convert the alloy envelope into a reth TransactionSigned.
+    let transaction_signed = match alloy_tx {
+        EthereumTxEnvelope::Legacy(signed_tx) => {
+            // Extract the unsigned transaction fields.
+            let tx_unsigned = signed_tx.strip_signature();
+            // Convert to a reth transaction variant and sign it.
+            TransactionSigned::new_unhashed(
+                Transaction::Legacy(tx_unsigned),
+                signed_tx.signature()
+            )
+        }
+        _ => unreachable!("Only legacy variant is expected"),
+    };
 
     let transaction = Recovered::new_unchecked(transaction_signed, Default::default());
     let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
-
     // Validate the pooled transaction.
     assert_eq!(pooled_tx.transaction, transaction);
     assert_eq!(pooled_tx.encoded_length, 200);
