@@ -60,7 +60,7 @@ pub type RethFullAdapter<DB, Types> =
 ///
 /// Configuring a node starts out with a [`NodeConfig`] (this can be obtained from cli arguments for
 /// example) and then proceeds to configure the core static types of the node:
-/// [`NodeTypesWithDBAdapter`], these include the node's primitive types and the node's engine
+/// [`NodeTypes`], these include the node's primitive types and the node's engine
 /// types.
 ///
 /// Next all stateful components of the node are configured, these include all the
