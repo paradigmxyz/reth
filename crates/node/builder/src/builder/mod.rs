@@ -60,7 +60,8 @@ pub type RethFullAdapter<DB, Types> =
 ///
 /// Configuring a node starts out with a [`NodeConfig`] (this can be obtained from cli arguments for
 /// example) and then proceeds to configure the core static types of the node:
-/// [`NodeTypesWithEngine`], these include the node's primitive types and the node's engine types.
+/// [`NodeTypes`], these include the node's primitive types and the node's engine
+/// types.
 ///
 /// Next all stateful components of the node are configured, these include all the
 /// components of the node that are downstream of those types, these include:
@@ -126,10 +127,10 @@ pub type RethFullAdapter<DB, Types> =
 ///
 /// ## Internals
 ///
-/// The node builder is fully type safe, it uses the [`NodeTypesWithEngine`] trait to enforce that
+/// The node builder is fully type safe, it uses the [`NodeTypes`] trait to enforce that
 /// all components are configured with the correct types. However the database types and with that
 /// the provider trait implementations are currently created by the builder itself during the launch
-/// process, hence the database type is not part of the [`NodeTypesWithEngine`] trait and the node's
+/// process, hence the database type is not part of the [`NodeTypes`] trait and the node's
 /// components, that depend on the database, are configured separately. In order to have a nice
 /// trait that encapsulates the entire node the
 /// [`FullNodeComponents`](reth_node_api::FullNodeComponents) trait was introduced. This
