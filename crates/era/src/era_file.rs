@@ -53,7 +53,7 @@ impl EraId {
     }
 
     /// Convert to file name following the era file naming convention :
-    /// config-name>-<era-number>-<era-count>-<short-historical-root>.era
+    /// `config-name>-<era-number>-<era-count>-<short-historical-root>.era`
     /// See also <https://github.com/status-im/nimbus-eth2/blob/stable/docs/e2store.md#file-name>
     pub fn to_file_name(&self) -> String {
         format!(
