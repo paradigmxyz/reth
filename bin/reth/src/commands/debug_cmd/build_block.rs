@@ -142,9 +142,11 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
         for tx_bytes in &self.transactions {
             debug!(target: "reth::cli", bytes = ?tx_bytes, "Decoding transaction");
-            let transaction = TransactionSigned::decode(&mut &Bytes::from_str(tx_bytes)?[..])?
-                .try_clone_into_recovered()
+            let tx_bytes = Bytes::from_str(tx_bytes)?;
+            let envelope = EthereumTxEnvelope::<TxEip4844>::decode(&mut &tx_bytes[..])
                 .map_err(|e| eyre::eyre!("failed to recover tx: {e}"))?;
+
+            let transaction: reth::Transaction = envelope.into();
 
             let encoded_length = match transaction.transaction() {
                 Transaction::Eip4844(TxEip4844 { blob_versioned_hashes, .. }) => {
