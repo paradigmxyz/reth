@@ -1467,7 +1467,7 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
+    use alloy_consensus::{EthereumTxEnvelope,TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
     use alloy_eips::eip4844::DATA_GAS_PER_BLOB;
     use alloy_primitives::PrimitiveSignature as Signature;
     use reth_ethereum_primitives::{Transaction, TransactionSigned};
@@ -1512,14 +1512,14 @@ mod tests {
     #[test]
     fn test_eth_pooled_transaction_new_legacy() {
         // Create a legacy transaction with specific parameters
-        let tx = Transaction::Legacy(TxLegacy {
-            gas_price: 10,
-            gas_limit: 1000,
-            value: U256::from(100),
-            ..Default::default()
-        });
+        let alloy_tx = EthereumTxEnvelope::<TxLegacy>::new_legacy(
+            10,                        
+            1000,                      
+            U256::from(100),           
+            Default::default()         
+        );
         let signature = Signature::test_signature();
-        let signed_tx = TransactionSigned::new_unhashed(tx, signature);
+        let signed_tx: TransactionSigned = alloy_tx.sign_unhashed(signature).into();
         let transaction = Recovered::new_unchecked(signed_tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
 
@@ -1533,14 +1533,14 @@ mod tests {
     #[test]
     fn test_eth_pooled_transaction_new_eip2930() {
         // Create an EIP-2930 transaction with specific parameters
-        let tx = Transaction::Eip2930(TxEip2930 {
-            gas_price: 10,
-            gas_limit: 1000,
-            value: U256::from(100),
-            ..Default::default()
-        });
+        let alloy_tx = EthereumTxEnvelope::<TxEip2930>::new_eip2930(
+            10,
+            1000,
+            U256::from(100),
+            Default::default()
+        );
         let signature = Signature::test_signature();
-        let signed_tx = TransactionSigned::new_unhashed(tx, signature);
+        let signed_tx: TransactionSigned = alloy_tx.sign_unhashed(signature).into();
         let transaction = Recovered::new_unchecked(signed_tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
 
@@ -1554,14 +1554,14 @@ mod tests {
     #[test]
     fn test_eth_pooled_transaction_new_eip1559() {
         // Create an EIP-1559 transaction with specific parameters
-        let tx = Transaction::Eip1559(TxEip1559 {
-            max_fee_per_gas: 10,
-            gas_limit: 1000,
-            value: U256::from(100),
-            ..Default::default()
-        });
+        let alloy_tx = EthereumTxEnvelope::<TxEip1559>::new_eip1559(
+            10,
+            1000,
+            U256::from(100),
+            Default::default()
+        );
         let signature = Signature::test_signature();
-        let signed_tx = TransactionSigned::new_unhashed(tx, signature);
+        let signed_tx: TransactionSigned = alloy_tx.sign_unhashed(signature).into();
         let transaction = Recovered::new_unchecked(signed_tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
 
@@ -1575,16 +1575,16 @@ mod tests {
     #[test]
     fn test_eth_pooled_transaction_new_eip4844() {
         // Create an EIP-4844 transaction with specific parameters
-        let tx = Transaction::Eip4844(TxEip4844 {
-            max_fee_per_gas: 10,
-            gas_limit: 1000,
-            value: U256::from(100),
-            max_fee_per_blob_gas: 5,
-            blob_versioned_hashes: vec![B256::default()],
-            ..Default::default()
-        });
+        let alloy_tx = EthereumTxEnvelope::<TxEip4844>::new_eip4844(
+            10,
+            1000,
+            U256::from(100),
+            5,
+            vec![B256::default()],
+            Default::default()
+        );
         let signature = Signature::test_signature();
-        let signed_tx = TransactionSigned::new_unhashed(tx, signature);
+        let signed_tx: TransactionSigned = alloy_tx.sign_unhashed(signature).into();
         let transaction = Recovered::new_unchecked(signed_tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 300);
 
@@ -1600,14 +1600,14 @@ mod tests {
     #[test]
     fn test_eth_pooled_transaction_new_eip7702() {
         // Init an EIP-7702 transaction with specific parameters
-        let tx = Transaction::Eip7702(TxEip7702 {
-            max_fee_per_gas: 10,
-            gas_limit: 1000,
-            value: U256::from(100),
-            ..Default::default()
-        });
+        let alloy_tx = EthereumTxEnvelope::<TxEip7702>::new_eip7702(
+            10,
+            1000,
+            U256::from(100),
+            Default::default()
+        );
         let signature = Signature::test_signature();
-        let signed_tx = TransactionSigned::new_unhashed(tx, signature);
+        let signed_tx: TransactionSigned = alloy_tx.sign_unhashed(signature).into();
         let transaction = Recovered::new_unchecked(signed_tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
 
