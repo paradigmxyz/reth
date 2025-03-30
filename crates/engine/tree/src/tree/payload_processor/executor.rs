@@ -3,7 +3,7 @@
 use rayon::ThreadPool as RayonPool;
 use std::sync::{Arc, OnceLock};
 use tokio::{
-    runtime::{Handle, Runtime},
+    runtime::{Builder, Handle, Runtime},
     task::JoinHandle,
 };
 
@@ -19,17 +19,24 @@ pub struct WorkloadExecutor {
 
 impl Default for WorkloadExecutor {
     fn default() -> Self {
-        Self { inner: WorkloadExecutorInner::new(rayon::ThreadPoolBuilder::new().build().unwrap()) }
+        Self {
+            inner: WorkloadExecutorInner::new(
+                rayon::ThreadPoolBuilder::new().build().unwrap(),
+                None,
+            ),
+        }
     }
 }
 
 impl WorkloadExecutor {
-    /// Creates a new executor with the given number of threads for cpu bound work (rayon).
+    /// Creates a new executor with the given number of threads for cpu bound work (rayon) and
+    /// an optional number of worker threads for the tokio runtime.
     #[allow(unused)]
-    pub(super) fn with_num_cpu_threads(cpu_threads: usize) -> Self {
+    pub(super) fn with_num_cpu_threads(cpu_threads: usize, worker_threads: Option<usize>) -> Self {
         Self {
             inner: WorkloadExecutorInner::new(
                 rayon::ThreadPoolBuilder::new().num_threads(cpu_threads).build().unwrap(),
+                worker_threads,
             ),
         }
     }
@@ -62,18 +69,31 @@ struct WorkloadExecutorInner {
 }
 
 impl WorkloadExecutorInner {
-    fn new(rayon_pool: rayon::ThreadPool) -> Self {
-        fn get_runtime_handle() -> Handle {
+    /// Creates a new `WorkloadExecutorInner` with the given Rayon thread pool and an optional
+    /// number of worker threads for the Tokio runtime.
+    ///
+    /// Note: The Tokio runtime is lazily initialized using a static `OnceLock`. This means the
+    /// runtime is created only once, on the first call to this function, using the
+    /// `worker_threads` value provided at that time. Subsequent calls will ignore any different
+    /// `worker_threads` values and reuse the existing runtime. This is acceptable for our use
+    /// case, as the executor is initialized only once in the engine.
+    fn new(rayon_pool: rayon::ThreadPool, worker_threads: Option<usize>) -> Self {
+        fn get_runtime_handle(worker_threads: Option<usize>) -> Handle {
             Handle::try_current().unwrap_or_else(|_| {
-                // Create a new runtime if now runtime is available
+                // Create a new runtime if no runtime is available
                 static RT: OnceLock<Runtime> = OnceLock::new();
 
-                let rt = RT.get_or_init(|| Runtime::new().unwrap());
+                let rt = RT.get_or_init(|| match worker_threads {
+                    Some(num_of_threads) => {
+                        Builder::new_multi_thread().worker_threads(num_of_threads).build().unwrap()
+                    }
+                    None => Runtime::new().unwrap(),
+                });
 
                 rt.handle().clone()
             })
         }
 
-        Self { handle: get_runtime_handle(), rayon_pool: Arc::new(rayon_pool) }
+        Self { handle: get_runtime_handle(worker_threads), rayon_pool: Arc::new(rayon_pool) }
     }
 }
