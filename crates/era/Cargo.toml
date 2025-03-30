@@ -11,7 +11,7 @@ exclude.workspace = true
 [dependencies]
 thiserror.workspace = true
 
-# alloy 
+# alloy
 alloy-primitives.workspace = true
 
 # ssz encoding - decoding
