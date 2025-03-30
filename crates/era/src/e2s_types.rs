@@ -41,6 +41,14 @@ pub enum E2sError {
     /// Reserved field in header not zero
     #[error("Reserved field in header not zero")]
     ReservedNotZero,
+
+    /// Error during Snappy compression
+    #[error("Snappy compression error: {0}")]
+    SnappyCompression(String),
+
+    /// Error during Snappy decompression
+    #[error("Snappy decompression error: {0}")]
+    SnappyDecompression(String),
 }
 
 /// Header for TLV records in e2store files

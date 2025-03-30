@@ -4,5 +4,6 @@
 //!
 //! See also <https://github.com/status-im/nimbus-eth2/blob/stable/docs/e2store.md.>
 
+pub mod beacon_types;
 pub mod e2s_types;
 // pub mod era_file;
