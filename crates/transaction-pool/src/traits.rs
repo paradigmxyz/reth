@@ -8,7 +8,7 @@ use crate::{
     validate::ValidPoolTransaction,
     AllTransactionsEvents,
 };
-use alloy_consensus::{transaction::PooledTransaction, BlockHeader, Signed, Typed2718};
+use alloy_consensus::{EthereumTxEnvelope,transaction::PooledTransaction, BlockHeader, Signed, Typed2718};
 use alloy_eips::{
     eip2718::Encodable2718,
     eip2930::AccessList,
@@ -1201,7 +1201,7 @@ impl<T: InMemorySize> InMemorySize for EthPooledTransaction<T> {
     }
 }
 
-impl<T: alloy_consensus::Transaction> alloy_consensus::Transaction for EthPooledTransaction<T> {
+impl alloy_consensus::Transaction for EthPooledTransaction<EthereumTxEnvelope<TxEip4844>> {
     fn chain_id(&self) -> Option<alloy_primitives::ChainId> {
         self.transaction.chain_id()
     }
@@ -1308,8 +1308,7 @@ impl EthPoolTransaction for EthPooledTransaction {
         settings: &KzgSettings,
     ) -> Result<(), BlobTransactionValidationError> {
         match self.transaction.transaction() {
-            Transaction::Eip4844(tx) => tx.validate_blob(sidecar, settings),
-            _ => Err(BlobTransactionValidationError::NotBlobTransaction(self.ty())),
+            self.transaction.validate_blob(sidecar, settings)
         }
     }
 }
