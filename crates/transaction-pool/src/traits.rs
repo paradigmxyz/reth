@@ -1470,7 +1470,7 @@ mod tests {
     use alloy_consensus::{EthereumTxEnvelope,TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
     use alloy_eips::eip4844::DATA_GAS_PER_BLOB;
     use alloy_primitives::PrimitiveSignature as Signature;
-    use reth_ethereum_primitives::{Transaction, TransactionSigned};
+    use reth_ethereum_primitives::TransactionSigned;
 
     #[test]
     fn test_pool_size_invariants() {
@@ -1512,12 +1512,14 @@ mod tests {
     #[test]
     fn test_eth_pooled_transaction_new_legacy() {
         // Create a legacy transaction with specific parameters
-        let alloy_tx = EthereumTxEnvelope::<TxLegacy>::new_legacy(
-            10,                        
-            1000,                      
-            U256::from(100),           
-            Default::default()         
-        );
+        let tx = TxLegacy {
+            gas_price: 10,
+            gas_limit: 1000,
+            value: U256::from(100),
+            ..Default::default()
+        };
+
+        let alloy_tx: EthereumTxEnvelope<TxLegacy> = tx.into();
         let signature = Signature::test_signature();
         let signed_tx: TransactionSigned = alloy_tx.sign_unhashed(signature).into();
         let transaction = Recovered::new_unchecked(signed_tx, Default::default());
