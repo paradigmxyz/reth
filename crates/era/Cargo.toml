@@ -9,7 +9,12 @@ repository.workspace = true
 exclude.workspace = true
 
 [dependencies]
+thiserror.workspace = true
+
+# ssz encoding - decoding
 snap.workspace = true
+ethereum_ssz.workspace = true
+ethereum_ssz_derive.workspace = true
 
 [lints]
 workspace = true

@@ -1,14 +1,8 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! Era files are special instances of .e2s files.
+//!
+//! They have a strict content format optimised for reading and long-term storage and distribution.
+//!
+//! See also <https://github.com/status-im/nimbus-eth2/blob/stable/docs/e2store.md.>
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub mod e2s_types;
+// pub mod era_file;

@@ -7904,7 +7904,10 @@ dependencies = [
 name = "reth-era"
 version = "1.3.4"
 dependencies = [
+ "ethereum_ssz",
+ "ethereum_ssz_derive",
  "snap",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
