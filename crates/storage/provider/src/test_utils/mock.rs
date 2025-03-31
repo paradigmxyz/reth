@@ -18,6 +18,7 @@ use reth_db_api::{
     mock::{DatabaseMock, TxMock},
     models::{AccountBeforeTx, StoredBlockBodyIndices},
 };
+use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_ethereum_primitives::{EthPrimitives, Receipt};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::NodeTypes;
@@ -202,6 +203,7 @@ impl NodeTypes for MockNode {
     type ChainSpec = reth_chainspec::ChainSpec;
     type StateCommitment = MerklePatriciaTrie;
     type Storage = EthStorage;
+    type Payload = EthEngineTypes;
 }
 
 impl<ChainSpec: EthChainSpec> StateCommitmentProvider for MockEthProvider<ChainSpec> {

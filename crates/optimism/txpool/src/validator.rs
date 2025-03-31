@@ -1,7 +1,4 @@
-use crate::{
-    supervisor::{parse_access_list_items_to_inbox_entries, ExecutingDescriptor, SupervisorClient},
-    InvalidCrossTx,
-};
+use crate::{interop::MaybeInteropTransaction, supervisor::SupervisorClient, InvalidCrossTx};
 use alloy_consensus::{BlockHeader, Transaction};
 use alloy_eips::Encodable2718;
 use op_revm::L1BlockInfo;
@@ -12,7 +9,7 @@ use reth_optimism_forks::OpHardforks;
 use reth_primitives_traits::{
     transaction::error::InvalidTransactionError, Block, BlockBody, GotExpected, SealedBlock,
 };
-use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
+use reth_storage_api::{BlockReaderIdExt, StateProvider, StateProviderFactory};
 use reth_transaction_pool::{
     error::InvalidPoolTransactionError, EthPoolTransaction, EthTransactionValidator,
     TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
@@ -21,10 +18,9 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     Arc,
 };
-use tracing::trace;
 
-/// The interval for which we check transaction against supervisor, 1 day.
-const TRANSACTION_VALIDITY_WINDOW_SECS: u64 = 86400;
+/// The interval for which we check transaction against supervisor, 1 hour.
+const TRANSACTION_VALIDITY_WINDOW_SECS: u64 = 3600;
 
 /// Tracks additional infos for the current block.
 #[derive(Debug, Default)]
@@ -101,7 +97,7 @@ impl<Client, Tx> OpTransactionValidator<Client, Tx> {
 impl<Client, Tx> OpTransactionValidator<Client, Tx>
 where
     Client: ChainSpecProvider<ChainSpec: OpHardforks> + StateProviderFactory + BlockReaderIdExt,
-    Tx: EthPoolTransaction,
+    Tx: EthPoolTransaction + MaybeInteropTransaction,
 {
     /// Create a new [`OpTransactionValidator`].
     pub fn new(inner: EthTransactionValidator<Client, Tx>) -> Self {
@@ -166,12 +162,32 @@ where
     ///
     /// See also [`TransactionValidator::validate_transaction`]
     ///
-    /// This behaves the same as [`EthTransactionValidator::validate_one`], but in addition, ensures
-    /// that the account has enough balance to cover the L1 gas cost.
+    /// This behaves the same as [`OpTransactionValidator::validate_one_with_state`], but creates
+    /// a new state provider internally.
     pub async fn validate_one(
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
+    ) -> TransactionValidationOutcome<Tx> {
+        self.validate_one_with_state(origin, transaction, &mut None).await
+    }
+
+    /// Validates a single transaction with a provided state provider.
+    ///
+    /// This allows reusing the same state provider across multiple transaction validations.
+    ///
+    /// See also [`TransactionValidator::validate_transaction`]
+    ///
+    /// This behaves the same as [`EthTransactionValidator::validate_one_with_state`], but in
+    /// addition applies OP validity checks:
+    /// - ensures tx is not eip4844
+    /// - ensures cross chain transactions are valid wrt locally configured safety level
+    /// - ensures that the account has enough balance to cover the L1 gas cost
+    pub async fn validate_one_with_state(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Tx,
+        state: &mut Option<Box<dyn StateProvider>>,
     ) -> TransactionValidationOutcome<Tx> {
         if transaction.is_eip4844() {
             return TransactionValidationOutcome::Invalid(
@@ -181,17 +197,26 @@ where
         }
 
         // Interop cross tx validation
-        if let Some(Err(err)) = self.is_valid_cross_tx(&transaction).await {
-            let err = match err {
-                InvalidCrossTx::CrossChainTxPreInterop => {
-                    InvalidTransactionError::TxTypeNotSupported.into()
-                }
-                err => InvalidPoolTransactionError::Other(Box::new(err)),
-            };
-            return TransactionValidationOutcome::Invalid(transaction, err)
+        match self.is_valid_cross_tx(&transaction).await {
+            Some(Err(err)) => {
+                let err = match err {
+                    InvalidCrossTx::CrossChainTxPreInterop => {
+                        InvalidTransactionError::TxTypeNotSupported.into()
+                    }
+                    err => InvalidPoolTransactionError::Other(Box::new(err)),
+                };
+                return TransactionValidationOutcome::Invalid(transaction, err)
+            }
+            Some(Ok(_)) => {
+                // valid interop tx
+                transaction.set_interop_deadlone(
+                    self.block_timestamp() + TRANSACTION_VALIDITY_WINDOW_SECS,
+                );
+            }
+            _ => {}
         }
 
-        let outcome = self.inner.validate_one(origin, transaction);
+        let outcome = self.inner.validate_one_with_state(origin, transaction, state);
 
         self.apply_op_checks(outcome)
     }
@@ -269,58 +294,27 @@ where
         outcome
     }
 
-    /// Extracts commitment from access list entries, pointing to 0x420..022 and validates them
-    /// against supervisor.
-    ///
-    /// If commitment present pre-interop tx rejected.
-    ///
-    /// Returns:
-    /// None - if tx is not cross chain,
-    /// Some(Ok(()) - if tx is valid cross chain,
-    /// Some(Err(e)) - if tx is not valid or interop is not active
+    /// Wrapper for is valid cross tx
     pub async fn is_valid_cross_tx(&self, tx: &Tx) -> Option<Result<(), InvalidCrossTx>> {
         // We don't need to check for deposit transaction in here, because they won't come from
         // txpool
-        let access_list = tx.access_list()?;
-        let inbox_entries = parse_access_list_items_to_inbox_entries(access_list.iter())
-            .copied()
-            .collect::<Vec<_>>();
-        if inbox_entries.is_empty() {
-            return None;
-        }
-
-        // Ensure interop is activated
-        if !self.fork_tracker.is_interop_activated() {
-            // No cross chain tx allowed before interop
-            return Some(Err(InvalidCrossTx::CrossChainTxPreInterop))
-        }
-
-        let client = self
-            .supervisor_client
-            .as_ref()
-            .expect("supervisor client should be always set after interop is active");
-
-        if let Err(err) = client
-            .check_access_list(
-                inbox_entries.as_slice(),
-                ExecutingDescriptor::new(
-                    self.block_info.timestamp(),
-                    Some(TRANSACTION_VALIDITY_WINDOW_SECS),
-                ),
+        self.supervisor_client
+            .as_ref()?
+            .is_valid_cross_tx(
+                tx.access_list(),
+                tx.hash(),
+                self.block_info.timestamp.load(Ordering::Relaxed),
+                Some(TRANSACTION_VALIDITY_WINDOW_SECS),
+                self.fork_tracker.is_interop_activated(),
             )
             .await
-        {
-            trace!(target: "txpool", hash=%tx.hash(), err=%err, "Cross chain transaction invalid");
-            return Some(Err(InvalidCrossTx::ValidationError(err)));
-        }
-        Some(Ok(()))
     }
 }
 
 impl<Client, Tx> TransactionValidator for OpTransactionValidator<Client, Tx>
 where
     Client: ChainSpecProvider<ChainSpec: OpHardforks> + StateProviderFactory + BlockReaderIdExt,
-    Tx: EthPoolTransaction,
+    Tx: EthPoolTransaction + MaybeInteropTransaction,
 {
     type Transaction = Tx;
 

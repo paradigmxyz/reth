@@ -29,6 +29,7 @@ alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-rpc-types-engine.workspace = true
+op-alloy-consensus.workspace = true
 op-alloy-rpc-types-engine.workspace = true
 
 # misc
@@ -41,6 +42,7 @@ arbitrary = [
     "alloy-consensus/arbitrary",
     "alloy-eips/arbitrary",
     "alloy-primitives/arbitrary",
+    "op-alloy-consensus/arbitrary",
     "op-alloy-rpc-types-engine/arbitrary",
     "reth-chainspec/arbitrary",
     "reth-codecs/arbitrary",

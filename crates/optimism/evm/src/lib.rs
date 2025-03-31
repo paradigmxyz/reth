@@ -7,6 +7,7 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 extern crate alloc;
 
@@ -109,8 +110,7 @@ where
         Block = alloy_consensus::Block<R::Transaction>,
     >,
     OpTransaction<TxEnv>: FromRecoveredTx<N::SignedTx>,
-    // Can remove Debug on R once it's added as OpReceiptBuilder constraint
-    R: OpReceiptBuilder<Receipt: DepositReceipt, Transaction: SignedTransaction> + Debug,
+    R: OpReceiptBuilder<Receipt: DepositReceipt, Transaction: SignedTransaction>,
     Self: Send + Sync + Unpin + Clone + 'static,
 {
     type Primitives = N;

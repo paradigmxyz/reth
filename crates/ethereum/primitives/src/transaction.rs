@@ -355,6 +355,11 @@ impl TransactionSigned {
     fn recalculate_hash(&self) -> B256 {
         keccak256(self.encoded_2718())
     }
+
+    /// Returns the signature of the transaction
+    pub fn signature(&self) -> &Signature {
+        &self.signature
+    }
 }
 
 impl Hash for TransactionSigned {
@@ -394,12 +399,6 @@ impl TransactionSigned {
     #[inline]
     pub fn hash(&self) -> &B256 {
         self.hash.get_or_init(|| self.recalculate_hash())
-    }
-
-    /// Returns the transaction signature.
-    #[inline]
-    pub const fn signature(&self) -> &Signature {
-        &self.signature
     }
 
     /// Creates a new signed transaction from the given transaction and signature without the hash.
@@ -893,10 +892,6 @@ impl SignedTransaction for TransactionSigned {
         self.hash.get_or_init(|| self.recalculate_hash())
     }
 
-    fn signature(&self) -> &Signature {
-        &self.signature
-    }
-
     fn recover_signer(&self) -> Result<Address, RecoveryError> {
         let signature_hash = self.signature_hash();
         recover_signer(&self.signature, signature_hash)
@@ -1141,7 +1136,7 @@ mod tests {
         // Block number: 46170
         let raw_tx = hex!("f86d8085746a52880082520894c93f2250589a6563f5359051c1ea25746549f0d889208686e75e903bc000801ba034b6fdc33ea520e8123cf5ac4a9ff476f639cab68980cd9366ccae7aef437ea0a0e517caa5f50e27ca0d1e9a92c503b4ccb039680c6d9d0c71203ed611ea4feb33");
         let tx = TransactionSigned::decode_2718(&mut &raw_tx[..]).unwrap();
-        let signature = tx.signature();
+        let signature = &tx.signature;
 
         // make sure we know it's greater than SECP256K1N_HALF
         assert!(signature.s() > SECP256K1N_HALF);
