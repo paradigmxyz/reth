@@ -177,3 +177,5 @@ pub use reth_network_p2p as p2p;
 pub use reth_eth_wire_types as types;
 
 use aquamarine as _;
+
+use smallvec as _;

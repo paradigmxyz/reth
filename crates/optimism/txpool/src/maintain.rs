@@ -9,8 +9,8 @@ const MAX_SUPERVISOR_QUERIES: usize = 10;
 
 use crate::{
     conditional::MaybeConditionalTransaction,
-    interop::{MaybeInteropTransaction, TransactionInterop},
-    supervisor::{is_valid_cross_tx, SupervisorClient},
+    interop::{is_stale_interop, is_valid_interop, MaybeInteropTransaction},
+    supervisor::SupervisorClient,
 };
 use alloy_consensus::{conditional::BlockConditionalAttributes, BlockHeader, Transaction};
 use futures_util::{future::BoxFuture, FutureExt, Stream, StreamExt};
@@ -147,12 +147,12 @@ pub async fn maintain_transaction_pool_interop<N, Pool, St>(
             let mut to_revalidate = Vec::new();
             for tx in &pool.pooled_transactions() {
                 // Only interop txs have this field set
-                if let Some(interop) = tx.transaction.interop() {
-                    if !interop.is_valid(timestamp) {
+                if let Some(interop) = tx.transaction.interop_deadline() {
+                    if !is_valid_interop(interop, timestamp) {
                         // That means tx didn't revalidated during [`OFFSET_TIME`] time
                         // We could assume that it won't be validated at all and remove it
                         to_remove.push(*tx.hash());
-                    } else if interop.is_stale(timestamp, OFFSET_TIME) {
+                    } else if is_stale_interop(interop, timestamp, OFFSET_TIME) {
                         // If tx has less then [`OFFSET_TIME`] of valid time we revalidate it
                         to_revalidate.push(tx.clone())
                     }
@@ -163,18 +163,18 @@ pub async fn maintain_transaction_pool_interop<N, Pool, St>(
                     futures_util::stream::iter(to_revalidate.into_iter().map(|tx| {
                         let supervisor_client = supervisor_client.clone();
                         async move {
-                            let check = is_valid_cross_tx(
-                                tx.transaction.access_list(),
-                                tx.transaction.hash(),
-                                timestamp,
-                                Some(TRANSACTION_VALIDITY_WINDOW),
-                                // We could assume that interop is enabled, because
-                                // tx.transaction.interop() would be set only in
-                                // this case
-                                true,
-                                Some(supervisor_client.as_ref()),
-                            )
-                            .await;
+                            let check = supervisor_client
+                                .is_valid_cross_tx(
+                                    tx.transaction.access_list(),
+                                    tx.transaction.hash(),
+                                    timestamp,
+                                    Some(TRANSACTION_VALIDITY_WINDOW),
+                                    // We could assume that interop is enabled, because
+                                    // tx.transaction.interop() would be set only in
+                                    // this case
+                                    true,
+                                )
+                                .await;
                             (tx.clone(), check)
                         }
                     }))
@@ -189,9 +189,7 @@ pub async fn maintain_transaction_pool_interop<N, Pool, St>(
                             to_remove.push(*tx.transaction.hash());
                         }
                     } else {
-                        tx.transaction.set_interop(TransactionInterop {
-                            timeout: timestamp + TRANSACTION_VALIDITY_WINDOW,
-                        })
+                        tx.transaction.set_interop_deadlone(timestamp + TRANSACTION_VALIDITY_WINDOW)
                     }
                 }
             }
