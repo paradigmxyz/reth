@@ -230,13 +230,13 @@ impl<C: TrieCursor> TrieWalker<C> {
 
         // Create a new CursorSubNode and push it to the stack.
         let subnode = CursorSubNode::new(key, Some(node));
-        let nibble = subnode.pointer();
+        let pointer = subnode.pointer();
         self.stack.push(subnode);
         self.update_skip_node();
 
         // Delete the current node if it's included in the prefix set or it doesn't contain the root
         // hash.
-        if !self.can_skip_current_node || nibble.is_child() {
+        if !self.can_skip_current_node || pointer.is_child() {
             if let Some((keys, key)) = self.removed_keys.as_mut().zip(self.cursor.current()?) {
                 keys.insert(key);
             }
@@ -271,13 +271,13 @@ impl<C: TrieCursor> TrieWalker<C> {
 
         // Find the next sibling with state.
         loop {
-            let nibble = subnode.pointer();
+            let pointer = subnode.pointer();
             if subnode.state_flag() {
-                trace!(target: "trie::walker", ?nibble, "found next sibling with state");
+                trace!(target: "trie::walker", ?pointer, "found next sibling with state");
                 return Ok(())
             }
-            if nibble.is_last_child() {
-                trace!(target: "trie::walker", ?nibble, "checked all siblings");
+            if pointer.is_last_child() {
+                trace!(target: "trie::walker", ?pointer, "checked all siblings");
                 break
             }
             subnode.inc_nibble();
