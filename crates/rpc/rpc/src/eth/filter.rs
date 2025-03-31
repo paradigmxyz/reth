@@ -433,7 +433,7 @@ where
                 // not, in case the block hash been reorged
                 let (receipts, maybe_block) = self
                     .eth_cache()
-                    .get_receipts_and_maybe_block(&block_num_hash)
+                    .get_receipts_and_maybe_block(block_num_hash.hash)
                     .await?
                     .ok_or(EthApiError::HeaderNotFound(block_hash.into()))?;
 
@@ -548,7 +548,7 @@ where
 
                     let num_hash = BlockNumHash::new(header.number(), block_hash);
                     if let Some((receipts, maybe_block)) =
-                        self.eth_cache().get_receipts_and_maybe_block(&num_hash).await?
+                        self.eth_cache().get_receipts_and_maybe_block(num_hash.hash).await?
                     {
                         append_matching_block_logs(
                             &mut all_logs,

@@ -3,7 +3,6 @@
 use super::{EthStateCacheConfig, MultiConsumerLruCache};
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::B256;
-use alloy_rpc_types_eth::BlockNumHash;
 use futures::{future::Either, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
 use reth_errors::{ProviderError, ProviderResult};
@@ -181,15 +180,12 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
     /// Retrieves receipts and blocks from cache if block is in the cache, otherwise only receipts.
     pub async fn get_receipts_and_maybe_block(
         &self,
-        block_num_hash: &BlockNumHash,
+        block_hash: B256,
     ) -> ProviderResult<Option<(Arc<Vec<R>>, Option<Arc<RecoveredBlock<B>>>)>> {
-        // The last 4 blocks are most likely cached, so we can just fetch them
         let (response_tx, rx) = oneshot::channel();
-        let _ = self
-            .to_service
-            .send(CacheAction::GetCachedBlock { block_hash: block_num_hash.hash, response_tx });
+        let _ = self.to_service.send(CacheAction::GetCachedBlock { block_hash, response_tx });
 
-        let receipts = self.get_receipts(block_num_hash.hash);
+        let receipts = self.get_receipts(block_hash);
 
         let (receipts, block) = futures::join!(receipts, rx);
 
