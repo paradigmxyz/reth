@@ -1,4 +1,5 @@
 //! Chain specification for BSC, credits to: <https://github.com/bnb-chain/reth/blob/main/crates/bsc/chainspec/src/bsc.rs>
+use crate::hardforks::bsc::BscHardfork;
 use alloy_primitives::{BlockHash, U256};
 use reth_chainspec::{
     make_genesis_header, BaseFeeParams, BaseFeeParamsKind, Chain, ChainSpec, Head, NamedChain,
@@ -6,9 +7,7 @@ use reth_chainspec::{
 use reth_primitives::SealedHeader;
 use std::{str::FromStr, sync::Arc};
 
-use crate::hardforks::bsc::BscHardfork;
-
-pub fn bsc_chain_spec() -> Arc<ChainSpec> {
+pub fn bsc_mainnet() -> Arc<ChainSpec> {
     let genesis = serde_json::from_str(include_str!("genesis.json"))
         .expect("Can't deserialize BSC Mainnet genesis json");
     let hardforks = BscHardfork::bsc_mainnet();
@@ -39,7 +38,7 @@ pub fn head() -> Head {
 
 #[cfg(test)]
 mod tests {
-    use crate::chainspec::bsc::{bsc_chain_spec, head};
+    use crate::chainspec::bsc::{bsc_mainnet, head};
     use alloy_primitives::hex;
     use reth_chainspec::{ForkHash, ForkId};
 
@@ -49,7 +48,7 @@ mod tests {
         let expected = [b[0], b[1], b[2], b[3]];
         let expected_f_id = ForkId { hash: ForkHash(expected), next: 0 };
 
-        let fork_id = bsc_chain_spec().fork_id(&head());
+        let fork_id = bsc_mainnet().fork_id(&head());
         assert_eq!(fork_id, expected_f_id);
     }
 }
