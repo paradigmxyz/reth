@@ -44,7 +44,7 @@ pub struct TrieNodeIter<C, H: HashedCursor> {
     /// Current hashed  entry.
     current_hashed_entry: Option<(B256, <H as HashedCursor>::Value)>,
     /// Flag indicating whether we should check the current walker key.
-    current_walker_key_checked: bool,
+    should_check_walker_key: bool,
 }
 
 impl<C, H: HashedCursor> TrieNodeIter<C, H> {
@@ -55,7 +55,7 @@ impl<C, H: HashedCursor> TrieNodeIter<C, H> {
             hashed_cursor,
             previous_hashed_key: None,
             current_hashed_entry: None,
-            current_walker_key_checked: false,
+            should_check_walker_key: false,
         }
     }
 
@@ -89,9 +89,12 @@ where
         loop {
             // If the walker has a key...
             if let Some(key) = self.walker.key() {
-                // Check if the current walker key is unchecked and there's no previous hashed key
-                if !self.current_walker_key_checked && self.previous_hashed_key.is_none() {
-                    self.current_walker_key_checked = true;
+                // Ensure that the current walker key shouldn't be checked and there's no previous
+                // hashed key
+                if !self.should_check_walker_key && self.previous_hashed_key.is_none() {
+                    // Make sure we check the next walker key, because we only know we can skip the
+                    // current one.
+                    self.should_check_walker_key = true;
                     // If it's possible to skip the current node in the walker, return a branch node
                     if self.walker.can_skip_current_node {
                         return Ok(Some(TrieElement::Branch(TrieBranchNode::new(
@@ -105,10 +108,9 @@ where
 
             // If there's a hashed entry...
             if let Some((hashed_key, value)) = self.current_hashed_entry.take() {
-                // If the walker's key is less than the unpacked hashed key,
-                // reset the checked status and continue
+                // Check if the walker's key is less than the key of the current hashed entry
                 if self.walker.key().is_some_and(|key| key < &Nibbles::unpack(hashed_key)) {
-                    self.current_walker_key_checked = false;
+                    self.should_check_walker_key = false;
                     continue
                 }
 
