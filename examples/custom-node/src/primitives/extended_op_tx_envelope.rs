@@ -28,14 +28,6 @@ pub enum ExtendedOpTxEnvelope<T> {
     Other(T),
 }
 
-// TODO: add SerdeBincodeCompat impl once https://github.com/paradigmxyz/reth/issues/15377 is done
-// #[derive(Debug)]
-// pub enum ExtendedOpTxEnvelopeRepr<'a, T: SerdeBincodeCompat> {
-//     BuiltIn(<OpTxEnvelope as SerdeBincodeCompat>::BincodeRepr<'a>),
-//     Other(T::BincodeRepr<'a>),
-// }
-//
-
 impl<T> Transaction for ExtendedOpTxEnvelope<T>
 where
     T: Transaction,
@@ -274,6 +266,12 @@ where
 }
 
 // TODO: add SerdeBincodeCompat impl once https://github.com/paradigmxyz/reth/issues/15377 is done
+// #[derive(Debug)]
+// pub enum ExtendedOpTxEnvelopeRepr<'a, T: SerdeBincodeCompat> {
+//     BuiltIn(<OpTxEnvelope as SerdeBincodeCompat>::BincodeRepr<'a>),
+//     Other(T::BincodeRepr<'a>),
+// }
+//
 // impl<T> SerdeBincodeCompat for ExtendedOpTxEnvelope<T>
 // where
 //     T: SerdeBincodeCompat,
