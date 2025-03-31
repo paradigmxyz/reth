@@ -84,13 +84,15 @@ impl SequencerClient {
     ) -> Result<(), SequencerClientError> {
         let params = json!([format!("0x{}", hex::encode(tx)), condition]);
 
-        self.send_rpc_call("eth_sendRawTransactionConditional", params).await.inspect_err(|err| {
-            warn!(
-                target: "rpc::eth",
-                %err,
-                "Failed to forward transaction conditional for sequencer",
-            );
-        })?;
+        self.send_rpc_call("eth_sendRawTransactionConditional", params).await.inspect_err(
+            |err| {
+                warn!(
+                    target: "rpc::eth",
+                    %err,
+                    "Failed to forward transaction conditional for sequencer",
+                );
+            },
+        )?;
         Ok(())
     }
 }
