@@ -340,6 +340,16 @@ where
             "MultiProof generated"
         );
 
+        for (address, storage) in BTreeMap::from_iter(storages.clone()) {
+            debug!(
+                target: "trie::parallel_proof_metrics",
+                ?address,
+                root = ?storage.root,
+                nodes = ?BTreeMap::from_iter(storage.subtree.deref().clone()),
+                "Storage proof",
+            );
+        }
+
         Ok(MultiProof { account_subtree, branch_node_hash_masks, branch_node_tree_masks, storages })
     }
 }
