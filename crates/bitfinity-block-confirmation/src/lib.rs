@@ -221,12 +221,6 @@ where
             .with_bundle_update()
             .build();
 
-        // let chain_spec = self.provider_factory.chain_spec();
-        // let evm_config = EthEvmConfig::new(chain_spec);
-
-        // let EvmEnv { cfg_env, block_env } =
-        //     evm_config.evm_env(&block.header);
-
         let base_fee = block.base_fee_per_gas.map(Into::into);
 
         trace!(
@@ -526,7 +520,7 @@ mod tests {
 
         // Commit the block's execution outcome to the database
         let provider_rw = provider_factory.provider_rw()?;
-        let block = block.clone().seal_slow();
+        let block = block.clone();
         provider_rw.append_blocks_with_state(
             vec![block],
             &execution_outcome,
@@ -554,7 +548,7 @@ mod tests {
                 Arc<TempDatabase<DatabaseEnv>>,
             >,
         >,
-        SealedRecoveredBlock,
+        RecoveredBlock<Block>,
     ) {
         // EVM genesis accounts (similar to the test genesis in EVM)
         let mut original_genesis = vec![
@@ -640,7 +634,7 @@ mod tests {
             // Insert the test block into the database.
             let provider_rw = block_validator.provider_factory.database_provider_rw().unwrap();
             provider_rw
-                .insert_block(test_block.clone().seal_slow(), StorageLocation::Database)
+                .insert_block(test_block.clone(), StorageLocation::Database)
                 .unwrap();
             provider_rw.commit().unwrap();
 
@@ -654,7 +648,7 @@ mod tests {
 
         // Calculate the POW hash.
         let pow =
-            block_validator.compute_pow_hash(&block1, ExecutionOutcome::default()).await.unwrap();
+            block_validator.compute_pow_hash(&block1.clone_block(), ExecutionOutcome::default()).await.unwrap();
 
         assert_ne!(pow.0, KECCAK_EMPTY, "Proof of work hash should not be empty");
 
@@ -677,10 +671,7 @@ mod tests {
             .get_executed_block_with_number(genesis_block.number + 1, genesis_block.hash_slow());
 
         let outcome = block.execution_outcome();
-        let block =
-            block.block().clone().seal_with_senders::<reth_primitives::Block>().unwrap().unseal();
-
-        let pow_res = block_validator.compute_pow_hash(&block.block, outcome.clone()).await;
+        let pow_res = block_validator.compute_pow_hash(&block.recovered_block().clone_block(), outcome.clone()).await;
 
         assert!(pow_res.is_ok());
 
@@ -695,12 +686,10 @@ mod tests {
             .get_executed_block_with_number(genesis_block.number + 1, genesis_block.hash_slow());
 
         let outcome = block.execution_outcome();
-        let block =
-            block.block().clone().seal_with_senders::<reth_primitives::Block>().unwrap().unseal();
 
         // Compute POW hash twice with the same input
-        let pow1 = block_validator.compute_pow_hash(&block.block, outcome.clone()).await.unwrap();
-        let pow2 = block_validator.compute_pow_hash(&block.block, outcome.clone()).await.unwrap();
+        let pow1 = block_validator.compute_pow_hash(&block.recovered_block().clone_block(), outcome.clone()).await.unwrap();
+        let pow2 = block_validator.compute_pow_hash(&block.recovered_block().clone_block(), outcome.clone()).await.unwrap();
 
         // Results should be deterministic
         assert_eq!(pow1, pow2, "POW hash computation should be deterministic");
@@ -714,8 +703,7 @@ mod tests {
             .get_executed_block_with_number(genesis_block.number + 1, genesis_block.hash_slow());
 
         let outcome = block.execution_outcome();
-        let block =
-            block.block().clone().seal_with_senders::<reth_primitives::Block>().unwrap().unseal();
+        let block = block.recovered_block().clone_block();
 
         // Get initial state
         let initial_state =
@@ -725,7 +713,7 @@ mod tests {
 
         // Compute POW multiple times
         for _ in 0..3 {
-            let _ = block_validator.compute_pow_hash(&block.block, outcome.clone()).await.unwrap();
+            let _ = block_validator.compute_pow_hash(&block, outcome.clone()).await.unwrap();
 
             // Check state after each computation
             let current_state =
@@ -796,7 +784,7 @@ mod tests {
 
         // Compute POW hash for two different blocks
         let computed_pow =
-            block_validator.compute_pow_hash(&block.block, outcome.clone()).await.unwrap();
+            block_validator.compute_pow_hash(&block.clone_block(), outcome.clone()).await.unwrap();
 
         assert_eq!(
             expected_pow_hash, computed_pow,
@@ -876,7 +864,7 @@ mod tests {
                 .unwrap();
 
         let computed_pow =
-            block_validator.compute_pow_hash(&block.block, outcome.clone()).await.unwrap();
+            block_validator.compute_pow_hash(&block.clone_block(), outcome.clone()).await.unwrap();
 
         assert_eq!(
             expected_pow_hash, computed_pow,
