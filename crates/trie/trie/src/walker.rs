@@ -98,18 +98,19 @@ impl<C> TrieWalker<C> {
 
     /// Returns the next unprocessed key in the trie.
     #[instrument(level = "trace", skip(self), ret)]
-    pub fn next_unprocessed_key(&self) -> Option<B256> {
+    pub fn next_unprocessed_key(&self) -> Option<(Nibbles, B256)> {
         self.key()
             .and_then(|key| {
                 if self.can_skip_current_node {
-                    key.increment().map(|inc| inc.pack())
+                    key.increment().map(|inc| inc)
                 } else {
-                    Some(key.pack())
+                    Some(key.clone())
                 }
             })
-            .map(|mut key| {
-                key.resize(32, 0);
-                B256::from_slice(key.as_slice())
+            .map(|key| {
+                let mut new_key = key.pack();
+                new_key.resize(32, 0);
+                (key, B256::from_slice(new_key.as_slice()))
             })
     }
 
