@@ -9,7 +9,10 @@ use alloy_primitives::{ChainId, TxHash};
 use alloy_rlp::{BufMut, Decodable, Encodable, Result as RlpResult};
 use op_alloy_consensus::{OpTxEnvelope, OpTxType};
 use reth_codecs::Compact;
-use reth_primitives_traits::{transaction::signed::RecoveryError, InMemorySize, SignedTransaction};
+use reth_primitives_traits::{
+    serde_bincode_compat::SerdeBincodeCompat, transaction::signed::RecoveryError, InMemorySize,
+    SignedTransaction,
+};
 use revm_primitives::{Address, Bytes, TxKind, B256, U256};
 use std::convert::TryInto;
 
@@ -261,36 +264,35 @@ where
     }
 }
 
-// TODO: add SerdeBincodeCompat impl once https://github.com/paradigmxyz/reth/issues/15377 is done
-// #[derive(Debug)]
-// pub enum ExtendedOpTxEnvelopeRepr<'a, T: SerdeBincodeCompat> {
-//     BuiltIn(<OpTxEnvelope as SerdeBincodeCompat>::BincodeRepr<'a>),
-//     Other(T::BincodeRepr<'a>),
-// }
-//
-// impl<T> SerdeBincodeCompat for ExtendedOpTxEnvelope<T>
-// where
-//     T: SerdeBincodeCompat,
-// {
-//     type BincodeRepr<'a> = ExtendedOpTxEnvelopeRepr<'a, T>;
-//
-//     fn as_repr(&self) -> Self::BincodeRepr<'_> {
-//         match self {
-//             Self::BuiltIn(tx) => ExtendedOpTxEnvelopeRepr::BuiltIn(tx.as_repr()),
-//             Self::Other(tx) => ExtendedOpTxEnvelopeRepr::Other(tx.as_repr()),
-//         }
-//     }
-//
-//     fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
-//         match repr {
-//             ExtendedOpTxEnvelopeRepr::BuiltIn(tx_repr) => {
-//                 Self::BuiltIn(OpTxEnvelope::from_repr(tx_repr))
-//             }
-//             ExtendedOpTxEnvelopeRepr::Other(tx_repr) => Self::Other(T::from_repr(tx_repr)),
-//         }
-//     }
-// }
-//
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub enum ExtendedOpTxEnvelopeRepr<'a, T: SerdeBincodeCompat> {
+    BuiltIn(Box<OpTxEnvelope>),
+    Other(T::BincodeRepr<'a>),
+}
+
+impl<T> SerdeBincodeCompat for ExtendedOpTxEnvelope<T>
+where
+    T: SerdeBincodeCompat + std::fmt::Debug,
+{
+    type BincodeRepr<'a> = ExtendedOpTxEnvelopeRepr<'a, T>;
+
+    fn as_repr(&self) -> Self::BincodeRepr<'_> {
+        match self {
+            // since OpTxEnvelope doesn't implement SerdeBincodeCompat yet,
+            // we need to clone the envelope for now
+            // TODO: use as_repr once https://github.com/paradigmxyz/reth/issues/15377 is done
+            Self::BuiltIn(tx) => ExtendedOpTxEnvelopeRepr::BuiltIn(tx.clone()),
+            Self::Other(tx) => ExtendedOpTxEnvelopeRepr::Other(tx.as_repr()),
+        }
+    }
+
+    fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
+        match repr {
+            ExtendedOpTxEnvelopeRepr::BuiltIn(tx) => Self::BuiltIn(tx),
+            ExtendedOpTxEnvelopeRepr::Other(tx_repr) => Self::Other(T::from_repr(tx_repr)),
+        }
+    }
+}
 
 impl<T> Compact for ExtendedOpTxEnvelope<T>
 where
