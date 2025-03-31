@@ -26,7 +26,7 @@ async fn can_connect() {
     let secret_key = SecretKey::new(&mut rand::thread_rng());
 
     let net_cfg = NetworkConfig::<_, EthNetworkPrimitives>::builder(secret_key)
-        .boot_nodes(boot_nodes())
+        .boot_nodes(bsc_boot_nodes.clone())
         .set_head(head())
         .with_pow()
         .listener_addr(local_addr)
@@ -35,7 +35,7 @@ async fn can_connect() {
 
     let net_cfg = net_cfg.set_discovery_v4(
         Discv4ConfigBuilder::default()
-            .add_boot_nodes(boot_nodes())
+            .add_boot_nodes(bsc_boot_nodes)
             .lookup_interval(Duration::from_millis(500))
             .build(),
     );
