@@ -30,7 +30,7 @@ use reth_node_ethereum::{
     BasicBlockExecutorProvider, EthEvmConfig, EthExecutionStrategyFactory, EthereumNode,
 };
 use reth_primitives::{Transaction, TransactionSigned};
-use reth_provider::providers::BlockchainProvider2;
+use reth_provider::providers::BlockchainProvider;
 use reth_rpc::EthApi;
 use reth_tasks::TaskManager;
 use reth_transaction_pool::{
@@ -338,7 +338,7 @@ pub async fn start_reth_node(
             FullNodeTypesAdapter<
                 EthereumNode,
                 Arc<TempDatabase<DatabaseEnv>>,
-                BlockchainProvider2<
+                BlockchainProvider<
                     NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
                 >,
             >,
@@ -346,7 +346,7 @@ pub async fn start_reth_node(
                 FullNodeTypesAdapter<
                     EthereumNode,
                     Arc<TempDatabase<DatabaseEnv>>,
-                    BlockchainProvider2<
+                    BlockchainProvider<
                         NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
                     >,
                 >,
@@ -354,7 +354,7 @@ pub async fn start_reth_node(
                 Pool<
                     TransactionValidationTaskExecutor<
                         EthTransactionValidator<
-                            BlockchainProvider2<
+                            BlockchainProvider<
                                 NodeTypesWithDBAdapter<
                                     EthereumNode,
                                     Arc<TempDatabase<DatabaseEnv>>,
@@ -376,7 +376,7 @@ pub async fn start_reth_node(
                 FullNodeTypesAdapter<
                     EthereumNode,
                     Arc<TempDatabase<DatabaseEnv>>,
-                    BlockchainProvider2<
+                    BlockchainProvider<
                         NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
                     >,
                 >,
@@ -384,7 +384,7 @@ pub async fn start_reth_node(
                     FullNodeTypesAdapter<
                         EthereumNode,
                         Arc<TempDatabase<DatabaseEnv>>,
-                        BlockchainProvider2<
+                        BlockchainProvider<
                             NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
                         >,
                     >,
@@ -392,7 +392,7 @@ pub async fn start_reth_node(
                     Pool<
                         TransactionValidationTaskExecutor<
                             EthTransactionValidator<
-                                BlockchainProvider2<
+                                BlockchainProvider<
                                     NodeTypesWithDBAdapter<
                                         EthereumNode,
                                         Arc<TempDatabase<DatabaseEnv>>,
@@ -410,13 +410,13 @@ pub async fn start_reth_node(
                 >,
             >,
             EthApi<
-                BlockchainProvider2<
+                BlockchainProvider<
                     NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
                 >,
                 Pool<
                     TransactionValidationTaskExecutor<
                         EthTransactionValidator<
-                            BlockchainProvider2<
+                            BlockchainProvider<
                                 NodeTypesWithDBAdapter<
                                     EthereumNode,
                                     Arc<TempDatabase<DatabaseEnv>>,
@@ -471,7 +471,7 @@ pub async fn start_reth_node(
     let node_handle = NodeBuilder::new(node_config)
         .with_database(database)
         .testing_node(exec)
-        .with_types_and_provider::<EthereumNode, BlockchainProvider2<_>>()
+        .with_types_and_provider::<EthereumNode, BlockchainProvider<_>>()
         .with_components(EthereumNode::components())
         .with_add_ons(EthereumAddOns::default())
         .launch_with_fn(|builder| {

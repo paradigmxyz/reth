@@ -5,13 +5,11 @@ use bitfinity_block_confirmation::BitfinityBlockConfirmation;
 use eyre::eyre;
 use futures::{Stream, StreamExt};
 use lightspeed_scheduler::{job::Job, scheduler::Scheduler, JobExecutor};
-use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
 use reth_config::{config::EtlConfig, Config};
 use reth_db::DatabaseEnv;
 
 use alloy_primitives::B256;
-use reth_consensus::Consensus;
 use reth_downloaders::{
     bitfinity_evm_client::{BitfinityEvmClient, CertificateCheckSettings, RpcClientConfig},
     bodies::bodies::BodiesDownloaderBuilder,
@@ -20,10 +18,10 @@ use reth_downloaders::{
 use reth_exex::ExExManagerHandle;
 use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_core::{args::BitfinityImportArgs, dirs::ChainPath};
-use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
+use reth_node_ethereum::{consensus::EthBeaconConsensus, EthExecutorProvider, EthereumNode};
 use reth_node_events::node::NodeEvent;
 use reth_primitives::{EthPrimitives, SealedHeader};
-use reth_provider::providers::BlockchainProvider2;
+use reth_provider::providers::BlockchainProvider;
 use reth_provider::{
     BlockHashReader, BlockNumReader, CanonChainTracker, ChainSpecProvider, DatabaseProviderFactory,
     HeaderProvider, ProviderError, ProviderFactory,
@@ -55,7 +53,7 @@ pub struct BitfinityImportCommand {
     provider_factory: ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
 
     blockchain_provider:
-        BlockchainProvider2<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
+        BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
 }
 
 type TypedPipeline = Pipeline<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>;
@@ -68,7 +66,7 @@ impl BitfinityImportCommand {
         chain: Arc<ChainSpec>,
         bitfinity: BitfinityImportArgs,
         provider_factory: ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
-        blockchain_provider: BlockchainProvider2<
+        blockchain_provider: BlockchainProvider<
             NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>,
         >,
     ) -> Self {
@@ -299,19 +297,17 @@ impl BitfinityImportCommand {
         }
     }
 
-    fn build_import_pipeline<C>(
+    fn build_import_pipeline(
         &self,
         config: &Config,
         provider_factory: ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
-        consensus: &Arc<C>,
+        consensus: &Arc<EthBeaconConsensus<ChainSpec>>,
         remote_client: Arc<BitfinityEvmClient>,
         static_file_producer: StaticFileProducer<
             ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
         >,
         max_block: u64,
     ) -> eyre::Result<(TypedPipeline, impl Stream<Item = NodeEvent<EthPrimitives>>)>
-    where
-        C: Consensus + 'static,
     {
         if !remote_client.has_canonical_blocks() {
             eyre::bail!("unable to import non canonical blocks");
@@ -349,6 +345,7 @@ impl BitfinityImportCommand {
                     })
                     .set(ExecutionStage::new(
                         executor,
+                        consensus.clone(),
                         ExecutionStageThresholds {
                             max_blocks: config.stages.execution.max_blocks,
                             max_changes: config.stages.execution.max_changes,
@@ -361,7 +358,6 @@ impl BitfinityImportCommand {
                             .clean_threshold
                             .max(config.stages.account_hashing.clean_threshold)
                             .max(config.stages.storage_hashing.clean_threshold),
-                        config.prune.clone().map(|prune| prune.segments).unwrap_or_default(),
                         ExExManagerHandle::empty(),
                     )),
                 )

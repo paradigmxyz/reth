@@ -27,7 +27,7 @@ use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_ethereum::EthereumNode;
 use reth_primitives::{BlockWithSenders, EthPrimitives, Receipt};
 use reth_provider::{
-    providers::{BlockchainProvider2, StaticFileProvider},
+    providers::{BlockchainProvider, StaticFileProvider},
     BlockNumReader, ExecutionOutcome, ProviderError, ProviderFactory,
 };
 use reth_prune::PruneModes;
@@ -73,7 +73,7 @@ pub struct ImportData {
     /// The provider factory.
     pub provider_factory: ProviderFactory<NodeTypes>,
     /// The blockchain provider.
-    pub blockchain_db: BlockchainProvider2<NodeTypes>,
+    pub blockchain_db: BlockchainProvider<NodeTypes>,
     /// The bitfinity import arguments.
     pub bitfinity_args: BitfinityImportArgs,
 }
@@ -144,7 +144,7 @@ pub async fn bitfinity_import_config_data(
 
     reth_db_common::init::init_genesis(&provider_factory)?;
 
-    let blockchain_db = BlockchainProvider2::new(provider_factory.clone())?;
+    let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;
 
     let bitfinity_args = BitfinityImportArgs {
         rpc_url: evm_datasource_url.to_string(),

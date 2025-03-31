@@ -7585,7 +7585,6 @@ dependencies = [
  "evm-canister-client",
  "eyre",
  "futures",
- "hex",
  "jsonrpsee",
  "lightspeed_scheduler",
  "parking_lot",
