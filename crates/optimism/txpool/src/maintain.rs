@@ -176,8 +176,8 @@ pub async fn maintain_transaction_pool_interop<N, Pool, St>(
                 }
             }
 
+            metrics.set_interop_txs_in_pool(interop_count);
             if !to_revalidate.is_empty() {
-                metrics.set_interop_txs_in_pool(interop_count);
                 metrics.inc_stale_tx_interop(to_revalidate.len());
                 let checks_stream =
                     futures_util::stream::iter(to_revalidate.into_iter().map(|tx| {
