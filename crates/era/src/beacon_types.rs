@@ -1,4 +1,4 @@
-//! Beacon chain specific types for e2store files
+//! Beacon chain specific types for era files
 //!
 //! Contains implementations for compressed beacon chain data structures:
 //! - [`CompressedSignedBeaconBlock`]

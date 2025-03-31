@@ -14,8 +14,10 @@ thiserror.workspace = true
 # alloy
 alloy-primitives.workspace = true
 
-# ssz encoding - decoding
+# compression and decompression
 snap.workspace = true
+
+# ssz encoding and decoding
 ethereum_ssz.workspace = true
 ethereum_ssz_derive.workspace = true
 

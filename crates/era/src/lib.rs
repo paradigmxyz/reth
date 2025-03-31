@@ -1,6 +1,7 @@
-//! Era files are special instances of .e2s files.
+//! Era files support for Ethereum history expiry.
 //!
-//! They have a strict content format optimised for reading and long-term storage and distribution.
+//! Era files are special instances of .e2s files with a strict content format
+//! optimised for reading and long-term storage and distribution.
 //!
 //! See also <https://github.com/status-im/nimbus-eth2/blob/stable/docs/e2store.md.>
 
