@@ -1,7 +1,6 @@
-use super::{
-    handle::ImportHandle,
-    parlia::{ParliaConsensus, ParliaConsensusErr},
-};
+use crate::consensus::{ParliaConsensus, ParliaConsensusErr};
+
+use super::handle::ImportHandle;
 use alloy_rpc_types::engine::{ForkchoiceState, PayloadStatusEnum};
 use futures::{future::Either, stream::FuturesUnordered, StreamExt};
 use reth_engine_primitives::{BeaconConsensusEngineHandle, EngineTypes};
@@ -225,6 +224,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::chainspec::bsc::bsc_mainnet;
+
     use super::*;
     use alloy_primitives::{B256, U128};
     use alloy_rpc_types::engine::PayloadStatus;

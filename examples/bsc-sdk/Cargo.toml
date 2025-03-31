@@ -8,6 +8,8 @@ license.workspace = true
 [dependencies]
 auto_impl.workspace = true
 # reth
+reth.workspace = true
+reth-db.workspace = true
 reth-chainspec.workspace = true
 reth-discv4 = { workspace = true, features = ["test-utils"] }
 reth-engine-primitives.workspace = true
@@ -16,9 +18,11 @@ reth-eth-wire.workspace = true
 reth-eth-wire-types.workspace = true
 reth-evm.workspace = true
 reth-evm-ethereum.workspace = true
+reth-node-core.workspace = true
 reth-revm.workspace = true
 reth-network = { workspace = true, features = ["test-utils"] }
 reth-network-api.workspace = true
+reth-node-ethereum = { workspace = true, features = ["test-utils"] }
 reth-network-peers.workspace = true
 reth-payload-primitives.workspace = true
 reth-primitives.workspace = true
@@ -33,6 +37,8 @@ alloy-consensus.workspace = true
 alloy-chains.workspace = true
 alloy-eips.workspace = true
 alloy-evm.workspace = true
+alloy-json-abi = { version = "0.8.25", default-features = false }
+alloy-dyn-abi = { version = "0.8.25", default-features = false }
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-rpc-types = { workspace = true, features = ["engine"] }
@@ -42,7 +48,9 @@ bytes.workspace = true
 cfg-if = { version = "1.0", default-features = false }
 derive_more.workspace = true
 futures.workspace = true
-once_cell = { version = "1.19", default-features = false, features = ["alloc"] }
+include_dir = { version = "0.7.4" }
+lazy_static = { version = "1.4.0" }
+once_cell = { workspace = true, default-features = false, features = ["alloc"] }
 parity-bytes = { version = "0.1.2", default-features = false }
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"], optional = true }
 serde = { workspace = true, features = ["derive"], optional = true }
@@ -76,8 +84,7 @@ blst = { version = "0.3.13", optional = true }
 # p256verify precompile
 p256 = { version = "0.13.2", optional = true, default-features = false, features = ["ecdsa"] }
 
-[dev-dependencies]
-reth-node-ethereum.workspace = true
+
 
 [features]
 default = ["c-kzg", "secp256k1", "blst", "secp256r1"]
