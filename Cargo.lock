@@ -8008,10 +8008,20 @@ version = "1.3.4"
 dependencies = [
  "clap",
  "eyre",
+ "futures",
  "reth-chainspec",
  "reth-cli",
  "reth-cli-commands",
+ "reth-cli-runner",
+ "reth-db",
  "reth-ethereum-cli",
+ "reth-network",
+ "reth-node-builder",
+ "reth-node-ethereum",
+ "reth-node-metrics",
+ "reth-tracing",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

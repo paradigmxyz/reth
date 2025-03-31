@@ -11,6 +11,8 @@
 /// Chain specification parser.
 pub mod chainspec;
 
+pub mod cli;
+
 #[cfg(test)]
 mod test {
     use clap::Parser;
