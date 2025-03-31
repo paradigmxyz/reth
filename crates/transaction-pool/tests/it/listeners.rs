@@ -66,6 +66,44 @@ async fn txpool_listener_replace_event() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn txpool_listener_queued_event() {
+    let txpool = TestPoolBuilder::default();
+    let mut mock_tx_factory = MockTransactionFactory::default();
+    let transaction = mock_tx_factory.create_eip1559().transaction.inc_nonce();
+
+    let mut all_tx_events = txpool.all_transactions_event_listener();
+
+    let result = txpool
+        .add_transaction_and_subscribe(TransactionOrigin::External, transaction.clone())
+        .await;
+    assert_matches!(result, Ok(_));
+
+    let mut events = result.unwrap();
+    assert_matches!(events.next().await, Some(TransactionEvent::Queued));
+
+    // The listener of all should receive queued event as well.
+    assert_matches!(all_tx_events.next().await, Some(FullTransactionEvent::Queued(hash)) if hash == *transaction.get_hash());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn txpool_listener_invalid_event() {
+    let txpool =
+        TestPoolBuilder::default().with_validator(MockTransactionValidator::return_invalid());
+    let mut mock_tx_factory = MockTransactionFactory::default();
+    let transaction = mock_tx_factory.create_eip1559().transaction;
+
+    let mut all_tx_events = txpool.all_transactions_event_listener();
+
+    let result = txpool
+        .add_transaction_and_subscribe(TransactionOrigin::External, transaction.clone())
+        .await;
+    assert_matches!(result, Err(_));
+
+    // The listener of all should receive invalid event.
+    assert_matches!(all_tx_events.next().await, Some(FullTransactionEvent::Invalid(hash)) if hash == *transaction.get_hash());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn txpool_listener_all() {
     let txpool = TestPoolBuilder::default();
     let mut mock_tx_factory = MockTransactionFactory::default();
