@@ -18,6 +18,7 @@ use revm::{
 use std::ops::{Deref, DerefMut};
 
 mod config;
+mod executor;
 mod factory;
 
 /// OP EVM implementation.
