@@ -75,8 +75,10 @@ impl CursorSubNode {
         &self.full_key
     }
 
-    /// Returns `true` if either no current node is set, or the current node is a child with state
-    /// mask bit set in the parent branch node.
+    /// Returns `true` if either of these:
+    /// - No current node is set.
+    /// - The current node is a parent branch node.
+    /// - The current node is a child with state mask bit set in the parent branch node.
     #[inline]
     pub fn state_flag(&self) -> bool {
         self.node.as_ref().is_none_or(|node| {
@@ -84,8 +86,10 @@ impl CursorSubNode {
         })
     }
 
-    /// Returns `true` if either no current node is set, or the current node is a child with tree
-    /// mask bit set in the parent branch node.
+    /// Returns `true` if either of these:
+    /// - No current node is set.
+    /// - The current node is a parent branch node.
+    /// - The current node is a child with tree mask bit set in the parent branch node.
     #[inline]
     pub fn tree_flag(&self) -> bool {
         self.node.as_ref().is_none_or(|node| {

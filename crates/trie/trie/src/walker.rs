@@ -165,7 +165,7 @@ impl<C: TrieCursor> TrieWalker<C> {
             if !self.can_skip_current_node && self.children_are_in_trie() {
                 trace!(
                     target: "trie::walker",
-                    nibble = ?last.pointer(),
+                    pointer = ?last.pointer(),
                     "cannot skip current node and children are in the trie"
                 );
                 // If we can't skip the current node and the children are in the trie,
