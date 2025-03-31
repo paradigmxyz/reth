@@ -5,9 +5,9 @@ use revm::{
     context::Cfg,
     context_interface::ContextTr,
     handler::{EthPrecompiles, PrecompileProvider},
-    interpreter::InterpreterResult,
+    interpreter::{InputsImpl, InterpreterResult},
     precompile::{bls12_381, kzg_point_evaluation, Precompiles},
-    primitives::{Address, Bytes},
+    primitives::{hardfork::SpecId, Address},
 };
 #[cfg(feature = "secp256r1")]
 use revm::precompile::secp256r1;
@@ -32,7 +32,7 @@ pub struct BscPrecompiles {
 impl BscPrecompiles {
     /// Create a new [`BscPrecompiles`] with the given precompiles.
     pub fn new(precompiles: &'static Precompiles) -> Self {
-        Self { inner: EthPrecompiles { precompiles } }
+        Self { inner: EthPrecompiles { precompiles, spec: SpecId::default() } }
     }
 
     /// Create a new precompile provider with the given bsc spec.
@@ -254,8 +254,9 @@ where
     type Output = InterpreterResult;
 
     #[inline]
-    fn set_spec(&mut self, spec: <CTX::Cfg as Cfg>::Spec) {
+    fn set_spec(&mut self, spec: <CTX::Cfg as Cfg>::Spec) -> bool {
         *self = Self::new_with_spec(spec);
+        true
     }
 
     #[inline]
@@ -263,10 +264,11 @@ where
         &mut self,
         context: &mut CTX,
         address: &Address,
-        bytes: &Bytes,
+        inputs: &InputsImpl,
+        is_static: bool,
         gas_limit: u64,
     ) -> Result<Option<Self::Output>, String> {
-        self.inner.run(context, address, bytes, gas_limit)
+        self.inner.run(context, address, inputs, is_static, gas_limit)
     }
 
     #[inline]
