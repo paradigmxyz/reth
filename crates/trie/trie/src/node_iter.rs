@@ -156,10 +156,15 @@ where
                     );
 
                     // We should get the iterator to return a branch node if we can skip the
-                    // current node, its hashed flag is set, and the tree flag is set.
+                    // current node and the tree flag for the current node is set.
                     //
                     // `can_skip_node` is already set when the hash flag is set, so we don't need
-                    // to check for the hash flag explicitly
+                    // to check for the hash flag explicitly.
+                    //
+                    // It is possible that the branch node at the key `seek_key` is not stored in
+                    // the database, so the walker will advance to the branch node after it. Because
+                    // of this, we need to check that the current walker key has a prefix of the key
+                    // that we seeked to.
                     if can_skip_node &&
                         self.walker.key().is_some_and(|key| key.has_prefix(&seek_prefix)) &&
                         self.walker.children_are_in_trie()
