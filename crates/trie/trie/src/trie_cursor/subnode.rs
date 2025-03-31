@@ -160,18 +160,18 @@ impl CursorSubNode {
         self.update_full_key(old_pointer);
     }
 
-    /// Updates the key by replacing or appending a child nibble based on the old node pointer.
+    /// Updates the full key by replacing or appending a child nibble based on the old node pointer.
     #[inline]
     fn update_full_key(&mut self, old_pointer: NodePointer) {
         if let Some(new_nibble) = self.pointer.as_child() {
             if old_pointer.is_child() {
-                let last_index = self.key.len() - 1;
-                self.key.set_at(last_index, new_nibble);
+                let last_index = self.full_key.len() - 1;
+                self.full_key.set_at(last_index, new_nibble);
             } else {
-                self.key.push(new_nibble);
+                self.full_key.push(new_nibble);
             }
         } else if old_pointer.is_child() {
-            self.key.pop();
+            self.full_key.pop();
         }
     }
 }
