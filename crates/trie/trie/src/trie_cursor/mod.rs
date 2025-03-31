@@ -15,7 +15,10 @@ pub mod noop;
 #[cfg(test)]
 pub mod mock;
 
-pub use self::{in_memory::*, subnode::CursorSubNode};
+pub use self::{
+    in_memory::*,
+    subnode::{CursorSubNode, Nibble},
+};
 
 /// Factory for creating trie cursors.
 #[auto_impl::auto_impl(&)]

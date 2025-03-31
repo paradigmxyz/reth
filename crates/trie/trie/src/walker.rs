@@ -1,6 +1,6 @@
 use crate::{
     prefix_set::PrefixSet,
-    trie_cursor::{CursorSubNode, TrieCursor},
+    trie_cursor::{CursorSubNode, Nibble, TrieCursor},
     BranchNodeCompact, Nibbles,
 };
 use alloy_primitives::{map::HashSet, B256};
@@ -171,8 +171,8 @@ impl<C: TrieCursor> TrieWalker<C> {
                 // If we can't skip the current node and the children are in the trie,
                 // either consume the next node or move to the next sibling.
                 match last.nibble() {
-                    -1 => self.move_to_next_sibling(true)?,
-                    _ => self.consume_node()?,
+                    Nibble::Parent => self.move_to_next_sibling(true)?,
+                    Nibble::Child(_) => self.consume_node()?,
                 }
             } else {
                 trace!(target: "trie::walker", "can skip current node");
@@ -212,7 +212,7 @@ impl<C: TrieCursor> TrieWalker<C> {
         // We need to sync the stack with the trie structure when consuming a new node. This is
         // necessary for proper traversal and accurately representing the trie in the stack.
         if !key.is_empty() && !self.stack.is_empty() {
-            self.stack[0].set_nibble(key[0] as i8);
+            self.stack[0].set_nibble(key[0]);
         }
 
         // The current tree mask might have been set incorrectly.
@@ -236,7 +236,7 @@ impl<C: TrieCursor> TrieWalker<C> {
 
         // Delete the current node if it's included in the prefix set or it doesn't contain the root
         // hash.
-        if !self.can_skip_current_node || nibble != -1 {
+        if !self.can_skip_current_node || nibble.is_child() {
             if let Some((keys, key)) = self.removed_keys.as_mut().zip(self.cursor.current()?) {
                 keys.insert(key);
             }
@@ -255,7 +255,9 @@ impl<C: TrieCursor> TrieWalker<C> {
 
         // Check if the walker needs to backtrack to the previous level in the trie during its
         // traversal.
-        if subnode.nibble() >= 0xf || (subnode.nibble() < 0 && !allow_root_to_child_nibble) {
+        if subnode.nibble().as_child().is_some_and(|nibble| nibble >= 0xf) ||
+            (subnode.nibble().is_parent() && !allow_root_to_child_nibble)
+        {
             self.stack.pop();
             self.move_to_next_sibling(false)?;
             return Ok(())
@@ -271,11 +273,11 @@ impl<C: TrieCursor> TrieWalker<C> {
         loop {
             let nibble = subnode.nibble();
             if subnode.state_flag() {
-                trace!(target: "trie::walker", nibble, "found next sibling with state");
+                trace!(target: "trie::walker", ?nibble, "found next sibling with state");
                 return Ok(())
             }
-            if nibble == 0xf {
-                trace!(target: "trie::walker", nibble, "checked all siblings");
+            if nibble.as_child() == Some(0xf) {
+                trace!(target: "trie::walker", ?nibble, "checked all siblings");
                 break
             }
             subnode.inc_nibble();
