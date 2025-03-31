@@ -255,7 +255,7 @@ impl<C: TrieCursor> TrieWalker<C> {
 
         // Check if the walker needs to backtrack to the previous level in the trie during its
         // traversal.
-        if subnode.pointer().is_out_of_bounds() ||
+        if subnode.pointer().is_last_child() ||
             (subnode.pointer().is_parent() && !allow_root_to_child_nibble)
         {
             self.stack.pop();
@@ -276,7 +276,7 @@ impl<C: TrieCursor> TrieWalker<C> {
                 trace!(target: "trie::walker", ?nibble, "found next sibling with state");
                 return Ok(())
             }
-            if nibble.is_out_of_bounds() {
+            if nibble.is_last_child() {
                 trace!(target: "trie::walker", ?nibble, "checked all siblings");
                 break
             }

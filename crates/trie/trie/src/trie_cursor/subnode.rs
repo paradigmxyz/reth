@@ -177,9 +177,9 @@ impl NodePointer {
         }
     }
 
-    /// Returns `true` if the pointer is set to a child node that is out of bounds (i.e. greater
-    /// than 0xf).
-    pub fn is_out_of_bounds(&self) -> bool {
+    /// Returns `true` if the pointer is set to a last child nibble (i.e. greater than or equal to
+    /// 0xf).
+    pub fn is_last_child(&self) -> bool {
         match self {
             Self::ParentBranch => false,
             Self::Child(nibble) => *nibble >= 0xf,
@@ -225,8 +225,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn node_pointer() {
-        let pointers = [
+    fn node_pointer_ord() {
+        assert!([
             NodePointer::ParentBranch,
             NodePointer::Child(0),
             NodePointer::Child(1),
@@ -244,10 +244,33 @@ mod tests {
             NodePointer::Child(13),
             NodePointer::Child(14),
             NodePointer::Child(15),
-        ];
-        assert!(pointers.is_sorted());
-        assert!(pointers.iter().all(|pointer| !pointer.is_out_of_bounds()));
+        ]
+        .is_sorted());
+    }
 
-        assert!(NodePointer::Child(16).is_out_of_bounds());
+    #[test]
+    fn node_pointer_is_last_child() {
+        assert!([
+            NodePointer::ParentBranch,
+            NodePointer::Child(0),
+            NodePointer::Child(1),
+            NodePointer::Child(2),
+            NodePointer::Child(3),
+            NodePointer::Child(4),
+            NodePointer::Child(5),
+            NodePointer::Child(6),
+            NodePointer::Child(7),
+            NodePointer::Child(8),
+            NodePointer::Child(9),
+            NodePointer::Child(10),
+            NodePointer::Child(11),
+            NodePointer::Child(12),
+            NodePointer::Child(13),
+            NodePointer::Child(14),
+        ]
+        .iter()
+        .all(|pointer| !pointer.is_last_child()));
+        assert!(NodePointer::Child(15).is_last_child());
+        assert!(NodePointer::Child(16).is_last_child());
     }
 }
