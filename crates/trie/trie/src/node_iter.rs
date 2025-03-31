@@ -140,19 +140,15 @@ where
                         target: "trie::node_iter",
                         ?seek_key,
                         can_skip_current_node = self.walker.can_skip_current_node,
+                        last = ?self.walker.stack.last(),
                         "seeking to the next unprocessed hashed entry"
                     );
                     let can_skip_node = self.walker.can_skip_current_node;
-                    trace!(
-                        target: "trie::node_iter",
-                        last = ?self.walker.stack.last(),
-                        "before walker advance"
-                    );
                     self.walker.advance()?;
                     trace!(
                         target: "trie::node_iter",
                         last = ?self.walker.stack.last(),
-                        "after walker advance"
+                        "advanced walker"
                     );
 
                     // We should get the iterator to return a branch node if we can skip the
@@ -176,7 +172,7 @@ where
                             "skipping hashed seek"
                         );
 
-                        self.current_walker_key_checked = false;
+                        self.should_check_walker_key = false;
                         continue
                     }
 
