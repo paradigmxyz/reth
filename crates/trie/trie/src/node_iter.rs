@@ -131,7 +131,7 @@ where
                 None => {
                     // Get the seek key and set the current hashed entry based on walker's next
                     // unprocessed key
-                    let seek_key = match self.walker.next_unprocessed_key() {
+                    let (seek_prefix, seek_key) = match self.walker.next_unprocessed_key() {
                         Some(key) => key,
                         None => break, // no more keys
                     };
@@ -160,7 +160,10 @@ where
                     //
                     // `can_skip_node` is already set when the hash flag is set, so we don't need
                     // to check for the hash flag explicitly
-                    if can_skip_node && self.walker.children_are_in_trie() {
+                    if can_skip_node &&
+                        self.walker.key().is_some_and(|key| key.has_prefix(&seek_prefix)) &&
+                        self.walker.children_are_in_trie()
+                    {
                         trace!(
                             target: "trie::node_iter",
                             ?seek_key,
