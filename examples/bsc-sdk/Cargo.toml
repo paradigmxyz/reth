@@ -64,7 +64,7 @@ prost = { version = "0.12.6" }
 tendermint = { git = "https://github.com/bnb-chain/tendermint-rs-parlia", rev = "8c21ccbd58a174e07eed2c9343e63ccd00f0fbd5", features = ["secp256k1"] }
 
 # KZG point evaluation precompile
-c-kzg = { version = "1.0.3", default-features = false, optional = true, features = ["ethereum_kzg_settings"] }
+c-kzg = { workspace = true, optional = true, features = ["ethereum_kzg_settings"] }
 
 # Optionally use `kzg-rs` for a pure Rust implementation of KZG point evaluation.
 kzg-rs = { version = "0.2.3", default-features = false, optional = true }

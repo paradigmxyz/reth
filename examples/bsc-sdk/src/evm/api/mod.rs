@@ -1,14 +1,14 @@
 use super::precompiles::BscPrecompiles;
 use revm::{
+    Inspector,
     context::{ContextSetters, Evm as EvmCtx, EvmData},
     context_interface::ContextTr,
     handler::{
+        EvmTr, PrecompileProvider,
         instructions::{EthInstructions, InstructionProvider},
-        EvmTr,
     },
     inspector::{InspectorEvmTr, JournalExt},
-    interpreter::{interpreter::EthInterpreter, Interpreter, InterpreterAction, InterpreterTypes},
-    Inspector,
+    interpreter::{Interpreter, InterpreterAction, InterpreterTypes, interpreter::EthInterpreter},
 };
 
 pub mod builder;
@@ -35,10 +35,11 @@ impl<CTX, INSP, I, P> InspectorEvmTr for BscEvmInner<CTX, INSP, I, P>
 where
     CTX: ContextTr<Journal: JournalExt> + ContextSetters,
     I: InstructionProvider<
-        Context = CTX,
-        InterpreterTypes: InterpreterTypes<Output = InterpreterAction>,
-    >,
+            Context = CTX,
+            InterpreterTypes: InterpreterTypes<Output = InterpreterAction>,
+        >,
     INSP: Inspector<CTX, I::InterpreterTypes>,
+    P: PrecompileProvider<CTX>,
 {
     type Inspector = INSP;
 
@@ -65,9 +66,10 @@ impl<CTX, INSP, I, P> EvmTr for BscEvmInner<CTX, INSP, I, P>
 where
     CTX: ContextTr,
     I: InstructionProvider<
-        Context = CTX,
-        InterpreterTypes: InterpreterTypes<Output = InterpreterAction>,
-    >,
+            Context = CTX,
+            InterpreterTypes: InterpreterTypes<Output = InterpreterAction>,
+        >,
+    P: PrecompileProvider<CTX>,
 {
     type Context = CTX;
     type Instructions = I;
@@ -106,8 +108,8 @@ where
 mod test {
     use super::{builder::BscBuilder, ctx::DefaultBsc};
     use revm::{
-        inspector::{InspectEvm, NoOpInspector},
         Context, ExecuteEvm,
+        inspector::{InspectEvm, NoOpInspector},
     };
 
     #[test]
