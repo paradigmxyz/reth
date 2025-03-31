@@ -62,12 +62,12 @@ serde.workspace = true
 eyre.workspace = true
 
 # rpc
-serde_json.workspace = true
 
 # test-utils dependencies
 reth-e2e-test-utils = { workspace = true, optional = true }
 alloy-genesis = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-optimism-node = { workspace = true, features = ["test-utils"] }
@@ -103,6 +103,7 @@ test-utils = [
     "reth-e2e-test-utils",
     "alloy-genesis",
     "tokio",
+    "serde_json",
     "reth-node-builder/test-utils",
     "reth-chainspec/test-utils",
     "reth-consensus/test-utils",
