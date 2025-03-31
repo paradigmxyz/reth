@@ -6,8 +6,7 @@ use ethereum_json_rpc_client::{Client, EthJsonRpcClient};
 use eyre::{eyre, Ok};
 use reth_chain_state::MemoryOverlayStateProvider;
 use reth_evm::{
-    env::EvmEnv,
-    execute::{BasicBlockExecutor, BlockExecutor, BlockExecutorProvider, Executor},
+    execute::{BasicBlockExecutor, BlockExecutorProvider, Executor},
     ConfigureEvm, Evm,
 };
 use reth_evm_ethereum::{
@@ -222,11 +221,11 @@ where
             .with_bundle_update()
             .build();
 
-        let chain_spec = self.provider_factory.chain_spec();
-        let evm_config = EthEvmConfig::new(chain_spec);
+        // let chain_spec = self.provider_factory.chain_spec();
+        // let evm_config = EthEvmConfig::new(chain_spec);
 
-        let EvmEnv { cfg_env, block_env } =
-            evm_config.evm_env(&block.header);
+        // let EvmEnv { cfg_env, block_env } =
+        //     evm_config.evm_env(&block.header);
 
         let base_fee = block.base_fee_per_gas.map(Into::into);
 
@@ -262,9 +261,12 @@ where
                 target: "bitfinity_block_confirmation::BitfinityBlockConfirmation",
                 "Setting up EVM for PoW transaction execution"
             );
+            let chain_spec = self.provider_factory.chain_spec();
+            let evm_config = EthEvmConfig::new(chain_spec);
+            let evm_env = evm_config.evm_env(&block.header);
             let mut evm = evm_config.evm_with_env(
                 &mut state,
-                EnvWithHandlerCfg::new_with_cfg_env(cfg_env_with_handler_cfg, block_env, tx),
+                evm_env,
             );
 
             debug!(
@@ -320,7 +322,7 @@ where
 #[cfg(test)]
 mod tests {
 
-    use alloy_consensus::{Block, BlockHeader, Header, SignableTransaction, TxEip2930};
+    use alloy_consensus::{BlockHeader, Header, SignableTransaction, TxEip2930};
     use alloy_genesis::{Genesis, GenesisAccount};
 
     use alloy_network::TxSignerSync;
@@ -346,7 +348,7 @@ mod tests {
 
     use reth_node_types::{AnyNodeTypesWithEngine, FullNodePrimitives, NodeTypesWithDBAdapter};
     use reth_primitives::{
-        BlockBody, BlockExt, EthPrimitives, Receipt, SealedRecoveredBlock, TransactionSigned,
+        Block, BlockBody, EthPrimitives, Receipt, TransactionSigned
     };
     use reth_provider::{
         test_utils::create_test_provider_factory_with_chain_spec, BlockExecutionOutput,
@@ -394,7 +396,7 @@ mod tests {
         provider_factory: &ProviderFactory<DB>,
         gas_used: u64,
         transactions: Vec<TransactionSigned>,
-    ) -> eyre::Result<RecoveredBlock>
+    ) -> eyre::Result<RecoveredBlock<Block>>
     where
         DB: NodeTypesWithDB<ChainSpec = reth_chainspec::ChainSpec> + ProviderNodeTypes + Clone,
     {
@@ -425,7 +427,7 @@ mod tests {
             },
             body: BlockBody { transactions, ..Default::default() },
         }
-        .with_recovered_senders()
+        .try_into_recovered()
         .expect("failed to recover senders");
 
         Ok(block)
@@ -436,7 +438,7 @@ mod tests {
         block_number: u64,
         parent_hash: did::H256,
         provider_factory: &ProviderFactory<DB>,
-    ) -> eyre::Result<RecoveredBlock>
+    ) -> eyre::Result<RecoveredBlock<Block>>
     where
         DB: NodeTypesWithDB<ChainSpec = reth_chainspec::ChainSpec> + ProviderNodeTypes + Clone,
     {
@@ -449,7 +451,7 @@ mod tests {
         parent_hash: did::H256,
         provider_factory: &ProviderFactory<DB>,
         nonce: u64,
-    ) -> eyre::Result<RecoveredBlock>
+    ) -> eyre::Result<RecoveredBlock<Block>>
     where
         DB: NodeTypesWithDB<ChainSpec = reth_chainspec::ChainSpec> + ProviderNodeTypes + Clone,
     {
@@ -481,7 +483,7 @@ mod tests {
     ) -> ExecutionOutcome {
         ExecutionOutcome {
             bundle: block_execution_output.state.clone(),
-            receipts: block_execution_output.receipts.clone().into(),
+            receipts: vec![block_execution_output.receipts.clone()],
             first_block: block_number,
             requests: vec![block_execution_output.requests.clone()],
         }
@@ -491,7 +493,7 @@ mod tests {
     fn execute_block_and_commit_to_database<N>(
         provider_factory: &ProviderFactory<N>,
         chain_spec: Arc<ChainSpec>,
-        block: &RecoveredBlock,
+        block: &RecoveredBlock<Block>,
     ) -> eyre::Result<BlockExecutionOutput<Receipt>>
     where
         N: ProviderNodeTypes<
@@ -511,7 +513,7 @@ mod tests {
         block_execution_output.state.reverts.sort();
 
         // Convert the block execution output to an execution outcome for committing to the database
-        let execution_outcome = to_execution_outcome(block.number, &block_execution_output);
+        let execution_outcome = to_execution_outcome(block.number(), &block_execution_output);
 
         let hashed_post_state = provider_factory.hashed_post_state(execution_outcome.state());
 
@@ -527,7 +529,7 @@ mod tests {
         let block = block.clone().seal_slow();
         provider_rw.append_blocks_with_state(
             vec![block],
-            execution_outcome,
+            &execution_outcome,
             hashed_state_sorted,
             trie_updates,
         )?;
