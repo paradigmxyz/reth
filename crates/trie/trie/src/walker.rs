@@ -1,6 +1,6 @@
 use crate::{
     prefix_set::PrefixSet,
-    trie_cursor::{CursorSubNode, Nibble, TrieCursor},
+    trie_cursor::{subnode::NodePointer, CursorSubNode, TrieCursor},
     BranchNodeCompact, Nibbles,
 };
 use alloy_primitives::{map::HashSet, B256};
@@ -165,14 +165,14 @@ impl<C: TrieCursor> TrieWalker<C> {
             if !self.can_skip_current_node && self.children_are_in_trie() {
                 trace!(
                     target: "trie::walker",
-                    nibble = ?last.nibble(),
+                    nibble = ?last.pointer(),
                     "cannot skip current node and children are in the trie"
                 );
                 // If we can't skip the current node and the children are in the trie,
                 // either consume the next node or move to the next sibling.
-                match last.nibble() {
-                    Nibble::Parent => self.move_to_next_sibling(true)?,
-                    Nibble::Child(_) => self.consume_node()?,
+                match last.pointer() {
+                    NodePointer::ParentBranch => self.move_to_next_sibling(true)?,
+                    NodePointer::Child(_) => self.consume_node()?,
                 }
             } else {
                 trace!(target: "trie::walker", "can skip current node");
@@ -212,7 +212,7 @@ impl<C: TrieCursor> TrieWalker<C> {
         // We need to sync the stack with the trie structure when consuming a new node. This is
         // necessary for proper traversal and accurately representing the trie in the stack.
         if !key.is_empty() && !self.stack.is_empty() {
-            self.stack[0].set_nibble(key[0]);
+            self.stack[0].set_next_node_nibble(key[0]);
         }
 
         // The current tree mask might have been set incorrectly.
@@ -230,7 +230,7 @@ impl<C: TrieCursor> TrieWalker<C> {
 
         // Create a new CursorSubNode and push it to the stack.
         let subnode = CursorSubNode::new(key, Some(node));
-        let nibble = subnode.nibble();
+        let nibble = subnode.pointer();
         self.stack.push(subnode);
         self.update_skip_node();
 
@@ -255,8 +255,8 @@ impl<C: TrieCursor> TrieWalker<C> {
 
         // Check if the walker needs to backtrack to the previous level in the trie during its
         // traversal.
-        if subnode.nibble().as_child().is_some_and(|nibble| nibble >= 0xf) ||
-            (subnode.nibble().is_parent() && !allow_root_to_child_nibble)
+        if subnode.pointer().as_child().is_some_and(|nibble| nibble >= 0xf) ||
+            (subnode.pointer().is_parent() && !allow_root_to_child_nibble)
         {
             self.stack.pop();
             self.move_to_next_sibling(false)?;
@@ -271,7 +271,7 @@ impl<C: TrieCursor> TrieWalker<C> {
 
         // Find the next sibling with state.
         loop {
-            let nibble = subnode.nibble();
+            let nibble = subnode.pointer();
             if subnode.state_flag() {
                 trace!(target: "trie::walker", ?nibble, "found next sibling with state");
                 return Ok(())
