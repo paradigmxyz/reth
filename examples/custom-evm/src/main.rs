@@ -2,9 +2,11 @@
 
 #![warn(unused_crate_dependencies)]
 
+use alloy_consensus::{SignableTransaction, Signed, TxLegacy};
 use alloy_evm::{eth::EthEvmContext, Evm, EvmFactory};
 use alloy_genesis::Genesis;
-use alloy_primitives::{address, Address, Bytes};
+use alloy_primitives::{address, Address, Bytes, Signature, TxHash};
+use derive_more::{AsRef, Deref};
 use reth::{
     builder::{
         components::{BasicPayloadServiceBuilder, ExecutorBuilder, PayloadBuilderBuilder},
@@ -24,7 +26,7 @@ use reth::{
         primitives::hardfork::SpecId,
         MainBuilder, MainContext,
     },
-    rpc::types::engine::PayloadAttributes,
+    rpc::types::{engine::PayloadAttributes, Block},
     tasks::TaskManager,
     transaction_pool::{PoolTransaction, TransactionPool},
 };
@@ -37,10 +39,47 @@ use reth_node_ethereum::{
     node::{EthereumAddOns, EthereumPayloadBuilder},
     BasicBlockExecutorProvider, EthereumNode,
 };
-use reth_primitives::{EthPrimitives, TransactionSigned};
+use reth_primitives::{
+    recover_signer_unchecked, transaction::recover_signer, BlockBody, EthPrimitives,
+    TransactionSigned,
+};
+use reth_primitives_traits::{transaction::signed::RecoveryError, BlockHeader, SignedTransaction};
 use reth_tracing::{RethTracer, Tracer};
 use std::sync::OnceLock;
 
+impl SignedTransaction for Signed<TxLegacy> {
+    fn tx_hash(&self) -> &TxHash {
+        self.hash()
+    }
+
+    fn signature(&self) -> &Signature {
+        self.signature()
+    }
+
+    fn recover_signer(&self) -> Result<Address, RecoveryError> {
+        self.recover_signer()
+    }
+
+    fn recover_signer_unchecked_with_buf(
+        &self,
+        buf: &mut Vec<u8>,
+    ) -> Result<Address, RecoveryError> {
+        self.rlp_encode(buf);
+        let signature_hash = keccak256(buf);
+        recover_signer_unchecked(&self.signature(), signature_hash)
+    }
+}
+
+#[derive(Debug)]
+pub struct SeismicPrimitive;
+
+impl reth_primitives_traits::NodePrimitives for SeismicPrimitive {
+    type Block = alloy_consensus::Block<Signed<TxLegacy>>;
+    type BlockHeader = alloy_consensus::Header;
+    type BlockBody = alloy_consensus::BlockBody<Signed<TxLegacy>>;
+    type SignedTx = Signed<TxLegacy>;
+    type Receipt = reth_ethereum_primitives::Receipt;
+}
 pub struct SeismicEvm<DB: Database, I, PRECOMPILE = EthPrecompiles> {
     inner: EthEvm<DB, I, PRECOMPILE>,
 }

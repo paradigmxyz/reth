@@ -17,9 +17,13 @@ reth-node-ethereum = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
 reth-evm.workspace = true
 reth-primitives-traits.workspace = true
+reth-ethereum-primitives.workspace = true
+alloy-consensus.workspace = true
 alloy-evm.workspace = true
 alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 
 eyre.workspace = true
 tokio.workspace = true
+
+derive_more = { workspace = true, features = ["deref", "from", "into", "constructor"] }

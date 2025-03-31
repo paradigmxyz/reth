@@ -3224,13 +3224,16 @@ dependencies = [
 name = "example-custom-evm"
 version = "0.0.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",
+ "derive_more 2.0.1",
  "eyre",
  "reth",
  "reth-chainspec",
  "reth-ethereum-payload-builder",
+ "reth-ethereum-primitives",
  "reth-evm",
  "reth-evm-ethereum",
  "reth-node-api",
