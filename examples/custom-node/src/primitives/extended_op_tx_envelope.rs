@@ -5,7 +5,7 @@ use alloy_eips::{
     eip7702::SignedAuthorization,
     Decodable2718, Encodable2718, Typed2718,
 };
-use alloy_primitives::{ChainId, PrimitiveSignature, TxHash};
+use alloy_primitives::{ChainId, TxHash};
 use alloy_rlp::{BufMut, Decodable, Encodable, Result as RlpResult};
 use op_alloy_consensus::{OpTxEnvelope, OpTxType};
 use reth_codecs::Compact;
@@ -149,10 +149,6 @@ where
             },
             Self::Other(tx) => tx.tx_hash(),
         }
-    }
-
-    fn signature(&self) -> &PrimitiveSignature {
-        delegate!(self => tx.signature())
     }
 }
 
