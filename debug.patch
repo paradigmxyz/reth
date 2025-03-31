@@ -1,0 +1,207 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 5b4ccbd7e..3702e0349 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -731,8 +731,6 @@ dependencies = [
+ [[package]]
+ name = "alloy-trie"
+ version = "0.5.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "398a977d774db13446b8cead8cfa9517aebf9e03fc8a1512892dc1e03e70bb04"
+ dependencies = [
+  "alloy-primitives",
+  "alloy-rlp",
+diff --git a/Cargo.toml b/Cargo.toml
+index 5d33234cd..f07ff3e45 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -420,7 +420,7 @@ alloy-dyn-abi = "0.8.0"
+ alloy-primitives = { version = "0.8.0", default-features = false }
+ alloy-rlp = "0.3.4"
+ alloy-sol-types = "0.8.0"
+-alloy-trie = { version = "0.5", default-features = false }
++alloy-trie = { default-features = false, path = "/Users/phe/repos/trie" }
+ 
+ alloy-consensus = { version = "0.3.5", default-features = false }
+ alloy-eips = { version = "0.3.5", default-features = false }
+diff --git a/crates/storage/provider/src/test_utils/mod.rs b/crates/storage/provider/src/test_utils/mod.rs
+index e2d7e6d77..b037783cf 100644
+--- a/crates/storage/provider/src/test_utils/mod.rs
++++ b/crates/storage/provider/src/test_utils/mod.rs
+@@ -40,7 +40,7 @@ pub fn create_test_provider_factory_with_chain_spec(
+     chain_spec: Arc<ChainSpec>,
+ ) -> ProviderFactory<MockNodeTypesWithDB> {
+     let (static_dir, _) = create_test_static_files_dir();
+-    let db = create_test_rw_db();
++    let db: Arc<TempDatabase<DatabaseEnv>> = create_test_rw_db();
+     ProviderFactory::new(
+         db,
+         chain_spec,
+diff --git a/crates/trie/db/src/trie_cursor.rs b/crates/trie/db/src/trie_cursor.rs
+index 124b8ccb2..ee79abeef 100644
+--- a/crates/trie/db/src/trie_cursor.rs
++++ b/crates/trie/db/src/trie_cursor.rs
+@@ -137,6 +137,8 @@ where
+         storage_updates.extend(
+             updates.storage_nodes_ref().iter().map(|(nibbles, node)| (nibbles, Some(node))),
+         );
++        println!("write_storage_trie_updates updates: {updates:?}");
++        println!("write_storage_trie_updates storage_updates: {storage_updates:?}");
+ 
+         // Sort trie node updates.
+         storage_updates.sort_unstable_by(|a, b| a.0.cmp(b.0));
+@@ -145,6 +147,7 @@ where
+         for (nibbles, maybe_updated) in storage_updates.into_iter().filter(|(n, _)| !n.is_empty()) {
+             num_entries += 1;
+             let nibbles = StoredNibblesSubKey(nibbles.clone());
++            println!("write_storage_trie_updates iterating through storage updates nibbles: {nibbles:?}");
+             // Delete the old entry if it exists.
+             if self
+                 .cursor
+diff --git a/crates/trie/db/tests/trie.rs b/crates/trie/db/tests/trie.rs
+index a6983dc4e..fc1d4fd9c 100644
+--- a/crates/trie/db/tests/trie.rs
++++ b/crates/trie/db/tests/trie.rs
+@@ -57,6 +57,13 @@ fn incremental_vs_full_root(inputs: &[&str], modified: &str) {
+     let tx = factory.provider_rw().unwrap();
+     let hashed_address = B256::with_last_byte(1);
+ 
++    let mut storage_trie_DB_Debug = tx.table::<tables::StoragesTrie>().unwrap();
++    let mut hashed_storage_DB_Debug = tx.table::<tables::HashedStorages>().unwrap();
++    println!("-1");
++    println!("incremental_vs_full_root storage_trie_DB_Debug: {storage_trie_DB_Debug:?}");
++    println!("incremental_vs_full_root hashed_storage_DB_Debug: {hashed_storage_DB_Debug:?}");
++
++
+     let mut hashed_storage_cursor =
+         tx.tx_ref().cursor_dup_write::<tables::HashedStorages>().unwrap();
+     let data = inputs.iter().map(|x| B256::from_str(x).unwrap());
+@@ -64,11 +71,27 @@ fn incremental_vs_full_root(inputs: &[&str], modified: &str) {
+     for key in data {
+         hashed_storage_cursor.upsert(hashed_address, StorageEntry { key, value }).unwrap();
+     }
++    // DEBUG : storageTrie tables are both udpated
++
++    let mut storage_trie_DB_Debug = tx.table::<tables::StoragesTrie>().unwrap();
++    let mut hashed_storage_DB_Debug = tx.table::<tables::HashedStorages>().unwrap();
++    println!("0");
++    println!("incremental_vs_full_root storage_trie_DB_Debug: {storage_trie_DB_Debug:?}");
++    println!("incremental_vs_full_root hashed_storage_DB_Debug: {hashed_storage_DB_Debug:?}");
+ 
+     // Generate the intermediate nodes on the receiving end of the channel
+     let (_, _, trie_updates) =
+         StorageRoot::from_tx_hashed(tx.tx_ref(), hashed_address).root_with_updates().unwrap();
+ 
++    println!("incremental_vs_full_root trie_updates: {trie_updates:?}");
++
++    let mut storage_trie_DB_Debug = tx.table::<tables::StoragesTrie>().unwrap();
++    let mut hashed_storage_DB_Debug = tx.table::<tables::HashedStorages>().unwrap();
++    println!("1");
++    println!("incremental_vs_full_root storage_trie_DB_Debug: {storage_trie_DB_Debug:?}");
++    println!("incremental_vs_full_root hashed_storage_DB_Debug: {hashed_storage_DB_Debug:?}");
++
++
+     // 1. Some state transition happens, update the hashed storage to the new value
+     let modified_key = B256::from_str(modified).unwrap();
+     let value = U256::from(1);
+@@ -78,13 +101,34 @@ fn incremental_vs_full_root(inputs: &[&str], modified: &str) {
+     hashed_storage_cursor
+         .upsert(hashed_address, StorageEntry { key: modified_key, value })
+         .unwrap();
++    // DEBUG : storageTrie tables are both udpated with one of the key value being ONE
++    let mut storage_trie_DB_Debug = tx.table::<tables::StoragesTrie>().unwrap();
++    let mut hashed_storage_DB_Debug = tx.table::<tables::HashedStorages>().unwrap();
++    println!("2");
++    println!("incremental_vs_full_root storage_trie_DB_Debug: {storage_trie_DB_Debug:?}");
++    println!("incremental_vs_full_root hashed_storage_DB_Debug: {hashed_storage_DB_Debug:?}");
++
+ 
+     // 2. Calculate full merkle root
+     let loader = StorageRoot::from_tx_hashed(tx.tx_ref(), hashed_address);
+     let modified_root = loader.root().unwrap();
+ 
++    let mut storage_trie_DB_Debug = tx.table::<tables::StoragesTrie>().unwrap();
++    let mut hashed_storage_DB_Debug = tx.table::<tables::HashedStorages>().unwrap();
++    println!("3");
++    println!("incremental_vs_full_root storage_trie_DB_Debug: {storage_trie_DB_Debug:?}");
++    println!("incremental_vs_full_root hashed_storage_DB_Debug: {hashed_storage_DB_Debug:?}");
++
++
+     // Update the intermediate roots table so that we can run the incremental verification
+     tx.write_individual_storage_trie_updates(hashed_address, &trie_updates).unwrap();
++    // DEBUG : storageTrie tables are both updated with 
++
++    let mut storage_trie_DB_Debug = tx.table::<tables::StoragesTrie>().unwrap();
++    let mut hashed_storage_DB_Debug = tx.table::<tables::HashedStorages>().unwrap();
++    println!("4");
++    println!("incremental_vs_full_root storage_trie_DB_Debug: {storage_trie_DB_Debug:?}");
++    println!("incremental_vs_full_root hashed_storage_DB_Debug: {hashed_storage_DB_Debug:?}");
+ 
+     // 3. Calculate the incremental root
+     let mut storage_changes = PrefixSetMut::default();
+@@ -93,6 +137,12 @@ fn incremental_vs_full_root(inputs: &[&str], modified: &str) {
+         .with_prefix_set(storage_changes.freeze());
+     let incremental_root = loader.root().unwrap();
+ 
++    let mut storage_trie_DB_Debug = tx.table::<tables::StoragesTrie>().unwrap();
++    let mut hashed_storage_DB_Debug = tx.table::<tables::HashedStorages>().unwrap();
++    println!("5");
++    println!("incremental_vs_full_root storage_trie_DB_Debug: {storage_trie_DB_Debug:?}");
++    println!("incremental_vs_full_root hashed_storage_DB_Debug: {hashed_storage_DB_Debug:?}");
++
+     assert_eq!(modified_root, incremental_root);
+ }
+ 
+diff --git a/crates/trie/trie/src/trie.rs b/crates/trie/trie/src/trie.rs
+index b8aa133d6..0be34f8bb 100644
+--- a/crates/trie/trie/src/trie.rs
++++ b/crates/trie/trie/src/trie.rs
+@@ -158,7 +158,7 @@ where
+         let hashed_account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
+         let (mut hash_builder, mut account_node_iter) = match self.previous_state {
+             Some(state) => {
+-                let hash_builder = state.hash_builder.with_updates(retain_updates);
++                let hash_builder: HashBuilder = state.hash_builder.with_updates(retain_updates);
+                 let walker = TrieWalker::from_stack(
+                     trie_cursor,
+                     state.walker_stack,
+@@ -412,16 +412,18 @@ where
+         let walker =
+             TrieWalker::new(trie_cursor, self.prefix_set).with_deletions_retained(retain_updates);
+ 
+-        let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
++        let mut hash_builder: HashBuilder = HashBuilder::default().with_updates(retain_updates);
+ 
+         let mut storage_node_iter = TrieNodeIter::new(walker, hashed_storage_cursor);
+         while let Some(node) = storage_node_iter.try_next()? {
++            println!("calculate current node trie element: {node:?}");
+             match node {
+                 TrieElement::Branch(node) => {
+                     tracker.inc_branch();
+                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
+                 }
+                 TrieElement::Leaf(hashed_slot, value) => {
++                    println!("add_leaf hashed_slot : {} value : {:?}", hashed_slot, alloy_rlp::encode_fixed_size(&value).as_ref());
+                     tracker.inc_leaf();
+                     hash_builder.add_leaf(
+                         Nibbles::unpack(hashed_slot),
+@@ -429,6 +431,7 @@ where
+                     );
+                 }
+             }
++            println!("calculate updated_notes: {:?}", hash_builder.updated_branch_nodes);
+         }
+ 
+         let root = hash_builder.root();
+diff --git a/crates/trie/trie/src/updates.rs b/crates/trie/trie/src/updates.rs
+index 9cb42fd68..aa0b850fc 100644
+--- a/crates/trie/trie/src/updates.rs
++++ b/crates/trie/trie/src/updates.rs
+@@ -201,6 +201,7 @@ impl StorageTrieUpdates {
+ 
+         // Retrieve updated nodes from hash builder.
+         let (_, updated_nodes) = hash_builder.split();
++        println!("finalizing updated_notes: {updated_nodes:?}");
+         self.storage_nodes.extend(exclude_empty_from_pair(updated_nodes));
+     }
+ 
