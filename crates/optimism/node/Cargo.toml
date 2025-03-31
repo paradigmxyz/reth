@@ -61,8 +61,6 @@ clap.workspace = true
 serde.workspace = true
 eyre.workspace = true
 
-# rpc
-
 # test-utils dependencies
 reth-e2e-test-utils = { workspace = true, optional = true }
 alloy-genesis = { workspace = true, optional = true }
