@@ -143,7 +143,17 @@ where
                         "seeking to the next unprocessed hashed entry"
                     );
                     let can_skip_node = self.walker.can_skip_current_node;
+                    trace!(
+                        target: "trie::node_iter",
+                        last = ?self.walker.stack.last(),
+                        "before walker advance"
+                    );
                     self.walker.advance()?;
+                    trace!(
+                        target: "trie::node_iter",
+                        last = ?self.walker.stack.last(),
+                        "after walker advance"
+                    );
 
                     // We should get the iterator to return a branch node if we can skip the
                     // current node, its hashed flag is set, and the tree flag is set.
