@@ -3237,6 +3237,7 @@ dependencies = [
  "reth-node-core",
  "reth-node-ethereum",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-tracing",
  "tokio",
 ]

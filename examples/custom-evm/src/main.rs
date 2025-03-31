@@ -2,7 +2,7 @@
 
 #![warn(unused_crate_dependencies)]
 
-use alloy_evm::{eth::EthEvmContext, EvmFactory};
+use alloy_evm::{eth::EthEvmContext, Evm, EvmFactory};
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, Address, Bytes};
 use reth::{
@@ -12,7 +12,7 @@ use reth::{
     },
     payload::{EthBuiltPayload, EthPayloadBuilderAttributes},
     revm::{
-        context::{Cfg, Context, TxEnv},
+        context::{result::ResultAndState, BlockEnv, Cfg, Context, TxEnv},
         context_interface::{
             result::{EVMError, HaltReason},
             ContextTr,
@@ -29,7 +29,7 @@ use reth::{
     transaction_pool::{PoolTransaction, TransactionPool},
 };
 use reth_chainspec::{Chain, ChainSpec};
-use reth_evm::{Database, EvmEnv};
+use reth_evm::{Database, EvmEnv, IntoTxEnv};
 use reth_evm_ethereum::{EthEvm, EthEvmConfig};
 use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithEngine, PayloadTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
@@ -41,14 +41,73 @@ use reth_primitives::{EthPrimitives, TransactionSigned};
 use reth_tracing::{RethTracer, Tracer};
 use std::sync::OnceLock;
 
+pub struct SeismicEvm<DB: Database, I, PRECOMPILE = EthPrecompiles> {
+    inner: EthEvm<DB, I, PRECOMPILE>,
+}
+
+impl<DB: Database, I, PRECOMPILE> SeismicEvm<DB, I, PRECOMPILE> {
+    pub fn new(inner: EthEvm<DB, I, PRECOMPILE>) -> Self {
+        Self { inner }
+    }
+}
+
+impl<DB, I, PRECOMPILE> Evm for SeismicEvm<DB, I, PRECOMPILE>
+where
+    DB: Database,
+    I: Inspector<EthEvmContext<DB>>,
+    PRECOMPILE: PrecompileProvider<EthEvmContext<DB>, Output = InterpreterResult>,
+{
+    type DB = DB;
+    type Tx = TxEnv;
+    type Error = EVMError<DB::Error>;
+    type HaltReason = HaltReason;
+    type Spec = SpecId;
+
+    fn block(&self) -> &BlockEnv {
+        self.inner.block()
+    }
+
+    fn transact_raw(&mut self, tx: Self::Tx) -> Result<ResultAndState, Self::Error> {
+        self.inner.transact_raw(tx)
+    }
+
+    fn transact(
+        &mut self,
+        tx: impl IntoTxEnv<Self::Tx>,
+    ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
+        self.transact_raw(tx.into_tx_env())
+    }
+
+    fn transact_system_call(
+        &mut self,
+        caller: Address,
+        contract: Address,
+        data: Bytes,
+    ) -> Result<ResultAndState, Self::Error> {
+        self.inner.transact_system_call(caller, contract, data)
+    }
+
+    fn db_mut(&mut self) -> &mut Self::DB {
+        self.inner.db_mut()
+    }
+
+    fn finish(self) -> (Self::DB, EvmEnv<Self::Spec>) {
+        self.inner.finish()
+    }
+
+    fn set_inspector_enabled(&mut self, enabled: bool) {
+        self.inner.set_inspector_enabled(enabled);
+    }
+}
+
 /// Custom EVM configuration.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
-pub struct MyEvmFactory;
+pub struct SeismicEvmFactory;
 
-impl EvmFactory for MyEvmFactory {
+impl EvmFactory for SeismicEvmFactory {
     type Evm<DB: Database, I: Inspector<EthEvmContext<DB>, EthInterpreter>> =
-        EthEvm<DB, I, CustomPrecompiles>;
+        SeismicEvm<DB, I, CustomPrecompiles>;
     type Tx = TxEnv;
     type Error<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
     type HaltReason = HaltReason;
@@ -63,7 +122,8 @@ impl EvmFactory for MyEvmFactory {
             .build_mainnet_with_inspector(NoOpInspector {})
             .with_precompiles(CustomPrecompiles::new());
 
-        EthEvm::new(evm, false)
+        let ethevm = EthEvm::new(evm, false);
+        SeismicEvm::new(ethevm)
     }
 
     fn create_evm_with_inspector<DB: Database, I: Inspector<Self::Context<DB>, EthInterpreter>>(
@@ -72,20 +132,24 @@ impl EvmFactory for MyEvmFactory {
         input: EvmEnv,
         inspector: I,
     ) -> Self::Evm<DB, I> {
-        EthEvm::new(self.create_evm(db, input).into_inner().with_inspector(inspector), true)
+        let ethevm = EthEvm::new(
+            self.create_evm(db, input).inner.into_inner().with_inspector(inspector),
+            true,
+        );
+        SeismicEvm::new(ethevm)
     }
 }
 
 /// Builds a regular ethereum block executor that uses the custom EVM.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
-pub struct MyExecutorBuilder;
+pub struct SeismicExecutorBuilder;
 
-impl<Node> ExecutorBuilder<Node> for MyExecutorBuilder
+impl<Node> ExecutorBuilder<Node> for SeismicExecutorBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
 {
-    type EVM = EthEvmConfig<MyEvmFactory>;
+    type EVM = EthEvmConfig<SeismicEvmFactory>;
     type Executor = BasicBlockExecutorProvider<Self::EVM>;
 
     async fn build_evm(
@@ -93,7 +157,7 @@ where
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
         let evm_config =
-            EthEvmConfig::new_with_evm_factory(ctx.chain_spec(), MyEvmFactory::default());
+            EthEvmConfig::new_with_evm_factory(ctx.chain_spec(), SeismicEvmFactory::default());
         Ok((evm_config.clone(), BasicBlockExecutorProvider::new(evm_config)))
     }
 }
@@ -101,11 +165,11 @@ where
 /// Builds a regular ethereum block executor that uses the custom EVM.
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
-pub struct MyPayloadBuilder {
+pub struct SeismicPayloadBuilder {
     inner: EthereumPayloadBuilder,
 }
 
-impl<Types, Node, Pool> PayloadBuilderBuilder<Node, Pool> for MyPayloadBuilder
+impl<Types, Node, Pool> PayloadBuilderBuilder<Node, Pool> for SeismicPayloadBuilder
 where
     Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
@@ -121,7 +185,7 @@ where
     type PayloadBuilder = reth_ethereum_payload_builder::EthereumPayloadBuilder<
         Pool,
         Node::Provider,
-        EthEvmConfig<MyEvmFactory>,
+        EthEvmConfig<SeismicEvmFactory>,
     >;
 
     async fn build_payload_builder(
@@ -130,7 +194,7 @@ where
         pool: Pool,
     ) -> eyre::Result<Self::PayloadBuilder> {
         let evm_config =
-            EthEvmConfig::new_with_evm_factory(ctx.chain_spec(), MyEvmFactory::default());
+            EthEvmConfig::new_with_evm_factory(ctx.chain_spec(), SeismicEvmFactory::default());
         self.inner.build(evm_config, ctx, pool)
     }
 }
@@ -223,8 +287,8 @@ async fn main() -> eyre::Result<()> {
         // use default ethereum components but with our executor
         .with_components(
             EthereumNode::components()
-                .executor(MyExecutorBuilder::default())
-                .payload(BasicPayloadServiceBuilder::new(MyPayloadBuilder::default())),
+                .executor(SeismicExecutorBuilder::default())
+                .payload(BasicPayloadServiceBuilder::new(SeismicPayloadBuilder::default())),
         )
         .with_add_ons(EthereumAddOns::default())
         .launch()
