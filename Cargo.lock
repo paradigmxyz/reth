@@ -3339,7 +3339,6 @@ dependencies = [
  "alloy-rpc-types",
  "bytes",
  "derive_more 2.0.1",
- "eyre",
  "futures",
  "reth-chainspec",
  "reth-discv4",
@@ -7656,7 +7655,6 @@ dependencies = [
  "alloy-eips",
  "alloy-network",
  "alloy-primitives",
- "alloy-rlp",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
  "alloy-signer",
@@ -7665,12 +7663,10 @@ dependencies = [
  "eyre",
  "futures-util",
  "jsonrpsee",
- "op-alloy-rpc-types-engine",
  "reth-chainspec",
  "reth-db",
  "reth-engine-local",
  "reth-ethereum-primitives",
- "reth-network",
  "reth-network-api",
  "reth-network-peers",
  "reth-node-api",
@@ -7680,10 +7676,8 @@ dependencies = [
  "reth-payload-builder",
  "reth-payload-builder-primitives",
  "reth-payload-primitives",
- "reth-primitives-traits",
  "reth-provider",
  "reth-rpc-api",
- "reth-rpc-builder",
  "reth-rpc-eth-api",
  "reth-rpc-layer",
  "reth-rpc-server-types",
@@ -8096,7 +8090,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-eth",
- "alloy-serde",
  "arbitrary",
  "bincode",
  "derive_more 2.0.1",
@@ -8867,8 +8860,6 @@ dependencies = [
  "alloy-hardforks",
  "alloy-primitives",
  "derive_more 2.0.1",
- "once_cell",
- "op-alloy-consensus",
  "op-alloy-rpc-types",
  "reth-chainspec",
  "reth-ethereum-forks",
@@ -8877,7 +8868,6 @@ dependencies = [
  "reth-optimism-primitives",
  "reth-primitives-traits",
  "serde_json",
- "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -8969,13 +8959,9 @@ dependencies = [
  "alloy-genesis",
  "alloy-op-evm",
  "alloy-primitives",
- "derive_more 2.0.1",
  "op-alloy-consensus",
  "op-revm",
  "reth-chainspec",
- "reth-consensus",
- "reth-consensus-common",
- "reth-ethereum-forks",
  "reth-evm",
  "reth-execution-errors",
  "reth-execution-types",
@@ -8987,20 +8973,16 @@ dependencies = [
  "reth-revm",
  "revm",
  "thiserror 2.0.12",
- "tracing",
 ]
 
 [[package]]
 name = "reth-optimism-forks"
 version = "1.3.4"
 dependencies = [
- "alloy-chains",
  "alloy-op-hardforks",
  "alloy-primitives",
- "auto_impl",
  "once_cell",
  "reth-ethereum-forks",
- "serde",
 ]
 
 [[package]]
@@ -9188,7 +9170,6 @@ name = "reth-optimism-storage"
 version = "1.3.4"
 dependencies = [
  "alloy-consensus",
- "alloy-eips",
  "alloy-primitives",
  "reth-chainspec",
  "reth-codecs",
@@ -9199,8 +9180,6 @@ dependencies = [
  "reth-prune-types",
  "reth-stages-types",
  "reth-storage-api",
- "reth-trie-common",
- "revm",
 ]
 
 [[package]]
@@ -9505,11 +9484,8 @@ dependencies = [
  "futures",
  "parking_lot",
  "reth-chain-state",
- "reth-engine-primitives",
  "reth-ethereum-primitives",
  "reth-evm",
- "reth-network",
- "reth-network-api",
  "reth-node-api",
  "reth-primitives-traits",
  "reth-provider",
@@ -10226,15 +10202,12 @@ dependencies = [
  "alloy-consensus",
  "alloy-primitives",
  "alloy-rlp",
- "derive_more 2.0.1",
- "metrics",
  "proptest",
  "proptest-arbitrary-interop",
  "reth-chainspec",
  "reth-db",
  "reth-db-api",
  "reth-execution-errors",
- "reth-metrics",
  "reth-primitives-traits",
  "reth-provider",
  "reth-storage-errors",
@@ -10242,7 +10215,6 @@ dependencies = [
  "reth-trie-common",
  "revm",
  "revm-database",
- "serde",
  "serde_json",
  "similar-asserts",
  "tracing",
@@ -10305,7 +10277,6 @@ dependencies = [
  "reth-trie-common",
  "reth-trie-db",
  "smallvec",
- "thiserror 2.0.12",
 ]
 
 [[package]]
