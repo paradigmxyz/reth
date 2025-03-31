@@ -100,17 +100,13 @@ impl<C> TrieWalker<C> {
     #[instrument(level = "trace", skip(self), ret)]
     pub fn next_unprocessed_key(&self) -> Option<(Nibbles, B256)> {
         self.key()
-            .and_then(|key| {
-                if self.can_skip_current_node {
-                    key.increment().map(|inc| inc)
-                } else {
-                    Some(key.clone())
-                }
-            })
+            .and_then(
+                |key| if self.can_skip_current_node { key.increment() } else { Some(key.clone()) },
+            )
             .map(|key| {
-                let mut new_key = key.pack();
-                new_key.resize(32, 0);
-                (key, B256::from_slice(new_key.as_slice()))
+                let mut packed = key.pack();
+                packed.resize(32, 0);
+                (key, B256::from_slice(packed.as_slice()))
             })
     }
 
