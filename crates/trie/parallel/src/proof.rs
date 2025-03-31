@@ -242,7 +242,7 @@ where
         {
             match account_node {
                 TrieElement::Branch(node) => {
-                    tracing::debug!(target: "trie::parallel_proof_metrics", ?node, "Adding branch node");
+                    tracing::trace!(target: "trie::parallel_proof_metrics", ?node, "Adding branch node");
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
                 TrieElement::Leaf(hashed_address, account) => {
@@ -330,25 +330,25 @@ where
             "Calculated proof"
         );
 
-        debug!(
-            target: "trie::parallel_proof_metrics",
-            total_targets = storage_root_targets_len,
-            account_subtree = ?BTreeMap::from_iter(account_subtree.deref().clone()),
-            // ?branch_node_hash_masks,
-            // ?branch_node_tree_masks,
-            // ?storages,
-            "MultiProof generated"
-        );
+        // debug!(
+        //     target: "trie::parallel_proof_metrics",
+        //     total_targets = storage_root_targets_len,
+        //     account_subtree = ?BTreeMap::from_iter(account_subtree.deref().clone()),
+        //     // ?branch_node_hash_masks,
+        //     // ?branch_node_tree_masks,
+        //     // ?storages,
+        //     "MultiProof generated"
+        // );
 
-        for (address, storage) in BTreeMap::from_iter(storages.clone()) {
-            debug!(
-                target: "trie::parallel_proof_metrics",
-                ?address,
-                root = ?storage.root,
-                nodes = ?BTreeMap::from_iter(storage.subtree.deref().clone()),
-                "Storage proof",
-            );
-        }
+        // for (address, storage) in BTreeMap::from_iter(storages.clone()) {
+        //     debug!(
+        //         target: "trie::parallel_proof_metrics",
+        //         ?address,
+        //         root = ?storage.root,
+        //         nodes = ?BTreeMap::from_iter(storage.subtree.deref().clone()),
+        //         "Storage proof",
+        //     );
+        // }
 
         Ok(MultiProof { account_subtree, branch_node_hash_masks, branch_node_tree_masks, storages })
     }

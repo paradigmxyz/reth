@@ -292,9 +292,11 @@ where
         while let Some(node) = storage_node_iter.try_next()? {
             match node {
                 TrieElement::Branch(node) => {
+                    tracing::trace!(target: "trie::parallel_proof_metrics", hashed_address = ?self.hashed_address, ?node, "Adding storage branch node");
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
                 TrieElement::Leaf(hashed_slot, value) => {
+                    tracing::trace!(target: "trie::parallel_proof_metrics", hashed_address = ?self.hashed_address, ?hashed_slot, ?value, "Adding storage leaf node");
                     hash_builder.add_leaf(
                         Nibbles::unpack(hashed_slot),
                         alloy_rlp::encode_fixed_size(&value).as_ref(),

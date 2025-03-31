@@ -6,7 +6,7 @@ use crate::{
 };
 use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
-use tracing::trace;
+use tracing::{debug, trace};
 
 /// Represents a branch node in the trie.
 #[derive(Debug)]
@@ -180,15 +180,13 @@ where
                     // if current_hashed_entry is prefixed by seek_key just use it?
                     trace!(
                         target: "trie::node_iter",
-                        ?seek_key, // c5
+                        ?seek_key,
                         can_skip_current_node = self.walker.can_skip_current_node,
                         "seeking to the next unprocessed hashed entry"
                     );
 
-                    // if we are traversing a node that is not in the target path, and we have a
-                    // hash for it, we should be able to return a trie element for it
-                    self.current_hashed_entry = self.hashed_cursor.seek(seek_key)?; // c5
-                    self.walker.advance()?; // walker.key() is what -> cb
+                    self.current_hashed_entry = self.hashed_cursor.seek(seek_key)?;
+                    self.walker.advance()?;
 
                     // update metrics
                     self.metrics.hashed_cursor_seek_count += 1;
@@ -197,7 +195,7 @@ where
             }
         }
 
-        trace!(
+        debug!(
             target: "trie::node_iter_metrics",
             final_metrics = ?self.metrics,
             "exhausted trie node iteration"
