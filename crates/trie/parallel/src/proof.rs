@@ -30,7 +30,11 @@ use reth_trie::{
 };
 use reth_trie_common::proof::ProofRetainer;
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use std::sync::{mpsc::Receiver, Arc};
+use std::{
+    collections::BTreeMap,
+    ops::Deref,
+    sync::{mpsc::Receiver, Arc},
+};
 use tracing::debug;
 
 /// Parallel proof calculator.
@@ -329,10 +333,10 @@ where
         debug!(
             target: "trie::parallel_proof_metrics",
             total_targets = storage_root_targets_len,
-            ?account_subtree,
-            ?branch_node_hash_masks,
-            ?branch_node_tree_masks,
-            ?storages,
+            account_subtree = ?BTreeMap::from_iter(account_subtree.deref().clone()),
+            // ?branch_node_hash_masks,
+            // ?branch_node_tree_masks,
+            // ?storages,
             "MultiProof generated"
         );
 
