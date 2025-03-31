@@ -212,7 +212,7 @@ impl<C: TrieCursor> TrieWalker<C> {
         // We need to sync the stack with the trie structure when consuming a new node. This is
         // necessary for proper traversal and accurately representing the trie in the stack.
         if !key.is_empty() && !self.stack.is_empty() {
-            self.stack[0].set_next_node_nibble(key[0]);
+            self.stack[0].set_nibble(key[0]);
         }
 
         // The current tree mask might have been set incorrectly.
@@ -255,7 +255,7 @@ impl<C: TrieCursor> TrieWalker<C> {
 
         // Check if the walker needs to backtrack to the previous level in the trie during its
         // traversal.
-        if subnode.pointer().as_child().is_some_and(|nibble| nibble >= 0xf) ||
+        if subnode.pointer().is_out_of_bounds() ||
             (subnode.pointer().is_parent() && !allow_root_to_child_nibble)
         {
             self.stack.pop();
@@ -276,7 +276,7 @@ impl<C: TrieCursor> TrieWalker<C> {
                 trace!(target: "trie::walker", ?nibble, "found next sibling with state");
                 return Ok(())
             }
-            if nibble.as_child() == Some(0xf) {
+            if nibble.is_out_of_bounds() {
                 trace!(target: "trie::walker", ?nibble, "checked all siblings");
                 break
             }

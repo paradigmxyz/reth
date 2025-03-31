@@ -142,7 +142,7 @@ impl CursorSubNode {
 
     /// Sets the nibble index.
     #[inline]
-    pub fn set_next_node_nibble(&mut self, nibble: u8) {
+    pub fn set_nibble(&mut self, nibble: u8) {
         let old_nibble = self.pointer;
         self.pointer = NodePointer::Child(nibble);
         update_full_key(&mut self.full_key, old_nibble, self.pointer);
@@ -174,6 +174,15 @@ impl NodePointer {
         match self {
             Self::Child(nibble) => Some(*nibble),
             _ => None,
+        }
+    }
+
+    /// Returns `true` if the pointer is set to a child node that is out of bounds (i.e. greater
+    /// than 0xf).
+    pub fn is_out_of_bounds(&self) -> bool {
+        match self {
+            Self::ParentBranch => false,
+            Self::Child(nibble) => *nibble >= 0xf,
         }
     }
 
@@ -216,8 +225,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn nibble_order() {
-        let nibbles = [
+    fn node_pointer() {
+        let pointers = [
             NodePointer::ParentBranch,
             NodePointer::Child(0),
             NodePointer::Child(1),
@@ -236,6 +245,9 @@ mod tests {
             NodePointer::Child(14),
             NodePointer::Child(15),
         ];
-        assert!(nibbles.is_sorted());
+        assert!(pointers.is_sorted());
+        assert!(pointers.iter().all(|pointer| !pointer.is_out_of_bounds()));
+
+        assert!(NodePointer::Child(16).is_out_of_bounds());
     }
 }
