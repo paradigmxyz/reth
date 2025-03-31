@@ -7,7 +7,6 @@ use include_dir::{include_dir, Dir};
 use lazy_static::lazy_static;
 use reth_chainspec::{ChainSpec, EthChainSpec};
 use reth_ethereum_forks::Hardforks;
-use reth_primitives::TransactionSigned;
 use revm::state::Bytecode;
 use std::collections::HashMap;
 use thiserror::Error;
@@ -280,9 +279,11 @@ pub fn is_invoke_system_contract(addr: &Address) -> bool {
 }
 
 /// Whether the transaction is a bsc system transaction
-pub fn is_system_transaction(tx: &TransactionSigned, sender: Address, coinbase: Address) -> bool {
-    if let Some(to) = tx.to() {
-        if sender == coinbase && is_invoke_system_contract(&to) && tx.max_fee_per_gas() == 0 {
+pub fn is_system_transaction<T: Transaction>(tx: &T, signer: Address, coinbase: Address) -> bool {
+    let to = tx.to();
+    let max_fee_per_gas = tx.max_fee_per_gas();
+    if let Some(to) = to {
+        if signer == coinbase && is_invoke_system_contract(&to) && max_fee_per_gas == 0 {
             return true;
         }
     }
