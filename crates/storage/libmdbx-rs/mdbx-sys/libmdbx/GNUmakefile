@@ -1,4 +1,4 @@
-# This makefile is for GNU Make 3.80 or above, and nowadays provided
+# This makefile is for GNU Make 3.81 or above, and nowadays provided
 # just for compatibility and preservation of traditions.
 #
 # Please use CMake in case of any difficulties or
@@ -16,6 +16,7 @@ ifneq ($(make_lt_3_81),0)
 $(error Please use GNU Make 3.81 or above)
 endif
 make_ge_4_1   := $(shell expr "$(MAKE_VERx3)" ">=" "  4  1")
+make_ge_4_4   := $(shell expr "$(MAKE_VERx3)" ">=" "  4  4")
 SRC_PROBE_C   := $(shell [ -f mdbx.c ] && echo mdbx.c || echo src/osal.c)
 SRC_PROBE_CXX := $(shell [ -f mdbx.c++ ] && echo mdbx.c++ || echo src/mdbx.c++)
 UNAME         := $(shell uname -s 2>/dev/null || echo Unknown)
@@ -51,17 +52,24 @@ CC      ?= gcc
 CXX     ?= g++
 CFLAGS_EXTRA ?=
 LD      ?= ld
+CMAKE	?= cmake
+CMAKE_OPT ?=
+CTEST	?= ctest
+CTEST_OPT ?=
+# target directory for `make dist`
+DIST_DIR ?= dist
 
 # build options
 MDBX_BUILD_OPTIONS   ?=-DNDEBUG=1
-MDBX_BUILD_TIMESTAMP ?=$(shell date +%Y-%m-%dT%H:%M:%S%z)
-MDBX_BUILD_CXX       ?= YES
+MDBX_BUILD_TIMESTAMP ?=$(if $(SOURCE_DATE_EPOCH),$(SOURCE_DATE_EPOCH),$(shell date +%Y-%m-%dT%H:%M:%S%z))
+MDBX_BUILD_CXX       ?=YES
+MDBX_BUILD_METADATA  ?=
 
 # probe and compose common compiler flags with variable expansion trick (seems this work two times per session for GNU Make 3.81)
 CFLAGS       ?= $(strip $(eval CFLAGS := -std=gnu11 -O2 -g -Wall -Werror -Wextra -Wpedantic -ffunction-sections -fPIC -fvisibility=hidden -pthread -Wno-error=attributes $$(shell for opt in -fno-semantic-interposition -Wno-unused-command-line-argument -Wno-tautological-compare; do [ -z "$$$$($(CC) '-DMDBX_BUILD_FLAGS="probe"' $$$${opt} -c $(SRC_PROBE_C) -o /dev/null >/dev/null 2>&1 || echo failed)" ] && echo "$$$${opt} "; done)$(CFLAGS_EXTRA))$(CFLAGS))
 
 # choosing C++ standard with variable expansion trick (seems this work two times per session for GNU Make 3.81)
-CXXSTD       ?= $(eval CXXSTD := $$(shell for std in gnu++23 c++23 gnu++2b c++2b gnu++20 c++20 gnu++2a c++2a gnu++17 c++17 gnu++1z c++1z gnu++14 c++14 gnu++1y c++1y gnu+11 c++11 gnu++0x c++0x; do $(CXX) -std=$$$${std} -c $(SRC_PROBE_CXX) -o /dev/null 2>probe4std-$$$${std}.err >/dev/null && echo "-std=$$$${std}" && exit; done))$(CXXSTD)
+CXXSTD       ?= $(eval CXXSTD := $$(shell for std in gnu++23 c++23 gnu++2b c++2b gnu++20 c++20 gnu++2a c++2a gnu++17 c++17 gnu++1z c++1z gnu++14 c++14 gnu++1y c++1y gnu+11 c++11 gnu++0x c++0x; do $(CXX) -std=$$$${std} -DMDBX_BUILD_CXX=1 -c $(SRC_PROBE_CXX) -o /dev/null 2>probe4std-$$$${std}.err >/dev/null && echo "-std=$$$${std}" && exit; done))$(CXXSTD)
 CXXFLAGS     ?= $(strip $(CXXSTD) $(filter-out -std=gnu11,$(CFLAGS)))
 
 # libraries and options for linking
@@ -76,6 +84,13 @@ else
 LIBS         ?= $(eval LIBS := $$(shell $$(uname2libs)))$(LIBS)
 LDFLAGS      ?= $(eval LDFLAGS := $$(shell $$(uname2ldflags)))$(LDFLAGS)
 LIB_STDCXXFS ?= $(eval LIB_STDCXXFS := $$(shell echo '$$(cxx_filesystem_probe)' | cat mdbx.h++ - | sed $$$$'1s/\xef\xbb\xbf//' | $(CXX) -x c++ $(CXXFLAGS) -Wno-error - -Wl,--allow-multiple-definition -lstdc++fs $(LIBS) $(LDFLAGS) $(EXE_LDFLAGS) -o /dev/null 2>probe4lstdfs.err >/dev/null && echo '-Wl,--allow-multiple-definition -lstdc++fs'))$(LIB_STDCXXFS)
+endif
+
+ifneq ($(make_ge_4_4),1)
+.NOTPARALLEL:
+WAIT         =
+else
+WAIT         = .WAIT
 endif
 
 ################################################################################
@@ -121,12 +136,13 @@ endef
 SO_SUFFIX  := $(shell $(uname2sosuffix))
 HEADERS    := mdbx.h mdbx.h++
 LIBRARIES  := libmdbx.a libmdbx.$(SO_SUFFIX)
-TOOLS      := mdbx_stat mdbx_copy mdbx_dump mdbx_load mdbx_chk mdbx_drop
+TOOLS      := chk copy drop dump load stat
+MDBX_TOOLS := $(addprefix mdbx_,$(TOOLS))
 MANPAGES   := mdbx_stat.1 mdbx_copy.1 mdbx_dump.1 mdbx_load.1 mdbx_chk.1 mdbx_drop.1
 TIP        := // TIP:
 
 .PHONY: all help options lib libs tools clean install uninstall check_buildflags_tag tools-static
-.PHONY: install-strip install-no-strip strip libmdbx mdbx show-options lib-static lib-shared
+.PHONY: install-strip install-no-strip strip libmdbx mdbx show-options lib-static lib-shared cmake-build ninja
 
 boolean = $(if $(findstring $(strip $($1)),YES Yes yes y ON On on 1 true True TRUE),1,$(if $(findstring $(strip $($1)),NO No no n OFF Off off 0 false False FALSE),,$(error Wrong value `$($1)` of $1 for YES/NO option)))
 select_by = $(if $(call boolean,$(1)),$(2),$(3))
@@ -148,7 +164,11 @@ else
   $(info $(TIP) Use `make V=1` for verbose.)
 endif
 
-all: show-options $(LIBRARIES) $(TOOLS)
+ifeq ($(UNAME),Darwin)
+  $(info $(TIP) Use `brew install gnu-sed gnu-tar` and add ones to the beginning of the PATH.)
+endif
+
+all: show-options $(LIBRARIES) $(MDBX_TOOLS)
 
 help:
 	@echo "  make all                 - build libraries and tools"
@@ -160,6 +180,7 @@ help:
 	@echo "  make clean               "
 	@echo "  make install             "
 	@echo "  make uninstall           "
+	@echo "  make cmake-build | ninja - build by CMake & Ninja"
 	@echo ""
 	@echo "  make strip               - strip debug symbols from binaries"
 	@echo "  make install-no-strip    - install explicitly without strip"
@@ -175,6 +196,7 @@ show-options:
 	@echo "  MDBX_BUILD_OPTIONS   = $(MDBX_BUILD_OPTIONS)"
 	@echo "  MDBX_BUILD_CXX       = $(MDBX_BUILD_CXX)"
 	@echo "  MDBX_BUILD_TIMESTAMP = $(MDBX_BUILD_TIMESTAMP)"
+	@echo "  MDBX_BUILD_METADATA  = $(MDBX_BUILD_METADATA)"
 	@echo '$(TIP) Use `make options` to listing available build options.'
 	@echo $(call select_by,MDBX_BUILD_CXX,"  CXX      =`which $(CXX)` | `$(CXX) --version | head -1`","  CC       =`which $(CC)` | `$(CC) --version | head -1`")
 	@echo $(call select_by,MDBX_BUILD_CXX,"  CXXFLAGS =$(CXXFLAGS)","  CFLAGS   =$(CFLAGS)")
@@ -202,38 +224,39 @@ options:
 	@echo ""
 	@echo "  MDBX_BUILD_OPTIONS   = $(MDBX_BUILD_OPTIONS)"
 	@echo "  MDBX_BUILD_TIMESTAMP = $(MDBX_BUILD_TIMESTAMP)"
+	@echo "  MDBX_BUILD_METADATA  = $(MDBX_BUILD_METADATA)"
 	@echo ""
 	@echo "## Assortment items for MDBX_BUILD_OPTIONS:"
 	@echo "##   Note that the defaults should already be correct for most platforms;"
 	@echo "##   you should not need to change any of these. Read their descriptions"
 	@echo "##   in README and source code (see mdbx.c) if you do."
-	@grep -h '#ifndef MDBX_' mdbx.c | grep -v BUILD | uniq | sed 's/#ifndef /  /'
+	@grep -h '#ifndef MDBX_' mdbx.c | grep -v BUILD | sort -u | sed 's/#ifndef /  /'
 
 lib libs libmdbx mdbx: libmdbx.a libmdbx.$(SO_SUFFIX)
 
-tools: $(TOOLS)
-tools-static: $(addsuffix .static,$(TOOLS)) $(addsuffix .static-lto,$(TOOLS))
+tools: $(MDBX_TOOLS)
+tools-static: $(addsuffix .static,$(MDBX_TOOLS)) $(addsuffix .static-lto,$(MDBX_TOOLS))
 
 strip: all
-	@echo '  STRIP libmdbx.$(SO_SUFFIX) $(TOOLS)'
-	$(TRACE )strip libmdbx.$(SO_SUFFIX) $(TOOLS)
+	@echo '  STRIP libmdbx.$(SO_SUFFIX) $(MDBX_TOOLS)'
+	$(TRACE )strip libmdbx.$(SO_SUFFIX) $(MDBX_TOOLS)
 
 clean:
 	@echo '  REMOVE ...'
-	$(QUIET)rm -rf $(TOOLS) mdbx_test @* *.[ao] *.[ls]o *.$(SO_SUFFIX) *.dSYM *~ tmp.db/* \
-		*.gcov *.log *.err src/*.o test/*.o mdbx_example dist \
-		config.h src/config.h src/version.c *.tar* buildflags.tag \
-		mdbx_*.static mdbx_*.static-lto
+	$(QUIET)rm -rf $(MDBX_TOOLS) mdbx_test @* *.[ao] *.[ls]o *.$(SO_SUFFIX) *.dSYM *~ tmp.db/* \
+		*.gcov *.log *.err src/*.o test/*.o mdbx_example dist @dist-check \
+		config.h src/config.h src/version.c *.tar* @buildflags.tag @dist-checked.tag \
+		mdbx_*.static mdbx_*.static-lto CMakeFiles
 
 MDBX_BUILD_FLAGS =$(strip MDBX_BUILD_CXX=$(MDBX_BUILD_CXX) $(MDBX_BUILD_OPTIONS) $(call select_by,MDBX_BUILD_CXX,$(CXXFLAGS) $(LDFLAGS) $(LIB_STDCXXFS) $(LIBS),$(CFLAGS) $(LDFLAGS) $(LIBS)))
 check_buildflags_tag:
-	$(QUIET)if [ "$(MDBX_BUILD_FLAGS)" != "$$(cat buildflags.tag 2>&1)" ]; then \
+	$(QUIET)if [ "$(MDBX_BUILD_FLAGS)" != "$$(cat @buildflags.tag 2>&1)" ]; then \
 		echo -n "  CLEAN for build with specified flags..." && \
 		$(MAKE) IOARENA=false CXXSTD= -s clean >/dev/null && echo " Ok" && \
-		echo '$(MDBX_BUILD_FLAGS)' > buildflags.tag; \
+		echo '$(MDBX_BUILD_FLAGS)' > @buildflags.tag; \
 	fi
 
-buildflags.tag: check_buildflags_tag
+@buildflags.tag: check_buildflags_tag
 
 lib-static libmdbx.a: mdbx-static.o $(call select_by,MDBX_BUILD_CXX,mdbx++-static.o)
 	@echo '  AR $@'
@@ -243,32 +266,46 @@ lib-shared libmdbx.$(SO_SUFFIX): mdbx-dylib.o $(call select_by,MDBX_BUILD_CXX,md
 	@echo '  LD $@'
 	$(QUIET)$(call select_by,MDBX_BUILD_CXX,$(CXX) $(CXXFLAGS),$(CC) $(CFLAGS)) $^ -pthread -shared $(LDFLAGS) $(call select_by,MDBX_BUILD_CXX,$(LIB_STDCXXFS)) $(LIBS) -o $@
 
+ninja-assertions: CMAKE_OPT += -DMDBX_FORCE_ASSERTIONS=ON
+ninja-assertions: cmake-build
+ninja-debug: CMAKE_OPT += -DCMAKE_BUILD_TYPE=Debug
+ninja-debug: cmake-build
+ninja: cmake-build
+cmake-build:
+	@echo "  RUN: cmake -G Ninja && cmake --build"
+	$(QUIET)mkdir -p @cmake-ninja-build && $(CMAKE) $(CMAKE_OPT) -G Ninja -S . -B @cmake-ninja-build && $(CMAKE) --build @cmake-ninja-build
+
+ctest: cmake-build
+	@echo "  RUN: ctest .."
+	$(QUIET)$(CTEST) --test-dir @cmake-ninja-build --parallel `(nproc | sysctl -n hw.ncpu | echo 2) 2>/dev/null` --schedule-random $(CTEST_OPT)
 
 ################################################################################
 # Amalgamated source code, i.e. distributed after `make dist`
 MAN_SRCDIR := man1/
 
-config.h: buildflags.tag mdbx.c $(lastword $(MAKEFILE_LIST))
+config.h: @buildflags.tag $(WAIT) mdbx.c $(lastword $(MAKEFILE_LIST)) LICENSE NOTICE
 	@echo '  MAKE $@'
 	$(QUIET)(echo '#define MDBX_BUILD_TIMESTAMP "$(MDBX_BUILD_TIMESTAMP)"' \
-	&& echo "#define MDBX_BUILD_FLAGS \"$$(cat buildflags.tag)\"" \
+	&& echo "#define MDBX_BUILD_FLAGS \"$$(cat @buildflags.tag)\"" \
 	&& echo '#define MDBX_BUILD_COMPILER "$(shell (LC_ALL=C $(CC) --version || echo 'Please use GCC or CLANG compatible compiler') | head -1)"' \
 	&& echo '#define MDBX_BUILD_TARGET "$(shell set -o pipefail; (LC_ALL=C $(CC) -v 2>&1 | grep -i '^Target:' | cut -d ' ' -f 2- || (LC_ALL=C $(CC) --version | grep -qi e2k && echo E2K) || echo 'Please use GCC or CLANG compatible compiler') | head -1)"' \
+	&& echo '#define MDBX_BUILD_CXX $(call select_by,MDBX_BUILD_CXX,1,0)' \
+	&& echo '#define MDBX_BUILD_METADATA "$(MDBX_BUILD_METADATA)"' \
 	) >$@
 
-mdbx-dylib.o: config.h mdbx.c mdbx.h $(lastword $(MAKEFILE_LIST))
+mdbx-dylib.o: config.h mdbx.c mdbx.h $(lastword $(MAKEFILE_LIST)) LICENSE NOTICE
 	@echo '  CC $@'
 	$(QUIET)$(CC) $(CFLAGS) $(MDBX_BUILD_OPTIONS) '-DMDBX_CONFIG_H="config.h"' -DLIBMDBX_EXPORTS=1 -c mdbx.c -o $@
 
-mdbx-static.o: config.h mdbx.c mdbx.h $(lastword $(MAKEFILE_LIST))
+mdbx-static.o: config.h mdbx.c mdbx.h $(lastword $(MAKEFILE_LIST)) LICENSE NOTICE
 	@echo '  CC $@'
 	$(QUIET)$(CC) $(CFLAGS) $(MDBX_BUILD_OPTIONS) '-DMDBX_CONFIG_H="config.h"' -ULIBMDBX_EXPORTS -c mdbx.c -o $@
 
-mdbx++-dylib.o: config.h mdbx.c++ mdbx.h mdbx.h++ $(lastword $(MAKEFILE_LIST))
+mdbx++-dylib.o: config.h mdbx.c++ mdbx.h mdbx.h++ $(lastword $(MAKEFILE_LIST)) LICENSE NOTICE
 	@echo '  CC $@'
 	$(QUIET)$(CXX) $(CXXFLAGS) $(MDBX_BUILD_OPTIONS) '-DMDBX_CONFIG_H="config.h"' -DLIBMDBX_EXPORTS=1 -c mdbx.c++ -o $@
 
-mdbx++-static.o: config.h mdbx.c++ mdbx.h mdbx.h++ $(lastword $(MAKEFILE_LIST))
+mdbx++-static.o: config.h mdbx.c++ mdbx.h mdbx.h++ $(lastword $(MAKEFILE_LIST)) LICENSE NOTICE
 	@echo '  CC $@'
 	$(QUIET)$(CXX) $(CXXFLAGS) $(MDBX_BUILD_OPTIONS) '-DMDBX_CONFIG_H="config.h"' -ULIBMDBX_EXPORTS -c mdbx.c++ -o $@
 
@@ -285,11 +322,10 @@ mdbx_%.static-lto: mdbx_%.c config.h mdbx.c mdbx.h
 	$(QUIET)$(CC) $(CFLAGS) -Os -flto $(MDBX_BUILD_OPTIONS) '-DLIBMDBX_API=' '-DMDBX_CONFIG_H="config.h"' \
 		$< mdbx.c $(EXE_LDFLAGS) $(LIBS) -static -Wl,--strip-all -o $@
 
-
-install: $(LIBRARIES) $(TOOLS) $(HEADERS)
+install: $(LIBRARIES) $(MDBX_TOOLS) $(HEADERS)
 	@echo '  INSTALLING...'
 	$(QUIET)mkdir -p $(DESTDIR)$(prefix)/bin$(suffix) && \
-		$(INSTALL) -p $(EXE_INSTALL_FLAGS) $(TOOLS) $(DESTDIR)$(prefix)/bin$(suffix)/ && \
+		$(INSTALL) -p $(EXE_INSTALL_FLAGS) $(MDBX_TOOLS) $(DESTDIR)$(prefix)/bin$(suffix)/ && \
 	mkdir -p $(DESTDIR)$(prefix)/lib$(suffix)/ && \
 		$(INSTALL) -p $(EXE_INSTALL_FLAGS) $(filter-out libmdbx.a,$(LIBRARIES)) $(DESTDIR)$(prefix)/lib$(suffix)/ && \
 	mkdir -p $(DESTDIR)$(prefix)/lib$(suffix)/ && \
@@ -307,7 +343,7 @@ install-no-strip: install
 
 uninstall:
 	@echo '  UNINSTALLING/REMOVE...'
-	$(QUIET)rm -f $(addprefix $(DESTDIR)$(prefix)/bin$(suffix)/,$(TOOLS)) \
+	$(QUIET)rm -f $(addprefix $(DESTDIR)$(prefix)/bin$(suffix)/,$(MDBX_TOOLS)) \
 		$(addprefix $(DESTDIR)$(prefix)/lib$(suffix)/,$(LIBRARIES)) \
 		$(addprefix $(DESTDIR)$(prefix)/include/,$(HEADERS)) \
 		$(addprefix $(DESTDIR)$(mandir)/man1/,$(MANPAGES))
@@ -347,17 +383,16 @@ bench-$(1)_$(2).txt: $(3) $(IOARENA) $(lastword $(MAKEFILE_LIST))
 	$(QUIET)(export LD_LIBRARY_PATH="./:$$$${LD_LIBRARY_PATH}"; \
 		ldd $(IOARENA) | grep -i $(1) && \
 		$(IOARENA) -D $(1) -B batch -m $(BENCH_CRUD_MODE) -n $(2) \
-			| tee $$@ | grep throughput | sed 's/throughput/batch×N/' && \
+			| tee $$@ | grep throughput | $(SED) 's/throughput/batch×N/' && \
 		$(IOARENA) -D $(1) -B crud -m $(BENCH_CRUD_MODE) -n $(2) \
-			| tee -a $$@ | grep throughput | sed 's/throughput/   crud/' && \
+			| tee -a $$@ | grep throughput | $(SED) 's/throughput/   crud/' && \
 		$(IOARENA) -D $(1) -B iterate,get,iterate,get,iterate -m $(BENCH_CRUD_MODE) -r 4 -n $(2) \
-			| tee -a $$@ | grep throughput | sed '0,/throughput/{s/throughput/iterate/};s/throughput/    get/' && \
+			| tee -a $$@ | grep throughput | $(SED) '0,/throughput/{s/throughput/iterate/};s/throughput/    get/' && \
 		$(IOARENA) -D $(1) -B delete -m $(BENCH_CRUD_MODE) -n $(2) \
-			| tee -a $$@ | grep throughput | sed 's/throughput/ delete/' && \
+			| tee -a $$@ | grep throughput | $(SED) 's/throughput/ delete/' && \
 	true) || mv -f $$@ $$@.error
 
 endef
-
 
 $(eval $(call bench-rule,mdbx,$(NN),libmdbx.$(SO_SUFFIX)))
 

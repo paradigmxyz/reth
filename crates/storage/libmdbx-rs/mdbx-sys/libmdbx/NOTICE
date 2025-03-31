@@ -1,0 +1,23 @@
+libmdbx (aka MDBX) is an extremely fast, compact, powerful, embeddedable,
+transactional key-value storage engine with open-source code. MDBX has a
+specific set of properties and capabilities, focused on creating unique
+lightweight solutions.
+
+Please visit https://libmdbx.dqdkfa.ru for more information, changelog,
+documentation, C++ API description and links to the original git repo
+with the source code. Questions, feedback and suggestions are welcome
+to the Telegram' group https://t.me/libmdbx.
+
+Donations are welcome to ETH `0xD104d8f8B2dC312aaD74899F83EBf3EEBDC1EA3A`.
+Всё будет хорошо!
+
+Copyright 2015-2025 Леонид Юрьев aka Leonid Yuriev <leo@yuriev.ru>
+SPDX-License-Identifier: Apache-2.0
+For notes about the license change, credits and acknowledgments,
+please refer to the COPYRIGHT file within original libmdbx source code
+repository https://gitflic.ru/project/erthink/libmdbx
+
+On 2022-04-15 the Github administration, without any warning nor
+explanation, deleted _libmdbx_ along with a lot of other projects,
+simultaneously blocking access for many developers.
+For the same reason ~~Github~~ is blacklisted forever.
