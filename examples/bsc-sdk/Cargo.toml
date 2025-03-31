@@ -42,7 +42,9 @@ bytes.workspace = true
 cfg-if = { version = "1.0", default-features = false }
 derive_more.workspace = true
 futures.workspace = true
-once_cell = { version = "1.19", default-features = false, features = ["alloc"] }
+include_dir = { version = "0.7.4" }
+lazy_static = { version = "1.4.0" }
+once_cell = { workspace = true, default-features = false, features = ["alloc"] }
 parity-bytes = { version = "0.1.2", default-features = false }
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"], optional = true }
 serde = { workspace = true, features = ["derive"], optional = true }

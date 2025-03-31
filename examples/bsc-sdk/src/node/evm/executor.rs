@@ -1,5 +1,7 @@
+use crate::{hardforks::BscHardforks, system_contracts::get_upgrade_system_contracts};
 use alloy_evm::{block::ExecutableTx, eth::EthBlockExecutor};
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use alloy_primitives::Address;
+use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_evm::{
     execute::{BlockExecutionError, BlockExecutor},
     Database, Evm, OnStateHook,
@@ -8,34 +10,83 @@ use reth_evm_ethereum::RethReceiptBuilder;
 use reth_primitives::{Receipt, TransactionSigned};
 use reth_provider::BlockExecutionResult;
 use reth_revm::State;
-use revm::context::{result::ExecutionResult, TxEnv};
+use revm::{
+    context::{result::ExecutionResult, TxEnv},
+    state::Bytecode,
+};
 use std::sync::Arc;
 
-struct BscBlockExecutor<'a, Evm, Spec> {
+struct BscBlockExecutor<'a, EVM, Spec> {
     /// Inner Ethereum execution strategy.
-    inner: EthBlockExecutor<'a, Evm, &'a Arc<ChainSpec>, &'a RethReceiptBuilder>,
+    inner: EthBlockExecutor<'a, EVM, &'a Arc<ChainSpec>, &'a RethReceiptBuilder>,
     /// Reference to the specification object.
     spec: Spec,
     /// Inner EVM.
-    evm: Evm,
+    evm: EVM,
 }
 
-impl<'a, Evm, Spec> BscBlockExecutor<'a, Evm, Spec> {
+impl<'a, DB, EVM, Spec> BscBlockExecutor<'a, EVM, Spec>
+where
+    DB: Database + 'a,
+    EVM: Evm<DB = &'a mut State<DB>, Tx = TxEnv>,
+    Spec: EthereumHardforks + BscHardforks + EthChainSpec + Hardforks,
+{
     /// Creates a new BscBlockExecutor.
     pub fn new(
-        inner: EthBlockExecutor<'a, Evm, &'a Arc<ChainSpec>, &'a RethReceiptBuilder>,
+        inner: EthBlockExecutor<'a, EVM, &'a Arc<ChainSpec>, &'a RethReceiptBuilder>,
         spec: Spec,
-        evm: Evm,
+        evm: EVM,
     ) -> Self {
         Self { inner, spec, evm }
     }
+
+    /// Applies system contract upgrades if the Feynman fork is not yet active.
+    fn apply_upgrade_contracts_if_before_feynman(&mut self) -> Result<(), BlockExecutionError> {
+        if self.spec.is_feynman_active_at_timestamp(self.evm.block().timestamp) {
+            return Ok(());
+        }
+
+        let contracts = get_upgrade_system_contracts(
+            &self.spec,
+            self.evm.block().number,
+            self.evm.block().timestamp,
+            self.evm.block().timestamp - 3_000, // TODO: how to get parent block timestamp?
+        )
+        .map_err(|_| BlockExecutionError::msg("Failed to get upgrade system contracts"))?;
+
+        for (address, maybe_code) in contracts {
+            if let Some(code) = maybe_code {
+                self.upgrade_system_contract(address, code)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Replaces the code of a system contract in state.
+    fn upgrade_system_contract(
+        &mut self,
+        address: Address,
+        code: Bytecode,
+    ) -> Result<(), BlockExecutionError> {
+        let account =
+            self.evm.db_mut().load_cache_account(address).map_err(BlockExecutionError::other)?;
+
+        let mut info = account.account_info().unwrap_or_default();
+        info.code_hash = code.hash_slow();
+        info.code = Some(code);
+
+        let transition = account.change(info, Default::default());
+        self.evm.db_mut().apply_transition(vec![(address, transition)]);
+        Ok(())
+    }
 }
 
-impl<'db, DB, E, Spec> BlockExecutor for BscBlockExecutor<'_, E, Spec>
+impl<'a, DB, E, Spec> BlockExecutor for BscBlockExecutor<'a, E, Spec>
 where
-    DB: Database + 'db,
-    E: Evm<DB = &'db mut State<DB>, Tx = TxEnv>,
-    Spec: EthereumHardforks,
+    DB: Database + 'a,
+    E: Evm<DB = &'a mut State<DB>, Tx = TxEnv>,
+    Spec: EthereumHardforks + BscHardforks + EthChainSpec + Hardforks,
 {
     type Transaction = TransactionSigned;
     type Receipt = Receipt;
@@ -48,7 +99,8 @@ where
         self.evm.db_mut().set_state_clear_flag(state_clear_flag);
         // TODO: (Consensus Verify cascading fields)[https://github.com/bnb-chain/reth/blob/main/crates/bsc/evm/src/pre_execution.rs#L43]
         // TODO: (Consensus System Call Before Execution)[https://github.com/bnb-chain/reth/blob/main/crates/bsc/evm/src/execute.rs#L678]
-        // TODO: (Upgrade system contracts)[https://github.com/bnb-chain/reth/blob/main/crates/bsc/evm/src/execute.rs#L498]
+        self.apply_upgrade_contracts_if_before_feynman()?;
+
         Ok(())
     }
 
@@ -65,14 +117,14 @@ where
     }
 
     fn finish(self) -> Result<(Self::Evm, BlockExecutionResult<Receipt>), BlockExecutionError> {
-        // Verify validators
-        // Verify turn length
+        // Consensus: Verify validators
+        // Consensus:Verify turn length
         // If first block init genesis contracts
         // Upgrade system contracts
         // Init feynman contracts
-        // Slash validator if not in turn
-        // Distribute rewards
-        // Update validator set
+        // Consensus:Slash validator if not in turn
+        // Consensus:Distribute rewards
+        // Consensus: Update validator set
         todo!()
     }
 
