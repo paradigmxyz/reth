@@ -42,8 +42,7 @@ impl From<StoredSubNode> for CursorSubNode {
     fn from(value: StoredSubNode) -> Self {
         let pointer = value.nibble.map_or(NodePointer::ParentBranch, NodePointer::Child);
         let key = Nibbles::from_nibbles_unchecked(value.key);
-        let full_key = full_key(key.clone(), pointer);
-        Self { key, pointer, node: value.node, full_key }
+        Self::new_with_full_key(key, value.node, pointer)
     }
 }
 
@@ -54,7 +53,7 @@ impl From<CursorSubNode> for StoredSubNode {
 }
 
 impl CursorSubNode {
-    /// Creates a new `CursorSubNode` from a key and an optional node.
+    /// Creates a new [`CursorSubNode`] from a key and an optional node.
     pub fn new(key: Nibbles, node: Option<BranchNodeCompact>) -> Self {
         // Find the first nibble that is set in the state mask of the node.
         let pointer = node.as_ref().filter(|n| n.root_hash.is_none()).map_or(
@@ -65,7 +64,20 @@ impl CursorSubNode {
                 )
             },
         );
-        let full_key = full_key(key.clone(), pointer);
+        Self::new_with_full_key(key, node, pointer)
+    }
+
+    /// Creates a new [`CursorSubNode`] and sets the full key according to the provided key and
+    /// pointer.
+    fn new_with_full_key(
+        key: Nibbles,
+        node: Option<BranchNodeCompact>,
+        pointer: NodePointer,
+    ) -> Self {
+        let mut full_key = key.clone();
+        if let Some(nibble) = pointer.as_child() {
+            full_key.push(nibble);
+        }
         Self { key, node, pointer, full_key }
     }
 
@@ -135,17 +147,32 @@ impl CursorSubNode {
     /// Increments the nibble index.
     #[inline]
     pub fn inc_nibble(&mut self) {
-        let old_nibble = self.pointer;
+        let old_pointer = self.pointer;
         self.pointer.increment();
-        update_full_key(&mut self.full_key, old_nibble, self.pointer);
+        self.update_full_key(old_pointer);
     }
 
     /// Sets the nibble index.
     #[inline]
     pub fn set_nibble(&mut self, nibble: u8) {
-        let old_nibble = self.pointer;
+        let old_pointer = self.pointer;
         self.pointer = NodePointer::Child(nibble);
-        update_full_key(&mut self.full_key, old_nibble, self.pointer);
+        self.update_full_key(old_pointer);
+    }
+
+    /// Updates the key by replacing or appending a child nibble based on the old node pointer.
+    #[inline]
+    fn update_full_key(&mut self, old_pointer: NodePointer) {
+        if let Some(new_nibble) = self.pointer.as_child() {
+            if old_pointer.is_child() {
+                let last_index = self.key.len() - 1;
+                self.key.set_at(last_index, new_nibble);
+            } else {
+                self.key.push(new_nibble);
+            }
+        } else if old_pointer.is_child() {
+            self.key.pop();
+        }
     }
 }
 
@@ -194,34 +221,8 @@ impl NodePointer {
     }
 }
 
-/// Constructs a full key from the given [`Nibbles`] and [`NodePointer`].
-#[inline]
-fn full_key(mut key: Nibbles, node_pointer: NodePointer) -> Nibbles {
-    if let Some(nibble) = node_pointer.as_child() {
-        key.push(nibble);
-    }
-    key
-}
-
-/// Updates the key by replacing or appending a child nibble based on the old and new node pointer
-/// values.
-#[inline]
-fn update_full_key(key: &mut Nibbles, old_pointer: NodePointer, new_pointer: NodePointer) {
-    if let Some(new_nibble) = new_pointer.as_child() {
-        if old_pointer.is_child() {
-            let last_index = key.len() - 1;
-            key.set_at(last_index, new_nibble);
-        } else {
-            key.push(new_nibble);
-        }
-    } else if old_pointer.is_child() {
-        key.pop();
-    }
-}
-
 #[cfg(test)]
 mod tests {
-
     use super::*;
 
     #[test]
