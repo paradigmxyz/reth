@@ -10,7 +10,7 @@ use reth_chainspec::{
 };
 use reth_discv4::NodeRecord;
 use reth_evm::eth::spec::EthExecutorSpec;
-use std::fmt::Display;
+use std::{fmt::Display, sync::Arc};
 
 pub mod bsc;
 
@@ -116,5 +116,11 @@ impl BscHardforks for BscChainSpec {
 impl EthExecutorSpec for BscChainSpec {
     fn deposit_contract_address(&self) -> Option<Address> {
         None
+    }
+}
+
+impl BscHardforks for Arc<BscChainSpec> {
+    fn bsc_fork_activation(&self, fork: BscHardfork) -> ForkCondition {
+        self.as_ref().bsc_fork_activation(fork)
     }
 }

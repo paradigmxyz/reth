@@ -1,5 +1,5 @@
 use example_bsc_sdk::{
-    chainspec::bsc::{bsc_chain_spec, head},
+    chainspec::bsc::{bsc_mainnet, head},
     node::network::{boot_nodes, handshake::BscHandshake},
 };
 use reth_chainspec::NamedChain;
@@ -31,7 +31,7 @@ async fn can_connect() {
         .with_pow()
         .listener_addr(local_addr)
         .eth_rlpx_handshake(Arc::new(BscHandshake::default()))
-        .build(NoopProvider::eth(bsc_chain_spec()));
+        .build(NoopProvider::eth(bsc_mainnet()));
 
     let net_cfg = net_cfg.set_discovery_v4(
         Discv4ConfigBuilder::default()

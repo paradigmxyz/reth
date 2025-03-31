@@ -52,13 +52,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
+    use super::*;
     use alloy_primitives::hex;
     use reth_chainspec::ChainInfo;
     use reth_provider::BlockHashReader;
-
-    use super::*;
+    use std::collections::HashMap;
 
     #[derive(Clone)]
     struct MockProvider {

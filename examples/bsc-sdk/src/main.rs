@@ -10,7 +10,7 @@
 //!
 //! Credits to: <https://merkle.io/blog/modifying-reth-to-build-the-fastest-transaction-network-on-bsc-and-polygon>
 
-use crate::chainspec::bsc::{bsc_chain_spec, head};
+use crate::chainspec::bsc::{bsc_mainnet, head};
 use node::network::{boot_nodes, handshake::BscHandshake};
 use reth_discv4::Discv4ConfigBuilder;
 use reth_network::{
@@ -32,9 +32,11 @@ use tokio_stream::StreamExt;
 use tracing::info;
 
 mod chainspec;
+mod consensus;
 mod evm;
 mod hardforks;
 mod node;
+mod system_contracts;
 
 #[tokio::main]
 async fn main() {
@@ -59,7 +61,7 @@ async fn main() {
         .with_pow()
         .listener_addr(local_addr)
         .eth_rlpx_handshake(Arc::new(BscHandshake::default()))
-        .build(NoopProvider::eth(bsc_chain_spec()));
+        .build(NoopProvider::eth(bsc_mainnet()));
 
     let net_cfg = net_cfg.set_discovery_v4(
         Discv4ConfigBuilder::default()
