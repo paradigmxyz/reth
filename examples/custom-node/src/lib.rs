@@ -8,7 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use chainspec::CustomChainSpec;
-use engine::CustomEngineTypes;
+use engine::CustomPayloadTypes;
 use primitives::CustomNodePrimitives;
 use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{components::ComponentsBuilder, Node, NodeComponentsBuilder};
@@ -30,14 +30,14 @@ impl NodeTypes for CustomNode {
     type ChainSpec = CustomChainSpec;
     type StateCommitment = <OpNode as NodeTypes>::StateCommitment;
     type Storage = <OpNode as NodeTypes>::Storage;
-    type Payload = CustomEngineTypes;
+    type Payload = CustomPayloadTypes;
 }
 
 impl<N> Node<N> for CustomNode
 where
     N: FullNodeTypes<
         Types: NodeTypes<
-            Payload = CustomEngineTypes,
+            Payload = CustomPayloadTypes,
             ChainSpec = CustomChainSpec,
             Primitives = CustomNodePrimitives,
             Storage = OpStorage,
