@@ -19,14 +19,14 @@ use reth_evm::{
     Database, Evm, FromRecoveredTx, OnStateHook,
 };
 use reth_evm_ethereum::RethReceiptBuilder;
-use reth_primitives::Log;
+use reth_primitives::{Log, Recovered};
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockExecutionResult, BlockNumReader};
 use reth_revm::State;
 use revm::{
     context::result::{ExecutionResult, ResultAndState},
     state::Bytecode,
-    DatabaseCommit,
+    Database as RevmDatabase, DatabaseCommit,
 };
 use std::sync::Arc;
 
@@ -100,22 +100,62 @@ where
     }
 
     /// Initializes the feynman contracts
-    fn init_feynman_contracts(&self) -> Result<(), BlockExecutionError> {
-        let _txs = self.consensus.init_feynman_contracts();
-        todo!()
+    fn deploy_feynman_contracts(
+        &mut self,
+        beneficiary: Address,
+    ) -> Result<(), BlockExecutionError> {
+        let txs = self.consensus.init_feynman_contracts();
+        for mut tx in txs {
+            self.transact_system_tx(&mut tx, beneficiary)?;
+        }
+        Ok(())
     }
 
     /// Initializes the genesis contracts
-    fn init_genesis_contracts(&self, validator: Address) -> Result<(), BlockExecutionError> {
-        let _txs = self.consensus.init_genesis_contracts();
-        todo!()
+    fn deploy_genesis_contracts(
+        &mut self,
+        beneficiary: Address,
+    ) -> Result<(), BlockExecutionError> {
+        let txs = self.consensus.init_genesis_contracts();
+
+        for mut tx in txs {
+            self.transact_system_tx(&mut tx, beneficiary)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn transact_system_tx(
-        &self,
-        transaction: reth_primitives::Transaction,
+        &mut self,
+        tx: &mut reth_primitives::Transaction,
         sender: Address,
     ) -> Result<(), BlockExecutionError> {
+        let account = self
+            .evm
+            .db_mut()
+            .basic(sender)
+            .map_err(BlockExecutionError::other)?
+            .ok_or(BlockExecutionError::msg("Sender account not found"))?;
+        tx.set_nonce(account.nonce);
+
+        // TODO: Consensus handle system txs
+        // https://github.com/bnb-chain/reth/blob/main/crates/bsc/evm/src/execute.rs#L602
+
+        let recovered = Recovered::new_unchecked(tx.clone(), sender);
+        let result_and_state =
+            self.evm.transact(recovered).map_err(|err| BlockExecutionError::other(err))?;
+        let ResultAndState { result, state } = result_and_state;
+
+        let gas_used = result.gas_used();
+        self.gas_used += gas_used;
+        self.receipts.push(self.receipt_builder.build_receipt(ReceiptBuilderCtx {
+            tx,
+            evm: &self.evm,
+            result,
+            state: &state,
+            cumulative_gas_used: self.gas_used,
+        }));
+        self.evm.db_mut().commit(state);
+
         Ok(())
     }
 
@@ -216,16 +256,14 @@ where
         // Consensus: Verify validators
         // Consensus: Verify turn lengthcons
 
-        // If first block init genesis contracts
+        // If first block deploy genesis contracts
         if self.evm.block().number == 1 {
-            self.init_genesis_contracts(self.evm.block().beneficiary)?;
+            self.deploy_genesis_contracts(self.evm.block().beneficiary)?;
         }
 
-        // Upgrade system contracts
         self.apply_upgrade_contracts_if_before_feynman()?;
 
-        // Init feynman contracts
-        self.init_feynman_contracts()?;
+        self.deploy_feynman_contracts(self.evm.block().beneficiary)?;
 
         // TODO:
         // Consensus: Slash validator if not in turn
