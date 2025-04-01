@@ -3,7 +3,7 @@
 use crate::Recovered;
 pub use alloy_consensus::transaction::PooledTransaction;
 use once_cell as _;
-#[allow(deprecated)]
+#[expect(deprecated)]
 pub use pooled::PooledTransactionsElementEcRecovered;
 pub use reth_primitives_traits::{
     sync::{LazyLock, OnceLock},
@@ -11,7 +11,7 @@ pub use reth_primitives_traits::{
         error::{
             InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
         },
-        signed::SignedTransactionIntoRecoveredExt,
+        signed::SignedTransaction,
     },
     FillTxEnv, WithEncoded,
 };

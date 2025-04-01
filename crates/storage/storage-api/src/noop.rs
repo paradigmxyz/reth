@@ -12,10 +12,10 @@ use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{eip4895::Withdrawals, BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
-    map::{B256Map, HashMap},
     Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use core::{
+    fmt::Debug,
     marker::PhantomData,
     ops::{RangeBounds, RangeInclusive},
 };
@@ -28,9 +28,9 @@ use reth_primitives_traits::{
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use reth_trie::{
+use reth_trie_common::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, TrieInput,
+    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 
 /// Supports various api interfaces for testing purposes.
@@ -107,7 +107,7 @@ impl<ChainSpec: Send + Sync, N: Send + Sync> BlockNumReader for NoopProvider<Cha
     }
 }
 
-impl<ChainSpec: EthChainSpec + 'static, N: Send + Sync + 'static> ChainSpecProvider
+impl<ChainSpec: EthChainSpec + 'static, N: Debug + Send + Sync + 'static> ChainSpecProvider
     for NoopProvider<ChainSpec, N>
 {
     type ChainSpec = ChainSpec;
@@ -181,7 +181,7 @@ impl<C: Send + Sync, N: NodePrimitives> BlockReader for NoopProvider<C, N> {
         Ok(None)
     }
 
-    fn block_with_senders(
+    fn recovered_block(
         &self,
         _id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
@@ -208,7 +208,7 @@ impl<C: Send + Sync, N: NodePrimitives> BlockReader for NoopProvider<C, N> {
         Ok(Vec::new())
     }
 
-    fn sealed_block_with_senders_range(
+    fn recovered_block_range(
         &self,
         _range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
@@ -405,8 +405,8 @@ impl<C: Send + Sync, N: NodePrimitives> StorageRootProvider for NoopProvider<C, 
         _address: Address,
         slot: B256,
         _hashed_storage: HashedStorage,
-    ) -> ProviderResult<reth_trie::StorageProof> {
-        Ok(reth_trie::StorageProof::new(slot))
+    ) -> ProviderResult<StorageProof> {
+        Ok(StorageProof::new(slot))
     }
 
     fn storage_multiproof(
@@ -414,8 +414,8 @@ impl<C: Send + Sync, N: NodePrimitives> StorageRootProvider for NoopProvider<C, 
         _address: Address,
         _slots: &[B256],
         _hashed_storage: HashedStorage,
-    ) -> ProviderResult<reth_trie::StorageMultiProof> {
-        Ok(reth_trie::StorageMultiProof::empty())
+    ) -> ProviderResult<StorageMultiProof> {
+        Ok(StorageMultiProof::empty())
     }
 }
 
@@ -437,12 +437,8 @@ impl<C: Send + Sync, N: NodePrimitives> StateProofProvider for NoopProvider<C, N
         Ok(MultiProof::default())
     }
 
-    fn witness(
-        &self,
-        _input: TrieInput,
-        _target: HashedPostState,
-    ) -> ProviderResult<B256Map<Bytes>> {
-        Ok(HashMap::default())
+    fn witness(&self, _input: TrieInput, _target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
+        Ok(Vec::default())
     }
 }
 

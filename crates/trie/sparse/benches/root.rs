@@ -21,7 +21,7 @@ fn calculate_root_from_leaves(c: &mut Criterion) {
 
     for size in [1_000, 5_000, 10_000, 100_000] {
         // Too slow.
-        #[allow(unexpected_cfgs)]
+        #[expect(unexpected_cfgs)]
         if cfg!(codspeed) && size > 5_000 {
             continue;
         }
@@ -63,7 +63,7 @@ fn calculate_root_from_leaves_repeated(c: &mut Criterion) {
 
     for init_size in [1_000, 10_000, 100_000] {
         // Too slow.
-        #[allow(unexpected_cfgs)]
+        #[expect(unexpected_cfgs)]
         if cfg!(codspeed) && init_size > 10_000 {
             continue;
         }
@@ -72,7 +72,7 @@ fn calculate_root_from_leaves_repeated(c: &mut Criterion) {
 
         for update_size in [100, 1_000, 5_000, 10_000] {
             // Too slow.
-            #[allow(unexpected_cfgs)]
+            #[expect(unexpected_cfgs)]
             if cfg!(codspeed) && update_size > 1_000 {
                 continue;
             }

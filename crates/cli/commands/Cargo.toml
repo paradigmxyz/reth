@@ -13,11 +13,10 @@ repository.workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-cli.workspace = true
-reth-ethereum-cli.workspace = true
 reth-cli-runner.workspace = true
 reth-cli-util.workspace = true
 reth-codecs.workspace = true
-reth-config.workspace = true
+reth-config = { workspace = true, features = ["serde"] }
 reth-consensus.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-db-api.workspace = true
@@ -36,7 +35,7 @@ reth-node-builder.workspace = true
 reth-node-core.workspace = true
 reth-node-events.workspace = true
 reth-node-metrics.workspace = true
-reth-primitives.workspace = true
+reth-ethereum-primitives = { workspace = true, optional = true }
 reth-provider.workspace = true
 reth-prune.workspace = true
 reth-prune-types = { workspace = true, optional = true }
@@ -60,8 +59,8 @@ futures.workspace = true
 tokio.workspace = true
 
 # misc
-ahash = "0.8"
-human_bytes = "0.4.1"
+ahash.workspace = true
+human_bytes.workspace = true
 eyre.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 serde.workspace = true
@@ -75,9 +74,9 @@ fdlimit.workspace = true
 toml = { workspace = true, features = ["display"] }
 
 # tui
-comfy-table = "7.0"
-crossterm = "0.28.0"
-ratatui = { version = "0.29", default-features = false, features = ["crossterm"] }
+comfy-table.workspace = true
+crossterm.workspace = true
+ratatui = { workspace = true, features = ["crossterm"] }
 
 # reth test-vectors
 proptest = { workspace = true, optional = true }
@@ -86,6 +85,7 @@ proptest-arbitrary-interop = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-discv4.workspace = true
+reth-ethereum-cli.workspace = true
 
 [features]
 default = []
@@ -93,7 +93,6 @@ arbitrary = [
     "dep:proptest",
     "dep:arbitrary",
     "dep:proptest-arbitrary-interop",
-    "reth-primitives/arbitrary",
     "reth-db-api/arbitrary",
     "reth-eth-wire/arbitrary",
     "reth-db/arbitrary",
@@ -110,4 +109,5 @@ arbitrary = [
     "reth-trie-common?/arbitrary",
     "alloy-consensus/arbitrary",
     "reth-primitives-traits/arbitrary",
+    "reth-ethereum-primitives/arbitrary",
 ]

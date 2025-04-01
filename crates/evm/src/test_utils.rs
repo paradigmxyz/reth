@@ -2,16 +2,16 @@
 
 use crate::{
     execute::{BasicBlockExecutor, BlockExecutionOutput, BlockExecutorProvider, Executor},
-    system_calls::OnStateHook,
-    Database,
+    Database, OnStateHook,
 };
 use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::eip7685::Requests;
 use parking_lot::Mutex;
+use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::{BlockExecutionResult, ExecutionOutcome};
-use reth_primitives::{EthPrimitives, NodePrimitives, RecoveredBlock};
-use revm_database::State;
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
+use revm::database::State;
 
 /// A [`BlockExecutorProvider`] that returns mocked execution results.
 #[derive(Clone, Debug, Default)]
@@ -97,7 +97,7 @@ impl<DB: Database> Executor<DB> for MockExecutorProvider {
         _f: F,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(&revm_database::State<DB>),
+        F: FnMut(&revm::database::State<DB>),
     {
         <Self as Executor<DB>>::execute(self, block)
     }
@@ -113,7 +113,7 @@ impl<DB: Database> Executor<DB> for MockExecutorProvider {
         <Self as Executor<DB>>::execute(self, block)
     }
 
-    fn into_state(self) -> revm_database::State<DB> {
+    fn into_state(self) -> revm::database::State<DB> {
         unreachable!()
     }
 

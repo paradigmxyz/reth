@@ -13,10 +13,10 @@ workspace = true
 
 [dependencies]
 tracing.workspace = true
-tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "ansi", "json"] }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt", "ansi", "json"] }
 tracing-appender.workspace = true
-tracing-journald = "0.3"
-tracing-logfmt = "0.3.3"
-rolling-file = "0.2.0"
+tracing-journald.workspace = true
+tracing-logfmt.workspace = true
+rolling-file.workspace = true
 eyre.workspace = true
 clap = { workspace = true, features = ["derive"] }

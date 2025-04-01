@@ -11,16 +11,17 @@ use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{eip4895::Withdrawals, BlockHashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use core::fmt;
-use reth_chainspec::{ChainInfo, EthereumHardforks};
+use reth_chainspec::ChainInfo;
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
 use reth_node_types::{
     BlockTy, HeaderTy, NodeTypes, NodeTypesWithDB, NodeTypesWithDBAdapter, ReceiptTy, TxTy,
 };
-use reth_primitives::{RecoveredBlock, SealedBlock, SealedHeader, StaticFileSegment};
+use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
+use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, NodePrimitivesProvider, OmmersProvider, StateCommitmentProvider,
     TryIntoHistoricalStateProvider,
@@ -257,18 +258,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ProviderFactory<N> {
     }
 
     fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
-        if let Some(td) = self.chain_spec.final_paris_total_difficulty(number) {
-            // if this block is higher than the final paris(merge) block, return the final paris
-            // difficulty
-            return Ok(Some(td))
-        }
-
-        self.static_file_provider.get_with_static_file_or_database(
-            StaticFileSegment::Headers,
-            number,
-            |static_file| static_file.header_td_by_number(number),
-            || self.provider()?.header_td_by_number(number),
-        )
+        self.provider()?.header_td_by_number(number)
     }
 
     fn headers_range(
@@ -390,12 +380,12 @@ impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
         self.provider()?.pending_block_and_receipts()
     }
 
-    fn block_with_senders(
+    fn recovered_block(
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        self.provider()?.block_with_senders(id, transaction_kind)
+        self.provider()?.recovered_block(id, transaction_kind)
     }
 
     fn sealed_block_with_senders(
@@ -417,11 +407,11 @@ impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
         self.provider()?.block_with_senders_range(range)
     }
 
-    fn sealed_block_with_senders_range(
+    fn recovered_block_range(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
-        self.provider()?.sealed_block_with_senders_range(range)
+        self.provider()?.recovered_block_range(range)
     }
 }
 
@@ -672,7 +662,6 @@ mod tests {
         test_utils::{create_test_static_files_dir, ERROR_TEMPDIR},
     };
     use reth_db_api::tables;
-    use reth_primitives::StaticFileSegment;
     use reth_primitives_traits::SignedTransaction;
     use reth_prune_types::{PruneMode, PruneModes};
     use reth_storage_errors::provider::ProviderError;

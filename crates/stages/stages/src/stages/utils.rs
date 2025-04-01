@@ -9,12 +9,12 @@ use reth_db_api::{
     BlockNumberList, DatabaseError,
 };
 use reth_etl::Collector;
-use reth_primitives::StaticFileSegment;
 use reth_provider::{
     providers::StaticFileProvider, BlockReader, DBProvider, ProviderError,
     StaticFileProviderFactory,
 };
 use reth_stages_api::StageError;
+use reth_static_file_types::StaticFileSegment;
 use std::{collections::HashMap, hash::Hash, ops::RangeBounds};
 use tracing::info;
 

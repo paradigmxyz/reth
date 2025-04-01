@@ -3,9 +3,11 @@
 //!
 //! Run with
 //!
-//! ```not_rust
+//! ```sh
 //! cargo run --release -p network-txpool -- node
 //! ```
+
+#![warn(unused_crate_dependencies)]
 
 use alloy_consensus::Transaction;
 use reth_network::{config::rng_secret_key, EthNetworkPrimitives, NetworkConfig, NetworkManager};
@@ -71,7 +73,7 @@ async fn main() -> eyre::Result<()> {
 ///
 /// CAUTION: This validator is not safe to use since it doesn't actually validate the transaction's
 /// properties such as chain id, balance, nonce, etc.
-#[derive(Default)]
+#[derive(Debug, Default)]
 #[non_exhaustive]
 struct OkValidator;
 

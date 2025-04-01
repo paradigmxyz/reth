@@ -26,9 +26,12 @@ use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
 /// ```
 #[derive(Debug, Clone, Default)]
 pub struct CachedReads {
-    accounts: HashMap<Address, CachedAccount>,
-    contracts: HashMap<B256, Bytecode>,
-    block_hashes: HashMap<u64, B256>,
+    /// Block state account with storage.
+    pub accounts: HashMap<Address, CachedAccount>,
+    /// Created contracts.
+    pub contracts: HashMap<B256, Bytecode>,
+    /// Block hash mapped to the block number.
+    pub block_hashes: HashMap<u64, B256>,
 }
 
 // === impl CachedReads ===
@@ -178,10 +181,14 @@ impl<DB: DatabaseRef> DatabaseRef for CachedReadsDBRef<'_, DB> {
     }
 }
 
+/// Cached account contains the account state with storage
+/// but lacks the account status.
 #[derive(Debug, Clone)]
-struct CachedAccount {
-    info: Option<AccountInfo>,
-    storage: HashMap<U256, U256>,
+pub struct CachedAccount {
+    /// Account state.
+    pub info: Option<AccountInfo>,
+    /// Account's storage.
+    pub storage: HashMap<U256, U256>,
 }
 
 impl CachedAccount {

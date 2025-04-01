@@ -1,19 +1,19 @@
 {
   "__inputs": [
     {
-      "name": "DS_EXPRESSION",
-      "label": "Expression",
-      "description": "",
-      "type": "datasource",
-      "pluginId": "__expr__"
-    },
-    {
       "name": "DS_PROMETHEUS",
       "label": "Prometheus",
       "description": "",
       "type": "datasource",
       "pluginId": "prometheus",
       "pluginName": "Prometheus"
+    },
+    {
+      "name": "DS_EXPRESSION",
+      "label": "Expression",
+      "description": "",
+      "type": "datasource",
+      "pluginId": "__expr__"
     }
   ],
   "__elements": {},
@@ -39,7 +39,7 @@
       "type": "grafana",
       "id": "grafana",
       "name": "Grafana",
-      "version": "11.2.0"
+      "version": "11.5.3"
     },
     {
       "type": "panel",
@@ -170,7 +170,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -240,7 +240,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -310,7 +310,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -380,7 +380,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -450,7 +450,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -520,7 +520,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -599,7 +599,7 @@
         "showThresholdMarkers": true,
         "sizing": "auto"
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -675,7 +675,7 @@
         "sizing": "auto",
         "valueMode": "color"
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -777,7 +777,7 @@
         "textMode": "auto",
         "wideLayout": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -908,11 +908,12 @@
           "showLegend": true
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
-      "pluginVersion": "11.4.0",
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -1004,11 +1005,12 @@
           "showLegend": true
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
-      "pluginVersion": "11.4.0",
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -1102,11 +1104,12 @@
           "showLegend": true
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
-      "pluginVersion": "11.4.0",
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -1215,11 +1218,12 @@
           "showLegend": true
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
-      "pluginVersion": "11.4.0",
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -1344,11 +1348,12 @@
           "showLegend": false
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
-      "pluginVersion": "11.4.0",
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -1438,7 +1443,7 @@
           "unit": "percentunit"
         }
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -1508,8 +1513,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               }
             ]
           },
@@ -1532,11 +1536,12 @@
           "showLegend": true
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
-      "pluginVersion": "11.4.0",
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -1605,8 +1610,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               }
             ]
           },
@@ -1629,11 +1633,12 @@
           "showLegend": true
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
-      "pluginVersion": "11.4.0",
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -1705,8 +1710,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -1760,11 +1764,12 @@
           "showLegend": true
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
-      "pluginVersion": "11.4.0",
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -1864,8 +1869,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -1919,11 +1923,12 @@
           "showLegend": true
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
-      "pluginVersion": "11.4.0",
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -2026,11 +2031,12 @@
           "values": false
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
-      "pluginVersion": "11.4.0",
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -2097,8 +2103,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2125,11 +2130,12 @@
           "showLegend": true
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
-      "pluginVersion": "11.4.0",
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -2197,11 +2203,12 @@
           "values": false
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
-      "pluginVersion": "11.4.0",
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -2268,8 +2275,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2296,11 +2302,12 @@
           "showLegend": true
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
-      "pluginVersion": "11.4.0",
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -2366,8 +2373,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2394,10 +2400,12 @@
           "showLegend": true
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -2436,8 +2444,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2556,7 +2563,7 @@
         },
         "showHeader": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -2640,11 +2647,12 @@
           "values": false
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
-      "pluginVersion": "9.3.6",
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -2684,8 +2692,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2792,7 +2799,7 @@
         },
         "showHeader": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -2834,8 +2841,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2942,7 +2948,7 @@
         },
         "showHeader": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -3011,8 +3017,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3039,10 +3044,12 @@
           "showLegend": true
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -3108,8 +3115,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3136,10 +3142,12 @@
           "showLegend": true
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -3219,8 +3227,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               }
             ]
           },
@@ -3243,10 +3250,12 @@
           "showLegend": true
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -3407,8 +3416,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3435,10 +3443,12 @@
           "showLegend": false
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -3525,8 +3535,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3553,10 +3562,12 @@
           "showLegend": false
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -3662,8 +3673,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3690,10 +3700,12 @@
           "showLegend": true
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -3701,66 +3713,15 @@
             "uid": "${datasource}"
           },
           "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_sync_block_validation_prewarm_spawn_duration{instance=\"$instance\"}",
+          "editorMode": "code",
+          "expr": "reth_sync_block_validation_trie_input_duration{instance=\"$instance\", quantile=~\"(0|0.5|0.9|0.95|1)\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
           "instant": false,
-          "legendFormat": "Prewarm task spawn duration",
+          "legendFormat": "Trie input creation duration p{{quantile}}",
           "range": true,
           "refId": "A",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_sync_block_validation_cache_saving_duration{instance=\"$instance\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "Cache saving duration",
-          "range": true,
-          "refId": "B",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_sync_block_validation_state_root_config_duration{instance=\"$instance\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "State root config creation duration",
-          "range": true,
-          "refId": "C",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_sync_block_validation_trie_input_duration{instance=\"$instance\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "Trie input creation duration",
-          "range": true,
-          "refId": "D",
           "useBackend": false
         }
       ],
@@ -3829,8 +3790,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3881,10 +3841,12 @@
           "showLegend": true
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "multi",
           "sort": "none"
         }
       },
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -3987,8 +3949,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4015,10 +3976,12 @@
           "showLegend": true
         },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
         }
       },
+      "pluginVersion": "11.5.3",
       "targets": [
         {
           "datasource": {
@@ -4108,8 +4071,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4139,6 +4101,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -4230,8 +4193,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4295,6 +4257,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -4433,8 +4396,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               }
             ]
           },
@@ -4461,6 +4423,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -4550,8 +4513,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4581,6 +4543,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -4658,8 +4621,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4707,6 +4669,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -4785,8 +4748,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4834,6 +4796,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -4939,8 +4902,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4970,6 +4932,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -5036,8 +4999,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5067,6 +5029,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -5133,8 +5096,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5164,6 +5126,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -5229,8 +5192,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5261,6 +5223,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -5326,8 +5289,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5358,6 +5320,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -5438,8 +5401,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5469,6 +5431,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -5534,8 +5497,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5565,6 +5527,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -5642,8 +5605,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5674,6 +5636,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -5739,8 +5702,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5771,6 +5733,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -6064,8 +6027,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6095,6 +6057,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -6160,8 +6123,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6192,6 +6154,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -6406,8 +6369,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6438,6 +6400,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -6687,6 +6650,271 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 228
+      },
+      "id": 258,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_engine_rpc_get_blobs_v1{instance=~\"$instance\", quantile=\"0.5\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "legendFormat": "engine_getBlobsV1 p50",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_engine_rpc_get_blobs_v1{instance=~\"$instance\", quantile=\"0.95\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "legendFormat": "engine_getBlobsV1 p95",
+          "range": true,
+          "refId": "B",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_engine_rpc_get_blobs_v1{instance=~\"$instance\", quantile=\"0.99\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "legendFormat": "engine_getBlobsV1 p99",
+          "range": true,
+          "refId": "C",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_engine_rpc_get_blobs_v1{instance=~\"$instance\", quantile=\"0\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "legendFormat": "engine_getBlobsV1 min",
+          "range": true,
+          "refId": "D",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_engine_rpc_get_blobs_v1{instance=~\"$instance\", quantile=\"1\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "legendFormat": "engine_getBlobsV1 max",
+          "range": true,
+          "refId": "E",
+          "useBackend": false
+        }
+      ],
+      "title": "Engine API getBlobs Latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 236
+      },
+      "id": 1000,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_engine_api_blob_metrics_blob_count{instance=~\"$instance\"}",
+          "legendFormat": "Blobs Found",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_engine_api_blob_metrics_blob_misses{instance=~\"$instance\"}",
+          "hide": false,
+          "legendFormat": "Blobs Missed",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Blob Count and Misses",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "description": "Counts the number of failed response deliveries due to client request termination.",
       "fieldConfig": {
         "defaults": {
@@ -6731,8 +6959,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6763,6 +6990,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -6796,7 +7024,7 @@
       },
       "id": 214,
       "panels": [],
-      "title": "State Trie",
+      "title": "State Root Task",
       "type": "row"
     },
     {
@@ -6847,215 +7075,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 245
-      },
-      "id": 215,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "expr": "reth_trie_duration_seconds{instance=\"$instance\",quantile=~\"(0.5|0.9|0.99)\"}",
-          "instant": false,
-          "legendFormat": "{{type}} root p{{quantile}}",
-          "range": true,
-          "refId": "Trie Root Duration"
-        }
-      ],
-      "title": "Trie Root Duration",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 245
-      },
-      "id": 253,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "expr": "reth_trie_branches_added{instance=\"$instance\",quantile=~\"(0.5|0.9|0.99)\"}",
-          "instant": false,
-          "legendFormat": "{{type}} branch nodes p{{quantile}}",
-          "range": true,
-          "refId": "Trie Root Duration"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "expr": "reth_trie_leaves_added{instance=\"$instance\",quantile=~\"(0.5|0.9|0.99)\"}",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{type}} leaves added p{{quantile}}",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Trie Nodes Added",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7070,7 +7090,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 253
+        "y": 245
       },
       "id": 216,
       "options": {
@@ -7085,6 +7105,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -7163,8 +7184,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7179,7 +7199,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 253
+        "y": 245
       },
       "id": 255,
       "options": {
@@ -7194,6 +7214,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -7203,7 +7224,7 @@
           "editorMode": "code",
           "expr": "reth_tree_root_proofs_processed_histogram{instance=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
           "instant": false,
-          "legendFormat": "{{type}} proofs processed p{{quantile}}",
+          "legendFormat": "{{quantile}} percentile",
           "range": true,
           "refId": "Branch Nodes"
         }
@@ -7259,8 +7280,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7276,7 +7296,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 261
+        "y": 253
       },
       "id": 254,
       "options": {
@@ -7291,6 +7311,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -7300,7 +7321,7 @@
           "editorMode": "code",
           "expr": "reth_tree_root_proof_calculation_duration_histogram{instance=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
           "instant": false,
-          "legendFormat": "{{type}} Proof calculation duration p{{quantile}}",
+          "legendFormat": "{{quantile}} percentile",
           "range": true,
           "refId": "Branch Nodes"
         }
@@ -7309,12 +7330,694 @@
       "type": "timeseries"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 253
+      },
+      "id": 256,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "reth_tree_root_inflight_multiproofs_histogram{instance=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "instant": false,
+          "legendFormat": "{{quantile}} percentile",
+          "range": true,
+          "refId": "Branch Nodes"
+        }
+      ],
+      "title": "In-flight MultiProof requests",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 261
+      },
+      "id": 257,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "reth_tree_root_pending_multiproofs_histogram{instance=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "instant": false,
+          "legendFormat": "{{quantile}} percentile",
+          "range": true,
+          "refId": "Branch Nodes"
+        }
+      ],
+      "title": "Pending MultiProof requests",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 261
+      },
+      "id": 259,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "reth_sparse_state_trie_multiproof_skipped_account_nodes{instance=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "instant": false,
+          "legendFormat": "Account {{quantile}} percentile",
+          "range": true,
+          "refId": "Branch Nodes"
+        }
+      ],
+      "title": "Redundant multiproof account nodes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 269
+      },
+      "id": 260,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "reth_sparse_state_trie_multiproof_skipped_storage_nodes{instance=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "instant": false,
+          "legendFormat": "Storage {{quantile}} percentile",
+          "range": true,
+          "refId": "Branch Nodes"
+        }
+      ],
+      "title": "Redundant multiproof storage nodes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 269
+      },
+      "id": 261,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "reth_sparse_state_trie_multiproof_total_storage_nodes{instance=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "instant": false,
+          "legendFormat": "Storage {{quantile}} percentile",
+          "range": true,
+          "refId": "Branch Nodes"
+        }
+      ],
+      "title": "Total multiproof storage nodes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 277
+      },
+      "id": 262,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "reth_sparse_state_trie_multiproof_total_account_nodes{instance=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "Account {{quantile}} percentile",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Total multiproof account nodes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "How much time is spent in the multiproof task",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 277
+      },
+      "id": 263,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "reth_tree_root_multiproof_task_total_duration_histogram{instance=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "Task duration {{quantile}} percentile",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Proof fetching total duration",
+      "type": "timeseries"
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 269
+        "y": 285
       },
       "id": 68,
       "panels": [],
@@ -7371,8 +8074,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7387,7 +8089,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 270
+        "y": 286
       },
       "id": 60,
       "options": {
@@ -7402,6 +8104,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -7467,8 +8170,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7483,7 +8185,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 270
+        "y": 286
       },
       "id": 62,
       "options": {
@@ -7498,6 +8200,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -7563,8 +8266,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7579,7 +8281,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 278
+        "y": 294
       },
       "id": 64,
       "options": {
@@ -7594,6 +8296,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -7616,7 +8319,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 286
+        "y": 302
       },
       "id": 97,
       "panels": [],
@@ -7671,8 +8374,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7701,7 +8403,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 287
+        "y": 303
       },
       "id": 98,
       "options": {
@@ -7716,6 +8418,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -7847,8 +8550,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7864,7 +8566,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 287
+        "y": 303
       },
       "id": 101,
       "options": {
@@ -7879,6 +8581,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -7945,8 +8648,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7962,7 +8664,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 295
+        "y": 311
       },
       "id": 99,
       "options": {
@@ -7977,6 +8679,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -8043,8 +8746,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8060,7 +8762,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 295
+        "y": 311
       },
       "id": 100,
       "options": {
@@ -8075,6 +8777,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -8098,7 +8801,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 303
+        "y": 319
       },
       "id": 105,
       "panels": [],
@@ -8154,8 +8857,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8171,7 +8873,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 304
+        "y": 320
       },
       "id": 106,
       "options": {
@@ -8186,6 +8888,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -8252,8 +8955,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8269,7 +8971,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 304
+        "y": 320
       },
       "id": 107,
       "options": {
@@ -8284,6 +8986,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -8349,8 +9052,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8366,7 +9068,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 312
+        "y": 328
       },
       "id": 217,
       "options": {
@@ -8381,6 +9083,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -8404,7 +9107,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 320
+        "y": 336
       },
       "id": 108,
       "panels": [],
@@ -8460,8 +9163,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8502,7 +9204,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 321
+        "y": 337
       },
       "id": 109,
       "options": {
@@ -8517,7 +9219,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "10.1.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -8564,7 +9266,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 321
+        "y": 337
       },
       "id": 111,
       "maxDataPoints": 25,
@@ -8677,8 +9379,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8694,7 +9395,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 329
+        "y": 345
       },
       "id": 120,
       "options": {
@@ -8709,7 +9410,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "10.1.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -8752,7 +9453,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 329
+        "y": 345
       },
       "id": 112,
       "maxDataPoints": 25,
@@ -8865,8 +9566,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8918,7 +9618,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 337
+        "y": 353
       },
       "id": 198,
       "options": {
@@ -8933,6 +9633,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -9121,8 +9822,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9138,7 +9838,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 337
+        "y": 353
       },
       "id": 246,
       "options": {
@@ -9153,7 +9853,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "10.1.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -9177,7 +9877,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 345
+        "y": 361
       },
       "id": 236,
       "panels": [],
@@ -9233,8 +9933,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9249,7 +9948,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 346
+        "y": 362
       },
       "id": 237,
       "options": {
@@ -9264,6 +9963,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -9330,8 +10030,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9346,7 +10045,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 346
+        "y": 362
       },
       "id": 238,
       "options": {
@@ -9361,6 +10060,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -9427,8 +10127,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9443,7 +10142,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 354
+        "y": 370
       },
       "id": 239,
       "options": {
@@ -9458,6 +10157,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -9536,8 +10236,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9552,7 +10251,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 354
+        "y": 370
       },
       "id": 219,
       "options": {
@@ -9567,6 +10266,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -9600,8 +10300,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9617,7 +10316,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 362
+        "y": 378
       },
       "id": 220,
       "options": {
@@ -9661,7 +10360,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 370
+        "y": 386
       },
       "id": 241,
       "panels": [],
@@ -9718,8 +10417,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9734,7 +10432,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 371
+        "y": 387
       },
       "id": 243,
       "options": {
@@ -9749,6 +10447,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -9830,8 +10529,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9846,7 +10544,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 371
+        "y": 387
       },
       "id": 244,
       "options": {
@@ -9861,6 +10559,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -9942,8 +10641,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9959,7 +10657,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 379
+        "y": 395
       },
       "id": 245,
       "options": {
@@ -9974,6 +10672,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -9998,7 +10697,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 387
+        "y": 403
       },
       "id": 226,
       "panels": [],
@@ -10054,8 +10753,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -10096,7 +10794,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 388
+        "y": 404
       },
       "id": 225,
       "options": {
@@ -10112,7 +10810,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "10.1.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -10183,8 +10881,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -10225,7 +10922,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 388
+        "y": 404
       },
       "id": 227,
       "options": {
@@ -10241,7 +10938,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "10.1.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -10312,8 +11009,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -10354,7 +11050,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 396
+        "y": 412
       },
       "id": 235,
       "options": {
@@ -10370,7 +11066,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "10.1.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -10441,8 +11137,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -10483,7 +11178,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 396
+        "y": 412
       },
       "id": 234,
       "options": {
@@ -10499,7 +11194,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "10.1.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -10522,8 +11217,8 @@
       "type": "timeseries"
     }
   ],
-  "refresh": "30s",
-  "schemaVersion": 39,
+  "refresh": "5s",
+  "schemaVersion": 40,
   "tags": [],
   "templating": {
     "list": [
@@ -10534,34 +11229,48 @@
           "uid": "${datasource}"
         },
         "definition": "query_result(reth_info)",
-        "hide": 0,
         "includeAll": false,
-        "multi": false,
-        "name": "instance",
+        "label": "Job",
+        "name": "job",
         "options": [],
         "query": {
+          "qryType": 3,
           "query": "query_result(reth_info)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 1,
-        "regex": "/.*instance=\\\"([^\\\"]*).*/",
-        "skipUrlSync": false,
-        "sort": 0,
+        "regex": "/.*job=\\\"([^\\\"]*).*/",
         "type": "query"
       },
       {
         "current": {},
-        "hide": 0,
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "query_result(reth_info{job=\"${job}\"})",
+        "includeAll": false,
+        "label": "Instance (auto-selected)",
+        "name": "instance",
+        "options": [],
+        "query": {
+          "qryType": 3,
+          "query": "query_result(reth_info{job=\"${job}\"})",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 1,
+        "regex": "/.*instance=\\\"([^\\\"]*).*/",
+        "type": "query"
+      },
+      {
+        "current": {},
         "includeAll": false,
         "label": "Datasource",
-        "multi": false,
         "name": "datasource",
         "options": [],
         "query": "prometheus",
-        "queryValue": "",
         "refresh": 1,
         "regex": "",
-        "skipUrlSync": false,
         "type": "datasource"
       }
     ]
@@ -10574,6 +11283,6 @@
   "timezone": "",
   "title": "Reth",
   "uid": "2k8BXz24x",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }

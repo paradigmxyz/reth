@@ -2,8 +2,9 @@
 
 use alloc::vec::Vec;
 use alloy_consensus::{
-    transaction::RlpEcdsaTx, Sealed, SignableTransaction, Signed, Transaction, TxEip1559,
-    TxEip2930, TxEip7702, TxLegacy, Typed2718,
+    transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx},
+    Sealed, SignableTransaction, Signed, Transaction, TxEip1559, TxEip2930, TxEip7702, TxLegacy,
+    Typed2718,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
@@ -21,9 +22,8 @@ use core::{
     ops::Deref,
 };
 use derive_more::{AsRef, Deref};
-use op_alloy_consensus::{
-    DepositTransaction, OpPooledTransaction, OpTxEnvelope, OpTypedTransaction, TxDeposit,
-};
+use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope, OpTypedTransaction, TxDeposit};
+use op_revm::transaction::deposit::DepositTransactionParts;
 #[cfg(any(test, feature = "reth-codec"))]
 use proptest as _;
 use reth_primitives_traits::{
@@ -33,7 +33,6 @@ use reth_primitives_traits::{
     InMemorySize, SignedTransaction,
 };
 use revm_context::TxEnv;
-use revm_optimism::transaction::deposit::DepositTransactionParts;
 
 /// Signed transaction.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
@@ -96,10 +95,6 @@ impl OpTransactionSigned {
 impl SignedTransaction for OpTransactionSigned {
     fn tx_hash(&self) -> &TxHash {
         self.hash.get_or_init(|| self.recalculate_hash())
-    }
-
-    fn signature(&self) -> &Signature {
-        &self.signature
     }
 
     fn recover_signer(&self) -> Result<Address, RecoveryError> {
@@ -214,7 +209,7 @@ impl OpTransaction for OpTransactionSigned {
     }
 }
 
-impl FromRecoveredTx<OpTransactionSigned> for revm_optimism::OpTransaction<TxEnv> {
+impl FromRecoveredTx<OpTransactionSigned> for op_revm::OpTransaction<TxEnv> {
     fn from_recovered_tx(tx: &OpTransactionSigned, sender: Address) -> Self {
         let envelope = tx.encoded_2718();
 
@@ -308,7 +303,11 @@ impl FromRecoveredTx<OpTransactionSigned> for revm_optimism::OpTransaction<TxEnv
                 DepositTransactionParts {
                     is_system_transaction: tx.is_system_transaction,
                     source_hash: tx.source_hash,
-                    mint: tx.mint,
+                    // For consistency with op-geth, we always return `0x0` for mint if it is
+                    // missing This is because op-geth does not distinguish
+                    // between null and 0, because this value is decoded from RLP where null is
+                    // represented as 0
+                    mint: Some(tx.mint.unwrap_or_default()),
                 }
             } else {
                 Default::default()
@@ -688,26 +687,6 @@ impl TryFrom<OpTransactionSigned> for OpPooledTransaction {
     }
 }
 
-impl DepositTransaction for OpTransactionSigned {
-    fn source_hash(&self) -> Option<B256> {
-        match &self.transaction {
-            OpTypedTransaction::Deposit(tx) => Some(tx.source_hash),
-            _ => None,
-        }
-    }
-
-    fn mint(&self) -> Option<u128> {
-        match &self.transaction {
-            OpTypedTransaction::Deposit(tx) => tx.mint,
-            _ => None,
-        }
-    }
-
-    fn is_system_transaction(&self) -> bool {
-        self.is_deposit()
-    }
-}
-
 /// Bincode-compatible transaction type serde implementations.
 #[cfg(feature = "serde-bincode-compat")]
 pub mod serde_bincode_compat {
@@ -792,6 +771,40 @@ pub mod serde_bincode_compat {
 
         fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
             repr.into()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::proptest;
+    use proptest_arbitrary_interop::arb;
+    use reth_codecs::Compact;
+
+    proptest! {
+        #[test]
+        fn test_roundtrip_compact_encode_envelope(reth_tx in arb::<OpTransactionSigned>()) {
+            let mut expected_buf = Vec::<u8>::new();
+            let expected_len = reth_tx.to_compact(&mut expected_buf);
+
+            let mut actual_but  = Vec::<u8>::new();
+            let alloy_tx = OpTxEnvelope::from(reth_tx);
+            let actual_len = alloy_tx.to_compact(&mut actual_but);
+
+            assert_eq!(actual_but, expected_buf);
+            assert_eq!(actual_len, expected_len);
+        }
+
+        #[test]
+        fn test_roundtrip_compact_decode_envelope(reth_tx in arb::<OpTransactionSigned>()) {
+            let mut buf = Vec::<u8>::new();
+            let len = reth_tx.to_compact(&mut buf);
+
+            let (actual_tx, _) = OpTxEnvelope::from_compact(&buf, len);
+            let expected_tx = OpTxEnvelope::from(reth_tx);
+
+            assert_eq!(actual_tx, expected_tx);
         }
     }
 }

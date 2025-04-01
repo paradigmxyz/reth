@@ -205,7 +205,7 @@ pub(crate) fn maybe_json_value_parser(value: &str) -> Result<String, eyre::Error
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{Address, B256};
+    use alloy_primitives::{address, B256};
     use clap::{Args, Parser};
     use reth_db_api::{
         models::{storage_sharded_key::StorageShardedKey, ShardedKey},
@@ -246,7 +246,7 @@ mod tests {
         assert_eq!(
             table_key::<StoragesHistory>(r#"{ "address": "0x01957911244e546ce519fbac6f798958fafadb41", "sharded_key": { "key": "0x0000000000000000000000000000000000000000000000000000000000000003", "highest_block_number": 18446744073709551615 } }"#).unwrap(),
             StorageShardedKey::new(
-                Address::from_str("0x01957911244e546ce519fbac6f798958fafadb41").unwrap(),
+                address!("0x01957911244e546ce519fbac6f798958fafadb41"),
                 B256::from_str(
                     "0x0000000000000000000000000000000000000000000000000000000000000003"
                 )
@@ -261,7 +261,7 @@ mod tests {
         assert_eq!(
             table_key::<AccountsHistory>(r#"{ "key": "0x4448e1273fd5a8bfdb9ed111e96889c960eee145", "highest_block_number": 18446744073709551615 }"#).unwrap(),
             ShardedKey::new(
-                Address::from_str("0x4448e1273fd5a8bfdb9ed111e96889c960eee145").unwrap(),
+                address!("0x4448e1273fd5a8bfdb9ed111e96889c960eee145"),
                 18446744073709551615
             )
         );

@@ -23,10 +23,9 @@ use reth_db::{
     },
     ClientVersion,
 };
+use reth_ethereum_primitives::{Receipt, Transaction, TransactionSigned, TxType};
 use reth_fs_util as fs;
-use reth_primitives::{
-    Account, Log, LogData, Receipt, StorageEntry, Transaction, TransactionSigned, TxType,
-};
+use reth_primitives_traits::{Account, Log, LogData, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneMode};
 use reth_stages_types::{
     AccountHashingCheckpoint, CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint,

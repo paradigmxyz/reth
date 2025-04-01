@@ -9,6 +9,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 /// CLI argument parsing for the optimism node.
 pub mod args;
@@ -24,6 +25,9 @@ pub use node::{OpNetworkPrimitives, OpNode};
 pub mod rpc;
 pub use rpc::OpEngineApiBuilder;
 
+pub mod version;
+pub use version::OP_NAME_CLIENT;
+
 pub use reth_optimism_txpool as txpool;
 
 /// Helpers for running test node instances.
@@ -31,7 +35,7 @@ pub use reth_optimism_txpool as txpool;
 pub mod utils;
 
 pub use reth_optimism_payload_builder::{
-    OpBuiltPayload, OpPayloadBuilder, OpPayloadBuilderAttributes,
+    OpBuiltPayload, OpPayloadAttributes, OpPayloadBuilder, OpPayloadBuilderAttributes,
 };
 
 pub use reth_optimism_evm::*;

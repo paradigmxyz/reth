@@ -20,10 +20,9 @@ use reth_consensus_common::validation::{
     validate_header_base_fee, validate_header_extra_data, validate_header_gas,
 };
 use reth_execution_types::BlockExecutionResult;
-use reth_primitives::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_primitives_traits::{
     constants::{GAS_LIMIT_BOUND_DIVISOR, MINIMUM_GAS_LIMIT},
-    Block, BlockHeader,
+    Block, BlockHeader, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
 use std::{fmt::Debug, sync::Arc, time::SystemTime};
 
@@ -203,8 +202,7 @@ where
         header: &H,
         _total_difficulty: U256,
     ) -> Result<(), ConsensusError> {
-        let is_post_merge =
-            self.chain_spec.is_paris_active_at_block(header.number()).is_some_and(|active| active);
+        let is_post_merge = self.chain_spec.is_paris_active_at_block(header.number());
 
         if is_post_merge {
             if !header.difficulty().is_zero() {
@@ -263,7 +261,7 @@ mod tests {
     use reth_primitives_traits::proofs;
 
     fn header_with_gas_limit(gas_limit: u64) -> SealedHeader {
-        let header = reth_primitives::Header { gas_limit, ..Default::default() };
+        let header = reth_primitives_traits::Header { gas_limit, ..Default::default() };
         SealedHeader::new(header, B256::ZERO)
     }
 
@@ -343,7 +341,7 @@ mod tests {
         // that the header is valid
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().shanghai_activated().build());
 
-        let header = reth_primitives::Header {
+        let header = reth_primitives_traits::Header {
             base_fee_per_gas: Some(1337),
             withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
             ..Default::default()

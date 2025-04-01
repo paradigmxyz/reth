@@ -21,7 +21,7 @@ use crate::{
     discovery::Discovery,
     error::{NetworkError, ServiceKind},
     eth_requests::IncomingEthRequest,
-    import::{BlockImport, BlockImportOutcome, BlockValidation},
+    import::{BlockImport, BlockImportEvent, BlockImportOutcome, BlockValidation, NewBlockEvent},
     listener::ConnectionListener,
     message::{NewBlockMessage, PeerMessage},
     metrics::{DisconnectMetrics, NetworkMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
@@ -248,6 +248,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             tx_gossip_disabled,
             transactions_manager_config: _,
             nat,
+            handshake,
         } = config;
 
         let peers_manager = PeersManager::new(peers_config);
@@ -299,6 +300,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             hello_message,
             fork_filter,
             extra_protocols,
+            handshake,
         );
 
         let state = NetworkState::new(
@@ -441,7 +443,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
         let status = sessions.status();
         let hello_message = sessions.hello_message();
 
-        #[allow(deprecated)]
+        #[expect(deprecated)]
         NetworkStatus {
             client_version: hello_message.client_version,
             protocol_version: hello_message.protocol_version as u64,
@@ -518,23 +520,39 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     }
 
     /// Invoked after a `NewBlock` message from the peer was validated
-    fn on_block_import_result(&mut self, outcome: BlockImportOutcome<N::Block>) {
-        let BlockImportOutcome { peer, result } = outcome;
-        match result {
-            Ok(validated_block) => match validated_block {
+    fn on_block_import_result(&mut self, event: BlockImportEvent<N::Block>) {
+        match event {
+            BlockImportEvent::Announcement(validation) => match validation {
                 BlockValidation::ValidHeader { block } => {
-                    self.swarm.state_mut().update_peer_block(&peer, block.hash, block.number());
                     self.swarm.state_mut().announce_new_block(block);
                 }
                 BlockValidation::ValidBlock { block } => {
                     self.swarm.state_mut().announce_new_block_hash(block);
                 }
             },
-            Err(_err) => {
-                self.swarm
-                    .state_mut()
-                    .peers_mut()
-                    .apply_reputation_change(&peer, ReputationChangeKind::BadBlock);
+            BlockImportEvent::Outcome(outcome) => {
+                let BlockImportOutcome { peer, result } = outcome;
+                match result {
+                    Ok(validated_block) => match validated_block {
+                        BlockValidation::ValidHeader { block } => {
+                            self.swarm.state_mut().update_peer_block(
+                                &peer,
+                                block.hash,
+                                block.number(),
+                            );
+                            self.swarm.state_mut().announce_new_block(block);
+                        }
+                        BlockValidation::ValidBlock { block } => {
+                            self.swarm.state_mut().announce_new_block_hash(block);
+                        }
+                    },
+                    Err(_err) => {
+                        self.swarm
+                            .state_mut()
+                            .peers_mut()
+                            .apply_reputation_change(&peer, ReputationChangeKind::BadBlock);
+                    }
+                }
             }
         }
     }
@@ -565,14 +583,16 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             PeerMessage::NewBlockHashes(hashes) => {
                 self.within_pow_or_disconnect(peer_id, |this| {
                     // update peer's state, to track what blocks this peer has seen
-                    this.swarm.state_mut().on_new_block_hashes(peer_id, hashes.0)
+                    this.swarm.state_mut().on_new_block_hashes(peer_id, hashes.0.clone());
+                    // start block import process for the hashes
+                    this.block_import.on_new_block(peer_id, NewBlockEvent::Hashes(hashes));
                 })
             }
             PeerMessage::NewBlock(block) => {
                 self.within_pow_or_disconnect(peer_id, move |this| {
                     this.swarm.state_mut().on_new_block(peer_id, block.hash);
                     // start block import process
-                    this.block_import.on_new_block(peer_id, block);
+                    this.block_import.on_new_block(peer_id, NewBlockEvent::Block(block));
                 });
             }
             PeerMessage::PooledTransactions(msg) => {
@@ -756,6 +776,13 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
 
                 self.update_active_connection_metrics();
 
+                let peer_kind = self
+                    .swarm
+                    .state()
+                    .peers()
+                    .peer_by_id(peer_id)
+                    .map(|(_, kind)| kind)
+                    .unwrap_or_default();
                 let session_info = SessionInfo {
                     peer_id,
                     remote_addr,
@@ -763,6 +790,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     capabilities,
                     status,
                     version,
+                    peer_kind,
                 };
 
                 self.event_sender

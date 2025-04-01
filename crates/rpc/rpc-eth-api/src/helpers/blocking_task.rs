@@ -33,7 +33,7 @@ pub trait SpawnBlocking: EthApiTypes + Clone + Send + Sync + 'static {
         self.tracing_task_guard().clone().acquire_owned()
     }
 
-    /// See also  [`Semaphore::acquire_many_owned`](`tokio::sync::Semaphore::acquire_many_owned`).
+    /// See also [`Semaphore::acquire_many_owned`](`tokio::sync::Semaphore::acquire_many_owned`).
     fn acquire_many_owned(
         &self,
         n: u32,
@@ -53,7 +53,7 @@ pub trait SpawnBlocking: EthApiTypes + Clone + Send + Sync + 'static {
         let (tx, rx) = oneshot::channel();
         let this = self.clone();
         self.io_task_spawner().spawn_blocking(Box::pin(async move {
-            let res = async move { f(this) }.await;
+            let res = f(this);
             let _ = tx.send(res);
         }));
 

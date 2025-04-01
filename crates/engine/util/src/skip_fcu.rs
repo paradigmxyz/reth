@@ -1,7 +1,8 @@
 //! Stream wrapper that skips specified number of FCUs.
 
 use futures::{Stream, StreamExt};
-use reth_engine_primitives::{BeaconEngineMessage, EngineTypes, OnForkChoiceUpdated};
+use reth_engine_primitives::{BeaconEngineMessage, OnForkChoiceUpdated};
+use reth_payload_primitives::PayloadTypes;
 use std::{
     pin::Pin,
     task::{ready, Context, Poll},
@@ -31,10 +32,10 @@ impl<S> EngineSkipFcu<S> {
     }
 }
 
-impl<S, Engine> Stream for EngineSkipFcu<S>
+impl<S, T> Stream for EngineSkipFcu<S>
 where
-    S: Stream<Item = BeaconEngineMessage<Engine>>,
-    Engine: EngineTypes,
+    S: Stream<Item = BeaconEngineMessage<T>>,
+    T: PayloadTypes,
 {
     type Item = S::Item;
 

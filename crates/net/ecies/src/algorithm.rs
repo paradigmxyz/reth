@@ -852,7 +852,7 @@ mod tests {
         .unwrap();
 
         let client_nonce =
-            b256!("7e968bba13b6c50e2c4cd7f241cc0d64d1ac25c7f5952df231ac6a2bda8ee5d6");
+            b256!("0x7e968bba13b6c50e2c4cd7f241cc0d64d1ac25c7f5952df231ac6a2bda8ee5d6");
 
         let server_id = pk2id(&PublicKey::from_secret_key(SECP256K1, &eip8_test_server_key()));
 
@@ -867,7 +867,7 @@ mod tests {
         .unwrap();
 
         let server_nonce =
-            b256!("559aead08264d5795d3909718cdd05abd49572e84fe55590eef31a88a08fdffd");
+            b256!("0x559aead08264d5795d3909718cdd05abd49572e84fe55590eef31a88a08fdffd");
 
         ECIES::new_static_server(eip8_test_server_key(), server_nonce, server_ephemeral_key)
             .unwrap()
@@ -970,7 +970,7 @@ mod tests {
         for len in len_range {
             let mut dest = vec![1u8; len];
             kdf(
-                b256!("7000000000000000000000000000000000000000000000000000000000000007"),
+                b256!("0x7000000000000000000000000000000000000000000000000000000000000007"),
                 &[0x01, 0x33, 0x70, 0xbe, 0xef],
                 &mut dest,
             );

@@ -1,6 +1,5 @@
-/// Ethereum helper methods
-mod ethereum;
-pub use ethereum::EthereumHardforks;
+mod dev;
+pub use dev::DEV_HARDFORKS;
 
 use crate::{ForkCondition, ForkFilter, ForkId, Hardfork, Head};
 #[cfg(feature = "std")]
@@ -143,5 +142,15 @@ impl core::fmt::Debug for ChainHardforks {
         f.debug_struct("ChainHardforks")
             .field("0", &self.forks_iter().map(|(hf, cond)| (hf.name(), cond)).collect::<Vec<_>>())
             .finish()
+    }
+}
+
+impl<T: Hardfork, const N: usize> From<[(T, ForkCondition); N]> for ChainHardforks {
+    fn from(list: [(T, ForkCondition); N]) -> Self {
+        Self::new(
+            list.into_iter()
+                .map(|(fork, cond)| (Box::new(fork) as Box<dyn Hardfork>, cond))
+                .collect(),
+        )
     }
 }

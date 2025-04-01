@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 
 use alloy_consensus::EMPTY_ROOT_HASH;
-use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
+use alloy_primitives::{address, b256, keccak256, Address, Bytes, B256, U256};
 use alloy_rlp::EMPTY_STRING_CODE;
 use reth_chainspec::{Chain, ChainSpec, HOLESKY, MAINNET};
 use reth_primitives_traits::Account;
@@ -102,7 +102,7 @@ fn testspec_empty_storage_proof() {
     let factory = create_test_provider_factory();
     let root = insert_genesis(&factory, TEST_SPEC.clone()).unwrap();
 
-    let target = Address::from_str("0x1ed9b1dd266b607ee278726d324b855a093394a6").unwrap();
+    let target = address!("0x1ed9b1dd266b607ee278726d324b855a093394a6");
     let slots = Vec::from([B256::with_last_byte(1), B256::with_last_byte(3)]);
 
     let provider = factory.provider().unwrap();
@@ -129,7 +129,7 @@ fn mainnet_genesis_account_proof() {
 
     // Address from mainnet genesis allocation.
     // keccak256 - `0xcf67b71c90b0d523dd5004cf206f325748da347685071b34812e21801f5270c4`
-    let target = Address::from_str("0x000d836201318ec6899a67540690382780743280").unwrap();
+    let target = address!("0x000d836201318ec6899a67540690382780743280");
 
     // `cast proof 0x000d836201318ec6899a67540690382780743280 --block 0`
     let expected_account_proof = convert_to_proof([
@@ -154,7 +154,7 @@ fn mainnet_genesis_account_proof_nonexistent() {
 
     // Address that does not exist in mainnet genesis allocation.
     // keccak256 - `0x18f415ffd7f66bb1924d90f0e82fb79ca8c6d8a3473cd9a95446a443b9db1761`
-    let target = Address::from_str("0x000d836201318ec6899a67540690382780743281").unwrap();
+    let target = address!("0x000d836201318ec6899a67540690382780743281");
 
     // `cast proof 0x000d836201318ec6899a67540690382780743281 --block 0`
     let expected_account_proof = convert_to_proof([
@@ -175,7 +175,7 @@ fn holesky_deposit_contract_proof() {
     let factory = create_test_provider_factory();
     let root = insert_genesis(&factory, HOLESKY.clone()).unwrap();
 
-    let target = Address::from_str("0x4242424242424242424242424242424242424242").unwrap();
+    let target = address!("0x4242424242424242424242424242424242424242");
     // existent
     let slot_22 =
         B256::from_str("0x0000000000000000000000000000000000000000000000000000000000000022")
@@ -198,9 +198,9 @@ fn holesky_deposit_contract_proof() {
         info:  Some(Account {
             balance: U256::ZERO,
             nonce: 0,
-            bytecode_hash: Some(B256::from_str("0x2034f79e0e33b0ae6bef948532021baceb116adf2616478703bec6b17329f1cc").unwrap())
+            bytecode_hash: Some(b256!("0x2034f79e0e33b0ae6bef948532021baceb116adf2616478703bec6b17329f1cc"))
         }),
-        storage_root: B256::from_str("0x556a482068355939c95a3412bdb21213a301483edb1b64402fb66ac9f3583599").unwrap(),
+        storage_root: b256!("0x556a482068355939c95a3412bdb21213a301483edb1b64402fb66ac9f3583599"),
         proof: convert_to_proof([
             "0xf90211a0ea92fb71507739d5afe328d607b2c5e98322b7aa7cdfeccf817543058b54af70a0bd0c2525b5bee47abf7120c9e01ec3249699d687f80ebb96ed9ad9de913dbab0a0ab4b14b89416eb23c6b64204fa45cfcb39d4220016a9cd0815ebb751fe45eb71a0986ae29c2148b9e61f9a7543f44a1f8d029f1c5095b359652e9ec94e64b5d393a0555d54aa23ed990b0488153418637df7b2c878b604eb761aa2673b609937b0eba0140afb6a3909cc6047b3d44af13fc83f161a7e4c4ddba430a2841862912eb222a031b1185c1f455022d9e42ce04a71f174eb9441b1ada67449510500f4d85b3b22a051ecd01e18113b23cc65e62f67d69b33ee15d20bf81a6b524f7df90ded00ca15a0703769d6a7befad000bc2b4faae3e41b809b1b1241fe2964262554e7e3603488a0e5de7f600e4e6c3c3e5630e0c66f50506a17c9715642fccb63667e81397bbf93a095f783cd1d464a60e3c8adcadc28c6eb9fec7306664df39553be41dccc909606a04225fda3b89f0c59bf40129d1d5e5c3bf67a2129f0c55e53ffdd2cebf185d644a078e0f7fd3ae5a9bc90f66169614211b48fe235eb64818b3935d3e69c53523b9aa0a870e00e53ebaa1e9ec16e5f36606fd7d21d3a3c96894c0a2a23550949d4fdf7a0809226b69cee1f4f22ced1974e7805230da1909036a49a7652428999431afac2a0f11593b2407e86e11997325d8df2d22d937bbe0aef8302ba40c6be0601b04fc380",
             "0xf901f1a09da7d9755fe0c558b3c3de9fdcdf9f28ae641f38c9787b05b73ab22ae53af3e2a0d9990bf0b810d1145ecb2b011fd68c63cc85564e6724166fd4a9520180706e5fa05f5f09855df46330aa310e8d6be5fb82d1a4b975782d9b29acf06ac8d3e72b1ca0ca976997ddaf06f18992f6207e4f6a05979d07acead96568058789017cc6d06ba04d78166b48044fdc28ed22d2fd39c8df6f8aaa04cb71d3a17286856f6893ff83a004f8c7cc4f1335182a1709fb28fc67d52e59878480210abcba864d5d1fd4a066a0fc3b71c33e2e6b77c5e494c1db7fdbb447473f003daf378c7a63ba9bf3f0049d80a07b8e7a21c1178d28074f157b50fca85ee25c12568ff8e9706dcbcdacb77bf854a0973274526811393ea0bf4811ca9077531db00d06b86237a2ecd683f55ba4bcb0a03a93d726d7487874e51b52d8d534c63aa2a689df18e3b307c0d6cb0a388b00f3a06aa67101d011d1c22fe739ef83b04b5214a3e2f8e1a2625d8bfdb116b447e86fa02dd545b33c62d33a183e127a08a4767fba891d9f3b94fc20a2ca02600d6d1fffa0f3b039a4f32349e85c782d1164c1890e5bf16badc9ee4cf827db6afd2229dde6a0d9240a9d2d5851d05a97ff3305334dfdb0101e1e321fc279d2bb3cad6afa8fc8a01b69c6ab5173de8a8ec53a6ebba965713a4cc7feb86cb3e230def37c230ca2b280",

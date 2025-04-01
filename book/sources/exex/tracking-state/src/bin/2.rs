@@ -67,10 +67,10 @@ impl<Node: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>> Fut
 }
 
 fn main() -> eyre::Result<()> {
-    reth::cli::Cli::parse_args().run(|builder, _| async move {
+    reth::cli::Cli::parse_args().run(async move |builder, _| {
         let handle = builder
             .node(EthereumNode::default())
-            .install_exex("my-exex", |ctx| async move { Ok(MyExEx::new(ctx)) })
+            .install_exex("my-exex", async move |ctx| Ok(MyExEx::new(ctx)))
             .launch()
             .await?;
 

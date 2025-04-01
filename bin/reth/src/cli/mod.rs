@@ -42,19 +42,6 @@ pub struct Cli<C: ChainSpecParser = EthereumChainSpecParser, Ext: clap::Args + f
     #[command(subcommand)]
     pub command: Commands<C, Ext>,
 
-    /// The chain this node is running.
-    ///
-    /// Possible values are either a built-in chain or the path to a chain specification file.
-    #[arg(
-        long,
-        value_name = "CHAIN_OR_PATH",
-        long_help = C::help_message(),
-        default_value = C::SUPPORTED_CHAINS[0],
-        value_parser = C::parser(),
-        global = true,
-    )]
-    pub chain: Arc<C::ChainSpec>,
-
     /// Add a new instance of a node.
     ///
     /// Configures the ports of the node to avoid conflicts with the defaults.
@@ -98,6 +85,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
     /// This accepts a closure that is used to launch the node via the
     /// [`NodeCommand`](node::NodeCommand).
     ///
+    /// This command will be run on the [default tokio runtime](reth_cli_runner::tokio_runtime).
+    ///
     ///
     /// # Example
     ///
@@ -106,7 +95,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
     /// use reth_node_ethereum::EthereumNode;
     ///
     /// Cli::parse_args()
-    ///     .run(|builder, _| async move {
+    ///     .run(async move |builder, _| {
     ///         let handle = builder.launch_node(EthereumNode::default()).await?;
     ///
     ///         handle.wait_for_node_exit().await
@@ -129,29 +118,60 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
     /// }
     ///
     /// Cli::<EthereumChainSpecParser, MyArgs>::parse()
-    ///     .run(|builder, my_args: MyArgs| async move {
+    ///     .run(async move |builder, my_args: MyArgs|
     ///         // launch the node
-    ///
-    ///         Ok(())
-    ///     })
+    ///         Ok(()))
     ///     .unwrap();
     /// ````
-    pub fn run<L, Fut>(mut self, launcher: L) -> eyre::Result<()>
+    pub fn run<L, Fut>(self, launcher: L) -> eyre::Result<()>
     where
         L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
     {
-        // add network name to logs dir
-        self.logs.log_file_directory =
-            self.logs.log_file_directory.join(self.chain.chain.to_string());
+        self.with_runner(CliRunner::try_default_runtime()?, launcher)
+    }
 
+    /// Execute the configured cli command with the provided [`CliRunner`].
+    ///
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use reth::cli::Cli;
+    /// use reth_cli_runner::CliRunner;
+    /// use reth_node_ethereum::EthereumNode;
+    ///
+    /// let runtime = tokio::runtime::Builder::new_multi_thread()
+    ///     .worker_threads(4)
+    ///     .max_blocking_threads(256)
+    ///     .enable_all()
+    ///     .build()
+    ///     .unwrap();
+    /// let runner = CliRunner::from_runtime(runtime);
+    ///
+    /// Cli::parse_args()
+    ///     .with_runner(runner, |builder, _| async move {
+    ///         let handle = builder.launch_node(EthereumNode::default()).await?;
+    ///         handle.wait_for_node_exit().await
+    ///     })
+    ///     .unwrap();
+    /// ```
+    pub fn with_runner<L, Fut>(mut self, runner: CliRunner, launcher: L) -> eyre::Result<()>
+    where
+        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
+        Fut: Future<Output = eyre::Result<()>>,
+    {
+        // Add network name if available to the logs dir
+        if let Some(chain_spec) = self.command.chain_spec() {
+            self.logs.log_file_directory =
+                self.logs.log_file_directory.join(chain_spec.chain.to_string());
+        }
         let _guard = self.init_tracing()?;
         info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
 
         // Install the prometheus recorder to be sure to record all metrics
         let _ = install_prometheus_recorder();
 
-        let runner = CliRunner::default();
         let components = |spec: Arc<C::ChainSpec>| {
             (EthExecutorProvider::ethereum(spec.clone()), EthBeaconConsensus::new(spec))
         };
@@ -203,6 +223,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
 
 /// Commands to be executed
 #[derive(Debug, Subcommand)]
+#[expect(clippy::large_enum_variant)]
 pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     /// Start the node
     #[command(name = "node")]
@@ -245,6 +266,28 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     Prune(prune::PruneCommand<C>),
 }
 
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Commands<C, Ext> {
+    /// Returns the underlying chain being used for commands
+    fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+        match self {
+            Self::Node(cmd) => cmd.chain_spec(),
+            Self::Init(cmd) => cmd.chain_spec(),
+            Self::InitState(cmd) => cmd.chain_spec(),
+            Self::Import(cmd) => cmd.chain_spec(),
+            Self::DumpGenesis(cmd) => cmd.chain_spec(),
+            Self::Db(cmd) => cmd.chain_spec(),
+            Self::Stage(cmd) => cmd.chain_spec(),
+            Self::P2P(cmd) => cmd.chain_spec(),
+            #[cfg(feature = "dev")]
+            Self::TestVectors(cmd) => cmd.chain_spec(),
+            Self::Config(cmd) => cmd.chain_spec(),
+            Self::Debug(cmd) => cmd.chain_spec(),
+            Self::Recover(cmd) => cmd.chain_spec(),
+            Self::Prune(cmd) => cmd.chain_spec(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -277,13 +320,15 @@ mod tests {
         }
     }
 
-    /// Tests that the log directory is parsed correctly. It's always tied to the specific chain's
-    /// name
+    /// Tests that the log directory is parsed correctly when using the node command. It's
+    /// always tied to the specific chain's name.    
     #[test]
-    fn parse_logs_path() {
+    fn parse_logs_path_node() {
         let mut reth = Cli::try_parse_args_from(["reth", "node"]).unwrap();
-        reth.logs.log_file_directory =
-            reth.logs.log_file_directory.join(reth.chain.chain.to_string());
+        if let Some(chain_spec) = reth.command.chain_spec() {
+            reth.logs.log_file_directory =
+                reth.logs.log_file_directory.join(chain_spec.chain.to_string());
+        }
         let log_dir = reth.logs.log_file_directory;
         let end = format!("reth/logs/{}", SUPPORTED_CHAINS[0]);
         assert!(log_dir.as_ref().ends_with(end), "{log_dir:?}");
@@ -292,19 +337,49 @@ mod tests {
         iter.next();
         for chain in iter {
             let mut reth = Cli::try_parse_args_from(["reth", "node", "--chain", chain]).unwrap();
-            reth.logs.log_file_directory =
-                reth.logs.log_file_directory.join(reth.chain.chain.to_string());
+            let chain =
+                reth.command.chain_spec().map(|c| c.chain.to_string()).unwrap_or(String::new());
+            reth.logs.log_file_directory = reth.logs.log_file_directory.join(chain.clone());
             let log_dir = reth.logs.log_file_directory;
-            let end = format!("reth/logs/{chain}");
+            let end = format!("reth/logs/{}", chain);
             assert!(log_dir.as_ref().ends_with(end), "{log_dir:?}");
         }
+    }
+
+    /// Tests that the log directory is parsed correctly when using the init command. It
+    /// uses the underlying environment in command to get the chain.
+    #[test]
+    fn parse_logs_path_init() {
+        let mut reth = Cli::try_parse_args_from(["reth", "init"]).unwrap();
+        if let Some(chain_spec) = reth.command.chain_spec() {
+            reth.logs.log_file_directory =
+                reth.logs.log_file_directory.join(chain_spec.chain.to_string());
+        }
+        let log_dir = reth.logs.log_file_directory;
+        let end = format!("reth/logs/{}", SUPPORTED_CHAINS[0]);
+        println!("{:?}", log_dir);
+        assert!(log_dir.as_ref().ends_with(end), "{log_dir:?}");
+    }
+
+    /// Tests that the config command does not return any chain spec leading to empty chain id.
+    #[test]
+    fn parse_empty_logs_path() {
+        let mut reth = Cli::try_parse_args_from(["reth", "config"]).unwrap();
+        if let Some(chain_spec) = reth.command.chain_spec() {
+            reth.logs.log_file_directory =
+                reth.logs.log_file_directory.join(chain_spec.chain.to_string());
+        }
+        let log_dir = reth.logs.log_file_directory;
+        let end = "reth/logs".to_string();
+        println!("{:?}", log_dir);
+        assert!(log_dir.as_ref().ends_with(end), "{log_dir:?}");
     }
 
     #[test]
     fn parse_env_filter_directives() {
         let temp_dir = tempfile::tempdir().unwrap();
 
-        std::env::set_var("RUST_LOG", "info,evm=debug");
+        unsafe { std::env::set_var("RUST_LOG", "info,evm=debug") };
         let reth = Cli::try_parse_args_from([
             "reth",
             "init",
@@ -314,6 +389,6 @@ mod tests {
             "debug,net=trace",
         ])
         .unwrap();
-        assert!(reth.run(|_, _| async move { Ok(()) }).is_ok());
+        assert!(reth.run(async move |_, _| Ok(())).is_ok());
     }
 }

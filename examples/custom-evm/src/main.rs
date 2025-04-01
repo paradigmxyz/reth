@@ -1,14 +1,13 @@
 //! This example shows how to implement a node with a custom EVM
 
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![warn(unused_crate_dependencies)]
 
-use alloy_consensus::Header;
 use alloy_evm::{eth::EthEvmContext, EvmFactory};
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, Address, Bytes};
 use reth::{
     builder::{
-        components::{ExecutorBuilder, PayloadServiceBuilder},
+        components::{BasicPayloadServiceBuilder, ExecutorBuilder, PayloadBuilderBuilder},
         BuilderContext, NodeBuilder,
     },
     payload::{EthBuiltPayload, EthPayloadBuilderAttributes},
@@ -20,9 +19,9 @@ use reth::{
         },
         handler::{EthPrecompiles, PrecompileProvider},
         inspector::{Inspector, NoOpInspector},
-        interpreter::{interpreter::EthInterpreter, InterpreterResult},
+        interpreter::{interpreter::EthInterpreter, InputsImpl, InterpreterResult},
         precompile::{PrecompileFn, PrecompileOutput, PrecompileResult, Precompiles},
-        specification::hardfork::SpecId,
+        primitives::hardfork::SpecId,
         MainBuilder, MainContext,
     },
     rpc::types::engine::PayloadAttributes,
@@ -32,34 +31,29 @@ use reth::{
 use reth_chainspec::{Chain, ChainSpec};
 use reth_evm::{Database, EvmEnv};
 use reth_evm_ethereum::{EthEvm, EthEvmConfig};
-use reth_node_api::{
-    ConfigureEvm, ConfigureEvmEnv, FullNodeTypes, NextBlockEnvAttributes, NodeTypes,
-    NodeTypesWithEngine, PayloadTypes,
-};
+use reth_node_api::{FullNodeTypes, NodeTypes, PayloadTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{
     node::{EthereumAddOns, EthereumPayloadBuilder},
-    BasicBlockExecutorProvider, EthExecutionStrategyFactory, EthereumNode,
+    BasicBlockExecutorProvider, EthereumNode,
 };
 use reth_primitives::{EthPrimitives, TransactionSigned};
 use reth_tracing::{RethTracer, Tracer};
-use std::{
-    convert::Infallible,
-    sync::{Arc, OnceLock},
-};
+use std::sync::OnceLock;
 
 /// Custom EVM configuration.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct MyEvmFactory;
 
-impl EvmFactory<EvmEnv> for MyEvmFactory {
+impl EvmFactory for MyEvmFactory {
     type Evm<DB: Database, I: Inspector<EthEvmContext<DB>, EthInterpreter>> =
-        EthEvm<DB, I, CustomPrecompiles<EthEvmContext<DB>>>;
+        EthEvm<DB, I, CustomPrecompiles>;
     type Tx = TxEnv;
     type Error<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
     type HaltReason = HaltReason;
     type Context<DB: Database> = EthEvmContext<DB>;
+    type Spec = SpecId;
 
     fn create_evm<DB: Database>(&self, db: DB, input: EvmEnv) -> Self::Evm<DB, NoOpInspector> {
         let evm = Context::mainnet()
@@ -82,50 +76,6 @@ impl EvmFactory<EvmEnv> for MyEvmFactory {
     }
 }
 
-/// Custom EVM configuration
-#[derive(Debug, Clone)]
-#[non_exhaustive]
-pub struct MyEvmConfig {
-    /// Wrapper around mainnet configuration
-    inner: EthEvmConfig,
-    /// Custom EVM factory.
-    evm_factory: MyEvmFactory,
-}
-
-impl MyEvmConfig {
-    pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { inner: EthEvmConfig::new(chain_spec), evm_factory: MyEvmFactory::default() }
-    }
-}
-
-impl ConfigureEvmEnv for MyEvmConfig {
-    type Header = Header;
-    type Transaction = TransactionSigned;
-    type Error = Infallible;
-    type TxEnv = TxEnv;
-    type Spec = SpecId;
-
-    fn evm_env(&self, header: &Self::Header) -> EvmEnv {
-        self.inner.evm_env(header)
-    }
-
-    fn next_evm_env(
-        &self,
-        parent: &Self::Header,
-        attributes: NextBlockEnvAttributes,
-    ) -> Result<EvmEnv, Self::Error> {
-        self.inner.next_evm_env(parent, attributes)
-    }
-}
-
-impl ConfigureEvm for MyEvmConfig {
-    type EvmFactory = MyEvmFactory;
-
-    fn evm_factory(&self) -> &Self::EvmFactory {
-        &self.evm_factory
-    }
-}
-
 /// Builds a regular ethereum block executor that uses the custom EVM.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
@@ -135,20 +85,16 @@ impl<Node> ExecutorBuilder<Node> for MyExecutorBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
 {
-    type EVM = MyEvmConfig;
-    type Executor = BasicBlockExecutorProvider<EthExecutionStrategyFactory<Self::EVM>>;
+    type EVM = EthEvmConfig<MyEvmFactory>;
+    type Executor = BasicBlockExecutorProvider<Self::EVM>;
 
     async fn build_evm(
         self,
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
-        Ok((
-            MyEvmConfig::new(ctx.chain_spec()),
-            BasicBlockExecutorProvider::new(EthExecutionStrategyFactory::new(
-                ctx.chain_spec(),
-                MyEvmConfig::new(ctx.chain_spec()),
-            )),
-        ))
+        let evm_config =
+            EthEvmConfig::new_with_evm_factory(ctx.chain_spec(), MyEvmFactory::default());
+        Ok((evm_config.clone(), BasicBlockExecutorProvider::new(evm_config)))
     }
 }
 
@@ -159,38 +105,43 @@ pub struct MyPayloadBuilder {
     inner: EthereumPayloadBuilder,
 }
 
-impl<Types, Node, Pool> PayloadServiceBuilder<Node, Pool> for MyPayloadBuilder
+impl<Types, Node, Pool> PayloadBuilderBuilder<Node, Pool> for MyPayloadBuilder
 where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
+    Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>
         + Unpin
         + 'static,
-    Types::Engine: PayloadTypes<
+    Types::Payload: PayloadTypes<
         BuiltPayload = EthBuiltPayload,
         PayloadAttributes = PayloadAttributes,
         PayloadBuilderAttributes = EthPayloadBuilderAttributes,
     >,
 {
-    type PayloadBuilder =
-        reth_ethereum_payload_builder::EthereumPayloadBuilder<Pool, Node::Provider, MyEvmConfig>;
+    type PayloadBuilder = reth_ethereum_payload_builder::EthereumPayloadBuilder<
+        Pool,
+        Node::Provider,
+        EthEvmConfig<MyEvmFactory>,
+    >;
 
     async fn build_payload_builder(
-        &self,
+        self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> eyre::Result<Self::PayloadBuilder> {
-        self.inner.build(MyEvmConfig::new(ctx.chain_spec()), ctx, pool)
+        let evm_config =
+            EthEvmConfig::new_with_evm_factory(ctx.chain_spec(), MyEvmFactory::default());
+        self.inner.build(evm_config, ctx, pool)
     }
 }
 
 /// A custom precompile that contains static precompiles.
 #[derive(Clone)]
-pub struct CustomPrecompiles<CTX> {
-    pub precompiles: EthPrecompiles<CTX>,
+pub struct CustomPrecompiles {
+    pub precompiles: EthPrecompiles,
 }
 
-impl<CTX: ContextTr> CustomPrecompiles<CTX> {
+impl CustomPrecompiles {
     /// Given a [`PrecompileProvider`] and cache for a specific precompiles, create a
     /// wrapper that can be used inside Evm.
     fn new() -> Self {
@@ -205,7 +156,7 @@ pub fn prague_custom() -> &'static Precompiles {
         let mut precompiles = Precompiles::prague().clone();
         // Custom precompile.
         precompiles.extend([(
-            address!("0000000000000000000000000000000000000999"),
+            address!("0x0000000000000000000000000000000000000999"),
             |_, _| -> PrecompileResult {
                 PrecompileResult::Ok(PrecompileOutput::new(0, Bytes::new()))
             } as PrecompileFn,
@@ -215,35 +166,36 @@ pub fn prague_custom() -> &'static Precompiles {
     })
 }
 
-impl<CTX: ContextTr> PrecompileProvider for CustomPrecompiles<CTX> {
-    type Context = CTX;
+impl<CTX: ContextTr> PrecompileProvider<CTX> for CustomPrecompiles {
     type Output = InterpreterResult;
 
-    fn set_spec(&mut self, spec: <<Self::Context as ContextTr>::Cfg as Cfg>::Spec) {
+    fn set_spec(&mut self, spec: <CTX::Cfg as Cfg>::Spec) -> bool {
         let spec_id = spec.clone().into();
         if spec_id == SpecId::PRAGUE {
-            self.precompiles = EthPrecompiles { precompiles: prague_custom(), ..Default::default() }
+            self.precompiles = EthPrecompiles { precompiles: prague_custom(), spec: spec.into() }
         } else {
-            self.precompiles.set_spec(spec);
+            PrecompileProvider::<CTX>::set_spec(&mut self.precompiles, spec);
         }
+        true
     }
 
     fn run(
         &mut self,
-        context: &mut Self::Context,
+        context: &mut CTX,
         address: &Address,
-        bytes: &Bytes,
+        inputs: &InputsImpl,
+        is_static: bool,
         gas_limit: u64,
-    ) -> Result<Option<Self::Output>, reth::revm::precompile::PrecompileErrors> {
-        self.precompiles.run(context, address, bytes, gas_limit)
+    ) -> Result<Option<Self::Output>, String> {
+        self.precompiles.run(context, address, inputs, is_static, gas_limit)
+    }
+
+    fn warm_addresses(&self) -> Box<impl Iterator<Item = Address>> {
+        self.precompiles.warm_addresses()
     }
 
     fn contains(&self, address: &Address) -> bool {
         self.precompiles.contains(address)
-    }
-
-    fn warm_addresses(&self) -> Box<impl Iterator<Item = Address> + '_> {
-        self.precompiles.warm_addresses()
     }
 }
 
@@ -274,7 +226,7 @@ async fn main() -> eyre::Result<()> {
         .with_components(
             EthereumNode::components()
                 .executor(MyExecutorBuilder::default())
-                .payload(MyPayloadBuilder::default()),
+                .payload(BasicPayloadServiceBuilder::new(MyPayloadBuilder::default())),
         )
         .with_add_ons(EthereumAddOns::default())
         .launch()

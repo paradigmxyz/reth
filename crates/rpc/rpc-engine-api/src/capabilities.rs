@@ -30,7 +30,7 @@ pub struct EngineCapabilities {
 
 impl EngineCapabilities {
     /// Creates a new `EngineCapabilities` instance with the given capabilities.
-    pub fn new(capabilities: impl IntoIterator<Item = impl Into<String>>) -> Self {
+    pub fn new(capabilities: impl IntoIterator<Item: Into<String>>) -> Self {
         Self { inner: capabilities.into_iter().map(Into::into).collect() }
     }
 

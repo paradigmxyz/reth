@@ -9,12 +9,13 @@ use reth_chain_state::{CanonStateSubscriptions, ForkChoiceSubscriptions};
 use reth_chainspec::EthereumHardforks;
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_storage_api::NodePrimitivesProvider;
+use std::fmt::Debug;
 
 /// Helper trait to unify all provider traits for simplicity.
 pub trait FullProvider<N: NodeTypesWithDB>:
     DatabaseProviderFactory<DB = N::DB>
     + NodePrimitivesProvider<Primitives = N::Primitives>
-    + StaticFileProviderFactory
+    + StaticFileProviderFactory<Primitives = N::Primitives>
     + BlockReaderIdExt<
         Transaction = TxTy<N>,
         Block = BlockTy<N>,
@@ -28,6 +29,7 @@ pub trait FullProvider<N: NodeTypesWithDB>:
     + ForkChoiceSubscriptions<Header = HeaderTy<N>>
     + StageCheckpointReader
     + Clone
+    + Debug
     + Unpin
     + 'static
 {
@@ -36,7 +38,7 @@ pub trait FullProvider<N: NodeTypesWithDB>:
 impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
     T: DatabaseProviderFactory<DB = N::DB>
         + NodePrimitivesProvider<Primitives = N::Primitives>
-        + StaticFileProviderFactory
+        + StaticFileProviderFactory<Primitives = N::Primitives>
         + BlockReaderIdExt<
             Transaction = TxTy<N>,
             Block = BlockTy<N>,
@@ -50,6 +52,7 @@ impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
         + ForkChoiceSubscriptions<Header = HeaderTy<N>>
         + StageCheckpointReader
         + Clone
+        + Debug
         + Unpin
         + 'static
 {

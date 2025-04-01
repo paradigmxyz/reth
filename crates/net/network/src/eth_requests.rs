@@ -31,21 +31,21 @@ use tokio_stream::wrappers::ReceiverStream;
 /// Maximum number of receipts to serve.
 ///
 /// Used to limit lookups.
-const MAX_RECEIPTS_SERVE: usize = 1024;
+pub const MAX_RECEIPTS_SERVE: usize = 1024;
 
 /// Maximum number of block headers to serve.
 ///
 /// Used to limit lookups.
-const MAX_HEADERS_SERVE: usize = 1024;
+pub const MAX_HEADERS_SERVE: usize = 1024;
 
 /// Maximum number of block headers to serve.
 ///
 /// Used to limit lookups. With 24KB block sizes nowadays, the practical limit will always be
 /// `SOFT_RESPONSE_LIMIT`.
-const MAX_BODIES_SERVE: usize = 1024;
+pub const MAX_BODIES_SERVE: usize = 1024;
 
 /// Maximum size of replies to data retrievals: 2MB
-const SOFT_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
+pub const SOFT_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
 
 /// Manages eth related requests on top of the p2p network.
 ///
@@ -57,7 +57,7 @@ pub struct EthRequestHandler<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     client: C,
     /// Used for reporting peers.
     // TODO use to report spammers
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     peers: PeersHandle,
     /// Incoming request from the [`NetworkManager`](crate::NetworkManager).
     incoming_requests: ReceiverStream<IncomingEthRequest<N>>,

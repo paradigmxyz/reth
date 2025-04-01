@@ -5,7 +5,6 @@ use jsonrpsee::{
     types::Request,
     MethodResponse,
 };
-use reth_rpc::EthApi;
 use reth_rpc_builder::{RpcServerConfig, TransportRpcModuleConfig};
 use reth_rpc_eth_api::EthApiClient;
 use reth_rpc_server_types::RpcModuleSelection;
@@ -60,10 +59,9 @@ where
 #[tokio::test(flavor = "multi_thread")]
 async fn test_rpc_middleware() {
     let builder = test_rpc_builder();
-    let modules = builder.build(
-        TransportRpcModuleConfig::set_http(RpcModuleSelection::All),
-        Box::new(EthApi::with_spawner),
-    );
+    let eth_api = builder.bootstrap_eth_api();
+    let modules =
+        builder.build(TransportRpcModuleConfig::set_http(RpcModuleSelection::All), eth_api);
 
     let mylayer = MyMiddlewareLayer::default();
 

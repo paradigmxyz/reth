@@ -5,7 +5,7 @@ use alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK;
 use alloy_primitives::{Keccak256, U256};
 use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use jsonrpsee::core::RpcResult;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv, Evm};
+use reth_evm::{ConfigureEvm, Evm};
 use reth_primitives_traits::SignedTransaction;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_eth_api::{
@@ -136,7 +136,7 @@ where
         self.eth_api()
             .spawn_with_state_at_block(at, move |state| {
                 let coinbase = evm_env.block_env.beneficiary;
-                let basefee = Some(evm_env.block_env.basefee);
+                let basefee = evm_env.block_env.basefee;
                 let db = CacheDB::new(StateProviderDatabase::new(state));
 
                 let initial_coinbase = db
@@ -147,7 +147,7 @@ where
                 let mut coinbase_balance_before_tx = initial_coinbase;
                 let mut coinbase_balance_after_tx = initial_coinbase;
                 let mut total_gas_used = 0u64;
-                let mut total_gas_fess = U256::ZERO;
+                let mut total_gas_fees = U256::ZERO;
                 let mut hasher = Keccak256::new();
 
                 let mut evm = eth_api.evm_config().evm_with_env(db, evm_env);
@@ -174,16 +174,18 @@ where
                     };
 
                     hasher.update(*tx.tx_hash());
-                    let gas_price = tx.effective_gas_price(basefee);
                     let ResultAndState { result, state } = evm
                         .transact(eth_api.evm_config().tx_env(&tx))
                         .map_err(Eth::Error::from_evm_err)?;
 
+                    let gas_price = tx
+                        .effective_tip_per_gas(basefee)
+                        .expect("fee is always valid; execution succeeded");
                     let gas_used = result.gas_used();
                     total_gas_used += gas_used;
 
                     let gas_fees = U256::from(gas_used) * U256::from(gas_price);
-                    total_gas_fess += gas_fees;
+                    total_gas_fees += gas_fees;
 
                     // coinbase is always present in the result state
                     coinbase_balance_after_tx =
@@ -230,7 +232,7 @@ where
                 // populate the response
 
                 let coinbase_diff = coinbase_balance_after_tx.saturating_sub(initial_coinbase);
-                let eth_sent_to_coinbase = coinbase_diff.saturating_sub(total_gas_fess);
+                let eth_sent_to_coinbase = coinbase_diff.saturating_sub(total_gas_fees);
                 let bundle_gas_price =
                     coinbase_diff.checked_div(U256::from(total_gas_used)).unwrap_or_default();
                 let res = EthCallBundleResponse {
@@ -238,7 +240,7 @@ where
                     bundle_hash: hasher.finalize(),
                     coinbase_diff,
                     eth_sent_to_coinbase,
-                    gas_fees: total_gas_fess,
+                    gas_fees: total_gas_fees,
                     results,
                     state_block_number,
                     total_gas_used,
@@ -266,7 +268,7 @@ struct EthBundleInner<Eth> {
     /// Access to commonly used code of the `eth` namespace
     eth_api: Eth,
     // restrict the number of concurrent tracing calls.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     blocking_task_guard: BlockingTaskGuard,
 }
 

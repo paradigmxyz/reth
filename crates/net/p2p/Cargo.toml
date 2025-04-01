@@ -62,4 +62,5 @@ std = [
     "derive_more/std",
     "reth-network-peers/std",
     "reth-storage-errors/std",
+    "tracing/std",
 ]

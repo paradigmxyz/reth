@@ -12,5 +12,5 @@ pub const MAINNET_PRUNE_DELETE_LIMIT: usize = 20000;
 pub(crate) const MAINNET_DEPOSIT_CONTRACT: DepositContract = DepositContract::new(
     MAINNET_DEPOSIT_CONTRACT_ADDRESS,
     11052984,
-    b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
+    b256!("0x649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
 );

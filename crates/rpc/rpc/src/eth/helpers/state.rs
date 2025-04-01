@@ -1,7 +1,7 @@
 //! Contains RPC handler implementations specific to state.
 
-use reth_chainspec::EthereumHardforks;
-use reth_provider::{BlockReader, ChainSpecProvider, StateProviderFactory};
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_storage_api::{BlockReader, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
 
 use reth_rpc_eth_api::{
@@ -38,7 +38,6 @@ mod tests {
     use super::*;
     use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M;
     use alloy_primitives::{Address, StorageKey, StorageValue, U256};
-    use reth_chainspec::MAINNET;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider, NoopProvider};
@@ -55,7 +54,7 @@ mod tests {
 
     fn noop_eth_api() -> EthApi<NoopProvider, TestPool, NoopNetwork, EthEvmConfig> {
         let pool = testing_pool();
-        let evm_config = EthEvmConfig::new(MAINNET.clone());
+        let evm_config = EthEvmConfig::mainnet();
 
         let cache = EthStateCache::spawn(NoopProvider::default(), Default::default());
         EthApi::new(

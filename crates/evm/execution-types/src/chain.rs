@@ -1,18 +1,17 @@
 //! Contains [Chain], a chain of blocks and their final state.
 
 use crate::ExecutionOutcome;
-use alloc::{borrow::Cow, boxed::Box, collections::BTreeMap, vec::Vec};
+use alloc::{borrow::Cow, collections::BTreeMap, vec::Vec};
 use alloy_consensus::{transaction::Recovered, BlockHeader};
 use alloy_eips::{eip1898::ForkBlock, eip2718::Encodable2718, BlockNumHash};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash};
 use core::{fmt, ops::RangeInclusive};
-use reth_execution_errors::{BlockExecutionError, InternalBlockExecutionError};
 use reth_primitives_traits::{
-    transaction::signed::SignedTransactionIntoRecoveredExt, Block, BlockBody, NodePrimitives,
-    RecoveredBlock, SealedHeader, SignedTransaction,
+    transaction::signed::SignedTransaction, Block, BlockBody, NodePrimitives, RecoveredBlock,
+    SealedHeader,
 };
 use reth_trie_common::updates::TrieUpdates;
-use revm_database::BundleState;
+use revm::database::BundleState;
 
 /// A chain of blocks and their final state.
 ///
@@ -131,7 +130,7 @@ impl<N: NodePrimitives> Chain<N> {
     }
 
     /// Returns the block with matching hash.
-    pub fn block_with_senders(&self, block_hash: BlockHash) -> Option<&RecoveredBlock<N::Block>> {
+    pub fn recovered_block(&self, block_hash: BlockHash) -> Option<&RecoveredBlock<N::Block>> {
         self.blocks.iter().find_map(|(_num, block)| (block.hash() == block_hash).then_some(block))
     }
 
@@ -272,15 +271,14 @@ impl<N: NodePrimitives> Chain<N> {
     /// Merge two chains by appending the given chain into the current one.
     ///
     /// The state of accounts for this chain is set to the state of the newest chain.
-    pub fn append_chain(&mut self, other: Self) -> Result<(), BlockExecutionError> {
+    ///
+    /// Returns the passed `other` chain in [`Result::Err`] variant if the chains could not be
+    /// connected.
+    pub fn append_chain(&mut self, other: Self) -> Result<(), Self> {
         let chain_tip = self.tip();
         let other_fork_block = other.fork_block();
         if chain_tip.hash() != other_fork_block.hash {
-            return Err(InternalBlockExecutionError::AppendChainDoesntConnect {
-                chain_tip: Box::new(chain_tip.num_hash()),
-                other_chain_fork: Box::new(other_fork_block),
-            }
-            .into())
+            return Err(other)
         }
 
         // Insert blocks from other chain
@@ -500,6 +498,7 @@ impl From<BlockHash> for ChainSplitTarget {
 
 /// Result of a split chain.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[expect(clippy::large_enum_variant)]
 pub enum ChainSplit<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
     /// Chain is not split. Pending chain is returned.
     /// Given block split is higher than last block.
@@ -526,8 +525,8 @@ pub enum ChainSplit<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives>
 /// Bincode-compatible [`Chain`] serde implementation.
 #[cfg(feature = "serde-bincode-compat")]
 pub(super) mod serde_bincode_compat {
-    use crate::ExecutionOutcome;
-    use alloc::borrow::Cow;
+    use crate::{serde_bincode_compat, ExecutionOutcome};
+    use alloc::{borrow::Cow, collections::BTreeMap};
     use alloy_primitives::BlockNumber;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_primitives_traits::{
@@ -537,7 +536,6 @@ pub(super) mod serde_bincode_compat {
     use reth_trie_common::serde_bincode_compat::updates::TrieUpdates;
     use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
-    use std::collections::BTreeMap;
 
     /// Bincode-compatible [`super::Chain`] serde implementation.
     ///
@@ -562,7 +560,7 @@ pub(super) mod serde_bincode_compat {
         >,
     {
         blocks: RecoveredBlocks<'a, N::Block>,
-        execution_outcome: Cow<'a, ExecutionOutcome<N::Receipt>>,
+        execution_outcome: serde_bincode_compat::ExecutionOutcome<'a, N::Receipt>,
         trie_updates: Option<TrieUpdates<'a>>,
     }
 
@@ -615,7 +613,7 @@ pub(super) mod serde_bincode_compat {
         fn from(value: &'a super::Chain<N>) -> Self {
             Self {
                 blocks: RecoveredBlocks(Cow::Borrowed(&value.blocks)),
-                execution_outcome: Cow::Borrowed(&value.execution_outcome),
+                execution_outcome: value.execution_outcome.as_repr(),
                 trie_updates: value.trie_updates.as_ref().map(Into::into),
             }
         }
@@ -630,7 +628,7 @@ pub(super) mod serde_bincode_compat {
         fn from(value: Chain<'a, N>) -> Self {
             Self {
                 blocks: value.blocks.0.into_owned(),
-                execution_outcome: value.execution_outcome.into_owned(),
+                execution_outcome: ExecutionOutcome::from_repr(value.execution_outcome),
                 trie_updates: value.trie_updates.map(Into::into),
             }
         }

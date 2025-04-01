@@ -1,6 +1,6 @@
 //! Node builder test that customizes priority of transactions in the block.
 
-use alloy_consensus::{SignableTransaction, TxEip1559};
+use alloy_consensus::{transaction::Recovered, SignableTransaction, TxEip1559};
 use alloy_genesis::Genesis;
 use alloy_network::TxSignerSync;
 use alloy_primitives::{Address, ChainId, TxKind};
@@ -10,9 +10,10 @@ use reth_db::test_utils::create_test_rw_db_with_path;
 use reth_e2e_test_utils::{
     node::NodeTestContext, transaction::TransactionTestContext, wallet::Wallet,
 };
-use reth_node_api::{FullNodeTypes, NodeTypesWithEngine};
+use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{
-    components::ComponentsBuilder, EngineNodeLauncher, NodeBuilder, NodeConfig,
+    components::{BasicPayloadServiceBuilder, ComponentsBuilder},
+    EngineNodeLauncher, NodeBuilder, NodeConfig,
 };
 use reth_node_core::args::DatadirArgs;
 use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
@@ -32,7 +33,6 @@ use reth_payload_util::{
     BestPayloadTransactions, PayloadTransactions, PayloadTransactionsChain,
     PayloadTransactionsFixed,
 };
-use reth_primitives::Recovered;
 use reth_provider::providers::BlockchainProvider;
 use reth_tasks::TaskManager;
 use reth_transaction_pool::PoolTransaction;
@@ -93,15 +93,15 @@ fn build_components<Node>(
 ) -> ComponentsBuilder<
     Node,
     OpPoolBuilder,
-    OpPayloadBuilder<CustomTxPriority>,
+    BasicPayloadServiceBuilder<OpPayloadBuilder<CustomTxPriority>>,
     OpNetworkBuilder,
     OpExecutorBuilder,
     OpConsensusBuilder,
 >
 where
     Node: FullNodeTypes<
-        Types: NodeTypesWithEngine<
-            Engine = OpEngineTypes,
+        Types: NodeTypes<
+            Payload = OpEngineTypes,
             ChainSpec = OpChainSpec,
             Primitives = OpPrimitives,
         >,
@@ -112,10 +112,10 @@ where
     ComponentsBuilder::default()
         .node_types::<Node>()
         .pool(OpPoolBuilder::default())
-        .payload(
+        .payload(BasicPayloadServiceBuilder::new(
             OpPayloadBuilder::new(compute_pending_block)
                 .with_transactions(CustomTxPriority { chain_id }),
-        )
+        ))
         .network(OpNetworkBuilder { disable_txpool_gossip, disable_discovery_v4: !discovery_v4 })
         .executor(OpExecutorBuilder::default())
         .consensus(OpConsensusBuilder::default())
@@ -186,7 +186,7 @@ async fn test_custom_block_priority_config() {
         .await
         .unwrap();
     assert_eq!(block_payloads.len(), 1);
-    let (block_payload, _) = block_payloads.first().unwrap();
+    let block_payload = block_payloads.first().unwrap();
     let block_payload = block_payload.block().clone();
     assert_eq!(block_payload.body().transactions.len(), 2); // L1 block info tx + end-of-block custom tx
 

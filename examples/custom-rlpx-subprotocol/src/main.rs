@@ -2,11 +2,13 @@
 //!
 //! Run with
 //!
-//! ```not_rust
+//! ```sh
 //! cargo run -p example-custom-rlpx-subprotocol -- node
 //! ```
 //!
-//! This launch a regular reth node with a custom rlpx subprotocol.
+//! This launches a regular reth node with a custom rlpx subprotocol.
+
+#![warn(unused_crate_dependencies)]
 
 mod subprotocol;
 

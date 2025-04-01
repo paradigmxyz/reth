@@ -506,7 +506,7 @@ pub(crate) struct ActivePeer<N: NetworkPrimitives> {
     /// Best block of the peer.
     pub(crate) best_hash: B256,
     /// The capabilities of the remote peer.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub(crate) capabilities: Arc<Capabilities>,
     /// A communication channel directly to the session task.
     pub(crate) request_tx: PeerRequestSender<PeerRequest<N>>,
@@ -566,10 +566,10 @@ mod tests {
     use alloy_consensus::Header;
     use alloy_primitives::B256;
     use reth_eth_wire::{BlockBodies, Capabilities, Capability, EthNetworkPrimitives, EthVersion};
+    use reth_ethereum_primitives::BlockBody;
     use reth_network_api::PeerRequestSender;
     use reth_network_p2p::{bodies::client::BodiesClient, error::RequestError};
     use reth_network_peers::PeerId;
-    use reth_primitives::BlockBody;
     use reth_storage_api::noop::NoopProvider;
     use std::{
         future::poll_fn,

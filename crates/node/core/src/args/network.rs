@@ -46,7 +46,7 @@ pub struct NetworkArgs {
     #[command(flatten)]
     pub discovery: DiscoveryArgs,
 
-    #[allow(clippy::doc_markdown)]
+    #[expect(clippy::doc_markdown)]
     /// Comma separated enode URLs of trusted peers for P2P connections.
     ///
     /// --trusted-peers enode://abcd@192.168.0.1:30303
@@ -287,15 +287,17 @@ impl NetworkArgs {
         self
     }
 
-    /// Change networking port numbers based on the instance number.
+    /// Change networking port numbers based on the instance number, if provided.
     /// Ports are updated to `previous_value + instance - 1`
     ///
     /// # Panics
     /// Warning: if `instance` is zero in debug mode, this will panic.
-    pub fn adjust_instance_ports(&mut self, instance: u16) {
-        debug_assert_ne!(instance, 0, "instance must be non-zero");
-        self.port += instance - 1;
-        self.discovery.adjust_instance_ports(instance);
+    pub fn adjust_instance_ports(&mut self, instance: Option<u16>) {
+        if let Some(instance) = instance {
+            debug_assert_ne!(instance, 0, "instance must be non-zero");
+            self.port += instance - 1;
+            self.discovery.adjust_instance_ports(instance);
+        }
     }
 
     /// Resolve all trusted peers at once
@@ -426,7 +428,8 @@ impl DiscoveryArgs {
             network_config_builder = network_config_builder.disable_discv4_discovery();
         }
 
-        if self.disable_discovery || self.disable_nat {
+        if self.disable_nat {
+            // we only check for `disable-nat` here and not for disable discovery because nat:extip can be used without discovery: <https://github.com/paradigmxyz/reth/issues/14878>
             network_config_builder = network_config_builder.disable_nat();
         }
 

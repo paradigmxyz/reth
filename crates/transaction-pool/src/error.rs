@@ -4,7 +4,7 @@ use std::any::Any;
 
 use alloy_eips::eip4844::BlobTransactionValidationError;
 use alloy_primitives::{Address, TxHash, U256};
-use reth_primitives::InvalidTransactionError;
+use reth_primitives_traits::transaction::error::InvalidTransactionError;
 
 /// Transaction pool result type.
 pub type PoolResult<T> = Result<T, PoolError>;
@@ -102,7 +102,7 @@ impl PoolError {
     /// erroneous transaction.
     #[inline]
     pub fn is_bad_transaction(&self) -> bool {
-        #[allow(clippy::match_same_arms)]
+        #[expect(clippy::match_same_arms)]
         match &self.kind {
             PoolErrorKind::AlreadyImported => {
                 // already imported but not bad
@@ -237,11 +237,17 @@ pub enum InvalidPoolTransactionError {
 // === impl InvalidPoolTransactionError ===
 
 impl InvalidPoolTransactionError {
+    /// Returns a new [`InvalidPoolTransactionError::Other`] instance with the given
+    /// [`PoolTransactionError`].
+    pub fn other<E: PoolTransactionError + 'static>(err: E) -> Self {
+        Self::Other(Box::new(err))
+    }
+
     /// Returns `true` if the error was caused by a transaction that is considered bad in the
     /// context of the transaction pool and warrants peer penalization.
     ///
     /// See [`PoolError::is_bad_transaction`].
-    #[allow(clippy::match_same_arms)]
+    #[expect(clippy::match_same_arms)]
     #[inline]
     fn is_bad_transaction(&self) -> bool {
         match self {
