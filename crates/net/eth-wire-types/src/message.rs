@@ -11,9 +11,14 @@ use super::{
     GetNodeData, GetPooledTransactions, GetReceipts, NewBlock, NewPooledTransactionHashes66,
     NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, Status, Transactions,
 };
-use crate::{EthNetworkPrimitives, EthVersion, NetworkPrimitives, SharedTransactions};
+use crate::{
+    EthNetworkPrimitives, EthVersion, NetworkPrimitives, RawCapabilityMessage, SharedTransactions,
+};
 use alloc::{boxed::Box, sync::Arc};
-use alloy_primitives::{bytes::{Buf, BufMut}, Bytes};
+use alloy_primitives::{
+    bytes::{Buf, BufMut},
+    Bytes,
+};
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use core::fmt::Debug;
 
@@ -104,7 +109,10 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
             EthMessageID::Other(_) => {
                 let raw_payload = Bytes::copy_from_slice(buf);
                 *buf = &buf[buf.len()..];
-                EthMessage::Other(raw_payload)
+                EthMessage::Other(RawCapabilityMessage::new(
+                    message_type.to_u8() as usize,
+                    raw_payload.into(),
+                ))
             }
         };
         Ok(Self { message_type, message })
@@ -234,8 +242,8 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
         serde(bound = "N::Receipt: serde::Serialize + serde::de::DeserializeOwned")
     )]
     Receipts(RequestPair<Receipts<N::Receipt>>),
-    /// Represents a `Unkown` request-response
-    Other(Bytes),
+    /// Represents an encoded message that doesn't match any other variant
+    Other(RawCapabilityMessage),
 }
 
 impl<N: NetworkPrimitives> EthMessage<N> {
@@ -259,14 +267,7 @@ impl<N: NetworkPrimitives> EthMessage<N> {
             Self::NodeData(_) => EthMessageID::NodeData,
             Self::GetReceipts(_) => EthMessageID::GetReceipts,
             Self::Receipts(_) => EthMessageID::Receipts,
-            Self::Other(bytes) => {
-                // If the message is unknown, assume the first byte is the message ID
-                if bytes.is_empty() {
-                    EthMessageID::Other(0xFF) // Default unknown ID
-                } else {
-                    EthMessageID::Other(bytes[0]) // Extract ID from first byte
-                }
-            }
+            Self::Other(msg) => EthMessageID::Other(msg.id as u8),
         }
     }
 
@@ -441,7 +442,7 @@ impl EthMessageID {
             Self::NodeData => 0x0e,
             Self::GetReceipts => 0x0f,
             Self::Receipts => 0x10,
-            Self::Other(value) => *value,  // Return the stored `u8`
+            Self::Other(value) => *value, // Return the stored `u8`
         }
     }
 
@@ -478,7 +479,7 @@ impl Decodable for EthMessageID {
             0x0e => Self::NodeData,
             0x0f => Self::GetReceipts,
             0x10 => Self::Receipts,
-            unknown=> Self::Other(*unknown),
+            unknown => Self::Other(*unknown),
         };
         buf.advance(1);
         Ok(id)
