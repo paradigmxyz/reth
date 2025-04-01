@@ -110,16 +110,15 @@ struct SequencerClientInner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use alloy_primitives::U64;
 
     #[test]
     fn test_body_str() {
         let client = SequencerClient::new("http://localhost:8545");
-        let params = json!(["0x1234", {"block_number":10}]);
 
         let request = client
             .http_client()
-            .make_request("eth_getBlockByNumber", params)
+            .make_request("eth_getBlockByNumber", (U64::from(10),))
             .serialize()
             .unwrap()
             .take_request();
@@ -127,15 +126,17 @@ mod tests {
 
         assert_eq!(
             body,
-            r#"{"method":"eth_getBlockByNumber","params":["0x1234",{"block_number":10}],"id":0,"jsonrpc":"2.0"}"#
+            r#"{"method":"eth_getBlockByNumber","params":["0xa"],"id":0,"jsonrpc":"2.0"}"#
         );
 
         let condition = TransactionConditional::default();
-        let params = json!([format!("0x{}", hex::encode("abcd")), condition]);
 
         let request = client
             .http_client()
-            .make_request("eth_sendRawTransactionConditional", params)
+            .make_request(
+                "eth_sendRawTransactionConditional",
+                (format!("0x{}", hex::encode("abcd")), condition),
+            )
             .serialize()
             .unwrap()
             .take_request();
