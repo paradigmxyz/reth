@@ -190,7 +190,16 @@ impl<C: TrieCursor> TrieWalker<C> {
     /// Retrieves the current root node from the DB, seeking either the exact node or the next one.
     fn node(&mut self, exact: bool) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let key = self.key().expect("key must exist").clone();
+
+        let key_str = format!("{key:?}");
         let entry = if exact { self.cursor.seek_exact(key)? } else { self.cursor.seek(key)? };
+        trace!(
+            target: "trie::walker_metrics",
+            key = %key_str,
+            ?entry,
+            exact,
+            "Sought the trie table",
+        );
 
         if let Some((_, node)) = &entry {
             assert!(!node.state_mask.is_empty());
