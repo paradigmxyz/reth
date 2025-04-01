@@ -131,7 +131,7 @@ where
                 None => {
                     // Get the seek key and set the current hashed entry based on walker's next
                     // unprocessed key
-                    let (seek_prefix, seek_key) = match self.walker.next_unprocessed_key() {
+                    let (seek_key, seek_prefix) = match self.walker.next_unprocessed_key() {
                         Some(key) => key,
                         None => break, // no more keys
                     };

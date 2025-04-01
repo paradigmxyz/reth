@@ -96,9 +96,9 @@ impl<C> TrieWalker<C> {
         self.stack.last().is_some_and(|n| n.tree_flag())
     }
 
-    /// Returns the next unprocessed key in the trie.
+    /// Returns the next unprocessed key in the trie along with its raw [`Nibbles`] representation.
     #[instrument(level = "trace", skip(self), ret)]
-    pub fn next_unprocessed_key(&self) -> Option<(Nibbles, B256)> {
+    pub fn next_unprocessed_key(&self) -> Option<(B256, Nibbles)> {
         self.key()
             .and_then(
                 |key| if self.can_skip_current_node { key.increment() } else { Some(key.clone()) },
@@ -106,7 +106,7 @@ impl<C> TrieWalker<C> {
             .map(|key| {
                 let mut packed = key.pack();
                 packed.resize(32, 0);
-                (key, B256::from_slice(packed.as_slice()))
+                (B256::from_slice(packed.as_slice()), key)
             })
     }
 
