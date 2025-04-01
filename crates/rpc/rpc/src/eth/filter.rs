@@ -9,12 +9,7 @@ use alloy_rpc_types_eth::{
 use async_trait::async_trait;
 use futures::future::TryFutureExt;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
-use reth_chainspec::ChainInfo;
-use reth_primitives_traits::RecoveredBlock;
-use reth_provider::{
-    BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, HeaderProvider, ProviderBlock,
-    ProviderError, ProviderReceipt,
-};
+use reth_errors::ProviderError;
 use reth_rpc_eth_api::{
     EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcNodeCoreExt,
     RpcTransaction, TransactionCompat,
@@ -24,6 +19,10 @@ use reth_rpc_eth_types::{
     EthApiError, EthFilterConfig, EthStateCache, EthSubscriptionIdProvider,
 };
 use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
+use reth_storage_api::{
+    BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, HeaderProvider, ProviderBlock,
+    ProviderReceipt,
+};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
 use std::{
@@ -250,7 +249,6 @@ where
                         &filter,
                         from_block_number,
                         to_block_number,
-                        info,
                         self.inner.query_limits,
                     )
                     .await?;
@@ -435,10 +433,8 @@ where
                 // we also need to ensure that the receipts are available and return an error if
                 // not, in case the block hash been reorged
                 let (receipts, maybe_block) = self
-                    .receipts_and_maybe_block(
-                        &block_num_hash,
-                        self.provider().chain_info()?.best_number,
-                    )
+                    .eth_cache()
+                    .get_receipts_and_maybe_block(block_num_hash.hash)
                     .await?
                     .ok_or(EthApiError::HeaderNotFound(block_hash.into()))?;
 
@@ -473,14 +469,8 @@ where
                     .flatten();
                 let (from_block_number, to_block_number) =
                     logs_utils::get_filter_block_range(from, to, start_block, info);
-                self.get_logs_in_block_range(
-                    &filter,
-                    from_block_number,
-                    to_block_number,
-                    info,
-                    limits,
-                )
-                .await
+                self.get_logs_in_block_range(&filter, from_block_number, to_block_number, limits)
+                    .await
             }
         }
     }
@@ -514,7 +504,6 @@ where
         filter: &Filter,
         from_block: u64,
         to_block: u64,
-        chain_info: ChainInfo,
         limits: QueryLimits,
     ) -> Result<Vec<Log>, EthFilterError> {
         trace!(target: "rpc::eth::filter", from=from_block, to=to_block, ?filter, "finding logs in range");
@@ -560,7 +549,7 @@ where
 
                     let num_hash = BlockNumHash::new(header.number(), block_hash);
                     if let Some((receipts, maybe_block)) =
-                        self.receipts_and_maybe_block(&num_hash, chain_info.best_number).await?
+                        self.eth_cache().get_receipts_and_maybe_block(num_hash.hash).await?
                     {
                         append_matching_block_logs(
                             &mut all_logs,
@@ -592,31 +581,6 @@ where
         }
 
         Ok(all_logs)
-    }
-
-    /// Retrieves receipts and block from cache if near the tip (4 blocks), otherwise only receipts.
-    async fn receipts_and_maybe_block(
-        &self,
-        block_num_hash: &BlockNumHash,
-        best_number: u64,
-    ) -> Result<
-        Option<(
-            Arc<Vec<ProviderReceipt<Eth::Provider>>>,
-            Option<Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>>,
-        )>,
-        EthFilterError,
-    > {
-        // The last 4 blocks are most likely cached, so we can just fetch them
-        let cached_range = best_number.saturating_sub(4)..=best_number;
-        let receipts_block = if cached_range.contains(&block_num_hash.number) {
-            self.eth_cache()
-                .get_block_and_receipts(block_num_hash.hash)
-                .await?
-                .map(|(b, r)| (r, Some(b)))
-        } else {
-            self.eth_cache().get_receipts(block_num_hash.hash).await?.map(|r| (r, None))
-        };
-        Ok(receipts_block)
     }
 }
 

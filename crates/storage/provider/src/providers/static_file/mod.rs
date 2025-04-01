@@ -8,9 +8,8 @@ mod writer;
 pub use writer::{StaticFileProviderRW, StaticFileProviderRWRefMut};
 
 mod metrics;
-
 use reth_nippy_jar::NippyJar;
-use reth_primitives::{static_file::SegmentHeader, StaticFileSegment};
+use reth_static_file_types::{SegmentHeader, StaticFileSegment};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{ops::Deref, sync::Arc};
 
@@ -65,9 +64,9 @@ mod tests {
     use reth_db_api::{
         transaction::DbTxMut, CanonicalHeaders, HeaderNumbers, HeaderTerminalDifficulties, Headers,
     };
-    use reth_primitives::{
-        static_file::{find_fixed_range, SegmentRangeInclusive, DEFAULT_BLOCKS_PER_STATIC_FILE},
-        EthPrimitives, Receipt, TransactionSigned,
+    use reth_ethereum_primitives::{EthPrimitives, Receipt, TransactionSigned};
+    use reth_static_file_types::{
+        find_fixed_range, SegmentRangeInclusive, DEFAULT_BLOCKS_PER_STATIC_FILE,
     };
     use reth_storage_api::{ReceiptProvider, TransactionsProvider};
     use reth_testing_utils::generators::{self, random_header_range};

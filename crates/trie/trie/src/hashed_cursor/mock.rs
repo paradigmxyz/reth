@@ -103,11 +103,8 @@ impl<T: Debug + Clone> HashedCursor for MockHashedCursor<T> {
 
     #[instrument(level = "trace", skip(self), ret)]
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
-        // Find the first key that has a prefix of the given key.
-        let entry = self
-            .values
-            .iter()
-            .find_map(|(k, v)| k.starts_with(key.as_slice()).then(|| (*k, v.clone())));
+        // Find the first key that is greater than or equal to the given key.
+        let entry = self.values.iter().find_map(|(k, v)| (k >= &key).then(|| (*k, v.clone())));
         if let Some((key, _)) = &entry {
             self.current_key = Some(*key);
         }

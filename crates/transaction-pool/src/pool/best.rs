@@ -144,8 +144,7 @@ impl<T: TransactionOrdering> BestTransactions<T> {
     /// set.
     fn pop_best(&mut self) -> Option<PendingTransaction<T>> {
         self.independent.pop_last().inspect(|best| {
-            let removed = self.all.remove(best.transaction.id());
-            debug_assert!(removed.is_some(), "must be present in both sets");
+            self.all.remove(best.transaction.id());
         })
     }
 

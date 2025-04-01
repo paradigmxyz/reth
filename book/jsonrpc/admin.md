@@ -113,17 +113,41 @@ These include general information about the node itself, as well as what protoco
 
 ## `admin_peerEvents`, `admin_peerEvents_unsubscribe`
 
-<!-- TODO: This seems to be unimplemented, so it is not really known what the events look like !-->
+Subscribe to events received by peers over the network. This creates a subscription that emits notifications about peer connections and disconnections.
 
-Subscribe to events received by peers over the network.
+The events provide information about peer activities such as when peers connect, disconnect, or experience errors. Each event contains details about the affected peer, including its enode URL, IP address, and the reason for the event.
 
 Like other subscription methods, this returns the ID of the subscription, which is then used in all events subsequently.
 
-To unsubscribe from peer events, call `admin_peerEvents_unsubscribe`
+To unsubscribe from peer events, call `admin_peerEvents_unsubscribe` with the subscription ID.
 
-| Client | Method invocation                |
-|--------|----------------------------------|
-| RPC    | `{"method": "admin_peerEvents"}` |
+| Client | Method invocation                                     |
+|--------|-------------------------------------------------------|
+| RPC    | `{"method": "admin_peerEvents", "params": []}`        |
+| RPC    | `{"method": "admin_peerEvents_unsubscribe", "params": [id]}` |
+
+### Event Types
+
+The subscription emits events with the following structure:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "admin_subscription",
+  "params": {
+    "subscription": "0xcd0c3e8af590364c09d0fa6a1210faf5",
+    "result": {
+      "type": "add", // or "drop", "error"
+      "peer": {
+        "id": "44826a5d6a55f88a18298bca4773fca5749cdc3a5c9f308aa7d810e9b31123f3e7c5fba0b1d70aac5308426f47df2a128a6747040a3815cc7dd7167d03be320d",
+        "enode": "enode://44826a5d6a55f88a18298bca4773fca5749cdc3a5c9f308aa7d810e9b31123f3e7c5fba0b1d70aac5308426f47df2a128a6747040a3815cc7dd7167d03be320d@192.168.1.1:30303",
+        "addr": "192.168.1.1:30303"
+      },
+      "error": "reason for disconnect or error" // only present for "drop" and "error" events
+    }
+  }
+}
+```
 
 ### Example
 
@@ -131,6 +155,13 @@ To unsubscribe from peer events, call `admin_peerEvents_unsubscribe`
 // > {"jsonrpc":"2.0","id":1,"method":"admin_peerEvents","params":[]}
 // responds with subscription ID
 {"jsonrpc": "2.0", "id": 1, "result": "0xcd0c3e8af590364c09d0fa6a1210faf5"}
+
+// Example event when a peer connects
+{"jsonrpc":"2.0","method":"admin_subscription","params":{"subscription":"0xcd0c3e8af590364c09d0fa6a1210faf5","result":{"type":"add","peer":{"id":"44826a5d6a55f88a18298bca4773fca5749cdc3a5c9f308aa7d810e9b31123f3e7c5fba0b1d70aac5308426f47df2a128a6747040a3815cc7dd7167d03be320d","enode":"enode://44826a5d6a55f88a18298bca4773fca5749cdc3a5c9f308aa7d810e9b31123f3e7c5fba0b1d70aac5308426f47df2a128a6747040a3815cc7dd7167d03be320d@192.168.1.1:30303","addr":"192.168.1.1:30303"}}}}
+
+// Unsubscribe
+// > {"jsonrpc":"2.0","id":2,"method":"admin_peerEvents_unsubscribe","params":["0xcd0c3e8af590364c09d0fa6a1210faf5"]}
+{"jsonrpc":"2.0","id":2,"result":true}
 ```
 
 [enode]: https://ethereum.org/en/developers/docs/networking-layer/network-addresses/#enode
