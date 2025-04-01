@@ -466,7 +466,7 @@ revm-context = { version = "2.0.0", default-features = false }
 revm-context-interface = { version = "2.0.0", default-features = false }
 revm-database-interface = { version = "2.0.0", default-features = false }
 op-revm = { version = "2.0.0", default-features = false }
-revm-scroll = { git = "https://github.com/scroll-tech/scroll-revm" }
+revm-scroll = { git = "https://github.com/scroll-tech/scroll-revm", branch = "chore/upstream-merge-21.0.0" }
 revm-inspectors = "0.18.0"
 
 # eth

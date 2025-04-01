@@ -1,6 +1,6 @@
 use reth_chainspec::EthChainSpec;
 use reth_node_builder::{components::ConsensusBuilder, BuilderContext, FullNodeTypes};
-use reth_node_types::{NodeTypes, NodeTypesWithEngine};
+use reth_node_types::NodeTypes;
 use reth_primitives_traits::NodePrimitives;
 use reth_scroll_consensus::ScrollBeaconConsensus;
 use reth_scroll_primitives::ScrollReceipt;
@@ -14,7 +14,7 @@ pub struct ScrollConsensusBuilder;
 impl<Node> ConsensusBuilder<Node> for ScrollConsensusBuilder
 where
     Node: FullNodeTypes<
-        Types: NodeTypesWithEngine<
+        Types: NodeTypes<
             ChainSpec: EthChainSpec + ScrollHardforks,
             Primitives: NodePrimitives<Receipt = ScrollReceipt>,
         >,
