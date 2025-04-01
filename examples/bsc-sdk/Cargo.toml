@@ -33,6 +33,8 @@ alloy-consensus.workspace = true
 alloy-chains.workspace = true
 alloy-eips.workspace = true
 alloy-evm.workspace = true
+alloy-json-abi = { version = "0.8.25", default-features = false }
+alloy-dyn-abi = { version = "0.8.25", default-features = false }
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-rpc-types = { workspace = true, features = ["engine"] }

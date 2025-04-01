@@ -12,7 +12,6 @@ use std::{
 };
 
 mod handle;
-mod parlia;
 mod service;
 
 pub struct BscBlockImport<T: PayloadTypes> {

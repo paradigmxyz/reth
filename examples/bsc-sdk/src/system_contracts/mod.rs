@@ -1,5 +1,9 @@
 #![allow(missing_docs)]
 //! Credits to <https://github.com/bnb-chain/reth/blob/main/crates/bsc/primitives/src/system_contracts/mod.rs>
+use crate::{
+    chainspec::bsc::bsc_mainnet,
+    hardforks::{bsc::BscHardfork, BscHardforks},
+};
 use alloy_chains::Chain;
 use alloy_consensus::Transaction;
 use alloy_primitives::{hex, Address, BlockNumber};
@@ -10,11 +14,6 @@ use reth_ethereum_forks::Hardforks;
 use revm::state::Bytecode;
 use std::collections::HashMap;
 use thiserror::Error;
-
-use crate::{
-    chainspec::bsc::bsc_mainnet,
-    hardforks::{bsc::BscHardfork, BscHardforks},
-};
 
 pub const VALIDATOR_CONTRACT: &str = "0x0000000000000000000000000000000000001000";
 pub const SLASH_CONTRACT: &str = "0x0000000000000000000000000000000000001001";
@@ -312,7 +311,7 @@ mod tests {
         let addr1 = address!("0000000000000000000000000000000000001000");
         let addr2 = address!("0000000000000000000000000000000000001100");
 
-        assert_eq!(is_invoke_system_contract(&addr1), true);
-        assert_eq!(is_invoke_system_contract(&addr2), false);
+        assert!(is_invoke_system_contract(&addr1));
+        assert!(!is_invoke_system_contract(&addr2));
     }
 }
