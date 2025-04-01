@@ -67,7 +67,12 @@ where
             calculate_receipt_root_no_memo_optimism(receipts, &self.chain_spec, timestamp);
         let logs_bloom = logs_bloom(receipts.iter().flat_map(|r| r.logs()));
 
+        let mut requests_hash = None;
+
         let withdrawals_root = if self.chain_spec.is_isthmus_active_at_timestamp(timestamp) {
+            // always empty requests hash post isthmus
+            requests_hash = Some(EMPTY_REQUESTS_HASH);
+
             // withdrawals root field in block header is used for storage root of L2 predeploy
             // `l2tol1-message-passer`
             Some(
@@ -108,11 +113,7 @@ where
             parent_beacon_block_root: ctx.parent_beacon_block_root,
             blob_gas_used,
             excess_blob_gas,
-            // always empty requests hash post isthmus
-            requests_hash: self
-                .chain_spec
-                .is_isthmus_active_at_timestamp(timestamp)
-                .then_some(EMPTY_REQUESTS_HASH),
+            requests_hash,
         };
 
         Ok(Block::new(
