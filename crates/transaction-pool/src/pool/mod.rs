@@ -499,7 +499,7 @@ where
             }
             TransactionValidationOutcome::Invalid(tx, err) => {
                 let mut listener = self.event_listener.write();
-                listener.discarded(tx.hash());
+                listener.invalid(tx.hash());
                 Err(PoolError::new(*tx.hash(), err))
             }
             TransactionValidationOutcome::Error(tx_hash, err) => {

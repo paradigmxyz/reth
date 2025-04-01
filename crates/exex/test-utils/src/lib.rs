@@ -31,7 +31,6 @@ use reth_exex::{ExExContext, ExExEvent, ExExNotification, ExExNotifications, Wal
 use reth_network::{config::SecretKey, NetworkConfigBuilder, NetworkManager};
 use reth_node_api::{
     FullNodeTypes, FullNodeTypesAdapter, NodePrimitives, NodeTypes, NodeTypesWithDBAdapter,
-    NodeTypesWithEngine,
 };
 use reth_node_builder::{
     components::{
@@ -122,17 +121,14 @@ impl NodeTypes for TestNode {
     type ChainSpec = ChainSpec;
     type StateCommitment = reth_trie_db::MerklePatriciaTrie;
     type Storage = EthStorage;
-}
-
-impl NodeTypesWithEngine for TestNode {
-    type Engine = EthEngineTypes;
+    type Payload = EthEngineTypes;
 }
 
 impl<N> Node<N> for TestNode
 where
     N: FullNodeTypes<
-        Types: NodeTypesWithEngine<
-            Engine = EthEngineTypes,
+        Types: NodeTypes<
+            Payload = EthEngineTypes,
             ChainSpec = ChainSpec,
             Primitives = EthPrimitives,
             Storage = EthStorage,

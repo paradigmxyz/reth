@@ -924,6 +924,11 @@ fn get_proof_targets(
             .filter(|slot| !fetched.is_some_and(|f| f.contains(*slot)))
             .peekable();
 
+        // If the storage is wiped, we still need to fetch the account proof.
+        if storage.wiped && fetched.is_none() {
+            targets.entry(*hashed_address).or_default();
+        }
+
         if changed_slots.peek().is_some() {
             targets.entry(*hashed_address).or_default().extend(changed_slots);
         }

@@ -8,7 +8,7 @@ use reth_node_builder::{
     },
     FullNodeComponents,
 };
-use reth_node_types::{NodeTypes, NodeTypesWithEngine};
+use reth_node_types::NodeTypes;
 use reth_rpc_eth_types::error::FromEvmError;
 use reth_scroll_chainspec::ScrollChainSpec;
 use reth_scroll_engine_primitives::ScrollEngineTypes;
@@ -58,11 +58,11 @@ where
 impl<N> NodeAddOns<N> for ScrollAddOns<N>
 where
     N: FullNodeComponents<
-        Types: NodeTypesWithEngine<
+        Types: NodeTypes<
             ChainSpec = ScrollChainSpec,
             Primitives = ScrollPrimitives,
             Storage = ScrollStorage,
-            Engine = ScrollEngineTypes,
+            Payload = ScrollEngineTypes,
         >,
         Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
@@ -83,11 +83,11 @@ where
 impl<N> RethRpcAddOns<N> for ScrollAddOns<N>
 where
     N: FullNodeComponents<
-        Types: NodeTypesWithEngine<
+        Types: NodeTypes<
             ChainSpec = ScrollChainSpec,
             Primitives = ScrollPrimitives,
             Storage = ScrollStorage,
-            Engine = ScrollEngineTypes,
+            Payload = ScrollEngineTypes,
         >,
         Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
@@ -104,10 +104,10 @@ where
 impl<N> EngineValidatorAddOn<N> for ScrollAddOns<N>
 where
     N: FullNodeComponents<
-        Types: NodeTypesWithEngine<
+        Types: NodeTypes<
             ChainSpec = ScrollChainSpec,
             Primitives = ScrollPrimitives,
-            Engine = ScrollEngineTypes,
+            Payload = ScrollEngineTypes,
         >,
     >,
     ScrollEthApiBuilder: EthApiBuilder<N>,

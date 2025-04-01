@@ -1,6 +1,6 @@
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_node_builder::{components::PayloadServiceBuilder, BuilderContext, FullNodeTypes};
-use reth_node_types::{NodeTypesWithEngine, TxTy};
+use reth_node_types::{NodeTypes, TxTy};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::CanonStateSubscriptions;
 use reth_scroll_chainspec::ScrollChainSpec;
@@ -19,9 +19,9 @@ pub struct ScrollPayloadBuilder<Txs = ()> {
 impl<Node, Pool, Txs> PayloadServiceBuilder<Node, Pool> for ScrollPayloadBuilder<Txs>
 where
     Node: FullNodeTypes,
-    Node::Types: NodeTypesWithEngine<
+    Node::Types: NodeTypes<
         Primitives = ScrollPrimitives,
-        Engine = ScrollEngineTypes,
+        Payload = ScrollEngineTypes,
         ChainSpec = ScrollChainSpec,
     >,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
@@ -33,7 +33,7 @@ where
         self,
         ctx: &BuilderContext<Node>,
         _pool: Pool,
-    ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>> {
+    ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>> {
         let payload_builder = reth_scroll_payload::ScrollEmptyPayloadBuilder::default();
 
         let conf = ctx.config().builder.clone();

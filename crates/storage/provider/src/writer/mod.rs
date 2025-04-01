@@ -7,8 +7,8 @@ use alloy_consensus::BlockHeader;
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
 use reth_db_api::transaction::{DbTx, DbTxMut};
 use reth_errors::ProviderResult;
-use reth_primitives::{NodePrimitives, StaticFileSegment};
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{NodePrimitives, SignedTransaction};
+use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{DBProvider, StageCheckpointWriter, TransactionsProviderExt};
 use reth_storage_errors::writer::UnifiedStorageWriterError;
 use revm_database::OriginalValuesKnown;
@@ -234,8 +234,9 @@ mod tests {
         tables,
         transaction::{DbTx, DbTxMut},
     };
+    use reth_ethereum_primitives::Receipt;
     use reth_execution_types::ExecutionOutcome;
-    use reth_primitives::{Account, Receipt, StorageEntry};
+    use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_api::{DatabaseProviderFactory, HashedPostStateProvider};
     use reth_trie::{
         test_utils::{state_root, storage_root_prehashed},

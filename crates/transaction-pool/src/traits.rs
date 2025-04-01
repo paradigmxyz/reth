@@ -32,6 +32,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     fmt,
+    fmt::Debug,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -59,7 +60,7 @@ pub type PoolPooledTx<P> = <<P as TransactionPool>::Transaction as PoolTransacti
 /// Note: This requires `Clone` for convenience, since it is assumed that this will be implemented
 /// for a wrapped `Arc` type, see also [`Pool`](crate::Pool).
 #[auto_impl::auto_impl(&, Arc)]
-pub trait TransactionPool: Send + Sync + Clone {
+pub trait TransactionPool: Clone + Debug + Send + Sync {
     /// The transaction type of the pool
     type Transaction: EthPoolTransaction;
 
@@ -938,7 +939,7 @@ impl BestTransactionsAttributes {
 /// handling of all valid `Consensus` transactions that can't be pooled (e.g Deposit transactions or
 /// blob-less EIP-4844 transactions).
 pub trait PoolTransaction:
-    alloy_consensus::Transaction + InMemorySize + fmt::Debug + Send + Sync + Clone
+    alloy_consensus::Transaction + InMemorySize + Debug + Send + Sync + Clone
 {
     /// Associated error type for the `try_from_consensus` method.
     type TryFromConsensusError: fmt::Display;

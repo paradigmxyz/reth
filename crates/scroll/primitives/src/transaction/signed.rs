@@ -87,10 +87,6 @@ impl SignedTransaction for ScrollTransactionSigned {
         self.hash.get_or_init(|| self.recalculate_hash())
     }
 
-    fn signature(&self) -> &Signature {
-        &self.signature
-    }
-
     fn recover_signer(&self) -> Result<Address, RecoveryError> {
         // Scroll's L1 message does not have a signature. Directly return the `sender` address.
         if let ScrollTypedTransaction::L1Message(TxL1Message { sender, .. }) = self.transaction {

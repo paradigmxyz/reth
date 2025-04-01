@@ -184,7 +184,7 @@ pub trait EthFees: LoadFee {
                             / alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
                     );
 
-                    // Percentiles were specified, so we need to collect reward percentile ino
+                    // Percentiles were specified, so we need to collect reward percentile info
                     if let Some(percentiles) = &reward_percentiles {
                         let (block, receipts) = self.cache()
                             .get_block_and_receipts(header.hash())

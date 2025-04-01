@@ -237,6 +237,12 @@ pub enum InvalidPoolTransactionError {
 // === impl InvalidPoolTransactionError ===
 
 impl InvalidPoolTransactionError {
+    /// Returns a new [`InvalidPoolTransactionError::Other`] instance with the given
+    /// [`PoolTransactionError`].
+    pub fn other<E: PoolTransactionError + 'static>(err: E) -> Self {
+        Self::Other(Box::new(err))
+    }
+
     /// Returns `true` if the error was caused by a transaction that is considered bad in the
     /// context of the transaction pool and warrants peer penalization.
     ///

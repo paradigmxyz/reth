@@ -6,7 +6,7 @@ use reth_node_builder::{
     EngineObjectValidationError, EngineTypes, EngineValidator, FullNodeComponents,
     PayloadOrAttributes,
 };
-use reth_node_types::NodeTypesWithEngine;
+use reth_node_types::NodeTypes;
 use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_scroll_chainspec::ScrollChainSpec;
 use reth_scroll_engine_primitives::{try_into_block, ScrollEngineTypes};
@@ -25,10 +25,10 @@ pub struct ScrollEngineValidatorBuilder;
 
 impl<Node, Types> EngineValidatorBuilder<Node> for ScrollEngineValidatorBuilder
 where
-    Types: NodeTypesWithEngine<
+    Types: NodeTypes<
         ChainSpec = ScrollChainSpec,
         Primitives = ScrollPrimitives,
-        Engine = ScrollEngineTypes,
+        Payload = ScrollEngineTypes,
     >,
     Node: FullNodeComponents<Types = Types>,
 {

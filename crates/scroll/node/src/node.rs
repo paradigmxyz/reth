@@ -6,7 +6,7 @@ use crate::{
 };
 use reth_node_builder::{
     components::ComponentsBuilder,
-    node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
+    node::{FullNodeTypes, NodeTypes},
     Node, NodeAdapter, NodeComponentsBuilder,
 };
 use reth_scroll_chainspec::ScrollChainSpec;
@@ -30,10 +30,10 @@ impl ScrollNode {
     >
     where
         Node: FullNodeTypes<
-            Types: NodeTypesWithEngine<
+            Types: NodeTypes<
                 ChainSpec = ScrollChainSpec,
                 Primitives = ScrollPrimitives,
-                Engine = ScrollEngineTypes,
+                Payload = ScrollEngineTypes,
             >,
         >,
     {
@@ -73,13 +73,10 @@ where
     }
 }
 
-impl NodeTypesWithEngine for ScrollNode {
-    type Engine = ScrollEngineTypes;
-}
-
 impl NodeTypes for ScrollNode {
     type Primitives = ScrollPrimitives;
     type ChainSpec = ScrollChainSpec;
     type StateCommitment = MerklePatriciaTrie;
     type Storage = ScrollStorage;
+    type Payload = ScrollEngineTypes;
 }

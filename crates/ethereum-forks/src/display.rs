@@ -1,9 +1,10 @@
-use crate::{hardforks::Hardforks, ForkCondition};
+use crate::ForkCondition;
 use alloc::{
     format,
     string::{String, ToString},
     vec::Vec,
 };
+use alloy_hardforks::Hardfork;
 
 /// A container to pretty-print a hardfork.
 ///
@@ -136,12 +137,15 @@ impl core::fmt::Display for DisplayHardforks {
 
 impl DisplayHardforks {
     /// Creates a new [`DisplayHardforks`] from an iterator of hardforks.
-    pub fn new<H: Hardforks>(hardforks: &H) -> Self {
+    pub fn new<'a, I>(hardforks: I) -> Self
+    where
+        I: IntoIterator<Item = (&'a dyn Hardfork, ForkCondition)>,
+    {
         let mut pre_merge = Vec::new();
         let mut with_merge = Vec::new();
         let mut post_merge = Vec::new();
 
-        for (fork, condition) in hardforks.forks_iter() {
+        for (fork, condition) in hardforks {
             let mut display_fork =
                 DisplayFork { name: fork.name().to_string(), activated_at: condition, eip: None };
 

@@ -21,6 +21,7 @@ use alloy_eips::{
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
 use alloy_trie::root::state_root_ref_unhashed;
+use core::fmt::Debug;
 use derive_more::From;
 use reth_ethereum_forks::{
     ChainHardforks, DisplayHardforks, EthereumHardfork, EthereumHardforks, ForkCondition,
@@ -478,7 +479,7 @@ impl ChainSpec {
 
     /// Returns the hardfork display helper.
     pub fn display_hardforks(&self) -> DisplayHardforks {
-        DisplayHardforks::new(&self)
+        DisplayHardforks::new(self.hardforks.forks_iter())
     }
 
     /// Get the fork id for the given hardfork.
@@ -813,7 +814,7 @@ impl EthereumHardforks for ChainSpec {
 
 /// A trait for reading the current chainspec.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait ChainSpecProvider: Send + Sync {
+pub trait ChainSpecProvider: Debug + Send + Sync {
     /// The chain spec type.
     type ChainSpec: EthChainSpec + 'static;
 

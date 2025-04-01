@@ -3,9 +3,10 @@ use crate::{
     table::{DupSort, Encode, Table},
     DatabaseError,
 };
+use std::fmt::Debug;
 
 /// Read only transaction
-pub trait DbTx: Send + Sync {
+pub trait DbTx: Debug + Send + Sync {
     /// Cursor type for this read-only transaction
     type Cursor<T: Table>: DbCursorRO<T> + Send + Sync;
     /// `DupCursor` type for this read-only transaction

@@ -1,5 +1,6 @@
 use alloy_evm::Evm;
 use alloy_primitives::U256;
+use core::fmt::Debug;
 use revm::context::result::ExecutionResult;
 
 /// Context for building a receipt.
@@ -17,7 +18,7 @@ pub struct ReceiptBuilderCtx<'a, T, E: Evm> {
 
 /// Type that knows how to build a receipt based on execution result.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait ScrollReceiptBuilder {
+pub trait ScrollReceiptBuilder: Debug {
     /// Transaction type.
     type Transaction;
     /// Receipt type.

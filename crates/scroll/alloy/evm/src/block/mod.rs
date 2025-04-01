@@ -9,12 +9,12 @@ use crate::{
 };
 use alloc::{boxed::Box, format, vec::Vec};
 
-use alloy_consensus::{transaction::Recovered, Transaction, TxReceipt, Typed2718};
+use alloy_consensus::{Transaction, TxReceipt, Typed2718};
 use alloy_eips::Encodable2718;
 use alloy_evm::{
     block::{
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
-        BlockExecutorFor, BlockValidationError, OnStateHook,
+        BlockExecutorFor, BlockValidationError, ExecutableTx, OnStateHook,
     },
     Database, Evm, FromRecoveredTx,
 };
@@ -114,47 +114,47 @@ where
 
     fn execute_transaction_with_result_closure(
         &mut self,
-        tx: Recovered<&Self::Transaction>,
+        tx: impl ExecutableTx<Self>,
         f: impl FnOnce(&revm::context::result::ExecutionResult<<Self::Evm as Evm>::HaltReason>),
     ) -> Result<u64, BlockExecutionError> {
         let chain_spec = &self.spec;
-        let is_l1_message = tx.ty() == L1_MESSAGE_TRANSACTION_TYPE;
+        let is_l1_message = tx.tx().ty() == L1_MESSAGE_TRANSACTION_TYPE;
         // The sum of the transaction’s gas limit and the gas utilized in this block prior,
         // must be no greater than the block’s gasLimit.
         let block_available_gas = self.evm.block().gas_limit - self.gas_used;
-        if tx.gas_limit() > block_available_gas {
+        if tx.tx().gas_limit() > block_available_gas {
             return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                transaction_gas_limit: tx.gas_limit(),
+                transaction_gas_limit: tx.tx().gas_limit(),
                 block_available_gas,
             }
             .into())
         }
 
-        let hash = tx.trie_hash();
+        let hash = tx.tx().trie_hash();
 
         // verify the transaction type is accepted by the current fork.
-        if tx.is_eip2930() && !chain_spec.is_curie_active_at_block(self.evm.block().number) {
+        if tx.tx().is_eip2930() && !chain_spec.is_curie_active_at_block(self.evm.block().number) {
             return Err(BlockValidationError::InvalidTx {
                 hash,
                 error: Box::new(InvalidTransaction::Eip2930NotSupported),
             }
             .into())
         }
-        if tx.is_eip1559() && !chain_spec.is_curie_active_at_block(self.evm.block().number) {
+        if tx.tx().is_eip1559() && !chain_spec.is_curie_active_at_block(self.evm.block().number) {
             return Err(BlockValidationError::InvalidTx {
                 hash,
                 error: Box::new(InvalidTransaction::Eip1559NotSupported),
             }
             .into())
         }
-        if tx.is_eip4844() {
+        if tx.tx().is_eip4844() {
             return Err(BlockValidationError::InvalidTx {
                 hash,
                 error: Box::new(InvalidTransaction::Eip4844NotSupported),
             }
             .into())
         }
-        if tx.is_eip7702() {
+        if tx.tx().is_eip7702() {
             return Err(BlockValidationError::InvalidTx {
                 hash,
                 error: Box::new(InvalidTransaction::Eip7702NotSupported),
@@ -183,7 +183,7 @@ where
         self.gas_used += gas_used;
 
         let ctx = ReceiptBuilderCtx::<'_, Self::Transaction, E> {
-            tx: tx.inner(),
+            tx: tx.tx(),
             result,
             cumulative_gas_used: self.gas_used,
             l1_fee,
