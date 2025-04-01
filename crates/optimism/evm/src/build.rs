@@ -3,7 +3,7 @@ use alloy_consensus::{
     constants::EMPTY_WITHDRAWALS, proofs, Block, BlockBody, Header, TxReceipt,
     EMPTY_OMMER_ROOT_HASH,
 };
-use alloy_eips::merge::BEACON_NONCE;
+use alloy_eips::{eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE};
 use alloy_evm::block::BlockExecutorFactory;
 use alloy_op_evm::OpBlockExecutionCtx;
 use alloy_primitives::logs_bloom;
@@ -108,7 +108,11 @@ where
             parent_beacon_block_root: ctx.parent_beacon_block_root,
             blob_gas_used,
             excess_blob_gas,
-            requests_hash: None,
+            // always empty requests hash post isthmus
+            requests_hash: self
+                .chain_spec
+                .is_isthmus_active_at_timestamp(timestamp)
+                .then(|| EMPTY_REQUESTS_HASH),
         };
 
         Ok(Block::new(
