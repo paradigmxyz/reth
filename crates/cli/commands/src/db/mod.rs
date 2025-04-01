@@ -155,7 +155,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 println!("{}", db_path.display());
             }
             Subcommands::Bootnode(command) => {
-                command.execute().await;
+                let _ = command.execute().await;
             }
         }
 
