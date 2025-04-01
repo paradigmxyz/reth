@@ -21,8 +21,6 @@ pub const EMPTY: [u8; 2] = [0x00, 0x00];
 /// `BlockIndex` record: ['i', '2']
 pub const BLOCK_INDEX: [u8; 2] = [0x66, 0x32];
 
-
-
 /// Error types for e2s file operations
 #[derive(Error, Debug)]
 pub enum E2sError {

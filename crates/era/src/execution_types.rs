@@ -334,7 +334,6 @@ mod tests {
 
     #[test]
     fn test_compression_roundtrip() {
-
         let rlp_data = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
         // Test header compression/decompression
