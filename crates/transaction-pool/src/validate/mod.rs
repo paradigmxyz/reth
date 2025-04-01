@@ -46,6 +46,8 @@ pub enum TransactionValidationOutcome<T: PoolTransaction> {
         transaction: ValidTransaction<T>,
         /// Whether to propagate the transaction to the network.
         propagate: bool,
+        /// The authorities of EIP-7702 transaction.
+        authorities: Option<Vec<Address>>,
     },
     /// The transaction is considered invalid indefinitely: It violates constraints that prevent
     /// this transaction from ever becoming valid.
@@ -270,6 +272,8 @@ pub struct ValidPoolTransaction<T: PoolTransaction> {
     pub timestamp: Instant,
     /// Where this transaction originated from.
     pub origin: TransactionOrigin,
+    /// The sender ids of the 7702 transaction authorities.
+    pub authority_ids: Option<Vec<SenderId>>,
 }
 
 // === impl ValidPoolTransaction ===
@@ -481,6 +485,7 @@ impl<T: PoolTransaction> Clone for ValidPoolTransaction<T> {
             propagate: self.propagate,
             timestamp: self.timestamp,
             origin: self.origin,
+            authority_ids: self.authority_ids.clone(),
         }
     }
 }

@@ -1343,6 +1343,7 @@ impl MockTransactionFactory {
             transaction,
             timestamp: Instant::now(),
             origin,
+            authority_ids: None,
         }
     }
 

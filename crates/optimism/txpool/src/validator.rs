@@ -159,6 +159,7 @@ where
             transaction: valid_tx,
             propagate,
             bytecode_hash,
+            authorities: _,
         } = outcome
         {
             let mut l1_block_info = self.block_info.l1_block_info.read().clone();
@@ -198,6 +199,7 @@ where
                 transaction: valid_tx,
                 propagate,
                 bytecode_hash,
+                authorities: None,
             }
         }
 
