@@ -441,6 +441,8 @@ pub(crate) struct MultiProofTaskMetrics {
     pub multiproof_task_total_duration_histogram: Histogram,
     /// Total time spent waiting for the first state update or prefetch request.
     pub first_update_wait_time_histogram: Histogram,
+    /// Total time spent waiting for the last proof result.
+    pub last_proof_wait_time_histogram: Histogram,
 }
 
 /// Standalone task that receives a transaction state stream and updates relevant
@@ -729,8 +731,8 @@ where
 
         // Timestamp when the first state update or prefetch was received
         let mut first_update_time = None;
-        // Timestamp when the last state update was received
-        let mut last_update_time = None;
+        // Timestamp when state updates have finished
+        let mut updates_finished_time = None;
 
         loop {
             trace!(target: "engine::root", "entering main channel receiving loop");
@@ -769,7 +771,6 @@ where
                             first_update_time = Some(Instant::now());
                             debug!(target: "engine::root", "Started state root calculation");
                         }
-                        last_update_time = Some(Instant::now());
 
                         let len = update.len();
                         state_update_proofs_requested += self.on_state_update(source, update);
@@ -784,6 +785,7 @@ where
                     MultiProofMessage::FinishedStateUpdates => {
                         trace!(target: "engine::root", "processing MultiProofMessage::FinishedStateUpdates");
                         updates_finished = true;
+                        updates_finished_time = Some(Instant::now());
                         if self.is_done(
                             proofs_processed,
                             state_update_proofs_requested,
@@ -886,7 +888,7 @@ where
             total_updates = state_update_proofs_requested,
             total_proofs = proofs_processed,
             total_time = ?first_update_time.map(|t|t.elapsed()),
-            time_from_last_update = ?last_update_time.map(|t|t.elapsed()),
+            time_since_updates_finished = ?updates_finished_time.map(|t|t.elapsed()),
             "All proofs processed, ending calculation"
         );
 
@@ -895,6 +897,12 @@ where
         self.metrics.proofs_processed_histogram.record(proofs_processed as f64);
         if let Some(total_time) = first_update_time.map(|t| t.elapsed()) {
             self.metrics.multiproof_task_total_duration_histogram.record(total_time);
+        }
+
+        if let Some(updates_finished_time) = updates_finished_time {
+            self.metrics
+                .last_proof_wait_time_histogram
+                .record(updates_finished_time.elapsed().as_secs_f64());
         }
     }
 }
