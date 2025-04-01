@@ -1,4 +1,7 @@
-use crate::{hashed_cursor::HashedCursor, trie_cursor::TrieCursor, walker::TrieWalker, Nibbles};
+use crate::{
+    hashed_cursor::HashedCursor, trie::TrieType, trie_cursor::TrieCursor, walker::TrieWalker,
+    Nibbles,
+};
 use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
 use tracing::trace;
@@ -45,17 +48,22 @@ pub struct TrieNodeIter<C, H: HashedCursor> {
     current_hashed_entry: Option<(B256, <H as HashedCursor>::Value)>,
     /// Flag indicating whether we should check the current walker key.
     should_check_walker_key: bool,
+
+    #[cfg(feature = "metrics")]
+    metrics: crate::metrics::TrieNodeIterMetrics,
 }
 
 impl<C, H: HashedCursor> TrieNodeIter<C, H> {
     /// Creates a new [`TrieNodeIter`].
-    pub const fn new(walker: TrieWalker<C>, hashed_cursor: H) -> Self {
+    pub fn new(walker: TrieWalker<C>, hashed_cursor: H, trie_type: TrieType) -> Self {
         Self {
             walker,
             hashed_cursor,
             previous_hashed_key: None,
             current_hashed_entry: None,
             should_check_walker_key: false,
+            #[cfg(feature = "metrics")]
+            metrics: crate::metrics::TrieNodeIterMetrics::new(trie_type),
         }
     }
 
@@ -97,6 +105,8 @@ where
                     self.should_check_walker_key = true;
                     // If it's possible to skip the current node in the walker, return a branch node
                     if self.walker.can_skip_current_node {
+                        #[cfg(feature = "metrics")]
+                        self.metrics.inc_branch_nodes_returned();
                         return Ok(Some(TrieElement::Branch(TrieBranchNode::new(
                             key.clone(),
                             self.walker.hash().unwrap(),
@@ -117,6 +127,8 @@ where
                 // Set the next hashed entry as a leaf node and return
                 trace!(target: "trie::node_iter", ?hashed_key, "next hashed entry");
                 self.current_hashed_entry = self.hashed_cursor.next()?;
+                #[cfg(feature = "metrics")]
+                self.metrics.inc_leaf_nodes_returned();
                 return Ok(Some(TrieElement::Leaf(hashed_key, value)))
             }
 
@@ -125,6 +137,8 @@ where
                 Some(hashed_key) => {
                     trace!(target: "trie::node_iter", ?hashed_key, "seeking to the previous hashed entry");
                     // Seek to the previous hashed key and get the next hashed entry
+                    #[cfg(feature = "metrics")]
+                    self.metrics.inc_leaf_nodes_seeked();
                     self.hashed_cursor.seek(hashed_key)?;
                     self.current_hashed_entry = self.hashed_cursor.next()?;
                 }
@@ -141,6 +155,8 @@ where
                         can_skip_current_node = self.walker.can_skip_current_node,
                         "seeking to the next unprocessed hashed entry"
                     );
+                    #[cfg(feature = "metrics")]
+                    self.metrics.inc_leaf_nodes_seeked();
                     self.current_hashed_entry = self.hashed_cursor.seek(seek_key)?;
                     self.walker.advance()?;
                 }
@@ -175,6 +191,7 @@ mod tests {
             HashedPostStateAccountCursor,
         },
         mock::{KeyVisit, KeyVisitType},
+        trie::TrieType,
         trie_cursor::{
             mock::MockTrieCursorFactory, noop::NoopAccountTrieCursor, TrieCursorFactory,
         },
@@ -206,6 +223,7 @@ mod tests {
                 NoopHashedAccountCursor::default(),
                 hashed_post_state.accounts(),
             ),
+            TrieType::State,
         );
 
         while let Some(node) = node_iter.try_next().unwrap() {
@@ -335,8 +353,11 @@ mod tests {
             B256Map::default(),
         );
 
-        let mut iter =
-            TrieNodeIter::new(walker, hashed_cursor_factory.hashed_account_cursor().unwrap());
+        let mut iter = TrieNodeIter::new(
+            walker,
+            hashed_cursor_factory.hashed_account_cursor().unwrap(),
+            TrieType::State,
+        );
 
         // Walk the iterator until it's exhausted.
         while iter.try_next().unwrap().is_some() {}

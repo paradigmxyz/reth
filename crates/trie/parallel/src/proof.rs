@@ -26,7 +26,7 @@ use reth_trie::{
     updates::TrieUpdatesSorted,
     walker::TrieWalker,
     HashBuilder, HashedPostStateSorted, MultiProof, MultiProofTargets, Nibbles, StorageMultiProof,
-    TRIE_ACCOUNT_RLP_MAX_SIZE,
+    TrieType, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::proof::ProofRetainer;
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
@@ -229,6 +229,7 @@ where
         let mut account_node_iter = TrieNodeIter::new(
             walker,
             hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?,
+            TrieType::State,
         );
         while let Some(account_node) =
             account_node_iter.try_next().map_err(ProviderError::Database)?
