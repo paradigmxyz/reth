@@ -12,6 +12,7 @@
 pub mod chainspec;
 
 pub mod cli;
+pub use cli::Cli;
 
 #[cfg(test)]
 mod test {

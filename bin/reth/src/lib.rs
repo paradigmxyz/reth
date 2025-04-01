@@ -188,5 +188,9 @@ pub mod ress;
 #[doc(inline)]
 pub use reth_cli_runner::{tokio_runtime, CliContext, CliRunner};
 
+/// Re-exported cli types
+#[cfg(feature = "cli")]
+pub use reth_ethereum_cli::Cli;
+
 // for rendering diagrams
 use aquamarine as _;
