@@ -18,14 +18,10 @@ pub const VERSION: [u8; 2] = [0x65, 0x32];
 /// Empty record
 pub const EMPTY: [u8; 2] = [0x00, 0x00];
 
-/// `CompressedSignedBeaconBlock` record
-pub const COMPRESSED_SIGNED_BEACON_BLOCK: [u8; 2] = [0x01, 0x00];
+/// `BlockIndex` record: ['i', '2']
+pub const BLOCK_INDEX: [u8; 2] = [0x66, 0x32];
 
-/// `CompressedBeaconState` record
-pub const COMPRESSED_BEACON_STATE: [u8; 2] = [0x02, 0x00];
 
-/// `SlotIndex` record: ['i', '2']
-pub const SLOT_INDEX: [u8; 2] = [0x69, 0x32];
 
 /// Error types for e2s file operations
 #[derive(Error, Debug)]
@@ -42,11 +38,11 @@ pub enum E2sError {
     #[error("Reserved field in header not zero")]
     ReservedNotZero,
 
-    /// Error during Snappy compression
+    /// Error during snappy compression
     #[error("Snappy compression error: {0}")]
     SnappyCompression(String),
 
-    /// Error during Snappy decompression
+    /// Error during snappy decompression
     #[error("Snappy decompression error: {0}")]
     SnappyDecompression(String),
 }
@@ -162,18 +158,8 @@ impl Entry {
         self.entry_type == VERSION
     }
 
-    /// Check if this is a `CompressedSignedBeaconBlock` entry
-    pub fn is_beacon_block(&self) -> bool {
-        self.entry_type == COMPRESSED_SIGNED_BEACON_BLOCK
-    }
-
-    /// Check if this is a `CompressedBeaconState` entry
-    pub fn is_beacon_state(&self) -> bool {
-        self.entry_type == COMPRESSED_BEACON_STATE
-    }
-
     /// Check if this is a `SlotIndex` entry
-    pub fn is_slot_index(&self) -> bool {
-        self.entry_type == SLOT_INDEX
+    pub fn is_block_index(&self) -> bool {
+        self.entry_type == BLOCK_INDEX
     }
 }
