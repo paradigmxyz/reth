@@ -19,6 +19,7 @@ use reth_optimism_node::{
 
 pub mod chainspec;
 pub mod engine;
+pub mod engine_api;
 pub mod primitives;
 
 #[derive(Debug, Clone)]

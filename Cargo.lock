@@ -3468,7 +3468,10 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-engine",
+ "async-trait",
  "derive_more 2.0.1",
+ "eyre",
+ "jsonrpsee",
  "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
  "reth-chain-state",
@@ -3482,6 +3485,7 @@ dependencies = [
  "reth-optimism-node",
  "reth-optimism-primitives",
  "reth-primitives-traits",
+ "reth-rpc-api",
  "revm-primitives",
  "serde",
 ]
