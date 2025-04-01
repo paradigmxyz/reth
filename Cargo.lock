@@ -3721,9 +3721,11 @@ version = "0.0.0"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
+ "alloy-dyn-abi",
  "alloy-eips",
  "alloy-evm",
  "alloy-genesis",
+ "alloy-json-abi",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types",

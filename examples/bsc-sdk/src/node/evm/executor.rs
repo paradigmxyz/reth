@@ -1,4 +1,6 @@
+use super::patch::{patch_mainnet_after_tx, patch_mainnet_before_tx};
 use crate::{
+    consensus::ParliaConsensus,
     hardforks::BscHardforks,
     system_contracts::{get_upgrade_system_contracts, is_system_transaction},
 };
@@ -18,7 +20,8 @@ use reth_evm::{
 };
 use reth_evm_ethereum::RethReceiptBuilder;
 use reth_primitives::Log;
-use reth_provider::BlockExecutionResult;
+use reth_primitives_traits::SignedTransaction;
+use reth_provider::{BlockExecutionResult, BlockNumReader};
 use reth_revm::State;
 use revm::{
     context::result::{ExecutionResult, ResultAndState},
@@ -27,9 +30,7 @@ use revm::{
 };
 use std::sync::Arc;
 
-use super::patch::{patch_mainnet_after_tx, patch_mainnet_before_tx};
-
-struct BscBlockExecutor<'a, EVM, Spec, R: ReceiptBuilder> {
+struct BscBlockExecutor<'a, EVM, Spec, R: ReceiptBuilder, P> {
     /// Inner Ethereum execution strategy.
     inner: EthBlockExecutor<'a, EVM, &'a Arc<ChainSpec>, &'a RethReceiptBuilder>,
     /// Reference to the specification object.
@@ -41,17 +42,19 @@ struct BscBlockExecutor<'a, EVM, Spec, R: ReceiptBuilder> {
     /// Receipts of executed transactions.
     receipts: Vec<R::Receipt>,
     /// System txs
-    system_txs: Vec<&'a R::Transaction>,
+    system_txs: Vec<R::Transaction>,
     /// Receipt builder.
     receipt_builder: R,
+    /// Parlia consensus
+    consensus: ParliaConsensus<P>,
 }
 
-impl<'a, DB, EVM, Spec, R: ReceiptBuilder> BscBlockExecutor<'a, EVM, Spec, R>
+impl<'a, DB, EVM, Spec, R: ReceiptBuilder, P> BscBlockExecutor<'a, EVM, Spec, R, P>
 where
     DB: Database + 'a,
     EVM: Evm<DB = &'a mut State<DB>, Tx: FromRecoveredTx<R::Transaction>>,
     Spec: EthereumHardforks + BscHardforks + EthChainSpec + Hardforks,
-    R: ReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt<Log = Log>>,
+    P: BlockNumReader + Clone,
 {
     /// Creates a new BscBlockExecutor.
     pub fn new(
@@ -59,6 +62,7 @@ where
         spec: Spec,
         evm: EVM,
         receipt_builder: R,
+        consensus: ParliaConsensus<P>,
     ) -> Self {
         Self {
             inner,
@@ -68,6 +72,7 @@ where
             receipts: vec![],
             system_txs: vec![],
             receipt_builder,
+            consensus,
         }
     }
 
@@ -94,6 +99,26 @@ where
         Ok(())
     }
 
+    /// Initializes the feynman contracts
+    fn init_feynman_contracts(&self) -> Result<(), BlockExecutionError> {
+        let _txs = self.consensus.init_feynman_contracts();
+        todo!()
+    }
+
+    /// Initializes the genesis contracts
+    fn init_genesis_contracts(&self, validator: Address) -> Result<(), BlockExecutionError> {
+        let _txs = self.consensus.init_genesis_contracts();
+        todo!()
+    }
+
+    pub(crate) fn transact_system_tx(
+        &self,
+        transaction: reth_primitives::Transaction,
+        sender: Address,
+    ) -> Result<(), BlockExecutionError> {
+        Ok(())
+    }
+
     /// Replaces the code of a system contract in state.
     fn upgrade_system_contract(
         &mut self,
@@ -113,13 +138,14 @@ where
     }
 }
 
-impl<'a, DB, E, Spec, R> BlockExecutor for BscBlockExecutor<'a, E, Spec, R>
+impl<'a, DB, E, Spec, R, P> BlockExecutor for BscBlockExecutor<'a, E, Spec, R, P>
 where
     DB: Database + 'a,
     E: Evm<DB = &'a mut State<DB>, Tx: FromRecoveredTx<R::Transaction>>,
     Spec: EthereumHardforks + BscHardforks + EthChainSpec + Hardforks,
-    R: ReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt<Log = Log>>,
+    R: ReceiptBuilder<Transaction: SignedTransaction, Receipt: TxReceipt<Log = Log>>,
     <R as ReceiptBuilder>::Transaction: Unpin,
+    P: BlockNumReader + Clone,
 {
     type Transaction = R::Transaction;
     type Receipt = R::Receipt;
@@ -145,9 +171,7 @@ where
         // Check if it's a system transaction
         let signer = tx.signer();
         if is_system_transaction(tx.tx(), *signer, self.evm.block().beneficiary) {
-            // TODO: add it to the system txs vector,
-            // we need a TransactionSigned so we can verify the signature
-            // https://github.com/bnb-chain/reth/blob/main/crates/bsc/evm/src/execute.rs#L581
+            self.system_txs.push(tx.tx().clone());
             return Ok(0);
         }
 
@@ -185,16 +209,27 @@ where
         Ok(gas_used)
     }
 
-    fn finish(self) -> Result<(Self::Evm, BlockExecutionResult<R::Receipt>), BlockExecutionError> {
+    fn finish(
+        mut self,
+    ) -> Result<(Self::Evm, BlockExecutionResult<R::Receipt>), BlockExecutionError> {
+        // TODO:
         // Consensus: Verify validators
-        // Consensus:Verify turn length
+        // Consensus: Verify turn lengthcons
 
         // If first block init genesis contracts
-        // Upgrade system contracts
-        // Init feynman contracts
+        if self.evm.block().number == 1 {
+            self.init_genesis_contracts(self.evm.block().beneficiary)?;
+        }
 
-        // Consensus:Slash validator if not in turn
-        // Consensus:Distribute rewards
+        // Upgrade system contracts
+        self.apply_upgrade_contracts_if_before_feynman()?;
+
+        // Init feynman contracts
+        self.init_feynman_contracts()?;
+
+        // TODO:
+        // Consensus: Slash validator if not in turn
+        // Consensus: Distribute rewards
         // Consensus: Update validator set
         todo!()
     }

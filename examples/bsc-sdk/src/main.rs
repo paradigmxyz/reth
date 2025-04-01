@@ -32,6 +32,7 @@ use tokio_stream::StreamExt;
 use tracing::info;
 
 mod chainspec;
+mod consensus;
 mod evm;
 mod hardforks;
 mod node;
