@@ -1,0 +1,21 @@
+[package]
+name = "example-exex-test"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+# This tells Cargo that this is a separate workspace
+
+[dependencies]
+reth.workspace = true
+reth-exex.workspace = true
+reth-node-ethereum.workspace = true
+reth-primitives.workspace = true
+reth-e2e-test-utils.workspace = true
+reth-chainspec.workspace = true
+
+eyre.workspace = true
+futures-util.workspace = true
+tokio = { workspace = true, features = ["full"] }
+serde_json.workspace = true
