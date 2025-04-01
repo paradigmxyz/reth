@@ -50,6 +50,9 @@ mod proofs;
 pub use proofs::triehash;
 pub use proofs::*;
 
+mod proof_fetching;
+pub use proof_fetching::*;
+
 pub mod root;
 
 /// Buffer for trie updates.
