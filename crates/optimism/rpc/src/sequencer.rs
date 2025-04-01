@@ -2,11 +2,11 @@
 
 use std::sync::Arc;
 
+use alloy_json_rpc::RpcSend;
 use alloy_primitives::hex;
 use alloy_rpc_client::{ClientBuilder, RpcClient as Client};
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
 use alloy_transport_http::Http;
-use serde_json::{json, Value};
 use tracing::warn;
 
 use crate::SequencerClientError;
@@ -48,8 +48,12 @@ impl SequencerClient {
     }
 
     /// Sends a [`alloy_rpc_client::RpcCall`] request to the sequencer endpoint.
-    async fn send_rpc_call(&self, method: &str, params: Value) -> Result<(), SequencerClientError> {
-        self.http_client().request::<Value, ()>(method.to_string(), params).await.inspect_err(
+    async fn send_rpc_call<Params: RpcSend>(
+        &self,
+        method: &str,
+        params: Params,
+    ) -> Result<(), SequencerClientError> {
+        self.http_client().request::<Params, ()>(method.to_string(), params).await.inspect_err(
             |err| {
                 warn!(
                     target: "rpc::sequencer",
@@ -63,15 +67,14 @@ impl SequencerClient {
 
     /// Forwards a transaction to the sequencer endpoint.
     pub async fn forward_raw_transaction(&self, tx: &[u8]) -> Result<(), SequencerClientError> {
-        self.send_rpc_call("eth_sendRawTransaction", json!([format!("0x{}", hex::encode(tx))]))
-            .await
-            .inspect_err(|err| {
-                warn!(
-                    target: "rpc::eth",
-                    %err,
-                    "Failed to forward transaction to sequencer",
-                );
-            })?;
+        let rlp_hex = hex::encode_prefixed(tx);
+        self.send_rpc_call("eth_sendRawTransaction", (rlp_hex,)).await.inspect_err(|err| {
+            warn!(
+                target: "rpc::eth",
+                %err,
+                "Failed to forward transaction to sequencer",
+            );
+        })?;
 
         Ok(())
     }
@@ -82,17 +85,16 @@ impl SequencerClient {
         tx: &[u8],
         condition: TransactionConditional,
     ) -> Result<(), SequencerClientError> {
-        let params = json!([format!("0x{}", hex::encode(tx)), condition]);
-
-        self.send_rpc_call("eth_sendRawTransactionConditional", params).await.inspect_err(
-            |err| {
+        let rlp_hex = hex::encode_prefixed(tx);
+        self.send_rpc_call("eth_sendRawTransactionConditional", (rlp_hex, condition))
+            .await
+            .inspect_err(|err| {
                 warn!(
                     target: "rpc::eth",
                     %err,
                     "Failed to forward transaction conditional for sequencer",
                 );
-            },
-        )?;
+            })?;
         Ok(())
     }
 }

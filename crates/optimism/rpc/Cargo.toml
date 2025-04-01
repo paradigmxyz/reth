@@ -41,6 +41,7 @@ reth-optimism-forks.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
+alloy-json-rpc.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-client.workspace = true
 alloy-rpc-types-eth.workspace = true
@@ -67,7 +68,6 @@ async-trait.workspace = true
 jsonrpsee-core.workspace = true
 jsonrpsee-types.workspace = true
 jsonrpsee.workspace = true
-serde_json.workspace = true
 
 # misc
 thiserror.workspace = true
@@ -76,6 +76,7 @@ derive_more = { workspace = true, features = ["constructor"] }
 
 [dev-dependencies]
 reth-optimism-chainspec.workspace = true
+serde_json.workspace = true
 
 [features]
 client = [
