@@ -367,6 +367,7 @@ impl<T: EthPoolTransaction> TransactionValidator for MockTransactionValidator<T>
                 TransactionOrigin::Local => self.propagate_local,
                 TransactionOrigin::Private => false,
             },
+            authorities: None,
         }
     }
 }

@@ -6,7 +6,7 @@ use crate::{
         Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
         PoolError, PoolErrorKind,
     },
-    identifier::{SenderId, SenderIdentifiers, TransactionId},
+    identifier::{SenderId, TransactionId},
     metrics::{AllTransactionsMetrics, TxPoolMetrics},
     pool::{
         best::BestTransactions,
@@ -31,8 +31,6 @@ use alloy_eips::{
     Typed2718,
 };
 use alloy_primitives::{Address, TxHash, B256};
-use parking_lot::RwLock;
-use reth_execution_types::ChangedAccount;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use std::{
@@ -87,8 +85,6 @@ use tracing::trace;
 ///   new --> |apply state changes| pool
 /// ```
 pub struct TxPool<T: TransactionOrdering> {
-    /// Internal mapping of addresses to plain ints.
-    identifiers: RwLock<SenderIdentifiers>,
     /// Contains the currently known information about the senders.
     sender_info: FxHashMap<SenderId, SenderInfo>,
     /// pending subpool
@@ -130,7 +126,6 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Create a new graph pool instance.
     pub fn new(ordering: T, config: PoolConfig) -> Self {
         Self {
-            identifiers: Default::default(),
             sender_info: Default::default(),
             pending_pool: PendingPool::with_buffer(
                 ordering,
@@ -144,27 +139,6 @@ impl<T: TransactionOrdering> TxPool<T> {
             metrics: Default::default(),
             latest_update_kind: None,
         }
-    }
-
-    /// Returns the internal [`SenderId`] for this address
-    pub fn get_sender_id(&self, addr: Address) -> SenderId {
-        self.identifiers.write().sender_id_or_create(addr)
-    }
-
-    /// Converts the changed accounts to a map of sender ids to sender info (internal identifier
-    /// used for accounts)
-    pub(crate) fn changed_senders(
-        &self,
-        accs: impl Iterator<Item = ChangedAccount>,
-    ) -> FxHashMap<SenderId, SenderInfo> {
-        let mut identifiers = self.identifiers.write();
-        accs.into_iter()
-            .map(|acc| {
-                let ChangedAccount { address, nonce, balance } = acc;
-                let sender_id = identifiers.sender_id_or_create(address);
-                (sender_id, SenderInfo { state_nonce: nonce, balance })
-            })
-            .collect()
     }
 
     /// Retrieves the highest nonce for a specific sender from the transaction pool.
@@ -762,7 +736,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     ) -> Result<(), PoolError> {
         // Short circuit if the sender has neither delegation nor pending delegation.
         if (on_chain_code_hash.is_none() || on_chain_code_hash == Some(KECCAK_EMPTY)) &&
-            !self.all_transactions.auths.contains_key(transaction.sender_ref())
+            !self.all_transactions.auths.contains_key(&transaction.sender_id())
         {
             return Ok(())
         }
@@ -795,7 +769,13 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 
     // validate_auth verifies that the transaction complies with code authorization
-    // restrictions brought by SetCode transaction type.
+    // restrictions brought by SetCode transaction type:
+    // 1. Any account with a deployed delegation or an in-flight authorization to deploy a
+    //    delegation will only be allowed a single transaction slot instead of the standard number.
+    //    This is due to the possibility of the account being sweeped by an unrelated account.
+    // 2. In case the pool is tracking a pending / queued transaction from a specific account, it
+    //    will reject new transactions with delegations from that account with standard in-flight
+    //    transactions.
     fn validate_auth(
         &self,
         transaction: &ValidPoolTransaction<T::Transaction>,
@@ -806,12 +786,11 @@ impl<T: TransactionOrdering> TxPool<T> {
         // pending authorization.
         self.check_delegation_limit(transaction, on_chain_nonce, on_chain_code_hash)?;
 
-        if let Some(authority_list) = transaction.authority_list() {
-            for addr in authority_list {
-                let sender_id = self.get_sender_id(addr);
-                if !self.pending_pool.get_txs_by_sender(sender_id).is_empty() ||
-                    !self.queued_pool.get_txs_by_sender(sender_id).is_empty() ||
-                    !self.basefee_pool.get_txs_by_sender(sender_id).is_empty()
+        if let Some(authority_list) = &transaction.authority_ids {
+            for sender_id in authority_list {
+                if !self.pending_pool.get_txs_by_sender(*sender_id).is_empty() ||
+                    !self.queued_pool.get_txs_by_sender(*sender_id).is_empty() ||
+                    !self.basefee_pool.get_txs_by_sender(*sender_id).is_empty()
                 {
                     return Err(PoolError::new(
                         *transaction.hash(),
@@ -1213,7 +1192,7 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     /// How to handle [`TransactionOrigin::Local`](crate::TransactionOrigin) transactions.
     local_transactions_config: LocalTransactionConfig,
     /// All accounts with a pooled authorization
-    auths: HashMap<Address, HashSet<TxHash>>,
+    auths: FxHashMap<SenderId, HashSet<TxHash>>,
     /// All Transactions metrics
     metrics: AllTransactionsMetrics,
 }
@@ -1612,13 +1591,13 @@ impl<T: PoolTransaction> AllTransactions<T> {
     }
 
     fn remove_auths(&mut self, tx: &PoolInternalTransaction<T>) {
-        if let Some(auths) = tx.transaction.authority_list() {
+        if let Some(auths) = &tx.transaction.authority_ids {
             let tx_hash = tx.transaction.hash();
             for auth in auths {
-                if let Some(list) = self.auths.get_mut(&auth) {
+                if let Some(list) = self.auths.get_mut(auth) {
                     list.remove(tx_hash);
                     if list.is_empty() {
-                        self.auths.remove(&auth);
+                        self.auths.remove(auth);
                     }
                 }
             }
@@ -1871,10 +1850,10 @@ impl<T: PoolTransaction> AllTransactions<T> {
             }
         }
 
-        if let Some(auths) = transaction.authority_list() {
+        if let Some(auths) = &transaction.authority_ids {
             let tx_hash = transaction.hash();
             for auth in auths {
-                self.auths.entry(auth).or_default().insert(*tx_hash);
+                self.auths.entry(*auth).or_default().insert(*tx_hash);
             }
         }
 

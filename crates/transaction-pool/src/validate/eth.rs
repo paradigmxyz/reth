@@ -561,6 +561,9 @@ where
             }
         }
 
+        let authorities = transaction.authorization_list().map(|auths| {
+            auths.iter().flat_map(|auth| auth.recover_authority()).collect::<Vec<_>>()
+        });
         // Return the valid transaction
         TransactionValidationOutcome::Valid {
             balance: account.balance,
@@ -575,6 +578,7 @@ where
                 }
                 TransactionOrigin::Private => false,
             },
+            authorities,
         }
     }
 
