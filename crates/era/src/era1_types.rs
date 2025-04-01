@@ -165,7 +165,7 @@ pub struct Era1Group {
 }
 
 impl Era1Group {
-    /// Create a new [`EraGroup`]
+    /// Create a new [`Era1Group`]
     pub fn new(blocks: Vec<BlockTuple>, accumulator: Accumulator, block_index: BlockIndex) -> Self {
         Self { blocks, accumulator, block_index, other_entries: Vec::new() }
     }
