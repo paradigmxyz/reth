@@ -112,7 +112,7 @@ where
             requests_hash: self
                 .chain_spec
                 .is_isthmus_active_at_timestamp(timestamp)
-                .then(|| EMPTY_REQUESTS_HASH),
+                .then_some(EMPTY_REQUESTS_HASH),
         };
 
         Ok(Block::new(
