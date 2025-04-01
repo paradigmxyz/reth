@@ -1,7 +1,7 @@
 //! Transaction pool metrics.
 
 use reth_metrics::{
-    metrics::{Counter, Gauge},
+    metrics::{Counter, Gauge, Histogram},
     Metrics,
 };
 
@@ -131,4 +131,12 @@ pub struct AllTransactionsMetrics {
     pub(crate) blob_base_fee: Gauge,
     /// The current base fee
     pub(crate) base_fee: Gauge,
+}
+
+/// Transaction pool validation metrics
+#[derive(Metrics)]
+#[metrics(scope = "transaction_pool")]
+pub struct TxPoolValidationMetrics {
+    /// How long to successfully validate a blob
+    pub(crate) blob_validation_duration: Histogram,
 }

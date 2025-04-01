@@ -43,6 +43,45 @@ pub enum InvalidInboxEntry {
 }
 
 impl InvalidInboxEntry {
+    /// Returns the [`SafetyLevel`] of message, if this is a [`MinimumSafety`](Self::MinimumSafety)
+    /// error.
+    pub fn msg_safety_level(&self) -> Option<SafetyLevel> {
+        match self {
+            Self::MinimumSafety { got, .. } => Some(*got),
+            Self::UnknownChain(_) => None,
+        }
+    }
+
+    /// Returns `true` if message is [`SafetyLevel::Invalid`]
+    pub fn is_msg_invalid(&self) -> bool {
+        matches!(self, Self::MinimumSafety { got: SafetyLevel::Invalid, .. })
+    }
+
+    /// Returns `true` if message is [`SafetyLevel::Unsafe`].
+    pub fn is_msg_unsafe(&self) -> bool {
+        matches!(self, Self::MinimumSafety { got: SafetyLevel::Unsafe, .. })
+    }
+
+    /// Returns `true` if message is [`SafetyLevel::CrossUnsafe`].
+    pub fn is_msg_cross_unsafe(&self) -> bool {
+        matches!(self, Self::MinimumSafety { got: SafetyLevel::CrossUnsafe, .. })
+    }
+
+    /// Returns `true` if message is [`SafetyLevel::LocalSafe`].
+    pub fn is_msg_local_safe(&self) -> bool {
+        matches!(self, Self::MinimumSafety { got: SafetyLevel::LocalSafe, .. })
+    }
+
+    /// Returns `true` if message is [`SafetyLevel::Safe`].
+    pub fn is_msg_safe(&self) -> bool {
+        matches!(self, Self::MinimumSafety { got: SafetyLevel::Safe, .. })
+    }
+
+    /// Returns `true` if message is at least [`SafetyLevel::CrossUnsafe`].
+    pub fn is_msg_at_least_cross_unsafe(&self) -> bool {
+        self.is_msg_cross_unsafe() || self.is_msg_local_safe() || self.is_msg_safe()
+    }
+
     /// Parses error message. Returns `None`, if message is not recognized.
     // todo: match on error code instead of message string once resolved <https://github.com/ethereum-optimism/optimism/issues/14603>
     pub fn parse_err_msg(err_msg: &str) -> Option<Self> {
@@ -116,7 +155,17 @@ pub enum InteropTxValidatorError {
 
 impl InteropTxValidatorError {
     /// Returns a new instance of [`RpcClientError`](Self::RpcClientError) variant.
-    pub fn client(err: impl error::Error + Send + Sync + 'static) -> Self {
+    pub fn client<E>(err: alloy_json_rpc::RpcError<E>) -> Self
+    where
+        E: error::Error + Send + Sync + 'static,
+    {
+        let err_msg = err.to_string();
+
+        // Trying to parse the InvalidInboxEntry
+        if let Some(invalid_entry) = InvalidInboxEntry::parse_err_msg(&err_msg) {
+            return Self::InvalidInboxEntry(invalid_entry);
+        }
+
         Self::RpcClientError(Box::new(err))
     }
 
@@ -129,6 +178,7 @@ impl InteropTxValidatorError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_json_rpc::{ErrorPayload, RpcError};
 
     const MIN_SAFETY_CROSS_UNSAFE_ERROR: &str = "message {0x4200000000000000000000000000000000000023 4 1 1728507701 901} (safety level: unsafe) does not meet the minimum safety cross-unsafe";
     const MIN_SAFETY_UNSAFE_ERROR: &str = "message {0x4200000000000000000000000000000000000023 1091637521 4369 0 901} (safety level: invalid) does not meet the minimum safety unsafe";
@@ -169,5 +219,27 @@ mod tests {
         ));
 
         assert!(InvalidInboxEntry::parse_err_msg(RANDOM_ERROR).is_none());
+    }
+
+    #[test]
+    fn test_client_error_parsing() {
+        let err =
+            ErrorPayload { code: 0, message: MIN_SAFETY_CROSS_UNSAFE_ERROR.into(), data: None };
+        let rpc_err = RpcError::<InvalidInboxEntry>::ErrorResp(err);
+        let error = InteropTxValidatorError::client(rpc_err);
+
+        assert!(matches!(
+            error,
+            InteropTxValidatorError::InvalidInboxEntry(InvalidInboxEntry::MinimumSafety {
+                expected: SafetyLevel::CrossUnsafe,
+                got: SafetyLevel::Unsafe
+            })
+        ));
+
+        // Testing with Unknown message
+        let err = ErrorPayload { code: 0, message: "unknown error".into(), data: None };
+        let rpc_err = RpcError::<InvalidInboxEntry>::ErrorResp(err);
+        let error = InteropTxValidatorError::client(rpc_err);
+        assert!(matches!(error, InteropTxValidatorError::RpcClientError(_)));
     }
 }

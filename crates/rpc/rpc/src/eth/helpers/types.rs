@@ -1,6 +1,6 @@
 //! L1 `eth` API types.
 
-use alloy_consensus::{Transaction as _, TxEip4844Variant, TxEnvelope};
+use alloy_consensus::{Transaction as _, TxEnvelope};
 use alloy_network::{Ethereum, Network};
 use alloy_primitives::PrimitiveSignature as Signature;
 use alloy_rpc_types::TransactionRequest;
@@ -78,16 +78,7 @@ where
     }
 
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
-        let input = match tx.inner.inner_mut() {
-            TxEnvelope::Eip1559(tx) => &mut tx.tx_mut().input,
-            TxEnvelope::Eip2930(tx) => &mut tx.tx_mut().input,
-            TxEnvelope::Legacy(tx) => &mut tx.tx_mut().input,
-            TxEnvelope::Eip4844(tx) => match tx.tx_mut() {
-                TxEip4844Variant::TxEip4844(tx) => &mut tx.input,
-                TxEip4844Variant::TxEip4844WithSidecar(tx) => &mut tx.tx.input,
-            },
-            TxEnvelope::Eip7702(tx) => &mut tx.tx_mut().input,
-        };
+        let input = tx.inner.inner_mut().input_mut();
         *input = input.slice(..4);
     }
 }

@@ -9,7 +9,7 @@ use reth_engine_primitives::{BeaconConsensusEngineEvent, BeaconConsensusEngineHa
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_network_api::FullNetwork;
 use reth_node_core::node_config::NodeConfig;
-use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter, NodeTypesWithEngine, TxTy};
+use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter, TxTy};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
@@ -17,13 +17,13 @@ use reth_tokio_util::EventSender;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::{fmt::Debug, future::Future, marker::PhantomData};
 
-/// A helper trait that is downstream of the [`NodeTypesWithEngine`] trait and adds stateful
+/// A helper trait that is downstream of the [`NodeTypes`] trait and adds stateful
 /// components to the node.
 ///
 /// Its types are configured by node internally and are not intended to be user configurable.
 pub trait FullNodeTypes: Clone + Debug + Send + Sync + Unpin + 'static {
     /// Node's types with the database.
-    type Types: NodeTypesWithEngine;
+    type Types: NodeTypes;
     /// Underlying database type used by the node to store and retrieve data.
     type DB: Database + DatabaseMetrics + Clone + Unpin + 'static;
     /// The provider type used to interact with the node.
@@ -36,7 +36,7 @@ pub struct FullNodeTypesAdapter<Types, DB, Provider>(PhantomData<(Types, DB, Pro
 
 impl<Types, DB, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
 where
-    Types: NodeTypesWithEngine,
+    Types: NodeTypes,
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
     Provider: FullProvider<NodeTypesWithDBAdapter<Types, DB>>,
 {
@@ -46,7 +46,7 @@ where
 }
 
 /// Helper trait to bound [`PayloadBuilder`] to the node's engine types.
-pub trait PayloadBuilderFor<N: NodeTypesWithEngine>:
+pub trait PayloadBuilderFor<N: NodeTypes>:
     PayloadBuilder<
     Attributes = <N::Payload as PayloadTypes>::PayloadBuilderAttributes,
     BuiltPayload = <N::Payload as PayloadTypes>::BuiltPayload,
@@ -54,7 +54,7 @@ pub trait PayloadBuilderFor<N: NodeTypesWithEngine>:
 {
 }
 
-impl<T, N: NodeTypesWithEngine> PayloadBuilderFor<N> for T where
+impl<T, N: NodeTypes> PayloadBuilderFor<N> for T where
     T: PayloadBuilder<
         Attributes = <N::Payload as PayloadTypes>::PayloadBuilderAttributes,
         BuiltPayload = <N::Payload as PayloadTypes>::BuiltPayload,
@@ -99,9 +99,7 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
 
     /// Returns the handle to the payload builder service handling payload building requests from
     /// the engine.
-    fn payload_builder_handle(
-        &self,
-    ) -> &PayloadBuilderHandle<<Self::Types as NodeTypesWithEngine>::Payload>;
+    fn payload_builder_handle(&self) -> &PayloadBuilderHandle<<Self::Types as NodeTypes>::Payload>;
 
     /// Returns the provider of the node.
     fn provider(&self) -> &Self::Provider;
@@ -118,8 +116,7 @@ pub struct AddOnsContext<'a, N: FullNodeComponents> {
     /// Node configuration.
     pub config: &'a NodeConfig<<N::Types as NodeTypes>::ChainSpec>,
     /// Handle to the beacon consensus engine.
-    pub beacon_engine_handle:
-        BeaconConsensusEngineHandle<<N::Types as NodeTypesWithEngine>::Payload>,
+    pub beacon_engine_handle: BeaconConsensusEngineHandle<<N::Types as NodeTypes>::Payload>,
     /// Notification channel for engine API events
     pub engine_events: EventSender<BeaconConsensusEngineEvent<<N::Types as NodeTypes>::Primitives>>,
     /// JWT secret for the node.

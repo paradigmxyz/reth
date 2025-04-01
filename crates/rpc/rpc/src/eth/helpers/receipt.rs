@@ -1,11 +1,11 @@
 //! Builds an RPC receipt response w.r.t. data layout of network.
 
 use alloy_consensus::transaction::TransactionMeta;
-use reth_chainspec::EthChainSpec;
+use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
-use reth_provider::{BlockReader, ChainSpecProvider, ReceiptProvider, TransactionsProvider};
 use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcNodeCoreExt, RpcReceipt};
 use reth_rpc_eth_types::{EthApiError, EthReceiptBuilder};
+use reth_storage_api::{BlockReader, ReceiptProvider, TransactionsProvider};
 
 use crate::EthApi;
 

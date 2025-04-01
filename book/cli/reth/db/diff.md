@@ -60,6 +60,16 @@ Database:
       --output <OUTPUT>
           The output directory for the diff report.
 
+Datadir:
+      --chain <CHAIN_OR_PATH>
+          The chain this node is running.
+          Possible values are either a built-in chain or the path to a chain specification file.
+
+          Built-in chains:
+              mainnet, sepolia, holesky, hoodi, dev
+
+          [default: mainnet]
+
 Logging:
       --log.stdout.format <FORMAT>
           The format to use for logs written to stdout

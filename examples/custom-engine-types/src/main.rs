@@ -32,7 +32,7 @@ use reth::{
     api::{InvalidPayloadAttributesError, PayloadTypes},
     builder::{
         components::{BasicPayloadServiceBuilder, ComponentsBuilder, PayloadBuilderBuilder},
-        node::{NodeTypes, NodeTypesWithEngine},
+        node::NodeTypes,
         rpc::{EngineValidatorBuilder, RpcAddOns},
         BuilderContext, FullNodeTypes, Node, NodeAdapter, NodeBuilder, NodeComponentsBuilder,
     },
@@ -261,7 +261,7 @@ pub struct CustomEngineValidatorBuilder;
 impl<N> EngineValidatorBuilder<N> for CustomEngineValidatorBuilder
 where
     N: FullNodeComponents<
-        Types: NodeTypesWithEngine<
+        Types: NodeTypes<
             Payload = CustomEngineTypes,
             ChainSpec = ChainSpec,
             Primitives = EthPrimitives,
@@ -285,10 +285,6 @@ impl NodeTypes for MyCustomNode {
     type ChainSpec = ChainSpec;
     type StateCommitment = MerklePatriciaTrie;
     type Storage = EthStorage;
-}
-
-/// Configure the node types with the custom engine types
-impl NodeTypesWithEngine for MyCustomNode {
     type Payload = CustomEngineTypes;
 }
 
@@ -301,7 +297,7 @@ pub type MyNodeAddOns<N> = RpcAddOns<N, EthereumEthApiBuilder, CustomEngineValid
 impl<N> Node<N> for MyCustomNode
 where
     N: FullNodeTypes<
-        Types: NodeTypesWithEngine<
+        Types: NodeTypes<
             Payload = CustomEngineTypes,
             ChainSpec = ChainSpec,
             Primitives = EthPrimitives,
@@ -344,7 +340,7 @@ pub struct CustomPayloadBuilderBuilder;
 impl<Node, Pool> PayloadBuilderBuilder<Node, Pool> for CustomPayloadBuilderBuilder
 where
     Node: FullNodeTypes<
-        Types: NodeTypesWithEngine<
+        Types: NodeTypes<
             Payload = CustomEngineTypes,
             ChainSpec = ChainSpec,
             Primitives = EthPrimitives,

@@ -1,6 +1,6 @@
 //! Contains connection-oriented interfaces.
 
-use futures::{ready, Stream};
+use futures::{ready, Stream, StreamExt};
 use std::{
     io,
     net::SocketAddr,
@@ -13,13 +13,11 @@ use tokio::net::{TcpListener, TcpStream};
 ///
 /// Listens for incoming connections.
 #[must_use = "Transport does nothing unless polled."]
-#[pin_project::pin_project]
 #[derive(Debug)]
 pub struct ConnectionListener {
     /// Local address of the listener stream.
     local_address: SocketAddr,
     /// The active tcp listener for incoming connections.
-    #[pin]
     incoming: TcpListenerStream,
 }
 
@@ -38,8 +36,8 @@ impl ConnectionListener {
 
     /// Polls the type to make progress.
     pub fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<ListenerEvent> {
-        let this = self.project();
-        match ready!(this.incoming.poll_next(cx)) {
+        let this = self.get_mut();
+        match ready!(this.incoming.poll_next_unpin(cx)) {
             Some(Ok((stream, remote_addr))) => {
                 if let Err(err) = stream.set_nodelay(true) {
                     tracing::warn!(target: "net", "set nodelay failed: {:?}", err);
@@ -48,7 +46,7 @@ impl ConnectionListener {
             }
             Some(Err(err)) => Poll::Ready(ListenerEvent::Error(err)),
             None => {
-                Poll::Ready(ListenerEvent::ListenerClosed { local_address: *this.local_address })
+                Poll::Ready(ListenerEvent::ListenerClosed { local_address: this.local_address })
             }
         }
     }

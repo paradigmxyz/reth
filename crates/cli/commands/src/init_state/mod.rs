@@ -11,7 +11,7 @@ use reth_primitives_traits::SealedHeader;
 use reth_provider::{
     BlockNumReader, DatabaseProviderFactory, StaticFileProviderFactory, StaticFileWriter,
 };
-use std::{io::BufReader, path::PathBuf, str::FromStr};
+use std::{io::BufReader, path::PathBuf, str::FromStr, sync::Arc};
 use tracing::info;
 
 pub mod without_evm;
@@ -129,5 +129,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateC
 
         info!(target: "reth::cli", hash = ?hash, "Genesis block written");
         Ok(())
+    }
+    /// Returns the underlying chain being used to run this command
+    pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+        Some(&self.env.chain)
     }
 }

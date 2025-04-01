@@ -8,7 +8,7 @@ use reth_ethereum_payload_builder::EthereumBuilderConfig;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::ConfigureEvm;
 use reth_evm_ethereum::EthEvmConfig;
-use reth_node_api::{FullNodeTypes, NodeTypesWithEngine, PrimitivesTy, TxTy};
+use reth_node_api::{FullNodeTypes, NodeTypes, PrimitivesTy, TxTy};
 use reth_node_builder::{
     components::PayloadBuilderBuilder, BuilderContext, PayloadBuilderConfig, PayloadTypes,
 };
@@ -31,7 +31,7 @@ impl EthereumPayloadBuilder {
         reth_ethereum_payload_builder::EthereumPayloadBuilder<Pool, Node::Provider, Evm>,
     >
     where
-        Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
+        Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
         Node: FullNodeTypes<Types = Types>,
         Evm: ConfigureEvm<Primitives = PrimitivesTy<Types>>,
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
@@ -55,7 +55,7 @@ impl EthereumPayloadBuilder {
 
 impl<Types, Node, Pool> PayloadBuilderBuilder<Node, Pool> for EthereumPayloadBuilder
 where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
+    Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin

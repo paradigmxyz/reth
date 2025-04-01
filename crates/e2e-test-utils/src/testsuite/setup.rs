@@ -9,7 +9,7 @@ use eyre::{eyre, Result};
 use reth_chainspec::ChainSpec;
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_ethereum_primitives::Block;
-use reth_node_api::{NodeTypesWithEngine, PayloadTypes};
+use reth_node_api::{NodeTypes, PayloadTypes};
 use reth_node_core::primitives::RecoveredBlock;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_rpc_api::clients::EthApiClient;
@@ -119,7 +119,7 @@ impl<I> Setup<I> {
     where
         N: NodeBuilderHelper,
         LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
-            <<N as NodeTypesWithEngine>::Payload as PayloadTypes>::PayloadAttributes,
+            <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
         >,
     {
         let chain_spec =
@@ -140,7 +140,7 @@ impl<I> Setup<I> {
                 withdrawals: Some(vec![]),
                 parent_beacon_block_root: Some(B256::ZERO),
             };
-            <<N as NodeTypesWithEngine>::Payload as PayloadTypes>::PayloadBuilderAttributes::from(
+            <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes::from(
                 EthPayloadBuilderAttributes::new(B256::ZERO, attributes),
             )
         };

@@ -10,9 +10,6 @@ use alloy_network::Ethereum;
 use alloy_primitives::{Bytes, U256};
 use derive_more::Deref;
 use reth_node_api::{FullNodeComponents, FullNodeTypes};
-use reth_provider::{
-    BlockReader, BlockReaderIdExt, NodePrimitivesProvider, ProviderBlock, ProviderReceipt,
-};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
     node::RpcNodeCoreExt,
@@ -20,6 +17,9 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{
     EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
+};
+use reth_storage_api::{
+    BlockReader, BlockReaderIdExt, NodePrimitivesProvider, ProviderBlock, ProviderReceipt,
 };
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
@@ -468,16 +468,14 @@ mod tests {
     use alloy_primitives::{PrimitiveSignature as Signature, B256, U64};
     use alloy_rpc_types::FeeHistory;
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
-    use reth_chainspec::{BaseFeeParams, ChainSpec};
+    use reth_chain_state::CanonStateSubscriptions;
+    use reth_chainspec::{BaseFeeParams, ChainSpec, ChainSpecProvider};
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
-    use reth_provider::{
-        test_utils::{MockEthProvider, NoopProvider},
-        BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
-        StateProviderFactory,
-    };
+    use reth_provider::test_utils::{MockEthProvider, NoopProvider};
     use reth_rpc_eth_api::EthApiServer;
+    use reth_storage_api::{BlockReader, BlockReaderIdExt, StateProviderFactory};
     use reth_testing_utils::{generators, generators::Rng};
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 

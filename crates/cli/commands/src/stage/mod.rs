@@ -55,4 +55,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             Subcommands::Unwind(command) => command.execute::<N>().await,
         }
     }
+    /// Returns the underlying chain being used to run this command
+    pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+        match self.command {
+            Subcommands::Run(ref command) => command.chain_spec(),
+            Subcommands::Drop(ref command) => command.chain_spec(),
+            Subcommands::Dump(ref command) => command.chain_spec(),
+            Subcommands::Unwind(ref command) => command.chain_spec(),
+        }
+    }
 }

@@ -1945,14 +1945,14 @@ impl TransportRpcModules {
 
     /// Returns all unique endpoints installed for the given module.
     ///
-    /// Note: In case of duplicate method names this only record the first occurrance.
+    /// Note: In case of duplicate method names this only record the first occurrence.
     pub fn methods_by_module<F>(&self, module: RethRpcModule) -> Methods {
         self.methods_by(|name| name.starts_with(module.as_str()))
     }
 
     /// Returns all unique endpoints installed in any of the configured modules.
     ///
-    /// Note: In case of duplicate method names this only record the first occurrance.
+    /// Note: In case of duplicate method names this only record the first occurrence.
     pub fn methods_by<F>(&self, mut filter: F) -> Methods
     where
         F: FnMut(&str) -> bool,

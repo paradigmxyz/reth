@@ -13,7 +13,7 @@
 //! **NOTE**: This expects that the CL client is running an http server on `localhost:5052` and is
 //! configured to emit payload attributes events.
 //!
-//! See lighthouse beacon Node API: <https://lighthouse-book.sigmaprime.io/api-bn.html#beacon-node-api>
+//! See lighthouse beacon Node API: <https://lighthouse-book.sigmaprime.io/api_bn.html#beacon-node-api>
 
 #![warn(unused_crate_dependencies)]
 

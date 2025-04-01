@@ -118,7 +118,7 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<
     fn payload_builder_handle(
         &self,
     ) -> &reth_payload_builder::PayloadBuilderHandle<
-        <Self::Types as reth_node_api::NodeTypesWithEngine>::Payload,
+        <Self::Types as reth_node_api::NodeTypes>::Payload,
     > {
         self.components.payload_builder_handle()
     }

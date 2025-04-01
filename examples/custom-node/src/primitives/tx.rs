@@ -1,6 +1,6 @@
 use alloy_consensus::Transaction;
 use alloy_eips::{eip2718::Eip2718Result, Decodable2718, Encodable2718, Typed2718};
-use alloy_primitives::{PrimitiveSignature, TxHash};
+use alloy_primitives::TxHash;
 use alloy_rlp::{BufMut, Decodable, Encodable, Result as RlpResult};
 use reth_codecs::Compact;
 use reth_optimism_primitives::{
@@ -93,6 +93,10 @@ impl Transaction for CustomTransaction {
 }
 
 impl SignedTransaction for CustomTransaction {
+    fn tx_hash(&self) -> &TxHash {
+        self.inner.tx_hash()
+    }
+
     fn recover_signer(&self) -> Result<Address, RecoveryError> {
         self.inner.recover_signer()
     }
@@ -106,14 +110,6 @@ impl SignedTransaction for CustomTransaction {
         buf: &mut Vec<u8>,
     ) -> Result<Address, RecoveryError> {
         self.inner.recover_signer_unchecked_with_buf(buf)
-    }
-
-    fn tx_hash(&self) -> &TxHash {
-        self.inner.tx_hash()
-    }
-
-    fn signature(&self) -> &PrimitiveSignature {
-        self.inner.signature()
     }
 }
 
@@ -134,12 +130,12 @@ impl Decodable2718 for CustomTransaction {
 }
 
 impl Encodable2718 for CustomTransaction {
-    fn encode_2718(&self, out: &mut dyn BufMut) {
-        self.inner.encode_2718(out)
-    }
-
     fn encode_2718_len(&self) -> usize {
         self.inner.encode_2718_len()
+    }
+
+    fn encode_2718(&self, out: &mut dyn BufMut) {
+        self.inner.encode_2718(out)
     }
 }
 

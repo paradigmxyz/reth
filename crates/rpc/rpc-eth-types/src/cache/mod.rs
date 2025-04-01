@@ -38,6 +38,8 @@ type BlockWithSendersResponseSender<B> =
 /// The type that can send the response to the requested receipts of a block.
 type ReceiptsResponseSender<R> = oneshot::Sender<ProviderResult<Option<Arc<Vec<R>>>>>;
 
+type CachedBlockResponseSender<B> = oneshot::Sender<Option<Arc<RecoveredBlock<B>>>>;
+
 /// The type that can send the response to a requested header
 type HeaderResponseSender<H> = oneshot::Sender<ProviderResult<H>>;
 
@@ -173,6 +175,22 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
         let (block, receipts) = futures::try_join!(block, receipts)?;
 
         Ok(block.zip(receipts))
+    }
+
+    /// Retrieves receipts and blocks from cache if block is in the cache, otherwise only receipts.
+    pub async fn get_receipts_and_maybe_block(
+        &self,
+        block_hash: B256,
+    ) -> ProviderResult<Option<(Arc<Vec<R>>, Option<Arc<RecoveredBlock<B>>>)>> {
+        let (response_tx, rx) = oneshot::channel();
+        let _ = self.to_service.send(CacheAction::GetCachedBlock { block_hash, response_tx });
+
+        let receipts = self.get_receipts(block_hash);
+
+        let (receipts, block) = futures::join!(receipts, rx);
+
+        let block = block.map_err(|_| ProviderError::CacheServiceUnavailable)?;
+        Ok(receipts?.map(|r| (r, block)))
     }
 
     /// Requests the header for the given hash.
@@ -361,6 +379,10 @@ where
                 }
                 Some(action) => {
                     match action {
+                        CacheAction::GetCachedBlock { block_hash, response_tx } => {
+                            let _ =
+                                response_tx.send(this.full_block_cache.get(&block_hash).cloned());
+                        }
                         CacheAction::GetBlockWithSenders { block_hash, response_tx } => {
                             if let Some(block) = this.full_block_cache.get(&block_hash).cloned() {
                                 let _ = response_tx.send(Ok(Some(block)));
@@ -512,6 +534,7 @@ enum CacheAction<B: Block, R> {
     GetBlockWithSenders { block_hash: B256, response_tx: BlockWithSendersResponseSender<B> },
     GetHeader { block_hash: B256, response_tx: HeaderResponseSender<B::Header> },
     GetReceipts { block_hash: B256, response_tx: ReceiptsResponseSender<R> },
+    GetCachedBlock { block_hash: B256, response_tx: CachedBlockResponseSender<B> },
     BlockWithSendersResult { block_hash: B256, res: ProviderResult<Option<Arc<RecoveredBlock<B>>>> },
     ReceiptsResult { block_hash: B256, res: ProviderResult<Option<Arc<Vec<R>>>> },
     HeaderResult { block_hash: B256, res: Box<ProviderResult<B::Header>> },

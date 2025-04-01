@@ -4,7 +4,7 @@ use reth_db_api::{
     cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx, Tables,
 };
 use reth_db_common::DbTool;
-use reth_node_builder::{NodeTypesWithDBAdapter, NodeTypesWithEngine};
+use reth_node_builder::{NodeTypes, NodeTypesWithDBAdapter};
 use reth_node_core::{
     args::DatabaseArgs,
     dirs::{DataDirPath, PlatformPath},
@@ -54,7 +54,7 @@ impl Command {
     ///
     /// The discrepancies and extra elements, along with a brief summary of the diff results are
     /// then written to a file in the output directory.
-    pub fn execute<T: NodeTypesWithEngine>(
+    pub fn execute<T: NodeTypes>(
         self,
         tool: &DbTool<NodeTypesWithDBAdapter<T, Arc<DatabaseEnv>>>,
     ) -> eyre::Result<()> {

@@ -69,7 +69,7 @@ rayon.workspace = true
 
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }
-reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }
+reth-primitives-traits = { workspace = true, features = ["arbitrary", "test-utils"] }
 reth-chain-state = { workspace = true, features = ["test-utils"] }
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
@@ -97,7 +97,6 @@ test-utils = [
     "reth-chainspec/test-utils",
     "reth-evm/test-utils",
     "reth-network-p2p/test-utils",
-    "reth-primitives/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-codecs/test-utils",
     "reth-db-api/test-utils",

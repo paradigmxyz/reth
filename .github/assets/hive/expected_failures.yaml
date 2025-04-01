@@ -1,4 +1,4 @@
-# https://github.com/paradigmxyz/reth/issues/13879
+# tracked by https://github.com/paradigmxyz/reth/issues/13879
 rpc-compat:
   - debug_getRawBlock/get-invalid-number (reth)
   - debug_getRawHeader/get-invalid-number (reth)
@@ -16,7 +16,7 @@ rpc-compat:
   - eth_getTransactionReceipt/get-legacy-input (reth)
   - eth_getTransactionReceipt/get-legacy-receipt (reth)
 
-# https://github.com/paradigmxyz/reth/issues/8732
+# no fix due to https://github.com/paradigmxyz/reth/issues/8732
 engine-withdrawals:
   - Withdrawals Fork On Genesis (Paris) (reth)
   - Withdrawals Fork on Block 1 (Paris) (reth)
@@ -39,12 +39,8 @@ engine-withdrawals:
 
 engine-api: []
 
-# https://github.com/paradigmxyz/reth/issues/8305
-# https://github.com/paradigmxyz/reth/issues/6217
-# https://github.com/paradigmxyz/reth/issues/8306
-# https://github.com/paradigmxyz/reth/issues/7144
+# no fix due to https://github.com/paradigmxyz/reth/issues/8732
 engine-cancun:
-  - Blob Transaction Ordering, Multiple Clients (Cancun) (reth)
   - Invalid PayloadAttributes, Missing BeaconRoot, Syncing=True (Cancun) (reth)
   - Invalid NewPayload, ExcessBlobGas, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
 

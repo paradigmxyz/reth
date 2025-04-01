@@ -5,9 +5,9 @@ use alloy_primitives::{Address, U256};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_errors::RethResult;
-use reth_provider::{BlockReaderIdExt, ChangeSetReader, StateProviderFactory};
 use reth_rpc_api::RethApiServer;
 use reth_rpc_eth_types::{EthApiError, EthResult};
+use reth_storage_api::{BlockReaderIdExt, ChangeSetReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use tokio::sync::oneshot;
 

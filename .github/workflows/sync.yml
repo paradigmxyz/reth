@@ -58,7 +58,7 @@ jobs:
             | grep ${{ matrix.chain.tip }}
       - name: Run stage unwind for 100 blocks
         run: |
-          ${{ matrix.chain.bin }} stage --chain ${{ matrix.chain.chain }} unwind num-blocks 100
+          ${{ matrix.chain.bin }} stage unwind num-blocks 100 --chain ${{ matrix.chain.chain }}
       - name: Run stage unwind to block hash
         run: |
-          ${{ matrix.chain.bin }} stage --chain ${{ matrix.chain.chain }} unwind to-block ${{ matrix.chain.unwind-target }}
+          ${{ matrix.chain.bin }} stage unwind to-block ${{ matrix.chain.unwind-target }} --chain ${{ matrix.chain.chain }} 

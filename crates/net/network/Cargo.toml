@@ -22,7 +22,6 @@ reth-network-p2p.workspace = true
 reth-discv4.workspace = true
 reth-discv5.workspace = true
 reth-dns-discovery.workspace = true
-reth-engine-primitives.workspace = true
 reth-ethereum-forks.workspace = true
 reth-eth-wire.workspace = true
 reth-eth-wire-types.workspace = true
@@ -72,7 +71,6 @@ secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"]
 derive_more.workspace = true
 schnellru.workspace = true
 itertools.workspace = true
-tempfile = { workspace = true, optional = true }
 smallvec.workspace = true
 
 [dev-dependencies]
@@ -130,7 +128,6 @@ serde = [
     "reth-network-api/serde",
 ]
 test-utils = [
-    "dep:tempfile",
     "reth-transaction-pool/test-utils",
     "reth-network-types/test-utils",
     "reth-chainspec/test-utils",
