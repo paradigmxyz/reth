@@ -9006,7 +9006,6 @@ dependencies = [
  "reth-consensus",
  "reth-db",
  "reth-e2e-test-utils",
- "reth-engine-local",
  "reth-evm",
  "reth-network",
  "reth-node-api",

@@ -102,3 +102,6 @@ test-utils = [
     "reth-provider/test-utils",
     "reth-transaction-pool/test-utils",
 ]
+op = [
+    "reth-engine-local/op",
+]
