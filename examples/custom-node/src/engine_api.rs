@@ -1,12 +1,16 @@
-use crate::engine::{CustomExecutionData, CustomPayloadAttributes};
+use crate::{
+    chainspec::CustomChainSpec,
+    engine::{CustomPayloadAttributes, CustomPayloadTypes},
+    primitives::CustomNodePrimitives,
+};
 use alloy_rpc_types_engine::{
     ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus, PayloadStatusEnum,
 };
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc, RpcModule};
-use reth_chainspec::EthereumHardforks;
-use reth_node_api::{AddOnsContext, EngineTypes, FullNodeComponents, NodeTypes};
+use reth_node_api::{AddOnsContext, FullNodeComponents, NodeTypes};
 use reth_node_builder::rpc::EngineApiBuilder;
+use reth_optimism_node::node::OpStorage;
 use reth_rpc_api::IntoEngineApiRpcModule;
 
 #[derive(serde::Deserialize)]
@@ -75,8 +79,10 @@ impl<N> EngineApiBuilder<N> for CustomEngineApiBuilder
 where
     N: FullNodeComponents<
         Types: NodeTypes<
-            ChainSpec: EthereumHardforks,
-            Payload: EngineTypes<ExecutionData = CustomExecutionData>,
+            Payload = CustomPayloadTypes,
+            ChainSpec = CustomChainSpec,
+            Primitives = CustomNodePrimitives,
+            Storage = OpStorage,
         >,
     >,
 {
