@@ -7,7 +7,7 @@ use reth_rpc_eth_api::{
     FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt,
 };
 use reth_rpc_eth_types::utils::recover_raw_transaction;
-use reth_storage_api::{BlockReader, BlockReaderIdExt, ProviderTx, TransactionsProvider};
+use reth_storage_api::{BlockReader, BlockReaderIdExt, ProviderTx};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
 impl<Provider, Pool, Network, EvmConfig> EthTransactions
@@ -46,9 +46,7 @@ where
 impl<Provider, Pool, Network, EvmConfig> LoadTransaction
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: SpawnBlocking
-        + FullEthApiTypes
-        + RpcNodeCoreExt<Provider: TransactionsProvider, Pool: TransactionPool>,
+    Self: SpawnBlocking + FullEthApiTypes,
     Provider: BlockReader,
 {
 }

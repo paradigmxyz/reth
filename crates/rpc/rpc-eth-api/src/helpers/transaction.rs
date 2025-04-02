@@ -455,7 +455,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` transactions RPC
 /// methods.
-pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
+pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes {
     /// Returns the transaction by hash.
     ///
     /// Checks the pool and state.
