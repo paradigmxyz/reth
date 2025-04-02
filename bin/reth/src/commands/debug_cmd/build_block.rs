@@ -144,7 +144,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         for tx_bytes in &self.transactions {
             debug!(target: "reth::cli", bytes = ?tx_bytes, "Decoding transaction");
             let tx_bytes = Bytes::from_str(tx_bytes)?;
-            let envelope = EthereumTxEnvelope::<TxEip4844>::decode(&mut &tx_bytes[..])
+            let envelope = EthereumTxEnvelope::<TxEip4844>::decode_2718(&mut &tx_bytes[..])
                 .map_err(|e| eyre::eyre!("failed to recover tx: {e}"))?;
 
             let transaction: reth::Transaction = envelope.into();
