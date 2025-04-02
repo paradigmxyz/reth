@@ -152,6 +152,7 @@ where
             self.executor.clone(),
             proof_task.handle(),
             to_sparse_trie,
+            max_concurrency,
         );
 
         // wire the multiproof task to the prewarm task
