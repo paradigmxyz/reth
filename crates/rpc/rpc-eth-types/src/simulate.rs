@@ -80,6 +80,9 @@ where
     S: BlockBuilder<Executor: BlockExecutor<Evm: Evm<DB: Database<Error: Into<EthApiError>>>>>,
     T: TransactionCompat<TxTy<S::Primitives>>,
 {
+    // Tell the block builder that it is used for simulation
+    builder.set_simulate(true);
+
     builder.apply_pre_execution_changes()?;
 
     let mut results = Vec::with_capacity(calls.len());
