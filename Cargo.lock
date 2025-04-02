@@ -3484,8 +3484,10 @@ dependencies = [
  "reth-optimism-forks",
  "reth-optimism-node",
  "reth-optimism-primitives",
+ "reth-payload-builder",
  "reth-primitives-traits",
  "reth-rpc-api",
+ "reth-rpc-engine-api",
  "revm-primitives",
  "serde",
 ]
