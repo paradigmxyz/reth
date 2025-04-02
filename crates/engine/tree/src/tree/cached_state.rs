@@ -292,10 +292,10 @@ pub(crate) struct ProviderCaches {
 impl ProviderCaches {
     /// Get storage value from hierarchical cache.
     ///
-    /// Returns a `SlotStatus`` indicating whether:
-    /// - NotCached: The account's storage cache doesn't exist
-    /// - Empty: The slot exists in the account's cache but is empty
-    /// - Value: The slot exists and has a specific value
+    /// Returns a `SlotStatus` indicating whether:
+    /// - `NotCached`: The account's storage cache doesn't exist
+    /// - `Empty`: The slot exists in the account's cache but is empty
+    /// - `Value`: The slot exists and has a specific value
     pub(crate) fn get_storage(&self, address: &Address, key: &StorageKey) -> SlotStatus {
         match self.storage_cache.get(address) {
             None => SlotStatus::NotCached,
@@ -533,8 +533,8 @@ impl AccountStorageCache {
 
     /// Get a storage value from this account's cache.
     ///
-    /// - Empty: The slot is empty (either not in account cache or explicitly None)
-    /// - Value: The slot has a specific value
+    /// - `Empty`: The slot is empty (either not in account storage cache or explicitly None)
+    /// - `Value`: The slot has a specific value
     pub(crate) fn get_storage(&self, key: &StorageKey) -> SlotStatus {
         match self.slots.get(key) {
             None | Some(None) => SlotStatus::Empty,
