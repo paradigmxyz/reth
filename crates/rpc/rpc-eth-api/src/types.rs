@@ -1,12 +1,12 @@
 //! Trait for specifying `eth` network dependent API types.
 
-use crate::{AsEthApiError, FromEthApiError, RpcNodeCore};
+use crate::{AsEthApiError, FromEthApiError};
 use alloy_json_rpc::RpcObject;
 use alloy_network::{Network, ReceiptResponse, TransactionResponse};
 use alloy_rpc_types_eth::Block;
-use reth_provider::{ProviderTx, ReceiptProvider, TransactionsProvider};
+use reth_node_api::FullNodeComponents;
+use reth_provider::TransactionsProvider;
 use reth_rpc_types_compat::TransactionCompat;
-use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::{
     error::Error,
     fmt::{self},
@@ -76,12 +76,8 @@ pub type RpcError<T> = <T as EthApiTypes>::Error;
 /// Helper trait holds necessary trait bounds on [`EthApiTypes`] to implement `eth` API.
 pub trait FullEthApiTypes
 where
-    Self: RpcNodeCore<
-            Provider: TransactionsProvider + ReceiptProvider,
-            Pool: TransactionPool<
-                Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
-            >,
-        > + EthApiTypes<
+    Self: FullNodeComponents
+        + EthApiTypes<
             TransactionCompat: TransactionCompat<
                 <Self::Provider as TransactionsProvider>::Transaction,
                 Transaction = RpcTransaction<Self::NetworkTypes>,
@@ -92,12 +88,8 @@ where
 }
 
 impl<T> FullEthApiTypes for T where
-    T: RpcNodeCore<
-            Provider: TransactionsProvider + ReceiptProvider,
-            Pool: TransactionPool<
-                Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
-            >,
-        > + EthApiTypes<
+    T: FullNodeComponents
+        + EthApiTypes<
             TransactionCompat: TransactionCompat<
                 <Self::Provider as TransactionsProvider>::Transaction,
                 Transaction = RpcTransaction<T::NetworkTypes>,

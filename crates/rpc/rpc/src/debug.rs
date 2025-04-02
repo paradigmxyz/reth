@@ -20,6 +20,7 @@ use reth_evm::{
     execute::{BlockExecutorProvider, Executor},
     ConfigureEvm, EvmEnvFor, TxEnvFor,
 };
+use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeTypes};
 use reth_primitives_traits::{
     Block as _, BlockBody, NodePrimitives, ReceiptWithBloom, RecoveredBlock, SignedTransaction,
 };
@@ -31,7 +32,7 @@ use reth_revm::{
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
-    EthApiTypes, FromEthApiError, RpcNodeCore,
+    EthApiTypes, FromEthApiError,
 };
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
@@ -73,7 +74,7 @@ impl<Eth, BlockExecutor> DebugApi<Eth, BlockExecutor> {
     }
 }
 
-impl<Eth: RpcNodeCore, BlockExecutor> DebugApi<Eth, BlockExecutor> {
+impl<Eth: FullNodeComponents, BlockExecutor> DebugApi<Eth, BlockExecutor> {
     /// Access the underlying provider.
     pub fn provider(&self) -> &Eth::Provider {
         self.inner.eth_api.provider()
@@ -87,6 +88,7 @@ where
     Eth: EthApiTypes + TraceExt + 'static,
     BlockExecutor:
         BlockExecutorProvider<Primitives: NodePrimitives<Block = ProviderBlock<Eth::Provider>>>,
+    <<Eth as FullNodeTypes>::Types as NodeTypes>::ChainSpec: EthereumHardforks,
 {
     /// Acquires a permit to execute a tracing call.
     async fn acquire_trace_permit(&self) -> Result<OwnedSemaphorePermit, AcquireError> {

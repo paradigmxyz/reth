@@ -25,7 +25,7 @@ pub use bundle::{EthBundleApiServer, EthCallBundleApiServer};
 pub use core::{EthApiServer, FullEthApiServer};
 pub use ext::L2EthApiExtServer;
 pub use filter::{EngineEthFilter, EthFilterApiServer, QueryLimits};
-pub use node::{RpcNodeCore, RpcNodeCoreExt};
+pub use node::RpcNodeCoreExt;
 pub use pubsub::EthPubSubApiServer;
 pub use reth_rpc_eth_types::error::{
     AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError,

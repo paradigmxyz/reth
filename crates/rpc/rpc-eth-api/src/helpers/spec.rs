@@ -3,25 +3,19 @@
 use alloy_primitives::{Address, U256, U64};
 use alloy_rpc_types_eth::{Stage, SyncInfo, SyncStatus};
 use futures::Future;
-use reth_chainspec::{ChainInfo, EthereumHardforks};
+use reth_chainspec::ChainInfo;
 use reth_errors::{RethError, RethResult};
 use reth_network_api::NetworkInfo;
-use reth_provider::{BlockNumReader, ChainSpecProvider, StageCheckpointReader};
+use reth_node_api::FullNodeComponents;
+use reth_provider::{BlockNumReader, StageCheckpointReader};
 
-use crate::{helpers::EthSigner, RpcNodeCore};
+use crate::helpers::EthSigner;
 
 /// `Eth` API trait.
 ///
 /// Defines core functionality of the `eth` API implementation.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait EthApiSpec:
-    RpcNodeCore<
-    Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>
-                  + BlockNumReader
-                  + StageCheckpointReader,
-    Network: NetworkInfo,
->
-{
+pub trait EthApiSpec: FullNodeComponents {
     /// The transaction type signers are using.
     type Transaction;
 

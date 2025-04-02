@@ -1,19 +1,18 @@
 //! Loads a pending block from database. Helper trait for `eth_` block, transaction, call and trace
 //! RPC methods.
 use super::{EthApiSpec, LoadPendingBlock, SpawnBlocking};
-use crate::{EthApiTypes, FromEthApiError, RpcNodeCore, RpcNodeCoreExt};
+use crate::{EthApiTypes, FromEthApiError, RpcNodeCoreExt};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::BlockId;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{Account, EIP1186AccountProofResponse};
 use alloy_serde::JsonStorageKey;
 use futures::Future;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
 use reth_evm::{ConfigureEvm, EvmEnvFor};
+use reth_node_api::FullNodeComponents;
 use reth_provider::{
-    BlockIdReader, BlockNumReader, ChainSpecProvider, StateProvider, StateProviderBox,
-    StateProviderFactory,
+    BlockIdReader, BlockNumReader, StateProvider, StateProviderBox, StateProviderFactory,
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlockEnv, RpcInvalidTransactionError};
 use reth_transaction_pool::TransactionPool;
@@ -164,14 +163,7 @@ pub trait EthState: LoadState + SpawnBlocking {
 /// Loads state from database.
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` state RPC methods.
-pub trait LoadState:
-    EthApiTypes
-    + RpcNodeCoreExt<
-        Provider: StateProviderFactory
-                      + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>,
-        Pool: TransactionPool,
-    >
-{
+pub trait LoadState: EthApiTypes + RpcNodeCoreExt {
     /// Returns the state at the given block number
     fn state_at_hash(&self, block_hash: B256) -> Result<StateProviderBox, Self::Error> {
         self.provider().history_by_block_hash(block_hash).map_err(Self::Error::from_eth_err)
@@ -223,7 +215,7 @@ pub trait LoadState:
                 Ok((evm_env, origin.state_block_id()))
             } else {
                 // Use cached values if there is no pending block
-                let block_hash = RpcNodeCore::provider(self)
+                let block_hash = FullNodeComponents::provider(self)
                     .block_hash_for_id(at)
                     .map_err(Self::Error::from_eth_err)?
                     .ok_or(EthApiError::HeaderNotFound(at))?;

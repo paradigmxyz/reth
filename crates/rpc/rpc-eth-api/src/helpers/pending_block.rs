@@ -2,30 +2,29 @@
 //! RPC methods.
 
 use super::SpawnBlocking;
-use crate::{types::RpcTypes, EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
+use crate::{types::RpcTypes, EthApiTypes, FromEthApiError, FromEvmError};
 use alloy_consensus::{BlockHeader, Transaction};
 use alloy_eips::eip7840::BlobParams;
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use futures::Future;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm, Evm, SpecFor,
 };
-use reth_node_api::NodePrimitives;
+use reth_node_api::FullNodeComponents;
 use reth_primitives_traits::{
-    transaction::error::InvalidTransactionError, Receipt, RecoveredBlock, SealedHeader,
+    transaction::error::InvalidTransactionError, RecoveredBlock, SealedHeader,
 };
 use reth_provider::{
-    BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderError, ProviderHeader,
-    ProviderReceipt, ProviderTx, ReceiptProvider, StateProviderFactory,
+    BlockReader, BlockReaderIdExt, ProviderBlock, ProviderError, ProviderHeader, ProviderReceipt,
+    ReceiptProvider, StateProviderFactory,
 };
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
 use reth_transaction_pool::{
-    error::InvalidPoolTransactionError, BestTransactionsAttributes, PoolTransaction,
-    TransactionPool,
+    error::InvalidPoolTransactionError, BestTransactionsAttributes, TransactionPool,
 };
 use revm::context_interface::Block;
 use std::time::{Duration, Instant};
@@ -41,19 +40,7 @@ pub trait LoadPendingBlock:
             Header = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
         >,
         Error: FromEvmError<Self::Evm>,
-    > + RpcNodeCore<
-        Provider: BlockReaderIdExt<Receipt: Receipt>
-                      + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
-                      + StateProviderFactory,
-        Evm: ConfigureEvm<
-            Primitives: NodePrimitives<
-                BlockHeader = ProviderHeader<Self::Provider>,
-                SignedTx = ProviderTx<Self::Provider>,
-                Receipt = ProviderReceipt<Self::Provider>,
-                Block = ProviderBlock<Self::Provider>,
-            >,
-        >,
-    >
+    > + FullNodeComponents
 {
     /// Returns a handle to the pending block.
     ///
@@ -135,8 +122,6 @@ pub trait LoadPendingBlock:
     > + Send
     where
         Self: SpawnBlocking,
-        Self::Pool:
-            TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
     {
         async move {
             let pending = self.pending_block_env_and_cfg()?;
@@ -204,8 +189,6 @@ pub trait LoadPendingBlock:
         Self::Error,
     >
     where
-        Self::Pool:
-            TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
         EthApiError: From<ProviderError>,
     {
         let state_provider = self

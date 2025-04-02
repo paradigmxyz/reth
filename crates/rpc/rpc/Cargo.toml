@@ -38,6 +38,7 @@ reth-rpc-server-types.workspace = true
 reth-network-types.workspace = true
 reth-consensus.workspace = true
 reth-node-api.workspace = true
+reth-provider.workspace = true
 
 # ethereum
 alloy-evm.workspace = true
@@ -92,13 +93,21 @@ derive_more.workspace = true
 reth-evm-ethereum.workspace = true
 reth-testing-utils.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
+reth-payload-builder = { workspace = true, features = ["test-utils"] }
+reth-network = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-ethereum-engine-primitives.workspace = true
+reth-db = { workspace = true, features = ["test-utils"] }
+reth-db-common.workspace = true
+reth-trie-db.workspace = true
 
 alloy-consensus.workspace = true
 rand.workspace = true
 
 jsonrpsee-types.workspace = true
 jsonrpsee = { workspace = true, features = ["client"] }
+
+eyre.workspace = true
 
 [features]
 js-tracer = ["revm-inspectors/js-tracer", "reth-rpc-eth-types/js-tracer"]

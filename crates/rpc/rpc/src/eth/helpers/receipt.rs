@@ -3,19 +3,20 @@
 use alloy_consensus::transaction::TransactionMeta;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
+use reth_node_api::FullNodeComponents;
 use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcNodeCoreExt, RpcReceipt};
 use reth_rpc_eth_types::{EthApiError, EthReceiptBuilder};
 use reth_storage_api::{BlockReader, ReceiptProvider, TransactionsProvider};
 
 use crate::EthApi;
 
-impl<Provider, Pool, Network, EvmConfig> LoadReceipt for EthApi<Provider, Pool, Network, EvmConfig>
+impl<Components: FullNodeComponents> LoadReceipt for EthApi<Components>
 where
     Self: RpcNodeCoreExt<
         Provider: TransactionsProvider<Transaction = TransactionSigned>
                       + ReceiptProvider<Receipt = reth_ethereum_primitives::Receipt>,
     >,
-    Provider: BlockReader + ChainSpecProvider,
+    Components::Provider: BlockReader + ChainSpecProvider,
 {
     async fn build_transaction_receipt(
         &self,

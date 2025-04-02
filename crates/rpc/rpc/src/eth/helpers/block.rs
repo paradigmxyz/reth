@@ -3,6 +3,7 @@
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_rpc_types_eth::{BlockId, TransactionReceipt};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
+use reth_node_api::FullNodeComponents;
 use reth_primitives_traits::BlockBody;
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
@@ -15,7 +16,7 @@ use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
 use crate::EthApi;
 
-impl<Provider, Pool, Network, EvmConfig> EthBlocks for EthApi<Provider, Pool, Network, EvmConfig>
+impl<Components: FullNodeComponents> EthBlocks for EthApi<Components>
 where
     Self: LoadBlock<
         Error = EthApiError,
@@ -25,7 +26,7 @@ where
             Receipt = reth_ethereum_primitives::Receipt,
         >,
     >,
-    Provider: BlockReader + ChainSpecProvider,
+    Components::Provider: BlockReader + ChainSpecProvider,
 {
     async fn block_receipts(
         &self,
@@ -69,7 +70,7 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> LoadBlock for EthApi<Provider, Pool, Network, EvmConfig>
+impl<Components: FullNodeComponents> LoadBlock for EthApi<Components>
 where
     Self: LoadPendingBlock
         + SpawnBlocking
@@ -78,6 +79,6 @@ where
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,
         >,
-    Provider: BlockReader,
+    Components::Provider: BlockReader,
 {
 }

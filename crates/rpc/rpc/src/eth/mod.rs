@@ -7,6 +7,9 @@ pub mod filter;
 pub mod helpers;
 pub mod pubsub;
 pub mod sim_bundle;
+#[cfg(test)]
+pub(crate) mod tests;
+// mod tests2;
 
 /// Implementation of `eth` namespace API.
 pub use builder::EthApiBuilder;
@@ -20,4 +23,4 @@ pub use helpers::{
     types::{EthTxBuilder, EthereumEthApiTypes},
 };
 
-pub use reth_rpc_eth_api::{EthApiServer, EthApiTypes, FullEthApiServer, RpcNodeCore};
+pub use reth_rpc_eth_api::{EthApiServer, EthApiTypes, FullEthApiServer};
