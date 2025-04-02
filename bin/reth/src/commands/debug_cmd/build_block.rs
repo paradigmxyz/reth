@@ -16,7 +16,7 @@ use reth_cli_runner::CliContext;
 use reth_consensus::{Consensus, FullConsensus};
 use reth_errors::{ConsensusError, RethResult};
 use reth_ethereum_payload_builder::EthereumBuilderConfig;
-use reth_ethereum_primitives::{EthPrimitives, Transaction, TransactionSigned};
+use reth_ethereum_primitives::{EthPrimitives, Transaction};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
