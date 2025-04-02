@@ -17,8 +17,10 @@ reth-optimism-chainspec.workspace = true
 reth-optimism-forks.workspace = true
 reth-optimism-node.workspace = true
 reth-optimism-primitives = { workspace = true, features = ["serde", "reth-codec"] }
+reth-payload-builder.workspace = true
 reth-primitives-traits.workspace = true
 reth-rpc-api.workspace = true
+reth-rpc-engine-api.workspace = true
 
 # revm
 revm-primitives.workspace = true
@@ -37,8 +39,8 @@ op-alloy-rpc-types-engine.workspace = true
 async-trait.workspace = true
 derive_more.workspace = true
 eyre.workspace = true
-serde.workspace = true
 jsonrpsee.workspace = true
+serde.workspace = true
 
 [features]
 default = []
