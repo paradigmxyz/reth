@@ -131,18 +131,52 @@ where
                 None => {
                     // Get the seek key and set the current hashed entry based on walker's next
                     // unprocessed key
-                    let seek_key = match self.walker.next_unprocessed_key() {
+                    let (seek_key, seek_prefix) = match self.walker.next_unprocessed_key() {
                         Some(key) => key,
                         None => break, // no more keys
                     };
+
                     trace!(
                         target: "trie::node_iter",
                         ?seek_key,
                         can_skip_current_node = self.walker.can_skip_current_node,
+                        last = ?self.walker.stack.last(),
                         "seeking to the next unprocessed hashed entry"
                     );
-                    self.current_hashed_entry = self.hashed_cursor.seek(seek_key)?;
+                    let can_skip_node = self.walker.can_skip_current_node;
                     self.walker.advance()?;
+                    trace!(
+                        target: "trie::node_iter",
+                        last = ?self.walker.stack.last(),
+                        "advanced walker"
+                    );
+
+                    // We should get the iterator to return a branch node if we can skip the
+                    // current node and the tree flag for the current node is set.
+                    //
+                    // `can_skip_node` is already set when the hash flag is set, so we don't need
+                    // to check for the hash flag explicitly.
+                    //
+                    // It is possible that the branch node at the key `seek_key` is not stored in
+                    // the database, so the walker will advance to the branch node after it. Because
+                    // of this, we need to check that the current walker key has a prefix of the key
+                    // that we seeked to.
+                    if can_skip_node &&
+                        self.walker.key().is_some_and(|key| key.has_prefix(&seek_prefix)) &&
+                        self.walker.children_are_in_trie()
+                    {
+                        trace!(
+                            target: "trie::node_iter",
+                            ?seek_key,
+                            walker_hash = ?self.walker.hash(),
+                            "skipping hashed seek"
+                        );
+
+                        self.should_check_walker_key = false;
+                        continue
+                    }
+
+                    self.current_hashed_entry = self.hashed_cursor.seek(seek_key)?;
                 }
             }
         }
@@ -375,11 +409,7 @@ mod tests {
                     visit_type: KeyVisitType::SeekNonExact(account_3),
                     visited_key: Some(account_3)
                 },
-                // Why do we seek the modified account two more times?
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_3),
-                    visited_key: Some(account_3)
-                },
+                // Why do we seek the account 3 one more time?
                 KeyVisit {
                     visit_type: KeyVisitType::SeekNonExact(account_3),
                     visited_key: Some(account_3)
