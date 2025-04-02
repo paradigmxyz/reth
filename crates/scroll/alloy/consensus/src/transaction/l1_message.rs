@@ -154,7 +154,6 @@ impl TxL1Message {
     }
 
     /// Calculates the in-memory size of the [`TxL1Message`] transaction.
-    #[allow(clippy::missing_const_for_fn)]
     #[inline]
     pub fn size(&self) -> usize {
         size_of::<u64>() + // queue_index

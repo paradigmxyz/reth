@@ -45,7 +45,6 @@ impl ScrollBuiltPayload {
     }
 
     /// Returns the built block(sealed)
-    #[allow(clippy::missing_const_for_fn)]
     pub fn block(&self) -> &SealedBlock<ScrollBlock> {
         &self.block
     }
