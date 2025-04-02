@@ -2,9 +2,8 @@
 
 use clap::Parser;
 use eyre::{bail, WrapErr};
-use reth_chainspec::ChainSpec;
 use reth_config::Config;
-use std::{path::PathBuf, sync::Arc};
+use std::path::PathBuf;
 /// `reth config` command
 #[derive(Debug, Parser)]
 pub struct Command {
@@ -34,9 +33,5 @@ impl Command {
         };
         println!("{}", toml::to_string_pretty(&config)?);
         Ok(())
-    }
-    /// Returns the underlying chain being used to run this command
-    pub fn chain_spec(&self) -> Option<&Arc<ChainSpec>> {
-        None
     }
 }
