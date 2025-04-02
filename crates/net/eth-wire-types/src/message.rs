@@ -108,7 +108,7 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
             EthMessageID::Receipts => EthMessage::Receipts(RequestPair::decode(buf)?),
             EthMessageID::Other(_) => {
                 let raw_payload = Bytes::copy_from_slice(buf);
-                *buf = &buf[buf.len()..];
+                buf.advance(raw_payload.len());
                 EthMessage::Other(RawCapabilityMessage::new(
                     message_type.to_u8() as usize,
                     raw_payload.into(),
@@ -315,7 +315,7 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::NodeData(data) => data.encode(out),
             Self::GetReceipts(request) => request.encode(out),
             Self::Receipts(receipts) => receipts.encode(out),
-            Self::Other(unknown) => unknown.encode(out),
+            Self::Other(unknown) => out.put_slice(&unknown.payload),
         }
     }
     fn length(&self) -> usize {
@@ -576,7 +576,7 @@ mod tests {
     use super::MessageError;
     use crate::{
         message::RequestPair, EthMessage, EthMessageID, EthNetworkPrimitives, EthVersion,
-        GetNodeData, NodeData, ProtocolMessage,
+        GetNodeData, NodeData, ProtocolMessage, RawCapabilityMessage,
     };
     use alloy_primitives::hex;
     use alloy_rlp::{Decodable, Encodable, Error};
@@ -702,5 +702,42 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(msg, MessageError::RlpError(alloy_rlp::Error::InputTooShort)));
+    }
+
+    #[test]
+    fn custom_message_roundtrip() {
+        let custom_payload = vec![1, 2, 3, 4, 5];
+        let custom_message = RawCapabilityMessage::new(0x20, custom_payload.into());
+        let protocol_message = ProtocolMessage::<EthNetworkPrimitives> {
+            message_type: EthMessageID::Other(0x20),
+            message: EthMessage::Other(custom_message),
+        };
+
+        let encoded = encode(protocol_message.clone());
+        let decoded = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
+            EthVersion::Eth68,
+            &mut &encoded[..],
+        )
+        .unwrap();
+
+        assert_eq!(protocol_message, decoded);
+    }
+
+    #[test]
+    fn custom_message_empty_payload_roundtrip() {
+        let custom_message = RawCapabilityMessage::new(0x30, vec![].into());
+        let protocol_message = ProtocolMessage::<EthNetworkPrimitives> {
+            message_type: EthMessageID::Other(0x30),
+            message: EthMessage::Other(custom_message),
+        };
+
+        let encoded = encode(protocol_message.clone());
+        let decoded = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
+            EthVersion::Eth68,
+            &mut &encoded[..],
+        )
+        .unwrap();
+
+        assert_eq!(protocol_message, decoded);
     }
 }
