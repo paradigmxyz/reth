@@ -1,6 +1,5 @@
 //! Command for debugging merkle tree calculation.
 use crate::{args::NetworkArgs, providers::ExecutionOutcome, utils::get_single_header};
-use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
@@ -21,8 +20,8 @@ use reth_node_api::{BlockTy, NodePrimitives};
 use reth_node_ethereum::{consensus::EthBeaconConsensus, EthExecutorProvider};
 use reth_provider::{
     providers::ProviderNodeTypes, BlockNumReader, BlockWriter, ChainSpecProvider,
-    DatabaseProviderFactory, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
-    ProviderError, ProviderFactory, StateWriter, StorageLocation,
+    DatabaseProviderFactory, LatestStateProviderRef, OriginalValuesKnown, ProviderFactory,
+    StateWriter, StorageLocation,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::{
@@ -143,10 +142,6 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             .get_full_block_range(to_header.hash_slow(), self.to - best_block_number)
             .await;
 
-        let mut td = provider_rw
-            .header_td_by_number(best_block_number)?
-            .ok_or(ProviderError::TotalDifficultyNotFound(best_block_number))?;
-
         let mut account_hashing_stage = AccountHashingStage::default();
         let mut storage_hashing_stage = StorageHashingStage::default();
         let mut merkle_stage = MerkleStage::default_execution();
@@ -159,7 +154,6 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
             provider_rw.insert_block(sealed_block.clone(), StorageLocation::Database)?;
 
-            td += sealed_block.difficulty();
             let executor = executor_provider
                 .executor(StateProviderDatabase::new(LatestStateProviderRef::new(&provider_rw)));
             let output = executor.execute(&sealed_block)?;
