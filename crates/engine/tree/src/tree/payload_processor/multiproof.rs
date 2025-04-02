@@ -280,8 +280,8 @@ where
         executor: WorkloadExecutor,
         metrics: MultiProofTaskMetrics,
         storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
+        max_concurrent: usize,
     ) -> Self {
-        let max_concurrent = executor.rayon_pool().current_num_threads();
         Self {
             pending: VecDeque::with_capacity(max_concurrent),
             max_concurrent,
@@ -441,6 +441,8 @@ pub(crate) struct MultiProofTaskMetrics {
     pub multiproof_task_total_duration_histogram: Histogram,
     /// Total time spent waiting for the first state update or prefetch request.
     pub first_update_wait_time_histogram: Histogram,
+    /// Total time spent waiting for the last proof result.
+    pub last_proof_wait_time_histogram: Histogram,
 }
 
 /// Standalone task that receives a transaction state stream and updates relevant
@@ -483,6 +485,7 @@ where
         executor: WorkloadExecutor,
         proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
         to_sparse_trie: Sender<SparseTrieUpdate>,
+        max_concurrency: usize,
     ) -> Self {
         let (tx, rx) = channel();
         let metrics = MultiProofTaskMetrics::default();
@@ -498,6 +501,7 @@ where
                 executor,
                 metrics.clone(),
                 proof_task_handle,
+                max_concurrency,
             ),
             metrics,
         }
@@ -729,8 +733,8 @@ where
 
         // Timestamp when the first state update or prefetch was received
         let mut first_update_time = None;
-        // Timestamp when the last state update was received
-        let mut last_update_time = None;
+        // Timestamp when state updates have finished
+        let mut updates_finished_time = None;
 
         loop {
             trace!(target: "engine::root", "entering main channel receiving loop");
@@ -769,7 +773,6 @@ where
                             first_update_time = Some(Instant::now());
                             debug!(target: "engine::root", "Started state root calculation");
                         }
-                        last_update_time = Some(Instant::now());
 
                         let len = update.len();
                         state_update_proofs_requested += self.on_state_update(source, update);
@@ -784,6 +787,7 @@ where
                     MultiProofMessage::FinishedStateUpdates => {
                         trace!(target: "engine::root", "processing MultiProofMessage::FinishedStateUpdates");
                         updates_finished = true;
+                        updates_finished_time = Some(Instant::now());
                         if self.is_done(
                             proofs_processed,
                             state_update_proofs_requested,
@@ -886,7 +890,7 @@ where
             total_updates = state_update_proofs_requested,
             total_proofs = proofs_processed,
             total_time = ?first_update_time.map(|t|t.elapsed()),
-            time_from_last_update = ?last_update_time.map(|t|t.elapsed()),
+            time_since_updates_finished = ?updates_finished_time.map(|t|t.elapsed()),
             "All proofs processed, ending calculation"
         );
 
@@ -895,6 +899,12 @@ where
         self.metrics.proofs_processed_histogram.record(proofs_processed as f64);
         if let Some(total_time) = first_update_time.map(|t| t.elapsed()) {
             self.metrics.multiproof_task_total_duration_histogram.record(total_time);
+        }
+
+        if let Some(updates_finished_time) = updates_finished_time {
+            self.metrics
+                .last_proof_wait_time_histogram
+                .record(updates_finished_time.elapsed().as_secs_f64());
         }
     }
 }
@@ -923,6 +933,11 @@ fn get_proof_targets(
             .keys()
             .filter(|slot| !fetched.is_some_and(|f| f.contains(*slot)))
             .peekable();
+
+        // If the storage is wiped, we still need to fetch the account proof.
+        if storage.wiped && fetched.is_none() {
+            targets.entry(*hashed_address).or_default();
+        }
 
         if changed_slots.peek().is_some() {
             targets.entry(*hashed_address).or_default().extend(changed_slots);
@@ -964,7 +979,7 @@ mod tests {
             + Clone
             + 'static,
     {
-        let executor = WorkloadExecutor::with_num_cpu_threads(2);
+        let executor = WorkloadExecutor::default();
         let config = create_state_root_config(factory, TrieInput::default());
         let task_ctx = ProofTaskCtx::new(
             config.nodes_sorted.clone(),
@@ -979,7 +994,7 @@ mod tests {
         );
         let channel = channel();
 
-        MultiProofTask::new(config, executor, proof_task.handle(), channel.0)
+        MultiProofTask::new(config, executor, proof_task.handle(), channel.0, 1)
     }
 
     #[test]

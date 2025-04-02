@@ -1,8 +1,4 @@
-use crate::{
-    interop::{MaybeInteropTransaction, TransactionInterop},
-    supervisor::{is_valid_cross_tx, SupervisorClient},
-    InvalidCrossTx,
-};
+use crate::{interop::MaybeInteropTransaction, supervisor::SupervisorClient, InvalidCrossTx};
 use alloy_consensus::{BlockHeader, Transaction};
 use alloy_eips::Encodable2718;
 use op_revm::L1BlockInfo;
@@ -78,11 +74,6 @@ impl<Client, Tx> OpTransactionValidator<Client, Tx> {
     /// Returns the current block timestamp.
     fn block_timestamp(&self) -> u64 {
         self.block_info.timestamp.load(Ordering::Relaxed)
-    }
-
-    /// Returns the current block number.
-    fn block_number(&self) -> u64 {
-        self.block_info.number.load(Ordering::Relaxed)
     }
 
     /// Whether to ensure that the transaction's sender has enough balance to also cover the L1 gas
@@ -213,9 +204,9 @@ where
             }
             Some(Ok(_)) => {
                 // valid interop tx
-                transaction.set_interop(TransactionInterop {
-                    timeout: self.block_timestamp() + TRANSACTION_VALIDITY_WINDOW_SECS,
-                });
+                transaction.set_interop_deadlone(
+                    self.block_timestamp() + TRANSACTION_VALIDITY_WINDOW_SECS,
+                );
             }
             _ => {}
         }
@@ -266,7 +257,6 @@ where
             let cost_addition = match l1_block_info.l1_tx_data_fee(
                 self.chain_spec(),
                 self.block_timestamp(),
-                self.block_number(),
                 &encoded,
                 false,
             ) {
@@ -298,19 +288,20 @@ where
         outcome
     }
 
-    /// Wrapper for [`is_valid_cross_tx`]
+    /// Wrapper for is valid cross tx
     pub async fn is_valid_cross_tx(&self, tx: &Tx) -> Option<Result<(), InvalidCrossTx>> {
         // We don't need to check for deposit transaction in here, because they won't come from
         // txpool
-        is_valid_cross_tx(
-            tx.access_list(),
-            tx.hash(),
-            self.block_info.timestamp.load(Ordering::Relaxed),
-            Some(TRANSACTION_VALIDITY_WINDOW_SECS),
-            self.fork_tracker.is_interop_activated(),
-            self.supervisor_client.as_ref(),
-        )
-        .await
+        self.supervisor_client
+            .as_ref()?
+            .is_valid_cross_tx(
+                tx.access_list(),
+                tx.hash(),
+                self.block_info.timestamp.load(Ordering::Relaxed),
+                Some(TRANSACTION_VALIDITY_WINDOW_SECS),
+                self.fork_tracker.is_interop_activated(),
+            )
+            .await
     }
 }
 

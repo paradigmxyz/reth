@@ -139,19 +139,23 @@ where
             state_root_config.state_sorted.clone(),
             state_root_config.prefix_sets.clone(),
         );
-        let max_concurrency = 256;
+        let max_proof_task_concurrency = 256;
         let proof_task = ProofTaskManager::new(
             self.executor.handle().clone(),
             state_root_config.consistent_view.clone(),
             task_ctx,
-            max_concurrency,
+            max_proof_task_concurrency,
         );
 
+        // We set it to half of the proof task concurrency, because often for each multiproof we
+        // spawn one Tokio task for the account proof, and one Tokio task for the storage proof.
+        let max_multi_proof_task_concurrency = max_proof_task_concurrency / 2;
         let multi_proof_task = MultiProofTask::new(
             state_root_config,
             self.executor.clone(),
             proof_task.handle(),
             to_sparse_trie,
+            max_multi_proof_task_concurrency,
         );
 
         // wire the multiproof task to the prewarm task

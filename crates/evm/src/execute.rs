@@ -3,6 +3,7 @@
 use crate::{ConfigureEvm, Database, OnStateHook};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
+use alloy_eips::eip2718::WithEncoded;
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory};
 use alloy_evm::{Evm, EvmEnv, EvmFactory};
 use alloy_primitives::B256;
@@ -233,6 +234,12 @@ pub trait BlockBuilder {
         Receipt = ReceiptTy<Self::Primitives>,
     >;
 
+    /// Marker for indicating that this block builder is used for simulation.
+    ///
+    /// This allows implementors to turn of certain restrictions, e.g. `eth_simulateV1`
+    // TODO(mattsse): find a nicer workaround for this
+    fn set_simulate(&mut self, _simulated: bool) {}
+
     /// Invokes [`BlockExecutor::apply_pre_execution_changes`].
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError>;
 
@@ -280,6 +287,7 @@ where
     pub(crate) ctx: F::ExecutionCtx<'a>,
     pub(crate) parent: &'a SealedHeader<HeaderTy<N>>,
     pub(crate) assembler: Builder,
+    pub(crate) simulated: bool,
 }
 
 impl<'a, F, DB, Executor, Builder, N> BlockBuilder
@@ -311,8 +319,16 @@ where
         tx: Recovered<TxTy<Self::Primitives>>,
         f: impl FnOnce(&ExecutionResult<<F::EvmFactory as EvmFactory>::HaltReason>),
     ) -> Result<u64, BlockExecutionError> {
-        let gas_used =
-            self.executor.execute_transaction_with_result_closure(tx.as_recovered_ref(), f)?;
+        let gas_used = if self.simulated {
+            // if used in simulation we want to disable the L1 gas overhead by providing empty
+            // encoded bytes this is a workaround to get eth_simulate properly supported
+            // with the regular blockbuilder api
+            let tx = WithEncoded::new(Default::default(), &tx);
+            self.executor.execute_transaction_with_result_closure(&tx, f)?
+        } else {
+            self.executor.execute_transaction_with_result_closure(tx.as_recovered_ref(), f)?
+        };
+
         self.transactions.push(tx);
         Ok(gas_used)
     }
