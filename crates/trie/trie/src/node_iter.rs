@@ -103,6 +103,7 @@ where
             .filter(|entry| entry.seeked_key == key)
             .map(|entry| entry.result)
         {
+            #[cfg(feature = "metrics")]
             self.metrics.inc_leaf_nodes_same_seeked();
             return Ok(entry);
         }
