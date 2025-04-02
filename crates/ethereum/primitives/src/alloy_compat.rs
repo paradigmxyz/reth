@@ -20,27 +20,27 @@ impl TryFrom<AnyRpcTransaction> for TransactionSigned {
         let (envelope, signature, hash) = match tx.inner.into_inner() {
             AnyTxEnvelope::Ethereum(TxEnvelope::Legacy(tx)) => {
                 let (tx, signature, hash) = tx.into_parts();
-                let envelope = EthereumTxEnvelope::<TxLegacy>::new(tx);
+                let envelope: EthereumTxEnvelope<TxLegacy> = tx.into();
                 (envelope, signature, hash)
             }
             AnyTxEnvelope::Ethereum(TxEnvelope::Eip2930(tx)) => {
                 let (tx, signature, hash) = tx.into_parts();
-                let envelope = EthereumTxEnvelope::<TxEip2930>::new(tx);
+                let envelope: EthereumTxEnvelope<TxEip2930> = tx.into();
                 (envelope, signature, hash)
             }
             AnyTxEnvelope::Ethereum(TxEnvelope::Eip1559(tx)) => {
                 let (tx, signature, hash) = tx.into_parts();
-                let envelope = EthereumTxEnvelope::<TxEip1559>::new(tx);
+                let envelope: EthereumTxEnvelope<TxEip1559> = tx.into();
                 (envelope, signature, hash)
             }
             AnyTxEnvelope::Ethereum(TxEnvelope::Eip4844(tx)) => {
                 let (tx, signature, hash) = tx.into_parts();
-                let envelope = EthereumTxEnvelope::<TxEip4844>::new(tx);
+                let envelope: EthereumTxEnvelope<TxEip4844> = tx.into();
                 (envelope, signature, hash)
             }
             AnyTxEnvelope::Ethereum(TxEnvelope::Eip7702(tx)) => {
                 let (tx, signature, hash) = tx.into_parts();
-                let envelope = EthereumTxEnvelope::<TxEip7702>::new(tx);
+                let envelope: EthereumTxEnvelope<TxEip7702> = tx.into();
                 (envelope, signature, hash)
             }
             _ => return Err(ConversionError::Custom("unknown transaction type".to_string())),
