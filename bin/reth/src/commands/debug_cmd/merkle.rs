@@ -159,7 +159,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
             provider_rw.insert_block(sealed_block.clone(), StorageLocation::Database)?;
 
-            td += sealed_block.difficulty();
+            td += sealed_block.total_difficulty();
             let executor = executor_provider
                 .executor(StateProviderDatabase::new(LatestStateProviderRef::new(&provider_rw)));
             let output = executor.execute(&sealed_block)?;
