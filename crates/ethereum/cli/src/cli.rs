@@ -1,10 +1,5 @@
 //! CLI definition and entrypoint to executable
 
-use crate::{
-    args::LogArgs,
-    commands::debug_cmd,
-    version::{LONG_VERSION, SHORT_VERSION},
-};
 use clap::{value_parser, Parser, Subcommand};
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
@@ -15,7 +10,7 @@ use reth_cli_commands::{
 };
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
-use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
+use crate::chainspec::EthereumChainSpecParser;
 use reth_network::EthNetworkPrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_ethereum::{consensus::EthBeaconConsensus, EthExecutorProvider, EthereumNode};
@@ -23,6 +18,7 @@ use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};
 use tracing::info;
+use reth_node_core::args::LogArgs;
 
 /// The main reth cli interface.
 ///
@@ -84,7 +80,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
     /// # Example
     ///
     /// ```no_run
-    /// use reth::cli::Cli;
+    /// use reth_ethereum_cli::cli::Cli;
     /// use reth_node_ethereum::EthereumNode;
     ///
     /// Cli::parse_args()
@@ -102,7 +98,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
     ///
     /// ```no_run
     /// use clap::Parser;
-    /// use reth::cli::Cli;
+    /// use reth_ethereum_cli::Cli;
     /// use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
     ///
     /// #[derive(Debug, Parser)]
@@ -130,7 +126,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
     /// # Example
     ///
     /// ```no_run
-    /// use reth::cli::Cli;
+    /// use reth_ethereum_cli::Cli;
     /// use reth_cli_runner::CliRunner;
     /// use reth_node_ethereum::EthereumNode;
     ///
@@ -160,7 +156,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
                 self.logs.log_file_directory.join(chain_spec.chain.to_string());
         }
         let _guard = self.init_tracing()?;
-        info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
+        info!(target: "reth_ethereum_cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
 
         // Install the prometheus recorder to be sure to record all metrics
         let _ = install_prometheus_recorder();

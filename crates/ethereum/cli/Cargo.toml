@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 # reth dependencies
 reth-cli.workspace = true
+reth-cli-commands.workspace = true
 reth-chainspec.workspace = true
 reth-cli-commands.workspace = true
 reth-cli-runner.workspace = true
@@ -20,12 +21,14 @@ reth-db.workspace = true
 reth-network.workspace = true
 reth-node-builder.workspace = true
 reth-node-ethereum.workspace = true
+reth-node-core.workspace = true
 reth-node-metrics.workspace = true
 reth-tracing.workspace = true
 
 # Miscellaneous dependencies
 clap = { workspace = true, features = ["derive", "env"] }
 eyre.workspace = true
+tracing.workspace = true
 
 # Async and utilities
 tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thread"] }
