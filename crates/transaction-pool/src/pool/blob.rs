@@ -407,7 +407,7 @@ pub fn blob_tx_priority(
 /// The `priority` value is calculated using the [`blob_tx_priority`] function, and should be
 /// re-calculated on each block.
 #[derive(Debug, Clone)]
-struct BlobOrd {
+pub struct BlobOrd {
     /// Identifier that tags when transaction was submitted in the pool.
     pub(crate) submission_id: u64,
     /// The priority for this transaction, calculated using the [`blob_tx_priority`] function,
