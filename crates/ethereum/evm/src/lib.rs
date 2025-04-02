@@ -22,7 +22,7 @@ use alloy_consensus::{BlockHeader, Header};
 pub use alloy_evm::EthEvm;
 use alloy_evm::{
     eth::{EthBlockExecutionCtx, EthBlockExecutorFactory},
-    EthEvmFactory, FromRecoveredTx,
+    EthEvmFactory, FromRecoveredTx, FromTxWithEncoded,
 };
 use alloy_primitives::{Bytes, U256};
 use core::{convert::Infallible, fmt::Debug};
@@ -102,8 +102,12 @@ impl<EvmFactory> EthEvmConfig<EvmFactory> {
 
 impl<EvmF> ConfigureEvm for EthEvmConfig<EvmF>
 where
-    EvmF: EvmFactory<Tx: TransactionEnv + FromRecoveredTx<TransactionSigned>, Spec = SpecId>
-        + Clone
+    EvmF: EvmFactory<
+            Tx: TransactionEnv
+                    + FromRecoveredTx<TransactionSigned>
+                    + FromTxWithEncoded<TransactionSigned>,
+            Spec = SpecId,
+        > + Clone
         + Debug
         + Send
         + Sync
