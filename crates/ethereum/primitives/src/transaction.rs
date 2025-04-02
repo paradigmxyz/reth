@@ -11,7 +11,7 @@ use alloy_eips::{
     eip2930::AccessList,
     eip7702::SignedAuthorization,
 };
-use alloy_evm::FromRecoveredTx;
+use alloy_evm::{FromRecoveredTx, FromTxWithEncoded};
 use alloy_primitives::{
     bytes::BufMut, keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash,
     TxKind, B256, U256,
@@ -883,6 +883,18 @@ impl FromRecoveredTx<TransactionSigned> for TxEnv {
                 tx_type: 4,
                 caller: sender,
             },
+        }
+    }
+}
+
+impl FromTxWithEncoded<TransactionSigned> for TxEnv {
+    fn from_encoded_tx(tx: &TransactionSigned, sender: Address, encoded: Bytes) -> Self {
+        match &tx.transaction {
+            Transaction::Legacy(tx) => Self::from_encoded_tx(tx, sender, encoded),
+            Transaction::Eip2930(tx) => Self::from_encoded_tx(tx, sender, encoded),
+            Transaction::Eip1559(tx) => Self::from_encoded_tx(tx, sender, encoded),
+            Transaction::Eip4844(tx) => Self::from_encoded_tx(tx, sender, encoded),
+            Transaction::Eip7702(tx) => Self::from_encoded_tx(tx, sender, encoded),
         }
     }
 }
