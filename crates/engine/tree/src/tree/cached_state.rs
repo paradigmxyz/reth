@@ -128,22 +128,39 @@ impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
     }
 }
 
+/// Represents the status of a storage slot in the cache
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SlotStatus {
+    /// The account's storage cache doesn't exist
+    NotCached,
+    /// The storage slot is empty (either not in cache or explicitly None)
+    Empty,
+    /// The storage slot has a value
+    Value(StorageValue),
+}
+
 impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
     fn storage(
         &self,
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        if let Some(res) = self.caches.get_storage(&account, &storage_key) {
-            self.metrics.storage_cache_hits.increment(1);
-            return Ok(res)
+        match self.caches.get_storage(&account, &storage_key) {
+            SlotStatus::NotCached => {
+                self.metrics.storage_cache_misses.increment(1);
+                let final_res = self.state_provider.storage(account, storage_key)?;
+                self.caches.insert_storage(account, storage_key, final_res);
+                Ok(final_res)
+            }
+            SlotStatus::Empty => {
+                self.metrics.storage_cache_hits.increment(1);
+                Ok(None)
+            }
+            SlotStatus::Value(value) => {
+                self.metrics.storage_cache_hits.increment(1);
+                Ok(Some(value))
+            }
         }
-
-        self.metrics.storage_cache_misses.increment(1);
-
-        let final_res = self.state_provider.storage(account, storage_key)?;
-        self.caches.insert_storage(account, storage_key, final_res);
-        Ok(final_res)
     }
 
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
@@ -273,13 +290,17 @@ pub(crate) struct ProviderCaches {
 }
 
 impl ProviderCaches {
-    /// Get storage value from hierarchical cache
-    pub(crate) fn get_storage(
-        &self,
-        address: &Address,
-        key: &StorageKey,
-    ) -> Option<Option<StorageValue>> {
-        self.storage_cache.get(address).and_then(|account_cache| account_cache.get_storage(key))
+    /// Get storage value from hierarchical cache.
+    ///
+    /// Returns a `SlotStatus` indicating whether:
+    /// - `NotCached`: The account's storage cache doesn't exist
+    /// - `Empty`: The slot exists in the account's cache but is empty
+    /// - `Value`: The slot exists and has a specific value
+    pub(crate) fn get_storage(&self, address: &Address, key: &StorageKey) -> SlotStatus {
+        match self.storage_cache.get(address) {
+            None => SlotStatus::NotCached,
+            Some(account_cache) => account_cache.get_storage(key),
+        }
     }
 
     /// Insert storage value into hierarchical cache
@@ -510,9 +531,15 @@ impl AccountStorageCache {
         }
     }
 
-    /// Get a storage value
-    pub(crate) fn get_storage(&self, key: &StorageKey) -> Option<Option<StorageValue>> {
-        self.slots.get(key)
+    /// Get a storage value from this account's cache.
+    ///
+    /// - `Empty`: The slot is empty (either not in account storage cache or explicitly None)
+    /// - `Value`: The slot has a specific value
+    pub(crate) fn get_storage(&self, key: &StorageKey) -> SlotStatus {
+        match self.slots.get(key) {
+            None | Some(None) => SlotStatus::Empty,
+            Some(Some(value)) => SlotStatus::Value(value),
+        }
     }
 
     /// Insert a storage value
