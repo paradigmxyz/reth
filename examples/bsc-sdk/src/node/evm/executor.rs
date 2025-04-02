@@ -5,7 +5,7 @@ use crate::{
     system_contracts::{get_upgrade_system_contracts, is_system_transaction},
 };
 use alloy_consensus::{Transaction, TxReceipt};
-use alloy_eips::Encodable2718;
+use alloy_eips::{eip7685::Requests, Encodable2718};
 use alloy_evm::{
     block::ExecutableTx,
     eth::{receipt_builder::ReceiptBuilderCtx, EthBlockExecutor},
@@ -14,12 +14,13 @@ use alloy_primitives::Address;
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_evm::{
     block::BlockValidationError,
-    eth::receipt_builder::ReceiptBuilder,
+    eth::{receipt_builder::ReceiptBuilder, EthBlockExecutionCtx},
     execute::{BlockExecutionError, BlockExecutor},
+    state_change::post_block_balance_increments,
     Database, Evm, FromRecoveredTx, OnStateHook,
 };
 use reth_evm_ethereum::RethReceiptBuilder;
-use reth_primitives::{Log, Recovered};
+use reth_primitives::{Log, Recovered, TransactionSigned};
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockExecutionResult, BlockNumReader};
 use reth_revm::State;
@@ -47,6 +48,8 @@ struct BscBlockExecutor<'a, EVM, Spec, R: ReceiptBuilder, P> {
     receipt_builder: R,
     /// Parlia consensus
     consensus: ParliaConsensus<P>,
+    /// Context for block execution.
+    pub ctx: EthBlockExecutionCtx<'a>,
 }
 
 impl<'a, DB, EVM, Spec, R: ReceiptBuilder, P> BscBlockExecutor<'a, EVM, Spec, R, P>
@@ -55,6 +58,7 @@ where
     EVM: Evm<DB = &'a mut State<DB>, Tx: FromRecoveredTx<R::Transaction>>,
     Spec: EthereumHardforks + BscHardforks + EthChainSpec + Hardforks,
     P: BlockNumReader + Clone,
+    R::Transaction: From<TransactionSigned> + Clone,
 {
     /// Creates a new BscBlockExecutor.
     pub fn new(
@@ -63,6 +67,7 @@ where
         evm: EVM,
         receipt_builder: R,
         consensus: ParliaConsensus<P>,
+        ctx: EthBlockExecutionCtx<'a>,
     ) -> Self {
         Self {
             inner,
@@ -73,6 +78,7 @@ where
             system_txs: vec![],
             receipt_builder,
             consensus,
+            ctx,
         }
     }
 
@@ -104,7 +110,7 @@ where
         &mut self,
         beneficiary: Address,
     ) -> Result<(), BlockExecutionError> {
-        let txs = self.consensus.init_feynman_contracts();
+        let txs = self.consensus.feynman_contracts_txs();
         for mut tx in txs {
             self.transact_system_tx(&mut tx, beneficiary)?;
         }
@@ -116,7 +122,7 @@ where
         &mut self,
         beneficiary: Address,
     ) -> Result<(), BlockExecutionError> {
-        let txs = self.consensus.init_genesis_contracts();
+        let txs = self.consensus.genesis_contracts_txs();
 
         for mut tx in txs {
             self.transact_system_tx(&mut tx, beneficiary)?;
@@ -126,7 +132,7 @@ where
 
     pub(crate) fn transact_system_tx(
         &mut self,
-        tx: &mut reth_primitives::Transaction,
+        tx: &mut TransactionSigned,
         sender: Address,
     ) -> Result<(), BlockExecutionError> {
         let account = self
@@ -136,11 +142,13 @@ where
             .map_err(BlockExecutionError::other)?
             .ok_or(BlockExecutionError::msg("Sender account not found"))?;
         tx.set_nonce(account.nonce);
+        let tx = R::Transaction::from(tx.clone());
 
         // TODO: Consensus handle system txs
         // https://github.com/bnb-chain/reth/blob/main/crates/bsc/evm/src/execute.rs#L602
 
         let recovered = Recovered::new_unchecked(tx.clone(), sender);
+
         let result_and_state =
             self.evm.transact(recovered).map_err(|err| BlockExecutionError::other(err))?;
         let ResultAndState { result, state } = result_and_state;
@@ -148,7 +156,7 @@ where
         let gas_used = result.gas_used();
         self.gas_used += gas_used;
         self.receipts.push(self.receipt_builder.build_receipt(ReceiptBuilderCtx {
-            tx,
+            tx: &tx,
             evm: &self.evm,
             result,
             state: &state,
@@ -184,7 +192,7 @@ where
     E: Evm<DB = &'a mut State<DB>, Tx: FromRecoveredTx<R::Transaction>>,
     Spec: EthereumHardforks + BscHardforks + EthChainSpec + Hardforks,
     R: ReceiptBuilder<Transaction: SignedTransaction, Receipt: TxReceipt<Log = Log>>,
-    <R as ReceiptBuilder>::Transaction: Unpin,
+    <R as ReceiptBuilder>::Transaction: Unpin + From<TransactionSigned>,
     P: BlockNumReader + Clone,
 {
     type Transaction = R::Transaction;
@@ -196,8 +204,10 @@ where
         let state_clear_flag =
             self.spec.is_spurious_dragon_active_at_block(self.evm.block().number);
         self.evm.db_mut().set_state_clear_flag(state_clear_flag);
+
         // TODO: (Consensus Verify cascading fields)[https://github.com/bnb-chain/reth/blob/main/crates/bsc/evm/src/pre_execution.rs#L43]
         // TODO: (Consensus System Call Before Execution)[https://github.com/bnb-chain/reth/blob/main/crates/bsc/evm/src/execute.rs#L678]
+
         self.apply_upgrade_contracts_if_before_feynman()?;
 
         Ok(())
@@ -262,14 +272,33 @@ where
         }
 
         self.apply_upgrade_contracts_if_before_feynman()?;
-
         self.deploy_feynman_contracts(self.evm.block().beneficiary)?;
+
+        // increment balances
+        let balance_increments = post_block_balance_increments(
+            &self.spec,
+            self.evm.block(),
+            self.ctx.ommers,
+            self.ctx.withdrawals.as_deref(),
+        );
+        self.evm
+            .db_mut()
+            .increment_balances(balance_increments.clone())
+            .map_err(|_| BlockValidationError::IncrementBalanceFailed)?;
 
         // TODO:
         // Consensus: Slash validator if not in turn
         // Consensus: Distribute rewards
         // Consensus: Update validator set
-        todo!()
+
+        Ok((
+            self.evm,
+            BlockExecutionResult {
+                receipts: self.receipts,
+                requests: Requests::default(),
+                gas_used: self.gas_used,
+            },
+        ))
     }
 
     fn set_state_hook(&mut self, _hook: Option<Box<dyn OnStateHook>>) {}

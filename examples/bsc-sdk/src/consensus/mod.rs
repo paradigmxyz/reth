@@ -2,9 +2,9 @@ use abi::{STAKE_HUB_ABI, VALIDATOR_SET_ABI};
 use alloy_consensus::TxLegacy;
 use alloy_dyn_abi::JsonAbiExt;
 use alloy_json_abi::JsonAbi;
-use alloy_primitives::{BlockNumber, Bytes, TxKind, B256, U256};
+use alloy_primitives::{BlockNumber, Bytes, PrimitiveSignature, TxKind, B256, U256};
 use reth_chainspec::ChainSpec;
-use reth_primitives::Transaction;
+use reth_primitives::{Transaction, TransactionSigned};
 use reth_provider::{BlockNumReader, ProviderError};
 use std::{cmp::Ordering, sync::Arc};
 
@@ -52,7 +52,7 @@ impl<P> ParliaConsensus<P>
 where
     P: BlockNumReader + Clone,
 {
-    pub fn init_genesis_contracts(&self) -> Vec<Transaction> {
+    pub fn genesis_contracts_txs(&self) -> Vec<TransactionSigned> {
         let function = self.validator_abi.function("init").unwrap().first().unwrap();
         let input = function.abi_encode_input(&[]).unwrap();
 
@@ -66,10 +66,12 @@ where
             CROSS_CHAIN_CONTRACT,
         ];
 
+        let signature = PrimitiveSignature::new(Default::default(), Default::default(), false);
+
         contracts
             .into_iter()
             .map(|contract| {
-                Transaction::Legacy(TxLegacy {
+                let tx = Transaction::Legacy(TxLegacy {
                     chain_id: Some(self.chain_spec.chain().id()),
                     nonce: 0,
                     gas_limit: u64::MAX / 2,
@@ -77,14 +79,18 @@ where
                     value: U256::ZERO,
                     input: Bytes::from(input.clone()),
                     to: TxKind::Call(contract.parse().unwrap()),
-                })
+                });
+
+                TransactionSigned::new_unhashed(tx, signature)
             })
             .collect()
     }
 
-    pub fn init_feynman_contracts(&self) -> Vec<Transaction> {
+    pub fn feynman_contracts_txs(&self) -> Vec<TransactionSigned> {
         let function = self.stake_hub_abi.function("initialize").unwrap().first().unwrap();
         let input = function.abi_encode_input(&[]).unwrap();
+
+        let signature = PrimitiveSignature::new(Default::default(), Default::default(), false);
 
         let contracts = vec![
             STAKE_HUB_CONTRACT,
@@ -97,7 +103,7 @@ where
         contracts
             .into_iter()
             .map(|contract| {
-                Transaction::Legacy(TxLegacy {
+                let tx = Transaction::Legacy(TxLegacy {
                     chain_id: Some(self.chain_spec.chain().id()),
                     nonce: 0,
                     gas_limit: u64::MAX / 2,
@@ -105,7 +111,9 @@ where
                     value: U256::ZERO,
                     input: Bytes::from(input.clone()),
                     to: TxKind::Call(contract.parse().unwrap()),
-                })
+                });
+
+                TransactionSigned::new_unhashed(tx, signature)
             })
             .collect()
     }
