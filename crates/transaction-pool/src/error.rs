@@ -185,8 +185,8 @@ pub enum Eip7702PoolTransactionError {
     /// Thrown if the transaction has no items in its authorization list
     #[error("no items in authorization list for EIP7702 transaction")]
     MissingEip7702AuthorizationList,
-    /// Returned when the transaction with gapped
-    /// nonce received from the accounts with delegation or pending delegation.
+    /// Returned when a transaction with a nonce
+    /// gap is received from accounts with a deployed delegation or pending delegation.
     #[error("gapped-nonce tx from delegated accounts")]
     OutOfOrderTxFromDelegated,
     /// Returned when the maximum number of in-flight

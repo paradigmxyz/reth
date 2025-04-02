@@ -768,14 +768,14 @@ impl<T: TransactionOrdering> TxPool<T> {
         ))
     }
 
-    // validate_auth verifies that the transaction complies with code authorization
-    // restrictions brought by SetCode transaction type:
-    // 1. Any account with a deployed delegation or an in-flight authorization to deploy a
-    //    delegation will only be allowed a single transaction slot instead of the standard number.
-    //    This is due to the possibility of the account being sweeped by an unrelated account.
-    // 2. In case the pool is tracking a pending / queued transaction from a specific account, it
-    //    will reject new transactions with delegations from that account with standard in-flight
-    //    transactions.
+    /// This verifies that the transaction complies with code authorization
+    /// restrictions brought by EIP-7702 transaction type:
+    /// 1. Any account with a deployed delegation or an in-flight authorization to deploy a
+    ///    delegation will only be allowed a single transaction slot instead of the standard limit.
+    ///    This is due to the possibility of the account being sweeped by an unrelated account.
+    /// 2. In case the pool is tracking a pending / queued transaction from a specific account, it
+    ///    will reject new transactions with delegations from that account with standard in-flight
+    ///    transactions.
     fn validate_auth(
         &self,
         transaction: &ValidPoolTransaction<T::Transaction>,
@@ -1576,14 +1576,14 @@ impl<T: PoolTransaction> AllTransactions<T> {
     }
 
     fn remove_auths(&mut self, tx: &PoolInternalTransaction<T>) {
-        if let Some(auths) = &tx.transaction.authority_ids {
-            let tx_hash = tx.transaction.hash();
-            for auth in auths {
-                if let Some(list) = self.auths.get_mut(auth) {
-                    list.remove(tx_hash);
-                    if list.is_empty() {
-                        self.auths.remove(auth);
-                    }
+        let Some(auths) = &tx.transaction.authority_ids else { return };
+
+        let tx_hash = tx.transaction.hash();
+        for auth in auths {
+            if let Some(list) = self.auths.get_mut(auth) {
+                list.remove(tx_hash);
+                if list.is_empty() {
+                    self.auths.remove(auth);
                 }
             }
         }

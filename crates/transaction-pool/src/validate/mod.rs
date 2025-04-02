@@ -389,15 +389,6 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.transaction.authorization_list()
     }
 
-    /// Returns the Authority list of the transaction.
-    ///
-    /// Returns `None` if this transaction is not EIP-7702.
-    pub fn authority_list(&self) -> Option<Vec<Address>> {
-        self.transaction
-            .authorization_list()
-            .map(|auths| auths.iter().flat_map(|auth| auth.recover_authority()).collect::<Vec<_>>())
-    }
-
     /// Returns the number of blobs of [`SignedAuthorization`] in this transactions
     ///
     /// This is convenience function for `len(authorization_list)`.
