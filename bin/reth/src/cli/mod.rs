@@ -268,7 +268,7 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Commands<C, Ext> {
     /// Returns the underlying chain being used for commands
-    fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+    pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         match self {
             Self::Node(cmd) => cmd.chain_spec(),
             Self::Init(cmd) => cmd.chain_spec(),
@@ -280,7 +280,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Co
             Self::P2P(cmd) => cmd.chain_spec(),
             #[cfg(feature = "dev")]
             Self::TestVectors(cmd) => cmd.chain_spec(),
-            Self::Config(cmd) => cmd.chain_spec(),
+            Self::Config(_) => None,
             Self::Debug(cmd) => cmd.chain_spec(),
             Self::Recover(cmd) => cmd.chain_spec(),
             Self::Prune(cmd) => cmd.chain_spec(),
