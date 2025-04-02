@@ -310,6 +310,10 @@ where
     type Primitives = N;
     type Executor = Executor;
 
+    fn set_simulate(&mut self, simulated: bool) {
+        self.simulated = simulated;
+    }
+
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         self.executor.apply_pre_execution_changes()
     }
