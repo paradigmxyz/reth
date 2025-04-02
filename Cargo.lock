@@ -8009,11 +8009,21 @@ dependencies = [
  "clap",
  "eyre",
  "futures",
- "futures",
  "reth-chainspec",
  "reth-cli",
  "reth-cli-commands",
+ "reth-cli-runner",
+ "reth-db",
  "reth-ethereum-cli",
+ "reth-network",
+ "reth-node-builder",
+ "reth-node-core",
+ "reth-node-ethereum",
+ "reth-node-metrics",
+ "reth-tracing",
+ "tempfile",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

@@ -15,7 +15,6 @@ workspace = true
 reth-cli.workspace = true
 reth-cli-commands.workspace = true
 reth-chainspec.workspace = true
-reth-cli-commands.workspace = true
 reth-cli-runner.workspace = true
 reth-db.workspace = true
 reth-network.workspace = true

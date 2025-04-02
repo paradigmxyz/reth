@@ -1,5 +1,6 @@
 //! CLI definition and entrypoint to executable
 
+use crate::chainspec::EthereumChainSpecParser;
 use clap::{value_parser, Parser, Subcommand};
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
@@ -10,15 +11,14 @@ use reth_cli_commands::{
 };
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
-use crate::chainspec::EthereumChainSpecParser;
 use reth_network::EthNetworkPrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
+use reth_node_core::args::LogArgs;
 use reth_node_ethereum::{consensus::EthBeaconConsensus, EthExecutorProvider, EthereumNode};
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};
 use tracing::info;
-use reth_node_core::args::LogArgs;
 
 /// The main reth cli interface.
 ///
@@ -98,8 +98,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
     ///
     /// ```no_run
     /// use clap::Parser;
-    /// use reth_ethereum_cli::Cli;
-    /// use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
+    /// use reth_ethereum_cli::{chainspec::EthereumChainSpecParser, Cli};
     ///
     /// #[derive(Debug, Parser)]
     /// pub struct MyArgs {
@@ -126,8 +125,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
     /// # Example
     ///
     /// ```no_run
-    /// use reth_ethereum_cli::Cli;
     /// use reth_cli_runner::CliRunner;
+    /// use reth_ethereum_cli::Cli;
     /// use reth_node_ethereum::EthereumNode;
     ///
     /// let runtime = tokio::runtime::Builder::new_multi_thread()
