@@ -53,6 +53,8 @@ pub struct TrieNodeIter<C, H: HashedCursor> {
     metrics: crate::metrics::TrieNodeIterMetrics,
     #[cfg(feature = "metrics")]
     previously_seeked_key: Option<B256>,
+    #[cfg(feature = "metrics")]
+    previously_advanced_to_key: Option<B256>,
 }
 
 impl<C, H: HashedCursor> TrieNodeIter<C, H> {
@@ -68,6 +70,8 @@ impl<C, H: HashedCursor> TrieNodeIter<C, H> {
             metrics: crate::metrics::TrieNodeIterMetrics::new(trie_type),
             #[cfg(feature = "metrics")]
             previously_seeked_key: None,
+            #[cfg(feature = "metrics")]
+            previously_advanced_to_key: None,
         }
     }
 
@@ -76,6 +80,35 @@ impl<C, H: HashedCursor> TrieNodeIter<C, H> {
     pub const fn with_last_hashed_key(mut self, previous_hashed_key: B256) -> Self {
         self.previous_hashed_key = Some(previous_hashed_key);
         self
+    }
+
+    fn hashed_cursor_seek(&mut self, key: B256) -> Result<Option<(B256, H::Value)>, DatabaseError> {
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.inc_leaf_nodes_seeked();
+
+            if Some(key) == self.previously_seeked_key {
+                self.metrics.inc_leaf_nodes_same_seeked();
+            }
+            self.previously_seeked_key = Some(key);
+
+            if Some(key) == self.previously_advanced_to_key {
+                self.metrics.inc_leaf_nodes_same_seeked_as_advanced();
+            }
+        }
+        self.hashed_cursor.seek(key)
+    }
+
+    fn hashed_cursor_next(&mut self) -> Result<Option<(B256, H::Value)>, DatabaseError> {
+        let result = self.hashed_cursor.next();
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.inc_leaf_nodes_advanced();
+
+            self.previously_advanced_to_key =
+                result.as_ref().ok().and_then(|result| result.as_ref().map(|(k, _)| *k));
+        }
+        result
     }
 }
 
@@ -130,7 +163,8 @@ where
 
                 // Set the next hashed entry as a leaf node and return
                 trace!(target: "trie::node_iter", ?hashed_key, "next hashed entry");
-                self.current_hashed_entry = self.hashed_cursor.next()?;
+                self.current_hashed_entry = self.hashed_cursor_next()?;
+
                 #[cfg(feature = "metrics")]
                 self.metrics.inc_leaf_nodes_returned();
                 return Ok(Some(TrieElement::Leaf(hashed_key, value)))
@@ -141,18 +175,8 @@ where
                 Some(hashed_key) => {
                     trace!(target: "trie::node_iter", ?hashed_key, "seeking to the previous hashed entry");
                     // Seek to the previous hashed key and get the next hashed entry
-                    self.hashed_cursor.seek(hashed_key)?;
+                    self.hashed_cursor_seek(hashed_key)?;
                     self.current_hashed_entry = self.hashed_cursor.next()?;
-
-                    #[cfg(feature = "metrics")]
-                    {
-                        self.metrics.inc_leaf_nodes_seeked();
-
-                        if Some(hashed_key) == self.previously_seeked_key {
-                            self.metrics.inc_same_leaf_node_seeked();
-                        }
-                        self.previously_seeked_key = Some(hashed_key);
-                    }
                 }
                 None => {
                     // Get the seek key and set the current hashed entry based on walker's next
@@ -202,17 +226,7 @@ where
                         continue
                     }
 
-                    self.current_hashed_entry = self.hashed_cursor.seek(seek_key)?;
-
-                    #[cfg(feature = "metrics")]
-                    {
-                        self.metrics.inc_leaf_nodes_seeked();
-
-                        if Some(seek_key) == self.previously_seeked_key {
-                            self.metrics.inc_same_leaf_node_seeked();
-                        }
-                        self.previously_seeked_key = Some(seek_key);
-                    }
+                    self.current_hashed_entry = self.hashed_cursor_seek(seek_key)?;
                 }
             }
         }

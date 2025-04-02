@@ -73,9 +73,13 @@ pub struct TrieNodeIterMetrics {
     /// The number of branch nodes returned by the iterator.
     branch_nodes_returned_total: Counter,
     /// The number of times same leaf node was seeked multiple times in a row by the iterator.
-    same_leaf_node_seeked_total: Counter,
+    leaf_nodes_same_seeked_total: Counter,
+    /// The number of times the same leaf node as we just advanced to was seeked by the iterator.
+    leaf_nodes_same_seeked_as_advanced_total: Counter,
     /// The number of leaf nodes seeked by the iterator.
     leaf_nodes_seeked_total: Counter,
+    /// The number of leaf nodes advanced by the iterator.
+    leaf_nodes_advanced_total: Counter,
     /// The number of leaf nodes returned by the iterator.
     leaf_nodes_returned_total: Counter,
 }
@@ -91,14 +95,24 @@ impl TrieNodeIterMetrics {
         self.branch_nodes_returned_total.increment(1);
     }
 
-    /// Increment `same_leaf_node_seeked_total`.
-    pub fn inc_same_leaf_node_seeked(&self) {
-        self.same_leaf_node_seeked_total.increment(1);
+    /// Increment `leaf_nodes_same_seeked_total`.
+    pub fn inc_leaf_nodes_same_seeked(&self) {
+        self.leaf_nodes_same_seeked_total.increment(1);
+    }
+
+    /// Increment `leaf_nodes_same_seeked_as_advanced_total`.
+    pub fn inc_leaf_nodes_same_seeked_as_advanced(&self) {
+        self.leaf_nodes_same_seeked_as_advanced_total.increment(1);
     }
 
     /// Increment `leaf_nodes_seeked_total`.
     pub fn inc_leaf_nodes_seeked(&self) {
         self.leaf_nodes_seeked_total.increment(1);
+    }
+
+    /// Increment `leaf_nodes_advanced_total`.
+    pub fn inc_leaf_nodes_advanced(&self) {
+        self.leaf_nodes_advanced_total.increment(1);
     }
 
     /// Increment `leaf_nodes_returned_total`.
