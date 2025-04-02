@@ -1,11 +1,8 @@
 //! Common conversions from alloy types.
 
-
-use crate::TransactionSigned;
+use crate::{Transaction, TransactionSigned};
 use alloc::string::ToString;
-use alloy_consensus::{
-    EthereumTxEnvelope, TxEnvelope, TxLegacy, TxEip2930, TxEip1559, TxEip4844, TxEip7702,
-};
+use alloy_consensus::TxEnvelope;
 use alloy_network::{AnyRpcTransaction, AnyTxEnvelope};
 use alloy_rpc_types_eth::Transaction as AlloyRpcTransaction;
 
@@ -17,36 +14,31 @@ impl TryFrom<AnyRpcTransaction> for TransactionSigned {
 
         let tx = tx.into_inner();
 
-        let (envelope, signature, hash) = match tx.inner.into_inner() {
+        let (transaction, signature, hash) = match tx.inner.into_inner() {
             AnyTxEnvelope::Ethereum(TxEnvelope::Legacy(tx)) => {
                 let (tx, signature, hash) = tx.into_parts();
-                let envelope: EthereumTxEnvelope<TxLegacy> = tx.into();
-                (envelope, signature, hash)
+                (Transaction::Legacy(tx), signature, hash)
             }
             AnyTxEnvelope::Ethereum(TxEnvelope::Eip2930(tx)) => {
                 let (tx, signature, hash) = tx.into_parts();
-                let envelope: EthereumTxEnvelope<TxEip2930> = tx.into();
-                (envelope, signature, hash)
+                (Transaction::Eip2930(tx), signature, hash)
             }
             AnyTxEnvelope::Ethereum(TxEnvelope::Eip1559(tx)) => {
                 let (tx, signature, hash) = tx.into_parts();
-                let envelope: EthereumTxEnvelope<TxEip1559> = tx.into();
-                (envelope, signature, hash)
+                (Transaction::Eip1559(tx), signature, hash)
             }
             AnyTxEnvelope::Ethereum(TxEnvelope::Eip4844(tx)) => {
                 let (tx, signature, hash) = tx.into_parts();
-                let envelope: EthereumTxEnvelope<TxEip4844> = tx.into();
-                (envelope, signature, hash)
+                (Transaction::Eip4844(tx.into()), signature, hash)
             }
             AnyTxEnvelope::Ethereum(TxEnvelope::Eip7702(tx)) => {
                 let (tx, signature, hash) = tx.into_parts();
-                let envelope: EthereumTxEnvelope<TxEip7702> = tx.into();
-                (envelope, signature, hash)
+                (Transaction::Eip7702(tx), signature, hash)
             }
             _ => return Err(ConversionError::Custom("unknown transaction type".to_string())),
         };
 
-        Ok(TransactionSigned::new(envelope, signature, hash))
+        Ok(Self::new(transaction, signature, hash))
     }
 }
 
