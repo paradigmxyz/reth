@@ -1,7 +1,7 @@
 //! Command for debugging block building.
 use alloy_consensus::{BlockHeader, TxEip4844, EthereumTxEnvelope};
 use alloy_eips::{
-    eip2718::{Encodable2718, Decodable2718},
+    eip2718::{Decodable2718, Encodable2718},
     eip4844::{env_settings::EnvKzgSettings, BlobTransactionSidecar},
 };
 use alloy_primitives::{Address, Bytes, B256, U256};
@@ -145,7 +145,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             let envelope = EthereumTxEnvelope::<TxEip4844>::decode_2718(&mut &tx_bytes[..])
                 .map_err(|e| eyre::eyre!("failed to recover tx: {e}"))?;
 
-            let transaction: reth::Transaction = envelope.into();
+            let transaction: Transaction = envelope.into();
 
             let encoded_length = match transaction.transaction() {
                 Transaction::Eip4844(TxEip4844 { blob_versioned_hashes, .. }) => {
