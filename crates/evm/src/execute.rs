@@ -237,7 +237,7 @@ pub trait BlockBuilder {
     /// Marker for indicating that this block builder is used for simulation.
     ///
     /// This allows implementors to turn of certain restrictions, e.g. `eth_simulateV1`
-    // TODO(mattss): find a nicer workaround for this
+    // TODO(mattsse): find a nicer workaround for this
     fn set_simulate(&mut self, _simulated: bool) {}
 
     /// Invokes [`BlockExecutor::apply_pre_execution_changes`].
