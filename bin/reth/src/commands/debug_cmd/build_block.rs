@@ -5,7 +5,6 @@ use alloy_eips::{
     eip4844::{env_settings::EnvKzgSettings, BlobTransactionSidecar},
 };
 use alloy_primitives::{Address, Bytes, B256, U256};
-use alloy_rlp::Decodable;
 use alloy_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
 use clap::Parser;
 use eyre::Context;
@@ -39,6 +38,8 @@ use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
 use std::{path::PathBuf, str::FromStr, sync::Arc};
 use tracing::*;
+use alloy_consensus::EthereumTxEnvelope;
+
 
 /// `reth debug build-block` command
 /// This debug routine requires that the node is positioned at the block before the target.
