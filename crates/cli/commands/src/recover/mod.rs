@@ -33,6 +33,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             Subcommands::StorageTries(command) => command.execute::<N>(ctx).await,
         }
     }
+}
+
+impl<C: ChainSpecParser> Command<C> {
     /// Returns the underlying chain being used to run this command
     pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         match &self.command {
