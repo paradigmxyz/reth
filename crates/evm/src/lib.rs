@@ -254,6 +254,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
             assembler: self.block_assembler(),
             parent,
             transactions: Vec::new(),
+            simulated: false,
         }
     }
 
