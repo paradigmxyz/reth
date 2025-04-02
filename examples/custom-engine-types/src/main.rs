@@ -184,7 +184,7 @@ pub struct CustomEngineValidator {
 
 impl CustomEngineValidator {
     /// Instantiates a new validator.
-    pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
+    pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { inner: EthereumExecutionPayloadValidator::new(chain_spec) }
     }
 
