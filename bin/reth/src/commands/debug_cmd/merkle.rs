@@ -143,10 +143,6 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             .get_full_block_range(to_header.hash_slow(), self.to - best_block_number)
             .await;
 
-        let mut td = provider_rw
-            .header_td_by_number(best_block_number)?
-            .ok_or(ProviderError::TotalDifficultyNotFound(best_block_number))?;
-
         let mut account_hashing_stage = AccountHashingStage::default();
         let mut storage_hashing_stage = StorageHashingStage::default();
         let mut merkle_stage = MerkleStage::default_execution();
