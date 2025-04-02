@@ -280,8 +280,8 @@ where
         executor: WorkloadExecutor,
         metrics: MultiProofTaskMetrics,
         storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
+        max_concurrent: usize,
     ) -> Self {
-        let max_concurrent = executor.rayon_pool().current_num_threads();
         Self {
             pending: VecDeque::with_capacity(max_concurrent),
             max_concurrent,
@@ -485,6 +485,7 @@ where
         executor: WorkloadExecutor,
         proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
         to_sparse_trie: Sender<SparseTrieUpdate>,
+        max_concurrency: usize,
     ) -> Self {
         let (tx, rx) = channel();
         let metrics = MultiProofTaskMetrics::default();
@@ -500,6 +501,7 @@ where
                 executor,
                 metrics.clone(),
                 proof_task_handle,
+                max_concurrency,
             ),
             metrics,
         }
@@ -977,7 +979,7 @@ mod tests {
             + Clone
             + 'static,
     {
-        let executor = WorkloadExecutor::with_num_cpu_threads(2);
+        let executor = WorkloadExecutor::default();
         let config = create_state_root_config(factory, TrieInput::default());
         let task_ctx = ProofTaskCtx::new(
             config.nodes_sorted.clone(),
@@ -992,7 +994,7 @@ mod tests {
         );
         let channel = channel();
 
-        MultiProofTask::new(config, executor, proof_task.handle(), channel.0)
+        MultiProofTask::new(config, executor, proof_task.handle(), channel.0, 1)
     }
 
     #[test]
