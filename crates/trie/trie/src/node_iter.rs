@@ -51,6 +51,8 @@ pub struct TrieNodeIter<C, H: HashedCursor> {
 
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::TrieNodeIterMetrics,
+    #[cfg(feature = "metrics")]
+    previously_seeked_key: Option<B256>,
 }
 
 impl<C, H: HashedCursor> TrieNodeIter<C, H> {
@@ -64,6 +66,8 @@ impl<C, H: HashedCursor> TrieNodeIter<C, H> {
             should_check_walker_key: false,
             #[cfg(feature = "metrics")]
             metrics: crate::metrics::TrieNodeIterMetrics::new(trie_type),
+            #[cfg(feature = "metrics")]
+            previously_seeked_key: None,
         }
     }
 
@@ -137,10 +141,18 @@ where
                 Some(hashed_key) => {
                     trace!(target: "trie::node_iter", ?hashed_key, "seeking to the previous hashed entry");
                     // Seek to the previous hashed key and get the next hashed entry
-                    #[cfg(feature = "metrics")]
-                    self.metrics.inc_leaf_nodes_seeked();
                     self.hashed_cursor.seek(hashed_key)?;
                     self.current_hashed_entry = self.hashed_cursor.next()?;
+
+                    #[cfg(feature = "metrics")]
+                    {
+                        self.metrics.inc_leaf_nodes_seeked();
+
+                        if Some(hashed_key) == self.previously_seeked_key {
+                            self.metrics.inc_same_leaf_node_seeked();
+                        }
+                        self.previously_seeked_key = Some(hashed_key);
+                    }
                 }
                 None => {
                     // Get the seek key and set the current hashed entry based on walker's next
@@ -190,9 +202,17 @@ where
                         continue
                     }
 
-                    #[cfg(feature = "metrics")]
-                    self.metrics.inc_leaf_nodes_seeked();
                     self.current_hashed_entry = self.hashed_cursor.seek(seek_key)?;
+
+                    #[cfg(feature = "metrics")]
+                    {
+                        self.metrics.inc_leaf_nodes_seeked();
+
+                        if Some(seek_key) == self.previously_seeked_key {
+                            self.metrics.inc_same_leaf_node_seeked();
+                        }
+                        self.previously_seeked_key = Some(seek_key);
+                    }
                 }
             }
         }

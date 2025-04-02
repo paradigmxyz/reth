@@ -72,6 +72,8 @@ impl WalkerMetrics {
 pub struct TrieNodeIterMetrics {
     /// The number of branch nodes returned by the iterator.
     branch_nodes_returned_total: Counter,
+    /// The number of times same leaf node was seeked multiple times in a row by the iterator.
+    same_leaf_node_seeked_total: Counter,
     /// The number of leaf nodes seeked by the iterator.
     leaf_nodes_seeked_total: Counter,
     /// The number of leaf nodes returned by the iterator.
@@ -87,6 +89,11 @@ impl TrieNodeIterMetrics {
     /// Increment `branch_nodes_returned_total`.
     pub fn inc_branch_nodes_returned(&self) {
         self.branch_nodes_returned_total.increment(1);
+    }
+
+    /// Increment `same_leaf_node_seeked_total`.
+    pub fn inc_same_leaf_node_seeked(&self) {
+        self.same_leaf_node_seeked_total.increment(1);
     }
 
     /// Increment `leaf_nodes_seeked_total`.
