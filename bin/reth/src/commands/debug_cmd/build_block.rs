@@ -1,7 +1,7 @@
 //! Command for debugging block building.
 use alloy_consensus::{BlockHeader, TxEip4844};
 use alloy_eips::{
-    eip2718::Encodable2718,
+    eip2718::{Encodable2718, Decodable2718},
     eip4844::{env_settings::EnvKzgSettings, BlobTransactionSidecar},
 };
 use alloy_primitives::{Address, Bytes, B256, U256};
