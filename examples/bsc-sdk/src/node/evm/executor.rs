@@ -1,17 +1,13 @@
 use super::patch::{patch_mainnet_after_tx, patch_mainnet_before_tx};
 use crate::{
-    consensus::ParliaConsensus,
     hardforks::BscHardforks,
-    system_contracts::{get_upgrade_system_contracts, is_system_transaction},
+    system_contracts::{get_upgrade_system_contracts, is_system_transaction, SystemContract},
 };
 use alloy_consensus::{Transaction, TxReceipt};
 use alloy_eips::{eip7685::Requests, Encodable2718};
-use alloy_evm::{
-    block::ExecutableTx,
-    eth::{receipt_builder::ReceiptBuilderCtx, EthBlockExecutor},
-};
+use alloy_evm::{block::ExecutableTx, eth::receipt_builder::ReceiptBuilderCtx};
 use alloy_primitives::Address;
-use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, Hardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_evm::{
     block::BlockValidationError,
     eth::{receipt_builder::ReceiptBuilder, EthBlockExecutionCtx},
@@ -19,21 +15,20 @@ use reth_evm::{
     state_change::post_block_balance_increments,
     Database, Evm, FromRecoveredTx, OnStateHook,
 };
-use reth_evm_ethereum::RethReceiptBuilder;
 use reth_primitives::{Log, Recovered, TransactionSigned};
 use reth_primitives_traits::SignedTransaction;
-use reth_provider::{BlockExecutionResult, BlockNumReader};
+use reth_provider::BlockExecutionResult;
 use reth_revm::State;
 use revm::{
     context::result::{ExecutionResult, ResultAndState},
     state::Bytecode,
     Database as RevmDatabase, DatabaseCommit,
 };
-use std::sync::Arc;
 
-struct BscBlockExecutor<'a, EVM, Spec, R: ReceiptBuilder, P> {
-    /// Inner Ethereum execution strategy.
-    inner: EthBlockExecutor<'a, EVM, &'a Arc<ChainSpec>, &'a RethReceiptBuilder>,
+pub struct BscBlockExecutor<'a, EVM, Spec, R: ReceiptBuilder>
+where
+    Spec: EthChainSpec,
+{
     /// Reference to the specification object.
     spec: Spec,
     /// Inner EVM.
@@ -46,38 +41,35 @@ struct BscBlockExecutor<'a, EVM, Spec, R: ReceiptBuilder, P> {
     system_txs: Vec<R::Transaction>,
     /// Receipt builder.
     receipt_builder: R,
-    /// Parlia consensus
-    consensus: ParliaConsensus<P>,
+    /// System contracts used to trigger fork specific logic.
+    system_contracts: SystemContract<Spec>,
     /// Context for block execution.
     pub ctx: EthBlockExecutionCtx<'a>,
 }
 
-impl<'a, DB, EVM, Spec, R: ReceiptBuilder, P> BscBlockExecutor<'a, EVM, Spec, R, P>
+impl<'a, DB, EVM, Spec, R: ReceiptBuilder> BscBlockExecutor<'a, EVM, Spec, R>
 where
     DB: Database + 'a,
     EVM: Evm<DB = &'a mut State<DB>, Tx: FromRecoveredTx<R::Transaction>>,
-    Spec: EthereumHardforks + BscHardforks + EthChainSpec + Hardforks,
-    P: BlockNumReader + Clone,
+    Spec: EthereumHardforks + BscHardforks + EthChainSpec + Hardforks + Clone,
     R::Transaction: From<TransactionSigned> + Clone,
 {
     /// Creates a new BscBlockExecutor.
     pub fn new(
-        inner: EthBlockExecutor<'a, EVM, &'a Arc<ChainSpec>, &'a RethReceiptBuilder>,
-        spec: Spec,
         evm: EVM,
-        receipt_builder: R,
-        consensus: ParliaConsensus<P>,
         ctx: EthBlockExecutionCtx<'a>,
+        spec: Spec,
+        receipt_builder: R,
+        system_contracts: SystemContract<Spec>,
     ) -> Self {
         Self {
-            inner,
             spec,
             evm,
             gas_used: 0,
             receipts: vec![],
             system_txs: vec![],
             receipt_builder,
-            consensus,
+            system_contracts,
             ctx,
         }
     }
@@ -110,7 +102,7 @@ where
         &mut self,
         beneficiary: Address,
     ) -> Result<(), BlockExecutionError> {
-        let txs = self.consensus.feynman_contracts_txs();
+        let txs = self.system_contracts.feynman_contracts_txs();
         for mut tx in txs {
             self.transact_system_tx(&mut tx, beneficiary)?;
         }
@@ -122,7 +114,7 @@ where
         &mut self,
         beneficiary: Address,
     ) -> Result<(), BlockExecutionError> {
-        let txs = self.consensus.genesis_contracts_txs();
+        let txs = self.system_contracts.genesis_contracts_txs();
 
         for mut tx in txs {
             self.transact_system_tx(&mut tx, beneficiary)?;
@@ -149,8 +141,7 @@ where
 
         let recovered = Recovered::new_unchecked(tx.clone(), sender);
 
-        let result_and_state =
-            self.evm.transact(recovered).map_err(|err| BlockExecutionError::other(err))?;
+        let result_and_state = self.evm.transact(recovered).map_err(BlockExecutionError::other)?;
         let ResultAndState { result, state } = result_and_state;
 
         let gas_used = result.gas_used();
@@ -186,14 +177,13 @@ where
     }
 }
 
-impl<'a, DB, E, Spec, R, P> BlockExecutor for BscBlockExecutor<'a, E, Spec, R, P>
+impl<'a, DB, E, Spec, R> BlockExecutor for BscBlockExecutor<'a, E, Spec, R>
 where
     DB: Database + 'a,
     E: Evm<DB = &'a mut State<DB>, Tx: FromRecoveredTx<R::Transaction>>,
     Spec: EthereumHardforks + BscHardforks + EthChainSpec + Hardforks,
     R: ReceiptBuilder<Transaction: SignedTransaction, Receipt: TxReceipt<Log = Log>>,
     <R as ReceiptBuilder>::Transaction: Unpin + From<TransactionSigned>,
-    P: BlockNumReader + Clone,
 {
     type Transaction = R::Transaction;
     type Receipt = R::Receipt;

@@ -1,6 +1,7 @@
-use super::factory::BscEvmFactory;
+use super::{executor::BscBlockExecutor, factory::BscEvmFactory};
 use crate::{
     chainspec::BscChainSpec, evm::spec::BscSpecId, hardforks::bsc::BscHardfork, node::evm::BscEvm,
+    system_contracts::SystemContract,
 };
 use alloy_consensus::{BlockHeader, Header};
 use alloy_primitives::{BlockNumber, Bytes, U256};
@@ -8,7 +9,7 @@ use reth_chainspec::EthChainSpec;
 use reth_ethereum_forks::EthereumHardfork;
 use reth_evm::{
     block::{BlockExecutorFactory, BlockExecutorFor},
-    eth::{EthBlockExecutionCtx, EthBlockExecutor, EthBlockExecutorFactory},
+    eth::{EthBlockExecutionCtx, EthBlockExecutorFactory},
     ConfigureEvm, EvmEnv, ExecutionCtxFor, InspectorFor, NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::{EthBlockAssembler, RethReceiptBuilder};
@@ -90,7 +91,13 @@ impl BlockExecutorFactory for BscEvmConfig {
         I: InspectorFor<Self, &'a mut State<DB>> + 'a,
         DB::Error: Send + Sync + 'static,
     {
-        EthBlockExecutor::new(evm, ctx, self.chain_spec(), self.executor_factory.receipt_builder())
+        BscBlockExecutor::new(
+            evm,
+            ctx,
+            self.chain_spec().clone(),
+            self.executor_factory.receipt_builder(),
+            SystemContract::new(self.chain_spec().clone()),
+        )
     }
 }
 
