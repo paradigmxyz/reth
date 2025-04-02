@@ -3,7 +3,7 @@
 use crate::{error::L1BlockInfoError, revm_spec_by_timestamp_after_bedrock, OpBlockExecutionError};
 use alloy_consensus::Transaction;
 use alloy_primitives::{hex, U256};
-use op_revm::{L1BlockInfo, OpSpecId};
+use op_revm::L1BlockInfo;
 use reth_execution_errors::BlockExecutionError;
 use reth_optimism_forks::OpHardforks;
 use reth_primitives_traits::BlockBody;
@@ -226,7 +226,6 @@ pub trait RethL1BlockInfo {
         &mut self,
         chain_spec: impl OpHardforks,
         timestamp: u64,
-        block: u64,
         input: &[u8],
         is_deposit: bool,
     ) -> Result<U256, BlockExecutionError>;
@@ -241,22 +240,8 @@ pub trait RethL1BlockInfo {
         &self,
         chain_spec: impl OpHardforks,
         timestamp: u64,
-        block_number: u64,
         input: &[u8],
     ) -> Result<U256, BlockExecutionError>;
-}
-
-fn determine_spec_id(
-    chain_spec: &impl OpHardforks,
-    timestamp: u64,
-    block_number: u64,
-) -> Result<OpSpecId, BlockExecutionError> {
-    let spec_id = revm_spec_by_timestamp_after_bedrock(chain_spec, timestamp);
-    if spec_id == OpSpecId::BEDROCK && !chain_spec.is_bedrock_active_at_block(block_number) {
-        Err(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::HardforksNotActive).into())
-    } else {
-        Ok(spec_id)
-    }
 }
 
 impl RethL1BlockInfo for L1BlockInfo {
@@ -264,7 +249,6 @@ impl RethL1BlockInfo for L1BlockInfo {
         &mut self,
         chain_spec: impl OpHardforks,
         timestamp: u64,
-        block_number: u64,
         input: &[u8],
         is_deposit: bool,
     ) -> Result<U256, BlockExecutionError> {
@@ -272,7 +256,7 @@ impl RethL1BlockInfo for L1BlockInfo {
             return Ok(U256::ZERO);
         }
 
-        let spec_id = determine_spec_id(&chain_spec, timestamp, block_number)?;
+        let spec_id = revm_spec_by_timestamp_after_bedrock(&chain_spec, timestamp);
         Ok(self.calculate_tx_l1_cost(input, spec_id))
     }
 
@@ -280,10 +264,9 @@ impl RethL1BlockInfo for L1BlockInfo {
         &self,
         chain_spec: impl OpHardforks,
         timestamp: u64,
-        block_number: u64,
         input: &[u8],
     ) -> Result<U256, BlockExecutionError> {
-        let spec_id = determine_spec_id(&chain_spec, timestamp, block_number)?;
+        let spec_id = revm_spec_by_timestamp_after_bedrock(&chain_spec, timestamp);
         Ok(self.data_gas(input, spec_id))
     }
 }
