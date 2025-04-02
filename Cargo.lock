@@ -3477,6 +3477,7 @@ dependencies = [
  "reth-chain-state",
  "reth-chainspec",
  "reth-codecs",
+ "reth-network",
  "reth-network-peers",
  "reth-node-api",
  "reth-node-builder",
@@ -3488,6 +3489,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-rpc-api",
  "reth-rpc-engine-api",
+ "reth-transaction-pool",
  "revm-primitives",
  "serde",
 ]
