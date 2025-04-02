@@ -149,7 +149,7 @@ where
 
         // We set it to half of the proof task concurrency, because often for each multiproof we
         // spawn one Tokio task for the account proof, and one Tokio task for the storage proof.
-        let max_multi_proof_task_concurrency = 128;
+        let max_multi_proof_task_concurrency = max_proof_task_concurrency / 2;
         let multi_proof_task = MultiProofTask::new(
             state_root_config,
             self.executor.clone(),
