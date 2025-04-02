@@ -12,7 +12,10 @@ exclude.workspace = true
 thiserror.workspace = true
 
 # alloy
+alloy-consensus.workspace = true
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
+alloy-rlp.workspace = true
 
 # compression and decompression
 snap.workspace = true

@@ -43,6 +43,10 @@ pub enum E2sError {
     /// Error during snappy decompression
     #[error("Snappy decompression error: {0}")]
     SnappyDecompression(String),
+
+    /// Error during RLP encoding/decoding
+    #[error("RLP error: {0}")]
+    Rlp(String),
 }
 
 /// Header for TLV records in e2store files

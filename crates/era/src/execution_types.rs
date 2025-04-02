@@ -11,8 +11,11 @@
 //! See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>
 
 use crate::e2s_types::{E2sError, Entry};
+use alloy_consensus::{Block, BlockBody, Header};
 use alloy_primitives::{B256, U256};
+use alloy_rlp::{Decodable, Encodable};
 use snap::raw::{Decoder, Encoder};
+use std::marker::PhantomData;
 
 // Era1-specific constants
 /// `CompressedHeader` record type
@@ -33,11 +36,66 @@ pub const ACCUMULATOR: [u8; 2] = [0x07, 0x00];
 /// Maximum number of blocks in an Era1 file, limited by accumulator size
 pub const MAX_BLOCKS_PER_ERA1: usize = 8192;
 
+/// Generic decoder for Snappy-compressed RLP data
+#[derive(Debug, Clone, Default)]
+pub struct SnappyRlpDecoder<T> {
+    _phantom: PhantomData<T>,
+}
+
+impl<T: Decodable> SnappyRlpDecoder<T> {
+    /// Create a new decoder for the given type
+    pub fn new() -> Self {
+        Self { _phantom: PhantomData }
+    }
+
+    /// Decode compressed data into the target type
+    pub fn decode(&self, compressed_data: &[u8]) -> Result<T, E2sError> {
+        let mut decoder = Decoder::new();
+        let decompressed = decoder.decompress_vec(compressed_data).map_err(|e| {
+            E2sError::SnappyDecompression(format!("Failed to decompress data: {}", e))
+        })?;
+
+        let mut slice = decompressed.as_slice();
+        T::decode(&mut slice)
+            .map_err(|e| E2sError::Rlp(format!("Failed to decode RLP data: {}", e)))
+    }
+}
+
+/// Generic encoder for RLP data to be Snappy-compressed
+#[derive(Debug, Clone, Default)]
+pub struct SnappyRlpEncoder<T> {
+    _phantom: PhantomData<T>,
+}
+
+impl<T: Encodable> SnappyRlpEncoder<T> {
+    /// Create a new encoder for the given type
+    pub fn new() -> Self {
+        Self { _phantom: PhantomData }
+    }
+
+    /// Encode data into compressed format
+    pub fn encode(&self, data: &T) -> Result<Vec<u8>, E2sError> {
+        let mut rlp_data = Vec::new();
+        data.encode(&mut rlp_data);
+
+        let mut encoder = Encoder::new();
+        encoder
+            .compress_vec(&rlp_data)
+            .map_err(|e| E2sError::SnappyCompression(format!("Failed to compress data: {}", e)))
+    }
+}
+
 /// Compressed block header using `snappyFramed(rlp(header))`
 #[derive(Debug, Clone)]
 pub struct CompressedHeader {
     /// The compressed data
     pub data: Vec<u8>,
+}
+
+/// Extension trait for generic decoding from compressed data
+pub trait DecodeCompressed {
+    /// Decompress and decode the data into the given type
+    fn decode<T: Decodable>(&self) -> Result<T, E2sError>;
 }
 
 impl CompressedHeader {
@@ -84,6 +142,25 @@ impl CompressedHeader {
         }
 
         Ok(Self { data: entry.data.clone() })
+    }
+
+    /// Decode this compressed header into an `alloy_consensus::Header`
+    pub fn decode_header(&self) -> Result<Header, E2sError> {
+        self.decode()
+    }
+
+    /// Create a [`CompressedHeader`] from an `alloy_consensus::Header`
+    pub fn from_header(header: &Header) -> Result<Self, E2sError> {
+        let encoder = SnappyRlpEncoder::<Header>::new();
+        let compressed = encoder.encode(header)?;
+        Ok(Self::new(compressed))
+    }
+}
+
+impl DecodeCompressed for CompressedHeader {
+    fn decode<T: Decodable>(&self) -> Result<T, E2sError> {
+        let decoder = SnappyRlpDecoder::<T>::new();
+        decoder.decode(&self.data)
     }
 }
 
@@ -136,6 +213,25 @@ impl CompressedBody {
 
         Ok(Self { data: entry.data.clone() })
     }
+
+    /// Decode this [`CompressedBody`] into an `alloy_consensus::BlockBody`
+    pub fn decode_body<T: Decodable, H: Decodable>(&self) -> Result<BlockBody<T, H>, E2sError> {
+        self.decode()
+    }
+
+    /// Create a [`CompressedBody`] from an `alloy_consensus::BlockBody`
+    pub fn from_body<T: Encodable, H: Encodable>(body: &BlockBody<T, H>) -> Result<Self, E2sError> {
+        let encoder = SnappyRlpEncoder::<BlockBody<T, H>>::new();
+        let compressed = encoder.encode(body)?;
+        Ok(Self::new(compressed))
+    }
+}
+
+impl DecodeCompressed for CompressedBody {
+    fn decode<T: Decodable>(&self) -> Result<T, E2sError> {
+        let decoder = SnappyRlpDecoder::<T>::new();
+        decoder.decode(&self.data)
+    }
 }
 
 /// Compressed receipts using snappyFramed(rlp(receipts))
@@ -187,6 +283,26 @@ impl CompressedReceipts {
         }
 
         Ok(Self { data: entry.data.clone() })
+    }
+
+    /// Decode this [`CompressedReceipts`] into the given type
+    pub fn decode<T: Decodable>(&self) -> Result<T, E2sError> {
+        let decoder = SnappyRlpDecoder::<T>::new();
+        decoder.decode(&self.data)
+    }
+
+    /// Create [`CompressedReceipts`] from an encodable type
+    pub fn from_encodable<T: Encodable>(data: &T) -> Result<Self, E2sError> {
+        let encoder = SnappyRlpEncoder::<T>::new();
+        let compressed = encoder.encode(data)?;
+        Ok(Self::new(compressed))
+    }
+}
+
+impl DecodeCompressed for CompressedReceipts {
+    fn decode<T: Decodable>(&self) -> Result<T, E2sError> {
+        let decoder = SnappyRlpDecoder::<T>::new();
+        decoder.decode(&self.data)
     }
 }
 
@@ -309,11 +425,89 @@ impl BlockTuple {
     ) -> Self {
         Self { header, body, receipts, total_difficulty }
     }
+
+    /// Convert to an `alloy_consensus::Block`
+    pub fn to_alloy_block<T: Decodable>(&self) -> Result<Block<T>, E2sError> {
+        let header: Header = self.header.decode()?;
+        let body: BlockBody<T> = self.body.decode()?;
+
+        Ok(Block::new(header, body))
+    }
+
+    /// Create from an `alloy_consensus::Block`
+    pub fn from_alloy_block<T: Encodable, R: Encodable>(
+        block: &Block<T>,
+        receipts: &R,
+        total_difficulty: U256,
+    ) -> Result<Self, E2sError> {
+        let header = CompressedHeader::from_header(&block.header)?;
+        let body = CompressedBody::from_body(&block.body)?;
+
+        let compressed_receipts = CompressedReceipts::from_encodable(receipts)?;
+
+        let difficulty = TotalDifficulty::new(total_difficulty);
+
+        Ok(Self::new(header, body, compressed_receipts, difficulty))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_eips::eip4895::Withdrawals;
+    use alloy_primitives::{Address, Bytes, B64};
+
+    #[test]
+    fn test_header_conversion_roundtrip() {
+        let header = Header {
+            parent_hash: B256::default(),
+            ommers_hash: B256::default(),
+            beneficiary: Address::default(),
+            state_root: B256::default(),
+            transactions_root: B256::default(),
+            receipts_root: B256::default(),
+            logs_bloom: Default::default(),
+            difficulty: U256::from(123456u64),
+            number: 100,
+            gas_limit: 5000000,
+            gas_used: 21000,
+            timestamp: 1609459200,
+            extra_data: Bytes::default(),
+            mix_hash: B256::default(),
+            nonce: B64::default(),
+            base_fee_per_gas: Some(10),
+            withdrawals_root: None,
+            blob_gas_used: None,
+            excess_blob_gas: None,
+            parent_beacon_block_root: None,
+            requests_hash: None,
+        };
+
+        let compressed_header = CompressedHeader::from_header(&header).unwrap();
+
+        let decoded_header = compressed_header.decode_header().unwrap();
+
+        assert_eq!(header.number, decoded_header.number);
+        assert_eq!(header.difficulty, decoded_header.difficulty);
+        assert_eq!(header.timestamp, decoded_header.timestamp);
+        assert_eq!(header.gas_used, decoded_header.gas_used);
+        assert_eq!(header.parent_hash, decoded_header.parent_hash);
+        assert_eq!(header.base_fee_per_gas, decoded_header.base_fee_per_gas);
+    }
+
+    #[test]
+    fn test_block_body_conversion() {
+        let block_body: BlockBody<Bytes> =
+            BlockBody { transactions: vec![], ommers: vec![], withdrawals: None };
+
+        let compressed_body = CompressedBody::from_body(&block_body).unwrap();
+
+        let decoded_body: BlockBody<Bytes> = compressed_body.decode_body().unwrap();
+
+        assert_eq!(decoded_body.transactions.len(), 0);
+        assert_eq!(decoded_body.ommers.len(), 0);
+        assert_eq!(decoded_body.withdrawals, None);
+    }
 
     #[test]
     fn test_total_difficulty_roundtrip() {
@@ -323,12 +517,10 @@ mod tests {
 
         let entry = total_difficulty.to_entry();
 
-        // Validate entry type
         assert_eq!(entry.entry_type, TOTAL_DIFFICULTY);
 
         let recovered = TotalDifficulty::from_entry(&entry).unwrap();
 
-        // Verify values match
         assert_eq!(recovered.value, value);
     }
 
@@ -350,5 +542,56 @@ mod tests {
         let compressed_receipts = CompressedReceipts::from_rlp(&rlp_data).unwrap();
         let decompressed = compressed_receipts.decompress().unwrap();
         assert_eq!(decompressed, rlp_data);
+    }
+
+    #[test]
+    fn test_block_tuple_with_data() {
+        // Create block with transactions and withdrawals
+        let header = Header {
+            parent_hash: B256::default(),
+            ommers_hash: B256::default(),
+            beneficiary: Address::default(),
+            state_root: B256::default(),
+            transactions_root: B256::default(),
+            receipts_root: B256::default(),
+            logs_bloom: Default::default(),
+            difficulty: U256::from(123456u64),
+            number: 100,
+            gas_limit: 5000000,
+            gas_used: 21000,
+            timestamp: 1609459200,
+            extra_data: Bytes::default(),
+            mix_hash: B256::default(),
+            nonce: B64::default(),
+            base_fee_per_gas: Some(10),
+            withdrawals_root: Some(B256::default()),
+            blob_gas_used: None,
+            excess_blob_gas: None,
+            parent_beacon_block_root: None,
+            requests_hash: None,
+        };
+
+        let transactions = vec![Bytes::from(vec![1, 2, 3, 4]), Bytes::from(vec![5, 6, 7, 8])];
+
+        let withdrawals = Some(Withdrawals(vec![]));
+
+        let block_body = BlockBody { transactions, ommers: vec![], withdrawals };
+
+        let block = Block::new(header, block_body);
+
+        let receipts: Vec<u8> = Vec::new();
+
+        let block_tuple =
+            BlockTuple::from_alloy_block(&block, &receipts, U256::from(123456u64)).unwrap();
+
+        // Convert back to Block
+        let decoded_block: Block<Bytes> = block_tuple.to_alloy_block().unwrap();
+
+        // Verify block components
+        assert_eq!(decoded_block.header.number, 100);
+        assert_eq!(decoded_block.body.transactions.len(), 2);
+        assert_eq!(decoded_block.body.transactions[0], Bytes::from(vec![1, 2, 3, 4]));
+        assert_eq!(decoded_block.body.transactions[1], Bytes::from(vec![5, 6, 7, 8]));
+        assert!(decoded_block.body.withdrawals.is_some());
     }
 }

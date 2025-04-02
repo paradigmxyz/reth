@@ -7904,7 +7904,10 @@ dependencies = [
 name = "reth-era"
 version = "1.3.4"
 dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
+ "alloy-rlp",
  "ethereum_ssz",
  "ethereum_ssz_derive",
  "snap",
