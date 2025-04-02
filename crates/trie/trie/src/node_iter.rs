@@ -176,7 +176,7 @@ where
                     trace!(target: "trie::node_iter", ?hashed_key, "seeking to the previous hashed entry");
                     // Seek to the previous hashed key and get the next hashed entry
                     self.hashed_cursor_seek(hashed_key)?;
-                    self.current_hashed_entry = self.hashed_cursor.next()?;
+                    self.current_hashed_entry = self.hashed_cursor_next()?;
                 }
                 None => {
                     // Get the seek key and set the current hashed entry based on walker's next
