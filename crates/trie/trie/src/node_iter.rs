@@ -82,6 +82,9 @@ impl<C, H: HashedCursor> TrieNodeIter<C, H> {
         self
     }
 
+    /// Seeks the hashed cursor to the given key.
+    ///
+    /// If `metrics` feature is enabled, also updates the metrics.
     fn hashed_cursor_seek(&mut self, key: B256) -> Result<Option<(B256, H::Value)>, DatabaseError> {
         #[cfg(feature = "metrics")]
         {
@@ -99,6 +102,9 @@ impl<C, H: HashedCursor> TrieNodeIter<C, H> {
         self.hashed_cursor.seek(key)
     }
 
+    /// Advances the hashed cursor to the next entry.
+    ///
+    /// If `metrics` feature is enabled, also updates the metrics.
     fn hashed_cursor_next(&mut self) -> Result<Option<(B256, H::Value)>, DatabaseError> {
         let result = self.hashed_cursor.next();
         #[cfg(feature = "metrics")]
