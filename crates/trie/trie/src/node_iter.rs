@@ -107,16 +107,21 @@ where
             return Ok(entry);
         }
 
+        let result = self.hashed_cursor.seek(key)?;
+        self.last_seeked_hashed_entry = Some(SeekedHashedEntry { seeked_key: key, result });
+
         #[cfg(feature = "metrics")]
         {
             self.metrics.inc_leaf_nodes_seeked();
 
-            if Some(key) == self.previously_advanced_to_key {
+            // If either the seek key or the result key is the same as the key we previously
+            // advanced to.
+            if Some(key) == self.previously_advanced_to_key ||
+                result.as_ref().map(|(k, _)| *k) == self.previously_advanced_to_key
+            {
                 self.metrics.inc_leaf_nodes_same_seeked_as_advanced();
             }
         }
-        let result = self.hashed_cursor.seek(key)?;
-        self.last_seeked_hashed_entry = Some(SeekedHashedEntry { seeked_key: key, result });
         Ok(result)
     }
 
