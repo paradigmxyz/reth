@@ -115,7 +115,9 @@ where
                 self.metrics.inc_leaf_nodes_same_seeked_as_advanced();
             }
         }
-        self.hashed_cursor.seek(key)
+        let result = self.hashed_cursor.seek(key)?;
+        self.last_seeked_hashed_entry = Some(SeekedHashedEntry { seeked_key: key, result });
+        Ok(result)
     }
 
     /// Advances the hashed cursor to the next entry.
@@ -483,11 +485,6 @@ mod tests {
                     visited_key: Some(account_1)
                 },
                 // Seek to the modified account.
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_3),
-                    visited_key: Some(account_3)
-                },
-                // Why do we seek the account 3 one more time?
                 KeyVisit {
                     visit_type: KeyVisitType::SeekNonExact(account_3),
                     visited_key: Some(account_3)
