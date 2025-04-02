@@ -1,0 +1,52 @@
+[package]
+name = "reth-scroll-txpool"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# ethereum
+alloy-consensus.workspace = true
+alloy-eips.workspace = true
+alloy-primitives.workspace = true
+alloy-rpc-types-eth.workspace = true
+
+# reth
+reth-chain-state.workspace = true
+reth-chainspec.workspace = true
+reth-primitives-traits.workspace = true
+reth-revm.workspace = true
+reth-storage-api.workspace = true
+reth-transaction-pool.workspace = true
+
+# revm-scroll
+revm-scroll.workspace = true
+
+# reth-scroll
+reth-scroll-evm.workspace = true
+reth-scroll-forks.workspace = true
+reth-scroll-primitives.workspace = true
+
+# scroll-alloy
+scroll-alloy-consensus.workspace = true
+
+# metrics
+reth-metrics.workspace = true
+metrics.workspace = true
+
+# misc
+c-kzg.workspace = true
+derive_more.workspace = true
+futures-util.workspace = true
+parking_lot.workspace = true
+
+[dev-dependencies]
+reth-scroll-chainspec.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }

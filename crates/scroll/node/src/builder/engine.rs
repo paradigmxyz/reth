@@ -87,6 +87,15 @@ impl PayloadValidator for ScrollEngineValidator {
         // First parse the block
         let mut block = try_into_block(payload, self.chainspec.clone())?;
 
+        // Seal the block and return if hashes match
+        let block_hash = block.hash_slow();
+        if block_hash == expected_hash {
+            return block
+                .seal_unchecked(block_hash)
+                .try_recover()
+                .map_err(|err| NewPayloadError::Other(err.into()));
+        }
+
         // Seal the block with the in-turn difficulty and return if hashes match
         block.header.difficulty = CLIQUE_IN_TURN_DIFFICULTY;
         let block_hash_in_turn = block.hash_slow();

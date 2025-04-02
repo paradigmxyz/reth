@@ -15,17 +15,23 @@ workspace = true
 # reth
 reth-basic-payload-builder.workspace = true
 reth-chainspec.workspace = true
-reth-rpc-eth-types.workspace = true
+reth-db = { workspace = true, features = ["scroll-alloy-traits"] }
+reth-engine-local = { workspace = true, features = ["scroll-alloy-traits"] }
 reth-eth-wire-types.workspace = true
 reth-evm = { workspace = true, features = ["scroll-alloy-traits"] }
+reth-e2e-test-utils = { workspace = true, optional = true }
 reth-network.workspace = true
 reth-node-api.workspace = true
+reth-node-core = { workspace = true, optional = true }
 reth-node-types.workspace = true
 reth-node-builder.workspace = true
 reth-payload-builder.workspace = true
 reth-primitives = { workspace = true, features = ["c-kzg"] }
 reth-primitives-traits.workspace = true
 reth-provider.workspace = true
+reth-rpc-eth-types.workspace = true
+reth-rpc-server-types = { workspace = true, optional = true }
+reth-tasks = { workspace = true, optional = true }
 reth-tracing.workspace = true
 reth-transaction-pool.workspace = true
 reth-trie-db.workspace = true
@@ -36,9 +42,11 @@ revm = { workspace = true, features = ["c-kzg"] }
 # alloy
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
+alloy-genesis = { workspace = true, optional = true }
+alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
 
-# scroll
+# scroll-reth
 reth-scroll-chainspec.workspace = true
 reth-scroll-consensus.workspace = true
 reth-scroll-engine-primitives.workspace = true
@@ -46,27 +54,71 @@ reth-scroll-evm.workspace = true
 reth-scroll-payload.workspace = true
 reth-scroll-primitives = { workspace = true, features = ["serde", "serde-bincode-compat", "reth-codec"] }
 reth-scroll-rpc.workspace = true
+reth-scroll-txpool.workspace = true
+
+# scroll-alloy
 scroll-alloy-consensus.workspace = true
 scroll-alloy-evm.workspace = true
 scroll-alloy-hardforks.workspace = true
 scroll-alloy-rpc-types-engine.workspace = true
 
-# alloy
-alloy-primitives.workspace = true
-
 # misc
 eyre.workspace = true
+serde_json = { workspace = true, optional = true }
+tracing.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 
+[dev-dependencies]
+reth-scroll-node = { workspace = true, features = ["test-utils"] }
+reth-db.workspace = true
+reth-node-core.workspace = true
+reth-node-builder = { workspace = true, features = ["test-utils"] }
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-revm = { workspace = true, features = ["test-utils"] }
+reth-tasks.workspace = true
+
+alloy-primitives.workspace = true
+scroll-alloy-consensus.workspace = true
+alloy-network.workspace = true
+alloy-consensus.workspace = true
+futures.workspace = true
+
 [features]
-default = ["reth-codec"]
+default = ["reth-codec", "scroll-alloy-traits"]
 reth-codec = [
-    "reth-primitives/reth-codec",
-    "reth-primitives-traits/reth-codec",
     "reth-scroll-primitives/reth-codec",
 ]
 skip-state-root-validation = [
     "reth-provider/skip-state-root-validation",
     "reth-node-builder/skip-state-root-validation",
+]
+test-utils = [
+    "dep:alloy-genesis",
+    "dep:reth-e2e-test-utils",
+    "dep:reth-node-core",
+    "dep:reth-rpc-server-types",
+    "dep:reth-tasks",
+    "dep:serde_json",
+    "reth-chainspec/test-utils",
+    "reth-evm/test-utils",
+    "reth-network/test-utils",
+    "reth-node-builder/test-utils",
+    "reth-payload-builder/test-utils",
+    "reth-primitives/test-utils",
+    "reth-primitives-traits/test-utils",
+    "reth-provider/test-utils",
+    "reth-scroll-payload/test-utils",
+    "reth-transaction-pool/test-utils",
+    "reth-trie-db/test-utils",
+    "reth-db/test-utils",
+    "reth-revm/test-utils",
+    "reth-scroll-node/test-utils",
+]
+scroll-alloy-traits = [
+    "reth-db/scroll-alloy-traits",
+    "reth-evm/scroll-alloy-traits",
+    "reth-primitives-traits/scroll-alloy-traits",
+    "reth-scroll-node/scroll-alloy-traits",
+    "reth-engine-local/scroll-alloy-traits",
 ]

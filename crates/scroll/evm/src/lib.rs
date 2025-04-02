@@ -11,6 +11,9 @@ mod config;
 pub use execute::{ScrollBlockExecutionInput, ScrollExecutorProvider};
 mod execute;
 
+mod l1;
+pub use l1::RethL1BlockInfo;
+
 pub use receipt::ScrollRethReceiptBuilder;
 mod receipt;
 
@@ -83,26 +86,35 @@ impl<ChainSpec: ScrollHardforks, N: NodePrimitives, R> ScrollEvmConfig<ChainSpec
         number: BlockNumber,
     ) -> ScrollSpecId {
         let chain_spec = self.chain_spec();
-        if chain_spec
-            .scroll_fork_activation(ScrollHardfork::DarwinV2)
-            .active_at_timestamp_or_number(timestamp, number) ||
-            chain_spec
-                .scroll_fork_activation(ScrollHardfork::Darwin)
-                .active_at_timestamp_or_number(timestamp, number)
-        {
-            ScrollSpecId::DARWIN
-        } else if chain_spec
-            .scroll_fork_activation(ScrollHardfork::Curie)
+        spec_id_at_timestamp_and_number(timestamp, number, chain_spec)
+    }
+}
+
+/// Returns the spec id at the given timestamp and block number for the provided chain spec.
+pub fn spec_id_at_timestamp_and_number(
+    timestamp: u64,
+    number: u64,
+    chain_spec: impl ScrollHardforks,
+) -> ScrollSpecId {
+    if chain_spec
+        .scroll_fork_activation(ScrollHardfork::DarwinV2)
+        .active_at_timestamp_or_number(timestamp, number) ||
+        chain_spec
+            .scroll_fork_activation(ScrollHardfork::Darwin)
             .active_at_timestamp_or_number(timestamp, number)
-        {
-            ScrollSpecId::CURIE
-        } else if chain_spec
-            .scroll_fork_activation(ScrollHardfork::Bernoulli)
-            .active_at_timestamp_or_number(timestamp, number)
-        {
-            ScrollSpecId::BERNOULLI
-        } else {
-            ScrollSpecId::SHANGHAI
-        }
+    {
+        ScrollSpecId::DARWIN
+    } else if chain_spec
+        .scroll_fork_activation(ScrollHardfork::Curie)
+        .active_at_timestamp_or_number(timestamp, number)
+    {
+        ScrollSpecId::CURIE
+    } else if chain_spec
+        .scroll_fork_activation(ScrollHardfork::Bernoulli)
+        .active_at_timestamp_or_number(timestamp, number)
+    {
+        ScrollSpecId::BERNOULLI
+    } else {
+        ScrollSpecId::SHANGHAI
     }
 }

@@ -167,7 +167,7 @@ mod tests {
     }
 
     #[test]
-    fn serialize_empty_optimism_transaction_receipt_fields_struct() {
+    fn serialize_empty_scroll_transaction_receipt_fields_struct() {
         let scroll_fields = ScrollTransactionReceiptFields::default();
 
         let json = serde_json::to_value(scroll_fields).unwrap();

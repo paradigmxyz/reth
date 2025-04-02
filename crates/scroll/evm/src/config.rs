@@ -129,7 +129,7 @@ where
         parent: &SealedHeader<N::BlockHeader>,
         _attributes: Self::NextBlockEnvCtx,
     ) -> ExecutionCtxFor<'_, Self> {
-        ScrollBlockExecutionCtx { parent_hash: parent.header().parent_hash() }
+        ScrollBlockExecutionCtx { parent_hash: parent.hash() }
     }
 }
 

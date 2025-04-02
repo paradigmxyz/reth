@@ -121,6 +121,7 @@ members = [
     "crates/scroll/node",
     "crates/scroll/payload",
     "crates/scroll/primitives",
+    "crates/scroll/txpool",
     "crates/scroll/rpc",
     "crates/scroll/trie",
     "crates/stages/api/",
@@ -529,6 +530,7 @@ reth-scroll-payload = { path = "crates/scroll/payload" }
 reth-scroll-primitives = { path = "crates/scroll/primitives" }
 reth-scroll-rpc = { path = "crates/scroll/rpc" }
 reth-scroll-trie = { path = "crates/scroll/trie" }
+reth-scroll-txpool = { path = "crates/scroll/txpool" }
 # TODO (scroll): point to crates.io/tag once the crate is published/a tag is created.
 poseidon-bn254 = { git = "https://github.com/scroll-tech/poseidon-bn254", rev = "526a64a", features = ["bn254"] }
 

@@ -12,17 +12,42 @@ exclude.workspace = true
 workspace = true
 
 [dependencies]
+#  alloy
+alloy-rlp.workspace = true
+alloy-consensus.workspace = true
+alloy-primitives.workspace = true
+
+# scroll-alloy
+scroll-alloy-hardforks.workspace = true
+scroll-alloy-consensus.workspace = true
+
+#  revm
+revm.workspace = true
+
 # reth
 reth-basic-payload-builder.workspace = true
-reth-payload-builder = { workspace = true, optional = true }
+reth-chainspec.workspace = true
+reth-chain-state.workspace = true
+reth-evm.workspace = true
+reth-execution-types.workspace = true
+reth-payload-builder.workspace = true
 reth-payload-primitives.workspace = true
 reth-primitives-traits.workspace = true
+reth-revm.workspace = true
+reth-scroll-chainspec.workspace = true
+reth-scroll-forks.workspace = true
+reth-storage-api.workspace = true
 reth-transaction-pool.workspace = true
 reth-payload-util.workspace = true
 
 # scroll
+reth-scroll-primitives.workspace = true
 reth-scroll-engine-primitives.workspace = true
+
+# misc
 futures-util = { workspace = true, optional = true }
+thiserror.workspace = true
+tracing.workspace = true
 
 [features]
 std = [
@@ -30,11 +55,25 @@ std = [
     "reth-payload-primitives/std",
     "reth-primitives-traits/std",
     "reth-scroll-engine-primitives/std",
+    "alloy-consensus/std",
+    "alloy-primitives/std",
+    "alloy-rlp/std",
+    "reth-chainspec/std",
+    "reth-evm/std",
+    "reth-execution-types/std",
+    "reth-revm/std",
+    "reth-storage-api/std",
+    "revm/std",
+    "thiserror/std",
+    "tracing/std",
 ]
 test-utils = [
     "dep:futures-util",
-    "dep:reth-payload-builder",
     "reth-payload-builder/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-transaction-pool/test-utils",
+    "reth-chain-state/test-utils",
+    "reth-chainspec/test-utils",
+    "reth-evm/test-utils",
+    "reth-revm/test-utils",
 ]

@@ -338,6 +338,13 @@ impl ScrollHardforks for ScrollChainSpec {
     }
 }
 
+impl From<ChainSpec> for ScrollChainSpec {
+    fn from(value: ChainSpec) -> Self {
+        let genesis = value.genesis;
+        genesis.into()
+    }
+}
+
 impl From<Genesis> for ScrollChainSpec {
     fn from(genesis: Genesis) -> Self {
         let scroll_chain_info = ScrollConfigInfo::extract_from(&genesis);

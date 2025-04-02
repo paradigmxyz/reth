@@ -83,6 +83,7 @@ exclude_crates=(
   reth-scroll-engine-primitives # proptest
   reth-scroll-payload # c-kzg
   reth-scroll-primitives # c-kzg
+  reth-scroll-txpool
 )
 
 # Array to hold the results

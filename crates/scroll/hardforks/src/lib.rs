@@ -3,7 +3,9 @@
 #![doc = include_str!("../docs/hardforks.md")]
 
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
-use scroll_alloy_hardforks::ScrollHardfork;
+
+// Re-export scroll-alloy-hardforks types.
+pub use scroll_alloy_hardforks::{ScrollHardfork, ScrollHardforks};
 
 #[cfg(not(feature = "std"))]
 use once_cell::sync::Lazy as LazyLock;
