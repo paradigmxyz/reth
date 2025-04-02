@@ -10,6 +10,7 @@ license.workspace = true
 reth-chain-state.workspace = true
 reth-chainspec.workspace = true
 reth-codecs.workspace = true
+reth-network.workspace = true
 reth-network-peers.workspace = true
 reth-node-api.workspace = true
 reth-node-builder.workspace = true
@@ -21,6 +22,7 @@ reth-payload-builder.workspace = true
 reth-primitives-traits.workspace = true
 reth-rpc-api.workspace = true
 reth-rpc-engine-api.workspace = true
+reth-transaction-pool.workspace = true
 
 # revm
 revm-primitives.workspace = true
@@ -55,4 +57,5 @@ arbitrary = [
     "reth-optimism-primitives/arbitrary",
     "reth-primitives-traits/arbitrary",
     "revm-primitives/arbitrary",
+    "reth-transaction-pool/arbitrary",
 ]
