@@ -9202,6 +9202,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-client",
  "alloy-rpc-types-eth",
+ "alloy-serde",
  "c-kzg",
  "derive_more 2.0.1",
  "futures-util",
