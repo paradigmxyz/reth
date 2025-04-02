@@ -1,6 +1,6 @@
 //! Trait for specifying `eth` network dependent API types.
 
-use crate::{AsEthApiError, FromEthApiError, RpcNodeCore};
+use crate::{AsEthApiError, FromEthApiError, RpcNodeCoreExt};
 use alloy_json_rpc::RpcObject;
 use alloy_network::{Network, ReceiptResponse, TransactionResponse};
 use alloy_rpc_types_eth::Block;
@@ -78,7 +78,7 @@ pub type RpcError<T> = <T as EthApiTypes>::Error;
 /// Helper trait holds necessary trait bounds on [`EthApiTypes`] to implement `eth` API.
 pub trait FullEthApiTypes
 where
-    Self: RpcNodeCore<
+    Self: RpcNodeCoreExt<
             Primitives: NodePrimitives,
             Provider: TransactionsProvider<Transaction = TxTy<Self::Primitives>>
                           + ReceiptProvider<Receipt = ReceiptTy<Self::Primitives>>,
@@ -94,7 +94,7 @@ where
 }
 
 impl<T> FullEthApiTypes for T where
-    T: RpcNodeCore<
+    T: RpcNodeCoreExt<
             Primitives: NodePrimitives,
             Provider: TransactionsProvider<Transaction = TxTy<Self::Primitives>>
                           + ReceiptProvider<Receipt = ReceiptTy<Self::Primitives>>,
