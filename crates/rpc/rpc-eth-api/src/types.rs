@@ -4,7 +4,9 @@ use crate::{AsEthApiError, FromEthApiError, RpcNodeCore};
 use alloy_json_rpc::RpcObject;
 use alloy_network::{Network, ReceiptResponse, TransactionResponse};
 use alloy_rpc_types_eth::Block;
-use reth_provider::{ProviderTx, ReceiptProvider, TransactionsProvider};
+use reth_node_api::NodePrimitives;
+use reth_primitives_traits::{ReceiptTy, TxTy};
+use reth_provider::{ReceiptProvider, TransactionsProvider};
 use reth_rpc_types_compat::TransactionCompat;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::{
@@ -77,13 +79,13 @@ pub type RpcError<T> = <T as EthApiTypes>::Error;
 pub trait FullEthApiTypes
 where
     Self: RpcNodeCore<
-            Provider: TransactionsProvider + ReceiptProvider,
-            Pool: TransactionPool<
-                Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
-            >,
+            Primitives: NodePrimitives,
+            Provider: TransactionsProvider<Transaction = TxTy<Self::Primitives>>
+                          + ReceiptProvider<Receipt = ReceiptTy<Self::Primitives>>,
+            Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Primitives>>>,
         > + EthApiTypes<
             TransactionCompat: TransactionCompat<
-                <Self::Provider as TransactionsProvider>::Transaction,
+                TxTy<Self::Primitives>,
                 Transaction = RpcTransaction<Self::NetworkTypes>,
                 Error = RpcError<Self>,
             >,
@@ -93,13 +95,13 @@ where
 
 impl<T> FullEthApiTypes for T where
     T: RpcNodeCore<
-            Provider: TransactionsProvider + ReceiptProvider,
-            Pool: TransactionPool<
-                Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
-            >,
+            Primitives: NodePrimitives,
+            Provider: TransactionsProvider<Transaction = TxTy<Self::Primitives>>
+                          + ReceiptProvider<Receipt = ReceiptTy<Self::Primitives>>,
+            Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Primitives>>>,
         > + EthApiTypes<
             TransactionCompat: TransactionCompat<
-                <Self::Provider as TransactionsProvider>::Transaction,
+                TxTy<Self::Primitives>,
                 Transaction = RpcTransaction<T::NetworkTypes>,
                 Error = RpcError<T>,
             >,

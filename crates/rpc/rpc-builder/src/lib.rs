@@ -123,7 +123,7 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     EvmConfig: ConfigureEvm<Primitives = N>,
-    EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
+    EthApi: FullEthApiServer<Primitives = N, Provider = Provider, Pool = Pool>,
     BlockExecutor: BlockExecutorProvider<Primitives = N>,
 {
     let module_config = module_config.into();
@@ -564,7 +564,7 @@ where
         RpcRegistryInner<Provider, Pool, Network, Tasks, EthApi, BlockExecutor, Consensus>,
     )
     where
-        EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
+        EthApi: FullEthApiServer<Primitives = N, Provider = Provider, Pool = Pool>,
     {
         let Self {
             provider, pool, network, executor, evm_config, block_executor, consensus, ..
@@ -627,7 +627,7 @@ where
         eth: EthApi,
     ) -> TransportRpcModules<()>
     where
-        EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
+        EthApi: FullEthApiServer<Primitives = N, Provider = Provider, Pool = Pool>,
     {
         let mut modules = TransportRpcModules::default();
 
@@ -1112,7 +1112,7 @@ where
     Pool: TransactionPool + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
+    EthApi: FullEthApiServer<Primitives = N, Provider = Provider, Pool = Pool>,
     BlockExecutor: BlockExecutorProvider<Primitives = N>,
     Consensus: FullConsensus<N, Error = ConsensusError> + Clone + 'static,
 {
