@@ -724,10 +724,10 @@ impl<T: TransactionOrdering> TxPool<T> {
         }
     }
 
-    // check_delegation_limit determines if the tx sender is delegated or has a
-    // pending delegation, and if so, ensures they have at most one in-flight
-    // **executable** transaction, e.g. disallow stacked and gapped transactions
-    // from the account.
+    /// Determines if the tx sender is delegated or has a
+    /// pending delegation, and if so, ensures they have at most one in-flight
+    /// **executable** transaction, e.g. disallow stacked and nonce-gapped transactions
+    /// from the account.
     fn check_delegation_limit(
         &self,
         transaction: &ValidPoolTransaction<T::Transaction>,
