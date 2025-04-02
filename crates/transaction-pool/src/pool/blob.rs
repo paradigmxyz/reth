@@ -16,7 +16,8 @@ use std::{
 ///
 /// This expects that certain constraints are met:
 ///   - blob transactions are always gap less
-pub(crate) struct BlobTransactions<T: PoolTransaction> {
+#[derive(Debug, Clone)]
+pub struct BlobTransactions<T: PoolTransaction> {
     /// Keeps track of transactions inserted in the pool.
     ///
     /// This way we can determine when transactions were submitted to the pool.
@@ -42,7 +43,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
     ///
     ///   - If the transaction is not a blob tx.
     ///   - If the transaction is already included.
-    pub(crate) fn add_transaction(&mut self, tx: Arc<ValidPoolTransaction<T>>) {
+    pub fn add_transaction(&mut self, tx: Arc<ValidPoolTransaction<T>>) {
         assert!(tx.is_eip4844(), "transaction is not a blob tx");
         let id = *tx.id();
         assert!(!self.contains(&id), "transaction already included {:?}", self.get(&id).unwrap());
@@ -217,10 +218,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
     /// the [`BlobOrd`] struct.
     ///
     /// Removed transactions are returned in the order they were removed.
-    pub(crate) fn truncate_pool(
-        &mut self,
-        limit: SubPoolLimit,
-    ) -> Vec<Arc<ValidPoolTransaction<T>>> {
+    pub fn truncate_pool(&mut self, limit: SubPoolLimit) -> Vec<Arc<ValidPoolTransaction<T>>> {
         let mut removed = Vec::new();
 
         while self.exceeds(&limit) {
