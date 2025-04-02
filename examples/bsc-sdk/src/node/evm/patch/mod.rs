@@ -1,6 +1,6 @@
-use alloy_consensus::Transaction;
 use alloy_primitives::{address, b256, Address, B256, U256};
 use reth_evm::block::BlockExecutionError;
+use reth_primitives_traits::SignedTransaction;
 use reth_revm::{db::states::StorageSlot, State};
 use revm::Database;
 use std::{collections::HashMap, str::FromStr, sync::LazyLock};
@@ -590,89 +590,17 @@ static MAINNET_PATCHES_AFTER_TX: LazyLock<HashMap<B256, StoragePatch>> = LazyLoc
     ])
 });
 
-static CHAPEL_PATCHES_BEFORE_TX: LazyLock<HashMap<B256, StoragePatch>> = LazyLock::new(|| {
-    HashMap::from([
-        // patch 1: BlockNum 35547779, txIndex 196
-        (
-            b256!("7ce9a3cf77108fcc85c1e84e88e363e3335eca515dfcf2feb2011729878b13a7"),
-            StoragePatch {
-                address: address!("89791428868131eb109e42340ad01eb8987526b2"),
-                storage: HashMap::from([(
-                    U256::from_str(
-                        "0xf1e9242398de526b8dd9c25d38e65fbb01926b8940377762d7884b8b0dcdc3b0",
-                    )
-                    .unwrap(),
-                    U256::from_str(
-                        "0x0000000000000000000000000000000000000000000000f6a7831804efd2cd0a",
-                    )
-                    .unwrap(),
-                )]),
-            },
-        ),
-        // patch 2: BlockNum 35548081, txIndex 486
-        (
-            b256!("e3895eb95605d6b43ceec7876e6ff5d1c903e572bf83a08675cb684c047a695c"),
-            StoragePatch {
-                address: address!("89791428868131eb109e42340ad01eb8987526b2"),
-                storage: HashMap::from([(
-                    U256::from_str(
-                        "0xf1e9242398de526b8dd9c25d38e65fbb01926b8940377762d7884b8b0dcdc3b0",
-                    )
-                    .unwrap(),
-                    U256::from_str(
-                        "0x0000000000000000000000000000000000000000000000114be8ecea72b64003",
-                    )
-                    .unwrap(),
-                )]),
-            },
-        ),
-    ])
-});
-
-static CHAPEL_PATCHES_AFTER_TX: LazyLock<HashMap<B256, StoragePatch>> = LazyLock::new(|| {
-    HashMap::from([
-        // patch 1: BlockNum 35547779, txIndex 196
-        (
-            b256!("7ce9a3cf77108fcc85c1e84e88e363e3335eca515dfcf2feb2011729878b13a7"),
-            StoragePatch {
-                address: address!("89791428868131eb109e42340ad01eb8987526b2"),
-                storage: HashMap::from([(
-                    U256::from_str(
-                        "0xf1e9242398de526b8dd9c25d38e65fbb01926b8940377762d7884b8b0dcdc3b0",
-                    )
-                    .unwrap(),
-                    U256::ZERO,
-                )]),
-            },
-        ),
-        // patch 2: BlockNum 35548081, txIndex 486
-        (
-            b256!("e3895eb95605d6b43ceec7876e6ff5d1c903e572bf83a08675cb684c047a695c"),
-            StoragePatch {
-                address: address!("89791428868131eb109e42340ad01eb8987526b2"),
-                storage: HashMap::from([(
-                    U256::from_str(
-                        "0xf1e9242398de526b8dd9c25d38e65fbb01926b8940377762d7884b8b0dcdc3b0",
-                    )
-                    .unwrap(),
-                    U256::ZERO,
-                )]),
-            },
-        ),
-    ])
-});
-
 pub(crate) fn patch_mainnet_before_tx<DB, T>(
     transaction: &T,
     state: &mut State<DB>,
 ) -> Result<(), BlockExecutionError>
 where
-    T: Transaction,
+    T: SignedTransaction,
     DB: Database,
     <DB as revm::Database>::Error: Sync + Send + 'static,
 {
-    let tx_hash = B256::ZERO; // TODO: how to get the tx hash?
-    if let Some(patch) = MAINNET_PATCHES_BEFORE_TX.get(&tx_hash) {
+    let tx_hash = transaction.tx_hash();
+    if let Some(patch) = MAINNET_PATCHES_BEFORE_TX.get(tx_hash) {
         trace!("patch evm state for mainnet before tx {:?}", tx_hash);
 
         apply_patch(state, patch.address, &patch.storage)?;
@@ -687,9 +615,10 @@ pub(crate) fn patch_mainnet_after_tx<DB, T>(
 where
     DB: Database,
     <DB as revm::Database>::Error: Sync + Send + 'static,
+    T: SignedTransaction,
 {
-    let tx_hash = B256::ZERO; // TODO: how to get the tx hash?
-    if let Some(patch) = MAINNET_PATCHES_AFTER_TX.get(&tx_hash) {
+    let tx_hash = transaction.tx_hash();
+    if let Some(patch) = MAINNET_PATCHES_AFTER_TX.get(tx_hash) {
         trace!("patch evm state for mainnet after tx {:?}", tx_hash);
 
         apply_patch(state, patch.address, &patch.storage)?;

@@ -1,20 +1,6 @@
-use abi::{STAKE_HUB_ABI, VALIDATOR_SET_ABI};
-use alloy_consensus::TxLegacy;
-use alloy_dyn_abi::JsonAbiExt;
-use alloy_json_abi::JsonAbi;
-use alloy_primitives::{BlockNumber, Bytes, PrimitiveSignature, TxKind, B256, U256};
-use reth_chainspec::ChainSpec;
-use reth_primitives::{Transaction, TransactionSigned};
+use alloy_primitives::{BlockNumber, B256};
 use reth_provider::{BlockNumReader, ProviderError};
-use std::{cmp::Ordering, sync::Arc};
-
-use crate::system_contracts::{
-    CROSS_CHAIN_CONTRACT, GOVERNOR_CONTRACT, GOV_TOKEN_CONTRACT, LIGHT_CLIENT_CONTRACT,
-    RELAYER_HUB_CONTRACT, RELAYER_INCENTIVIZE_CONTRACT, SLASH_CONTRACT, STAKE_HUB_CONTRACT,
-    TIMELOCK_CONTRACT, TOKEN_HUB_CONTRACT, TOKEN_RECOVER_PORTAL_CONTRACT, VALIDATOR_CONTRACT,
-};
-
-mod abi;
+use std::cmp::Ordering;
 
 /// Errors that can occur in Parlia consensus
 #[derive(Debug, thiserror::Error)]
@@ -31,20 +17,12 @@ pub enum ParliaConsensusErr {
 pub struct ParliaConsensus<P> {
     /// The provider for reading block information
     provider: P,
-    /// The validator contract abi
-    validator_abi: JsonAbi,
-    /// The stake hub abi
-    stake_hub_abi: JsonAbi,
-    /// The chain spec
-    chain_spec: Arc<ChainSpec>,
 }
 
 impl<P> ParliaConsensus<P> {
     /// Create a new Parlia consensus instance
-    pub fn new(provider: P, chain_spec: Arc<ChainSpec>) -> Self {
-        let validator_abi = serde_json::from_str(*VALIDATOR_SET_ABI).unwrap();
-        let stake_hub_abi = serde_json::from_str(*STAKE_HUB_ABI).unwrap();
-        Self { provider, validator_abi, stake_hub_abi, chain_spec }
+    pub fn new(provider: P) -> Self {
+        Self { provider }
     }
 }
 
@@ -52,72 +30,6 @@ impl<P> ParliaConsensus<P>
 where
     P: BlockNumReader + Clone,
 {
-    pub fn genesis_contracts_txs(&self) -> Vec<TransactionSigned> {
-        let function = self.validator_abi.function("init").unwrap().first().unwrap();
-        let input = function.abi_encode_input(&[]).unwrap();
-
-        let contracts = vec![
-            VALIDATOR_CONTRACT,
-            SLASH_CONTRACT,
-            LIGHT_CLIENT_CONTRACT,
-            RELAYER_HUB_CONTRACT,
-            TOKEN_HUB_CONTRACT,
-            RELAYER_INCENTIVIZE_CONTRACT,
-            CROSS_CHAIN_CONTRACT,
-        ];
-
-        let signature = PrimitiveSignature::new(Default::default(), Default::default(), false);
-
-        contracts
-            .into_iter()
-            .map(|contract| {
-                let tx = Transaction::Legacy(TxLegacy {
-                    chain_id: Some(self.chain_spec.chain().id()),
-                    nonce: 0,
-                    gas_limit: u64::MAX / 2,
-                    gas_price: 0,
-                    value: U256::ZERO,
-                    input: Bytes::from(input.clone()),
-                    to: TxKind::Call(contract.parse().unwrap()),
-                });
-
-                TransactionSigned::new_unhashed(tx, signature)
-            })
-            .collect()
-    }
-
-    pub fn feynman_contracts_txs(&self) -> Vec<TransactionSigned> {
-        let function = self.stake_hub_abi.function("initialize").unwrap().first().unwrap();
-        let input = function.abi_encode_input(&[]).unwrap();
-
-        let signature = PrimitiveSignature::new(Default::default(), Default::default(), false);
-
-        let contracts = vec![
-            STAKE_HUB_CONTRACT,
-            GOVERNOR_CONTRACT,
-            GOV_TOKEN_CONTRACT,
-            TIMELOCK_CONTRACT,
-            TOKEN_RECOVER_PORTAL_CONTRACT,
-        ];
-
-        contracts
-            .into_iter()
-            .map(|contract| {
-                let tx = Transaction::Legacy(TxLegacy {
-                    chain_id: Some(self.chain_spec.chain().id()),
-                    nonce: 0,
-                    gas_limit: u64::MAX / 2,
-                    gas_price: 0,
-                    value: U256::ZERO,
-                    input: Bytes::from(input.clone()),
-                    to: TxKind::Call(contract.parse().unwrap()),
-                });
-
-                TransactionSigned::new_unhashed(tx, signature)
-            })
-            .collect()
-    }
-
     /// Determines the head block hash according to Parlia consensus rules:
     /// 1. Follow the highest block number
     /// 2. For same height blocks, pick the one with lower hash
@@ -140,15 +52,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
+    use super::*;
     use alloy_primitives::hex;
     use reth_chainspec::ChainInfo;
     use reth_provider::BlockHashReader;
-
-    use crate::chainspec::bsc::bsc_mainnet;
-
-    use super::*;
+    use std::collections::HashMap;
 
     #[derive(Clone)]
     struct MockProvider {
@@ -215,7 +123,7 @@ mod tests {
 
         for ((curr_hash, curr_num, head_num, head_hash), expected) in test_cases {
             let provider = MockProvider::new(head_num, head_hash);
-            let consensus = ParliaConsensus::new(provider, bsc_mainnet());
+            let consensus = ParliaConsensus::new(provider);
             assert_eq!(consensus.canonical_head(curr_hash, curr_num).unwrap(), expected);
         }
     }
