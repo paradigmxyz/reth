@@ -1065,8 +1065,8 @@ impl TryFrom<Recovered<TxEnvelope>> for MockTransaction {
         let size = transaction.size();
 
         match transaction {
-            TransactionType::Legacy => {
-                let envelope: EthereumTxEnvelope<TxLegacy> = transaction.into();
+            EthereumTxEnvelope::Legacy(signed_tx) => {
+                let tx = signed_tx.strip_signature();
                 Ok(Self::Legacy {
                     chain_id: tx.chain_id,
                     hash,
@@ -1081,8 +1081,8 @@ impl TryFrom<Recovered<TxEnvelope>> for MockTransaction {
                     cost: U256::from(tx.gas_limit) * U256::from(tx.gas_price) + tx.value,
                 })
             }
-            ETransactionType::Eip2930 => {
-                let envelope: EthereumTxEnvelope<TxEip2930> = transaction.into();
+            EthereumTxEnvelope::Eip2930(signed_tx) => {
+                let tx = signed_tx.strip_signature();
                 Ok(Self::Eip2930 {
                     chain_id: tx.chain_id,
                     hash,
@@ -1098,8 +1098,8 @@ impl TryFrom<Recovered<TxEnvelope>> for MockTransaction {
                     cost: U256::from(tx.gas_limit) * U256::from(tx.gas_price) + tx.value,
                 })
             }
-            TransactionType::Eip1559 => {
-                let envelope: EthereumTxEnvelope<TxEip1559> = transaction.into();
+            EthereumTxEnvelope::Eip1559(signed_tx) => {
+                let tx = signed_tx.strip_signature();
                 Ok(Self::Eip1559 {
                     chain_id: tx.chain_id,
                     hash,
@@ -1116,9 +1116,8 @@ impl TryFrom<Recovered<TxEnvelope>> for MockTransaction {
                     cost: U256::from(tx.gas_limit) * U256::from(tx.max_fee_per_gas) + tx.value,
                 })
             }
-            TransactionType::Eip4844 => {
-                let envelope: EthereumTxEnvelope<TxEip4844> = transaction.into();
-                Ok(Self::Eip4844 {
+            EthereumTxEnvelope::Eip4844(signed_tx) => match signed_tx.tx() {
+                TxEip4844Variant::TxEip4844(tx) => Ok(Self::Eip4844 {
                     chain_id: tx.chain_id,
                     hash,
                     sender,
@@ -1136,10 +1135,10 @@ impl TryFrom<Recovered<TxEnvelope>> for MockTransaction {
                     size,
                     cost: U256::from(tx.gas_limit) * U256::from(tx.max_fee_per_gas) + tx.value,
                 }),
-                _ => Err(TryFromRecoveredTransactionError::UnsupportedTransactionType(tx.ty())),
+                tx => Err(TryFromRecoveredTransactionError::UnsupportedTransactionType(tx.ty())),
             },
-            TransactionType::Eip7702 => {
-                let envelope: EthereumTxEnvelope<TxEip7702> = transaction.into();
+            EthereumTxEnvelope::Eip7702(signed_tx) => {
+                let tx = signed_tx.strip_signature();
                 Ok(Self::Eip7702 {
                     chain_id: tx.chain_id,
                     hash,
