@@ -1,4 +1,7 @@
-use crate::{hashed_cursor::HashedCursor, trie_cursor::TrieCursor, walker::TrieWalker, Nibbles};
+use crate::{
+    hashed_cursor::HashedCursor, trie::TrieType, trie_cursor::TrieCursor, walker::TrieWalker,
+    Nibbles,
+};
 use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
 use tracing::trace;
@@ -45,17 +48,30 @@ pub struct TrieNodeIter<C, H: HashedCursor> {
     current_hashed_entry: Option<(B256, <H as HashedCursor>::Value)>,
     /// Flag indicating whether we should check the current walker key.
     should_check_walker_key: bool,
+
+    #[cfg(feature = "metrics")]
+    metrics: crate::metrics::TrieNodeIterMetrics,
+    #[cfg(feature = "metrics")]
+    previously_seeked_key: Option<B256>,
+    #[cfg(feature = "metrics")]
+    previously_advanced_to_key: Option<B256>,
 }
 
 impl<C, H: HashedCursor> TrieNodeIter<C, H> {
     /// Creates a new [`TrieNodeIter`].
-    pub const fn new(walker: TrieWalker<C>, hashed_cursor: H) -> Self {
+    pub fn new(walker: TrieWalker<C>, hashed_cursor: H, trie_type: TrieType) -> Self {
         Self {
             walker,
             hashed_cursor,
             previous_hashed_key: None,
             current_hashed_entry: None,
             should_check_walker_key: false,
+            #[cfg(feature = "metrics")]
+            metrics: crate::metrics::TrieNodeIterMetrics::new(trie_type),
+            #[cfg(feature = "metrics")]
+            previously_seeked_key: None,
+            #[cfg(feature = "metrics")]
+            previously_advanced_to_key: None,
         }
     }
 
@@ -64,6 +80,41 @@ impl<C, H: HashedCursor> TrieNodeIter<C, H> {
     pub const fn with_last_hashed_key(mut self, previous_hashed_key: B256) -> Self {
         self.previous_hashed_key = Some(previous_hashed_key);
         self
+    }
+
+    /// Seeks the hashed cursor to the given key.
+    ///
+    /// If `metrics` feature is enabled, also updates the metrics.
+    fn hashed_cursor_seek(&mut self, key: B256) -> Result<Option<(B256, H::Value)>, DatabaseError> {
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.inc_leaf_nodes_seeked();
+
+            if Some(key) == self.previously_seeked_key {
+                self.metrics.inc_leaf_nodes_same_seeked();
+            }
+            self.previously_seeked_key = Some(key);
+
+            if Some(key) == self.previously_advanced_to_key {
+                self.metrics.inc_leaf_nodes_same_seeked_as_advanced();
+            }
+        }
+        self.hashed_cursor.seek(key)
+    }
+
+    /// Advances the hashed cursor to the next entry.
+    ///
+    /// If `metrics` feature is enabled, also updates the metrics.
+    fn hashed_cursor_next(&mut self) -> Result<Option<(B256, H::Value)>, DatabaseError> {
+        let result = self.hashed_cursor.next();
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.inc_leaf_nodes_advanced();
+
+            self.previously_advanced_to_key =
+                result.as_ref().ok().and_then(|result| result.as_ref().map(|(k, _)| *k));
+        }
+        result
     }
 }
 
@@ -97,6 +148,8 @@ where
                     self.should_check_walker_key = true;
                     // If it's possible to skip the current node in the walker, return a branch node
                     if self.walker.can_skip_current_node {
+                        #[cfg(feature = "metrics")]
+                        self.metrics.inc_branch_nodes_returned();
                         return Ok(Some(TrieElement::Branch(TrieBranchNode::new(
                             key.clone(),
                             self.walker.hash().unwrap(),
@@ -116,7 +169,10 @@ where
 
                 // Set the next hashed entry as a leaf node and return
                 trace!(target: "trie::node_iter", ?hashed_key, "next hashed entry");
-                self.current_hashed_entry = self.hashed_cursor.next()?;
+                self.current_hashed_entry = self.hashed_cursor_next()?;
+
+                #[cfg(feature = "metrics")]
+                self.metrics.inc_leaf_nodes_returned();
                 return Ok(Some(TrieElement::Leaf(hashed_key, value)))
             }
 
@@ -125,8 +181,8 @@ where
                 Some(hashed_key) => {
                     trace!(target: "trie::node_iter", ?hashed_key, "seeking to the previous hashed entry");
                     // Seek to the previous hashed key and get the next hashed entry
-                    self.hashed_cursor.seek(hashed_key)?;
-                    self.current_hashed_entry = self.hashed_cursor.next()?;
+                    self.hashed_cursor_seek(hashed_key)?;
+                    self.current_hashed_entry = self.hashed_cursor_next()?;
                 }
                 None => {
                     // Get the seek key and set the current hashed entry based on walker's next
@@ -176,7 +232,7 @@ where
                         continue
                     }
 
-                    self.current_hashed_entry = self.hashed_cursor.seek(seek_key)?;
+                    self.current_hashed_entry = self.hashed_cursor_seek(seek_key)?;
                 }
             }
         }
@@ -209,6 +265,7 @@ mod tests {
             HashedPostStateAccountCursor,
         },
         mock::{KeyVisit, KeyVisitType},
+        trie::TrieType,
         trie_cursor::{
             mock::MockTrieCursorFactory, noop::NoopAccountTrieCursor, TrieCursorFactory,
         },
@@ -240,6 +297,7 @@ mod tests {
                 NoopHashedAccountCursor::default(),
                 hashed_post_state.accounts(),
             ),
+            TrieType::State,
         );
 
         while let Some(node) = node_iter.try_next().unwrap() {
@@ -369,8 +427,11 @@ mod tests {
             B256Map::default(),
         );
 
-        let mut iter =
-            TrieNodeIter::new(walker, hashed_cursor_factory.hashed_account_cursor().unwrap());
+        let mut iter = TrieNodeIter::new(
+            walker,
+            hashed_cursor_factory.hashed_account_cursor().unwrap(),
+            TrieType::State,
+        );
 
         // Walk the iterator until it's exhausted.
         while iter.try_next().unwrap().is_some() {}
