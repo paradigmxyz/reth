@@ -30,6 +30,12 @@ pub enum TrieElement<Value> {
     Leaf(B256, Value),
 }
 
+#[derive(Debug)]
+struct SeekedHashedEntry<V> {
+    seeked_key: B256,
+    result: Option<(B256, V)>,
+}
+
 /// An iterator over existing intermediate branch nodes and updated leaf nodes.
 #[derive(Debug)]
 pub struct TrieNodeIter<C, H: HashedCursor> {
@@ -42,12 +48,18 @@ pub struct TrieNodeIter<C, H: HashedCursor> {
     previous_hashed_key: Option<B256>,
 
     /// Current hashed  entry.
-    current_hashed_entry: Option<(B256, <H as HashedCursor>::Value)>,
+    current_hashed_entry: Option<(B256, H::Value)>,
     /// Flag indicating whether we should check the current walker key.
     should_check_walker_key: bool,
+
+    /// The last seeked hashed entry.
+    last_seeked_hashed_entry: Option<SeekedHashedEntry<H::Value>>,
 }
 
-impl<C, H: HashedCursor> TrieNodeIter<C, H> {
+impl<C, H: HashedCursor> TrieNodeIter<C, H>
+where
+    H::Value: Copy,
+{
     /// Creates a new [`TrieNodeIter`].
     pub const fn new(walker: TrieWalker<C>, hashed_cursor: H) -> Self {
         Self {
@@ -56,6 +68,7 @@ impl<C, H: HashedCursor> TrieNodeIter<C, H> {
             previous_hashed_key: None,
             current_hashed_entry: None,
             should_check_walker_key: false,
+            last_seeked_hashed_entry: None,
         }
     }
 
@@ -65,12 +78,31 @@ impl<C, H: HashedCursor> TrieNodeIter<C, H> {
         self.previous_hashed_key = Some(previous_hashed_key);
         self
     }
+
+    /// Seeks the hashed cursor to the given key and returns the entry.
+    ///
+    /// If the key is the same as the last seeked key, the result of the last seek is returned.
+    fn seek_hashed_entry(&mut self, key: B256) -> Result<Option<(B256, H::Value)>, DatabaseError> {
+        if let Some(entry) = self
+            .last_seeked_hashed_entry
+            .as_ref()
+            .filter(|entry| entry.seeked_key == key)
+            .map(|entry| entry.result)
+        {
+            return Ok(entry);
+        }
+
+        let result = self.hashed_cursor.seek(key)?;
+        self.last_seeked_hashed_entry = Some(SeekedHashedEntry { seeked_key: key, result });
+        Ok(result)
+    }
 }
 
 impl<C, H> TrieNodeIter<C, H>
 where
     C: TrieCursor,
     H: HashedCursor,
+    H::Value: Copy,
 {
     /// Return the next trie node to be added to the hash builder.
     ///
@@ -125,7 +157,7 @@ where
                 Some(hashed_key) => {
                     trace!(target: "trie::node_iter", ?hashed_key, "seeking to the previous hashed entry");
                     // Seek to the previous hashed key and get the next hashed entry
-                    self.hashed_cursor.seek(hashed_key)?;
+                    self.seek_hashed_entry(hashed_key)?;
                     self.current_hashed_entry = self.hashed_cursor.next()?;
                 }
                 None => {
@@ -176,7 +208,7 @@ where
                         continue
                     }
 
-                    self.current_hashed_entry = self.hashed_cursor.seek(seek_key)?;
+                    self.current_hashed_entry = self.seek_hashed_entry(seek_key)?;
                 }
             }
         }
