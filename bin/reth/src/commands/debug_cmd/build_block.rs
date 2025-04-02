@@ -1,5 +1,5 @@
 //! Command for debugging block building.
-use alloy_consensus::{BlockHeader, TxEip4844};
+use alloy_consensus::{BlockHeader, TxEip4844, EthereumTxEnvelope};
 use alloy_eips::{
     eip2718::{Encodable2718, Decodable2718},
     eip4844::{env_settings::EnvKzgSettings, BlobTransactionSidecar},
@@ -38,8 +38,6 @@ use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
 use std::{path::PathBuf, str::FromStr, sync::Arc};
 use tracing::*;
-use alloy_consensus::EthereumTxEnvelope;
-
 
 /// `reth debug build-block` command
 /// This debug routine requires that the node is positioned at the block before the target.
