@@ -61,8 +61,6 @@ pub struct TrieNodeIter<C, H: HashedCursor> {
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::TrieNodeIterMetrics,
     #[cfg(feature = "metrics")]
-    previously_seeked_key: Option<B256>,
-    #[cfg(feature = "metrics")]
     previously_advanced_to_key: Option<B256>,
 }
 
@@ -81,8 +79,6 @@ where
             last_seeked_hashed_entry: None,
             #[cfg(feature = "metrics")]
             metrics: crate::metrics::TrieNodeIterMetrics::new(trie_type),
-            #[cfg(feature = "metrics")]
-            previously_seeked_key: None,
             #[cfg(feature = "metrics")]
             previously_advanced_to_key: None,
         }
@@ -107,17 +103,13 @@ where
             .filter(|entry| entry.seeked_key == key)
             .map(|entry| entry.result)
         {
+            self.metrics.inc_leaf_nodes_same_seeked();
             return Ok(entry);
         }
 
         #[cfg(feature = "metrics")]
         {
             self.metrics.inc_leaf_nodes_seeked();
-
-            if Some(key) == self.previously_seeked_key {
-                self.metrics.inc_leaf_nodes_same_seeked();
-            }
-            self.previously_seeked_key = Some(key);
 
             if Some(key) == self.previously_advanced_to_key {
                 self.metrics.inc_leaf_nodes_same_seeked_as_advanced();
