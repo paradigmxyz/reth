@@ -47,6 +47,10 @@ hardfork!(
         HaberFix,
         /// BSC `Bohr` hardfork
         Bohr,
+        /// BSC `Pascal` hardfork
+        Pascal,
+        /// BSC `Prague` hardfork
+        Prague,
     }
 );
 
@@ -215,10 +219,11 @@ impl BscHardfork {
             (Self::Kepler.boxed(), ForkCondition::Timestamp(1705996800)),
             (Self::Feynman.boxed(), ForkCondition::Timestamp(1713419340)),
             (Self::FeynmanFix.boxed(), ForkCondition::Timestamp(1713419340)),
-            (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(1718863500)),
+            (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(1713419340)),
             (Self::Haber.boxed(), ForkCondition::Timestamp(1718863500)),
             (Self::HaberFix.boxed(), ForkCondition::Timestamp(1727316120)),
             (Self::Bohr.boxed(), ForkCondition::Timestamp(1727317200)),
+            (Self::Prague.boxed(), ForkCondition::Timestamp(1742436600)),
         ])
     }
 

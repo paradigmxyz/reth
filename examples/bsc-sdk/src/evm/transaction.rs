@@ -1,6 +1,6 @@
 use alloy_rpc_types::AccessList;
 use auto_impl::auto_impl;
-use reth_evm::{FromRecoveredTx, IntoTxEnv, TransactionEnv};
+use reth_evm::{FromRecoveredTx, FromTxWithEncoded, IntoTxEnv, TransactionEnv};
 use reth_primitives::TransactionSigned;
 use revm::{
     context::TxEnv,
@@ -69,20 +69,12 @@ impl<T: Transaction> Transaction for BscTransaction<T> {
         self.base.chain_id()
     }
 
-    fn access_list(&self) -> Option<impl Iterator<Item = &Self::AccessListItem>> {
-        self.base.access_list()
-    }
-
-    fn max_priority_fee_per_gas(&self) -> Option<u128> {
-        self.base.max_priority_fee_per_gas()
-    }
-
-    fn max_fee_per_gas(&self) -> u128 {
-        self.base.max_fee_per_gas()
-    }
-
     fn gas_price(&self) -> u128 {
         self.base.gas_price()
+    }
+
+    fn access_list(&self) -> Option<impl Iterator<Item = &Self::AccessListItem>> {
+        self.base.access_list()
     }
 
     fn blob_versioned_hashes(&self) -> &[B256] {
@@ -93,16 +85,24 @@ impl<T: Transaction> Transaction for BscTransaction<T> {
         self.base.max_fee_per_blob_gas()
     }
 
-    fn effective_gas_price(&self, base_fee: u128) -> u128 {
-        self.base.effective_gas_price(base_fee)
-    }
-
     fn authorization_list_len(&self) -> usize {
         self.base.authorization_list_len()
     }
 
     fn authorization_list(&self) -> impl Iterator<Item = &Self::Authorization> {
         self.base.authorization_list()
+    }
+
+    fn max_fee_per_gas(&self) -> u128 {
+        self.base.max_fee_per_gas()
+    }
+
+    fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        self.base.max_priority_fee_per_gas()
+    }
+
+    fn effective_gas_price(&self, base_fee: u128) -> u128 {
+        self.base.effective_gas_price(base_fee)
     }
 }
 
@@ -121,6 +121,20 @@ impl<T: revm::context::Transaction> IntoTxEnv<Self> for BscTransaction<T> {
 impl FromRecoveredTx<TransactionSigned> for BscTransaction<TxEnv> {
     fn from_recovered_tx(tx: &TransactionSigned, sender: Address) -> Self {
         Self::new(TxEnv::from_recovered_tx(tx, sender))
+    }
+}
+
+impl FromTxWithEncoded<TransactionSigned> for BscTransaction<TxEnv> {
+    fn from_encoded_tx(tx: &TransactionSigned, sender: Address, _encoded: Bytes) -> Self {
+        let base = match &tx.transaction() {
+            reth_primitives::Transaction::Legacy(tx) => TxEnv::from_recovered_tx(tx, sender),
+            reth_primitives::Transaction::Eip2930(tx) => TxEnv::from_recovered_tx(tx, sender),
+            reth_primitives::Transaction::Eip1559(tx) => TxEnv::from_recovered_tx(tx, sender),
+            reth_primitives::Transaction::Eip4844(tx) => TxEnv::from_recovered_tx(tx, sender),
+            reth_primitives::Transaction::Eip7702(tx) => TxEnv::from_recovered_tx(tx, sender),
+        };
+
+        Self { base, is_system_transaction: None }
     }
 }
 
