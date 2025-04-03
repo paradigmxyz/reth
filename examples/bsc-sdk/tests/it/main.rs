@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 
-mod block_sync;
 mod p2p;
+mod sync_blocks;
 
 const fn main() {}

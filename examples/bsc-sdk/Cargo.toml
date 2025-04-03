@@ -9,6 +9,7 @@ license.workspace = true
 auto_impl.workspace = true
 # reth
 reth.workspace = true
+reth-db.workspace = true
 reth-chainspec.workspace = true
 reth-discv4 = { workspace = true, features = ["test-utils"] }
 reth-engine-primitives.workspace = true

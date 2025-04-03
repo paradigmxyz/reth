@@ -1,8 +1,6 @@
 //! This example shows how to run a custom dev node programmatically and submit a transaction
 //! through rpc.
 
-#![warn(unused_crate_dependencies)]
-
 use example_bsc_sdk::{
     chainspec::bsc::{bsc_mainnet, head},
     node::network::{boot_nodes, handshake::BscHandshake},
@@ -12,10 +10,9 @@ use reth::{
     builder::{NodeBuilder, NodeConfig, NodeHandle},
     tasks::TaskManager,
 };
-
 use reth_discv4::Discv4ConfigBuilder;
-use reth_network::{EthNetworkPrimitives, NetworkConfig, NetworkManager};
-
+use reth_network::{EthNetworkPrimitives, NetworkConfig};
+use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
 use reth_provider::noop::NoopProvider;
 use secp256k1::{rand, SecretKey};
 use std::{
@@ -24,8 +21,9 @@ use std::{
     time::Duration,
 };
 
-#[tokio::main]
-async fn main() -> eyre::Result<()> {
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn can_sync_blocks() -> eyre::Result<()> {
     let tasks = TaskManager::current();
     let exec = tasks.executor();
     let local_addr = SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 30303);
@@ -46,11 +44,20 @@ async fn main() -> eyre::Result<()> {
             .lookup_interval(Duration::from_millis(500))
             .build(),
     );
+    let _network = net_cfg.start_network().await?;
 
     let node_config = NodeConfig::new(bsc_mainnet())
         .with_unused_ports()
-        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http())
-        .set_dev(true);
+        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
+
+    // TODO: override network and Evm Executor with BSC types
+    let NodeHandle { node: _, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
+        .testing_node(exec.clone())
+        .with_types::<EthereumNode>()
+        .with_components(EthereumNode::components())
+        .with_add_ons(EthereumAddOns::default())
+        .launch()
+        .await?;
 
     Ok(())
 }
