@@ -82,9 +82,7 @@ where
 
 /// Additional components, asides the core node components, needed to run `eth_` namespace API
 /// server.
-pub trait RpcNodeCoreExt:
-    RpcNodeCore<Primitives: NodePrimitives>
-{
+pub trait RpcNodeCoreExt: RpcNodeCore<Primitives: NodePrimitives> {
     /// Returns handle to RPC cache service.
     fn cache(&self) -> &EthStateCache<BlockTy<Self::Primitives>, ReceiptTy<Self::Primitives>>;
 }

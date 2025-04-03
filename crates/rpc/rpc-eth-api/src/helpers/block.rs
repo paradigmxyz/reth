@@ -2,7 +2,8 @@
 
 use super::{LoadPendingBlock, LoadReceipt, SpawnBlocking};
 use crate::{
-    node::RpcNodeCoreExt, EthApiTypes, FromEthApiError, FullEthApiTypes, RpcBlock, RpcHeader, RpcNodeCore, RpcReceipt
+    node::RpcNodeCoreExt, EthApiTypes, FromEthApiError, FullEthApiTypes, RpcBlock, RpcHeader,
+    RpcNodeCore, RpcReceipt,
 };
 use alloy_eips::BlockId;
 use alloy_primitives::{Sealable, U256};
@@ -52,7 +53,11 @@ pub trait EthBlocks: LoadBlock {
         async move {
             let Some(block) = self.recovered_block(block_id).await? else { return Ok(None) };
 
-            let block = from_block((*block).clone(), full.into(), self.tx_resp_builder())?;
+            let block = from_block::<_, Self::Primitives>(
+                (*block).clone(),
+                full.into(),
+                self.tx_resp_builder(),
+            )?;
             Ok(Some(block))
         }
     }
