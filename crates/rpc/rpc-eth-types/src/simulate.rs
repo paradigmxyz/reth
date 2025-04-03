@@ -146,14 +146,12 @@ where
         tx.to = Some(TxKind::Create);
     }
 
-    if tx.buildable_type().is_none() {
-        if tx_type == TxType::Eip1559 {
-            if tx.max_fee_per_gas.is_none() {
-                tx.max_fee_per_gas = Some(0);
-                tx.max_priority_fee_per_gas = Some(0);
-            } else if tx.gas_price.is_none() {
-                tx.gas_price = Some(0);
-            }
+    if tx.buildable_type().is_none() && tx_type == TxType::Eip1559 {
+        if tx.max_fee_per_gas.is_none() {
+            tx.max_fee_per_gas = Some(0);
+            tx.max_priority_fee_per_gas = Some(0);
+        } else if tx.gas_price.is_none() {
+            tx.gas_price = Some(0);
         }
     }
 
