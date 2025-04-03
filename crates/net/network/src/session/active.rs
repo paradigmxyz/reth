@@ -23,11 +23,11 @@ use alloy_primitives::Sealable;
 use futures::{stream::Fuse, SinkExt, StreamExt};
 use metrics::Gauge;
 use reth_eth_wire::{
-    capability::RawCapabilityMessage,
     errors::{EthHandshakeError, EthStreamError},
     message::{EthBroadcastMessage, RequestPair},
     Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives,
 };
+use reth_eth_wire_types::RawCapabilityMessage;
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::RequestError;
@@ -255,6 +255,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             EthMessage::Receipts(resp) => {
                 on_response!(resp, GetReceipts)
             }
+            EthMessage::Other(bytes) => self.try_emit_broadcast(PeerMessage::Other(bytes)).into(),
         }
     }
 
