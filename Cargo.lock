@@ -157,14 +157,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebf25443920ecb9728cb087fe4dc04a0b290bd6ac85638c58fe94aba70f1a44e"
 dependencies = [
  "alloy-consensus",
- "alloy-dyn-abi",
- "alloy-json-abi",
+ "alloy-dyn-abi 1.0.0",
+ "alloy-json-abi 1.0.0",
  "alloy-network",
  "alloy-network-primitives",
  "alloy-primitives 1.0.0",
  "alloy-provider",
  "alloy-rpc-types-eth",
- "alloy-sol-types",
+ "alloy-sol-types 1.0.0",
  "alloy-transport",
  "futures",
  "futures-util",
@@ -364,7 +364,7 @@ dependencies = [
  "alloy-rpc-types-eth",
  "alloy-serde",
  "alloy-signer",
- "alloy-sol-types",
+ "alloy-sol-types 1.0.0",
  "async-trait",
  "auto_impl",
  "derive_more 2.0.1",
@@ -447,7 +447,6 @@ dependencies = [
  "bytes 1.10.1",
  "cfg-if",
  "const-hex",
- "derive_arbitrary",
  "derive_more 2.0.1",
  "foldhash",
  "getrandom 0.3.3",
@@ -486,7 +485,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
  "alloy-signer",
- "alloy-sol-types",
+ "alloy-sol-types 1.0.0",
  "alloy-transport",
  "alloy-transport-http",
  "alloy-transport-ipc",
@@ -803,8 +802,22 @@ version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8612e0658964d616344f199ab251a49d48113992d81b92dab93ed855faa66383"
 dependencies = [
- "alloy-sol-macro-expander",
- "alloy-sol-macro-input",
+ "alloy-sol-macro-expander 0.8.25",
+ "alloy-sol-macro-input 0.8.25",
+ "proc-macro-error2",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.100",
+]
+
+[[package]]
+name = "alloy-sol-macro"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60fcfa26956bcb22f66ab13407115197f26ef23abca5b48d39a1946897382d74"
+dependencies = [
+ "alloy-sol-macro-expander 1.0.0",
+ "alloy-sol-macro-input 1.0.0",
  "proc-macro-error2",
  "proc-macro2",
  "quote",
@@ -817,7 +830,7 @@ version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a384edac7283bc4c010a355fb648082860c04b826bb7a814c45263c8f304c74"
 dependencies = [
- "alloy-sol-macro-input",
+ "alloy-sol-macro-input 0.8.25",
  "const-hex",
  "heck",
  "indexmap 2.8.0",
@@ -3613,7 +3626,7 @@ dependencies = [
  "alloy-eips 0.15.0",
  "alloy-evm",
  "alloy-genesis",
- "alloy-json-abi",
+ "alloy-json-abi 0.8.25",
  "alloy-network",
  "alloy-primitives 1.0.0",
  "alloy-rlp",
@@ -3696,8 +3709,8 @@ version = "0.0.0"
 dependencies = [
  "alloy-eips",
  "alloy-evm",
- "alloy-sol-macro",
- "alloy-sol-types",
+ "alloy-sol-macro 1.0.0",
+ "alloy-sol-types 1.0.0",
  "eyre",
  "reth-ethereum",
 ]
@@ -8940,6 +8953,7 @@ dependencies = [
  "reth-execution-types",
  "reth-metrics",
  "reth-primitives-traits",
+ "reth-revm",
  "reth-storage-api",
  "reth-storage-errors",
  "reth-trie-common",
@@ -9518,7 +9532,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
  "alloy-signer",
- "alloy-sol-types",
+ "alloy-sol-types 1.0.0",
  "eyre",
  "futures",
  "rand 0.9.1",
@@ -10599,7 +10613,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-eth",
- "alloy-sol-types",
+ "alloy-sol-types 1.0.0",
  "derive_more 2.0.1",
  "futures",
  "itertools 0.14.0",
@@ -11285,7 +11299,7 @@ dependencies = [
  "alloy-primitives 1.0.0",
  "alloy-rpc-types-eth",
  "alloy-rpc-types-trace",
- "alloy-sol-types",
+ "alloy-sol-types 1.0.0",
  "anstyle",
  "boa_engine",
  "boa_gc",
@@ -12499,6 +12513,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.101",
+]
+
+[[package]]
+name = "syn-solidity"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34c9c96de1f835488c1501092847b522be88c9ac6fb0d4c0fbea92992324c8f4"
+dependencies = [
+ "paste",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.100",
 ]
 
 [[package]]

@@ -14,8 +14,9 @@ pub trait BscBuilder: Sized {
     type Context;
 
     /// Build the bsc.
-    fn build_bsc(self)
-        -> BscEvmInner<Self::Context, (), EthInstructions<EthInterpreter, Self::Context>>;
+    fn build_bsc(
+        self,
+    ) -> BscEvmInner<Self::Context, (), EthInstructions<EthInterpreter, Self::Context>>;
 
     /// Build the bsc with an inspector.
     fn build_bsc_with_inspector<INSP>(

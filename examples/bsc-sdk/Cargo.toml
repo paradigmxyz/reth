@@ -9,11 +9,15 @@ license.workspace = true
 auto_impl.workspace = true
 # reth
 reth.workspace = true
+reth-basic-payload-builder.workspace = true
 reth-db.workspace = true
 reth-chainspec.workspace = true
 reth-discv4 = { workspace = true, features = ["test-utils"] }
 reth-engine-primitives.workspace = true
+reth-e2e-test-utils.workspace = true
 reth-ethereum-forks = { workspace = true, features = ["serde"] }
+reth-ethereum-payload-builder.workspace = true
+reth-ethereum-primitives.workspace = true
 reth-eth-wire.workspace = true
 reth-eth-wire-types.workspace = true
 reth-evm.workspace = true
@@ -21,15 +25,24 @@ reth-evm-ethereum.workspace = true
 reth-node-core.workspace = true
 reth-revm.workspace = true
 reth-network = { workspace = true, features = ["test-utils"] }
+reth-network-p2p.workspace = true
 reth-network-api.workspace = true
 reth-node-ethereum = { workspace = true, features = ["test-utils"] }
 reth-network-peers.workspace = true
+reth-optimism-rpc.workspace = true
 reth-payload-primitives.workspace = true
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-rpc-eth-api.workspace = true
+reth-rpc-engine-api.workspace = true
 reth-tracing.workspace = true
+reth-trie-common.workspace = true
+reth-trie-db.workspace = true
 revm = { workspace = true, features = ["secp256r1"] }
+jsonrpsee-core.workspace = true
+jsonrpsee-types.workspace = true
+jsonrpsee.workspace = true
 
 # alloy
 alloy-genesis.workspace = true
@@ -39,19 +52,26 @@ alloy-eips.workspace = true
 alloy-evm.workspace = true
 alloy-json-abi = { version = "0.8.25", default-features = false }
 alloy-dyn-abi = { version = "0.8.25", default-features = false }
+alloy-network.workspace = true
+
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-rpc-types = { workspace = true, features = ["engine"] }
+alloy-rpc-types-eth.workspace = true
+alloy-rpc-types-engine.workspace = true
 
 # misc
+async-trait.workspace = true
 bytes.workspace = true
 cfg-if = { version = "1.0", default-features = false }
 derive_more.workspace = true
+eyre.workspace = true
 futures.workspace = true
 include_dir = { version = "0.7.4" }
 lazy_static = { version = "1.4.0" }
 once_cell = { workspace = true, default-features = false, features = ["alloc"] }
 parity-bytes = { version = "0.1.2", default-features = false }
+parking_lot.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"], optional = true }
 serde = { workspace = true, features = ["derive"], optional = true }
 serde_json.workspace = true
@@ -107,5 +127,10 @@ serde = [
     "bytes/serde",
     "reth-network/serde",
     "reth-network-api/serde",
+]
+client = [
+    "jsonrpsee/client",
+    "jsonrpsee/async-client",
+    "reth-rpc-eth-api/client",
 ]
 

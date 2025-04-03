@@ -1,6 +1,8 @@
 use super::spec::BscSpecId;
 use cfg_if::cfg_if;
 use once_cell::{race::OnceBox, sync::Lazy};
+#[cfg(feature = "secp256r1")]
+use revm::precompile::secp256r1;
 use revm::{
     context::Cfg,
     context_interface::ContextTr,
@@ -9,8 +11,6 @@ use revm::{
     precompile::{bls12_381, kzg_point_evaluation, Precompiles},
     primitives::{hardfork::SpecId, Address},
 };
-#[cfg(feature = "secp256r1")]
-use revm::precompile::secp256r1;
 use std::boxed::Box;
 
 mod bls;
@@ -40,24 +40,29 @@ impl BscPrecompiles {
     pub fn new_with_spec(spec: BscSpecId) -> Self {
         match spec {
             // Pre-BSC hardforks use standard Ethereum precompiles
-            BscSpecId::FRONTIER | BscSpecId::FRONTIER_THAWING | BscSpecId::HOMESTEAD |
-            BscSpecId::TANGERINE | BscSpecId::SPURIOUS_DRAGON => {
-                Self::new(Precompiles::homestead())
-            }
+            BscSpecId::FRONTIER |
+            BscSpecId::FRONTIER_THAWING |
+            BscSpecId::HOMESTEAD |
+            BscSpecId::TANGERINE |
+            BscSpecId::SPURIOUS_DRAGON => Self::new(Precompiles::homestead()),
             BscSpecId::BYZANTIUM | BscSpecId::CONSTANTINOPLE | BscSpecId::PETERSBURG => {
                 Self::new(Precompiles::byzantium())
             }
             BscSpecId::ISTANBUL | BscSpecId::MUIR_GLACIER => Self::new(Precompiles::istanbul()),
             // BSC specific hardforks
-            BscSpecId::RAMANUJAN | BscSpecId::NIELS | BscSpecId::MIRROR_SYNC | BscSpecId::BRUNO | BscSpecId::EULER => {
-                Self::new(istanbul())
-            }
+            BscSpecId::RAMANUJAN |
+            BscSpecId::NIELS |
+            BscSpecId::MIRROR_SYNC |
+            BscSpecId::BRUNO |
+            BscSpecId::EULER => Self::new(istanbul()),
             BscSpecId::NANO => Self::new(nano()),
             BscSpecId::MORAN | BscSpecId::GIBBS => Self::new(moran()),
             BscSpecId::PLANCK => Self::new(planck()),
             BscSpecId::LUBAN => Self::new(luban()),
             BscSpecId::PLATO => Self::new(plato()),
-            BscSpecId::BERLIN | BscSpecId::LONDON | BscSpecId::SHANGHAI => Self::new(Precompiles::berlin()),
+            BscSpecId::BERLIN | BscSpecId::LONDON | BscSpecId::SHANGHAI => {
+                Self::new(Precompiles::berlin())
+            }
             BscSpecId::HERTZ | BscSpecId::HERTZ_FIX | BscSpecId::KEPLER => Self::new(hertz()),
             BscSpecId::FEYNMAN | BscSpecId::FEYNMAN_FIX => Self::new(feynman()),
             BscSpecId::HABER | BscSpecId::HABER_FIX | BscSpecId::BOHR => Self::new(haber()),
@@ -87,7 +92,6 @@ pub fn berlin() -> &'static Precompiles {
     &BERLIN
 }
 
-
 /// Returns precompiles for Nano sepc.
 pub fn nano() -> &'static Precompiles {
     static INSTANCE: OnceBox<Precompiles> = OnceBox::new();
@@ -107,10 +111,8 @@ pub fn moran() -> &'static Precompiles {
     static INSTANCE: OnceBox<Precompiles> = OnceBox::new();
     INSTANCE.get_or_init(|| {
         let mut precompiles = istanbul().clone();
-        precompiles.extend([
-            tendermint::TENDERMINT_HEADER_VALIDATION,
-            iavl::IAVL_PROOF_VALIDATION_MORAN,
-        ]);
+        precompiles
+            .extend([tendermint::TENDERMINT_HEADER_VALIDATION, iavl::IAVL_PROOF_VALIDATION_MORAN]);
 
         Box::new(precompiles)
     })
@@ -153,8 +155,6 @@ pub fn plato() -> &'static Precompiles {
     })
 }
 
-
-
 /// Returns precompiles for Hertz sepc.
 pub fn hertz() -> &'static Precompiles {
     static INSTANCE: OnceBox<Precompiles> = OnceBox::new();
@@ -170,12 +170,11 @@ pub fn hertz() -> &'static Precompiles {
 pub fn feynman() -> &'static Precompiles {
     static INSTANCE: OnceBox<Precompiles> = OnceBox::new();
     INSTANCE.get_or_init(|| {
-            let mut precompiles = hertz().clone();
-            precompiles.extend([double_sign::DOUBLE_SIGN_EVIDENCE_VALIDATION]);
+        let mut precompiles = hertz().clone();
+        precompiles.extend([double_sign::DOUBLE_SIGN_EVIDENCE_VALIDATION]);
 
-          
-            #[cfg(feature = "secp256k1")]
-            precompiles.extend([tm_secp256k1::TM_SECP256K1_SIGNATURE_RECOVER]);
+        #[cfg(feature = "secp256k1")]
+        precompiles.extend([tm_secp256k1::TM_SECP256K1_SIGNATURE_RECOVER]);
 
         Box::new(precompiles)
     })

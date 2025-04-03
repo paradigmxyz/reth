@@ -5,9 +5,9 @@ use reth_chainspec::{
     make_genesis_header, BaseFeeParams, BaseFeeParamsKind, Chain, ChainSpec, Head, NamedChain,
 };
 use reth_primitives::SealedHeader;
-use std::{str::FromStr, sync::Arc};
+use std::str::FromStr;
 
-pub fn bsc_mainnet() -> Arc<ChainSpec> {
+pub fn bsc_mainnet() -> ChainSpec {
     let genesis = serde_json::from_str(include_str!("genesis.json"))
         .expect("Can't deserialize BSC Mainnet genesis json");
     let hardforks = BscHardfork::bsc_mainnet();
@@ -29,7 +29,6 @@ pub fn bsc_mainnet() -> Arc<ChainSpec> {
         ),
         ..Default::default()
     }
-    .into()
 }
 
 pub fn head() -> Head {

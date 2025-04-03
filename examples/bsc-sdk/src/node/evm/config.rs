@@ -1,26 +1,36 @@
 use super::{executor::BscBlockExecutor, factory::BscEvmFactory};
 use crate::{
-    chainspec::BscChainSpec, evm::spec::BscSpecId, hardforks::bsc::BscHardfork, node::evm::BscEvm,
+    chainspec::BscChainSpec,
+    evm::spec::BscSpecId,
+    hardforks::{bsc::BscHardfork, BscHardforks},
     system_contracts::SystemContract,
 };
-use alloy_consensus::{BlockHeader, Header};
-use alloy_primitives::{BlockNumber, Bytes, U256};
-use reth_chainspec::EthChainSpec;
+use alloy_consensus::{BlockHeader, Header, Transaction, TxReceipt};
+use alloy_eips::Encodable2718;
+
+use alloy_primitives::{BlockNumber, Bytes, Log, U256};
+use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_ethereum_forks::EthereumHardfork;
 use reth_evm::{
     block::{BlockExecutorFactory, BlockExecutorFor},
-    eth::{EthBlockExecutionCtx, EthBlockExecutorFactory},
-    ConfigureEvm, EvmEnv, ExecutionCtxFor, InspectorFor, NextBlockEnvAttributes,
+    eth::{
+        receipt_builder::{AlloyReceiptBuilder, ReceiptBuilder},
+        EthBlockExecutionCtx,
+    },
+    ConfigureEvm, EvmEnv, EvmFactory, ExecutionCtxFor, FromRecoveredTx, FromTxWithEncoded,
+    NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::{EthBlockAssembler, RethReceiptBuilder};
 use reth_primitives::{
-    BlockTy, EthPrimitives, HeaderTy, Receipt, SealedBlock, SealedHeader, TransactionSigned,
+    BlockTy, EthPrimitives, HeaderTy, SealedBlock, SealedHeader, TransactionSigned,
 };
-use reth_revm::{Database, State};
+use reth_primitives_traits::SignedTransaction;
+use reth_revm::State;
 use revm::{
     context::{BlockEnv, CfgEnv},
     context_interface::block::BlobExcessGasAndPrice,
     primitives::hardfork::SpecId,
+    Inspector,
 };
 use std::{borrow::Cow, convert::Infallible, sync::Arc};
 
@@ -29,7 +39,7 @@ use std::{borrow::Cow, convert::Infallible, sync::Arc};
 pub struct BscEvmConfig {
     /// Inner [`EthBlockExecutorFactory`].
     pub executor_factory:
-        EthBlockExecutorFactory<RethReceiptBuilder, Arc<BscChainSpec>, BscEvmFactory>,
+        BscBlockExecutorFactory<RethReceiptBuilder, Arc<BscChainSpec>, BscEvmFactory>,
     /// Ethereum block assembler.
     pub block_assembler: EthBlockAssembler<BscChainSpec>,
 }
@@ -51,7 +61,7 @@ impl BscEvmConfig {
     pub fn new_with_evm_factory(chain_spec: Arc<BscChainSpec>, evm_factory: BscEvmFactory) -> Self {
         Self {
             block_assembler: EthBlockAssembler::new(chain_spec.clone()),
-            executor_factory: EthBlockExecutorFactory::new(
+            executor_factory: BscBlockExecutorFactory::new(
                 RethReceiptBuilder::default(),
                 chain_spec,
                 evm_factory,
@@ -71,32 +81,79 @@ impl BscEvmConfig {
     }
 }
 
-impl BlockExecutorFactory for BscEvmConfig {
-    type EvmFactory = BscEvmFactory;
+/// Ethereum block executor factory.
+#[derive(Debug, Clone, Default, Copy)]
+pub struct BscBlockExecutorFactory<
+    R = AlloyReceiptBuilder,
+    Spec = BscHardfork,
+    EvmFactory = BscEvmFactory,
+> {
+    /// Receipt builder.
+    receipt_builder: R,
+    /// Chain specification.
+    spec: Spec,
+    /// EVM factory.
+    evm_factory: EvmFactory,
+}
+
+impl<R, Spec, EvmFactory> BscBlockExecutorFactory<R, Spec, EvmFactory> {
+    /// Creates a new [`BscBlockExecutorFactory`] with the given spec, [`EvmFactory`], and
+    /// [`ReceiptBuilder`].
+    pub const fn new(receipt_builder: R, spec: Spec, evm_factory: EvmFactory) -> Self {
+        Self { receipt_builder, spec, evm_factory }
+    }
+
+    /// Exposes the receipt builder.
+    pub const fn receipt_builder(&self) -> &R {
+        &self.receipt_builder
+    }
+
+    /// Exposes the chain specification.
+    pub const fn spec(&self) -> &Spec {
+        &self.spec
+    }
+
+    /// Exposes the EVM factory.
+    pub const fn evm_factory(&self) -> &EvmFactory {
+        &self.evm_factory
+    }
+}
+
+impl<R, Spec, EvmF> BlockExecutorFactory for BscBlockExecutorFactory<R, Spec, EvmF>
+where
+    R: ReceiptBuilder<
+        Transaction: Transaction + Encodable2718 + SignedTransaction,
+        Receipt: TxReceipt<Log = Log>,
+    >,
+    Spec: EthereumHardforks + BscHardforks + EthChainSpec + Hardforks + Clone,
+    EvmF: EvmFactory<Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>>,
+    R::Transaction: From<TransactionSigned> + Clone,
+    Self: 'static,
+{
+    type EvmFactory = EvmF;
     type ExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
-    type Transaction = TransactionSigned;
-    type Receipt = Receipt;
+    type Transaction = R::Transaction;
+    type Receipt = R::Receipt;
 
     fn evm_factory(&self) -> &Self::EvmFactory {
-        self.executor_factory.evm_factory()
+        &self.evm_factory
     }
 
     fn create_executor<'a, DB, I>(
         &'a self,
-        evm: BscEvm<&'a mut State<DB>, I>,
+        evm: <Self::EvmFactory as EvmFactory>::Evm<&'a mut State<DB>, I>,
         ctx: Self::ExecutionCtx<'a>,
     ) -> impl BlockExecutorFor<'a, Self, DB, I>
     where
-        DB: Database + 'a,
-        I: InspectorFor<Self, &'a mut State<DB>> + 'a,
-        DB::Error: Send + Sync + 'static,
+        DB: alloy_evm::Database + 'a,
+        I: Inspector<<Self::EvmFactory as EvmFactory>::Context<&'a mut State<DB>>> + 'a,
     {
         BscBlockExecutor::new(
             evm,
             ctx,
-            self.chain_spec().clone(),
-            self.executor_factory.receipt_builder(),
-            SystemContract::new(self.chain_spec().clone()),
+            self.spec().clone(),
+            self.receipt_builder(),
+            SystemContract::new(self.spec().clone()),
         )
     }
 }
@@ -111,7 +168,7 @@ where
     type Error = Infallible;
     type NextBlockEnvCtx = NextBlockEnvAttributes;
     type BlockExecutorFactory =
-        EthBlockExecutorFactory<RethReceiptBuilder, Arc<BscChainSpec>, BscEvmFactory>;
+        BscBlockExecutorFactory<RethReceiptBuilder, Arc<BscChainSpec>, BscEvmFactory>;
     type BlockAssembler = EthBlockAssembler<BscChainSpec>;
 
     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {

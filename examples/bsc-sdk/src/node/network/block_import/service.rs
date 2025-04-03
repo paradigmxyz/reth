@@ -133,7 +133,7 @@ where
         let number = sealed_block.number();
 
         Box::pin(async move {
-            let head_block_hash = match consensus.canonical_head(hash, number) {
+            let (head_block_hash, current_hash) = match consensus.canonical_head(hash, number) {
                 Ok(hash) => hash,
                 Err(ParliaConsensusErr::Provider(e)) => {
                     return Outcome::<T> {
@@ -151,8 +151,8 @@ where
 
             let state = ForkchoiceState {
                 head_block_hash,
-                safe_block_hash: head_block_hash,
-                finalized_block_hash: head_block_hash,
+                safe_block_hash: current_hash,
+                finalized_block_hash: current_hash,
             };
 
             match engine.fork_choice_updated(state, None, EngineApiMessageVersion::default()).await
