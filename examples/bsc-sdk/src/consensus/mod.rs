@@ -37,15 +37,15 @@ where
         &self,
         hash: B256,
         number: BlockNumber,
-    ) -> Result<B256, ParliaConsensusErr> {
+    ) -> Result<(B256, B256), ParliaConsensusErr> {
         let current_head = self.provider.best_block_number()?;
         let current_hash =
             self.provider.block_hash(current_head)?.ok_or(ParliaConsensusErr::HeadHashNotFound)?;
 
         match number.cmp(&current_head) {
-            Ordering::Greater => Ok(hash),
-            Ordering::Equal => Ok(hash.min(current_hash)),
-            Ordering::Less => Ok(current_hash),
+            Ordering::Greater => Ok((hash, current_hash)),
+            Ordering::Equal => Ok((hash.min(current_hash), current_hash)),
+            Ordering::Less => Ok((current_hash, current_hash)),
         }
     }
 }
@@ -124,7 +124,10 @@ mod tests {
         for ((curr_hash, curr_num, head_num, head_hash), expected) in test_cases {
             let provider = MockProvider::new(head_num, head_hash);
             let consensus = ParliaConsensus::new(provider);
-            assert_eq!(consensus.canonical_head(curr_hash, curr_num).unwrap(), expected);
+            let (head_block_hash, current_hash) =
+                consensus.canonical_head(curr_hash, curr_num).unwrap();
+            assert_eq!(head_block_hash, expected);
+            assert_eq!(current_hash, head_hash);
         }
     }
 }

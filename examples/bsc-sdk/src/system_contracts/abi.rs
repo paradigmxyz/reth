@@ -3533,7 +3533,8 @@ lazy_static! {
                 "internalType": "uint16"
               }
             ],
-            "stateMutability": "view"
+            "stateMutability": "view",
+            "type": "function"
           },
           {
             "type": "function",
@@ -5867,6 +5868,8 @@ lazy_static! {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Read;
+
     use alloy_dyn_abi::{DynSolValue, FunctionExt, JsonAbiExt};
     use alloy_json_abi::JsonAbi;
     use alloy_primitives::{address, hex, Address, U256};
@@ -5902,8 +5905,15 @@ mod tests {
         let function = stake_hub_abi.function("getValidatorElectionInfo").unwrap().first().unwrap();
         let output = function.abi_decode_output(&output, true).unwrap();
 
-        let consensus_address: Vec<Address> =
-            output[0].as_array().unwrap().iter().map(|val| val.as_address().unwrap()).collect();
+        let consensus_address: Vec<Address> = output[0]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|val| {
+                let addr_bytes: [u8; 20] = val.as_bytes().unwrap().try_into().unwrap();
+                Address::from_slice(&addr_bytes)
+            })
+            .collect();
         let voting_powers: Vec<U256> =
             output[1].as_array().unwrap().iter().map(|val| val.as_uint().unwrap().0).collect();
         let vote_addresses: Vec<Vec<u8>> = output[2]

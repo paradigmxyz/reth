@@ -9,7 +9,7 @@ use alloy_chains::Chain;
 use alloy_consensus::TxLegacy;
 use alloy_dyn_abi::JsonAbiExt;
 use alloy_json_abi::JsonAbi;
-use alloy_primitives::{hex, Address, BlockNumber, Bytes, PrimitiveSignature, TxKind, U256};
+use alloy_primitives::{hex, Address, BlockNumber, Bytes, Signature, TxKind, U256};
 use include_dir::{include_dir, Dir};
 use lazy_static::lazy_static;
 use reth_chainspec::{ChainSpec, EthChainSpec};
@@ -38,6 +38,7 @@ impl<Spec: EthChainSpec> SystemContract<Spec> {
     }
 
     pub(crate) fn genesis_contracts_txs(&self) -> Vec<TransactionSigned> {
+        println!("genesis_contracts_txs");
         let function = self.validator_abi.function("init").unwrap().first().unwrap();
         let input = function.abi_encode_input(&[]).unwrap();
 
@@ -51,7 +52,7 @@ impl<Spec: EthChainSpec> SystemContract<Spec> {
             CROSS_CHAIN_CONTRACT,
         ];
 
-        let signature = PrimitiveSignature::new(Default::default(), Default::default(), false);
+        let signature = Signature::new(Default::default(), Default::default(), false);
 
         contracts
             .into_iter()
@@ -72,10 +73,11 @@ impl<Spec: EthChainSpec> SystemContract<Spec> {
     }
 
     pub(crate) fn feynman_contracts_txs(&self) -> Vec<TransactionSigned> {
+        println!("feynman_contracts_txs");
         let function = self.stake_hub_abi.function("initialize").unwrap().first().unwrap();
         let input = function.abi_encode_input(&[]).unwrap();
 
-        let signature = PrimitiveSignature::new(Default::default(), Default::default(), false);
+        let signature = Signature::new(Default::default(), Default::default(), false);
 
         let contracts = vec![
             STAKE_HUB_CONTRACT,
@@ -145,7 +147,7 @@ lazy_static! {
 
     /// mainnet system contracts: hardfork -> address -> Bytecode
     pub(crate) static ref BSC_MAINNET_CONTRACTS: HashMap<String, HashMap<String, Option<Bytecode>>> =
-        read_all_system_contracts(bsc_mainnet().as_ref());
+        read_all_system_contracts(&bsc_mainnet());
 
 
 }

@@ -11,8 +11,8 @@ use std::{
     task::{ready, Context, Poll},
 };
 
-mod handle;
-mod service;
+pub mod handle;
+pub mod service;
 
 pub struct BscBlockImport<T: PayloadTypes> {
     handle: ImportHandle<T>,
