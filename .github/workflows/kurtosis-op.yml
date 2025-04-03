@@ -34,7 +34,7 @@ jobs:
       matrix:
         params:
           - name: 'optimsim'
-            file: 'github/assets/kurtosis_op_network_params_optimism.yaml'
+            file: '.github/assets/kurtosis_op_network_params_optimism.yaml'
           - name: 'base'
             file: '.github/assets/kurtosis_op_network_params_base.yaml'
     name: run kurtosis
