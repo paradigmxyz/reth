@@ -68,6 +68,17 @@ impl Status {
             .total_difficulty(head.total_difficulty)
             .forkid(spec.fork_id(head))
     }
+
+    /// Converts this [`Status`] into the [Eth69](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7642.md) variant that excludes the total difficulty field.
+    pub fn into_eth69(self) -> StatusEth69 {
+        StatusEth69 {
+            version: EthVersion::Eth69,
+            chain: self.chain,
+            blockhash: self.blockhash,
+            genesis: self.genesis,
+            forkid: self.forkid,
+        }
+    }
 }
 
 impl Display for Status {
@@ -291,13 +302,7 @@ impl Default for StatusEth69 {
 
 impl From<Status> for StatusEth69 {
     fn from(status: Status) -> Self {
-        Self {
-            version: EthVersion::Eth69,
-            chain: status.chain,
-            blockhash: status.blockhash,
-            genesis: status.genesis,
-            forkid: status.forkid,
-        }
+        status.into_eth69()
     }
 }
 

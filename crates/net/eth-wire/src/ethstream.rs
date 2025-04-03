@@ -1,5 +1,4 @@
 use crate::{
-    capability::RawCapabilityMessage,
     errors::{EthHandshakeError, EthStreamError},
     handshake::EthereumEthHandshake,
     message::{EthBroadcastMessage, ProtocolBroadcastMessage},
@@ -11,7 +10,7 @@ use alloy_primitives::bytes::{Bytes, BytesMut};
 use alloy_rlp::Encodable;
 use futures::{ready, Sink, SinkExt};
 use pin_project::pin_project;
-use reth_eth_wire_types::NetworkPrimitives;
+use reth_eth_wire_types::{NetworkPrimitives, RawCapabilityMessage};
 use reth_ethereum_forks::ForkFilter;
 use std::{
     future::Future,

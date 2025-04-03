@@ -537,7 +537,8 @@ impl AccountStorageCache {
     /// - `Value`: The slot has a specific value
     pub(crate) fn get_storage(&self, key: &StorageKey) -> SlotStatus {
         match self.slots.get(key) {
-            None | Some(None) => SlotStatus::Empty,
+            None => SlotStatus::NotCached,
+            Some(None) => SlotStatus::Empty,
             Some(Some(value)) => SlotStatus::Value(value),
         }
     }

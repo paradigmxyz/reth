@@ -11,9 +11,14 @@ use super::{
     GetNodeData, GetPooledTransactions, GetReceipts, NewBlock, NewPooledTransactionHashes66,
     NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, Status, Transactions,
 };
-use crate::{EthNetworkPrimitives, EthVersion, NetworkPrimitives, SharedTransactions};
+use crate::{
+    EthNetworkPrimitives, EthVersion, NetworkPrimitives, RawCapabilityMessage, SharedTransactions,
+};
 use alloc::{boxed::Box, sync::Arc};
-use alloy_primitives::bytes::{Buf, BufMut};
+use alloy_primitives::{
+    bytes::{Buf, BufMut},
+    Bytes,
+};
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use core::fmt::Debug;
 
@@ -101,6 +106,14 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
             }
             EthMessageID::GetReceipts => EthMessage::GetReceipts(RequestPair::decode(buf)?),
             EthMessageID::Receipts => EthMessage::Receipts(RequestPair::decode(buf)?),
+            EthMessageID::Other(_) => {
+                let raw_payload = Bytes::copy_from_slice(buf);
+                buf.advance(raw_payload.len());
+                EthMessage::Other(RawCapabilityMessage::new(
+                    message_type.to_u8() as usize,
+                    raw_payload.into(),
+                ))
+            }
         };
         Ok(Self { message_type, message })
     }
@@ -229,11 +242,13 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
         serde(bound = "N::Receipt: serde::Serialize + serde::de::DeserializeOwned")
     )]
     Receipts(RequestPair<Receipts<N::Receipt>>),
+    /// Represents an encoded message that doesn't match any other variant
+    Other(RawCapabilityMessage),
 }
 
 impl<N: NetworkPrimitives> EthMessage<N> {
     /// Returns the message's ID.
-    pub const fn message_id(&self) -> EthMessageID {
+    pub fn message_id(&self) -> EthMessageID {
         match self {
             Self::Status(_) => EthMessageID::Status,
             Self::NewBlockHashes(_) => EthMessageID::NewBlockHashes,
@@ -252,6 +267,7 @@ impl<N: NetworkPrimitives> EthMessage<N> {
             Self::NodeData(_) => EthMessageID::NodeData,
             Self::GetReceipts(_) => EthMessageID::GetReceipts,
             Self::Receipts(_) => EthMessageID::Receipts,
+            Self::Other(msg) => EthMessageID::Other(msg.id as u8),
         }
     }
 
@@ -299,6 +315,7 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::NodeData(data) => data.encode(out),
             Self::GetReceipts(request) => request.encode(out),
             Self::Receipts(receipts) => receipts.encode(out),
+            Self::Other(unknown) => out.put_slice(&unknown.payload),
         }
     }
     fn length(&self) -> usize {
@@ -319,6 +336,7 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::NodeData(data) => data.length(),
             Self::GetReceipts(request) => request.length(),
             Self::Receipts(receipts) => receipts.length(),
+            Self::Other(unknown) => unknown.length(),
         }
     }
 }
@@ -401,18 +419,42 @@ pub enum EthMessageID {
     GetReceipts = 0x0f,
     /// Represents receipts.
     Receipts = 0x10,
+    /// Represents unknown message types.
+    Other(u8),
 }
 
 impl EthMessageID {
+    /// Returns the corresponding `u8` value for an `EthMessageID`.
+    pub const fn to_u8(&self) -> u8 {
+        match self {
+            Self::Status => 0x00,
+            Self::NewBlockHashes => 0x01,
+            Self::Transactions => 0x02,
+            Self::GetBlockHeaders => 0x03,
+            Self::BlockHeaders => 0x04,
+            Self::GetBlockBodies => 0x05,
+            Self::BlockBodies => 0x06,
+            Self::NewBlock => 0x07,
+            Self::NewPooledTransactionHashes => 0x08,
+            Self::GetPooledTransactions => 0x09,
+            Self::PooledTransactions => 0x0a,
+            Self::GetNodeData => 0x0d,
+            Self::NodeData => 0x0e,
+            Self::GetReceipts => 0x0f,
+            Self::Receipts => 0x10,
+            Self::Other(value) => *value, // Return the stored `u8`
+        }
+    }
+
     /// Returns the max value.
     pub const fn max() -> u8 {
-        Self::Receipts as u8
+        Self::Receipts.to_u8()
     }
 }
 
 impl Encodable for EthMessageID {
     fn encode(&self, out: &mut dyn BufMut) {
-        out.put_u8(*self as u8);
+        out.put_u8(self.to_u8());
     }
     fn length(&self) -> usize {
         1
@@ -437,7 +479,7 @@ impl Decodable for EthMessageID {
             0x0e => Self::NodeData,
             0x0f => Self::GetReceipts,
             0x10 => Self::Receipts,
-            _ => return Err(alloy_rlp::Error::Custom("Invalid message ID")),
+            unknown => Self::Other(*unknown),
         };
         buf.advance(1);
         Ok(id)
@@ -534,7 +576,7 @@ mod tests {
     use super::MessageError;
     use crate::{
         message::RequestPair, EthMessage, EthMessageID, EthNetworkPrimitives, EthVersion,
-        GetNodeData, NodeData, ProtocolMessage,
+        GetNodeData, NodeData, ProtocolMessage, RawCapabilityMessage,
     };
     use alloy_primitives::hex;
     use alloy_rlp::{Decodable, Encodable, Error};
@@ -660,5 +702,42 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(msg, MessageError::RlpError(alloy_rlp::Error::InputTooShort)));
+    }
+
+    #[test]
+    fn custom_message_roundtrip() {
+        let custom_payload = vec![1, 2, 3, 4, 5];
+        let custom_message = RawCapabilityMessage::new(0x20, custom_payload.into());
+        let protocol_message = ProtocolMessage::<EthNetworkPrimitives> {
+            message_type: EthMessageID::Other(0x20),
+            message: EthMessage::Other(custom_message),
+        };
+
+        let encoded = encode(protocol_message.clone());
+        let decoded = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
+            EthVersion::Eth68,
+            &mut &encoded[..],
+        )
+        .unwrap();
+
+        assert_eq!(protocol_message, decoded);
+    }
+
+    #[test]
+    fn custom_message_empty_payload_roundtrip() {
+        let custom_message = RawCapabilityMessage::new(0x30, vec![].into());
+        let protocol_message = ProtocolMessage::<EthNetworkPrimitives> {
+            message_type: EthMessageID::Other(0x30),
+            message: EthMessage::Other(custom_message),
+        };
+
+        let encoded = encode(protocol_message.clone());
+        let decoded = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
+            EthVersion::Eth68,
+            &mut &encoded[..],
+        )
+        .unwrap();
+
+        assert_eq!(protocol_message, decoded);
     }
 }
