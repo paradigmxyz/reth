@@ -5,7 +5,7 @@ use reth_db_api::{cursor::DbCursorRW, tables, transaction::DbTxMut};
 use reth_provider::test_utils::create_test_provider_factory;
 use reth_trie::{
     prefix_set::PrefixSetMut, trie_cursor::TrieCursor, walker::TrieWalker, BranchNodeCompact,
-    Nibbles, StorageTrieEntry,
+    Nibbles, RlpNode, StorageTrieEntry,
 };
 use reth_trie_db::{DatabaseAccountTrieCursor, DatabaseStorageTrieCursor};
 
@@ -100,7 +100,7 @@ fn cursor_rootnode_with_changesets() {
                 0b00010,
                 0,
                 0b00010,
-                vec![B256::random()],
+                vec![RlpNode::word_rlp(&B256::random())],
                 None,
             ),
         ),

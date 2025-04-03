@@ -208,6 +208,7 @@ mod tests {
     use alloy_primitives::hex_literal::hex;
     use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
     use reth_provider::test_utils::create_test_provider_factory;
+    use reth_trie::RlpNode;
 
     #[test]
     fn test_account_trie_order() {
@@ -258,7 +259,7 @@ mod tests {
 
         let hashed_address = B256::random();
         let key = StoredNibblesSubKey::from(vec![0x2, 0x3]);
-        let value = BranchNodeCompact::new(1, 1, 1, vec![B256::random()], None);
+        let value = BranchNodeCompact::new(1, 1, 1, vec![RlpNode::word_rlp(&B256::random())], None);
 
         cursor
             .upsert(hashed_address, &StorageTrieEntry { nibbles: key.clone(), node: value.clone() })
