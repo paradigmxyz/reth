@@ -5,6 +5,8 @@ use alloy_consensus::TxType;
 use alloy_evm::block::BlockExecutorFactory;
 use alloy_primitives::{TxKind, U256};
 use alloy_rpc_types::TransactionRequest;
+use reth_chainspec::ChainSpecProvider;
+use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{ConfigureEvm, EvmEnv, EvmFactory, SpecFor};
 use reth_rpc_eth_api::{
     helpers::{estimate::EstimateCall, Call, EthCall, LoadBlock, LoadState, SpawnBlocking},
@@ -24,13 +26,15 @@ where
 impl<Provider, Pool, Network, EvmConfig> Call for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Self: LoadState<
+            Primitives = EthPrimitives,
+            Provider = Provider,
             Evm: ConfigureEvm<
-                BlockExecutorFactory: BlockExecutorFactory<EvmFactory: EvmFactory<Tx = TxEnv>>,
                 Primitives = Self::Primitives,
+                BlockExecutorFactory: BlockExecutorFactory<EvmFactory: EvmFactory<Tx = TxEnv>>,
             >,
             Error: FromEvmError<Self::Evm>,
         > + SpawnBlocking,
-    Provider: BlockReader,
+    Provider: ChainSpecProvider,
 {
     #[inline]
     fn call_gas_limit(&self) -> u64 {

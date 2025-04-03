@@ -6,26 +6,27 @@ use alloy_rpc_types_eth::{Log, TransactionReceipt};
 use op_alloy_consensus::{OpDepositReceipt, OpDepositReceiptWithBloom, OpReceiptEnvelope};
 use op_alloy_rpc_types::{L1BlockInfo, OpTransactionReceipt, OpTransactionReceiptFields};
 use reth_chainspec::ChainSpecProvider;
-use reth_node_api::FullNodeComponents;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
+use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcNodeCoreExt, RpcReceipt};
 use reth_rpc_eth_types::{receipt::build_receipt, EthApiError};
-use reth_storage_api::ReceiptProvider;
 
 use crate::{OpEthApi, OpEthApiError};
 
 impl<N> LoadReceipt for OpEthApi<N>
 where
-    Self: RpcNodeCoreExt<Provider: ChainSpecProvider<ChainSpec = OpChainSpec>>,
+    Self: RpcNodeCoreExt<
+        Primitives = OpPrimitives,
+        Provider: ChainSpecProvider<ChainSpec = OpChainSpec>,
+    >,
 {
     async fn build_transaction_receipt(
         &self,
-        tx: OpTransactionSigned,
+        tx: TxTy<Self::Primitives>,
         meta: TransactionMeta,
-        receipt: OpReceipt,
+        receipt: ReceiptTy<Self::Primitives>,
     ) -> Result<RpcReceipt<Self::NetworkTypes>, Self::Error> {
         let (block, receipts) = self
             .inner

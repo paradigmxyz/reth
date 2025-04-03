@@ -33,14 +33,13 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
 use reth_storage_api::{
-    BlockNumReader, BlockReader, BlockReaderIdExt, ProviderTx, StageCheckpointReader,
-    StateProviderFactory,
+    BlockNumReader, BlockReader, BlockReaderIdExt, StageCheckpointReader, StateProviderFactory,
 };
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner,
 };
-use reth_transaction_pool::{PoolTransaction, TransactionPool};
+use reth_transaction_pool::TransactionPool;
 use std::{fmt, sync::Arc};
 
 use crate::{OpEthApiError, SequencerClient};
@@ -53,10 +52,6 @@ pub type EthApiNodeBackend<N> = EthApiInner<
     <N as RpcNodeCore>::Evm,
 >;
 
-/// A helper trait with requirements for [`RpcNodeCore`] to be used in [`OpEthApi`].
-pub trait OpNodeCore: RpcNodeCore<Primitives = OpPrimitives> {}
-impl<T> OpNodeCore for T where T: RpcNodeCore<Primitives = OpPrimitives> {}
-
 /// OP-Reth `Eth` API implementation.
 ///
 /// This type provides the functionality for handling `eth_` related requests.
@@ -68,14 +63,14 @@ impl<T> OpNodeCore for T where T: RpcNodeCore<Primitives = OpPrimitives> {}
 /// This type implements the [`FullEthApi`](reth_rpc_eth_api::helpers::FullEthApi) by implemented
 /// all the `Eth` helper traits and prerequisite traits.
 #[derive(Clone)]
-pub struct OpEthApi<N: OpNodeCore> {
+pub struct OpEthApi<N: RpcNodeCore> {
     /// Gateway to node's core components.
     inner: Arc<OpEthApiInner<N>>,
 }
 
 impl<N> OpEthApi<N>
 where
-    N: OpNodeCore<
+    N: RpcNodeCore<
         Provider: BlockReaderIdExt
                       + ChainSpecProvider
                       + CanonStateSubscriptions<Primitives = OpPrimitives>
@@ -152,9 +147,13 @@ where
 
 impl<N> RpcNodeCoreExt for OpEthApi<N>
 where
-    N: OpNodeCore<
+    N: RpcNodeCore<
         Primitives = OpPrimitives,
-        Provider: BlockReader<Block = BlockTy<N::Primitives>, Receipt = ReceiptTy<N::Primitives>>,
+        Provider: BlockReader<
+            Block = BlockTy<N::Primitives>,
+            Receipt = ReceiptTy<N::Primitives>,
+            Transaction = TxTy<N::Primitives>,
+        >,
     >,
 {
     #[inline]
@@ -277,7 +276,7 @@ impl<N: OpNodeCore> fmt::Debug for OpEthApi<N> {
 
 /// Container type `OpEthApi`
 #[allow(missing_debug_implementations)]
-struct OpEthApiInner<N: OpNodeCore> {
+struct OpEthApiInner<N: RpcNodeCore> {
     /// Gateway to node's core components.
     eth_api: EthApiNodeBackend<N>,
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP

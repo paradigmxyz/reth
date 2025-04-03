@@ -5,26 +5,23 @@ use alloy_rpc_types_eth::BlockId;
 use op_alloy_rpc_types::OpTransactionReceipt;
 use reth_chainspec::ChainSpecProvider;
 use reth_node_api::BlockBody;
-use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
+use reth_optimism_primitives::OpPrimitives;
 use reth_primitives_traits::SignedTransaction;
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
     types::RpcTypes,
-    RpcReceipt,
+    RpcNodeCore, RpcReceipt,
 };
-use reth_storage_api::{BlockReader, HeaderProvider};
 
-use crate::{eth::OpNodeCore, OpEthApi, OpEthApiError, OpReceiptBuilder};
+use crate::{OpEthApi, OpEthApiError, OpReceiptBuilder};
 
 impl<N> EthBlocks for OpEthApi<N>
 where
     Self: LoadBlock<
         Error = OpEthApiError,
+        Primitives = OpPrimitives,
         NetworkTypes: RpcTypes<Receipt = OpTransactionReceipt>,
-        Provider: BlockReader<Receipt = OpReceipt, Transaction = OpTransactionSigned>,
     >,
-    N: OpNodeCore<Provider: ChainSpecProvider<ChainSpec = OpChainSpec> + HeaderProvider>,
 {
     async fn block_receipts(
         &self,
@@ -82,9 +79,4 @@ where
     }
 }
 
-impl<N> LoadBlock for OpEthApi<N>
-where
-    Self: LoadPendingBlock + SpawnBlocking,
-    N: OpNodeCore,
-{
-}
+impl<N> LoadBlock for OpEthApi<N> where Self: LoadPendingBlock + SpawnBlocking {}

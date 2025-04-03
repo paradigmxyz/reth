@@ -201,7 +201,6 @@ pub trait EthBlocks: LoadBlock {
 pub trait LoadBlock:
     LoadPendingBlock<NetworkTypes: RpcTypes<Header = Header<HeaderTy<Self::Primitives>>>>
     + SpawnBlocking
-    + RpcNodeCoreExt
 {
     /// Returns the block object for the given block id.
     #[expect(clippy::type_complexity)]

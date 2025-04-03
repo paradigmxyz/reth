@@ -16,7 +16,7 @@ use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_storage_api::{BlockReader, BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
-use crate::{eth::OpNodeCore, OpEthApi, OpEthApiError, SequencerClient};
+use crate::{EthApi, OpEthApiError, SequencerClient};
 
 impl<N> EthTransactions for OpEthApi<N>
 where
