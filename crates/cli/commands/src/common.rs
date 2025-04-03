@@ -44,7 +44,8 @@ pub struct EnvironmentArgs<C: ChainSpecParser> {
         value_name = "CHAIN_OR_PATH",
         long_help = C::help_message(),
         default_value = C::SUPPORTED_CHAINS[0],
-        value_parser = C::parser()
+        value_parser = C::parser(),
+        global = true
     )]
     pub chain: Arc<C::ChainSpec>,
 
