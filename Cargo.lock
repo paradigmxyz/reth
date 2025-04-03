@@ -3741,6 +3741,7 @@ dependencies = [
  "prost 0.12.6",
  "reth",
  "reth-chainspec",
+ "reth-db",
  "reth-discv4",
  "reth-engine-primitives",
  "reth-eth-wire",
