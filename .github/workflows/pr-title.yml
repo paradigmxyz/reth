@@ -15,7 +15,7 @@ permissions:
 jobs:
   conventional-title:
     name: Validate PR title is Conventional Commit
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       - name: Check title
         if: github.event_name == 'pull_request_target'
