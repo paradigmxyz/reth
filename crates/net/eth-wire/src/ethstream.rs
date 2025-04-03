@@ -255,7 +255,7 @@ where
         let res = ready!(this.inner.poll_next(cx));
 
         match res {
-            Some(Ok(bytes)) => Poll::Ready(Some(this.eth.decode_bytes(bytes))),
+            Some(Ok(bytes)) => Poll::Ready(Some(this.eth.decode_message(bytes))),
             Some(Err(err)) => Poll::Ready(Some(Err(err.into()))),
             None => Poll::Ready(None),
         }
