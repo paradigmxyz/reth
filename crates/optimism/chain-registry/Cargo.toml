@@ -12,12 +12,21 @@ exclude.workspace = true
 workspace = true
 
 [dependencies]
+# reth
 reth-fs-util.workspace = true
+reth-cli.workspace = true
+reth-db.workspace = true
+reth-optimism-chainspec.workspace = true
+reth-cli-commands.workspace = true
+alloy-genesis.workspace = true
 
 # misc
 serde_json = { workspace = true, features = ["std"] }
 zstd.workspace = true
 eyre.workspace = true
+# misc
+clap.workspace = true
+shellexpand.workspace = true
 
 # tracing
 tracing.workspace = true
