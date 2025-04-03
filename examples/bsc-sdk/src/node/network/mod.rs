@@ -1,8 +1,81 @@
-use reth_discv4::NodeRecord;
+use crate::chainspec::{bsc::head, BscChainSpec};
+use handshake::BscHandshake;
+use reth::{
+    api::{FullNodeTypes, NodeTypes, TxTy},
+    builder::{components::NetworkBuilder, BuilderContext},
+    transaction_pool::{PoolTransaction, TransactionPool},
+};
+use reth_chainspec::Hardforks;
+use reth_discv4::{Discv4ConfigBuilder, NodeRecord};
+use reth_network::{EthNetworkPrimitives, NetworkConfig, NetworkHandle, NetworkManager};
+use reth_network_api::PeersInfo;
+use reth_primitives::{EthPrimitives, PooledTransaction};
+use std::{sync::Arc, time::Duration};
+use tracing::info;
 
 pub(crate) mod block_import;
 pub mod handshake;
 pub(crate) mod upgrade_status;
+
+/// A basic bsc network builder.
+#[derive(Debug, Default, Clone)]
+#[non_exhaustive]
+pub struct BscNetworkBuilder;
+
+impl BscNetworkBuilder {
+    /// Returns the [`NetworkConfig`] that contains the settings to launch the p2p network.
+    ///
+    /// This applies the configured [`BscNetworkBuilder`] settings.
+    pub fn network_config<Node>(
+        &self,
+        ctx: &BuilderContext<Node>,
+    ) -> eyre::Result<NetworkConfig<<Node as FullNodeTypes>::Provider, EthNetworkPrimitives>>
+    where
+        Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
+    {
+        let mut network_builder = ctx.network_config_builder()?;
+
+        network_builder = network_builder
+            .set_head(head())
+            .with_pow()
+            .with_unused_ports()
+            .eth_rlpx_handshake(Arc::new(BscHandshake::default()));
+        let network_config = ctx.build_network_config(network_builder);
+
+        let network_config = network_config.set_discovery_v4(
+            Discv4ConfigBuilder::default()
+                .add_boot_nodes(boot_nodes())
+                .lookup_interval(Duration::from_millis(500))
+                .build(),
+        );
+
+        Ok(network_config)
+    }
+}
+
+impl<Node, Pool> NetworkBuilder<Node, Pool> for BscNetworkBuilder
+where
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = BscChainSpec, Primitives = EthPrimitives>>,
+    Pool: TransactionPool<
+            Transaction: PoolTransaction<Consensus = TxTy<Node::Types>, Pooled = PooledTransaction>,
+        > + Unpin
+        + 'static,
+{
+    type Primitives = EthNetworkPrimitives;
+
+    async fn build_network(
+        self,
+        ctx: &BuilderContext<Node>,
+        pool: Pool,
+    ) -> eyre::Result<NetworkHandle<Self::Primitives>> {
+        let network_config = self.network_config(ctx)?;
+        let network = NetworkManager::builder(network_config).await?;
+        let handle = ctx.start_network(network, pool);
+        info!(target: "reth::cli", enode=%handle.local_node_record(), "P2P networking initialized");
+
+        Ok(handle)
+    }
+}
 
 /// BSC mainnet bootnodes <https://github.com/bnb-chain/bsc/blob/master/params/bootnodes.go#L23>
 static BOOTNODES : [&str; 6] = [

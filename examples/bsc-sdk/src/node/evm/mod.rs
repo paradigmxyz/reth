@@ -1,11 +1,21 @@
-use crate::evm::{
-    api::{ctx::BscContext, BscEvmInner},
-    precompiles::BscPrecompiles,
-    spec::BscSpecId,
-    transaction::BscTransaction,
+use crate::{
+    chainspec::BscChainSpec,
+    evm::{
+        api::{ctx::BscContext, BscEvmInner},
+        precompiles::BscPrecompiles,
+        spec::BscSpecId,
+        transaction::BscTransaction,
+    },
 };
 use alloy_primitives::{Address, Bytes};
+use config::BscEvmConfig;
+use reth::{
+    api::{FullNodeTypes, NodeTypes},
+    builder::{components::ExecutorBuilder, BuilderContext},
+};
 use reth_evm::{Evm, EvmEnv};
+use reth_node_ethereum::BasicBlockExecutorProvider;
+use reth_primitives::EthPrimitives;
 use revm::{
     context::{
         result::{EVMError, HaltReason, ResultAndState},
@@ -17,17 +27,16 @@ use revm::{
 };
 use std::ops::{Deref, DerefMut};
 
-mod config;
+pub mod config;
 mod executor;
 mod factory;
 mod patch;
 
-/// OP EVM implementation.
+/// BSC EVM implementation.
 ///
 /// This is a wrapper type around the `revm` evm with optional [`Inspector`] (tracing)
 /// support. [`Inspector`] support is configurable at runtime because it's part of the underlying
-/// [`OpEvm`](op_revm::OpEvm) type.
-#[allow(missing_debug_implementations)] // missing revm::OpContext Debug impl
+#[allow(missing_debug_implementations)]
 pub struct BscEvm<DB: Database, I, P = BscPrecompiles> {
     pub inner: BscEvmInner<BscContext<DB>, I, EthInstructions<EthInterpreter, BscContext<DB>>, P>,
     pub inspect: bool,
@@ -51,10 +60,9 @@ impl<DB: Database, I, P> BscEvm<DB, I, P> {
 }
 
 impl<DB: Database, I, P> BscEvm<DB, I, P> {
-    /// Creates a new OP EVM instance.
+    /// Creates a new Bsc EVM instance.
     ///
     /// The `inspect` argument determines whether the configured [`Inspector`] of the given
-    /// [`OpEvm`](op_revm::OpEvm) should be invoked on [`Evm::transact`].
     pub const fn new(
         evm: BscEvmInner<BscContext<DB>, I, EthInstructions<EthInterpreter, BscContext<DB>>, P>,
         inspect: bool,
@@ -130,5 +138,28 @@ where
 
     fn set_inspector_enabled(&mut self, enabled: bool) {
         self.inspect = enabled;
+    }
+}
+
+/// A regular bsc evm and executor builder.
+#[derive(Debug, Default, Clone, Copy)]
+#[non_exhaustive]
+pub struct BscExecutorBuilder;
+
+impl<Node> ExecutorBuilder<Node> for BscExecutorBuilder
+where
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = BscChainSpec, Primitives = EthPrimitives>>,
+{
+    type EVM = BscEvmConfig;
+    type Executor = BasicBlockExecutorProvider<Self::EVM>;
+
+    async fn build_evm(
+        self,
+        ctx: &BuilderContext<Node>,
+    ) -> eyre::Result<(Self::EVM, Self::Executor)> {
+        let evm_config = BscEvmConfig::bsc(ctx.chain_spec());
+        let executor = BasicBlockExecutorProvider::new(evm_config.clone());
+
+        Ok((evm_config, executor))
     }
 }
