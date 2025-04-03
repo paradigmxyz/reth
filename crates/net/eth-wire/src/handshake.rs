@@ -4,14 +4,13 @@ use crate::{
     CanDisconnect,
 };
 use bytes::{Bytes, BytesMut};
-use derive_more::with_trait::Debug;
 use futures::{Sink, SinkExt, Stream};
 use reth_eth_wire_types::{
     DisconnectReason, EthMessage, EthNetworkPrimitives, ProtocolMessage, Status,
 };
 use reth_ethereum_forks::ForkFilter;
 use reth_primitives_traits::GotExpected;
-use std::{future::Future, pin::Pin, time::Duration};
+use std::{fmt::Debug, future::Future, pin::Pin, time::Duration};
 use tokio::time::timeout;
 use tokio_stream::StreamExt;
 use tracing::{debug, trace};
