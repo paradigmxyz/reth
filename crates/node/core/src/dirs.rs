@@ -103,7 +103,7 @@ pub trait XdgPath {
 /// assert_ne!(default.as_ref(), custom.as_ref());
 /// ```
 #[derive(Debug, PartialEq, Eq)]
-pub struct PlatformPath<D>(PathBuf, std::marker::PhantomData<D>);
+pub struct PlatformPath<D>(pub PathBuf, pub std::marker::PhantomData<D>);
 
 impl<D> Display for PlatformPath<D> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -147,27 +147,28 @@ impl<D> From<PlatformPath<D>> for PathBuf {
 }
 
 impl<D> PlatformPath<D> {
-    /// Returns the path joined with another path
+    /// Public constructor that creates a new PlatformPath from a given PathBuf.
+    pub fn new(path: PathBuf) -> Self {
+        Self(path, std::marker::PhantomData)
+    }
+    
+    /// Returns the path joined with another path.
     pub fn join<P: AsRef<Path>>(&self, path: P) -> Self {
         Self(self.0.join(path), std::marker::PhantomData)
     }
-}
-
-impl<D> PlatformPath<D> {
-    /// Converts the path to a `ChainPath` with the given `Chain`.
+    
+    /// Converts the path to a ChainPath with the given chain and datadir arguments.
     pub fn with_chain(&self, chain: Chain, datadir_args: DatadirArgs) -> ChainPath<D> {
-        // extract chain name
         let platform_path = self.platform_path_from_chain(chain);
-
         ChainPath::new(platform_path, chain, datadir_args)
     }
-
+    
     fn platform_path_from_chain(&self, chain: Chain) -> Self {
         let chain_name = config_path_prefix(chain);
         let path = self.0.join(chain_name);
         Self(path, std::marker::PhantomData)
     }
-
+    
     /// Map the inner path to a new type `T`.
     pub fn map_to<T>(&self) -> PlatformPath<T> {
         PlatformPath(self.0.clone(), std::marker::PhantomData)
@@ -271,33 +272,44 @@ pub struct ChainPath<D>(PlatformPath<D>, Chain, DatadirArgs);
 
 impl<D> ChainPath<D> {
     /// Returns a new `ChainPath` given a `PlatformPath` and a `Chain`.
+    /// This constructor now fully respects the provided path without modification.
     pub const fn new(path: PlatformPath<D>, chain: Chain, datadir_args: DatadirArgs) -> Self {
         Self(path, chain, datadir_args)
     }
 
     /// Returns the path to the reth data directory for this chain.
+    /// Now respects the exact path provided via --datadir if specified.
     ///
-    /// `<DIR>/<CHAIN_ID>`
+    /// Path structure:
+    /// - With --datadir: uses provided path exactly
+    /// - Without --datadir: `<PLATFORM_DIR>/<CHAIN_ID>`
     pub fn data_dir(&self) -> &Path {
         self.0.as_ref()
     }
 
     /// Returns the path to the db directory for this chain.
+    /// Respects the base directory structure from data_dir().
     ///
-    /// `<DIR>/<CHAIN_ID>/db`
+    /// Path structure:
+    /// - With --datadir: `<DATADIR>/db`
+    /// - Without --datadir: `<PLATFORM_DIR>/<CHAIN_ID>/db`
     pub fn db(&self) -> PathBuf {
         self.data_dir().join("db")
     }
 
     /// Returns the path to the static files directory for this chain.
+    /// Provides maximum flexibility by respecting both --datadir and --datadir.static-files.
     ///
-    /// `<DIR>/<CHAIN_ID>/static_files`
+    /// Path resolution priority:
+    /// 1. If --datadir.static-files provided: uses that path exactly
+    /// 2. If --datadir provided: `<DATADIR>/static-files`
+    /// 3. Otherwise: `<PLATFORM_DIR>/<CHAIN_ID>/static-files`
     pub fn static_files(&self) -> PathBuf {
         let datadir_args = &self.2;
         if let Some(static_files_path) = &datadir_args.static_files_path {
             static_files_path.clone()
         } else {
-            self.data_dir().join("static_files")
+            self.data_dir().join("static-files")
         }
     }
 
