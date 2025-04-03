@@ -1,12 +1,13 @@
 //! Trait for specifying `eth` network dependent API types.
 
 use crate::{AsEthApiError, FromEthApiError, RpcNodeCoreExt};
+use alloy_consensus::Header;
 use alloy_json_rpc::RpcObject;
 use alloy_network::{Network, ReceiptResponse, TransactionResponse};
 use alloy_rpc_types_eth::Block;
 use reth_evm::ConfigureEvm;
 use reth_node_api::NodePrimitives;
-use reth_primitives_traits::{BlockTy, ReceiptTy, TxTy};
+use reth_primitives_traits::{BlockTy, HeaderTy, ReceiptTy, TxTy};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, FullRpcProvider, ReceiptProvider, TransactionsProvider,
 };
@@ -87,6 +88,7 @@ where
                 Transaction = TxTy<Self::Primitives>,
                 Receipt = ReceiptTy<Self::Primitives>,
                 Block = BlockTy<Self::Primitives>,
+                Header = HeaderTy<Self::Primitives>,
             >,
             Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Primitives>>>,
             Evm: ConfigureEvm<Primitives = Self::Primitives>,
@@ -107,6 +109,7 @@ impl<T> FullEthApiTypes for T where
                 Transaction = TxTy<Self::Primitives>,
                 Receipt = ReceiptTy<Self::Primitives>,
                 Block = BlockTy<Self::Primitives>,
+                Header = HeaderTy<Self::Primitives>,
             >,
             Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Primitives>>>,
             Evm: ConfigureEvm<Primitives = Self::Primitives>,

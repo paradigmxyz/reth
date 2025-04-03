@@ -13,11 +13,11 @@ use reth_evm::{
     ConfigureEvm, Evm, SpecFor,
 };
 use reth_primitives_traits::{
-    transaction::error::InvalidTransactionError, BlockTy, HeaderTy, RecoveredBlock, SealedHeader,
+    transaction::error::InvalidTransactionError, BlockTy, HeaderTy, ReceiptTy, RecoveredBlock,
+    SealedHeader,
 };
 use reth_provider::{
-    BlockReader, BlockReaderIdExt, ProviderError, ProviderReceipt, ReceiptProvider,
-    StateProviderFactory,
+    BlockReader, BlockReaderIdExt, ProviderError, ReceiptProvider, StateProviderFactory,
 };
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
@@ -39,7 +39,7 @@ pub trait LoadPendingBlock: FullEthApiTypes {
     #[expect(clippy::type_complexity)]
     fn pending_block(
         &self,
-    ) -> &Mutex<Option<PendingBlock<BlockTy<Self::Primitives>, ProviderReceipt<Self::Provider>>>>;
+    ) -> &Mutex<Option<PendingBlock<BlockTy<Self::Primitives>, ReceiptTy<Self::Primitives>>>>;
 
     /// Configures the [`PendingBlockEnv`] for the pending block
     ///
@@ -48,11 +48,7 @@ pub trait LoadPendingBlock: FullEthApiTypes {
     fn pending_block_env_and_cfg(
         &self,
     ) -> Result<
-        PendingBlockEnv<
-            BlockTy<Self::Primitives>,
-            ProviderReceipt<Self::Provider>,
-            SpecFor<Self::Evm>,
-        >,
+        PendingBlockEnv<BlockTy<Self::Primitives>, ReceiptTy<Self::Primitives>, SpecFor<Self::Evm>>,
         Self::Error,
     > {
         if let Some(block) =
@@ -104,10 +100,7 @@ pub trait LoadPendingBlock: FullEthApiTypes {
         &self,
     ) -> impl Future<
         Output = Result<
-            Option<(
-                RecoveredBlock<<Self::Provider as BlockReader>::Block>,
-                Vec<ProviderReceipt<Self::Provider>>,
-            )>,
+            Option<(RecoveredBlock<BlockTy<Self::Primitives>>, Vec<ReceiptTy<Self::Primitives>>)>,
             Self::Error,
         >,
     > + Send
@@ -176,7 +169,7 @@ pub trait LoadPendingBlock: FullEthApiTypes {
         &self,
         parent: &SealedHeader<HeaderTy<Self::Primitives>>,
     ) -> Result<
-        (RecoveredBlock<BlockTy<Self::Primitives>>, Vec<ProviderReceipt<Self::Provider>>),
+        (RecoveredBlock<BlockTy<Self::Primitives>>, Vec<ReceiptTy<Self::Primitives>>),
         Self::Error,
     >
     where

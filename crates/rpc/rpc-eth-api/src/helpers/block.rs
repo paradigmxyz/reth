@@ -2,8 +2,7 @@
 
 use super::{LoadPendingBlock, LoadReceipt, SpawnBlocking};
 use crate::{
-    node::RpcNodeCoreExt, EthApiTypes, FromEthApiError, FullEthApiTypes, RpcBlock, RpcNodeCore,
-    RpcReceipt,
+    node::RpcNodeCoreExt, EthApiTypes, FromEthApiError, FullEthApiTypes, RpcBlock, RpcHeader, RpcNodeCore, RpcReceipt
 };
 use alloy_eips::BlockId;
 use alloy_primitives::{Sealable, U256};
@@ -35,7 +34,7 @@ pub trait EthBlocks: LoadBlock {
     fn rpc_block_header(
         &self,
         block_id: BlockId,
-    ) -> impl Future<Output = Result<Option<Header<HeaderTy<Self::Primitives>>>, Self::Error>> + Send
+    ) -> impl Future<Output = Result<Option<RpcHeader<Self::NetworkTypes>>, Self::Error>> + Send
     {
         async move { Ok(self.rpc_block(block_id, false).await?.map(|block| block.header)) }
     }
