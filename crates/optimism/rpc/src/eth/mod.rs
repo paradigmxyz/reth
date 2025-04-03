@@ -15,7 +15,7 @@ use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_node_api::{FullNodeComponents, NodePrimitives};
+use reth_node_api::{FullNodeComponents, NodePrimitives, PrimitivesTy};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
 use reth_optimism_primitives::OpPrimitives;
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
@@ -321,7 +321,11 @@ impl OpEthApiBuilder {
 impl<N> EthApiBuilder<N> for OpEthApiBuilder
 where
     N: FullNodeComponents,
-    OpEthApi<N>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
+    OpEthApi<N>: FullEthApiServer<
+        Primitives = PrimitivesTy<N::Types>,
+        Provider = N::Provider,
+        Pool = N::Pool,
+    >,
 {
     type EthApi = OpEthApi<N>;
 

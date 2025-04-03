@@ -8,7 +8,7 @@ use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineTypes, EngineValidator, FullNodeComponents, FullNodeTypes,
-    NodeAddOns, NodeTypes, PayloadTypes, ReceiptTy,
+    NodeAddOns, NodeTypes, PayloadTypes, PrimitivesTy, ReceiptTy,
 };
 use reth_node_core::{
     node_config::NodeConfig,
@@ -615,8 +615,11 @@ pub struct EthApiCtx<'a, N: FullNodeTypes> {
 pub trait EthApiBuilder<N: FullNodeComponents>: Default + Send + 'static {
     /// The Ethapi implementation this builder will build.
     type EthApi: EthApiTypes
-        + FullEthApiServer<Provider = N::Provider, Pool = N::Pool>
-        + AddDevSigners
+        + FullEthApiServer<
+            Primitives = PrimitivesTy<N::Types>,
+            Provider = N::Provider,
+            Pool = N::Pool,
+        > + AddDevSigners
         + Unpin
         + 'static;
 
