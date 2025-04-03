@@ -33,10 +33,10 @@ use jsonrpsee::{
     Methods, RpcModule,
 };
 use reth_chainspec::EthereumHardforks;
-use reth_consensus::{ConsensusError, FullConsensus};
+use reth_consensus::{Consensus, ConsensusError, FullConsensus};
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
-use reth_primitives_traits::NodePrimitives;
+use reth_primitives_traits::{NodePrimitives, Transaction};
 use reth_provider::{
     AccountReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
     ChangeSetReader, FullRpcProvider, ProviderBlock, StateProviderFactory,
@@ -119,7 +119,7 @@ where
         + CanonStateSubscriptions<Primitives = N>
         + AccountReader
         + ChangeSetReader,
-    Pool: TransactionPool + 'static,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     EvmConfig: ConfigureEvm<Primitives = N>,
@@ -539,7 +539,7 @@ where
         + CanonStateSubscriptions<Primitives = N>
         + AccountReader
         + ChangeSetReader,
-    Pool: TransactionPool + 'static,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     EvmConfig: ConfigureEvm<Primitives = N>,
@@ -1072,8 +1072,7 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn debug_api(&self) -> DebugApi<EthApi, BlockExecutor>
     where
-        EthApi: EthApiSpec + EthTransactions + TraceExt,
-        BlockExecutor::Primitives: NodePrimitives<Block = ProviderBlock<EthApi::Provider>>,
+        EthApi: EthApiSpec + EthTransactions<Primitives = N> + TraceExt,
     {
         DebugApi::new(
             self.eth_api().clone(),
@@ -1109,7 +1108,7 @@ where
         + CanonStateSubscriptions<Primitives = N>
         + AccountReader
         + ChangeSetReader,
-    Pool: TransactionPool + 'static,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     EthApi: FullEthApiServer<Primitives = N, Provider = Provider, Pool = Pool>,

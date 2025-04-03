@@ -4,9 +4,12 @@ use crate::{AsEthApiError, FromEthApiError, RpcNodeCoreExt};
 use alloy_json_rpc::RpcObject;
 use alloy_network::{Network, ReceiptResponse, TransactionResponse};
 use alloy_rpc_types_eth::Block;
+use reth_evm::ConfigureEvm;
 use reth_node_api::NodePrimitives;
-use reth_primitives_traits::{ReceiptTy, TxTy};
-use reth_provider::{ReceiptProvider, TransactionsProvider};
+use reth_primitives_traits::{BlockTy, ReceiptTy, TxTy};
+use reth_provider::{
+    BlockReaderIdExt, ChainSpecProvider, FullRpcProvider, ReceiptProvider, TransactionsProvider,
+};
 use reth_rpc_types_compat::TransactionCompat;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::{
@@ -80,9 +83,13 @@ pub trait FullEthApiTypes
 where
     Self: RpcNodeCoreExt<
             Primitives: NodePrimitives,
-            Provider: TransactionsProvider<Transaction = TxTy<Self::Primitives>>
-                          + ReceiptProvider<Receipt = ReceiptTy<Self::Primitives>>,
+            Provider: FullRpcProvider<
+                Transaction = TxTy<Self::Primitives>,
+                Receipt = ReceiptTy<Self::Primitives>,
+                Block = BlockTy<Self::Primitives>,
+            >,
             Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Primitives>>>,
+            Evm: ConfigureEvm<Primitives = Self::Primitives>,
         > + EthApiTypes<
             TransactionCompat: TransactionCompat<
                 TxTy<Self::Primitives>,
@@ -96,9 +103,13 @@ where
 impl<T> FullEthApiTypes for T where
     T: RpcNodeCoreExt<
             Primitives: NodePrimitives,
-            Provider: TransactionsProvider<Transaction = TxTy<Self::Primitives>>
-                          + ReceiptProvider<Receipt = ReceiptTy<Self::Primitives>>,
+            Provider: FullRpcProvider<
+                Transaction = TxTy<Self::Primitives>,
+                Receipt = ReceiptTy<Self::Primitives>,
+                Block = BlockTy<Self::Primitives>,
+            >,
             Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Primitives>>>,
+            Evm: ConfigureEvm<Primitives = Self::Primitives>,
         > + EthApiTypes<
             TransactionCompat: TransactionCompat<
                 TxTy<Self::Primitives>,

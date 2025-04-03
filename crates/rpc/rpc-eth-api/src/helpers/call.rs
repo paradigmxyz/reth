@@ -20,9 +20,9 @@ use reth_evm::{
     ConfigureEvm, Evm, EvmEnv, EvmEnvFor, HaltReasonFor, InspectorFor, SpecFor, TransactionEnv,
     TxEnvFor,
 };
-use reth_node_api::{BlockBody, NodePrimitives};
-use reth_primitives_traits::{Recovered, SealedHeader, SignedTransaction};
-use reth_provider::{BlockIdReader, ProviderHeader, ProviderTx};
+use reth_node_api::BlockBody;
+use reth_primitives_traits::{Recovered, SealedHeader, SignedTransaction, TxTy};
+use reth_provider::BlockIdReader;
 use reth_revm::{
     database::StateProviderDatabase,
     db::{CacheDB, State},
@@ -50,7 +50,7 @@ pub type SimulatedBlocksResult<N, E> = Result<Vec<SimulatedBlock<RpcBlock<N>>>, 
 
 /// Execution related functions for the [`EthApiServer`](crate::EthApiServer) trait in
 /// the `eth_` namespace.
-pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthApiTypes {
+pub trait EthCall: EstimateCall + Call + LoadBlock {
     /// Estimate gas needed for execution of the `request` at the [`BlockId`].
     fn estimate_gas_at(
         &self,
@@ -430,15 +430,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
 /// Executes code on state.
 pub trait Call:
-    LoadState<
-        Evm: ConfigureEvm<
-            Primitives: NodePrimitives<
-                BlockHeader = ProviderHeader<Self::Provider>,
-                SignedTx = ProviderTx<Self::Provider>,
-            >,
-        >,
-        Error: FromEvmError<Self::Evm>,
-    > + SpawnBlocking
+    LoadState<Evm: ConfigureEvm<Primitives = Self::Primitives>, Error: FromEvmError<Self::Evm>>
+    + SpawnBlocking
 {
     /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
     ///
@@ -661,7 +654,7 @@ pub trait Call:
     ) -> Result<usize, Self::Error>
     where
         DB: Database<Error = ProviderError> + DatabaseCommit,
-        I: IntoIterator<Item = Recovered<&'a ProviderTx<Self::Provider>>>,
+        I: IntoIterator<Item = Recovered<&'a TxTy<Self::Primitives>>>,
     {
         let mut evm = self.evm_config().evm_with_env(db, evm_env);
         let mut index = 0;

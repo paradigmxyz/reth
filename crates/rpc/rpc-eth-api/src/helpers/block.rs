@@ -11,10 +11,8 @@ use alloy_rlp::Encodable;
 use alloy_rpc_types_eth::{Block, BlockTransactions, Header, Index};
 use futures::Future;
 use reth_node_api::BlockBody;
-use reth_primitives_traits::{RecoveredBlock, SealedBlock};
-use reth_provider::{
-    BlockIdReader, BlockReader, BlockReaderIdExt, ProviderHeader, ProviderReceipt,
-};
+use reth_primitives_traits::{BlockTy, HeaderTy, ReceiptTy, RecoveredBlock, SealedBlock};
+use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt};
 use reth_rpc_types_compat::block::from_block;
 use std::sync::Arc;
 
@@ -23,8 +21,8 @@ pub type BlockReceiptsResult<N, E> = Result<Option<Vec<RpcReceipt<N>>>, E>;
 /// Result type of the fetched block and its receipts.
 pub type BlockAndReceiptsResult<Eth> = Result<
     Option<(
-        SealedBlock<<<Eth as RpcNodeCore>::Provider as BlockReader>::Block>,
-        Arc<Vec<ProviderReceipt<<Eth as RpcNodeCore>::Provider>>>,
+        SealedBlock<BlockTy<<Eth as RpcNodeCore>::Primitives>>,
+        Arc<Vec<ReceiptTy<<Eth as RpcNodeCore>::Primitives>>>,
     )>,
     <Eth as EthApiTypes>::Error,
 >;
@@ -37,9 +35,7 @@ pub trait EthBlocks: LoadBlock {
     fn rpc_block_header(
         &self,
         block_id: BlockId,
-    ) -> impl Future<Output = Result<Option<Header<ProviderHeader<Self::Provider>>>, Self::Error>> + Send
-    where
-        Self: FullEthApiTypes,
+    ) -> impl Future<Output = Result<Option<Header<HeaderTy<Self::Primitives>>>, Self::Error>> + Send
     {
         async move { Ok(self.rpc_block(block_id, false).await?.map(|block| block.header)) }
     }
@@ -53,8 +49,6 @@ pub trait EthBlocks: LoadBlock {
         block_id: BlockId,
         full: bool,
     ) -> impl Future<Output = Result<Option<RpcBlock<Self::NetworkTypes>>, Self::Error>> + Send
-    where
-        Self: FullEthApiTypes,
     {
         async move {
             let Some(block) = self.recovered_block(block_id).await? else { return Ok(None) };
@@ -159,7 +153,7 @@ pub trait EthBlocks: LoadBlock {
     fn ommers(
         &self,
         block_id: BlockId,
-    ) -> Result<Option<Vec<ProviderHeader<Self::Provider>>>, Self::Error> {
+    ) -> Result<Option<Vec<HeaderTy<Self::Primitives>>>, Self::Error> {
         self.provider().ommers_by_id(block_id).map_err(Self::Error::from_eth_err)
     }
 
@@ -208,10 +202,7 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
         &self,
         block_id: BlockId,
     ) -> impl Future<
-        Output = Result<
-            Option<Arc<RecoveredBlock<<Self::Provider as BlockReader>::Block>>>,
-            Self::Error,
-        >,
+        Output = Result<Option<Arc<RecoveredBlock<BlockTy<Self::Primitives>>>>, Self::Error>,
     > + Send {
         async move {
             if block_id.is_pending() {

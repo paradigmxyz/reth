@@ -12,9 +12,8 @@ use reth_evm::{
     system_calls::SystemCaller, ConfigureEvm, Database, Evm, EvmEnvFor, HaltReasonFor,
     InspectorFor, TxEnvFor,
 };
-use reth_node_api::NodePrimitives;
-use reth_primitives_traits::{BlockBody, RecoveredBlock, SignedTransaction};
-use reth_provider::{BlockReader, ProviderBlock, ProviderHeader, ProviderTx};
+use reth_primitives_traits::{BlockBody, BlockTy, RecoveredBlock, SignedTransaction};
+use reth_provider::BlockReader;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDb, StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
@@ -32,12 +31,7 @@ use std::sync::Arc;
 pub trait Trace:
     LoadState<
     Provider: BlockReader,
-    Evm: ConfigureEvm<
-        Primitives: NodePrimitives<
-            BlockHeader = ProviderHeader<Self::Provider>,
-            SignedTx = ProviderTx<Self::Provider>,
-        >,
-    >,
+    Evm: ConfigureEvm<Primitives = Self::Primitives>,
     Error: FromEvmError<Self::Evm>,
 >
 {
@@ -233,7 +227,7 @@ pub trait Trace:
     fn trace_block_until<F, R>(
         &self,
         block_id: BlockId,
-        block: Option<Arc<RecoveredBlock<ProviderBlock<Self::Provider>>>>,
+        block: Option<Arc<RecoveredBlock<BlockTy<Self::Primitives>>>>,
         highest_index: Option<u64>,
         config: TracingInspectorConfig,
         f: F,
@@ -273,7 +267,7 @@ pub trait Trace:
     fn trace_block_until_with_inspector<Setup, Insp, F, R>(
         &self,
         block_id: BlockId,
-        block: Option<Arc<RecoveredBlock<ProviderBlock<Self::Provider>>>>,
+        block: Option<Arc<RecoveredBlock<BlockTy<Self::Primitives>>>>,
         highest_index: Option<u64>,
         mut inspector_setup: Setup,
         f: F,
@@ -392,7 +386,7 @@ pub trait Trace:
     fn trace_block_with<F, R>(
         &self,
         block_id: BlockId,
-        block: Option<Arc<RecoveredBlock<ProviderBlock<Self::Provider>>>>,
+        block: Option<Arc<RecoveredBlock<BlockTy<Self::Primitives>>>>,
         config: TracingInspectorConfig,
         f: F,
     ) -> impl Future<Output = Result<Option<Vec<R>>, Self::Error>> + Send
@@ -431,7 +425,7 @@ pub trait Trace:
     fn trace_block_inspector<Setup, Insp, F, R>(
         &self,
         block_id: BlockId,
-        block: Option<Arc<RecoveredBlock<ProviderBlock<Self::Provider>>>>,
+        block: Option<Arc<RecoveredBlock<BlockTy<Self::Primitives>>>>,
         insp_setup: Setup,
         f: F,
     ) -> impl Future<Output = Result<Option<Vec<R>>, Self::Error>> + Send
@@ -463,7 +457,7 @@ pub trait Trace:
     /// already applied.
     fn apply_pre_execution_changes<DB: Send + Database + DatabaseCommit>(
         &self,
-        block: &RecoveredBlock<ProviderBlock<Self::Provider>>,
+        block: &RecoveredBlock<BlockTy<Self::Primitives>>,
         db: &mut DB,
         evm_env: &EvmEnvFor<Self::Evm>,
     ) -> Result<(), Self::Error> {

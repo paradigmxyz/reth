@@ -2,30 +2,27 @@
 //! RPC methods.
 
 use super::SpawnBlocking;
-use crate::{types::RpcTypes, EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
+use crate::{FromEthApiError, FullEthApiTypes};
 use alloy_consensus::{BlockHeader, Transaction};
 use alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK;
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use futures::Future;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm, Evm, SpecFor,
 };
-use reth_node_api::NodePrimitives;
 use reth_primitives_traits::{
-    transaction::error::InvalidTransactionError, Receipt, RecoveredBlock, SealedHeader,
+    transaction::error::InvalidTransactionError, BlockTy, HeaderTy, RecoveredBlock, SealedHeader,
 };
 use reth_provider::{
-    BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderError, ProviderHeader,
-    ProviderReceipt, ProviderTx, ReceiptProvider, StateProviderFactory,
+    BlockReader, BlockReaderIdExt, ProviderError, ProviderReceipt, ReceiptProvider,
+    StateProviderFactory,
 };
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
 use reth_transaction_pool::{
-    error::InvalidPoolTransactionError, BestTransactionsAttributes, PoolTransaction,
-    TransactionPool,
+    error::InvalidPoolTransactionError, BestTransactionsAttributes, TransactionPool,
 };
 use revm::context_interface::Block;
 use std::time::{Duration, Instant};
@@ -35,34 +32,14 @@ use tracing::debug;
 /// Loads a pending block from database.
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
-pub trait LoadPendingBlock:
-    EthApiTypes<
-        NetworkTypes: RpcTypes<
-            Header = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
-        >,
-        Error: FromEvmError<Self::Evm>,
-    > + RpcNodeCore<
-        Provider: BlockReaderIdExt<Receipt: Receipt>
-                      + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
-                      + StateProviderFactory,
-        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
-        Evm: ConfigureEvm<
-            Primitives: NodePrimitives<
-                BlockHeader = ProviderHeader<Self::Provider>,
-                SignedTx = ProviderTx<Self::Provider>,
-                Receipt = ProviderReceipt<Self::Provider>,
-                Block = ProviderBlock<Self::Provider>,
-            >,
-        >,
-    >
-{
+pub trait LoadPendingBlock: FullEthApiTypes {
     /// Returns a handle to the pending block.
     ///
     /// Data access in default (L1) trait method implementations.
     #[expect(clippy::type_complexity)]
     fn pending_block(
         &self,
-    ) -> &Mutex<Option<PendingBlock<ProviderBlock<Self::Provider>, ProviderReceipt<Self::Provider>>>>;
+    ) -> &Mutex<Option<PendingBlock<BlockTy<Self::Primitives>, ProviderReceipt<Self::Provider>>>>;
 
     /// Configures the [`PendingBlockEnv`] for the pending block
     ///
@@ -72,7 +49,7 @@ pub trait LoadPendingBlock:
         &self,
     ) -> Result<
         PendingBlockEnv<
-            ProviderBlock<Self::Provider>,
+            BlockTy<Self::Primitives>,
             ProviderReceipt<Self::Provider>,
             SpecFor<Self::Evm>,
         >,
@@ -118,7 +95,7 @@ pub trait LoadPendingBlock:
     /// Returns [`ConfigureEvm::NextBlockEnvCtx`] for building a local pending block.
     fn next_env_attributes(
         &self,
-        parent: &SealedHeader<ProviderHeader<Self::Provider>>,
+        parent: &SealedHeader<HeaderTy<Self::Primitives>>,
     ) -> Result<<Self::Evm as ConfigureEvm>::NextBlockEnvCtx, Self::Error>;
 
     /// Returns the locally built pending block
@@ -197,9 +174,9 @@ pub trait LoadPendingBlock:
     #[expect(clippy::type_complexity)]
     fn build_block(
         &self,
-        parent: &SealedHeader<ProviderHeader<Self::Provider>>,
+        parent: &SealedHeader<HeaderTy<Self::Primitives>>,
     ) -> Result<
-        (RecoveredBlock<ProviderBlock<Self::Provider>>, Vec<ProviderReceipt<Self::Provider>>),
+        (RecoveredBlock<BlockTy<Self::Primitives>>, Vec<ProviderReceipt<Self::Provider>>),
         Self::Error,
     >
     where
