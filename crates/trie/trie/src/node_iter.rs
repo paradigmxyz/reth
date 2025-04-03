@@ -33,9 +33,14 @@ pub enum TrieElement<Value> {
     Leaf(B256, Value),
 }
 
+/// Result of calling [`HashedCursor::seek`].
 #[derive(Debug)]
 struct SeekedHashedEntry<V> {
+    /// The key that was seeked.
     seeked_key: B256,
+    /// The result of the seek.
+
+    /// If no entry was found for the provided key, this will be [`None`].
     result: Option<(B256, V)>,
 }
 
@@ -60,6 +65,7 @@ pub struct TrieNodeIter<C, H: HashedCursor> {
 
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::TrieNodeIterMetrics,
+    /// The key that the [`HashedCursor`] previously advanced to using [`HashedCursor::next`].
     #[cfg(feature = "metrics")]
     previously_advanced_to_key: Option<B256>,
 }
