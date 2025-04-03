@@ -4,7 +4,7 @@
 use super::{EthApiSpec, EthSigner, LoadBlock, LoadReceipt, LoadState, SpawnBlocking};
 use crate::{
     helpers::estimate::EstimateCall, FromEthApiError, FullEthApiTypes, IntoEthApiError,
-    RpcNodeCore, RpcNodeCoreExt, RpcReceipt, RpcTransaction,
+    RpcNodeCore, RpcReceipt, RpcTransaction,
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader, Transaction};
 use alloy_dyn_abi::TypedData;

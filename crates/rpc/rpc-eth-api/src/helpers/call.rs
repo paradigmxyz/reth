@@ -2,9 +2,7 @@
 //! methods.
 
 use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
-use crate::{
-    helpers::estimate::EstimateCall, FromEvmError, FullEthApiTypes, RpcBlock, RpcNodeCore,
-};
+use crate::{helpers::estimate::EstimateCall, FromEvmError, RpcBlock, RpcNodeCore};
 use alloy_consensus::BlockHeader;
 use alloy_eips::eip2930::AccessListResult;
 use alloy_primitives::{Bytes, B256, U256};

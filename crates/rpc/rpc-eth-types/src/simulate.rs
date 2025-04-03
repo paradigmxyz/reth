@@ -12,8 +12,7 @@ use reth_evm::{
     Evm,
 };
 use reth_primitives_traits::{
-    block::BlockTx, BlockBody as _, NodePrimitives, Recovered, RecoveredBlock, SignedTransaction,
-    TxTy,
+    BlockBody as _, NodePrimitives, Recovered, RecoveredBlock, SignedTransaction, TxTy,
 };
 use reth_rpc_server_types::result::rpc_err;
 use reth_rpc_types_compat::{block::from_block, TransactionCompat};

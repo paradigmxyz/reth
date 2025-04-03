@@ -1,16 +1,13 @@
 //! Trait for specifying `eth` network dependent API types.
 
 use crate::{AsEthApiError, FromEthApiError, RpcNodeCoreExt};
-use alloy_consensus::Header;
 use alloy_json_rpc::RpcObject;
 use alloy_network::{Network, ReceiptResponse, TransactionResponse};
 use alloy_rpc_types_eth::Block;
 use reth_evm::ConfigureEvm;
 use reth_node_api::NodePrimitives;
 use reth_primitives_traits::{BlockTy, HeaderTy, ReceiptTy, TxTy};
-use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, FullRpcProvider, ReceiptProvider, TransactionsProvider,
-};
+use reth_provider::FullRpcProvider;
 use reth_rpc_types_compat::TransactionCompat;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::{
