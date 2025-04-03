@@ -27,6 +27,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec>> DumpGenesisCommand<C> {
         println!("{}", serde_json::to_string_pretty(self.chain.genesis())?);
         Ok(())
     }
+    /// Returns the underlying chain being used to run this command
+    pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+        Some(&self.chain)
+    }
 }
 
 #[cfg(test)]

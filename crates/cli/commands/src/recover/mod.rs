@@ -5,6 +5,7 @@ use clap::{Parser, Subcommand};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
+use std::sync::Arc;
 
 mod storage_tries;
 
@@ -30,6 +31,15 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
     ) -> eyre::Result<()> {
         match self.command {
             Subcommands::StorageTries(command) => command.execute::<N>(ctx).await,
+        }
+    }
+}
+
+impl<C: ChainSpecParser> Command<C> {
+    /// Returns the underlying chain being used to run this command
+    pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+        match &self.command {
+            Subcommands::StorageTries(command) => command.chain_spec(),
         }
     }
 }

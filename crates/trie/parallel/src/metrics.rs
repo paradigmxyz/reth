@@ -1,7 +1,7 @@
 use crate::stats::ParallelTrieStats;
 use metrics::Histogram;
 use reth_metrics::Metrics;
-use reth_trie::metrics::{TrieRootMetrics, TrieType};
+use reth_trie::{metrics::TrieRootMetrics, TrieType};
 
 /// Parallel state root metrics.
 #[derive(Debug)]

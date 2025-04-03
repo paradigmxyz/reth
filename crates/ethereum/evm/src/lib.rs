@@ -22,7 +22,7 @@ use alloy_consensus::{BlockHeader, Header};
 pub use alloy_evm::EthEvm;
 use alloy_evm::{
     eth::{EthBlockExecutionCtx, EthBlockExecutorFactory},
-    EthEvmFactory, FromRecoveredTx,
+    EthEvmFactory, FromRecoveredTx, FromTxWithEncoded,
 };
 use alloy_primitives::{Bytes, U256};
 use core::{convert::Infallible, fmt::Debug};
@@ -102,8 +102,12 @@ impl<EvmFactory> EthEvmConfig<EvmFactory> {
 
 impl<EvmF> ConfigureEvm for EthEvmConfig<EvmF>
 where
-    EvmF: EvmFactory<Tx: TransactionEnv + FromRecoveredTx<TransactionSigned>, Spec = SpecId>
-        + Clone
+    EvmF: EvmFactory<
+            Tx: TransactionEnv
+                    + FromRecoveredTx<TransactionSigned>
+                    + FromTxWithEncoded<TransactionSigned>,
+            Spec = SpecId,
+        > + Clone
         + Debug
         + Send
         + Sync
@@ -321,7 +325,7 @@ mod tests {
         assert_eq!(evm.block, evm_env.block_env);
 
         // Default spec ID
-        assert_eq!(evm.cfg.spec, SpecId::LATEST);
+        assert_eq!(evm.cfg.spec, SpecId::default());
     }
 
     #[test]
@@ -368,7 +372,7 @@ mod tests {
 
         // Check that the EVM environment is set with custom configuration
         assert_eq!(evm.cfg, cfg_env);
-        assert_eq!(evm.cfg.spec, SpecId::LATEST);
+        assert_eq!(evm.cfg.spec, SpecId::default());
     }
 
     #[test]
@@ -385,7 +389,7 @@ mod tests {
 
         // Verify that the block and transaction environments are set correctly
         assert_eq!(evm.block, evm_env.block_env);
-        assert_eq!(evm.cfg.spec, SpecId::LATEST);
+        assert_eq!(evm.cfg.spec, SpecId::default());
     }
 
     #[test]

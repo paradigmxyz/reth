@@ -165,7 +165,7 @@ where
                     self.prefix_sets.account_prefix_set,
                 )
                 .with_deletions_retained(retain_updates);
-                let node_iter = TrieNodeIter::new(walker, hashed_account_cursor)
+                let node_iter = TrieNodeIter::new(walker, hashed_account_cursor, TrieType::State)
                     .with_last_hashed_key(state.last_account_key);
                 (hash_builder, node_iter)
             }
@@ -173,7 +173,7 @@ where
                 let hash_builder = HashBuilder::default().with_updates(retain_updates);
                 let walker = TrieWalker::new(trie_cursor, self.prefix_sets.account_prefix_set)
                     .with_deletions_retained(retain_updates);
-                let node_iter = TrieNodeIter::new(walker, hashed_account_cursor);
+                let node_iter = TrieNodeIter::new(walker, hashed_account_cursor, TrieType::State);
                 (hash_builder, node_iter)
             }
         };
@@ -412,7 +412,8 @@ where
 
         let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
 
-        let mut storage_node_iter = TrieNodeIter::new(walker, hashed_storage_cursor);
+        let mut storage_node_iter =
+            TrieNodeIter::new(walker, hashed_storage_cursor, TrieType::Storage);
         while let Some(node) = storage_node_iter.try_next()? {
             match node {
                 TrieElement::Branch(node) => {
@@ -452,5 +453,23 @@ where
 
         let storage_slots_walked = stats.leaves_added() as usize;
         Ok((root, storage_slots_walked, trie_updates))
+    }
+}
+
+/// Trie type for differentiating between various trie calculations.
+#[derive(Clone, Copy, Debug)]
+pub enum TrieType {
+    /// State trie type.
+    State,
+    /// Storage trie type.
+    Storage,
+}
+
+impl TrieType {
+    pub(crate) const fn as_str(&self) -> &'static str {
+        match self {
+            Self::State => "state",
+            Self::Storage => "storage",
+        }
     }
 }

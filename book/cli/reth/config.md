@@ -15,15 +15,6 @@ Options:
       --default
           Show the default config
 
-      --chain <CHAIN_OR_PATH>
-          The chain this node is running.
-          Possible values are either a built-in chain or the path to a chain specification file.
-
-          Built-in chains:
-              mainnet, sepolia, holesky, hoodi, dev
-
-          [default: mainnet]
-
       --instance <INSTANCE>
           Add a new instance of a node.
 

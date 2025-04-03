@@ -23,7 +23,6 @@ reth-payload-builder = { workspace = true, features = ["test-utils"] }
 reth-payload-builder-primitives.workspace = true
 reth-payload-primitives.workspace = true
 reth-provider.workspace = true
-reth-network.workspace = true
 reth-node-api.workspace = true
 reth-node-core.workspace = true
 reth-node-builder = { workspace = true, features = ["test-utils"] }
@@ -33,8 +32,6 @@ reth-network-peers.workspace = true
 reth-engine-local.workspace = true
 reth-tasks.workspace = true
 reth-node-ethereum.workspace = true
-reth-primitives-traits.workspace = true
-reth-rpc-builder.workspace = true
 reth-ethereum-primitives.workspace = true
 
 revm.workspace = true
@@ -46,8 +43,6 @@ url.workspace = true
 # ethereum
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
-alloy-rlp.workspace = true
-op-alloy-rpc-types-engine.workspace = true
 
 futures-util.workspace = true
 eyre.workspace = true
