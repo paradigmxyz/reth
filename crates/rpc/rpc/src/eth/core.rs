@@ -9,7 +9,7 @@ use alloy_eips::BlockNumberOrTag;
 use alloy_network::Ethereum;
 use alloy_primitives::{Bytes, U256};
 use derive_more::Deref;
-use reth_node_api::{FullNodeComponents, FullNodeTypes, NodePrimitives};
+use reth_node_api::{FullNodeComponents, FullNodeTypes};
 use reth_primitives_traits::{BlockTy, ReceiptTy};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},

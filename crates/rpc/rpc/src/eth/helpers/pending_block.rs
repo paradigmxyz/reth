@@ -14,7 +14,8 @@ use crate::EthApi;
 impl<Provider, Pool, Network, EvmConfig> LoadPendingBlock
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: FullEthApiTypes<Primitives = EthPrimitives, Provider = Provider, Evm = EvmConfig>,
+    Self: FullEthApiTypes<Primitives = EthPrimitives, Evm = EvmConfig>,
+    Provider: BlockReader<Block = BlockTy<Self::Primitives>, Receipt = ReceiptTy<Self::Primitives>>,
     EvmConfig: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
 {
     #[inline]
