@@ -9,10 +9,9 @@ use reth_primitives_traits::{HeaderTy, SignedTransaction};
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
     types::RpcTypes,
-    RpcNodeCoreExt, RpcReceipt,
+    RpcReceipt,
 };
 use reth_rpc_eth_types::{EthApiError, EthReceiptBuilder};
-use reth_storage_api::BlockReader;
 
 use crate::EthApi;
 
@@ -21,9 +20,10 @@ where
     Self: LoadBlock<
         Error = EthApiError,
         Primitives = EthPrimitives,
+        Provider = Provider,
         NetworkTypes: RpcTypes<Receipt = TransactionReceipt>,
     >,
-    Provider: BlockReader + ChainSpecProvider,
+    Provider: ChainSpecProvider,
 {
     async fn block_receipts(
         &self,
@@ -68,9 +68,11 @@ where
 
 impl<Provider, Pool, Network, EvmConfig> LoadBlock for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: LoadPendingBlock<NetworkTypes: RpcTypes<Header = Header<HeaderTy<Self::Primitives>>>>
-        + SpawnBlocking
-        + RpcNodeCoreExt,
-    Provider: BlockReader,
+    Self: LoadPendingBlock<
+            Primitives = EthPrimitives,
+            Provider = Provider,
+            NetworkTypes: RpcTypes<Header = Header<HeaderTy<Self::Primitives>>>,
+        > + SpawnBlocking,
+    Provider: ChainSpecProvider,
 {
 }
