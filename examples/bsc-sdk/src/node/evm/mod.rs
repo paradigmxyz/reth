@@ -1,11 +1,21 @@
-use crate::evm::{
-    api::{ctx::BscContext, BscEvmInner},
-    precompiles::BscPrecompiles,
-    spec::BscSpecId,
-    transaction::BscTransaction,
+use crate::{
+    chainspec::BscChainSpec,
+    evm::{
+        api::{ctx::BscContext, BscEvmInner},
+        precompiles::BscPrecompiles,
+        spec::BscSpecId,
+        transaction::BscTransaction,
+    },
 };
-use alloy_primitives::{Address, Bytes};
+use alloy_primitives::{Address, Bytes, TxKind, U256};
+use config::BscEvmConfig;
+use reth::{
+    api::{FullNodeTypes, NodeTypes},
+    builder::{components::ExecutorBuilder, BuilderContext},
+};
 use reth_evm::{Evm, EvmEnv};
+use reth_node_ethereum::BasicBlockExecutorProvider;
+use reth_primitives::EthPrimitives;
 use revm::{
     context::{
         result::{EVMError, HaltReason, ResultAndState},
@@ -17,17 +27,16 @@ use revm::{
 };
 use std::ops::{Deref, DerefMut};
 
-mod config;
+pub mod config;
 mod executor;
 mod factory;
 mod patch;
 
-/// OP EVM implementation.
+/// BSC EVM implementation.
 ///
 /// This is a wrapper type around the `revm` evm with optional [`Inspector`] (tracing)
 /// support. [`Inspector`] support is configurable at runtime because it's part of the underlying
-/// [`OpEvm`](op_revm::OpEvm) type.
-#[allow(missing_debug_implementations)] // missing revm::OpContext Debug impl
+#[allow(missing_debug_implementations)]
 pub struct BscEvm<DB: Database, I, P = BscPrecompiles> {
     pub inner: BscEvmInner<BscContext<DB>, I, EthInstructions<EthInterpreter, BscContext<DB>>, P>,
     pub inspect: bool,
@@ -51,10 +60,9 @@ impl<DB: Database, I, P> BscEvm<DB, I, P> {
 }
 
 impl<DB: Database, I, P> BscEvm<DB, I, P> {
-    /// Creates a new OP EVM instance.
+    /// Creates a new Bsc EVM instance.
     ///
     /// The `inspect` argument determines whether the configured [`Inspector`] of the given
-    /// [`OpEvm`](op_revm::OpEvm) should be invoked on [`Evm::transact`].
     pub const fn new(
         evm: BscEvmInner<BscContext<DB>, I, EthInstructions<EthInterpreter, BscContext<DB>>, P>,
         inspect: bool,
@@ -110,12 +118,61 @@ where
 
     fn transact_system_call(
         &mut self,
-        _caller: Address,
-        _contract: Address,
-        _data: Bytes,
+        caller: Address,
+        contract: Address,
+        data: Bytes,
     ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
-        // no system calls on BSC
-        unimplemented!()
+        // TODO: error handling
+        let account = self.db_mut().basic(caller).unwrap().unwrap_or_default();
+
+        println!("account: {:?}", account.nonce);
+
+        let tx = TxEnv {
+            caller,
+            kind: TxKind::Call(contract),
+            nonce: account.nonce,
+            gas_limit: u64::MAX / 2,
+            value: U256::ZERO,
+            data,
+            // Setting the gas price to zero enforces that no value is transferred as part of the
+            // call, and that the call will not count against the block's gas limit
+            gas_price: 0,
+            // The chain ID check is not relevant here and is disabled if set to None
+            chain_id: Some(56),
+            // Setting the gas priority fee to None ensures the effective gas price is derived from
+            // the `gas_price` field, which we need to be zero
+            gas_priority_fee: None,
+            access_list: Default::default(),
+            // blob fields can be None for this tx
+            blob_hashes: Vec::new(),
+            max_fee_per_blob_gas: 0,
+            tx_type: 0,
+            authorization_list: Default::default(),
+        };
+
+        let mut gas_limit = tx.gas_limit;
+        let mut basefee = 0;
+        let mut disable_nonce_check = true;
+
+        // ensure the block gas limit is >= the tx
+        core::mem::swap(&mut self.block.gas_limit, &mut gas_limit);
+        // disable the base fee check for this call by setting the base fee to zero
+        core::mem::swap(&mut self.block.basefee, &mut basefee);
+        // disable the nonce check
+        core::mem::swap(&mut self.cfg.disable_nonce_check, &mut disable_nonce_check);
+
+        let tx = BscTransaction { base: tx, is_system_transaction: Some(true) };
+
+        let res = self.transact(tx);
+
+        // swap back to the previous gas limit
+        core::mem::swap(&mut self.block.gas_limit, &mut gas_limit);
+        // swap back to the previous base fee
+        core::mem::swap(&mut self.block.basefee, &mut basefee);
+        // swap back to the previous nonce check flag
+        core::mem::swap(&mut self.cfg.disable_nonce_check, &mut disable_nonce_check);
+
+        res
     }
 
     fn db_mut(&mut self) -> &mut Self::DB {
@@ -130,5 +187,28 @@ where
 
     fn set_inspector_enabled(&mut self, enabled: bool) {
         self.inspect = enabled;
+    }
+}
+
+/// A regular bsc evm and executor builder.
+#[derive(Debug, Default, Clone, Copy)]
+#[non_exhaustive]
+pub struct BscExecutorBuilder;
+
+impl<Node> ExecutorBuilder<Node> for BscExecutorBuilder
+where
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = BscChainSpec, Primitives = EthPrimitives>>,
+{
+    type EVM = BscEvmConfig;
+    type Executor = BasicBlockExecutorProvider<Self::EVM>;
+
+    async fn build_evm(
+        self,
+        ctx: &BuilderContext<Node>,
+    ) -> eyre::Result<(Self::EVM, Self::Executor)> {
+        let evm_config = BscEvmConfig::bsc(ctx.chain_spec());
+        let executor = BasicBlockExecutorProvider::new(evm_config.clone());
+
+        Ok((evm_config, executor))
     }
 }

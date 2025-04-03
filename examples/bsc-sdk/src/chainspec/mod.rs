@@ -101,6 +101,12 @@ impl Hardforks for BscChainSpec {
     }
 }
 
+impl From<ChainSpec> for BscChainSpec {
+    fn from(value: ChainSpec) -> Self {
+        Self { inner: value }
+    }
+}
+
 impl EthereumHardforks for BscChainSpec {
     fn ethereum_fork_activation(&self, fork: EthereumHardfork) -> ForkCondition {
         self.inner.ethereum_fork_activation(fork)
@@ -116,6 +122,12 @@ impl BscHardforks for BscChainSpec {
 impl EthExecutorSpec for BscChainSpec {
     fn deposit_contract_address(&self) -> Option<Address> {
         None
+    }
+}
+
+impl From<BscChainSpec> for ChainSpec {
+    fn from(value: BscChainSpec) -> Self {
+        value.inner
     }
 }
 

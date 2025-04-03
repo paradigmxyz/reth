@@ -26,10 +26,10 @@ pub struct BscEvmFactory;
 impl EvmFactory for BscEvmFactory {
     type Evm<DB: Database<Error: Send + Sync + 'static>, I: Inspector<BscContext<DB>>> =
         BscEvm<DB, I>;
+    type Context<DB: Database<Error: Send + Sync + 'static>> = BscContext<DB>;
     type Tx = BscTransaction<TxEnv>;
     type Error<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
     type HaltReason = HaltReason;
-    type Context<DB: Database<Error: Send + Sync + 'static>> = BscContext<DB>;
     type Spec = BscSpecId;
 
     fn create_evm<DB: Database<Error: Send + Sync + 'static>>(

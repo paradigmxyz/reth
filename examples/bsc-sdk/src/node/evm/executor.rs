@@ -13,16 +13,16 @@ use reth_evm::{
     eth::{receipt_builder::ReceiptBuilder, EthBlockExecutionCtx},
     execute::{BlockExecutionError, BlockExecutor},
     state_change::post_block_balance_increments,
-    Database, Evm, FromRecoveredTx, OnStateHook,
+    Database, Evm, FromRecoveredTx, FromTxWithEncoded, OnStateHook,
 };
-use reth_primitives::{Log, Recovered, TransactionSigned};
+use reth_primitives::{Log, TransactionSigned};
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::BlockExecutionResult;
 use reth_revm::State;
 use revm::{
     context::result::{ExecutionResult, ResultAndState},
     state::Bytecode,
-    Database as RevmDatabase, DatabaseCommit,
+    DatabaseCommit,
 };
 
 pub struct BscBlockExecutor<'a, EVM, Spec, R: ReceiptBuilder>
@@ -127,23 +127,16 @@ where
         tx: &mut TransactionSigned,
         sender: Address,
     ) -> Result<(), BlockExecutionError> {
-        let account = self
-            .evm
-            .db_mut()
-            .basic(sender)
-            .map_err(BlockExecutionError::other)?
-            .ok_or(BlockExecutionError::msg("Sender account not found"))?;
-        tx.set_nonce(account.nonce);
-        let tx = R::Transaction::from(tx.clone());
-
         // TODO: Consensus handle system txs
         // https://github.com/bnb-chain/reth/blob/main/crates/bsc/evm/src/execute.rs#L602
 
-        let recovered = Recovered::new_unchecked(tx.clone(), sender);
-
-        let result_and_state = self.evm.transact(recovered).map_err(BlockExecutionError::other)?;
+        let result_and_state = self
+            .evm
+            .transact_system_call(sender, tx.to().unwrap(), tx.input().clone())
+            .map_err(BlockExecutionError::other)?;
         let ResultAndState { result, state } = result_and_state;
 
+        let tx = R::Transaction::from(tx.clone());
         let gas_used = result.gas_used();
         self.gas_used += gas_used;
         self.receipts.push(self.receipt_builder.build_receipt(ReceiptBuilderCtx {
@@ -184,6 +177,7 @@ where
     Spec: EthereumHardforks + BscHardforks + EthChainSpec + Hardforks,
     R: ReceiptBuilder<Transaction: SignedTransaction, Receipt: TxReceipt<Log = Log>>,
     <R as ReceiptBuilder>::Transaction: Unpin + From<TransactionSigned>,
+    <E as alloy_evm::Evm>::Tx: FromTxWithEncoded<<R as ReceiptBuilder>::Transaction>,
 {
     type Transaction = R::Transaction;
     type Receipt = R::Receipt;
@@ -254,7 +248,7 @@ where
     ) -> Result<(Self::Evm, BlockExecutionResult<R::Receipt>), BlockExecutionError> {
         // TODO:
         // Consensus: Verify validators
-        // Consensus: Verify turn lengthcons
+        // Consensus: Verify turn length
 
         // If first block deploy genesis contracts
         if self.evm.block().number == 1 {
@@ -262,7 +256,10 @@ where
         }
 
         self.apply_upgrade_contracts_if_before_feynman()?;
-        self.deploy_feynman_contracts(self.evm.block().beneficiary)?;
+
+        if self.spec.is_feynman_active_at_timestamp(self.evm.block().timestamp) {
+            self.deploy_feynman_contracts(self.evm.block().beneficiary)?;
+        }
 
         // increment balances
         let balance_increments = post_block_balance_increments(
@@ -271,6 +268,7 @@ where
             self.ctx.ommers,
             self.ctx.withdrawals.as_deref(),
         );
+
         self.evm
             .db_mut()
             .increment_balances(balance_increments.clone())
@@ -280,6 +278,9 @@ where
         // Consensus: Slash validator if not in turn
         // Consensus: Distribute rewards
         // Consensus: Update validator set
+
+        let state = self.evm.db_mut().bundle_state.clone();
+        println!("bundle state: {:?}", state);
 
         Ok((
             self.evm,
@@ -295,5 +296,9 @@ where
 
     fn evm_mut(&mut self) -> &mut Self::Evm {
         &mut self.evm
+    }
+
+    fn evm(&self) -> &Self::Evm {
+        &self.evm
     }
 }
