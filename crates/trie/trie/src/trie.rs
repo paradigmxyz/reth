@@ -1,6 +1,5 @@
 use crate::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
-    metrics::TrieType,
     node_iter::{TrieElement, TrieNodeIter},
     prefix_set::{PrefixSet, TriePrefixSets},
     progress::{IntermediateStateRootState, StateRootProgress},
@@ -454,5 +453,23 @@ where
 
         let storage_slots_walked = stats.leaves_added() as usize;
         Ok((root, storage_slots_walked, trie_updates))
+    }
+}
+
+/// Trie type for differentiating between various trie calculations.
+#[derive(Clone, Copy, Debug)]
+pub enum TrieType {
+    /// State trie type.
+    State,
+    /// Storage trie type.
+    Storage,
+}
+
+impl TrieType {
+    pub(crate) const fn as_str(&self) -> &'static str {
+        match self {
+            Self::State => "state",
+            Self::Storage => "storage",
+        }
     }
 }

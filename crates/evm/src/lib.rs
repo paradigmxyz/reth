@@ -89,7 +89,7 @@ pub use alloy_evm::block::state_changes as state_change;
 /// [`NextBlockEnvCtx`]: ConfigureEvm::NextBlockEnvCtx
 /// [`BlockExecutor`]: alloy_evm::block::BlockExecutor
 #[auto_impl::auto_impl(&, Arc)]
-pub trait ConfigureEvm: Send + Sync + Unpin + Clone {
+pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// The primitives type used by the EVM.
     type Primitives: NodePrimitives;
 
@@ -105,7 +105,11 @@ pub trait ConfigureEvm: Send + Sync + Unpin + Clone {
     type BlockExecutorFactory: BlockExecutorFactory<
         Transaction = TxTy<Self::Primitives>,
         Receipt = ReceiptTy<Self::Primitives>,
-        EvmFactory: EvmFactory<Tx: TransactionEnv + FromRecoveredTx<TxTy<Self::Primitives>>>,
+        EvmFactory: EvmFactory<
+            Tx: TransactionEnv
+                    + FromRecoveredTx<TxTy<Self::Primitives>>
+                    + FromTxWithEncoded<TxTy<Self::Primitives>>,
+        >,
     >;
 
     /// A type that knows how to build a block.
@@ -250,6 +254,7 @@ pub trait ConfigureEvm: Send + Sync + Unpin + Clone {
             assembler: self.block_assembler(),
             parent,
             transactions: Vec::new(),
+            simulated: false,
         }
     }
 

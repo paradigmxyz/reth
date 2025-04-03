@@ -1556,11 +1556,10 @@ mod tests {
     use reth_provider::{test_utils::create_test_provider_factory, TrieWriter};
     use reth_trie::{
         hashed_cursor::{noop::NoopHashedAccountCursor, HashedPostStateAccountCursor},
-        metrics::TrieType,
         node_iter::{TrieElement, TrieNodeIter},
         trie_cursor::{noop::NoopAccountTrieCursor, TrieCursor, TrieCursorFactory},
         walker::TrieWalker,
-        BranchNode, ExtensionNode, HashedPostState, LeafNode,
+        BranchNode, ExtensionNode, HashedPostState, LeafNode, TrieType,
     };
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},

@@ -73,7 +73,7 @@ async fn main() -> eyre::Result<()> {
 ///
 /// CAUTION: This validator is not safe to use since it doesn't actually validate the transaction's
 /// properties such as chain id, balance, nonce, etc.
-#[derive(Default)]
+#[derive(Debug, Default)]
 #[non_exhaustive]
 struct OkValidator;
 

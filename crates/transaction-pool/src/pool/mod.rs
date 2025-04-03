@@ -102,7 +102,7 @@ use tokio::sync::mpsc;
 use tracing::{debug, trace, warn};
 mod events;
 pub use best::{BestTransactionFilter, BestTransactionsWithPrioritizedSenders};
-pub use blob::{blob_tx_priority, fee_delta};
+pub use blob::{blob_tx_priority, fee_delta, BlobOrd, BlobTransactions};
 pub use events::{FullTransactionEvent, NewTransactionEvent, TransactionEvent};
 pub use listener::{AllTransactionsEvents, TransactionEvents, TransactionListenerKind};
 pub use parked::{BasefeeOrd, ParkedOrd, ParkedPool, QueuedOrd};
@@ -499,7 +499,7 @@ where
             }
             TransactionValidationOutcome::Invalid(tx, err) => {
                 let mut listener = self.event_listener.write();
-                listener.discarded(tx.hash());
+                listener.invalid(tx.hash());
                 Err(PoolError::new(*tx.hash(), err))
             }
             TransactionValidationOutcome::Error(tx_hash, err) => {

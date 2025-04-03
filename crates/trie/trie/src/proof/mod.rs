@@ -1,8 +1,8 @@
 use crate::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
-    metrics::TrieType,
     node_iter::{TrieElement, TrieNodeIter},
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
+    trie::TrieType,
     trie_cursor::TrieCursorFactory,
     walker::TrieWalker,
     HashBuilder, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE,
