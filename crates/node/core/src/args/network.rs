@@ -159,8 +159,6 @@ pub struct NetworkArgs {
     /// Transaction Propogation Policy
     ///
     /// The policy determines which peers transactions are gossiped to.
-    ///
-    /// Defaults to `All`.
     #[arg(long = "tx-propagation-policy", default_value_t = TransactionPropagationKind::All)]
     pub tx_propagation_policy: TransactionPropagationKind,
 }

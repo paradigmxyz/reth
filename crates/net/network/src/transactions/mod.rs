@@ -1087,6 +1087,8 @@ where
             Entry::Vacant(entry) => entry.insert(peer),
         };
 
+        self.config.propagation_policy.on_session_established(peer);
+
         // Send a `NewPooledTransactionHashes` to the peer with up to
         // `SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE`
         // transactions in the pool.
@@ -1121,7 +1123,11 @@ where
         match event_result {
             NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, .. }) => {
                 // remove the peer
-                self.peers.remove(&peer_id);
+
+                let peer = self.peers.remove(&peer_id);
+                if let Some(mut peer) = peer {
+                    self.config.propagation_policy.on_session_closed(&mut peer);
+                }
                 self.transaction_fetcher.remove_peer(&peer_id);
             }
             NetworkEvent::ActivePeerSession { info, messages } => {

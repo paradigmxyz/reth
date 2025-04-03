@@ -103,12 +103,16 @@ impl Default for TransactionFetcherConfig {
     }
 }
 
-/// A trait for filtering peers based on their metadata.
-///
-/// This is used to determine whether a transaction should be propagated to a given peer.
+/// A policy defining which peers pending transactions are gossiped to.
 pub trait TransactionPropagationPolicy: Default + Clone {
-    /// Returns true if we should propagate the transaction to the given peer.
+    /// Filter a given peer based on the policy.
     fn filter<N: NetworkPrimitives>(&self, peer: &mut PeerMetadata<N>) -> bool;
+
+    /// A callback on the policy when a new peer session is established.
+    fn on_session_established<N: NetworkPrimitives>(&mut self, peer: &mut PeerMetadata<N>);
+
+    /// A callback on the policy when a peer session is closed.
+    fn on_session_closed<N: NetworkPrimitives>(&mut self, peer: &mut PeerMetadata<N>);
 }
 
 /// Determines which peers pending transactions are propagated to.
@@ -118,10 +122,7 @@ pub enum TransactionPropagationKind {
     /// Propagate transactions to all peers.
     #[default]
     All,
-    /// Propagate transactions to only trusted peers.
-    ///
-    /// Can be used to keep the mempool private on networks like op mainnet
-    /// while still gossiping the transaction pool to trusted peers.
+    /// Propagate transactions to only trusted peers.    
     Trusted,
 }
 
@@ -132,6 +133,10 @@ impl TransactionPropagationPolicy for TransactionPropagationKind {
             Self::Trusted => matches!(peer.peer_kind, PeerKind::Trusted),
         }
     }
+
+    fn on_session_established<N: NetworkPrimitives>(&mut self, _peer: &mut PeerMetadata<N>) {}
+
+    fn on_session_closed<N: NetworkPrimitives>(&mut self, _peer: &mut PeerMetadata<N>) {}
 }
 
 impl FromStr for TransactionPropagationKind {
