@@ -33,6 +33,11 @@ tracing.workspace = true
 tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thread"] }
 futures.workspace = true
 
+[features]
+default = ["jemalloc", "reth-revm/portable"]
+
+dev = ["reth-cli-commands/arbitrary"]
+
 [dev-dependencies]
 clap.workspace = true
 reth-cli-commands.workspace = true
