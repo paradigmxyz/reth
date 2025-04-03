@@ -1366,10 +1366,6 @@ impl SparseNodeType {
         matches!(self, Self::Hash)
     }
 
-    const fn is_branch(&self) -> bool {
-        matches!(self, Self::Branch { .. })
-    }
-
     const fn store_in_db_trie(&self) -> Option<bool> {
         match *self {
             Self::Extension { store_in_db_trie } | Self::Branch { store_in_db_trie } => {
