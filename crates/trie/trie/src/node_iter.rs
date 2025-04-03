@@ -61,6 +61,8 @@ pub struct TrieNodeIter<C, H: HashedCursor> {
     should_check_walker_key: bool,
 
     /// The last seeked hashed entry.
+    ///
+    /// We use it to not seek the same hashed entry twice, and instead re-use it.
     last_seeked_hashed_entry: Option<SeekedHashedEntry<H::Value>>,
 
     #[cfg(feature = "metrics")]
@@ -121,11 +123,7 @@ where
         {
             self.metrics.inc_leaf_nodes_seeked();
 
-            // If either the seek key or the result key is the same as the key we previously
-            // advanced to.
-            if Some(key) == self.previously_advanced_to_key ||
-                result.as_ref().map(|(k, _)| *k) == self.previously_advanced_to_key
-            {
+            if Some(key) == self.previously_advanced_to_key {
                 self.metrics.inc_leaf_nodes_same_seeked_as_advanced();
             }
         }
