@@ -11,7 +11,6 @@ use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
 use reth_evm::{ConfigureEvm, EvmEnvFor};
-use reth_node_api::NodePrimitives;
 use reth_provider::{
     BlockIdReader, BlockNumReader, ChainSpecProvider, StateProvider, StateProviderBox,
     StateProviderFactory,
@@ -168,7 +167,6 @@ pub trait EthState: LoadState + SpawnBlocking {
 pub trait LoadState:
     EthApiTypes
     + RpcNodeCoreExt<
-        Primitives: NodePrimitives,
         Provider: StateProviderFactory
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>,
         Pool: TransactionPool,

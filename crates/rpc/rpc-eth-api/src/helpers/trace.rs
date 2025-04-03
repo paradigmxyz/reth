@@ -13,7 +13,6 @@ use reth_evm::{
     InspectorFor, TxEnvFor,
 };
 use reth_primitives_traits::{BlockBody, BlockTy, RecoveredBlock, SignedTransaction};
-use reth_provider::BlockReader;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDb, StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
@@ -29,11 +28,7 @@ use std::sync::Arc;
 
 /// Executes CPU heavy tasks.
 pub trait Trace:
-    LoadState<
-    Provider: BlockReader,
-    Evm: ConfigureEvm<Primitives = Self::Primitives>,
-    Error: FromEvmError<Self::Evm>,
->
+    LoadState<Evm: ConfigureEvm<Primitives = Self::Primitives>, Error: FromEvmError<Self::Evm>>
 {
     /// Executes the [`reth_evm::EvmEnv`] against the given [Database] without committing state
     /// changes.
