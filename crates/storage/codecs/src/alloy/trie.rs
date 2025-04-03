@@ -37,7 +37,7 @@ impl Compact for HashBuilderValue {
         let mut this = Self::default();
         let buf = match buf.get_u8() {
             HASH_BUILDER_TYPE_HASH => {
-                let (data, buf) = Vec::from_compact(buf, 32);
+                let (data, buf) = Vec::from_compact(buf, 0);
                 this.set_from_ref(HashBuilderValueRef::Hash(
                     RlpNode::from_raw_rlp(&data).expect("rlp node too large"),
                 ));
