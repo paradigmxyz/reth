@@ -1,6 +1,6 @@
 use crate::{
     prefix_set::PrefixSet,
-    trie_cursor::{subnode::NodePointer, CursorSubNode, TrieCursor},
+    trie_cursor::{subnode::SubNodePosition, CursorSubNode, TrieCursor},
     BranchNodeCompact, Nibbles,
 };
 use alloy_primitives::{map::HashSet, B256};
@@ -162,14 +162,14 @@ impl<C: TrieCursor> TrieWalker<C> {
             if !self.can_skip_current_node && self.children_are_in_trie() {
                 trace!(
                     target: "trie::walker",
-                    pointer = ?last.pointer(),
+                    position = ?last.position(),
                     "cannot skip current node and children are in the trie"
                 );
                 // If we can't skip the current node and the children are in the trie,
                 // either consume the next node or move to the next sibling.
-                match last.pointer() {
-                    NodePointer::ParentBranch => self.move_to_next_sibling(true)?,
-                    NodePointer::Child(_) => self.consume_node()?,
+                match last.position() {
+                    SubNodePosition::ParentBranch => self.move_to_next_sibling(true)?,
+                    SubNodePosition::Child(_) => self.consume_node()?,
                 }
             } else {
                 trace!(target: "trie::walker", "can skip current node");
@@ -227,13 +227,13 @@ impl<C: TrieCursor> TrieWalker<C> {
 
         // Create a new CursorSubNode and push it to the stack.
         let subnode = CursorSubNode::new(key, Some(node));
-        let pointer = subnode.pointer();
+        let position = subnode.position();
         self.stack.push(subnode);
         self.update_skip_node();
 
         // Delete the current node if it's included in the prefix set or it doesn't contain the root
         // hash.
-        if !self.can_skip_current_node || pointer.is_child() {
+        if !self.can_skip_current_node || position.is_child() {
             if let Some((keys, key)) = self.removed_keys.as_mut().zip(self.cursor.current()?) {
                 keys.insert(key);
             }
@@ -252,8 +252,8 @@ impl<C: TrieCursor> TrieWalker<C> {
 
         // Check if the walker needs to backtrack to the previous level in the trie during its
         // traversal.
-        if subnode.pointer().is_last_child() ||
-            (subnode.pointer().is_parent() && !allow_root_to_child_nibble)
+        if subnode.position().is_last_child() ||
+            (subnode.position().is_parent() && !allow_root_to_child_nibble)
         {
             self.stack.pop();
             self.move_to_next_sibling(false)?;
@@ -268,13 +268,13 @@ impl<C: TrieCursor> TrieWalker<C> {
 
         // Find the next sibling with state.
         loop {
-            let pointer = subnode.pointer();
+            let position = subnode.position();
             if subnode.state_flag() {
-                trace!(target: "trie::walker", ?pointer, "found next sibling with state");
+                trace!(target: "trie::walker", ?position, "found next sibling with state");
                 return Ok(())
             }
-            if pointer.is_last_child() {
-                trace!(target: "trie::walker", ?pointer, "checked all siblings");
+            if position.is_last_child() {
+                trace!(target: "trie::walker", ?position, "checked all siblings");
                 break
             }
             subnode.inc_nibble();
