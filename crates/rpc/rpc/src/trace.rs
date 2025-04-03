@@ -248,16 +248,9 @@ where
         let start = from_block.unwrap_or(0);
         let latest_block = self.provider().best_block_number().map_err(Eth::Error::from_eth_err)?;
         if start > latest_block {
-            return Err(EthApiError::InvalidParams(
-                "invalid parameters: fromBlock cannot be greater than latest block".to_string(),
-            )
-            .into());
+            return Err(EthApiError::HeaderNotFound(start.into()).into());
         }
-        let end = if let Some(to_block) = to_block {
-            to_block
-        } else {
-            self.provider().best_block_number().map_err(Eth::Error::from_eth_err)?
-        };
+        let end = if let Some(to_block) = to_block { to_block } else { latest_block };
 
         if start > end {
             return Err(EthApiError::InvalidParams(
