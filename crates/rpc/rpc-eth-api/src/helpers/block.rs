@@ -2,8 +2,8 @@
 
 use super::{LoadPendingBlock, LoadReceipt, SpawnBlocking};
 use crate::{
-    node::RpcNodeCoreExt, EthApiTypes, FromEthApiError, RpcBlock, RpcHeader, RpcNodeCore,
-    RpcReceipt,
+    node::RpcNodeCoreExt, types::RpcTypes, EthApiTypes, FromEthApiError, RpcBlock, RpcHeader,
+    RpcNodeCore, RpcReceipt,
 };
 use alloy_eips::BlockId;
 use alloy_primitives::{Sealable, U256};
@@ -199,7 +199,11 @@ pub trait EthBlocks: LoadBlock {
 /// Loads a block from database.
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
-pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
+pub trait LoadBlock:
+    LoadPendingBlock<NetworkTypes: RpcTypes<Header = Header<HeaderTy<Self::Primitives>>>>
+    + SpawnBlocking
+    + RpcNodeCoreExt
+{
     /// Returns the block object for the given block id.
     #[expect(clippy::type_complexity)]
     fn recovered_block(

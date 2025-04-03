@@ -186,7 +186,7 @@ pub trait EthCall: EstimateCall + Call + LoadBlock {
                         )?
                     };
 
-                    let block = simulate::build_simulated_block(
+                    let block = simulate::build_simulated_block::<_, Self::Primitives, _>(
                         result.block,
                         results,
                         return_full_transactions,
