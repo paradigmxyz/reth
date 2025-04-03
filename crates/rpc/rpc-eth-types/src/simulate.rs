@@ -65,7 +65,6 @@ impl ToRpcError for EthSimulateError {
 pub fn execute_transactions<S, T>(
     mut builder: S,
     calls: Vec<TransactionRequest>,
-    validation: bool,
     default_gas_limit: u64,
     chain_id: u64,
     tx_resp_builder: &T,
@@ -91,7 +90,6 @@ where
         // correctness.
         let tx = resolve_transaction(
             call,
-            validation,
             default_gas_limit,
             chain_id,
             builder.evm_mut().db_mut(),
@@ -112,7 +110,6 @@ where
 /// them into primitive transactions.
 pub fn resolve_transaction<DB: Database, Tx, T: TransactionCompat<Tx>>(
     mut tx: TransactionRequest,
-    _validation: bool,
     default_gas_limit: u64,
     chain_id: u64,
     db: &mut DB,
@@ -149,14 +146,16 @@ where
         tx.to = Some(TxKind::Create);
     }
 
-    if tx.buildable_type().is_none() || tx_type == TxType::Eip1559 {
-        if tx.max_fee_per_gas.is_none() {
-            tx.max_fee_per_gas = Some(0);
-            tx.max_priority_fee_per_gas = Some(0);
-        }
-    } else {
-        if tx.gas_price.is_none() {
-            tx.gas_price = Some(0);
+    if tx.buildable_type().is_none() {
+        if tx_type == TxType::Eip1559 {
+            if tx.max_fee_per_gas.is_none() {
+                tx.max_fee_per_gas = Some(0);
+                tx.max_priority_fee_per_gas = Some(0);
+            }
+        } else {
+            if tx.gas_price.is_none() {
+                tx.gas_price = Some(0);
+            }
         }
     }
 

@@ -82,3 +82,57 @@ where
         *input = input.slice(..4);
     }
 }
+
+//tests for simulate
+mod tests {
+    use super::*;
+    use reth_rpc_eth_types::simulate::resolve_transaction;
+    use revm::database::CacheDB;
+
+    #[test]
+    fn test_resolve_transaction_empty_request() {
+        let builder = EthTxBuilder::default();
+        let mut db = CacheDB::<reth_revm::db::EmptyDBTyped<reth_errors::ProviderError>>::default();
+        let tx = TransactionRequest::default();
+        let result = resolve_transaction(tx, 21000, 1, &mut db, &builder).unwrap();
+
+        // For an empty request, we should get a valid transaction with defaults
+        let tx = result.into_inner();
+        assert_eq!(tx.max_fee_per_gas(), 0);
+        assert_eq!(tx.max_priority_fee_per_gas(), Some(0));
+        assert_eq!(tx.gas_price(), None);
+    }
+
+    #[test]
+    fn test_resolve_transaction_legacy() {
+        let mut db = CacheDB::<reth_revm::db::EmptyDBTyped<reth_errors::ProviderError>>::default();
+        let builder = EthTxBuilder::default();
+
+        let mut tx = TransactionRequest::default();
+        tx.gas_price = Some(100);
+
+        let result = resolve_transaction(tx, 21000, 1, &mut db, &builder).unwrap();
+
+        let tx = result.into_inner();
+        assert_eq!(tx.gas_price(), Some(100));
+        assert_eq!(tx.max_fee_per_gas(), 100);
+        assert_eq!(tx.max_priority_fee_per_gas(), None);
+    }
+
+    #[test]
+    fn test_resolve_transaction_partial_eip1559() {
+        let mut db = CacheDB::<reth_revm::db::EmptyDBTyped<reth_errors::ProviderError>>::default();
+        let builder = EthTxBuilder::default();
+
+        let mut tx = TransactionRequest::default();
+        tx.max_fee_per_gas = Some(200);
+        tx.max_priority_fee_per_gas = Some(10);
+
+        let result = resolve_transaction(tx, 21000, 1, &mut db, &builder).unwrap();
+
+        let tx = result.into_inner();
+        assert_eq!(tx.max_fee_per_gas(), 200);
+        assert_eq!(tx.max_priority_fee_per_gas(), Some(10));
+        assert_eq!(tx.gas_price(), None);
+    }
+}
