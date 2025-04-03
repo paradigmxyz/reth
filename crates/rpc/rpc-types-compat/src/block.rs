@@ -7,7 +7,7 @@ use alloy_rpc_types_eth::{
     Block, BlockTransactions, BlockTransactionsKind, Header, TransactionInfo,
 };
 use reth_primitives_traits::{
-    Block as BlockTrait, BlockBody, RecoveredBlock, SealedHeader, SignedTransaction,
+    BlockBody, NodePrimitives, RecoveredBlock, SealedHeader, SignedTransaction, TxTy,
 };
 
 /// Converts the given primitive block into a [`Block`] response with the given
@@ -15,18 +15,18 @@ use reth_primitives_traits::{
 ///
 /// If a `block_hash` is provided, then this is used, otherwise the block hash is computed.
 #[expect(clippy::type_complexity)]
-pub fn from_block<T, B>(
-    block: RecoveredBlock<B>,
+pub fn from_block<T, N>(
+    block: RecoveredBlock<N::Block>,
     kind: BlockTransactionsKind,
     tx_resp_builder: &T,
-) -> Result<Block<T::Transaction, Header<B::Header>>, T::Error>
+) -> Result<Block<T::Transaction, Header<N::BlockHeader>>, T::Error>
 where
-    T: TransactionCompat<<<B as BlockTrait>::Body as BlockBody>::Transaction>,
-    B: BlockTrait,
+    T: TransactionCompat<TxTy<N>>,
+    N: NodePrimitives,
 {
     match kind {
-        BlockTransactionsKind::Hashes => Ok(from_block_with_tx_hashes::<T::Transaction, B>(block)),
-        BlockTransactionsKind::Full => from_block_full::<T, B>(block, tx_resp_builder),
+        BlockTransactionsKind::Hashes => Ok(from_block_with_tx_hashes::<T::Transaction, N>(block)),
+        BlockTransactionsKind::Full => from_block_full::<T, N>(block, tx_resp_builder),
     }
 }
 
@@ -35,14 +35,16 @@ where
 ///
 /// This will populate the `transactions` field with only the hashes of the transactions in the
 /// block: [`BlockTransactions::Hashes`]
-pub fn from_block_with_tx_hashes<T, B>(block: RecoveredBlock<B>) -> Block<T, Header<B::Header>>
+pub fn from_block_with_tx_hashes<T, N>(
+    block: RecoveredBlock<N::Block>,
+) -> Block<T, Header<N::BlockHeader>>
 where
-    B: BlockTrait,
+    N: NodePrimitives,
 {
     let transactions = block.body().transaction_hashes_iter().copied().collect();
     let rlp_length = block.rlp_length();
     let (header, body) = block.into_sealed_block().split_sealed_header_body();
-    from_block_with_transactions::<T, B>(
+    from_block_with_transactions::<_, N>(
         rlp_length,
         header,
         body,
@@ -56,13 +58,13 @@ where
 /// This will populate the `transactions` field with the _full_
 /// [`TransactionCompat::Transaction`] objects: [`BlockTransactions::Full`]
 #[expect(clippy::type_complexity)]
-pub fn from_block_full<T, B>(
-    block: RecoveredBlock<B>,
+pub fn from_block_full<T, N>(
+    block: RecoveredBlock<N::Block>,
     tx_resp_builder: &T,
-) -> Result<Block<T::Transaction, Header<B::Header>>, T::Error>
+) -> Result<Block<T::Transaction, Header<N::BlockHeader>>, T::Error>
 where
-    T: TransactionCompat<<<B as BlockTrait>::Body as BlockBody>::Transaction>,
-    B: BlockTrait,
+    T: TransactionCompat<TxTy<N>>,
+    N: NodePrimitives,
 {
     let block_number = block.header().number();
     let base_fee = block.header().base_fee_per_gas();
@@ -86,7 +88,7 @@ where
         .collect::<Result<Vec<_>, T::Error>>()?;
 
     let (header, body) = block.into_sealed_block().split_sealed_header_body();
-    Ok(from_block_with_transactions::<_, B>(
+    Ok(from_block_with_transactions::<_, N>(
         block_length,
         header,
         body,
@@ -95,12 +97,15 @@ where
 }
 
 #[inline]
-fn from_block_with_transactions<T, B: BlockTrait>(
+fn from_block_with_transactions<T, N>(
     block_length: usize,
-    header: SealedHeader<B::Header>,
-    body: B::Body,
+    header: SealedHeader<N::BlockHeader>,
+    body: N::BlockBody,
     transactions: BlockTransactions<T>,
-) -> Block<T, Header<B::Header>> {
+) -> Block<T, Header<N::BlockHeader>>
+where
+    N: NodePrimitives,
+{
     let withdrawals =
         header.withdrawals_root().is_some().then(|| body.withdrawals().cloned()).flatten();
 

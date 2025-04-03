@@ -12,7 +12,8 @@ use reth_evm::{
     Evm,
 };
 use reth_primitives_traits::{
-    block::BlockTx, BlockBody as _, Recovered, RecoveredBlock, SignedTransaction, TxTy,
+    block::BlockTx, BlockBody as _, NodePrimitives, Recovered, RecoveredBlock, SignedTransaction,
+    TxTy,
 };
 use reth_rpc_server_types::result::rpc_err;
 use reth_rpc_types_compat::{block::from_block, TransactionCompat};
@@ -175,15 +176,15 @@ where
 
 /// Handles outputs of the calls execution and builds a [`SimulatedBlock`].
 #[expect(clippy::type_complexity)]
-pub fn build_simulated_block<T, B, Halt: Clone>(
-    block: RecoveredBlock<B>,
+pub fn build_simulated_block<T, N, Halt: Clone>(
+    block: RecoveredBlock<N::Block>,
     results: Vec<ExecutionResult<Halt>>,
     full_transactions: bool,
     tx_resp_builder: &T,
-) -> Result<SimulatedBlock<Block<T::Transaction, Header<B::Header>>>, T::Error>
+) -> Result<SimulatedBlock<Block<T::Transaction, Header<N::BlockHeader>>>, T::Error>
 where
-    T: TransactionCompat<BlockTx<B>, Error: FromEthApiError + FromEvmHalt<Halt>>,
-    B: reth_primitives_traits::Block,
+    T: TransactionCompat<TxTy<N>, Error: FromEthApiError + FromEvmHalt<Halt>>,
+    N: NodePrimitives,
 {
     let mut calls: Vec<SimCallResult> = Vec::with_capacity(results.len());
 
@@ -245,6 +246,6 @@ where
     let txs_kind =
         if full_transactions { BlockTransactionsKind::Full } else { BlockTransactionsKind::Hashes };
 
-    let block = from_block(block, txs_kind, tx_resp_builder)?;
+    let block = from_block::<_, N>(block, txs_kind, tx_resp_builder)?;
     Ok(SimulatedBlock { inner: block, calls })
 }
