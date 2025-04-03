@@ -6,18 +6,17 @@ use alloy_evm::block::BlockExecutorFactory;
 use alloy_primitives::{TxKind, U256};
 use alloy_rpc_types::TransactionRequest;
 use reth_evm::{ConfigureEvm, EvmEnv, EvmFactory, SpecFor};
-use reth_node_api::NodePrimitives;
 use reth_rpc_eth_api::{
-    helpers::{estimate::EstimateCall, Call, EthCall, LoadPendingBlock, LoadState, SpawnBlocking},
-    FromEthApiError, FromEvmError, FullEthApiTypes, IntoEthApiError,
+    helpers::{estimate::EstimateCall, Call, EthCall, LoadBlock, LoadState, SpawnBlocking},
+    FromEthApiError, FromEvmError, IntoEthApiError,
 };
 use reth_rpc_eth_types::{revm_utils::CallFees, EthApiError, RpcInvalidTransactionError};
-use reth_storage_api::{BlockReader, ProviderHeader, ProviderTx};
+use reth_storage_api::BlockReader;
 use revm::{context::TxEnv, context_interface::Block, Database};
 
 impl<Provider, Pool, Network, EvmConfig> EthCall for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: EstimateCall + LoadPendingBlock + FullEthApiTypes,
+    Self: EstimateCall + LoadBlock,
     Provider: BlockReader,
 {
 }
@@ -27,10 +26,7 @@ where
     Self: LoadState<
             Evm: ConfigureEvm<
                 BlockExecutorFactory: BlockExecutorFactory<EvmFactory: EvmFactory<Tx = TxEnv>>,
-                Primitives: NodePrimitives<
-                    BlockHeader = ProviderHeader<Self::Provider>,
-                    SignedTx = ProviderTx<Self::Provider>,
-                >,
+                Primitives = Self::Primitives,
             >,
             Error: FromEvmError<Self::Evm>,
         > + SpawnBlocking,

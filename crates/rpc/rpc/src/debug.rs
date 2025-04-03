@@ -21,8 +21,7 @@ use reth_evm::{
     ConfigureEvm, EvmEnvFor, TxEnvFor,
 };
 use reth_primitives_traits::{
-    Block as _, BlockBody, BlockTy, NodePrimitives, ReceiptWithBloom, RecoveredBlock,
-    SignedTransaction,
+    Block as _, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock, SignedTransaction,
 };
 use reth_revm::{
     database::StateProviderDatabase,
@@ -32,13 +31,13 @@ use reth_revm::{
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
-    EthApiTypes, FromEthApiError, RpcNodeCore,
+    FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
-    BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderBlock, ReceiptProviderIdExt,
-    StateProofProvider, StateProvider, StateProviderFactory, TransactionVariant,
+    BlockIdReader, BlockReaderIdExt, HeaderProvider, ReceiptProviderIdExt, StateProofProvider,
+    StateProvider, StateProviderFactory, TransactionVariant,
 };
 use reth_tasks::pool::BlockingTaskGuard;
 use revm::{context_interface::Transaction, state::EvmState, DatabaseCommit};
