@@ -85,6 +85,7 @@ where
 
 //tests for simulate
 mod tests {
+    #![allow(unused_imports)]
     use super::*;
     use reth_rpc_eth_types::simulate::resolve_transaction;
     use revm::database::CacheDB;

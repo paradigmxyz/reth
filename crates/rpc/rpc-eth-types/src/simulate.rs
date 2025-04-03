@@ -151,9 +151,7 @@ where
             if tx.max_fee_per_gas.is_none() {
                 tx.max_fee_per_gas = Some(0);
                 tx.max_priority_fee_per_gas = Some(0);
-            }
-        } else {
-            if tx.gas_price.is_none() {
+            } else if tx.gas_price.is_none() {
                 tx.gas_price = Some(0);
             }
         }
