@@ -23,13 +23,9 @@ where
 
 impl<Provider, Pool, Network, EvmConfig> LoadState for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: RpcNodeCoreExt<
-        Provider: BlockReader
-                      + StateProviderFactory
-                      + ChainSpecProvider<ChainSpec: EthereumHardforks>,
-        Pool: TransactionPool,
-    >,
-    Provider: BlockReader,
+    Self: RpcNodeCoreExt<Provider = Provider, Pool = Pool>,
+    Provider: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks>,
+    Pool: TransactionPool,
 {
 }
 

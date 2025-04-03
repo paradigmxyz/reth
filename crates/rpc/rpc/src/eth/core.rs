@@ -10,7 +10,7 @@ use alloy_network::Ethereum;
 use alloy_primitives::{Bytes, U256};
 use derive_more::Deref;
 use reth_node_api::{FullNodeComponents, FullNodeTypes};
-use reth_primitives_traits::{BlockTy, ReceiptTy};
+use reth_primitives_traits::{BlockTy, ReceiptTy, TxTy};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
     node::RpcNodeCoreExt,
@@ -205,6 +205,7 @@ where
     Provider: BlockReader<
             Block = BlockTy<Provider::Primitives>,
             Receipt = ReceiptTy<Provider::Primitives>,
+            Transaction = TxTy<Provider::Primitives>,
         > + NodePrimitivesProvider
         + Clone
         + Unpin,

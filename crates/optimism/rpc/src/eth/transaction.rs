@@ -7,14 +7,13 @@ use op_alloy_consensus::OpTxEnvelope;
 use op_alloy_rpc_types::{OpTransactionRequest, Transaction};
 use reth_node_api::FullNodeComponents;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
+use reth_primitives_traits::TxTy;
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
     FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt, TransactionCompat,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
-use reth_storage_api::{
-    BlockReader, BlockReaderIdExt, ProviderTx, ReceiptProvider, TransactionsProvider,
-};
+use reth_storage_api::{BlockReader, BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
 use crate::{eth::OpNodeCore, OpEthApi, OpEthApiError, SequencerClient};
@@ -22,9 +21,9 @@ use crate::{eth::OpNodeCore, OpEthApi, OpEthApiError, SequencerClient};
 impl<N> EthTransactions for OpEthApi<N>
 where
     Self: LoadTransaction<Provider: BlockReaderIdExt>,
-    N: OpNodeCore<Provider: BlockReader<Transaction = ProviderTx<Self::Provider>>>,
+    N: OpNodeCore<Provider: BlockReader<Transaction = TxTy<N::Primitives>>>,
 {
-    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>> {
+    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<TxTy<Self::Primitives>>>>> {
         self.inner.eth_api.signers()
     }
 

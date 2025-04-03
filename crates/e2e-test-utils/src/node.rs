@@ -89,7 +89,7 @@ where
     ) -> eyre::Result<Vec<Payload::BuiltPayload>>
     where
         AddOns::EthApi: EthApiSpec<Provider: BlockReader<Block = BlockTy<Node::Types>>>
-            + EthTransactions
+            + EthTransactions<Primitives = PrimitivesTy<Node::Types>>
             + TraceExt,
     {
         let mut chain = Vec::with_capacity(length as usize);

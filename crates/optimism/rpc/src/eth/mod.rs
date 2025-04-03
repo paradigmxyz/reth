@@ -8,6 +8,7 @@ mod block;
 mod call;
 mod pending_block;
 
+use alloy_consensus::Receipt;
 use alloy_primitives::U256;
 use op_alloy_network::Optimism;
 pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
@@ -15,9 +16,13 @@ use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_node_api::{FullNodeComponents, NodePrimitives, PrimitivesTy};
-use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
+use reth_node_api::{Block, FullNodeComponents, NodePrimitives, PrimitivesTy};
+use reth_node_builder::{
+    rpc::{EthApiBuilder, EthApiCtx},
+    Node,
+};
 use reth_optimism_primitives::OpPrimitives;
+use reth_primitives_traits::{BlockTy, ReceiptTy, TxTy};
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
     helpers::{
@@ -28,14 +33,14 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
 use reth_storage_api::{
-    BlockNumReader, BlockReader, BlockReaderIdExt, ProviderBlock, ProviderHeader, ProviderReceipt,
-    ProviderTx, StageCheckpointReader, StateProviderFactory,
+    BlockNumReader, BlockReader, BlockReaderIdExt, ProviderTx, StageCheckpointReader,
+    StateProviderFactory,
 };
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner,
 };
-use reth_transaction_pool::TransactionPool;
+use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::{fmt, sync::Arc};
 
 use crate::{OpEthApiError, SequencerClient};
@@ -49,8 +54,8 @@ pub type EthApiNodeBackend<N> = EthApiInner<
 >;
 
 /// A helper trait with requirements for [`RpcNodeCore`] to be used in [`OpEthApi`].
-pub trait OpNodeCore: RpcNodeCore<Provider: BlockReader> {}
-impl<T> OpNodeCore for T where T: RpcNodeCore<Provider: BlockReader> {}
+pub trait OpNodeCore: RpcNodeCore<Primitives = OpPrimitives> {}
+impl<T> OpNodeCore for T where T: RpcNodeCore<Primitives = OpPrimitives> {}
 
 /// OP-Reth `Eth` API implementation.
 ///
@@ -112,11 +117,11 @@ impl<N> RpcNodeCore for OpEthApi<N>
 where
     N: OpNodeCore,
 {
-    type Primitives = OpPrimitives;
+    type Primitives = N::Primitives;
     type Provider = N::Provider;
     type Pool = N::Pool;
-    type Evm = <N as RpcNodeCore>::Evm;
-    type Network = <N as RpcNodeCore>::Network;
+    type Evm = N::Evm;
+    type Network = N::Network;
     type PayloadBuilder = ();
 
     #[inline]
@@ -147,10 +152,13 @@ where
 
 impl<N> RpcNodeCoreExt for OpEthApi<N>
 where
-    N: OpNodeCore,
+    N: OpNodeCore<
+        Primitives = OpPrimitives,
+        Provider: BlockReader<Block = BlockTy<N::Primitives>, Receipt = ReceiptTy<N::Primitives>>,
+    >,
 {
     #[inline]
-    fn cache(&self) -> &EthStateCache<ProviderBlock<N::Provider>, ProviderReceipt<N::Provider>> {
+    fn cache(&self) -> &EthStateCache<BlockTy<N::Primitives>, ReceiptTy<N::Primitives>> {
         self.inner.eth_api.cache()
     }
 }
@@ -164,7 +172,7 @@ where
         Network: NetworkInfo,
     >,
 {
-    type Transaction = ProviderTx<Self::Provider>;
+    type Transaction = TxTy<Self::Primitives>;
 
     #[inline]
     fn starting_block(&self) -> U256 {
@@ -172,7 +180,7 @@ where
     }
 
     #[inline]
-    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>> {
+    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<TxTy<Self::Primitives>>>>> {
         self.inner.eth_api.signers()
     }
 }
@@ -219,7 +227,7 @@ where
 }
 
 impl<N> LoadState for OpEthApi<N> where
-    N: OpNodeCore<
+    N: RpcNodeCoreExt<
         Provider: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks>,
         Pool: TransactionPool,
     >
@@ -247,15 +255,7 @@ where
 impl<N> Trace for OpEthApi<N>
 where
     Self: RpcNodeCore<Provider: BlockReader>
-        + LoadState<
-            Evm: ConfigureEvm<
-                Primitives: NodePrimitives<
-                    BlockHeader = ProviderHeader<Self::Provider>,
-                    SignedTx = ProviderTx<Self::Provider>,
-                >,
-            >,
-            Error: FromEvmError<Self::Evm>,
-        >,
+        + LoadState<Evm: ConfigureEvm<Primitives = Self::Primitives>, Error: FromEvmError<Self::Evm>>,
     N: OpNodeCore,
 {
 }

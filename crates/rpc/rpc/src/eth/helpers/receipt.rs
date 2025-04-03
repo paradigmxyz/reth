@@ -2,29 +2,23 @@
 
 use alloy_consensus::transaction::TransactionMeta;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
-use reth_ethereum_primitives::{Receipt, TransactionSigned};
-use reth_node_api::NodePrimitives;
+use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{ReceiptTy, TxTy};
 use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcNodeCoreExt, RpcReceipt};
 use reth_rpc_eth_types::{EthApiError, EthReceiptBuilder};
-use reth_storage_api::{BlockReader, ReceiptProvider, TransactionsProvider};
 
 use crate::EthApi;
 
 impl<Provider, Pool, Network, EvmConfig> LoadReceipt for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: RpcNodeCoreExt<
-        Primitives: NodePrimitives<SignedTx = TransactionSigned, Receipt = Receipt>,
-        Provider: TransactionsProvider<Transaction = TxTy<Self::Primitives>>
-                      + ReceiptProvider<Receipt = ReceiptTy<Self::Primitives>>,
-    >,
-    Provider: BlockReader + ChainSpecProvider,
+    Self: RpcNodeCoreExt<Primitives = EthPrimitives, Provider = Provider>,
+    Provider: ChainSpecProvider,
 {
     async fn build_transaction_receipt(
         &self,
-        tx: TransactionSigned,
+        tx: TxTy<Self::Primitives>,
         meta: TransactionMeta,
-        receipt: Receipt,
+        receipt: ReceiptTy<Self::Primitives>,
     ) -> Result<RpcReceipt<Self::NetworkTypes>, Self::Error> {
         let hash = meta.block_hash;
         // get all receipts for the block

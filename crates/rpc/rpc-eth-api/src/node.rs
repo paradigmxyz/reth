@@ -2,7 +2,7 @@
 
 use reth_node_api::{FullNodeComponents, NodePrimitives, NodeTypes, PrimitivesTy};
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_primitives_traits::{BlockTy, ReceiptTy};
+use reth_primitives_traits::{BlockTy, ReceiptTy, TxTy};
 use reth_provider::BlockReader;
 use reth_rpc_eth_types::EthStateCache;
 
@@ -85,7 +85,11 @@ where
 pub trait RpcNodeCoreExt:
     RpcNodeCore<
     Primitives: NodePrimitives,
-    Provider: BlockReader<Block = BlockTy<Self::Primitives>, Receipt = ReceiptTy<Self::Primitives>>,
+    Provider: BlockReader<
+        Block = BlockTy<Self::Primitives>,
+        Receipt = ReceiptTy<Self::Primitives>,
+        Transaction = TxTy<Self::Primitives>,
+    >,
 >
 {
     /// Returns handle to RPC cache service.
