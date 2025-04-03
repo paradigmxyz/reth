@@ -532,8 +532,8 @@ impl AccountStorageCache {
     }
 
     /// Get a storage value from this account's cache.
-    ///
-    /// - `Empty`: The slot is empty (either not in account storage cache or explicitly None)
+    /// - `NotCached`: The slot is not in the cache
+    /// - `Empty`: The slot is empty
     /// - `Value`: The slot has a specific value
     pub(crate) fn get_storage(&self, key: &StorageKey) -> SlotStatus {
         match self.slots.get(key) {
