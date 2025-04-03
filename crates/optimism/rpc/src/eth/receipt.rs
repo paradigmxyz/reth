@@ -9,18 +9,19 @@ use reth_chainspec::ChainSpecProvider;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
+use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
+use reth_primitives_traits::{ReceiptTy, TxTy};
 use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcNodeCoreExt, RpcReceipt};
 use reth_rpc_eth_types::{receipt::build_receipt, EthApiError};
 
 use crate::{OpEthApi, OpEthApiError};
 
+use super::OpNodeCore;
+
 impl<N> LoadReceipt for OpEthApi<N>
 where
-    Self: RpcNodeCoreExt<
-        Primitives = OpPrimitives,
-        Provider: ChainSpecProvider<ChainSpec = OpChainSpec>,
-    >,
+    N: OpNodeCore<Provider: ChainSpecProvider<ChainSpec = OpChainSpec>>,
+    Self: RpcNodeCoreExt<Primitives = N::Primitives>,
 {
     async fn build_transaction_receipt(
         &self,

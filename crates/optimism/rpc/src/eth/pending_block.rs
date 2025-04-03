@@ -4,19 +4,19 @@ use crate::OpEthApi;
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::B256;
+use reth_evm::ConfigureEvm;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_primitives_traits::{BlockTy, HeaderTy, ReceiptTy, RecoveredBlock, SealedHeader};
 use reth_rpc_eth_api::{helpers::LoadPendingBlock, FromEthApiError, FullEthApiTypes, RpcNodeCore};
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
 use reth_storage_api::{BlockReader, BlockReaderIdExt, ReceiptProvider};
-use reth_transaction_pool::PoolTransaction;
 
 use super::OpNodeCore;
 
 impl<N> LoadPendingBlock for OpEthApi<N>
 where
-    N: OpNodeCore,
-    Self: FullEthApiTypes,
+    N: OpNodeCore<Evm: ConfigureEvm<NextBlockEnvCtx = OpNextBlockEnvAttributes>>,
+    Self: FullEthApiTypes<Primitives = N::Primitives, Evm = N::Evm>,
 {
     #[inline]
     fn pending_block(

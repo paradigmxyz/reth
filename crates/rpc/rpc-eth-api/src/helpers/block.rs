@@ -2,8 +2,7 @@
 
 use super::{LoadPendingBlock, LoadReceipt, SpawnBlocking};
 use crate::{
-    node::RpcNodeCoreExt, types::RpcTypes, EthApiTypes, FromEthApiError, RpcBlock, RpcHeader,
-    RpcNodeCore, RpcReceipt,
+    types::RpcTypes, EthApiTypes, FromEthApiError, RpcBlock, RpcHeader, RpcNodeCore, RpcReceipt,
 };
 use alloy_eips::BlockId;
 use alloy_primitives::{Sealable, U256};

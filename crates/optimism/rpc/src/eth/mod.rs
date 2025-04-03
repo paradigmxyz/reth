@@ -8,7 +8,6 @@ mod block;
 mod call;
 mod pending_block;
 
-use alloy_consensus::Receipt;
 use alloy_primitives::U256;
 use op_alloy_network::Optimism;
 pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
@@ -16,13 +15,10 @@ use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_node_api::{Block, FullNodeComponents, NodePrimitives, PrimitivesTy};
-use reth_node_builder::{
-    rpc::{EthApiBuilder, EthApiCtx},
-    Node,
-};
+use reth_node_api::{FullNodeComponents, NodeTypes, PrimitivesTy};
+use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
 use reth_optimism_primitives::OpPrimitives;
-use reth_primitives_traits::{BlockTy, ReceiptTy, TxTy};
+use reth_primitives_traits::{BlockTy, HeaderTy, ReceiptTy, TxTy};
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
     helpers::{
@@ -52,6 +48,32 @@ pub type EthApiNodeBackend<N> = EthApiInner<
     <N as RpcNodeCore>::Evm,
 >;
 
+/// A helper trait with requirements for [`RpcNodeCore`] to be used in [`OpEthApi`].
+pub trait OpNodeCore:
+    RpcNodeCore<
+    Primitives = OpPrimitives,
+    Provider: BlockReader<
+        Block = BlockTy<Self::Primitives>,
+        Header = HeaderTy<Self::Primitives>,
+        Transaction = TxTy<Self::Primitives>,
+        Receipt = ReceiptTy<Self::Primitives>,
+    >,
+>
+{
+}
+impl<T> OpNodeCore for T where
+    T: RpcNodeCore<
+        Primitives = OpPrimitives,
+        Provider: BlockReader<
+            Block = BlockTy<Self::Primitives>,
+            Header = HeaderTy<Self::Primitives>,
+            Transaction = TxTy<Self::Primitives>,
+            Receipt = ReceiptTy<Self::Primitives>,
+        >,
+    >
+{
+}
+
 /// OP-Reth `Eth` API implementation.
 ///
 /// This type provides the functionality for handling `eth_` related requests.
@@ -63,14 +85,14 @@ pub type EthApiNodeBackend<N> = EthApiInner<
 /// This type implements the [`FullEthApi`](reth_rpc_eth_api::helpers::FullEthApi) by implemented
 /// all the `Eth` helper traits and prerequisite traits.
 #[derive(Clone)]
-pub struct OpEthApi<N: RpcNodeCore> {
+pub struct OpEthApi<N: OpNodeCore> {
     /// Gateway to node's core components.
     inner: Arc<OpEthApiInner<N>>,
 }
 
 impl<N> OpEthApi<N>
 where
-    N: RpcNodeCore<
+    N: OpNodeCore<
         Provider: BlockReaderIdExt
                       + ChainSpecProvider
                       + CanonStateSubscriptions<Primitives = OpPrimitives>
@@ -147,14 +169,8 @@ where
 
 impl<N> RpcNodeCoreExt for OpEthApi<N>
 where
-    N: RpcNodeCore<
-        Primitives = OpPrimitives,
-        Provider: BlockReader<
-            Block = BlockTy<N::Primitives>,
-            Receipt = ReceiptTy<N::Primitives>,
-            Transaction = TxTy<N::Primitives>,
-        >,
-    >,
+    N: OpNodeCore,
+    Self: RpcNodeCore<Primitives = N::Primitives, Provider = N::Provider, Pool = N::Pool>,
 {
     #[inline]
     fn cache(&self) -> &EthStateCache<BlockTy<N::Primitives>, ReceiptTy<N::Primitives>> {
@@ -207,12 +223,12 @@ where
 
 impl<N> LoadFee for OpEthApi<N>
 where
-    Self: LoadBlock<Provider = N::Provider>,
     N: OpNodeCore<
         Provider: BlockReaderIdExt
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                       + StateProviderFactory,
     >,
+    Self: LoadBlock<Primitives = N::Primitives, Provider = N::Provider>,
 {
     #[inline]
     fn gas_oracle(&self) -> &GasPriceOracle<Self::Provider> {
@@ -225,11 +241,13 @@ where
     }
 }
 
-impl<N> LoadState for OpEthApi<N> where
-    N: RpcNodeCoreExt<
+impl<N> LoadState for OpEthApi<N>
+where
+    N: OpNodeCore<
         Provider: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks>,
         Pool: TransactionPool,
-    >
+    >,
+    Self: RpcNodeCoreExt<Primitives = N::Primitives, Provider = N::Provider, Pool = N::Pool>,
 {
 }
 
@@ -276,7 +294,7 @@ impl<N: OpNodeCore> fmt::Debug for OpEthApi<N> {
 
 /// Container type `OpEthApi`
 #[allow(missing_debug_implementations)]
-struct OpEthApiInner<N: RpcNodeCore> {
+struct OpEthApiInner<N: OpNodeCore> {
     /// Gateway to node's core components.
     eth_api: EthApiNodeBackend<N>,
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
@@ -319,7 +337,7 @@ impl OpEthApiBuilder {
 
 impl<N> EthApiBuilder<N> for OpEthApiBuilder
 where
-    N: FullNodeComponents,
+    N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>,
     OpEthApi<N>: FullEthApiServer<
         Primitives = PrimitivesTy<N::Types>,
         Provider = N::Provider,

@@ -5,23 +5,22 @@ use alloy_primitives::{Bytes, PrimitiveSignature as Signature, Sealable, Sealed,
 use alloy_rpc_types_eth::TransactionInfo;
 use op_alloy_consensus::OpTxEnvelope;
 use op_alloy_rpc_types::{OpTransactionRequest, Transaction};
-use reth_node_api::FullNodeComponents;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use reth_primitives_traits::TxTy;
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt, TransactionCompat,
+    FromEthApiError, FullEthApiTypes, RpcNodeCore, TransactionCompat,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
-use reth_storage_api::{BlockReader, BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
+use reth_storage_api::ReceiptProvider;
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
-use crate::{EthApi, OpEthApiError, SequencerClient};
+use crate::{eth::OpNodeCore, OpEthApi, OpEthApiError, SequencerClient};
 
 impl<N> EthTransactions for OpEthApi<N>
 where
-    Self: LoadTransaction<Provider: BlockReaderIdExt>,
-    N: OpNodeCore<Provider: BlockReader<Transaction = TxTy<N::Primitives>>>,
+    N: OpNodeCore,
+    Self: LoadTransaction<Primitives = N::Primitives>,
 {
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<TxTy<Self::Primitives>>>>> {
         self.inner.eth_api.signers()
@@ -56,9 +55,8 @@ where
 
 impl<N> LoadTransaction for OpEthApi<N>
 where
-    Self: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt,
-    N: OpNodeCore<Provider: TransactionsProvider, Pool: TransactionPool>,
-    Self::Pool: TransactionPool,
+    N: OpNodeCore,
+    Self: SpawnBlocking + FullEthApiTypes<Primitives = N::Primitives>,
 {
 }
 
@@ -74,7 +72,7 @@ where
 
 impl<N> TransactionCompat<OpTransactionSigned> for OpEthApi<N>
 where
-    N: FullNodeComponents<Provider: ReceiptProvider<Receipt = OpReceipt>>,
+    N: OpNodeCore,
 {
     type Transaction = Transaction;
     type Error = OpEthApiError;

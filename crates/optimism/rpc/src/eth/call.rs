@@ -4,7 +4,6 @@ use alloy_primitives::{Bytes, TxKind, U256};
 use alloy_rpc_types_eth::transaction::TransactionRequest;
 use op_revm::OpTransaction;
 use reth_evm::{execute::BlockExecutorFactory, ConfigureEvm, EvmEnv, EvmFactory, SpecFor};
-use reth_optimism_primitives::OpPrimitives;
 use reth_rpc_eth_api::{
     helpers::{estimate::EstimateCall, Call, EthCall, LoadBlock, LoadState, SpawnBlocking},
     FromEthApiError, FromEvmError, IntoEthApiError,
@@ -12,27 +11,37 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{revm_utils::CallFees, EthApiError, RpcInvalidTransactionError};
 use revm::{context::TxEnv, context_interface::Block, Database};
 
-impl<N> EthCall for OpEthApi<N> where Self: EstimateCall + LoadBlock {}
+use super::OpNodeCore;
+
+impl<N> EthCall for OpEthApi<N>
+where
+    N: OpNodeCore,
+    Self: EstimateCall + LoadBlock,
+{
+}
 
 impl<N> EstimateCall for OpEthApi<N>
 where
-    Self: Call,
-    Self::Error: From<OpEthApiError>,
+    N: OpNodeCore,
+    Self: Call<Error: From<OpEthApiError>>,
 {
 }
 
 impl<N> Call for OpEthApi<N>
 where
-    Self: LoadState<
-            Evm: ConfigureEvm<
-                Primitives = OpPrimitives,
-                BlockExecutorFactory: BlockExecutorFactory<
-                    EvmFactory: EvmFactory<Tx = OpTransaction<TxEnv>>,
-                >,
+    N: OpNodeCore<
+        Evm: ConfigureEvm<
+            Primitives = N::Primitives,
+            BlockExecutorFactory: BlockExecutorFactory<
+                EvmFactory: EvmFactory<Tx = OpTransaction<TxEnv>>,
             >,
-            Error: FromEvmError<Self::Evm>,
+        >,
+    >,
+    Self: LoadState<
+            Primitives = N::Primitives,
+            Evm = N::Evm,
+            Error: FromEvmError<Self::Evm> + From<OpEthApiError>,
         > + SpawnBlocking,
-    Self::Error: From<OpEthApiError>,
 {
     #[inline]
     fn call_gas_limit(&self) -> u64 {

@@ -1,25 +1,28 @@
 //! Loads and formats OP block RPC response.
 
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
-use alloy_rpc_types_eth::BlockId;
+use alloy_rpc_types_eth::{BlockId, Header};
 use op_alloy_rpc_types::OpTransactionReceipt;
 use reth_chainspec::ChainSpecProvider;
-use reth_node_api::BlockBody;
-use reth_optimism_primitives::OpPrimitives;
-use reth_primitives_traits::SignedTransaction;
+use reth_optimism_chainspec::OpChainSpec;
+use reth_primitives_traits::{HeaderTy, SignedTransaction};
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
     types::RpcTypes,
-    RpcNodeCore, RpcReceipt,
+    RpcReceipt,
 };
 
 use crate::{OpEthApi, OpEthApiError, OpReceiptBuilder};
 
+use super::OpNodeCore;
+
 impl<N> EthBlocks for OpEthApi<N>
 where
+    N: OpNodeCore<Provider: ChainSpecProvider<ChainSpec = OpChainSpec>>,
     Self: LoadBlock<
         Error = OpEthApiError,
-        Primitives = OpPrimitives,
+        Primitives = N::Primitives,
+        Provider = N::Provider,
         NetworkTypes: RpcTypes<Receipt = OpTransactionReceipt>,
     >,
 {
@@ -42,7 +45,6 @@ where
             return block
                 .body()
                 .transactions()
-                .iter()
                 .zip(receipts.iter())
                 .enumerate()
                 .map(|(idx, (tx, receipt))| -> Result<_, _> {
@@ -79,4 +81,10 @@ where
     }
 }
 
-impl<N> LoadBlock for OpEthApi<N> where Self: LoadPendingBlock + SpawnBlocking {}
+impl<N> LoadBlock for OpEthApi<N>
+where
+    N: OpNodeCore,
+    Self: LoadPendingBlock<NetworkTypes: RpcTypes<Header = Header<HeaderTy<Self::Primitives>>>>
+        + SpawnBlocking,
+{
+}
