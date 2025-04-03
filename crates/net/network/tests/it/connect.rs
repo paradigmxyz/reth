@@ -10,7 +10,6 @@ use reth_eth_wire::{DisconnectReason, EthNetworkPrimitives, HeadersDirection};
 use reth_net_banlist::BanList;
 use reth_network::{
     test_utils::{enr_to_peer_id, NetworkEventStream, PeerConfig, Testnet, GETH_TIMEOUT},
-    transactions::config::TransactionPropagationKind,
     BlockDownloaderProvider, NetworkConfigBuilder, NetworkEvent, NetworkEventListenerProvider,
     NetworkManager, PeersConfig,
 };
