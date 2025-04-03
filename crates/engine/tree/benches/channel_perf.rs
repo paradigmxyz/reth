@@ -44,7 +44,7 @@ struct StdStateRootTask {
 }
 
 impl StdStateRootTask {
-    const fn new(rx: std::sync::mpsc::Receiver<EvmState>) -> Self {
+    fn new(rx: std::sync::mpsc::Receiver<EvmState>) -> Self {
         Self { rx }
     }
 
