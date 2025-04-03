@@ -109,8 +109,7 @@ mod tests {
         let mut db = CacheDB::<reth_revm::db::EmptyDBTyped<reth_errors::ProviderError>>::default();
         let builder = EthTxBuilder::default();
 
-        let mut tx = TransactionRequest::default();
-        tx.gas_price = Some(100);
+        let tx = TransactionRequest { gas_price: Some(100), ..Default::default() };
 
         let result = resolve_transaction(tx, 21000, 1, &mut db, &builder).unwrap();
 
@@ -125,9 +124,11 @@ mod tests {
         let mut db = CacheDB::<reth_revm::db::EmptyDBTyped<reth_errors::ProviderError>>::default();
         let builder = EthTxBuilder::default();
 
-        let mut tx = TransactionRequest::default();
-        tx.max_fee_per_gas = Some(200);
-        tx.max_priority_fee_per_gas = Some(10);
+        let tx = TransactionRequest {
+            max_fee_per_gas: Some(200),
+            max_priority_fee_per_gas: Some(0),
+            ..Default::default()
+        };
 
         let result = resolve_transaction(tx, 21000, 1, &mut db, &builder).unwrap();
 
