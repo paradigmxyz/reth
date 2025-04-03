@@ -2336,18 +2336,45 @@ where
         &mut self,
         block: RecoveredBlock<N::Block>,
     ) -> Result<InsertPayloadOk, InsertBlockError<N::Block>> {
-        self.insert_block_inner(block.clone())
-            .map_err(|kind| InsertBlockError::new(block.into_sealed_block(), kind))
+        match self.insert_block_inner(block) {
+            Ok(result) => Ok(result),
+            Err((kind, block)) => Err(InsertBlockError::new(block.into_sealed_block(), kind)),
+        }
     }
 
     fn insert_block_inner(
         &mut self,
         block: RecoveredBlock<N::Block>,
-    ) -> Result<InsertPayloadOk, InsertBlockErrorKind> {
+    ) -> Result<InsertPayloadOk, (InsertBlockErrorKind, RecoveredBlock<N::Block>)> {
+        macro_rules! ok_or_return {
+            ($expr:expr) => {
+                match $expr {
+                    Ok(val) => val,
+                    Err(e) => return Err((e.into(), block)),
+                }
+            };
+        }
+        macro_rules! ok_or_return2 {
+            ($expr:expr) => {
+                match $expr {
+                    Ok(val) => val,
+                    Err(e) => return Err((InsertBlockErrorKind::Other(Box::new(e)), block)),
+                }
+            };
+        }
+        macro_rules! some_or_return_expr {
+            ($expr:expr, $e:expr) => {
+                match $expr {
+                    Some(val) => val,
+                    None => return Err(($e, block)),
+                }
+            };
+        }
+
         let block_num_hash = block.num_hash();
         debug!(target: "engine::tree", block=?block_num_hash, parent = ?block.parent_hash(), state_root = ?block.state_root(), "Inserting new block into tree");
 
-        if self.block_by_hash(block.hash())?.is_some() {
+        if ok_or_return!(self.block_by_hash(block.hash())).is_some() {
             return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid))
         }
 
@@ -2356,10 +2383,12 @@ where
         trace!(target: "engine::tree", block=?block_num_hash, "Validating block consensus");
 
         // validate block consensus rules
-        self.validate_block(&block)?;
+        ok_or_return!(self.validate_block(&block));
 
         trace!(target: "engine::tree", block=?block_num_hash, parent=?block.parent_hash(), "Fetching block state provider");
-        let Some(provider_builder) = self.state_provider_builder(block.parent_hash())? else {
+        let Some(provider_builder) =
+            ok_or_return!(self.state_provider_builder(block.parent_hash()))
+        else {
             // we don't have the state required to execute this block, buffering it and find the
             // missing parent block
             let missing_ancestor = self
@@ -2378,19 +2407,20 @@ where
         };
 
         // now validate against the parent
-        let parent_block = self.sealed_header_by_hash(block.parent_hash())?.ok_or_else(|| {
+        let parent_block = some_or_return_expr!(
+            ok_or_return!(self.sealed_header_by_hash(block.parent_hash())),
             InsertBlockErrorKind::Provider(ProviderError::HeaderNotFound(
                 block.parent_hash().into(),
             ))
-        })?;
+        );
         if let Err(e) =
             self.consensus.validate_header_against_parent(block.sealed_header(), &parent_block)
         {
             warn!(target: "engine::tree", ?block, "Failed to validate header {} against parent: {e}", block.hash());
-            return Err(e.into())
+            return Err((e.into(), block))
         }
 
-        let state_provider = provider_builder.build()?;
+        let state_provider = ok_or_return!(provider_builder.build());
 
         // We only run the parallel state root if we are not currently persisting any blocks or
         // persisting blocks that are all ancestors of the one we are executing.
@@ -2409,17 +2439,16 @@ where
         let txs = block.clone_transactions_recovered().collect();
         let mut handle = if run_parallel_state_root && self.config.use_state_root_task() {
             // use background tasks for state root calc
-            let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
+            let consistent_view =
+                ok_or_return!(ConsistentDbView::new_with_latest_tip(self.provider.clone()));
 
             // Compute trie input
             let trie_input_start = Instant::now();
-            let trie_input = self
-                .compute_trie_input(
-                    persisting_kind,
-                    consistent_view.clone(),
-                    block.header().parent_hash(),
-                )
-                .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
+            let trie_input = ok_or_return2!(self.compute_trie_input(
+                persisting_kind,
+                consistent_view.clone(),
+                block.header().parent_hash(),
+            ));
 
             self.metrics
                 .block_validation
@@ -2443,11 +2472,11 @@ where
 
         let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
         let execution_start = Instant::now();
-        let output = self.metrics.executor.execute_metered(
+        let output = ok_or_return!(self.metrics.executor.execute_metered(
             executor,
             &block,
             Box::new(handle.state_hook()),
-        )?;
+        ));
         let execution_finish = Instant::now();
         let execution_time = execution_finish.duration_since(execution_start);
         debug!(target: "engine::tree", elapsed = ?execution_time, number=?block_num_hash.number, "Executed block");
@@ -2458,7 +2487,7 @@ where
         if let Err(err) = self.consensus.validate_block_post_execution(&block, &output) {
             // call post-block hook
             self.on_invalid_block(&parent_block, &block, &output, None);
-            return Err(err.into())
+            return Err((err.into(), block))
         }
 
         let hashed_state = self.provider.hashed_post_state(&output.state);
@@ -2469,7 +2498,7 @@ where
         {
             // call post-block hook
             self.on_invalid_block(&parent_block, &block, &output, None);
-            return Err(err.into())
+            return Err((err.into(), block))
         }
 
         debug!(target: "engine::tree", block=?block_num_hash, "Calculating block state root");
@@ -2520,7 +2549,7 @@ where
                     Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(error))) => {
                         debug!(target: "engine::tree", %error, "Parallel state root computation failed consistency check, falling back");
                     }
-                    Err(error) => return Err(InsertBlockErrorKind::Other(Box::new(error))),
+                    Err(error) => return Err((InsertBlockErrorKind::Other(Box::new(error)), block)),
                 }
             }
         }
@@ -2532,7 +2561,8 @@ where
         } else {
             // fallback is to compute the state root regularly in sync
             warn!(target: "engine::tree", block=?block_num_hash, ?persisting_kind, "Failed to compute state root in parallel");
-            let (root, updates) = state_provider.state_root_with_updates(hashed_state.clone())?;
+            let (root, updates) =
+                ok_or_return!(state_provider.state_root_with_updates(hashed_state.clone()));
             (root, updates, root_time.elapsed())
         };
 
@@ -2543,10 +2573,13 @@ where
         if state_root != block.header().state_root() {
             // call post-block hook
             self.on_invalid_block(&parent_block, &block, &output, Some((&trie_output, state_root)));
-            return Err(ConsensusError::BodyStateRootDiff(
-                GotExpected { got: state_root, expected: block.header().state_root() }.into(),
-            )
-            .into())
+            return Err((
+                ConsensusError::BodyStateRootDiff(
+                    GotExpected { got: state_root, expected: block.header().state_root() }.into(),
+                )
+                .into(),
+                block,
+            ))
         }
 
         // terminate prewarming task with good state output
@@ -2554,7 +2587,7 @@ where
 
         let executed: ExecutedBlockWithTrieUpdates<N> = ExecutedBlockWithTrieUpdates {
             block: ExecutedBlock {
-                recovered_block: Arc::new(block),
+                recovered_block: Arc::new(block.clone()),
                 execution_output: Arc::new(ExecutionOutcome::from((output, block_num_hash.number))),
                 hashed_state: Arc::new(hashed_state),
             },
@@ -2573,7 +2606,7 @@ where
 
         // emit insert event
         let elapsed = start.elapsed();
-        let engine_event = if self.is_fork(block_num_hash.hash)? {
+        let engine_event = if ok_or_return!(self.is_fork(block_num_hash.hash)) {
             BeaconConsensusEngineEvent::ForkBlockAdded(executed, elapsed)
         } else {
             BeaconConsensusEngineEvent::CanonicalBlockAdded(executed, elapsed)
