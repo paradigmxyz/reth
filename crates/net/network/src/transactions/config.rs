@@ -16,7 +16,7 @@ use reth_network_api::PeerKind;
 /// Configuration for managing transactions within the network.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct TransactionsManagerConfig {
+pub struct TransactionsManagerConfig<P: TransactionPropagationPolicy = TransactionPropagationKind> {
     /// Configuration for fetching transactions.
     pub transaction_fetcher_config: TransactionFetcherConfig,
     /// Max number of seen transactions to store for each peer.
@@ -24,57 +24,18 @@ pub struct TransactionsManagerConfig {
     /// How new pending transactions are propagated.
     #[cfg_attr(feature = "serde", serde(default))]
     pub propagation_mode: TransactionPropagationMode,
+    /// Policy defining which peers transactions are propagated to.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub propagation_policy: P,
 }
 
-impl Default for TransactionsManagerConfig {
+impl<P: TransactionPropagationPolicy> Default for TransactionsManagerConfig<P> {
     fn default() -> Self {
         Self {
             transaction_fetcher_config: TransactionFetcherConfig::default(),
             max_transactions_seen_by_peer_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
             propagation_mode: TransactionPropagationMode::default(),
-        }
-    }
-}
-
-/// A trait for filtering peers based on their metadata.
-///
-/// This is used to determine whether a transaction should be propagated to a given peer.
-pub trait TransactionPropagationPolicy: Default + Clone {
-    /// Returns true if we should propagate the transaction to the given peer.
-    fn filter<N: NetworkPrimitives>(&self, peer: &mut PeerMetadata<N>) -> bool;
-}
-
-/// Determines which peers pending transactions are propagated to.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Display)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum TransactionPropagationKind {
-    /// Propagate transactions to all peers.
-    #[default]
-    All,
-    /// Propagate transactions to only trusted peers.
-    ///
-    /// Can be used to keep the mempool private on networks like op mainnet
-    /// while still gossiping the transaction pool to trusted peers.
-    Trusted,
-}
-
-impl TransactionPropagationPolicy for TransactionPropagationKind {
-    fn filter<N: NetworkPrimitives>(&self, peer: &mut PeerMetadata<N>) -> bool {
-        match self {
-            Self::All => true,
-            Self::Trusted => matches!(peer.peer_kind, PeerKind::Trusted),
-        }
-    }
-}
-
-impl FromStr for TransactionPropagationKind {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "All" | "all" => Ok(Self::All),
-            "Trusted" | "trusted" => Ok(Self::Trusted),
-            _ => Err(format!("Invalid transaction propagation policy: {}", s)),
+            propagation_policy: P::default(),
         }
     }
 }
@@ -138,6 +99,49 @@ impl Default for TransactionFetcherConfig {
             soft_limit_byte_size_pooled_transactions_response_on_pack_request:
                 DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
                 max_capacity_cache_txns_pending_fetch: DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
+        }
+    }
+}
+
+/// A trait for filtering peers based on their metadata.
+///
+/// This is used to determine whether a transaction should be propagated to a given peer.
+pub trait TransactionPropagationPolicy: Default + Clone {
+    /// Returns true if we should propagate the transaction to the given peer.
+    fn filter<N: NetworkPrimitives>(&self, peer: &mut PeerMetadata<N>) -> bool;
+}
+
+/// Determines which peers pending transactions are propagated to.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Display)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum TransactionPropagationKind {
+    /// Propagate transactions to all peers.
+    #[default]
+    All,
+    /// Propagate transactions to only trusted peers.
+    ///
+    /// Can be used to keep the mempool private on networks like op mainnet
+    /// while still gossiping the transaction pool to trusted peers.
+    Trusted,
+}
+
+impl TransactionPropagationPolicy for TransactionPropagationKind {
+    fn filter<N: NetworkPrimitives>(&self, peer: &mut PeerMetadata<N>) -> bool {
+        match self {
+            Self::All => true,
+            Self::Trusted => matches!(peer.peer_kind, PeerKind::Trusted),
+        }
+    }
+}
+
+impl FromStr for TransactionPropagationKind {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "All" | "all" => Ok(Self::All),
+            "Trusted" | "trusted" => Ok(Self::Trusted),
+            _ => Err(format!("Invalid transaction propagation policy: {}", s)),
         }
     }
 }

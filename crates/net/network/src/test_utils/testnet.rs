@@ -5,10 +5,7 @@ use crate::{
     error::NetworkError,
     eth_requests::EthRequestHandler,
     protocol::IntoRlpxSubProtocol,
-    transactions::{
-        config::TransactionPropagationKind, TransactionsHandle, TransactionsManager,
-        TransactionsManagerConfig,
-    },
+    transactions::{TransactionsHandle, TransactionsManager, TransactionsManagerConfig},
     NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
 };
 use alloy_consensus::transaction::PooledTransaction;
@@ -458,7 +455,6 @@ where
             pool.clone(),
             rx,
             TransactionsManagerConfig::default(),
-            TransactionPropagationKind::default(),
         );
         self.transactions_manager = Some(transactions_manager);
         self.pool = Some(pool);
@@ -477,7 +473,6 @@ where
             pool.clone(),
             rx,
             TransactionsManagerConfig::default(),
-            TransactionPropagationKind::default(),
         );
         Peer {
             network,
@@ -507,7 +502,6 @@ where
             pool.clone(),
             rx,
             config, // Use provided config
-            TransactionPropagationKind::default(),
         );
 
         Peer {

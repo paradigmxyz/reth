@@ -70,20 +70,13 @@ impl<Tx, Eth, N: NetworkPrimitives> NetworkBuilder<Tx, Eth, N> {
     pub fn transactions<Pool: TransactionPool, P: TransactionPropagationPolicy>(
         self,
         pool: Pool,
-        transactions_manager_config: TransactionsManagerConfig,
-        transaction_propagation_policy: P,
+        transactions_manager_config: TransactionsManagerConfig<P>,
     ) -> NetworkBuilder<TransactionsManager<Pool, N, P>, Eth, N> {
         let Self { mut network, request_handler, .. } = self;
         let (tx, rx) = mpsc::unbounded_channel();
         network.set_transactions(tx);
         let handle = network.handle().clone();
-        let transactions = TransactionsManager::new(
-            handle,
-            pool,
-            rx,
-            transactions_manager_config,
-            transaction_propagation_policy,
-        );
+        let transactions = TransactionsManager::new(handle, pool, rx, transactions_manager_config);
         NetworkBuilder { network, request_handler, transactions }
     }
 }

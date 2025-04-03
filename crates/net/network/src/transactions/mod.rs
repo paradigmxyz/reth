@@ -297,11 +297,9 @@ pub struct TransactionsManager<
     /// Incoming events from the [`NetworkManager`](crate::NetworkManager).
     transaction_events: UnboundedMeteredReceiver<NetworkTransactionEvent<N>>,
     /// How the `TransactionsManager` is configured.
-    config: TransactionsManagerConfig,
+    config: TransactionsManagerConfig<P>,
     /// `TransactionsManager` metrics
     metrics: TransactionsManagerMetrics,
-    /// The transaction propagation policy.
-    transaction_propagation_policy: P,
 }
 
 impl<Pool: TransactionPool, N: NetworkPrimitives, P: TransactionPropagationPolicy>
@@ -314,8 +312,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives, P: TransactionPropagationPolic
         network: NetworkHandle<N>,
         pool: Pool,
         from_network: mpsc::UnboundedReceiver<NetworkTransactionEvent<N>>,
-        transactions_manager_config: TransactionsManagerConfig,
-        transaction_propagation_policy: P,
+        transactions_manager_config: TransactionsManagerConfig<P>,
     ) -> Self {
         let network_events = network.event_listener();
 
@@ -355,7 +352,6 @@ impl<Pool: TransactionPool, N: NetworkPrimitives, P: TransactionPropagationPolic
             ),
             config: transactions_manager_config,
             metrics,
-            transaction_propagation_policy,
         }
     }
 
@@ -905,7 +901,7 @@ where
 
         // Note: Assuming ~random~ order due to random state of the peers map hasher
         for (peer_idx, (peer_id, peer)) in self.peers.iter_mut().enumerate() {
-            if !self.transaction_propagation_policy.filter(peer) {
+            if !self.config.propagation_policy.filter(peer) {
                 continue
             }
             // determine whether to send full tx objects or hashes.
@@ -1978,11 +1974,7 @@ mod tests {
             .await
             .unwrap()
             .into_builder()
-            .transactions(
-                pool.clone(),
-                transactions_manager_config,
-                TransactionPropagationKind::All,
-            )
+            .transactions(pool.clone(), transactions_manager_config)
             .split_with_handle();
 
         (transactions, network)
@@ -2038,11 +2030,7 @@ mod tests {
             .await
             .unwrap()
             .into_builder()
-            .transactions(
-                pool.clone(),
-                transactions_manager_config,
-                TransactionPropagationKind::All,
-            )
+            .transactions(pool.clone(), transactions_manager_config)
             .split_with_handle();
 
         tokio::task::spawn(network);
@@ -2110,11 +2098,7 @@ mod tests {
             .await
             .unwrap()
             .into_builder()
-            .transactions(
-                pool.clone(),
-                transactions_manager_config,
-                TransactionPropagationKind::All,
-            )
+            .transactions(pool.clone(), transactions_manager_config)
             .split_with_handle();
 
         tokio::task::spawn(network);
@@ -2182,11 +2166,7 @@ mod tests {
             .await
             .unwrap()
             .into_builder()
-            .transactions(
-                pool.clone(),
-                transactions_manager_config,
-                TransactionPropagationKind::All,
-            )
+            .transactions(pool.clone(), transactions_manager_config)
             .split_with_handle();
 
         let peer_id_1 = PeerId::new([1; 64]);
@@ -2290,11 +2270,7 @@ mod tests {
             .await
             .unwrap()
             .into_builder()
-            .transactions(
-                pool.clone(),
-                transactions_manager_config,
-                TransactionPropagationKind::All,
-            )
+            .transactions(pool.clone(), transactions_manager_config)
             .split_with_handle();
         tokio::task::spawn(network);
 
@@ -2370,11 +2346,7 @@ mod tests {
             .await
             .unwrap()
             .into_builder()
-            .transactions(
-                pool.clone(),
-                transactions_manager_config,
-                TransactionPropagationKind::All,
-            )
+            .transactions(pool.clone(), transactions_manager_config)
             .split_with_handle();
         tokio::task::spawn(network);
 
