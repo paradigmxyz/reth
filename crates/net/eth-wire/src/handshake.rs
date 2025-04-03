@@ -4,7 +4,7 @@ use crate::{
     CanDisconnect,
 };
 use bytes::{Bytes, BytesMut};
-use derive_more::with_trait::Debug;
+use derive_more::Debug;
 use futures::{Sink, SinkExt, Stream};
 use reth_eth_wire_types::{
     DisconnectReason, EthMessage, EthNetworkPrimitives, ProtocolMessage, Status,
