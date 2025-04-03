@@ -196,8 +196,15 @@ where
     }
 
     fn add_ons(&self) -> Self::AddOns {
+        let sequencer = self
+            .args
+            .sequencer
+            .as_ref()
+            .or(self.args.sequencer_http.as_ref())
+            .or(self.args.sequencer_ws.as_ref())
+            .cloned();
         Self::AddOns::builder()
-            .with_sequencer(self.args.sequencer_http.clone())
+            .with_sequencer(sequencer)
             .with_da_config(self.da_config.clone())
             .with_enable_tx_conditional(self.args.enable_tx_conditional)
             .build()

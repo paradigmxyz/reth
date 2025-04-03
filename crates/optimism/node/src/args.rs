@@ -13,6 +13,14 @@ pub struct RollupArgs {
     #[arg(long = "rollup.sequencer-http", value_name = "HTTP_URL")]
     pub sequencer_http: Option<String>,
 
+    /// WS endpoint for the sequencer mempool
+    #[arg(long = "rollup.sequencer-ws", value_name = "WS_URL")]
+    pub sequencer_ws: Option<String>,
+
+    /// Endpoint for the sequencer mempool (can be both HTTP and WS)
+    #[arg(long = "rollup.sequencer")]
+    pub sequencer: Option<String>,
+
     /// Disable transaction pool gossip
     #[arg(long = "rollup.disable-tx-pool-gossip")]
     pub disable_txpool_gossip: bool,
@@ -61,6 +69,8 @@ impl Default for RollupArgs {
     fn default() -> Self {
         Self {
             sequencer_http: None,
+            sequencer_ws: None,
+            sequencer: None,
             disable_txpool_gossip: false,
             enable_genesis_walkback: false,
             compute_pending_block: false,
