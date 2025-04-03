@@ -36,18 +36,20 @@ pub const ACCUMULATOR: [u8; 2] = [0x07, 0x00];
 /// Maximum number of blocks in an Era1 file, limited by accumulator size
 pub const MAX_BLOCKS_PER_ERA1: usize = 8192;
 
-/// Generic decoder for Snappy-compressed RLP data
+/// Generic codec for Snappy-compressed RLP data
 #[derive(Debug, Clone, Default)]
-pub struct SnappyRlpDecoder<T> {
+pub struct SnappyRlpCodec<T> {
     _phantom: PhantomData<T>,
 }
 
-impl<T: Decodable> SnappyRlpDecoder<T> {
-    /// Create a new decoder for the given type
+impl<T> SnappyRlpCodec<T> {
+    /// Create a new codec for the given type
     pub fn new() -> Self {
         Self { _phantom: PhantomData }
     }
+}
 
+impl<T: Decodable> SnappyRlpCodec<T> {
     /// Decode compressed data into the target type
     pub fn decode(&self, compressed_data: &[u8]) -> Result<T, E2sError> {
         let mut decoder = Decoder::new();
@@ -61,18 +63,7 @@ impl<T: Decodable> SnappyRlpDecoder<T> {
     }
 }
 
-/// Generic encoder for RLP data to be Snappy-compressed
-#[derive(Debug, Clone, Default)]
-pub struct SnappyRlpEncoder<T> {
-    _phantom: PhantomData<T>,
-}
-
-impl<T: Encodable> SnappyRlpEncoder<T> {
-    /// Create a new encoder for the given type
-    pub fn new() -> Self {
-        Self { _phantom: PhantomData }
-    }
-
+impl<T: Encodable> SnappyRlpCodec<T> {
     /// Encode data into compressed format
     pub fn encode(&self, data: &T) -> Result<Vec<u8>, E2sError> {
         let mut rlp_data = Vec::new();
@@ -151,7 +142,7 @@ impl CompressedHeader {
 
     /// Create a [`CompressedHeader`] from an `alloy_consensus::Header`
     pub fn from_header(header: &Header) -> Result<Self, E2sError> {
-        let encoder = SnappyRlpEncoder::<Header>::new();
+        let encoder = SnappyRlpCodec::<Header>::new();
         let compressed = encoder.encode(header)?;
         Ok(Self::new(compressed))
     }
@@ -159,7 +150,7 @@ impl CompressedHeader {
 
 impl DecodeCompressed for CompressedHeader {
     fn decode<T: Decodable>(&self) -> Result<T, E2sError> {
-        let decoder = SnappyRlpDecoder::<T>::new();
+        let decoder = SnappyRlpCodec::<T>::new();
         decoder.decode(&self.data)
     }
 }
@@ -221,7 +212,7 @@ impl CompressedBody {
 
     /// Create a [`CompressedBody`] from an `alloy_consensus::BlockBody`
     pub fn from_body<T: Encodable, H: Encodable>(body: &BlockBody<T, H>) -> Result<Self, E2sError> {
-        let encoder = SnappyRlpEncoder::<BlockBody<T, H>>::new();
+        let encoder = SnappyRlpCodec::<BlockBody<T, H>>::new();
         let compressed = encoder.encode(body)?;
         Ok(Self::new(compressed))
     }
@@ -229,7 +220,7 @@ impl CompressedBody {
 
 impl DecodeCompressed for CompressedBody {
     fn decode<T: Decodable>(&self) -> Result<T, E2sError> {
-        let decoder = SnappyRlpDecoder::<T>::new();
+        let decoder = SnappyRlpCodec::<T>::new();
         decoder.decode(&self.data)
     }
 }
@@ -287,13 +278,13 @@ impl CompressedReceipts {
 
     /// Decode this [`CompressedReceipts`] into the given type
     pub fn decode<T: Decodable>(&self) -> Result<T, E2sError> {
-        let decoder = SnappyRlpDecoder::<T>::new();
+        let decoder = SnappyRlpCodec::<T>::new();
         decoder.decode(&self.data)
     }
 
     /// Create [`CompressedReceipts`] from an encodable type
     pub fn from_encodable<T: Encodable>(data: &T) -> Result<Self, E2sError> {
-        let encoder = SnappyRlpEncoder::<T>::new();
+        let encoder = SnappyRlpCodec::<T>::new();
         let compressed = encoder.encode(data)?;
         Ok(Self::new(compressed))
     }
@@ -301,7 +292,7 @@ impl CompressedReceipts {
 
 impl DecodeCompressed for CompressedReceipts {
     fn decode<T: Decodable>(&self) -> Result<T, E2sError> {
-        let decoder = SnappyRlpDecoder::<T>::new();
+        let decoder = SnappyRlpCodec::<T>::new();
         decoder.decode(&self.data)
     }
 }
