@@ -302,18 +302,18 @@ impl<N: OpNodeCore> OpEthApiInner<N> {
 pub struct OpEthApiBuilder {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
-    sequencer_client: Option<SequencerClient>,
+    sequencer_url: Option<String>,
 }
 
 impl OpEthApiBuilder {
     /// Creates a [`OpEthApiBuilder`] instance from core components.
     pub const fn new() -> Self {
-        Self { sequencer_client: None }
+        Self { sequencer_url: None }
     }
 
     /// With a [`SequencerClient`].
-    pub fn with_sequencer(mut self, sequencer_client: Option<SequencerClient>) -> Self {
-        self.sequencer_client = sequencer_client;
+    pub fn with_sequencer(mut self, sequencer_url: Option<String>) -> Self {
+        self.sequencer_url = sequencer_url;
         self
     }
 }
@@ -326,7 +326,7 @@ where
     type EthApi = OpEthApi<N>;
 
     fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> Self::EthApi {
-        let Self { sequencer_client } = self;
+        let Self { sequencer_url } = self;
         let eth_api = reth_rpc::EthApiBuilder::new(
             ctx.components.provider().clone(),
             ctx.components.pool().clone(),
@@ -341,6 +341,14 @@ where
         .fee_history_cache_config(ctx.config.fee_history_cache)
         .proof_permits(ctx.config.proof_permits)
         .build_inner();
+
+        let sequencer_client = sequencer_url.map(|url| {
+            ctx.components
+                .task_executor()
+                .handle()
+                .block_on(SequencerClient::new(url))
+                .expect("Failed to init sequencer client")
+        });
 
         OpEthApi { inner: Arc::new(OpEthApiInner { eth_api, sequencer_client }) }
     }
