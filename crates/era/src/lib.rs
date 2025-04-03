@@ -13,5 +13,6 @@
 //! - Era1 format: <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>
 
 pub mod e2s_types;
+pub mod era1_file;
 pub mod era1_types;
 pub mod execution_types;

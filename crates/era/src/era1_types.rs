@@ -8,6 +8,35 @@ use crate::{
 };
 use alloy_primitives::{BlockNumber, ChainId};
 
+/// File content in an Era1 file
+///
+/// Format: `block-tuple* | other-entries* | Accumulator | BlockIndex`
+#[derive(Debug)]
+pub struct Era1Group {
+    /// Blocks in this era1 group
+    pub blocks: Vec<BlockTuple>,
+
+    /// Other entries that don't fit into the standard categories
+    pub other_entries: Vec<Entry>,
+
+    /// Accumulator is hash tree root of block headers and difficulties
+    pub accumulator: Accumulator,
+
+    /// Block index, optional, omitted for genesis era
+    pub block_index: BlockIndex,
+}
+
+impl Era1Group {
+    /// Create a new [`Era1Group`]
+    pub fn new(blocks: Vec<BlockTuple>, accumulator: Accumulator, block_index: BlockIndex) -> Self {
+        Self { blocks, accumulator, block_index, other_entries: Vec::new() }
+    }
+    /// Add another entry to this group
+    pub fn add_entry(&mut self, entry: Entry) {
+        self.other_entries.push(entry);
+    }
+}
+
 /// [`BlockIndex`] records store offsets to data at specific block numbers
 /// from the beginning of the index record to the beginning of the corresponding data.
 ///
@@ -143,35 +172,6 @@ impl Era1Id {
             "{}-{:10}-{:02}-{}.era1",
             self.config_name, self.start_block, self.block_count, self.chain_id
         )
-    }
-}
-
-/// Group in an Era1 file
-///
-/// Format: `Version | block-tuple* | other-entries* | Accumulator | BlockIndex`
-#[derive(Debug)]
-pub struct Era1Group {
-    /// Blocks in this era1 group
-    pub blocks: Vec<BlockTuple>,
-
-    /// Other entries that don't fit into the standard categories
-    pub other_entries: Vec<Entry>,
-
-    /// Accumulator is hash tree root of block headers and difficulties
-    pub accumulator: Accumulator,
-
-    /// Block index, optional, omitted for genesis era
-    pub block_index: BlockIndex,
-}
-
-impl Era1Group {
-    /// Create a new [`Era1Group`]
-    pub fn new(blocks: Vec<BlockTuple>, accumulator: Accumulator, block_index: BlockIndex) -> Self {
-        Self { blocks, accumulator, block_index, other_entries: Vec::new() }
-    }
-    /// Add another entry to this group
-    pub fn add_entry(&mut self, entry: Entry) {
-        self.other_entries.push(entry);
     }
 }
 
