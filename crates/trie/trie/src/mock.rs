@@ -15,18 +15,22 @@ pub struct KeyVisit<T> {
 }
 
 impl<T> KeyVisit<T> {
+    /// Creates a new [`KeyVisit`].
     pub fn new(visit_type: KeyVisitType<T>, visited_key: Option<T>) -> Self {
         Self { visit_type, visited_key, at: Instant::now() }
     }
 
+    /// Creates a new [`KeyVisit`] with [`KeyVisitType::SeekExact`].
     pub fn seek_exact(key: T, visited_key: Option<T>) -> Self {
         Self::new(KeyVisitType::SeekExact(key), visited_key)
     }
 
+    /// Creates a new [`KeyVisit`] with [`KeyVisitType::SeekNonExact`].
     pub fn seek_non_exact(key: T, visited_key: Option<T>) -> Self {
         Self::new(KeyVisitType::SeekNonExact(key), visited_key)
     }
 
+    /// Creates a new [`KeyVisit`] with [`KeyVisitType::Next`].
     pub fn next(key: Option<T>) -> Self {
         Self::new(KeyVisitType::Next, key)
     }
@@ -63,7 +67,9 @@ pub enum KeyVisitType<T> {
 /// The cursor type.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CursorType {
+    /// The trie cursor type.
     Trie(KeyVisit<Nibbles>),
+    /// The hashed cursor type.
     Hashed(KeyVisit<B256>),
 }
 
