@@ -11,4 +11,6 @@ optimism_package:
         cl_type: op-node
       - el_type: op-reth
         el_image: "ghcr.io/paradigmxyz/op-reth:kurtosis-ci"
+        el_extra_params:
+        - "--chain=base"
         cl_type: op-node

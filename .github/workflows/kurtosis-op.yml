@@ -5,8 +5,11 @@ name: kurtosis-op
 on:
   workflow_dispatch:
   schedule:
-    # run every 12 hours
     - cron: "0 */12 * * *"
+
+  push:
+    tags:
+      - '*'
 
 env:
   CARGO_TERM_COLOR: always
@@ -28,6 +31,12 @@ jobs:
     timeout-minutes: 60
     strategy:
       fail-fast: false
+      matrix:
+        params:
+          - name: 'optimsim'
+            file: 'github/assets/kurtosis_op_network_params_optimism.yaml'
+          - name: 'base'
+            file: '.github/assets/kurtosis_op_network_params_base.yaml'
     name: run kurtosis
     runs-on:
       group: Reth
@@ -53,13 +62,13 @@ jobs:
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
 
-      - name: Run kurtosis
+      - name: Run kurtosis for ${{ matrix.params.name }}
         run: |
           echo "deb [trusted=yes] https://apt.fury.io/kurtosis-tech/ /" | sudo tee /etc/apt/sources.list.d/kurtosis.list
           sudo apt update
           sudo apt install kurtosis-cli
           kurtosis engine start
-          kurtosis run --enclave op-devnet github.com/ethpandaops/optimism-package --args-file .github/assets/kurtosis_op_network_params.yaml
+          kurtosis run --enclave op-devnet github.com/ethpandaops/optimism-package --args-file ${{matrix.params.file}}
           ENCLAVE_ID=$(curl http://127.0.0.1:9779/api/enclaves | jq --raw-output 'keys[0]')
           GETH_PORT=$(curl "http://127.0.0.1:9779/api/enclaves/$ENCLAVE_ID/services" | jq '."op-el-1-op-geth-op-node-op-kurtosis".public_ports.rpc.number')
           RETH_PORT=$(curl "http://127.0.0.1:9779/api/enclaves/$ENCLAVE_ID/services" | jq '."op-el-2-op-reth-op-node-op-kurtosis".public_ports.rpc.number')
