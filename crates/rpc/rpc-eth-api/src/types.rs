@@ -4,6 +4,7 @@ use crate::{AsEthApiError, FromEthApiError, RpcNodeCoreExt};
 use alloy_json_rpc::RpcObject;
 use alloy_network::{Network, ReceiptResponse, TransactionResponse};
 use alloy_rpc_types_eth::Block;
+use reth_chainspec::EthChainSpec;
 use reth_evm::ConfigureEvm;
 use reth_node_api::NodePrimitives;
 use reth_primitives_traits::{BlockTy, HeaderTy, ReceiptTy, TxTy};
@@ -86,6 +87,7 @@ where
                 Receipt = ReceiptTy<Self::Primitives>,
                 Block = BlockTy<Self::Primitives>,
                 Header = HeaderTy<Self::Primitives>,
+                ChainSpec: EthChainSpec<Header = HeaderTy<Self::Primitives>>,
             >,
             Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Primitives>>>,
             Evm: ConfigureEvm<Primitives = Self::Primitives>,
@@ -107,6 +109,7 @@ impl<T> FullEthApiTypes for T where
                 Receipt = ReceiptTy<Self::Primitives>,
                 Block = BlockTy<Self::Primitives>,
                 Header = HeaderTy<Self::Primitives>,
+                ChainSpec: EthChainSpec<Header = HeaderTy<Self::Primitives>>,
             >,
             Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Primitives>>>,
             Evm: ConfigureEvm<Primitives = Self::Primitives>,
