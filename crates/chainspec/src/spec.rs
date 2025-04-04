@@ -276,7 +276,7 @@ impl HardforkBlobParams {
     pub fn from_schedule(blob_schedule: &BTreeMap<String, BlobParams>) -> Self {
         Self {
             cancun: blob_schedule.get("cancun").copied().unwrap_or_else(BlobParams::cancun),
-            prague: blob_schedule.get("prague").copied().unwrap_or_else(BlobParams::cancun),
+            prague: blob_schedule.get("prague").copied().unwrap_or_else(BlobParams::prague),
         }
     }
 }
