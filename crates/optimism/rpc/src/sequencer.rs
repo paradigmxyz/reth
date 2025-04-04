@@ -70,7 +70,7 @@ impl SequencerClient {
     /// Forwards a transaction to the sequencer endpoint.
     pub async fn forward_raw_transaction(&self, tx: &[u8]) -> Result<B256, SequencerClientError> {
         let rlp_hex = hex::encode_prefixed(tx);
-        let tx_hash: B256 =
+        let tx_hash =
             self.send_rpc_call("eth_sendRawTransaction", (rlp_hex,)).await.inspect_err(|err| {
                 warn!(
                     target: "rpc::eth",
@@ -89,7 +89,7 @@ impl SequencerClient {
         condition: TransactionConditional,
     ) -> Result<B256, SequencerClientError> {
         let rlp_hex = hex::encode_prefixed(tx);
-        let tx_hash: B256 = self
+        let tx_hash = self
             .send_rpc_call("eth_sendRawTransactionConditional", (rlp_hex, condition))
             .await
             .inspect_err(|err| {
