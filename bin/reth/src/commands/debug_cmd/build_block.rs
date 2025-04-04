@@ -1,11 +1,10 @@
 //! Command for debugging block building.
-use alloy_consensus::{BlockHeader, TxEip4844};
+use alloy_consensus::{BlockHeader, TxEip4844, EthereumTxEnvelope};
 use alloy_eips::{
-    eip2718::Encodable2718,
+    eip2718::{Decodable2718, Encodable2718},
     eip4844::{env_settings::EnvKzgSettings, BlobTransactionSidecar},
 };
 use alloy_primitives::{Address, Bytes, B256, U256};
-use alloy_rlp::Decodable;
 use alloy_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
 use clap::Parser;
 use eyre::Context;
@@ -17,7 +16,7 @@ use reth_cli_runner::CliContext;
 use reth_consensus::{Consensus, FullConsensus};
 use reth_errors::{ConsensusError, RethResult};
 use reth_ethereum_payload_builder::EthereumBuilderConfig;
-use reth_ethereum_primitives::{EthPrimitives, Transaction, TransactionSigned};
+use reth_ethereum_primitives::{EthPrimitives, Transaction};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
@@ -142,10 +141,11 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
         for tx_bytes in &self.transactions {
             debug!(target: "reth::cli", bytes = ?tx_bytes, "Decoding transaction");
-            let transaction = TransactionSigned::decode(&mut &Bytes::from_str(tx_bytes)?[..])?
-                .try_clone_into_recovered()
+            let tx_bytes = Bytes::from_str(tx_bytes)?;
+            let envelope = EthereumTxEnvelope::<TxEip4844>::decode_2718(&mut &tx_bytes[..])
                 .map_err(|e| eyre::eyre!("failed to recover tx: {e}"))?;
 
+            let transaction: reth::Transaction = envelope.into();
             let encoded_length = match transaction.transaction() {
                 Transaction::Eip4844(TxEip4844 { blob_versioned_hashes, .. }) => {
                     let blobs_bundle = blobs_bundle.as_mut().ok_or_else(|| {
