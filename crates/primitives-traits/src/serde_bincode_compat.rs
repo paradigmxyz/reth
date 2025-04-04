@@ -11,7 +11,7 @@ pub use block_bincode::{Block, BlockBody};
 ///
 /// The recommended way to add bincode compatible serialization is via the
 /// [`serde_with`] crate and the `serde_as` macro that. See for reference [`header`].
-pub trait SerdeBincodeCompat: Sized + 'static {
+pub trait SerdeBincodeCompat: Sized {
     /// Serde representation of the type for bincode serialization.
     ///
     /// This type defines the bincode compatible serde format for the type.

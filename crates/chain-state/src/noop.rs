@@ -8,7 +8,11 @@ use reth_primitives_traits::NodePrimitives;
 use reth_storage_api::noop::NoopProvider;
 use tokio::sync::{broadcast, watch};
 
-impl<C: Send + Sync, N: NodePrimitives> CanonStateSubscriptions for NoopProvider<C, N> {
+impl<C, N> CanonStateSubscriptions for NoopProvider<C, N>
+where
+    C: Send + Sync,
+    N: NodePrimitives + Default + Clone + 'static,
+{
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<N> {
         broadcast::channel(1).1
     }

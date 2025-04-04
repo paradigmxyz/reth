@@ -1237,7 +1237,7 @@ pub trait StaticFileWriter {
     fn commit(&self) -> ProviderResult<()>;
 }
 
-impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
+impl<N: NodePrimitives + 'static> StaticFileWriter for StaticFileProvider<N> {
     type Primitives = N;
 
     fn get_writer(

@@ -243,25 +243,22 @@ where
         Ok(None)
     }
 
-    fn transaction_by_id(&self, _id: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
+    fn transaction_by_id(&self, _id: TxNumber) -> ProviderResult<Option<Self::SignedTx>> {
         Ok(None)
     }
 
-    fn transaction_by_id_unhashed(
-        &self,
-        _id: TxNumber,
-    ) -> ProviderResult<Option<Self::Transaction>> {
+    fn transaction_by_id_unhashed(&self, _id: TxNumber) -> ProviderResult<Option<Self::SignedTx>> {
         Ok(None)
     }
 
-    fn transaction_by_hash(&self, _hash: TxHash) -> ProviderResult<Option<Self::Transaction>> {
+    fn transaction_by_hash(&self, _hash: TxHash) -> ProviderResult<Option<Self::SignedTx>> {
         Ok(None)
     }
 
     fn transaction_by_hash_with_meta(
         &self,
         _hash: TxHash,
-    ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
+    ) -> ProviderResult<Option<(Self::SignedTx, TransactionMeta)>> {
         Ok(None)
     }
 
@@ -272,21 +269,21 @@ where
     fn transactions_by_block(
         &self,
         _block_id: BlockHashOrNumber,
-    ) -> ProviderResult<Option<Vec<Self::Transaction>>> {
+    ) -> ProviderResult<Option<Vec<Self::SignedTx>>> {
         Ok(None)
     }
 
     fn transactions_by_block_range(
         &self,
         _range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<Vec<Self::Transaction>>> {
+    ) -> ProviderResult<Vec<Vec<Self::SignedTx>>> {
         Ok(Vec::default())
     }
 
     fn transactions_by_tx_range(
         &self,
         _range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<Self::Transaction>> {
+    ) -> ProviderResult<Vec<Self::SignedTx>> {
         Ok(Vec::default())
     }
 
@@ -588,7 +585,11 @@ impl<C: Send + Sync, N: NodePrimitives> PruneCheckpointReader for NoopProvider<C
     }
 }
 
-impl<C: Send + Sync, N: NodePrimitives> NodePrimitivesProvider for NoopProvider<C, N> {
+impl<C, N> NodePrimitivesProvider for NoopProvider<C, N>
+where
+    C: Send + Sync,
+    N: NodePrimitives + Clone + Default + 'static,
+{
     type Primitives = N;
 }
 

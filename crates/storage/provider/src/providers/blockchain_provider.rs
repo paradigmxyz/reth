@@ -29,7 +29,7 @@ use reth_db_api::{
 use reth_ethereum_primitives::{Block, EthPrimitives, Receipt, TransactionSigned};
 use reth_evm::{ConfigureEvm, EvmEnv};
 use reth_execution_types::ExecutionOutcome;
-use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
+use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, BlockBody, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader, StorageEntry,
 };
@@ -361,25 +361,22 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider<N> {
         self.consistent_provider()?.transaction_id(tx_hash)
     }
 
-    fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
+    fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<Self::SignedTx>> {
         self.consistent_provider()?.transaction_by_id(id)
     }
 
-    fn transaction_by_id_unhashed(
-        &self,
-        id: TxNumber,
-    ) -> ProviderResult<Option<Self::Transaction>> {
+    fn transaction_by_id_unhashed(&self, id: TxNumber) -> ProviderResult<Option<Self::SignedTx>> {
         self.consistent_provider()?.transaction_by_id_unhashed(id)
     }
 
-    fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Transaction>> {
+    fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::SignedTx>> {
         self.consistent_provider()?.transaction_by_hash(hash)
     }
 
     fn transaction_by_hash_with_meta(
         &self,
         tx_hash: TxHash,
-    ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
+    ) -> ProviderResult<Option<(Self::SignedTx, TransactionMeta)>> {
         self.consistent_provider()?.transaction_by_hash_with_meta(tx_hash)
     }
 
@@ -390,21 +387,21 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider<N> {
     fn transactions_by_block(
         &self,
         id: BlockHashOrNumber,
-    ) -> ProviderResult<Option<Vec<Self::Transaction>>> {
+    ) -> ProviderResult<Option<Vec<Self::SignedTx>>> {
         self.consistent_provider()?.transactions_by_block(id)
     }
 
     fn transactions_by_block_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<Vec<Self::Transaction>>> {
+    ) -> ProviderResult<Vec<Vec<Self::SignedTx>>> {
         self.consistent_provider()?.transactions_by_block_range(range)
     }
 
     fn transactions_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<Self::Transaction>> {
+    ) -> ProviderResult<Vec<Self::SignedTx>> {
         self.consistent_provider()?.transactions_by_tx_range(range)
     }
 

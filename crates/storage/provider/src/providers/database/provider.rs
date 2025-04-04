@@ -1382,28 +1382,25 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         Ok(self.tx.get::<tables::TransactionHashNumbers>(tx_hash)?)
     }
 
-    fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
+    fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<Self::SignedTx>> {
         self.static_file_provider.get_with_static_file_or_database(
             StaticFileSegment::Transactions,
             id,
             |static_file| static_file.transaction_by_id(id),
-            || Ok(self.tx.get::<tables::Transactions<Self::Transaction>>(id)?),
+            || Ok(self.tx.get::<tables::Transactions<Self::SignedTx>>(id)?),
         )
     }
 
-    fn transaction_by_id_unhashed(
-        &self,
-        id: TxNumber,
-    ) -> ProviderResult<Option<Self::Transaction>> {
+    fn transaction_by_id_unhashed(&self, id: TxNumber) -> ProviderResult<Option<Self::SignedTx>> {
         self.static_file_provider.get_with_static_file_or_database(
             StaticFileSegment::Transactions,
             id,
             |static_file| static_file.transaction_by_id_unhashed(id),
-            || Ok(self.tx.get::<tables::Transactions<Self::Transaction>>(id)?),
+            || Ok(self.tx.get::<tables::Transactions<Self::SignedTx>>(id)?),
         )
     }
 
-    fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Transaction>> {
+    fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::SignedTx>> {
         if let Some(id) = self.transaction_id(hash)? {
             Ok(self.transaction_by_id_unhashed(id)?)
         } else {
@@ -1414,7 +1411,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
     fn transaction_by_hash_with_meta(
         &self,
         tx_hash: TxHash,
-    ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
+    ) -> ProviderResult<Option<(Self::SignedTx, TransactionMeta)>> {
         let mut transaction_cursor = self.tx.cursor_read::<tables::TransactionBlocks>()?;
         if let Some(transaction_id) = self.transaction_id(tx_hash)? {
             if let Some(transaction) = self.transaction_by_id_unhashed(transaction_id)? {
@@ -1458,8 +1455,8 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
     fn transactions_by_block(
         &self,
         id: BlockHashOrNumber,
-    ) -> ProviderResult<Option<Vec<Self::Transaction>>> {
-        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions<Self::Transaction>>()?;
+    ) -> ProviderResult<Option<Vec<Self::SignedTx>>> {
+        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions<Self::SignedTx>>()?;
 
         if let Some(block_number) = self.convert_hash_or_number(id)? {
             if let Some(body) = self.block_body_indices(block_number)? {
@@ -1477,9 +1474,9 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
     fn transactions_by_block_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<Vec<Self::Transaction>>> {
+    ) -> ProviderResult<Vec<Vec<Self::SignedTx>>> {
         let range = to_range(range);
-        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions<Self::Transaction>>()?;
+        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions<Self::SignedTx>>()?;
 
         self.block_body_indices_range(range.start..=range.end.saturating_sub(1))?
             .into_iter()
@@ -1500,7 +1497,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
     fn transactions_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<Self::Transaction>> {
+    ) -> ProviderResult<Vec<Self::SignedTx>> {
         self.transactions_by_tx_range_with_cursor(
             range,
             &mut self.tx.cursor_read::<tables::Transactions<_>>()?,

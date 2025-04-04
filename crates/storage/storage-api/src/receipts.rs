@@ -1,5 +1,5 @@
 use crate::BlockIdReader;
-use alloc::vec::Vec;
+use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{TxHash, TxNumber};
 use core::ops::RangeBounds;
@@ -10,7 +10,6 @@ use reth_storage_errors::provider::ProviderResult;
 pub type ProviderReceipt<P> = <P as NodePrimitives>::Receipt;
 
 /// Client trait for fetching receipt data.
-#[auto_impl::auto_impl(&, Arc)]
 pub trait ReceiptProvider: NodePrimitives + Send + Sync {
     /// Get receipt by transaction number
     ///
@@ -35,6 +34,54 @@ pub trait ReceiptProvider: NodePrimitives + Send + Sync {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Self::Receipt>>;
+}
+
+impl<T: ReceiptProvider> ReceiptProvider for &T {
+    fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
+        T::receipt(self, id)
+    }
+
+    fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Receipt>> {
+        T::receipt_by_hash(self, hash)
+    }
+
+    fn receipts_by_block(
+        &self,
+        block: BlockHashOrNumber,
+    ) -> ProviderResult<Option<Vec<Self::Receipt>>> {
+        T::receipts_by_block(self, block)
+    }
+
+    fn receipts_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Self::Receipt>> {
+        T::receipts_by_tx_range(self, range)
+    }
+}
+
+impl<T: ReceiptProvider> ReceiptProvider for Arc<T> {
+    fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
+        T::receipt(self, id)
+    }
+
+    fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Receipt>> {
+        T::receipt_by_hash(self, hash)
+    }
+
+    fn receipts_by_block(
+        &self,
+        block: BlockHashOrNumber,
+    ) -> ProviderResult<Option<Vec<Self::Receipt>>> {
+        T::receipts_by_block(self, block)
+    }
+
+    fn receipts_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Self::Receipt>> {
+        T::receipts_by_tx_range(self, range)
+    }
 }
 
 /// Trait extension for `ReceiptProvider`, for types that implement `BlockId` conversion.

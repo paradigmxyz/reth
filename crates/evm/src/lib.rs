@@ -91,7 +91,7 @@ pub use alloy_evm::block::state_changes as state_change;
 #[auto_impl::auto_impl(&, Arc)]
 pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// The primitives type used by the EVM.
-    type Primitives: NodePrimitives;
+    type Primitives: NodePrimitives + Default + 'static;
 
     /// The error type that is returned by [`Self::next_evm_env`].
     type Error: Error + Send + Sync + 'static;

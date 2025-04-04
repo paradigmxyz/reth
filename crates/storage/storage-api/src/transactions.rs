@@ -1,5 +1,5 @@
 use crate::{BlockNumReader, BlockReader};
-use alloc::vec::Vec;
+use alloc::{sync::Arc, vec::Vec};
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, BlockNumber, TxHash, TxNumber};
@@ -21,7 +21,6 @@ pub enum TransactionVariant {
 }
 
 ///  Client trait for fetching transactions related data.
-#[auto_impl::auto_impl(&, Arc)]
 pub trait TransactionsProvider: NodePrimitives + BlockNumReader + Send + Sync {
     /// Get internal transaction identifier by transaction hash.
     ///
@@ -30,21 +29,20 @@ pub trait TransactionsProvider: NodePrimitives + BlockNumReader + Send + Sync {
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>>;
 
     /// Get transaction by id, computes hash every time so more expensive.
-    fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<Self::Transaction>>;
+    fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<Self::SignedTx>>;
 
     /// Get transaction by id without computing the hash.
-    fn transaction_by_id_unhashed(&self, id: TxNumber)
-        -> ProviderResult<Option<Self::Transaction>>;
+    fn transaction_by_id_unhashed(&self, id: TxNumber) -> ProviderResult<Option<Self::SignedTx>>;
 
     /// Get transaction by transaction hash.
-    fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Transaction>>;
+    fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::SignedTx>>;
 
     /// Get transaction by transaction hash and additional metadata of the block the transaction was
     /// mined in
     fn transaction_by_hash_with_meta(
         &self,
         hash: TxHash,
-    ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>>;
+    ) -> ProviderResult<Option<(Self::SignedTx, TransactionMeta)>>;
 
     /// Get transaction block number
     fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>>;
@@ -53,19 +51,19 @@ pub trait TransactionsProvider: NodePrimitives + BlockNumReader + Send + Sync {
     fn transactions_by_block(
         &self,
         block: BlockHashOrNumber,
-    ) -> ProviderResult<Option<Vec<Self::Transaction>>>;
+    ) -> ProviderResult<Option<Vec<Self::SignedTx>>>;
 
     /// Get transactions by block range.
     fn transactions_by_block_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<Vec<Self::Transaction>>>;
+    ) -> ProviderResult<Vec<Vec<Self::SignedTx>>>;
 
     /// Get transactions by tx range.
     fn transactions_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<Self::Transaction>>;
+    ) -> ProviderResult<Vec<Self::SignedTx>>;
 
     /// Get Senders from a tx range.
     fn senders_by_tx_range(
@@ -79,8 +77,130 @@ pub trait TransactionsProvider: NodePrimitives + BlockNumReader + Send + Sync {
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>>;
 }
 
+impl<T: TransactionsProvider> TransactionsProvider for &T {
+    fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
+        T::transaction_id(self, tx_hash)
+    }
+
+    fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<Self::SignedTx>> {
+        T::transaction_by_id(self, id)
+    }
+
+    fn transaction_by_id_unhashed(&self, id: TxNumber) -> ProviderResult<Option<Self::SignedTx>> {
+        T::transaction_by_id_unhashed(self, id)
+    }
+
+    fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::SignedTx>> {
+        T::transaction_by_hash(self, hash)
+    }
+
+    fn transaction_by_hash_with_meta(
+        &self,
+        hash: TxHash,
+    ) -> ProviderResult<Option<(Self::SignedTx, TransactionMeta)>> {
+        T::transaction_by_hash_with_meta(self, hash)
+    }
+
+    fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
+        T::transaction_block(self, id)
+    }
+
+    fn transactions_by_block(
+        &self,
+        block: BlockHashOrNumber,
+    ) -> ProviderResult<Option<Vec<Self::SignedTx>>> {
+        T::transactions_by_block(self, block)
+    }
+
+    fn transactions_by_block_range(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<Vec<Self::SignedTx>>> {
+        T::transactions_by_block_range(self, range)
+    }
+
+    fn transactions_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Self::SignedTx>> {
+        T::transactions_by_tx_range(self, range)
+    }
+
+    fn senders_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Address>> {
+        T::senders_by_tx_range(self, range)
+    }
+
+    fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
+        T::transaction_sender(self, id)
+    }
+}
+
+impl<T: TransactionsProvider> TransactionsProvider for Arc<T> {
+    fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
+        T::transaction_id(self, tx_hash)
+    }
+
+    fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<Self::SignedTx>> {
+        T::transaction_by_id(self, id)
+    }
+
+    fn transaction_by_id_unhashed(&self, id: TxNumber) -> ProviderResult<Option<Self::SignedTx>> {
+        T::transaction_by_id_unhashed(self, id)
+    }
+
+    fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::SignedTx>> {
+        T::transaction_by_hash(self, hash)
+    }
+
+    fn transaction_by_hash_with_meta(
+        &self,
+        hash: TxHash,
+    ) -> ProviderResult<Option<(Self::SignedTx, TransactionMeta)>> {
+        T::transaction_by_hash_with_meta(self, hash)
+    }
+
+    fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
+        T::transaction_block(self, id)
+    }
+
+    fn transactions_by_block(
+        &self,
+        block: BlockHashOrNumber,
+    ) -> ProviderResult<Option<Vec<Self::SignedTx>>> {
+        T::transactions_by_block(self, block)
+    }
+
+    fn transactions_by_block_range(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<Vec<Self::SignedTx>>> {
+        T::transactions_by_block_range(self, range)
+    }
+
+    fn transactions_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Self::SignedTx>> {
+        T::transactions_by_tx_range(self, range)
+    }
+
+    fn senders_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Address>> {
+        T::senders_by_tx_range(self, range)
+    }
+
+    fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
+        T::transaction_sender(self, id)
+    }
+}
+
 /// A helper type alias to access [`TransactionsProvider::Transaction`].
-pub type ProviderTx<P> = <P as TransactionsProvider>::Transaction;
+pub type ProviderTx<P> = <P as NodePrimitives>::SignedTx;
 
 ///  Client trait for fetching additional transactions related data.
 #[auto_impl::auto_impl(&, Arc)]

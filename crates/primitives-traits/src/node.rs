@@ -6,17 +6,20 @@ use alloc::sync::Arc;
 use core::fmt;
 
 /// Configures all the primitive types of the node.
-pub trait NodePrimitives: Send + Sync + Unpin + Clone + fmt::Debug + PartialEq + Eq {
+pub trait NodePrimitives: Send + Sync + Unpin + Sized + fmt::Debug + PartialEq + Eq {
     /// Block primitive.
-    type Block: Block<Header = Self::BlockHeader, Body = Self::BlockBody> + MaybeSerdeBincodeCompat;
+    type Block: Block<Header = Self::BlockHeader, Body = Self::BlockBody>
+        + MaybeSerdeBincodeCompat
+        + 'static;
     /// Block header primitive.
-    type BlockHeader: FullBlockHeader;
+    type BlockHeader: FullBlockHeader + 'static;
     /// Block body primitive.
-    type BlockBody: FullBlockBody<Transaction = Self::SignedTx, OmmerHeader = Self::BlockHeader>;
+    type BlockBody: FullBlockBody<Transaction = Self::SignedTx, OmmerHeader = Self::BlockHeader>
+        + 'static;
     /// Signed version of the transaction type.
-    type SignedTx: FullSignedTx;
+    type SignedTx: FullSignedTx + 'static;
     /// A receipt.
-    type Receipt: Receipt;
+    type Receipt: Receipt + 'static;
 }
 
 impl<T: NodePrimitives> NodePrimitives for &T {
@@ -45,6 +48,9 @@ where
             SignedTx: FullSignedTx,
             Receipt: FullReceipt,
         > + Default
+        + Clone
+        + PartialEq
+        + Eq
         + 'static,
 {
 }
@@ -57,6 +63,9 @@ impl<T> FullNodePrimitives for T where
             SignedTx: FullSignedTx,
             Receipt: FullReceipt,
         > + Default
+        + Clone
+        + PartialEq
+        + Eq
         + 'static
 {
 }

@@ -103,12 +103,12 @@ impl<ChainSpec, N, R> ConfigureEvm for OpEvmConfig<ChainSpec, N, R>
 where
     ChainSpec: EthChainSpec + OpHardforks,
     N: NodePrimitives<
-        Receipt = R::Receipt,
-        SignedTx = R::Transaction,
-        BlockHeader = Header,
-        BlockBody = alloy_consensus::BlockBody<R::Transaction>,
-        Block = alloy_consensus::Block<R::Transaction>,
-    >,
+            Receipt = R::Receipt,
+            SignedTx = R::Transaction,
+            BlockHeader = Header,
+            BlockBody = alloy_consensus::BlockBody<R::Transaction>,
+            Block = alloy_consensus::Block<R::Transaction>,
+        > + 'static,
     OpTransaction<TxEnv>: FromRecoveredTx<N::SignedTx> + FromTxWithEncoded<N::SignedTx>,
     R: OpReceiptBuilder<Receipt: DepositReceipt, Transaction: SignedTransaction>,
     Self: Send + Sync + Unpin + Clone + 'static,

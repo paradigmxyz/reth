@@ -53,13 +53,17 @@ impl<T: CanonStateSubscriptions> CanonStateSubscriptions for &T {
 /// A Stream of [`CanonStateNotification`].
 #[derive(Debug)]
 #[pin_project::pin_project]
-pub struct CanonStateNotificationStream<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives>
-{
+pub struct CanonStateNotificationStream<
+    N: NodePrimitives + 'static = reth_ethereum_primitives::EthPrimitives,
+> {
     #[pin]
     st: BroadcastStream<CanonStateNotification<N>>,
 }
 
-impl<N: NodePrimitives> Stream for CanonStateNotificationStream<N> {
+impl<N> Stream for CanonStateNotificationStream<N>
+where
+    N: NodePrimitives + Clone + 'static,
+{
     type Item = CanonStateNotification<N>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {

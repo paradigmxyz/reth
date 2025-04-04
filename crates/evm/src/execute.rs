@@ -305,7 +305,7 @@ where
     >,
     DB: Database + 'a,
     Builder: BlockAssembler<F, Block = N::Block>,
-    N: NodePrimitives,
+    N: NodePrimitives + Default + 'static,
 {
     type Primitives = N;
     type Executor = Executor;

@@ -15,7 +15,9 @@ const UNAVAILABLE_FOR_NOOP: &str = "execution unavailable for noop";
 #[non_exhaustive]
 pub struct NoopBlockExecutorProvider<P>(core::marker::PhantomData<P>);
 
-impl<P: NodePrimitives> BlockExecutorProvider for NoopBlockExecutorProvider<P> {
+impl<P: NodePrimitives + Default + Clone + 'static> BlockExecutorProvider
+    for NoopBlockExecutorProvider<P>
+{
     type Primitives = P;
 
     type Executor<DB: Database> = Self;

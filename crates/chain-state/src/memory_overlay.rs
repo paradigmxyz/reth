@@ -19,7 +19,7 @@ use std::sync::OnceLock;
 #[expect(missing_debug_implementations)]
 pub struct MemoryOverlayStateProviderRef<
     'a,
-    N: NodePrimitives = reth_ethereum_primitives::EthPrimitives,
+    N: NodePrimitives + 'static = reth_ethereum_primitives::EthPrimitives,
 > {
     /// Historical state provider for state lookups that are not found in in-memory blocks.
     pub(crate) historical: Box<dyn StateProvider + 'a>,

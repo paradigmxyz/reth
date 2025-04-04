@@ -19,7 +19,7 @@ use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStatePro
 use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::{BundleStateInit, ExecutionOutcome, RevertsInit};
-use reth_node_types::{BlockTy, HeaderTy, NodePrimitives, ReceiptTy, TxTy};
+use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodePrimitives, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, BlockBody, RecoveredBlock, SealedBlock, SealedHeader, StorageEntry,
 };
@@ -918,7 +918,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
         )
     }
 
-    fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
+    fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<Self::SignedTx>> {
         self.get_in_memory_or_storage_by_tx(
             id.into(),
             |provider| provider.transaction_by_id(id),
@@ -934,10 +934,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
         )
     }
 
-    fn transaction_by_id_unhashed(
-        &self,
-        id: TxNumber,
-    ) -> ProviderResult<Option<Self::Transaction>> {
+    fn transaction_by_id_unhashed(&self, id: TxNumber) -> ProviderResult<Option<Self::SignedTx>> {
         self.get_in_memory_or_storage_by_tx(
             id.into(),
             |provider| provider.transaction_by_id_unhashed(id),
@@ -953,7 +950,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
         )
     }
 
-    fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Transaction>> {
+    fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::SignedTx>> {
         if let Some(tx) = self.head_block.as_ref().and_then(|b| b.transaction_on_chain(hash)) {
             return Ok(Some(tx))
         }
@@ -964,7 +961,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
     fn transaction_by_hash_with_meta(
         &self,
         tx_hash: TxHash,
-    ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
+    ) -> ProviderResult<Option<(Self::SignedTx, TransactionMeta)>> {
         if let Some((tx, meta)) =
             self.head_block.as_ref().and_then(|b| b.transaction_meta_on_chain(tx_hash))
         {
@@ -985,7 +982,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
     fn transactions_by_block(
         &self,
         id: BlockHashOrNumber,
-    ) -> ProviderResult<Option<Vec<Self::Transaction>>> {
+    ) -> ProviderResult<Option<Vec<Self::SignedTx>>> {
         self.get_in_memory_or_storage_by_block(
             id,
             |provider| provider.transactions_by_block(id),
@@ -998,7 +995,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
     fn transactions_by_block_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<Vec<Self::Transaction>>> {
+    ) -> ProviderResult<Vec<Vec<Self::SignedTx>>> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
             |db_provider, range, _| db_provider.transactions_by_block_range(range),
@@ -1012,7 +1009,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
     fn transactions_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<Self::Transaction>> {
+    ) -> ProviderResult<Vec<Self::SignedTx>> {
         self.get_in_memory_or_storage_by_tx_range(
             range,
             |db_provider, db_range| db_provider.transactions_by_tx_range(db_range),

@@ -27,7 +27,7 @@ use reth_trie_db::StateCommitment;
 /// This trait is intended to be stateless and only define the types of the node.
 pub trait NodeTypes: Clone + Debug + Send + Sync + Unpin + 'static {
     /// The node's primitive types, defining basic operations and structures.
-    type Primitives: NodePrimitives;
+    type Primitives: NodePrimitives + PartialEq + Eq + Clone + Default + 'static;
     /// The type used for configuration of the EVM.
     type ChainSpec: EthChainSpec<Header = <Self::Primitives as NodePrimitives>::BlockHeader>;
     /// The type used to perform state commitment operations.
@@ -125,7 +125,7 @@ impl<P, C, SC, S, PL> AnyNodeTypes<P, C, SC, S, PL> {
 
 impl<P, C, SC, S, PL> NodeTypes for AnyNodeTypes<P, C, SC, S, PL>
 where
-    P: NodePrimitives + Send + Sync + Unpin + 'static,
+    P: NodePrimitives + Send + Sync + Unpin + Clone + Default + PartialEq + Eq + 'static,
     C: EthChainSpec<Header = P::BlockHeader> + Clone + 'static,
     SC: StateCommitment,
     S: Default + Clone + Send + Sync + Unpin + Debug + 'static,
@@ -186,7 +186,7 @@ impl<P, E, C, SC, S, PL> AnyNodeTypesWithEngine<P, E, C, SC, S, PL> {
 
 impl<P, E, C, SC, S, PL> NodeTypes for AnyNodeTypesWithEngine<P, E, C, SC, S, PL>
 where
-    P: NodePrimitives + Send + Sync + Unpin + 'static,
+    P: NodePrimitives + Send + Sync + Unpin + Clone + Default + PartialEq + Eq + 'static,
     E: EngineTypes + Send + Sync + Unpin,
     C: EthChainSpec<Header = P::BlockHeader> + Clone + 'static,
     SC: StateCommitment,

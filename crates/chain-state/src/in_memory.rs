@@ -61,7 +61,7 @@ pub(crate) struct InMemoryState<N: NodePrimitives = EthPrimitives> {
     metrics: InMemoryStateMetrics,
 }
 
-impl<N: NodePrimitives> InMemoryState<N> {
+impl<N: NodePrimitives + Clone> InMemoryState<N> {
     pub(crate) fn new(
         blocks: HashMap<B256, Arc<BlockState<N>>>,
         numbers: BTreeMap<u64, B256>,
@@ -141,7 +141,7 @@ pub(crate) struct CanonicalInMemoryStateInner<N: NodePrimitives> {
     pub(crate) canon_state_notification_sender: CanonStateNotificationSender<N>,
 }
 
-impl<N: NodePrimitives> CanonicalInMemoryStateInner<N> {
+impl<N: NodePrimitives + Clone> CanonicalInMemoryStateInner<N> {
     /// Clears all entries in the in memory state.
     fn clear(&self) {
         {
@@ -169,7 +169,7 @@ pub struct CanonicalInMemoryState<N: NodePrimitives = EthPrimitives> {
     pub(crate) inner: Arc<CanonicalInMemoryStateInner<N>>,
 }
 
-impl<N: NodePrimitives> CanonicalInMemoryState<N> {
+impl<N: NodePrimitives + Clone + Default> CanonicalInMemoryState<N> {
     /// Create a new in-memory state with the given blocks, numbers, pending state, and optional
     /// finalized header.
     pub fn new(
@@ -598,7 +598,10 @@ pub struct BlockState<N: NodePrimitives = EthPrimitives> {
 }
 
 #[allow(dead_code)]
-impl<N: NodePrimitives> BlockState<N> {
+impl<N> BlockState<N>
+where
+    N: NodePrimitives + Clone,
+{
     /// [`BlockState`] constructor.
     pub const fn new(block: ExecutedBlockWithTrieUpdates<N>) -> Self {
         Self { block, parent: None }
