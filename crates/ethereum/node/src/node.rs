@@ -367,26 +367,36 @@ where
         let transaction_pool =
             reth_transaction_pool::Pool::eth_pool(validator, blob_store, pool_config);
         info!(target: "reth::cli", "Transaction pool initialized");
-        let transactions_path = data_dir.txpool_transactions();
 
         // spawn txpool maintenance task
         {
             let pool = transaction_pool.clone();
             let chain_events = ctx.provider().canonical_state_stream();
             let client = ctx.provider().clone();
-            let transactions_backup_config =
-                reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
+            // Only spawn backup task if not disabled
+            if !ctx.config().txpool.disable_transactions_backup {
+                // Use configured backup path or default to data dir
+                let transactions_path = ctx
+                    .config()
+                    .txpool
+                    .transactions_backup_path
+                    .clone()
+                    .unwrap_or_else(|| data_dir.txpool_transactions());
 
-            ctx.task_executor().spawn_critical_with_graceful_shutdown_signal(
-                "local transactions backup task",
-                |shutdown| {
-                    reth_transaction_pool::maintain::backup_local_transactions_task(
-                        shutdown,
-                        pool.clone(),
-                        transactions_backup_config,
-                    )
-                },
-            );
+                let transactions_backup_config =
+                    reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
+
+                ctx.task_executor().spawn_critical_with_graceful_shutdown_signal(
+                    "local transactions backup task",
+                    |shutdown| {
+                        reth_transaction_pool::maintain::backup_local_transactions_task(
+                            shutdown,
+                            pool.clone(),
+                            transactions_backup_config,
+                        )
+                    },
+                );
+            }
 
             // spawn the maintenance task
             ctx.task_executor().spawn_critical(

@@ -74,7 +74,7 @@ pub struct RpcServerArgs {
     pub ws_port: u16,
 
     /// Origins from which to accept `WebSocket` requests
-    #[arg(id = "ws.origins", long = "ws.origins")]
+    #[arg(id = "ws.origins", long = "ws.origins", alias = "ws.corsdomain")]
     pub ws_allowed_origins: Option<String>,
 
     /// Rpc Modules to be configured for the WS server

@@ -31,7 +31,6 @@ pub struct DevSigner {
     accounts: HashMap<Address, PrivateKeySigner>,
 }
 
-#[allow(dead_code)]
 impl DevSigner {
     /// Generates a random dev signer which satisfies [`EthSigner`] trait
     pub fn random<T: Decodable2718>() -> Box<dyn EthSigner<T>> {

@@ -443,7 +443,6 @@ where
 #[derive(Debug)]
 struct EthSimBundleInner<Eth> {
     /// Access to commonly used code of the `eth` namespace
-    #[allow(dead_code)]
     eth_api: Eth,
     // restrict the number of concurrent tracing calls.
     #[expect(dead_code)]

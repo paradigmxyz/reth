@@ -57,19 +57,17 @@ impl ForkchoiceStateTracker {
     }
 
     /// Returns whether the latest received FCU is syncing: [`ForkchoiceStatus::Invalid`]
-    #[allow(dead_code)]
     pub fn is_latest_invalid(&self) -> bool {
         self.latest_status().is_some_and(|s| s.is_invalid())
     }
 
     /// Returns the last valid head hash.
-    #[allow(dead_code)]
     pub fn last_valid_head(&self) -> Option<B256> {
         self.last_valid.as_ref().map(|s| s.head_block_hash)
     }
 
     /// Returns the head hash of the latest received FCU to which we need to sync.
-    #[allow(dead_code)]
+    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn sync_target(&self) -> Option<B256> {
         self.last_syncing.as_ref().map(|s| s.head_block_hash)
     }
@@ -123,8 +121,8 @@ impl ForkchoiceStateTracker {
 
 /// Represents a forkchoice update and tracks the status we assigned to it.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub(crate) struct ReceivedForkchoiceState {
+    #[cfg_attr(not(test), expect(dead_code))]
     state: ForkchoiceState,
     status: ForkchoiceStatus,
 }

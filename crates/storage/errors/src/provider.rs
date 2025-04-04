@@ -214,7 +214,6 @@ pub struct StaticFileWriterError {
 
 impl StaticFileWriterError {
     /// Creates a new [`StaticFileWriterError`] with the given message.
-    #[allow(dead_code)]
     pub fn new(message: impl Into<String>) -> Self {
         Self { message: message.into() }
     }
