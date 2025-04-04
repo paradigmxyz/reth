@@ -1,6 +1,14 @@
 //! Utilities for serving `eth_simulateV1`
 
+use crate::{
+    error::{
+        api::{FromEthApiError, FromEvmHalt},
+        ToRpcError,
+    },
+    EthApiError, RevertError,
+};
 use alloy_consensus::{BlockHeader, Transaction as _, TxType};
+use alloy_eips::eip2718::WithEncoded;
 use alloy_rpc_types_eth::{
     simulate::{SimCallResult, SimulateError, SimulatedBlock},
     transaction::TransactionRequest,
@@ -8,7 +16,8 @@ use alloy_rpc_types_eth::{
 };
 use jsonrpsee_types::ErrorObject;
 use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
+    block::ExecutableTx,
+    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor, ExecutorTx},
     Evm,
 };
 use reth_primitives_traits::{
@@ -21,14 +30,6 @@ use revm::{
     context_interface::result::ExecutionResult,
     primitives::{Address, Bytes, TxKind},
     Database,
-};
-
-use crate::{
-    error::{
-        api::{FromEthApiError, FromEvmHalt},
-        ToRpcError,
-    },
-    EthApiError, RevertError,
 };
 
 /// Errors which may occur during `eth_simulateV1` execution.
@@ -57,6 +58,31 @@ impl ToRpcError for EthSimulateError {
     }
 }
 
+/// An executable transaction that is intended for simulation.
+///
+/// The effect for a layer-2 execution client is that it does not charge L1 cost.
+#[derive(Debug)]
+pub struct SimulateTx<Transaction> {
+    envelope: WithEncoded<Recovered<Transaction>>,
+}
+
+impl<Transaction> SimulateTx<Transaction> {
+    /// Creates new transaction with an empty envelope.
+    pub fn new(tx: Recovered<Transaction>) -> Self {
+        Self { envelope: WithEncoded::new(Default::default(), tx) }
+    }
+}
+
+impl<Executor: BlockExecutor> ExecutorTx<Executor> for SimulateTx<Executor::Transaction> {
+    fn as_executable(&self) -> impl ExecutableTx<Executor> {
+        &self.envelope
+    }
+
+    fn into_recovered(self) -> Recovered<Executor::Transaction> {
+        self.envelope.1
+    }
+}
+
 /// Converts all [`TransactionRequest`]s into [`Recovered`] transactions and applies them to the
 /// given [`BlockExecutor`].
 ///
@@ -80,9 +106,6 @@ where
     S: BlockBuilder<Executor: BlockExecutor<Evm: Evm<DB: Database<Error: Into<EthApiError>>>>>,
     T: TransactionCompat<TxTy<S::Primitives>>,
 {
-    // Tell the block builder that it is used for simulation
-    builder.set_simulate(true);
-
     builder.apply_pre_execution_changes()?;
 
     let mut results = Vec::with_capacity(calls.len());
@@ -97,6 +120,7 @@ where
             builder.evm_mut().db_mut(),
             tx_resp_builder,
         )?;
+        let tx = SimulateTx::new(tx);
 
         builder
             .execute_transaction_with_result_closure(tx, |result| results.push(result.clone()))?;
