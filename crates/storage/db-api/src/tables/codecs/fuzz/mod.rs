@@ -36,7 +36,6 @@ macro_rules! impl_fuzzer_with_input {
                 }
 
                 #[cfg(test)]
-                #[allow(dead_code)]
                 #[expect(missing_docs)]
                 #[test_fuzz::test_fuzz]
                 pub fn fuzz(obj: $input_type)  {

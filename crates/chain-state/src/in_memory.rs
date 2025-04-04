@@ -597,7 +597,6 @@ pub struct BlockState<N: NodePrimitives = EthPrimitives> {
     parent: Option<Arc<BlockState<N>>>,
 }
 
-#[allow(dead_code)]
 impl<N: NodePrimitives> BlockState<N> {
     /// [`BlockState`] constructor.
     pub const fn new(block: ExecutedBlockWithTrieUpdates<N>) -> Self {
