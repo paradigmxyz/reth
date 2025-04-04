@@ -53,16 +53,23 @@ impl SequencerClient {
         method: &str,
         params: Params,
     ) -> Result<(), SequencerClientError> {
-        self.http_client().request::<Params, ()>(method.to_string(), params).await.inspect_err(
-            |err| {
-                warn!(
-                    target: "rpc::sequencer",
-                    %err,
-                    "HTTP request to sequencer failed",
-                );
-            },
-        )?;
-        Ok(())
+
+    let result = self
+        .http_client()
+        .request::<Params, ()>(method.to_string(), params)
+        .await;
+
+    if let Err(ref err) = result {
+        warn!(
+            target: "rpc::sequencer",
+            %err,
+            "HTTP request to sequencer failed",
+        );
+    }
+
+result?;
+Ok(())
+
     }
 
     /// Forwards a transaction to the sequencer endpoint.
