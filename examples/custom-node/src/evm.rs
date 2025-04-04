@@ -13,6 +13,7 @@ use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpEvm};
 use op_revm::{OpSpecId, OpTransaction};
 use reth_evm::InspectorFor;
 use reth_node_api::ConfigureEvm;
+use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::{
     OpBlockAssembler, OpEvmConfig, OpEvmFactory, OpNextBlockEnvAttributes, OpRethReceiptBuilder,
 };
@@ -25,7 +26,7 @@ use revm::{
 use std::sync::Arc;
 
 pub struct CustomBlockExecutor<Evm> {
-    inner: OpBlockExecutor<Evm, OpRethReceiptBuilder, Arc<CustomChainSpec>>,
+    inner: OpBlockExecutor<Evm, OpRethReceiptBuilder, Arc<OpChainSpec>>,
 }
 
 impl<'db, DB, E> BlockExecutor for CustomBlockExecutor<E>
@@ -64,7 +65,7 @@ where
 
 #[derive(Debug, Clone)]
 pub struct CustomEvmConfig {
-    inner: OpEvmConfig<CustomChainSpec, CustomNodePrimitives>,
+    inner: OpEvmConfig,
 }
 
 impl BlockExecutorFactory for CustomEvmConfig {
@@ -90,7 +91,7 @@ impl BlockExecutorFactory for CustomEvmConfig {
             inner: OpBlockExecutor::new(
                 evm,
                 ctx,
-                *self.inner.chain_spec(),
+                self.inner.chain_spec().clone(),
                 *self.inner.executor_factory.receipt_builder(),
             ),
         }
