@@ -63,5 +63,5 @@ arbitrary = [
     "reth-primitives-traits/arbitrary",
     "revm-primitives/arbitrary",
     "reth-transaction-pool/arbitrary",
-    "revm",
+    "revm/arbitrary",
 ]
