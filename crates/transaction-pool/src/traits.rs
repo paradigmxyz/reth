@@ -1558,15 +1558,17 @@ mod tests {
             Default::default()
         );
         let signature = Signature::test_signature();
-        let signed_tx: TransactionSigned = alloy_tx.sign_unhashed(signature).into();
+        let signed = Signed::new_unhashed(tx, signature);
+        let alloy_tx = EthereumTxEnvelope::Eip2930(signed);
+        let signed_tx: TransactionSigned = alloy_tx.into();
         let transaction = Recovered::new_unchecked(signed_tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
-
-        // Check that the pooled transaction is created correctly
+        let expected_cost = U256::from(100) + (U256::from(10) * U256::from(1000));
+        
         assert_eq!(pooled_tx.transaction, transaction);
         assert_eq!(pooled_tx.encoded_length, 200);
         assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::None);
-        assert_eq!(pooled_tx.cost, U256::from(100) + U256::from(10 * 1000));
+        assert_eq!(pooled_tx.cost, expected_cost);
     }
 
     #[test]
