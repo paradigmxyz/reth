@@ -272,22 +272,11 @@ pub struct HardforkBlobParams {
 
 impl HardforkBlobParams {
     /// Constructs params for chainspec from a provided blob schedule.
-    /// Falls back to defaults if the schedule is empty.
+    /// Falls back to defaults if the schedule is missing.
     pub fn from_schedule(blob_schedule: &BTreeMap<String, BlobParams>) -> Self {
-        let extract = |key: &str, default: fn() -> BlobParams| {
-            blob_schedule
-                .get(key)
-                .map(|item| BlobParams {
-                    target_blob_count: item.target_blob_count,
-                    max_blob_count: item.max_blob_count,
-                    ..default()
-                })
-                .unwrap_or_else(default) // Use default if key is missing
-        };
-
         Self {
-            cancun: extract("cancun", BlobParams::cancun),
-            prague: extract("prague", BlobParams::prague),
+            cancun: blob_schedule.get("cancun").copied().unwrap_or_else(BlobParams::cancun),
+            prague: blob_schedule.get("prague").copied().unwrap_or_else(BlobParams::prague),
         }
     }
 }
@@ -1075,6 +1064,7 @@ mod tests {
     use super::*;
     use alloy_chains::Chain;
     use alloy_consensus::constants::ETH_TO_WEI;
+    use alloy_eips::eip4844::BLOB_TX_MIN_BLOB_GASPRICE;
     use alloy_evm::block::calc::{base_block_reward, block_reward};
     use alloy_genesis::{ChainConfig, GenesisAccount};
     use alloy_primitives::{b256, hex};
@@ -2509,5 +2499,38 @@ Post-merge hard forks (timestamp based):
         for (num_ommers, expected_reward) in cases {
             assert_eq!(block_reward(base_reward, num_ommers), expected_reward);
         }
+    }
+
+    #[test]
+    fn blob_params_from_genesis() {
+        let s = r#"{
+         "cancun":{
+            "baseFeeUpdateFraction":3338477,
+            "max":6,
+            "target":3
+         },
+         "prague":{
+            "baseFeeUpdateFraction":3338477,
+            "max":6,
+            "target":3
+         }
+      }"#;
+        let schedule: BTreeMap<String, BlobParams> = serde_json::from_str(s).unwrap();
+        let hardfork_params = HardforkBlobParams::from_schedule(&schedule);
+        let expected = HardforkBlobParams {
+            cancun: BlobParams {
+                target_blob_count: 3,
+                max_blob_count: 6,
+                update_fraction: 3338477,
+                min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
+            },
+            prague: BlobParams {
+                target_blob_count: 3,
+                max_blob_count: 6,
+                update_fraction: 3338477,
+                min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
+            },
+        };
+        assert_eq!(hardfork_params, expected);
     }
 }
