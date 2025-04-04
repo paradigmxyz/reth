@@ -6,7 +6,7 @@
 use crate::{providers::StaticFileProvider, ProviderFactory};
 use reth_db::{mdbx::DatabaseArguments, open_db_read_only, DatabaseEnv};
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
-use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter};
+use reth_node_types::{FullNodePrimitives, NodeTypes, NodeTypesWithDBAdapter};
 use std::{
     marker::PhantomData,
     path::{Path, PathBuf},
@@ -77,7 +77,7 @@ impl<N> ProviderFactoryBuilder<N> {
         config: impl Into<ReadOnlyConfig>,
     ) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>>
     where
-        N: NodeTypes,
+        N: NodeTypes<Primitives: FullNodePrimitives>,
     {
         let ReadOnlyConfig { db_dir, db_args, static_files_dir, watch_static_files } =
             config.into();
@@ -285,7 +285,7 @@ impl<N, Val1, Val2, Val3> TypesAnd3<N, Val1, Val2, Val3> {
 
 impl<N, DB> TypesAnd3<N, DB, Arc<N::ChainSpec>, StaticFileProvider<N::Primitives>>
 where
-    N: NodeTypes,
+    N: NodeTypes<Primitives: FullNodePrimitives>,
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
 {
     /// Creates the [`ProviderFactory`].

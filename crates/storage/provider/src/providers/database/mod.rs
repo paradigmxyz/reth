@@ -16,8 +16,8 @@ use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
 use reth_node_types::{
-    BlockTy, BodyTy, HeaderTy, NodePrimitives, NodeTypes, NodeTypesWithDB, NodeTypesWithDBAdapter,
-    ReceiptTy, TxTy,
+    BlockTy, BodyTy, FullNodePrimitives, HeaderTy, NodePrimitives, NodeTypes, NodeTypesWithDB,
+    NodeTypesWithDBAdapter, ReceiptTy, TxTy,
 };
 use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
@@ -68,7 +68,10 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     storage: Arc<N::Storage>,
 }
 
-impl<N: NodeTypes> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>> {
+impl<N> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>
+where
+    N: NodeTypes<Primitives: FullNodePrimitives>,
+{
     /// Instantiates the builder for this type
     pub fn builder() -> ProviderFactoryBuilder<N> {
         ProviderFactoryBuilder::default()

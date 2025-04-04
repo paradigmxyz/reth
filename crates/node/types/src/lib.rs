@@ -42,7 +42,7 @@ pub trait NodeTypes: Clone + Debug + Send + Sync + Unpin + 'static {
 /// node.
 ///
 /// Its types are configured by node internally and are not intended to be user configurable.
-pub trait NodeTypesWithDB: NodeTypes {
+pub trait NodeTypesWithDB: NodeTypes<Primitives: FullNodePrimitives> {
     /// Underlying database type used by the node to store and retrieve data.
     type DB: Database + DatabaseMetrics + Clone + Unpin + 'static;
 }
@@ -75,7 +75,7 @@ where
 
 impl<Types, DB> NodeTypesWithDB for NodeTypesWithDBAdapter<Types, DB>
 where
-    Types: NodeTypes,
+    Types: NodeTypes<Primitives: FullNodePrimitives>,
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
 {
     type DB = DB;
