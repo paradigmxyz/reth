@@ -1192,7 +1192,7 @@ mod tests {
     }
 
     #[test]
-    fn test_state_new() {
+    fn test_state() {
         let number = rand::thread_rng().gen::<u64>();
         let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
         let block = test_block_builder.get_executed_block_with_number(number, B256::random());
@@ -1200,49 +1200,8 @@ mod tests {
         let state = BlockState::new(block.clone());
 
         assert_eq!(state.block(), block);
-    }
-
-    #[test]
-    fn test_state_block() {
-        let number = rand::thread_rng().gen::<u64>();
-        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
-        let block = test_block_builder.get_executed_block_with_number(number, B256::random());
-
-        let state = BlockState::new(block.clone());
-
-        assert_eq!(state.block(), block);
-    }
-
-    #[test]
-    fn test_state_hash() {
-        let number = rand::thread_rng().gen::<u64>();
-        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
-        let block = test_block_builder.get_executed_block_with_number(number, B256::random());
-
-        let state = BlockState::new(block.clone());
-
         assert_eq!(state.hash(), block.recovered_block().hash());
-    }
-
-    #[test]
-    fn test_state_number() {
-        let number = rand::thread_rng().gen::<u64>();
-        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
-        let block = test_block_builder.get_executed_block_with_number(number, B256::random());
-
-        let state = BlockState::new(block);
-
         assert_eq!(state.number(), number);
-    }
-
-    #[test]
-    fn test_state_state_root() {
-        let number = rand::thread_rng().gen::<u64>();
-        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
-        let block = test_block_builder.get_executed_block_with_number(number, B256::random());
-
-        let state = BlockState::new(block.clone());
-
         assert_eq!(state.state_root(), block.recovered_block().state_root);
     }
 
