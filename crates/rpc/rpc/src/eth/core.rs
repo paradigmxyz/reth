@@ -9,10 +9,7 @@ use alloy_eips::BlockNumberOrTag;
 use alloy_network::Ethereum;
 use alloy_primitives::{Bytes, U256};
 use derive_more::Deref;
-use reth_node_api::{FullNodeComponents, FullNodeTypes};
-use reth_provider::{
-    ReceiptProvider,
-};
+use reth_node_api::{FullNodeComponents, FullNodeTypes, TxTy};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
     node::RpcNodeCoreExt,
@@ -24,6 +21,7 @@ use reth_rpc_eth_types::{
 };
 use reth_storage_api::{
     BlockReader, BlockReaderIdExt, NodePrimitivesProvider, ProviderBlock, ProviderReceipt,
+    ReceiptProvider,
 };
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
@@ -102,7 +100,10 @@ impl<Components: FullNodeComponents> EthApi<Components> {
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         components: Components,
-        eth_cache: EthStateCache<Components::Provider::Block, Components::Provider::Receipt>,
+        eth_cache: EthStateCache<
+            <Components::Provider as BlockReader>::Block,
+            <Components::Provider as ReceiptProvider>::Receipt,
+        >,
         gas_oracle: GasPriceOracle<Components::Provider>,
         gas_cap: impl Into<GasCap>,
         max_simulate_blocks: u64,
@@ -190,9 +191,7 @@ where
 pub struct EthApiInner<Components: FullNodeComponents> {
     components: Components,
     /// All configured Signers
-    signers: parking_lot::RwLock<
-        Vec<Box<dyn EthSigner<<Components::Provider as RpcTypes>::Transaction>>>,
-    >,
+    signers: parking_lot::RwLock<Vec<Box<dyn EthSigner<TxTy<Components::Types>>>>>,
     /// The async cache frontend for eth related data
     eth_cache: EthStateCache<
         <Components::Provider as BlockReader>::Block,
@@ -236,7 +235,10 @@ impl<Components: FullNodeComponents> EthApiInner<Components> {
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         components: Components,
-        eth_cache: EthStateCache<Components::Provider::Block, Components::Provider::Receipt>,
+        eth_cache: EthStateCache<
+            <Components::Provider as BlockReader>::Block,
+            <Components::Provider as ReceiptProvider>::Receipt,
+        >,
         gas_oracle: GasPriceOracle<Components::Provider>,
         gas_cap: impl Into<GasCap>,
         max_simulate_blocks: u64,
@@ -293,7 +295,10 @@ where
     #[inline]
     pub const fn cache(
         &self,
-    ) -> &EthStateCache<Components::Provider::Block, Components::Provider::Receipt> {
+    ) -> &EthStateCache<
+        <Components::Provider as BlockReader>::Block,
+        <Components::Provider as ReceiptProvider>::Receipt,
+    > {
         &self.eth_cache
     }
 
@@ -301,8 +306,14 @@ where
     #[inline]
     pub const fn pending_block(
         &self,
-    ) -> &Mutex<Option<PendingBlock<Components::Provider::Block, Components::Provider::Receipt>>>
-    {
+    ) -> &Mutex<
+        Option<
+            PendingBlock<
+                <Components::Provider as BlockReader>::Block,
+                <Components::Provider as ReceiptProvider>::Receipt,
+            >,
+        >,
+    > {
         &self.pending_block
     }
 
@@ -370,7 +381,7 @@ where
 
     /// Returns the inner `Network`
     #[inline]
-    pub const fn network(&self) -> &Components::Network {
+    pub fn network(&self) -> &Components::Network {
         self.components.network()
     }
 
