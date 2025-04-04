@@ -1201,7 +1201,7 @@ impl<T: InMemorySize> InMemorySize for EthPooledTransaction<T> {
     }
 }
 
-impl alloy_consensus::Transaction for EthPooledTransaction<EthereumTxEnvelope<TxEip4844>> {
+impl<T: alloy_consensus::Transaction> alloy_consensus::Transaction for EthPooledTransaction<T> {
     fn chain_id(&self) -> Option<alloy_primitives::ChainId> {
         self.transaction.chain_id()
     }
@@ -1308,7 +1308,8 @@ impl EthPoolTransaction for EthPooledTransaction {
         settings: &KzgSettings,
     ) -> Result<(), BlobTransactionValidationError> {
         match self.transaction.transaction() {
-            self.transaction.validate_blob(sidecar, settings)
+            Transaction::Eip4844(tx) => tx.validate_blob(sidecar, settings),
+            _ => Err(BlobTransactionValidationError::NotBlobTransaction(self.ty())),
         }
     }
 }
