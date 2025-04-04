@@ -10,7 +10,7 @@ use alloy_evm::{
     Database, Evm, EvmEnv,
 };
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpEvm};
-use op_revm::OpSpecId;
+use op_revm::{OpSpecId, OpTransaction};
 use reth_evm::InspectorFor;
 use reth_node_api::ConfigureEvm;
 use reth_optimism_node::{
@@ -31,7 +31,7 @@ pub struct CustomBlockExecutor<Evm> {
 impl<'db, DB, E> BlockExecutor for CustomBlockExecutor<E>
 where
     DB: Database + 'db,
-    E: Evm<DB = &'db mut State<DB>, Tx = TxEnv>,
+    E: Evm<DB = &'db mut State<DB>, Tx = OpTransaction<TxEnv>>,
 {
     type Transaction = OpTransactionSigned;
     type Receipt = OpReceipt;
@@ -49,9 +49,7 @@ where
         self.inner.execute_transaction_with_result_closure(tx, f)
     }
 
-    fn finish(
-        mut self,
-    ) -> Result<(Self::Evm, BlockExecutionResult<OpReceipt>), BlockExecutionError> {
+    fn finish(self) -> Result<(Self::Evm, BlockExecutionResult<OpReceipt>), BlockExecutionError> {
         self.inner.finish()
     }
 
