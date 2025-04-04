@@ -277,11 +277,7 @@ impl HardforkBlobParams {
         let extract = |key: &str, default: fn() -> BlobParams| {
             blob_schedule
                 .get(key)
-                .map(|item| BlobParams {
-                    target_blob_count: item.target_blob_count,
-                    max_blob_count: item.max_blob_count,
-                    ..default()
-                })
+                .copied()
                 .unwrap_or_else(default) // Use default if key is missing
         };
 
