@@ -112,7 +112,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             Subcommands::Drop { force } => {
                 if !force {
                     // Ask for confirmation
-                    print!("Are you sure you want to drop the database at {data_dir}? This cannot be undone. (y/N): ");
+                    print!(
+                        "Are you sure you want to drop the database at {data_dir}? This cannot be undone. (y/N): "
+                    );
                     // Flush the buffer to ensure the message is printed immediately
                     io::stdout().flush().unwrap();
 

@@ -270,14 +270,14 @@ mod tests {
             .map(|_| {
                 let address = Address::random();
                 let account =
-                    Account { balance: U256::from(rng.gen::<u64>()), ..Default::default() };
+                    Account { balance: U256::from(rng.r#gen::<u64>()), ..Default::default() };
                 let mut storage = HashMap::<B256, U256>::default();
                 let has_storage = rng.gen_bool(0.7);
                 if has_storage {
                     for _ in 0..100 {
                         storage.insert(
-                            B256::from(U256::from(rng.gen::<u64>())),
-                            U256::from(rng.gen::<u64>()),
+                            B256::from(U256::from(rng.r#gen::<u64>())),
+                            U256::from(rng.r#gen::<u64>()),
                         );
                     }
                 }
@@ -318,7 +318,7 @@ mod tests {
 
             let should_update_account = rng.gen_bool(0.5);
             if should_update_account {
-                *account = Account { balance: U256::from(rng.gen::<u64>()), ..*account };
+                *account = Account { balance: U256::from(rng.r#gen::<u64>()), ..*account };
                 hashed_state.accounts.insert(hashed_address, Some(*account));
             }
 
@@ -326,7 +326,7 @@ mod tests {
             if should_update_storage {
                 for (slot, value) in storage.iter_mut() {
                     let hashed_slot = keccak256(slot);
-                    *value = U256::from(rng.gen::<u64>());
+                    *value = U256::from(rng.r#gen::<u64>());
                     hashed_state
                         .storages
                         .entry(hashed_address)

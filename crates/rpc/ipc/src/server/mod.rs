@@ -792,7 +792,7 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
 #[cfg(test)]
 #[expect(missing_docs)]
 pub fn dummy_name() -> String {
-    let num: u64 = rand::Rng::gen(&mut rand::thread_rng());
+    let num: u64 = rand::Rng::r#gen(&mut rand::thread_rng());
     if cfg!(windows) {
         format!(r"\\.\pipe\my-pipe-{}", num)
     } else {
