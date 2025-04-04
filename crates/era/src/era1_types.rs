@@ -6,7 +6,7 @@ use crate::{
     e2s_types::{E2sError, Entry, BLOCK_INDEX},
     execution_types::{Accumulator, BlockTuple},
 };
-use alloy_primitives::{BlockNumber, ChainId};
+use alloy_primitives::BlockNumber;
 
 /// File content in an Era1 file
 ///
@@ -139,39 +139,32 @@ impl BlockIndex {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Era1Id {
     /// Network configuration name
-    pub config_name: String,
+    pub network_name: String,
 
     /// First block number in file
     pub start_block: BlockNumber,
 
     /// Number of blocks in the file
     pub block_count: u32,
-
-    /// Chain identifier
-    pub chain_id: ChainId,
 }
 
 impl Era1Id {
     /// Create a new [`Era1Id`]
     pub fn new(
-        config_name: impl Into<String>,
+        network_name: impl Into<String>,
         start_block: BlockNumber,
         block_count: u32,
-        chain_id: ChainId,
     ) -> Self {
-        Self { config_name: config_name.into(), start_block, block_count, chain_id }
+        Self { network_name: network_name.into(), start_block, block_count }
     }
 
     /// Convert to file name following the era1 file naming:
-    /// `<config-name>-<start-block>-<block-count>-<chain-id>.era1`
+    /// `<network-name>-<start-block>-<block-count>.era1`
     /// inspired from era file naming convention in
     /// <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md#file-name>
     /// See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>
     pub fn to_file_name(&self) -> String {
-        format!(
-            "{}-{:10}-{:02}-{}.era1",
-            self.config_name, self.start_block, self.block_count, self.chain_id
-        )
+        format!("{}-{:10}-{:02}.era1", self.network_name, self.start_block, self.block_count,)
     }
 }
 
