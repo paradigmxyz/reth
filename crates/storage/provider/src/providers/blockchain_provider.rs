@@ -856,7 +856,7 @@ mod tests {
         (database_blocks.to_vec(), in_memory_blocks.to_vec())
     }
 
-    #[allow(clippy::type_complexity, clippy::too_many_arguments)]
+    #[expect(clippy::type_complexity, clippy::too_many_arguments)]
     fn provider_with_chain_spec_and_random_blocks(
         rng: &mut impl Rng,
         chain_spec: Arc<ChainSpec>,
