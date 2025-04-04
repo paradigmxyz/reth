@@ -1,3 +1,9 @@
+//! Ethereum protocol stream implementations.
+//!
+//! Provides stream types for the Ethereum wire protocol.
+//! It separates protocol logic [`EthStreamInner`] from transport concerns [`EthStream`].
+//! Handles handshaking, message processing, and RLP serialization.
+
 use crate::{
     errors::{EthHandshakeError, EthStreamError},
     handshake::EthereumEthHandshake,
@@ -98,31 +104,94 @@ where
     }
 }
 
+/// Contains eth protocol specific logic for processing messages
+#[derive(Debug)]
+pub struct EthStreamInner<N> {
+    /// Negotiated eth version
+    version: EthVersion,
+    _pd: std::marker::PhantomData<N>,
+}
+
+impl<N> EthStreamInner<N>
+where
+    N: NetworkPrimitives,
+{
+    /// Creates a new [`EthStreamInner`] with the given eth version
+    pub const fn new(version: EthVersion) -> Self {
+        Self { version, _pd: std::marker::PhantomData }
+    }
+
+    /// Returns the eth version
+    #[inline]
+    pub const fn version(&self) -> EthVersion {
+        self.version
+    }
+
+    /// Decodes incoming bytes into an [`EthMessage`].
+    pub fn decode_message(&self, bytes: BytesMut) -> Result<EthMessage<N>, EthStreamError> {
+        if bytes.len() > MAX_MESSAGE_SIZE {
+            return Err(EthStreamError::MessageTooBig(bytes.len()));
+        }
+
+        let msg = match ProtocolMessage::decode_message(self.version, &mut bytes.as_ref()) {
+            Ok(m) => m,
+            Err(err) => {
+                let msg = if bytes.len() > 50 {
+                    format!("{:02x?}...{:x?}", &bytes[..10], &bytes[bytes.len() - 10..])
+                } else {
+                    format!("{bytes:02x?}")
+                };
+                debug!(
+                    version=?self.version,
+                    %msg,
+                    "failed to decode protocol message"
+                );
+                return Err(EthStreamError::InvalidMessage(err));
+            }
+        };
+
+        if matches!(msg.message, EthMessage::Status(_)) {
+            return Err(EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake));
+        }
+
+        Ok(msg.message)
+    }
+
+    /// Encodes an [`EthMessage`] to bytes.
+    ///
+    /// Validates that Status messages are not sent after handshake, enforcing protocol rules.
+    pub fn encode_message(&self, item: EthMessage<N>) -> Result<Bytes, EthStreamError> {
+        if matches!(item, EthMessage::Status(_)) {
+            return Err(EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake));
+        }
+
+        Ok(Bytes::from(alloy_rlp::encode(ProtocolMessage::from(item))))
+    }
+}
+
 /// An `EthStream` wraps over any `Stream` that yields bytes and makes it
 /// compatible with eth-networking protocol messages, which get RLP encoded/decoded.
 #[pin_project]
 #[derive(Debug)]
 pub struct EthStream<S, N = EthNetworkPrimitives> {
-    /// Negotiated eth version.
-    version: EthVersion,
+    /// Eth-specific logic
+    eth: EthStreamInner<N>,
     #[pin]
     inner: S,
-
-    _pd: std::marker::PhantomData<N>,
 }
 
-impl<S, N> EthStream<S, N> {
+impl<S, N: NetworkPrimitives> EthStream<S, N> {
     /// Creates a new unauthed [`EthStream`] from a provided stream. You will need
     /// to manually handshake a peer.
     #[inline]
     pub const fn new(version: EthVersion, inner: S) -> Self {
-        Self { version, inner, _pd: std::marker::PhantomData }
+        Self { eth: EthStreamInner::new(version), inner }
     }
 
     /// Returns the eth version.
     #[inline]
     pub const fn version(&self) -> EthVersion {
-        self.version
+        self.eth.version()
     }
 
     /// Returns the underlying stream.
@@ -184,40 +253,12 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.project();
         let res = ready!(this.inner.poll_next(cx));
-        let bytes = match res {
-            Some(Ok(bytes)) => bytes,
-            Some(Err(err)) => return Poll::Ready(Some(Err(err.into()))),
-            None => return Poll::Ready(None),
-        };
 
-        if bytes.len() > MAX_MESSAGE_SIZE {
-            return Poll::Ready(Some(Err(EthStreamError::MessageTooBig(bytes.len()))))
+        match res {
+            Some(Ok(bytes)) => Poll::Ready(Some(this.eth.decode_message(bytes))),
+            Some(Err(err)) => Poll::Ready(Some(Err(err.into()))),
+            None => Poll::Ready(None),
         }
-
-        let msg = match ProtocolMessage::decode_message(*this.version, &mut bytes.as_ref()) {
-            Ok(m) => m,
-            Err(err) => {
-                let msg = if bytes.len() > 50 {
-                    format!("{:02x?}...{:x?}", &bytes[..10], &bytes[bytes.len() - 10..])
-                } else {
-                    format!("{bytes:02x?}")
-                };
-                debug!(
-                    version=?this.version,
-                    %msg,
-                    "failed to decode protocol message"
-                );
-                return Poll::Ready(Some(Err(EthStreamError::InvalidMessage(err))))
-            }
-        };
-
-        if matches!(msg.message, EthMessage::Status(_)) {
-            return Poll::Ready(Some(Err(EthStreamError::EthHandshakeError(
-                EthHandshakeError::StatusNotInHandshake,
-            ))))
-        }
-
-        Poll::Ready(Some(Ok(msg.message)))
     }
 }
 
