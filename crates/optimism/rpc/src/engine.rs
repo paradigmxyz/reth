@@ -104,6 +104,8 @@ pub trait OpEngineApi<Engine: EngineTypes> {
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_forkchoiceupdatedv1>
     ///
+    /// This exsits because it is used by op-node: <https://github.com/ethereum-optimism/optimism/blob/0bc5fe8d16155dc68bcdf1fa5733abc58689a618/op-node/rollup/types.go#L615-L617>
+    ///
     /// Caution: This should not accept the `withdrawals` field in the payload attributes.
     #[method(name = "forkchoiceUpdatedV1")]
     async fn fork_choice_updated_v1(
@@ -304,7 +306,6 @@ where
     ) -> RpcResult<ForkchoiceUpdated> {
         Ok(self.inner.fork_choice_updated_v1_metered(fork_choice_state, payload_attributes).await?)
     }
-
 
     async fn fork_choice_updated_v2(
         &self,
