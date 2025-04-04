@@ -81,7 +81,7 @@ mod tests {
 
         // Validate entries
         assert_eq!(entries.len(), 4);
-        // First entry sould be version
+        // First entry should be version
         assert!(entries[0].is_version());
         // Second entry should be block index
         assert!(entries[1].is_block_index());
