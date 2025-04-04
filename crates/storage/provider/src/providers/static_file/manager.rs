@@ -1267,7 +1267,10 @@ impl<N: NodePrimitives + 'static> StaticFileWriter for StaticFileProvider<N> {
     }
 }
 
-impl<N> HeaderProvider for StaticFileProvider<N> where N: NodePrimitives<BlockHeader: Value> + 'static {
+impl<N> HeaderProvider for StaticFileProvider<N>
+where
+    N: NodePrimitives<BlockHeader: Value> + 'static,
+{
     type Header = N::BlockHeader;
 
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
@@ -1381,8 +1384,9 @@ impl<N: NodePrimitives + 'static> BlockHashReader for StaticFileProvider<N> {
     }
 }
 
-impl<N> ReceiptProvider
-    for StaticFileProvider<N> where N: NodePrimitives<SignedTx: Value + SignedTransaction, Receipt: Value> + 'static
+impl<N> ReceiptProvider for StaticFileProvider<N>
+where
+    N: NodePrimitives<SignedTx: Value + SignedTransaction, Receipt: Value> + 'static,
 {
     fn receipt(&self, num: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
         self.get_segment_provider_from_transaction(StaticFileSegment::Receipts, num, None)
@@ -1423,8 +1427,9 @@ impl<N> ReceiptProvider
     }
 }
 
-impl<N>
-    TransactionsProviderExt for StaticFileProvider<N> where N: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>
+impl<N> TransactionsProviderExt for StaticFileProvider<N>
+where
+    N: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
 {
     fn transaction_hashes_by_range(
         &self,
@@ -1459,13 +1464,13 @@ impl<N>
                     StaticFileSegment::Transactions,
                     chunk_range,
                     |cursor, number| {
-                        Ok(cursor
-                            .get_one::<TransactionMask<Self::SignedTx>>(number.into())?
-                            .map(|transaction| {
+                        Ok(cursor.get_one::<TransactionMask<Self::SignedTx>>(number.into())?.map(
+                            |transaction| {
                                 rlp_buf.clear();
                                 let _ = channel_tx
                                     .send(calculate_hash((number, transaction), &mut rlp_buf));
-                            }))
+                            },
+                        ))
                     },
                     |_| true,
                 );
@@ -1516,10 +1521,7 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction> + 'static> Tran
             })
     }
 
-    fn transaction_by_id_unhashed(
-        &self,
-        num: TxNumber,
-    ) -> ProviderResult<Option<Self::SignedTx>> {
+    fn transaction_by_id_unhashed(&self, num: TxNumber) -> ProviderResult<Option<Self::SignedTx>> {
         self.get_segment_provider_from_transaction(StaticFileSegment::Transactions, num, None)
             .and_then(|provider| provider.transaction_by_id_unhashed(num))
             .or_else(|err| {

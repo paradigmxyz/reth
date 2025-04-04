@@ -232,29 +232,26 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
         let mut cursor = self.cursor()?;
 
         Ok(cursor
-            .get_one::<TransactionMask<Self::Transaction>>((&hash).into())?
+            .get_one::<TransactionMask<Self::SignedTx>>((&hash).into())?
             .and_then(|res| (res.trie_hash() == hash).then(|| cursor.number()).flatten()))
     }
 
-    fn transaction_by_id(&self, num: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
-        self.cursor()?.get_one::<TransactionMask<Self::Transaction>>(num.into())
+    fn transaction_by_id(&self, num: TxNumber) -> ProviderResult<Option<Self::SignedTx>> {
+        self.cursor()?.get_one::<TransactionMask<Self::SignedTx>>(num.into())
     }
 
-    fn transaction_by_id_unhashed(
-        &self,
-        num: TxNumber,
-    ) -> ProviderResult<Option<Self::Transaction>> {
-        self.cursor()?.get_one::<TransactionMask<Self::Transaction>>(num.into())
+    fn transaction_by_id_unhashed(&self, num: TxNumber) -> ProviderResult<Option<Self::SignedTx>> {
+        self.cursor()?.get_one::<TransactionMask<Self::SignedTx>>(num.into())
     }
 
-    fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Transaction>> {
-        self.cursor()?.get_one::<TransactionMask<Self::Transaction>>((&hash).into())
+    fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::SignedTx>> {
+        self.cursor()?.get_one::<TransactionMask<Self::SignedTx>>((&hash).into())
     }
 
     fn transaction_by_hash_with_meta(
         &self,
         _hash: TxHash,
-    ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
+    ) -> ProviderResult<Option<(Self::SignedTx, TransactionMeta)>> {
         // Information required on indexing table [`tables::TransactionBlocks`]
         Err(ProviderError::UnsupportedProvider)
     }
@@ -267,7 +264,7 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
     fn transactions_by_block(
         &self,
         _block_id: BlockHashOrNumber,
-    ) -> ProviderResult<Option<Vec<Self::Transaction>>> {
+    ) -> ProviderResult<Option<Vec<Self::SignedTx>>> {
         // Related to indexing tables. Live database should get the tx_range and call static file
         // provider with `transactions_by_tx_range` instead.
         Err(ProviderError::UnsupportedProvider)
@@ -276,7 +273,7 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
     fn transactions_by_block_range(
         &self,
         _range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<Vec<Self::Transaction>>> {
+    ) -> ProviderResult<Vec<Vec<Self::SignedTx>>> {
         // Related to indexing tables. Live database should get the tx_range and call static file
         // provider with `transactions_by_tx_range` instead.
         Err(ProviderError::UnsupportedProvider)
@@ -285,13 +282,13 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
     fn transactions_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<Self::Transaction>> {
+    ) -> ProviderResult<Vec<Self::SignedTx>> {
         let range = to_range(range);
         let mut cursor = self.cursor()?;
         let mut txes = Vec::with_capacity((range.end - range.start) as usize);
 
         for num in range {
-            if let Some(tx) = cursor.get_one::<TransactionMask<Self::Transaction>>(num.into())? {
+            if let Some(tx) = cursor.get_one::<TransactionMask<Self::SignedTx>>(num.into())? {
                 txes.push(tx)
             }
         }
@@ -309,13 +306,14 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
     fn transaction_sender(&self, num: TxNumber) -> ProviderResult<Option<Address>> {
         Ok(self
             .cursor()?
-            .get_one::<TransactionMask<Self::Transaction>>(num.into())?
+            .get_one::<TransactionMask<Self::SignedTx>>(num.into())?
             .and_then(|tx| tx.recover_signer().ok()))
     }
 }
 
-impl<N>
-    ReceiptProvider for StaticFileJarProvider<'_, N> where N: NodePrimitives<SignedTx: Decompress + SignedTransaction, Receipt: Decompress>
+impl<N> ReceiptProvider for StaticFileJarProvider<'_, N>
+where
+    N: NodePrimitives<SignedTx: Decompress + SignedTransaction, Receipt: Decompress>,
 {
     fn receipt(&self, num: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
         self.cursor()?.get_one::<ReceiptMask<Self::Receipt>>(num.into())

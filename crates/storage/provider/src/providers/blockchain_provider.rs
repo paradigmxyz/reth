@@ -157,7 +157,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     }
 }
 
-impl<N: NodeTypes> NodePrimitives for BlockchainProvider<N> {
+impl<N: NodeTypesWithDB> NodePrimitives for BlockchainProvider<N> {
     type Block = BlockTy<N>;
     type BlockHeader = HeaderTy<N>;
     type BlockBody = BodyTy<N>;
@@ -666,7 +666,7 @@ impl<N: ProviderNodeTypes> CanonChainTracker for BlockchainProvider<N> {
 
 impl<N: ProviderNodeTypes> BlockReaderIdExt for BlockchainProvider<N>
 where
-    Self: ReceiptProviderIdExt,
+    Self: ReceiptProviderIdExt<Block = BlockTy<N>>,
 {
     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Block>> {
         self.consistent_provider()?.block_by_id(id)

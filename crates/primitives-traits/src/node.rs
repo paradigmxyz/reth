@@ -6,7 +6,7 @@ use alloc::sync::Arc;
 use core::fmt;
 
 /// Configures all the primitive types of the node.
-pub trait NodePrimitives: Send + Sync + Unpin + Sized + fmt::Debug + PartialEq + Eq {
+pub trait NodePrimitives: Send + Sync + Sized + fmt::Debug {
     /// Block primitive.
     type Block: Block<Header = Self::BlockHeader, Body = Self::BlockBody>
         + MaybeSerdeBincodeCompat
@@ -47,8 +47,11 @@ where
             BlockBody: FullBlockBody<Transaction = Self::SignedTx>,
             SignedTx: FullSignedTx,
             Receipt: FullReceipt,
-        > + Default
+        > + Unpin
+        + Default
         + Clone
+        + PartialEq
+        + Eq
         + 'static,
 {
 }
@@ -60,8 +63,11 @@ impl<T> FullNodePrimitives for T where
             BlockBody: FullBlockBody<Transaction = Self::SignedTx>,
             SignedTx: FullSignedTx,
             Receipt: FullReceipt,
-        > + Default
+        > + Unpin
+        + Default
         + Clone
+        + PartialEq
+        + Eq
         + 'static
 {
 }

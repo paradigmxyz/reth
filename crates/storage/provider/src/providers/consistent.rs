@@ -613,7 +613,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     }
 }
 
-impl<N: NodeTypes> NodePrimitives for ConsistentProvider<N> {
+impl<N: NodeTypesWithDB> NodePrimitives for ConsistentProvider<N> {
     type Block = BlockTy<N>;
     type BlockHeader = HeaderTy<N>;
     type BlockBody = BodyTy<N>;
