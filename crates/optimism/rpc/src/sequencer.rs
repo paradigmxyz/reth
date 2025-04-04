@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use alloy_json_rpc::RpcSend;
-use alloy_primitives::hex;
+use alloy_primitives::{hex, Bytes};
 use alloy_rpc_client::{ClientBuilder, RpcClient as Client};
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
 use alloy_transport_http::Http;
@@ -53,7 +53,7 @@ impl SequencerClient {
         method: &str,
         params: Params,
     ) -> Result<(), SequencerClientError> {
-        self.http_client().request::<Params, ()>(method.to_string(), params).await.inspect_err(
+        self.http_client().request::<Params, Bytes>(method.to_string(), params).await.inspect_err(
             |err| {
                 warn!(
                     target: "rpc::sequencer",
