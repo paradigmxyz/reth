@@ -6,7 +6,7 @@ use crate::{
 use bytes::{Bytes, BytesMut};
 use futures::{Sink, SinkExt, Stream};
 use reth_eth_wire_types::{
-    DisconnectReason, EthMessage, EthNetworkPrimitives, ProtocolMessage, Status,
+    DisconnectReason, EthMessage, EthNetworkPrimitives, ProtocolMessage, Status, StatusPayload,
 };
 use reth_ethereum_forks::ForkFilter;
 use reth_primitives_traits::GotExpected;
@@ -90,7 +90,7 @@ where
             alloy_rlp::encode(ProtocolMessage::<EthNetworkPrimitives>::from(EthMessage::<
                 EthNetworkPrimitives,
             >::Status(
-                status
+                StatusPayload::Legacy(status),
             )))
             .into();
         unauth.send(status_msg).await.map_err(EthStreamError::from)?;
@@ -135,8 +135,12 @@ where
 
         // Validate peer response
         match msg.message {
-            EthMessage::Status(their_status) => {
+            EthMessage::Status(their_status_payload) => {
                 trace!("Validating incoming ETH status from peer");
+                let their_status = match their_status_payload {
+                    StatusPayload::Legacy(s) => s,
+                    StatusPayload::Eth69(s) => s.into(),
+                };
 
                 if status.genesis != their_status.genesis {
                     unauth

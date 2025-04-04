@@ -9,10 +9,12 @@
 use super::{
     broadcast::NewBlockHashes, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
     GetNodeData, GetPooledTransactions, GetReceipts, NewBlock, NewPooledTransactionHashes66,
-    NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, Status, Transactions,
+    NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, Status, StatusEth69,
+    Transactions,
 };
 use crate::{
-    EthNetworkPrimitives, EthVersion, NetworkPrimitives, RawCapabilityMessage, SharedTransactions,
+    status::StatusPayload, EthNetworkPrimitives, EthVersion, NetworkPrimitives,
+    RawCapabilityMessage, SharedTransactions,
 };
 use alloc::{boxed::Box, sync::Arc};
 use alloy_primitives::{
@@ -57,7 +59,11 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
         let message_type = EthMessageID::decode(buf)?;
 
         let message = match message_type {
-            EthMessageID::Status => EthMessage::Status(Status::decode(buf)?),
+            EthMessageID::Status => EthMessage::Status(if version < EthVersion::Eth69 {
+                StatusPayload::Legacy(Status::decode(buf)?)
+            } else {
+                StatusPayload::Eth69(StatusEth69::decode(buf)?)
+            }),
             EthMessageID::NewBlockHashes => {
                 if version.is_eth69() {
                     return Err(MessageError::Invalid(version, EthMessageID::NewBlockHashes));
@@ -186,7 +192,7 @@ impl<N: NetworkPrimitives> From<EthBroadcastMessage<N>> for ProtocolBroadcastMes
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Represents a Status message required for the protocol handshake.
-    Status(Status),
+    Status(StatusPayload),
     /// Represents a `NewBlockHashes` message broadcast to the network.
     NewBlockHashes(NewBlockHashes),
     /// Represents a `NewBlock` message broadcast to the network.
