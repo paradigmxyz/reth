@@ -9692,6 +9692,7 @@ dependencies = [
  "reth-metrics",
  "reth-network-api",
  "reth-network-peers",
+ "reth-node-api",
  "reth-node-core",
  "reth-node-ethereum",
  "reth-payload-builder",
