@@ -1380,8 +1380,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProviderExt
 
 // Calculates the hash of the given transaction
 impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for DatabaseProvider<TX, N> {
-    type Transaction = TxTy<N>;
-
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         Ok(self.tx.get::<tables::TransactionHashNumbers>(tx_hash)?)
     }

@@ -228,8 +228,6 @@ impl<N: NodePrimitives> BlockNumReader for StaticFileJarProvider<'_, N> {
 impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsProvider
     for StaticFileJarProvider<'_, N>
 {
-    type Transaction = N::SignedTx;
-
     fn transaction_id(&self, hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         let mut cursor = self.cursor()?;
 

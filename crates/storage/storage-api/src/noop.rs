@@ -225,8 +225,6 @@ impl<C: Send + Sync, N: NodePrimitives> BlockReader for NoopProvider<C, N> {
 }
 
 impl<C: Send + Sync, N: NodePrimitives> TransactionsProvider for NoopProvider<C, N> {
-    type Transaction = N::SignedTx;
-
     fn transaction_id(&self, _tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         Ok(None)
     }

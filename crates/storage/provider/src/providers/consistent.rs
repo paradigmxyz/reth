@@ -912,8 +912,6 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
-    type Transaction = TxTy<N>;
-
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         self.get_in_memory_or_storage_by_tx(
             tx_hash.into(),

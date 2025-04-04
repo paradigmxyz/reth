@@ -424,8 +424,6 @@ impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
 }
 
 impl<N: ProviderNodeTypes> TransactionsProvider for ProviderFactory<N> {
-    type Transaction = TxTy<N>;
-
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         self.provider()?.transaction_id(tx_hash)
     }

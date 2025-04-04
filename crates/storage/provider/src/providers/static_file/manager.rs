@@ -1489,8 +1489,6 @@ impl<N: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>>
 impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsProvider
     for StaticFileProvider<N>
 {
-    type Transaction = N::SignedTx;
-
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         self.find_static_file(StaticFileSegment::Transactions, |jar_provider| {
             let mut cursor = jar_provider.cursor()?;

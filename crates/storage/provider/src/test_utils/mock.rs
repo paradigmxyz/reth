@@ -329,8 +329,6 @@ impl<ChainSpec: EthChainSpec + 'static> ChainSpecProvider for MockEthProvider<Ch
 }
 
 impl<ChainSpec: EthChainSpec> TransactionsProvider for MockEthProvider<ChainSpec> {
-    type Transaction = reth_ethereum_primitives::TransactionSigned;
-
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         let lock = self.blocks.lock();
         let tx_number = lock

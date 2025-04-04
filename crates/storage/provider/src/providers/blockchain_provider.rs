@@ -357,8 +357,6 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider<N> {
-    type Transaction = TxTy<N>;
-
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         self.consistent_provider()?.transaction_id(tx_hash)
     }

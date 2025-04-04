@@ -4,7 +4,7 @@ use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, BlockNumber, TxHash, TxNumber};
 use core::ops::{Range, RangeBounds, RangeInclusive};
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::NodePrimitives;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 
 /// Enum to control transaction hash inclusion.
@@ -22,10 +22,7 @@ pub enum TransactionVariant {
 
 ///  Client trait for fetching transactions related data.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait TransactionsProvider: BlockNumReader + Send + Sync {
-    /// The transaction type this provider reads.
-    type Transaction: Send + Sync + SignedTransaction;
-
+pub trait TransactionsProvider: NodePrimitives + BlockNumReader + Send + Sync {
     /// Get internal transaction identifier by transaction hash.
     ///
     /// This is the inverse of [TransactionsProvider::transaction_by_id].
