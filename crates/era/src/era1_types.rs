@@ -97,7 +97,7 @@ impl BlockIndex {
 
         if entry.data.len() < 16 {
             return Err(E2sError::Ssz(String::from(
-                "BlockIndex entry too short to contain starting slot and count",
+                "BlockIndex entry too short to contain starting block number and count",
             )));
         }
 
