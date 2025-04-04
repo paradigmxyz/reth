@@ -274,9 +274,20 @@ impl HardforkBlobParams {
     /// Constructs params for chainspec from a provided blob schedule.
     /// Falls back to defaults if the schedule is missing.
     pub fn from_schedule(blob_schedule: &BTreeMap<String, BlobParams>) -> Self {
+        let extract = |key: &str, default: fn() -> BlobParams| {
+            blob_schedule
+                .get(key)
+                .map(|item| BlobParams {
+                    target_blob_count: item.target_blob_count,
+                    max_blob_count: item.max_blob_count,
+                    ..default()
+                })
+                .unwrap_or_else(default) // Use default if key is missing
+        };
+
         Self {
-            cancun: blob_schedule.get("cancun").copied().unwrap_or_else(BlobParams::cancun),
-            prague: blob_schedule.get("prague").copied().unwrap_or_else(BlobParams::prague),
+            cancun: extract("cancun", BlobParams::cancun),
+            prague: extract("prague", BlobParams::prague),
         }
     }
 }
