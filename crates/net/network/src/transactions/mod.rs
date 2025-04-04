@@ -12,7 +12,11 @@ pub use self::constants::{
     tx_fetcher::DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
-pub use config::{TransactionFetcherConfig, TransactionPropagationMode, TransactionsManagerConfig};
+use config::TransactionPropagationKind;
+pub use config::{
+    TransactionFetcherConfig, TransactionPropagationMode, TransactionPropagationPolicy,
+    TransactionsManagerConfig,
+};
 pub use validation::*;
 
 pub(crate) use fetcher::{FetchEvent, TransactionFetcher};
@@ -42,7 +46,7 @@ use reth_ethereum_primitives::TransactionSigned;
 use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
 use reth_network_api::{
     events::{PeerEvent, SessionInfo},
-    NetworkEvent, NetworkEventListenerProvider, PeerRequest, PeerRequestSender, Peers,
+    NetworkEvent, NetworkEventListenerProvider, PeerKind, PeerRequest, PeerRequestSender, Peers,
 };
 use reth_network_p2p::{
     error::{RequestError, RequestResult},
@@ -234,7 +238,11 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
 /// propagate new transactions over the network.
 #[derive(Debug)]
 #[must_use = "Manager does nothing unless polled."]
-pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives> {
+pub struct TransactionsManager<
+    Pool,
+    N: NetworkPrimitives = EthNetworkPrimitives,
+    P: TransactionPropagationPolicy = TransactionPropagationKind,
+> {
     /// Access to the transaction pool.
     pool: Pool,
     /// Network access.
@@ -289,12 +297,14 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     /// Incoming events from the [`NetworkManager`](crate::NetworkManager).
     transaction_events: UnboundedMeteredReceiver<NetworkTransactionEvent<N>>,
     /// How the `TransactionsManager` is configured.
-    config: TransactionsManagerConfig,
+    config: TransactionsManagerConfig<P>,
     /// `TransactionsManager` metrics
     metrics: TransactionsManagerMetrics,
 }
 
-impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
+impl<Pool: TransactionPool, N: NetworkPrimitives, P: TransactionPropagationPolicy>
+    TransactionsManager<Pool, N, P>
+{
     /// Sets up a new instance.
     ///
     /// Note: This expects an existing [`NetworkManager`](crate::NetworkManager) instance.
@@ -302,7 +312,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         network: NetworkHandle<N>,
         pool: Pool,
         from_network: mpsc::UnboundedReceiver<NetworkTransactionEvent<N>>,
-        transactions_manager_config: TransactionsManagerConfig,
+        transactions_manager_config: TransactionsManagerConfig<P>,
     ) -> Self {
         let network_events = network.event_listener();
 
@@ -891,6 +901,9 @@ where
 
         // Note: Assuming ~random~ order due to random state of the peers map hasher
         for (peer_idx, (peer_id, peer)) in self.peers.iter_mut().enumerate() {
+            if !self.config.propagation_policy.filter(peer) {
+                continue
+            }
             // determine whether to send full tx objects or hashes.
             let mut builder = if peer_idx > max_num_full {
                 PropagateTransactionsBuilder::pooled(peer.version)
@@ -1064,6 +1077,7 @@ where
             version,
             client_version,
             self.config.max_transactions_seen_by_peer_history,
+            info.peer_kind,
         );
         let peer = match self.peers.entry(peer_id) {
             Entry::Occupied(mut entry) => {
@@ -1072,6 +1086,8 @@ where
             }
             Entry::Vacant(entry) => entry.insert(peer),
         };
+
+        self.config.propagation_policy.on_session_established(peer);
 
         // Send a `NewPooledTransactionHashes` to the peer with up to
         // `SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE`
@@ -1107,7 +1123,11 @@ where
         match event_result {
             NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, .. }) => {
                 // remove the peer
-                self.peers.remove(&peer_id);
+
+                let peer = self.peers.remove(&peer_id);
+                if let Some(mut peer) = peer {
+                    self.config.propagation_policy.on_session_closed(&mut peer);
+                }
                 self.transaction_fetcher.remove_peer(&peer_id);
             }
             NetworkEvent::ActivePeerSession { info, messages } => {
@@ -1790,6 +1810,8 @@ pub struct PeerMetadata<N: NetworkPrimitives = EthNetworkPrimitives> {
     version: EthVersion,
     /// The peer's client version.
     client_version: Arc<str>,
+    /// The kind of peer.
+    peer_kind: PeerKind,
 }
 
 impl<N: NetworkPrimitives> PeerMetadata<N> {
@@ -1799,12 +1821,14 @@ impl<N: NetworkPrimitives> PeerMetadata<N> {
         version: EthVersion,
         client_version: Arc<str>,
         max_transactions_seen_by_peer: u32,
+        peer_kind: PeerKind,
     ) -> Self {
         Self {
             seen_transactions: LruCache::new(max_transactions_seen_by_peer),
             request_tx,
             version,
             client_version,
+            peer_kind,
         }
     }
 }
@@ -1979,6 +2003,7 @@ mod tests {
                 version,
                 Arc::from(""),
                 DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
+                PeerKind::Trusted,
             ),
             to_mock_session_rx,
         )
