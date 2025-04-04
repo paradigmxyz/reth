@@ -8,14 +8,15 @@ use metrics::Histogram;
 use reth_errors::ProviderError;
 use reth_metrics::Metrics;
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateCommitmentProvider,
+    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, FactoryTx,
+    StateCommitmentProvider,
 };
 use reth_revm::state::EvmState;
 use reth_trie::{
     prefix_set::TriePrefixSetsMut, updates::TrieUpdatesSorted, HashedPostState,
     HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets, TrieInput,
 };
-use reth_trie_parallel::proof::ParallelProof;
+use reth_trie_parallel::{proof::ParallelProof, proof_task::ProofTaskManagerHandle};
 use std::{
     collections::{BTreeMap, VecDeque},
     ops::DerefMut,
@@ -254,15 +255,17 @@ struct MultiproofInput<Factory> {
 /// concurrency, further calculation requests are queued and spawn later, after
 /// availability has been signaled.
 #[derive(Debug)]
-pub struct MultiproofManager<Factory> {
+pub struct MultiproofManager<Factory: DatabaseProviderFactory> {
     /// Maximum number of concurrent calculations.
     max_concurrent: usize,
     /// Currently running calculations.
     inflight: usize,
     /// Queued calculations.
     pending: VecDeque<MultiproofInput<Factory>>,
-    /// Executor for tassks
+    /// Executor for tasks
     executor: WorkloadExecutor,
+    /// Sender to the storage proof task.
+    storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
     /// Metrics
     metrics: MultiProofTaskMetrics,
 }
@@ -273,14 +276,19 @@ where
         DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + Clone + 'static,
 {
     /// Creates a new [`MultiproofManager`].
-    fn new(executor: WorkloadExecutor, metrics: MultiProofTaskMetrics) -> Self {
-        let max_concurrent = executor.rayon_pool().current_num_threads();
+    fn new(
+        executor: WorkloadExecutor,
+        metrics: MultiProofTaskMetrics,
+        storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
+        max_concurrent: usize,
+    ) -> Self {
         Self {
             pending: VecDeque::with_capacity(max_concurrent),
             max_concurrent,
             executor,
             inflight: 0,
             metrics,
+            storage_proof_task_handle,
         }
     }
 
@@ -333,7 +341,7 @@ where
             state_root_message_sender,
         }: MultiproofInput<Factory>,
     ) {
-        let executor = self.executor.clone();
+        let storage_proof_task_handle = self.storage_proof_task_handle.clone();
 
         self.executor.spawn_blocking(move || {
             let account_targets = proof_targets.len();
@@ -353,7 +361,7 @@ where
                 config.nodes_sorted,
                 config.state_sorted,
                 config.prefix_sets,
-                executor.handle().clone(),
+                storage_proof_task_handle.clone(),
             )
             .with_branch_node_masks(true)
             .multiproof(proof_targets);
@@ -429,6 +437,12 @@ pub(crate) struct MultiProofTaskMetrics {
     pub state_updates_received_histogram: Histogram,
     /// Histogram of proofs processed.
     pub proofs_processed_histogram: Histogram,
+    /// Histogram of total time spent in the multiproof task.
+    pub multiproof_task_total_duration_histogram: Histogram,
+    /// Total time spent waiting for the first state update or prefetch request.
+    pub first_update_wait_time_histogram: Histogram,
+    /// Total time spent waiting for the last proof result.
+    pub last_proof_wait_time_histogram: Histogram,
 }
 
 /// Standalone task that receives a transaction state stream and updates relevant
@@ -441,7 +455,7 @@ pub(crate) struct MultiProofTaskMetrics {
 /// Then it updates relevant leaves according to the result of the transaction.
 /// This feeds updates to the sparse trie task.
 #[derive(Debug)]
-pub(super) struct MultiProofTask<Factory> {
+pub(super) struct MultiProofTask<Factory: DatabaseProviderFactory> {
     /// Task configuration.
     config: MultiProofConfig<Factory>,
     /// Receiver for state root related messages.
@@ -469,10 +483,13 @@ where
     pub(super) fn new(
         config: MultiProofConfig<Factory>,
         executor: WorkloadExecutor,
+        proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
         to_sparse_trie: Sender<SparseTrieUpdate>,
+        max_concurrency: usize,
     ) -> Self {
         let (tx, rx) = channel();
         let metrics = MultiProofTaskMetrics::default();
+
         Self {
             config,
             rx,
@@ -480,7 +497,12 @@ where
             to_sparse_trie,
             fetched_proof_targets: Default::default(),
             proof_sequencer: ProofSequencer::default(),
-            multiproof_manager: MultiproofManager::new(executor, metrics.clone()),
+            multiproof_manager: MultiproofManager::new(
+                executor,
+                metrics.clone(),
+                proof_task_handle,
+                max_concurrency,
+            ),
             metrics,
         }
     }
@@ -706,10 +728,13 @@ where
 
         let mut updates_finished = false;
 
-        // Timestamp when the first state update was received
+        // Timestamp before the first state update or prefetch was received
+        let start = Instant::now();
+
+        // Timestamp when the first state update or prefetch was received
         let mut first_update_time = None;
-        // Timestamp when the last state update was received
-        let mut last_update_time = None;
+        // Timestamp when state updates have finished
+        let mut updates_finished_time = None;
 
         loop {
             trace!(target: "engine::root", "entering main channel receiving loop");
@@ -717,6 +742,14 @@ where
                 Ok(message) => match message {
                     MultiProofMessage::PrefetchProofs(targets) => {
                         trace!(target: "engine::root", "processing MultiProofMessage::PrefetchProofs");
+                        if first_update_time.is_none() {
+                            // record the wait time
+                            self.metrics
+                                .first_update_wait_time_histogram
+                                .record(start.elapsed().as_secs_f64());
+                            first_update_time = Some(Instant::now());
+                            debug!(target: "engine::root", "Started state root calculation");
+                        }
 
                         let account_targets = targets.len();
                         let storage_targets =
@@ -731,13 +764,15 @@ where
                         );
                     }
                     MultiProofMessage::StateUpdate(source, update) => {
-                        trace!(target: "engine::root", "processing
-        MultiProofMessage::StateUpdate");
-                        if state_update_proofs_requested == 0 {
+                        trace!(target: "engine::root", "processing MultiProofMessage::StateUpdate");
+                        if first_update_time.is_none() {
+                            // record the wait time
+                            self.metrics
+                                .first_update_wait_time_histogram
+                                .record(start.elapsed().as_secs_f64());
                             first_update_time = Some(Instant::now());
                             debug!(target: "engine::root", "Started state root calculation");
                         }
-                        last_update_time = Some(Instant::now());
 
                         let len = update.len();
                         state_update_proofs_requested += self.on_state_update(source, update);
@@ -752,6 +787,7 @@ where
                     MultiProofMessage::FinishedStateUpdates => {
                         trace!(target: "engine::root", "processing MultiProofMessage::FinishedStateUpdates");
                         updates_finished = true;
+                        updates_finished_time = Some(Instant::now());
                         if self.is_done(
                             proofs_processed,
                             state_update_proofs_requested,
@@ -853,14 +889,23 @@ where
             target: "engine::root",
             total_updates = state_update_proofs_requested,
             total_proofs = proofs_processed,
-            total_time =? first_update_time.map(|t|t.elapsed()),
-            time_from_last_update =?last_update_time.map(|t|t.elapsed()),
+            total_time = ?first_update_time.map(|t|t.elapsed()),
+            time_since_updates_finished = ?updates_finished_time.map(|t|t.elapsed()),
             "All proofs processed, ending calculation"
         );
 
         // update total metrics on finish
         self.metrics.state_updates_received_histogram.record(state_update_proofs_requested as f64);
         self.metrics.proofs_processed_histogram.record(proofs_processed as f64);
+        if let Some(total_time) = first_update_time.map(|t| t.elapsed()) {
+            self.metrics.multiproof_task_total_duration_histogram.record(total_time);
+        }
+
+        if let Some(updates_finished_time) = updates_finished_time {
+            self.metrics
+                .last_proof_wait_time_histogram
+                .record(updates_finished_time.elapsed().as_secs_f64());
+        }
     }
 }
 
@@ -889,6 +934,11 @@ fn get_proof_targets(
             .filter(|slot| !fetched.is_some_and(|f| f.contains(*slot)))
             .peekable();
 
+        // If the storage is wiped, we still need to fetch the account proof.
+        if storage.wiped && fetched.is_none() {
+            targets.entry(*hashed_address).or_default();
+        }
+
         if changed_slots.peek().is_some() {
             targets.entry(*hashed_address).or_default().extend(changed_slots);
         }
@@ -903,6 +953,7 @@ mod tests {
     use alloy_primitives::map::B256Set;
     use reth_provider::{providers::ConsistentDbView, test_utils::create_test_provider_factory};
     use reth_trie::TrieInput;
+    use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofTaskManager};
     use revm_primitives::{B256, U256};
     use std::sync::Arc;
 
@@ -928,11 +979,22 @@ mod tests {
             + Clone
             + 'static,
     {
-        let executor = WorkloadExecutor::with_num_cpu_threads(2);
+        let executor = WorkloadExecutor::default();
         let config = create_state_root_config(factory, TrieInput::default());
+        let task_ctx = ProofTaskCtx::new(
+            config.nodes_sorted.clone(),
+            config.state_sorted.clone(),
+            config.prefix_sets.clone(),
+        );
+        let proof_task = ProofTaskManager::new(
+            executor.handle().clone(),
+            config.consistent_view.clone(),
+            task_ctx,
+            1,
+        );
         let channel = channel();
 
-        MultiProofTask::new(config, executor, channel.0)
+        MultiProofTask::new(config, executor, proof_task.handle(), channel.0, 1)
     }
 
     #[test]

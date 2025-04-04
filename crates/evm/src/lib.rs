@@ -20,19 +20,14 @@ extern crate alloc;
 use crate::execute::BasicBlockBuilder;
 use alloc::vec::Vec;
 use alloy_eips::{eip2930::AccessList, eip4895::Withdrawals};
-pub use alloy_evm::evm::EvmFactory;
-use alloy_evm::{
-    block::{BlockExecutorFactory, BlockExecutorFor},
-    IntoTxEnv,
-};
+use alloy_evm::block::{BlockExecutorFactory, BlockExecutorFor};
 use alloy_primitives::{Address, B256};
 use core::{error::Error, fmt::Debug};
 use execute::{BlockAssembler, BlockBuilder};
 use reth_primitives_traits::{
     BlockTy, HeaderTy, NodePrimitives, ReceiptTy, SealedBlock, SealedHeader, TxTy,
 };
-use revm::context::TxEnv;
-use revm_database::State;
+use revm::{context::TxEnv, database::State};
 
 pub mod either;
 /// EVM environment configuration.
@@ -50,7 +45,7 @@ pub mod test_utils;
 
 pub use alloy_evm::{
     block::{state_changes, system_calls, OnStateHook},
-    env, Database, Evm, EvmEnv, EvmError, FromRecoveredTx, InvalidTxError,
+    *,
 };
 
 pub use alloy_evm::block::state_changes as state_change;
@@ -94,7 +89,7 @@ pub use alloy_evm::block::state_changes as state_change;
 /// [`NextBlockEnvCtx`]: ConfigureEvm::NextBlockEnvCtx
 /// [`BlockExecutor`]: alloy_evm::block::BlockExecutor
 #[auto_impl::auto_impl(&, Arc)]
-pub trait ConfigureEvm: Send + Sync + Unpin + Clone {
+pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// The primitives type used by the EVM.
     type Primitives: NodePrimitives;
 
@@ -110,7 +105,11 @@ pub trait ConfigureEvm: Send + Sync + Unpin + Clone {
     type BlockExecutorFactory: BlockExecutorFactory<
         Transaction = TxTy<Self::Primitives>,
         Receipt = ReceiptTy<Self::Primitives>,
-        EvmFactory: EvmFactory<Tx: TransactionEnv + FromRecoveredTx<TxTy<Self::Primitives>>>,
+        EvmFactory: EvmFactory<
+            Tx: TransactionEnv
+                    + FromRecoveredTx<TxTy<Self::Primitives>>
+                    + FromTxWithEncoded<TxTy<Self::Primitives>>,
+        >,
     >;
 
     /// A type that knows how to build a block.
@@ -255,6 +254,7 @@ pub trait ConfigureEvm: Send + Sync + Unpin + Clone {
             assembler: self.block_assembler(),
             parent,
             transactions: Vec::new(),
+            simulated: false,
         }
     }
 

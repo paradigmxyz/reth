@@ -7,12 +7,13 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 extern crate alloc;
 
 use alloc::sync::Arc;
 use alloy_consensus::{BlockHeader, Header};
-use alloy_evm::FromRecoveredTx;
+use alloy_evm::{FromRecoveredTx, FromTxWithEncoded};
 use alloy_op_evm::{block::receipt_builder::OpReceiptBuilder, OpBlockExecutionCtx};
 use alloy_primitives::U256;
 use core::fmt::Debug;
@@ -54,8 +55,10 @@ pub struct OpEvmConfig<
     N: NodePrimitives = OpPrimitives,
     R = OpRethReceiptBuilder,
 > {
-    executor_factory: OpBlockExecutorFactory<R, Arc<ChainSpec>>,
-    block_assembler: OpBlockAssembler<ChainSpec>,
+    /// Inner [`OpBlockExecutorFactory`].
+    pub executor_factory: OpBlockExecutorFactory<R, Arc<ChainSpec>>,
+    /// Optimism block assembler.
+    pub block_assembler: OpBlockAssembler<ChainSpec>,
     _pd: core::marker::PhantomData<N>,
 }
 
@@ -106,7 +109,7 @@ where
         BlockBody = alloy_consensus::BlockBody<R::Transaction>,
         Block = alloy_consensus::Block<R::Transaction>,
     >,
-    OpTransaction<TxEnv>: FromRecoveredTx<N::SignedTx>,
+    OpTransaction<TxEnv>: FromRecoveredTx<N::SignedTx> + FromTxWithEncoded<N::SignedTx>,
     R: OpReceiptBuilder<Receipt: DepositReceipt, Transaction: SignedTransaction>,
     Self: Send + Sync + Unpin + Clone + 'static,
 {
@@ -227,9 +230,13 @@ mod tests {
     use reth_optimism_chainspec::BASE_MAINNET;
     use reth_optimism_primitives::{OpBlock, OpPrimitives, OpReceipt};
     use reth_primitives_traits::{Account, RecoveredBlock};
-    use revm::{database_interface::EmptyDBTyped, inspector::NoOpInspector, state::AccountInfo};
-    use revm_database::{BundleState, CacheDB};
-    use revm_primitives::Log;
+    use revm::{
+        database::{BundleState, CacheDB},
+        database_interface::EmptyDBTyped,
+        inspector::NoOpInspector,
+        primitives::Log,
+        state::AccountInfo,
+    };
     use std::sync::Arc;
 
     fn test_evm_config() -> OpEvmConfig {

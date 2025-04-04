@@ -10,7 +10,7 @@ use tower_http::compression::{Compression, CompressionLayer as TowerCompressionL
 /// This layer is a wrapper around [`tower_http::compression::CompressionLayer`] that integrates
 /// with jsonrpsee's HTTP types. It automatically compresses responses based on the client's
 /// Accept-Encoding header.
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 #[derive(Clone)]
 pub struct CompressionLayer {
     inner_layer: TowerCompressionLayer,
@@ -44,7 +44,7 @@ impl<S> Layer<S> for CompressionLayer {
 /// Service that performs response compression.
 ///
 /// Created by [`CompressionLayer`].
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 #[derive(Clone)]
 pub struct CompressionService<S> {
     compression: Compression<S>,

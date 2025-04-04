@@ -1,12 +1,11 @@
 //! Helper types that can be used by launchers.
 
-use std::{sync::Arc, thread::available_parallelism};
-
 use crate::{
     components::{NodeComponents, NodeComponentsBuilder},
     hooks::OnComponentInitializedHook,
     BuilderContext, NodeAdapter,
 };
+use alloy_eips::eip2124::Head;
 use alloy_primitives::{BlockNumber, B256};
 use eyre::{Context, OptionExt};
 use rayon::ThreadPoolBuilder;
@@ -40,7 +39,6 @@ use reth_node_metrics::{
     server::{MetricServer, MetricServerConfig},
     version::VersionInfo,
 };
-use reth_primitives::Head;
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, StaticFileProvider},
     BlockHashReader, BlockNumReader, ChainSpecProvider, ProviderError, ProviderFactory,
@@ -55,6 +53,7 @@ use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, error, info, warn};
 use reth_transaction_pool::TransactionPool;
+use std::{sync::Arc, thread::available_parallelism};
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedSender},
     oneshot, watch,
@@ -586,7 +585,7 @@ where
     }
 
     /// Creates a `BlockchainProvider` and attaches it to the launch context.
-    #[allow(clippy::complexity)]
+    #[expect(clippy::complexity)]
     pub fn with_blockchain_db<T, F>(
         self,
         create_blockchain_provider: F,
@@ -1021,7 +1020,7 @@ pub struct WithMeteredProvider<N: NodeTypesWithDB> {
 
 /// Helper container to bundle the [`ProviderFactory`], [`FullNodeTypes::Provider`]
 /// and a metrics sender.
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 pub struct WithMeteredProviders<T>
 where
     T: FullNodeTypes,
@@ -1031,7 +1030,7 @@ where
 }
 
 /// Helper container to bundle the metered providers container and [`NodeAdapter`].
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 pub struct WithComponents<T, CB>
 where
     T: FullNodeTypes,

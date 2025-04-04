@@ -47,7 +47,7 @@ pub use capability::*;
 pub mod primitives;
 pub use primitives::*;
 
-mod snap;
+pub mod snap;
 pub use snap::*;
 
 /// re-export for convenience

@@ -37,6 +37,7 @@ use crate::{
     metrics::TransactionFetcherMetrics,
     transactions::{validation, PartiallyFilterMessage},
 };
+use alloy_consensus::transaction::PooledTransaction;
 use alloy_primitives::TxHash;
 use derive_more::{Constructor, Deref};
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
@@ -49,11 +50,8 @@ use reth_eth_wire_types::{EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::{RequestError, RequestResult};
 use reth_network_peers::PeerId;
-use reth_primitives::PooledTransaction;
 use reth_primitives_traits::SignedTransaction;
 use schnellru::ByLength;
-#[cfg(debug_assertions)]
-use smallvec::{smallvec, SmallVec};
 use std::{
     collections::HashMap,
     pin::Pin,
@@ -1180,7 +1178,7 @@ impl<T: SignedTransaction> VerifyPooledTransactionsResponse for UnverifiedPooled
         let Self { mut txns } = self;
 
         #[cfg(debug_assertions)]
-        let mut tx_hashes_not_requested: SmallVec<[TxHash; 16]> = smallvec!();
+        let mut tx_hashes_not_requested: smallvec::SmallVec<[TxHash; 16]> = smallvec::smallvec!();
         #[cfg(not(debug_assertions))]
         let mut tx_hashes_not_requested_count = 0;
 
@@ -1297,7 +1295,7 @@ mod test {
     use alloy_primitives::{hex, B256};
     use alloy_rlp::Decodable;
     use derive_more::IntoIterator;
-    use reth_primitives::TransactionSigned;
+    use reth_ethereum_primitives::TransactionSigned;
     use std::{collections::HashSet, str::FromStr};
 
     #[derive(IntoIterator)]

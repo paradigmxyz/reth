@@ -4,8 +4,8 @@
 
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::TransactionInfo;
-use reth_primitives::{Recovered, TransactionSigned};
-use reth_primitives_traits::SignedTransaction;
+use reth_ethereum_primitives::TransactionSigned;
+use reth_primitives_traits::{Recovered, SignedTransaction};
 use reth_rpc_types_compat::TransactionCompat;
 
 /// Represents from where a transaction was fetched.

@@ -1591,7 +1591,7 @@ mod tests {
         node_iter::{TrieElement, TrieNodeIter},
         trie_cursor::{noop::NoopAccountTrieCursor, TrieCursor, TrieCursorFactory},
         walker::TrieWalker,
-        BranchNode, ExtensionNode, HashedPostState, LeafNode,
+        BranchNode, ExtensionNode, HashedPostState, LeafNode, TrieType,
     };
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
@@ -1648,6 +1648,7 @@ mod tests {
                 NoopHashedAccountCursor::default(),
                 hashed_post_state.accounts(),
             ),
+            TrieType::State,
         );
 
         while let Some(node) = node_iter.try_next().unwrap() {

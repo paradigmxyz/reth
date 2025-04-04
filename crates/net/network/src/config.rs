@@ -227,7 +227,7 @@ impl NetworkConfigBuilder<EthNetworkPrimitives> {
 
 // === impl NetworkConfigBuilder ===
 
-#[allow(missing_docs)]
+#[expect(missing_docs)]
 impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     /// Create a new builder instance with a random secret key.
     pub fn with_rng_secret_key() -> Self {
@@ -695,10 +695,10 @@ impl NetworkMode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_eips::eip2124::ForkHash;
     use rand::thread_rng;
     use reth_chainspec::{Chain, MAINNET};
     use reth_dns_discovery::tree::LinkEntry;
-    use reth_primitives::ForkHash;
     use reth_storage_api::noop::NoopProvider;
     use std::sync::Arc;
 

@@ -31,6 +31,7 @@ use std::{
 use tokio_stream::StreamExt;
 use tracing::info;
 
+mod block_import;
 mod chainspec;
 mod handshake;
 mod upgrade_status;
@@ -50,8 +51,10 @@ async fn main() {
 
     let secret_key = SecretKey::new(&mut rand::thread_rng());
 
+    let bsc_boot_nodes = boot_nodes();
+
     let net_cfg = NetworkConfig::builder(secret_key)
-        .boot_nodes(boot_nodes())
+        .boot_nodes(bsc_boot_nodes.clone())
         .set_head(head())
         .with_pow()
         .listener_addr(local_addr)
@@ -60,7 +63,7 @@ async fn main() {
 
     let net_cfg = net_cfg.set_discovery_v4(
         Discv4ConfigBuilder::default()
-            .add_boot_nodes(boot_nodes())
+            .add_boot_nodes(bsc_boot_nodes)
             .lookup_interval(Duration::from_millis(500))
             .build(),
     );

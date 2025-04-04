@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 # reth
 reth-codecs-derive.workspace = true
+reth-zstd-compressors = { workspace = true, optional = true, default-features = false }
 
 # eth
 alloy-consensus = { workspace = true, optional = true }
@@ -55,12 +56,14 @@ std = [
     "serde/std",
     "op-alloy-consensus?/std",
     "serde_json/std",
+    "reth-zstd-compressors?/std",
 ]
 alloy = [
     "dep:alloy-consensus",
     "dep:alloy-eips",
     "dep:alloy-genesis",
     "dep:alloy-trie",
+    "dep:reth-zstd-compressors",
 ]
 op = ["alloy", "dep:op-alloy-consensus"]
 test-utils = [

@@ -10,7 +10,7 @@ use reth_db::{init_db, open_db_read_only, DatabaseEnv};
 use reth_db_common::init::init_genesis;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_evm::{execute::BlockExecutorProvider, noop::NoopBlockExecutorProvider};
-use reth_node_builder::{NodeTypesWithDBAdapter, NodeTypesWithEngine};
+use reth_node_builder::{NodeTypes, NodeTypesWithDBAdapter};
 use reth_node_core::{
     args::{DatabaseArgs, DatadirArgs},
     dirs::{ChainPath, DataDirPath},
@@ -44,7 +44,8 @@ pub struct EnvironmentArgs<C: ChainSpecParser> {
         value_name = "CHAIN_OR_PATH",
         long_help = C::help_message(),
         default_value = C::SUPPORTED_CHAINS[0],
-        value_parser = C::parser()
+        value_parser = C::parser(),
+        global = true
     )]
     pub chain: Arc<C::ChainSpec>,
 
@@ -174,7 +175,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
 
 /// Environment built from [`EnvironmentArgs`].
 #[derive(Debug)]
-pub struct Environment<N: NodeTypesWithEngine> {
+pub struct Environment<N: NodeTypes> {
     /// Configuration for reth node
     pub config: Config,
     /// Provider factory.
@@ -200,9 +201,9 @@ impl AccessRights {
 }
 
 /// Helper trait with a common set of requirements for the
-/// [`NodeTypes`](reth_node_builder::NodeTypes) in CLI.
-pub trait CliNodeTypes: NodeTypesWithEngine + NodeTypesForProvider {}
-impl<N> CliNodeTypes for N where N: NodeTypesWithEngine + NodeTypesForProvider {}
+/// [`NodeTypes`] in CLI.
+pub trait CliNodeTypes: NodeTypes + NodeTypesForProvider {}
+impl<N> CliNodeTypes for N where N: NodeTypes + NodeTypesForProvider {}
 
 /// Helper trait aggregating components required for the CLI.
 pub trait CliNodeComponents<N: CliNodeTypes> {

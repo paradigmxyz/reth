@@ -11,13 +11,17 @@ use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
     Evm,
 };
-use reth_primitives::{Recovered, RecoveredBlock, TxTy};
-use reth_primitives_traits::{block::BlockTx, BlockBody as _, SignedTransaction};
+use reth_primitives_traits::{
+    block::BlockTx, BlockBody as _, Recovered, RecoveredBlock, SignedTransaction, TxTy,
+};
 use reth_rpc_server_types::result::rpc_err;
 use reth_rpc_types_compat::{block::from_block, TransactionCompat};
 use reth_storage_api::noop::NoopProvider;
-use revm::{context_interface::result::ExecutionResult, Database};
-use revm_primitives::{Address, Bytes, TxKind};
+use revm::{
+    context_interface::result::ExecutionResult,
+    primitives::{Address, Bytes, TxKind},
+    Database,
+};
 
 use crate::{
     error::{
@@ -76,6 +80,9 @@ where
     S: BlockBuilder<Executor: BlockExecutor<Evm: Evm<DB: Database<Error: Into<EthApiError>>>>>,
     T: TransactionCompat<TxTy<S::Primitives>>,
 {
+    // Tell the block builder that it is used for simulation
+    builder.set_simulate(true);
+
     builder.apply_pre_execution_changes()?;
 
     let mut results = Vec::with_capacity(calls.len());

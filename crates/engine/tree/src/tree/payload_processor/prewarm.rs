@@ -8,9 +8,10 @@ use crate::tree::{
     StateProviderBuilder,
 };
 use alloy_consensus::transaction::Recovered;
+use alloy_evm::Database;
 use alloy_primitives::{keccak256, map::B256Set, B256};
 use metrics::{Gauge, Histogram};
-use reth_evm::{ConfigureEvm, Evm};
+use reth_evm::{ConfigureEvm, Evm, EvmFor};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{header::SealedHeaderFor, NodePrimitives, SignedTransaction};
 use reth_provider::{BlockReader, StateCommitmentProvider, StateProviderFactory, StateReader};
@@ -86,6 +87,9 @@ where
     fn spawn_next(&mut self) {
         while self.in_progress < self.max_concurrency {
             if let Some(tx) = self.pending.pop_front() {
+                // increment the in progress counter
+                self.in_progress += 1;
+
                 self.spawn_transaction(tx);
             } else {
                 break
@@ -99,6 +103,7 @@ where
         let metrics = self.ctx.metrics.clone();
         let actions_tx = self.actions_tx.clone();
         let prepare_proof_targets = self.should_prepare_multi_proof_targets();
+
         self.executor.spawn_blocking(move || {
             let start = Instant::now();
             // depending on whether this task needs he proof targets we either just transact or
@@ -208,51 +213,16 @@ where
         let metrics = self.metrics.clone();
         let state = self.transact(tx)?;
 
-        let mut targets = MultiProofTargets::with_capacity(state.len());
-        let mut storage_targets = 0;
-
-        for (addr, account) in state {
-            // if the account was not touched, or if the account was selfdestructed, do not
-            // fetch proofs for it
-            //
-            // Since selfdestruct can only happen in the same transaction, we can skip
-            // prefetching proofs for selfdestructed accounts
-            //
-            // See: https://eips.ethereum.org/EIPS/eip-6780
-            if !account.is_touched() || account.is_selfdestructed() {
-                continue
-            }
-
-            let mut storage_set =
-                B256Set::with_capacity_and_hasher(account.storage.len(), Default::default());
-            for (key, slot) in account.storage {
-                // do nothing if unchanged
-                if !slot.is_changed() {
-                    continue
-                }
-
-                storage_set.insert(keccak256(B256::new(key.to_be_bytes())));
-            }
-
-            storage_targets += storage_set.len();
-            targets.insert(keccak256(addr), storage_set);
-        }
-
+        let (targets, storage_targets) = multiproof_targets_from_state(state);
         metrics.prefetch_storage_targets.record(storage_targets as f64);
 
         Some(targets)
     }
 
-    /// Transacts the transaction and returns the state outcome.
-    ///
-    /// Returns `None` if executing the transaction failed to a non Revert error.
-    /// Returns the touched+modified state of the transaction.
-    ///
-    /// Note: Since here are no ordering guarantees this won't the state the tx produces when
-    /// executed sequentially.
-    fn transact(self, tx: Recovered<N::SignedTx>) -> Option<EvmState> {
+    /// Splits this context into an evm, an evm config, and metrics.
+    fn evm_for_ctx(self) -> Option<(EvmFor<Evm, impl Database>, Evm, PrewarmMetrics)> {
         let Self { header, evm_config, cache: caches, cache_metrics, provider, metrics } = self;
-        // Create the state provider inside the thread
+
         let state_provider = match provider.build() {
             Ok(provider) => provider,
             Err(err) => {
@@ -269,7 +239,7 @@ where
         let state_provider =
             CachedStateProvider::new_with_caches(state_provider, caches, cache_metrics);
 
-        let state_provider = StateProviderDatabase::new(&state_provider);
+        let state_provider = StateProviderDatabase::new(state_provider);
 
         let mut evm_env = evm_config.evm_env(&header);
 
@@ -278,7 +248,20 @@ where
         evm_env.cfg_env.disable_nonce_check = true;
 
         // create a new executor and disable nonce checks in the env
-        let mut evm = evm_config.evm_with_env(state_provider, evm_env);
+        let evm = evm_config.evm_with_env(state_provider, evm_env);
+
+        Some((evm, evm_config, metrics))
+    }
+
+    /// Transacts the transaction and returns the state outcome.
+    ///
+    /// Returns `None` if executing the transaction failed to a non Revert error.
+    /// Returns the touched+modified state of the transaction.
+    ///
+    /// Note: Since here are no ordering guarantees this won't the state the tx produces when
+    /// executed sequentially.
+    fn transact(self, tx: Recovered<N::SignedTx>) -> Option<EvmState> {
+        let (mut evm, evm_config, metrics) = self.evm_for_ctx()?;
 
         // create the tx env and reset nonce
         let tx_env = evm_config.tx_env(&tx);
@@ -300,6 +283,41 @@ where
 
         Some(res.state)
     }
+}
+
+/// Returns a set of [`MultiProofTargets`] and the total amount of storage targets, based on the
+/// given state.
+fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargets, usize) {
+    let mut targets = MultiProofTargets::with_capacity(state.len());
+    let mut storage_targets = 0;
+    for (addr, account) in state {
+        // if the account was not touched, or if the account was selfdestructed, do not
+        // fetch proofs for it
+        //
+        // Since selfdestruct can only happen in the same transaction, we can skip
+        // prefetching proofs for selfdestructed accounts
+        //
+        // See: https://eips.ethereum.org/EIPS/eip-6780
+        if !account.is_touched() || account.is_selfdestructed() {
+            continue
+        }
+
+        let mut storage_set =
+            B256Set::with_capacity_and_hasher(account.storage.len(), Default::default());
+        for (key, slot) in account.storage {
+            // do nothing if unchanged
+            if !slot.is_changed() {
+                continue
+            }
+
+            storage_set.insert(keccak256(B256::new(key.to_be_bytes())));
+        }
+
+        storage_targets += storage_set.len();
+        targets.insert(keccak256(addr), storage_set);
+    }
+
+    (targets, storage_targets)
 }
 
 /// The events the pre-warm task can handle.

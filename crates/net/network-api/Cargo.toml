@@ -39,7 +39,6 @@ auto_impl.workspace = true
 derive_more.workspace = true
 
 [features]
-default = ["serde"]
 serde = [
     "dep:serde",
     "reth-eth-wire-types/serde",

@@ -38,7 +38,7 @@ use tower::{Layer, Service};
 ///         .unwrap();
 /// }
 /// ```
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 pub struct AuthLayer<V> {
     validator: V,
 }
@@ -104,7 +104,7 @@ where
 
 /// A future representing the response of an RPC request
 #[pin_project]
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 pub struct ResponseFuture<F> {
     /// The kind of response future, error or pending
     #[pin]

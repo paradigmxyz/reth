@@ -1,11 +1,11 @@
 use crate::EthVersion;
 use alloy_chains::{Chain, NamedChain};
+use alloy_hardforks::{EthereumHardfork, ForkId, Head};
 use alloy_primitives::{hex, B256, U256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use core::fmt::{Debug, Display};
 use reth_chainspec::{EthChainSpec, Hardforks, MAINNET};
 use reth_codecs_derive::add_arbitrary_tests;
-use reth_ethereum_forks::{EthereumHardfork, ForkId, Head};
 
 /// The status message is used in the eth protocol handshake to ensure that peers are on the same
 /// network and are following the same fork.
@@ -67,6 +67,17 @@ impl Status {
             .blockhash(head.hash)
             .total_difficulty(head.total_difficulty)
             .forkid(spec.fork_id(head))
+    }
+
+    /// Converts this [`Status`] into the [Eth69](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7642.md) variant that excludes the total difficulty field.
+    pub fn into_eth69(self) -> StatusEth69 {
+        StatusEth69 {
+            version: EthVersion::Eth69,
+            chain: self.chain,
+            blockhash: self.blockhash,
+            genesis: self.genesis,
+            forkid: self.forkid,
+        }
     }
 }
 
@@ -283,13 +294,7 @@ impl Default for StatusEth69 {
 
 impl From<Status> for StatusEth69 {
     fn from(status: Status) -> Self {
-        Self {
-            version: EthVersion::Eth69,
-            chain: status.chain,
-            blockhash: status.blockhash,
-            genesis: status.genesis,
-            forkid: status.forkid,
-        }
+        status.into_eth69()
     }
 }
 
@@ -298,11 +303,11 @@ mod tests {
     use crate::{EthVersion, Status, StatusEth69};
     use alloy_consensus::constants::MAINNET_GENESIS_HASH;
     use alloy_genesis::Genesis;
+    use alloy_hardforks::{EthereumHardfork, ForkHash, ForkId, Head};
     use alloy_primitives::{hex, B256, U256};
     use alloy_rlp::{Decodable, Encodable};
     use rand::Rng;
     use reth_chainspec::{Chain, ChainSpec, ForkCondition, NamedChain};
-    use reth_ethereum_forks::{EthereumHardfork, ForkHash, ForkId, Head};
     use std::str::FromStr;
 
     #[test]

@@ -9,7 +9,6 @@ use crate::{
 };
 use alloy_primitives::{Address, U256};
 use rand::Rng;
-use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     ops::{Deref, DerefMut},
@@ -167,7 +166,8 @@ impl MockSimulatorConfig {
 }
 
 /// Represents
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) enum ScenarioType {
     OnchainNonce,
     HigherNonce { skip: u64 },
@@ -178,7 +178,8 @@ pub(crate) enum ScenarioType {
 /// A scenario produces one or more transactions and expects a certain Outcome.
 ///
 /// An executed scenario can affect previous executed transactions
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) enum Scenario {
     /// Send a tx with the same nonce as on chain.
     OnchainNonce { nonce: u64 },
@@ -191,7 +192,8 @@ pub(crate) enum Scenario {
 }
 
 /// Represents an executed scenario
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct ExecutedScenario {
     /// balance at the time of execution
     balance: U256,
@@ -202,7 +204,8 @@ pub(crate) struct ExecutedScenario {
 }
 
 /// All executed scenarios by a sender
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct ExecutedScenarios {
     sender: Address,
     scenarios: Vec<ExecutedScenario>,

@@ -19,10 +19,8 @@ use reth::{
         },
         handler::{EthPrecompiles, PrecompileProvider},
         inspector::{Inspector, NoOpInspector},
-        interpreter::{interpreter::EthInterpreter, InterpreterResult},
-        precompile::{
-            PrecompileError, PrecompileFn, PrecompileOutput, PrecompileResult, Precompiles,
-        },
+        interpreter::{interpreter::EthInterpreter, InputsImpl, InterpreterResult},
+        precompile::{PrecompileFn, PrecompileOutput, PrecompileResult, Precompiles},
         primitives::hardfork::SpecId,
         MainBuilder, MainContext,
     },
@@ -33,7 +31,7 @@ use reth::{
 use reth_chainspec::{Chain, ChainSpec};
 use reth_evm::{Database, EvmEnv};
 use reth_evm_ethereum::{EthEvm, EthEvmConfig};
-use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithEngine, PayloadTypes};
+use reth_node_api::{FullNodeTypes, NodeTypes, PayloadTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{
     node::{EthereumAddOns, EthereumPayloadBuilder},
@@ -109,12 +107,12 @@ pub struct MyPayloadBuilder {
 
 impl<Types, Node, Pool> PayloadBuilderBuilder<Node, Pool> for MyPayloadBuilder
 where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
+    Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>
         + Unpin
         + 'static,
-    Types::Engine: PayloadTypes<
+    Types::Payload: PayloadTypes<
         BuiltPayload = EthBuiltPayload,
         PayloadAttributes = PayloadAttributes,
         PayloadBuilderAttributes = EthPayloadBuilderAttributes,
@@ -171,31 +169,33 @@ pub fn prague_custom() -> &'static Precompiles {
 impl<CTX: ContextTr> PrecompileProvider<CTX> for CustomPrecompiles {
     type Output = InterpreterResult;
 
-    fn set_spec(&mut self, spec: <CTX::Cfg as Cfg>::Spec) {
+    fn set_spec(&mut self, spec: <CTX::Cfg as Cfg>::Spec) -> bool {
         let spec_id = spec.clone().into();
         if spec_id == SpecId::PRAGUE {
-            self.precompiles = EthPrecompiles { precompiles: prague_custom() }
+            self.precompiles = EthPrecompiles { precompiles: prague_custom(), spec: spec.into() }
         } else {
             PrecompileProvider::<CTX>::set_spec(&mut self.precompiles, spec);
         }
+        true
     }
 
     fn run(
         &mut self,
         context: &mut CTX,
         address: &Address,
-        bytes: &Bytes,
+        inputs: &InputsImpl,
+        is_static: bool,
         gas_limit: u64,
-    ) -> Result<Option<Self::Output>, PrecompileError> {
-        self.precompiles.run(context, address, bytes, gas_limit)
-    }
-
-    fn contains(&self, address: &Address) -> bool {
-        self.precompiles.contains(address)
+    ) -> Result<Option<Self::Output>, String> {
+        self.precompiles.run(context, address, inputs, is_static, gas_limit)
     }
 
     fn warm_addresses(&self) -> Box<impl Iterator<Item = Address>> {
         self.precompiles.warm_addresses()
+    }
+
+    fn contains(&self, address: &Address) -> bool {
+        self.precompiles.contains(address)
     }
 }
 

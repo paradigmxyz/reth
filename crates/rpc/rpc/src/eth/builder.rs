@@ -4,10 +4,9 @@ use crate::{
     eth::{core::EthApiInner, EthTxBuilder},
     EthApi,
 };
+use reth_chain_state::CanonStateSubscriptions;
+use reth_chainspec::ChainSpecProvider;
 use reth_node_api::NodePrimitives;
-use reth_provider::{
-    BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, StateProviderFactory,
-};
 use reth_rpc_eth_types::{
     fee_history::fee_history_cache_new_blocks_task, EthStateCache, FeeHistoryCache,
     FeeHistoryCacheConfig, GasCap, GasPriceOracle,
@@ -15,6 +14,7 @@ use reth_rpc_eth_types::{
 use reth_rpc_server_types::constants::{
     DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
 };
+use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner, TokioTaskExecutor};
 use std::sync::Arc;
 

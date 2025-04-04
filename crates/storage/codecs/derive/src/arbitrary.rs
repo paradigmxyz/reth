@@ -98,7 +98,7 @@ pub fn maybe_generate_tests(
     let mut tests = TokenStream2::default();
     if !roundtrips.is_empty() {
         tests = quote! {
-            #[allow(non_snake_case)]
+            #[expect(non_snake_case)]
             #[cfg(test)]
             mod #mod_tests {
                 #(#traits)*

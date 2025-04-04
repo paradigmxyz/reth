@@ -166,7 +166,7 @@ impl ExecutionPayload for op_alloy_rpc_types_engine::OpExecutionData {
 }
 
 /// Special implementation for Ethereum types that provides additional helper methods
-impl<'a, Attributes> PayloadOrAttributes<'a, ExecutionData, Attributes>
+impl<Attributes> PayloadOrAttributes<'_, ExecutionData, Attributes>
 where
     Attributes: PayloadAttributes,
 {

@@ -14,12 +14,10 @@ extern crate alloc;
 use alloy_consensus::BlockHeader;
 use reth_errors::ConsensusError;
 use reth_payload_primitives::{
-    BuiltPayload, EngineApiMessageVersion, EngineObjectValidationError,
-    InvalidPayloadAttributesError, NewPayloadError, PayloadAttributes, PayloadOrAttributes,
-    PayloadTypes,
+    EngineApiMessageVersion, EngineObjectValidationError, InvalidPayloadAttributesError,
+    NewPayloadError, PayloadAttributes, PayloadOrAttributes, PayloadTypes,
 };
-use reth_primitives::{NodePrimitives, RecoveredBlock, SealedBlock};
-use reth_primitives_traits::Block;
+use reth_primitives_traits::{Block, RecoveredBlock};
 use reth_trie_common::HashedPostState;
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -41,6 +39,9 @@ pub use event::*;
 mod invalid_block_hook;
 pub use invalid_block_hook::InvalidBlockHook;
 
+pub mod config;
+pub use config::*;
+
 /// This type defines the versioned types of the engine API.
 ///
 /// This includes the execution payload types and payload attributes that are used to trigger a
@@ -53,7 +54,6 @@ pub trait EngineTypes:
                           + TryInto<Self::ExecutionPayloadEnvelopeV4>,
     > + DeserializeOwned
     + Serialize
-    + 'static
 {
     /// Execution Payload V1 envelope type.
     type ExecutionPayloadEnvelopeV1: DeserializeOwned
@@ -87,15 +87,6 @@ pub trait EngineTypes:
         + Send
         + Sync
         + 'static;
-    /// Execution data.
-    type ExecutionData: ExecutionPayload;
-
-    /// Converts a [`BuiltPayload`] into an [`Self::ExecutionData`].
-    fn block_to_payload(
-        block: SealedBlock<
-            <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
-        >,
-    ) -> Self::ExecutionData;
 }
 
 /// Type that validates an [`ExecutionPayload`].
@@ -132,7 +123,7 @@ pub trait PayloadValidator: Send + Sync + Unpin + 'static {
 }
 
 /// Type that validates the payloads processed by the engine.
-pub trait EngineValidator<Types: EngineTypes>:
+pub trait EngineValidator<Types: PayloadTypes>:
     PayloadValidator<ExecutionData = Types::ExecutionData>
 {
     /// Validates the presence or exclusion of fork-specific fields based on the payload attributes

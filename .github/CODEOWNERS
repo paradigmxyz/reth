@@ -44,5 +44,6 @@ crates/tokio-util/          @fgimenez
 crates/tracing/             @onbjerg
 crates/transaction-pool/    @mattsse
 crates/trie/                @rkrasiuk @Rjected @shekhirin
+crates/ress                 @rkrasiuk
 etc/                        @Rjected @onbjerg @shekhirin
 .github/                    @onbjerg @gakonst @DaniPopes

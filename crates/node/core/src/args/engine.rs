@@ -1,6 +1,7 @@
 //! clap [Args](clap::Args) for engine purposes
 
 use clap::Args;
+use reth_engine_primitives::TreeConfig;
 
 use crate::node_config::{
     DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB, DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
@@ -23,10 +24,6 @@ pub struct EngineArgs {
     #[arg(long = "engine.legacy-state-root", default_value = "false")]
     pub legacy_state_root_task_enabled: bool,
 
-    /// Enable state root task
-    #[arg(long = "engine.state-root-task", default_value = "false", hide = true)]
-    pub state_root_task_enabled: bool,
-
     /// Enable cross-block caching and parallel prewarming
     #[arg(long = "engine.caching-and-prewarming")]
     pub caching_and_prewarming_enabled: bool,
@@ -39,6 +36,10 @@ pub struct EngineArgs {
     /// state root calculation.
     #[arg(long = "engine.state-root-task-compare-updates")]
     pub state_root_task_compare_updates: bool,
+
+    /// Enables accepting requests hash instead of an array of requests in `engine_newPayloadV4`.
+    #[arg(long = "engine.accept-execution-requests-hash")]
+    pub accept_execution_requests_hash: bool,
 }
 
 impl Default for EngineArgs {
@@ -47,11 +48,24 @@ impl Default for EngineArgs {
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
             legacy_state_root_task_enabled: false,
-            state_root_task_enabled: false,
             state_root_task_compare_updates: false,
             caching_and_prewarming_enabled: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB,
+            accept_execution_requests_hash: false,
         }
+    }
+}
+
+impl EngineArgs {
+    /// Creates a [`TreeConfig`] from the engine arguments.
+    pub fn tree_config(&self) -> TreeConfig {
+        TreeConfig::default()
+            .with_persistence_threshold(self.persistence_threshold)
+            .with_memory_block_buffer_target(self.memory_block_buffer_target)
+            .with_legacy_state_root(self.legacy_state_root_task_enabled)
+            .with_caching_and_prewarming(self.caching_and_prewarming_enabled)
+            .with_always_compare_trie_updates(self.state_root_task_compare_updates)
+            .with_cross_block_cache_size(self.cross_block_cache_size * 1024 * 1024)
     }
 }
 

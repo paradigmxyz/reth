@@ -57,6 +57,7 @@ rand.workspace = true
 
 [features]
 test-utils = [
+    "alloy-primitives/getrandom",
     "alloy-signer",
     "alloy-signer-local",
     "rand",

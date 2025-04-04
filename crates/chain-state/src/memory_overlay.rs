@@ -16,7 +16,7 @@ use std::sync::OnceLock;
 
 /// A state provider that stores references to in-memory blocks along with their state as well as a
 /// reference of the historical state provider for fallback lookups.
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 pub struct MemoryOverlayStateProviderRef<
     'a,
     N: NodePrimitives = reth_ethereum_primitives::EthPrimitives,

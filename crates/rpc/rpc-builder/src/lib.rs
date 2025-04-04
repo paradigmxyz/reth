@@ -100,7 +100,7 @@ use reth_rpc::eth::sim_bundle::EthSimBundle;
 pub mod rate_limiter;
 
 /// Convenience function for starting a server in one step.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub async fn launch<N, Provider, Pool, Network, Tasks, EvmConfig, EthApi, BlockExecutor>(
     provider: Provider,
     pool: Pool,
@@ -552,7 +552,7 @@ where
     /// This behaves exactly as [`RpcModuleBuilder::build`] for the [`TransportRpcModules`], but
     /// also configures the auth (engine api) server, which exposes a subset of the `eth_`
     /// namespace.
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     pub fn build_with_auth_server<EthApi>(
         self,
         module_config: TransportRpcModuleConfig,
@@ -767,6 +767,8 @@ pub struct RpcRegistryInner<
     blocking_pool_guard: BlockingTaskGuard,
     /// Contains the [Methods] of a module
     modules: HashMap<RethRpcModule, Methods>,
+    /// eth config settings
+    eth_config: EthConfig,
 }
 
 // === impl RpcRegistryInner ===
@@ -788,7 +790,7 @@ where
     BlockExecutor: BlockExecutorProvider<Primitives = N>,
 {
     /// Creates a new, empty instance.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new<EvmConfig>(
         provider: Provider,
         pool: Pool,
@@ -817,6 +819,7 @@ where
             modules: Default::default(),
             blocking_pool_guard,
             block_executor,
+            eth_config: config.eth,
         }
     }
 }
@@ -1046,7 +1049,7 @@ where
     where
         EthApi: TraceExt,
     {
-        TraceApi::new(self.eth_api().clone(), self.blocking_pool_guard.clone())
+        TraceApi::new(self.eth_api().clone(), self.blocking_pool_guard.clone(), self.eth_config)
     }
 
     /// Instantiates [`EthBundle`] Api
@@ -1221,11 +1224,13 @@ where
                         RethRpcModule::Net => {
                             NetApi::new(self.network.clone(), eth_api.clone()).into_rpc().into()
                         }
-                        RethRpcModule::Trace => {
-                            TraceApi::new(eth_api.clone(), self.blocking_pool_guard.clone())
-                                .into_rpc()
-                                .into()
-                        }
+                        RethRpcModule::Trace => TraceApi::new(
+                            eth_api.clone(),
+                            self.blocking_pool_guard.clone(),
+                            self.eth_config,
+                        )
+                        .into_rpc()
+                        .into(),
                         RethRpcModule::Web3 => Web3Api::new(self.network.clone()).into_rpc().into(),
                         RethRpcModule::Txpool => TxPoolApi::new(
                             self.eth.api.pool().clone(),
@@ -1938,6 +1943,68 @@ impl TransportRpcModules {
         Ok(())
     }
 
+    /// Returns all unique endpoints installed for the given module.
+    ///
+    /// Note: In case of duplicate method names this only record the first occurrence.
+    pub fn methods_by_module<F>(&self, module: RethRpcModule) -> Methods {
+        self.methods_by(|name| name.starts_with(module.as_str()))
+    }
+
+    /// Returns all unique endpoints installed in any of the configured modules.
+    ///
+    /// Note: In case of duplicate method names this only record the first occurrence.
+    pub fn methods_by<F>(&self, mut filter: F) -> Methods
+    where
+        F: FnMut(&str) -> bool,
+    {
+        let mut methods = Methods::new();
+
+        // filter that matches the given filter and also removes duplicates we already have
+        let mut f =
+            |name: &str, mm: &Methods| filter(name) && !mm.method_names().any(|m| m == name);
+
+        if let Some(m) = self.http_methods(|name| f(name, &methods)) {
+            let _ = methods.merge(m);
+        }
+        if let Some(m) = self.ws_methods(|name| f(name, &methods)) {
+            let _ = methods.merge(m);
+        }
+        if let Some(m) = self.ipc_methods(|name| f(name, &methods)) {
+            let _ = methods.merge(m);
+        }
+        methods
+    }
+
+    /// Returns all [`Methods`] installed for the http server based in the given closure.
+    ///
+    /// Returns `None` if no http support is configured.
+    pub fn http_methods<F>(&self, filter: F) -> Option<Methods>
+    where
+        F: FnMut(&str) -> bool,
+    {
+        self.http.as_ref().map(|module| methods_by(module, filter))
+    }
+
+    /// Returns all [`Methods`] installed for the ws server based in the given closure.
+    ///
+    /// Returns `None` if no ws support is configured.
+    pub fn ws_methods<F>(&self, filter: F) -> Option<Methods>
+    where
+        F: FnMut(&str) -> bool,
+    {
+        self.ws.as_ref().map(|module| methods_by(module, filter))
+    }
+
+    /// Returns all [`Methods`] installed for the ipc server based in the given closure.
+    ///
+    /// Returns `None` if no ipc support is configured.
+    pub fn ipc_methods<F>(&self, filter: F) -> Option<Methods>
+    where
+        F: FnMut(&str) -> bool,
+    {
+        self.ipc.as_ref().map(|module| methods_by(module, filter))
+    }
+
     /// Removes the method with the given name from the configured http methods.
     ///
     /// Returns `true` if the method was found and removed, `false` otherwise.
@@ -2079,6 +2146,23 @@ impl TransportRpcModules {
         self.replace_ipc(other)?;
         Ok(true)
     }
+}
+
+/// Returns the methods installed in the given module that match the given filter.
+fn methods_by<T, F>(module: &RpcModule<T>, mut filter: F) -> Methods
+where
+    F: FnMut(&str) -> bool,
+{
+    let mut methods = Methods::new();
+    let method_names = module.method_names().filter(|name| filter(name));
+
+    for name in method_names {
+        if let Some(matched_method) = module.method(name).cloned() {
+            let _ = methods.verify_and_insert(name, matched_method);
+        }
+    }
+
+    methods
 }
 
 /// A handle to the spawned servers.

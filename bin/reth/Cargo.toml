@@ -63,8 +63,11 @@ reth-node-events.workspace = true
 reth-node-metrics.workspace = true
 reth-consensus.workspace = true
 reth-prune.workspace = true
+reth-tokio-util.workspace = true
+reth-ress-protocol.workspace = true
+reth-ress-provider.workspace = true
 
-# crypto
+# alloy
 alloy-eips = { workspace = true, features = ["kzg"] }
 alloy-rlp.workspace = true
 alloy-rpc-types = { workspace = true, features = ["engine"] }

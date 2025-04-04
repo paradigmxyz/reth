@@ -8,10 +8,10 @@ use alloy_rpc_types_eth::{
 use reth_evm::TransactionEnv;
 use revm::{
     context::BlockEnv,
+    database::{CacheDB, State},
     state::{Account, AccountStatus, Bytecode, EvmStorageSlot},
     Database, DatabaseCommit,
 };
-use revm_database::{CacheDB, State};
 use std::{
     cmp::min,
     collections::{BTreeMap, HashMap},
