@@ -1,10 +1,11 @@
 use crate::{ExExContextDyn, ExExEvent, ExExNotifications, ExExNotificationsStream};
 use alloy_eips::BlockNumHash;
+use reth_evm::execute::BlockExecutorProvider;
 use reth_exex_types::ExExHead;
 use reth_node_api::{FullNodeComponents, NodePrimitives, NodeTypes, PrimitivesTy};
 use reth_node_core::node_config::NodeConfig;
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_provider::BlockReader;
+use reth_provider::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::TaskExecutor;
 use std::fmt::Debug;
 use tokio::sync::mpsc::{error::SendError, UnboundedSender};
@@ -61,8 +62,11 @@ impl<Node> ExExContext<Node>
 where
     Node: FullNodeComponents,
     Node::Provider: Debug + BlockReader,
-    Node::Executor: Debug,
-    Node::Types: NodeTypes<Primitives: NodePrimitives>,
+    Node::Executor: Debug
+        + reth_evm::execute::BlockExecutorProvider<
+            Primitives: NodePrimitives<Block = <Node::Provider as BlockReader>::Block>,
+        >,
+    PrimitivesTy<Node::Types>: NodePrimitives<Block = <Node::Provider as BlockReader>::Block>,
 {
     /// Returns dynamic version of the context
     pub fn into_dyn(self) -> ExExContextDyn<PrimitivesTy<Node::Types>> {
@@ -73,7 +77,12 @@ where
 impl<Node> ExExContext<Node>
 where
     Node: FullNodeComponents,
-    Node::Types: NodeTypes<Primitives: NodePrimitives>,
+    Node::Provider: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
+    Node::Executor: BlockExecutorProvider<
+            Primitives: NodePrimitives<Block = <Node::Provider as BlockReader>::Block>,
+        > + Clone
+        + Unpin
+        + 'static,
 {
     /// Returns the transaction pool of the node.
     pub fn pool(&self) -> &Node::Pool {
@@ -141,9 +150,10 @@ where
 #[cfg(test)]
 mod tests {
     use crate::ExExContext;
+    use reth_evm::execute::BlockExecutorProvider;
     use reth_exex_types::ExExHead;
-    use reth_node_api::FullNodeComponents;
-    use reth_provider::BlockReader;
+    use reth_node_api::{FullNodeComponents, NodePrimitives};
+    use reth_provider::{BlockReader, HeaderProvider, StateProviderFactory};
 
     /// <https://github.com/paradigmxyz/reth/issues/12054>
     #[test]
@@ -153,9 +163,16 @@ mod tests {
             ctx: ExExContext<Node>,
         }
 
-        impl<Node: FullNodeComponents> ExEx<Node>
+        impl<Node> ExEx<Node>
         where
-            Node::Provider: BlockReader,
+            Node: FullNodeComponents,
+            Node::Provider:
+                BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
+            Node::Executor: BlockExecutorProvider<
+                    Primitives: NodePrimitives<Block = <Node::Provider as BlockReader>::Block>,
+                > + Clone
+                + Unpin
+                + 'static,
         {
             async fn _test_bounds(mut self) -> eyre::Result<()> {
                 self.ctx.pool();
