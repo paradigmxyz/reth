@@ -1467,7 +1467,10 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{EthereumTxEnvelope, SignableTransaction, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxEnvelope, TxLegacy};
+    use alloy_consensus::{
+        EthereumTxEnvelope, SignableTransaction, TxEip1559, TxEip2930, TxEip4844, TxEip7702,
+        TxEnvelope, TxLegacy,
+    };
     use alloy_eips::eip4844::DATA_GAS_PER_BLOB;
     use alloy_primitives::PrimitiveSignature as Signature;
 
@@ -1517,7 +1520,8 @@ mod tests {
                 gas_limit: 1000,
                 value: U256::from(100),
                 ..Default::default()
-            }.into_signed(Signature::test_signature())
+            }
+            .into_signed(Signature::test_signature()),
         );
         let transaction = Recovered::new_unchecked(tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
@@ -1538,11 +1542,12 @@ mod tests {
                 gas_limit: 1000,
                 value: U256::from(100),
                 ..Default::default()
-            }.into_signed(Signature::test_signature())
+            }
+            .into_signed(Signature::test_signature()),
         );
         let transaction = Recovered::new_unchecked(tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
-        let expected_cost = U256::from(100) + (U256::from(10* 1000));
+        let expected_cost = U256::from(100) + (U256::from(10 * 1000));
 
         assert_eq!(pooled_tx.transaction, transaction);
         assert_eq!(pooled_tx.encoded_length, 200);
@@ -1559,7 +1564,8 @@ mod tests {
                 gas_limit: 1000,
                 value: U256::from(100),
                 ..Default::default()
-            }.into_signed(Signature::test_signature())
+            }
+            .into_signed(Signature::test_signature()),
         );
         let transaction = Recovered::new_unchecked(tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
@@ -1582,7 +1588,8 @@ mod tests {
                 max_fee_per_blob_gas: 5,
                 blob_versioned_hashes: vec![B256::default()],
                 ..Default::default()
-            }.into_signed(Signature::test_signature())
+            }
+            .into_signed(Signature::test_signature()),
         );
         let transaction = Recovered::new_unchecked(tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 300);
@@ -1605,7 +1612,8 @@ mod tests {
                 gas_limit: 1000,
                 value: U256::from(100),
                 ..Default::default()
-            }.into_signed(Signature::test_signature())
+            }
+            .into_signed(Signature::test_signature()),
         );
         let transaction = Recovered::new_unchecked(tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
