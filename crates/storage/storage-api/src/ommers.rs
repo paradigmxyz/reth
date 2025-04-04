@@ -8,17 +8,17 @@ pub trait OmmersProvider: HeaderProvider + Send + Sync {
     /// Returns the ommers/uncle headers of the given block from the database.
     ///
     /// Returns `None` if block is not found.
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>>;
+    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::BlockHeader>>>;
 }
 
 impl<T: OmmersProvider> OmmersProvider for Arc<T> {
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
+    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::BlockHeader>>> {
         T::ommers(self, id)
     }
 }
 
 impl<T: OmmersProvider> OmmersProvider for &T {
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
+    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::BlockHeader>>> {
         T::ommers(self, id)
     }
 }

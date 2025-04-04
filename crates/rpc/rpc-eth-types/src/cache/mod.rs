@@ -230,7 +230,7 @@ pub(crate) struct EthStateCacheService<
     Provider: BlockReader,
     LimitBlocks: Limiter<B256, Arc<RecoveredBlock<Provider::Block>>>,
     LimitReceipts: Limiter<B256, Arc<Vec<Provider::Receipt>>>,
-    LimitHeaders: Limiter<B256, Provider::Header>,
+    LimitHeaders: Limiter<B256, Provider::BlockHeader>,
 {
     /// The type used to lookup data from disk
     provider: Provider,
@@ -242,7 +242,7 @@ pub(crate) struct EthStateCacheService<
     ///
     /// Headers are cached because they are required to populate the environment for execution
     /// (evm).
-    headers_cache: HeaderLruCache<Provider::Header, LimitHeaders>,
+    headers_cache: HeaderLruCache<Provider::BlockHeader, LimitHeaders>,
     /// Sender half of the action channel.
     action_tx: UnboundedSender<CacheAction<Provider::Block, Provider::Receipt>>,
     /// Receiver half of the action channel.

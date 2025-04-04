@@ -70,7 +70,7 @@ pub fn append_matching_block_logs<P>(
     block_timestamp: u64,
 ) -> Result<(), ProviderError>
 where
-    P: BlockReader<Transaction: SignedTransaction>,
+    P: BlockReader<SignedTx: SignedTransaction>,
 {
     // Tracks the index of a log in the entire block.
     let mut log_index: u64 = 0;

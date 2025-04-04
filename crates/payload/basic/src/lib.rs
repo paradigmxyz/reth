@@ -129,7 +129,7 @@ impl<Client, Tasks, Builder> PayloadJobGenerator
     for BasicPayloadJobGenerator<Client, Tasks, Builder>
 where
     Client: StateProviderFactory
-        + BlockReaderIdExt<Header = HeaderForPayload<Builder::BuiltPayload>>
+        + BlockReaderIdExt<BlockHeader = HeaderForPayload<Builder::BuiltPayload>>
         + Clone
         + Unpin
         + 'static,

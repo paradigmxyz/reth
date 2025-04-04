@@ -1271,13 +1271,11 @@ impl<N> HeaderProvider for StaticFileProvider<N>
 where
     N: NodePrimitives<BlockHeader: Value> + 'static,
 {
-    type Header = N::BlockHeader;
-
-    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
+    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::BlockHeader>> {
         self.find_static_file(StaticFileSegment::Headers, |jar_provider| {
             Ok(jar_provider
                 .cursor()?
-                .get_two::<HeaderWithHashMask<Self::Header>>(block_hash.into())?
+                .get_two::<HeaderWithHashMask<Self::BlockHeader>>(block_hash.into())?
                 .and_then(|(header, hash)| {
                     if &hash == block_hash {
                         return Some(header)
@@ -1287,7 +1285,7 @@ where
         })
     }
 
-    fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::Header>> {
+    fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::BlockHeader>> {
         self.get_segment_provider_from_block(StaticFileSegment::Headers, num, None)
             .and_then(|provider| provider.header_by_number(num))
             .or_else(|err| {
@@ -1323,11 +1321,11 @@ where
     fn headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<Self::Header>> {
+    ) -> ProviderResult<Vec<Self::BlockHeader>> {
         self.fetch_range_with_predicate(
             StaticFileSegment::Headers,
             to_range(range),
-            |cursor, number| cursor.get_one::<HeaderMask<Self::Header>>(number.into()),
+            |cursor, number| cursor.get_one::<HeaderMask<Self::BlockHeader>>(number.into()),
             |_| true,
         )
     }
@@ -1335,7 +1333,7 @@ where
     fn sealed_header(
         &self,
         num: BlockNumber,
-    ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
+    ) -> ProviderResult<Option<SealedHeader<Self::BlockHeader>>> {
         self.get_segment_provider_from_block(StaticFileSegment::Headers, num, None)
             .and_then(|provider| provider.sealed_header(num))
             .or_else(|err| {
@@ -1350,14 +1348,14 @@ where
     fn sealed_headers_while(
         &self,
         range: impl RangeBounds<BlockNumber>,
-        predicate: impl FnMut(&SealedHeader<Self::Header>) -> bool,
-    ) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
+        predicate: impl FnMut(&SealedHeader<Self::BlockHeader>) -> bool,
+    ) -> ProviderResult<Vec<SealedHeader<Self::BlockHeader>>> {
         self.fetch_range_with_predicate(
             StaticFileSegment::Headers,
             to_range(range),
             |cursor, number| {
                 Ok(cursor
-                    .get_two::<HeaderWithHashMask<Self::Header>>(number.into())?
+                    .get_two::<HeaderWithHashMask<Self::BlockHeader>>(number.into())?
                     .map(|(header, hash)| SealedHeader::new(header, hash)))
             },
             predicate,
@@ -1601,7 +1599,7 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction> + 'static> Tran
 
 /* Cannot be successfully implemented but must exist for trait requirements */
 
-impl<N: NodePrimitives> BlockNumReader for StaticFileProvider<N> {
+impl<N: NodePrimitives + 'static> BlockNumReader for StaticFileProvider<N> {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
         // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
@@ -1719,7 +1717,7 @@ impl<N: NodePrimitives + 'static> WithdrawalsProvider for StaticFileProvider<N> 
 }
 
 impl<N: FullNodePrimitives<BlockHeader: Value>> OmmersProvider for StaticFileProvider<N> {
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
+    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::BlockHeader>>> {
         if let Some(num) = id.as_number() {
             return self
                 .get_segment_provider_from_block(StaticFileSegment::BlockMeta, num, None)

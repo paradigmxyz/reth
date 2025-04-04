@@ -99,7 +99,7 @@ impl<S, T, Provider, Evm, Validator> Stream for EngineReorg<S, T, Provider, Evm,
 where
     S: Stream<Item = BeaconEngineMessage<T>>,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = Evm::Primitives>>,
-    Provider: BlockReader<Header = HeaderTy<Evm::Primitives>, Block = BlockTy<Evm::Primitives>>
+    Provider: BlockReader<BlockHeader = HeaderTy<Evm::Primitives>, Block = BlockTy<Evm::Primitives>>
         + StateProviderFactory
         + ChainSpecProvider,
     Evm: ConfigureEvm,
@@ -244,7 +244,7 @@ fn create_reorg_head<Provider, Evm, Validator>(
     next_payload: Validator::ExecutionData,
 ) -> RethResult<SealedBlock<BlockTy<Evm::Primitives>>>
 where
-    Provider: BlockReader<Header = HeaderTy<Evm::Primitives>, Block = BlockTy<Evm::Primitives>>
+    Provider: BlockReader<BlockHeader = HeaderTy<Evm::Primitives>, Block = BlockTy<Evm::Primitives>>
         + StateProviderFactory
         + ChainSpecProvider<ChainSpec: EthChainSpec>,
     Evm: ConfigureEvm,

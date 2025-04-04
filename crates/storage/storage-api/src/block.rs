@@ -288,7 +288,7 @@ pub trait BlockReaderIdExt: BlockReader + ReceiptProviderIdExt {
     ///
     /// Note: This returns a [`SealedHeader`] because it's expected that this is sealed by the
     /// provider and the caller does not know the hash.
-    fn pending_header(&self) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
+    fn pending_header(&self) -> ProviderResult<Option<SealedHeader<Self::BlockHeader>>> {
         self.sealed_header_by_id(BlockNumberOrTag::Pending.into())
     }
 
@@ -296,7 +296,7 @@ pub trait BlockReaderIdExt: BlockReader + ReceiptProviderIdExt {
     ///
     /// Note: This returns a [`SealedHeader`] because it's expected that this is sealed by the
     /// provider and the caller does not know the hash.
-    fn latest_header(&self) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
+    fn latest_header(&self) -> ProviderResult<Option<SealedHeader<Self::BlockHeader>>> {
         self.sealed_header_by_id(BlockNumberOrTag::Latest.into())
     }
 
@@ -304,7 +304,7 @@ pub trait BlockReaderIdExt: BlockReader + ReceiptProviderIdExt {
     ///
     /// Note: This returns a [`SealedHeader`] because it's expected that this is sealed by the
     /// provider and the caller does not know the hash.
-    fn safe_header(&self) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
+    fn safe_header(&self) -> ProviderResult<Option<SealedHeader<Self::BlockHeader>>> {
         self.sealed_header_by_id(BlockNumberOrTag::Safe.into())
     }
 
@@ -312,7 +312,7 @@ pub trait BlockReaderIdExt: BlockReader + ReceiptProviderIdExt {
     ///
     /// Note: This returns a [`SealedHeader`] because it's expected that this is sealed by the
     /// provider and the caller does not know the hash.
-    fn finalized_header(&self) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
+    fn finalized_header(&self) -> ProviderResult<Option<SealedHeader<Self::BlockHeader>>> {
         self.sealed_header_by_id(BlockNumberOrTag::Finalized.into())
     }
 
@@ -345,7 +345,7 @@ pub trait BlockReaderIdExt: BlockReader + ReceiptProviderIdExt {
     fn header_by_number_or_tag(
         &self,
         id: BlockNumberOrTag,
-    ) -> ProviderResult<Option<Self::Header>> {
+    ) -> ProviderResult<Option<Self::BlockHeader>> {
         self.convert_block_number(id)?
             .map_or_else(|| Ok(None), |num| self.header_by_hash_or_number(num.into()))
     }
@@ -356,7 +356,7 @@ pub trait BlockReaderIdExt: BlockReader + ReceiptProviderIdExt {
     fn sealed_header_by_number_or_tag(
         &self,
         id: BlockNumberOrTag,
-    ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
+    ) -> ProviderResult<Option<SealedHeader<Self::BlockHeader>>> {
         self.convert_block_number(id)?
             .map_or_else(|| Ok(None), |num| self.header_by_hash_or_number(num.into()))?
             .map_or_else(|| Ok(None), |h| Ok(Some(SealedHeader::seal_slow(h))))
@@ -368,25 +368,25 @@ pub trait BlockReaderIdExt: BlockReader + ReceiptProviderIdExt {
     fn sealed_header_by_id(
         &self,
         id: BlockId,
-    ) -> ProviderResult<Option<SealedHeader<Self::Header>>>;
+    ) -> ProviderResult<Option<SealedHeader<Self::BlockHeader>>>;
 
     /// Returns the header with the matching `BlockId` from the database.
     ///
     /// Returns `None` if header is not found.
-    fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Header>>;
+    fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::BlockHeader>>;
 
     /// Returns the ommers with the matching tag from the database.
     fn ommers_by_number_or_tag(
         &self,
         id: BlockNumberOrTag,
-    ) -> ProviderResult<Option<Vec<Self::Header>>> {
+    ) -> ProviderResult<Option<Vec<Self::BlockHeader>>> {
         self.convert_block_number(id)?.map_or_else(|| Ok(None), |num| self.ommers(num.into()))
     }
 
     /// Returns the ommers with the matching `BlockId` from the database.
     ///
     /// Returns `None` if block is not found.
-    fn ommers_by_id(&self, id: BlockId) -> ProviderResult<Option<Vec<Self::Header>>>;
+    fn ommers_by_id(&self, id: BlockId) -> ProviderResult<Option<Vec<Self::BlockHeader>>>;
 }
 
 /// Functionality to read the last known chain blocks from the database.

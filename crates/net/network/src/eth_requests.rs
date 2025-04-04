@@ -84,7 +84,7 @@ where
     C: BlockReader,
 {
     /// Returns the list of requested headers
-    fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<C::Header> {
+    fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<C::BlockHeader> {
         let GetBlockHeaders { start_block, limit, skip, direction } = request;
 
         let mut headers = Vec::new();
@@ -147,7 +147,7 @@ where
         &self,
         _peer_id: PeerId,
         request: GetBlockHeaders,
-        response: oneshot::Sender<RequestResult<BlockHeaders<C::Header>>>,
+        response: oneshot::Sender<RequestResult<BlockHeaders<C::BlockHeader>>>,
     ) {
         self.metrics.eth_headers_requests_received_total.increment(1);
         let headers = self.get_headers_response(request);
@@ -223,7 +223,7 @@ impl<C, N> Future for EthRequestHandler<C, N>
 where
     N: NetworkPrimitives,
     C: BlockReader<Block = N::Block, Receipt = N::Receipt>
-        + HeaderProvider<Header = N::BlockHeader>
+        + HeaderProvider<BlockHeader = N::BlockHeader>
         + Unpin,
 {
     type Output = ();

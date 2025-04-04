@@ -146,8 +146,9 @@ where
 
 impl<Provider, T, H> BlockBodyReader<Provider> for EthStorage<T, H>
 where
-    Provider:
-        DBProvider + ChainSpecProvider<ChainSpec: EthereumHardforks> + OmmersProvider<Header = H>,
+    Provider: DBProvider
+        + ChainSpecProvider<ChainSpec: EthereumHardforks>
+        + OmmersProvider<BlockHeader = H>,
     T: SignedTransaction,
     H: FullBlockHeader,
 {

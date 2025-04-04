@@ -52,7 +52,7 @@ impl<B: Block + 'static> TaskDownloader<B> {
     /// fn t<
     ///     B: Block + 'static,
     ///     C: BodiesClient<Body = B::Body> + 'static,
-    ///     Provider: HeaderProvider<Header = B::Header> + Unpin + 'static,
+    ///     Provider: HeaderProvider<BlockHeader = B::Header> + Unpin + 'static,
     /// >(
     ///     client: Arc<C>,
     ///     consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,

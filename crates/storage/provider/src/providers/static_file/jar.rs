@@ -99,18 +99,16 @@ impl<'a, N: NodePrimitives> NodePrimitives for StaticFileJarProvider<'a, N> {
 }
 
 impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileJarProvider<'_, N> {
-    type Header = N::BlockHeader;
-
-    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
+    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::BlockHeader>> {
         Ok(self
             .cursor()?
-            .get_two::<HeaderWithHashMask<Self::Header>>(block_hash.into())?
+            .get_two::<HeaderWithHashMask<Self::BlockHeader>>(block_hash.into())?
             .filter(|(_, hash)| hash == block_hash)
             .map(|(header, _)| header))
     }
 
-    fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::Header>> {
-        self.cursor()?.get_one::<HeaderMask<Self::Header>>(num.into())
+    fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::BlockHeader>> {
+        self.cursor()?.get_one::<HeaderMask<Self::BlockHeader>>(num.into())
     }
 
     fn header_td(&self, block_hash: &BlockHash) -> ProviderResult<Option<U256>> {
@@ -128,14 +126,14 @@ impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileJarProv
     fn headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<Self::Header>> {
+    ) -> ProviderResult<Vec<Self::BlockHeader>> {
         let range = to_range(range);
 
         let mut cursor = self.cursor()?;
         let mut headers = Vec::with_capacity((range.end - range.start) as usize);
 
         for num in range {
-            if let Some(header) = cursor.get_one::<HeaderMask<Self::Header>>(num.into())? {
+            if let Some(header) = cursor.get_one::<HeaderMask<Self::BlockHeader>>(num.into())? {
                 headers.push(header);
             }
         }
@@ -146,18 +144,18 @@ impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileJarProv
     fn sealed_header(
         &self,
         number: BlockNumber,
-    ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
+    ) -> ProviderResult<Option<SealedHeader<Self::BlockHeader>>> {
         Ok(self
             .cursor()?
-            .get_two::<HeaderWithHashMask<Self::Header>>(number.into())?
+            .get_two::<HeaderWithHashMask<Self::BlockHeader>>(number.into())?
             .map(|(header, hash)| SealedHeader::new(header, hash)))
     }
 
     fn sealed_headers_while(
         &self,
         range: impl RangeBounds<BlockNumber>,
-        mut predicate: impl FnMut(&SealedHeader<Self::Header>) -> bool,
-    ) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
+        mut predicate: impl FnMut(&SealedHeader<Self::BlockHeader>) -> bool,
+    ) -> ProviderResult<Vec<SealedHeader<Self::BlockHeader>>> {
         let range = to_range(range);
 
         let mut cursor = self.cursor()?;
@@ -165,7 +163,7 @@ impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileJarProv
 
         for number in range {
             if let Some((header, hash)) =
-                cursor.get_two::<HeaderWithHashMask<Self::Header>>(number.into())?
+                cursor.get_two::<HeaderWithHashMask<Self::BlockHeader>>(number.into())?
             {
                 let sealed = SealedHeader::new(header, hash);
                 if !predicate(&sealed) {
@@ -372,11 +370,11 @@ impl<N: NodePrimitives> WithdrawalsProvider for StaticFileJarProvider<'_, N> {
 }
 
 impl<N: FullNodePrimitives<BlockHeader: Value>> OmmersProvider for StaticFileJarProvider<'_, N> {
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
+    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::BlockHeader>>> {
         if let Some(num) = id.as_number() {
             return Ok(self
                 .cursor()?
-                .get_one::<OmmersMask<Self::Header>>(num.into())?
+                .get_one::<OmmersMask<Self::BlockHeader>>(num.into())?
                 .map(|s| s.ommers))
         }
         // Only accepts block number queries

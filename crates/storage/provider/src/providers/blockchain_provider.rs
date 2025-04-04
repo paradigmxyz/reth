@@ -194,13 +194,11 @@ impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider<N> {
-    type Header = HeaderTy<N>;
-
-    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
+    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::BlockHeader>> {
         self.consistent_provider()?.header(block_hash)
     }
 
-    fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::Header>> {
+    fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::BlockHeader>> {
         self.consistent_provider()?.header_by_number(num)
     }
 
@@ -215,29 +213,29 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider<N> {
     fn headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<Self::Header>> {
+    ) -> ProviderResult<Vec<Self::BlockHeader>> {
         self.consistent_provider()?.headers_range(range)
     }
 
     fn sealed_header(
         &self,
         number: BlockNumber,
-    ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
+    ) -> ProviderResult<Option<SealedHeader<Self::BlockHeader>>> {
         self.consistent_provider()?.sealed_header(number)
     }
 
     fn sealed_headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
+    ) -> ProviderResult<Vec<SealedHeader<Self::BlockHeader>>> {
         self.consistent_provider()?.sealed_headers_range(range)
     }
 
     fn sealed_headers_while(
         &self,
         range: impl RangeBounds<BlockNumber>,
-        predicate: impl FnMut(&SealedHeader<Self::Header>) -> bool,
-    ) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
+        predicate: impl FnMut(&SealedHeader<Self::BlockHeader>) -> bool,
+    ) -> ProviderResult<Vec<SealedHeader<Self::BlockHeader>>> {
         self.consistent_provider()?.sealed_headers_while(range, predicate)
     }
 }
@@ -458,7 +456,7 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> OmmersProvider for BlockchainProvider<N> {
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
+    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::BlockHeader>>> {
         self.consistent_provider()?.ommers(id)
     }
 }
@@ -666,7 +664,7 @@ impl<N: ProviderNodeTypes> CanonChainTracker for BlockchainProvider<N> {
 
 impl<N: ProviderNodeTypes> BlockReaderIdExt for BlockchainProvider<N>
 where
-    Self: ReceiptProviderIdExt<Block = BlockTy<N>>,
+    Self: ReceiptProviderIdExt<Block = BlockTy<N>, BlockHeader = HeaderTy<N>>,
 {
     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Block>> {
         self.consistent_provider()?.block_by_id(id)
@@ -675,29 +673,29 @@ where
     fn header_by_number_or_tag(
         &self,
         id: BlockNumberOrTag,
-    ) -> ProviderResult<Option<Self::Header>> {
+    ) -> ProviderResult<Option<Self::BlockHeader>> {
         self.consistent_provider()?.header_by_number_or_tag(id)
     }
 
     fn sealed_header_by_number_or_tag(
         &self,
         id: BlockNumberOrTag,
-    ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
+    ) -> ProviderResult<Option<SealedHeader<Self::BlockHeader>>> {
         self.consistent_provider()?.sealed_header_by_number_or_tag(id)
     }
 
     fn sealed_header_by_id(
         &self,
         id: BlockId,
-    ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
+    ) -> ProviderResult<Option<SealedHeader<Self::BlockHeader>>> {
         self.consistent_provider()?.sealed_header_by_id(id)
     }
 
-    fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Header>> {
+    fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::BlockHeader>> {
         self.consistent_provider()?.header_by_id(id)
     }
 
-    fn ommers_by_id(&self, id: BlockId) -> ProviderResult<Option<Vec<Self::Header>>> {
+    fn ommers_by_id(&self, id: BlockId) -> ProviderResult<Option<Vec<Self::BlockHeader>>> {
         self.consistent_provider()?.ommers_by_id(id)
     }
 }

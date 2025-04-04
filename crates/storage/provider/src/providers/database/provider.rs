@@ -211,7 +211,11 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX, N: NodeTypes> NodePrimitives for DatabaseProvider<TX, N> {
+impl<TX, N> NodePrimitives for DatabaseProvider<TX, N>
+where
+    TX: Send + Sync + Debug,
+    N: NodeTypes,
+{
     type Block = BlockTy<N>;
     type BlockHeader = HeaderTy<N>;
     type BlockBody = BodyTy<N>;
@@ -991,9 +995,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderSyncGapProvider
 }
 
 impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderProvider for DatabaseProvider<TX, N> {
-    type Header = HeaderTy<N>;
-
-    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
+    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::BlockHeader>> {
         if let Some(num) = self.block_number(*block_hash)? {
             Ok(self.header_by_number(num)?)
         } else {
@@ -1001,12 +1003,12 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderProvider for DatabasePro
         }
     }
 
-    fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::Header>> {
+    fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::BlockHeader>> {
         self.static_file_provider.get_with_static_file_or_database(
             StaticFileSegment::Headers,
             num,
             |static_file| static_file.header_by_number(num),
-            || Ok(self.tx.get::<tables::Headers<Self::Header>>(num)?),
+            || Ok(self.tx.get::<tables::Headers<Self::BlockHeader>>(num)?),
         )
     }
 
@@ -1038,12 +1040,12 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderProvider for DatabasePro
     fn headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<Self::Header>> {
+    ) -> ProviderResult<Vec<Self::BlockHeader>> {
         self.static_file_provider.get_range_with_static_file_or_database(
             StaticFileSegment::Headers,
             to_range(range),
             |static_file, range, _| static_file.headers_range(range),
-            |range, _| self.cursor_read_collect::<tables::Headers<Self::Header>>(range),
+            |range, _| self.cursor_read_collect::<tables::Headers<Self::BlockHeader>>(range),
             |_| true,
         )
     }
@@ -1051,7 +1053,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderProvider for DatabasePro
     fn sealed_header(
         &self,
         number: BlockNumber,
-    ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
+    ) -> ProviderResult<Option<SealedHeader<Self::BlockHeader>>> {
         self.static_file_provider.get_with_static_file_or_database(
             StaticFileSegment::Headers,
             number,
@@ -1072,16 +1074,18 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderProvider for DatabasePro
     fn sealed_headers_while(
         &self,
         range: impl RangeBounds<BlockNumber>,
-        predicate: impl FnMut(&SealedHeader<Self::Header>) -> bool,
-    ) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
+        predicate: impl FnMut(&SealedHeader<Self::BlockHeader>) -> bool,
+    ) -> ProviderResult<Vec<SealedHeader<Self::BlockHeader>>> {
         self.static_file_provider.get_range_with_static_file_or_database(
             StaticFileSegment::Headers,
             to_range(range),
             |static_file, range, predicate| static_file.sealed_headers_while(range, predicate),
             |range, mut predicate| {
                 let mut headers = vec![];
-                for entry in
-                    self.tx.cursor_read::<tables::Headers<Self::Header>>()?.walk_range(range)?
+                for entry in self
+                    .tx
+                    .cursor_read::<tables::Headers<Self::BlockHeader>>()?
+                    .walk_range(range)?
                 {
                     let (number, header) = entry?;
                     let hash = self
@@ -1601,7 +1605,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> OmmersProvider for DatabasePro
     ///
     /// If the block is not found, this returns `None`.
     /// If the block exists, but doesn't contain ommers, this returns `None`.
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
+    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::BlockHeader>>> {
         if let Some(number) = self.convert_hash_or_number(id)? {
             // If the Paris (Merge) hardfork block is known and block is after it, return empty
             // ommers.
@@ -1613,7 +1617,12 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> OmmersProvider for DatabasePro
                 StaticFileSegment::BlockMeta,
                 number,
                 |static_file| static_file.ommers(id),
-                || Ok(self.tx.get::<tables::BlockOmmers<Self::Header>>(number)?.map(|o| o.ommers)),
+                || {
+                    Ok(self
+                        .tx
+                        .get::<tables::BlockOmmers<Self::BlockHeader>>(number)?
+                        .map(|o| o.ommers))
+                },
             )
         }
 

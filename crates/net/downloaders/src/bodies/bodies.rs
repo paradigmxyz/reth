@@ -37,7 +37,7 @@ use tracing::info;
 pub struct BodiesDownloader<
     B: Block,
     C: BodiesClient<Body = B::Body>,
-    Provider: HeaderProvider<Header = B::Header>,
+    Provider: HeaderProvider<BlockHeader = B::Header>,
 > {
     /// The bodies client
     client: Arc<C>,
@@ -73,10 +73,12 @@ impl<B, C, Provider> BodiesDownloader<B, C, Provider>
 where
     B: Block,
     C: BodiesClient<Body = B::Body> + 'static,
-    Provider: HeaderProvider<Header = B::Header> + Unpin + 'static,
+    Provider: HeaderProvider<BlockHeader = B::Header> + Unpin + 'static,
 {
     /// Returns the next contiguous request.
-    fn next_headers_request(&self) -> DownloadResult<Option<Vec<SealedHeader<Provider::Header>>>> {
+    fn next_headers_request(
+        &self,
+    ) -> DownloadResult<Option<Vec<SealedHeader<Provider::BlockHeader>>>> {
         let start_at = match self.in_progress_queue.last_requested_block_number {
             Some(num) => num + 1,
             None => *self.download_range.start(),
@@ -286,7 +288,7 @@ impl<B, C, Provider> BodiesDownloader<B, C, Provider>
 where
     B: Block + 'static,
     C: BodiesClient<Body = B::Body> + 'static,
-    Provider: HeaderProvider<Header = B::Header> + Unpin + 'static,
+    Provider: HeaderProvider<BlockHeader = B::Header> + Unpin + 'static,
 {
     /// Spawns the downloader task via [`tokio::task::spawn`]
     pub fn into_task(self) -> TaskDownloader<B> {
@@ -306,7 +308,7 @@ impl<B, C, Provider> BodyDownloader for BodiesDownloader<B, C, Provider>
 where
     B: Block + 'static,
     C: BodiesClient<Body = B::Body> + 'static,
-    Provider: HeaderProvider<Header = B::Header> + Unpin + 'static,
+    Provider: HeaderProvider<BlockHeader = B::Header> + Unpin + 'static,
 {
     type Block = B;
 
@@ -357,7 +359,7 @@ impl<B, C, Provider> Stream for BodiesDownloader<B, C, Provider>
 where
     B: Block + 'static,
     C: BodiesClient<Body = B::Body> + 'static,
-    Provider: HeaderProvider<Header = B::Header> + Unpin + 'static,
+    Provider: HeaderProvider<BlockHeader = B::Header> + Unpin + 'static,
 {
     type Item = BodyDownloaderResult<B>;
 
@@ -580,7 +582,7 @@ impl BodiesDownloaderBuilder {
     where
         B: Block,
         C: BodiesClient<Body = B::Body> + 'static,
-        Provider: HeaderProvider<Header = B::Header>,
+        Provider: HeaderProvider<BlockHeader = B::Header>,
     {
         let Self {
             request_limit,

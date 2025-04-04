@@ -198,7 +198,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     }
 }
 
-impl<N: NodeTypes> NodePrimitives for ProviderFactory<N> {
+impl<N: NodeTypesWithDB> NodePrimitives for ProviderFactory<N> {
     type Block = BlockTy<N>;
     type BlockHeader = HeaderTy<N>;
     type BlockBody = BodyTy<N>;
@@ -236,6 +236,7 @@ impl<N: NodeTypesWithDB> StaticFileProviderFactory for ProviderFactory<N> {
 
 impl<N: ProviderNodeTypes> HeaderSyncGapProvider for ProviderFactory<N> {
     type Header = HeaderTy<N>;
+
     fn sync_gap(
         &self,
         tip: watch::Receiver<B256>,
@@ -246,13 +247,11 @@ impl<N: ProviderNodeTypes> HeaderSyncGapProvider for ProviderFactory<N> {
 }
 
 impl<N: ProviderNodeTypes> HeaderProvider for ProviderFactory<N> {
-    type Header = HeaderTy<N>;
-
-    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
+    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::BlockHeader>> {
         self.provider()?.header(block_hash)
     }
 
-    fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::Header>> {
+    fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::BlockHeader>> {
         self.static_file_provider.get_with_static_file_or_database(
             StaticFileSegment::Headers,
             num,
@@ -272,7 +271,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ProviderFactory<N> {
     fn headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<Self::Header>> {
+    ) -> ProviderResult<Vec<Self::BlockHeader>> {
         self.static_file_provider.get_range_with_static_file_or_database(
             StaticFileSegment::Headers,
             to_range(range),
@@ -285,7 +284,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ProviderFactory<N> {
     fn sealed_header(
         &self,
         number: BlockNumber,
-    ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
+    ) -> ProviderResult<Option<SealedHeader<Self::BlockHeader>>> {
         self.static_file_provider.get_with_static_file_or_database(
             StaticFileSegment::Headers,
             number,
@@ -297,15 +296,15 @@ impl<N: ProviderNodeTypes> HeaderProvider for ProviderFactory<N> {
     fn sealed_headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
+    ) -> ProviderResult<Vec<SealedHeader<Self::BlockHeader>>> {
         self.sealed_headers_while(range, |_| true)
     }
 
     fn sealed_headers_while(
         &self,
         range: impl RangeBounds<BlockNumber>,
-        predicate: impl FnMut(&SealedHeader<Self::Header>) -> bool,
-    ) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
+        predicate: impl FnMut(&SealedHeader<Self::BlockHeader>) -> bool,
+    ) -> ProviderResult<Vec<SealedHeader<Self::BlockHeader>>> {
         self.static_file_provider.get_range_with_static_file_or_database(
             StaticFileSegment::Headers,
             to_range(range),
@@ -538,7 +537,7 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for ProviderFactory<N> {
 }
 
 impl<N: ProviderNodeTypes> OmmersProvider for ProviderFactory<N> {
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
+    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::BlockHeader>>> {
         self.provider()?.ommers(id)
     }
 }

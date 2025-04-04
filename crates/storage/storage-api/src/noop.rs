@@ -34,7 +34,7 @@ use reth_trie_common::{
 };
 
 /// Supports various api interfaces for testing purposes.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 #[non_exhaustive]
 pub struct NoopProvider<ChainSpec = reth_chainspec::ChainSpec, N = EthPrimitives> {
     chain_spec: Arc<ChainSpec>,
@@ -76,7 +76,7 @@ impl<ChainSpec, N> Clone for NoopProvider<ChainSpec, N> {
 
 impl<ChainSpec, N> NodePrimitives for NoopProvider<ChainSpec, N>
 where
-    ChainSpec: Send + Sync + PartialEq + Eq + Debug,
+    ChainSpec: Send + Sync + Debug,
     N: NodePrimitives,
 {
     type Block = N::Block;
@@ -334,14 +334,12 @@ where
 {
 }
 
-impl<C: Send + Sync, N: NodePrimitives> HeaderProvider for NoopProvider<C, N> {
-    type Header = N::BlockHeader;
-
-    fn header(&self, _block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
+impl<C: Send + Sync + Debug, N: NodePrimitives> HeaderProvider for NoopProvider<C, N> {
+    fn header(&self, _block_hash: &BlockHash) -> ProviderResult<Option<Self::BlockHeader>> {
         Ok(None)
     }
 
-    fn header_by_number(&self, _num: u64) -> ProviderResult<Option<Self::Header>> {
+    fn header_by_number(&self, _num: u64) -> ProviderResult<Option<Self::BlockHeader>> {
         Ok(None)
     }
 
@@ -356,22 +354,22 @@ impl<C: Send + Sync, N: NodePrimitives> HeaderProvider for NoopProvider<C, N> {
     fn headers_range(
         &self,
         _range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<Self::Header>> {
+    ) -> ProviderResult<Vec<Self::BlockHeader>> {
         Ok(Vec::new())
     }
 
     fn sealed_header(
         &self,
         _number: BlockNumber,
-    ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
+    ) -> ProviderResult<Option<SealedHeader<Self::BlockHeader>>> {
         Ok(None)
     }
 
     fn sealed_headers_while(
         &self,
         _range: impl RangeBounds<BlockNumber>,
-        _predicate: impl FnMut(&SealedHeader<Self::Header>) -> bool,
-    ) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
+        _predicate: impl FnMut(&SealedHeader<Self::BlockHeader>) -> bool,
+    ) -> ProviderResult<Vec<SealedHeader<Self::BlockHeader>>> {
         Ok(Vec::new())
     }
 }
@@ -566,8 +564,8 @@ impl<C: Send + Sync, N: NodePrimitives> WithdrawalsProvider for NoopProvider<C, 
     }
 }
 
-impl<C: Send + Sync, N: NodePrimitives> OmmersProvider for NoopProvider<C, N> {
-    fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
+impl<C: Send + Sync + Debug, N: NodePrimitives> OmmersProvider for NoopProvider<C, N> {
+    fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::BlockHeader>>> {
         Ok(None)
     }
 }
