@@ -43,7 +43,6 @@ pub struct ReorgedBlob {
 }
 
 #[derive(Debug, Clone)]
-#[expect(clippy::large_enum_variant)]
 pub enum BlobTransactionEvent {
     Mined(MinedBlob),
     Reorged(ReorgedBlob),

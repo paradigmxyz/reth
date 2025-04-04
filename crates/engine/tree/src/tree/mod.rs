@@ -3081,7 +3081,6 @@ mod tests {
     /// This is a test channel that allows you to `release` any value that is in the channel.
     ///
     /// If nothing has been sent, then the next value will be immediately sent.
-    #[expect(dead_code)]
     struct TestChannel<T> {
         /// If an item is sent to this channel, an item will be released in the wrapped channel
         release: Receiver<()>,
@@ -3093,7 +3092,6 @@ mod tests {
 
     impl<T: Send + 'static> TestChannel<T> {
         /// Creates a new test channel
-        #[expect(dead_code)]
         fn spawn_channel() -> (Sender<T>, Receiver<T>, TestChannelHandle) {
             let (original_tx, original_rx) = channel();
             let (wrapped_tx, wrapped_rx) = channel();

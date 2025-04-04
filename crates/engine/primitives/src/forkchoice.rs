@@ -67,7 +67,7 @@ impl ForkchoiceStateTracker {
     }
 
     /// Returns the head hash of the latest received FCU to which we need to sync.
-    #[expect(dead_code)]
+    #[cfg(test)]
     pub(crate) fn sync_target(&self) -> Option<B256> {
         self.last_syncing.as_ref().map(|s| s.head_block_hash)
     }
@@ -121,8 +121,8 @@ impl ForkchoiceStateTracker {
 
 /// Represents a forkchoice update and tracks the status we assigned to it.
 #[derive(Debug, Clone)]
-#[expect(dead_code)]
 pub(crate) struct ReceivedForkchoiceState {
+    #[cfg_attr(not(test), expect(dead_code))]
     state: ForkchoiceState,
     status: ForkchoiceStatus,
 }
