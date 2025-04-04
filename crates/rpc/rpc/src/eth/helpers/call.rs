@@ -28,13 +28,14 @@ where
     Self: LoadState<
             Primitives = EthPrimitives,
             Provider = Provider,
-            Evm: ConfigureEvm<
-                Primitives = Self::Primitives,
-                BlockExecutorFactory: BlockExecutorFactory<EvmFactory: EvmFactory<Tx = TxEnv>>,
-            >,
+            Evm = EvmConfig,
             Error: FromEvmError<Self::Evm>,
         > + SpawnBlocking,
     Provider: ChainSpecProvider,
+    EvmConfig: ConfigureEvm<
+        Primitives = Self::Primitives,
+        BlockExecutorFactory: BlockExecutorFactory<EvmFactory: EvmFactory<Tx = TxEnv>>,
+    >,
 {
     #[inline]
     fn call_gas_limit(&self) -> u64 {

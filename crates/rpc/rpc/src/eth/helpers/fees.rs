@@ -1,25 +1,22 @@
 //! Contains RPC handler implementations for fee history.
 
-use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_chainspec::ChainSpecProvider;
 use reth_rpc_eth_api::helpers::{EthFees, LoadBlock, LoadFee};
 use reth_rpc_eth_types::{FeeHistoryCache, GasPriceOracle};
-use reth_storage_api::{BlockReader, BlockReaderIdExt, StateProviderFactory};
 
 use crate::EthApi;
 
 impl<Provider, Pool, Network, EvmConfig> EthFees for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: LoadFee,
-    Provider: BlockReader,
+    Self: LoadFee<Provider = Provider>,
+    Provider: ChainSpecProvider,
 {
 }
 
 impl<Provider, Pool, Network, EvmConfig> LoadFee for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Self: LoadBlock<Provider = Provider>,
-    Provider: BlockReaderIdExt
-        + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
-        + StateProviderFactory,
+    Provider: ChainSpecProvider,
 {
     #[inline]
     fn gas_oracle(&self) -> &GasPriceOracle<Self::Provider> {
