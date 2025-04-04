@@ -51,8 +51,6 @@ macro_rules! poll_nested_stream_with_budget {
             loop {
                 match $poll_stream {
                     Poll::Ready(Some(item)) => {
-                        #[allow(unused_mut)]
-                        let mut f = $on_ready_some;
                         $on_ready_some(item);
 
                         budget -= 1;
