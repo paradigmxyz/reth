@@ -145,8 +145,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             let envelope = EthereumTxEnvelope::<TxEip4844>::decode_2718(&mut &tx_bytes[..])
                 .map_err(|e| eyre::eyre!("failed to recover tx: {e}"))?;
 
-            let transaction: Transaction = envelope.into();
-
+            let transaction: reth::Transaction = envelope.into();
             let encoded_length = match transaction.transaction() {
                 Transaction::Eip4844(TxEip4844 { blob_versioned_hashes, .. }) => {
                     let blobs_bundle = blobs_bundle.as_mut().ok_or_else(|| {
