@@ -560,6 +560,46 @@ where
         res
     }
 
+    /// TODO:
+    pub async fn get_payload_v5(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV5> {
+        // First we fetch the payload attributes to check the timestamp
+        let attributes = self.get_payload_attributes(payload_id).await?;
+
+        // validate timestamp according to engine rules
+        validate_payload_timestamp(
+            &self.inner.chain_spec,
+            EngineApiMessageVersion::V5,
+            attributes.timestamp(),
+        )?;
+
+        // Now resolve the payload
+        self.inner
+            .payload_store
+            .resolve(payload_id)
+            .await
+            .ok_or(EngineApiError::UnknownPayload)?
+            .map_err(|_| EngineApiError::UnknownPayload)?
+            .try_into()
+            .map_err(|_| {
+                warn!("could not transform built payload into ExecutionPayloadV3");
+                EngineApiError::UnknownPayload
+            })
+    }
+
+    /// Metrics version of `get_payload_v5`
+    pub async fn get_payload_v5_metered(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV5> {
+        let start = Instant::now();
+        let res = Self::get_payload_v5(self, payload_id).await;
+        self.inner.metrics.latency.get_payload_v5.record(start.elapsed());
+        res
+    }
+
     /// Fetches all the blocks for the provided range starting at `start`, containing `count`
     /// blocks and returns the mapped payload bodies.
     pub async fn get_payload_bodies_by_range_with<F, R>(
@@ -1112,6 +1152,15 @@ where
     ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV4> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV4");
         Ok(self.get_payload_v4_metered(payload_id).await?)
+    }
+
+    /// TODO:
+    async fn get_payload_v5(
+        &self,
+        payload_id: PayloadId,
+    ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV5> {
+        trace!(target: "rpc::engine", "Serving engine_getPayloadV5");
+        Ok(self.get_payload_v5_metered(payload_id).await?)
     }
 
     /// Handler for `engine_getPayloadBodiesByHashV1`

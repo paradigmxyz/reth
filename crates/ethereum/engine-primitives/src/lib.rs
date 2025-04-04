@@ -17,7 +17,7 @@ pub use payload::{EthBuiltPayload, EthPayloadBuilderAttributes};
 use alloy_rpc_types_engine::{ExecutionData, ExecutionPayload};
 pub use alloy_rpc_types_engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
-    ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes,
+    ExecutionPayloadEnvelopeV5, ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes,
 };
 use reth_engine_primitives::EngineTypes;
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};
@@ -62,12 +62,14 @@ where
         + TryInto<ExecutionPayloadV1>
         + TryInto<ExecutionPayloadEnvelopeV2>
         + TryInto<ExecutionPayloadEnvelopeV3>
-        + TryInto<ExecutionPayloadEnvelopeV4>,
+        + TryInto<ExecutionPayloadEnvelopeV4>
+        + TryInto<ExecutionPayloadEnvelopeV5>,
 {
     type ExecutionPayloadEnvelopeV1 = ExecutionPayloadV1;
     type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadEnvelopeV3 = ExecutionPayloadEnvelopeV3;
     type ExecutionPayloadEnvelopeV4 = ExecutionPayloadEnvelopeV4;
+    type ExecutionPayloadEnvelopeV5 = ExecutionPayloadEnvelopeV5;
 }
 
 /// A default payload type for [`EthEngineTypes`]
