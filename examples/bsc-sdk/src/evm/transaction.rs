@@ -1,6 +1,6 @@
 use alloy_rpc_types::AccessList;
 use auto_impl::auto_impl;
-use reth_evm::{FromRecoveredTx, IntoTxEnv, TransactionEnv};
+use reth_evm::{FromRecoveredTx, FromTxWithEncoded, IntoTxEnv, TransactionEnv};
 use reth_primitives::TransactionSigned;
 use revm::{
     context::TxEnv,
@@ -121,6 +121,20 @@ impl<T: revm::context::Transaction> IntoTxEnv<Self> for BscTransaction<T> {
 impl FromRecoveredTx<TransactionSigned> for BscTransaction<TxEnv> {
     fn from_recovered_tx(tx: &TransactionSigned, sender: Address) -> Self {
         Self::new(TxEnv::from_recovered_tx(tx, sender))
+    }
+}
+
+impl FromTxWithEncoded<TransactionSigned> for BscTransaction<TxEnv> {
+    fn from_encoded_tx(tx: &TransactionSigned, sender: Address, _encoded: Bytes) -> Self {
+        let base = match &tx.transaction() {
+            reth_primitives::Transaction::Legacy(tx) => TxEnv::from_recovered_tx(tx, sender),
+            reth_primitives::Transaction::Eip2930(tx) => TxEnv::from_recovered_tx(tx, sender),
+            reth_primitives::Transaction::Eip1559(tx) => TxEnv::from_recovered_tx(tx, sender),
+            reth_primitives::Transaction::Eip4844(tx) => TxEnv::from_recovered_tx(tx, sender),
+            reth_primitives::Transaction::Eip7702(tx) => TxEnv::from_recovered_tx(tx, sender),
+        };
+
+        Self { base, is_system_transaction: None }
     }
 }
 
