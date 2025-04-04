@@ -617,7 +617,7 @@ impl From<TransactionSigned> for Signed<Transaction> {
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        #[allow(unused_mut)]
+        #[expect(unused_mut)]
         let mut transaction = Transaction::arbitrary(u)?;
 
         let secp = secp256k1::Secp256k1::new();
