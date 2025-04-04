@@ -164,7 +164,7 @@ impl Era1Id {
     /// <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md#file-name>
     /// See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>
     pub fn to_file_name(&self) -> String {
-        format!("{}-{:10}-{:02}.era1", self.network_name, self.start_block, self.block_count,)
+        format!("{}-{}-{}.era1", self.network_name, self.start_block, self.block_count)
     }
 }
 
