@@ -97,7 +97,7 @@ impl BlockIndex {
 
         if entry.data.len() < 16 {
             return Err(E2sError::Ssz(String::from(
-                "SlotIndex entry too short to contain starting slot and count",
+                "BlockIndex entry too short to contain starting slot and count",
             )));
         }
 
@@ -115,7 +115,7 @@ impl BlockIndex {
         let expected_size = 8 + count * 8 + 8;
         if entry.data.len() != expected_size {
             return Err(E2sError::Ssz(format!(
-                "SlotIndex entry has incorrect size: expected {}, got {}",
+                "BlockIndex entry has incorrect size: expected {}, got {}",
                 expected_size,
                 entry.data.len()
             )));

@@ -160,7 +160,7 @@ impl Entry {
         self.entry_type == VERSION
     }
 
-    /// Check if this is a `SlotIndex` entry
+    /// Check if this is a `BlockIndex` entry
     pub fn is_block_index(&self) -> bool {
         self.entry_type == BLOCK_INDEX
     }
