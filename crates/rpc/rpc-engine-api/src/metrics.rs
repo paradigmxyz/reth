@@ -54,6 +54,8 @@ pub(crate) struct EngineApiLatencyMetrics {
     pub(crate) exchange_transition_configuration: Histogram,
     /// Latency for `engine_getBlobsV1`
     pub(crate) get_blobs_v1: Histogram,
+    /// Latency for `engine_getBlobsV2`
+    pub(crate) get_blobs_v2: Histogram,
 }
 
 /// Metrics for engine API forkchoiceUpdated responses.

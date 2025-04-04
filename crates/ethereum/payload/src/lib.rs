@@ -12,7 +12,8 @@
 pub mod validator;
 pub use validator::EthereumExecutionPayloadValidator;
 
-use alloy_consensus::{Transaction, Typed2718};
+use alloy_consensus::Transaction;
+use alloy_eips::eip7594::BlobTransactionSidecarVariant;
 use alloy_primitives::U256;
 use reth_basic_payload_builder::{
     is_better_payload, BuildArguments, BuildOutcome, MissingPayloadBehaviour, PayloadBuilder,
@@ -190,6 +191,8 @@ where
     })?;
 
     let mut block_blob_count = 0;
+    let mut blob_sidecars = Vec::new();
+
     let blob_params = chain_spec.blob_params_at_timestamp(attributes.timestamp);
     let max_blob_count =
         blob_params.as_ref().map(|params| params.max_blob_count).unwrap_or_default();
@@ -217,6 +220,7 @@ where
 
         // There's only limited amount of blob space available per block, so we need to check if
         // the EIP-4844 can still fit in the block
+        let mut maybe_sidecar = None;
         if let Some(blob_tx) = tx.as_eip4844() {
             let tx_blob_count = blob_tx.blob_versioned_hashes.len() as u64;
 
@@ -237,6 +241,40 @@ where
                 );
                 continue
             }
+
+            // TODO: not ideal, refine
+            // Pre-load sidecar and check its type.
+            let Some(sidecar) = pool.get_blob(*tx.tx_hash()).map_err(PayloadBuilderError::other)?
+            else {
+                best_txs.mark_invalid(
+                    &pool_tx,
+                    InvalidPoolTransactionError::Eip4844(
+                        Eip4844PoolTransactionError::MissingEip4844BlobSidecar,
+                    ),
+                );
+                continue
+            };
+            if chain_spec.is_osaka_active_at_timestamp(attributes.timestamp) {
+                if matches!(sidecar.as_ref(), BlobTransactionSidecarVariant::Eip4844(_)) {
+                    best_txs.mark_invalid(
+                        &pool_tx,
+                        InvalidPoolTransactionError::Eip4844(
+                            Eip4844PoolTransactionError::UnexpectedEip4844SidecarAfterOsaka,
+                        ),
+                    );
+                    continue
+                }
+            } else if matches!(sidecar.as_ref(), BlobTransactionSidecarVariant::Eip7594(_)) {
+                best_txs.mark_invalid(
+                    &pool_tx,
+                    InvalidPoolTransactionError::Eip4844(
+                        Eip4844PoolTransactionError::UnexpectedEip7594SidecarBeforeOsaka,
+                    ),
+                );
+                continue
+            }
+
+            maybe_sidecar = Some(sidecar);
         }
 
         let gas_used = match builder.execute_transaction(tx.clone()) {
@@ -274,6 +312,10 @@ where
             }
         }
 
+        if let Some(sidecar) = maybe_sidecar {
+            blob_sidecars.push(sidecar);
+        }
+
         // update add to total fees
         let miner_fee =
             tx.effective_tip_per_gas(base_fee).expect("fee is always valid; execution succeeded");
@@ -294,24 +336,6 @@ where
     let requests = chain_spec
         .is_prague_active_at_timestamp(attributes.timestamp)
         .then_some(execution_result.requests);
-
-    // initialize empty blob sidecars at first. If cancun is active then this will
-    let mut blob_sidecars = Vec::new();
-
-    // only determine cancun fields when active
-    if chain_spec.is_cancun_active_at_timestamp(attributes.timestamp) {
-        // grab the blob sidecars from the executed txs
-        blob_sidecars = pool
-            .get_all_blobs_exact(
-                block
-                    .body()
-                    .transactions()
-                    .filter(|tx| tx.is_eip4844())
-                    .map(|tx| *tx.tx_hash())
-                    .collect(),
-            )
-            .map_err(PayloadBuilderError::other)?;
-    }
 
     let sealed_block = Arc::new(block.sealed_block().clone());
     debug!(target: "payload_builder", id=%attributes.id, sealed_block_header = ?sealed_block.sealed_header(), "sealed built block");

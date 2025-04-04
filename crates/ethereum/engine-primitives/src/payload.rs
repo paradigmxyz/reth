@@ -1,12 +1,13 @@
 //! Contains types required for building a payload.
 
 use alloc::{sync::Arc, vec::Vec};
-use alloy_eips::{eip4844::BlobTransactionSidecar, eip4895::Withdrawals, eip7685::Requests};
+use alloy_eips::{eip4895::Withdrawals, eip7594::BlobTransactionSidecarVariant, eip7685::Requests};
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{
-    ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
-    ExecutionPayloadFieldV2, ExecutionPayloadV1, ExecutionPayloadV3, PayloadAttributes, PayloadId,
+    BlobsBundleV1, BlobsBundleV2, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
+    ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ExecutionPayloadFieldV2,
+    ExecutionPayloadV1, ExecutionPayloadV3, PayloadAttributes, PayloadId,
 };
 use core::convert::Infallible;
 use reth_ethereum_primitives::{Block, EthPrimitives};
@@ -28,7 +29,7 @@ pub struct EthBuiltPayload {
     pub(crate) fees: U256,
     /// The blobs, proofs, and commitments in the block. If the block is pre-cancun, this will be
     /// empty.
-    pub(crate) sidecars: Vec<BlobTransactionSidecar>,
+    pub(crate) sidecars: Vec<BlobTransactionSidecarVariant>,
     /// The requests of the payload
     pub(crate) requests: Option<Requests>,
 }
@@ -38,7 +39,7 @@ pub struct EthBuiltPayload {
 impl EthBuiltPayload {
     /// Initializes the payload with the given initial block
     ///
-    /// Caution: This does not set any [`BlobTransactionSidecar`].
+    /// Caution: This does not set any [`BlobTransactionSidecarVariant`].
     pub const fn new(
         id: PayloadId,
         block: Arc<SealedBlock<Block>>,
@@ -64,19 +65,22 @@ impl EthBuiltPayload {
     }
 
     /// Returns the blob sidecars.
-    pub fn sidecars(&self) -> &[BlobTransactionSidecar] {
+    pub fn sidecars(&self) -> &[BlobTransactionSidecarVariant] {
         &self.sidecars
     }
 
     /// Adds sidecars to the payload.
-    pub fn extend_sidecars(&mut self, sidecars: impl IntoIterator<Item = BlobTransactionSidecar>) {
+    pub fn extend_sidecars(
+        &mut self,
+        sidecars: impl IntoIterator<Item = BlobTransactionSidecarVariant>,
+    ) {
         self.sidecars.extend(sidecars)
     }
 
     /// Same as [`Self::extend_sidecars`] but returns the type again.
     pub fn with_sidecars(
         mut self,
-        sidecars: impl IntoIterator<Item = BlobTransactionSidecar>,
+        sidecars: impl IntoIterator<Item = BlobTransactionSidecarVariant>,
     ) -> Self {
         self.extend_sidecars(sidecars);
         self
@@ -124,11 +128,26 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV2 {
     }
 }
 
-impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV3 {
-    fn from(value: EthBuiltPayload) -> Self {
+impl TryFrom<EthBuiltPayload> for ExecutionPayloadEnvelopeV3 {
+    type Error = String;
+
+    fn try_from(value: EthBuiltPayload) -> Result<Self, Self::Error> {
         let EthBuiltPayload { block, fees, sidecars, .. } = value;
 
-        Self {
+        let blobs_bundle = BlobsBundleV1::from(
+            sidecars
+                .into_iter()
+                .map(|sidecar| {
+                    if let BlobTransactionSidecarVariant::Eip4844(sidecar) = sidecar {
+                        Ok(sidecar)
+                    } else {
+                        Err("unexpected sidecar type in v1 bundle".to_owned())
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+
+        Ok(Self {
             execution_payload: ExecutionPayloadV3::from_block_unchecked(
                 block.hash(),
                 &Arc::unwrap_or_clone(block).into_block(),
@@ -143,17 +162,59 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV3 {
             // Spec:
             // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
             should_override_builder: false,
-            blobs_bundle: sidecars.into(),
-        }
+            blobs_bundle,
+        })
     }
 }
 
-impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV4 {
-    fn from(value: EthBuiltPayload) -> Self {
-        Self {
+impl TryFrom<EthBuiltPayload> for ExecutionPayloadEnvelopeV4 {
+    type Error = String;
+
+    fn try_from(value: EthBuiltPayload) -> Result<Self, Self::Error> {
+        Ok(Self {
             execution_requests: value.requests.clone().unwrap_or_default(),
-            envelope_inner: value.into(),
-        }
+            envelope_inner: value.try_into()?,
+        })
+    }
+}
+
+impl TryFrom<EthBuiltPayload> for ExecutionPayloadEnvelopeV5 {
+    type Error = String;
+
+    fn try_from(value: EthBuiltPayload) -> Result<Self, Self::Error> {
+        let EthBuiltPayload { block, fees, sidecars, requests, .. } = value;
+
+        let blobs_bundle = BlobsBundleV2::from(
+            sidecars
+                .into_iter()
+                .map(|sidecar| {
+                    if let BlobTransactionSidecarVariant::Eip7594(sidecar) = sidecar {
+                        Ok(sidecar)
+                    } else {
+                        Err("unexpected sidecar type in v2 bundle".to_owned())
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+
+        Ok(Self {
+            execution_payload: ExecutionPayloadV3::from_block_unchecked(
+                block.hash(),
+                &Arc::unwrap_or_clone(block).into_block(),
+            ),
+            block_value: fees,
+            // From the engine API spec:
+            //
+            // > Client software **MAY** use any heuristics to decide whether to set
+            // `shouldOverrideBuilder` flag or not. If client software does not implement any
+            // heuristic this flag **SHOULD** be set to `false`.
+            //
+            // Spec:
+            // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
+            should_override_builder: false,
+            blobs_bundle,
+            execution_requests: requests.unwrap_or_default(),
+        })
     }
 }
 
