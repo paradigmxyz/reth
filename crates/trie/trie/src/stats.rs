@@ -10,7 +10,7 @@ pub struct TrieStats {
 
 impl TrieStats {
     /// Duration for root calculation.
-    pub const fn duration(&self) -> Duration {
+    pub fn duration(&self) -> Duration {
         self.duration
     }
 
