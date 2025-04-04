@@ -1,7 +1,5 @@
-use crate::{
-    chainspec::CustomChainSpec,
-    primitives::{Block, CustomHeader, CustomNodePrimitives},
-};
+use crate::chainspec::CustomChainSpec;
+use alloy_consensus::{Block, Header};
 use alloy_evm::{
     block::{
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
@@ -11,14 +9,17 @@ use alloy_evm::{
 };
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpEvm};
 use op_revm::{OpSpecId, OpTransaction};
-use reth_evm::InspectorFor;
+use reth_evm::{
+    execute::{BlockAssembler, BlockAssemblerInput},
+    InspectorFor,
+};
 use reth_node_api::ConfigureEvm;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::{
     OpBlockAssembler, OpEvmConfig, OpEvmFactory, OpNextBlockEnvAttributes, OpRethReceiptBuilder,
 };
-use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
-use reth_primitives_traits::{SealedBlock, SealedHeader};
+use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
+use reth_primitives_traits::{Receipt, SealedBlock, SealedHeader};
 use revm::{
     context::{result::ExecutionResult, TxEnv},
     database::State,
@@ -63,9 +64,36 @@ where
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct CustomBlockAssembler {
+    inner: OpBlockAssembler<CustomChainSpec>,
+}
+
+impl<F> BlockAssembler<F> for CustomBlockAssembler
+where
+    F: for<'a> BlockExecutorFactory<
+        ExecutionCtx<'a> = OpBlockExecutionCtx,
+        Transaction = OpTransactionSigned,
+        Receipt: Receipt + DepositReceipt,
+    >,
+{
+    // TODO: use custom block here
+    type Block = Block<OpTransactionSigned>;
+
+    fn assemble_block(
+        &self,
+        input: BlockAssemblerInput<'_, '_, F>,
+    ) -> Result<Self::Block, BlockExecutionError> {
+        let block = self.inner.assemble_block(input)?;
+
+        Ok(block)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CustomEvmConfig {
     inner: OpEvmConfig,
+    block_assembler: CustomBlockAssembler,
 }
 
 impl BlockExecutorFactory for CustomEvmConfig {
@@ -99,39 +127,42 @@ impl BlockExecutorFactory for CustomEvmConfig {
 }
 
 impl ConfigureEvm for CustomEvmConfig {
-    type Primitives = CustomNodePrimitives;
+    type Primitives = OpPrimitives;
     type Error = <OpEvmConfig as ConfigureEvm>::Error;
     type NextBlockEnvCtx = <OpEvmConfig as ConfigureEvm>::NextBlockEnvCtx;
     type BlockExecutorFactory = Self;
-    type BlockAssembler = OpBlockAssembler<CustomChainSpec>;
+    type BlockAssembler = CustomBlockAssembler;
 
     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
         self
     }
 
     fn block_assembler(&self) -> &Self::BlockAssembler {
-        self.inner.block_assembler()
+        &self.block_assembler
     }
 
-    fn evm_env(&self, header: &CustomHeader) -> EvmEnv<OpSpecId> {
+    fn evm_env(&self, header: &Header) -> EvmEnv<OpSpecId> {
         self.inner.evm_env(header)
     }
 
     fn next_evm_env(
         &self,
-        parent: &CustomHeader,
+        parent: &Header,
         attributes: &OpNextBlockEnvAttributes,
     ) -> Result<EvmEnv<OpSpecId>, Self::Error> {
         self.inner.next_evm_env(parent, attributes)
     }
 
-    fn context_for_block<'a>(&self, block: &'a SealedBlock<Block>) -> OpBlockExecutionCtx {
+    fn context_for_block(
+        &self,
+        block: &SealedBlock<Block<OpTransactionSigned>>,
+    ) -> OpBlockExecutionCtx {
         self.inner.context_for_block(block)
     }
 
     fn context_for_next_block(
         &self,
-        parent: &SealedHeader<CustomHeader>,
+        parent: &SealedHeader,
         attributes: Self::NextBlockEnvCtx,
     ) -> OpBlockExecutionCtx {
         self.inner.context_for_next_block(parent, attributes)
