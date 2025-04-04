@@ -566,7 +566,9 @@ impl Default for AccountStorageCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::{B256, U256};
     use rand::Rng;
+    use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use std::mem::size_of;
 
     mod tracking_allocator {
@@ -661,5 +663,95 @@ mod tests {
         println!("StorageValue size: {} bytes", size_of::<StorageValue>());
         println!("Option<StorageValue> size: {} bytes", size_of::<Option<StorageValue>>());
         println!("Option<B256> size: {} bytes", size_of::<Option<B256>>());
+    }
+
+    #[test]
+    fn test_empty_storage_cached_state_provider() {
+        // make sure when we have an empty value in storage, we return `Empty` and not `NotCached`
+        let address = Address::random();
+        let storage_key = StorageKey::random();
+        let account = ExtendedAccount::new(0, U256::ZERO);
+
+        // note there is no storage here
+        let provider = MockEthProvider::default();
+        provider.extend_accounts(vec![(address, account)]);
+
+        let caches = ProviderCacheBuilder::default().build_caches(1000);
+        let state_provider =
+            CachedStateProvider::new_with_caches(provider, caches, CachedStateMetrics::zeroed());
+
+        // check that the storage is empty
+        let res = state_provider.storage(address, storage_key);
+        assert!(res.is_ok());
+        assert_eq!(res.unwrap(), None);
+    }
+
+    #[test]
+    fn test_uncached_storage_cached_state_provider() {
+        // make sure when we have something uncached, we get the cached value
+        let address = Address::random();
+        let storage_key = StorageKey::random();
+        let storage_value = U256::from(1);
+        let account =
+            ExtendedAccount::new(0, U256::ZERO).extend_storage(vec![(storage_key, storage_value)]);
+
+        // note that we extend storage here with one value
+        let provider = MockEthProvider::default();
+        provider.extend_accounts(vec![(address, account)]);
+
+        let caches = ProviderCacheBuilder::default().build_caches(1000);
+        let state_provider =
+            CachedStateProvider::new_with_caches(provider, caches, CachedStateMetrics::zeroed());
+
+        // check that the storage is empty
+        let res = state_provider.storage(address, storage_key);
+        assert!(res.is_ok());
+        assert_eq!(res.unwrap(), Some(storage_value));
+    }
+
+    #[test]
+    fn test_get_storage_populated() {
+        // make sure when we have something cached, we get the cached value in the `SlotStatus`
+        let address = Address::random();
+        let storage_key = StorageKey::random();
+        let storage_value = U256::from(1);
+
+        // insert into caches directly
+        let caches = ProviderCacheBuilder::default().build_caches(1000);
+        caches.insert_storage(address, storage_key, Some(storage_value));
+
+        // check that the storage is empty
+        let slot_status = caches.get_storage(&address, &storage_key);
+        assert_eq!(slot_status, SlotStatus::Value(storage_value));
+    }
+
+    #[test]
+    fn test_get_storage_not_cached() {
+        // make sure when we have nothing cached, we get the `NotCached` value in the `SlotStatus`
+        let storage_key = StorageKey::random();
+        let address = Address::random();
+
+        // just create empty caches
+        let caches = ProviderCacheBuilder::default().build_caches(1000);
+
+        // check that the storage is empty
+        let slot_status = caches.get_storage(&address, &storage_key);
+        assert_eq!(slot_status, SlotStatus::NotCached);
+    }
+
+    #[test]
+    fn test_get_storage_empty() {
+        // make sure when we insert an empty value to the cache, we get the `Empty` value in the
+        // `SlotStatus`
+        let address = Address::random();
+        let storage_key = StorageKey::random();
+
+        // insert into caches directly
+        let caches = ProviderCacheBuilder::default().build_caches(1000);
+        caches.insert_storage(address, storage_key, None);
+
+        // check that the storage is empty
+        let slot_status = caches.get_storage(&address, &storage_key);
+        assert_eq!(slot_status, SlotStatus::Empty);
     }
 }
