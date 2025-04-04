@@ -29,7 +29,7 @@ pub enum E2sError {
     Io(#[from] io::Error),
 
     /// Error during SSZ encoding/decoding
-    #[error("SSZ error")]
+    #[error("SSZ error: {0}")]
     Ssz(String),
 
     /// Reserved field in header not zero
