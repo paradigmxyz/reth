@@ -5,6 +5,7 @@ Start the node
 ```bash
 $ reth node --help
 ```
+
 ```txt
 Usage: reth node [OPTIONS]
 
@@ -527,6 +528,12 @@ TxPool:
           Maximum amount of time non-executable transaction are queued
 
           [default: 10800]
+
+      --txpool.transactions-backup <PATH>
+         Path to store the local transaction backup at
+
+      --txpool.disable-transactions-backup
+          Disables transaction backup to disk
 
 Builder:
       --builder.extradata <EXTRA_DATA>
