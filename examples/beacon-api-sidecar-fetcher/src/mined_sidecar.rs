@@ -3,6 +3,7 @@ use alloy_consensus::{
     transaction::PooledTransaction, BlockHeader, Signed, Transaction as _, TxEip4844WithSidecar,
     Typed2718,
 };
+use alloy_eips::eip7594::BlobTransactionSidecarVariant;
 use alloy_primitives::B256;
 use alloy_rpc_types_beacon::sidecar::{BeaconBlobBundle, SidecarIterator};
 use eyre::Result;
@@ -275,7 +276,7 @@ async fn fetch_blobs_for_block(
             sidecar_iterator.next_sidecar(*blob_len).and_then(|sidecar| {
                 if let PooledTransaction::Eip4844(transaction) = tx
                     .clone()
-                    .try_into_pooled_eip4844(sidecar)
+                    .try_into_pooled_eip4844(BlobTransactionSidecarVariant::Eip4844(sidecar))
                     .expect("should not fail to convert blob tx if it is already eip4844")
                 {
                     let block_metadata = BlockMetadata {

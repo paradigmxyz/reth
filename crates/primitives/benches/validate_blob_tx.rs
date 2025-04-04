@@ -1,8 +1,9 @@
 #![allow(missing_docs)]
 
 use alloy_consensus::TxEip4844;
-use alloy_eips::eip4844::{
-    env_settings::EnvKzgSettings, BlobTransactionSidecar, MAX_BLOBS_PER_BLOCK,
+use alloy_eips::{
+    eip4844::{env_settings::EnvKzgSettings, BlobTransactionSidecar, MAX_BLOBS_PER_BLOCK},
+    eip7594::BlobTransactionSidecarVariant,
 };
 use criterion::{
     criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
@@ -52,7 +53,7 @@ fn validate_blob_tx(
 
         tx.blob_versioned_hashes = blob_sidecar.versioned_hashes().collect();
 
-        (tx, blob_sidecar)
+        (tx, BlobTransactionSidecarVariant::Eip4844(blob_sidecar))
     };
 
     let group_id = format!("validate_blob | num blobs: {num_blobs} | {description}");

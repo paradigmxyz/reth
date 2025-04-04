@@ -18,6 +18,7 @@ pub const CAPABILITIES: &[&str] = &[
     "engine_getPayloadBodiesByHashV1",
     "engine_getPayloadBodiesByRangeV1",
     "engine_getBlobsV1",
+    "engine_getBlobsV2",
 ];
 
 // The list of all supported Engine capabilities available over the engine endpoint.
