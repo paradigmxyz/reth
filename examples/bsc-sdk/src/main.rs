@@ -36,6 +36,7 @@ mod consensus;
 mod evm;
 mod hardforks;
 mod node;
+mod rpc;
 mod system_contracts;
 
 #[tokio::main]

@@ -16,6 +16,7 @@ reth-discv4 = { workspace = true, features = ["test-utils"] }
 reth-engine-primitives.workspace = true
 reth-ethereum-forks = { workspace = true, features = ["serde"] }
 reth-ethereum-payload-builder.workspace = true
+reth-ethereum-primitives.workspace = true
 reth-eth-wire.workspace = true
 reth-eth-wire-types.workspace = true
 reth-evm.workspace = true
@@ -56,6 +57,7 @@ alloy-rpc-types-engine.workspace = true
 bytes.workspace = true
 cfg-if = { version = "1.0", default-features = false }
 derive_more.workspace = true
+eyre.workspace = true
 futures.workspace = true
 include_dir = { version = "0.7.4" }
 lazy_static = { version = "1.4.0" }
