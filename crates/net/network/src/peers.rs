@@ -702,7 +702,6 @@ impl PeersManager {
     /// Called for a newly discovered trusted peer.
     ///
     /// If the peer already exists, then the address and kind will be updated.
-    #[expect(dead_code)]
     pub(crate) fn add_trusted_peer(&mut self, peer_id: PeerId, addr: PeerAddr) {
         self.add_peer_kind(peer_id, PeerKind::Trusted, addr, None)
     }
@@ -778,7 +777,6 @@ impl PeersManager {
 
     /// Connect to the given peer. NOTE: if the maximum number out outbound sessions is reached,
     /// this won't do anything. See `reth_network::SessionManager::dial_outbound`.
-    #[expect(dead_code)]
     pub(crate) fn add_and_connect(
         &mut self,
         peer_id: PeerId,

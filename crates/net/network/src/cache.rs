@@ -269,7 +269,6 @@ mod test {
     }
 
     #[test]
-    #[expect(dead_code)]
     fn test_debug_impl_lru_cache() {
         let mut cache = LruCache::new(2);
         let key_1 = Key(1);
