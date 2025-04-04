@@ -1,4 +1,9 @@
-use example_bsc_sdk::{chainspec::bsc::bsc_mainnet, node::BscNode};
+use std::sync::Arc;
+
+use example_bsc_sdk::{
+    chainspec::{bsc::bsc_mainnet, BscChainSpec},
+    node::BscNode,
+};
 use reth::{
     args::RpcServerArgs,
     builder::{NodeBuilder, NodeConfig, NodeHandle},
@@ -11,7 +16,9 @@ async fn can_sync_blocks() -> eyre::Result<()> {
     let tasks = TaskManager::current();
     let exec = tasks.executor();
 
-    let node_config = NodeConfig::new(bsc_mainnet())
+    let bsc_chainspec = BscChainSpec { inner: bsc_mainnet() };
+
+    let node_config = NodeConfig::new(Arc::new(bsc_chainspec))
         .with_unused_ports()
         .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
 

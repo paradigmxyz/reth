@@ -145,7 +145,7 @@ lazy_static! {
 
     /// mainnet system contracts: hardfork -> address -> Bytecode
     pub(crate) static ref BSC_MAINNET_CONTRACTS: HashMap<String, HashMap<String, Option<Bytecode>>> =
-        read_all_system_contracts(bsc_mainnet().as_ref());
+        read_all_system_contracts(&bsc_mainnet());
 
 
 }
