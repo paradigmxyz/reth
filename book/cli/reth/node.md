@@ -529,10 +529,10 @@ TxPool:
           [default: 10800]
 
       --txpool.transactions-backup <PATH>
-          Path to store the local transaction backup at
+          Path to store the local transaction backup at, to survive node restarts
 
       --txpool.disable-transactions-backup
-          Disables transaction backup to disk
+          Disables transaction backup to disk on node shutdown
 
 Builder:
       --builder.extradata <EXTRA_DATA>
