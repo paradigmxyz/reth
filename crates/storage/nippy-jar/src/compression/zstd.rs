@@ -320,7 +320,7 @@ impl ZstdDictionaries<'_> {
 /// A Zstd dictionary. It's created and serialized with [`ZstdDictionary::Raw`], and deserialized as
 /// [`ZstdDictionary::Loaded`].
 pub(crate) enum ZstdDictionary<'a> {
-    #[cfg(test)]
+    #[cfg_attr(not(test), expect(dead_code))]
     Raw(RawDictionary),
     Loaded(DecoderDictionary<'a>),
 }
@@ -329,7 +329,6 @@ impl ZstdDictionary<'_> {
     /// Returns a reference to the expected `RawDictionary`
     pub(crate) const fn raw(&self) -> Option<&RawDictionary> {
         match self {
-            #[cfg(test)]
             ZstdDictionary::Raw(dict) => Some(dict),
             ZstdDictionary::Loaded(_) => None,
         }
@@ -338,7 +337,6 @@ impl ZstdDictionary<'_> {
     /// Returns a reference to the expected `DecoderDictionary`
     pub(crate) const fn loaded(&self) -> Option<&DecoderDictionary<'_>> {
         match self {
-            #[cfg(test)]
             ZstdDictionary::Raw(_) => None,
             ZstdDictionary::Loaded(dict) => Some(dict),
         }
@@ -356,13 +354,12 @@ impl<'de> Deserialize<'de> for ZstdDictionary<'_> {
 }
 
 impl Serialize for ZstdDictionary<'_> {
-    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         match self {
-            #[cfg(test)]
-            ZstdDictionary::Raw(r) => r.serialize(_serializer),
+            ZstdDictionary::Raw(r) => r.serialize(serializer),
             ZstdDictionary::Loaded(_) => unreachable!(),
         }
     }
