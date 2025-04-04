@@ -14,13 +14,9 @@ use reth::{
     consensus::{ConsensusError, FullConsensus},
 };
 use reth_node_ethereum::{EthEngineTypes, EthereumEngineValidator};
-
 use reth_primitives::{Block, BlockBody, EthPrimitives};
-
 use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
-
 use reth_trie_db::MerklePatriciaTrie;
-
 use std::sync::Arc;
 
 pub mod evm;
@@ -31,40 +27,6 @@ pub mod rpc;
 
 /// Bsc addons configuring RPC types
 pub type BscNodeAddOns<N> = RpcAddOns<N, BscEthApiBuilder, BscEngineValidatorBuilder>;
-
-/// A basic ethereum consensus builder.
-#[derive(Debug, Default, Clone, Copy)]
-#[non_exhaustive]
-pub struct BscConsensusBuilder;
-
-impl<Node> ConsensusBuilder<Node> for BscConsensusBuilder
-where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = BscChainSpec, Primitives = EthPrimitives>>,
-{
-    type Consensus = Arc<dyn FullConsensus<EthPrimitives, Error = ConsensusError>>;
-
-    async fn build_consensus(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
-        Ok(Arc::new(EthBeaconConsensus::new(ctx.chain_spec())))
-    }
-}
-
-/// Builder for [`EthereumEngineValidator`].
-#[derive(Debug, Default, Clone)]
-#[non_exhaustive]
-pub struct BscEngineValidatorBuilder;
-
-impl<Node, Types> EngineValidatorBuilder<Node> for BscEngineValidatorBuilder
-where
-    Types:
-        NodeTypes<ChainSpec = BscChainSpec, Payload = EthEngineTypes, Primitives = EthPrimitives>,
-    Node: FullNodeComponents<Types = Types>,
-{
-    type Validator = EthereumEngineValidator;
-
-    async fn build(self, ctx: &AddOnsContext<'_, Node>) -> eyre::Result<Self::Validator> {
-        Ok(EthereumEngineValidator::new(Arc::new(ctx.config.chain.clone().as_ref().clone().into())))
-    }
-}
 
 /// Type configuration for a regular BSC node.
 #[derive(Debug, Default, Clone)]
@@ -166,4 +128,38 @@ impl NodeTypes for BscNode {
     type StateCommitment = MerklePatriciaTrie;
     type Storage = EthStorage;
     type Payload = EthEngineTypes;
+}
+
+/// A basic ethereum consensus builder.
+#[derive(Debug, Default, Clone, Copy)]
+#[non_exhaustive]
+pub struct BscConsensusBuilder;
+
+impl<Node> ConsensusBuilder<Node> for BscConsensusBuilder
+where
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = BscChainSpec, Primitives = EthPrimitives>>,
+{
+    type Consensus = Arc<dyn FullConsensus<EthPrimitives, Error = ConsensusError>>;
+
+    async fn build_consensus(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
+        Ok(Arc::new(EthBeaconConsensus::new(ctx.chain_spec())))
+    }
+}
+
+/// Builder for [`EthereumEngineValidator`].
+#[derive(Debug, Default, Clone)]
+#[non_exhaustive]
+pub struct BscEngineValidatorBuilder;
+
+impl<Node, Types> EngineValidatorBuilder<Node> for BscEngineValidatorBuilder
+where
+    Types:
+        NodeTypes<ChainSpec = BscChainSpec, Payload = EthEngineTypes, Primitives = EthPrimitives>,
+    Node: FullNodeComponents<Types = Types>,
+{
+    type Validator = EthereumEngineValidator;
+
+    async fn build(self, ctx: &AddOnsContext<'_, Node>) -> eyre::Result<Self::Validator> {
+        Ok(EthereumEngineValidator::new(Arc::new(ctx.config.chain.clone().as_ref().clone().into())))
+    }
 }

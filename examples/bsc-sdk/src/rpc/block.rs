@@ -29,6 +29,7 @@ use reth_rpc_eth_api::{
     types::RpcTypes,
     FromEthApiError, RpcNodeCore, RpcNodeCoreExt, RpcReceipt,
 };
+
 impl<N> EthBlocks for BscEthApi<N>
 where
     Self: LoadBlock<
