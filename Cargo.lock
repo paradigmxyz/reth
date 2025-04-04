@@ -7909,6 +7909,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-era"
+version = "1.3.7"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-primitives",
+ "alloy-rlp",
+ "ethereum_ssz",
+ "ethereum_ssz_derive",
+ "snap",
+ "thiserror 2.0.12",
+]
+
+[[package]]
 name = "reth-errors"
 version = "1.3.7"
 dependencies = [
