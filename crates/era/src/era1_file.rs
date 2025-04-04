@@ -15,7 +15,11 @@ use crate::{
     },
 };
 use alloy_primitives::BlockNumber;
-use std::io::{Read, Seek};
+use std::{
+    fs::File,
+    io::{Read, Seek},
+    path::Path,
+};
 
 /// Era1 file interface
 #[derive(Debug)]
@@ -165,5 +169,17 @@ impl<R: Read + Seek> Era1Reader<R> {
         );
 
         Ok(Era1File::new(group, id))
+    }
+}
+
+impl Era1Reader<File> {
+    /// Opens and reads an Era1 file from the given path
+    pub fn open<P: AsRef<Path>>(
+        path: P,
+        network_name: impl Into<String>,
+    ) -> Result<Era1File, E2sError> {
+        let file = File::open(path).map_err(E2sError::Io)?;
+        let mut reader = Self::new(file);
+        reader.read(network_name.into())
     }
 }
