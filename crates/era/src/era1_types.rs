@@ -41,7 +41,7 @@ impl Era1Group {
 /// from the beginning of the index record to the beginning of the corresponding data.
 ///
 /// Format:
-/// `starting-number | index | index | index ... | count`
+/// `starting-(block)-number | index | index | index ... | count`
 #[derive(Debug, Clone)]
 pub struct BlockIndex {
     /// Starting block number
@@ -57,7 +57,7 @@ impl BlockIndex {
         Self { starting_number, offsets }
     }
 
-    /// Get the offset for a specific slot
+    /// Get the offset for a specific block number
     pub fn offset_for_block(&self, block_number: BlockNumber) -> Option<i64> {
         if block_number < self.starting_number {
             return None;
@@ -69,7 +69,7 @@ impl BlockIndex {
 
     /// Convert to an [`Entry`] for storage in an e2store file
     pub fn to_entry(&self) -> Entry {
-        // Format: starting-slot | index | index | index ... | count
+        // Format: starting-(block)-number | index | index | index ... | count
         let mut data = Vec::with_capacity(8 + self.offsets.len() * 8 + 8);
 
         // Add starting block number
@@ -101,7 +101,7 @@ impl BlockIndex {
             )));
         }
 
-        // Extract starting slot = first 8 bytes
+        // Extract starting block number = first 8 bytes
         let mut starting_number_bytes = [0u8; 8];
         starting_number_bytes.copy_from_slice(&entry.data[0..8]);
         let starting_number = u64::from_le_bytes(starting_number_bytes);
