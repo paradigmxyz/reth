@@ -1,6 +1,6 @@
 //! Contains types required for building a payload.
 
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{borrow::ToOwned, string::String, sync::Arc, vec::Vec};
 use alloy_eips::{eip4895::Withdrawals, eip7594::BlobTransactionSidecarVariant, eip7685::Requests};
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Encodable;
