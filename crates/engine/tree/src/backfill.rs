@@ -212,7 +212,6 @@ impl<N: ProviderNodeTypes> BackfillSync for PipelineSync<N> {
 /// blockchain tree any messages that would result in database writes, since it would result in a
 /// deadlock.
 #[derive(Debug)]
-#[expect(clippy::large_enum_variant)]
 enum PipelineState<N: ProviderNodeTypes> {
     /// Pipeline is idle.
     Idle(Option<Box<Pipeline<N>>>),
