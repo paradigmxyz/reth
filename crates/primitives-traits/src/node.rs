@@ -49,8 +49,6 @@ where
             Receipt: FullReceipt,
         > + Default
         + Clone
-        + PartialEq
-        + Eq
         + 'static,
 {
 }
@@ -64,8 +62,6 @@ impl<T> FullNodePrimitives for T where
             Receipt: FullReceipt,
         > + Default
         + Clone
-        + PartialEq
-        + Eq
         + 'static
 {
 }

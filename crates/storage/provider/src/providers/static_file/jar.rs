@@ -314,8 +314,8 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
     }
 }
 
-impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction, Receipt: Decompress>>
-    ReceiptProvider for StaticFileJarProvider<'_, N>
+impl<N>
+    ReceiptProvider for StaticFileJarProvider<'_, N> where N: NodePrimitives<SignedTx: Decompress + SignedTransaction, Receipt: Decompress>
 {
     fn receipt(&self, num: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
         self.cursor()?.get_one::<ReceiptMask<Self::Receipt>>(num.into())

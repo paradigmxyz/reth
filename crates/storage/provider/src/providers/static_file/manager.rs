@@ -95,7 +95,7 @@ impl<N> Clone for StaticFileProvider<N> {
     }
 }
 
-impl<N: NodePrimitives> StaticFileProvider<N> {
+impl<N: NodePrimitives + 'static> StaticFileProvider<N> {
     /// Creates a new [`StaticFileProvider`] with the given [`StaticFileAccess`].
     fn new(path: impl AsRef<Path>, access: StaticFileAccess) -> ProviderResult<Self> {
         let provider = Self(Arc::new(StaticFileProviderInner::new(path, access)?));
@@ -221,7 +221,7 @@ impl<N: NodePrimitives> Deref for StaticFileProvider<N> {
     }
 }
 
-impl<N: NodePrimitives> NodePrimitives for StaticFileProvider<N> {
+impl<N: NodePrimitives + 'static> NodePrimitives for StaticFileProvider<N> {
     type Block = N::Block;
     type BlockHeader = N::BlockHeader;
     type BlockBody = N::BlockBody;
@@ -291,7 +291,7 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
     }
 }
 
-impl<N: NodePrimitives> StaticFileProvider<N> {
+impl<N: NodePrimitives + 'static> StaticFileProvider<N> {
     /// Set a custom number of blocks per file.
     #[cfg(any(test, feature = "test-utils"))]
     pub fn with_custom_blocks_per_file(self, blocks_per_file: u64) -> Self {
@@ -669,7 +669,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ) -> ProviderResult<Option<PipelineTarget>>
     where
         Provider: DBProvider + BlockReader + StageCheckpointReader + ChainSpecProvider,
-        N: NodePrimitives<Receipt: Value, BlockHeader: Value, SignedTx: Value>,
+        N: NodePrimitives<Receipt: Value, BlockHeader: Value, SignedTx: Value> + 'static,
     {
         // OVM historical import is broken and does not work with this check. It's importing
         // duplicated receipts resulting in having more receipts than the expected transaction
@@ -1267,7 +1267,7 @@ impl<N: NodePrimitives + 'static> StaticFileWriter for StaticFileProvider<N> {
     }
 }
 
-impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileProvider<N> {
+impl<N> HeaderProvider for StaticFileProvider<N> where N: NodePrimitives<BlockHeader: Value> + 'static {
     type Header = N::BlockHeader;
 
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
@@ -1362,7 +1362,7 @@ impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileProvide
     }
 }
 
-impl<N: NodePrimitives> BlockHashReader for StaticFileProvider<N> {
+impl<N: NodePrimitives + 'static> BlockHashReader for StaticFileProvider<N> {
     fn block_hash(&self, num: u64) -> ProviderResult<Option<B256>> {
         self.get_segment_provider_from_block(StaticFileSegment::Headers, num, None)?.block_hash(num)
     }
@@ -1381,8 +1381,8 @@ impl<N: NodePrimitives> BlockHashReader for StaticFileProvider<N> {
     }
 }
 
-impl<N: NodePrimitives<SignedTx: Value + SignedTransaction, Receipt: Value>> ReceiptProvider
-    for StaticFileProvider<N>
+impl<N> ReceiptProvider
+    for StaticFileProvider<N> where N: NodePrimitives<SignedTx: Value + SignedTransaction, Receipt: Value> + 'static
 {
     fn receipt(&self, num: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
         self.get_segment_provider_from_transaction(StaticFileSegment::Receipts, num, None)
@@ -1423,8 +1423,8 @@ impl<N: NodePrimitives<SignedTx: Value + SignedTransaction, Receipt: Value>> Rec
     }
 }
 
-impl<N: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>>
-    TransactionsProviderExt for StaticFileProvider<N>
+impl<N>
+    TransactionsProviderExt for StaticFileProvider<N> where N: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>
 {
     fn transaction_hashes_by_range(
         &self,
@@ -1460,7 +1460,7 @@ impl<N: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>>
                     chunk_range,
                     |cursor, number| {
                         Ok(cursor
-                            .get_one::<TransactionMask<Self::Transaction>>(number.into())?
+                            .get_one::<TransactionMask<Self::SignedTx>>(number.into())?
                             .map(|transaction| {
                                 rlp_buf.clear();
                                 let _ = channel_tx
@@ -1486,14 +1486,14 @@ impl<N: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>>
     }
 }
 
-impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsProvider
+impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction> + 'static> TransactionsProvider
     for StaticFileProvider<N>
 {
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         self.find_static_file(StaticFileSegment::Transactions, |jar_provider| {
             let mut cursor = jar_provider.cursor()?;
             if cursor
-                .get_one::<TransactionMask<Self::Transaction>>((&tx_hash).into())?
+                .get_one::<TransactionMask<Self::SignedTx>>((&tx_hash).into())?
                 .and_then(|tx| (tx.trie_hash() == tx_hash).then_some(tx))
                 .is_some()
             {
@@ -1504,7 +1504,7 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
         })
     }
 
-    fn transaction_by_id(&self, num: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
+    fn transaction_by_id(&self, num: TxNumber) -> ProviderResult<Option<Self::SignedTx>> {
         self.get_segment_provider_from_transaction(StaticFileSegment::Transactions, num, None)
             .and_then(|provider| provider.transaction_by_id(num))
             .or_else(|err| {
@@ -1519,7 +1519,7 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
     fn transaction_by_id_unhashed(
         &self,
         num: TxNumber,
-    ) -> ProviderResult<Option<Self::Transaction>> {
+    ) -> ProviderResult<Option<Self::SignedTx>> {
         self.get_segment_provider_from_transaction(StaticFileSegment::Transactions, num, None)
             .and_then(|provider| provider.transaction_by_id_unhashed(num))
             .or_else(|err| {
@@ -1531,11 +1531,11 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
             })
     }
 
-    fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Transaction>> {
+    fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::SignedTx>> {
         self.find_static_file(StaticFileSegment::Transactions, |jar_provider| {
             Ok(jar_provider
                 .cursor()?
-                .get_one::<TransactionMask<Self::Transaction>>((&hash).into())?
+                .get_one::<TransactionMask<Self::SignedTx>>((&hash).into())?
                 .and_then(|tx| (tx.trie_hash() == hash).then_some(tx)))
         })
     }
@@ -1543,7 +1543,7 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
     fn transaction_by_hash_with_meta(
         &self,
         _hash: TxHash,
-    ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
+    ) -> ProviderResult<Option<(Self::SignedTx, TransactionMeta)>> {
         // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
@@ -1556,7 +1556,7 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
     fn transactions_by_block(
         &self,
         _block_id: BlockHashOrNumber,
-    ) -> ProviderResult<Option<Vec<Self::Transaction>>> {
+    ) -> ProviderResult<Option<Vec<Self::SignedTx>>> {
         // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
@@ -1564,7 +1564,7 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
     fn transactions_by_block_range(
         &self,
         _range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<Vec<Self::Transaction>>> {
+    ) -> ProviderResult<Vec<Vec<Self::SignedTx>>> {
         // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
@@ -1572,11 +1572,11 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
     fn transactions_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<Self::Transaction>> {
+    ) -> ProviderResult<Vec<Self::SignedTx>> {
         self.fetch_range_with_predicate(
             StaticFileSegment::Transactions,
             to_range(range),
-            |cursor, number| cursor.get_one::<TransactionMask<Self::Transaction>>(number.into()),
+            |cursor, number| cursor.get_one::<TransactionMask<Self::SignedTx>>(number.into()),
             |_| true,
         )
     }
@@ -1693,7 +1693,7 @@ impl<N: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>>
     }
 }
 
-impl<N: NodePrimitives> WithdrawalsProvider for StaticFileProvider<N> {
+impl<N: NodePrimitives + 'static> WithdrawalsProvider for StaticFileProvider<N> {
     fn withdrawals_by_block(
         &self,
         id: BlockHashOrNumber,
@@ -1735,7 +1735,7 @@ impl<N: FullNodePrimitives<BlockHeader: Value>> OmmersProvider for StaticFilePro
     }
 }
 
-impl<N: NodePrimitives> BlockBodyIndicesProvider for StaticFileProvider<N> {
+impl<N: NodePrimitives + 'static> BlockBodyIndicesProvider for StaticFileProvider<N> {
     fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
         self.get_segment_provider_from_block(StaticFileSegment::BlockMeta, num, None)
             .and_then(|provider| provider.block_body_indices(num))
@@ -1761,7 +1761,7 @@ impl<N: NodePrimitives> BlockBodyIndicesProvider for StaticFileProvider<N> {
     }
 }
 
-impl<N: NodePrimitives> StatsReader for StaticFileProvider<N> {
+impl<N: NodePrimitives + 'static> StatsReader for StaticFileProvider<N> {
     fn count_entries<T: Table>(&self) -> ProviderResult<usize> {
         match T::NAME {
             tables::CanonicalHeaders::NAME |

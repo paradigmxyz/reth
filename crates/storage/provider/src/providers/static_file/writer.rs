@@ -45,7 +45,7 @@ impl<N> Default for StaticFileWriters<N> {
     }
 }
 
-impl<N: NodePrimitives> StaticFileWriters<N> {
+impl<N: NodePrimitives + 'static> StaticFileWriters<N> {
     pub(crate) fn get_or_create(
         &self,
         segment: StaticFileSegment,
@@ -118,7 +118,7 @@ pub struct StaticFileProviderRW<N> {
     prune_on_commit: Option<(u64, Option<BlockNumber>)>,
 }
 
-impl<N: NodePrimitives> StaticFileProviderRW<N> {
+impl<N: NodePrimitives + 'static> StaticFileProviderRW<N> {
     /// Creates a new [`StaticFileProviderRW`] for a [`StaticFileSegment`].
     ///
     /// Before use, transaction based segments should ensure the block end range is the expected
