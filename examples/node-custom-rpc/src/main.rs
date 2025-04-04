@@ -15,8 +15,11 @@
 #![warn(unused_crate_dependencies)]
 
 use clap::Parser;
-use jsonrpsee::core::SubscriptionResult;
-use jsonrpsee::{core::RpcResult, proc_macros::rpc, PendingSubscriptionSink, SubscriptionMessage};
+use jsonrpsee::{
+    core::{RpcResult, SubscriptionResult},
+    proc_macros::rpc,
+    PendingSubscriptionSink, SubscriptionMessage,
+};
 use reth::{chainspec::EthereumChainSpecParser, cli::Cli};
 use reth_node_ethereum::EthereumNode;
 use reth_transaction_pool::TransactionPool;
@@ -73,7 +76,10 @@ pub trait TxpoolExtApi {
 
     /// Creates a subscription that returns the number of transactions in the pool every 10s.
     #[subscription(name = "subscribeTransactionCount", item = usize)]
-    fn subscribe_transaction_count(&self, #[argument(rename = "delay")] delay: Option<u64>) -> SubscriptionResult;
+    fn subscribe_transaction_count(
+        &self,
+        #[argument(rename = "delay")] delay: Option<u64>,
+    ) -> SubscriptionResult;
 }
 
 /// The type that implements the `txpool` rpc namespace trait
@@ -122,8 +128,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jsonrpsee::ws_client::WsClientBuilder;
-    use jsonrpsee::{http_client::HttpClientBuilder, server::ServerBuilder};
+    use jsonrpsee::{
+        http_client::HttpClientBuilder, server::ServerBuilder, ws_client::WsClientBuilder,
+    };
     use reth_transaction_pool::noop::NoopTransactionPool;
 
     #[cfg(test)]
