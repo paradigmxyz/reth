@@ -38,6 +38,7 @@ use revm::{
 
 mod config;
 use alloy_eips::eip1559::INITIAL_BASE_FEE;
+use alloy_eips::eip7840::BlobParams;
 pub use config::{revm_spec, revm_spec_by_timestamp_and_block_number};
 use reth_ethereum_forks::EthereumHardfork;
 
@@ -166,14 +167,17 @@ where
         // configure evm env based on parent block
         let cfg = CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec_id);
 
+        let blob_params = self.chain_spec().blob_params_at_timestamp(attributes.timestamp);
         // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
         // cancun now, we need to set the excess blob gas to the default value(0)
         let blob_excess_gas_and_price = parent
-            .maybe_next_block_excess_blob_gas(
-                self.chain_spec().blob_params_at_timestamp(attributes.timestamp),
-            )
+            .maybe_next_block_excess_blob_gas(blob_params)
             .or_else(|| (spec_id == SpecId::CANCUN).then_some(0))
-            .map(|gas| BlobExcessGasAndPrice::new(gas, spec_id >= SpecId::PRAGUE));
+            .map(|excess_blob_gas| {
+                let blob_gasprice =
+                    blob_params.unwrap_or_else(BlobParams::cancun).calc_blob_fee(excess_blob_gas);
+                BlobExcessGasAndPrice { excess_blob_gas, blob_gasprice }
+            });
 
         let mut basefee = parent.next_block_base_fee(
             self.chain_spec().base_fee_params_at_timestamp(attributes.timestamp),
