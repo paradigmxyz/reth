@@ -61,6 +61,7 @@ proptest-arbitrary-interop = { workspace = true, optional = true }
 [dev-dependencies]
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
+alloy-primitives = { workspace = true, features = ["rand"] }
 paste.workspace = true
 rand.workspace = true
 proptest.workspace = true
@@ -97,6 +98,7 @@ test-utils = [
     "reth-provider/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-ethereum-primitives/test-utils",
+    "alloy-primitives/rand",
 ]
 arbitrary = [
     "proptest",
