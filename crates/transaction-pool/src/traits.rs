@@ -8,7 +8,7 @@ use crate::{
     validate::ValidPoolTransaction,
     AllTransactionsEvents,
 };
-use alloy_consensus::{EthereumTxEnvelope,transaction::PooledTransaction, BlockHeader, Signed, Typed2718};
+use alloy_consensus::{transaction::PooledTransaction, BlockHeader, Signed, Typed2718};
 use alloy_eips::{
     eip2718::Encodable2718,
     eip2930::AccessList,
