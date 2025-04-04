@@ -111,11 +111,11 @@ pub struct TxPoolArgs {
     #[arg(long = "txpool.lifetime", value_parser = parse_duration_from_secs_or_ms, default_value = "10800", value_name = "DURATION")]
     pub max_queued_lifetime: Duration,
 
-    /// Path to store the local transaction backup at.
+    /// Path to store the local transaction backup at, to survive node restarts.
     #[arg(long = "txpool.transactions-backup", alias = "txpool.journal", value_name = "PATH")]
     pub transactions_backup_path: Option<std::path::PathBuf>,
 
-    /// Disables transaction backup to disk
+    /// Disables transaction backup to disk on node shutdown.
     #[arg(
         long = "txpool.disable-transactions-backup",
         alias = "txpool.disable-journal",
