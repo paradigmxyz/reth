@@ -21,7 +21,7 @@ pub struct Era1File {
     /// Main content group of the Era1 file
     pub group: Era1Group,
 
-    /// File identifier of Era1 file
+    /// File identifier
     pub id: Era1Id,
 }
 
