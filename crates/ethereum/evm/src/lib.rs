@@ -134,6 +134,15 @@ where
         // configure evm env based on parent block
         let cfg_env = CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec);
 
+        // derive the EIP-4844 blob fees from the header's `excess_blob_gas` and the current blobparams
+        let blob_excess_gas_and_price = header.excess_blob_gas.zip(self.chain_spec().blob_params_at_timestamp(header.timestamp)).map(|(excess_blob_gas, params)| {
+            let blob_gasprice = params.calc_blob_fee(excess_blob_gas);
+            BlobExcessGasAndPrice {
+                excess_blob_gas,
+                blob_gasprice,
+            }
+        });
+
         let block_env = BlockEnv {
             number: header.number(),
             beneficiary: header.beneficiary(),
@@ -142,10 +151,7 @@ where
             prevrandao: if spec >= SpecId::MERGE { header.mix_hash() } else { None },
             gas_limit: header.gas_limit(),
             basefee: header.base_fee_per_gas().unwrap_or_default(),
-            // EIP-4844 excess blob gas of this block, introduced in Cancun
-            blob_excess_gas_and_price: header.excess_blob_gas.map(|excess_blob_gas| {
-                BlobExcessGasAndPrice::new(excess_blob_gas, spec >= SpecId::PRAGUE)
-            }),
+            blob_excess_gas_and_price
         };
 
         EvmEnv { cfg_env, block_env }
