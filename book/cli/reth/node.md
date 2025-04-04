@@ -5,7 +5,6 @@ Start the node
 ```bash
 $ reth node --help
 ```
-
 ```txt
 Usage: reth node [OPTIONS]
 
@@ -530,7 +529,7 @@ TxPool:
           [default: 10800]
 
       --txpool.transactions-backup <PATH>
-         Path to store the local transaction backup at
+          Path to store the local transaction backup at
 
       --txpool.disable-transactions-backup
           Disables transaction backup to disk
