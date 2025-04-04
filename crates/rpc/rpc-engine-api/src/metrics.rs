@@ -46,6 +46,8 @@ pub(crate) struct EngineApiLatencyMetrics {
     pub(crate) get_payload_v3: Histogram,
     /// Latency for `engine_getPayloadV4`
     pub(crate) get_payload_v4: Histogram,
+    /// Latency for `engine_getPayloadV5`
+    pub(crate) get_payload_v5: Histogram,
     /// Latency for `engine_getPayloadBodiesByRangeV1`
     pub(crate) get_payload_bodies_by_range_v1: Histogram,
     /// Latency for `engine_getPayloadBodiesByHashV1`

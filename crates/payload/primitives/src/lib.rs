@@ -133,6 +133,12 @@ pub fn validate_payload_timestamp(
         //    the payload does not fall within the time frame of the Prague fork.
         return Err(EngineObjectValidationError::UnsupportedFork)
     }
+
+    let is_osaka = chain_spec.is_osaka_active_at_timestamp(timestamp);
+    if version.is_v5() && !is_osaka {
+        return Err(EngineObjectValidationError::UnsupportedFork)
+    }
+
     Ok(())
 }
 
@@ -155,7 +161,10 @@ pub fn validate_withdrawals_presence<T: EthereumHardforks>(
                     .to_error(VersionSpecificValidationError::WithdrawalsNotSupportedInV1))
             }
         }
-        EngineApiMessageVersion::V2 | EngineApiMessageVersion::V3 | EngineApiMessageVersion::V4 => {
+        EngineApiMessageVersion::V2 |
+        EngineApiMessageVersion::V3 |
+        EngineApiMessageVersion::V4 |
+        EngineApiMessageVersion::V5 => {
             if is_shanghai_active && !has_withdrawals {
                 return Err(message_validation_kind
                     .to_error(VersionSpecificValidationError::NoWithdrawalsPostShanghai))
@@ -256,7 +265,7 @@ pub fn validate_parent_beacon_block_root_presence<T: EthereumHardforks>(
                 ))
             }
         }
-        EngineApiMessageVersion::V3 | EngineApiMessageVersion::V4 => {
+        EngineApiMessageVersion::V3 | EngineApiMessageVersion::V4 | EngineApiMessageVersion::V5 => {
             if !has_parent_beacon_block_root {
                 return Err(validation_kind
                     .to_error(VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun))
@@ -356,6 +365,10 @@ pub enum EngineApiMessageVersion {
     ///
     /// Added in the Prague hardfork.
     V4 = 4,
+    /// Version 5
+    ///
+    /// Added in the Osaka hardfork.
+    V5 = 5,
 }
 
 impl EngineApiMessageVersion {
@@ -377,6 +390,11 @@ impl EngineApiMessageVersion {
     /// Returns true if the version is V4.
     pub const fn is_v4(&self) -> bool {
         matches!(self, Self::V4)
+    }
+
+    /// Returns true if the version is V5.
+    pub const fn is_v5(&self) -> bool {
+        matches!(self, Self::V5)
     }
 }
 
