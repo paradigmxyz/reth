@@ -1068,7 +1068,6 @@ impl<T: TransactionOrdering> Drop for TxPool<T> {
 
 // Additional test impls
 #[cfg(any(test, feature = "test-utils"))]
-#[expect(dead_code)]
 impl<T: TransactionOrdering> TxPool<T> {
     pub(crate) const fn pending(&self) -> &PendingPool<T> {
         &self.pending_pool
