@@ -90,6 +90,14 @@ impl<'a, N: NodePrimitives> StaticFileJarProvider<'a, N> {
     }
 }
 
+impl<'a, N: NodePrimitives> NodePrimitives for StaticFileJarProvider<'a, N> {
+    type Block = N::Block;
+    type BlockHeader = N::BlockHeader;
+    type BlockBody = N::BlockBody;
+    type SignedTx = N::SignedTx;
+    type Receipt = N::Receipt;
+}
+
 impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileJarProvider<'_, N> {
     type Header = N::BlockHeader;
 
@@ -311,8 +319,6 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
 impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction, Receipt: Decompress>>
     ReceiptProvider for StaticFileJarProvider<'_, N>
 {
-    type Receipt = N::Receipt;
-
     fn receipt(&self, num: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
         self.cursor()?.get_one::<ReceiptMask<Self::Receipt>>(num.into())
     }

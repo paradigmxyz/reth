@@ -74,6 +74,14 @@ impl<ChainSpec, N> Clone for NoopProvider<ChainSpec, N> {
     }
 }
 
+impl<ChainSpec: Send + Sync, N: NodePrimitives> NodePrimitives for NoopProvider<ChainSpec, N> {
+    type Block = N::Block;
+    type BlockHeader = N::BlockHeader;
+    type BlockBody = N::BlockBody;
+    type SignedTx = N::SignedTx;
+    type Receipt = N::Receipt;
+}
+
 /// Noop implementation for testing purposes
 impl<ChainSpec: Send + Sync, N: Send + Sync> BlockHashReader for NoopProvider<ChainSpec, N> {
     fn block_hash(&self, _number: u64) -> ProviderResult<Option<B256>> {
@@ -283,8 +291,6 @@ impl<C: Send + Sync, N: NodePrimitives> TransactionsProvider for NoopProvider<C,
 }
 
 impl<C: Send + Sync, N: NodePrimitives> ReceiptProvider for NoopProvider<C, N> {
-    type Receipt = N::Receipt;
-
     fn receipt(&self, _id: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
         Ok(None)
     }

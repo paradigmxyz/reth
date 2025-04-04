@@ -16,7 +16,8 @@ use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
 use reth_node_types::{
-    BlockTy, HeaderTy, NodeTypes, NodeTypesWithDB, NodeTypesWithDBAdapter, ReceiptTy, TxTy,
+    BlockTy, HeaderTy, NodePrimitives, NodeTypes, NodeTypesWithDB, NodeTypesWithDBAdapter,
+    ReceiptTy, TxTy,
 };
 use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
@@ -197,6 +198,13 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     }
 }
 
+impl<N: NodeTypes> NodePrimitives for ProviderFactory<N> {
+    type Block = BlockTy<N>;
+    type BlockHeader = HeaderTy<N>;
+    type BlockBody = BodyTy<N>;
+    type SignedTx = TxTy<N>;
+    type Receipt = ReceiptTy<N>;
+}
 impl<N: NodeTypesWithDB> NodePrimitivesProvider for ProviderFactory<N> {
     type Primitives = N::Primitives;
 }
@@ -492,7 +500,6 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ProviderFactory<N> {
 }
 
 impl<N: ProviderNodeTypes> ReceiptProvider for ProviderFactory<N> {
-    type Receipt = ReceiptTy<N>;
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
         self.static_file_provider.get_with_static_file_or_database(
             StaticFileSegment::Receipts,

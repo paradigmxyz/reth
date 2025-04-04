@@ -221,6 +221,14 @@ impl<N: NodePrimitives> Deref for StaticFileProvider<N> {
     }
 }
 
+impl<N: NodePrimitives> NodePrimitives for StaticFileProvider<N> {
+    type Block = N::Block;
+    type BlockHeader = N::BlockHeader;
+    type BlockBody = N::BlockBody;
+    type SignedTx = N::SignedTx;
+    type Receipt = N::Receipt;
+}
+
 /// [`StaticFileProviderInner`] manages all existing [`StaticFileJarProvider`].
 #[derive(Debug)]
 pub struct StaticFileProviderInner<N> {
@@ -1376,8 +1384,6 @@ impl<N: NodePrimitives> BlockHashReader for StaticFileProvider<N> {
 impl<N: NodePrimitives<SignedTx: Value + SignedTransaction, Receipt: Value>> ReceiptProvider
     for StaticFileProvider<N>
 {
-    type Receipt = N::Receipt;
-
     fn receipt(&self, num: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
         self.get_segment_provider_from_transaction(StaticFileSegment::Receipts, num, None)
             .and_then(|provider| provider.receipt(num))

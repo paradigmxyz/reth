@@ -157,6 +157,14 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     }
 }
 
+impl<N: NodeTypes> NodePrimitives for BlockchainProvider<N> {
+    type Block = BlockTy<N>;
+    type BlockHeader = HeaderTy<N>;
+    type BlockBody = BodyTy<N>;
+    type SignedTx = TxTy<N>;
+    type Receipt = ReceiptTy<N>;
+}
+
 impl<N: NodeTypesWithDB> NodePrimitivesProvider for BlockchainProvider<N> {
     type Primitives = N::Primitives;
 }
@@ -281,8 +289,6 @@ impl<N: ProviderNodeTypes> BlockIdReader for BlockchainProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider<N> {
-    type Block = BlockTy<N>;
-
     fn find_block_by_hash(
         &self,
         hash: B256,
@@ -417,8 +423,6 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> ReceiptProvider for BlockchainProvider<N> {
-    type Receipt = ReceiptTy<N>;
-
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
         self.consistent_provider()?.receipt(id)
     }

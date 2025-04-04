@@ -21,7 +21,7 @@ use reth_db_api::{
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_ethereum_primitives::{EthPrimitives, Receipt};
 use reth_execution_types::ExecutionOutcome;
-use reth_node_types::NodeTypes;
+use reth_node_types::{NodePrimitives, NodeTypes};
 use reth_primitives_traits::{
     Account, Bytecode, GotExpected, RecoveredBlock, SealedBlock, SealedHeader, SignedTransaction,
 };
@@ -90,6 +90,7 @@ impl MockEthProvider {
         }
     }
 }
+
 impl<ChainSpec> MockEthProvider<ChainSpec> {
     /// Add block to local block store
     pub fn add_block(&self, hash: B256, block: reth_ethereum_primitives::Block) {
@@ -155,6 +156,14 @@ impl Default for MockEthProvider {
     fn default() -> Self {
         Self::new()
     }
+}
+
+impl<ChainSpec> NodePrimitives for MockEthProvider {
+    type Block = <EthPrimitives as NodePrimitives>::Block;
+    type BlockHeader = <EthPrimitives as NodePrimitives>::BlockHeader;
+    type BlockBody = <EthPrimitives as NodePrimitives>::BlockBody;
+    type SignedTx = <EthPrimitives as NodePrimitives>::SignedTx;
+    type Receipt = <EthPrimitives as NodePrimitives>::Receipt;
 }
 
 /// An extended account for local store
@@ -459,8 +468,6 @@ impl<ChainSpec: EthChainSpec> TransactionsProvider for MockEthProvider<ChainSpec
 }
 
 impl<ChainSpec: EthChainSpec> ReceiptProvider for MockEthProvider<ChainSpec> {
-    type Receipt = Receipt;
-
     fn receipt(&self, _id: TxNumber) -> ProviderResult<Option<Receipt>> {
         Ok(None)
     }

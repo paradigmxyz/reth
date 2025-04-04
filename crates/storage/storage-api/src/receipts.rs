@@ -3,18 +3,15 @@ use alloc::vec::Vec;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{TxHash, TxNumber};
 use core::ops::RangeBounds;
-use reth_primitives_traits::Receipt;
+use reth_primitives_traits::NodePrimitives;
 use reth_storage_errors::provider::ProviderResult;
 
 /// A helper type alias to access [`ReceiptProvider::Receipt`].
-pub type ProviderReceipt<P> = <P as ReceiptProvider>::Receipt;
+pub type ProviderReceipt<P> = <P as NodePrimitives>::Receipt;
 
 /// Client trait for fetching receipt data.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait ReceiptProvider: Send + Sync {
-    /// The receipt type.
-    type Receipt: Receipt;
-
+pub trait ReceiptProvider: NodePrimitives + Send + Sync {
     /// Get receipt by transaction number
     ///
     /// Returns `None` if the transaction is not found.

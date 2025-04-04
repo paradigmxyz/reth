@@ -2,12 +2,11 @@ use crate::{
     Block, FullBlock, FullBlockBody, FullBlockHeader, FullReceipt, FullSignedTx,
     MaybeSerdeBincodeCompat, Receipt,
 };
+use alloc::sync::Arc;
 use core::fmt;
 
 /// Configures all the primitive types of the node.
-pub trait NodePrimitives:
-    Send + Sync + Unpin + Clone + Default + fmt::Debug + PartialEq + Eq + 'static
-{
+pub trait NodePrimitives: Send + Sync + Unpin + Clone + fmt::Debug + PartialEq + Eq {
     /// Block primitive.
     type Block: Block<Header = Self::BlockHeader, Body = Self::BlockBody> + MaybeSerdeBincodeCompat;
     /// Block header primitive.
@@ -19,6 +18,23 @@ pub trait NodePrimitives:
     /// A receipt.
     type Receipt: Receipt;
 }
+
+impl<T: NodePrimitives> NodePrimitives for &T {
+    type Block = T::Block;
+    type BlockHeader = T::BlockHeader;
+    type BlockBody = T::BlockBody;
+    type SignedTx = T::SignedTx;
+    type Receipt = T::Receipt;
+}
+
+impl<T: NodePrimitives> NodePrimitives for Arc<T> {
+    type Block = T::Block;
+    type BlockHeader = T::BlockHeader;
+    type BlockBody = T::BlockBody;
+    type SignedTx = T::SignedTx;
+    type Receipt = T::Receipt;
+}
+
 /// Helper trait that sets trait bounds on [`NodePrimitives`].
 pub trait FullNodePrimitives
 where
@@ -28,14 +44,7 @@ where
             BlockBody: FullBlockBody<Transaction = Self::SignedTx>,
             SignedTx: FullSignedTx,
             Receipt: FullReceipt,
-        > + Send
-        + Sync
-        + Unpin
-        + Clone
-        + Default
-        + fmt::Debug
-        + PartialEq
-        + Eq
+        > + Default
         + 'static,
 {
 }
@@ -47,14 +56,7 @@ impl<T> FullNodePrimitives for T where
             BlockBody: FullBlockBody<Transaction = Self::SignedTx>,
             SignedTx: FullSignedTx,
             Receipt: FullReceipt,
-        > + Send
-        + Sync
-        + Unpin
-        + Clone
-        + Default
-        + fmt::Debug
-        + PartialEq
-        + Eq
+        > + Default
         + 'static
 {
 }

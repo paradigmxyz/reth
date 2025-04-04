@@ -211,6 +211,14 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     }
 }
 
+impl<TX, N: NodeTypes> NodePrimitives for DatabaseProvider<TX, N> {
+    type Block = BlockTy<N>;
+    type BlockHeader = HeaderTy<N>;
+    type BlockBody = BodyTy<N>;
+    type SignedTx = TxTy<N>;
+    type Receipt = ReceiptTy<N>;
+}
+
 impl<TX, N: NodeTypes> NodePrimitivesProvider for DatabaseProvider<TX, N> {
     type Primitives = N::Primitives;
 }
@@ -1516,8 +1524,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
 }
 
 impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabaseProvider<TX, N> {
-    type Receipt = ReceiptTy<N>;
-
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
         self.static_file_provider.get_with_static_file_or_database(
             StaticFileSegment::Receipts,

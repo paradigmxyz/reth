@@ -19,7 +19,7 @@ use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStatePro
 use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::{BundleStateInit, ExecutionOutcome, RevertsInit};
-use reth_node_types::{BlockTy, HeaderTy, ReceiptTy, TxTy};
+use reth_node_types::{BlockTy, HeaderTy, NodePrimitives, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, BlockBody, RecoveredBlock, SealedBlock, SealedHeader, StorageEntry,
 };
@@ -613,6 +613,14 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     }
 }
 
+impl<N: NodeTypes> NodePrimitives for ConsistentProvider<N> {
+    type Block = BlockTy<N>;
+    type BlockHeader = HeaderTy<N>;
+    type BlockBody = BodyTy<N>;
+    type SignedTx = TxTy<N>;
+    type Receipt = ReceiptTy<N>;
+}
+
 impl<N: ProviderNodeTypes> NodePrimitivesProvider for ConsistentProvider<N> {
     type Primitives = N::Primitives;
 }
@@ -1044,8 +1052,6 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> ReceiptProvider for ConsistentProvider<N> {
-    type Receipt = ReceiptTy<N>;
-
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
         self.get_in_memory_or_storage_by_tx(
             id.into(),
