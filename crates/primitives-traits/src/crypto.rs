@@ -60,7 +60,6 @@ pub mod secp256k1 {
 }
 
 #[cfg(any(test, feature = "secp256k1"))]
-#[allow(unused, unreachable_pub)]
 mod impl_secp256k1 {
     use super::*;
     pub(crate) use ::secp256k1::Error;

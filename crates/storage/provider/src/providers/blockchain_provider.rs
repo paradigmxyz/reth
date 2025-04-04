@@ -2223,7 +2223,7 @@ mod tests {
                 );
 
                 // Test range that spans database and in-memory
-                #[allow(unused_assignments)]
+                #[expect(unused_assignments)]
                 {
                     // This block will be persisted to disk and removed from memory AFTER the firsk database query. This ensures that we query the in-memory state before the database avoiding any race condition.
                     persist_block_after_db_tx_creation(provider.clone(), in_memory_blocks[0].number);
