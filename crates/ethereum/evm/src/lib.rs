@@ -37,7 +37,7 @@ use revm::{
 };
 
 mod config;
-use alloy_eips::{eip1559::INITIAL_BASE_FEE, eip7840::BlobParams};
+use alloy_eips::eip1559::INITIAL_BASE_FEE;
 pub use config::{revm_spec, revm_spec_by_timestamp_and_block_number};
 use reth_ethereum_forks::EthereumHardfork;
 
@@ -134,16 +134,6 @@ where
         // configure evm env based on parent block
         let cfg_env = CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec);
 
-        // derive the EIP-4844 blob fees from the header's `excess_blob_gas` and the current
-        // blobparams
-        let blob_excess_gas_and_price = header
-            .excess_blob_gas
-            .zip(self.chain_spec().blob_params_at_timestamp(header.timestamp))
-            .map(|(excess_blob_gas, params)| {
-                let blob_gasprice = params.calc_blob_fee(excess_blob_gas);
-                BlobExcessGasAndPrice { excess_blob_gas, blob_gasprice }
-            });
-
         let block_env = BlockEnv {
             number: header.number(),
             beneficiary: header.beneficiary(),
@@ -152,7 +142,10 @@ where
             prevrandao: if spec >= SpecId::MERGE { header.mix_hash() } else { None },
             gas_limit: header.gas_limit(),
             basefee: header.base_fee_per_gas().unwrap_or_default(),
-            blob_excess_gas_and_price,
+            // EIP-4844 excess blob gas of this block, introduced in Cancun
+            blob_excess_gas_and_price: header.excess_blob_gas.map(|excess_blob_gas| {
+                BlobExcessGasAndPrice::new(excess_blob_gas, spec >= SpecId::PRAGUE)
+            }),
         };
 
         EvmEnv { cfg_env, block_env }
@@ -173,17 +166,14 @@ where
         // configure evm env based on parent block
         let cfg = CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec_id);
 
-        let blob_params = self.chain_spec().blob_params_at_timestamp(attributes.timestamp);
         // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
         // cancun now, we need to set the excess blob gas to the default value(0)
         let blob_excess_gas_and_price = parent
-            .maybe_next_block_excess_blob_gas(blob_params)
+            .maybe_next_block_excess_blob_gas(
+                self.chain_spec().blob_params_at_timestamp(attributes.timestamp),
+            )
             .or_else(|| (spec_id == SpecId::CANCUN).then_some(0))
-            .map(|excess_blob_gas| {
-                let blob_gasprice =
-                    blob_params.unwrap_or_else(BlobParams::cancun).calc_blob_fee(excess_blob_gas);
-                BlobExcessGasAndPrice { excess_blob_gas, blob_gasprice }
-            });
+            .map(|gas| BlobExcessGasAndPrice::new(gas, spec_id >= SpecId::PRAGUE));
 
         let mut basefee = parent.next_block_base_fee(
             self.chain_spec().base_fee_params_at_timestamp(attributes.timestamp),
