@@ -1,0 +1,34 @@
+name: Pull Request
+
+on:
+  merge_group:
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - edited
+      - synchronize
+
+permissions:
+  pull-requests: read
+
+jobs:
+  conventional-title:
+    name: Validate PR title is Conventional Commit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check title
+        if: github.event_name == 'pull_request_target'
+        uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            fix
+            feat
+            chore
+            test
+            perf
+            refactor
+            docs
+            ci
