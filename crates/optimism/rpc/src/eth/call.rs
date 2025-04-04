@@ -1,50 +1,47 @@
-use super::OpNodeCore;
 use crate::{OpEthApi, OpEthApiError};
 use alloy_consensus::TxType;
 use alloy_primitives::{Bytes, TxKind, U256};
 use alloy_rpc_types_eth::transaction::TransactionRequest;
 use op_revm::OpTransaction;
 use reth_evm::{execute::BlockExecutorFactory, ConfigureEvm, EvmEnv, EvmFactory, SpecFor};
-use reth_node_api::NodePrimitives;
 use reth_rpc_eth_api::{
     helpers::{estimate::EstimateCall, Call, EthCall, LoadBlock, LoadState, SpawnBlocking},
-    FromEthApiError, FromEvmError, FullEthApiTypes, IntoEthApiError,
+    FromEthApiError, FromEvmError, IntoEthApiError,
 };
 use reth_rpc_eth_types::{revm_utils::CallFees, EthApiError, RpcInvalidTransactionError};
-use reth_storage_api::{ProviderHeader, ProviderTx};
 use revm::{context::TxEnv, context_interface::Block, Database};
+
+use super::OpNodeCore;
 
 impl<N> EthCall for OpEthApi<N>
 where
-    Self: EstimateCall + LoadBlock + FullEthApiTypes,
     N: OpNodeCore,
+    Self: EstimateCall + LoadBlock,
 {
 }
 
 impl<N> EstimateCall for OpEthApi<N>
 where
-    Self: Call,
-    Self::Error: From<OpEthApiError>,
     N: OpNodeCore,
+    Self: Call<Error: From<OpEthApiError>>,
 {
 }
 
 impl<N> Call for OpEthApi<N>
 where
-    Self: LoadState<
-            Evm: ConfigureEvm<
-                Primitives: NodePrimitives<
-                    BlockHeader = ProviderHeader<Self::Provider>,
-                    SignedTx = ProviderTx<Self::Provider>,
-                >,
-                BlockExecutorFactory: BlockExecutorFactory<
-                    EvmFactory: EvmFactory<Tx = OpTransaction<TxEnv>>,
-                >,
+    N: OpNodeCore<
+        Evm: ConfigureEvm<
+            Primitives = N::Primitives,
+            BlockExecutorFactory: BlockExecutorFactory<
+                EvmFactory: EvmFactory<Tx = OpTransaction<TxEnv>>,
             >,
-            Error: FromEvmError<Self::Evm>,
+        >,
+    >,
+    Self: LoadState<
+            Primitives = N::Primitives,
+            Evm = N::Evm,
+            Error: FromEvmError<Self::Evm> + From<OpEthApiError>,
         > + SpawnBlocking,
-    Self::Error: From<OpEthApiError>,
-    N: OpNodeCore,
 {
     #[inline]
     fn call_gas_limit(&self) -> u64 {

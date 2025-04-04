@@ -4,7 +4,7 @@
 use super::{EthApiSpec, EthSigner, LoadBlock, LoadReceipt, LoadState, SpawnBlocking};
 use crate::{
     helpers::estimate::EstimateCall, FromEthApiError, FullEthApiTypes, IntoEthApiError,
-    RpcNodeCore, RpcNodeCoreExt, RpcReceipt, RpcTransaction,
+    RpcNodeCore, RpcReceipt, RpcTransaction,
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader, Transaction};
 use alloy_dyn_abi::TypedData;
@@ -14,9 +14,9 @@ use alloy_primitives::{Address, Bytes, TxHash, B256};
 use alloy_rpc_types_eth::{transaction::TransactionRequest, BlockNumberOrTag, TransactionInfo};
 use futures::Future;
 use reth_node_api::BlockBody;
-use reth_primitives_traits::{RecoveredBlock, SignedTransaction};
+use reth_primitives_traits::{RecoveredBlock, SignedTransaction, TxTy};
 use reth_provider::{
-    BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
+    BlockNumReader, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
     TransactionsProvider,
 };
 use reth_rpc_eth_types::{utils::binary_search, EthApiError, SignError, TransactionSource};
@@ -46,12 +46,12 @@ use std::sync::Arc;
 /// See also <https://github.com/paradigmxyz/reth/issues/6240>
 ///
 /// This implementation follows the behaviour of Geth and disables the basefee check for tracing.
-pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
+pub trait EthTransactions: LoadTransaction {
     /// Returns a handle for signing data.
     ///
     /// Signer access in default (L1) trait method implementations.
     #[expect(clippy::type_complexity)]
-    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>>;
+    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<TxTy<Self::Primitives>>>>>;
 
     /// Decodes and recovers the transaction and submits it to the pool.
     ///
@@ -455,7 +455,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` transactions RPC
 /// methods.
-pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
+pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes {
     /// Returns the transaction by hash.
     ///
     /// Checks the pool and state.

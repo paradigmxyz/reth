@@ -1,16 +1,17 @@
 //! Contains RPC handler implementations specific to blocks.
 
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
+use alloy_rpc_types::Header;
 use alloy_rpc_types_eth::{BlockId, TransactionReceipt};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
-use reth_primitives_traits::{BlockBody, SignedTransaction};
+use reth_ethereum_primitives::EthPrimitives;
+use reth_primitives_traits::{HeaderTy, SignedTransaction};
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
     types::RpcTypes,
-    RpcNodeCoreExt, RpcReceipt,
+    RpcReceipt,
 };
 use reth_rpc_eth_types::{EthApiError, EthReceiptBuilder};
-use reth_storage_api::BlockReader;
 
 use crate::EthApi;
 
@@ -18,13 +19,11 @@ impl<Provider, Pool, Network, EvmConfig> EthBlocks for EthApi<Provider, Pool, Ne
 where
     Self: LoadBlock<
         Error = EthApiError,
+        Primitives = EthPrimitives,
+        Provider = Provider,
         NetworkTypes: RpcTypes<Receipt = TransactionReceipt>,
-        Provider: BlockReader<
-            Transaction = reth_ethereum_primitives::TransactionSigned,
-            Receipt = reth_ethereum_primitives::Receipt,
-        >,
     >,
-    Provider: BlockReader + ChainSpecProvider,
+    Provider: ChainSpecProvider,
 {
     async fn block_receipts(
         &self,
@@ -44,7 +43,6 @@ where
             return block
                 .body()
                 .transactions()
-                .iter()
                 .zip(receipts.iter())
                 .enumerate()
                 .map(|(idx, (tx, receipt))| {
@@ -70,7 +68,11 @@ where
 
 impl<Provider, Pool, Network, EvmConfig> LoadBlock for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt,
-    Provider: BlockReader,
+    Self: LoadPendingBlock<
+            Primitives = EthPrimitives,
+            Provider = Provider,
+            NetworkTypes: RpcTypes<Header = Header<HeaderTy<Self::Primitives>>>,
+        > + SpawnBlocking,
+    Provider: ChainSpecProvider,
 {
 }
