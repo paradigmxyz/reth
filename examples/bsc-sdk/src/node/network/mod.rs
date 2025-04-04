@@ -42,12 +42,8 @@ impl BscNetworkBuilder {
             .eth_rlpx_handshake(Arc::new(BscHandshake::default()));
         let network_config = ctx.build_network_config(network_builder);
 
-        let network_config = network_config.set_discovery_v4(
-            Discv4ConfigBuilder::default()
-                .add_boot_nodes(boot_nodes())
-                .lookup_interval(Duration::from_millis(500))
-                .build(),
-        );
+        let network_config = network_config
+            .set_discovery_v4(Discv4ConfigBuilder::default().add_boot_nodes(boot_nodes()).build());
 
         Ok(network_config)
     }
@@ -69,6 +65,7 @@ where
         pool: Pool,
     ) -> eyre::Result<NetworkHandle<Self::Primitives>> {
         let network_config = self.network_config(ctx)?;
+        info!("network_config: {:?}", network_config.boot_nodes);
         let network = NetworkManager::builder(network_config).await?;
         let handle = ctx.start_network(network, pool);
         info!(target: "reth::cli", enode=%handle.local_node_record(), "P2P networking initialized");
