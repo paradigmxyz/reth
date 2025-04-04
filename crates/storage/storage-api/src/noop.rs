@@ -34,7 +34,7 @@ use reth_trie_common::{
 };
 
 /// Supports various api interfaces for testing purposes.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct NoopProvider<ChainSpec = reth_chainspec::ChainSpec, N = EthPrimitives> {
     chain_spec: Arc<ChainSpec>,
@@ -74,7 +74,11 @@ impl<ChainSpec, N> Clone for NoopProvider<ChainSpec, N> {
     }
 }
 
-impl<ChainSpec: Send + Sync, N: NodePrimitives> NodePrimitives for NoopProvider<ChainSpec, N> {
+impl<ChainSpec, N> NodePrimitives for NoopProvider<ChainSpec, N>
+where
+    ChainSpec: Send + Sync + PartialEq + Eq + Debug,
+    N: NodePrimitives,
+{
     type Block = N::Block;
     type BlockHeader = N::BlockHeader;
     type BlockBody = N::BlockBody;
@@ -139,7 +143,11 @@ impl<C: Send + Sync, N: NodePrimitives> BlockIdReader for NoopProvider<C, N> {
     }
 }
 
-impl<C: Send + Sync, N: NodePrimitives> BlockReaderIdExt for NoopProvider<C, N> {
+impl<C, N> BlockReaderIdExt for NoopProvider<C, N>
+where
+    C: Send + Sync + PartialEq + Eq + Debug,
+    N: NodePrimitives,
+{
     fn block_by_id(&self, _id: BlockId) -> ProviderResult<Option<N::Block>> {
         Ok(None)
     }
@@ -160,9 +168,11 @@ impl<C: Send + Sync, N: NodePrimitives> BlockReaderIdExt for NoopProvider<C, N> 
     }
 }
 
-impl<C: Send + Sync, N: NodePrimitives> BlockReader for NoopProvider<C, N> {
-    type Block = N::Block;
-
+impl<C, N> BlockReader for NoopProvider<C, N>
+where
+    C: Send + Sync + Eq + PartialEq + Debug,
+    N: NodePrimitives,
+{
     fn find_block_by_hash(
         &self,
         _hash: B256,
@@ -224,7 +234,11 @@ impl<C: Send + Sync, N: NodePrimitives> BlockReader for NoopProvider<C, N> {
     }
 }
 
-impl<C: Send + Sync, N: NodePrimitives> TransactionsProvider for NoopProvider<C, N> {
+impl<C, N> TransactionsProvider for NoopProvider<C, N>
+where
+    C: Send + Sync + PartialEq + Eq + Debug,
+    N: NodePrimitives,
+{
     fn transaction_id(&self, _tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         Ok(None)
     }
@@ -288,7 +302,11 @@ impl<C: Send + Sync, N: NodePrimitives> TransactionsProvider for NoopProvider<C,
     }
 }
 
-impl<C: Send + Sync, N: NodePrimitives> ReceiptProvider for NoopProvider<C, N> {
+impl<C, N> ReceiptProvider for NoopProvider<C, N>
+where
+    C: Send + Sync + PartialEq + Eq + Debug,
+    N: NodePrimitives,
+{
     fn receipt(&self, _id: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
         Ok(None)
     }
@@ -312,7 +330,12 @@ impl<C: Send + Sync, N: NodePrimitives> ReceiptProvider for NoopProvider<C, N> {
     }
 }
 
-impl<C: Send + Sync, N: NodePrimitives> ReceiptProviderIdExt for NoopProvider<C, N> {}
+impl<C, N> ReceiptProviderIdExt for NoopProvider<C, N>
+where
+    C: Send + Sync + PartialEq + Eq + Debug,
+    N: NodePrimitives,
+{
+}
 
 impl<C: Send + Sync, N: NodePrimitives> HeaderProvider for NoopProvider<C, N> {
     type Header = N::BlockHeader;
@@ -466,7 +489,11 @@ impl<C: Send + Sync, N: NodePrimitives> StateProvider for NoopProvider<C, N> {
     }
 }
 
-impl<C: Send + Sync + 'static, N: NodePrimitives> StateProviderFactory for NoopProvider<C, N> {
+impl<C, N> StateProviderFactory for NoopProvider<C, N>
+where
+    C: Send + Sync + PartialEq + Eq + Debug + 'static,
+    N: NodePrimitives + 'static,
+{
     fn latest(&self) -> ProviderResult<StateProviderBox> {
         Ok(Box::new(self.clone()))
     }

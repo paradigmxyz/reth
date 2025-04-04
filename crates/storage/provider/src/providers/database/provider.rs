@@ -1159,8 +1159,6 @@ impl<TX: DbTx + 'static, N: NodeTypes> BlockNumReader for DatabaseProvider<TX, N
 }
 
 impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvider<TX, N> {
-    type Block = BlockTy<N>;
-
     fn find_block_by_hash(
         &self,
         hash: B256,

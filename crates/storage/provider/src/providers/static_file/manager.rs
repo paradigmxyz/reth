@@ -1624,8 +1624,6 @@ impl<N: NodePrimitives> BlockNumReader for StaticFileProvider<N> {
 impl<N: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>> BlockReader
     for StaticFileProvider<N>
 {
-    type Block = N::Block;
-
     fn find_block_by_hash(
         &self,
         _hash: B256,

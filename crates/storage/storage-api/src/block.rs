@@ -6,7 +6,7 @@ use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{BlockNumber, B256};
 use core::ops::RangeInclusive;
-use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_storage_errors::provider::ProviderResult;
 
 /// A helper enum that represents the origin of the requested block.
@@ -41,7 +41,7 @@ impl BlockSource {
 }
 
 /// A helper type alias to access [`BlockReader::Block`].
-pub type ProviderBlock<P> = <P as BlockReader>::Block;
+pub type ProviderBlock<P> = <P as NodePrimitives>::Block;
 
 /// Api trait for fetching `Block` related data.
 ///
@@ -58,12 +58,6 @@ pub trait BlockReader:
     + Send
     + Sync
 {
-    /// The block type this provider reads.
-    type Block: reth_primitives_traits::Block<
-        Body: reth_primitives_traits::BlockBody<Transaction = Self::Transaction>,
-        Header = Self::Header,
-    >;
-
     /// Tries to find in the given block source.
     ///
     /// Note: this only operates on the hash because the number might be ambiguous.
@@ -155,8 +149,6 @@ pub trait BlockReader:
 }
 
 impl<T: BlockReader> BlockReader for Arc<T> {
-    type Block = T::Block;
-
     fn find_block_by_hash(
         &self,
         hash: B256,
@@ -216,8 +208,6 @@ impl<T: BlockReader> BlockReader for Arc<T> {
 }
 
 impl<T: BlockReader> BlockReader for &T {
-    type Block = T::Block;
-
     fn find_block_by_hash(
         &self,
         hash: B256,

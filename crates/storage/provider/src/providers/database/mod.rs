@@ -360,8 +360,6 @@ impl<N: ProviderNodeTypes> BlockNumReader for ProviderFactory<N> {
 }
 
 impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
-    type Block = BlockTy<N>;
-
     fn find_block_by_hash(
         &self,
         hash: B256,

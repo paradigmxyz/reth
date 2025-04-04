@@ -558,8 +558,6 @@ impl<ChainSpec: EthChainSpec> BlockIdReader for MockEthProvider<ChainSpec> {
 }
 
 impl<ChainSpec: EthChainSpec> BlockReader for MockEthProvider<ChainSpec> {
-    type Block = reth_ethereum_primitives::Block;
-
     fn find_block_by_hash(
         &self,
         hash: B256,
