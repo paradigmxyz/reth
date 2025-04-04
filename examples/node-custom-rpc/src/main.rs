@@ -73,7 +73,7 @@ pub trait TxpoolExtApi {
 
     /// Creates a subscription that returns the number of transactions in the pool every 10s.
     #[subscription(name = "subscribeTransactionCount", item = usize)]
-    fn subscribe_transaction_count(&self) -> SubscriptionResult;
+    fn subscribe_transaction_count(&self, #[argument(rename = "delay")] delay: Option<u64>) -> SubscriptionResult;
 }
 
 /// The type that implements the `txpool` rpc namespace trait
@@ -93,8 +93,10 @@ where
     fn subscribe_transaction_count(
         &self,
         pending_subscription_sink: PendingSubscriptionSink,
+        delay: Option<u64>,
     ) -> SubscriptionResult {
         let pool = self.pool.clone();
+        let delay = delay.unwrap_or(10);
         tokio::spawn(async move {
             let sink = match pending_subscription_sink.accept().await {
                 Ok(sink) => sink,
@@ -105,7 +107,7 @@ where
             };
 
             loop {
-                sleep(Duration::from_secs(10)).await;
+                sleep(Duration::from_secs(delay)).await;
 
                 let msg = SubscriptionMessage::from_json(&pool.pool_size().total)
                     .expect("Failed to serialize `usize`");
@@ -136,7 +138,9 @@ mod tests {
         fn subscribe_transaction_count(
             &self,
             pending: PendingSubscriptionSink,
+            delay: Option<u64>,
         ) -> SubscriptionResult {
+            let delay = delay.unwrap_or(10);
             let pool = self.pool.clone();
             tokio::spawn(async move {
                 // Accept the subscription
@@ -150,7 +154,7 @@ mod tests {
 
                 // Send pool size repeatedly, with a 10-second delay
                 loop {
-                    sleep(Duration::from_millis(200)).await;
+                    sleep(Duration::from_millis(delay)).await;
                     let message = SubscriptionMessage::from_json(&pool.pool_size().total)
                         .expect("serialize usize");
 
@@ -177,7 +181,7 @@ mod tests {
         let ws_url = format!("ws://{}", server_addr);
         let client = WsClientBuilder::default().build(&ws_url).await.unwrap();
 
-        let mut sub = TxpoolExtApiClient::subscribe_transaction_count(&client)
+        let mut sub = TxpoolExtApiClient::subscribe_transaction_count(&client, None)
             .await
             .expect("failed to subscribe");
 
