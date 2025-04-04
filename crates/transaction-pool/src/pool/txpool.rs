@@ -1068,7 +1068,7 @@ impl<T: TransactionOrdering> Drop for TxPool<T> {
 
 // Additional test impls
 #[cfg(any(test, feature = "test-utils"))]
-#[allow(dead_code)]
+#[expect(dead_code)]
 impl<T: TransactionOrdering> TxPool<T> {
     pub(crate) const fn pending(&self) -> &PendingPool<T> {
         &self.pending_pool
@@ -1908,7 +1908,7 @@ pub(crate) struct InsertOk<T: PoolTransaction> {
     /// Where to move the transaction to.
     move_to: SubPool,
     /// Current state of the inserted tx.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     state: TxState,
     /// The transaction that was replaced by this.
     replaced_tx: Option<(Arc<ValidPoolTransaction<T>>, SubPool)>,

@@ -37,7 +37,7 @@ impl TestPipelineBuilder {
     }
 
     /// Set the executor results to use for the test consensus engine.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub fn with_executor_results(mut self, executor_results: Vec<ExecutionOutcome>) -> Self {
         self.executor_results = executor_results;
         self
