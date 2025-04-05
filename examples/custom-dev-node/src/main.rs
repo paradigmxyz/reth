@@ -13,10 +13,14 @@ use reth::{
     tasks::TaskManager,
 };
 use reth_ethereum::{
-    chainspec::ChainSpec, node::EthereumNode, provider::CanonStateSubscriptions,
+    chainspec::ChainSpec,
+    node::{
+        core::{args::RpcServerArgs, node_config::NodeConfig, primitives::SignedTransaction},
+        EthereumNode,
+    },
+    provider::CanonStateSubscriptions,
     rpc::api::eth::helpers::EthTransactions,
 };
-use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig, primitives::SignedTransaction};
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
