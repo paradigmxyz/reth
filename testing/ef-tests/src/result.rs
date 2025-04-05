@@ -17,9 +17,6 @@ pub enum Error {
     /// The test was skipped
     #[error("test was skipped")]
     Skipped,
-    /// The test was expected to fail
-    #[error("test successfully failed")]
-    ShouldFail,
     /// No post state found in test
     #[error("no post state found for validation")]
     MissingPostState,
@@ -93,7 +90,6 @@ pub(crate) fn categorize_results(
     for case in results {
         match case.result.as_ref().err() {
             Some(Error::Skipped) => skipped.push(case),
-            Some(Error::ShouldFail) => passed.push(case),
             Some(_) => failed.push(case),
             None => passed.push(case),
         }

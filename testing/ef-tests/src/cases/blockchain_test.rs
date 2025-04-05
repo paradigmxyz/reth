@@ -91,7 +91,7 @@ impl Case for BlockchainTestCase {
                 let should_fail = case.blocks.iter().any(|block| block.expect_exception.is_some());
 
                 if has_failed && should_fail {
-                    return Err(Error::ShouldFail)
+                    return Ok(())
                 }
                 return case_result
             })?;
