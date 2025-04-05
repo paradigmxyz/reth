@@ -3390,9 +3390,8 @@ dependencies = [
  "eyre",
  "futures-util",
  "reth",
- "reth-chainspec",
+ "reth-ethereum",
  "reth-node-core",
- "reth-node-ethereum",
  "serde_json",
  "tokio",
 ]
