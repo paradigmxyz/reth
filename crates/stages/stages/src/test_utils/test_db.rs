@@ -18,7 +18,7 @@ use reth_ethereum_primitives::{Block, EthPrimitives, Receipt};
 use reth_primitives_traits::{Account, SealedBlock, SealedHeader, StorageEntry};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
-    test_utils::MockNodeTypesWithDB,
+    test_utils::MockNodeTypes,
     HistoryWriter, ProviderError, ProviderFactory, StaticFileProviderFactory,
 };
 use reth_static_file_types::StaticFileSegment;
@@ -30,7 +30,7 @@ use tempfile::TempDir;
 /// Test database that is used for testing stage implementations.
 #[derive(Debug)]
 pub struct TestStageDB {
-    pub factory: ProviderFactory<MockNodeTypesWithDB>,
+    pub factory: ProviderFactory<MockNodeTypes>,
     pub temp_static_files_dir: TempDir,
 }
 

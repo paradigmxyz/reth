@@ -68,7 +68,7 @@ impl<PB> BasicPayloadServiceBuilder<PB> {
 
 impl<Node, Pool, PB> PayloadServiceBuilder<Node, Pool> for BasicPayloadServiceBuilder<PB>
 where
-    Node: FullNodeTypes,
+    Node: FullNodeTypes<Types = Node>,
     Pool: TransactionPool,
     PB: PayloadBuilderBuilder<Node, Pool>,
 {
