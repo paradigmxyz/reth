@@ -346,7 +346,12 @@ impl InvalidPoolTransactionError {
                 }
             }
             Self::Eip7702(eip7702_err) => match eip7702_err {
-                Eip7702PoolTransactionError::MissingEip7702AuthorizationList => true,
+                Eip7702PoolTransactionError::MissingEip7702AuthorizationList => {
+                    // as EIP-7702 specifies, 7702 transactions must have an non-empty authorization
+                    // list so this is a malformed transaction and should not be
+                    // sent over the network
+                    true
+                }
                 Eip7702PoolTransactionError::OutOfOrderTxFromDelegated => false,
                 Eip7702PoolTransactionError::InflightTxLimitReached => false,
                 Eip7702PoolTransactionError::AuthorityReserved => false,
