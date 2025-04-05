@@ -11,9 +11,9 @@ use reqwest::{Error, StatusCode};
 use reth::{
     core::primitives::SignedTransaction,
     primitives::RecoveredBlock,
-    providers::CanonStateNotification,
     transaction_pool::{BlobStoreError, TransactionPoolExt},
 };
+use reth_ethereum::provider::CanonStateNotification;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::VecDeque,
