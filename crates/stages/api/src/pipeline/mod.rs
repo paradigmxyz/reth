@@ -599,7 +599,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_consensus::ConsensusError;
     use reth_errors::ProviderError;
-    use reth_provider::test_utils::{create_test_provider_factory, MockNodeTypesWithDB};
+    use reth_provider::test_utils::{create_test_provider_factory, MockNodeTypes};
     use reth_prune::PruneModes;
     use reth_testing_utils::generators::{self, random_block_with_parent};
     use tokio_stream::StreamExt;
@@ -646,7 +646,7 @@ mod tests {
         let (stage_b, post_execute_commit_counter_b) = stage_b.with_post_execute_commit_counter();
         let (stage_b, post_unwind_commit_counter_b) = stage_b.with_post_unwind_commit_counter();
 
-        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+        let mut pipeline = Pipeline::<MockNodeTypes>::builder()
             .add_stage(stage_a)
             .add_stage(stage_b)
             .with_max_block(10)
@@ -732,7 +732,7 @@ mod tests {
         let (stage_c, post_execute_commit_counter_c) = stage_c.with_post_execute_commit_counter();
         let (stage_c, post_unwind_commit_counter_c) = stage_c.with_post_unwind_commit_counter();
 
-        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+        let mut pipeline = Pipeline::<MockNodeTypes>::builder()
             .add_stage(stage_a)
             .add_stage(stage_b)
             .add_stage(stage_c)
@@ -863,7 +863,7 @@ mod tests {
     async fn unwind_pipeline_with_intermediate_progress() {
         let provider_factory = create_test_provider_factory();
 
-        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+        let mut pipeline = Pipeline::<MockNodeTypes>::builder()
             .add_stage(
                 TestStage::new(StageId::Other("A"))
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(100), done: true }))
@@ -963,7 +963,7 @@ mod tests {
     async fn run_pipeline_with_unwind() {
         let provider_factory = create_test_provider_factory();
 
-        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+        let mut pipeline = Pipeline::<MockNodeTypes>::builder()
             .add_stage(
                 TestStage::new(StageId::Other("A"))
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true }))
@@ -1084,7 +1084,7 @@ mod tests {
     async fn pipeline_error_handling() {
         // Non-fatal
         let provider_factory = create_test_provider_factory();
-        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+        let mut pipeline = Pipeline::<MockNodeTypes>::builder()
             .add_stage(
                 TestStage::new(StageId::Other("NonFatal"))
                     .add_exec(Err(StageError::Recoverable(Box::new(std::fmt::Error))))
@@ -1100,7 +1100,7 @@ mod tests {
 
         // Fatal
         let provider_factory = create_test_provider_factory();
-        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+        let mut pipeline = Pipeline::<MockNodeTypes>::builder()
             .add_stage(TestStage::new(StageId::Other("Fatal")).add_exec(Err(
                 StageError::DatabaseIntegrity(ProviderError::BlockBodyIndicesNotFound(5)),
             )))

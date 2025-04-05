@@ -4,7 +4,7 @@ use reth_ethereum_primitives::BlockBody;
 use reth_network_p2p::test_utils::TestFullBlockClient;
 use reth_primitives_traits::SealedHeader;
 use reth_provider::{
-    test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
+    test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypes},
     ExecutionOutcome,
 };
 use reth_prune_types::PruneModes;
@@ -43,12 +43,12 @@ impl TestPipelineBuilder {
     }
 
     /// Builds the pipeline.
-    pub fn build(self, chain_spec: Arc<ChainSpec>) -> Pipeline<MockNodeTypesWithDB> {
+    pub fn build(self, chain_spec: Arc<ChainSpec>) -> Pipeline<MockNodeTypes> {
         reth_tracing::init_test_tracing();
 
         // Setup pipeline
         let (tip_tx, _tip_rx) = watch::channel(B256::default());
-        let pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+        let pipeline = Pipeline::<MockNodeTypes>::builder()
             .add_stages(TestStages::new(self.pipeline_exec_outputs, Default::default()))
             .with_tip_sender(tip_tx);
 

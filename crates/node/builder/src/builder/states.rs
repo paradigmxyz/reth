@@ -30,7 +30,7 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
     /// Creates a new instance of the node builder with the given configuration and types.
     pub const fn new(
         config: NodeConfig<<T::Types as NodeTypes>::ChainSpec>,
-        database: T::DB,
+        database: <<T as FullNodeTypes>::Types as NodeTypes>::Database,
     ) -> Self {
         Self { config, adapter: NodeTypesAdapter::new(database) }
     }
@@ -54,12 +54,14 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
 /// Container for the node's types and the database the node uses.
 pub struct NodeTypesAdapter<T: FullNodeTypes> {
     /// The database type used by the node.
-    pub database: T::DB,
+    pub database: <<T as FullNodeTypes>::Types as NodeTypes>::Database,
 }
 
 impl<T: FullNodeTypes> NodeTypesAdapter<T> {
     /// Create a new adapter from the given node types.
-    pub(crate) const fn new(database: T::DB) -> Self {
+    pub(crate) const fn new(
+        database: <<T as FullNodeTypes>::Types as NodeTypes>::Database,
+    ) -> Self {
         Self { database }
     }
 }
@@ -84,7 +86,6 @@ pub struct NodeAdapter<T: FullNodeTypes, C: NodeComponents<T>> {
 
 impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeTypes for NodeAdapter<T, C> {
     type Types = T::Types;
-    type DB = T::DB;
     type Provider = T::Provider;
 }
 

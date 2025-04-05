@@ -15,9 +15,7 @@ use reth_chainspec::ChainInfo;
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
-use reth_node_types::{
-    BlockTy, HeaderTy, NodeTypes, NodeTypesWithDB, NodeTypesWithDBAdapter, ReceiptTy, TxTy,
-};
+use reth_node_types::{BlockTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -54,9 +52,9 @@ pub use chain::*;
 /// A common provider that fetches data from a database or static file.
 ///
 /// This provider implements most provider or provider factory traits.
-pub struct ProviderFactory<N: NodeTypesWithDB> {
+pub struct ProviderFactory<N: NodeTypes> {
     /// Database instance
-    db: N::DB,
+    db: N::Database,
     /// Chain spec
     chain_spec: Arc<N::ChainSpec>,
     /// Static File Provider
@@ -67,17 +65,17 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     storage: Arc<N::Storage>,
 }
 
-impl<N: NodeTypes> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>> {
+impl<N: NodeTypes<Database = Arc<DatabaseEnv>>> ProviderFactory<N> {
     /// Instantiates the builder for this type
     pub fn builder() -> ProviderFactoryBuilder<N> {
         ProviderFactoryBuilder::default()
     }
 }
 
-impl<N: NodeTypesWithDB> ProviderFactory<N> {
+impl<N: NodeTypes> ProviderFactory<N> {
     /// Create new database provider factory.
     pub fn new(
-        db: N::DB,
+        db: N::Database,
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
     ) -> Self {
@@ -103,18 +101,18 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     }
 
     /// Returns reference to the underlying database.
-    pub const fn db_ref(&self) -> &N::DB {
+    pub const fn db_ref(&self) -> &N::Database {
         &self.db
     }
 
     #[cfg(any(test, feature = "test-utils"))]
     /// Consumes Self and returns DB
-    pub fn into_db(self) -> N::DB {
+    pub fn into_db(self) -> N::Database {
         self.db
     }
 }
 
-impl<N: NodeTypesWithDB<DB = Arc<DatabaseEnv>>> ProviderFactory<N> {
+impl<N: NodeTypes<Database = Arc<DatabaseEnv>>> ProviderFactory<N> {
     /// Create new database provider by passing a path. [`ProviderFactory`] will own the database
     /// instance.
     pub fn new_with_database_path<P: AsRef<Path>>(
@@ -141,7 +139,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// This sets the [`PruneModes`] to [`None`], because they should only be relevant for writing
     /// data.
     #[track_caller]
-    pub fn provider(&self) -> ProviderResult<DatabaseProviderRO<N::DB, N>> {
+    pub fn provider(&self) -> ProviderResult<DatabaseProviderRO<N::Database, N>> {
         Ok(DatabaseProvider::new(
             self.db.tx()?,
             self.chain_spec.clone(),
@@ -156,7 +154,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// [`BlockHashReader`].  This may fail if the inner read/write database transaction fails to
     /// open.
     #[track_caller]
-    pub fn provider_rw(&self) -> ProviderResult<DatabaseProviderRW<N::DB, N>> {
+    pub fn provider_rw(&self) -> ProviderResult<DatabaseProviderRW<N::Database, N>> {
         Ok(DatabaseProviderRW(DatabaseProvider::new_rw(
             self.db.tx_mut()?,
             self.chain_spec.clone(),
@@ -197,14 +195,14 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     }
 }
 
-impl<N: NodeTypesWithDB> NodePrimitivesProvider for ProviderFactory<N> {
+impl<N: NodeTypes> NodePrimitivesProvider for ProviderFactory<N> {
     type Primitives = N::Primitives;
 }
 
 impl<N: ProviderNodeTypes> DatabaseProviderFactory for ProviderFactory<N> {
-    type DB = N::DB;
-    type Provider = DatabaseProvider<<N::DB as Database>::TX, N>;
-    type ProviderRW = DatabaseProvider<<N::DB as Database>::TXMut, N>;
+    type DB = N::Database;
+    type Provider = DatabaseProvider<<N::Database as Database>::TX, N>;
+    type ProviderRW = DatabaseProvider<<N::Database as Database>::TXMut, N>;
 
     fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
         self.provider()
@@ -215,11 +213,11 @@ impl<N: ProviderNodeTypes> DatabaseProviderFactory for ProviderFactory<N> {
     }
 }
 
-impl<N: NodeTypesWithDB> StateCommitmentProvider for ProviderFactory<N> {
+impl<N: NodeTypes> StateCommitmentProvider for ProviderFactory<N> {
     type StateCommitment = N::StateCommitment;
 }
 
-impl<N: NodeTypesWithDB> StaticFileProviderFactory for ProviderFactory<N> {
+impl<N: NodeTypes> StaticFileProviderFactory for ProviderFactory<N> {
     /// Returns static file provider
     fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         self.static_file_provider.clone()
@@ -587,7 +585,7 @@ impl<N: ProviderNodeTypes> StageCheckpointReader for ProviderFactory<N> {
     }
 }
 
-impl<N: NodeTypesWithDB> ChainSpecProvider for ProviderFactory<N> {
+impl<N: NodeTypes> ChainSpecProvider for ProviderFactory<N> {
     type ChainSpec = N::ChainSpec;
 
     fn chain_spec(&self) -> Arc<N::ChainSpec> {
@@ -618,7 +616,7 @@ impl<N: ProviderNodeTypes> HashedPostStateProvider for ProviderFactory<N> {
 
 impl<N> fmt::Debug for ProviderFactory<N>
 where
-    N: NodeTypesWithDB<DB: fmt::Debug, ChainSpec: fmt::Debug, Storage: fmt::Debug>,
+    N: NodeTypes<Database: fmt::Debug, ChainSpec: fmt::Debug, Storage: fmt::Debug>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self { db, chain_spec, static_file_provider, prune_modes, storage } = self;
@@ -632,7 +630,7 @@ where
     }
 }
 
-impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
+impl<N: NodeTypes> Clone for ProviderFactory<N> {
     fn clone(&self) -> Self {
         Self {
             db: self.db.clone(),
@@ -649,7 +647,7 @@ mod tests {
     use super::*;
     use crate::{
         providers::{StaticFileProvider, StaticFileWriter},
-        test_utils::{blocks::TEST_BLOCK, create_test_provider_factory, MockNodeTypesWithDB},
+        test_utils::{blocks::TEST_BLOCK, create_test_provider_factory, MockNodeTypes},
         BlockHashReader, BlockNumReader, BlockWriter, DBProvider, HeaderSyncGapProvider,
         StorageLocation, TransactionsProvider,
     };
@@ -699,7 +697,7 @@ mod tests {
     fn provider_factory_with_database_path() {
         let chain_spec = ChainSpecBuilder::mainnet().build();
         let (_static_dir, static_dir_path) = create_test_static_files_dir();
-        let factory = ProviderFactory::<MockNodeTypesWithDB<DatabaseEnv>>::new_with_database_path(
+        let factory = ProviderFactory::<MockNodeTypes<Arc<DatabaseEnv>>>::new_with_database_path(
             tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
             Arc::new(chain_spec),
             DatabaseArguments::new(Default::default()),

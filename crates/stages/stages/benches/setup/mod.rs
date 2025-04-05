@@ -9,7 +9,7 @@ use reth_db_api::{
 };
 use reth_primitives_traits::{Account, SealedBlock, SealedHeader};
 use reth_provider::{
-    test_utils::MockNodeTypesWithDB, DatabaseProvider, DatabaseProviderFactory, TrieWriter,
+    test_utils::MockNodeTypes, DatabaseProvider, DatabaseProviderFactory, TrieWriter,
 };
 use reth_stages::{
     stages::{AccountHashingStage, StorageHashingStage},
@@ -33,8 +33,7 @@ use reth_trie_db::DatabaseStateRoot;
 pub(crate) type StageRange = (ExecInput, UnwindInput);
 
 pub(crate) fn stage_unwind<
-    S: Clone
-        + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, MockNodeTypesWithDB>>,
+    S: Clone + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, MockNodeTypes>>,
 >(
     stage: S,
     db: &TestStageDB,
@@ -67,7 +66,7 @@ pub(crate) fn stage_unwind<
 pub(crate) fn unwind_hashes<S>(stage: S, db: &TestStageDB, range: StageRange)
 where
     S: Clone
-        + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, MockNodeTypesWithDB>>,
+        + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, MockNodeTypes>>,
 {
     let (input, unwind) = range;
 

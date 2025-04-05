@@ -29,7 +29,7 @@ use reth_db_api::{
 use reth_ethereum_primitives::{Block, EthPrimitives, Receipt, TransactionSigned};
 use reth_evm::{ConfigureEvm, EvmEnv};
 use reth_execution_types::ExecutionOutcome;
-use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
+use reth_node_types::{BlockTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, BlockBody, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader, StorageEntry,
 };
@@ -56,7 +56,7 @@ use tracing::trace;
 /// from database storage and from the blockchain tree (pending state etc.) It is a simple wrapper
 /// type that holds an instance of the database and the blockchain tree.
 #[derive(Debug)]
-pub struct BlockchainProvider<N: NodeTypesWithDB> {
+pub struct BlockchainProvider<N: NodeTypes> {
     /// Provider factory used to access the database.
     pub(crate) database: ProviderFactory<N>,
     /// Tracks the chain info wrt forkchoice updates and in memory canonical
@@ -64,7 +64,7 @@ pub struct BlockchainProvider<N: NodeTypesWithDB> {
     pub(crate) canonical_in_memory_state: CanonicalInMemoryState<N::Primitives>,
 }
 
-impl<N: NodeTypesWithDB> Clone for BlockchainProvider<N> {
+impl<N: NodeTypes> Clone for BlockchainProvider<N> {
     fn clone(&self) -> Self {
         Self {
             database: self.database.clone(),
@@ -157,12 +157,12 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     }
 }
 
-impl<N: NodeTypesWithDB> NodePrimitivesProvider for BlockchainProvider<N> {
+impl<N: NodeTypes> NodePrimitivesProvider for BlockchainProvider<N> {
     type Primitives = N::Primitives;
 }
 
 impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider<N> {
-    type DB = N::DB;
+    type DB = N::Database;
     type Provider = <ProviderFactory<N> as DatabaseProviderFactory>::Provider;
     type ProviderRW = <ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW;
 
@@ -507,7 +507,7 @@ impl<N: ProviderNodeTypes> PruneCheckpointReader for BlockchainProvider<N> {
     }
 }
 
-impl<N: NodeTypesWithDB> ChainSpecProvider for BlockchainProvider<N> {
+impl<N: NodeTypes> ChainSpecProvider for BlockchainProvider<N> {
     type ChainSpec = N::ChainSpec;
 
     fn chain_spec(&self) -> Arc<N::ChainSpec> {
@@ -624,7 +624,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
     }
 }
 
-impl<N: NodeTypesWithDB> HashedPostStateProvider for BlockchainProvider<N> {
+impl<N: NodeTypes> HashedPostStateProvider for BlockchainProvider<N> {
     fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
         HashedPostState::from_bundle_state::<<N::StateCommitment as StateCommitment>::KeyHasher>(
             bundle_state.state(),
@@ -774,7 +774,7 @@ mod tests {
         providers::BlockchainProvider,
         test_utils::{
             create_test_provider_factory, create_test_provider_factory_with_chain_spec,
-            MockNodeTypesWithDB,
+            MockNodeTypes,
         },
         writer::UnifiedStorageWriter,
         BlockWriter, CanonChainTracker, ProviderFactory, StaticFileProviderFactory,
@@ -864,7 +864,7 @@ mod tests {
         in_memory_blocks: usize,
         block_range_params: BlockRangeParams,
     ) -> eyre::Result<(
-        BlockchainProvider<MockNodeTypesWithDB>,
+        BlockchainProvider<MockNodeTypes>,
         Vec<SealedBlock<Block>>,
         Vec<SealedBlock<Block>>,
         Vec<Vec<Receipt>>,
@@ -964,7 +964,7 @@ mod tests {
         in_memory_blocks: usize,
         block_range_params: BlockRangeParams,
     ) -> eyre::Result<(
-        BlockchainProvider<MockNodeTypesWithDB>,
+        BlockchainProvider<MockNodeTypes>,
         Vec<SealedBlock<Block>>,
         Vec<SealedBlock<Block>>,
         Vec<Vec<Receipt>>,
@@ -984,7 +984,7 @@ mod tests {
     /// This simulates a RPC method having a different view than when its database transaction was
     /// created.
     fn persist_block_after_db_tx_creation(
-        provider: BlockchainProvider<MockNodeTypesWithDB>,
+        provider: BlockchainProvider<MockNodeTypes>,
         block_number: BlockNumber,
     ) {
         let hook_provider = provider.clone();
@@ -2724,7 +2724,7 @@ mod tests {
         let old_transaction_hash_fn =
             |hash: B256,
              canonical_in_memory_state: CanonicalInMemoryState,
-             factory: ProviderFactory<MockNodeTypesWithDB>| {
+             factory: ProviderFactory<MockNodeTypes>| {
                 assert!(factory.transaction_by_hash(hash)?.is_none(), "should not be in database");
                 Ok::<_, ProviderError>(canonical_in_memory_state.transaction_by_hash(hash))
             };
@@ -2733,7 +2733,7 @@ mod tests {
         let correct_transaction_hash_fn =
             |hash: B256,
              canonical_in_memory_state: CanonicalInMemoryState,
-             _factory: ProviderFactory<MockNodeTypesWithDB>| {
+             _factory: ProviderFactory<MockNodeTypes>| {
                 if let Some(tx) = canonical_in_memory_state.transaction_by_hash(hash) {
                     return Ok::<_, ProviderError>(Some(tx));
                 }

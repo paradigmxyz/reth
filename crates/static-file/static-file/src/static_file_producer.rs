@@ -263,8 +263,8 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db_api::{database::Database, transaction::DbTx};
     use reth_provider::{
-        providers::StaticFileWriter, test_utils::MockNodeTypesWithDB, ProviderError,
-        ProviderFactory, StaticFileProviderFactory,
+        providers::StaticFileWriter, test_utils::MockNodeTypes, ProviderError, ProviderFactory,
+        StaticFileProviderFactory,
     };
     use reth_prune_types::PruneModes;
     use reth_stages::test_utils::{StorageKind, TestStageDB};
@@ -275,7 +275,7 @@ mod tests {
     use std::{sync::mpsc::channel, time::Duration};
     use tempfile::TempDir;
 
-    fn setup() -> (ProviderFactory<MockNodeTypesWithDB>, TempDir) {
+    fn setup() -> (ProviderFactory<MockNodeTypes>, TempDir) {
         let mut rng = generators::rng();
         let db = TestStageDB::default();
 

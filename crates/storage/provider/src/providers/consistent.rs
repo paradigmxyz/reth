@@ -300,7 +300,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     ) -> ProviderResult<Vec<T>>
     where
         F: FnOnce(
-            &DatabaseProviderRO<N::DB, N>,
+            &DatabaseProviderRO<N::Database, N>,
             RangeInclusive<BlockNumber>,
             &mut P,
         ) -> ProviderResult<Vec<T>>,
@@ -417,7 +417,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     ) -> ProviderResult<Vec<R>>
     where
         S: FnOnce(
-            &DatabaseProviderRO<N::DB, N>,
+            &DatabaseProviderRO<N::Database, N>,
             RangeInclusive<TxNumber>,
         ) -> ProviderResult<Vec<R>>,
         M: Fn(RangeInclusive<usize>, &BlockState<N::Primitives>) -> ProviderResult<Vec<R>>,
@@ -516,7 +516,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         fetch_from_block_state: M,
     ) -> ProviderResult<Option<R>>
     where
-        S: FnOnce(&DatabaseProviderRO<N::DB, N>) -> ProviderResult<Option<R>>,
+        S: FnOnce(&DatabaseProviderRO<N::Database, N>) -> ProviderResult<Option<R>>,
         M: Fn(usize, TxNumber, &BlockState<N::Primitives>) -> ProviderResult<Option<R>>,
     {
         let in_mem_chain = self.head_block.iter().flat_map(|b| b.chain()).collect::<Vec<_>>();
@@ -583,7 +583,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         fetch_from_block_state: M,
     ) -> ProviderResult<R>
     where
-        S: FnOnce(&DatabaseProviderRO<N::DB, N>) -> ProviderResult<R>,
+        S: FnOnce(&DatabaseProviderRO<N::Database, N>) -> ProviderResult<R>,
         M: Fn(&BlockState<N::Primitives>) -> ProviderResult<R>,
     {
         if let Some(Some(block_state)) = self.head_block.as_ref().map(|b| b.block_on_chain(id)) {
