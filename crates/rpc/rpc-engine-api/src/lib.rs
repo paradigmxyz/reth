@@ -1,6 +1,7 @@
 //! The implementation of Engine API.
 //! [Read more](https://github.com/ethereum/execution-apis/tree/main/src/engine).
 
+#![warn(clippy::iter_over_hash_type)]
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",

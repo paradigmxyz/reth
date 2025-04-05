@@ -1,3 +1,4 @@
+#![warn(clippy::iter_over_hash_type)]
 //! Rust Optimism (op-reth) binary executable.
 //!
 //! ## Feature Flags

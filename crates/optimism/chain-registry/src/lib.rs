@@ -1,3 +1,4 @@
+#![warn(clippy::iter_over_hash_type)]
 //! Utilities for interacting the optimism superchain registry
 
 #![doc(

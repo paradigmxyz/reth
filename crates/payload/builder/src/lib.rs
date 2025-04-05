@@ -1,3 +1,4 @@
+#![warn(clippy::iter_over_hash_type)]
 //! This crate defines abstractions to create and update payloads (blocks):
 //! - [`PayloadJobGenerator`]: a type that knows how to create new jobs for creating payloads based
 //!   on [`PayloadAttributes`](alloy_rpc_types::engine::PayloadAttributes).

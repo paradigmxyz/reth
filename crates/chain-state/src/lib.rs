@@ -1,3 +1,5 @@
+#![warn(clippy::iter_over_hash_type)]
+
 //! Reth state related types and functionality.
 
 #![doc(

@@ -1,3 +1,4 @@
+#![warn(clippy::iter_over_hash_type)]
 //! reth's database abstraction layer.
 //!
 //! The database abstraction assumes that the underlying store is a KV store subdivided into tables.

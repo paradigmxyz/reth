@@ -1,3 +1,4 @@
+#![warn(clippy::iter_over_hash_type)]
 //! Utilities for end-to-end tests.
 
 use node::NodeTestContext;

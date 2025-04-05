@@ -1,3 +1,4 @@
+#![warn(clippy::iter_over_hash_type)]
 //! Reth CLI implementation.
 
 #![doc(

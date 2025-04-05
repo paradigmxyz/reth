@@ -8,6 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![allow(clippy::useless_let_if_seq)]
+#![warn(clippy::iter_over_hash_type)]
 
 pub mod validator;
 pub use validator::EthereumExecutionPayloadValidator;
