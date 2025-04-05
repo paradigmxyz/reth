@@ -129,7 +129,7 @@ pub struct Block {
     pub block_header: Option<Header>,
     /// RLP encoded block bytes
     pub rlp: Bytes,
-    /// If the execution of the block should fail
+    /// If the execution of the block should fail,
     /// `expect_exception` is `Some`.
     /// Its contents detail the reason for the failure.
     pub expect_exception: Option<String>,
