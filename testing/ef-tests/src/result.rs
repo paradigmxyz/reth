@@ -61,12 +61,19 @@ pub struct CaseResult {
     pub path: PathBuf,
     /// The result of the test.
     pub result: Result<(), Error>,
+    /// Indicates whether the test should fail
+    pub should_fail: bool,
 }
 
 impl CaseResult {
     /// Create a new test result.
     pub fn new(path: &Path, case: &impl Case, result: Result<(), Error>) -> Self {
-        Self { desc: case.description(), path: path.into(), result }
+        Self {
+            desc: case.description(),
+            path: path.into(),
+            result,
+            should_fail: case.should_fail(),
+        }
     }
 }
 
@@ -90,7 +97,13 @@ pub(crate) fn categorize_results(
     for case in results {
         match case.result.as_ref().err() {
             Some(Error::Skipped) => skipped.push(case),
-            Some(_) => failed.push(case),
+            Some(_) => {
+                if case.should_fail {
+                    passed.push(case);
+                } else {
+                    failed.push(case);
+                }
+            }
             None => passed.push(case),
         }
     }
