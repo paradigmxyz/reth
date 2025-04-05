@@ -42,19 +42,25 @@ impl Suite for BlockchainTests {
 pub struct BlockchainTestCase {
     tests: BTreeMap<String, BlockchainTest>,
     skip: bool,
+    should_fail: bool,
 }
 
 impl Case for BlockchainTestCase {
     fn load(path: &Path) -> Result<Self, Error> {
-        Ok(Self {
-            tests: {
-                let s = fs::read_to_string(path)
-                    .map_err(|error| Error::Io { path: path.into(), error })?;
-                serde_json::from_str(&s)
-                    .map_err(|error| Error::CouldNotDeserialize { path: path.into(), error })?
-            },
-            skip: should_skip(path),
-        })
+        let s = fs::read_to_string(path).map_err(|error| Error::Io { path: path.into(), error })?;
+        let blockchain_test_case: BTreeMap<String, BlockchainTest> = serde_json::from_str(&s)
+            .map_err(|error| Error::CouldNotDeserialize { path: path.into(), error })?;
+        // This assumes that if a case contains tests, then they all either fail or all pass.
+        let should_fail = blockchain_test_case
+            .first_key_value()
+            .expect("expected at least one test in the case")
+            .1
+            .blocks
+            .iter()
+            .any(|block| block.expect_exception.is_some());
+        let this = Self { tests: blockchain_test_case, skip: should_skip(path), should_fail };
+
+        Ok(this)
     }
 
     /// Runs the test cases for the Ethereum Forks test suite.
@@ -161,6 +167,10 @@ impl Case for BlockchainTestCase {
             })?;
 
         Ok(())
+    }
+
+    fn should_fail(&self) -> bool {
+        self.should_fail
     }
 }
 

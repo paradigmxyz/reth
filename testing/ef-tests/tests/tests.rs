@@ -88,4 +88,4 @@ macro_rules! blockchain_test {
 }
 
 blockchain_test!(valid_blocks, ValidBlocks);
-// blockchain_test!(invalid_blocks, InvalidBlocks);
+blockchain_test!(invalid_blocks, InvalidBlocks);
