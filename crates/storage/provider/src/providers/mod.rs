@@ -59,8 +59,3 @@ where
 {
 }
 impl<T> ProviderNodeTypes for T where T: NodeTypesForProvider + NodeTypesWithDB {}
-
-/// Helper trait expressing requirements for node types to be used in engine.
-pub trait EngineNodeTypes: ProviderNodeTypes {}
-
-impl<T> EngineNodeTypes for T where T: ProviderNodeTypes {}

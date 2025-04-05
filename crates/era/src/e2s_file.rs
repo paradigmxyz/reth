@@ -31,6 +31,11 @@ impl<R: Read + Seek> E2StoreReader<R> {
         }
     }
 
+    /// Read the next entry from the file
+    pub fn read_next_entry(&mut self) -> Result<Option<Entry>, E2sError> {
+        Entry::read(&mut self.reader)
+    }
+
     /// Iterate through all entries, including the version entry
     pub fn entries(&mut self) -> Result<Vec<Entry>, E2sError> {
         // Reset reader to beginning
@@ -38,7 +43,7 @@ impl<R: Read + Seek> E2StoreReader<R> {
 
         let mut entries = Vec::new();
 
-        while let Some(entry) = Entry::read(&mut self.reader)? {
+        while let Some(entry) = self.read_next_entry()? {
             entries.push(entry);
         }
 
@@ -69,7 +74,7 @@ impl<W: Write> E2StoreWriter<W> {
     }
 
     /// Write the version entry as the first entry in the file.
-    /// Thi must be called before writing any other entries.
+    /// This must be called before writing any other entries.
     pub fn write_version(&mut self) -> Result<(), E2sError> {
         if self.has_written_version {
             return Ok(());
@@ -117,22 +122,19 @@ mod tests {
         // Create a mock e2store file in memory
         let mut mock_file = Vec::new();
 
-        // Write version entry
         let version_entry = Entry::new(VERSION, Vec::new());
         version_entry.write(&mut mock_file)?;
 
-        // Write multiple entries of different types
-        let block_index_entry1 = Entry::new(BLOCK_INDEX, vec![1, 2, 3, 4]);
+        let block_index_entry1 = Entry::new(BLOCK_INDEX, create_block_index_data(1, 1024));
         block_index_entry1.write(&mut mock_file)?;
 
-        let block_index_entry2 = Entry::new(BLOCK_INDEX, vec![5, 6, 7, 8, 9]);
+        let block_index_entry2 = Entry::new(BLOCK_INDEX, create_block_index_data(2, 2048));
         block_index_entry2.write(&mut mock_file)?;
 
-        let custom_type = [0x99, 0x99]; // Application-specific type
+        let custom_type = [0x99, 0x99];
         let custom_entry = Entry::new(custom_type, vec![10, 11, 12]);
         custom_entry.write(&mut mock_file)?;
 
-        // Create reader and process entries
         let cursor = Cursor::new(mock_file);
         let mut e2store_reader = E2StoreReader::new(cursor);
 
@@ -151,6 +153,51 @@ mod tests {
         assert!(entries[2].is_block_index());
         // Fourth entry is custom type
         assert!(entries[3].entry_type == [0x99, 0x99]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_empty_file() -> Result<(), E2sError> {
+        // Create an empty file
+        let mock_file = Vec::new();
+
+        // Create reader
+        let cursor = Cursor::new(mock_file);
+        let mut e2store_reader = E2StoreReader::new(cursor);
+
+        // Reading version should return None
+        let version = e2store_reader.read_version()?;
+        assert!(version.is_none());
+
+        // Entries should be empty
+        let entries = e2store_reader.entries()?;
+        assert!(entries.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_next_entry() -> Result<(), E2sError> {
+        let mut mock_file = Vec::new();
+
+        let version_entry = Entry::new(VERSION, Vec::new());
+        version_entry.write(&mut mock_file)?;
+
+        let block_entry = Entry::new(BLOCK_INDEX, create_block_index_data(1, 1024));
+        block_entry.write(&mut mock_file)?;
+
+        let cursor = Cursor::new(mock_file);
+        let mut reader = E2StoreReader::new(cursor);
+
+        let first = reader.read_next_entry()?.unwrap();
+        assert!(first.is_version());
+
+        let second = reader.read_next_entry()?.unwrap();
+        assert!(second.is_block_index());
+
+        let third = reader.read_next_entry()?;
+        assert!(third.is_none());
 
         Ok(())
     }
@@ -188,4 +235,6 @@ mod tests {
 
         Ok(())
     }
+
+
 }

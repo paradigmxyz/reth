@@ -3310,7 +3310,7 @@ dependencies = [
  "futures-util",
  "reqwest",
  "reth",
- "reth-node-ethereum",
+ "reth-ethereum",
  "serde",
  "serde_json",
  "thiserror 2.0.12",
@@ -3374,11 +3374,7 @@ dependencies = [
  "alloy-sol-types",
  "eyre",
  "reth",
- "reth-chainspec",
- "reth-evm",
- "reth-evm-ethereum",
- "reth-node-ethereum",
- "reth-primitives",
+ "reth-ethereum",
 ]
 
 [[package]]
@@ -3390,9 +3386,7 @@ dependencies = [
  "eyre",
  "futures-util",
  "reth",
- "reth-chainspec",
- "reth-node-core",
- "reth-node-ethereum",
+ "reth-ethereum",
  "serde_json",
  "tokio",
 ]
@@ -8012,14 +8006,17 @@ dependencies = [
  "reth-exex",
  "reth-network",
  "reth-node-api",
+ "reth-node-core",
  "reth-node-ethereum",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-revm",
  "reth-rpc",
  "reth-rpc-api",
  "reth-rpc-builder",
  "reth-rpc-eth-types",
  "reth-storage-api",
+ "reth-transaction-pool",
  "reth-trie",
 ]
 
@@ -8191,7 +8188,6 @@ dependencies = [
  "reth-testing-utils",
  "revm",
  "secp256k1",
- "serde_json",
 ]
 
 [[package]]
@@ -8847,6 +8843,7 @@ dependencies = [
  "reth-evm",
  "reth-network",
  "reth-node-api",
+ "reth-node-core",
  "reth-optimism-chainspec",
  "reth-optimism-cli",
  "reth-optimism-consensus",
@@ -8856,11 +8853,13 @@ dependencies = [
  "reth-optimism-rpc",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-revm",
  "reth-rpc",
  "reth-rpc-api",
  "reth-rpc-builder",
  "reth-rpc-eth-types",
  "reth-storage-api",
+ "reth-transaction-pool",
  "reth-trie",
 ]
 
@@ -9338,7 +9337,6 @@ dependencies = [
  "reth-ethereum-primitives",
  "reth-primitives-traits",
  "reth-static-file-types",
- "serde_json",
 ]
 
 [[package]]
@@ -10190,7 +10188,6 @@ dependencies = [
  "reth-trie-sparse",
  "revm-database",
  "revm-state",
- "serde_json",
  "tracing",
  "triehash",
 ]
