@@ -14,6 +14,7 @@ use std::sync::{
 };
 mod wal_test;
 
+#[allow(dead_code)]
 struct TestState {
     received_blocks: AtomicU64,
     saw_trie_updates: AtomicBool,
@@ -21,6 +22,7 @@ struct TestState {
 }
 
 /// ExEx that tests assertions about notifications and state
+#[allow(dead_code)]
 async fn test_assertion_exex<
     Node: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>,
 >(
@@ -49,6 +51,7 @@ async fn test_assertion_exex<
             println!("Received committed chain: {:?}", range);
 
             // Increment blocks count
+            #[allow(clippy::unnecessary_cast)]
             state_clone.received_blocks.fetch_add(blocks_count as u64, Ordering::SeqCst);
 
             // Send event that we've processed this height
@@ -70,6 +73,7 @@ async fn test_assertion_exex<
 }
 
 /// Verify test assertions after completion
+#[allow(dead_code)]
 fn report_test_results(state: &TestState) {
     let blocks_received = state.received_blocks.load(Ordering::SeqCst);
     let saw_trie_updates = state.saw_trie_updates.load(Ordering::SeqCst);

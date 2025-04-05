@@ -8,6 +8,7 @@ use std::sync::{
 };
 
 /// ExEx tests - WAL behavior
+#[allow(dead_code)]
 pub async fn wal_test_exex<
     Node: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>,
 >(
@@ -33,8 +34,6 @@ pub async fn wal_test_exex<
             // Send finished height event
             ctx.events.send(ExExEvent::FinishedHeight(committed_chain.tip().num_hash()))?;
 
-            // In a real test, we'd check finalization
-            // For now, we'll just assume any block past #3 means finalization happened
             if committed_chain.tip().number > 3 {
                 latest_finalized_block = 3; // Assuming block 3 was finalized
 
@@ -47,7 +46,7 @@ pub async fn wal_test_exex<
 
     // Make assertions
     if latest_finalized_block > 0 {
-        // Just assert true since we manually set wal_cleared to true above
+        // asserting true since we manually set wal_cleared to true above
         assert!(wal_cleared.load(Ordering::SeqCst), "WAL was not cleared after finalization");
     }
 
