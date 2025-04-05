@@ -90,6 +90,7 @@ impl Case for BlockchainTestCase {
                 // Check if the test should fail
                 let should_fail = case.blocks.iter().any(|block| block.expect_exception.is_some());
 
+                // A test that fails and should have failed is successful.
                 if has_failed && should_fail {
                     return Ok(())
                 }
