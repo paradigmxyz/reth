@@ -75,8 +75,8 @@ impl ForkchoiceStateTracker {
     /// Returns the latest received [`ForkchoiceState`].
     ///
     /// Caution: this can be invalid.
-    pub const fn latest_state(&self) -> Option<ForkchoiceState> {
-        self.last_valid
+    pub fn latest_state(&self) -> Option<ForkchoiceState> {
+        self.latest.as_ref().map(|s| s.state.clone())
     }
 
     /// Returns the last valid [`ForkchoiceState`].
