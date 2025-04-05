@@ -59,6 +59,7 @@ arbitrary = [
     "reth-optimism-primitives/arbitrary",
     "reth-primitives-traits/arbitrary",
     "reth-db?/arbitrary",
+    "reth-transaction-pool?/arbitrary",
 ]
 
 test-utils = [
