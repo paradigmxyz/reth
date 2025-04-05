@@ -21,13 +21,11 @@ use std::{fmt::Debug, future::Future, marker::PhantomData};
 /// components to the node.
 ///
 /// Its types are configured by node internally and are not intended to be user configurable.
-pub trait FullNodeTypes: NodeTypes + Clone + Debug + Send + Sync + Unpin + 'static {
+pub trait FullNodeTypes: Clone + Debug + Send + Sync + Unpin + 'static {
     /// Node's types with the database.
     type Types: NodeTypes;
-    /// Underlying database type used by the node to store and retrieve data.
-    type DB: Database + DatabaseMetrics + Clone + Unpin + 'static;
     /// The provider type used to interact with the node.
-    type Provider: FullProvider<Self>;
+    type Provider: FullProvider<Self::Types>;
 }
 
 /// An adapter type that adds the builtin provider type to the user configured node types.
@@ -50,12 +48,11 @@ where
 
 impl<Types, DB, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
 where
-    Types: NodeTypes,
+    Types: NodeTypes<Database = DB>,
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
     Provider: FullProvider<Self>,
 {
     type Types = Types;
-    type DB = DB;
     type Provider = Provider;
 }
 

@@ -67,7 +67,7 @@ impl<Types, DB, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for 
 where
     Types: NodeTypesForProvider + NodeTypes,
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
-    T: FullNodeTypes<Types = Types, DB = DB, Provider = BlockchainProvider<Types>>,
+    T: FullNodeTypes<Types = Types, Provider = BlockchainProvider<Types>>,
     CB: NodeComponentsBuilder<T>,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
         + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,

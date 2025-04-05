@@ -68,7 +68,7 @@ impl<PB> BasicPayloadServiceBuilder<PB> {
 
 impl<Node, Pool, PB> PayloadServiceBuilder<Node, Pool> for BasicPayloadServiceBuilder<PB>
 where
-    Node: FullNodeTypes<Types = Node>,
+    Node: FullNodeTypes,
     Pool: TransactionPool,
     PB: PayloadBuilderBuilder<Node, Pool>,
 {
@@ -76,7 +76,8 @@ where
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>> {
+    ) -> eyre::Result<PayloadBuilderHandle<<<Node as FullNodeTypes>::Types as NodeTypes>::Payload>>
+    {
         let payload_builder = self.0.build_payload_builder(ctx, pool).await?;
 
         let conf = ctx.config().builder.clone();

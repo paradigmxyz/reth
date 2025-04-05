@@ -2,7 +2,7 @@ use crate::{ExExContextDyn, ExExEvent, ExExNotifications, ExExNotificationsStrea
 use alloy_eips::BlockNumHash;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_exex_types::ExExHead;
-use reth_node_api::{FullNodeComponents, NodePrimitives, NodeTypes, PrimitivesTy};
+use reth_node_api::{FullNodeComponents, NodeTypes, PrimitivesTy};
 use reth_node_core::node_config::NodeConfig;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::{BlockReader, HeaderProvider, StateProviderFactory};
@@ -62,11 +62,8 @@ impl<Node> ExExContext<Node>
 where
     Node: FullNodeComponents,
     Node::Provider: Debug + BlockReader,
-    Node::Executor: Debug
-        + reth_evm::execute::BlockExecutorProvider<
-            Primitives: NodePrimitives<Block = <Node::Provider as BlockReader>::Block>,
-        >,
-    PrimitivesTy<Node::Types>: NodePrimitives<Block = <Node::Provider as BlockReader>::Block>,
+    Node::Executor:
+        Debug + BlockExecutorProvider<Primitives = <Node::Types as NodeTypes>::Primitives>,
 {
     /// Returns dynamic version of the context
     pub fn into_dyn(self) -> ExExContextDyn<PrimitivesTy<Node::Types>> {
@@ -78,9 +75,8 @@ impl<Node> ExExContext<Node>
 where
     Node: FullNodeComponents,
     Node::Provider: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    Node::Executor: BlockExecutorProvider<
-            Primitives: NodePrimitives<Block = <Node::Provider as BlockReader>::Block>,
-        > + Clone
+    Node::Executor: BlockExecutorProvider<Primitives = <Node::Types as NodeTypes>::Primitives>
+        + Clone
         + Unpin
         + 'static,
 {
@@ -152,7 +148,7 @@ mod tests {
     use crate::ExExContext;
     use reth_evm::execute::BlockExecutorProvider;
     use reth_exex_types::ExExHead;
-    use reth_node_api::{FullNodeComponents, NodePrimitives};
+    use reth_node_api::{FullNodeComponents, NodeTypes};
     use reth_provider::{BlockReader, HeaderProvider, StateProviderFactory};
 
     /// <https://github.com/paradigmxyz/reth/issues/12054>
@@ -168,9 +164,8 @@ mod tests {
             Node: FullNodeComponents,
             Node::Provider:
                 BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-            Node::Executor: BlockExecutorProvider<
-                    Primitives: NodePrimitives<Block = <Node::Provider as BlockReader>::Block>,
-                > + Clone
+            Node::Executor: BlockExecutorProvider<Primitives = <Node::Types as NodeTypes>::Primitives>
+                + Clone
                 + Unpin
                 + 'static,
         {
