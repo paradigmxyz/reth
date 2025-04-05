@@ -7,25 +7,23 @@ use alloy_consensus::{BlockHeader, Transaction};
 use alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK;
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use futures::Future;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm, Evm, SpecFor,
 };
-use reth_node_api::{FullNodeComponents, NodePrimitives};
+use reth_node_api::FullNodeComponents;
 use reth_primitives_traits::{
-    transaction::error::InvalidTransactionError, Receipt, RecoveredBlock, SealedHeader,
+    transaction::error::InvalidTransactionError, RecoveredBlock, SealedHeader,
 };
 use reth_provider::{
-    BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderError, ProviderHeader,
-    ProviderReceipt, ProviderTx, ReceiptProvider, StateProviderFactory,
+    BlockReader, BlockReaderIdExt, ProviderBlock, ProviderError, ProviderHeader, ProviderReceipt,
+    ReceiptProvider, StateProviderFactory,
 };
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
 use reth_transaction_pool::{
-    error::InvalidPoolTransactionError, BestTransactionsAttributes, PoolTransaction,
-    TransactionPool,
+    error::InvalidPoolTransactionError, BestTransactionsAttributes, TransactionPool,
 };
 use revm::context_interface::Block;
 use std::time::{Duration, Instant};

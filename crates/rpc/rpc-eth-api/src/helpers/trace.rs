@@ -12,9 +12,9 @@ use reth_evm::{
     system_calls::SystemCaller, ConfigureEvm, Database, Evm, EvmEnvFor, HaltReasonFor,
     InspectorFor, TxEnvFor,
 };
-use reth_node_api::{FullNodeTypes, NodePrimitives, NodeTypes};
+use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_primitives_traits::{BlockBody, RecoveredBlock, SignedTransaction};
-use reth_provider::{BlockReader, ProviderBlock, ProviderHeader, ProviderTx};
+use reth_provider::ProviderBlock;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDb, StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},

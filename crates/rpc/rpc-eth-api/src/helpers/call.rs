@@ -18,9 +18,9 @@ use reth_evm::{
     ConfigureEvm, Evm, EvmEnv, EvmEnvFor, HaltReasonFor, InspectorFor, SpecFor, TransactionEnv,
     TxEnvFor,
 };
-use reth_node_api::{BlockBody, FullNodeComponents, NodePrimitives};
+use reth_node_api::{BlockBody, FullNodeComponents};
 use reth_primitives_traits::{Recovered, SealedHeader, SignedTransaction};
-use reth_provider::{BlockIdReader, ProviderHeader, ProviderTx};
+use reth_provider::{BlockIdReader, ProviderTx};
 use reth_revm::{
     database::StateProviderDatabase,
     db::{CacheDB, State},
