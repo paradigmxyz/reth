@@ -170,7 +170,6 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         simulate::execute_transactions(
                             builder,
                             calls,
-                            validation,
                             default_gas_limit,
                             chain_id,
                             this.tx_resp_builder(),
@@ -181,7 +180,6 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         simulate::execute_transactions(
                             builder,
                             calls,
-                            validation,
                             default_gas_limit,
                             chain_id,
                             this.tx_resp_builder(),
