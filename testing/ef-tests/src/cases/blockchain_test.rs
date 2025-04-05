@@ -117,9 +117,9 @@ impl Case for BlockchainTestCase {
                 let last_block = blocks.last().cloned();
 
                 // Initialize executor with state
-                let basic_block_executor = EthExecutorProvider::ethereum(chain_spec);
+                let executor_provider = EthExecutorProvider::ethereum(chain_spec);
                 let state_db = StateProviderDatabase(LatestStateProviderRef::new(&provider));
-                let executor = basic_block_executor.executor(state_db);
+                let executor = executor_provider.executor(state_db);
 
                 // Execute all blocks in a batch
                 if let Ok(state) = executor.execute_batch(&blocks) {
