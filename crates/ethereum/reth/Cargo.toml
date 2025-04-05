@@ -19,10 +19,12 @@ reth-provider = { workspace = true, optional = true }
 reth-db = { workspace = true, optional = true, features = ["mdbx"] }
 reth-storage-api = { workspace = true, optional = true }
 reth-node-api = { workspace = true, optional = true }
+reth-node-core = { workspace = true, optional = true }
 reth-consensus = { workspace = true, optional = true }
 reth-consensus-common = { workspace = true, optional = true }
 reth-evm = { workspace = true, optional = true }
 reth-revm = { workspace = true, optional = true }
+reth-transaction-pool = { workspace = true, optional = true }
 reth-rpc = { workspace = true, optional = true }
 reth-rpc-api = { workspace = true, optional = true }
 reth-rpc-eth-types = { workspace = true, optional = true }
@@ -60,6 +62,7 @@ arbitrary = [
     "reth-primitives-traits/arbitrary",
     "reth-db?/arbitrary",
     "alloy-rpc-types-eth?/arbitrary",
+    "reth-transaction-pool?/arbitrary",
 ]
 
 test-utils = [
@@ -74,9 +77,10 @@ test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-provider?/test-utils",
     "reth-trie?/test-utils",
+    "reth-transaction-pool?/test-utils",
 ]
 
-full = ["consensus", "evm", "node", "provider", "rpc", "exex", "trie"]
+full = ["consensus", "evm", "node", "provider", "rpc", "exex", "trie", "pool"]
 
 alloy-compat = ["reth-ethereum-primitives/alloy-compat"]
 cli = ["dep:reth-ethereum-cli"]
@@ -87,7 +91,7 @@ consensus = [
 ]
 evm = ["dep:reth-evm", "dep:reth-evm-ethereum", "dep:reth-revm"]
 exex = ["provider", "dep:reth-exex"]
-node-api = ["dep:reth-node-api"]
+node-api = ["dep:reth-node-api", "dep:reth-node-core"]
 node = [
     "provider",
     "consensus",
@@ -97,6 +101,7 @@ node = [
     "rpc",
     "trie",
 ]
+pool = ["dep:reth-transaction-pool"]
 rpc = [
     "dep:reth-rpc",
     "dep:reth-rpc-builder",

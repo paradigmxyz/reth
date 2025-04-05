@@ -7,7 +7,6 @@ license.workspace = true
 
 [dependencies]
 reth.workspace = true
-reth-node-core.workspace = true
 reth-ethereum = { workspace = true, features = ["node", "test-utils"] }
 futures-util.workspace = true
 
