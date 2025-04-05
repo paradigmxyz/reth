@@ -68,6 +68,7 @@ test-utils = [
     "reth-db?/test-utils",
     "reth-ethereum-primitives/test-utils",
     "reth-evm?/test-utils",
+    "reth-revm?/test-utils",
     "reth-network?/test-utils",
     "reth-node-ethereum?/test-utils",
     "reth-primitives-traits/test-utils",
