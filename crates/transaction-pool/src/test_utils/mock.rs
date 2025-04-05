@@ -20,6 +20,7 @@ use alloy_eips::{
     eip1559::MIN_PROTOCOL_BASE_FEE,
     eip2930::AccessList,
     eip4844::{BlobTransactionSidecar, BlobTransactionValidationError, DATA_GAS_PER_BLOB},
+    eip7594::BlobTransactionSidecarVariant,
     eip7702::SignedAuthorization,
 };
 use alloy_primitives::{
@@ -221,7 +222,7 @@ pub enum MockTransaction {
         /// The transaction input data.
         input: Bytes,
         /// The sidecar information for the transaction.
-        sidecar: BlobTransactionSidecar,
+        sidecar: BlobTransactionSidecarVariant,
         /// The blob versioned hashes for the transaction.
         blob_versioned_hashes: Vec<B256>,
         /// The size of the transaction, returned in the implementation of [`PoolTransaction`].
@@ -364,7 +365,7 @@ impl MockTransaction {
             value: Default::default(),
             input: Bytes::new(),
             access_list: Default::default(),
-            sidecar: Default::default(),
+            sidecar: BlobTransactionSidecarVariant::Eip4844(BlobTransactionSidecar::default()),
             blob_versioned_hashes: Default::default(),
             size: Default::default(),
             cost: U256::ZERO,
@@ -372,12 +373,12 @@ impl MockTransaction {
     }
 
     /// Returns a new EIP4844 transaction with a provided sidecar
-    pub fn eip4844_with_sidecar(sidecar: BlobTransactionSidecar) -> Self {
+    pub fn eip4844_with_sidecar(sidecar: BlobTransactionSidecarVariant) -> Self {
         let mut transaction = Self::eip4844();
         if let Self::Eip4844 { sidecar: existing_sidecar, blob_versioned_hashes, .. } =
             &mut transaction
         {
-            *blob_versioned_hashes = sidecar.versioned_hashes().collect();
+            *blob_versioned_hashes = sidecar.versioned_hashes();
             *existing_sidecar = sidecar;
         }
         transaction
@@ -882,7 +883,7 @@ impl EthPoolTransaction for MockTransaction {
 
     fn try_into_pooled_eip4844(
         self,
-        sidecar: Arc<BlobTransactionSidecar>,
+        sidecar: Arc<BlobTransactionSidecarVariant>,
     ) -> Option<Recovered<Self::Pooled>> {
         let (tx, signer) = self.into_consensus().into_parts();
         tx.try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar))
@@ -892,7 +893,7 @@ impl EthPoolTransaction for MockTransaction {
 
     fn try_from_eip4844(
         tx: Recovered<Self::Consensus>,
-        sidecar: BlobTransactionSidecar,
+        sidecar: BlobTransactionSidecarVariant,
     ) -> Option<Self> {
         let (tx, signer) = tx.into_parts();
         tx.try_into_pooled_eip4844(sidecar)
@@ -903,7 +904,7 @@ impl EthPoolTransaction for MockTransaction {
 
     fn validate_blob(
         &self,
-        _blob: &BlobTransactionSidecar,
+        _blob: &BlobTransactionSidecarVariant,
         _settings: &KzgSettings,
     ) -> Result<(), alloy_eips::eip4844::BlobTransactionValidationError> {
         match &self {
@@ -1018,7 +1019,7 @@ impl TryFrom<Recovered<TransactionSigned>> for MockTransaction {
                 value,
                 input,
                 access_list,
-                sidecar: BlobTransactionSidecar::default(),
+                sidecar: BlobTransactionSidecarVariant::Eip4844(BlobTransactionSidecar::default()),
                 blob_versioned_hashes: Default::default(),
                 size,
                 cost: U256::from(gas_limit) * U256::from(max_fee_per_gas) + value,
@@ -1130,7 +1131,9 @@ impl TryFrom<Recovered<TxEnvelope>> for MockTransaction {
                     value: tx.value,
                     input: tx.input.clone(),
                     access_list: tx.access_list.clone(),
-                    sidecar: BlobTransactionSidecar::default(),
+                    sidecar: BlobTransactionSidecarVariant::Eip4844(
+                        BlobTransactionSidecar::default(),
+                    ),
                     blob_versioned_hashes: tx.blob_versioned_hashes.clone(),
                     size,
                     cost: U256::from(tx.gas_limit) * U256::from(tx.max_fee_per_gas) + tx.value,
@@ -1255,7 +1258,7 @@ impl From<MockTransaction> for Transaction {
                 to,
                 value,
                 access_list,
-                blob_versioned_hashes: sidecar.versioned_hashes().collect(),
+                blob_versioned_hashes: sidecar.versioned_hashes(),
                 max_fee_per_blob_gas,
                 input,
             }),
