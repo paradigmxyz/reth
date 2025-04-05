@@ -30,7 +30,7 @@ impl<R: Read + Seek> E2StoreReader<R> {
     }
 
     /// Read the next entry from the file
-    pub fn next(&mut self) -> Result<Option<Entry>, E2sError> {
+    pub fn read_next_entry(&mut self) -> Result<Option<Entry>, E2sError> {
         Entry::read(&mut self.reader)
     }
 
@@ -41,7 +41,7 @@ impl<R: Read + Seek> E2StoreReader<R> {
 
         let mut entries = Vec::new();
 
-        while let Some(entry) = self.next()? {
+        while let Some(entry) = self.read_next_entry()? {
             entries.push(entry);
         }
 
@@ -55,27 +55,31 @@ mod tests {
     use crate::e2s_types::{BLOCK_INDEX, VERSION};
     use std::io::Cursor;
 
+    fn create_block_index_data(block_number: u64, offset: u64) -> Vec<u8> {
+        let mut data = Vec::with_capacity(16);
+        data.extend_from_slice(&block_number.to_le_bytes());
+        data.extend_from_slice(&offset.to_le_bytes());
+        data
+    }
+
     #[test]
     fn test_e2store_reader() -> Result<(), E2sError> {
         // Create a mock e2store file in memory
         let mut mock_file = Vec::new();
 
-        // Write version entry
         let version_entry = Entry::new(VERSION, Vec::new());
         version_entry.write(&mut mock_file)?;
 
-        // Write multiple entries of different types
-        let block_index_entry1 = Entry::new(BLOCK_INDEX, vec![1, 2, 3, 4]);
+        let block_index_entry1 = Entry::new(BLOCK_INDEX, create_block_index_data(1, 1024));
         block_index_entry1.write(&mut mock_file)?;
 
-        let block_index_entry2 = Entry::new(BLOCK_INDEX, vec![5, 6, 7, 8, 9]);
+        let block_index_entry2 = Entry::new(BLOCK_INDEX, create_block_index_data(2, 2048));
         block_index_entry2.write(&mut mock_file)?;
 
         let custom_type = [0x99, 0x99];
         let custom_entry = Entry::new(custom_type, vec![10, 11, 12]);
         custom_entry.write(&mut mock_file)?;
 
-        // Create reader and process entries
         let cursor = Cursor::new(mock_file);
         let mut e2store_reader = E2StoreReader::new(cursor);
 
@@ -114,6 +118,31 @@ mod tests {
         // Entries should be empty
         let entries = e2store_reader.entries()?;
         assert!(entries.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_next_entry() -> Result<(), E2sError> {
+        let mut mock_file = Vec::new();
+
+        let version_entry = Entry::new(VERSION, Vec::new());
+        version_entry.write(&mut mock_file)?;
+
+        let block_entry = Entry::new(BLOCK_INDEX, create_block_index_data(1, 1024));
+        block_entry.write(&mut mock_file)?;
+
+        let cursor = Cursor::new(mock_file);
+        let mut reader = E2StoreReader::new(cursor);
+
+        let first = reader.read_next_entry()?.unwrap();
+        assert!(first.is_version());
+
+        let second = reader.read_next_entry()?.unwrap();
+        assert!(second.is_block_index());
+
+        let third = reader.read_next_entry()?;
+        assert!(third.is_none());
 
         Ok(())
     }
