@@ -71,6 +71,7 @@ test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-provider?/test-utils",
     "reth-trie?/test-utils",
+    "reth-transaction-pool?/test-utils",
 ]
 
 full = ["consensus", "evm", "node", "provider", "rpc", "trie", "pool"]
