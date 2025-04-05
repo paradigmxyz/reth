@@ -26,7 +26,7 @@ use reth::{
     builder::NodeHandle, chainspec::EthereumChainSpecParser, cli::Cli,
     providers::CanonStateSubscriptions,
 };
-use reth_node_ethereum::EthereumNode;
+use reth_ethereum::node::EthereumNode;
 
 pub mod mined_sidecar;
 
