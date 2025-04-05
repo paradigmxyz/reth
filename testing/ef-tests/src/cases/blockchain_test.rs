@@ -93,7 +93,7 @@ impl Case for BlockchainTestCase {
                 if has_failed && should_fail {
                     return Ok(())
                 }
-                return case_result
+                case_result
             })?;
 
         Ok(())
