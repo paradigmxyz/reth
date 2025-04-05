@@ -2,12 +2,14 @@
 //!
 //! See also <https://github.com/status-im/nimbus-eth2/blob/stable/docs/e2store.md>
 
-use crate::e2s_types::{E2sError, Entry};
-use std::io::{BufReader, Read, Seek, SeekFrom};
+use crate::e2s_types::{E2sError, Entry, Version};
+use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 
-/// A reader for `E2Store` files that wraps a [`BufReader`]
+/// A reader for `E2Store` files that wraps a [`BufReader`].
+
 #[derive(Debug)]
 pub struct E2StoreReader<R: Read> {
+    /// Buffered reader
     reader: BufReader<R>,
 }
 
@@ -44,11 +46,71 @@ impl<R: Read + Seek> E2StoreReader<R> {
     }
 }
 
+/// A writer for `E2Store` files that wraps a [`BufWriter`].
+#[derive(Debug)]
+pub struct E2StoreWriter<W: Write> {
+    /// Buffered writer
+    writer: BufWriter<W>,
+    /// Tracks whether this writer has written a version entry
+    has_written_version: bool,
+}
+
+impl<W: Write> E2StoreWriter<W> {
+    /// Create a new [`E2StoreWriter`]
+    pub fn new(writer: W) -> Self {
+        Self { writer: BufWriter::new(writer), has_written_version: false }
+    }
+
+    /// Create a new [`E2StoreWriter`] and write the version entry
+    pub fn with_version(writer: W) -> Result<Self, E2sError> {
+        let mut writer = Self::new(writer);
+        writer.write_version()?;
+        Ok(writer)
+    }
+
+    /// Write the version entry as the first entry in the file.
+    /// Thi must be called before writing any other entries.
+    pub fn write_version(&mut self) -> Result<(), E2sError> {
+        if self.has_written_version {
+            return Ok(());
+        }
+
+        let version = Version;
+        version.encode(&mut self.writer)?;
+        self.has_written_version = true;
+        Ok(())
+    }
+
+    /// Write an entry to the file.
+    /// If a version entry has not been written yet, it will be added.
+    pub fn write_entry(&mut self, entry: &Entry) -> Result<(), E2sError> {
+        if !self.has_written_version {
+            self.write_version()?;
+        }
+
+        entry.write(&mut self.writer)?;
+        Ok(())
+    }
+
+    /// Flush any buffered data to the underlying writer
+    pub fn flush(&mut self) -> Result<(), E2sError> {
+        self.writer.flush().map_err(E2sError::Io)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::e2s_types::{BLOCK_INDEX, VERSION};
     use std::io::Cursor;
+
+    /// Creates properly formatted [`BlockIndex`] data
+    fn create_block_index_data(block_number: u64, offset: u64) -> Vec<u8> {
+        let mut data = Vec::with_capacity(16);
+        data.extend_from_slice(&block_number.to_le_bytes());
+        data.extend_from_slice(&offset.to_le_bytes());
+        data
+    }
 
     #[test]
     fn test_e2store_reader() -> Result<(), E2sError> {
@@ -89,6 +151,40 @@ mod tests {
         assert!(entries[2].is_block_index());
         // Fourth entry is custom type
         assert!(entries[3].entry_type == [0x99, 0x99]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_e2store_writer() -> Result<(), E2sError> {
+        let mut buffer = Vec::new();
+
+        {
+            let mut writer = E2StoreWriter::new(&mut buffer);
+
+            // Write version entry
+            writer.write_version()?;
+
+            // Write a block index entry
+            let block_entry = Entry::new(BLOCK_INDEX, create_block_index_data(1, 1024));
+            writer.write_entry(&block_entry)?;
+
+            // Write a custom entry
+            let custom_type = [0x99, 0x99];
+            let custom_entry = Entry::new(custom_type, vec![10, 11, 12]);
+            writer.write_entry(&custom_entry)?;
+
+            writer.flush()?;
+        }
+
+        let cursor = Cursor::new(&buffer);
+        let mut reader = E2StoreReader::new(cursor);
+
+        let entries = reader.entries()?;
+        assert_eq!(entries.len(), 3);
+        assert!(entries[0].is_version());
+        assert!(entries[1].is_block_index());
+        assert_eq!(entries[2].entry_type, [0x99, 0x99]);
 
         Ok(())
     }
