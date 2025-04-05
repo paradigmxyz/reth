@@ -13,7 +13,7 @@ use super::{
     Transactions,
 };
 use crate::{
-    status::StatusPayload, EthNetworkPrimitives, EthVersion, NetworkPrimitives,
+    status::StatusMessage, EthNetworkPrimitives, EthVersion, NetworkPrimitives,
     RawCapabilityMessage, SharedTransactions,
 };
 use alloc::{boxed::Box, sync::Arc};
@@ -58,11 +58,13 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
     pub fn decode_message(version: EthVersion, buf: &mut &[u8]) -> Result<Self, MessageError> {
         let message_type = EthMessageID::decode(buf)?;
 
+        // For EIP-7642 (https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7642.md):
+        // pre-merge (legacy) status messages include total difficulty, whereas eth/69 omits it.
         let message = match message_type {
             EthMessageID::Status => EthMessage::Status(if version < EthVersion::Eth69 {
-                StatusPayload::Legacy(Status::decode(buf)?)
+                StatusMessage::Legacy(Status::decode(buf)?)
             } else {
-                StatusPayload::Eth69(StatusEth69::decode(buf)?)
+                StatusMessage::Eth69(StatusEth69::decode(buf)?)
             }),
             EthMessageID::NewBlockHashes => {
                 if version.is_eth69() {
@@ -192,7 +194,7 @@ impl<N: NetworkPrimitives> From<EthBroadcastMessage<N>> for ProtocolBroadcastMes
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Represents a Status message required for the protocol handshake.
-    Status(StatusPayload),
+    Status(StatusMessage),
     /// Represents a `NewBlockHashes` message broadcast to the network.
     NewBlockHashes(NewBlockHashes),
     /// Represents a `NewBlock` message broadcast to the network.
