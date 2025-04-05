@@ -2,9 +2,7 @@
 //! methods.
 
 use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
-use crate::{
-    helpers::estimate::EstimateCall, FromEvmError, FullEthApiTypes, RpcBlock, RpcNodeCore,
-};
+use crate::{helpers::estimate::EstimateCall, FromEvmError, FullEthApiTypes, RpcBlock};
 use alloy_consensus::BlockHeader;
 use alloy_eips::eip2930::AccessListResult;
 use alloy_primitives::{Bytes, B256, U256};
@@ -20,7 +18,7 @@ use reth_evm::{
     ConfigureEvm, Evm, EvmEnv, EvmEnvFor, HaltReasonFor, InspectorFor, SpecFor, TransactionEnv,
     TxEnvFor,
 };
-use reth_node_api::{BlockBody, NodePrimitives};
+use reth_node_api::{BlockBody, FullNodeComponents, NodePrimitives};
 use reth_primitives_traits::{Recovered, SealedHeader, SignedTransaction};
 use reth_provider::{BlockIdReader, ProviderHeader, ProviderTx};
 use reth_revm::{
@@ -292,7 +290,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     // to be replayed
                     let transactions = block.transactions_recovered().take(num_txs);
                     for tx in transactions {
-                        let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);
+                        let tx_env = FullNodeComponents::evm_config(&this).tx_env(tx);
                         let (res, _) = this.transact(&mut db, evm_env.clone(), tx_env)?;
                         db.commit(res.state);
                     }
@@ -429,17 +427,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 }
 
 /// Executes code on state.
-pub trait Call:
-    LoadState<
-        Evm: ConfigureEvm<
-            Primitives: NodePrimitives<
-                BlockHeader = ProviderHeader<Self::Provider>,
-                SignedTx = ProviderTx<Self::Provider>,
-            >,
-        >,
-        Error: FromEvmError<Self::Evm>,
-    > + SpawnBlocking
-{
+pub trait Call: LoadState<Error: FromEvmError<Self::Evm>> + SpawnBlocking {
     /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
     ///
     /// Data access in default trait method implementations.
@@ -635,7 +623,7 @@ pub trait Call:
                 // replay all transactions prior to the targeted transaction
                 this.replay_transactions_until(&mut db, evm_env.clone(), block_txs, *tx.tx_hash())?;
 
-                let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);
+                let tx_env = FullNodeComponents::evm_config(&this).tx_env(tx);
 
                 let (res, _) = this.transact(&mut db, evm_env, tx_env)?;
                 f(tx_info, res, db)

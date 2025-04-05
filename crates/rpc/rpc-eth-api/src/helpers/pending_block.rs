@@ -2,7 +2,7 @@
 //! RPC methods.
 
 use super::SpawnBlocking;
-use crate::{types::RpcTypes, EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
+use crate::{types::RpcTypes, EthApiTypes, FromEthApiError, FromEvmError};
 use alloy_consensus::{BlockHeader, Transaction};
 use alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK;
 use alloy_rpc_types_eth::BlockNumberOrTag;
@@ -13,7 +13,7 @@ use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm, Evm, SpecFor,
 };
-use reth_node_api::NodePrimitives;
+use reth_node_api::{FullNodeComponents, NodePrimitives};
 use reth_primitives_traits::{
     transaction::error::InvalidTransactionError, Receipt, RecoveredBlock, SealedHeader,
 };
@@ -41,20 +41,7 @@ pub trait LoadPendingBlock:
             Header = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
         >,
         Error: FromEvmError<Self::Evm>,
-    > + RpcNodeCore<
-        Provider: BlockReaderIdExt<Receipt: Receipt>
-                      + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
-                      + StateProviderFactory,
-        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
-        Evm: ConfigureEvm<
-            Primitives: NodePrimitives<
-                BlockHeader = ProviderHeader<Self::Provider>,
-                SignedTx = ProviderTx<Self::Provider>,
-                Receipt = ProviderReceipt<Self::Provider>,
-                Block = ProviderBlock<Self::Provider>,
-            >,
-        >,
-    >
+    > + FullNodeComponents
 {
     /// Returns a handle to the pending block.
     ///
