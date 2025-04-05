@@ -1,7 +1,7 @@
 //! Types to build e2store files
-//! ie. with .e2s extension
+//! ie. with `.e2s` extension
 //!
-//! e2store contains header and entry
+//! e2store file contains header and entry
 //!
 //! The [`Header`] is an 8-byte structure at the beginning of each record in the file
 //!
