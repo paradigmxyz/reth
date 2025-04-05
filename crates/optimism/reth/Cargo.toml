@@ -51,6 +51,7 @@ std = [
     "reth-primitives-traits/std",
     "reth-storage-api?/std",
     "reth-evm?/std",
+    "reth-revm?/std",
 ]
 arbitrary = [
     "std",
