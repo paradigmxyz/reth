@@ -10,13 +10,13 @@ use alloy_primitives::{b256, hex};
 use futures_util::StreamExt;
 use reth::{
     builder::{NodeBuilder, NodeHandle},
-    providers::CanonStateSubscriptions,
-    rpc::api::eth::helpers::EthTransactions,
     tasks::TaskManager,
 };
-use reth_chainspec::ChainSpec;
+use reth_ethereum::{
+    chainspec::ChainSpec, node::EthereumNode, provider::CanonStateSubscriptions,
+    rpc::api::eth::helpers::EthTransactions,
+};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig, primitives::SignedTransaction};
-use reth_node_ethereum::EthereumNode;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
