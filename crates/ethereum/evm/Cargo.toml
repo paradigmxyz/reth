@@ -31,7 +31,6 @@ reth-testing-utils.workspace = true
 reth-evm = { workspace = true, features = ["test-utils"] }
 reth-execution-types.workspace = true
 secp256k1.workspace = true
-serde_json.workspace = true
 alloy-genesis.workspace = true
 
 [features]
@@ -43,7 +42,6 @@ std = [
     "alloy-primitives/std",
     "secp256k1/std",
     "reth-ethereum-forks/std",
-    "serde_json/std",
     "reth-chainspec/std",
     "alloy-evm/std",
     "reth-execution-types/std",
