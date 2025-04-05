@@ -7,7 +7,7 @@ license.workspace = true
 
 [dependencies]
 # reth
-reth-chainspec.workspace = true
+reth-ethereum.workspace = true
 reth-discv4 = { workspace = true, features = ["test-utils"] }
 reth-engine-primitives.workspace = true
 reth-ethereum-forks = { workspace = true, features = ["serde"] }
@@ -17,7 +17,6 @@ reth-network = { workspace = true, features = ["test-utils"] }
 reth-network-api.workspace = true
 reth-network-peers.workspace = true
 reth-payload-primitives.workspace = true
-reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true

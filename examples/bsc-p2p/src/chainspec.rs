@@ -1,12 +1,14 @@
 //! Chain specification for BSC, credits to: <https://github.com/bnb-chain/reth/blob/main/crates/bsc/chainspec/src/bsc.rs>
 
 use alloy_primitives::{BlockHash, U256};
-use reth_chainspec::{
-    hardfork, make_genesis_header, BaseFeeParams, BaseFeeParamsKind, Chain, ChainHardforks,
-    ChainSpec, EthereumHardfork, ForkCondition, Hardfork, Head, NamedChain,
+use reth_ethereum::{
+    chainspec::{
+        hardfork, make_genesis_header, BaseFeeParams, BaseFeeParamsKind, Chain, ChainHardforks,
+        ChainSpec, EthereumHardfork, ForkCondition, Hardfork, Head, NamedChain,
+    },
+    primitives::SealedHeader,
 };
 use reth_network_peers::NodeRecord;
-use reth_primitives::SealedHeader;
 use std::{str::FromStr, sync::Arc};
 
 hardfork!(
@@ -148,7 +150,7 @@ pub fn head() -> Head {
 mod tests {
     use crate::chainspec::{bsc_chain_spec, head};
     use alloy_primitives::hex;
-    use reth_chainspec::{ForkHash, ForkId};
+    use reth_ethereum::chainspec::{ForkHash, ForkId};
 
     #[test]
     fn can_create_forkid() {

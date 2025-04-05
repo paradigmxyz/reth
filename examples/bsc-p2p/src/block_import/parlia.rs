@@ -55,7 +55,7 @@ mod tests {
     use std::collections::HashMap;
 
     use alloy_primitives::hex;
-    use reth_chainspec::ChainInfo;
+    use reth_ethereum::chainspec::ChainInfo;
     use reth_provider::BlockHashReader;
 
     use super::*;

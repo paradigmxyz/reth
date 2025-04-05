@@ -2,8 +2,8 @@ use example_bsc_p2p::{
     chainspec::{boot_nodes, bsc_chain_spec, head},
     handshake::BscHandshake,
 };
-use reth_chainspec::NamedChain;
 use reth_discv4::Discv4ConfigBuilder;
+use reth_ethereum::chainspec::NamedChain;
 use reth_network::{
     EthNetworkPrimitives, NetworkConfig, NetworkEvent, NetworkEventListenerProvider, NetworkManager,
 };

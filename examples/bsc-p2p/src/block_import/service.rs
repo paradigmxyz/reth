@@ -3,13 +3,13 @@ use crate::block_import::parlia::{ParliaConsensus, ParliaConsensusErr};
 use alloy_rpc_types::engine::{ForkchoiceState, PayloadStatusEnum};
 use futures::{future::Either, stream::FuturesUnordered, StreamExt};
 use reth_engine_primitives::{BeaconConsensusEngineHandle, EngineTypes};
+use reth_ethereum::primitives::NodePrimitives;
 use reth_network::{
     import::{BlockImportError, BlockImportEvent, BlockImportOutcome, BlockValidation},
     message::NewBlockMessage,
 };
 use reth_network_api::PeerId;
 use reth_payload_primitives::{BuiltPayload, EngineApiMessageVersion, PayloadTypes};
-use reth_primitives::NodePrimitives;
 use reth_primitives_traits::{AlloyBlockHeader, Block};
 use reth_provider::{BlockHashReader, BlockNumReader};
 use std::{
@@ -226,11 +226,10 @@ mod tests {
     use super::*;
     use alloy_primitives::{B256, U128};
     use alloy_rpc_types::engine::PayloadStatus;
-    use reth_chainspec::ChainInfo;
     use reth_engine_primitives::{BeaconEngineMessage, OnForkChoiceUpdated};
     use reth_eth_wire::NewBlock;
+    use reth_ethereum::{chainspec::ChainInfo, Block};
     use reth_node_ethereum::EthEngineTypes;
-    use reth_primitives::Block;
     use reth_provider::ProviderError;
     use std::{
         sync::Arc,
@@ -402,7 +401,7 @@ mod tests {
 
     /// Creates a test block message
     fn create_test_block() -> NewBlockMessage<Block> {
-        let block: reth_primitives::Block = Block::default();
+        let block = Block::default();
         let new_block = NewBlock { block: block.clone(), td: U128::ZERO };
         NewBlockMessage { hash: block.header.hash_slow(), block: Arc::new(new_block) }
     }
