@@ -3387,7 +3387,6 @@ dependencies = [
  "futures-util",
  "reth",
  "reth-ethereum",
- "reth-node-core",
  "serde_json",
  "tokio",
 ]
@@ -8007,6 +8006,7 @@ dependencies = [
  "reth-exex",
  "reth-network",
  "reth-node-api",
+ "reth-node-core",
  "reth-node-ethereum",
  "reth-primitives-traits",
  "reth-provider",
@@ -8016,6 +8016,7 @@ dependencies = [
  "reth-rpc-builder",
  "reth-rpc-eth-types",
  "reth-storage-api",
+ "reth-transaction-pool",
  "reth-trie",
 ]
 
@@ -8842,6 +8843,7 @@ dependencies = [
  "reth-evm",
  "reth-network",
  "reth-node-api",
+ "reth-node-core",
  "reth-optimism-chainspec",
  "reth-optimism-cli",
  "reth-optimism-consensus",
@@ -8857,6 +8859,7 @@ dependencies = [
  "reth-rpc-builder",
  "reth-rpc-eth-types",
  "reth-storage-api",
+ "reth-transaction-pool",
  "reth-trie",
 ]
 
