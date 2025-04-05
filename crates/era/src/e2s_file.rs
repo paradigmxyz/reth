@@ -235,4 +235,72 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_writer_implicit_version_insertion() -> Result<(), E2sError> {
+        let mut buffer = Vec::new();
+
+        {
+            // Writer without explicitly writing the version
+            let mut writer = E2StoreWriter::new(&mut buffer);
+
+            // Write an entry, it should automatically add a version first
+            let custom_type = [0x42, 0x42];
+            let custom_entry = Entry::new(custom_type, vec![1, 2, 3, 4]);
+            writer.write_entry(&custom_entry)?;
+
+            // Write another entry
+            let another_custom = Entry::new([0x43, 0x43], vec![5, 6, 7, 8]);
+            writer.write_entry(&another_custom)?;
+
+            writer.flush()?;
+        }
+
+        let cursor = Cursor::new(&buffer);
+        let mut reader = E2StoreReader::new(cursor);
+
+        let version = reader.read_version()?;
+        assert!(version.is_some(), "Version entry should have been auto-added");
+
+        let entries = reader.entries()?;
+        assert_eq!(entries.len(), 3);
+        assert!(entries[0].is_version());
+        assert_eq!(entries[1].entry_type, [0x42, 0x42]);
+        assert_eq!(entries[1].data, vec![1, 2, 3, 4]);
+        assert_eq!(entries[2].entry_type, [0x43, 0x43]);
+        assert_eq!(entries[2].data, vec![5, 6, 7, 8]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_writer_prevents_duplicate_versions() -> Result<(), E2sError> {
+        let mut buffer = Vec::new();
+
+        {
+            let mut writer = E2StoreWriter::new(&mut buffer);
+
+            // Call write_version multiple times, it should only write once
+            writer.write_version()?;
+            writer.write_version()?;
+            writer.write_version()?;
+
+            // Write an entry
+            let block_entry = Entry::new(BLOCK_INDEX, create_block_index_data(42, 8192));
+            writer.write_entry(&block_entry)?;
+
+            writer.flush()?;
+        }
+
+        // Verify only one version entry was written
+        let cursor = Cursor::new(&buffer);
+        let mut reader = E2StoreReader::new(cursor);
+
+        let entries = reader.entries()?;
+        assert_eq!(entries.len(), 2);
+        assert!(entries[0].is_version());
+        assert!(entries[1].is_block_index());
+
+        Ok(())
+    }
 }
