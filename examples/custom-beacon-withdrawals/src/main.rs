@@ -15,12 +15,6 @@ use reth::{
     builder::{components::ExecutorBuilder, BuilderContext},
     cli::Cli,
     primitives::SealedBlock,
-    revm::{
-        context::{result::ExecutionResult, TxEnv},
-        db::State,
-        primitives::{address, hardfork::SpecId, Address},
-        DatabaseCommit,
-    },
 };
 use reth_ethereum::{
     chainspec::ChainSpec,
@@ -28,6 +22,12 @@ use reth_ethereum::{
         primitives::{
             execute::{BlockExecutionError, BlockExecutor, InternalBlockExecutionError},
             Database, Evm, EvmEnv, InspectorFor, NextBlockEnvAttributes, OnStateHook,
+        },
+        revm::{
+            context::{result::ExecutionResult, TxEnv},
+            db::State,
+            primitives::{address, hardfork::SpecId, Address},
+            DatabaseCommit,
         },
         EthBlockAssembler, EthEvmConfig, RethReceiptBuilder,
     },
