@@ -17,6 +17,9 @@ pub enum Error {
     /// The test was skipped
     #[error("test was skipped")]
     Skipped,
+    /// The test was expected to fail
+    #[error("test successfully failed")]
+    ShouldFail,
     /// No post state found in test
     #[error("no post state found for validation")]
     MissingPostState,
@@ -61,19 +64,12 @@ pub struct CaseResult {
     pub path: PathBuf,
     /// The result of the test.
     pub result: Result<(), Error>,
-    /// Indicates whether the test should fail
-    pub should_fail: bool,
 }
 
 impl CaseResult {
     /// Create a new test result.
     pub fn new(path: &Path, case: &impl Case, result: Result<(), Error>) -> Self {
-        Self {
-            desc: case.description(),
-            path: path.into(),
-            result,
-            should_fail: case.should_fail(),
-        }
+        Self { desc: case.description(), path: path.into(), result }
     }
 }
 
@@ -97,13 +93,8 @@ pub(crate) fn categorize_results(
     for case in results {
         match case.result.as_ref().err() {
             Some(Error::Skipped) => skipped.push(case),
-            Some(_) => {
-                if case.should_fail {
-                    passed.push(case);
-                } else {
-                    failed.push(case);
-                }
-            }
+            Some(Error::ShouldFail) => passed.push(case),
+            Some(_) => failed.push(case),
             None => passed.push(case),
         }
     }

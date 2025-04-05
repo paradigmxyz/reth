@@ -23,9 +23,6 @@ pub trait Case: Debug + Sync + Sized {
 
     /// Run the test.
     fn run(&self) -> Result<(), Error>;
-
-    /// Returns true if the test cases should fail
-    fn should_fail(&self) -> bool;
 }
 
 /// A container for multiple test cases.
