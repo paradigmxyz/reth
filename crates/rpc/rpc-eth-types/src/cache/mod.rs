@@ -1,6 +1,7 @@
 //! Async caching support for eth RPC
 
 use super::{EthStateCacheConfig, MultiConsumerLruCache};
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::B256;
 use futures::{future::Either, Stream, StreamExt};
