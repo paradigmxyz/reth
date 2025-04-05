@@ -154,6 +154,9 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
 
     // Execute the execution stage using the EVM processor factory for the test case
     // network.
+    //
+    // Note: If `execute` fails, we do not check the error because the post state check
+    // will subsequently fail because no state is written on execution failure.
     let _ = ExecutionStage::new_with_executor(
         reth_evm_ethereum::execute::EthExecutorProvider::ethereum(chain_spec.clone()),
         Arc::new(EthBeaconConsensus::new(chain_spec)),
