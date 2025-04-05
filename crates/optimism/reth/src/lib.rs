@@ -58,6 +58,9 @@ pub mod evm {
 
     #[doc(inline)]
     pub use reth_evm as primitives;
+
+    #[doc(inline)]
+    pub use reth_revm as revm;
 }
 
 /// Re-exported reth network types
