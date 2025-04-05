@@ -40,7 +40,6 @@ use reth_ethereum::{
     provider::BlockExecutionResult,
     EthPrimitives, Receipt, TransactionSigned,
 };
-
 use std::{fmt::Display, sync::Arc};
 
 pub const SYSTEM_ADDRESS: Address = address!("0xfffffffffffffffffffffffffffffffffffffffe");
