@@ -3325,7 +3325,7 @@ dependencies = [
  "futures-util",
  "mev-share-sse",
  "reth",
- "reth-node-ethereum",
+ "reth-ethereum",
  "tokio",
  "tracing",
 ]
