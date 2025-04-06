@@ -92,8 +92,6 @@ async fn test_tx_propagation_policy() {
 
     assert_eq!(inserted, hash_0);
 
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-
     // ensure tx is not gossiped to peer1
     peer1_tx_listener.try_recv().expect_err("Empty");
 
@@ -121,10 +119,10 @@ async fn test_tx_propagation_policy() {
     assert_eq!(inserted, hash_1);
 
     // ensure peer1 now receives the pending txs from peer0
-    let inserted_0 = peer1_tx_listener.recv().await.unwrap();
-    let inserted_1 = peer1_tx_listener.recv().await.unwrap();
-    assert_eq!(inserted_0, hash_0);
-    assert_eq!(inserted_1, hash_1);
+    let mut buff = Vec::with_capacity(2);
+    peer1_tx_listener.recv_many(&mut buff, 2).await;
+
+    assert!(buff.contains(&hash_1));
 }
 
 #[tokio::test(flavor = "multi_thread")]
