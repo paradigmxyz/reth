@@ -47,10 +47,9 @@ impl Command {
 
         let config = Discv4Config::builder().external_ip_resolver(Some(self.nat)).build();
 
-        let (_discv4, mut discv4_service) =
-            Discv4::bind(socket_addr, local_enr, sk, config).await.map_err(|err| {
-                NetworkError::from_io_error(err, ServiceKind::Discovery(socket_addr))
-            })?;
+        let (_discv4, mut discv4_service) = Discv4::bind(socket_addr, local_enr, sk, config)
+            .await
+            .map_err(|err| NetworkError::from_io_error(err, ServiceKind::Discovery(socket_addr)))?;
 
         info!("Started discv4 at address:{:?}", socket_addr);
 
