@@ -61,13 +61,16 @@ impl Command {
             info!("Starting discv5 ");
             let config = Config::builder(socket_addr).build();
             let (_discv5, _discv5_updates, _local_enr_discv5) =
-                Discv5::start(&sk, config).await.map_err(|e| NetworkError::Discv5Error(e))?;
+                Discv5::start(&sk, config).await.map_err(NetworkError::Discv5Error)?;
         };
 
         while let Some(update) = discv4_updates.next().await {
             match update {
                 DiscoveryUpdate::Added(record) => {
-                    info!("new peer added, peer_id={}", record.id);
+                    info!("new peer added, peer_id={:?}", record.id);
+                }
+                DiscoveryUpdate::Removed(peer_id) => {
+                    info!("peer with peer-id={:?} removed", peer_id);
                 }
                 _ => {}
             }
