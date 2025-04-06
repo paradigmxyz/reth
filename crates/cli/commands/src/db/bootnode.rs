@@ -1,6 +1,6 @@
 use clap::Parser;
 use rand::thread_rng;
-use reth_discv4::{Discv4, Discv4Config};
+use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config};
 use reth_discv5::{Config, Discv5};
 use reth_net_nat::NatResolver;
 use reth_network::error::{NetworkError, ServiceKind};
@@ -8,6 +8,7 @@ use reth_network_peers::NodeRecord;
 use secp256k1::SECP256K1;
 use std::{net::SocketAddr, str::FromStr};
 use tracing::info;
+use tokio_stream::StreamExt;
 
 /// The arguments for the `reth db bootnode` command.
 /// see https://github.com/ethereum/go-ethereum/blob/14eb8967be7acc54c5dc9a416151ac45c01251b6/cmd/bootnode/main.go#L39-L48
@@ -53,8 +54,8 @@ impl Command {
 
         info!("Started discv4 at address:{:?}", socket_addr);
 
-        let discv4_updates = discv4_service.update_stream();
-        let _discv4_service = discv4_service.spawn();
+        let mut discv4_updates = discv4_service.update_stream();
+        discv4_service.spawn();
 
         if self.v5 != false {
             info!("Starting discv5 ");
@@ -62,6 +63,15 @@ impl Command {
             let (_discv5, _discv5_updates, _local_enr_discv5) =
                 Discv5::start(&sk, config).await.map_err(|e| NetworkError::Discv5Error(e))?;
         };
+
+        while let Some(update) = discv4_updates.next().await {
+            match update {
+                DiscoveryUpdate::Added(record) => {
+                    info!("new peer added, peer_id={}", record.id);
+                }
+                _ => {}
+            }
+        }
 
         Ok(())
     }
