@@ -7,8 +7,8 @@ use reth_network::error::{NetworkError, ServiceKind};
 use reth_network_peers::NodeRecord;
 use secp256k1::SECP256K1;
 use std::{net::SocketAddr, str::FromStr};
-use tracing::info;
 use tokio_stream::StreamExt;
+use tracing::info;
 
 /// The arguments for the `reth db bootnode` command.
 /// see https://github.com/ethereum/go-ethereum/blob/14eb8967be7acc54c5dc9a416151ac45c01251b6/cmd/bootnode/main.go#L39-L48
