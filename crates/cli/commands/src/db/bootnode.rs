@@ -7,6 +7,7 @@ use reth_network::error::{NetworkError, ServiceKind};
 use reth_network_peers::NodeRecord;
 use secp256k1::SECP256K1;
 use std::{net::SocketAddr, str::FromStr};
+use tracing::info;
 
 /// The arguments for the `reth db bootnode` command.
 /// see https://github.com/ethereum/go-ethereum/blob/14eb8967be7acc54c5dc9a416151ac45c01251b6/cmd/bootnode/main.go#L39-L48
@@ -46,17 +47,20 @@ impl Command {
 
         let config = Discv4Config::builder().external_ip_resolver(Some(self.nat)).build();
 
-        let (discv4, mut discv4_service) =
+        let (_discv4, mut discv4_service) =
             Discv4::bind(socket_addr, local_enr, sk, config).await.map_err(|err| {
                 NetworkError::from_io_error(err, ServiceKind::Discovery(socket_addr))
             })?;
 
+        info!("Started discv4 at address:{:?}", socket_addr);
+
         let discv4_updates = discv4_service.update_stream();
-        let discv4_service = discv4_service.spawn();
+        let _discv4_service = discv4_service.spawn();
 
         if self.v5 != false {
+            info!("Starting discv5 ");
             let config = Config::builder(socket_addr).build();
-            let (discv5, _discv5_updates, _local_enr_discv5) =
+            let (_discv5, _discv5_updates, _local_enr_discv5) =
                 Discv5::start(&sk, config).await.map_err(|e| NetworkError::Discv5Error(e))?;
         };
 
