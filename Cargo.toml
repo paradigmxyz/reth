@@ -614,7 +614,6 @@ toml = "0.8"
 arbitrary = "1.3"
 assert_matches = "1.5.0"
 criterion = { package = "codspeed-criterion-compat", version = "2.7" }
-pprof = "0.14"
 proptest = "1.4"
 proptest-derive = "0.5"
 serial_test = { default-features = false, version = "3" }
