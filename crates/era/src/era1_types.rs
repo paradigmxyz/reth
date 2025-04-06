@@ -283,4 +283,25 @@ mod tests {
         assert_eq!(era1_group.other_entries[1].entry_type, [0x02, 0x02]);
         assert_eq!(era1_group.other_entries[1].data, vec![5, 6, 7, 8]);
     }
+
+    #[test]
+    fn test_era1_group_with_mismatched_index() {
+        let blocks =
+            vec![create_sample_block(10), create_sample_block(15), create_sample_block(20)];
+
+        let root_bytes = [0xDD; 32];
+        let accumulator = Accumulator::new(B256::from(root_bytes));
+
+        // Create block index with different starting number
+        let block_index = BlockIndex::new(2000, vec![100, 200, 300]);
+
+        // This should create a valid Era1Group
+        // even though the block numbers don't match the block index
+        // validation not at the era1 group level
+        let era1_group = Era1Group::new(blocks, accumulator, block_index);
+
+        // Verify the mismatch exists but the group was created
+        assert_eq!(era1_group.blocks.len(), 3);
+        assert_eq!(era1_group.block_index.starting_number, 2000);
+    }
 }
