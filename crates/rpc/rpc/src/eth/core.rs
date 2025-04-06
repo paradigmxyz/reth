@@ -14,7 +14,7 @@ use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
     node::RpcNodeCoreExt,
     types::RpcTypes,
-    EthApiTypes, RpcNodeCore,
+    EthApiTypes,
 };
 use reth_rpc_eth_types::{
     EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
@@ -79,18 +79,18 @@ impl<Components: FullNodeComponents> EthApi<Components> {
     /// # Create an instance with noop ethereum implementations
     ///
     /// ```no_run
-    /// use reth_evm_ethereum::EthEvmConfig;
-    /// use reth_network_api::noop::NoopNetwork;
-    /// use reth_provider::noop::NoopProvider;
-    /// use reth_rpc::EthApi;
-    /// use reth_transaction_pool::noop::NoopTransactionPool;
-    /// let eth_api = EthApi::builder(
-    ///     NoopProvider::default(),
-    ///     NoopTransactionPool::default(),
-    ///     NoopNetwork::default(),
-    ///     EthEvmConfig::mainnet(),
-    /// )
-    /// .build();
+    /// // use reth_evm_ethereum::EthEvmConfig;
+    /// // use reth_network_api::noop::NoopNetwork;
+    /// // use reth_provider::noop::NoopProvider;
+    /// // use reth_rpc::EthApi;
+    /// // use reth_transaction_pool::noop::NoopTransactionPool;
+    /// // let eth_api = EthApi::builder(
+    /// //     NoopProvider::default(),
+    /// //     NoopTransactionPool::default(),
+    /// //     NoopNetwork::default(),
+    /// //     EthEvmConfig::mainnet(),
+    /// // )
+    /// // .build();
     /// ```
     pub fn builder(components: Components) -> EthApiBuilder<Components> {
         EthApiBuilder::new(components)
@@ -160,7 +160,7 @@ where
     }
 }
 
-impl<Components> std::fmt::Debug for EthApi<Components> {
+impl<Components: FullNodeComponents> std::fmt::Debug for EthApi<Components> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EthApi").finish_non_exhaustive()
     }
@@ -369,7 +369,7 @@ where
     #[inline]
     pub const fn signers(
         &self,
-    ) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<Components::Provider::Transaction>>>> {
+    ) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<TxTy<Components::Types>>>>> {
         &self.signers
     }
 
@@ -412,7 +412,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{EthApi, EthApiBuilder};
+    use crate::{eth::tests::create_components, EthApi, EthApiBuilder};
     use alloy_consensus::{Block, BlockBody, Header};
     use alloy_eips::BlockNumberOrTag;
     use alloy_primitives::{PrimitiveSignature as Signature, B256, U64};
@@ -420,14 +420,21 @@ mod tests {
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use reth_chain_state::CanonStateSubscriptions;
     use reth_chainspec::{BaseFeeParams, ChainSpec, ChainSpecProvider};
+    use reth_consensus::test_utils::TestConsensus;
+    use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_ethereum_primitives::TransactionSigned;
+    use reth_evm::test_utils::MockExecutorProvider;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
+    use reth_node_api::{FullNodeComponents, NodeTypes};
+    use reth_payload_builder::noop::NoopPayloadBuilderService;
     use reth_provider::test_utils::{MockEthProvider, NoopProvider};
     use reth_rpc_eth_api::EthApiServer;
     use reth_storage_api::{BlockReader, BlockReaderIdExt, StateProviderFactory};
+    use reth_tasks::TaskManager;
     use reth_testing_utils::{generators, generators::Rng};
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+    use std::sync::Arc;
 
     fn build_test_eth_api<
         P: BlockReaderIdExt<
@@ -443,14 +450,15 @@ mod tests {
             + 'static,
     >(
         provider: P,
-    ) -> EthApi<P, TestPool, NoopNetwork, EthEvmConfig> {
-        EthApiBuilder::new(
-            provider.clone(),
-            testing_pool(),
-            NoopNetwork::default(),
-            EthEvmConfig::new(provider.chain_spec()),
-        )
-        .build()
+    ) -> EthApi<impl FullNodeComponents> {
+        let components = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(create_components())
+            .unwrap();
+
+        EthApiBuilder::new(components).build()
     }
 
     // Function to prepare the EthApi with mock data
@@ -459,7 +467,7 @@ mod tests {
         mut oldest_block: Option<B256>,
         block_count: u64,
         mock_provider: MockEthProvider,
-    ) -> (EthApi<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig>, Vec<u128>, Vec<f64>) {
+    ) -> (EthApi<impl FullNodeComponents>, Vec<u128>, Vec<f64>) {
         let mut rng = generators::rng();
 
         // Build mock data

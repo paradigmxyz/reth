@@ -3,12 +3,12 @@
 use alloy_consensus::BlockHeader;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_evm::{ConfigureEvm, NextBlockEnvAttributes};
-use reth_node_api::NodePrimitives;
+use reth_node_api::{FullNodeComponents, NodePrimitives};
 use reth_primitives_traits::SealedHeader;
 use reth_rpc_eth_api::{
     helpers::{LoadPendingBlock, SpawnBlocking},
     types::RpcTypes,
-    FromEvmError, RpcNodeCore,
+    EthApiTypes, FromEvmError,
 };
 use reth_rpc_eth_types::PendingBlock;
 use reth_storage_api::{
@@ -20,13 +20,12 @@ use revm_primitives::B256;
 
 use crate::EthApi;
 
-impl<Provider, Pool, Network, EvmConfig> LoadPendingBlock
-    for EthApi<Provider, Pool, Network, EvmConfig>
+impl<Components: FullNodeComponents> LoadPendingBlock for EthApi<Components>
 where
     Self: SpawnBlocking<
             NetworkTypes: RpcTypes<Header = alloy_rpc_types_eth::Header>,
             Error: FromEvmError<Self::Evm>,
-        > + RpcNodeCore<
+        > + FullNodeComponents<
             Provider: BlockReaderIdExt<
                 Transaction = reth_ethereum_primitives::TransactionSigned,
                 Block = reth_ethereum_primitives::Block,
@@ -47,7 +46,7 @@ where
                 NextBlockEnvCtx = NextBlockEnvAttributes,
             >,
         >,
-    Provider: BlockReader<
+    Components::Provider: BlockReader<
         Block = reth_ethereum_primitives::Block,
         Receipt = reth_ethereum_primitives::Receipt,
     >,

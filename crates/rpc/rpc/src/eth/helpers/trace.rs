@@ -1,7 +1,7 @@
 //! Contains RPC handler implementations specific to tracing.
 
 use reth_evm::ConfigureEvm;
-use reth_node_api::NodePrimitives;
+use reth_node_api::{FullNodeComponents, NodePrimitives};
 use reth_rpc_eth_api::{
     helpers::{LoadState, Trace},
     FromEvmError,
@@ -10,7 +10,7 @@ use reth_storage_api::{BlockReader, ProviderHeader, ProviderTx};
 
 use crate::EthApi;
 
-impl<Provider, Pool, Network, EvmConfig> Trace for EthApi<Provider, Pool, Network, EvmConfig>
+impl<Components: FullNodeComponents> Trace for EthApi<Components>
 where
     Self: LoadState<
         Provider: BlockReader,
@@ -22,6 +22,6 @@ where
         >,
         Error: FromEvmError<Self::Evm>,
     >,
-    Provider: BlockReader,
+    Components::Provider: BlockReader,
 {
 }

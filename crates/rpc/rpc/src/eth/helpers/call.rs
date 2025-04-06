@@ -5,8 +5,8 @@ use alloy_consensus::TxType;
 use alloy_evm::block::BlockExecutorFactory;
 use alloy_primitives::{TxKind, U256};
 use alloy_rpc_types::TransactionRequest;
-use reth_evm::{ConfigureEvm, EvmEnv, EvmFactory, SpecFor};
-use reth_node_api::NodePrimitives;
+use reth_evm::{ConfigureEvm, EvmEnv, EvmFactory, SpecFor, TxEnvFor};
+use reth_node_api::{FullNodeComponents, NodePrimitives};
 use reth_rpc_eth_api::{
     helpers::{estimate::EstimateCall, Call, EthCall, LoadPendingBlock, LoadState, SpawnBlocking},
     FromEthApiError, FromEvmError, FullEthApiTypes, IntoEthApiError,
@@ -15,26 +15,26 @@ use reth_rpc_eth_types::{revm_utils::CallFees, EthApiError, RpcInvalidTransactio
 use reth_storage_api::{BlockReader, ProviderHeader, ProviderTx};
 use revm::{context::TxEnv, context_interface::Block, Database};
 
-impl<Provider, Pool, Network, EvmConfig> EthCall for EthApi<Provider, Pool, Network, EvmConfig>
+impl<Components: FullNodeComponents> EthCall for EthApi<Components>
 where
     Self: EstimateCall + LoadPendingBlock + FullEthApiTypes,
-    Provider: BlockReader,
+    Components::Provider: BlockReader,
 {
 }
 
-impl<Provider, Pool, Network, EvmConfig> Call for EthApi<Provider, Pool, Network, EvmConfig>
+impl<Components: FullNodeComponents> Call for EthApi<Components>
 where
     Self: LoadState<
-            Evm: ConfigureEvm<
-                BlockExecutorFactory: BlockExecutorFactory<EvmFactory: EvmFactory<Tx = TxEnv>>,
-                Primitives: NodePrimitives<
-                    BlockHeader = ProviderHeader<Self::Provider>,
-                    SignedTx = ProviderTx<Self::Provider>,
-                >,
-            >,
+            // Evm: ConfigureEvm<
+            //     BlockExecutorFactory: BlockExecutorFactory<EvmFactory: EvmFactory<Tx = TxEnv>>,
+            //     Primitives: NodePrimitives<
+            //         BlockHeader = ProviderHeader<Self::Provider>,
+            //         SignedTx = ProviderTx<Self::Provider>,
+            //     >,
+            // >,
             Error: FromEvmError<Self::Evm>,
         > + SpawnBlocking,
-    Provider: BlockReader,
+    Components::Provider: BlockReader,
 {
     #[inline]
     fn call_gas_limit(&self) -> u64 {
@@ -51,7 +51,7 @@ where
         evm_env: &EvmEnv<SpecFor<Self::Evm>>,
         request: TransactionRequest,
         mut db: impl Database<Error: Into<EthApiError>>,
-    ) -> Result<TxEnv, Self::Error> {
+    ) -> Result<TxEnvFor<Self::Evm>, Self::Error> {
         // Ensure that if versioned hashes are set, they're not empty
         if request.blob_versioned_hashes.as_ref().is_some_and(|hashes| hashes.is_empty()) {
             return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into_eth_err())
@@ -146,9 +146,9 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> EstimateCall for EthApi<Provider, Pool, Network, EvmConfig>
+impl<Components: FullNodeComponents> EstimateCall for EthApi<Components>
 where
     Self: Call,
-    Provider: BlockReader,
+    Components::Provider: BlockReader,
 {
 }
