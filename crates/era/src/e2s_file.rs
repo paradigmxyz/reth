@@ -303,4 +303,75 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_e2store_multiple_roundtrip_conversions() -> Result<(), E2sError> {
+        // Initial set of entries to test with varied types and sizes
+        let entry1 = Entry::new([0x01, 0x01], vec![1, 2, 3, 4, 5]);
+        let entry2 = Entry::new([0x02, 0x02], vec![10, 20, 30, 40, 50]);
+        let entry3 = Entry::new(BLOCK_INDEX, create_block_index_data(123, 45678));
+        let entry4 = Entry::new([0xFF, 0xFF], Vec::new());
+
+        println!("Initial entries count: 4");
+
+        // First write cycle : create initial buffer
+        let mut buffer1 = Vec::new();
+        {
+            let mut writer = E2StoreWriter::new(&mut buffer1);
+            writer.write_version()?;
+            writer.write_entry(&entry1)?;
+            writer.write_entry(&entry2)?;
+            writer.write_entry(&entry3)?;
+            writer.write_entry(&entry4)?;
+            writer.flush()?;
+        }
+
+        // First read cycle : read from initial buffer
+        let mut reader1 = E2StoreReader::new(Cursor::new(&buffer1));
+        let entries1 = reader1.entries()?;
+
+        println!("First read entries:");
+        for (i, entry) in entries1.iter().enumerate() {
+            println!("Entry {}: type {:?}, data len {}", i, entry.entry_type, entry.data.len());
+        }
+        println!("First read entries count: {}", entries1.len());
+
+        // Verify first read content
+        assert_eq!(entries1.len(), 5, "Should have 5 entries (version + 4 data)");
+        assert!(entries1[0].is_version());
+        assert_eq!(entries1[1].entry_type, [0x01, 0x01]);
+        assert_eq!(entries1[1].data, vec![1, 2, 3, 4, 5]);
+        assert_eq!(entries1[2].entry_type, [0x02, 0x02]);
+        assert_eq!(entries1[2].data, vec![10, 20, 30, 40, 50]);
+        assert!(entries1[3].is_block_index());
+        assert_eq!(entries1[4].entry_type, [0xFF, 0xFF]);
+        assert_eq!(entries1[4].data.len(), 0);
+
+        // Second write cycle : write what we just read
+        let mut buffer2 = Vec::new();
+        {
+            let mut writer = E2StoreWriter::new(&mut buffer2);
+            // Only write version once
+            writer.write_version()?;
+
+            // Skip the first entry ie the version since we already wrote it
+            for entry in &entries1[1..] {
+                writer.write_entry(entry)?;
+            }
+            writer.flush()?;
+        }
+
+        // Second read cycle - read the second buffer
+        let mut reader2 = E2StoreReader::new(Cursor::new(&buffer2));
+        let entries2 = reader2.entries()?;
+
+        // Verify second read matches first read
+        assert_eq!(entries1.len(), entries2.len());
+        for i in 0..entries1.len() {
+            assert_eq!(entries1[i].entry_type, entries2[i].entry_type);
+            assert_eq!(entries1[i].data, entries2[i].data);
+        }
+
+        Ok(())
+    }
 }
