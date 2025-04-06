@@ -58,7 +58,7 @@ mod tests {
     fn create_slot_index_data(starting_slot: u64, offsets: &[i64]) -> Vec<u8> {
         // Format: starting-slot | index | index | index ... | count
         let mut data = Vec::with_capacity(8 + offsets.len() * 8 + 8);
-        
+
         // Add starting slot
         data.extend_from_slice(&starting_slot.to_le_bytes());
 

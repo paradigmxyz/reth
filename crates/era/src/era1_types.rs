@@ -174,6 +174,30 @@ impl Era1Id {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::execution_types::{
+        CompressedBody, CompressedHeader, CompressedReceipts, TotalDifficulty,
+    };
+    use alloy_primitives::{B256, U256};
+
+    /// Helper function to create a sample block tuple
+    fn create_sample_block(data_size: usize) -> BlockTuple {
+        // Create a compressed header with very sample data
+        let header_data = vec![0xAA; data_size];
+        let header = CompressedHeader::new(header_data);
+
+        // Create a compressed body
+        let body_data = vec![0xBB; data_size * 2];
+        let body = CompressedBody::new(body_data);
+
+        // Create compressed receipts
+        let receipts_data = vec![0xCC; data_size];
+        let receipts = CompressedReceipts::new(receipts_data);
+
+        let difficulty = TotalDifficulty::new(U256::from(data_size));
+
+        // Create and return the block tuple
+        BlockTuple::new(header, body, receipts, difficulty)
+    }
 
     #[test]
     fn test_block_index_roundtrip() {
@@ -210,5 +234,53 @@ mod tests {
         // Test out of range lookups
         assert_eq!(block_index.offset_for_block(999), None);
         assert_eq!(block_index.offset_for_block(1005), None);
+    }
+
+    #[test]
+    fn test_era1_group_basic_construction() {
+        let blocks =
+            vec![create_sample_block(10), create_sample_block(15), create_sample_block(20)];
+
+        let root_bytes = [0xDD; 32];
+        let accumulator = Accumulator::new(B256::from(root_bytes));
+        let block_index = BlockIndex::new(1000, vec![100, 200, 300]);
+
+        let era1_group = Era1Group::new(blocks, accumulator.clone(), block_index);
+
+        // Verify initial state
+        assert_eq!(era1_group.blocks.len(), 3);
+        assert_eq!(era1_group.other_entries.len(), 0);
+        assert_eq!(era1_group.accumulator.root, accumulator.root);
+        assert_eq!(era1_group.block_index.starting_number, 1000);
+        assert_eq!(era1_group.block_index.offsets, vec![100, 200, 300]);
+    }
+
+    #[test]
+    fn test_era1_group_add_entries() {
+        let blocks = vec![create_sample_block(10)];
+
+        let root_bytes = [0xDD; 32];
+        let accumulator = Accumulator::new(B256::from(root_bytes));
+
+        let block_index = BlockIndex::new(1000, vec![100]);
+
+        // Create and verify group
+        let mut era1_group = Era1Group::new(blocks, accumulator, block_index);
+        assert_eq!(era1_group.other_entries.len(), 0);
+
+        // Create custom entries with different types
+        let entry1 = Entry::new([0x01, 0x01], vec![1, 2, 3, 4]);
+        let entry2 = Entry::new([0x02, 0x02], vec![5, 6, 7, 8]);
+
+        // Add those entries
+        era1_group.add_entry(entry1);
+        era1_group.add_entry(entry2);
+
+        // Verify entries were added correctly
+        assert_eq!(era1_group.other_entries.len(), 2);
+        assert_eq!(era1_group.other_entries[0].entry_type, [0x01, 0x01]);
+        assert_eq!(era1_group.other_entries[0].data, vec![1, 2, 3, 4]);
+        assert_eq!(era1_group.other_entries[1].entry_type, [0x02, 0x02]);
+        assert_eq!(era1_group.other_entries[1].data, vec![5, 6, 7, 8]);
     }
 }
