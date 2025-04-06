@@ -20,7 +20,7 @@ use reth_evm::{
     execute::{BlockExecutorProvider, Executor},
     ConfigureEvm, EvmEnvFor, TxEnvFor,
 };
-use reth_node_api::FullNodeComponents;
+use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeTypes};
 use reth_primitives_traits::{
     Block as _, BlockBody, NodePrimitives, ReceiptWithBloom, RecoveredBlock, SignedTransaction,
 };
@@ -88,6 +88,7 @@ where
     Eth: EthApiTypes + TraceExt + 'static,
     BlockExecutor:
         BlockExecutorProvider<Primitives: NodePrimitives<Block = ProviderBlock<Eth::Provider>>>,
+    <<Eth as FullNodeTypes>::Types as NodeTypes>::ChainSpec: EthereumHardforks,
 {
     /// Acquires a permit to execute a tracing call.
     async fn acquire_trace_permit(&self) -> Result<OwnedSemaphorePermit, AcquireError> {

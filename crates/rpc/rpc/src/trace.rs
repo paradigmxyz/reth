@@ -15,14 +15,17 @@ use alloy_rpc_types_trace::{
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardfork, MAINNET, SEPOLIA};
+use reth_chainspec::{
+    ChainSpecProvider, EthChainSpec, EthereumHardfork, EthereumHardforks, MAINNET, SEPOLIA,
+};
 use reth_evm::ConfigureEvm;
+use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeTypes};
 use reth_primitives_traits::{BlockBody, BlockHeader};
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_api::TraceApiServer;
-use reth_rpc_eth_api::{helpers::TraceExt, FromEthApiError, RpcNodeCore};
+use reth_rpc_eth_api::{helpers::TraceExt, FromEthApiError};
 use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction, EthConfig};
-use reth_storage_api::{BlockNumReader, BlockReader};
+use reth_storage_api::{BlockNumReader, BlockReader, OmmersProvider};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
 use revm::DatabaseCommit;
@@ -66,7 +69,7 @@ impl<Eth> TraceApi<Eth> {
     }
 }
 
-impl<Eth: RpcNodeCore> TraceApi<Eth> {
+impl<Eth: FullNodeComponents> TraceApi<Eth> {
     /// Access the underlying provider.
     pub fn provider(&self) -> &Eth::Provider {
         self.inner.eth_api.provider()
@@ -78,6 +81,7 @@ impl<Eth: RpcNodeCore> TraceApi<Eth> {
 impl<Eth> TraceApi<Eth>
 where
     Eth: TraceExt + 'static,
+    <<Eth as FullNodeTypes>::Types as NodeTypes>::ChainSpec: EthereumHardforks,
 {
     /// Executes the given call and returns a number of possible traces for it.
     pub async fn trace_call(
@@ -113,8 +117,9 @@ where
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
     ) -> Result<TraceResults, Eth::Error> {
-        let tx = recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(&tx)?
-            .map(<Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus);
+        let tx = recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(&tx)?.map(
+            <<Eth::Pool as TransactionPool>::Transaction as PoolTransaction>::pooled_into_consensus,
+        );
 
         let (evm_env, at) = self.eth_api().evm_env_at(block_id.unwrap_or_default()).await?;
         let tx_env = self.eth_api().evm_config().tx_env(tx);
