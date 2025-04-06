@@ -7132,7 +7132,6 @@ dependencies = [
  "reth-downloaders",
  "reth-ecies",
  "reth-eth-wire",
- "reth-ethereum-cli",
  "reth-ethereum-primitives",
  "reth-evm",
  "reth-exex",
