@@ -1833,7 +1833,7 @@ pub struct PeerMetadata<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Optimistically keeps track of transactions that we know the peer has seen. Optimistic, in
     /// the sense that transactions are preemptively marked as seen by peer when they are sent to
     /// the peer.
-    seen_transactions: LruCache<TxHash>,
+    pub seen_transactions: LruCache<TxHash>,
     /// A communication channel directly to the peer's session task.
     request_tx: PeerRequestSender<PeerRequest<N>>,
     /// negotiated version of the session.
@@ -1846,7 +1846,7 @@ pub struct PeerMetadata<N: NetworkPrimitives = EthNetworkPrimitives> {
 
 impl<N: NetworkPrimitives> PeerMetadata<N> {
     /// Returns a new instance of [`PeerMetadata`].
-    fn new(
+    pub fn new(
         request_tx: PeerRequestSender<PeerRequest<N>>,
         version: EthVersion,
         client_version: Arc<str>,

@@ -84,7 +84,7 @@ pub struct TransactionFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// which a [`GetPooledTransactions`] request is inflight.
     pub hashes_pending_fetch: LruCache<TxHash>,
     /// Tracks all hashes in the transaction fetcher.
-    pub(super) hashes_fetch_inflight_and_pending_fetch: LruMap<TxHash, TxFetchMetadata, ByLength>,
+    pub hashes_fetch_inflight_and_pending_fetch: LruMap<TxHash, TxFetchMetadata, ByLength>,
     /// Filter for valid announcement and response data.
     pub(super) filter_valid_message: MessageFilter,
     /// Info on capacity of the transaction fetcher.
