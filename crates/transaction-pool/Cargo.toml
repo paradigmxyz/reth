@@ -67,7 +67,6 @@ rand.workspace = true
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 criterion.workspace = true
-pprof = { workspace = true, features = ["criterion", "flamegraph"] }
 assert_matches.workspace = true
 tempfile.workspace = true
 serde_json.workspace = true
