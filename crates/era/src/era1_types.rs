@@ -3,10 +3,13 @@
 //! See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>
 
 use crate::{
-    e2s_types::{E2sError, Entry, BLOCK_INDEX},
+    e2s_types::{E2sError, Entry},
     execution_types::{Accumulator, BlockTuple},
 };
 use alloy_primitives::BlockNumber;
+
+/// `BlockIndex` record: ['i', '2']
+pub const BLOCK_INDEX: [u8; 2] = [0x66, 0x32];
 
 /// File content in an Era1 file
 ///
@@ -171,7 +174,6 @@ impl Era1Id {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::e2s_types::BLOCK_INDEX;
 
     #[test]
     fn test_block_index_roundtrip() {

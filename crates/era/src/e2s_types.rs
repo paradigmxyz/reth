@@ -18,8 +18,8 @@ pub const VERSION: [u8; 2] = [0x65, 0x32];
 /// Empty record
 pub const EMPTY: [u8; 2] = [0x00, 0x00];
 
-/// `BlockIndex` record: ['i', '2']
-pub const BLOCK_INDEX: [u8; 2] = [0x69, 0x32];
+/// `SlotIndex` record: ['i', '2']
+pub const SLOT_INDEX: [u8; 2] = [0x69, 0x32];
 
 /// Error types for e2s file operations
 #[derive(Error, Debug)]
@@ -160,8 +160,8 @@ impl Entry {
         self.entry_type == VERSION
     }
 
-    /// Check if this is a `BlockIndex` entry
-    pub fn is_block_index(&self) -> bool {
-        self.entry_type == BLOCK_INDEX
+    /// Check if this is a `SlotIndex` entry
+    pub fn is_slot_index(&self) -> bool {
+        self.entry_type == SLOT_INDEX
     }
 }
