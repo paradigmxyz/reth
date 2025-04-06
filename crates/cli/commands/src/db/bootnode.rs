@@ -57,7 +57,7 @@ impl Command {
         let mut discv4_updates = discv4_service.update_stream();
         discv4_service.spawn();
 
-        if self.v5 != false {
+        if self.v5 {
             info!("Starting discv5 ");
             let config = Config::builder(socket_addr).build();
             let (_discv5, _discv5_updates, _local_enr_discv5) =
