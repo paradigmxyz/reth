@@ -44,31 +44,22 @@ impl Command {
         let socket_addr = SocketAddr::from_str(&self.addr).expect("Invalid addr");
         let local_enr = NodeRecord::from_secret_key(socket_addr, &sk);
 
-        let discv4_future = async {
-            let config = Discv4Config::builder().external_ip_resolver(Some(self.nat)).build();
+        let config = Discv4Config::builder().external_ip_resolver(Some(self.nat)).build();
 
-            let (discv4, mut discv4_service) =
-                Discv4::bind(socket_addr, local_enr, sk, config).await.map_err(|err| {
-                    NetworkError::from_io_error(err, ServiceKind::Discovery(socket_addr))
-                })?;
+        let (discv4, mut discv4_service) =
+            Discv4::bind(socket_addr, local_enr, sk, config).await.map_err(|err| {
+                NetworkError::from_io_error(err, ServiceKind::Discovery(socket_addr))
+            })?;
 
-            let discv4_updates = discv4_service.update_stream();
-            let discv4_service = discv4_service.spawn();
+        let discv4_updates = discv4_service.update_stream();
+        let discv4_service = discv4_service.spawn();
 
-            Ok((Some(discv4), Some(discv4_updates), Some(discv4_service)))
-        };
-
-        let discv5_future = async {
-            if self.v5 == false {
-                return Ok::<Option<Discv5>, NetworkError>(None);
-            }
+        if self.v5 != false {
             let config = Config::builder(socket_addr).build();
             let (discv5, _discv5_updates, _local_enr_discv5) =
                 Discv5::start(&sk, config).await.map_err(|e| NetworkError::Discv5Error(e))?;
-            Ok(Some(discv5))
         };
 
-        let _ = tokio::try_join!(discv4_future, discv5_future)?;
         Ok(())
     }
 }
