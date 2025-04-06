@@ -37,7 +37,7 @@ pub struct Command {
 
 impl Command {
     pub async fn execute(self) -> Result<(), NetworkError> {
-        println!("Bootnode started with config: {:?}", self);
+        info!("Bootnode started with config: {:?}", self);
         // generate a (random) keypair
         let mut rng = thread_rng();
         let (sk, _pk) = SECP256K1.generate_keypair(&mut rng);
