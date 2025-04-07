@@ -1,6 +1,8 @@
 //! Loads a pending block from database. Helper trait for `eth_` transaction, call and trace RPC
 //! methods.
 
+use std::iter;
+
 use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
 use crate::{
     helpers::estimate::EstimateCall, FromEvmError, FullEthApiTypes, RpcBlock, RpcNodeCore,
@@ -12,7 +14,7 @@ use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimulatePayload, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
     transaction::TransactionRequest,
-    BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
+    BlockId, BlockOverrides, Bundle, EthCallResponse, StateContext, TransactionInfo,
 };
 use futures::Future;
 use reth_errors::{ProviderError, RethError};
@@ -103,7 +105,46 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 let mut gas_used = 0;
                 let mut blocks: Vec<SimulatedBlock<RpcBlock<Self::NetworkTypes>>> =
                     Vec::with_capacity(block_state_calls.len());
+
+                let block_state_calls = iter::from_fn({
+                    let mut iter = block_state_calls.into_iter();
+                    let mut prev = None;
+
+                    move || {
+                        let block = iter.next()?;
+
+                        let this = block.block_overrides.as_ref().and_then(|b| b.number);
+
+                        let range = iter::successors(prev, |p| U256::checked_add(*p, U256::ONE));
+                        let range = this
+                            .map(|t| range.skip(1).take_while(move |i| i < &t))
+                            .into_iter()
+                            .flatten();
+                        prev = this;
+
+                        let gaps = range.map(|n| {
+                            SimBlock::default().with_block_overrides(BlockOverrides {
+                                number: Some(n),
+                                ..Default::default()
+                            })
+                        });
+
+                        Some(gaps.chain(Some(block)))
+                    }
+                })
+                .flatten();
+
+                let mut previous_block_number = U256::ZERO;
                 for block in block_state_calls {
+                    if let Some(number) = block.block_overrides.as_ref().and_then(|b| b.number) {
+                        if number < previous_block_number {
+                            return Err(EthApiError::InvalidParams(format!(
+                                "Cannot simulate block number reduction from {} to {}",
+                                previous_block_number, number
+                            ))
+                            .into())
+                        }
+                    }
                     let mut evm_env = this
                         .evm_config()
                         .next_evm_env(&parent, &this.next_env_attributes(&parent)?)
@@ -200,6 +241,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         block.inner.header.hash,
                     );
                     gas_used += block.inner.header.gas_used();
+
+                    previous_block_number = U256::from(block.inner.header.inner.number());
 
                     blocks.push(block);
                 }
