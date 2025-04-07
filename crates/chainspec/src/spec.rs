@@ -268,6 +268,8 @@ pub struct HardforkBlobParams {
     pub cancun: BlobParams,
     /// Configuration for blob-related calculations for the Prague hardfork.
     pub prague: BlobParams,
+    /// Configuration for blob-related calculations for the Osaka hardfork.
+    pub osaka: BlobParams,
 }
 
 impl HardforkBlobParams {
@@ -277,13 +279,18 @@ impl HardforkBlobParams {
         Self {
             cancun: blob_schedule.get("cancun").copied().unwrap_or_else(BlobParams::cancun),
             prague: blob_schedule.get("prague").copied().unwrap_or_else(BlobParams::prague),
+            osaka: blob_schedule.get("osaka").copied().unwrap_or_else(BlobParams::osaka),
         }
     }
 }
 
 impl Default for HardforkBlobParams {
     fn default() -> Self {
-        Self { cancun: BlobParams::cancun(), prague: BlobParams::prague() }
+        Self {
+            cancun: BlobParams::cancun(),
+            prague: BlobParams::prague(),
+            osaka: BlobParams::osaka(),
+        }
     }
 }
 
@@ -2513,7 +2520,12 @@ Post-merge hard forks (timestamp based):
             "baseFeeUpdateFraction":3338477,
             "max":6,
             "target":3
-         }
+         },
+         "osaka": {
+            "target": 48,
+            "max": 64,
+            "baseFeeUpdateFraction": 5007716
+        }
       }"#;
         let schedule: BTreeMap<String, BlobParams> = serde_json::from_str(s).unwrap();
         let hardfork_params = HardforkBlobParams::from_schedule(&schedule);
@@ -2528,6 +2540,12 @@ Post-merge hard forks (timestamp based):
                 target_blob_count: 3,
                 max_blob_count: 6,
                 update_fraction: 3338477,
+                min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
+            },
+            osaka: BlobParams {
+                target_blob_count: 48,
+                max_blob_count: 64,
+                update_fraction: 5007716,
                 min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
             },
         };
