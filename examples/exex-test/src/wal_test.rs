@@ -8,7 +8,7 @@ use std::sync::{
 };
 
 /// ExEx tests - WAL behavior
-#[allow(dead_code)]
+#[expect(dead_code)]
 pub async fn wal_test_exex<
     Node: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>,
 >(

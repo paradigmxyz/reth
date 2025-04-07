@@ -14,7 +14,7 @@ use std::sync::{
 };
 mod wal_test;
 
-#[allow(dead_code)]
+#[allow(unfulfilled_lint_expectations)]
 struct TestState {
     received_blocks: AtomicU64,
     saw_trie_updates: AtomicBool,
@@ -22,7 +22,7 @@ struct TestState {
 }
 
 /// ExEx that tests assertions about notifications and state
-#[allow(dead_code)]
+#[expect(dead_code)]
 async fn test_assertion_exex<
     Node: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>,
 >(
@@ -73,7 +73,7 @@ async fn test_assertion_exex<
 }
 
 /// Verify test assertions after completion
-#[allow(dead_code)]
+#[allow(unfulfilled_lint_expectations)]
 fn report_test_results(state: &TestState) {
     let blocks_received = state.received_blocks.load(Ordering::SeqCst);
     let saw_trie_updates = state.saw_trie_updates.load(Ordering::SeqCst);
