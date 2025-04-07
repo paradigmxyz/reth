@@ -5,7 +5,6 @@ use alloy_primitives::{
     U256,
 };
 use criterion::*;
-use pprof::criterion::{Output, PProfProfiler};
 use reth_network::{
     test_utils::Testnet,
     transactions::{
@@ -18,7 +17,7 @@ use tokio::runtime::Runtime as TokioRuntime;
 
 criterion_group!(
     name = tx_fetch_benches;
-    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    config = Criterion::default();
     targets = tx_fetch_bench
 );
 

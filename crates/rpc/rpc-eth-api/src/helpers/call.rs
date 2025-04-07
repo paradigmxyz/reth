@@ -89,9 +89,6 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 return Err(EthApiError::InvalidParams(String::from("calls are empty.")).into())
             }
 
-            // Gas cap for entire operation
-            let total_gas_limit = self.call_gas_limit();
-
             let base_block =
                 self.recovered_block(block).await?.ok_or(EthApiError::HeaderNotFound(block))?;
             let mut parent = base_block.sealed_header().clone();
@@ -100,7 +97,6 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             self.spawn_with_state_at_block(block, move |state| {
                 let mut db =
                     State::builder().with_database(StateProviderDatabase::new(state)).build();
-                let mut gas_used = 0;
                 let mut blocks: Vec<SimulatedBlock<RpcBlock<Self::NetworkTypes>>> =
                     Vec::with_capacity(block_state_calls.len());
                 for block in block_state_calls {
@@ -121,6 +117,16 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     let SimBlock { block_overrides, state_overrides, calls } = block;
 
                     if let Some(block_overrides) = block_overrides {
+                        // ensure we dont allow uncapped gas limit per block
+                        if let Some(gas_limit_override) = block_overrides.gas_limit {
+                            if gas_limit_override > evm_env.block_env.gas_limit &&
+                                gas_limit_override > this.call_gas_limit()
+                            {
+                                return Err(
+                                    EthApiError::other(EthSimulateError::GasLimitReached).into()
+                                )
+                            }
+                        }
                         apply_block_overrides(block_overrides, &mut db, &mut evm_env.block_env);
                     }
                     if let Some(state_overrides) = state_overrides {
@@ -129,12 +135,6 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                     let block_env = evm_env.block_env.clone();
                     let chain_id = evm_env.cfg_env.chain_id;
-
-                    if (total_gas_limit - gas_used) < evm_env.block_env.gas_limit {
-                        return Err(
-                            EthApiError::Other(Box::new(EthSimulateError::GasLimitReached)).into()
-                        )
-                    }
 
                     let default_gas_limit = {
                         let total_specified_gas = calls.iter().filter_map(|tx| tx.gas).sum::<u64>();
@@ -199,7 +199,6 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         block.inner.header.inner.clone(),
                         block.inner.header.hash,
                     );
-                    gas_used += block.inner.header.gas_used();
 
                     blocks.push(block);
                 }

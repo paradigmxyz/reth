@@ -8,7 +8,7 @@
 use crate::{
     e2s_file::{E2StoreReader, E2StoreWriter},
     e2s_types::{E2sError, Version, BLOCK_INDEX},
-    era1_types::{BlockIndex, Era1Group, Era1Id},
+    era1_types::{BlockIndex, Era1Group, Era1Id, BLOCK_INDEX},
     execution_types::{
         self, Accumulator, BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts,
         TotalDifficulty, MAX_BLOCKS_PER_ERA1,
