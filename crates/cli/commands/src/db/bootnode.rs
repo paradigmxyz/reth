@@ -1,13 +1,14 @@
 use clap::Parser;
 use rand::thread_rng;
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config};
-use reth_discv5::{Config, Discv5};
+use reth_discv5::{Config, Discv5, discv5::Event};
 use reth_net_nat::NatResolver;
 use reth_network::error::{NetworkError, ServiceKind};
 use reth_network_peers::NodeRecord;
 use secp256k1::SECP256K1;
 use std::{net::SocketAddr, str::FromStr};
 use tokio_stream::StreamExt;
+use tokio::select;
 use tracing::info;
 
 /// The arguments for the `reth db bootnode` command.
@@ -57,22 +58,57 @@ impl Command {
         let mut discv4_updates = discv4_service.update_stream();
         discv4_service.spawn();
 
+        // Optional discv5 update event listener if v5 is enabled
+        let mut discv5_updates = None;
+
         if self.v5 {
             info!("Starting discv5");
             let config = Config::builder(socket_addr).build();
-            let (_discv5, _discv5_updates, _local_enr_discv5) =
+            let (_discv5, updates, _local_enr_discv5) =
                 Discv5::start(&sk, config).await.map_err(NetworkError::Discv5Error)?;
+            discv5_updates = Some(updates);
         };
 
-        while let Some(update) = discv4_updates.next().await {
-            match update {
-                DiscoveryUpdate::Added(record) => {
-                    info!("new peer added, peer_id={:?}", record.id);
+        // event info loop for logging
+        loop {
+            select! {
+                //discv4 updates
+                update = discv4_updates.next() => {
+                    if let Some(update) = update {
+                        match update {
+                            DiscoveryUpdate::Added(record) => {
+                                info!("(Discv4) new peer added, peer_id={:?}", record.id);
+                            }
+                            DiscoveryUpdate::Removed(peer_id) => {
+                                info!("(Discv4) peer with peer-id={:?} removed", peer_id);
+                            }
+                            _ => {}
+                        }
+                    } else {
+                        info!("(Discv4) update stream ended.");
+                        break;
+                    }
                 }
-                DiscoveryUpdate::Removed(peer_id) => {
-                    info!("peer with peer-id={:?} removed", peer_id);
+                //if discv5, discv5 update stream, else do nothing
+                update = async {
+                    if let Some(ref mut updates) = discv5_updates {
+                        updates.recv().await
+                    } else {
+                        futures::future::pending().await
+                    }
+                } => {
+                    if let Some(update) = update {
+                        match update {
+                            Event::SessionEstablished(enr, _) => {
+                                info!("(Discv5) new peer added, peer_id={:?}", enr.id());
+                            }
+                            _ => {}
+                        }
+                    } else {
+                        info!("(Discv5) update stream ended.");
+                        break;
+                    }
                 }
-                _ => {}
             }
         }
 
