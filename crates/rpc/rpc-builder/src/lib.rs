@@ -204,7 +204,7 @@ where
         provider: P,
     ) -> RpcModuleBuilder<N, P, Pool, Network, Tasks, EvmConfig, BlockExecutor, Consensus>
     where
-        P: BlockReader<Block = N::Block, Header = N::BlockHeader, Receipt = N::Receipt>
+        P: BlockReader<Block = N::Block, BlockHeader = N::BlockHeader, Receipt = N::Receipt>
             + StateProviderFactory
             + 'static,
     {
@@ -516,7 +516,7 @@ where
     /// See also [`EthApiBuilder`].
     pub fn bootstrap_eth_api(&self) -> EthApi<Provider, Pool, Network, EvmConfig>
     where
-        Provider: BlockReaderIdExt<Block = N::Block, Header = N::BlockHeader, Receipt = N::Receipt>
+        Provider: BlockReaderIdExt<Block = N::Block, BlockHeader = N::BlockHeader, Receipt = N::Receipt>
             + StateProviderFactory
             + CanonStateSubscriptions<Primitives = N>
             + ChainSpecProvider

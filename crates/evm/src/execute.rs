@@ -132,7 +132,7 @@ pub trait Executor<DB: Database>: Sized {
 /// A type that can create a new executor for block execution.
 pub trait BlockExecutorProvider: Clone + Debug + Send + Sync + Unpin + 'static {
     /// Receipt type.
-    type Primitives: NodePrimitives;
+    type Primitives: NodePrimitives + Clone;
 
     /// An executor that can execute a single block given a database.
     ///
@@ -405,7 +405,7 @@ impl<F> BasicBlockExecutorProvider<F> {
 
 impl<F> BlockExecutorProvider for BasicBlockExecutorProvider<F>
 where
-    F: ConfigureEvm + 'static,
+    F: ConfigureEvm<Primitives: Clone> + 'static,
 {
     type Primitives = F::Primitives;
 

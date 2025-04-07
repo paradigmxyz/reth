@@ -259,7 +259,7 @@ where
     Provider: DBProvider
         + BlockReader<
             Block = <E::Primitives as NodePrimitives>::Block,
-            Header = <E::Primitives as NodePrimitives>::BlockHeader,
+            BlockHeader = <E::Primitives as NodePrimitives>::BlockHeader,
         > + StaticFileProviderFactory
         + StatsReader
         + BlockHashReader
@@ -564,7 +564,7 @@ where
     }
 }
 
-fn execution_checkpoint<N: NodePrimitives>(
+fn execution_checkpoint<N: NodePrimitives + 'static>(
     provider: &StaticFileProvider<N>,
     start_block: BlockNumber,
     max_block: BlockNumber,
@@ -631,7 +631,7 @@ fn execution_checkpoint<N: NodePrimitives>(
     })
 }
 
-fn calculate_gas_used_from_headers<N: NodePrimitives>(
+fn calculate_gas_used_from_headers<N: NodePrimitives + 'static>(
     provider: &StaticFileProvider<N>,
     range: RangeInclusive<BlockNumber>,
 ) -> Result<u64, ProviderError> {

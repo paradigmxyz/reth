@@ -101,7 +101,7 @@ where
 
 impl<Provider, E> ValidationApi<Provider, E>
 where
-    Provider: BlockReaderIdExt<Header = <E::Primitives as NodePrimitives>::BlockHeader>
+    Provider: BlockReaderIdExt<BlockHeader = <E::Primitives as NodePrimitives>::BlockHeader>
         + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory
         + 'static,
@@ -406,7 +406,7 @@ where
 #[async_trait]
 impl<Provider, E> BlockSubmissionValidationApiServer for ValidationApi<Provider, E>
 where
-    Provider: BlockReaderIdExt<Header = <E::Primitives as NodePrimitives>::BlockHeader>
+    Provider: BlockReaderIdExt<BlockHeader = <E::Primitives as NodePrimitives>::BlockHeader>
         + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory
         + Clone

@@ -426,7 +426,7 @@ where
 impl<P, N> Future for ExExManager<P, N>
 where
     P: HeaderProvider + Unpin + 'static,
-    N: NodePrimitives + Clone,
+    N: NodePrimitives + Clone + 'static,
 {
     type Output = eyre::Result<()>;
 

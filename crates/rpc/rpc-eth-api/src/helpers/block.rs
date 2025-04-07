@@ -208,10 +208,7 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
         &self,
         block_id: BlockId,
     ) -> impl Future<
-        Output = Result<
-            Option<Arc<RecoveredBlock<<Self::Provider as BlockReader>::Block>>>,
-            Self::Error,
-        >,
+        Output = Result<Option<Arc<RecoveredBlock<BlockTy<Self::Primitives>>>>, Self::Error>,
     > + Send {
         async move {
             if block_id.is_pending() {
