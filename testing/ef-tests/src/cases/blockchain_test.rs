@@ -18,6 +18,7 @@ use reth_provider::{
     OriginalValuesKnown, StateCommitmentProvider, StateProofProvider, StateWriter, StorageLocation,
 };
 use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord, State};
+use reth_stateless::validation::{stateless_validation, Input};
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 
 /// A handler for the blockchain test suite.
@@ -87,7 +88,7 @@ impl Case for BlockchainTestCase {
                 )
             })
             .par_bridge()
-            .try_for_each(|case| run_case(case))?;
+            .try_for_each(run_case)?;
 
         Ok(())
     }
@@ -120,7 +121,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     .try_recover()
     .unwrap();
 
-    provider.insert_block(genesis_block, StorageLocation::Database)?;
+    provider.insert_block(genesis_block.clone(), StorageLocation::Database)?;
     case.pre.write_to_db(provider.tx_ref())?;
 
     // Decode and insert blocks, creating a chain of blocks for the test case.
@@ -135,8 +136,26 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     }
     let last_block = blocks.last().cloned();
 
-    // Initialize executor with state
-    let _execution_witness = execute_blocks(&provider, &blocks, chain_spec.clone());
+    let execution_witnesses = execute_blocks(&provider, &blocks, chain_spec.clone())?;
+    // If block execution failed, then the execution witness will be empty
+    if !execution_witnesses.is_empty() {
+        let mut blocks_with_genesis = blocks;
+        blocks_with_genesis.insert(0, genesis_block);
+        let stateless_inputs =
+            compute_stateless_input(execution_witnesses, &blocks_with_genesis, chain_spec);
+
+        for (block, stateless_input) in
+            blocks_with_genesis.into_iter().skip(1).zip(stateless_inputs)
+        {
+            assert!(stateless_validation(
+                block,
+                stateless_input.execution_witness,
+                stateless_input.ancestor_headers,
+                stateless_input.chain_spec,
+            )
+            .is_some());
+        }
+    }
 
     // Validate the post-state for the test case.
     match (&case.post_state, &case.post_state_hash) {
@@ -177,7 +196,7 @@ fn execute_blocks<
 
     let mut exec_witnesses = Vec::new();
 
-    for block in blocks_without_genesis.iter() {
+    for block in blocks_without_genesis {
         let state_provider = LatestStateProviderRef::new(provider);
         let state_db = StateProviderDatabase(&state_provider);
         let block_executor = executor_provider.executor(state_db);
@@ -203,6 +222,39 @@ fn execute_blocks<
     }
 
     Ok(exec_witnesses)
+}
+
+fn compute_stateless_input(
+    execution_witnesses: Vec<ExecutionWitness>,
+    blocks_with_genesis: &[RecoveredBlock<Block<TransactionSigned>>],
+    chain_spec: Arc<ChainSpec>,
+) -> Vec<Input> {
+    let mut guest_inputs = Vec::new();
+    assert_eq!(blocks_with_genesis.len() - 1, execution_witnesses.len());
+    for block in blocks_with_genesis.iter().skip(1) {
+        // Skip the genesis block, it has no ancestors and no execution
+        // TODO: This should ideally look inside of the block and check for blockhash opcodes
+        // TODO: to see how many ancestors we need instead of just getting all of the previous
+        // TODO: blocks
+        let ancestors = blocks_with_genesis[0..block.number as usize]
+            .iter()
+            .map(|block| block.header())
+            .cloned()
+            .collect();
+
+        // block number starts from 0, so current_block is block.number
+        let current_block = blocks_with_genesis[block.number as usize].clone();
+        let execution_witness = execution_witnesses[block.number as usize - 1].clone();
+
+        guest_inputs.push(Input {
+            current_block,
+            execution_witness,
+            ancestor_headers: ancestors,
+            chain_spec: chain_spec.clone(),
+        });
+    }
+
+    guest_inputs
 }
 
 /// Returns whether the test at the given path should be skipped.
