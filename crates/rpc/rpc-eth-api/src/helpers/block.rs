@@ -23,8 +23,8 @@ pub type BlockReceiptsResult<N, E> = Result<Option<Vec<RpcReceipt<N>>>, E>;
 /// Result type of the fetched block and its receipts.
 pub type BlockAndReceiptsResult<Eth> = Result<
     Option<(
-        SealedBlock<<<Eth as RpcNodeCore>::Provider as BlockReader>::Block>,
-        Arc<Vec<ProviderReceipt<<Eth as RpcNodeCore>::Provider>>>,
+        SealedBlock<BlockTy<<Eth as RpcNodeCore>::Primitives>>,
+        Arc<Vec<ReceiptTy<<Eth as RpcNodeCore>::Primitives>>>,
     )>,
     <Eth as EthApiTypes>::Error,
 >;

@@ -104,16 +104,9 @@ impl PrunerBuilder {
         static_file_provider: StaticFileProvider<Provider>,
     ) -> Pruner<Provider, ()>
     where
-        Provider: StaticFileProviderFactory<
-                Primitives: NodePrimitives<
-                    SignedTx = Provider::SignedTx,
-                    Receipt = Provider::Receipt,
-                    Block = Provider::Block,
-                    BlockHeader = Provider::BlockHeader,
-                    BlockBody = Provider::BlockBody,
-                >,
-            > + DBProvider<Tx: DbTxMut>
-            + BlockReader<SignedTx: Encodable2718 + Value, Receipt: Value>
+        Provider: BlockReader<SignedTx: Encodable2718 + Value, Receipt: Value>
+            + StaticFileProviderFactory<Primitives = Provider>
+            + DBProvider<Tx: DbTxMut>
             + PruneCheckpointWriter,
     {
         let segments = SegmentSet::<Provider>::from_components(static_file_provider, self.segments);
