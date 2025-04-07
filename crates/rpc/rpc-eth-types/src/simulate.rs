@@ -1,6 +1,14 @@
 //! Utilities for serving `eth_simulateV1`
 
+use crate::{
+    error::{
+        api::{FromEthApiError, FromEvmHalt},
+        ToRpcError,
+    },
+    EthApiError, RevertError,
+};
 use alloy_consensus::{BlockHeader, Transaction as _, TxType};
+use alloy_eips::eip2718::WithEncoded;
 use alloy_rpc_types_eth::{
     simulate::{SimCallResult, SimulateError, SimulatedBlock},
     transaction::TransactionRequest,
@@ -21,14 +29,6 @@ use revm::{
     context_interface::result::ExecutionResult,
     primitives::{Address, Bytes, TxKind},
     Database,
-};
-
-use crate::{
-    error::{
-        api::{FromEthApiError, FromEvmHalt},
-        ToRpcError,
-    },
-    EthApiError, RevertError,
 };
 
 /// Errors which may occur during `eth_simulateV1` execution.
@@ -80,9 +80,6 @@ where
     S: BlockBuilder<Executor: BlockExecutor<Evm: Evm<DB: Database<Error: Into<EthApiError>>>>>,
     T: TransactionCompat<TxTy<S::Primitives>>,
 {
-    // Tell the block builder that it is used for simulation
-    builder.set_simulate(true);
-
     builder.apply_pre_execution_changes()?;
 
     let mut results = Vec::with_capacity(calls.len());
@@ -97,6 +94,9 @@ where
             builder.evm_mut().db_mut(),
             tx_resp_builder,
         )?;
+        // Create transaction with an empty envelope.
+        // The effect for a layer-2 execution client is that it does not charge L1 cost.
+        let tx = WithEncoded::new(Default::default(), tx);
 
         builder
             .execute_transaction_with_result_closure(tx, |result| results.push(result.clone()))?;
