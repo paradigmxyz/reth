@@ -196,7 +196,7 @@ fn execute_blocks<
             )?;
 
             let ExecutionWitnessRecord { hashed_state, codes, keys } = witness_record;
-            let state = state_provider.witness(Default::default(), hashed_state).unwrap();
+            let state = state_provider.witness(Default::default(), hashed_state)?;
             let exec_witness = ExecutionWitness { state, codes, keys };
             exec_witnesses.push(exec_witness);
         };
