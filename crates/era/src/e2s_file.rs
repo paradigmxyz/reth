@@ -52,13 +52,24 @@ impl<R: Read + Seek> E2StoreReader<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::e2s_types::{BLOCK_INDEX, VERSION};
+    use crate::e2s_types::{SLOT_INDEX, VERSION};
     use std::io::Cursor;
 
-    fn create_block_index_data(block_number: u64, offset: u64) -> Vec<u8> {
-        let mut data = Vec::with_capacity(16);
-        data.extend_from_slice(&block_number.to_le_bytes());
-        data.extend_from_slice(&offset.to_le_bytes());
+    fn create_slot_index_data(starting_slot: u64, offsets: &[i64]) -> Vec<u8> {
+        // Format: starting-slot | index | index | index ... | count
+        let mut data = Vec::with_capacity(8 + offsets.len() * 8 + 8);
+
+        // Add starting slot
+        data.extend_from_slice(&starting_slot.to_le_bytes());
+
+        // Add all offsets
+        for offset in offsets {
+            data.extend_from_slice(&offset.to_le_bytes());
+        }
+
+        // Add count
+        data.extend_from_slice(&(offsets.len() as i64).to_le_bytes());
+
         data
     }
 
@@ -70,11 +81,11 @@ mod tests {
         let version_entry = Entry::new(VERSION, Vec::new());
         version_entry.write(&mut mock_file)?;
 
-        let block_index_entry1 = Entry::new(BLOCK_INDEX, create_block_index_data(1, 1024));
-        block_index_entry1.write(&mut mock_file)?;
+        let slot_index_entry1 = Entry::new(SLOT_INDEX, create_slot_index_data(1, &[1024]));
+        slot_index_entry1.write(&mut mock_file)?;
 
-        let block_index_entry2 = Entry::new(BLOCK_INDEX, create_block_index_data(2, 2048));
-        block_index_entry2.write(&mut mock_file)?;
+        let slot_index_entry2 = Entry::new(SLOT_INDEX, create_slot_index_data(2, &[2048]));
+        slot_index_entry2.write(&mut mock_file)?;
 
         let custom_type = [0x99, 0x99];
         let custom_entry = Entry::new(custom_type, vec![10, 11, 12]);
@@ -92,12 +103,49 @@ mod tests {
         assert_eq!(entries.len(), 4);
         // First entry should be version
         assert!(entries[0].is_version());
-        // Second entry should be block index
-        assert!(entries[1].is_block_index());
-        // Third entry is block index
-        assert!(entries[2].is_block_index());
+        // Second entry should be slot index
+        assert!(entries[1].is_slot_index());
+        // Third entry is slot index
+        assert!(entries[2].is_slot_index());
         // Fourth entry is custom type
         assert!(entries[3].entry_type == [0x99, 0x99]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_slot_index_with_multiple_offsets() -> Result<(), E2sError> {
+        let starting_slot = 100;
+        let offsets = &[1024, 2048, 0, 0, 3072, 0, 4096];
+
+        let slot_index_data = create_slot_index_data(starting_slot, offsets);
+
+        let slot_index_entry = Entry::new(SLOT_INDEX, slot_index_data.clone());
+
+        // Verify the slot index data format
+        assert_eq!(slot_index_data.len(), 8 + offsets.len() * 8 + 8);
+
+        // Check the starting slot
+        let mut starting_slot_bytes = [0u8; 8];
+        starting_slot_bytes.copy_from_slice(&slot_index_data[0..8]);
+        assert_eq!(u64::from_le_bytes(starting_slot_bytes), starting_slot);
+
+        // Check the count at the end
+        let mut count_bytes = [0u8; 8];
+        count_bytes.copy_from_slice(&slot_index_data[slot_index_data.len() - 8..]);
+        assert_eq!(i64::from_le_bytes(count_bytes), offsets.len() as i64);
+
+        // Verify we can write and read it back
+        let mut buffer = Vec::new();
+        slot_index_entry.write(&mut buffer)?;
+
+        let cursor = Cursor::new(buffer);
+        let mut reader = E2StoreReader::new(cursor);
+
+        let read_entry = reader.read_next_entry()?.unwrap();
+        assert!(read_entry.is_slot_index());
+
+        assert_eq!(read_entry.data.len(), slot_index_data.len());
 
         Ok(())
     }
@@ -129,8 +177,8 @@ mod tests {
         let version_entry = Entry::new(VERSION, Vec::new());
         version_entry.write(&mut mock_file)?;
 
-        let block_entry = Entry::new(BLOCK_INDEX, create_block_index_data(1, 1024));
-        block_entry.write(&mut mock_file)?;
+        let slot_entry = Entry::new(SLOT_INDEX, create_slot_index_data(1, &[1024]));
+        slot_entry.write(&mut mock_file)?;
 
         let cursor = Cursor::new(mock_file);
         let mut reader = E2StoreReader::new(cursor);
@@ -139,7 +187,7 @@ mod tests {
         assert!(first.is_version());
 
         let second = reader.read_next_entry()?.unwrap();
-        assert!(second.is_block_index());
+        assert!(second.is_slot_index());
 
         let third = reader.read_next_entry()?;
         assert!(third.is_none());
