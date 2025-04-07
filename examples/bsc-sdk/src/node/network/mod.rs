@@ -6,7 +6,7 @@ use reth::{
     transaction_pool::{PoolTransaction, TransactionPool},
 };
 use reth_chainspec::Hardforks;
-use reth_discv4::{Discv4ConfigBuilder, NodeRecord};
+use reth_discv4::{Discv4Config, NodeRecord};
 use reth_network::{EthNetworkPrimitives, NetworkConfig, NetworkHandle, NetworkManager};
 use reth_network_api::PeersInfo;
 use reth_primitives::{EthPrimitives, PooledTransaction};
@@ -33,17 +33,18 @@ impl BscNetworkBuilder {
     where
         Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
     {
-        let mut network_builder = ctx.network_config_builder()?;
+        let network_builder = ctx.network_config_builder()?;
+        let mut discv4 = Discv4Config::builder();
+        discv4.add_boot_nodes(boot_nodes()).lookup_interval(Duration::from_millis(500));
 
-        network_builder = network_builder
+        let network_builder = network_builder
+            .boot_nodes(boot_nodes())
             .set_head(head())
             .with_pow()
-            .with_unused_ports()
+            .discovery(discv4)
             .eth_rlpx_handshake(Arc::new(BscHandshake::default()));
-        let network_config = ctx.build_network_config(network_builder);
 
-        let network_config = network_config
-            .set_discovery_v4(Discv4ConfigBuilder::default().add_boot_nodes(boot_nodes()).build());
+        let network_config = ctx.build_network_config(network_builder);
 
         Ok(network_config)
     }
