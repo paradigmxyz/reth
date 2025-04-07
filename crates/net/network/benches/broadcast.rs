@@ -5,7 +5,6 @@ use alloy_primitives::{
 };
 use criterion::*;
 use futures::StreamExt;
-use pprof::criterion::{Output, PProfProfiler};
 use reth_network::{test_utils::Testnet, NetworkEventListenerProvider};
 use reth_network_api::Peers;
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
@@ -15,7 +14,7 @@ use tokio::{runtime::Runtime as TokioRuntime, sync::mpsc::unbounded_channel};
 
 criterion_group!(
     name = broadcast_benches;
-    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    config = Criterion::default();
     targets = broadcast_ingress_bench
 );
 
