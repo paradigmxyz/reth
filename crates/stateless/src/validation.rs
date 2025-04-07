@@ -23,7 +23,9 @@ pub struct Input {
     /// TODO doc
     pub ancestor_headers: Vec<Header>,
     /// TODO doc
-    pub chain_spec: ChainSpec,
+    /// Note: // We need to use this Arc, because `EthEvmConfig` and a lot of internal
+    /// reth components require it
+    pub chain_spec: Arc<ChainSpec>,
 }
 
 /// Performs stateless validation of a block using the provided witness data.
