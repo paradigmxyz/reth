@@ -13,11 +13,7 @@ use reth_revm::state::Bytecode;
 use reth_trie::{iter::IntoParallelRefIterator, HashedPostState, KeccakKeyHasher};
 use reth_trie_sparse::{blinded::DefaultBlindedProviderFactory, SparseStateTrie};
 
-// TODO: In some places, I call witness data ExecutionWitness and in other places, I refer to it as
-// TODO: the set of all inputs including ancestor headers.  witness data should only refer to the
-// TODO: whole set.
-
-/// Performs stateless validation of a block using provided witness data.
+/// Performs stateless validation of a block using the provided witness data.
 ///
 /// This function attempts to fully validate a given `current_block` statelessly, ie without access
 /// to a persistent database.
@@ -101,14 +97,14 @@ pub fn stateless_validation(
     return Some(current_block.hash_slow());
 }
 
-/// Verifies execution witness data [`ExecutionWitness`] against an expected pre-state root.
+/// Verifies execution witness [`ExecutionWitness`] against an expected pre-state root.
 ///
-/// This function takes the RLP-encoded witness data provided in [`ExecutionWitness`]
+/// This function takes the RLP-encoded values provided in [`ExecutionWitness`]
 /// (which includes state trie nodes, storage trie nodes, and contract bytecode)
 /// and uses it to populate a new [`SparseStateTrie`].
 ///
 /// If the computed root hash matches the `pre_state_root`, it signifies that the
-/// provided witness data is consistent with that pre-state root. In this case, the function
+/// provided execution witness is consistent with that pre-state root. In this case, the function
 /// returns the populated [`SparseStateTrie`] and a [`B256Map`] containing the
 /// contract bytecode (mapping code hash to [`Bytecode`]).
 ///
