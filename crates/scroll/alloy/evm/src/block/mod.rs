@@ -16,7 +16,7 @@ use alloy_evm::{
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
         BlockExecutorFor, BlockValidationError, ExecutableTx, OnStateHook,
     },
-    Database, Evm, FromRecoveredTx,
+    Database, Evm, FromRecoveredTx, FromTxWithEncoded,
 };
 use alloy_primitives::{B256, U256};
 use revm::{
@@ -76,7 +76,10 @@ where
 impl<'db, DB, E, R, Spec> BlockExecutor for ScrollBlockExecutor<E, R, Spec>
 where
     DB: Database + 'db,
-    E: EvmExt<DB = &'db mut State<DB>, Tx: FromRecoveredTx<R::Transaction>>,
+    E: EvmExt<
+        DB = &'db mut State<DB>,
+        Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
+    >,
     R: ScrollReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt>,
     Spec: ScrollHardforks,
 {
@@ -281,7 +284,8 @@ impl<R, Spec> BlockExecutorFactory for ScrollBlockExecutorFactory<R, Spec>
 where
     R: ScrollReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt>,
     Spec: ScrollHardforks,
-    ScrollTransactionIntoTxEnv<TxEnv>: FromRecoveredTx<<R as ScrollReceiptBuilder>::Transaction>,
+    ScrollTransactionIntoTxEnv<TxEnv>:
+        FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
     Self: 'static,
 {
     type EvmFactory = ScrollEvmFactory;

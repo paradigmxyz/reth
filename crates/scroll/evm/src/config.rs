@@ -1,6 +1,6 @@
 use crate::{build::ScrollBlockAssembler, ScrollEvmConfig};
 use alloy_consensus::{BlockHeader, Header};
-use alloy_evm::FromRecoveredTx;
+use alloy_evm::{FromRecoveredTx, FromTxWithEncoded};
 use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, EvmEnv, ExecutionCtxFor, NextBlockEnvAttributes};
 use reth_primitives_traits::{
@@ -30,7 +30,8 @@ where
         BlockBody = alloy_consensus::BlockBody<R::Transaction>,
         Block = alloy_consensus::Block<R::Transaction>,
     >,
-    ScrollTransactionIntoTxEnv<TxEnv>: FromRecoveredTx<N::SignedTx>,
+    ScrollTransactionIntoTxEnv<TxEnv>:
+        FromRecoveredTx<N::SignedTx> + FromTxWithEncoded<N::SignedTx>,
     R: ScrollReceiptBuilder<Receipt = ScrollReceipt, Transaction: SignedTransaction>,
     Self: Send + Sync + Unpin + Clone + 'static,
 {
