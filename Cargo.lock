@@ -9873,6 +9873,7 @@ dependencies = [
  "reth-trie",
  "reth-trie-common",
  "reth-trie-sparse",
+ "thiserror 2.0.12",
  "tracing",
 ]
 

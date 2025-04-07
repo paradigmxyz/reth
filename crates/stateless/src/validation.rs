@@ -13,6 +13,60 @@ use reth_revm::state::Bytecode;
 use reth_trie::{iter::IntoParallelRefIterator, HashedPostState, KeccakKeyHasher};
 use reth_trie_sparse::{blinded::DefaultBlindedProviderFactory, SparseStateTrie};
 
+/// Errors that can occur during stateless validation.
+#[derive(Debug, thiserror::Error)]
+pub enum StatelessValidationError {
+    /// Error when the number of ancestor headers exceeds the limit.
+    #[error("ancestor header count ({count}) exceeds limit ({limit})")]
+    AncestorHeaderLimitExceeded {
+        /// The number of headers provided.
+        count: usize,
+        /// The limit.
+        limit: usize,
+    },
+
+    /// Error when the ancestor headers do not form a contiguous chain.
+    #[error("invalid ancestor chain")]
+    InvalidAncestorChain,
+
+    /// Error when revealing the witness data failed.
+    #[error("failed to reveal witness data for pre-state root {pre_state_root}")]
+    WitnessRevealFailed {
+        /// The pre-state root used for verification.
+        pre_state_root: B256,
+    },
+
+    /// Error during stateless block execution.
+    #[error("stateless block execution failed")]
+    StatelessExecutionFailed,
+
+    /// Error during stateless post-execution validation.
+    #[error("stateless post-execution validation failed: {0}")]
+    // StatelessPostValidationFailed(#[from] ConsensusError),
+    StatelessPostValidationFailed(String),
+
+    /// Error during stateless state root calculation.
+    #[error("stateless state root calculation failed")]
+    StatelessStateRootCalculationFailed,
+
+    /// Error calculating the pre-state root from the witness data.
+    #[error("stateless pre-state root calculation failed")]
+    StatelessPreStateRootCalculationFailed,
+
+    /// Error when required ancestor headers are missing (e.g., parent header for pre-state root).
+    #[error("missing required ancestor headers")]
+    MissingAncestorHeader,
+
+    /// Error when the computed state root does not match the one in the block header.
+
+    #[error("mismatched post block state root: {got}\n {expected}")]
+    StateRootMismatch { got: B256, expected: B256 },
+
+    /// Error when the computed pre-state root does not match the expected one.
+    #[error("mismatched pre-state root: {got} \n {expected}")]
+    PreStateRootMismatch { got: B256, expected: B256 },
+}
+
 #[derive(Debug)]
 /// TODO doc
 pub struct Input {
@@ -69,9 +123,9 @@ pub fn stateless_validation(
     witness: ExecutionWitness,
     ancestor_headers: Vec<Header>,
     chain_spec: Arc<ChainSpec>,
-) -> Option<B256> {
+) -> Result<B256, StatelessValidationError> {
     // Check that the ancestor headers form a contiguous chain and are not just random headers.
-    let ancestor_hashes = compute_ancestor_hashes(&current_block, &ancestor_headers).unwrap();
+    let ancestor_hashes = compute_ancestor_hashes(&current_block, &ancestor_headers)?;
 
     // Get the last ancestor header and retrieve its state root.
     //
@@ -81,7 +135,7 @@ pub fn stateless_validation(
     // block.
     let pre_state_root = match ancestor_headers.last() {
         Some(prev_header) => prev_header.state_root,
-        None => return None, // Need at least one ancestor header, to fetch pre_state root
+        None => return Err(StatelessValidationError::MissingAncestorHeader),
     };
 
     // First verify that the pre-state reads are correct
@@ -93,23 +147,31 @@ pub fn stateless_validation(
     // Execute the block
     let basic_block_executor = EthExecutorProvider::ethereum(chain_spec.clone());
     let executor = basic_block_executor.executor(db);
-    let output = executor.execute(&current_block).unwrap();
+    // TODO: map error properly
+    let output = executor
+        .execute(&current_block)
+        .map_err(|_e| StatelessValidationError::StatelessExecutionFailed)?;
 
     // Post validation checks
     validate_block_post_execution(&current_block, &chain_spec, &output.receipts, &output.requests)
-        .unwrap();
+        .map_err(|err| StatelessValidationError::StatelessPostValidationFailed(err.to_string()))?;
 
     // Compute and check the post state root
     // TODO: Remove rayon
     let hashed_state =
         HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state.par_iter());
-    let state_root = crate::root::calculate_state_root(&mut sparse_trie, hashed_state).unwrap();
+    // TODO: map error properly
+    let state_root = crate::root::calculate_state_root(&mut sparse_trie, hashed_state)
+        .map_err(|_e| StatelessValidationError::StatelessStateRootCalculationFailed)?;
     if state_root != current_block.state_root {
-        return None;
+        return Err(StatelessValidationError::StateRootMismatch {
+            got: state_root,
+            expected: current_block.state_root,
+        });
     }
 
     // Return block hash
-    Some(current_block.hash_slow())
+    Ok(current_block.hash_slow())
 }
 
 /// Verifies execution witness [`ExecutionWitness`] against an expected pre-state root.
@@ -133,7 +195,7 @@ pub fn stateless_validation(
 pub fn verify_execution_witness(
     witness: &ExecutionWitness,
     pre_state_root: B256,
-) -> Option<(SparseStateTrie, B256Map<Bytecode>)> {
+) -> Result<(SparseStateTrie, B256Map<Bytecode>), StatelessValidationError> {
     let mut trie = SparseStateTrie::new(DefaultBlindedProviderFactory);
     let mut state_witness = B256Map::default();
     let mut bytecode = B256Map::default();
@@ -153,12 +215,22 @@ pub fn verify_execution_witness(
     }
 
     // Reveal the witness with our state root
-    trie.reveal_witness(pre_state_root, &state_witness).unwrap();
+    trie.reveal_witness(pre_state_root, &state_witness)
+        .map_err(|_e| StatelessValidationError::WitnessRevealFailed { pre_state_root })?;
 
     // Calculate the root
-    let computed_root = trie.root().unwrap();
+    let computed_root = trie
+        .root()
+        .map_err(|_e| StatelessValidationError::StatelessPreStateRootCalculationFailed)?;
 
-    (computed_root == pre_state_root).then_some((trie, bytecode))
+    if computed_root == pre_state_root {
+        Ok((trie, bytecode))
+    } else {
+        Err(StatelessValidationError::PreStateRootMismatch {
+            got: computed_root,
+            expected: pre_state_root,
+        })
+    }
 }
 
 /// `BLOCKHASH_HISTORICAL_HASH_LIMIT` specifies the maximum number of historical
@@ -186,11 +258,14 @@ const BLOCKHASH_HISTORICAL_HASH_LIMIT: usize = 256;
 fn compute_ancestor_hashes(
     current_block: &RecoveredBlock<Block<TransactionSigned>>,
     ancestor_headers: &[Header],
-) -> Option<HashMap<u64, B256>> {
+) -> Result<HashMap<u64, B256>, StatelessValidationError> {
     // Check that we have `BLOCKHASH_HISTORICAL_HASH_LIMIT` number of
     // ancestors.
     if ancestor_headers.len() >= BLOCKHASH_HISTORICAL_HASH_LIMIT {
-        return None;
+        return Err(StatelessValidationError::AncestorHeaderLimitExceeded {
+            count: ancestor_headers.len(),
+            limit: BLOCKHASH_HISTORICAL_HASH_LIMIT,
+        });
     }
     let mut ancestor_hashes = HashMap::with_capacity(ancestor_headers.len());
 
@@ -202,15 +277,16 @@ fn compute_ancestor_hashes(
         ancestor_hashes.insert(parent_header.number, parent_hash);
 
         if parent_hash != parent_header.hash_slow() {
-            return None; // Blocks must be contiguous
+            return Err(StatelessValidationError::InvalidAncestorChain); // Blocks must be contiguous
         }
 
         if parent_header.number + 1 != child_header.number {
-            return None; // Header number should be contiguous
+            return Err(StatelessValidationError::InvalidAncestorChain); // Header number should be
+                                                                        // contiguous
         }
 
         child_header = parent_header
     }
 
-    Some(ancestor_hashes)
+    Ok(ancestor_hashes)
 }
