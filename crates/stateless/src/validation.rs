@@ -147,7 +147,8 @@ pub fn verify_execution_witness(
 }
 
 /// `BLOCKHASH_HISTORICAL_HASH_LIMIT` specifies the maximum number of historical
-/// block hashes that the BLOCKHASH opcode is specified to allow.
+/// block hashes that the [BLOCKHASH](https://www.evm.codes/?fork=cancun#40)
+/// opcode is specified to allow.
 const BLOCKHASH_HISTORICAL_HASH_LIMIT: usize = 256;
 
 /// Verifies the contiguity, number of ancestor headers and extracts their hashes.
