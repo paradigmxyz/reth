@@ -2,7 +2,7 @@ use crate::EthVersion;
 use alloy_chains::{Chain, NamedChain};
 use alloy_hardforks::{EthereumHardfork, ForkId, Head};
 use alloy_primitives::{hex, B256, U256};
-use alloy_rlp::{RlpDecodable, RlpEncodable};
+use alloy_rlp::{BufMut, Encodable, RlpDecodable, RlpEncodable};
 use core::fmt::{Debug, Display};
 use reth_chainspec::{EthChainSpec, Hardforks, MAINNET};
 use reth_codecs_derive::add_arbitrary_tests;
@@ -303,6 +303,85 @@ impl Default for StatusEth69 {
 impl From<Status> for StatusEth69 {
     fn from(status: Status) -> Self {
         status.into_eth69()
+    }
+}
+
+/// `StatusMessage` can store either the Legacy version (with TD) or the
+/// eth/69 version (omits TD).
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StatusMessage {
+    /// The legacy status (`eth/66` through `eth/68`) with `total_difficulty`.
+    Legacy(Status),
+    /// The new `eth/69` status with no `total_difficulty`.
+    Eth69(StatusEth69),
+}
+
+impl StatusMessage {
+    /// Returns the genesis hash from the status message.
+    pub const fn genesis(&self) -> B256 {
+        match self {
+            Self::Legacy(legacy_status) => legacy_status.genesis,
+            Self::Eth69(status_69) => status_69.genesis,
+        }
+    }
+
+    /// Returns the protocol version.
+    pub const fn version(&self) -> EthVersion {
+        match self {
+            Self::Legacy(legacy_status) => legacy_status.version,
+            Self::Eth69(status_69) => status_69.version,
+        }
+    }
+
+    /// Returns the chain identifier.
+    pub const fn chain(&self) -> &Chain {
+        match self {
+            Self::Legacy(legacy_status) => &legacy_status.chain,
+            Self::Eth69(status_69) => &status_69.chain,
+        }
+    }
+
+    /// Returns the fork identifier.
+    pub const fn forkid(&self) -> ForkId {
+        match self {
+            Self::Legacy(legacy_status) => legacy_status.forkid,
+            Self::Eth69(status_69) => status_69.forkid,
+        }
+    }
+
+    /// Converts to legacy Status since full support for EIP-7642
+    /// is not fully implemented
+    /// `<https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7642.md>`
+    pub fn to_legacy(self) -> Status {
+        match self {
+            Self::Legacy(legacy_status) => legacy_status,
+            Self::Eth69(status_69) => Status {
+                version: status_69.version,
+                chain: status_69.chain,
+                // total_difficulty is omitted in Eth69.
+                total_difficulty: U256::default(),
+                blockhash: status_69.blockhash,
+                genesis: status_69.genesis,
+                forkid: status_69.forkid,
+            },
+        }
+    }
+}
+
+impl Encodable for StatusMessage {
+    fn encode(&self, out: &mut dyn BufMut) {
+        match self {
+            Self::Legacy(s) => s.encode(out),
+            Self::Eth69(s) => s.encode(out),
+        }
+    }
+
+    fn length(&self) -> usize {
+        match self {
+            Self::Legacy(s) => s.length(),
+            Self::Eth69(s) => s.length(),
+        }
     }
 }
 
