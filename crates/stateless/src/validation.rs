@@ -13,6 +13,19 @@ use reth_revm::state::Bytecode;
 use reth_trie::{iter::IntoParallelRefIterator, HashedPostState, KeccakKeyHasher};
 use reth_trie_sparse::{blinded::DefaultBlindedProviderFactory, SparseStateTrie};
 
+#[derive(Debug)]
+/// TODO doc
+pub struct Input {
+    /// TODO doc
+    pub current_block: RecoveredBlock<Block<TransactionSigned>>,
+    /// TODO doc
+    pub execution_witness: ExecutionWitness,
+    /// TODO doc
+    pub ancestor_headers: Vec<Header>,
+    /// TODO doc
+    pub chain_spec: ChainSpec,
+}
+
 /// Performs stateless validation of a block using the provided witness data.
 ///
 /// This function attempts to fully validate a given `current_block` statelessly, ie without access
