@@ -158,9 +158,9 @@ const BLOCKHASH_HISTORICAL_HASH_LIMIT: usize = 256;
 ///
 /// It performs two main checks:
 ///
-/// 1. Ensures that the number of provided `ancestor_headers` plus the `current_block` itself does
-///    not exceed the `BLOCKHASH_HISTORICAL_HASH_LIMIT` (256). This limit is defined by the
-///    `BLOCKHASH` opcode and has nothing to do with stateless.
+/// 1. Ensures that the number of provided `ancestor_headers` does not exceed the
+///    `BLOCKHASH_HISTORICAL_HASH_LIMIT` (256). This limit is defined by the `BLOCKHASH` opcode and
+///    has nothing to do with stateless.
 /// 2. Verifies that the provided `ancestor_headers` form a valid, unbroken chain leading back from
 ///    the parent of the `current_block`.
 ///
@@ -172,9 +172,9 @@ fn compute_ancestor_hashes(
     current_block: &RecoveredBlock<Block<TransactionSigned>>,
     ancestor_headers: &[Header],
 ) -> Option<HashMap<u64, B256>> {
-    // We should only have at most BLOCKHASH_OPCODE_LIMIT -1 number of ancestors
-    // because we include the current block in the blockhash limit
-    if ancestor_headers.len() > BLOCKHASH_HISTORICAL_HASH_LIMIT {
+    // Check that we have `BLOCKHASH_HISTORICAL_HASH_LIMIT` number of
+    // ancestors.
+    if ancestor_headers.len() >= BLOCKHASH_HISTORICAL_HASH_LIMIT {
         return None;
     }
     let mut ancestor_hashes = HashMap::with_capacity(ancestor_headers.len());
