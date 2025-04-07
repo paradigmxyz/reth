@@ -117,20 +117,10 @@ pub fn stateless_validation(
 ///
 /// If the roots do not match, it returns `None`, indicating the witness is invalid
 /// for the given `pre_state_root`.
-///
-/// # Parameters
-/// - `witness`: The [`ExecutionWitness`] containing RLP-encoded trie nodes and bytecode necessary
-///   to prove the pre-state against the `pre_state_root`.
-/// - `pre_state_root`: The expected [`B256`] state root hash before execution.
-///
-/// # Returns
-/// - `Some((SparseStateTrie, B256Map<Bytecode>))` if the witness is valid for the `pre_state_root`.
-/// - `None` if the computed root does not match the `pre_state_root`.
 // Note: This approach might be inefficient for ZKVMs requiring minimal memory operations, which
 // would explain why they have for the most part re-implemented this function.
 
 pub fn verify_execution_witness(
-    // Witness for the pre_state reads
     witness: &ExecutionWitness,
     pre_state_root: B256,
 ) -> Option<(SparseStateTrie, B256Map<Bytecode>)> {
@@ -138,7 +128,6 @@ pub fn verify_execution_witness(
     let mut state_witness = B256Map::default();
     let mut bytecode = B256Map::default();
 
-    // Add all witness components to our map
     for rlp_encoded in &witness.state {
         let hash = keccak256(rlp_encoded);
         state_witness.insert(hash, rlp_encoded.clone());
@@ -205,7 +194,9 @@ fn compute_ancestor_hashes(
             return None; // Blocks must be contiguous
         }
 
-        // TODO: Check the parent block number too?
+        if parent_header.number + 1 != child_header.number {
+            return None; // Header number should be contiguous
+        }
 
         child_header = parent_header
     }
