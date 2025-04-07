@@ -20,7 +20,7 @@ use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::{BundleStateInit, ExecutionOutcome, RevertsInit};
 use reth_node_types::{
-    BlockTy, BodyTy, HeaderTy, NodePrimitives, NodeTypesWithDB, ReceiptTy, TxTy,
+    BlockTy, BodyTy, HeaderTy, NodePrimitives, ReceiptTy, TxTy,
 };
 use reth_primitives_traits::{
     Account, BlockBody, RecoveredBlock, SealedBlock, SealedHeader, StorageEntry,
@@ -615,7 +615,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     }
 }
 
-impl<N: NodeTypesWithDB> NodePrimitives for ConsistentProvider<N> {
+impl<N: ProviderNodeTypes> NodePrimitives for ConsistentProvider<N> {
     type Block = BlockTy<N>;
     type BlockHeader = HeaderTy<N>;
     type BlockBody = BodyTy<N>;

@@ -47,10 +47,10 @@ impl<Provider> SegmentSet<Provider> {
 
 impl<Provider> SegmentSet<Provider>
 where
-    Provider: StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value, Receipt: Value>>
+    Provider: StaticFileProviderFactory<Primitives = Provider>
         + DBProvider<Tx: DbTxMut>
         + PruneCheckpointWriter
-        + BlockReader<Transaction: Encodable2718>,
+        + BlockReader<SignedTx: Encodable2718 + Value, Receipt: Value>,
 {
     /// Creates a [`SegmentSet`] from an existing components, such as [`StaticFileProvider`] and
     /// [`PruneModes`].

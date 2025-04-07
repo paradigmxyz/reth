@@ -23,7 +23,7 @@ impl TransactionLookup {
 
 impl<Provider> Segment<Provider> for TransactionLookup
 where
-    Provider: DBProvider<Tx: DbTxMut> + BlockReader<Transaction: Encodable2718>,
+    Provider: DBProvider<Tx: DbTxMut> + BlockReader<SignedTx: Encodable2718>,
 {
     fn segment(&self) -> PruneSegment {
         PruneSegment::TransactionLookup

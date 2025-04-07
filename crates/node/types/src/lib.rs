@@ -27,7 +27,7 @@ use reth_trie_db::StateCommitment;
 /// This trait is intended to be stateless and only define the types of the node.
 pub trait NodeTypes: Clone + Debug + Send + Sync + Unpin + 'static {
     /// The node's primitive types, defining basic operations and structures.
-    type Primitives: NodePrimitives + Clone + Default + 'static;
+    type Primitives: NodePrimitives + Unpin + Clone + Default + PartialEq + Eq + 'static;
     /// The type used for configuration of the EVM.
     type ChainSpec: EthChainSpec<Header = <Self::Primitives as NodePrimitives>::BlockHeader>;
     /// The type used to perform state commitment operations.

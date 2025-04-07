@@ -5,6 +5,7 @@ use crate::{
     StateProvider, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
     TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
+use core::fmt;
 use alloy_consensus::{constants::EMPTY_ROOT_HASH, transaction::TransactionMeta, Header};
 use alloy_eips::{eip4895::Withdrawals, BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
@@ -158,7 +159,7 @@ impl Default for MockEthProvider {
     }
 }
 
-impl<ChainSpec> NodePrimitives for MockEthProvider {
+impl<ChainSpec: Send + Sync + fmt::Debug> NodePrimitives for MockEthProvider<ChainSpec> {
     type Block = <EthPrimitives as NodePrimitives>::Block;
     type BlockHeader = <EthPrimitives as NodePrimitives>::BlockHeader;
     type BlockBody = <EthPrimitives as NodePrimitives>::BlockBody;

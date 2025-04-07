@@ -9,7 +9,7 @@ use reth_engine_primitives::{BeaconConsensusEngineEvent, BeaconConsensusEngineHa
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_network_api::FullNetwork;
 use reth_node_core::node_config::NodeConfig;
-use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter, TxTy};
+use reth_node_types::{FullNodePrimitives, NodeTypes, NodeTypesWithDBAdapter, TxTy};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
@@ -23,7 +23,7 @@ use std::{fmt::Debug, future::Future, marker::PhantomData};
 /// Its types are configured by node internally and are not intended to be user configurable.
 pub trait FullNodeTypes: Clone + Debug + Send + Sync + Unpin + 'static {
     /// Node's types with the database.
-    type Types: NodeTypes;
+    type Types: NodeTypes<Primitives: FullNodePrimitives>;
     /// Underlying database type used by the node to store and retrieve data.
     type DB: Database + DatabaseMetrics + Clone + Unpin + 'static;
     /// The provider type used to interact with the node.
@@ -36,7 +36,7 @@ pub struct FullNodeTypesAdapter<Types, DB, Provider>(PhantomData<(Types, DB, Pro
 
 impl<Types, DB, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
 where
-    Types: NodeTypes,
+    Types: NodeTypes<Primitives: FullNodePrimitives>,
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
     Provider: FullProvider<NodeTypesWithDBAdapter<Types, DB>>,
 {

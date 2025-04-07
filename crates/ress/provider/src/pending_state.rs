@@ -25,7 +25,7 @@ struct PendingStateInner<N: NodePrimitives> {
     block_hashes_by_number: BTreeMap<BlockNumber, B256HashSet>,
 }
 
-impl<N: NodePrimitives> PendingState<N> {
+impl<N> PendingState<N>  where N: NodePrimitives + Clone{
     /// Insert executed block with trie updates.
     pub fn insert_block(&self, block: ExecutedBlockWithTrieUpdates<N>) {
         let mut this = self.0.write();
