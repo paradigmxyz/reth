@@ -20,7 +20,7 @@ use tracing::trace;
 /// This is designed for stateless execution scenarios where direct access to a full node's
 /// database is not available or desired.
 #[derive(Debug)]
-pub struct WitnessDatabase<'a> {
+pub(crate) struct WitnessDatabase<'a> {
     /// Map of block numbers to block hashes.
     /// This is used to service the `BLOCKHASH` opcode.
     // TODO: use Vec instead -- ancestors should be contiguous
@@ -52,7 +52,7 @@ impl<'a> WitnessDatabase<'a> {
     ///    to 256 including the current block number). It assumes these hashes correspond to a
     ///    contiguous chain of blocks. The caller is responsible for verifying the contiguity and
     ///    the block limit.
-    pub fn new(
+    pub(crate) fn new(
         trie: &'a SparseStateTrie,
         bytecode: B256Map<Bytecode>,
         ancestor_hashes: HashMap<u64, B256>,
@@ -69,12 +69,13 @@ impl Database for WitnessDatabase<'_> {
     /// in the underlying [`SparseStateTrie`].
     ///
     /// Returns `Ok(None)` if the account is not found in the trie.
+    // TODO: This was copied from ress -- Should it not return an Error if no account was found?
+    // TODO: See the other methods.
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         let hashed_address = keccak256(address);
         trace!(target: "reth-stateless::evm", %address, %hashed_address, "retrieving account");
         let Some(bytes) = self.trie.get_account_value(&hashed_address) else {
             trace!(target: "reth-stateless::evm", %address, %hashed_address, "no account found");
-            // TODO: Copied from ress -- Should it not return an Error if no account was found?
             return Ok(None)
         };
         let account = TrieAccount::decode(&mut bytes.as_slice())?;
@@ -90,9 +91,7 @@ impl Database for WitnessDatabase<'_> {
 
     /// Get storage value of an account at a specific slot.
     ///
-    /// This hashes the address and storage slot key and retrieves the value
-    /// from the underlying [`SparseStateTrie`]. Returns `U256::ZERO` if the
-    /// slot is not found in the trie.
+    ///  Returns `U256::ZERO` if the slot is not found in the trie.
     fn storage(&mut self, address: Address, slot: U256) -> Result<U256, Self::Error> {
         let slot = B256::from(slot);
         let hashed_address = keccak256(address);
