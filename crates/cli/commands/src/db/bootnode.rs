@@ -58,7 +58,7 @@ impl Command {
         discv4_service.spawn();
 
         if self.v5 {
-            info!("Starting discv5 ");
+            info!("Starting discv5");
             let config = Config::builder(socket_addr).build();
             let (_discv5, _discv5_updates, _local_enr_discv5) =
                 Discv5::start(&sk, config).await.map_err(NetworkError::Discv5Error)?;
