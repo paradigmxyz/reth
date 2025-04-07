@@ -108,12 +108,12 @@ pub fn stateless_validation(
 /// and uses it to populate a new [`SparseStateTrie`].
 ///
 /// If the computed root hash matches the `pre_state_root`, it signifies that the
-/// provided witness data is consistent with that state root. In this case, the function
+/// provided witness data is consistent with that pre-state root. In this case, the function
 /// returns the populated [`SparseStateTrie`] and a [`B256Map`] containing the
 /// contract bytecode (mapping code hash to [`Bytecode`]).
 ///
 /// The bytecode has a separate mapping because the [`SparseStateTrie`] does not store the
-/// contract bytecode, only the hash of it.
+/// contract bytecode, only the hash of it (code hash).
 ///
 /// If the roots do not match, it returns `None`, indicating the witness is invalid
 /// for the given `pre_state_root`.
