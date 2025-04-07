@@ -122,7 +122,6 @@ impl ForkchoiceStateTracker {
 /// Represents a forkchoice update and tracks the status we assigned to it.
 #[derive(Debug, Clone)]
 pub(crate) struct ReceivedForkchoiceState {
-    #[cfg_attr(not(test), expect(dead_code))]
     state: ForkchoiceState,
     status: ForkchoiceStatus,
 }
