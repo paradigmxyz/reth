@@ -461,7 +461,7 @@ alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-ne
 alloy-sol-types = { version = "0.8.25", default-features = false }
 alloy-trie = { version = "0.7.9", default-features = false }
 
-alloy-hardforks = "0.1.2"
+alloy-hardforks = "0.1.4"
 
 alloy-consensus = { version = "0.13.0", default-features = false }
 alloy-contract = { version = "0.13.0", default-features = false }
