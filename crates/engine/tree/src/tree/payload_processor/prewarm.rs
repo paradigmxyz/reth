@@ -90,7 +90,7 @@ where
             let pending_chunk = chunk.collect::<Vec<_>>();
 
             self.executor.spawn_blocking(move || {
-                let _ = ctx.transact_batch(&pending_chunk, sender);
+                ctx.transact_batch(&pending_chunk, sender);
             });
         }
     }
@@ -216,12 +216,8 @@ where
     ///
     /// Note: Since here are no ordering guarantees this won't the state the txs produce when
     /// executed sequentially.
-    fn transact_batch(
-        self,
-        txs: &[Recovered<N::SignedTx>],
-        sender: Sender<PrewarmTaskEvent>,
-    ) -> Option<()> {
-        let (mut evm, evm_config, metrics) = self.evm_for_ctx()?;
+    fn transact_batch(self, txs: &[Recovered<N::SignedTx>], sender: Sender<PrewarmTaskEvent>) {
+        let Some((mut evm, evm_config, metrics)) = self.evm_for_ctx() else { return };
 
         for tx in txs {
             // create the tx env
@@ -237,7 +233,7 @@ where
                         sender=%tx.signer(),
                         "Error when executing prewarm transaction",
                     );
-                    return None
+                    return
                 }
             };
             metrics.execution_duration.record(start.elapsed());
@@ -248,8 +244,6 @@ where
 
             let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: Some(targets) });
         }
-
-        Some(())
     }
 }
 
