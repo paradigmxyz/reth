@@ -59,23 +59,21 @@ pub fn stateless_validation(
     ancestor_headers: Vec<Header>,
     chain_spec: Arc<ChainSpec>,
 ) -> Option<B256> {
-    // There should be at least one ancestor header, this is because we need the parent header to
-    // retrieve the previous state root.
-    // The edge case here would be the genesis block, but we do not create proofs for the genesis
-    // block.
-    if ancestor_headers.is_empty() {
-        return None;
-    }
-
     // 0. Check that the ancestor headers form a contiguous chain and are not just random headers.
     //
     // This would make BLOCKHASH unsafe.
     let ancestor_hashes = compute_ancestor_hashes(&current_block, &ancestor_headers).unwrap();
 
     // Get the last ancestor header and retrieve its state root.
-    // TODO: replace expect with a match and remove the first .is_empty call
-    let pre_state_root =
-        ancestor_headers.last().expect("There should be atleast one ancestor header").state_root;
+    //
+    // There should be at least one ancestor header, this is because we need the parent header to
+    // retrieve the previous state root.
+    // The edge case here would be the genesis block, but we do not create proofs for the genesis
+    // block.
+    let pre_state_root = match ancestor_headers.last() {
+        Some(prev_header) => prev_header.state_root,
+        None => return None, // Need at least one ancestor header, to fetch pre_state root
+    };
 
     // 1. First verify that the pre-state reads are correct
     let (mut sparse_trie, bytecode) = verify_execution_witness(&witness, pre_state_root)?;
