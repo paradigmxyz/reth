@@ -128,7 +128,10 @@ pub trait LoadPendingBlock:
         &self,
     ) -> impl Future<
         Output = Result<
-            Option<(RecoveredBlock<BlockTy<Self::Primitives>>, Vec<ReceiptTy<Self::Primitives>>)>,
+            Option<(
+                RecoveredBlock<<Self::Provider as NodePrimitives>::Block>,
+                Vec<ProviderReceipt<Self::Provider>>,
+            )>,
             Self::Error,
         >,
     > + Send

@@ -98,7 +98,7 @@ pub(crate) const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 /// - This only stores blocks that are connected to the canonical chain.
 /// - All executed blocks are valid and have been executed.
 #[derive(Debug, Default)]
-pub struct TreeState<N: NodePrimitives + Clone = EthPrimitives> {
+pub struct TreeState<N: NodePrimitives = EthPrimitives> {
     /// __All__ unique executed blocks by block hash that are connected to the canonical chain.
     ///
     /// This includes blocks of all forks.
@@ -119,7 +119,10 @@ pub struct TreeState<N: NodePrimitives + Clone = EthPrimitives> {
     current_canonical_head: BlockNumHash,
 }
 
-impl<N> TreeState<N> where N: NodePrimitives + Clone {
+impl<N> TreeState<N>
+where
+    N: NodePrimitives + Clone,
+{
     /// Returns a new, empty tree state that points to the given canonical head.
     fn new(current_canonical_head: BlockNumHash) -> Self {
         Self {
@@ -460,8 +463,9 @@ impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
     }
 }
 
-impl<N: NodePrimitives, P> StateProviderBuilder<N, P>
+impl<N, P> StateProviderBuilder<N, P>
 where
+    N: NodePrimitives + Clone + 'static,
     P: BlockReader + StateProviderFactory + StateReader + StateCommitmentProvider + Clone,
 {
     /// Creates a new state provider from this builder.
@@ -490,7 +494,10 @@ pub struct EngineApiTreeState<N: NodePrimitives> {
     invalid_headers: InvalidHeaderCache,
 }
 
-impl<N: NodePrimitives> EngineApiTreeState<N> {
+impl<N> EngineApiTreeState<N>
+where
+    N: NodePrimitives + Clone,
+{
     fn new(
         block_buffer_limit: u32,
         max_invalid_header_cache_length: u32,

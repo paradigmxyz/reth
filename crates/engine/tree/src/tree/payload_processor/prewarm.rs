@@ -204,7 +204,7 @@ pub(super) struct PrewarmContext<N: NodePrimitives, P, Evm> {
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
-    N: NodePrimitives,
+    N: NodePrimitives + Clone + 'static,
     P: BlockReader + StateProviderFactory + StateReader + StateCommitmentProvider + Clone + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
