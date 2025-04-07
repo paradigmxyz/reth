@@ -89,7 +89,10 @@ pub struct ExExHandle<N: NodePrimitives = EthPrimitives> {
     finished_height: Option<BlockNumHash>,
 }
 
-impl<N: NodePrimitives> ExExHandle<N> {
+impl<N> ExExHandle<N>
+where
+    N: NodePrimitives + Clone,
+{
     /// Create a new handle for the given `ExEx`.
     ///
     /// Returns the handle, as well as a [`UnboundedSender`] for [`ExExEvent`]s and a
@@ -423,7 +426,7 @@ where
 impl<P, N> Future for ExExManager<P, N>
 where
     P: HeaderProvider + Unpin + 'static,
-    N: NodePrimitives,
+    N: NodePrimitives + Clone,
 {
     type Output = eyre::Result<()>;
 
@@ -553,7 +556,10 @@ pub struct ExExManagerHandle<N: NodePrimitives = EthPrimitives> {
     finished_height: watch::Receiver<FinishedExExHeight>,
 }
 
-impl<N: NodePrimitives> ExExManagerHandle<N> {
+impl<N> ExExManagerHandle<N>
+where
+    N: NodePrimitives + Clone,
+{
     /// Creates an empty manager handle.
     ///
     /// Use this if there is no manager present.

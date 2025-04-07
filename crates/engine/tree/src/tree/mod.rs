@@ -637,7 +637,7 @@ where
 
 impl<N, P, E, T, V, C> EngineApiTreeHandler<N, P, E, T, V, C>
 where
-    N: NodePrimitives,
+    N: NodePrimitives + Clone + Default + 'static,
     P: DatabaseProviderFactory
         + BlockReader<Block = N::Block, Header = N::BlockHeader>
         + StateProviderFactory

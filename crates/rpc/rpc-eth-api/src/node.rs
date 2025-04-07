@@ -2,6 +2,7 @@
 
 use reth_node_api::{FullNodeComponents, NodeTypes, PrimitivesTy};
 use reth_payload_builder::PayloadBuilderHandle;
+use reth_primitives_traits::{BlockTy, BodyTy, HeaderTy, NodePrimitives, ReceiptTy, TxTy};
 use reth_provider::{BlockReader, ProviderBlock, ProviderReceipt};
 use reth_rpc_eth_types::EthStateCache;
 

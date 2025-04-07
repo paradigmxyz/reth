@@ -41,7 +41,7 @@ pub struct BackfillJob<E, P> {
 impl<E, P> Iterator for BackfillJob<E, P>
 where
     E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>>,
-    P: HeaderProvider + BlockReader<Transaction: SignedTransaction> + StateProviderFactory,
+    P: HeaderProvider + BlockReader<SignedTx: SignedTransaction> + StateProviderFactory,
 {
     type Item = BackfillJobResult<Chain<E::Primitives>>;
 
@@ -57,7 +57,7 @@ where
 impl<E, P> BackfillJob<E, P>
 where
     E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>>,
-    P: BlockReader<Transaction: SignedTransaction> + HeaderProvider + StateProviderFactory,
+    P: BlockReader<SignedTx: SignedTransaction> + HeaderProvider + StateProviderFactory,
 {
     /// Converts the backfill job into a single block backfill job.
     pub fn into_single_blocks(self) -> SingleBlockBackfillJob<E, P> {

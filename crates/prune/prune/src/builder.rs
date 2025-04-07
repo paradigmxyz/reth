@@ -1,5 +1,4 @@
 use crate::{segments::SegmentSet, Pruner};
-use alloy_consensus::Receipt;
 use alloy_eips::eip2718::Encodable2718;
 use reth_chainspec::MAINNET_PRUNE_DELETE_LIMIT;
 use reth_config::PruneConfig;
@@ -8,7 +7,7 @@ use reth_exex_types::FinishedExExHeight;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::StaticFileProvider, BlockReader, DBProvider, DatabaseProviderFactory,
-    PruneCheckpointWriter, StaticFileProviderFactory,
+    NodePrimitivesProvider, PruneCheckpointWriter, StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
 use std::time::Duration;
@@ -81,9 +80,13 @@ impl PrunerBuilder {
     where
         PF: DatabaseProviderFactory<
                 ProviderRW: PruneCheckpointWriter
-                                + BlockReader<SignedTx: Encodable2718 + Value, Receipt: Value>
-                                + StaticFileProviderFactory<Primitives = PF::ProviderRW>,
-            > + StaticFileProviderFactory<Primitives = PF::ProviderRW>,
+                                + BlockReader<SignedTx: Encodable2718>
+                                + StaticFileProviderFactory<
+                    Primitives: NodePrimitives<SignedTx: Value, Receipt: Value>,
+                >,
+            > + StaticFileProviderFactory<
+                Primitives = <PF::ProviderRW as NodePrimitivesProvider>::Primitives,
+            >,
     {
         let segments =
             SegmentSet::from_components(provider_factory.static_file_provider(), self.segments);
@@ -101,12 +104,12 @@ impl PrunerBuilder {
     /// Builds a [Pruner] from the current configuration with the given static file provider.
     pub fn build<Provider>(
         self,
-        static_file_provider: StaticFileProvider<Provider>,
+        static_file_provider: StaticFileProvider<Provider::Primitives>,
     ) -> Pruner<Provider, ()>
     where
-        Provider: BlockReader<SignedTx: Encodable2718 + Value, Receipt: Value>
-            + StaticFileProviderFactory<Primitives = Provider>
+        Provider: StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value, Receipt: Value>>
             + DBProvider<Tx: DbTxMut>
+            + BlockReader<SignedTx: Encodable2718>
             + PruneCheckpointWriter,
     {
         let segments = SegmentSet::<Provider>::from_components(static_file_provider, self.segments);

@@ -47,15 +47,15 @@ impl<Provider> SegmentSet<Provider> {
 
 impl<Provider> SegmentSet<Provider>
 where
-    Provider: BlockReader<SignedTx: Encodable2718 + Value, Receipt: Value>
-        + StaticFileProviderFactory<Primitives = Provider>
+    Provider: StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value, Receipt: Value>>
         + DBProvider<Tx: DbTxMut>
-        + PruneCheckpointWriter,
+        + PruneCheckpointWriter
+        + BlockReader<SignedTx: Encodable2718>,
 {
     /// Creates a [`SegmentSet`] from an existing components, such as [`StaticFileProvider`] and
     /// [`PruneModes`].
     pub fn from_components(
-        static_file_provider: StaticFileProvider<Provider>,
+        static_file_provider: StaticFileProvider<Provider::Primitives>,
         prune_modes: PruneModes,
     ) -> Self {
         let PruneModes {

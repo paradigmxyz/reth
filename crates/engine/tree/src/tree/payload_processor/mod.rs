@@ -77,7 +77,7 @@ impl<N, Evm> PayloadProcessor<N, Evm> {
 
 impl<N, Evm> PayloadProcessor<N, Evm>
 where
-    N: NodePrimitives,
+    N: NodePrimitives + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Spawns all background tasks and returns a handle connected to the tasks.
