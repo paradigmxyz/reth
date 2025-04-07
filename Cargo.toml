@@ -563,7 +563,7 @@ proc-macro2 = "1.0"
 quote = "1.0"
 
 # tokio
-tokio = { version = "1.39", default-features = false }
+tokio = { version = "1.44.2", default-features = false }
 tokio-stream = "0.1.11"
 tokio-util = { version = "0.7.4", features = ["codec"] }
 
