@@ -3064,6 +3064,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-revm",
+ "reth-stateless",
  "revm",
  "serde",
  "serde_json",
