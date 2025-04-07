@@ -211,7 +211,7 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
     /// first).
     /// This is useful for efficiently retrieving a sequence of blocks that might already be in
     /// cache without making separate database requests.
-    /// Returns `None` if no blocks are found in the cache, otherwise returns an Option 
+    /// Returns `None` if no blocks are found in the cache, otherwise returns an Option
     /// with at least one block.
     pub async fn get_cached_parent_blocks(
         &self,
