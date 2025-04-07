@@ -34,7 +34,7 @@ use reth_trie_sparse::{blinded::DefaultBlindedProviderFactory, SparseStateTrie};
 ///
 /// 3. **Chain Verification:** The code currently does not verify the [`ChainSpec`] and expects a
 ///    higher level function to assert that this is correct by, for example, asserting that it is
-///    equal to the Ethereum Mainnet Chainspec or asserting against the genesis hash that this
+///    equal to the Ethereum Mainnet ChainSpec or asserting against the genesis hash that this
 ///    ChainSpec defines.
 ///
 /// High Level Overview of functionality:
@@ -80,11 +80,11 @@ pub fn stateless_validation(
     let executor = basic_block_executor.executor(db);
     let output = executor.execute(&current_block).unwrap();
 
-    // 4. Post validation checks
+    // Post validation checks
     validate_block_post_execution(&current_block, &chain_spec, &output.receipts, &output.requests)
         .unwrap();
 
-    // 5. Compute and check the post state root
+    // Compute and check the post state root
     // TODO: Remove rayon
     let hashed_state =
         HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state.par_iter());
@@ -93,8 +93,8 @@ pub fn stateless_validation(
         return None;
     }
 
-    // 6. return block hash
-    return Some(current_block.hash_slow());
+    // Return block hash
+    Some(current_block.hash_slow())
 }
 
 /// Verifies execution witness [`ExecutionWitness`] against an expected pre-state root.
