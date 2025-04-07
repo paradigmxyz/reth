@@ -1,7 +1,7 @@
 use crate::EthVersion;
 use alloy_chains::{Chain, NamedChain};
 use alloy_hardforks::{EthereumHardfork, ForkId, Head};
-use alloy_primitives::{hex, FixedBytes, B256, U256};
+use alloy_primitives::{hex, B256, U256};
 use alloy_rlp::{BufMut, Encodable, RlpDecodable, RlpEncodable};
 use core::fmt::{Debug, Display};
 use reth_chainspec::{EthChainSpec, Hardforks, MAINNET};
@@ -319,8 +319,7 @@ pub enum StatusMessage {
 
 impl StatusMessage {
     /// Returns the genesis hash from the status message.
-    #[inline]
-    pub fn genesis(&self) -> FixedBytes<32> {
+    pub const fn genesis(&self) -> B256 {
         match self {
             Self::Legacy(legacy_status) => legacy_status.genesis,
             Self::Eth69(status_69) => status_69.genesis,
@@ -328,8 +327,7 @@ impl StatusMessage {
     }
 
     /// Returns the protocol version.
-    #[inline]
-    pub fn version(&self) -> EthVersion {
+    pub const fn version(&self) -> EthVersion {
         match self {
             Self::Legacy(legacy_status) => legacy_status.version,
             Self::Eth69(status_69) => status_69.version,
@@ -337,8 +335,7 @@ impl StatusMessage {
     }
 
     /// Returns the chain identifier.
-    #[inline]
-    pub fn chain(&self) -> &Chain {
+    pub const fn chain(&self) -> &Chain {
         match self {
             Self::Legacy(legacy_status) => &legacy_status.chain,
             Self::Eth69(status_69) => &status_69.chain,
@@ -346,8 +343,7 @@ impl StatusMessage {
     }
 
     /// Returns the fork identifier.
-    #[inline]
-    pub fn forkid(&self) -> ForkId {
+    pub const fn forkid(&self) -> ForkId {
         match self {
             Self::Legacy(legacy_status) => legacy_status.forkid,
             Self::Eth69(status_69) => status_69.forkid,
