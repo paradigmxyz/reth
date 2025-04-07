@@ -3054,6 +3054,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-rpc-types-debug",
  "rayon",
  "reth-chainspec",
  "reth-db",

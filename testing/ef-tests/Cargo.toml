@@ -22,18 +22,23 @@ asm-keccak = [
 [dependencies]
 reth-chainspec.workspace = true
 reth-primitives.workspace = true
-reth-db = { workspace = true, features = ["mdbx", "test-utils", "disable-lock"] }
+reth-db = { workspace = true, features = [
+    "mdbx",
+    "test-utils",
+    "disable-lock",
+] }
 reth-db-api.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-evm-ethereum.workspace = true
 reth-evm.workspace = true
-reth-revm = { workspace = true, features = ["std"] }
+reth-revm = { workspace = true, features = ["std", "witness"] }
 
 revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
 
 alloy-rlp.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
+alloy-rpc-types-debug.workspace = true
 alloy-consensus.workspace = true
 
 walkdir.workspace = true

@@ -4,17 +4,20 @@ use crate::{
     models::{BlockchainTest, ForkSpec},
     Case, Error, Suite,
 };
+use alloy_consensus::Block;
 use alloy_rlp::Decodable;
+use alloy_rpc_types_debug::ExecutionWitness;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_chainspec::ChainSpec;
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_evm_ethereum::execute::EthExecutorProvider;
-use reth_primitives::{BlockBody, SealedBlock};
+use reth_primitives::{BlockBody, RecoveredBlock, SealedBlock, TransactionSigned};
 use reth_provider::{
-    test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, DatabaseProviderFactory,
-    HashingWriter, LatestStateProviderRef, OriginalValuesKnown, StateWriter, StorageLocation,
+    test_utils::create_test_provider_factory_with_chain_spec, BlockHashReader, BlockWriter,
+    DBProvider, DatabaseProviderFactory, ExecutionOutcome, HashingWriter, LatestStateProviderRef,
+    OriginalValuesKnown, StateCommitmentProvider, StateProofProvider, StateWriter, StorageLocation,
 };
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord, State};
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 
 /// A handler for the blockchain test suite.
@@ -84,79 +87,122 @@ impl Case for BlockchainTestCase {
                 )
             })
             .par_bridge()
-            .try_for_each(|case| {
-                // Create a new test database and initialize a provider for the test case.
-                let chain_spec: Arc<ChainSpec> = Arc::new(case.network.into());
-                let provider = create_test_provider_factory_with_chain_spec(chain_spec.clone())
-                    .database_provider_rw()
-                    .unwrap();
-
-                // Insert the genesis block and the initial test state into the provider
-                provider.insert_block(
-                    SealedBlock::<reth_primitives::Block>::from_sealed_parts(
-                        case.genesis_block_header.clone().into(),
-                        BlockBody::default(),
-                    )
-                    .try_recover()
-                    .unwrap(),
-                    StorageLocation::Database,
-                )?;
-                case.pre.write_to_db(provider.tx_ref())?;
-
-                // Decode and insert blocks, creating a chain of blocks for the test case.
-                let mut blocks = Vec::with_capacity(case.blocks.len());
-                for block in &case.blocks {
-                    let decoded =
-                        SealedBlock::<reth_primitives::Block>::decode(&mut block.rlp.as_ref())?;
-                    let recovered_block = decoded.clone().try_recover().unwrap();
-
-                    provider.insert_block(recovered_block.clone(), StorageLocation::Database)?;
-
-                    blocks.push(recovered_block);
-                }
-                let last_block = blocks.last().cloned();
-
-                // Initialize executor with state
-                let executor_provider = EthExecutorProvider::ethereum(chain_spec);
-                let state_db = StateProviderDatabase(LatestStateProviderRef::new(&provider));
-                let executor = executor_provider.executor(state_db);
-
-                // Execute all blocks in a batch
-                if let Ok(state) = executor.execute_batch(&blocks) {
-                    provider.write_state(
-                        &state,
-                        OriginalValuesKnown::Yes,
-                        StorageLocation::Database,
-                    )?;
-                }
-
-                // Validate the post-state for the test case.
-                match (&case.post_state, &case.post_state_hash) {
-                    (Some(state), None) => {
-                        // Validate accounts in the state against the provider's database.
-                        for (&address, account) in state {
-                            account.assert_db(address, provider.tx_ref())?;
-                        }
-                    }
-                    (None, Some(expected_state_root)) => {
-                        // Insert state hashes into the provider based on the expected state root.
-                        let last_block = last_block.unwrap_or_default();
-                        provider.insert_hashes(
-                            0..=last_block.number,
-                            last_block.hash(),
-                            *expected_state_root,
-                        )?;
-                    }
-                    _ => return Err(Error::MissingPostState),
-                }
-
-                // Drop the provider without committing to the database.
-                drop(provider);
-                Ok(())
-            })?;
+            .try_for_each(|case| run_case(case))?;
 
         Ok(())
     }
+}
+
+/// Executes a single `BlockchainTest`, returning an error if the blockchain state
+/// does not match the expected outcome after all blocks are executed.
+///
+/// A `BlockchainTest` represents a self-contained scenario:
+/// - It initializes a fresh blockchain state.
+/// - It sequentially decodes, executes, and inserts a predefined set of blocks.
+/// - It then verifies that the resulting blockchain state (post-state) matches the expected
+///   outcome.
+///
+/// Returns:
+/// - `Ok(())` if all blocks execute successfully and the final state is correct.
+/// - `Err(Error)` if any block fails to execute correctly, or if the post-state validation fails.
+fn run_case(case: &BlockchainTest) -> Result<(), Error> {
+    // Create a new test database and initialize a provider for the test case.
+    let chain_spec: Arc<ChainSpec> = Arc::new(case.network.into());
+    let provider = create_test_provider_factory_with_chain_spec(chain_spec.clone())
+        .database_provider_rw()
+        .unwrap();
+
+    // Insert the genesis block and the initial test state into the provider
+    let genesis_block = SealedBlock::<reth_primitives::Block>::from_sealed_parts(
+        case.genesis_block_header.clone().into(),
+        BlockBody::default(),
+    )
+    .try_recover()
+    .unwrap();
+
+    provider.insert_block(genesis_block, StorageLocation::Database)?;
+    case.pre.write_to_db(provider.tx_ref())?;
+
+    // Decode and insert blocks, creating a chain of blocks for the test case.
+    let mut blocks = Vec::with_capacity(case.blocks.len());
+    for block in &case.blocks {
+        let decoded = SealedBlock::<reth_primitives::Block>::decode(&mut block.rlp.as_ref())?;
+        let recovered_block = decoded.clone().try_recover().unwrap();
+
+        provider.insert_block(recovered_block.clone(), StorageLocation::Database)?;
+
+        blocks.push(recovered_block);
+    }
+    let last_block = blocks.last().cloned();
+
+    // Initialize executor with state
+    let _execution_witness = execute_blocks(&provider, &blocks, chain_spec.clone());
+
+    // Validate the post-state for the test case.
+    match (&case.post_state, &case.post_state_hash) {
+        (Some(state), None) => {
+            // Validate accounts in the state against the provider's database.
+            for (&address, account) in state {
+                account.assert_db(address, provider.tx_ref())?;
+            }
+        }
+        (None, Some(expected_state_root)) => {
+            // Insert state hashes into the provider based on the expected state root.
+            let last_block = last_block.unwrap_or_default();
+            provider.insert_hashes(
+                0..=last_block.number,
+                last_block.hash(),
+                *expected_state_root,
+            )?;
+        }
+        _ => return Err(Error::MissingPostState),
+    }
+
+    // Drop the provider without committing to the database.
+    drop(provider);
+    Ok(())
+}
+
+fn execute_blocks<
+    Provider: DBProvider
+        + StateWriter<Receipt = reth_primitives::Receipt>
+        + BlockHashReader
+        + StateCommitmentProvider,
+>(
+    provider: &Provider,
+    blocks_without_genesis: &[RecoveredBlock<Block<TransactionSigned>>],
+    chain_spec: Arc<ChainSpec>,
+) -> Result<Vec<ExecutionWitness>, Error> {
+    let executor_provider = EthExecutorProvider::ethereum(chain_spec);
+
+    let mut exec_witnesses = Vec::new();
+
+    for block in blocks_without_genesis.iter() {
+        let state_provider = LatestStateProviderRef::new(provider);
+        let state_db = StateProviderDatabase(&state_provider);
+        let block_executor = executor_provider.executor(state_db);
+
+        let mut witness_record = ExecutionWitnessRecord::default();
+
+        if let Ok(output) =
+            block_executor.execute_with_state_closure(&(*block).clone(), |statedb: &State<_>| {
+                witness_record.record_executed_state(statedb);
+            })
+        {
+            provider.write_state(
+                &ExecutionOutcome::single(block.number, output),
+                OriginalValuesKnown::Yes,
+                StorageLocation::Database,
+            )?;
+
+            let ExecutionWitnessRecord { hashed_state, codes, keys } = witness_record;
+            let state = state_provider.witness(Default::default(), hashed_state).unwrap();
+            let exec_witness = ExecutionWitness { state, codes, keys };
+            exec_witnesses.push(exec_witness);
+        };
+    }
+
+    Ok(exec_witnesses)
 }
 
 /// Returns whether the test at the given path should be skipped.
