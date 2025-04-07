@@ -58,13 +58,22 @@ pub enum StatelessValidationError {
     MissingAncestorHeader,
 
     /// Error when the computed state root does not match the one in the block header.
-
-    #[error("mismatched post block state root: {got}\n {expected}")]
-    StateRootMismatch { got: B256, expected: B256 },
+    #[error("mismatched post- state root: {got}\n {expected}")]
+    PostStateRootMismatch {
+        /// The computed post-state root
+        got: B256,
+        /// The expected post-state root; in the block header
+        expected: B256,
+    },
 
     /// Error when the computed pre-state root does not match the expected one.
     #[error("mismatched pre-state root: {got} \n {expected}")]
-    PreStateRootMismatch { got: B256, expected: B256 },
+    PreStateRootMismatch {
+        /// The computed pre-state root
+        got: B256,
+        /// The expected pre-state root from the previous block
+        expected: B256,
+    },
 }
 
 #[derive(Debug)]
@@ -117,7 +126,6 @@ pub struct Input {
 ///
 /// If all steps succeed the function returns `Some` containing the hash of the validated
 /// `current_block`.
-// TODO(Note): The code currently unwraps in a lot of places. This will be cleaned up.
 pub fn stateless_validation(
     current_block: RecoveredBlock<Block<TransactionSigned>>,
     witness: ExecutionWitness,
@@ -147,7 +155,6 @@ pub fn stateless_validation(
     // Execute the block
     let basic_block_executor = EthExecutorProvider::ethereum(chain_spec.clone());
     let executor = basic_block_executor.executor(db);
-    // TODO: map error properly
     let output = executor
         .execute(&current_block)
         .map_err(|_e| StatelessValidationError::StatelessExecutionFailed)?;
@@ -160,11 +167,10 @@ pub fn stateless_validation(
     // TODO: Remove rayon
     let hashed_state =
         HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state.par_iter());
-    // TODO: map error properly
     let state_root = crate::root::calculate_state_root(&mut sparse_trie, hashed_state)
         .map_err(|_e| StatelessValidationError::StatelessStateRootCalculationFailed)?;
     if state_root != current_block.state_root {
-        return Err(StatelessValidationError::StateRootMismatch {
+        return Err(StatelessValidationError::PostStateRootMismatch {
             got: state_root,
             expected: current_block.state_root,
         });
