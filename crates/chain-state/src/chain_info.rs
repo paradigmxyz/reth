@@ -88,7 +88,6 @@ where
     }
 
     /// Returns the canonical head of the chain.
-    #[allow(dead_code)]
     pub fn get_canonical_num_hash(&self) -> BlockNumHash {
         self.inner.canonical_head.read().num_hash()
     }

@@ -21,3 +21,4 @@ eyre.workspace = true
 [dev-dependencies]
 clap.workspace = true
 reth-cli-commands.workspace = true
+reth-ethereum-cli.workspace = true

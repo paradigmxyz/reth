@@ -50,6 +50,7 @@ impl WorkloadExecutor {
     }
 
     /// Returns access to the rayon pool
+    #[allow(unused)]
     pub(super) fn rayon_pool(&self) -> &Arc<rayon::ThreadPool> {
         &self.inner.rayon_pool
     }
