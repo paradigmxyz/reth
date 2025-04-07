@@ -10,6 +10,7 @@ use crate::tree::{
 use alloy_consensus::transaction::Recovered;
 use alloy_evm::Database;
 use alloy_primitives::{keccak256, map::B256Set, B256};
+use itertools::Itertools;
 use metrics::{Gauge, Histogram};
 use reth_evm::{ConfigureEvm, Evm, EvmFor};
 use reth_metrics::Metrics;
@@ -83,15 +84,11 @@ where
     fn spawn_all(&mut self) {
         let chunk_size = (self.pending.len() / self.max_concurrency).max(1);
 
-        // drain the entire pending vec
-        while !self.pending.is_empty() {
+        for chunk in &self.pending.drain(..).chunks(chunk_size) {
             let sender = self.actions_tx.clone();
             let ctx = self.ctx.clone();
+            let pending_chunk = chunk.collect::<Vec<_>>();
 
-            // prepare chunk by draining the pending vec, we min here so we don't panic if the
-            // pending vec is smaller than the chunk size
-            let chunk_end = chunk_size.min(self.pending.len());
-            let pending_chunk = self.pending.drain(..chunk_end).collect::<Vec<_>>();
             self.executor.spawn_blocking(move || {
                 let _ = ctx.transact_batch(&pending_chunk, sender);
             });
