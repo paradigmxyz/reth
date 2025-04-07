@@ -4,5 +4,5 @@ use reth_primitives_traits::NodePrimitives;
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait NodePrimitivesProvider {
     /// The node primitive types.
-    type Primitives: NodePrimitives + Clone + Default + 'static;
+    type Primitives: NodePrimitives + Unpin + Clone + Default + 'static;
 }

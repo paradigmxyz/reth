@@ -586,7 +586,7 @@ impl<C: Send + Sync, N: NodePrimitives> PruneCheckpointReader for NoopProvider<C
 impl<C, N> NodePrimitivesProvider for NoopProvider<C, N>
 where
     C: Send + Sync,
-    N: NodePrimitives + Clone + Default + 'static,
+    N: NodePrimitives + Unpin + Clone + Default + 'static,
 {
     type Primitives = N;
 }

@@ -10,6 +10,7 @@ use alloy_network::Ethereum;
 use alloy_primitives::{Bytes, U256};
 use derive_more::Deref;
 use reth_node_api::{FullNodeComponents, FullNodeTypes};
+use reth_primitives_traits::NodePrimitives;
 use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
     node::RpcNodeCoreExt,
@@ -18,9 +19,7 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{
     EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
 };
-use reth_storage_api::{
-    BlockReader, BlockReaderIdExt, NodePrimitivesProvider, ProviderBlock, ProviderReceipt,
-};
+use reth_storage_api::{BlockReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt};
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner, TokioTaskExecutor,
@@ -167,12 +166,12 @@ where
 
 impl<Provider, Pool, Network, EvmConfig> RpcNodeCore for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Provider: BlockReader + NodePrimitivesProvider + Clone + Unpin,
+    Provider: NodePrimitives + Clone + Unpin,
     Pool: Send + Sync + Clone + Unpin,
     Network: Send + Sync + Clone,
     EvmConfig: Send + Sync + Clone + Unpin,
 {
-    type Primitives = Provider::Primitives;
+    type Primitives = Provider;
     type Provider = Provider;
     type Pool = Pool;
     type Evm = EvmConfig;
@@ -203,13 +202,13 @@ where
 impl<Provider, Pool, Network, EvmConfig> RpcNodeCoreExt
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Provider: BlockReader + NodePrimitivesProvider + Clone + Unpin,
+    Provider: NodePrimitives + Clone + Unpin,
     Pool: Send + Sync + Clone + Unpin,
     Network: Send + Sync + Clone,
     EvmConfig: Send + Sync + Clone + Unpin,
 {
     #[inline]
-    fn cache(&self) -> &EthStateCache<ProviderBlock<Provider>, ProviderReceipt<Provider>> {
+    fn cache(&self) -> &EthStateCache<BlockTy<Provider>, ReceiptTy<Provider>> {
         self.inner.cache()
     }
 }
@@ -248,7 +247,7 @@ where
 
 /// Container type `EthApi`
 #[expect(missing_debug_implementations)]
-pub struct EthApiInner<Provider: BlockReader, Pool, Network, EvmConfig> {
+pub struct EthApiInner<Provider: NodePrimitives, Pool, Network, EvmConfig> {
     /// The transaction pool.
     pool: Pool,
     /// The provider that can interact with the chain.
@@ -256,7 +255,7 @@ pub struct EthApiInner<Provider: BlockReader, Pool, Network, EvmConfig> {
     /// An interface to interact with the network
     network: Network,
     /// All configured Signers
-    signers: parking_lot::RwLock<Vec<Box<dyn EthSigner<Provider::Transaction>>>>,
+    signers: parking_lot::RwLock<Vec<Box<dyn EthSigner<Provider::SignedTx>>>>,
     /// The async cache frontend for eth related data
     eth_cache: EthStateCache<Provider::Block, Provider::Receipt>,
     /// The async gas oracle frontend for gas price suggestions
@@ -419,7 +418,7 @@ where
     #[inline]
     pub const fn signers(
         &self,
-    ) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<Provider::Transaction>>>> {
+    ) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<Provider::SignedTx>>>> {
         &self.signers
     }
 

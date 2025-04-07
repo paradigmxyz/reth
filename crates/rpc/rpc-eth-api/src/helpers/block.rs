@@ -12,9 +12,7 @@ use alloy_rpc_types_eth::{Block, BlockTransactions, Header, Index};
 use futures::Future;
 use reth_node_api::BlockBody;
 use reth_primitives_traits::{BlockTy, ReceiptTy, RecoveredBlock, SealedBlock};
-use reth_provider::{
-    BlockIdReader, BlockReader, BlockReaderIdExt, ProviderHeader, ProviderReceipt,
-};
+use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt, ProviderHeader};
 use reth_rpc_types_compat::block::from_block;
 use std::sync::Arc;
 

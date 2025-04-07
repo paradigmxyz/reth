@@ -8,7 +8,7 @@ use alloy_primitives::{B256, U256};
 use alloy_rpc_types_eth::BlockId;
 use derive_more::{Deref, DerefMut, From, Into};
 use itertools::Itertools;
-use reth_primitives_traits::{BlockBody, SignedTransaction};
+use reth_primitives_traits::{BlockBody, NodePrimitives, SignedTransaction};
 use reth_rpc_server_types::{
     constants,
     constants::gas_oracle::{
@@ -16,7 +16,7 @@ use reth_rpc_server_types::{
         DEFAULT_MAX_GAS_PRICE, MAX_HEADER_HISTORY, MAX_REWARD_PERCENTILE_COUNT, SAMPLE_NUMBER,
     },
 };
-use reth_storage_api::{BlockReader, BlockReaderIdExt};
+use reth_storage_api::BlockReaderIdExt;
 use schnellru::{ByLength, LruMap};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Formatter};
@@ -78,7 +78,7 @@ impl Default for GasPriceOracleConfig {
 #[derive(Debug)]
 pub struct GasPriceOracle<Provider>
 where
-    Provider: BlockReader,
+    Provider: NodePrimitives,
 {
     /// The type used to subscribe to block events and get block info
     provider: Provider,

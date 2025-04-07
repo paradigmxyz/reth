@@ -11,7 +11,7 @@ use tokio::sync::{broadcast, watch};
 impl<C, N> CanonStateSubscriptions for NoopProvider<C, N>
 where
     C: Send + Sync,
-    N: NodePrimitives + Default + Clone + 'static,
+    N: NodePrimitives + Unpin + Default + Clone + 'static,
 {
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<N> {
         broadcast::channel(1).1

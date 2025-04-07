@@ -15,8 +15,7 @@ use reth_evm::{
 };
 use reth_node_api::NodePrimitives;
 use reth_primitives_traits::{
-    transaction::error::InvalidTransactionError, BlockTy, Receipt, ReceiptTy, RecoveredBlock,
-    SealedHeader, TxTy,
+    transaction::error::InvalidTransactionError, Receipt, RecoveredBlock, SealedHeader,
 };
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderError, ProviderHeader,

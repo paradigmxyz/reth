@@ -4,8 +4,8 @@ use crate::{AsEthApiError, FromEthApiError, RpcNodeCore};
 use alloy_json_rpc::RpcObject;
 use alloy_network::{Network, ReceiptResponse, TransactionResponse};
 use alloy_rpc_types_eth::Block;
-use reth_primitives_traits::{ReceiptTy, TxTy};
-use reth_provider::{ProviderTx, ReceiptProvider, TransactionsProvider};
+use reth_primitives_traits::TxTy;
+use reth_provider::{ReceiptProvider, TransactionsProvider};
 use reth_rpc_types_compat::TransactionCompat;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::{
