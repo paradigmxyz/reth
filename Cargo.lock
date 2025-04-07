@@ -7688,6 +7688,7 @@ dependencies = [
  "crossbeam-channel",
  "derive_more 2.0.1",
  "futures",
+ "itertools 0.14.0",
  "metrics",
  "mini-moka",
  "parking_lot",
