@@ -34,8 +34,8 @@ use reth_trie_sparse::{blinded::DefaultBlindedProviderFactory, SparseStateTrie};
 ///
 /// 3. **Chain Verification:** The code currently does not verify the [`ChainSpec`] and expects a
 ///    higher level function to assert that this is correct by, for example, asserting that it is
-///    equal to the Ethereum Mainnet ChainSpec or asserting against the genesis hash that this
-///    ChainSpec defines.
+///    equal to the Ethereum Mainnet `ChainSpec` or asserting against the genesis hash that this
+///    `ChainSpec` defines.
 ///
 /// High Level Overview of functionality:
 ///
@@ -115,7 +115,6 @@ pub fn stateless_validation(
 /// for the given `pre_state_root`.
 // Note: This approach might be inefficient for ZKVMs requiring minimal memory operations, which
 // would explain why they have for the most part re-implemented this function.
-
 pub fn verify_execution_witness(
     witness: &ExecutionWitness,
     pre_state_root: B256,
@@ -144,10 +143,10 @@ pub fn verify_execution_witness(
     // Calculate the root
     let computed_root = trie.root().unwrap();
 
-    (computed_root == pre_state_root).then(|| (trie, bytecode))
+    (computed_root == pre_state_root).then_some((trie, bytecode))
 }
 
-/// BLOCKHASH_HISTORICAL_HASH_LIMIT specifies the maximum number of historical
+/// `BLOCKHASH_HISTORICAL_HASH_LIMIT` specifies the maximum number of historical
 /// block hashes that the BLOCKHASH opcode is specified to allow.
 const BLOCKHASH_HISTORICAL_HASH_LIMIT: usize = 256;
 
