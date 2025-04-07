@@ -136,26 +136,29 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     }
     let last_block = blocks.last().cloned();
 
-    let execution_witnesses = execute_blocks(&provider, &blocks, chain_spec.clone())?;
-    // If block execution failed, then the execution witness will be empty
-    if !execution_witnesses.is_empty() {
-        let mut blocks_with_genesis = blocks;
-        blocks_with_genesis.insert(0, genesis_block);
-        let stateless_inputs =
-            compute_stateless_input(execution_witnesses, &blocks_with_genesis, chain_spec);
-
-        for (block, stateless_input) in
-            blocks_with_genesis.into_iter().skip(1).zip(stateless_inputs)
-        {
-            assert!(stateless_validation(
-                block,
-                stateless_input.execution_witness,
-                stateless_input.ancestor_headers,
-                stateless_input.chain_spec,
-            )
-            .is_some());
+    match execute_blocks(&provider, &blocks, chain_spec.clone()) {
+        Err(Error::BlockExecutionFailed) => {
+            // If block execution failed, then we don't generate a stateless witness, but we still
+            // do the post state checks
         }
-    }
+        Ok(execution_witnesses) => {
+            let mut blocks_with_genesis = blocks;
+            blocks_with_genesis.insert(0, genesis_block);
+            let stateless_inputs =
+                compute_stateless_input(execution_witnesses, &blocks_with_genesis, chain_spec);
+
+            for stateless_input in stateless_inputs {
+                assert!(stateless_validation(
+                    stateless_input.current_block,
+                    stateless_input.execution_witness,
+                    stateless_input.ancestor_headers,
+                    stateless_input.chain_spec,
+                )
+                .is_some());
+            }
+        }
+        Err(err) => return Err(err),
+    };
 
     // Validate the post-state for the test case.
     match (&case.post_state, &case.post_state_hash) {
@@ -203,22 +206,22 @@ fn execute_blocks<
 
         let mut witness_record = ExecutionWitnessRecord::default();
 
-        if let Ok(output) =
-            block_executor.execute_with_state_closure(&(*block).clone(), |statedb: &State<_>| {
+        let output = block_executor
+            .execute_with_state_closure(&(*block).clone(), |statedb: &State<_>| {
                 witness_record.record_executed_state(statedb);
             })
-        {
-            provider.write_state(
-                &ExecutionOutcome::single(block.number, output),
-                OriginalValuesKnown::Yes,
-                StorageLocation::Database,
-            )?;
+            .map_err(|_| Error::BlockExecutionFailed)?;
 
-            let ExecutionWitnessRecord { hashed_state, codes, keys } = witness_record;
-            let state = state_provider.witness(Default::default(), hashed_state)?;
-            let exec_witness = ExecutionWitness { state, codes, keys };
-            exec_witnesses.push(exec_witness);
-        };
+        provider.write_state(
+            &ExecutionOutcome::single(block.number, output),
+            OriginalValuesKnown::Yes,
+            StorageLocation::Database,
+        )?;
+
+        let ExecutionWitnessRecord { hashed_state, codes, keys } = witness_record;
+        let state = state_provider.witness(Default::default(), hashed_state)?;
+        let exec_witness = ExecutionWitness { state, codes, keys };
+        exec_witnesses.push(exec_witness);
     }
 
     Ok(exec_witnesses)
@@ -230,24 +233,24 @@ fn compute_stateless_input(
     chain_spec: Arc<ChainSpec>,
 ) -> Vec<Input> {
     let mut guest_inputs = Vec::new();
+
     assert_eq!(blocks_with_genesis.len() - 1, execution_witnesses.len());
-    for block in blocks_with_genesis.iter().skip(1) {
+
+    for (current_block, execution_witness) in
+        blocks_with_genesis.iter().skip(1).zip(execution_witnesses)
+    {
         // Skip the genesis block, it has no ancestors and no execution
         // TODO: This should ideally look inside of the block and check for blockhash opcodes
         // TODO: to see how many ancestors we need instead of just getting all of the previous
         // TODO: blocks
-        let ancestors = blocks_with_genesis[0..block.number as usize]
+        let ancestors = blocks_with_genesis[0..current_block.number as usize]
             .iter()
             .map(|block| block.header())
             .cloned()
             .collect();
 
-        // block number starts from 0, so current_block is block.number
-        let current_block = blocks_with_genesis[block.number as usize].clone();
-        let execution_witness = execution_witnesses[block.number as usize - 1].clone();
-
         guest_inputs.push(Input {
-            current_block,
+            current_block: current_block.clone(),
             execution_witness,
             ancestor_headers: ancestors,
             chain_spec: chain_spec.clone(),
