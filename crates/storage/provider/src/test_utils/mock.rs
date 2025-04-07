@@ -5,13 +5,13 @@ use crate::{
     StateProvider, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
     TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
-use core::fmt;
 use alloy_consensus::{constants::EMPTY_ROOT_HASH, transaction::TransactionMeta, Header};
 use alloy_eips::{eip4895::Withdrawals, BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
     keccak256, map::HashMap, Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue,
     TxHash, TxNumber, B256, U256,
 };
+use core::fmt;
 use parking_lot::Mutex;
 use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions};
 use reth_chainspec::{ChainInfo, EthChainSpec};

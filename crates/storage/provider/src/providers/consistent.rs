@@ -19,9 +19,7 @@ use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStatePro
 use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::{BundleStateInit, ExecutionOutcome, RevertsInit};
-use reth_node_types::{
-    BlockTy, BodyTy, HeaderTy, NodePrimitives, ReceiptTy, TxTy,
-};
+use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodePrimitives, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, BlockBody, RecoveredBlock, SealedBlock, SealedHeader, StorageEntry,
 };

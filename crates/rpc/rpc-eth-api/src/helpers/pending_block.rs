@@ -15,7 +15,8 @@ use reth_evm::{
 };
 use reth_node_api::NodePrimitives;
 use reth_primitives_traits::{
-    transaction::error::InvalidTransactionError, Receipt, RecoveredBlock, SealedHeader,
+    transaction::error::InvalidTransactionError, BlockTy, Receipt, ReceiptTy, RecoveredBlock,
+    SealedHeader, TxTy,
 };
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderError, ProviderHeader,
@@ -127,10 +128,7 @@ pub trait LoadPendingBlock:
         &self,
     ) -> impl Future<
         Output = Result<
-            Option<(
-                RecoveredBlock<<Self::Provider as BlockReader>::Block>,
-                Vec<ProviderReceipt<Self::Provider>>,
-            )>,
+            Option<(RecoveredBlock<BlockTy<Self::Primitives>>, Vec<ReceiptTy<Self::Primitives>>)>,
             Self::Error,
         >,
     > + Send
