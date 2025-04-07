@@ -13,7 +13,7 @@ use reth_primitives::{EthPrimitives, PooledTransaction};
 use std::{sync::Arc, time::Duration};
 use tracing::info;
 
-pub(crate) mod block_import;
+pub mod block_import;
 pub mod handshake;
 pub(crate) mod upgrade_status;
 

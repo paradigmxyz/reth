@@ -1,8 +1,13 @@
+use alloy_consensus::Block;
 use alloy_eips::HashOrNumber;
-use alloy_primitives::B256;
+use alloy_primitives::{B256, U128};
 use example_bsc_sdk::{
     chainspec::{bsc::bsc_mainnet, BscChainSpec},
-    node::BscNode,
+    consensus::ParliaConsensus,
+    node::{
+        network::block_import::{handle::ImportHandle, service::ImportService},
+        BscNode,
+    },
 };
 use reth::{
     args::RpcServerArgs,
@@ -10,16 +15,22 @@ use reth::{
     tasks::TaskManager,
 };
 use reth_eth_wire::HeadersDirection;
-use reth_network::{BlockDownloaderProvider, NetworkSyncUpdater, PeersInfo, SyncState};
+use reth_eth_wire_types::NewBlock;
+use reth_network::{
+    message::NewBlockMessage, BlockDownloaderProvider, NetworkSyncUpdater, PeersInfo, SyncState,
+};
+use reth_network_api::PeerId;
 use reth_network_p2p::{
     headers::client::{HeadersClient, HeadersRequest},
     BodiesClient,
 };
-use reth_provider::providers::BlockchainProvider;
+use reth_node_ethereum::EthEngineTypes;
+use reth_primitives::TransactionSigned;
+use reth_provider::{providers::BlockchainProvider, BlockNumReader};
 use std::{sync::Arc, time::Duration};
 use tokio::task;
 
-use tracing::info;
+use tracing::{error, info};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn can_sync_blocks() -> eyre::Result<()> {
@@ -28,7 +39,6 @@ async fn can_sync_blocks() -> eyre::Result<()> {
     let exec = tasks.executor();
 
     let bsc_chainspec = BscChainSpec { inner: bsc_mainnet() };
-
     let node_config = NodeConfig::new(Arc::new(bsc_chainspec))
         .with_unused_ports()
         .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
@@ -40,6 +50,17 @@ async fn can_sync_blocks() -> eyre::Result<()> {
         .with_add_ons(BscNode::default().add_ons())
         .launch()
         .await?;
+    let provider = node.provider.clone();
+    let consensus = Arc::new(ParliaConsensus::new(provider.clone()));
+
+    let (service, block_handle) = ImportService::new(consensus, node.beacon_engine_handle.clone());
+    let block_handle: ImportHandle<EthEngineTypes> = block_handle;
+    tokio::spawn(Box::pin(async move {
+        if let Err(e) = service.await {
+            error!("Import service error: {}", e);
+        }
+    }));
+
     let handle = node.network.clone();
 
     handle.update_sync_state(SyncState::Syncing);
@@ -76,16 +97,35 @@ async fn can_sync_blocks() -> eyre::Result<()> {
 
     info!("Successfully retrieved {} headers", headers.len());
     let hashes: Vec<B256> = headers.iter().map(|h| h.hash_slow()).collect::<Vec<_>>();
-    let bodies = {
+    let bodies: Vec<Block<TransactionSigned>> = {
         loop {
             let Ok(bodies) = fetcher.get_block_bodies(hashes.clone()).await else { continue };
             if bodies.1.len() == hashes.len() {
-                break bodies;
+                let mut blocks = Vec::new();
+                for (i, b) in bodies.1.iter().enumerate() {
+                    let header = headers[i].clone();
+                    let block = b.clone().into_block(header);
+                    blocks.push(block);
+                }
+                break blocks;
             }
         }
     };
 
-    info!("Successfully retrieved {} bodies", bodies.1.len());
+    info!("Successfully retrieved {} bodies", bodies.len());
+
+    for b in bodies {
+        let td = U128::from(b.header.difficulty);
+        let block = NewBlockMessage {
+            hash: b.header.hash_slow(),
+            block: Arc::new(NewBlock { block: b, td }),
+        };
+        block_handle.send_block(block, PeerId::random()).unwrap();
+    }
+    // give time to commit the blocks
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    let current_block = provider.best_block_number()?;
+    assert_eq!(current_block, 10);
 
     Ok(())
 }
