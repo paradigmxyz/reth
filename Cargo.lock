@@ -9851,6 +9851,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-stateless"
+version = "1.3.7"
+dependencies = [
+ "alloy-consensus",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-rpc-types-debug",
+ "alloy-trie",
+ "itertools 0.14.0",
+ "rayon",
+ "reth-chainspec",
+ "reth-ethereum-consensus",
+ "reth-evm",
+ "reth-evm-ethereum",
+ "reth-primitives",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-revm",
+ "reth-trie",
+ "reth-trie-common",
+ "reth-trie-sparse",
+ "tracing",
+]
+
+[[package]]
 name = "reth-static-file"
 version = "1.3.7"
 dependencies = [

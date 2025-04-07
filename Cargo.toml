@@ -108,6 +108,7 @@ members = [
     "crates/stages/api/",
     "crates/stages/stages/",
     "crates/stages/types/",
+    "crates/stateless",
     "crates/static-file/static-file",
     "crates/static-file/types/",
     "crates/storage/codecs/",
