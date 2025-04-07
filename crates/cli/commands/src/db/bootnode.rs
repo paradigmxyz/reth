@@ -1,14 +1,14 @@
 use clap::Parser;
 use rand::thread_rng;
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config};
-use reth_discv5::{Config, Discv5, discv5::Event};
+use reth_discv5::{discv5::Event, Config, Discv5};
 use reth_net_nat::NatResolver;
 use reth_network::error::{NetworkError, ServiceKind};
 use reth_network_peers::NodeRecord;
 use secp256k1::SECP256K1;
 use std::{net::SocketAddr, str::FromStr};
-use tokio_stream::StreamExt;
 use tokio::select;
+use tokio_stream::StreamExt;
 use tracing::info;
 
 /// The arguments for the `reth db bootnode` command.
