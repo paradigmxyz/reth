@@ -116,16 +116,17 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                     let SimBlock { block_overrides, state_overrides, calls } = block;
 
-                    evm_env.block_env.gas_limit = this.call_gas_limit();
                     if let Some(block_overrides) = block_overrides {
-                        if let Some(gas_limit) = block_overrides.gas_limit {
-                            if gas_limit > evm_env.block_env.gas_limit {
-                                return Err(EthApiError::InvalidTransaction(
-                                    RpcInvalidTransactionError::GasTooHigh,
+                        // ensure we dont allow uncapped gas limit per block
+                        if let Some(gas_limit_override) = block_overrides.gas_limit {
+                            if gas_limit_override > evm_env.block_env.gas_limit &&
+                                gas_limit_override > this.call_gas_limit()
+                            {
+                                return Err(
+                                    EthApiError::other(EthSimulateError::GasLimitReached).into()
                                 )
-                                .into());
                             }
-                            evm_env.block_env.gas_limit = gas_limit;
+                            evm_env.block_env.gas_limit = gas_limit_override;
                         }
                         apply_block_overrides(block_overrides, &mut db, &mut evm_env.block_env);
                     }
