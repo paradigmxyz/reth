@@ -14,7 +14,7 @@ services:
       - sepolia_data:/root/.local/share/reth/sepolia
       - holesky_data:/root/.local/share/reth/holesky
       - logs:/root/logs
-      - ./jwttoken:/root/jwt:ro
+      - ./jwttoken:/root/jwt/:ro
     # https://paradigmxyz.github.io/reth/run/troubleshooting.html#concurrent-database-access-error-using-containersdocker
     pid: host
     # For Sepolia, replace `--chain mainnet` with `--chain sepolia`
