@@ -211,12 +211,13 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
     /// first).
     /// This is useful for efficiently retrieving a sequence of blocks that might already be in
     /// cache without making separate database requests.
-    /// If the starting block is not in cache, an empty vector is returned.
+    /// Returns `None` if no blocks are found in the cache, otherwise returns an Option 
+    /// with at least one block.
     pub async fn get_cached_parent_blocks(
         &self,
         block_hash: B256,
         max_blocks: usize,
-    ) -> Vec<Arc<RecoveredBlock<B>>> {
+    ) -> Option<Vec<Arc<RecoveredBlock<B>>>> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetCachedParentBlocks {
             block_hash,
@@ -224,7 +225,12 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
             response_tx,
         });
 
-        rx.await.unwrap_or_default()
+        let blocks = rx.await.unwrap_or_default();
+        if blocks.is_empty() {
+            None
+        } else {
+            Some(blocks)
+        }
     }
 }
 
