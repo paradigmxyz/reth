@@ -148,13 +148,13 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
                 compute_stateless_input(execution_witnesses, &blocks_with_genesis, chain_spec);
 
             for stateless_input in stateless_inputs {
-                assert!(stateless_validation(
+                stateless_validation(
                     stateless_input.current_block,
                     stateless_input.execution_witness,
                     stateless_input.ancestor_headers,
                     stateless_input.chain_spec,
                 )
-                .is_some());
+                .expect("stateless validation failed");
             }
         }
         Err(err) => return Err(err),
