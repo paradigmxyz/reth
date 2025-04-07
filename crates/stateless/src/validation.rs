@@ -60,8 +60,6 @@ pub fn stateless_validation(
     chain_spec: Arc<ChainSpec>,
 ) -> Option<B256> {
     // Check that the ancestor headers form a contiguous chain and are not just random headers.
-    //
-    // This would make BLOCKHASH unsafe.
     let ancestor_hashes = compute_ancestor_hashes(&current_block, &ancestor_headers).unwrap();
 
     // Get the last ancestor header and retrieve its state root.
