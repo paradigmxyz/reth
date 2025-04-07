@@ -7,7 +7,7 @@
 
 use crate::{
     e2s_file::{E2StoreReader, E2StoreWriter},
-    e2s_types::{E2sError, Version, BLOCK_INDEX},
+    e2s_types::{E2sError, Version},
     era1_types::{BlockIndex, Era1Group, Era1Id, BLOCK_INDEX},
     execution_types::{
         self, Accumulator, BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts,
