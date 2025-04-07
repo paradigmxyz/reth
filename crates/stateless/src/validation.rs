@@ -59,7 +59,7 @@ pub fn stateless_validation(
     ancestor_headers: Vec<Header>,
     chain_spec: Arc<ChainSpec>,
 ) -> Option<B256> {
-    // 0. Check that the ancestor headers form a contiguous chain and are not just random headers.
+    // Check that the ancestor headers form a contiguous chain and are not just random headers.
     //
     // This would make BLOCKHASH unsafe.
     let ancestor_hashes = compute_ancestor_hashes(&current_block, &ancestor_headers).unwrap();
@@ -75,15 +75,14 @@ pub fn stateless_validation(
         None => return None, // Need at least one ancestor header, to fetch pre_state root
     };
 
-    // 1. First verify that the pre-state reads are correct
+    // First verify that the pre-state reads are correct
     let (mut sparse_trie, bytecode) = verify_execution_witness(&witness, pre_state_root)?;
 
-    // 2. Create an in-memory database that will use the reads to validate the block
+    // Create an in-memory database that will use the reads to validate the block
     let db = WitnessDatabase::new(&sparse_trie, bytecode, ancestor_hashes);
 
-    // 3. Execute the block
+    // Execute the block
     let basic_block_executor = EthExecutorProvider::ethereum(chain_spec.clone());
-
     let executor = basic_block_executor.executor(db);
     let output = executor.execute(&current_block).unwrap();
 
