@@ -661,7 +661,7 @@ where
             })
             .await?;
 
-        // For zkVMs, they need a contiguous set of block headers in order to prove that the block
+        // For stateless execution, one needs a contiguous set of block headers in order to prove that the block
         // hashes are correct.
         //
         // Fetch the smallest block and return an empty vector if there were no block_ids
