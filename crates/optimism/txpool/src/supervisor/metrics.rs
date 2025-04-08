@@ -108,16 +108,19 @@ pub struct SafetyLevelCounter {
 impl SafetyLevelCounter {
     /// Increases counter for given [`SafetyLevel`].
     pub(crate) fn increase_safety_level_count_once_for(&self, level: SafetyLevel) {
-        if matches!(level, SafetyLevel::Invalid) {
-            self.invalid.fetch_add(1, Ordering::Relaxed);
-        } else if matches!(level, SafetyLevel::Unsafe) {
-            self.r#unsafe.fetch_add(1, Ordering::Relaxed);
-        } else if matches!(level, SafetyLevel::CrossUnsafe) {
-            self.cross_unsafe.fetch_add(1, Ordering::Relaxed);
-        } else if matches!(level, SafetyLevel::LocalSafe) {
-            self.local_safe.fetch_add(1, Ordering::Relaxed);
-        } else if matches!(level, SafetyLevel::Safe) {
-            self.safe.fetch_add(1, Ordering::Relaxed);
+        let Self { invalid, r#unsafe, cross_unsafe, local_safe, safe } = self;
+        match level {
+            SafetyLevel::Invalid => _ = invalid.fetch_add(1, Ordering::Relaxed),
+            SafetyLevel::Unsafe => _ = r#unsafe.fetch_add(1, Ordering::Relaxed),
+            SafetyLevel::CrossUnsafe => _ = cross_unsafe.fetch_add(1, Ordering::Relaxed),
+            SafetyLevel::LocalSafe => _ = local_safe.fetch_add(1, Ordering::Relaxed),
+            SafetyLevel::Safe => _ = safe.fetch_add(1, Ordering::Relaxed),
+            SafetyLevel::Finalized => {
+                debug_assert!(
+                    false,
+                    "message of max safety level always meets min safety requirement"
+                )
+            }
         }
     }
 }
