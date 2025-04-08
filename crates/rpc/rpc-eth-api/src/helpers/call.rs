@@ -281,11 +281,12 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
             let this = self.clone();
             self.spawn_with_state_at_block(at.into(), move |state| {
-                let mut all_results = Vec::new(); // Accumulate results from all bundles
+                let mut results = Vec::new();
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
                 if replay_block_txs {
-                    // Replay transactions before processing bundles if needed
+                    // only need to replay the transactions in the block if not all transactions are
+                    // to be replayed
                     let block_transactions = block.transactions_recovered().take(num_txs);
                     for tx in block_transactions {
                         let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);
@@ -294,9 +295,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     }
                 }
 
-                let initial_state_overrides = state_override.take();
-                let mut is_first_transaction = true;
-
+                // transact all bundles
                 for bundle in bundles {
                     let Bundle { transactions, block_override } = bundle;
                     if transactions.is_empty() {
@@ -305,19 +304,13 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     }
 
                     let block_overrides = block_override.map(Box::new);
-                    let mut current_bundle_transactions = transactions.into_iter().peekable();
 
-                    while let Some(tx) = current_bundle_transactions.next() {
-                        // Apply state overrides only for the very first transaction across all
-                        // bundles
-                        let state_overrides_for_tx = if is_first_transaction {
-                            is_first_transaction = false;
-                            initial_state_overrides.clone()
-                        } else {
-                            None
-                        };
+                    // transact all transactions in the bundle
+                    for tx in transactions {
+                        // Apply overrides, state overrides are only applied for the first tx in the
+                        // request
                         let overrides =
-                            EvmOverrides::new(state_overrides_for_tx, block_overrides.clone());
+                            EvmOverrides::new(state_override.take(), block_overrides.clone());
 
                         let (current_evm_env, prepared_tx) =
                             this.prepare_call_env(evm_env.clone(), tx, &mut db, overrides)?;
@@ -325,11 +318,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                         match ensure_success::<_, Self::Error>(res.result) {
                             Ok(output) => {
-                                all_results
-                                    .push(EthCallResponse { value: Some(output), error: None });
+                                results.push(EthCallResponse { value: Some(output), error: None });
                             }
                             Err(err) => {
-                                all_results.push(EthCallResponse {
+                                results.push(EthCallResponse {
                                     value: None,
                                     error: Some(err.to_string()),
                                 });
@@ -342,7 +334,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     }
                 }
 
-                Ok(all_results)
+                Ok(results)
             })
             .await
         }
