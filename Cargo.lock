@@ -7783,6 +7783,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-era-downloader"
+version = "1.3.8"
+dependencies = [
+ "eyre",
+ "futures",
+ "reqwest",
+ "tokio",
+]
+
+[[package]]
 name = "reth-errors"
 version = "1.3.9"
 dependencies = [

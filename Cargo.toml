@@ -29,6 +29,7 @@ members = [
     "crates/engine/tree/",
     "crates/engine/util/",
     "crates/era",
+    "crates/era-downloader",
     "crates/errors/",
     "crates/ethereum-forks/",
     "crates/ethereum/cli/",
@@ -344,6 +345,7 @@ reth-engine-service = { path = "crates/engine/service" }
 reth-engine-util = { path = "crates/engine/util" }
 reth-errors = { path = "crates/errors" }
 reth-era = { path = "crates/era" }
+reth-era-downloader = { path = "crates/era-downloader" }
 reth-eth-wire = { path = "crates/net/eth-wire" }
 reth-eth-wire-types = { path = "crates/net/eth-wire-types" }
 reth-ethereum-cli = { path = "crates/ethereum/cli" }
