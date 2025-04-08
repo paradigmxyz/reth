@@ -157,9 +157,11 @@ where
                 }
             }
             _ => {
-                // set dynamic 1559 fee
+                // set dynamic 1559 fees
                 if tx.max_fee_per_gas.is_none() {
                     tx.max_fee_per_gas = Some(0);
+                }
+                if tx.max_priority_fee_per_gas.is_none() {
                     tx.max_priority_fee_per_gas = Some(0);
                 }
             }
