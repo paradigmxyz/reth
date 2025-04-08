@@ -119,8 +119,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     if let Some(block_overrides) = block_overrides {
                         // ensure we dont allow uncapped gas limit per block
                         if let Some(gas_limit_override) = block_overrides.gas_limit {
-                            if gas_limit_override > evm_env.block_env.gas_limit
-                                && gas_limit_override > this.call_gas_limit()
+                            if gas_limit_override > evm_env.block_env.gas_limit &&
+                                gas_limit_override > this.call_gas_limit()
                             {
                                 return Err(
                                     EthApiError::other(EthSimulateError::GasLimitReached).into()
@@ -149,8 +149,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         }
 
                         if txs_without_gas_limit > 0 {
-                            (block_env.gas_limit - total_specified_gas)
-                                / txs_without_gas_limit as u64
+                            (block_env.gas_limit - total_specified_gas) /
+                                txs_without_gas_limit as u64
                         } else {
                             0
                         }
@@ -308,7 +308,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     let mut current_bundle_transactions = transactions.into_iter().peekable();
 
                     while let Some(tx) = current_bundle_transactions.next() {
-                        // Apply state overrides only for the very first transaction across all bundles
+                        // Apply state overrides only for the very first transaction across all
+                        // bundles
                         let state_overrides_for_tx = if is_first_transaction {
                             is_first_transaction = false;
                             initial_state_overrides.clone()
@@ -335,7 +336,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             }
                         }
 
-                        // Commit state changes after each transaction to allow subsequent calls to see the updates
+                        // Commit state changes after each transaction to allow subsequent calls to
+                        // see the updates
                         db.commit(res.state);
                     }
                 }
