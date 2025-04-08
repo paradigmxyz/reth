@@ -29,7 +29,6 @@ pub use error::*;
 pub use reth_rpc_api::EngineApiServer;
 
 #[cfg(test)]
-#[expect(unused_imports)]
 mod tests {
     // silence unused import warning
     use alloy_rlp as _;

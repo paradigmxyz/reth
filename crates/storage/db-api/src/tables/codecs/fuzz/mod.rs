@@ -19,7 +19,7 @@ macro_rules! impl_fuzzer_with_input {
                 #[expect(unused_imports)]
                 use reth_primitives_traits::*;
 
-                #[expect(unused_imports)]
+                #[allow(unused_imports)]
                 use super::inputs::*;
 
                 use crate::models::*;
