@@ -2,6 +2,7 @@ use alloy_consensus::{
     Eip2718EncodableReceipt, Eip658Value, Receipt, ReceiptWithBloom, RlpDecodableReceipt,
     RlpEncodableReceipt, TxReceipt, Typed2718,
 };
+use alloy_eips::{eip2718::Eip2718Result, Decodable2718, Encodable2718};
 use alloy_primitives::{Bloom, Log};
 use alloy_rlp::{BufMut, Decodable, Header};
 use op_alloy_consensus::{OpDepositReceipt, OpTxType};
@@ -181,6 +182,33 @@ impl RlpDecodableReceipt for OpReceipt {
         }
 
         Ok(this)
+    }
+}
+
+impl Decodable2718 for OpReceipt {
+    fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
+        let receipt_with_bloom = Self::rlp_decode_inner(buf, OpTxType::try_from(ty)?)?;
+        Ok(receipt_with_bloom.receipt)
+    }
+
+    fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
+        let receipt_with_bloom = Self::rlp_decode_inner(buf, OpTxType::Legacy)?;
+        Ok(receipt_with_bloom.receipt)
+    }
+}
+
+impl Encodable2718 for OpReceipt {
+    fn encode_2718_len(&self) -> usize {
+        !self.tx_type().is_legacy() as usize +
+            self.rlp_header_inner(&self.bloom()).length_with_payload()
+    }
+
+    fn encode_2718(&self, out: &mut dyn BufMut) {
+        if !self.tx_type().is_legacy() {
+            out.put_u8(self.tx_type() as u8);
+        }
+        self.rlp_header_inner(&self.bloom()).encode(out);
+        self.rlp_encode_fields(&self.bloom(), out);
     }
 }
 
