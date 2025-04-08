@@ -679,7 +679,7 @@ pub trait Call:
         for tx in transactions {
             if *tx.tx_hash() == target_tx_hash {
                 // reached the target transaction
-                break;
+                break
             }
 
             let tx_env = self.evm_config().tx_env(tx);
@@ -729,7 +729,7 @@ pub trait Call:
             // configured gas exceeds limit
             return Err(
                 EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh).into()
-            );
+            )
         }
 
         // apply configured gas cap
