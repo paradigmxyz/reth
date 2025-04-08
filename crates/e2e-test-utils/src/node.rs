@@ -4,7 +4,6 @@ use alloy_eips::BlockId;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealable, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use alloy_rpc_types_eth::BlockNumberOrTag;
-use eyre::Result;
 use futures_util::Future;
 use jsonrpsee::http_client::{transport::HttpBackend, HttpClient};
 use reth_chainspec::EthereumHardforks;
