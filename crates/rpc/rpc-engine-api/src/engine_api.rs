@@ -1233,12 +1233,11 @@ where
         Ok(self.get_blobs_v1_metered(versioned_hashes)?)
     }
 
-    async fn get_blobs_v2(
-        &self,
-        versioned_hashes: Vec<B256>,
-    ) -> RpcResult<Vec<Option<BlobAndProofV2>>> {
+    async fn get_blobs_v2(&self, versioned_hashes: Vec<B256>) -> RpcResult<Vec<BlobAndProofV2>> {
         trace!(target: "rpc::engine", "Serving engine_getBlobsV2");
-        Ok(self.get_blobs_v2_metered(versioned_hashes)?)
+        let result = self.get_blobs_v2_metered(versioned_hashes)?;
+        // 2. Client software **MUST** return an empty array in case of any missing blobs.
+        Ok(result.into_iter().collect::<Option<Vec<_>>>().unwrap_or_default())
     }
 }
 

@@ -242,10 +242,7 @@ pub trait EngineApi<Engine: EngineTypes> {
 
     /// Fetch blobs for the consensus layer from the blob store.
     #[method(name = "getBlobsV2")]
-    async fn get_blobs_v2(
-        &self,
-        versioned_hashes: Vec<B256>,
-    ) -> RpcResult<Vec<Option<BlobAndProofV2>>>;
+    async fn get_blobs_v2(&self, versioned_hashes: Vec<B256>) -> RpcResult<Vec<BlobAndProofV2>>;
 }
 
 /// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>

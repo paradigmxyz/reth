@@ -500,7 +500,7 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         versioned_hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError>;
 
-    /// Return blobs with EIP-7594 style pr for a list of blob versioned hashes.
+    /// Return blobs with EIP-7594 style proofs for a list of blob versioned hashes.
     fn get_blobs_for_versioned_hashes_v2(
         &self,
         versioned_hashes: &[B256],
