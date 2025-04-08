@@ -232,7 +232,7 @@ pub trait EthApi<T: RpcObject, B: RpcObject, R: RpcObject, H: RpcObject> {
     #[method(name = "callMany")]
     async fn call_many(
         &self,
-        bundle: Bundle,
+        bundle: Vec<Bundle>,
         state_context: Option<StateContext>,
         state_override: Option<StateOverride>,
     ) -> RpcResult<Vec<EthCallResponse>>;
@@ -656,7 +656,7 @@ where
     /// Handler for: `eth_callMany`
     async fn call_many(
         &self,
-        bundle: Bundle,
+        bundle: Vec<Bundle>,
         state_context: Option<StateContext>,
         state_override: Option<StateOverride>,
     ) -> RpcResult<Vec<EthCallResponse>> {

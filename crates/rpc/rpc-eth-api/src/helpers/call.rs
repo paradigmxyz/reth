@@ -73,7 +73,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     ) -> impl Future<Output = SimulatedBlocksResult<Self::NetworkTypes, Self::Error>> + Send {
         async move {
             if payload.block_state_calls.len() > self.max_simulate_blocks() as usize {
-                return Err(EthApiError::InvalidParams("too many blocks.".to_string()).into())
+                return Err(EthApiError::InvalidParams("too many blocks.".to_string()).into());
             }
 
             let block = block.unwrap_or_default();
@@ -86,7 +86,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             } = payload;
 
             if block_state_calls.is_empty() {
-                return Err(EthApiError::InvalidParams(String::from("calls are empty.")).into())
+                return Err(EthApiError::InvalidParams(String::from("calls are empty.")).into());
             }
 
             let base_block =
@@ -119,12 +119,12 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     if let Some(block_overrides) = block_overrides {
                         // ensure we dont allow uncapped gas limit per block
                         if let Some(gas_limit_override) = block_overrides.gas_limit {
-                            if gas_limit_override > evm_env.block_env.gas_limit &&
-                                gas_limit_override > this.call_gas_limit()
+                            if gas_limit_override > evm_env.block_env.gas_limit
+                                && gas_limit_override > this.call_gas_limit()
                             {
                                 return Err(
                                     EthApiError::other(EthSimulateError::GasLimitReached).into()
-                                )
+                                );
                             }
                         }
                         apply_block_overrides(block_overrides, &mut db, &mut evm_env.block_env);
@@ -145,12 +145,12 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             return Err(EthApiError::Other(Box::new(
                                 EthSimulateError::BlockGasLimitExceeded,
                             ))
-                            .into())
+                            .into());
                         }
 
                         if txs_without_gas_limit > 0 {
-                            (block_env.gas_limit - total_specified_gas) /
-                                txs_without_gas_limit as u64
+                            (block_env.gas_limit - total_specified_gas)
+                                / txs_without_gas_limit as u64
                         } else {
                             0
                         }
@@ -228,16 +228,14 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     /// optionality of state overrides
     fn call_many(
         &self,
-        bundle: Bundle,
+        bundles: Vec<Bundle>,
         state_context: Option<StateContext>,
         mut state_override: Option<StateOverride>,
     ) -> impl Future<Output = Result<Vec<EthCallResponse>, Self::Error>> + Send {
         async move {
-            let Bundle { transactions, block_override } = bundle;
-            if transactions.is_empty() {
-                return Err(
-                    EthApiError::InvalidParams(String::from("transactions are empty.")).into()
-                )
+            // Check if the vector of bundles is empty
+            if bundles.is_empty() {
+                return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into());
             }
 
             let StateContext { transaction_index, block_number } =
@@ -283,52 +281,70 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
             let this = self.clone();
             self.spawn_with_state_at_block(at.into(), move |state| {
-                let mut results = Vec::with_capacity(transactions.len());
+                let mut all_results = Vec::new(); // Accumulate results from all bundles
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
                 if replay_block_txs {
-                    // only need to replay the transactions in the block if not all transactions are
-                    // to be replayed
-                    let transactions = block.transactions_recovered().take(num_txs);
-                    for tx in transactions {
+                    // Replay transactions before processing bundles if needed
+                    let block_transactions = block.transactions_recovered().take(num_txs);
+                    for tx in block_transactions {
                         let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);
                         let (res, _) = this.transact(&mut db, evm_env.clone(), tx_env)?;
                         db.commit(res.state);
                     }
                 }
 
-                let block_overrides = block_override.map(Box::new);
+                // Apply state overrides only once before processing any bundles
+                let initial_state_overrides = state_override.take();
+                let mut is_first_transaction = true; // Flag to apply initial state override only once
 
-                let mut transactions = transactions.into_iter().peekable();
-                while let Some(tx) = transactions.next() {
-                    // apply state overrides only once, before the first transaction
-                    let state_overrides = state_override.take();
-                    let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
-
-                    let (evm_env, tx) =
-                        this.prepare_call_env(evm_env.clone(), tx, &mut db, overrides)?;
-                    let (res, _) = this.transact(&mut db, evm_env, tx)?;
-
-                    match ensure_success::<_, Self::Error>(res.result) {
-                        Ok(output) => {
-                            results.push(EthCallResponse { value: Some(output), error: None });
-                        }
-                        Err(err) => {
-                            results.push(EthCallResponse {
-                                value: None,
-                                error: Some(err.to_string()),
-                            });
-                        }
+                // Iterate over each bundle in the input vector
+                for bundle in bundles {
+                    let Bundle { transactions, block_override } = bundle;
+                    if transactions.is_empty() {
+                        // Skip empty bundles
+                        continue;
                     }
 
-                    if transactions.peek().is_some() {
-                        // need to apply the state changes of this call before executing the next
-                        // call
+                    let block_overrides = block_override.map(Box::new);
+                    let mut current_bundle_transactions = transactions.into_iter().peekable();
+
+                    while let Some(tx) = current_bundle_transactions.next() {
+                        // Apply state overrides only for the very first transaction across all bundles
+                        let state_overrides_for_tx = if is_first_transaction {
+                            is_first_transaction = false; // Clear flag after first use
+                            initial_state_overrides.clone()
+                        } else {
+                            None
+                        };
+                        let overrides =
+                            EvmOverrides::new(state_overrides_for_tx, block_overrides.clone());
+
+                        // Prepare and execute the transaction
+                        let (current_evm_env, prepared_tx) =
+                            this.prepare_call_env(evm_env.clone(), tx, &mut db, overrides)?;
+                        let (res, _) = this.transact(&mut db, current_evm_env, prepared_tx)?;
+
+                        // Store the result
+                        match ensure_success::<_, Self::Error>(res.result) {
+                            Ok(output) => {
+                                all_results
+                                    .push(EthCallResponse { value: Some(output), error: None });
+                            }
+                            Err(err) => {
+                                all_results.push(EthCallResponse {
+                                    value: None,
+                                    error: Some(err.to_string()),
+                                });
+                            }
+                        }
+
+                        // Commit state changes after each transaction to allow subsequent calls to see the updates
                         db.commit(res.state);
                     }
                 }
 
-                Ok(results)
+                Ok(all_results) // Return accumulated results
             })
             .await
         }
@@ -397,11 +413,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             ExecutionResult::Halt { reason, gas_used } => {
                 let error =
                     Some(Self::Error::from_evm_halt(reason, tx_env.gas_limit()).to_string());
-                return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
+                return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error });
             }
             ExecutionResult::Revert { output, gas_used } => {
                 let error = Some(RevertError::new(output).to_string());
-                return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
+                return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error });
             }
             ExecutionResult::Success { .. } => {}
         };
@@ -667,7 +683,7 @@ pub trait Call:
         for tx in transactions {
             if *tx.tx_hash() == target_tx_hash {
                 // reached the target transaction
-                break
+                break;
             }
 
             let tx_env = self.evm_config().tx_env(tx);
@@ -717,7 +733,7 @@ pub trait Call:
             // configured gas exceeds limit
             return Err(
                 EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh).into()
-            )
+            );
         }
 
         // apply configured gas cap
