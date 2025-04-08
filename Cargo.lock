@@ -7774,6 +7774,7 @@ dependencies = [
  "ethereum_ssz",
  "ethereum_ssz_derive",
  "snap",
+ "tempfile",
  "thiserror 2.0.12",
 ]
 
