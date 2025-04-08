@@ -125,25 +125,24 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     case.pre.write_to_db(provider.tx_ref())?;
 
     // Decode and insert blocks, creating a chain of blocks for the test case.
-    let mut blocks = Vec::with_capacity(case.blocks.len());
+    let mut blocks_with_genesis = Vec::with_capacity(case.blocks.len() + 1);
+    blocks_with_genesis.push(genesis_block.clone());
     for block in &case.blocks {
         let decoded = SealedBlock::<reth_primitives::Block>::decode(&mut block.rlp.as_ref())?;
         let recovered_block = decoded.clone().try_recover().unwrap();
 
         provider.insert_block(recovered_block.clone(), StorageLocation::Database)?;
 
-        blocks.push(recovered_block);
+        blocks_with_genesis.push(recovered_block);
     }
-    let last_block = blocks.last().cloned();
+    let last_block = blocks_with_genesis.last().cloned();
 
-    match execute_blocks(&provider, &blocks, chain_spec.clone()) {
+    match execute_blocks(&provider, &blocks_with_genesis, chain_spec.clone()) {
         Err(Error::BlockExecutionFailed) => {
             // If block execution failed, then we don't generate a stateless witness, but we still
             // do the post state checks
         }
         Ok(execution_witnesses) => {
-            let mut blocks_with_genesis = blocks;
-            blocks_with_genesis.insert(0, genesis_block);
             let stateless_inputs =
                 compute_stateless_input(execution_witnesses, &blocks_with_genesis, chain_spec);
 
@@ -192,14 +191,14 @@ fn execute_blocks<
         + StateCommitmentProvider,
 >(
     provider: &Provider,
-    blocks_without_genesis: &[RecoveredBlock<Block<TransactionSigned>>],
+    blocks_with_genesis: &[RecoveredBlock<Block<TransactionSigned>>],
     chain_spec: Arc<ChainSpec>,
 ) -> Result<Vec<ExecutionWitness>, Error> {
     let executor_provider = EthExecutorProvider::ethereum(chain_spec);
 
     let mut exec_witnesses = Vec::new();
 
-    for block in blocks_without_genesis {
+    for block in blocks_with_genesis.iter().skip(1) {
         let state_provider = LatestStateProviderRef::new(provider);
         let state_db = StateProviderDatabase(&state_provider);
         let block_executor = executor_provider.executor(state_db);
