@@ -8,12 +8,10 @@ homepage.workspace = true
 repository.workspace = true
 exclude.workspace = true
 
-
 [lints]
 workspace = true
 
 [dependencies]
-
 # alloy
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
