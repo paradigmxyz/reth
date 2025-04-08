@@ -108,6 +108,8 @@ where
 
 /// Goes over the list of [`TransactionRequest`]s and populates missing fields trying to resolve
 /// them into primitive transactions.
+///
+/// This will set the defaults as defined in <https://github.com/ethereum/execution-apis/blob/e56d3208789259d0b09fa68e9d8594aa4d73c725/docs/ethsimulatev1-notes.md#default-values-for-transactions>
 pub fn resolve_transaction<DB: Database, Tx, T: TransactionCompat<Tx>>(
     mut tx: TransactionRequest,
     default_gas_limit: u64,
@@ -118,7 +120,7 @@ pub fn resolve_transaction<DB: Database, Tx, T: TransactionCompat<Tx>>(
 where
     DB::Error: Into<EthApiError>,
 {
-    // If we're missing any fields and validation is disabled, we try filling nonce, gas and
+    // If we're missing any fields we try to fill nonce, gas and
     // gas price.
     let tx_type = tx.preferred_type();
 
@@ -146,12 +148,21 @@ where
         tx.to = Some(TxKind::Create);
     }
 
-    if tx.buildable_type().is_none() && tx_type == TxType::Eip1559 {
-        if tx.max_fee_per_gas.is_none() {
-            tx.max_fee_per_gas = Some(0);
-            tx.max_priority_fee_per_gas = Some(0);
-        } else if tx.gas_price.is_none() {
-            tx.gas_price = Some(0);
+    // if we can't build the _entire_ transaction yet, we need to check the fee values
+    if tx.buildable_type().is_none() {
+        match tx_type {
+            TxType::Legacy | TxType::Eip2930 => {
+                if tx.gas_price.is_none() {
+                    tx.gas_price = Some(0);
+                }
+            }
+            _ => {
+                // set dynamic 1559 fee
+                if tx.max_fee_per_gas.is_none() {
+                    tx.max_fee_per_gas = Some(0);
+                    tx.max_priority_fee_per_gas = Some(0);
+                }
+            }
         }
     }
 

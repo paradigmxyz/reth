@@ -84,9 +84,10 @@ where
 }
 
 //tests for simulate
+#[cfg(test)]
 mod tests {
-    #![allow(unused_imports)]
     use super::*;
+    use alloy_consensus::TxType;
     use reth_rpc_eth_types::simulate::resolve_transaction;
     use revm::database::CacheDB;
 
@@ -111,11 +112,12 @@ mod tests {
 
         let tx = TransactionRequest { gas_price: Some(100), ..Default::default() };
 
-        let result = resolve_transaction(tx, 21000, 1, &mut db, &builder).unwrap();
+        let tx = resolve_transaction(tx, 21000, 1, &mut db, &builder).unwrap();
 
-        let tx = result.into_inner();
+        assert_eq!(tx.tx_type(), TxType::Legacy);
+
+        let tx = tx.into_inner();
         assert_eq!(tx.gas_price(), Some(100));
-        assert_eq!(tx.max_fee_per_gas(), 100);
         assert_eq!(tx.max_priority_fee_per_gas(), None);
     }
 
@@ -132,6 +134,7 @@ mod tests {
 
         let result = resolve_transaction(tx, 21000, 1, &mut db, &builder).unwrap();
 
+        assert_eq!(result.tx_type(), TxType::Eip1559);
         let tx = result.into_inner();
         assert_eq!(tx.max_fee_per_gas(), 200);
         assert_eq!(tx.max_priority_fee_per_gas(), Some(10));
