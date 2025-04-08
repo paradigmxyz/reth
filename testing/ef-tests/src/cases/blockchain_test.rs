@@ -126,7 +126,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
 
     // Decode and insert blocks, creating a chain of blocks for the test case.
     let mut blocks_with_genesis = Vec::with_capacity(case.blocks.len() + 1);
-    blocks_with_genesis.push(genesis_block.clone());
+    blocks_with_genesis.push(genesis_block);
     for block in &case.blocks {
         let decoded = SealedBlock::<reth_primitives::Block>::decode(&mut block.rlp.as_ref())?;
         let recovered_block = decoded.clone().try_recover().unwrap();
@@ -226,7 +226,7 @@ fn execute_blocks<
     Ok(exec_witnesses)
 }
 
-/// Selects a contiguous range of items from a slice, ending just before the specified end_index.
+/// Selects a contiguous range of items from a slice, ending just before the specified `end_index`.
 ///
 /// # Arguments
 ///

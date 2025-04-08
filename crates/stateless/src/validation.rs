@@ -102,9 +102,9 @@ pub struct Input {
 ///
 /// 1. **Ancestor Header Verification:** Checks if the `ancestor_headers` are present, form a
 ///    contiguous chain back from `current_block`'s parent, and do not exceed the `BLOCKHASH` opcode
-///    limit using [`compute_ancestor_hashes`]. We must have at least one ancestor header, even if
-///    the `BLOCKHASH` opcode is not used because we need the state root of the previous block to
-///    verify the pre state reads.
+///    limit using `compute_ancestor_hashes`. We must have at least one ancestor header, even if the
+///    `BLOCKHASH` opcode is not used because we need the state root of the previous block to verify
+///    the pre state reads.
 ///
 /// 2. **Pre-State Verification:** Retrieves the expected `pre_state_root` from the parent header
 ///    from `ancestor_headers`. Verifies the provided [`ExecutionWitness`] against this root using

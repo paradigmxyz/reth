@@ -6,12 +6,12 @@
 //!
 //! # Key Components
 //!
-//! * [`WitnessDatabase`]: An implementation of [`reth_revm::Database`] that uses a
+//! * `WitnessDatabase`: An implementation of [`reth_revm::Database`] that uses a
 //!   [`reth_trie_sparse::SparseStateTrie`] populated from witness data, along with provided
 //!   bytecode and ancestor block hashes, to serve state reads during execution.
-//! * [`stateless_validation`]: The core function that orchestrates the stateless validation
-//!   process. It takes a block, its execution witness, ancestor headers, and chain specification,
-//!   then performs:
+//! * `stateless_validation`: The core function that orchestrates the stateless validation process.
+//!   It takes a block, its execution witness, ancestor headers, and chain specification, then
+//!   performs:
 //!     1. Witness verification against the parent block's state root.
 //!     2. Block execution using the `WitnessDatabase`.
 //!     3. Post-execution consensus checks.
@@ -19,9 +19,10 @@
 //!
 //! # Usage
 //!
-//! The primary entry point is typically the [`stateless_validation`] function. Callers need to
-//! provide the block to be validated along with accurately generated [`ExecutionWitness`] data
-//! corresponding to that block's execution trace and the necessary [`Header`]s of ancestor blocks.
+//! The primary entry point is typically the `validation::stateless_validation` function. Callers
+//! need to provide the block to be validated along with accurately generated `ExecutionWitness`
+//! data corresponding to that block's execution trace and the necessary Headers of ancestor
+//! blocks.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
