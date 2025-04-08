@@ -21,7 +21,7 @@ use super::metrics::SupervisorMetrics;
 pub const DEFAULT_SUPERVISOR_URL: &str = "http://localhost:1337/";
 
 /// The default request timeout to use
-const DEFAULT_REQUEST_TIMOUT: Duration = Duration::from_millis(100);
+const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(100);
 
 /// Implementation of the supervisor trait for the interop.
 #[derive(Debug)]
@@ -46,7 +46,7 @@ impl SupervisorClient {
         Self {
             client,
             safety,
-            timeout: DEFAULT_REQUEST_TIMOUT,
+            timeout: DEFAULT_REQUEST_TIMEOUT,
             metrics: SupervisorMetrics::default(),
         }
     }
