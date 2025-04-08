@@ -742,7 +742,6 @@ pub mod serde_bincode_compat {
 
     /// Bincode-compatible [`super::OpTypedTransaction`] serde implementation.
     #[derive(Debug, Serialize, Deserialize)]
-    #[allow(missing_docs)]
     enum OpTypedTransaction<'a> {
         Legacy(TxLegacy<'a>),
         Eip2930(TxEip2930<'a>),
