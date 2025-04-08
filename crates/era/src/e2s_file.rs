@@ -2,12 +2,14 @@
 //!
 //! See also <https://github.com/status-im/nimbus-eth2/blob/stable/docs/e2store.md>
 
-use crate::e2s_types::{E2sError, Entry};
-use std::io::{BufReader, Read, Seek, SeekFrom};
+use crate::e2s_types::{E2sError, Entry, Version};
+use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 
-/// A reader for `E2Store` files that wraps a [`BufReader`]
+/// A reader for `E2Store` files that wraps a [`BufReader`].
+
 #[derive(Debug)]
 pub struct E2StoreReader<R: Read> {
+    /// Buffered reader
     reader: BufReader<R>,
 }
 
@@ -46,6 +48,58 @@ impl<R: Read + Seek> E2StoreReader<R> {
         }
 
         Ok(entries)
+    }
+}
+
+/// A writer for `E2Store` files that wraps a [`BufWriter`].
+#[derive(Debug)]
+pub struct E2StoreWriter<W: Write> {
+    /// Buffered writer
+    writer: BufWriter<W>,
+    /// Tracks whether this writer has written a version entry
+    has_written_version: bool,
+}
+
+impl<W: Write> E2StoreWriter<W> {
+    /// Create a new [`E2StoreWriter`]
+    pub fn new(writer: W) -> Self {
+        Self { writer: BufWriter::new(writer), has_written_version: false }
+    }
+
+    /// Create a new [`E2StoreWriter`] and write the version entry
+    pub fn with_version(writer: W) -> Result<Self, E2sError> {
+        let mut writer = Self::new(writer);
+        writer.write_version()?;
+        Ok(writer)
+    }
+
+    /// Write the version entry as the first entry in the file.
+    /// This must be called before writing any other entries.
+    pub fn write_version(&mut self) -> Result<(), E2sError> {
+        if self.has_written_version {
+            return Ok(());
+        }
+
+        let version = Version;
+        version.encode(&mut self.writer)?;
+        self.has_written_version = true;
+        Ok(())
+    }
+
+    /// Write an entry to the file.
+    /// If a version entry has not been written yet, it will be added.
+    pub fn write_entry(&mut self, entry: &Entry) -> Result<(), E2sError> {
+        if !self.has_written_version {
+            self.write_version()?;
+        }
+
+        entry.write(&mut self.writer)?;
+        Ok(())
+    }
+
+    /// Flush any buffered data to the underlying writer
+    pub fn flush(&mut self) -> Result<(), E2sError> {
+        self.writer.flush().map_err(E2sError::Io)
     }
 }
 
@@ -191,6 +245,179 @@ mod tests {
 
         let third = reader.read_next_entry()?;
         assert!(third.is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_e2store_writer() -> Result<(), E2sError> {
+        let mut buffer = Vec::new();
+
+        {
+            let mut writer = E2StoreWriter::new(&mut buffer);
+
+            // Write version entry
+            writer.write_version()?;
+
+            // Write a block index entry
+            let block_entry = Entry::new(SLOT_INDEX, create_slot_index_data(1, &[1024]));
+            writer.write_entry(&block_entry)?;
+
+            // Write a custom entry
+            let custom_type = [0x99, 0x99];
+            let custom_entry = Entry::new(custom_type, vec![10, 11, 12]);
+            writer.write_entry(&custom_entry)?;
+
+            writer.flush()?;
+        }
+
+        let cursor = Cursor::new(&buffer);
+        let mut reader = E2StoreReader::new(cursor);
+
+        let entries = reader.entries()?;
+        assert_eq!(entries.len(), 3);
+        assert!(entries[0].is_version());
+        assert!(entries[1].is_slot_index());
+        assert_eq!(entries[2].entry_type, [0x99, 0x99]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_writer_implicit_version_insertion() -> Result<(), E2sError> {
+        let mut buffer = Vec::new();
+
+        {
+            // Writer without explicitly writing the version
+            let mut writer = E2StoreWriter::new(&mut buffer);
+
+            // Write an entry, it should automatically add a version first
+            let custom_type = [0x42, 0x42];
+            let custom_entry = Entry::new(custom_type, vec![1, 2, 3, 4]);
+            writer.write_entry(&custom_entry)?;
+
+            // Write another entry
+            let another_custom = Entry::new([0x43, 0x43], vec![5, 6, 7, 8]);
+            writer.write_entry(&another_custom)?;
+
+            writer.flush()?;
+        }
+
+        let cursor = Cursor::new(&buffer);
+        let mut reader = E2StoreReader::new(cursor);
+
+        let version = reader.read_version()?;
+        assert!(version.is_some(), "Version entry should have been auto-added");
+
+        let entries = reader.entries()?;
+        assert_eq!(entries.len(), 3);
+        assert!(entries[0].is_version());
+        assert_eq!(entries[1].entry_type, [0x42, 0x42]);
+        assert_eq!(entries[1].data, vec![1, 2, 3, 4]);
+        assert_eq!(entries[2].entry_type, [0x43, 0x43]);
+        assert_eq!(entries[2].data, vec![5, 6, 7, 8]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_writer_prevents_duplicate_versions() -> Result<(), E2sError> {
+        let mut buffer = Vec::new();
+
+        {
+            let mut writer = E2StoreWriter::new(&mut buffer);
+
+            // Call write_version multiple times, it should only write once
+            writer.write_version()?;
+            writer.write_version()?;
+            writer.write_version()?;
+
+            // Write an entry
+            let block_entry = Entry::new(SLOT_INDEX, create_slot_index_data(42, &[8192]));
+            writer.write_entry(&block_entry)?;
+
+            writer.flush()?;
+        }
+
+        // Verify only one version entry was written
+        let cursor = Cursor::new(&buffer);
+        let mut reader = E2StoreReader::new(cursor);
+
+        let entries = reader.entries()?;
+        assert_eq!(entries.len(), 2);
+        assert!(entries[0].is_version());
+        assert!(entries[1].is_slot_index());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_e2store_multiple_roundtrip_conversions() -> Result<(), E2sError> {
+        // Initial set of entries to test with varied types and sizes
+        let entry1 = Entry::new([0x01, 0x01], vec![1, 2, 3, 4, 5]);
+        let entry2 = Entry::new([0x02, 0x02], vec![10, 20, 30, 40, 50]);
+        let entry3 = Entry::new(SLOT_INDEX, create_slot_index_data(123, &[45678]));
+        let entry4 = Entry::new([0xFF, 0xFF], Vec::new());
+
+        println!("Initial entries count: 4");
+
+        // First write cycle : create initial buffer
+        let mut buffer1 = Vec::new();
+        {
+            let mut writer = E2StoreWriter::new(&mut buffer1);
+            writer.write_version()?;
+            writer.write_entry(&entry1)?;
+            writer.write_entry(&entry2)?;
+            writer.write_entry(&entry3)?;
+            writer.write_entry(&entry4)?;
+            writer.flush()?;
+        }
+
+        // First read cycle : read from initial buffer
+        let mut reader1 = E2StoreReader::new(Cursor::new(&buffer1));
+        let entries1 = reader1.entries()?;
+
+        println!("First read entries:");
+        for (i, entry) in entries1.iter().enumerate() {
+            println!("Entry {}: type {:?}, data len {}", i, entry.entry_type, entry.data.len());
+        }
+        println!("First read entries count: {}", entries1.len());
+
+        // Verify first read content
+        assert_eq!(entries1.len(), 5, "Should have 5 entries (version + 4 data)");
+        assert!(entries1[0].is_version());
+        assert_eq!(entries1[1].entry_type, [0x01, 0x01]);
+        assert_eq!(entries1[1].data, vec![1, 2, 3, 4, 5]);
+        assert_eq!(entries1[2].entry_type, [0x02, 0x02]);
+        assert_eq!(entries1[2].data, vec![10, 20, 30, 40, 50]);
+        assert!(entries1[3].is_slot_index());
+        assert_eq!(entries1[4].entry_type, [0xFF, 0xFF]);
+        assert_eq!(entries1[4].data.len(), 0);
+
+        // Second write cycle : write what we just read
+        let mut buffer2 = Vec::new();
+        {
+            let mut writer = E2StoreWriter::new(&mut buffer2);
+            // Only write version once
+            writer.write_version()?;
+
+            // Skip the first entry ie the version since we already wrote it
+            for entry in &entries1[1..] {
+                writer.write_entry(entry)?;
+            }
+            writer.flush()?;
+        }
+
+        // Second read cycle - read the second buffer
+        let mut reader2 = E2StoreReader::new(Cursor::new(&buffer2));
+        let entries2 = reader2.entries()?;
+
+        // Verify second read matches first read
+        assert_eq!(entries1.len(), entries2.len());
+        for i in 0..entries1.len() {
+            assert_eq!(entries1[i].entry_type, entries2[i].entry_type);
+            assert_eq!(entries1[i].data, entries2[i].data);
+        }
 
         Ok(())
     }

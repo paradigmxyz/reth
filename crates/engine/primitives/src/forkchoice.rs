@@ -75,8 +75,8 @@ impl ForkchoiceStateTracker {
     /// Returns the latest received [`ForkchoiceState`].
     ///
     /// Caution: this can be invalid.
-    pub const fn latest_state(&self) -> Option<ForkchoiceState> {
-        self.last_valid
+    pub fn latest_state(&self) -> Option<ForkchoiceState> {
+        self.latest.as_ref().map(|s| s.state)
     }
 
     /// Returns the last valid [`ForkchoiceState`].
@@ -122,7 +122,6 @@ impl ForkchoiceStateTracker {
 /// Represents a forkchoice update and tracks the status we assigned to it.
 #[derive(Debug, Clone)]
 pub(crate) struct ReceivedForkchoiceState {
-    #[cfg_attr(not(test), expect(dead_code))]
     state: ForkchoiceState,
     status: ForkchoiceStatus,
 }
