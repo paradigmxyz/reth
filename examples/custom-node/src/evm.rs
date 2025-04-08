@@ -62,6 +62,10 @@ where
     fn evm_mut(&mut self) -> &mut Self::Evm {
         self.inner.evm_mut()
     }
+
+    fn evm(&self) -> &Self::Evm {
+        self.inner.evm()
+    }
 }
 
 #[derive(Clone, Debug)]
