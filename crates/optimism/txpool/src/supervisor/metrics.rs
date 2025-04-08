@@ -38,29 +38,29 @@ impl SupervisorMetrics {
 }
 
 /// Tracks the safety level of transactions that didn't pass validation, i.e. for which RPC
-/// `supervisor_checkAccessList` returned error
-/// [`InvalidInboxEntry::MinimumSafetyLevel`](crate::InvalidInboxEntry::MinimumSafetyLevel).
+/// `supervisor_checkAccessList` returns [`MinimumSafety`](crate::InvalidInboxEntry::MinimumSafety)
+/// error.
 #[derive(Metrics)]
 #[metrics(scope = "transaction_pool.supervisor")]
 pub struct FailedSafetyLevelMetrics {
     /// Frequency of cross chain transactions failing validation due to being
-    /// [`SafetyLevel::Invalid`](SafetyLevel::Invalid).
+    /// [`Invalid`](SafetyLevel::Invalid).
     pub(crate) invalid: Histogram,
 
     /// Frequency of cross chain transactions failing validation due to being
-    /// [`SafetyLevel::Unsafe`](SafetyLevel::Unsafe).
+    /// [`Unsafe`](SafetyLevel::Unsafe).
     pub(crate) r#unsafe: Histogram,
 
     /// Frequency of cross chain transactions failing validation due to being
-    /// [`SafetyLevel::CrossUnsafe`](SafetyLevel::CrossUnsafe).
+    /// [`CrossUnsafe`](SafetyLevel::CrossUnsafe).
     pub(crate) cross_unsafe: Histogram,
 
     /// Frequency of cross chain transactions failing validation due to being
-    /// [`SafetyLevel::LocalSafe`](SafetyLevel::LocalSafe).
+    /// [`LocalSafe`](SafetyLevel::LocalSafe).
     pub(crate) local_safe: Histogram,
 
     /// Frequency of cross chain transactions failing validation due to being
-    /// [`SafetyLevel::Safe`](SafetyLevel::Safe).
+    /// [`Safe`](SafetyLevel::Safe).
     pub(crate) safe: Histogram,
 }
 
