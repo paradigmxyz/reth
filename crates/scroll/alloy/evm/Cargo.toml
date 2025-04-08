@@ -13,23 +13,23 @@ workspace = true
 
 [dependencies]
 # alloy
-alloy-consensus.workspace = true
-alloy-eips.workspace = true
-alloy-evm.workspace = true
-alloy-primitives.workspace = true
+alloy-consensus = { workspace = true, default-features = false }
+alloy-eips = { workspace = true, default-features = false }
+alloy-evm = { workspace = true, default-features = false }
+alloy-primitives = { workspace = true, default-features = false }
 
 # revm
-revm = { workspace = true, features = ["optional_no_base_fee"] }
+revm = { workspace = true, default-features = false, features = ["optional_no_base_fee"] }
 
 # scroll
-revm-scroll.workspace = true
+revm-scroll = { workspace = true, default-features = false }
 
 # scroll
-scroll-alloy-consensus.workspace = true
-scroll-alloy-hardforks.workspace = true
+scroll-alloy-consensus = { workspace = true, default-features = false }
+scroll-alloy-hardforks = { workspace = true, default-features = false }
 
 # misc
-auto_impl.workspace = true
+auto_impl = { workspace = true, default-features = false }
 serde = { workspace = true, default-features = false, features = ["derive"], optional = true }
 
 [dev-dependencies]
@@ -44,6 +44,8 @@ std = [
     "serde/std",
     "alloy-consensus/std",
     "alloy-eips/std",
+    "scroll-alloy-consensus/std",
+    "scroll-alloy-hardforks/std",
 ]
 serde = [
     "dep:serde",

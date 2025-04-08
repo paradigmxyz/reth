@@ -45,6 +45,7 @@ std = [
     "serde/std",
     "thiserror/std",
     "reth-primitives-traits/std",
+    "scroll-alloy-rpc-types-engine?/std",
 ]
 op = [
     "dep:op-alloy-rpc-types-engine",

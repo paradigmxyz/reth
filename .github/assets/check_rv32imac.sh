@@ -30,6 +30,14 @@ crates_to_check=(
     reth-optimism-consensus
     reth-optimism-primitives
     reth-optimism-evm
+
+    ## scroll
+    reth-scroll-chainspec
+    scroll-alloy-consensus
+    scroll-alloy-evm
+    scroll-alloy-rpc-types
+    scroll-alloy-rpc-types-engine
+
 )
 
 # Array to hold the results

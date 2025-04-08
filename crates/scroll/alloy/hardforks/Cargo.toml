@@ -16,8 +16,10 @@ workspace = true
 alloy-hardforks.workspace = true
 
 # misc
-auto_impl.workspace = true
+auto_impl = { workspace = true, default-features = false }
 serde = { workspace = true, optional = true }
 
 [features]
+default = ["std"]
+std = ["serde?/std"]
 serde = ["dep:serde", "alloy-hardforks/serde"]

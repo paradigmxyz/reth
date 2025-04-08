@@ -1,6 +1,11 @@
 //! Scroll-Reth hard forks.
 
+#![cfg_attr(not(feature = "std"), no_std)]
+#[cfg(not(feature = "std"))]
+extern crate alloc as std;
+
 use alloy_hardforks::{EthereumHardfork, EthereumHardforks, ForkCondition};
+use std::vec::Vec;
 
 pub use hardfork::ScrollHardfork;
 pub mod hardfork;

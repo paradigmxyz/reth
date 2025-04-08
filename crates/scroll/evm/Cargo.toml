@@ -72,4 +72,5 @@ std = [
     "revm/std",
     "thiserror/std",
     "tracing/std",
+    "scroll-alloy-hardforks/std",
 ]

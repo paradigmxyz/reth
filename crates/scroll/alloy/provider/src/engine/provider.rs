@@ -16,7 +16,7 @@ use reqwest::Url;
 use scroll_alloy_network::Scroll;
 use scroll_alloy_rpc_types_engine::ScrollPayloadAttributes;
 
-/// An authenticated [`alloy_provider::Provider`] to the [`super::ScrollEngineApi`].
+/// An authenticated [`alloy_provider::Provider`] to the [`ScrollEngineApi`].
 #[derive(Debug, Clone, Deref)]
 pub struct ScrollAuthEngineApiProvider<N: Network = Scroll> {
     auth_provider: RootProvider<N>,
@@ -43,7 +43,7 @@ impl ScrollAuthEngineApiProvider {
 }
 
 #[async_trait::async_trait]
-impl ScrollEngineApi<scroll_alloy_network::Scroll> for ScrollAuthEngineApiProvider {
+impl ScrollEngineApi<Scroll> for ScrollAuthEngineApiProvider {
     async fn new_payload_v1(&self, payload: ExecutionPayloadV1) -> TransportResult<PayloadStatus> {
         self.auth_provider.new_payload_v1(payload).await
     }

@@ -1,6 +1,9 @@
 //! Scroll-Reth hard forks.
 
+#![cfg_attr(not(feature = "std"), no_std)]
 #![doc = include_str!("../docs/hardforks.md")]
+#[cfg(not(feature = "std"))]
+extern crate alloc as std;
 
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 
@@ -11,6 +14,7 @@ pub use scroll_alloy_hardforks::{ScrollHardfork, ScrollHardforks};
 use once_cell::sync::Lazy as LazyLock;
 #[cfg(feature = "std")]
 use std::sync::LazyLock;
+use std::vec;
 
 /// Scroll mainnet hardforks
 pub static SCROLL_MAINNET_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {

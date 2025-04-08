@@ -57,4 +57,5 @@ std = [
     "derive_more/std",
     "serde/std",
     "serde_json/std",
+    "scroll-alloy-consensus/std",
 ]

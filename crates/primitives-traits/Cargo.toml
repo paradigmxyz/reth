@@ -99,6 +99,7 @@ std = [
     "reth-chainspec/std",
     "revm-bytecode/std",
     "revm-state/std",
+    "scroll-alloy-consensus?/std",
 ]
 secp256k1 = ["dep:secp256k1"]
 test-utils = [

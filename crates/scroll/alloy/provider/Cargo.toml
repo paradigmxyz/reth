@@ -44,7 +44,6 @@ reth-rpc-engine-api.workspace = true
 reth-scroll-engine-primitives.workspace = true
 reth-scroll-node.workspace = true
 reth-scroll-payload = { workspace = true, features = ["test-utils"] }
-reth-scroll-primitives.workspace = true
 reth-scroll-chainspec.workspace = true
 reth-tasks.workspace = true
 reth-tracing.workspace = true
@@ -65,4 +64,5 @@ std = [
     "reth-primitives-traits/std",
     "reth-scroll-payload/std",
     "futures-util/std",
+    "reth-scroll-chainspec/std",
 ]

@@ -35,6 +35,7 @@ std = [
     "serde?/std",
     "alloy-chains/std",
     "reth-ethereum-forks/std",
+    "scroll-alloy-hardforks/std",
 ]
 serde = [
     "dep:serde",

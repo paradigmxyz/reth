@@ -66,6 +66,10 @@ std = [
     "revm/std",
     "thiserror/std",
     "tracing/std",
+    "reth-scroll-chainspec/std",
+    "reth-scroll-forks/std",
+    "scroll-alloy-consensus/std",
+    "scroll-alloy-hardforks/std",
 ]
 test-utils = [
     "dep:futures-util",

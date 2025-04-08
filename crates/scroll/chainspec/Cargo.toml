@@ -14,30 +14,30 @@ workspace = true
 [dependencies]
 # reth
 reth-chainspec = { workspace = true, features = ["scroll"] }
-reth-ethereum-forks.workspace = true
-reth-network-peers.workspace = true
-reth-primitives-traits.workspace = true
-reth-trie-common.workspace = true
+reth-ethereum-forks = { workspace = true, default-features = false }
+reth-network-peers = { workspace = true, default-features = false }
+reth-primitives-traits = { workspace = true, default-features = false }
+reth-trie-common = { workspace = true, default-features = false }
 
 # scroll
-reth-scroll-forks.workspace = true
-scroll-alloy-hardforks.workspace = true
+reth-scroll-forks = { workspace = true, default-features = false }
+scroll-alloy-hardforks = { workspace = true, default-features = false }
 
 # ethereum
-alloy-chains.workspace = true
-alloy-genesis.workspace = true
-alloy-primitives.workspace = true
-alloy-consensus.workspace = true
-alloy-eips.workspace = true
-alloy-serde.workspace = true
+alloy-chains = { workspace = true, default-features = false }
+alloy-genesis = { workspace = true, default-features = false }
+alloy-primitives = { workspace = true, default-features = false }
+alloy-consensus = { workspace = true, default-features = false }
+alloy-eips = { workspace = true, default-features = false }
+alloy-serde = { workspace = true, default-features = false }
 
 # io
-serde_json.workspace = true
-serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, default-features = false }
+serde = { workspace = true, default-features = false, features = ["derive"] }
 
 # misc
-derive_more.workspace = true
-once_cell.workspace = true
+derive_more = { workspace = true, default-features = false }
+once_cell = { workspace = true, default-features = false }
 
 [dev-dependencies]
 alloy-genesis.workspace = true
@@ -62,4 +62,5 @@ std = [
     "derive_more/std",
     "reth-network-peers/std",
     "serde_json/std",
+    "scroll-alloy-hardforks/std",
 ]

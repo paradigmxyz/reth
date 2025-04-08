@@ -53,7 +53,7 @@ default = [
 std = [
     "serde/std",
     "alloy-primitives/std",
-    "reth-codecs/std",
+    "reth-codecs?/std",
     "alloy-consensus/std",
     "alloy-eips/std",
     "alloy-rlp/std",
@@ -85,7 +85,7 @@ arbitrary = [
     "alloy-consensus/arbitrary",
     "alloy-eips/arbitrary",
     "alloy-serde/arbitrary",
-    "reth-codecs/arbitrary",
+    "reth-codecs?/arbitrary",
     "alloy-primitives/rand",
 ]
 serde = [
@@ -95,7 +95,7 @@ serde = [
     "alloy-consensus/serde",
     "alloy-eips/serde",
     "rand/serde",
-    "reth-codecs/serde",
+    "reth-codecs?/serde",
 ]
 serde-bincode-compat = [
     "alloy-consensus/serde-bincode-compat",
