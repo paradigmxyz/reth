@@ -5,7 +5,7 @@ use alloc::{boxed::Box, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::eip2718::WithEncoded;
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory};
-use alloy_evm::{Evm, EvmEnv, EvmFactory};
+use alloy_evm::{block::ExecutableTx, Evm, EvmEnv, EvmFactory};
 use alloy_primitives::B256;
 use core::fmt::Debug;
 pub use reth_execution_errors::{
@@ -234,12 +234,6 @@ pub trait BlockBuilder {
         Receipt = ReceiptTy<Self::Primitives>,
     >;
 
-    /// Marker for indicating that this block builder is used for simulation.
-    ///
-    /// This allows implementors to turn of certain restrictions, e.g. `eth_simulateV1`
-    // TODO(mattsse): find a nicer workaround for this
-    fn set_simulate(&mut self, _simulated: bool) {}
-
     /// Invokes [`BlockExecutor::apply_pre_execution_changes`].
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError>;
 
@@ -247,7 +241,7 @@ pub trait BlockBuilder {
     /// transaction in internal state.
     fn execute_transaction_with_result_closure(
         &mut self,
-        tx: Recovered<TxTy<Self::Primitives>>,
+        tx: impl ExecutorTx<Self::Executor>,
         f: impl FnOnce(&ExecutionResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::HaltReason>),
     ) -> Result<u64, BlockExecutionError>;
 
@@ -287,7 +281,37 @@ where
     pub(crate) ctx: F::ExecutionCtx<'a>,
     pub(crate) parent: &'a SealedHeader<HeaderTy<N>>,
     pub(crate) assembler: Builder,
-    pub(crate) simulated: bool,
+}
+
+/// Conversions for executable transactions.
+pub trait ExecutorTx<Executor: BlockExecutor> {
+    /// Converts the transaction into [`ExecutableTx`].
+    fn as_executable(&self) -> impl ExecutableTx<Executor>;
+
+    /// Converts the transaction into [`Recovered`].
+    fn into_recovered(self) -> Recovered<Executor::Transaction>;
+}
+
+impl<Executor: BlockExecutor> ExecutorTx<Executor>
+    for WithEncoded<Recovered<Executor::Transaction>>
+{
+    fn as_executable(&self) -> impl ExecutableTx<Executor> {
+        self
+    }
+
+    fn into_recovered(self) -> Recovered<Executor::Transaction> {
+        self.1
+    }
+}
+
+impl<Executor: BlockExecutor> ExecutorTx<Executor> for Recovered<Executor::Transaction> {
+    fn as_executable(&self) -> impl ExecutableTx<Executor> {
+        self
+    }
+
+    fn into_recovered(self) -> Self {
+        self
+    }
 }
 
 impl<'a, F, DB, Executor, Builder, N> BlockBuilder
@@ -310,30 +334,18 @@ where
     type Primitives = N;
     type Executor = Executor;
 
-    fn set_simulate(&mut self, simulated: bool) {
-        self.simulated = simulated;
-    }
-
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         self.executor.apply_pre_execution_changes()
     }
 
     fn execute_transaction_with_result_closure(
         &mut self,
-        tx: Recovered<TxTy<Self::Primitives>>,
+        tx: impl ExecutorTx<Self::Executor>,
         f: impl FnOnce(&ExecutionResult<<F::EvmFactory as EvmFactory>::HaltReason>),
     ) -> Result<u64, BlockExecutionError> {
-        let gas_used = if self.simulated {
-            // if used in simulation we want to disable the L1 gas overhead by providing empty
-            // encoded bytes this is a workaround to get eth_simulate properly supported
-            // with the regular blockbuilder api
-            let tx = WithEncoded::new(Default::default(), &tx);
-            self.executor.execute_transaction_with_result_closure(&tx, f)?
-        } else {
-            self.executor.execute_transaction_with_result_closure(tx.as_recovered_ref(), f)?
-        };
-
-        self.transactions.push(tx);
+        let gas_used =
+            self.executor.execute_transaction_with_result_closure(tx.as_executable(), f)?;
+        self.transactions.push(tx.into_recovered());
         Ok(gas_used)
     }
 
