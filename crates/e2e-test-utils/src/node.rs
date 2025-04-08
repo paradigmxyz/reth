@@ -58,7 +58,7 @@ where
     pub async fn new(
         node: FullNode<Node, AddOns>,
         attributes_generator: impl Fn(u64) -> Payload::PayloadBuilderAttributes + Send + Sync + 'static,
-    ) -> Result<Self> {
+    ) -> eyre::Result<Self> {
         Ok(Self {
             inner: node.clone(),
             payload: PayloadTestContext::new(
@@ -86,7 +86,7 @@ where
         &mut self,
         length: u64,
         tx_generator: impl Fn(u64) -> Pin<Box<dyn Future<Output = Bytes>>>,
-    ) -> Result<Vec<Payload::BuiltPayload>>
+    ) -> eyre::Result<Vec<Payload::BuiltPayload>>
     where
         AddOns::EthApi: EthApiSpec<Provider: BlockReader<Block = BlockTy<Node::Types>>>
             + EthTransactions
@@ -109,7 +109,7 @@ where
     /// expects a payload attribute event and waits until the payload is built.
     ///
     /// It triggers the resolve payload via engine api and expects the built payload event.
-    pub async fn new_payload(&mut self) -> Result<Payload::BuiltPayload> {
+    pub async fn new_payload(&mut self) -> eyre::Result<Payload::BuiltPayload> {
         // trigger new payload building draining the pool
         let eth_attr = self.payload.new_payload().await.unwrap();
         // first event is the payload attributes
@@ -121,7 +121,7 @@ where
     }
 
     /// Triggers payload building job and submits it to the engine.
-    pub async fn build_and_submit_payload(&mut self) -> Result<Payload::BuiltPayload> {
+    pub async fn build_and_submit_payload(&mut self) -> eyre::Result<Payload::BuiltPayload> {
         let payload = self.new_payload().await?;
 
         self.submit_payload(payload.clone()).await?;
@@ -130,7 +130,7 @@ where
     }
 
     /// Advances the node forward one block
-    pub async fn advance_block(&mut self) -> Result<Payload::BuiltPayload> {
+    pub async fn advance_block(&mut self) -> eyre::Result<Payload::BuiltPayload> {
         let payload = self.build_and_submit_payload().await?;
 
         // trigger forkchoice update via engine api to commit the block to the blockchain
@@ -145,7 +145,7 @@ where
         number: BlockNumber,
         expected_block_hash: BlockHash,
         wait_finish_checkpoint: bool,
-    ) -> Result<()> {
+    ) -> eyre::Result<()> {
         let mut check = !wait_finish_checkpoint;
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
@@ -175,7 +175,7 @@ where
     }
 
     /// Waits for the node to unwind to the given block number
-    pub async fn wait_unwind(&self, number: BlockNumber) -> Result<()> {
+    pub async fn wait_unwind(&self, number: BlockNumber) -> eyre::Result<()> {
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             if let Some(checkpoint) = self.inner.provider.get_stage_checkpoint(StageId::Headers)? {
@@ -196,7 +196,7 @@ where
         tip_tx_hash: B256,
         block_hash: B256,
         block_number: BlockNumber,
-    ) -> Result<()> {
+    ) -> eyre::Result<()> {
         // get head block from notifications stream and verify the tx has been pushed to the
         // pool is actually present in the canonical block
         let head = self.canonical_stream.next().await.unwrap();
@@ -231,7 +231,7 @@ where
     }
 
     /// Sends FCU and waits for the node to sync to the given block.
-    pub async fn sync_to(&self, block: BlockHash) -> Result<()> {
+    pub async fn sync_to(&self, block: BlockHash) -> eyre::Result<()> {
         let start = std::time::Instant::now();
 
         while self
@@ -255,7 +255,7 @@ where
     }
 
     /// Sends a forkchoice update message to the engine.
-    pub async fn update_forkchoice(&self, current_head: B256, new_head: B256) -> Result<()> {
+    pub async fn update_forkchoice(&self, current_head: B256, new_head: B256) -> eyre::Result<()> {
         self.inner
             .add_ons_handle
             .beacon_engine_handle
@@ -274,12 +274,12 @@ where
     }
 
     /// Sends forkchoice update to the engine api with a zero finalized hash
-    pub async fn update_optimistic_forkchoice(&self, hash: B256) -> Result<()> {
+    pub async fn update_optimistic_forkchoice(&self, hash: B256) -> eyre::Result<()> {
         self.update_forkchoice(B256::ZERO, hash).await
     }
 
     /// Submits a payload to the engine.
-    pub async fn submit_payload(&self, payload: Payload::BuiltPayload) -> Result<B256> {
+    pub async fn submit_payload(&self, payload: Payload::BuiltPayload) -> eyre::Result<B256> {
         let block_hash = payload.block().hash();
         self.inner
             .add_ons_handle
