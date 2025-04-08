@@ -18,7 +18,7 @@ pub struct SupervisorMetrics {
 }
 
 impl SupervisorMetrics {
-    /// Updates metrics for a batch of transactions from given intermediary [`SafetyLevelCounter`].
+    /// Updates metrics for a batch of transactions from intermediary [`SafetyLevelCounter`].
     pub(crate) fn update(&self) {
         let Self { failed_safety_level_metrics, safety_level_counter } = self;
 
