@@ -227,6 +227,27 @@ fn execute_blocks<
     Ok(exec_witnesses)
 }
 
+/// Selects a contiguous range of items from a slice, ending just before the specified end_index.
+///
+/// # Arguments
+///
+/// * `slice` - The source slice to select items from
+/// * `end_index` - The exclusive end index for selection (items up to but not including this index)
+/// * `num_items_to_select` - The number of items to select
+fn select_items_before_index<T: Clone>(
+    slice: &[T],
+    end_index: usize,
+    num_items_to_select: usize,
+) -> Option<Vec<T>> {
+    if end_index == 0 || end_index > slice.len() || num_items_to_select == 0 {
+        return None;
+    }
+
+    let end_pos = end_index - 1;
+    let start_pos = end_pos.saturating_sub(num_items_to_select - 1);
+    slice.iter().skip(start_pos).take(end_pos - start_pos + 1).cloned().collect::<Vec<_>>().into()
+}
+
 fn compute_stateless_input(
     execution_witnesses: Vec<ExecutionWitness>,
     blocks_with_genesis: &[RecoveredBlock<Block<TransactionSigned>>],
@@ -237,22 +258,18 @@ fn compute_stateless_input(
     assert_eq!(blocks_with_genesis.len() - 1, execution_witnesses.len());
 
     for (current_block, execution_witness) in
+        // Skip the genesis block, it has no ancestors and no execution
         blocks_with_genesis.iter().skip(1).zip(execution_witnesses)
     {
-        // Skip the genesis block, it has no ancestors and no execution
-        // TODO: This should ideally look inside of the block and check for blockhash opcodes
-        // TODO: to see how many ancestors we need instead of just getting all of the previous
-        // TODO: blocks
-        let ancestors = blocks_with_genesis[0..current_block.number as usize]
-            .iter()
-            .map(|block| block.header())
-            .cloned()
-            .collect();
-
+        let ancestor_blocks =
+            select_items_before_index(blocks_with_genesis, current_block.number as usize, 256)
+                .expect("could not fetch ancestors");
+        let ancestor_headers =
+            ancestor_blocks.into_iter().map(|block| block.clone_header()).collect();
         guest_inputs.push(Input {
             current_block: current_block.clone(),
             execution_witness,
-            ancestor_headers: ancestors,
+            ancestor_headers,
             chain_spec: chain_spec.clone(),
         });
     }
@@ -325,4 +342,55 @@ pub fn should_skip(path: &Path) -> bool {
 fn path_contains(path_str: &str, rhs: &[&str]) -> bool {
     let rhs = rhs.join(std::path::MAIN_SEPARATOR_STR);
     path_str.contains(&rhs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_valid_selection() {
+        let items = vec![0, 1, 2, 3, 4];
+
+        // Select 3 items ending before index 4
+        assert_eq!(select_items_before_index(&items, 4, 3), Some(vec![1, 2, 3]));
+
+        // Select 2 items ending before index 3
+        assert_eq!(select_items_before_index(&items, 3, 2), Some(vec![1, 2]));
+
+        // Select 1 item ending before index 2
+        assert_eq!(select_items_before_index(&items, 2, 1), Some(vec![1]));
+    }
+
+    #[test]
+    fn test_edge_cases() {
+        let items = vec![0, 1, 2, 3, 4];
+
+        // Select all items before the last
+        assert_eq!(select_items_before_index(&items, 4, 4), Some(vec![0, 1, 2, 3]));
+
+        // Select item before index 1
+        assert_eq!(select_items_before_index(&items, 1, 1), Some(vec![0]));
+
+        // Index is at the end of the slice
+        assert_eq!(select_items_before_index(&items, 5, 2), Some(vec![3, 4]));
+    }
+
+    #[test]
+    fn test_invalid_inputs() {
+        let items = vec![0, 1, 2, 3, 4];
+
+        // end_index is 0
+        assert_eq!(select_items_before_index(&items, 0, 1), None);
+
+        // end_index beyond slice bounds
+        assert_eq!(select_items_before_index(&items, 6, 3), None);
+
+        // num_items_to_select is 0
+        assert_eq!(select_items_before_index(&items, 3, 0), None);
+
+        // Empty slice
+        let empty: Vec<i32> = vec![];
+        assert_eq!(select_items_before_index(&empty, 1, 1), None);
+    }
 }
