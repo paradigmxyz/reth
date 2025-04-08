@@ -385,14 +385,14 @@ where
                     .unwrap_or_else(|| data_dir.txpool_transactions());
 
                 let transactions_backup_config =
-                    reth_ethereum::pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(
+                    reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(
                         transactions_path,
                     );
 
                 ctx.task_executor().spawn_critical_with_graceful_shutdown_signal(
                     "local transactions backup task",
                     |shutdown| {
-                        reth_ethereum::pool::maintain::backup_local_transactions_task(
+                        reth_transaction_pool::maintain::backup_local_transactions_task(
                             shutdown,
                             pool.clone(),
                             transactions_backup_config,
@@ -404,12 +404,12 @@ where
             // spawn the maintenance task
             ctx.task_executor().spawn_critical(
                 "txpool maintenance task",
-                reth_ethereum::pool::maintain::maintain_transaction_pool_future(
+                reth_transaction_pool::maintain::maintain_transaction_pool_future(
                     client,
                     pool,
                     chain_events,
                     ctx.task_executor().clone(),
-                    reth_ethereum::pool::maintain::MaintainPoolConfig {
+                    reth_transaction_pool::maintain::MaintainPoolConfig {
                         max_tx_lifetime: transaction_pool.config().max_queued_lifetime,
                         ..Default::default()
                     },
