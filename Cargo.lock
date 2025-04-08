@@ -3392,8 +3392,7 @@ dependencies = [
  "clap",
  "futures-util",
  "reth",
- "reth-evm",
- "reth-node-ethereum",
+ "reth-ethereum",
 ]
 
 [[package]]
