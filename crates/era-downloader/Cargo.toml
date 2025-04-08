@@ -1,0 +1,25 @@
+[package]
+name = "reth-era-downloader"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[dependencies]
+# http
+reqwest.workspace = true
+reqwest.features = ["stream"]
+futures.workspace = true
+
+# async
+tokio.workspace = true
+tokio.features = ["fs", "io-util"]
+
+# errors
+eyre.workspace = true
+
+[lints]
+workspace = true
