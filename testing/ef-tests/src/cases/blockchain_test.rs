@@ -12,7 +12,7 @@ use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_primitives::{BlockBody, SealedBlock};
 use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, DatabaseProviderFactory,
-    HashingWriter, LatestStateProviderRef, OriginalValuesKnown, StateWriter, StorageLocation,
+    ExecutionOutcome, HashingWriter, OriginalValuesKnown, StateWriter, StorageLocation,
 };
 use reth_revm::database::StateProviderDatabase;
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
@@ -118,16 +118,19 @@ impl Case for BlockchainTestCase {
 
                 // Initialize executor with state
                 let executor_provider = EthExecutorProvider::ethereum(chain_spec);
-                let state_db = StateProviderDatabase(LatestStateProviderRef::new(&provider));
-                let executor = executor_provider.executor(state_db);
+                for block in blocks {
+                    let state_provider = provider.history_by_block_hash(block.parent_hash)?;
+                    let state_db = StateProviderDatabase(state_provider);
+                    let executor = executor_provider.executor(state_db);
 
-                // Execute all blocks in a batch
-                if let Ok(state) = executor.execute_batch(&blocks) {
-                    provider.write_state(
-                        &state,
-                        OriginalValuesKnown::Yes,
-                        StorageLocation::Database,
-                    )?;
+                    // Execute all blocks in a batch
+                    if let Ok(output) = executor.execute(&block) {
+                        provider.write_state(
+                            &ExecutionOutcome::single(block.number, output),
+                            OriginalValuesKnown::Yes,
+                            StorageLocation::Database,
+                        )?;
+                    }
                 }
 
                 // Validate the post-state for the test case.
