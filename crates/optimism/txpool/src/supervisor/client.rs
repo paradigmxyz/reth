@@ -32,6 +32,7 @@ pub struct SupervisorClient {
     /// The default request timeout
     timeout: Duration,
     /// Metrics for cross chain transaction validation.
+    #[doc(hidden)]
     pub(crate) metrics: SupervisorMetrics,
 }
 
