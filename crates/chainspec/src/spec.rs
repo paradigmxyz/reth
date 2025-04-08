@@ -1117,7 +1117,8 @@ Merge hard forks:
 - Paris                            @58750000000000000000000 (network is known to be merged)
 Post-merge hard forks (timestamp based):
 - Shanghai                         @1681338455
-- Cancun                           @1710338135"
+- Cancun                           @1710338135
+- Prague                           @1746612311"
         );
     }
 
@@ -1357,7 +1358,11 @@ Post-merge hard forks (timestamp based):
                 ),
                 (
                     EthereumHardfork::Cancun,
-                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
+                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 1746612311 },
+                ),
+                (
+                    EthereumHardfork::Prague,
+                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
                 ),
             ],
         );
@@ -1493,12 +1498,17 @@ Post-merge hard forks (timestamp based):
                 // First Cancun block
                 (
                     Head { number: 20000001, timestamp: 1710338135, ..Default::default() },
-                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
+                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 1746612311 },
                 ),
-                // Future Cancun block
+                // First Prague block
+                (
+                    Head { number: 20000002, timestamp: 1746612311, ..Default::default() },
+                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
+                ),
+                // Future Prague block
                 (
                     Head { number: 20000002, timestamp: 2000000000, ..Default::default() },
-                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
+                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
                 ),
             ],
         );
@@ -1754,11 +1764,19 @@ Post-merge hard forks (timestamp based):
                 ), // First Cancun block
                 (
                     Head { number: 20000002, timestamp: 1710338135, ..Default::default() },
-                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
-                ), // Future Cancun block
+                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 1746612311 },
+                ), // Last Cancun block
                 (
-                    Head { number: 20000003, timestamp: 2000000000, ..Default::default() },
-                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
+                    Head { number: 20000003, timestamp: 1746612310, ..Default::default() },
+                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 1746612311 },
+                ), // First Prague block
+                (
+                    Head { number: 20000004, timestamp: 1746612311, ..Default::default() },
+                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
+                ), // Future Prague block
+                (
+                    Head { number: 20000004, timestamp: 2000000000, ..Default::default() },
+                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
                 ),
             ],
         );
@@ -2401,7 +2419,7 @@ Post-merge hard forks (timestamp based):
     #[test]
     fn latest_eth_mainnet_fork_id() {
         assert_eq!(
-            ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
+            ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
             MAINNET.latest_fork_id()
         )
     }
