@@ -1036,7 +1036,7 @@ where
     async fn debug_execution_witness(
         &self,
         block: BlockNumberOrTag,
-    ) -> RpcResult<(ExecutionWitness)> {
+    ) -> RpcResult<ExecutionWitness> {
         let _permit = self.acquire_trace_permit().await;
         Self::debug_execution_witness(self, block).await.map_err(Into::into).map(|p| p.0)
     }
