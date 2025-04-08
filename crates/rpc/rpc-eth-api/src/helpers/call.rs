@@ -294,9 +294,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     }
                 }
 
-                // Apply state overrides only once before processing any bundles
                 let initial_state_overrides = state_override.take();
-                let mut is_first_transaction = true; // Flag to apply initial state override only once
+                let mut is_first_transaction = true;
 
                 // Iterate over each bundle in the input vector
                 for bundle in bundles {
@@ -312,7 +311,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     while let Some(tx) = current_bundle_transactions.next() {
                         // Apply state overrides only for the very first transaction across all bundles
                         let state_overrides_for_tx = if is_first_transaction {
-                            is_first_transaction = false; // Clear flag after first use
+                            is_first_transaction = false;
                             initial_state_overrides.clone()
                         } else {
                             None
@@ -320,12 +319,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         let overrides =
                             EvmOverrides::new(state_overrides_for_tx, block_overrides.clone());
 
-                        // Prepare and execute the transaction
                         let (current_evm_env, prepared_tx) =
                             this.prepare_call_env(evm_env.clone(), tx, &mut db, overrides)?;
                         let (res, _) = this.transact(&mut db, current_evm_env, prepared_tx)?;
 
-                        // Store the result
                         match ensure_success::<_, Self::Error>(res.result) {
                             Ok(output) => {
                                 all_results
@@ -344,7 +341,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     }
                 }
 
-                Ok(all_results) // Return accumulated results
+                Ok(all_results)
             })
             .await
         }
