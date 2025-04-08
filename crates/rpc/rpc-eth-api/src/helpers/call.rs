@@ -73,7 +73,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     ) -> impl Future<Output = SimulatedBlocksResult<Self::NetworkTypes, Self::Error>> + Send {
         async move {
             if payload.block_state_calls.len() > self.max_simulate_blocks() as usize {
-                return Err(EthApiError::InvalidParams("too many blocks.".to_string()).into());
+                return Err(EthApiError::InvalidParams("too many blocks.".to_string()).into())
             }
 
             let block = block.unwrap_or_default();
@@ -86,7 +86,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             } = payload;
 
             if block_state_calls.is_empty() {
-                return Err(EthApiError::InvalidParams(String::from("calls are empty.")).into());
+                return Err(EthApiError::InvalidParams(String::from("calls are empty.")).into())
             }
 
             let base_block =
@@ -124,7 +124,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             {
                                 return Err(
                                     EthApiError::other(EthSimulateError::GasLimitReached).into()
-                                );
+                                )
                             }
                         }
                         apply_block_overrides(block_overrides, &mut db, &mut evm_env.block_env);
@@ -145,7 +145,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             return Err(EthApiError::Other(Box::new(
                                 EthSimulateError::BlockGasLimitExceeded,
                             ))
-                            .into());
+                            .into())
                         }
 
                         if txs_without_gas_limit > 0 {
@@ -409,11 +409,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             ExecutionResult::Halt { reason, gas_used } => {
                 let error =
                     Some(Self::Error::from_evm_halt(reason, tx_env.gas_limit()).to_string());
-                return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error });
+                return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
             }
             ExecutionResult::Revert { output, gas_used } => {
                 let error = Some(RevertError::new(output).to_string());
-                return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error });
+                return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
             }
             ExecutionResult::Success { .. } => {}
         };
