@@ -1,6 +1,7 @@
 use reth_cli::chainspec::{parse_genesis, ChainSpecParser};
 use reth_optimism_chainspec::{
-    OpChainSpec, BASE_MAINNET, BASE_SEPOLIA, OP_DEV, OP_MAINNET, OP_SEPOLIA,
+    OpChainSpec, BASE_MAINNET, BASE_SEPOLIA, OP_DEV, OP_MAINNET, OP_SEPOLIA, UNICHAIN_MAINNET,
+    UNICHAIN_SEPOLIA,
 };
 use std::sync::Arc;
 
@@ -38,6 +39,8 @@ pub fn chain_value_parser(s: &str) -> eyre::Result<Arc<OpChainSpec>, eyre::Error
         "optimism_sepolia" | "optimism-sepolia" => OP_SEPOLIA.clone(),
         "base" => BASE_MAINNET.clone(),
         "base_sepolia" | "base-sepolia" => BASE_SEPOLIA.clone(),
+        "unichain" => UNICHAIN_MAINNET.clone(),
+        "unichain_sepolia" | "unichain-sepolia" => UNICHAIN_SEPOLIA.clone(),
         _ => Arc::new(parse_genesis(s)?.into()),
     })
 }

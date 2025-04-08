@@ -17,6 +17,8 @@ pub mod constants;
 mod dev;
 mod op;
 mod op_sepolia;
+mod uni;
+mod uni_sepolia;
 
 use alloc::{boxed::Box, vec, vec::Vec};
 use alloy_chains::Chain;
@@ -40,6 +42,8 @@ use reth_network_peers::NodeRecord;
 use reth_optimism_forks::{OpHardfork, OpHardforks, OP_MAINNET_HARDFORKS};
 use reth_optimism_primitives::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
 use reth_primitives_traits::{sync::LazyLock, SealedHeader};
+pub use uni::UNICHAIN_MAINNET;
+pub use uni_sepolia::UNICHAIN_SEPOLIA;
 
 /// Chain spec builder for a OP stack chain.
 #[derive(Debug, Default, From)]
@@ -65,6 +69,17 @@ impl OpChainSpecBuilder {
         let mut inner =
             ChainSpecBuilder::default().chain(OP_MAINNET.chain).genesis(OP_MAINNET.genesis.clone());
         let forks = OP_MAINNET.hardforks.clone();
+        inner = inner.with_forks(forks);
+
+        Self { inner }
+    }
+
+    /// Construct a new builder from the unichain mainnet chain spec.
+    pub fn unichain_mainnet() -> Self {
+        let mut inner = ChainSpecBuilder::default()
+            .chain(UNICHAIN_MAINNET.chain)
+            .genesis(UNICHAIN_MAINNET.genesis.clone());
+        let forks = UNICHAIN_MAINNET.hardforks.clone();
         inner = inner.with_forks(forks);
 
         Self { inner }
