@@ -19,7 +19,6 @@ pub struct SenderIdentifiers {
 
 impl SenderIdentifiers {
     /// Returns the address for the given identifier.
-    #[allow(dead_code)]
     pub fn address(&self, id: &SenderId) -> Option<&Address> {
         self.sender_to_address.get(id)
     }

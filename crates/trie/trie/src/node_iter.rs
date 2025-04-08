@@ -77,7 +77,7 @@ where
     H::Value: Copy,
 {
     /// Creates a new [`TrieNodeIter`].
-    pub fn new(walker: TrieWalker<C>, hashed_cursor: H, trie_type: TrieType) -> Self {
+    pub fn new(walker: TrieWalker<C>, hashed_cursor: H, _trie_type: TrieType) -> Self {
         Self {
             walker,
             hashed_cursor,
@@ -86,7 +86,7 @@ where
             should_check_walker_key: false,
             last_seeked_hashed_entry: None,
             #[cfg(feature = "metrics")]
-            metrics: crate::metrics::TrieNodeIterMetrics::new(trie_type),
+            metrics: crate::metrics::TrieNodeIterMetrics::new(_trie_type),
             #[cfg(feature = "metrics")]
             previously_advanced_to_key: None,
         }

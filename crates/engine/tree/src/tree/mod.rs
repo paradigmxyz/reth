@@ -3081,7 +3081,6 @@ mod tests {
     /// This is a test channel that allows you to `release` any value that is in the channel.
     ///
     /// If nothing has been sent, then the next value will be immediately sent.
-    #[allow(dead_code)]
     struct TestChannel<T> {
         /// If an item is sent to this channel, an item will be released in the wrapped channel
         release: Receiver<()>,
@@ -3093,7 +3092,6 @@ mod tests {
 
     impl<T: Send + 'static> TestChannel<T> {
         /// Creates a new test channel
-        #[allow(dead_code)]
         fn spawn_channel() -> (Sender<T>, Receiver<T>, TestChannelHandle) {
             let (original_tx, original_rx) = channel();
             let (wrapped_tx, wrapped_rx) = channel();
@@ -3157,7 +3155,7 @@ mod tests {
             Self::with_persistence_channel(chain_spec, action_tx, action_rx)
         }
 
-        #[allow(dead_code)]
+        #[expect(dead_code)]
         fn with_test_channel(chain_spec: Arc<ChainSpec>) -> (Self, TestChannelHandle) {
             let (action_tx, action_rx, handle) = TestChannel::spawn_channel();
             (Self::with_persistence_channel(chain_spec, action_tx, action_rx), handle)
