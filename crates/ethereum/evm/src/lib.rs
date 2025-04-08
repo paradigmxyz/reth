@@ -94,7 +94,7 @@ impl<EvmFactory> EthEvmConfig<EvmFactory> {
     }
 
     /// Returns blob params by hard fork as specified in chain spec.
-    pub fn blob_max_and_target_count_by_hardfork(&self) -> [(SpecId, u8, u8); 2] {
+    pub fn blob_max_and_target_count_by_hardfork(&self) -> [(SpecId, u64, u64); 2] {
         let HardforkBlobParams { cancun, prague } = self.chain_spec().blob_params;
         [
             (SpecId::CANCUN, cancun.target_blob_count, cancun.max_blob_count),
