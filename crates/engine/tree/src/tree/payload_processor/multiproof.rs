@@ -2,7 +2,11 @@
 
 use crate::tree::payload_processor::executor::WorkloadExecutor;
 use alloy_evm::block::StateChangeSource;
-use alloy_primitives::{keccak256, map::HashSet, B256};
+use alloy_primitives::{
+    keccak256,
+    map::{B256Set, HashSet},
+    B256,
+};
 use derive_more::derive::Deref;
 use metrics::Histogram;
 use reth_errors::ProviderError;
@@ -239,6 +243,75 @@ pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostStat
     hashed_state
 }
 
+/// A pending multiproof task, either [`StorageMultiproofInput`] or [`MultiproofInput`].
+#[derive(Debug)]
+enum PendingMultiproofTask<Factory> {
+    /// A storage multiproof task input.
+    Storage(StorageMultiproofInput<Factory>),
+    /// A regular multiproof task input.
+    Regular(MultiproofInput<Factory>),
+}
+
+impl<Factory> PendingMultiproofTask<Factory> {
+    /// Returns the proof sequence number of the task.
+    fn proof_sequence_number(&self) -> u64 {
+        match self {
+            Self::Storage(input) => input.proof_sequence_number,
+            Self::Regular(input) => input.proof_sequence_number,
+        }
+    }
+
+    /// Returns whether or not the proof targets are empty.
+    fn proof_targets_is_empty(&self) -> bool {
+        match self {
+            Self::Storage(input) => input.proof_targets.is_empty(),
+            Self::Regular(input) => input.proof_targets.is_empty(),
+        }
+    }
+
+    /// Destroys the input and sends a [`MultiProofMessage::EmptyProof`] message to the sender.
+    fn send_empty_proof(self) {
+        match self {
+            Self::Storage(input) => input.send_empty_proof(),
+            Self::Regular(input) => input.send_empty_proof(),
+        }
+    }
+}
+
+impl<Factory> From<StorageMultiproofInput<Factory>> for PendingMultiproofTask<Factory> {
+    fn from(input: StorageMultiproofInput<Factory>) -> Self {
+        Self::Storage(input)
+    }
+}
+
+impl<Factory> From<MultiproofInput<Factory>> for PendingMultiproofTask<Factory> {
+    fn from(input: MultiproofInput<Factory>) -> Self {
+        Self::Regular(input)
+    }
+}
+
+/// Input parameters for spawning a dedicated storage multiproof calculation.
+#[derive(Debug)]
+struct StorageMultiproofInput<Factory> {
+    config: MultiProofConfig<Factory>,
+    source: Option<StateChangeSource>,
+    hashed_state_update: HashedPostState,
+    hashed_address: B256,
+    proof_targets: B256Set,
+    proof_sequence_number: u64,
+    state_root_message_sender: Sender<MultiProofMessage>,
+}
+
+impl<Factory> StorageMultiproofInput<Factory> {
+    /// Destroys the input and sends a [`MultiProofMessage::EmptyProof`] message to the sender.
+    fn send_empty_proof(self) {
+        let _ = self.state_root_message_sender.send(MultiProofMessage::EmptyProof {
+            sequence_number: self.proof_sequence_number,
+            state: self.hashed_state_update,
+        });
+    }
+}
+
 /// Input parameters for spawning a multiproof calculation.
 #[derive(Debug)]
 struct MultiproofInput<Factory> {
@@ -248,6 +321,16 @@ struct MultiproofInput<Factory> {
     proof_targets: MultiProofTargets,
     proof_sequence_number: u64,
     state_root_message_sender: Sender<MultiProofMessage>,
+}
+
+impl<Factory> MultiproofInput<Factory> {
+    /// Destroys the input and sends a [`MultiProofMessage::EmptyProof`] message to the sender.
+    fn send_empty_proof(self) {
+        let _ = self.state_root_message_sender.send(MultiProofMessage::EmptyProof {
+            sequence_number: self.proof_sequence_number,
+            state: self.hashed_state_update,
+        });
+    }
 }
 
 /// Manages concurrent multiproof calculations.
@@ -261,7 +344,7 @@ pub struct MultiproofManager<Factory: DatabaseProviderFactory> {
     /// Currently running calculations.
     inflight: usize,
     /// Queued calculations.
-    pending: VecDeque<MultiproofInput<Factory>>,
+    pending: VecDeque<PendingMultiproofTask<Factory>>,
     /// Executor for tasks
     executor: WorkloadExecutor,
     /// Sender to the storage proof task.
@@ -294,17 +377,14 @@ where
 
     /// Spawns a new multiproof calculation or enqueues it for later if
     /// `max_concurrent` are already inflight.
-    fn spawn_or_queue(&mut self, input: MultiproofInput<Factory>) {
+    fn spawn_or_queue(&mut self, input: PendingMultiproofTask<Factory>) {
         // If there are no proof targets, we can just send an empty multiproof back immediately
-        if input.proof_targets.is_empty() {
+        if input.proof_targets_is_empty() {
             debug!(
-                sequence_number = input.proof_sequence_number,
+                sequence_number = input.proof_sequence_number(),
                 "No proof targets, sending empty multiproof back immediately"
             );
-            let _ = input.state_root_message_sender.send(MultiProofMessage::EmptyProof {
-                sequence_number: input.proof_sequence_number,
-                state: input.hashed_state_update,
-            });
+            input.send_empty_proof();
             return
         }
 
@@ -314,7 +394,7 @@ where
             return;
         }
 
-        self.spawn_multiproof(input);
+        self.spawn_multiproof_task(input);
     }
 
     /// Signals that a multiproof calculation has finished and there's room to
@@ -325,22 +405,101 @@ where
 
         if let Some(input) = self.pending.pop_front() {
             self.metrics.pending_multiproofs_histogram.record(self.pending.len() as f64);
-            self.spawn_multiproof(input);
+            self.spawn_multiproof_task(input);
         }
     }
 
+    /// Spawns a multiproof task, dispatching to `spawn_storage_proof` if the input is a storage
+    /// multiproof, and dispatching to `spawn_multiproof` otherwise.
+    fn spawn_multiproof_task(&mut self, input: PendingMultiproofTask<Factory>) {
+        match input {
+            PendingMultiproofTask::Storage(storage_input) => {
+                self.spawn_storage_proof(storage_input);
+            }
+            PendingMultiproofTask::Regular(multiproof_input) => {
+                self.spawn_multiproof(multiproof_input);
+            }
+        }
+    }
+
+    /// Spawns a single storage proof calculation task.
+    fn spawn_storage_proof(&mut self, storage_multiproof_input: StorageMultiproofInput<Factory>) {
+        let StorageMultiproofInput {
+            config,
+            source,
+            hashed_state_update,
+            hashed_address,
+            proof_targets,
+            proof_sequence_number,
+            state_root_message_sender,
+        } = storage_multiproof_input;
+
+        let storage_proof_task_handle = self.storage_proof_task_handle.clone();
+
+        self.executor.spawn_blocking(move || {
+            let storage_targets = proof_targets.len();
+
+            trace!(
+                target: "engine::root",
+                proof_sequence_number,
+                ?proof_targets,
+                storage_targets,
+                "Starting dedicated storage proof calculation",
+            );
+            let start = Instant::now();
+            let result = ParallelProof::new(
+                config.consistent_view,
+                config.nodes_sorted,
+                config.state_sorted,
+                config.prefix_sets,
+                storage_proof_task_handle.clone(),
+            )
+            .with_branch_node_masks(true)
+            .storage_proof(hashed_address, proof_targets);
+            let elapsed = start.elapsed();
+            trace!(
+                target: "engine::root",
+                proof_sequence_number,
+                ?elapsed,
+                ?source,
+                storage_targets,
+                "Storage multiproofs calculated",
+            );
+
+            match result {
+                Ok(proof) => {
+                    let _ = state_root_message_sender.send(MultiProofMessage::ProofCalculated(
+                        Box::new(ProofCalculated {
+                            sequence_number: proof_sequence_number,
+                            update: SparseTrieUpdate {
+                                state: hashed_state_update,
+                                multiproof: MultiProof::from_storage_proof(hashed_address, proof),
+                            },
+                            elapsed,
+                        }),
+                    ));
+                }
+                Err(error) => {
+                    let _ = state_root_message_sender
+                        .send(MultiProofMessage::ProofCalculationError(error.into()));
+                }
+            }
+        });
+
+        self.inflight += 1;
+        self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
+    }
+
     /// Spawns a single multiproof calculation task.
-    fn spawn_multiproof(
-        &mut self,
-        MultiproofInput {
+    fn spawn_multiproof(&mut self, multiproof_input: MultiproofInput<Factory>) {
+        let MultiproofInput {
             config,
             source,
             hashed_state_update,
             proof_targets,
             proof_sequence_number,
             state_root_message_sender,
-        }: MultiproofInput<Factory>,
-    ) {
+        } = multiproof_input;
         let storage_proof_task_handle = self.storage_proof_task_handle.clone();
 
         self.executor.spawn_blocking(move || {
@@ -527,14 +686,17 @@ where
         // Process proof targets in chunks.
         let mut chunks = 0;
         for proof_targets_chunk in proof_targets.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
-            self.multiproof_manager.spawn_or_queue(MultiproofInput {
-                config: self.config.clone(),
-                source: None,
-                hashed_state_update: Default::default(),
-                proof_targets: proof_targets_chunk,
-                proof_sequence_number: self.proof_sequencer.next_sequence(),
-                state_root_message_sender: self.tx.clone(),
-            });
+            self.multiproof_manager.spawn_or_queue(
+                MultiproofInput {
+                    config: self.config.clone(),
+                    source: None,
+                    hashed_state_update: Default::default(),
+                    proof_targets: proof_targets_chunk,
+                    proof_sequence_number: self.proof_sequencer.next_sequence(),
+                    state_root_message_sender: self.tx.clone(),
+                }
+                .into(),
+            );
             chunks += 1;
         }
         self.metrics.prefetch_proof_chunks_histogram.record(chunks as f64);
@@ -643,14 +805,17 @@ where
             let proof_targets = get_proof_targets(&chunk, &self.fetched_proof_targets);
             spawned_proof_targets.extend_ref(&proof_targets);
 
-            self.multiproof_manager.spawn_or_queue(MultiproofInput {
-                config: self.config.clone(),
-                source: Some(source),
-                hashed_state_update: chunk,
-                proof_targets,
-                proof_sequence_number: self.proof_sequencer.next_sequence(),
-                state_root_message_sender: self.tx.clone(),
-            });
+            self.multiproof_manager.spawn_or_queue(
+                MultiproofInput {
+                    config: self.config.clone(),
+                    source: Some(source),
+                    hashed_state_update: chunk,
+                    proof_targets,
+                    proof_sequence_number: self.proof_sequencer.next_sequence(),
+                    state_root_message_sender: self.tx.clone(),
+                }
+                .into(),
+            );
             chunks += 1;
         }
 
