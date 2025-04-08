@@ -1,5 +1,5 @@
 [workspace.package]
-version = "1.3.7"
+version = "1.3.8"
 edition = "2021"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
@@ -457,13 +457,13 @@ revm-inspectors = "0.18.0"
 alloy-chains = { version = "0.1.68", default-features = false }
 alloy-dyn-abi = "0.8.25"
 alloy-eip2124 = { version = "0.1.0", default-features = false }
-alloy-evm = { version = "0.3.1", default-features = false }
+alloy-evm = { version = "0.3.2", default-features = false }
 alloy-primitives = { version = "0.8.25", default-features = false, features = ["map-foldhash"] }
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
 alloy-sol-types = { version = "0.8.25", default-features = false }
 alloy-trie = { version = "0.7.9", default-features = false }
 
-alloy-hardforks = "0.1.2"
+alloy-hardforks = "0.1.4"
 
 alloy-consensus = { version = "0.13.0", default-features = false }
 alloy-contract = { version = "0.13.0", default-features = false }
@@ -495,7 +495,7 @@ alloy-transport-ipc = { version = "0.13.0", default-features = false }
 alloy-transport-ws = { version = "0.13.0", default-features = false }
 
 # op
-alloy-op-evm = { version = "0.3.1", default-features = false }
+alloy-op-evm = { version = "0.3.2", default-features = false }
 alloy-op-hardforks = "0.1.2"
 op-alloy-rpc-types = { version = "0.12.0", default-features = false }
 op-alloy-rpc-types-engine = { version = "0.12.0", default-features = false }
@@ -565,7 +565,7 @@ proc-macro2 = "1.0"
 quote = "1.0"
 
 # tokio
-tokio = { version = "1.39", default-features = false }
+tokio = { version = "1.44.2", default-features = false }
 tokio-stream = "0.1.11"
 tokio-util = { version = "0.7.4", features = ["codec"] }
 
