@@ -102,7 +102,7 @@ pub fn verify_withdrawals_root_prehashed<DB, H>(
 ) -> Result<(), OpConsensusError>
 where
     DB: StorageRootProvider,
-    H: BlockHeader + core::fmt::Debug,
+    H: BlockHeader + Debug,
 {
     let header_storage_root =
         header.withdrawals_root().ok_or(OpConsensusError::L2WithdrawalsRootMissing)?;

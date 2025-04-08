@@ -196,10 +196,10 @@ impl From<Sealed<TxDeposit>> for OpTransactionSigned {
     }
 }
 
-/// A trait that represents an optimism transaction, mainly used to indicate whether or not the
+/// A trait that represents an optimism transaction, mainly used to indicate whether the
 /// transaction is a deposit transaction.
 pub trait OpTransaction {
-    /// Whether or not the transaction is a dpeosit transaction.
+    /// Whether the transaction is a deposit transaction.
     fn is_deposit(&self) -> bool;
 }
 

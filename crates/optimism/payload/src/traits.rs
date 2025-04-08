@@ -6,24 +6,19 @@ use reth_primitives_traits::{NodePrimitives, SignedTransaction};
 pub trait OpPayloadPrimitives:
     NodePrimitives<
     Receipt: DepositReceipt,
-    SignedTx = Self::_TX,
+    SignedTx: SignedTransaction + OpTransaction,
     BlockHeader = Header,
-    BlockBody = BlockBody<Self::_TX>,
+    BlockBody = BlockBody<Self::SignedTx>,
 >
 {
-    /// Helper AT to bound [`NodePrimitives::Block`] type without causing bound cycle.
-    type _TX: SignedTransaction + OpTransaction;
 }
 
-impl<Tx, T> OpPayloadPrimitives for T
-where
-    Tx: SignedTransaction + OpTransaction,
+impl<T> OpPayloadPrimitives for T where
     T: NodePrimitives<
-        SignedTx = Tx,
         Receipt: DepositReceipt,
+        SignedTx: SignedTransaction + OpTransaction,
         BlockHeader = Header,
-        BlockBody = BlockBody<Tx>,
-    >,
+        BlockBody = BlockBody<Self::SignedTx>,
+    >
 {
-    type _TX = Tx;
 }
