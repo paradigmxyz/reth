@@ -297,7 +297,6 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 let initial_state_overrides = state_override.take();
                 let mut is_first_transaction = true;
 
-                // Iterate over each bundle in the input vector
                 for bundle in bundles {
                     let Bundle { transactions, block_override } = bundle;
                     if transactions.is_empty() {
