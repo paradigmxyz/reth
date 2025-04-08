@@ -596,7 +596,7 @@ where
     pub async fn debug_execution_witness_by_block_hash(
         &self,
         hash: B256,
-    ) -> Result<ExecutionWitness, Eth::Error> {
+    ) -> Result<(ExecutionWitness, Vec<Bytes>), Eth::Error> {
         let this = self.clone();
         let block = this
             .eth_api()
@@ -614,7 +614,7 @@ where
     pub async fn debug_execution_witness(
         &self,
         block_id: BlockNumberOrTag,
-    ) -> Result<ExecutionWitness, Eth::Error> {
+    ) -> Result<(ExecutionWitness, Vec<Bytes>), Eth::Error> {
         let this = self.clone();
         let block = this
             .eth_api()
@@ -629,9 +629,12 @@ where
     pub async fn debug_execution_witness_for_block(
         &self,
         block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
-    ) -> Result<ExecutionWitness, Eth::Error> {
+    ) -> Result<(ExecutionWitness, Vec<Bytes>), Eth::Error> {
         let this = self.clone();
-        self.eth_api()
+        let block_number = block.header().number();
+
+        let (exec_witness, blocks_ids_for_blockhash_opcode) = self
+            .eth_api()
             .spawn_with_state_at_block(block.parent_hash().into(), move |state_provider| {
                 let db = StateProviderDatabase::new(&state_provider);
                 let block_executor = this.inner.block_executor.executor(db);
@@ -644,14 +647,43 @@ where
                     })
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 
-                let ExecutionWitnessRecord { hashed_state, codes, keys } = witness_record;
+                let ExecutionWitnessRecord {
+                    hashed_state,
+                    codes,
+                    keys,
+                    block_ids_for_blockhash_opcode,
+                } = witness_record;
 
                 let state = state_provider
                     .witness(Default::default(), hashed_state)
                     .map_err(EthApiError::from)?;
-                Ok(ExecutionWitness { state, codes, keys })
+                Ok((ExecutionWitness { state, codes, keys }, block_ids_for_blockhash_opcode))
             })
-            .await
+            .await?;
+
+        // For zkVMs, they need a contiguous set of block headers in order to prove that the block
+        // hashes are correct.
+        //
+        // Fetch the smallest block and return an empty vector if there were no block_ids
+        let Some(smallest) = blocks_ids_for_blockhash_opcode.iter().min().copied() else {
+            return Ok((exec_witness, Vec::new()));
+        };
+
+        let range = smallest..block_number;
+        // TODO: Check if headers_range errors when one of the headers in the range is missing
+        let headers: Vec<Bytes> = self
+            .provider()
+            .headers_range(range)
+            .map_err(EthApiError::from)?
+            .into_iter()
+            .map(|header| {
+                let mut serialized_header = Vec::new();
+                header.encode(&mut serialized_header);
+                serialized_header.into()
+            })
+            .collect();
+
+        Ok((exec_witness, headers))
     }
 
     /// Returns the code associated with a given hash at the specified block ID. If no code is
@@ -1004,9 +1036,9 @@ where
     async fn debug_execution_witness(
         &self,
         block: BlockNumberOrTag,
-    ) -> RpcResult<ExecutionWitness> {
+    ) -> RpcResult<(ExecutionWitness)> {
         let _permit = self.acquire_trace_permit().await;
-        Self::debug_execution_witness(self, block).await.map_err(Into::into)
+        Self::debug_execution_witness(self, block).await.map_err(Into::into).map(|p| p.0)
     }
 
     /// Handler for `debug_executionWitnessByBlockHash`
@@ -1015,7 +1047,10 @@ where
         hash: B256,
     ) -> RpcResult<ExecutionWitness> {
         let _permit = self.acquire_trace_permit().await;
-        Self::debug_execution_witness_by_block_hash(self, hash).await.map_err(Into::into)
+        Self::debug_execution_witness_by_block_hash(self, hash)
+            .await
+            .map_err(Into::into)
+            .map(|p| p.0)
     }
 
     async fn debug_backtrace_at(&self, _location: &str) -> RpcResult<()> {
