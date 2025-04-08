@@ -3,7 +3,10 @@ use alloy_consensus::{
     Eip2718EncodableReceipt, Eip658Value, ReceiptWithBloom, RlpDecodableReceipt,
     RlpEncodableReceipt, TxReceipt, TxType, Typed2718,
 };
-use alloy_eips::eip2718::Encodable2718;
+use alloy_eips::{
+    eip2718::{Eip2718Result, Encodable2718},
+    Decodable2718,
+};
 use alloy_primitives::{Bloom, Log, B256};
 use alloy_rlp::{BufMut, Decodable, Encodable, Header};
 use reth_primitives_traits::{proofs::ordered_trie_root_with_encoder, InMemorySize};
@@ -149,6 +152,28 @@ impl RlpDecodableReceipt for Receipt {
         }
 
         Ok(this)
+    }
+}
+
+impl Decodable2718 for Receipt {
+    fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
+        let receipt_with_bloom = Self::rlp_decode_inner(buf, TxType::try_from(ty)?)?;
+        Ok(receipt_with_bloom.receipt)
+    }
+
+    fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
+        let receipt_with_bloom = Self::rlp_decode_inner(buf, TxType::Legacy)?;
+        Ok(receipt_with_bloom.receipt)
+    }
+}
+
+impl Encodable2718 for Receipt {
+    fn encode_2718_len(&self) -> usize {
+        self.rlp_encoded_length_with_bloom(&self.bloom())
+    }
+
+    fn encode_2718(&self, out: &mut dyn BufMut) {
+        self.rlp_encode_with_bloom(&self.bloom(), out);
     }
 }
 
