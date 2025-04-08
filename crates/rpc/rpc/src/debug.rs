@@ -661,8 +661,8 @@ where
             })
             .await?;
 
-        // For stateless execution, one needs a contiguous set of block headers in order to prove that the block
-        // hashes are correct.
+        // For stateless execution, one needs a contiguous set of block headers in order to prove
+        // that the block hashes are correct.
         //
         // Fetch the smallest block and return an empty vector if there were no block_ids
         let Some(smallest) = blocks_ids_for_blockhash_opcode.iter().min().copied() else {
