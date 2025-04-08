@@ -263,6 +263,9 @@ pub trait BlockBuilder {
     /// Provides mutable access to the inner [`BlockExecutor`].
     fn executor_mut(&mut self) -> &mut Self::Executor;
 
+    /// Provides access to the inner [`BlockExecutor`].
+    fn executor(&self) -> &Self::Executor;
+
     /// Helper to access inner [`BlockExecutor::Evm`] mutably.
     fn evm_mut(&mut self) -> &mut <Self::Executor as BlockExecutor>::Evm {
         self.executor_mut().evm_mut()
@@ -270,7 +273,7 @@ pub trait BlockBuilder {
 
     /// Helper to access inner [`BlockExecutor::Evm`].
     fn evm(&self) -> &<Self::Executor as BlockExecutor>::Evm {
-        self.executor_mut().evm()
+        self.executor().evm()
     }
 
     /// Consumes the type and returns the underlying [`BlockExecutor`].
@@ -391,6 +394,10 @@ where
 
     fn executor_mut(&mut self) -> &mut Self::Executor {
         &mut self.executor
+    }
+
+    fn executor(&self) -> &Self::Executor {
+        &self.executor
     }
 
     fn into_executor(self) -> Self::Executor {
