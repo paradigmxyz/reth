@@ -3,7 +3,6 @@ use alloy_primitives::Address;
 use criterion::{
     criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
-use pprof::criterion::{Output, PProfProfiler};
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use reth_transaction_pool::{
     pool::{BasefeeOrd, BlobTransactions, ParkedPool, PendingPool, QueuedOrd},
@@ -274,7 +273,7 @@ fn truncate_basefee(
 
 criterion_group! {
     name = truncate;
-    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    config = Criterion::default();
     targets = txpool_truncate
 }
 criterion_main!(truncate);

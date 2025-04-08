@@ -5,7 +5,6 @@ use std::{path::Path, sync::Arc};
 use criterion::{
     criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
-use pprof::criterion::{Output, PProfProfiler};
 use reth_db::test_utils::create_test_rw_db_with_path;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
@@ -21,7 +20,7 @@ use utils::*;
 
 criterion_group! {
     name = benches;
-    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    config = Criterion::default();
     targets = db, serialization
 }
 criterion_main!(benches);
