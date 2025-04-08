@@ -36,6 +36,7 @@ reth-primitives-traits.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-rpc-eth-api.workspace = true
 reth-tracing.workspace = true
+reth-trie-common.workspace = true
 reth-trie-db.workspace = true
 revm = { workspace = true, features = ["secp256r1"] }
 

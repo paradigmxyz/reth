@@ -3781,6 +3781,7 @@ dependencies = [
  "reth-revm",
  "reth-rpc-eth-api",
  "reth-tracing",
+ "reth-trie-common",
  "reth-trie-db",
  "revm",
  "secp256k1",

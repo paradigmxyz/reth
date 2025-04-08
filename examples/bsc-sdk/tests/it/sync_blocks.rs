@@ -27,10 +27,18 @@ use reth_network_p2p::{
 use reth_node_ethereum::EthEngineTypes;
 use reth_primitives::TransactionSigned;
 use reth_provider::{providers::BlockchainProvider, BlockNumReader};
-use std::{sync::Arc, time::Duration};
+use std::{fs::File, sync::Arc, time::Duration};
 use tokio::task;
 
 use tracing::{error, info};
+
+pub fn read_blocks_from_file<P: AsRef<std::path::Path>>(
+    path: P,
+) -> Result<Vec<Block<TransactionSigned>>, Box<dyn std::error::Error>> {
+    let file = File::open(path)?;
+    let blocks: Vec<Block<TransactionSigned>> = serde_json::from_reader(file)?;
+    Ok(blocks)
+}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn can_sync_blocks() -> eyre::Result<()> {
@@ -114,18 +122,45 @@ async fn can_sync_blocks() -> eyre::Result<()> {
 
     info!("Successfully retrieved {} bodies", bodies.len());
 
+    let mut blocks_to_write = Vec::new();
     for b in bodies {
         let td = U128::from(b.header.difficulty);
         let block = NewBlockMessage {
             hash: b.header.hash_slow(),
-            block: Arc::new(NewBlock { block: b, td }),
+            block: Arc::new(NewBlock { block: b.clone(), td }),
         };
-        block_handle.send_block(block, PeerId::random()).unwrap();
+
+        blocks_to_write.push(b);
+        if let Err(err) = block_handle.send_block(block, PeerId::random()) {
+            error!("Error sending block: {}", err);
+        }
     }
+
+    let file = File::create("blocks.json").unwrap();
+    serde_json::to_writer_pretty(file, &blocks_to_write).unwrap();
+    info!("Successfully wrote {} blocks to blocks.json", blocks_to_write.len());
+
     // give time to commit the blocks
     tokio::time::sleep(Duration::from_secs(10)).await;
     let current_block = provider.best_block_number()?;
     assert_eq!(current_block, 10);
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn can_read_blocks_from_file() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    // Read blocks from the file
+    let blocks = read_blocks_from_file("blocks.json").unwrap();
+    info!("Successfully read {} blocks from blocks.json", blocks.len());
+
+    // Process the blocks
+    for (i, block) in blocks.iter().enumerate() {
+        let header = block.clone().into_header();
+        info!("Block {}: hash={:?}, number={}", i, header.hash_slow(), header.number);
+    }
 
     Ok(())
 }
