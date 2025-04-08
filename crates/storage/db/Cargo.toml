@@ -55,7 +55,6 @@ tempfile.workspace = true
 parking_lot.workspace = true
 
 serde.workspace = true
-pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
 criterion.workspace = true
 
 arbitrary = { workspace = true, features = ["derive"] }

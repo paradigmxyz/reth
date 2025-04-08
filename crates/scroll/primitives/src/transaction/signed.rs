@@ -19,7 +19,7 @@ use alloy_eips::{
     eip2930::AccessList,
     eip7702::SignedAuthorization,
 };
-use alloy_evm::FromRecoveredTx;
+use alloy_evm::{FromRecoveredTx, FromTxWithEncoded};
 use alloy_primitives::{
     keccak256, Address, Bytes, PrimitiveSignature as Signature, TxHash, TxKind, Uint, B256,
 };
@@ -334,6 +334,31 @@ impl Hash for ScrollTransactionSigned {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.signature.hash(state);
         self.transaction.hash(state);
+    }
+}
+
+impl FromTxWithEncoded<ScrollTransactionSigned> for ScrollTransactionIntoTxEnv<TxEnv> {
+    fn from_encoded_tx(tx: &ScrollTransactionSigned, caller: Address, encoded: Bytes) -> Self {
+        let base = match &tx.transaction {
+            ScrollTypedTransaction::Legacy(tx) => TxEnv::from_recovered_tx(tx, caller),
+            ScrollTypedTransaction::Eip1559(tx) => TxEnv::from_recovered_tx(tx, caller),
+            ScrollTypedTransaction::Eip2930(tx) => TxEnv::from_recovered_tx(tx, caller),
+            ScrollTypedTransaction::L1Message(tx) => {
+                let TxL1Message { to, value, gas_limit, input, queue_index: _, sender: _ } = tx;
+                TxEnv {
+                    tx_type: tx.ty(),
+                    caller,
+                    gas_limit: *gas_limit,
+                    kind: TxKind::Call(*to),
+                    value: *value,
+                    data: input.clone(),
+                    ..Default::default()
+                }
+            }
+        };
+
+        let encoded = (!tx.is_l1_message()).then_some(encoded);
+        Self::new(base, encoded)
     }
 }
 

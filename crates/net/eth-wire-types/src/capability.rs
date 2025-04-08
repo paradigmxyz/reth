@@ -1,11 +1,62 @@
 //! All capability related types
 
-use crate::EthVersion;
+use crate::{EthMessageID, EthVersion};
 use alloc::{borrow::Cow, string::String, vec::Vec};
+use alloy_primitives::bytes::Bytes;
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use bytes::BufMut;
 use core::fmt;
 use reth_codecs_derive::add_arbitrary_tests;
+
+/// A Capability message consisting of the message-id and the payload.
+#[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct RawCapabilityMessage {
+    /// Identifier of the message.
+    pub id: usize,
+    /// Actual __encoded__ payload
+    pub payload: Bytes,
+}
+
+impl RawCapabilityMessage {
+    /// Creates a new capability message with the given id and payload.
+    pub const fn new(id: usize, payload: Bytes) -> Self {
+        Self { id, payload }
+    }
+
+    /// Creates a raw message for the eth sub-protocol.
+    ///
+    /// Caller must ensure that the rlp encoded `payload` matches the given `id`.
+    ///
+    /// See also  [`EthMessage`](crate::EthMessage)
+    pub const fn eth(id: EthMessageID, payload: Bytes) -> Self {
+        Self::new(id.to_u8() as usize, payload)
+    }
+}
+
+impl Encodable for RawCapabilityMessage {
+    /// Encodes the `RawCapabilityMessage` into an RLP byte stream.
+    fn encode(&self, out: &mut dyn BufMut) {
+        self.id.encode(out);
+        out.put_slice(&self.payload);
+    }
+
+    /// Returns the total length of the encoded message.
+    fn length(&self) -> usize {
+        self.id.length() + self.payload.len()
+    }
+}
+
+impl Decodable for RawCapabilityMessage {
+    /// Decodes a `RawCapabilityMessage` from an RLP byte stream.
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let id = usize::decode(buf)?;
+        let payload = Bytes::copy_from_slice(buf);
+        *buf = &buf[buf.len()..];
+
+        Ok(Self { id, payload })
+    }
+}
 
 /// A message indicating a supported capability and capability version.
 #[add_arbitrary_tests(rlp)]

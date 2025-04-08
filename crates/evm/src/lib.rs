@@ -105,7 +105,11 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     type BlockExecutorFactory: BlockExecutorFactory<
         Transaction = TxTy<Self::Primitives>,
         Receipt = ReceiptTy<Self::Primitives>,
-        EvmFactory: EvmFactory<Tx: TransactionEnv + FromRecoveredTx<TxTy<Self::Primitives>>>,
+        EvmFactory: EvmFactory<
+            Tx: TransactionEnv
+                    + FromRecoveredTx<TxTy<Self::Primitives>>
+                    + FromTxWithEncoded<TxTy<Self::Primitives>>,
+        >,
     >;
 
     /// A type that knows how to build a block.
@@ -250,6 +254,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
             assembler: self.block_assembler(),
             parent,
             transactions: Vec::new(),
+            simulated: false,
         }
     }
 

@@ -1,4 +1,7 @@
-use crate::{hashed_cursor::HashedCursor, trie_cursor::TrieCursor, walker::TrieWalker, Nibbles};
+use crate::{
+    hashed_cursor::HashedCursor, trie::TrieType, trie_cursor::TrieCursor, walker::TrieWalker,
+    Nibbles,
+};
 use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
 use tracing::trace;
@@ -30,6 +33,17 @@ pub enum TrieElement<Value> {
     Leaf(B256, Value),
 }
 
+/// Result of calling [`HashedCursor::seek`].
+#[derive(Debug)]
+struct SeekedHashedEntry<V> {
+    /// The key that was seeked.
+    seeked_key: B256,
+    /// The result of the seek.
+
+    /// If no entry was found for the provided key, this will be [`None`].
+    result: Option<(B256, V)>,
+}
+
 /// An iterator over existing intermediate branch nodes and updated leaf nodes.
 #[derive(Debug)]
 pub struct TrieNodeIter<C, H: HashedCursor> {
@@ -42,20 +56,39 @@ pub struct TrieNodeIter<C, H: HashedCursor> {
     previous_hashed_key: Option<B256>,
 
     /// Current hashed  entry.
-    current_hashed_entry: Option<(B256, <H as HashedCursor>::Value)>,
+    current_hashed_entry: Option<(B256, H::Value)>,
     /// Flag indicating whether we should check the current walker key.
     should_check_walker_key: bool,
+
+    /// The last seeked hashed entry.
+    ///
+    /// We use it to not seek the same hashed entry twice, and instead re-use it.
+    last_seeked_hashed_entry: Option<SeekedHashedEntry<H::Value>>,
+
+    #[cfg(feature = "metrics")]
+    metrics: crate::metrics::TrieNodeIterMetrics,
+    /// The key that the [`HashedCursor`] previously advanced to using [`HashedCursor::next`].
+    #[cfg(feature = "metrics")]
+    previously_advanced_to_key: Option<B256>,
 }
 
-impl<C, H: HashedCursor> TrieNodeIter<C, H> {
+impl<C, H: HashedCursor> TrieNodeIter<C, H>
+where
+    H::Value: Copy,
+{
     /// Creates a new [`TrieNodeIter`].
-    pub const fn new(walker: TrieWalker<C>, hashed_cursor: H) -> Self {
+    pub fn new(walker: TrieWalker<C>, hashed_cursor: H, _trie_type: TrieType) -> Self {
         Self {
             walker,
             hashed_cursor,
             previous_hashed_key: None,
             current_hashed_entry: None,
             should_check_walker_key: false,
+            last_seeked_hashed_entry: None,
+            #[cfg(feature = "metrics")]
+            metrics: crate::metrics::TrieNodeIterMetrics::new(_trie_type),
+            #[cfg(feature = "metrics")]
+            previously_advanced_to_key: None,
         }
     }
 
@@ -65,12 +98,59 @@ impl<C, H: HashedCursor> TrieNodeIter<C, H> {
         self.previous_hashed_key = Some(previous_hashed_key);
         self
     }
+
+    /// Seeks the hashed cursor to the given key.
+    ///
+    /// If the key is the same as the last seeked key, the result of the last seek is returned.
+    ///
+    /// If `metrics` feature is enabled, also updates the metrics.
+    fn seek_hashed_entry(&mut self, key: B256) -> Result<Option<(B256, H::Value)>, DatabaseError> {
+        if let Some(entry) = self
+            .last_seeked_hashed_entry
+            .as_ref()
+            .filter(|entry| entry.seeked_key == key)
+            .map(|entry| entry.result)
+        {
+            #[cfg(feature = "metrics")]
+            self.metrics.inc_leaf_nodes_same_seeked();
+            return Ok(entry);
+        }
+
+        let result = self.hashed_cursor.seek(key)?;
+        self.last_seeked_hashed_entry = Some(SeekedHashedEntry { seeked_key: key, result });
+
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.inc_leaf_nodes_seeked();
+
+            if Some(key) == self.previously_advanced_to_key {
+                self.metrics.inc_leaf_nodes_same_seeked_as_advanced();
+            }
+        }
+        Ok(result)
+    }
+
+    /// Advances the hashed cursor to the next entry.
+    ///
+    /// If `metrics` feature is enabled, also updates the metrics.
+    fn next_hashed_entry(&mut self) -> Result<Option<(B256, H::Value)>, DatabaseError> {
+        let result = self.hashed_cursor.next();
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.inc_leaf_nodes_advanced();
+
+            self.previously_advanced_to_key =
+                result.as_ref().ok().and_then(|result| result.as_ref().map(|(k, _)| *k));
+        }
+        result
+    }
 }
 
 impl<C, H> TrieNodeIter<C, H>
 where
     C: TrieCursor,
     H: HashedCursor,
+    H::Value: Copy,
 {
     /// Return the next trie node to be added to the hash builder.
     ///
@@ -97,6 +177,8 @@ where
                     self.should_check_walker_key = true;
                     // If it's possible to skip the current node in the walker, return a branch node
                     if self.walker.can_skip_current_node {
+                        #[cfg(feature = "metrics")]
+                        self.metrics.inc_branch_nodes_returned();
                         return Ok(Some(TrieElement::Branch(TrieBranchNode::new(
                             key.clone(),
                             self.walker.hash().unwrap(),
@@ -116,7 +198,10 @@ where
 
                 // Set the next hashed entry as a leaf node and return
                 trace!(target: "trie::node_iter", ?hashed_key, "next hashed entry");
-                self.current_hashed_entry = self.hashed_cursor.next()?;
+                self.current_hashed_entry = self.next_hashed_entry()?;
+
+                #[cfg(feature = "metrics")]
+                self.metrics.inc_leaf_nodes_returned();
                 return Ok(Some(TrieElement::Leaf(hashed_key, value)))
             }
 
@@ -125,24 +210,58 @@ where
                 Some(hashed_key) => {
                     trace!(target: "trie::node_iter", ?hashed_key, "seeking to the previous hashed entry");
                     // Seek to the previous hashed key and get the next hashed entry
-                    self.hashed_cursor.seek(hashed_key)?;
-                    self.current_hashed_entry = self.hashed_cursor.next()?;
+                    self.seek_hashed_entry(hashed_key)?;
+                    self.current_hashed_entry = self.next_hashed_entry()?;
                 }
                 None => {
                     // Get the seek key and set the current hashed entry based on walker's next
                     // unprocessed key
-                    let seek_key = match self.walker.next_unprocessed_key() {
+                    let (seek_key, seek_prefix) = match self.walker.next_unprocessed_key() {
                         Some(key) => key,
                         None => break, // no more keys
                     };
+
                     trace!(
                         target: "trie::node_iter",
                         ?seek_key,
                         can_skip_current_node = self.walker.can_skip_current_node,
+                        last = ?self.walker.stack.last(),
                         "seeking to the next unprocessed hashed entry"
                     );
-                    self.current_hashed_entry = self.hashed_cursor.seek(seek_key)?;
+                    let can_skip_node = self.walker.can_skip_current_node;
                     self.walker.advance()?;
+                    trace!(
+                        target: "trie::node_iter",
+                        last = ?self.walker.stack.last(),
+                        "advanced walker"
+                    );
+
+                    // We should get the iterator to return a branch node if we can skip the
+                    // current node and the tree flag for the current node is set.
+                    //
+                    // `can_skip_node` is already set when the hash flag is set, so we don't need
+                    // to check for the hash flag explicitly.
+                    //
+                    // It is possible that the branch node at the key `seek_key` is not stored in
+                    // the database, so the walker will advance to the branch node after it. Because
+                    // of this, we need to check that the current walker key has a prefix of the key
+                    // that we seeked to.
+                    if can_skip_node &&
+                        self.walker.key().is_some_and(|key| key.has_prefix(&seek_prefix)) &&
+                        self.walker.children_are_in_trie()
+                    {
+                        trace!(
+                            target: "trie::node_iter",
+                            ?seek_key,
+                            walker_hash = ?self.walker.hash(),
+                            "skipping hashed seek"
+                        );
+
+                        self.should_check_walker_key = false;
+                        continue
+                    }
+
+                    self.current_hashed_entry = self.seek_hashed_entry(seek_key)?;
                 }
             }
         }
@@ -175,6 +294,7 @@ mod tests {
             HashedPostStateAccountCursor,
         },
         mock::{KeyVisit, KeyVisitType},
+        trie::TrieType,
         trie_cursor::{
             mock::MockTrieCursorFactory, noop::NoopAccountTrieCursor, TrieCursorFactory,
         },
@@ -206,6 +326,7 @@ mod tests {
                 NoopHashedAccountCursor::default(),
                 hashed_post_state.accounts(),
             ),
+            TrieType::State,
         );
 
         while let Some(node) = node_iter.try_next().unwrap() {
@@ -335,8 +456,11 @@ mod tests {
             B256Map::default(),
         );
 
-        let mut iter =
-            TrieNodeIter::new(walker, hashed_cursor_factory.hashed_account_cursor().unwrap());
+        let mut iter = TrieNodeIter::new(
+            walker,
+            hashed_cursor_factory.hashed_account_cursor().unwrap(),
+            TrieType::State,
+        );
 
         // Walk the iterator until it's exhausted.
         while iter.try_next().unwrap().is_some() {}
@@ -371,15 +495,6 @@ mod tests {
                     visited_key: Some(account_1)
                 },
                 // Seek to the modified account.
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_3),
-                    visited_key: Some(account_3)
-                },
-                // Why do we seek the modified account two more times?
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_3),
-                    visited_key: Some(account_3)
-                },
                 KeyVisit {
                     visit_type: KeyVisitType::SeekNonExact(account_3),
                     visited_key: Some(account_3)

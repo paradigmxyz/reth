@@ -6,8 +6,8 @@ use alloy_primitives::B256;
 pub struct CursorSubNode {
     /// The key of the current node.
     pub key: Nibbles,
-    /// The index of the next child to visit.
-    nibble: i8,
+    /// The position of the current subnode.
+    position: SubNodePosition,
     /// The node itself.
     pub node: Option<BranchNodeCompact>,
     /// Full key
@@ -24,7 +24,7 @@ impl std::fmt::Debug for CursorSubNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CursorSubNode")
             .field("key", &self.key)
-            .field("nibble", &self.nibble)
+            .field("position", &self.position)
             .field("state_flag", &self.state_flag())
             .field("tree_flag", &self.tree_flag())
             .field("hash_flag", &self.hash_flag())
@@ -40,29 +40,45 @@ impl From<StoredSubNode> for CursorSubNode {
     /// Extracts necessary values from the `StoredSubNode` and constructs
     /// a corresponding `CursorSubNode`.
     fn from(value: StoredSubNode) -> Self {
-        let nibble = value.nibble.map_or(-1, |n| n as i8);
+        let position = value.nibble.map_or(SubNodePosition::ParentBranch, SubNodePosition::Child);
         let key = Nibbles::from_nibbles_unchecked(value.key);
-        let full_key = full_key(key.clone(), nibble);
-        Self { key, nibble, node: value.node, full_key }
+        Self::new_with_full_key(key, value.node, position)
     }
 }
 
 impl From<CursorSubNode> for StoredSubNode {
     fn from(value: CursorSubNode) -> Self {
-        let nibble = (value.nibble >= 0).then_some(value.nibble as u8);
-        Self { key: value.key.to_vec(), nibble, node: value.node }
+        Self { key: value.key.to_vec(), nibble: value.position.as_child(), node: value.node }
     }
 }
 
 impl CursorSubNode {
-    /// Creates a new `CursorSubNode` from a key and an optional node.
+    /// Creates a new [`CursorSubNode`] from a key and an optional node.
     pub fn new(key: Nibbles, node: Option<BranchNodeCompact>) -> Self {
         // Find the first nibble that is set in the state mask of the node.
-        let nibble = node.as_ref().filter(|n| n.root_hash.is_none()).map_or(-1, |n| {
-            CHILD_INDEX_RANGE.clone().find(|i| n.state_mask.is_bit_set(*i)).unwrap() as i8
-        });
-        let full_key = full_key(key.clone(), nibble);
-        Self { key, node, nibble, full_key }
+        let position = node.as_ref().filter(|n| n.root_hash.is_none()).map_or(
+            SubNodePosition::ParentBranch,
+            |n| {
+                SubNodePosition::Child(
+                    CHILD_INDEX_RANGE.clone().find(|i| n.state_mask.is_bit_set(*i)).unwrap(),
+                )
+            },
+        );
+        Self::new_with_full_key(key, node, position)
+    }
+
+    /// Creates a new [`CursorSubNode`] and sets the full key according to the provided key and
+    /// position.
+    fn new_with_full_key(
+        key: Nibbles,
+        node: Option<BranchNodeCompact>,
+        position: SubNodePosition,
+    ) -> Self {
+        let mut full_key = key.clone();
+        if let Some(nibble) = position.as_child() {
+            full_key.push(nibble);
+        }
+        Self { key, node, position, full_key }
     }
 
     /// Returns the full key of the current node.
@@ -71,87 +87,192 @@ impl CursorSubNode {
         &self.full_key
     }
 
-    /// Returns `true` if the state flag is set for the current nibble.
+    /// Updates the full key by replacing or appending a child nibble based on the old subnode
+    /// position.
     #[inline]
-    pub fn state_flag(&self) -> bool {
-        self.node
-            .as_ref()
-            .is_none_or(|node| self.nibble < 0 || node.state_mask.is_bit_set(self.nibble as u8))
-    }
-
-    /// Returns `true` if the tree flag is set for the current nibble.
-    #[inline]
-    pub fn tree_flag(&self) -> bool {
-        self.node
-            .as_ref()
-            .is_none_or(|node| self.nibble < 0 || node.tree_mask.is_bit_set(self.nibble as u8))
-    }
-
-    /// Returns `true` if the current nibble has a root hash.
-    pub fn hash_flag(&self) -> bool {
-        self.node.as_ref().is_some_and(|node| match self.nibble {
-            // This guy has it
-            -1 => node.root_hash.is_some(),
-            // Or get it from the children
-            _ => node.hash_mask.is_bit_set(self.nibble as u8),
-        })
-    }
-
-    /// Returns the root hash of the current node, if it has one.
-    pub fn hash(&self) -> Option<B256> {
-        if self.hash_flag() {
-            let node = self.node.as_ref().unwrap();
-            match self.nibble {
-                -1 => node.root_hash,
-                _ => Some(node.hash_for_nibble(self.nibble as u8)),
+    fn update_full_key(&mut self, old_position: SubNodePosition) {
+        if let Some(new_nibble) = self.position.as_child() {
+            if old_position.is_child() {
+                let last_index = self.full_key.len() - 1;
+                self.full_key.set_at(last_index, new_nibble);
+            } else {
+                self.full_key.push(new_nibble);
             }
-        } else {
-            None
+        } else if old_position.is_child() {
+            self.full_key.pop();
         }
     }
 
-    /// Returns the next child index to visit.
+    /// Returns `true` if either of these:
+    /// - No current node is set.
+    /// - The current node is a parent branch node.
+    /// - The current node is a child with state mask bit set in the parent branch node.
     #[inline]
-    pub const fn nibble(&self) -> i8 {
-        self.nibble
+    pub fn state_flag(&self) -> bool {
+        self.node.as_ref().is_none_or(|node| {
+            self.position.as_child().is_none_or(|nibble| node.state_mask.is_bit_set(nibble))
+        })
+    }
+
+    /// Returns `true` if either of these:
+    /// - No current node is set.
+    /// - The current node is a parent branch node.
+    /// - The current node is a child with tree mask bit set in the parent branch node.
+    #[inline]
+    pub fn tree_flag(&self) -> bool {
+        self.node.as_ref().is_none_or(|node| {
+            self.position.as_child().is_none_or(|nibble| node.tree_mask.is_bit_set(nibble))
+        })
+    }
+
+    /// Returns `true` if the hash for the current node is set.
+    ///
+    /// It means either of two:
+    /// - Current node is a parent branch node, and it has a root hash.
+    /// - Current node is a child node, and it has a hash mask bit set in the parent branch node.
+    pub fn hash_flag(&self) -> bool {
+        self.node.as_ref().is_some_and(|node| match self.position {
+            // Check if the parent branch node has a root hash
+            SubNodePosition::ParentBranch => node.root_hash.is_some(),
+            // Or get it from the children
+            SubNodePosition::Child(nibble) => node.hash_mask.is_bit_set(nibble),
+        })
+    }
+
+    /// Returns the hash of the current node.
+    ///
+    /// It means either of two:
+    /// - Root hash of the parent branch node.
+    /// - Hash of the child node at the current nibble, if it has a hash mask bit set in the parent
+    ///   branch node.
+    pub fn hash(&self) -> Option<B256> {
+        self.node.as_ref().and_then(|node| match self.position {
+            // Get the root hash for the parent branch node
+            SubNodePosition::ParentBranch => node.root_hash,
+            // Or get it from the children
+            SubNodePosition::Child(nibble) => Some(node.hash_for_nibble(nibble)),
+        })
+    }
+
+    /// Returns the position to the current node.
+    #[inline]
+    pub const fn position(&self) -> SubNodePosition {
+        self.position
     }
 
     /// Increments the nibble index.
     #[inline]
     pub fn inc_nibble(&mut self) {
-        self.nibble += 1;
-        update_full_key(&mut self.full_key, self.nibble - 1, self.nibble);
+        let old_position = self.position;
+        self.position.increment();
+        self.update_full_key(old_position);
     }
 
     /// Sets the nibble index.
     #[inline]
-    pub fn set_nibble(&mut self, nibble: i8) {
-        let old_nibble = self.nibble;
-        self.nibble = nibble;
-        update_full_key(&mut self.full_key, old_nibble, self.nibble);
+    pub fn set_nibble(&mut self, nibble: u8) {
+        let old_position = self.position;
+        self.position = SubNodePosition::Child(nibble);
+        self.update_full_key(old_position);
     }
 }
 
-/// Constructs a full key from the given `Nibbles` and `nibble`.
-#[inline]
-fn full_key(mut key: Nibbles, nibble: i8) -> Nibbles {
-    if nibble >= 0 {
-        key.push(nibble as u8);
-    }
-    key
+/// Represents a subnode position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SubNodePosition {
+    /// Positioned at the parent branch node.
+    ParentBranch,
+    /// Positioned at a child node at the given nibble.
+    Child(u8),
 }
 
-/// Updates the key by replacing or appending a nibble based on the old and new nibble values.
-#[inline]
-fn update_full_key(key: &mut Nibbles, old_nibble: i8, new_nibble: i8) {
-    if new_nibble >= 0 {
-        if old_nibble >= 0 {
-            let last_index = key.len() - 1;
-            key.set_at(last_index, new_nibble as u8);
-        } else {
-            key.push(new_nibble as u8);
+impl SubNodePosition {
+    /// Returns `true` if the position is set to the parent branch node.
+    pub fn is_parent(&self) -> bool {
+        matches!(self, Self::ParentBranch)
+    }
+
+    /// Returns `true` if the position is set to a child node.
+    pub fn is_child(&self) -> bool {
+        matches!(self, Self::Child(_))
+    }
+
+    /// Returns the nibble of the child node if the position is set to a child node.
+    pub fn as_child(&self) -> Option<u8> {
+        match self {
+            Self::Child(nibble) => Some(*nibble),
+            _ => None,
         }
-    } else if old_nibble >= 0 {
-        key.pop();
+    }
+
+    /// Returns `true` if the position is set to a last child nibble (i.e. greater than or equal to
+    /// 0xf).
+    pub fn is_last_child(&self) -> bool {
+        match self {
+            Self::ParentBranch => false,
+            Self::Child(nibble) => *nibble >= 0xf,
+        }
+    }
+
+    fn increment(&mut self) {
+        match self {
+            Self::ParentBranch => *self = Self::Child(0),
+            Self::Child(nibble) => *nibble += 1,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn subnode_position_ord() {
+        assert!([
+            SubNodePosition::ParentBranch,
+            SubNodePosition::Child(0),
+            SubNodePosition::Child(1),
+            SubNodePosition::Child(2),
+            SubNodePosition::Child(3),
+            SubNodePosition::Child(4),
+            SubNodePosition::Child(5),
+            SubNodePosition::Child(6),
+            SubNodePosition::Child(7),
+            SubNodePosition::Child(8),
+            SubNodePosition::Child(9),
+            SubNodePosition::Child(10),
+            SubNodePosition::Child(11),
+            SubNodePosition::Child(12),
+            SubNodePosition::Child(13),
+            SubNodePosition::Child(14),
+            SubNodePosition::Child(15),
+        ]
+        .is_sorted());
+    }
+
+    #[test]
+    fn subnode_position_is_last_child() {
+        assert!([
+            SubNodePosition::ParentBranch,
+            SubNodePosition::Child(0),
+            SubNodePosition::Child(1),
+            SubNodePosition::Child(2),
+            SubNodePosition::Child(3),
+            SubNodePosition::Child(4),
+            SubNodePosition::Child(5),
+            SubNodePosition::Child(6),
+            SubNodePosition::Child(7),
+            SubNodePosition::Child(8),
+            SubNodePosition::Child(9),
+            SubNodePosition::Child(10),
+            SubNodePosition::Child(11),
+            SubNodePosition::Child(12),
+            SubNodePosition::Child(13),
+            SubNodePosition::Child(14),
+        ]
+        .iter()
+        .all(|position| !position.is_last_child()));
+        assert!(SubNodePosition::Child(15).is_last_child());
+        assert!(SubNodePosition::Child(16).is_last_child());
     }
 }

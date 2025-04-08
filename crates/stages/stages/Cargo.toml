@@ -93,9 +93,6 @@ tempfile.workspace = true
 # Stage benchmarks
 criterion = { workspace = true, features = ["async_tokio"] }
 
-[target.'cfg(not(target_os = "windows"))'.dev-dependencies]
-pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
-
 [features]
 test-utils = [
     "dep:reth-chainspec",

@@ -99,7 +99,6 @@ url.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }
 
 ## Benchmarks
-pprof = { workspace = true, features = ["criterion", "flamegraph"] }
 criterion = { workspace = true, features = ["async_tokio", "html_reports"] }
 
 [features]
