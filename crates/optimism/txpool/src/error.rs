@@ -1,4 +1,5 @@
 use crate::supervisor::{InteropTxValidatorError, InvalidInboxEntry};
+use op_alloy_consensus::interop::SafetyLevel;
 use reth_transaction_pool::error::PoolTransactionError;
 use std::any::Any;
 
@@ -11,6 +12,19 @@ pub enum InvalidCrossTx {
     /// Error cause by cross chain tx during not active interop hardfork
     #[error("cross chain tx is invalid before interop")]
     CrossChainTxPreInterop,
+}
+
+impl InvalidCrossTx {
+    /// Returns the [`SafetyLevel`] of message, if this is a
+    /// [`MinimumSafety`](InvalidInboxEntry::MinimumSafety) error.
+    pub fn msg_safety_level(&self) -> Option<SafetyLevel> {
+        match self {
+            Self::ValidationError(InteropTxValidatorError::InvalidInboxEntry(
+                InvalidInboxEntry::MinimumSafety { got, .. },
+            )) => Some(*got),
+            _ => None,
+        }
+    }
 }
 
 impl PoolTransactionError for InvalidCrossTx {

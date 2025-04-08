@@ -1,4 +1,4 @@
-use crate::{interop::MaybeInteropTransaction, supervisor::SupervisorClient, InvalidCrossTx};
+use crate::{interop::MaybeInteropTransaction, InvalidCrossTx, SupervisorClient};
 use alloy_consensus::{BlockHeader, Transaction};
 use alloy_eips::Encodable2718;
 use op_revm::L1BlockInfo;
@@ -52,7 +52,7 @@ pub struct OpTransactionValidator<Client, Tx> {
     /// L2 block.
     require_l1_data_gas_fee: bool,
     /// Client used to check transaction validity with op-supervisor
-    supervisor_client: Option<SupervisorClient>,
+    supervisor_client: Option<Arc<SupervisorClient>>,
     /// tracks activated forks relevant for transaction validation
     fork_tracker: Arc<OpForkTracker>,
 }
@@ -128,7 +128,7 @@ where
     }
 
     /// Set the supervisor client and safety level
-    pub fn with_supervisor(mut self, supervisor_client: SupervisorClient) -> Self {
+    pub fn with_supervisor(mut self, supervisor_client: Arc<SupervisorClient>) -> Self {
         self.supervisor_client = Some(supervisor_client);
         self
     }
@@ -292,8 +292,9 @@ where
     pub async fn is_valid_cross_tx(&self, tx: &Tx) -> Option<Result<(), InvalidCrossTx>> {
         // We don't need to check for deposit transaction in here, because they won't come from
         // txpool
-        self.supervisor_client
-            .as_ref()?
+        let client = self.supervisor_client.as_ref()?;
+
+        let res = client
             .is_valid_cross_tx(
                 tx.access_list(),
                 tx.hash(),
@@ -301,7 +302,13 @@ where
                 Some(TRANSACTION_VALIDITY_WINDOW_SECS),
                 self.fork_tracker.is_interop_activated(),
             )
-            .await
+            .await;
+
+        if let Some(Err(ref err)) = res {
+            client.metrics.maybe_increment_safety_level_counter(err)
+        }
+
+        res
     }
 }
 

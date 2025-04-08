@@ -541,12 +541,12 @@ where
     type Pool = OpTransactionPool<Node::Provider, DiskFileBlobStore, T>;
 
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
-        let Self { pool_config_overrides, .. } = self;
+        let Self { pool_config_overrides, supervisor_http, supervisor_safety_level, .. } = self;
         let data_dir = ctx.config().datadir();
         let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
         // supervisor used for interop
         if ctx.chain_spec().is_interop_active_at_timestamp(ctx.head().timestamp) &&
-            self.supervisor_http == DEFAULT_SUPERVISOR_URL
+            supervisor_http == DEFAULT_SUPERVISOR_URL
         {
             info!(target: "reth::cli",
                 url=%DEFAULT_SUPERVISOR_URL,
@@ -554,7 +554,7 @@ where
             );
         }
         let supervisor_client =
-            SupervisorClient::new(self.supervisor_http.clone(), self.supervisor_safety_level).await;
+            Arc::new(SupervisorClient::new(supervisor_http, supervisor_safety_level).await);
 
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
             .no_eip4844()

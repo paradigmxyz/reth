@@ -14,6 +14,8 @@ use op_alloy_consensus::interop::SafetyLevel;
 use std::{borrow::Cow, future::IntoFuture, time::Duration};
 use tracing::trace;
 
+use super::metrics::SupervisorMetrics;
+
 /// Supervisor hosted by op-labs
 // TODO: This should be changes to actual supervisor url
 pub const DEFAULT_SUPERVISOR_URL: &str = "http://localhost:1337/";
@@ -22,13 +24,15 @@ pub const DEFAULT_SUPERVISOR_URL: &str = "http://localhost:1337/";
 const DEFAULT_REQUEST_TIMOUT: Duration = Duration::from_millis(100);
 
 /// Implementation of the supervisor trait for the interop.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct SupervisorClient {
     client: ReqwestClient,
     /// The default
     safety: SafetyLevel,
     /// The default request timeout
     timeout: Duration,
+    /// Metrics for cross chain transaction validation.
+    pub(crate) metrics: SupervisorMetrics,
 }
 
 impl SupervisorClient {
@@ -38,7 +42,12 @@ impl SupervisorClient {
             .connect(supervisor_endpoint.into().as_str())
             .await
             .expect("building supervisor client");
-        Self { client, safety, timeout: DEFAULT_REQUEST_TIMOUT }
+        Self {
+            client,
+            safety,
+            timeout: DEFAULT_REQUEST_TIMOUT,
+            metrics: SupervisorMetrics::default(),
+        }
     }
 
     /// Configures a custom timeout
@@ -108,6 +117,7 @@ impl SupervisorClient {
             .await
         {
             trace!(target: "txpool", hash=%hash, err=%err, "Cross chain transaction invalid");
+
             return Some(Err(InvalidCrossTx::ValidationError(err)));
         }
         Some(Ok(()))

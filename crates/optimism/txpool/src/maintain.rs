@@ -124,7 +124,7 @@ where
 pub fn maintain_transaction_pool_interop_future<N, Pool, St>(
     pool: Pool,
     events: St,
-    supervisor_client: SupervisorClient,
+    supervisor_client: Arc<SupervisorClient>,
 ) -> BoxFuture<'static, ()>
 where
     N: NodePrimitives,
@@ -145,7 +145,7 @@ where
 pub async fn maintain_transaction_pool_interop<N, Pool, St>(
     pool: Pool,
     mut events: St,
-    supervisor_client: SupervisorClient,
+    supervisor_client: Arc<SupervisorClient>,
 ) where
     N: NodePrimitives,
     Pool: TransactionPool,
@@ -153,8 +153,9 @@ pub async fn maintain_transaction_pool_interop<N, Pool, St>(
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
 {
     let metrics = MaintainPoolInteropMetrics::default();
-    let supervisor_client = Arc::new(supervisor_client);
     loop {
+        supervisor_client.metrics.update(); // periodically update supervisor metrics
+
         let Some(event) = events.next().await else { break };
         if let CanonStateNotification::Commit { new } = event {
             let timestamp = new.tip().timestamp();
