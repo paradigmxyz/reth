@@ -8109,6 +8109,7 @@ dependencies = [
  "alloy-genesis",
  "alloy-primitives 1.0.0",
  "reth-chainspec",
+ "reth-engine-tree",
  "reth-ethereum-forks",
  "reth-ethereum-primitives",
  "reth-evm",
