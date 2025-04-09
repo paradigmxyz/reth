@@ -10,7 +10,7 @@ use reth_optimism_txpool::supervisor::DEFAULT_SUPERVISOR_URL;
 #[command(next_help_heading = "Rollup")]
 pub struct RollupArgs {
     /// Endpoint for the sequencer mempool (can be both HTTP and WS)
-    #[arg(long = "rollup.sequencer", aliases = ["rollup.sequencer-http", "rollup.sequencer-ws"])]
+    #[arg(long = "rollup.sequencer", visible_aliases = ["rollup.sequencer-http", "rollup.sequencer-ws"])]
     pub sequencer: Option<String>,
 
     /// Disable transaction pool gossip
