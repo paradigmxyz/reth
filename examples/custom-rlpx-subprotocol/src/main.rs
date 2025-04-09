@@ -15,12 +15,12 @@ mod subprotocol;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 use reth::builder::NodeHandle;
+use reth_ethereum::node::EthereumNode;
 use reth_network::{
     config::SecretKey, protocol::IntoRlpxSubProtocol, NetworkConfig, NetworkManager,
     NetworkProtocols,
 };
 use reth_network_api::{test_utils::PeersHandleProvider, NetworkInfo};
-use reth_ethereum::node::EthereumNode;
 use subprotocol::{
     connection::CustomCommand,
     protocol::{
