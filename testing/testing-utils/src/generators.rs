@@ -70,7 +70,7 @@ pub fn rng() -> StdRng {
     if let Ok(seed) = std::env::var("SEED") {
         rng_with_seed(seed.as_bytes())
     } else {
-        StdRng::from_rng(&mut thread_rng())
+        StdRng::from_rng(&mut thread_rng()).expect("Failed to create RNG")
     }
 }
 
