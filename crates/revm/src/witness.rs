@@ -19,7 +19,7 @@ pub struct ExecutionWitnessRecord {
     ///
     /// `keccak(address|slot) => address|slot`
     pub keys: Vec<Bytes>,
-    /// The earliest block number referenced by any BLOCKHASH opcode call during transaction
+    /// The lowest block number referenced by any BLOCKHASH opcode call during transaction
     /// execution.
     ///
     /// This helps determine which ancestor block headers must be included in the ExecutionWitness.
