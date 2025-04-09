@@ -50,9 +50,7 @@ pub fn broadcast_ingress_bench(c: &mut Criterion) {
                         }
 
                         // prepare some transactions
-                        let mut gen = TransactionGenerator::new(TestRng::deterministic_rng(
-                            RngAlgorithm::ChaCha,
-                        ));
+                        let mut gen = TransactionGenerator::new(rand::rng());
                         let num_broadcasts = 10;
                         for _ in 0..num_broadcasts {
                             for _ in 0..2 {

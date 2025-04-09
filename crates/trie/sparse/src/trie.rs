@@ -1583,7 +1583,6 @@ mod tests {
     use prop::sample::SizeRange;
     use proptest::prelude::*;
     use proptest_arbitrary_interop::arb;
-    use rand::seq::IteratorRandom;
     use reth_primitives_traits::Account;
     use reth_provider::{test_utils::create_test_provider_factory, TrieWriter};
     use reth_trie::{
@@ -2355,9 +2354,9 @@ mod tests {
             }
         }
 
-        fn transform_updates<R: RngCore>(
+        fn transform_updates(
             updates: Vec<BTreeMap<Nibbles, Account>>,
-            rng: &mut R,
+            mut rng: impl rand_08::Rng,
         ) -> Vec<(BTreeMap<Nibbles, Account>, BTreeSet<Nibbles>)> {
             let mut keys = BTreeSet::new();
             updates
@@ -2368,7 +2367,9 @@ mod tests {
                     let keys_to_delete_len = update.len() / 2;
                     let keys_to_delete = (0..keys_to_delete_len)
                         .map(|_| {
-                            let key = keys.iter().choose(rng).unwrap().clone();
+                            let key = rand_08::seq::IteratorRandom::choose(keys.iter(), &mut rng)
+                                .unwrap()
+                                .clone();
                             keys.take(&key).unwrap()
                         })
                         .collect();
