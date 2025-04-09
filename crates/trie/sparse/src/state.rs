@@ -10,7 +10,6 @@ use alloy_primitives::{
 };
 use alloy_rlp::{Decodable, Encodable};
 use core::fmt;
-use itertools::Itertools;
 use reth_execution_errors::{SparseStateTrieErrorKind, SparseStateTrieResult, SparseTrieErrorKind};
 use reth_primitives_traits::Account;
 use reth_tracing::tracing::trace;
@@ -282,34 +281,11 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
         branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
     ) -> SparseStateTrieResult<()> {
-        let len = account_subtree.len();
-        let (mut account_nodes, branch_children) = account_subtree
-            .into_inner()
-            .into_iter()
-            .filter_map(|(path, bytes)| {
-                self.metrics.increment_total_account_nodes();
-                // If the node is already revealed, skip it.
-                if self.revealed_account_paths.contains(&path) {
-                    self.metrics.increment_skipped_account_nodes();
-                    return None
-                }
-
-                Some(TrieNode::decode(&mut &bytes[..]).map(|node| (path, node)))
-            })
-            .fold_ok(
-                (Vec::with_capacity(len), 0usize),
-                |(mut nodes, mut children), (path, node)| {
-                    if let TrieNode::Branch(branch) = &node {
-                        children += branch.state_mask.count_ones() as usize;
-                    }
-
-                    nodes.push((path, node));
-
-                    (nodes, children)
-                },
-            )?;
-        account_nodes.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-        let mut account_nodes = account_nodes.into_iter().peekable();
+        let DecodedProofNodes { nodes, total_nodes, skipped_nodes, branch_children } =
+            DecodedProofNodes::new(account_subtree, &self.revealed_account_paths)?;
+        self.metrics.increment_total_account_nodes(total_nodes);
+        self.metrics.increment_skipped_account_nodes(skipped_nodes);
+        let mut account_nodes = nodes.into_iter().peekable();
 
         if let Some(root_node) = Self::validate_root_node_decoded(&mut account_nodes)? {
             // Reveal root node if it wasn't already.
@@ -355,35 +331,10 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     ) -> SparseStateTrieResult<()> {
         let revealed_nodes = self.revealed_storage_paths.entry(account).or_default();
 
-        let len = storage_subtree.subtree.len();
-        let (mut nodes, branch_children) = storage_subtree
-            .subtree
-            .into_inner()
-            .into_iter()
-            .filter_map(|(path, bytes)| {
-                self.metrics.increment_total_storage_nodes();
-                // If the node is already revealed, skip it.
-                if revealed_nodes.contains(&path) {
-                    self.metrics.increment_skipped_storage_nodes();
-                    return None
-                }
-
-                Some(TrieNode::decode(&mut &bytes[..]).map(|node| (path, node)))
-            })
-            .fold_ok(
-                (Vec::with_capacity(len), 0usize),
-                |(mut nodes, mut children), (path, node)| {
-                    if let TrieNode::Branch(branch) = &node {
-                        children += branch.state_mask.count_ones() as usize;
-                    }
-
-                    nodes.push((path, node));
-
-                    (nodes, children)
-                },
-            )?;
-
-        nodes.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        let DecodedProofNodes { nodes, total_nodes, skipped_nodes, branch_children } =
+            DecodedProofNodes::new(storage_subtree.subtree, revealed_nodes)?;
+        self.metrics.increment_total_storage_nodes(total_nodes);
+        self.metrics.increment_skipped_storage_nodes(skipped_nodes);
         let mut nodes = nodes.into_iter().peekable();
 
         if let Some(root_node) = Self::validate_root_node_decoded(&mut nodes)? {
@@ -542,8 +493,6 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         &self,
         proof: &mut Peekable<I>,
     ) -> SparseStateTrieResult<Option<TrieNode>> {
-        let mut proof = proof.into_iter().peekable();
-
         // Validate root node.
         let Some((path, node)) = proof.next() else { return Ok(None) };
         if !path.is_empty() {
@@ -559,11 +508,10 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         Ok(Some(root_node))
     }
 
+    /// Validates the decoded root node of the proof and returns it if it exists and is valid.
     fn validate_root_node_decoded<I: Iterator<Item = (Nibbles, TrieNode)>>(
         proof: &mut Peekable<I>,
     ) -> SparseStateTrieResult<Option<TrieNode>> {
-        let mut proof = proof.into_iter().peekable();
-
         // Validate root node.
         let Some((path, root_node)) = proof.next() else { return Ok(None) };
         if !path.is_empty() {
@@ -574,7 +522,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
             .into())
         }
 
-        // Decode root node and perform sanity check.
+        // Perform sanity check.
         if matches!(root_node, TrieNode::EmptyRoot) && proof.peek().is_some() {
             return Err(SparseStateTrieErrorKind::InvalidRootNode {
                 path,
@@ -830,6 +778,49 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         let storage_trie = self.storages.get_mut(&address).ok_or(SparseTrieErrorKind::Blind)?;
         storage_trie.remove_leaf(slot)?;
         Ok(())
+    }
+}
+
+/// Decoded proof nodes returned by [`decode_proof_nodes`].
+#[derive(Debug)]
+struct DecodedProofNodes {
+    /// Filtered, decoded and sorted proof nodes.
+    nodes: Vec<(Nibbles, TrieNode)>,
+    /// Number of nodes in the proof.
+    total_nodes: u64,
+    /// Number of nodes that were skipped because they were already revealed.
+    skipped_nodes: u64,
+    /// Number of children of all branch nodes in the proof.
+    branch_children: usize,
+}
+
+impl DecodedProofNodes {
+    fn new(proof_nodes: ProofNodes, revealed_nodes: &HashSet<Nibbles>) -> alloy_rlp::Result<Self> {
+        let mut result = Self {
+            nodes: Vec::with_capacity(proof_nodes.len()),
+            total_nodes: 0,
+            skipped_nodes: 0,
+            branch_children: 0,
+        };
+
+        for (path, bytes) in proof_nodes.into_inner() {
+            result.total_nodes += 1;
+            // If the node is already revealed, skip it.
+            if revealed_nodes.contains(&path) {
+                result.skipped_nodes += 1;
+                continue
+            }
+
+            let node = TrieNode::decode(&mut &bytes[..])?;
+            if let TrieNode::Branch(branch) = &node {
+                result.branch_children += branch.state_mask.count_ones() as usize;
+            }
+
+            result.nodes.push((path, node));
+        }
+
+        result.nodes.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        Ok(result)
     }
 }
 
