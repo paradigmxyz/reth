@@ -10,6 +10,7 @@ use alloy_primitives::{
 };
 use alloy_rlp::{Decodable, Encodable};
 use core::fmt;
+use itertools::Itertools;
 use reth_execution_errors::{SparseStateTrieErrorKind, SparseStateTrieResult, SparseTrieErrorKind};
 use reth_primitives_traits::Account;
 use reth_tracing::tracing::trace;
@@ -281,10 +282,36 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
         branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
     ) -> SparseStateTrieResult<()> {
-        let account_subtree = account_subtree.into_nodes_sorted();
-        let mut account_nodes = account_subtree.into_iter().peekable();
+        let len = account_subtree.len();
+        let (mut account_nodes, branch_children) = account_subtree
+            .into_inner()
+            .into_iter()
+            .filter_map(|(path, bytes)| {
+                self.metrics.increment_total_account_nodes();
+                // If the node is already revealed, skip it.
+                if self.revealed_account_paths.contains(&path) {
+                    self.metrics.increment_skipped_account_nodes();
+                    return None
+                }
 
-        if let Some(root_node) = self.validate_root_node(&mut account_nodes)? {
+                Some(TrieNode::decode(&mut &bytes[..]).map(|node| (path, node)))
+            })
+            .fold_ok(
+                (Vec::with_capacity(len), 0usize),
+                |(mut nodes, mut children), (path, node)| {
+                    if let TrieNode::Branch(branch) = &node {
+                        children += branch.state_mask.count_ones() as usize;
+                    }
+
+                    nodes.push((path, node));
+
+                    (nodes, children)
+                },
+            )?;
+        account_nodes.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        let mut account_nodes = account_nodes.into_iter().peekable();
+
+        if let Some(root_node) = self.validate_root_node_decoded(&mut account_nodes)? {
             // Reveal root node if it wasn't already.
             let trie = self.state.reveal_root_with_provider(
                 self.provider_factory.account_node_provider(),
@@ -296,15 +323,10 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                 self.retain_updates,
             )?;
 
+            trie.reserve_nodes(branch_children);
+
             // Reveal the remaining proof nodes.
-            for (path, bytes) in account_nodes {
-                self.metrics.increment_total_account_nodes();
-                // If the node is already revealed, skip it.
-                if self.revealed_account_paths.contains(&path) {
-                    self.metrics.increment_skipped_account_nodes();
-                    continue
-                }
-                let node = TrieNode::decode(&mut &bytes[..])?;
+            for (path, node) in account_nodes {
                 let (hash_mask, tree_mask) = if let TrieNode::Branch(_) = node {
                     (
                         branch_node_hash_masks.get(&path).copied(),
@@ -508,6 +530,34 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         let root_node = TrieNode::decode(&mut &node[..])?;
         if matches!(root_node, TrieNode::EmptyRoot) && proof.peek().is_some() {
             return Err(SparseStateTrieErrorKind::InvalidRootNode { path, node }.into())
+        }
+
+        Ok(Some(root_node))
+    }
+
+    fn validate_root_node_decoded<I: Iterator<Item = (Nibbles, TrieNode)>>(
+        &self,
+        proof: &mut Peekable<I>,
+    ) -> SparseStateTrieResult<Option<TrieNode>> {
+        let mut proof = proof.into_iter().peekable();
+
+        // Validate root node.
+        let Some((path, root_node)) = proof.next() else { return Ok(None) };
+        if !path.is_empty() {
+            return Err(SparseStateTrieErrorKind::InvalidRootNode {
+                path,
+                node: alloy_rlp::encode(&root_node).into(),
+            }
+            .into())
+        }
+
+        // Decode root node and perform sanity check.
+        if matches!(root_node, TrieNode::EmptyRoot) && proof.peek().is_some() {
+            return Err(SparseStateTrieErrorKind::InvalidRootNode {
+                path,
+                node: alloy_rlp::encode(&root_node).into(),
+            }
+            .into())
         }
 
         Ok(Some(root_node))

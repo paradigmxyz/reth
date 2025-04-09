@@ -24,6 +24,7 @@ alloy-rlp.workspace = true
 
 # misc
 auto_impl.workspace = true
+itertools.workspace = true
 smallvec = { workspace = true, features = ["const_new"] }
 
 # metrics
