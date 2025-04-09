@@ -815,6 +815,8 @@ impl DecodedProofNodes {
 
             let node = TrieNode::decode(&mut &bytes[..])?;
             result.new_nodes += 1;
+            // If it's a branch node, increase the number of new nodes by the number of children
+            // according to the state mask.
             if let TrieNode::Branch(branch) = &node {
                 result.new_nodes += branch.state_mask.count_ones() as usize;
             }
