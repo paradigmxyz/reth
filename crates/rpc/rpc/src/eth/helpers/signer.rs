@@ -6,7 +6,7 @@ use crate::EthApi;
 use alloy_dyn_abi::TypedData;
 use alloy_eips::eip2718::Decodable2718;
 use alloy_network::{eip2718::Encodable2718, EthereumWallet, TransactionBuilder};
-use alloy_primitives::{eip191_hash_message, Address, PrimitiveSignature as Signature, B256};
+use alloy_primitives::{eip191_hash_message, Address, Signature, B256};
 use alloy_rpc_types_eth::TransactionRequest;
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;

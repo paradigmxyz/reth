@@ -5,7 +5,7 @@ use crate::{
     receive_loop, send_loop, Discv4, Discv4Config, Discv4Service, EgressSender, IngressEvent,
     IngressReceiver, PeerId, SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
 };
-use alloy_primitives::{aliases::B16, hex, FixedBytes, B256, B512, B64};
+use alloy_primitives::{hex, B256, B512};
 use rand_08::{thread_rng, Rng, RngCore};
 use reth_ethereum_forks::{ForkHash, ForkId};
 use reth_network_peers::{pk2id, NodeRecord};

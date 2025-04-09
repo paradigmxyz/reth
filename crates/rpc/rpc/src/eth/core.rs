@@ -465,7 +465,7 @@ mod tests {
     use crate::{EthApi, EthApiBuilder};
     use alloy_consensus::{Block, BlockBody, Header};
     use alloy_eips::BlockNumberOrTag;
-    use alloy_primitives::{PrimitiveSignature as Signature, B256, U64};
+    use alloy_primitives::{Signature, B256, U64};
     use alloy_rpc_types::FeeHistory;
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use reth_chain_state::CanonStateSubscriptions;

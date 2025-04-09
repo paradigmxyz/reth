@@ -76,7 +76,7 @@ impl<R: Rng> TransactionGenerator<R> {
 
     /// Returns a random signer from the set
     fn rng_signer(&mut self) -> B256 {
-        let idx = self.rng.gen_range(0..self.signer_keys.len());
+        let idx = self.rng.random_range(0..self.signer_keys.len());
         self.signer_keys[idx]
     }
 
@@ -359,11 +359,11 @@ impl Default for TransactionBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::thread_rng;
+    use rand::rng;
 
     #[test]
     fn test_generate_transaction() {
-        let rng = thread_rng();
+        let rng = rng();
         let mut gen = TransactionGenerator::new(rng);
         let _tx = gen.transaction().into_legacy();
         let _tx = gen.transaction().into_eip1559();

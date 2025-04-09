@@ -28,7 +28,7 @@ pub use secp256k1::SecretKey;
 
 /// Convenience function to create a new random [`SecretKey`]
 pub fn rng_secret_key() -> SecretKey {
-    SecretKey::new(&mut rand::thread_rng())
+    SecretKey::new(&mut rand_08::thread_rng())
 }
 
 /// All network related initialization settings.
@@ -696,14 +696,13 @@ impl NetworkMode {
 mod tests {
     use super::*;
     use alloy_eips::eip2124::ForkHash;
-    use rand::thread_rng;
     use reth_chainspec::{Chain, MAINNET};
     use reth_dns_discovery::tree::LinkEntry;
     use reth_storage_api::noop::NoopProvider;
     use std::sync::Arc;
 
     fn builder() -> NetworkConfigBuilder {
-        let secret_key = SecretKey::new(&mut thread_rng());
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
         NetworkConfigBuilder::new(secret_key)
     }
 

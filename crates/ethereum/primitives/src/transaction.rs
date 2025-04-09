@@ -967,7 +967,7 @@ pub(super) mod serde_bincode_compat {
         transaction::serde_bincode_compat::{TxEip1559, TxEip2930, TxEip7702, TxLegacy},
         TxEip4844,
     };
-    use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
+    use alloy_primitives::{Signature, TxHash};
     use reth_primitives_traits::{serde_bincode_compat::SerdeBincodeCompat, SignedTransaction};
 
     /// Bincode-compatible [`super::Transaction`] serde implementation.
@@ -1102,8 +1102,7 @@ mod tests {
         eip7702::constants::SECP256K1N_HALF,
     };
     use alloy_primitives::{
-        address, b256, bytes, hex, Address, Bytes, PrimitiveSignature as Signature, TxKind, B256,
-        U256,
+        address, b256, bytes, hex, Address, Bytes, Signature, TxKind, B256, U256,
     };
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
     use proptest::proptest;

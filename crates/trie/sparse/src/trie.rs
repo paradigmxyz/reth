@@ -2355,9 +2355,9 @@ mod tests {
             }
         }
 
-        fn transform_updates(
+        fn transform_updates<R: RngCore>(
             updates: Vec<BTreeMap<Nibbles, Account>>,
-            mut rng: impl Rng,
+            rng: &mut R,
         ) -> Vec<(BTreeMap<Nibbles, Account>, BTreeSet<Nibbles>)> {
             let mut keys = BTreeSet::new();
             updates
@@ -2368,7 +2368,7 @@ mod tests {
                     let keys_to_delete_len = update.len() / 2;
                     let keys_to_delete = (0..keys_to_delete_len)
                         .map(|_| {
-                            let key = keys.iter().choose(&mut rng).unwrap().clone();
+                            let key = keys.iter().choose(rng).unwrap().clone();
                             keys.take(&key).unwrap()
                         })
                         .collect();

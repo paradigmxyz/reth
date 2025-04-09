@@ -1,5 +1,5 @@
 use alloy_eips::eip4895::Withdrawals;
-use alloy_primitives::{hex, private::getrandom::getrandom, PrimitiveSignature, TxKind};
+use alloy_primitives::{hex, private::getrandom::getrandom, Signature, TxKind};
 use arbitrary::Arbitrary;
 use eyre::{Context, Result};
 use proptest::{
@@ -128,7 +128,7 @@ compact_types!(
     ],
     // These types require an extra identifier which is usually stored elsewhere (eg. parent type).
     identifier: [
-        PrimitiveSignature,
+        Signature,
         Transaction,
         TxType,
         TxKind

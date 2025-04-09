@@ -728,7 +728,7 @@ pub mod serde_bincode_compat {
     use alloy_consensus::transaction::serde_bincode_compat::{
         TxEip1559, TxEip2930, TxEip7702, TxLegacy,
     };
-    use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
+    use alloy_primitives::{Signature, TxHash};
     use reth_primitives_traits::{serde_bincode_compat::SerdeBincodeCompat, SignedTransaction};
     use serde::{Deserialize, Serialize};
 
