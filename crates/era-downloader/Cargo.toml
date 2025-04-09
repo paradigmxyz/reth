@@ -12,11 +12,12 @@ exclude.workspace = true
 # http
 reqwest.workspace = true
 reqwest.features = ["stream"]
-futures.workspace = true
 
 # async
+pin-project.workspace = true
 tokio.workspace = true
 tokio.features = ["fs", "io-util"]
+futures-util.workspace = true
 
 # errors
 eyre.workspace = true
