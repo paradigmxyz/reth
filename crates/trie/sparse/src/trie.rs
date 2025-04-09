@@ -412,8 +412,9 @@ impl<P> RevealedSparseTrie<P> {
                 // Reserve space for children nodes. We may over-reserve here if some of the
                 // children already exist in `nodes`, but it's better than reserving one by one.
                 //
-                // TODO: ideally we do preprocessing of all nodes by decoding them, calculating full
-                // paths, checking if they exist in `nodes`, and then reserving space for them.
+                // TODO: ideally we do preprocessing of all nodes in a caller of `reveal_node` by
+                // decoding them, calculating full paths, checking if they exist in `nodes`, and
+                // then reserving space for them.
                 self.nodes.reserve(set_nibbles.len());
 
                 let mut stack_ptr = branch.as_ref().first_child_index();
