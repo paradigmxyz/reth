@@ -282,7 +282,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
     ) -> SparseStateTrieResult<()> {
         let DecodedProofNodes { nodes, total_nodes, skipped_nodes, new_nodes } =
-            DecodedProofNodes::new(account_subtree, &self.revealed_account_paths)?;
+            decode_proof_nodes(account_subtree, &self.revealed_account_paths)?;
         self.metrics.increment_total_account_nodes(total_nodes);
         self.metrics.increment_skipped_account_nodes(skipped_nodes);
         let mut account_nodes = nodes.into_iter().peekable();
@@ -332,7 +332,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         let revealed_nodes = self.revealed_storage_paths.entry(account).or_default();
 
         let DecodedProofNodes { nodes, total_nodes, skipped_nodes, new_nodes } =
-            DecodedProofNodes::new(storage_subtree.subtree, revealed_nodes)?;
+            decode_proof_nodes(storage_subtree.subtree, revealed_nodes)?;
         self.metrics.increment_total_storage_nodes(total_nodes);
         self.metrics.increment_skipped_storage_nodes(skipped_nodes);
         let mut nodes = nodes.into_iter().peekable();
@@ -781,8 +781,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     }
 }
 
-/// Decoded proof nodes with additional information about the number of total, skipped, and new
-/// nodes.
+/// Result of [`decode_proof_nodes`].
 #[derive(Debug)]
 struct DecodedProofNodes {
     /// Filtered, decoded and sorted proof nodes.
@@ -796,37 +795,40 @@ struct DecodedProofNodes {
     new_nodes: usize,
 }
 
-impl DecodedProofNodes {
-    fn new(proof_nodes: ProofNodes, revealed_nodes: &HashSet<Nibbles>) -> alloy_rlp::Result<Self> {
-        let mut result = Self {
-            nodes: Vec::with_capacity(proof_nodes.len()),
-            total_nodes: 0,
-            skipped_nodes: 0,
-            new_nodes: 0,
-        };
+/// Decodes the proof nodes returning additional information about the number of total, skipped, and
+/// new nodes.
+fn decode_proof_nodes(
+    proof_nodes: ProofNodes,
+    revealed_nodes: &HashSet<Nibbles>,
+) -> alloy_rlp::Result<DecodedProofNodes> {
+    let mut result = DecodedProofNodes {
+        nodes: Vec::with_capacity(proof_nodes.len()),
+        total_nodes: 0,
+        skipped_nodes: 0,
+        new_nodes: 0,
+    };
 
-        for (path, bytes) in proof_nodes.into_inner() {
-            result.total_nodes += 1;
-            // If the node is already revealed, skip it.
-            if revealed_nodes.contains(&path) {
-                result.skipped_nodes += 1;
-                continue
-            }
-
-            let node = TrieNode::decode(&mut &bytes[..])?;
-            result.new_nodes += 1;
-            // If it's a branch node, increase the number of new nodes by the number of children
-            // according to the state mask.
-            if let TrieNode::Branch(branch) = &node {
-                result.new_nodes += branch.state_mask.count_ones() as usize;
-            }
-
-            result.nodes.push((path, node));
+    for (path, bytes) in proof_nodes.into_inner() {
+        result.total_nodes += 1;
+        // If the node is already revealed, skip it.
+        if revealed_nodes.contains(&path) {
+            result.skipped_nodes += 1;
+            continue
         }
 
-        result.nodes.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-        Ok(result)
+        let node = TrieNode::decode(&mut &bytes[..])?;
+        result.new_nodes += 1;
+        // If it's a branch node, increase the number of new nodes by the number of children
+        // according to the state mask.
+        if let TrieNode::Branch(branch) = &node {
+            result.new_nodes += branch.state_mask.count_ones() as usize;
+        }
+
+        result.nodes.push((path, node));
     }
+
+    result.nodes.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    Ok(result)
 }
 
 #[cfg(test)]
