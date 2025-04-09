@@ -13,16 +13,12 @@ use tokio::fs::File;
 #[derive(Debug, Clone)]
 pub struct EraClient {
     client: Client,
-    max_files: usize,
-    max_concurrent_downloads: usize,
     url: Url,
     folder: Box<Path>,
-    pending: usize,
 }
 
 impl EraClient {
     pub async fn download_to_file(&mut self, url: impl IntoUrl) -> eyre::Result<Box<Path>> {
-        self.pending += 1;
         let path = self.folder.to_path_buf();
 
         let url = url.into_url()?;
@@ -66,10 +62,6 @@ impl EraClient {
 
     async fn files_count(&self) -> usize {
         tokio::fs::read_dir(&self.folder).await.iter().count()
-    }
-
-    async fn delete_file(&self, path: &Path) -> Result<(), std::io::Error> {
-        tokio::fs::remove_file(path).await
     }
 
     fn number_to_file_name(&self, number: u64) -> String {
@@ -122,13 +114,15 @@ impl Stream for DownloadStream {
 
 #[pin_project]
 struct StartingStream {
-    pub client: EraClient,
-    pub filler: Pin<Box<dyn Future<Output = ()>>>,
-    pub downloading: usize,
-    pub files_count: Pin<Box<dyn Future<Output = usize> + Send + Sync + 'static>>,
-    pub next_url: Pin<Box<dyn Future<Output = Option<Url>> + Send + Sync + 'static>>,
-    pub files_count_ready: bool,
-    pub state: State,
+    client: EraClient,
+    filler: Pin<Box<dyn Future<Output = ()>>>,
+    downloading: usize,
+    files_count: Pin<Box<dyn Future<Output = usize> + Send + Sync + 'static>>,
+    next_url: Pin<Box<dyn Future<Output = Option<Url>> + Send + Sync + 'static>>,
+    files_count_ready: bool,
+    state: State,
+    max_files: usize,
+    max_concurrent_downloads: usize,
 }
 
 #[derive(Debug, PartialEq)]
@@ -163,8 +157,8 @@ impl Stream for StartingStream {
                 match Pin::new(&mut self.files_count).poll(cx) {
                     Poll::Ready(downloaded) => {
                         let max_missing = (downloaded + downloading)
-                            .saturating_sub(self.client.max_files)
-                            .max(self.client.max_concurrent_downloads);
+                            .saturating_sub(self.max_files)
+                            .max(self.max_concurrent_downloads);
 
                         self.files_count_ready = false;
                         self.state = State::Missing(max_missing);
