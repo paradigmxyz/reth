@@ -4,9 +4,12 @@ use crate::{
     models::{BlockchainTest, ForkSpec},
     Case, Error, Suite,
 };
+use alloy_genesis::{Genesis, GenesisAccount};
+use alloy_primitives::U64;
 use alloy_rlp::Decodable;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_chainspec::ChainSpec;
+use reth_db_common::init::init_genesis;
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_primitives::{BlockBody, SealedBlock, StaticFileSegment};
@@ -87,14 +90,14 @@ impl Case for BlockchainTestCase {
             .par_bridge()
             .try_for_each(|case| {
                 // Create a new test database and initialize a provider for the test case.
-                let chain_spec: Arc<ChainSpec> = Arc::new(case.network.into());
-                let provider = create_test_provider_factory_with_chain_spec(chain_spec.clone())
-                    .database_provider_rw()
-                    .unwrap();
+                let mut chain_spec: ChainSpec = case.network.into();
 
-                let chain_spec_genesis_hash = chain_spec.genesis_hash();
+                let gen_accounts: BTreeMap<_, _> = case
+                    .pre
+                    .iter()
+                    .map(|(addr, acc)| (addr.clone(), GenesisAccount::from(acc.clone())))
+                    .collect();
 
-                // Insert initial test state into the provider.
                 let genesis_block = SealedBlock::<reth_primitives::Block>::from_sealed_parts(
                     case.genesis_block_header.clone().into(),
                     BlockBody::default(),
@@ -102,23 +105,39 @@ impl Case for BlockchainTestCase {
                 .try_recover()
                 .unwrap();
 
+                // Fix-up chain_spec -- TODO: This is hacky, clean up
+                chain_spec.genesis = Genesis {
+                    config: chain_spec.genesis.config,
+                    nonce: U64::from_be_bytes(genesis_block.nonce.0).to::<u64>(),
+                    timestamp: genesis_block.timestamp,
+                    extra_data: genesis_block.extra_data.clone(),
+                    gas_limit: genesis_block.gas_limit.clone(),
+                    difficulty: genesis_block.clone().difficulty,
+                    mix_hash: genesis_block.clone().mix_hash,
+                    coinbase: genesis_block.clone_header().beneficiary,
+                    alloc: gen_accounts.clone(),
+                    base_fee_per_gas: genesis_block.base_fee_per_gas.map(|x| x as u128),
+                    excess_blob_gas: genesis_block.excess_blob_gas,
+                    blob_gas_used: genesis_block.blob_gas_used,
+                    number: Some(genesis_block.number),
+                };
+                chain_spec.genesis_header = genesis_block.clone_sealed_header();
+
+                let chain_spec_genesis_hash = chain_spec.genesis_hash();
+
+                let chain_spec = Arc::new(chain_spec);
+
+                let factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+
                 assert_eq!(
                     chain_spec_genesis_hash,
                     genesis_block.hash_slow(),
                     "shouldn't these hashes be the same?"
                 );
 
-                provider.insert_historical_block(genesis_block)?;
-                case.pre.write_to_db(provider.tx_ref())?;
+                init_genesis(&factory).unwrap();
 
-                // Initialize receipts static file with genesis
-                {
-                    let static_file_provider = provider.static_file_provider();
-                    let mut receipts_writer =
-                        static_file_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
-                    receipts_writer.increment_block(0).unwrap();
-                    receipts_writer.commit_without_sync_all().unwrap();
-                }
+                let provider = factory.database_provider_rw().unwrap();
 
                 // Decode and insert blocks, creating a chain of blocks for the test case.
                 let mut blocks = Vec::new();

@@ -28,6 +28,7 @@ reth-db = { workspace = true, features = [
     "disable-lock",
 ] }
 reth-db-api.workspace = true
+reth-db-common.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-stages.workspace = true
 reth-evm-ethereum.workspace = true
@@ -41,6 +42,7 @@ alloy-rlp.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
 alloy-consensus.workspace = true
+alloy-genesis.workspace = true
 
 walkdir.workspace = true
 serde.workspace = true

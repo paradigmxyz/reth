@@ -3,6 +3,7 @@
 use crate::{assert::assert_equal, Error};
 use alloy_consensus::Header as RethHeader;
 use alloy_eips::eip4895::Withdrawals;
+use alloy_genesis::GenesisAccount;
 use alloy_primitives::{keccak256, Address, Bloom, Bytes, B256, B64, U256};
 use reth_chainspec::{ChainSpec, ChainSpecBuilder};
 use reth_db_api::{
@@ -213,7 +214,40 @@ pub struct Account {
     pub storage: BTreeMap<U256, U256>,
 }
 
+impl From<Account> for GenesisAccount {
+    fn from(value: Account) -> Self {
+        let balance = value.balance;
+
+        let has_code = !value.code.is_empty();
+        let code = has_code.then(|| value.code);
+
+        let nonce = Some(value.nonce.to::<u64>());
+
+        let has_storage = !value.storage.is_empty();
+        let storage = has_storage.then(|| {
+            value
+                .storage
+                .into_iter()
+                .filter(|(_, v)| !v.is_zero())
+                .map(|(k, v)| {
+                    (
+                        B256::from_slice(&k.to_be_bytes::<32>()),
+                        B256::from_slice(&v.to_be_bytes::<32>()),
+                    )
+                })
+                .collect()
+        });
+
+        GenesisAccount::default()
+            .with_balance(balance)
+            .with_code(code)
+            .with_nonce(nonce)
+            .with_storage(storage)
+    }
+}
+
 impl Account {
+    // TODO: Can likely remove this if we use init_genesis
     /// Check that the account matches what is in the database.
     ///
     /// In case of a mismatch, `Err(Error::Assertion)` is returned.
