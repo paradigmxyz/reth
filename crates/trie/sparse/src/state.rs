@@ -299,6 +299,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                 self.retain_updates,
             )?;
 
+            // Reserve the capacity for new nodes ahead of time.
             trie.reserve_nodes(new_nodes);
 
             // Reveal the remaining proof nodes.
@@ -355,6 +356,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                 self.retain_updates,
             )?;
 
+            // Reserve the capacity for new nodes ahead of time.
             trie.reserve_nodes(new_nodes);
 
             // Reveal the remaining proof nodes.
