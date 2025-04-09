@@ -363,7 +363,7 @@ dependencies = [
  "auto_impl",
  "derive_more 2.0.1",
  "op-alloy-consensus",
- "op-revm 3.0.0",
+ "op-revm",
  "revm 22.0.0",
  "thiserror 2.0.12",
 ]
@@ -519,7 +519,7 @@ dependencies = [
  "alloy-primitives 1.0.0",
  "auto_impl",
  "op-alloy-consensus",
- "op-revm 3.0.0",
+ "op-revm",
  "revm 22.0.0",
 ]
 
@@ -541,11 +541,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8c77490fe91a0ce933a1f219029521f20fc28c2c0ca95d53fa4da9c00b8d9d4e"
 dependencies = [
  "alloy-rlp",
- "arbitrary",
  "bytes",
  "cfg-if",
  "const-hex",
- "derive_arbitrary",
  "derive_more 2.0.1",
  "foldhash",
  "hashbrown 0.15.2",
@@ -555,7 +553,6 @@ dependencies = [
  "keccak-asm",
  "paste",
  "proptest",
- "proptest-derive",
  "rand 0.8.5",
  "ruint",
  "rustc-hash 2.1.1",
@@ -3346,7 +3343,7 @@ dependencies = [
  "reth-provider",
  "reth-revm",
  "reth-stages",
- "revm 21.0.0",
+ "revm 22.0.0",
  "serde",
  "serde_json",
  "thiserror 2.0.12",
@@ -3735,7 +3732,7 @@ dependencies = [
  "jsonrpsee",
  "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
- "op-revm 2.0.0",
+ "op-revm",
  "reth-chain-state",
  "reth-chainspec",
  "reth-codecs",
@@ -3753,8 +3750,8 @@ dependencies = [
  "reth-rpc-api",
  "reth-rpc-engine-api",
  "reth-transaction-pool",
- "revm 21.0.0",
- "revm-primitives 17.0.0",
+ "revm 22.0.0",
+ "revm-primitives 18.0.0",
  "serde",
 ]
 
@@ -6297,18 +6294,6 @@ dependencies = [
 
 [[package]]
 name = "op-revm"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e981d234dcfd3a3de7480e5a5cf7439071af39d15b7d258188cc4c69b9d1f26e"
-dependencies = [
- "auto_impl",
- "once_cell",
- "revm 21.0.0",
- "serde",
-]
-
-[[package]]
-name = "op-revm"
 version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac40ce865561819210df49a6d191c452155d71d9908b4aab7ba155fff68d2ab2"
@@ -7386,8 +7371,8 @@ dependencies = [
  "reth-storage-api",
  "reth-testing-utils",
  "reth-trie",
- "revm-database 2.0.0",
- "revm-state 2.0.0",
+ "revm-database 3.0.0",
+ "revm-state 3.0.0",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -7886,7 +7871,7 @@ dependencies = [
  "reth-tasks",
  "reth-tokio-util",
  "reth-tracing",
- "revm 21.0.0",
+ "revm 22.0.0",
  "serde_json",
  "tokio",
  "tokio-stream",
@@ -8063,8 +8048,8 @@ dependencies = [
  "reth-trie-db",
  "reth-trie-parallel",
  "reth-trie-sparse",
- "revm-primitives 17.0.0",
- "revm-state 2.0.0",
+ "revm-primitives 18.0.0",
+ "revm-state 3.0.0",
  "schnellru",
  "thiserror 2.0.12",
  "tokio",
@@ -8296,7 +8281,7 @@ dependencies = [
  "reth-revm",
  "reth-storage-api",
  "reth-transaction-pool",
- "revm 21.0.0",
+ "revm 22.0.0",
  "tracing",
 ]
 
@@ -8322,7 +8307,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-testing-utils",
  "reth-zstd-compressors",
- "revm-context 2.0.0",
+ "revm-context 3.0.0",
  "secp256k1",
  "serde",
  "serde_with",
@@ -8352,7 +8337,7 @@ dependencies = [
  "futures-util",
  "metrics",
  "metrics-util",
- "op-revm 2.0.0",
+ "op-revm",
  "parking_lot",
  "reth-ethereum-forks",
  "reth-ethereum-primitives",
@@ -8363,7 +8348,7 @@ dependencies = [
  "reth-storage-api",
  "reth-storage-errors",
  "reth-trie-common",
- "revm 21.0.0",
+ "revm 22.0.0",
 ]
 
 [[package]]
@@ -8382,7 +8367,7 @@ dependencies = [
  "reth-execution-types",
  "reth-primitives-traits",
  "reth-testing-utils",
- "revm 21.0.0",
+ "revm 22.0.0",
  "secp256k1",
 ]
 
@@ -8413,7 +8398,7 @@ dependencies = [
  "reth-ethereum-primitives",
  "reth-primitives-traits",
  "reth-trie-common",
- "revm 21.0.0",
+ "revm 22.0.0",
  "serde",
  "serde_with",
 ]
@@ -8964,7 +8949,7 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "reth-trie-db",
- "revm 21.0.0",
+ "revm 22.0.0",
  "serde_json",
  "tokio",
 ]
@@ -9165,7 +9150,7 @@ dependencies = [
  "reth-storage-errors",
  "reth-trie",
  "reth-trie-common",
- "revm 21.0.0",
+ "revm 22.0.0",
  "thiserror 2.0.12",
  "tracing",
 ]
@@ -9181,7 +9166,7 @@ dependencies = [
  "alloy-op-evm",
  "alloy-primitives 1.0.0",
  "op-alloy-consensus",
- "op-revm 2.0.0",
+ "op-revm",
  "reth-chainspec",
  "reth-evm",
  "reth-execution-errors",
@@ -9192,7 +9177,7 @@ dependencies = [
  "reth-optimism-primitives",
  "reth-primitives-traits",
  "reth-revm",
- "revm 21.0.0",
+ "revm 22.0.0",
  "thiserror 2.0.12",
 ]
 
@@ -9222,7 +9207,7 @@ dependencies = [
  "futures",
  "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
- "op-revm 2.0.0",
+ "op-revm",
  "reth-chainspec",
  "reth-consensus",
  "reth-db",
@@ -9258,7 +9243,7 @@ dependencies = [
  "reth-transaction-pool",
  "reth-trie-common",
  "reth-trie-db",
- "revm 21.0.0",
+ "revm 22.0.0",
  "serde",
  "serde_json",
  "tokio",
@@ -9295,7 +9280,7 @@ dependencies = [
  "reth-revm",
  "reth-storage-api",
  "reth-transaction-pool",
- "revm 21.0.0",
+ "revm 22.0.0",
  "sha2 0.10.8",
  "thiserror 2.0.12",
  "tracing",
@@ -9319,14 +9304,14 @@ dependencies = [
  "derive_more 2.0.1",
  "modular-bitfield",
  "op-alloy-consensus",
- "op-revm 2.0.0",
+ "op-revm",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.8.5",
  "reth-codecs",
  "reth-primitives-traits",
  "reth-zstd-compressors",
- "revm-context 2.0.0",
+ "revm-context 3.0.0",
  "rstest",
  "secp256k1",
  "serde",
@@ -9358,7 +9343,7 @@ dependencies = [
  "op-alloy-rpc-jsonrpsee",
  "op-alloy-rpc-types",
  "op-alloy-rpc-types-engine",
- "op-revm 2.0.0",
+ "op-revm",
  "parking_lot",
  "reqwest",
  "reth-chain-state",
@@ -9383,7 +9368,7 @@ dependencies = [
  "reth-storage-api",
  "reth-tasks",
  "reth-transaction-pool",
- "revm 21.0.0",
+ "revm 22.0.0",
  "thiserror 2.0.12",
  "tokio",
  "tracing",
@@ -9423,7 +9408,7 @@ dependencies = [
  "metrics",
  "op-alloy-consensus",
  "op-alloy-flz",
- "op-revm 2.0.0",
+ "op-revm",
  "parking_lot",
  "reth-chain-state",
  "reth-chainspec",
@@ -9558,9 +9543,9 @@ dependencies = [
  "rayon",
  "reth-chainspec",
  "reth-codecs",
- "revm-bytecode 2.0.0",
- "revm-primitives 17.0.0",
- "revm-state 2.0.0",
+ "revm-bytecode 3.0.0",
+ "revm-primitives 18.0.0",
+ "revm-state 3.0.0",
  "secp256k1",
  "serde",
  "serde_json",
@@ -9611,9 +9596,9 @@ dependencies = [
  "reth-testing-utils",
  "reth-trie",
  "reth-trie-db",
- "revm-database 2.0.0",
- "revm-database-interface 2.0.0",
- "revm-state 2.0.0",
+ "revm-database 3.0.0",
+ "revm-database-interface 3.0.0",
+ "revm-state 3.0.0",
  "strum 0.27.1",
  "tempfile",
  "tokio",
@@ -9733,7 +9718,7 @@ dependencies = [
  "reth-storage-api",
  "reth-storage-errors",
  "reth-trie",
- "revm 21.0.0",
+ "revm 22.0.0",
 ]
 
 [[package]]
@@ -9799,9 +9784,9 @@ dependencies = [
  "reth-tasks",
  "reth-testing-utils",
  "reth-transaction-pool",
- "revm 21.0.0",
+ "revm 22.0.0",
  "revm-inspectors",
- "revm-primitives 17.0.0",
+ "revm-primitives 18.0.0",
  "serde",
  "serde_json",
  "thiserror 2.0.12",
@@ -9982,7 +9967,7 @@ dependencies = [
  "reth-tasks",
  "reth-transaction-pool",
  "reth-trie-common",
- "revm 21.0.0",
+ "revm 22.0.0",
  "revm-inspectors",
  "tokio",
  "tracing",
@@ -10019,7 +10004,7 @@ dependencies = [
  "reth-tasks",
  "reth-transaction-pool",
  "reth-trie",
- "revm 21.0.0",
+ "revm 22.0.0",
  "revm-inspectors",
  "schnellru",
  "serde",
@@ -10233,7 +10218,7 @@ dependencies = [
  "reth-storage-errors",
  "reth-trie-common",
  "reth-trie-db",
- "revm-database 2.0.0",
+ "revm-database 3.0.0",
 ]
 
 [[package]]
@@ -10247,7 +10232,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-prune-types",
  "reth-static-file-types",
- "revm-database-interface 2.0.0",
+ "revm-database-interface 3.0.0",
  "thiserror 2.0.12",
 ]
 
@@ -10337,8 +10322,8 @@ dependencies = [
  "reth-storage-api",
  "reth-tasks",
  "reth-tracing",
- "revm-interpreter 17.0.0",
- "revm-primitives 17.0.0",
+ "revm-interpreter 18.0.0",
+ "revm-primitives 18.0.0",
  "rustc-hash 2.1.1",
  "schnellru",
  "serde",
@@ -10377,8 +10362,8 @@ dependencies = [
  "reth-tracing",
  "reth-trie-common",
  "reth-trie-sparse",
- "revm-database 2.0.0",
- "revm-state 2.0.0",
+ "revm-database 3.0.0",
+ "revm-state 3.0.0",
  "tracing",
  "triehash",
 ]
@@ -10408,8 +10393,8 @@ dependencies = [
  "rayon",
  "reth-codecs",
  "reth-primitives-traits",
- "revm-database 2.0.0",
- "revm-state 2.0.0",
+ "revm-database 3.0.0",
+ "revm-state 3.0.0",
  "serde",
  "serde_json",
  "serde_with",
@@ -10433,8 +10418,8 @@ dependencies = [
  "reth-storage-errors",
  "reth-trie",
  "reth-trie-common",
- "revm 21.0.0",
- "revm-database 2.0.0",
+ "revm 22.0.0",
+ "revm-database 3.0.0",
  "serde_json",
  "similar-asserts",
  "tracing",
@@ -10834,6 +10819,7 @@ dependencies = [
  "ark-ff 0.5.0",
  "ark-serialize 0.5.0",
  "aurora-engine-modexp",
+ "blst",
  "c-kzg",
  "cfg-if",
  "k256",
