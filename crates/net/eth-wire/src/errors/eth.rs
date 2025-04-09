@@ -41,6 +41,12 @@ pub enum EthStreamError {
     /// Error when data is not received from peer for a prolonged period.
     #[error("never received data from remote peer")]
     StreamTimeout,
+    /// Error triggered when an unknown or unsupported Ethereum message ID is received.
+    #[error("Received unknown ETH message ID: 0x{message_id:X}")]
+    UnsupportedMessage {
+        /// The identifier of the unknown Ethereum message.
+        message_id: u8,
+    },
 }
 
 // === impl EthStreamError ===

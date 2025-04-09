@@ -20,6 +20,14 @@ pub mod primitives {
     pub use reth_primitives_traits::*;
 }
 
+/// Re-exported cli types
+#[cfg(feature = "cli")]
+pub use reth_optimism_cli as cli;
+
+/// Re-exported pool types
+#[cfg(feature = "pool")]
+pub use reth_transaction_pool as pool;
+
 /// Re-exported consensus types
 #[cfg(feature = "consensus")]
 pub mod consensus {
@@ -50,6 +58,9 @@ pub mod evm {
 
     #[doc(inline)]
     pub use reth_evm as primitives;
+
+    #[doc(inline)]
+    pub use reth_revm as revm;
 }
 
 /// Re-exported reth network types
@@ -81,6 +92,8 @@ pub mod storage {
 pub mod node {
     #[doc(inline)]
     pub use reth_node_api as api;
+    #[doc(inline)]
+    pub use reth_node_core as core;
     #[cfg(feature = "node")]
     pub use reth_optimism_node::*;
 }

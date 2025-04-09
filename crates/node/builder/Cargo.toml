@@ -87,6 +87,7 @@ tempfile.workspace = true
 default = []
 js-tracer = ["reth-rpc/js-tracer"]
 test-utils = [
+    "dep:reth-db",
     "reth-db/test-utils",
     "reth-chain-state/test-utils",
     "reth-chainspec/test-utils",
@@ -101,4 +102,10 @@ test-utils = [
     "reth-db-api/test-utils",
     "reth-provider/test-utils",
     "reth-transaction-pool/test-utils",
+]
+op = [
+    "reth-db?/op",
+    "reth-db-api/op",
+    "reth-engine-local/op",
+    "reth-evm/op",
 ]

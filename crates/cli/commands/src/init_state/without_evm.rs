@@ -5,8 +5,8 @@ use reth_codecs::Compact;
 use reth_node_builder::NodePrimitives;
 use reth_primitives_traits::{SealedBlock, SealedHeader, SealedHeaderFor};
 use reth_provider::{
-    providers::StaticFileProvider, BlockWriter, StageCheckpointWriter, StaticFileProviderFactory,
-    StaticFileWriter, StorageLocation,
+    providers::StaticFileProvider, BlockWriter, ProviderResult, StageCheckpointWriter,
+    StaticFileProviderFactory, StaticFileWriter, StorageLocation,
 };
 use reth_stages::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
@@ -29,13 +29,13 @@ pub fn setup_without_evm<Provider>(
     provider_rw: &Provider,
     header: SealedHeader<<Provider::Primitives as NodePrimitives>::BlockHeader>,
     total_difficulty: U256,
-) -> Result<(), eyre::Error>
+) -> ProviderResult<()>
 where
     Provider: StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader = Header>>
         + StageCheckpointWriter
         + BlockWriter<Block = <Provider::Primitives as NodePrimitives>::Block>,
 {
-    info!(target: "reth::cli", "Setting up dummy EVM chain before importing state.");
+    info!(target: "reth::cli", new_tip = ?header.num_hash(), "Setting up dummy EVM chain before importing state.");
 
     let static_file_provider = provider_rw.static_file_provider();
     // Write EVM dummy data up to `header - 1` block
@@ -62,7 +62,7 @@ fn append_first_block<Provider>(
     provider_rw: &Provider,
     header: &SealedHeaderFor<Provider::Primitives>,
     total_difficulty: U256,
-) -> Result<(), eyre::Error>
+) -> ProviderResult<()>
 where
     Provider: BlockWriter<Block = <Provider::Primitives as NodePrimitives>::Block>
         + StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Compact>>,
@@ -100,7 +100,7 @@ where
 fn append_dummy_chain<N: NodePrimitives<BlockHeader = Header>>(
     sf_provider: &StaticFileProvider<N>,
     target_height: BlockNumber,
-) -> Result<(), eyre::Error> {
+) -> ProviderResult<()> {
     let (tx, rx) = std::sync::mpsc::channel();
 
     // Spawn jobs for incrementing the block end range of transactions and receipts
@@ -136,8 +136,11 @@ fn append_dummy_chain<N: NodePrimitives<BlockHeader = Header>>(
     });
 
     // Catches any StaticFileWriter error.
-    while let Ok(r) = rx.recv() {
-        r?;
+    while let Ok(append_result) = rx.recv() {
+        if let Err(err) = append_result {
+            tracing::error!(target: "reth::cli", "Error appending dummy chain: {err}");
+            return Err(err)
+        }
     }
 
     // If, for any reason, rayon crashes this verifies if all segments are at the same

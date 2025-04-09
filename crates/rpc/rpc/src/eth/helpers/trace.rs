@@ -2,11 +2,11 @@
 
 use reth_evm::ConfigureEvm;
 use reth_node_api::NodePrimitives;
-use reth_provider::{BlockReader, ProviderHeader, ProviderTx};
 use reth_rpc_eth_api::{
     helpers::{LoadState, Trace},
     FromEvmError,
 };
+use reth_storage_api::{BlockReader, ProviderHeader, ProviderTx};
 
 use crate::EthApi;
 
