@@ -4,7 +4,7 @@ use alloy_consensus::{
 };
 use alloy_eips::{eip2718::Eip2718Result, Decodable2718, Encodable2718};
 use alloy_primitives::{Bloom, Log};
-use alloy_rlp::{BufMut, Decodable, Header};
+use alloy_rlp::{BufMut, Decodable, Encodable, Header};
 use op_alloy_consensus::{OpDepositReceipt, OpTxType};
 use reth_primitives_traits::InMemorySize;
 
@@ -121,6 +121,89 @@ impl OpReceipt {
             }
         }
     }
+
+    /// Returns length of RLP-encoded receipt fields without an RLP header.
+    pub fn rlp_encoded_fields_length_without_bloom(&self) -> usize {
+        match self {
+            Self::Legacy(receipt) |
+            Self::Eip2930(receipt) |
+            Self::Eip1559(receipt) |
+            Self::Eip7702(receipt) => {
+                receipt.status.length() +
+                    receipt.cumulative_gas_used.length() +
+                    receipt.logs.length()
+            }
+            Self::Deposit(receipt) => {
+                receipt.inner.status.length() +
+                    receipt.inner.cumulative_gas_used.length() +
+                    receipt.inner.logs.length()
+            }
+        }
+    }
+
+    /// RLP-encodes receipt fields without an RLP header.
+    pub fn rlp_encode_fields_without_bloom(&self, out: &mut dyn BufMut) {
+        match self {
+            Self::Legacy(receipt) |
+            Self::Eip2930(receipt) |
+            Self::Eip1559(receipt) |
+            Self::Eip7702(receipt) => {
+                receipt.status.encode(out);
+                receipt.cumulative_gas_used.encode(out);
+                receipt.logs.encode(out);
+            }
+            Self::Deposit(receipt) => {
+                receipt.inner.status.encode(out);
+                receipt.inner.cumulative_gas_used.encode(out);
+                receipt.inner.logs.encode(out);
+            }
+        }
+    }
+
+    /// Returns RLP header for inner encoding without bloom.
+    pub fn rlp_header_inner_without_bloom(&self) -> Header {
+        Header { list: true, payload_length: self.rlp_encoded_fields_length_without_bloom() }
+    }
+
+    /// RLP-decodes the receipt from the provided buffer without bloom.
+    pub fn rlp_decode_inner_without_bloom(
+        buf: &mut &[u8],
+        tx_type: OpTxType,
+    ) -> alloy_rlp::Result<Self> {
+        let header = Header::decode(buf)?;
+        if !header.list {
+            return Err(alloy_rlp::Error::UnexpectedString);
+        }
+
+        let remaining = buf.len();
+        let success: bool = Decodable::decode(buf)?;
+        let cumulative_gas_used: u64 = Decodable::decode(buf)?;
+        let logs: Vec<Log> = Decodable::decode(buf)?;
+
+        if buf.len() + header.payload_length != remaining {
+            return Err(alloy_rlp::Error::UnexpectedLength);
+        }
+
+        match tx_type {
+            OpTxType::Legacy => {
+                Ok(Self::Legacy(Receipt { status: success.into(), cumulative_gas_used, logs }))
+            }
+            OpTxType::Eip2930 => {
+                Ok(Self::Eip2930(Receipt { status: success.into(), cumulative_gas_used, logs }))
+            }
+            OpTxType::Eip1559 => {
+                Ok(Self::Eip1559(Receipt { status: success.into(), cumulative_gas_used, logs }))
+            }
+            OpTxType::Eip7702 => {
+                Ok(Self::Eip7702(Receipt { status: success.into(), cumulative_gas_used, logs }))
+            }
+            OpTxType::Deposit => Ok(Self::Deposit(OpDepositReceipt {
+                inner: Receipt { status: success.into(), cumulative_gas_used, logs },
+                deposit_nonce: None,
+                deposit_receipt_version: None,
+            })),
+        }
+    }
 }
 
 impl Eip2718EncodableReceipt for OpReceipt {
@@ -199,16 +282,14 @@ impl Decodable2718 for OpReceipt {
 
 impl Encodable2718 for OpReceipt {
     fn encode_2718_len(&self) -> usize {
-        !self.tx_type().is_legacy() as usize +
-            self.rlp_header_inner(&self.bloom()).length_with_payload()
+        !self.tx_type().is_legacy() as usize + self.rlp_encoded_fields_length_without_bloom()
     }
 
     fn encode_2718(&self, out: &mut dyn BufMut) {
         if !self.tx_type().is_legacy() {
             out.put_u8(self.tx_type() as u8);
         }
-        self.rlp_header_inner(&self.bloom()).encode(out);
-        self.rlp_encode_fields(&self.bloom(), out);
+        self.rlp_encode_fields_without_bloom(out);
     }
 }
 
