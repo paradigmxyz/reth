@@ -662,11 +662,7 @@ where
             None => {
                 // Return only the parent header, if there were no calls to the
                 // BLOCKHASH opcode.
-                //
-                // TODO: This assumes that the user did not pass in the genesis block
-                // TODO as input. Safer to use saturating_sub as I'm not sure it will return
-                // TODO an error when executing genesis_block
-                block_number - 1
+                block_number.saturating_sub(1)
             }
         };
 
