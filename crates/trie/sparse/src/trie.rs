@@ -406,14 +406,22 @@ impl<P> RevealedSparseTrie<P> {
                 self.nodes.insert(path, SparseNode::Empty);
             }
             TrieNode::Branch(branch) => {
+                let set_nibbles = CHILD_INDEX_RANGE
+                    .filter(|idx| branch.state_mask.is_bit_set(*idx))
+                    .collect::<Vec<_>>();
+                // Reserve space for children nodes. We may over-reserve here if some of the
+                // children already exist in `nodes`, but it's better than reserving one by one.
+                //
+                // TODO: ideally we do preprocessing of all nodes by decoding them, calculating full
+                // paths, checking if they exist in `nodes`, and then reserving space for them.
+                self.nodes.reserve(set_nibbles.len());
+
                 let mut stack_ptr = branch.as_ref().first_child_index();
-                for idx in CHILD_INDEX_RANGE {
-                    if branch.state_mask.is_bit_set(idx) {
-                        let mut child_path = path.clone();
-                        child_path.push_unchecked(idx);
-                        self.reveal_node_or_hash(child_path, &branch.stack[stack_ptr])?;
-                        stack_ptr += 1;
-                    }
+                for nibble in set_nibbles {
+                    let mut child_path = path.clone();
+                    child_path.push_unchecked(nibble);
+                    self.reveal_node_or_hash(child_path, &branch.stack[stack_ptr])?;
+                    stack_ptr += 1;
                 }
 
                 match self.nodes.entry(path) {
