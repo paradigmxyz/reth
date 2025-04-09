@@ -6258,9 +6258,9 @@ dependencies = [
 
 [[package]]
 name = "op-alloy-flz"
-version = "0.12.0"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11de45c4437943b8100b0a381a5d7b50e320d6f02e7aeab841a9f45448f34366"
+checksum = "4ef71f23a8caf6f2a2d5cafbdc44956d44e6014dcb9aa58abf7e4e6481c6ec34"
 
 [[package]]
 name = "op-alloy-network"
