@@ -229,7 +229,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         bundles: Vec<Bundle>,
         state_context: Option<StateContext>,
         mut state_override: Option<StateOverride>,
-    ) -> impl Future<Output = Result<Vec<EthCallResponse>, Self::Error>> + Send {
+    ) -> impl Future<Output = Result<Vec<Vec<EthCallResponse>>, Self::Error>> + Send {
         async move {
             // Check if the vector of bundles is empty
             if bundles.is_empty() {
@@ -332,7 +332,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     }
                 }
 
-                Ok(results)
+                Ok(vec![results])
             })
             .await
         }
