@@ -22,11 +22,16 @@ asm-keccak = [
 [dependencies]
 reth-chainspec.workspace = true
 reth-primitives.workspace = true
-reth-db = { workspace = true, features = ["mdbx", "test-utils", "disable-lock"] }
+reth-db = { workspace = true, features = [
+    "mdbx",
+    "test-utils",
+    "disable-lock",
+] }
 reth-db-api.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-stages.workspace = true
 reth-evm-ethereum.workspace = true
+reth-evm.workspace = true
 reth-ethereum-consensus.workspace = true
 reth-revm = { workspace = true, features = ["std"] }
 

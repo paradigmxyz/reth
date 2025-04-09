@@ -7,13 +7,15 @@ use crate::{
 use alloy_rlp::Decodable;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_chainspec::ChainSpec;
-use reth_ethereum_consensus::EthBeaconConsensus;
+use reth_evm::execute::{BlockExecutorProvider, Executor};
+use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_primitives::{BlockBody, SealedBlock, StaticFileSegment};
 use reth_provider::{
     providers::StaticFileWriter, test_utils::create_test_provider_factory_with_chain_spec,
-    DatabaseProviderFactory, HashingWriter, StaticFileProviderFactory,
+    DatabaseProviderFactory, ExecutionOutcome, HashingWriter, LatestStateProviderRef,
+    OriginalValuesKnown, StateWriter, StaticFileProviderFactory, StorageLocation,
 };
-use reth_stages::{stages::ExecutionStage, ExecInput, Stage};
+use reth_revm::database::StateProviderDatabase;
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 
 /// A handler for the blockchain test suite.
@@ -111,10 +113,15 @@ impl Case for BlockchainTestCase {
                 }
 
                 // Decode and insert blocks, creating a chain of blocks for the test case.
+                let mut blocks = Vec::new();
                 let last_block = case.blocks.iter().try_fold(None, |_, block| {
                     let decoded =
                         SealedBlock::<reth_primitives::Block>::decode(&mut block.rlp.as_ref())?;
-                    provider.insert_historical_block(decoded.clone().try_recover().unwrap())?;
+                    let recovered = decoded.clone().try_recover().unwrap();
+                    provider.insert_historical_block(recovered.clone())?;
+
+                    blocks.push(recovered);
+
                     Ok::<Option<SealedBlock>, Error>(Some(decoded))
                 })?;
                 provider
@@ -124,16 +131,21 @@ impl Case for BlockchainTestCase {
                     .commit_without_sync_all()
                     .unwrap();
 
-                // Execute the execution stage using the EVM processor factory for the test case
-                // network.
-                let _ = ExecutionStage::new_with_executor(
-                    reth_evm_ethereum::execute::EthExecutorProvider::ethereum(chain_spec.clone()),
-                    Arc::new(EthBeaconConsensus::new(chain_spec)),
-                )
-                .execute(
-                    &provider,
-                    ExecInput { target: last_block.as_ref().map(|b| b.number), checkpoint: None },
-                );
+                let executor_provider = EthExecutorProvider::ethereum(chain_spec);
+                for block in blocks {
+                    let state_provider = LatestStateProviderRef::new(&provider);
+                    let state_db = StateProviderDatabase(state_provider);
+                    let executor = executor_provider.executor(state_db);
+
+                    // Execute all blocks in a batch
+                    if let Ok(output) = executor.execute(&block) {
+                        provider.write_state(
+                            &ExecutionOutcome::single(block.number, output),
+                            OriginalValuesKnown::Yes,
+                            StorageLocation::StaticFiles,
+                        )?;
+                    }
+                }
 
                 // Validate the post-state for the test case.
                 match (&case.post_state, &case.post_state_hash) {
