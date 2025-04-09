@@ -774,7 +774,6 @@ mod test {
     // <https://github.com/sigp/discv5/blob/master/src/kbucket/key.rs#L89-L101>
     #[expect(unreachable_pub)]
     #[expect(unused)]
-    #[allow(clippy::assign_op_pattern)]
     mod sigp {
         use alloy_primitives::U256;
         use enr::{
