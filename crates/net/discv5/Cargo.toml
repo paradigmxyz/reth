@@ -24,6 +24,7 @@ alloy-rlp.workspace = true
 discv5 = { workspace = true, features = ["libp2p"] }
 enr.workspace = true
 secp256k1.workspace = true
+rand_08.workspace = true
 
 # async/futures
 tokio.workspace = true

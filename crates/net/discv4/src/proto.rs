@@ -594,7 +594,7 @@ mod tests {
     use alloy_primitives::hex;
     use assert_matches::assert_matches;
     use enr::EnrPublicKey;
-    use rand::{rng, Rng, RngCore};
+    use rand_08::{thread_rng as rng, Rng, RngCore};
     use reth_ethereum_forks::ForkHash;
 
     #[test]
@@ -605,8 +605,8 @@ mod tests {
             rng.fill_bytes(&mut ip);
             let msg = NodeEndpoint {
                 address: IpAddr::V4(ip.into()),
-                tcp_port: rng.random(),
-                udp_port: rng.random(),
+                tcp_port: rng.gen(),
+                udp_port: rng.gen(),
             };
 
             let decoded = NodeEndpoint::decode(&mut alloy_rlp::encode(msg).as_slice()).unwrap();
@@ -622,8 +622,8 @@ mod tests {
             rng.fill_bytes(&mut ip);
             let msg = NodeEndpoint {
                 address: IpAddr::V6(ip.into()),
-                tcp_port: rng.random(),
-                udp_port: rng.random(),
+                tcp_port: rng.gen(),
+                udp_port: rng.gen(),
             };
 
             let decoded = NodeEndpoint::decode(&mut alloy_rlp::encode(msg).as_slice()).unwrap();
@@ -659,7 +659,7 @@ mod tests {
                 from: rng_endpoint(&mut rng),
                 to: rng_endpoint(&mut rng),
                 expire: 0,
-                enr_sq: Some(rng.random()),
+                enr_sq: Some(rng.gen()),
             };
 
             let decoded = Ping::decode(&mut alloy_rlp::encode(&msg).as_slice()).unwrap();
@@ -675,8 +675,8 @@ mod tests {
             rng.fill_bytes(&mut ip);
             let msg = Pong {
                 to: rng_endpoint(&mut rng),
-                echo: rng.random(),
-                expire: rng.random(),
+                echo: B256::random(),
+                expire: rng.gen(),
                 enr_sq: None,
             };
 
@@ -693,9 +693,9 @@ mod tests {
             rng.fill_bytes(&mut ip);
             let msg = Pong {
                 to: rng_endpoint(&mut rng),
-                echo: rng.random(),
-                expire: rng.random(),
-                enr_sq: Some(rng.random()),
+                echo: B256::random(),
+                expire: rng.gen(),
+                enr_sq: Some(rng.gen()),
             };
 
             let decoded = Pong::decode(&mut alloy_rlp::encode(&msg).as_slice()).unwrap();
@@ -725,7 +725,7 @@ mod tests {
         let mut rng = rng();
         let msg = Message::Neighbours(Neighbours {
             nodes: std::iter::repeat_with(|| rng_ipv4_record(&mut rng)).take(16).collect(),
-            expire: rng.random(),
+            expire: rng.gen(),
         });
         let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);
 
@@ -742,7 +742,7 @@ mod tests {
                 nodes: std::iter::repeat_with(|| rng_ipv6_record(&mut rng))
                     .take(SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS)
                     .collect(),
-                expire: rng.random(),
+                expire: rng.gen(),
             });
             let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);
 
@@ -753,7 +753,7 @@ mod tests {
                 nodes: std::iter::repeat_with(|| rng_ipv6_record(&mut rng))
                     .take(SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS - 1)
                     .collect(),
-                expire: rng.random(),
+                expire: rng.gen(),
             };
             neighbours.nodes.push(rng_ipv4_record(&mut rng));
             let msg = Message::Neighbours(neighbours);
@@ -798,7 +798,7 @@ mod tests {
         use enr::secp256k1::SecretKey;
         use std::net::Ipv4Addr;
 
-        let mut rng = rand::rngs::OsRng;
+        let mut rng = rand_08::rngs::OsRng;
         let key = SecretKey::new(&mut rng);
         let ip = Ipv4Addr::new(127, 0, 0, 1);
         let tcp = 3000;
@@ -816,7 +816,7 @@ mod tests {
             builder.build(&key).unwrap()
         };
 
-        let enr_response = EnrResponse { request_hash: rng.random(), enr };
+        let enr_response = EnrResponse { request_hash: B256::random(), enr };
 
         let mut buf = Vec::new();
         enr_response.encode(&mut buf);
@@ -908,7 +908,7 @@ mod tests {
         use enr::{secp256k1::SecretKey, EnrPublicKey};
         use std::net::Ipv4Addr;
 
-        let key = SecretKey::new(&mut rand::rngs::OsRng);
+        let key = SecretKey::new(&mut rand_08::rngs::OsRng);
         let ip = Ipv4Addr::new(127, 0, 0, 1);
         let tcp = 3000;
 

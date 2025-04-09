@@ -20,6 +20,7 @@ enr = { workspace = true, optional = true }
 # crypto
 
 secp256k1 = { workspace = true, optional = true }
+rand_08.workspace = true
 # misc
 serde_with.workspace = true
 thiserror.workspace = true

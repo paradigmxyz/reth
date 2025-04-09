@@ -655,7 +655,7 @@ pub async fn lookup(
 mod test {
     use super::*;
     use ::enr::{CombinedKey, EnrKey};
-    use rand::thread_rng;
+    use rand_08::thread_rng;
     use reth_chainspec::MAINNET;
     use tracing::trace;
 

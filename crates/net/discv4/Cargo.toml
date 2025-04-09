@@ -38,6 +38,7 @@ rand = { workspace = true, optional = true }
 generic-array.workspace = true
 serde = { workspace = true, optional = true }
 itertools.workspace = true
+rand_08.workspace = true
 
 [dev-dependencies]
 secp256k1 = { workspace = true, features = ["rand"] }

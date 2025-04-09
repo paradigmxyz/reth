@@ -26,6 +26,7 @@ alloy-eips = { workspace = true, features = ["k256"] }
 revm-context.workspace = true
 op-revm.workspace = true
 secp256k1 = { workspace = true, optional = true }
+rand_08.workspace = true
 
 # op
 op-alloy-consensus.workspace = true

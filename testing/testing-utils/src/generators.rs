@@ -6,12 +6,9 @@ use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
     NumHash,
 };
-use alloy_primitives::{Address, BlockNumber, Bytes, TxKind, B256, U256};
-pub use rand::Rng;
-use rand::{
-    distributions::uniform::SampleRange, rng as thread_rng, rngs::StdRng, seq::SliceRandom,
-    SeedableRng,
-};
+use alloy_primitives::{Address, BlockNumber, Bytes, TxKind, B256, B64, U256};
+// pub use rand::Rng;
+use rand_08::{distributions::uniform::SampleRange, rngs::StdRng, thread_rng, Rng, SeedableRng};
 use reth_primitives::{
     Account, BlockBody, Log, Receipt, SealedBlock, SealedHeader, StorageEntry, Transaction,
     TransactionSigned,
@@ -73,7 +70,7 @@ pub fn rng() -> StdRng {
     if let Ok(seed) = std::env::var("SEED") {
         rng_with_seed(seed.as_bytes())
     } else {
-        StdRng::from_rng(&mut thread_rng()).expect("could not build rng")
+        StdRng::from_rng(&mut thread_rng())
     }
 }
 
@@ -112,7 +109,10 @@ pub fn random_block_with_parent<R: Rng>(
     number: u64,
     parent: Option<B256>,
 ) -> BlockWithParent {
-    BlockWithParent { parent: parent.unwrap_or_default(), block: NumHash::new(number, rng.gen()) }
+    BlockWithParent {
+        parent: parent.unwrap_or_default(),
+        block: NumHash::new(number, B256::random()),
+    }
 }
 
 /// Generate a random [`SealedHeader`].
@@ -121,7 +121,7 @@ pub fn random_block_with_parent<R: Rng>(
 pub fn random_header<R: Rng>(rng: &mut R, number: u64, parent: Option<B256>) -> SealedHeader {
     let header = alloy_consensus::Header {
         number,
-        nonce: rng.gen(),
+        nonce: B64::random(),
         difficulty: U256::from(rng.gen::<u32>()),
         parent_hash: parent.unwrap_or_default(),
         ..Default::default()
@@ -141,7 +141,7 @@ pub fn random_tx<R: Rng>(rng: &mut R) -> Transaction {
         nonce: rng.gen::<u16>().into(),
         gas_price: rng.gen::<u16>().into(),
         gas_limit: rng.gen::<u16>().into(),
-        to: TxKind::Call(rng.gen()),
+        to: TxKind::Call(Address::random()),
         value: U256::from(rng.gen::<u16>()),
         input: Bytes::default(),
     })
@@ -215,7 +215,7 @@ pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams)
                 amount: rng.gen(),
                 index: i.into(),
                 validator_index: i.into(),
-                address: rng.gen(),
+                address: Address::random(),
             })
             .collect::<Vec<_>>()
     });
@@ -370,6 +370,7 @@ pub fn random_account_change<R: Rng>(
     n_storage_changes: Range<u64>,
     key_range: Range<u64>,
 ) -> (Address, Address, U256, Vec<StorageEntry>) {
+    use rand::prelude::IndexedRandom;
     let mut addresses = valid_addresses.choose_multiple(rng, 2).copied();
 
     let addr_from = addresses.next().unwrap_or_else(Address::random);
@@ -405,7 +406,7 @@ pub fn random_storage_entry<R: Rng>(rng: &mut R, key_range: Range<u64>) -> Stora
 pub fn random_eoa_account<R: Rng>(rng: &mut R) -> (Address, Account) {
     let nonce: u64 = rng.gen();
     let balance = U256::from(rng.gen::<u32>());
-    let addr = rng.gen();
+    let addr = Address::random();
 
     (addr, Account { nonce, balance, bytecode_hash: None })
 }
@@ -428,7 +429,7 @@ pub fn random_contract_account_range<R: Rng>(
     for _ in acc_range {
         let (address, eoa_account) = random_eoa_account(rng);
         // todo: can a non-eoa account have a nonce > 0?
-        let account = Account { bytecode_hash: Some(rng.gen()), ..eoa_account };
+        let account = Account { bytecode_hash: Some(B256::random()), ..eoa_account };
         accounts.push((address, account))
     }
     accounts
@@ -461,8 +462,8 @@ pub fn random_log<R: Rng>(rng: &mut R, address: Option<Address>, topics_count: O
     let data_byte_count = rng.gen::<u8>() as usize;
     let topics_count = topics_count.unwrap_or_else(|| rng.gen()) as usize;
     Log::new_unchecked(
-        address.unwrap_or_else(|| rng.gen()),
-        std::iter::repeat_with(|| rng.gen()).take(topics_count).collect(),
+        address.unwrap_or_else(|| Address::random()),
+        std::iter::repeat_with(|| B256::random()).take(topics_count).collect(),
         std::iter::repeat_with(|| rng.gen()).take(data_byte_count).collect::<Vec<_>>().into(),
     )
 }
@@ -497,7 +498,7 @@ mod tests {
         let signature_hash = tx.signature_hash();
 
         for _ in 0..100 {
-            let key_pair = Keypair::new(&secp, &mut rand::thread_rng());
+            let key_pair = Keypair::new(&secp, &mut rand_08::thread_rng());
 
             let signature =
                 sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), signature_hash)

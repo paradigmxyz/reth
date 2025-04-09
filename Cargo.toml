@@ -603,6 +603,8 @@ proptest-arbitrary-interop = "0.1.0"
 enr = { version = "0.13", default-features = false }
 k256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
 secp256k1 = { version = "0.30", default-features = false, features = ["global-context", "recovery"] }
+# rand 8 for secp256k1
+rand_08 = { package = "rand", version = "0.8" }
 
 # for eip-4844
 c-kzg = "2.1.0"
