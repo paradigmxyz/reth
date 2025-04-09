@@ -56,6 +56,13 @@ pub struct MaintainPoolConfig {
     /// Maximum amount of time non-executable, non local transactions are queued.
     /// Default: 3 hours
     pub max_tx_lifetime: Duration,
+
+    /// Apply no exemptions to the locally received transactions.
+    ///
+    /// This includes:
+    ///   - no price exemptions
+    ///   - no eviction exemptions
+    pub no_exemptions: bool,
 }
 
 impl Default for MaintainPoolConfig {
@@ -64,6 +71,7 @@ impl Default for MaintainPoolConfig {
             max_update_depth: 64,
             max_reload_accounts: 100,
             max_tx_lifetime: MAX_QUEUED_TRANSACTION_LIFETIME,
+            no_exemptions: false,
         }
     }
 }
@@ -257,8 +265,14 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                     .queued_transactions()
                     .into_iter()
                     .filter(|tx| {
-                        // filter stale external txs
-                        tx.origin.is_external() && tx.timestamp.elapsed() > config.max_tx_lifetime
+                        // filter stale transactions based on config
+                        if config.no_exemptions {
+                            // if no exemptions, treat all transactions the same
+                            tx.timestamp.elapsed() > config.max_tx_lifetime
+                        } else {
+                            // only evict external transactions
+                            tx.origin.is_external() && tx.timestamp.elapsed() > config.max_tx_lifetime
+                        }
                     })
                     .map(|tx| *tx.hash())
                     .collect();
