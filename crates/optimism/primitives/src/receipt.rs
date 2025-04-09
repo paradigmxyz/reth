@@ -177,8 +177,8 @@ impl OpReceipt {
 
         let remaining = buf.len();
         let success: bool = Decodable::decode(buf)?;
-        let cumulative_gas_used: u64 = Decodable::decode(buf)?;
-        let logs: Vec<Log> = Decodable::decode(buf)?;
+        let cumulative_gas_used = Decodable::decode(buf)?;
+        let logs = Decodable::decode(buf)?;
 
         if buf.len() + header.payload_length != remaining {
             return Err(alloy_rlp::Error::UnexpectedLength);
@@ -270,13 +270,11 @@ impl RlpDecodableReceipt for OpReceipt {
 
 impl Decodable2718 for OpReceipt {
     fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
-        let receipt_with_bloom = Self::rlp_decode_inner(buf, OpTxType::try_from(ty)?)?;
-        Ok(receipt_with_bloom.receipt)
+        Ok(Self::rlp_decode_inner_without_bloom(buf, OpTxType::try_from(ty)?)?)
     }
 
     fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
-        let receipt_with_bloom = Self::rlp_decode_inner(buf, OpTxType::Legacy)?;
-        Ok(receipt_with_bloom.receipt)
+        Ok(Self::rlp_decode_inner_without_bloom(buf, OpTxType::Legacy)?)
     }
 }
 
