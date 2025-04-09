@@ -9,7 +9,8 @@ use alloy_eips::{
 use alloy_primitives::{Address, BlockNumber, Bytes, TxKind, B256, U256};
 pub use rand::Rng;
 use rand::{
-    distributions::uniform::SampleRange, rngs::StdRng, seq::SliceRandom, thread_rng, SeedableRng,
+    distributions::uniform::SampleRange, rng as thread_rng, rngs::StdRng, seq::SliceRandom,
+    SeedableRng,
 };
 use reth_primitives::{
     Account, BlockBody, Log, Receipt, SealedBlock, SealedHeader, StorageEntry, Transaction,
@@ -72,7 +73,7 @@ pub fn rng() -> StdRng {
     if let Ok(seed) = std::env::var("SEED") {
         rng_with_seed(seed.as_bytes())
     } else {
-        StdRng::from_rng(thread_rng()).expect("could not build rng")
+        StdRng::from_rng(&mut thread_rng()).expect("could not build rng")
     }
 }
 
@@ -471,7 +472,7 @@ mod tests {
     use super::*;
     use alloy_consensus::TxEip1559;
     use alloy_eips::eip2930::AccessList;
-    use alloy_primitives::{hex, PrimitiveSignature as Signature};
+    use alloy_primitives::{hex, Signature};
     use reth_primitives_traits::{
         crypto::secp256k1::{public_key_to_address, sign_message},
         SignedTransaction,

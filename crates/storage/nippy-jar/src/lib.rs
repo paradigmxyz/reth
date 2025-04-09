@@ -432,7 +432,7 @@ mod tests {
         let num_rows = 100;
 
         let mut vec: Vec<u8> = vec![0; value_length];
-        let mut rng = seed.map(SmallRng::seed_from_u64).unwrap_or_else(SmallRng::from_entropy);
+        let mut rng = seed.map(SmallRng::seed_from_u64).unwrap_or_else(SmallRng::from_os_rng);
 
         let mut gen = || {
             (0..num_rows)

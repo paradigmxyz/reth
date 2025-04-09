@@ -15,7 +15,7 @@ use alloy_rlp::{Encodable, Rlp, RlpEncodable, RlpMaxEncodedLen};
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
 use ctr::Ctr64BE;
 use digest::{crypto_common::KeyIvInit, Digest};
-use rand::{thread_rng, Rng};
+use rand::{rng, Rng};
 use reth_network_peers::{id2pk, pk2id};
 use secp256k1::{
     ecdsa::{RecoverableSignature, RecoveryId},
@@ -312,7 +312,7 @@ impl ECIES {
 
     /// Create a new ECIES client with the given static secret key and remote peer ID.
     pub fn new_client(secret_key: SecretKey, remote_id: PeerId) -> Result<Self, ECIESError> {
-        let mut rng = thread_rng();
+        let mut rng = rng();
         let nonce = rng.gen();
         let ephemeral_secret_key = SecretKey::new(&mut rng);
         Self::new_static_client(secret_key, remote_id, nonce, ephemeral_secret_key)
@@ -354,8 +354,8 @@ impl ECIES {
 
     /// Create a new ECIES server with the given static secret key.
     pub fn new_server(secret_key: SecretKey) -> Result<Self, ECIESError> {
-        let mut rng = thread_rng();
-        let nonce = rng.gen();
+        let mut rng = rng();
+        let nonce = rng.random();
         let ephemeral_secret_key = SecretKey::new(&mut rng);
         Self::new_static_server(secret_key, nonce, ephemeral_secret_key)
     }
@@ -366,7 +366,7 @@ impl ECIES {
     }
 
     fn encrypt_message(&self, data: &[u8], out: &mut BytesMut) {
-        let mut rng = thread_rng();
+        let mut rng = rng();
 
         out.reserve(secp256k1::constants::UNCOMPRESSED_PUBLIC_KEY_SIZE + 16 + data.len() + 32);
 
@@ -442,7 +442,7 @@ impl ECIES {
         }
         .encode(&mut out);
 
-        out.resize(out.len() + thread_rng().gen_range(100..=300), 0);
+        out.resize(out.len() + rng().gen_range(100..=300), 0);
         out
     }
 
@@ -763,7 +763,7 @@ mod tests {
 
     #[test]
     fn communicate() {
-        let mut rng = thread_rng();
+        let mut rng = rng();
         let server_secret_key = SecretKey::new(&mut rng);
         let server_public_key = PublicKey::from_secret_key(SECP256K1, &server_secret_key);
         let client_secret_key = SecretKey::new(&mut rng);

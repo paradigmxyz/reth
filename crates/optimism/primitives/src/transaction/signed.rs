@@ -13,9 +13,7 @@ use alloy_eips::{
     eip7702::SignedAuthorization,
 };
 use alloy_evm::{FromRecoveredTx, FromTxWithEncoded};
-use alloy_primitives::{
-    keccak256, Address, Bytes, PrimitiveSignature as Signature, TxHash, TxKind, Uint, B256,
-};
+use alloy_primitives::{keccak256, Address, Bytes, Signature, TxHash, TxKind, Uint, B256};
 use alloy_rlp::Header;
 use core::{
     hash::{Hash, Hasher},
