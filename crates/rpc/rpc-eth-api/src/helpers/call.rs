@@ -145,7 +145,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             return Err(EthApiError::Other(Box::new(
                                 EthSimulateError::BlockGasLimitExceeded,
                             ))
-                            .into());
+                            .into())
                         }
 
                         if txs_without_gas_limit > 0 {
