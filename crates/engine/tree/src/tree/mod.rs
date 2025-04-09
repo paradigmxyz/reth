@@ -71,7 +71,7 @@ mod invalid_headers;
 mod metrics;
 mod payload_processor;
 mod persistence_state;
-mod precompile_cache;
+pub mod precompile_cache;
 
 // TODO(alexey): compare trie updates in `insert_block_inner`
 #[expect(unused)]
@@ -83,6 +83,7 @@ pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
 pub use invalid_headers::InvalidHeaderCache;
 pub use payload_processor::*;
 pub use persistence_state::PersistenceState;
+pub use precompile_cache::CachedPrecompileProvider;
 pub use reth_engine_primitives::TreeConfig;
 use reth_evm::execute::BlockExecutionOutput;
 
