@@ -408,7 +408,7 @@ impl<P> RevealedSparseTrie<P> {
             TrieNode::Branch(branch) => {
                 let set_nibbles = CHILD_INDEX_RANGE
                     .filter(|idx| branch.state_mask.is_bit_set(*idx))
-                    .collect::<Vec<_>>();
+                    .collect::<SmallVec<[u8; 16]>>();
                 // Reserve space for children nodes. We may over-reserve here if some of the
                 // children already exist in `nodes`, but it's better than reserving one by one.
                 //
