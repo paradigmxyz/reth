@@ -106,3 +106,39 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
         self.precompile.contains(address)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_revm::revm::interpreter::{Gas, InstructionResult};
+
+    fn precompile_address(num: u8) -> Address {
+        Address::from_slice(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, num])
+    }
+
+    fn test_input(data: &[u8], gas: u64) -> (SpecId, Bytes, u64) {
+        (SpecId::PRAGUE, Bytes::copy_from_slice(data), gas)
+    }
+
+    #[test]
+    fn test_precompile_cache_basic() {
+        let cache = Arc::new(PrecompileCache::default());
+
+        let address = precompile_address(1);
+        let key = test_input(b"test_input", 100);
+
+        let expected = Ok(InterpreterResult::new(
+            InstructionResult::Return,
+            Bytes::copy_from_slice(b"cached_result"),
+            Gas::new(50),
+        ));
+
+        let subcache = CacheBuilder::new(10000).build_with_hasher(DefaultHashBuilder::default());
+        cache.cache.insert(address, subcache);
+        cache.cache.get_mut(&address).unwrap().insert(key.clone(), expected.clone());
+
+        let actual = cache.cache.get(&address).unwrap().get(&key).unwrap();
+
+        assert_eq!(actual, expected);
+    }
+}
