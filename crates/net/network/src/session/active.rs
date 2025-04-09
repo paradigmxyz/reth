@@ -169,7 +169,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         macro_rules! on_response {
             ($resp:ident, $item:ident) => {{
                 let RequestPair { request_id, message } = $resp;
-                #[allow(clippy::collapsible_match)]
                 if let Some(req) = self.inflight_requests.remove(&request_id) {
                     match req.request {
                         RequestState::Waiting(PeerRequest::$item { response, .. }) => {

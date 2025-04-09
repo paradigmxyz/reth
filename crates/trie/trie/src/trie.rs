@@ -466,6 +466,7 @@ pub enum TrieType {
 }
 
 impl TrieType {
+    #[cfg(feature = "metrics")]
     pub(crate) const fn as_str(&self) -> &'static str {
         match self {
             Self::State => "state",

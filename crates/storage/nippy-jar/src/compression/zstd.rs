@@ -320,7 +320,7 @@ impl ZstdDictionaries<'_> {
 /// A Zstd dictionary. It's created and serialized with [`ZstdDictionary::Raw`], and deserialized as
 /// [`ZstdDictionary::Loaded`].
 pub(crate) enum ZstdDictionary<'a> {
-    #[allow(dead_code)]
+    #[cfg_attr(not(test), expect(dead_code))]
     Raw(RawDictionary),
     Loaded(DecoderDictionary<'a>),
 }

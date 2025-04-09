@@ -180,6 +180,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::BothStateAndStateDiffInOverride(_) |
             EthApiError::InvalidTracerConfig |
             EthApiError::TransactionConversionError |
+            EthApiError::InvalidRewardPercentiles |
             EthApiError::InvalidBytecode(_) => invalid_params_rpc_err(error.to_string()),
             EthApiError::InvalidTransaction(err) => err.into(),
             EthApiError::PoolError(err) => err.into(),
@@ -187,10 +188,8 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::ExcessBlobGasNotSet |
             EthApiError::InvalidBlockData(_) |
             EthApiError::Internal(_) |
-            EthApiError::TransactionNotFound |
-            EthApiError::EvmCustom(_) |
-            EthApiError::InvalidRewardPercentiles => internal_rpc_err(error.to_string()),
-            EthApiError::UnknownBlockOrTxIndex => {
+            EthApiError::EvmCustom(_) => internal_rpc_err(error.to_string()),
+            EthApiError::UnknownBlockOrTxIndex | EthApiError::TransactionNotFound => {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
             }
             // TODO(onbjerg): We rewrite the error message here because op-node does string matching

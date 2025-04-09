@@ -22,7 +22,7 @@ use clap::Parser;
 use futures_util::stream::StreamExt;
 use mev_share_sse::{client::EventStream, EventClient};
 use reth::{chainspec::EthereumChainSpecParser, cli::Cli};
-use reth_node_ethereum::EthereumNode;
+use reth_ethereum::node::EthereumNode;
 use std::net::{IpAddr, Ipv4Addr};
 use tracing::{info, warn};
 

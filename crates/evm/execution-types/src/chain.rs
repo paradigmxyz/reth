@@ -461,7 +461,6 @@ impl<B: Block> IntoIterator for ChainBlocks<'_, B> {
     type IntoIter = alloc::collections::btree_map::IntoIter<BlockNumber, RecoveredBlock<B>>;
 
     fn into_iter(self) -> Self::IntoIter {
-        #[allow(clippy::unnecessary_to_owned)]
         self.blocks.into_owned().into_iter()
     }
 }

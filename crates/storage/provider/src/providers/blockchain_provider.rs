@@ -856,7 +856,7 @@ mod tests {
         (database_blocks.to_vec(), in_memory_blocks.to_vec())
     }
 
-    #[allow(clippy::type_complexity, clippy::too_many_arguments)]
+    #[expect(clippy::type_complexity)]
     fn provider_with_chain_spec_and_random_blocks(
         rng: &mut impl Rng,
         chain_spec: Arc<ChainSpec>,
@@ -2223,7 +2223,6 @@ mod tests {
                 );
 
                 // Test range that spans database and in-memory
-                #[allow(unused_assignments)]
                 {
                     // This block will be persisted to disk and removed from memory AFTER the firsk database query. This ensures that we query the in-memory state before the database avoiding any race condition.
                     persist_block_after_db_tx_creation(provider.clone(), in_memory_blocks[0].number);

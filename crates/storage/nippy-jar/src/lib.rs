@@ -329,7 +329,6 @@ pub struct DataReader {
     /// Mmap handle for data.
     data_mmap: Mmap,
     /// Offset file descriptor. Needs to be kept alive as long as `offset_mmap` handle.
-    #[allow(dead_code)]
     offset_file: File,
     /// Mmap handle for offsets.
     offset_mmap: Mmap,

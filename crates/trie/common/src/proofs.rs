@@ -283,6 +283,14 @@ impl MultiProof {
             }
         }
     }
+
+    /// Create a [`MultiProof`] from a [`StorageMultiProof`].
+    pub fn from_storage_proof(hashed_address: B256, storage_proof: StorageMultiProof) -> Self {
+        Self {
+            storages: B256Map::from_iter([(hashed_address, storage_proof)]),
+            ..Default::default()
+        }
+    }
 }
 
 /// This is a type of [`MultiProof`] that uses decoded proofs, meaning these proofs are stored as a
