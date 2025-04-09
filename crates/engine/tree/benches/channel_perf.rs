@@ -44,7 +44,7 @@ struct StdStateRootTask {
 }
 
 impl StdStateRootTask {
-    const fn new(rx: std::sync::mpsc::Receiver<EvmState>) -> Self {
+    fn new(rx: std::sync::mpsc::Receiver<EvmState>) -> Self {
         Self { rx }
     }
 
@@ -61,7 +61,7 @@ struct CrossbeamStateRootTask {
 }
 
 impl CrossbeamStateRootTask {
-    const fn new(rx: crossbeam_channel::Receiver<EvmState>) -> Self {
+    fn new(rx: crossbeam_channel::Receiver<EvmState>) -> Self {
         Self { rx }
     }
 
