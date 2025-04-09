@@ -19,9 +19,13 @@ pub struct ExecutionWitnessRecord {
     ///
     /// `keccak(address|slot) => address|slot`
     pub keys: Vec<Bytes>,
-    /// List of block ids for blocks whose hashes were requested during execution
-    /// by the BLOCKHASH opcode.
-    pub block_ids_for_blockhash_opcode: Vec<u64>,
+    /// The earliest block number referenced by any BLOCKHASH opcode call during transaction
+    /// execution.
+    ///
+    /// This helps determine which ancestor block headers must be included in the ExecutionWitness.
+    ///
+    /// `None` - when the BLOCKHASH opcode was not called during execution
+    pub lowest_block_number: Option<u64>,
 }
 
 impl ExecutionWitnessRecord {
@@ -65,9 +69,8 @@ impl ExecutionWitnessRecord {
                 }
             }
         }
-        // Save only the block numbers, since the block hashes are redundant.
-        // The block numbers moreover, give us the ordering of the blocks.
-        self.block_ids_for_blockhash_opcode = statedb.block_hashes.keys().copied().collect();
+        // BTreeMap keys are ordered, so the first key is the smallest
+        self.lowest_block_number = statedb.block_hashes.keys().next().copied()
     }
 
     /// Creates the record from the state after execution.

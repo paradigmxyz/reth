@@ -381,7 +381,7 @@ impl<Txs> OpBuilder<'_, Txs> {
         ctx.execute_sequencer_transactions(&mut builder)?;
         builder.into_executor().apply_post_execution_changes()?;
 
-        let ExecutionWitnessRecord { hashed_state, codes, keys, block_ids_for_blockhash_opcode: _ } =
+        let ExecutionWitnessRecord { hashed_state, codes, keys, lowest_block_number: _ } =
             ExecutionWitnessRecord::from_executed_state(&db);
         let state = state_provider.witness(Default::default(), hashed_state)?;
         Ok(ExecutionWitness { state: state.into_iter().collect(), codes, keys })

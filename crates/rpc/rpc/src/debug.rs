@@ -633,7 +633,7 @@ where
         let this = self.clone();
         let block_number = block.header().number();
 
-        let (exec_witness, blocks_ids_for_blockhash_opcode) = self
+        let (exec_witness, lowest_block_number) = self
             .eth_api()
             .spawn_with_state_at_block(block.parent_hash().into(), move |state_provider| {
                 let db = StateProviderDatabase::new(&state_provider);
@@ -647,26 +647,27 @@ where
                     })
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 
-                let ExecutionWitnessRecord {
-                    hashed_state,
-                    codes,
-                    keys,
-                    block_ids_for_blockhash_opcode,
-                } = witness_record;
+                let ExecutionWitnessRecord { hashed_state, codes, keys, lowest_block_number } =
+                    witness_record;
 
                 let state = state_provider
                     .witness(Default::default(), hashed_state)
                     .map_err(EthApiError::from)?;
-                Ok((ExecutionWitness { state, codes, keys }, block_ids_for_blockhash_opcode))
+                Ok((ExecutionWitness { state, codes, keys }, lowest_block_number))
             })
             .await?;
 
-        // For stateless execution, one needs a contiguous set of block headers in order to prove
-        // that the block hashes are correct.
-        //
-        // Fetch the smallest block and return an empty vector if there were no block_ids
-        let Some(smallest) = blocks_ids_for_blockhash_opcode.iter().min().copied() else {
-            return Ok((exec_witness, Vec::new()));
+        let smallest = match lowest_block_number {
+            Some(smallest) => smallest,
+            None => {
+                // Return only the parent header, if there were no calls to the
+                // BLOCKHASH opcode.
+                //
+                // TODO: This assumes that the user did not pass in the genesis block
+                // TODO as input. Safer to use saturating_sub as I'm not sure it will return
+                // TODO an error when executing genesis_block
+                block_number - 1
+            }
         };
 
         let range = smallest..block_number;
