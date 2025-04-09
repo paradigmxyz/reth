@@ -281,7 +281,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
         branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
     ) -> SparseStateTrieResult<()> {
-        let DecodedProofNodes { nodes, total_nodes, skipped_nodes, branch_children } =
+        let DecodedProofNodes { nodes, total_nodes, skipped_nodes, new_nodes } =
             DecodedProofNodes::new(account_subtree, &self.revealed_account_paths)?;
         self.metrics.increment_total_account_nodes(total_nodes);
         self.metrics.increment_skipped_account_nodes(skipped_nodes);
@@ -299,7 +299,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                 self.retain_updates,
             )?;
 
-            trie.reserve_nodes(branch_children);
+            trie.reserve_nodes(new_nodes);
 
             // Reveal the remaining proof nodes.
             for (path, node) in account_nodes {
@@ -331,7 +331,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     ) -> SparseStateTrieResult<()> {
         let revealed_nodes = self.revealed_storage_paths.entry(account).or_default();
 
-        let DecodedProofNodes { nodes, total_nodes, skipped_nodes, branch_children } =
+        let DecodedProofNodes { nodes, total_nodes, skipped_nodes, new_nodes } =
             DecodedProofNodes::new(storage_subtree.subtree, revealed_nodes)?;
         self.metrics.increment_total_storage_nodes(total_nodes);
         self.metrics.increment_skipped_storage_nodes(skipped_nodes);
@@ -355,7 +355,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                 self.retain_updates,
             )?;
 
-            trie.reserve_nodes(branch_children);
+            trie.reserve_nodes(new_nodes);
 
             // Reveal the remaining proof nodes.
             for (path, node) in nodes {
@@ -790,8 +790,9 @@ struct DecodedProofNodes {
     total_nodes: u64,
     /// Number of nodes that were skipped because they were already revealed.
     skipped_nodes: u64,
-    /// Number of children of all branch nodes in the proof.
-    branch_children: usize,
+    /// Number of new nodes that will be revealed. This includes all children of branch nodes, even
+    /// if they are not in the proof.
+    new_nodes: usize,
 }
 
 impl DecodedProofNodes {
@@ -800,7 +801,7 @@ impl DecodedProofNodes {
             nodes: Vec::with_capacity(proof_nodes.len()),
             total_nodes: 0,
             skipped_nodes: 0,
-            branch_children: 0,
+            new_nodes: 0,
         };
 
         for (path, bytes) in proof_nodes.into_inner() {
@@ -812,8 +813,9 @@ impl DecodedProofNodes {
             }
 
             let node = TrieNode::decode(&mut &bytes[..])?;
+            result.new_nodes += 1;
             if let TrieNode::Branch(branch) = &node {
-                result.branch_children += branch.state_mask.count_ones() as usize;
+                result.new_nodes += branch.state_mask.count_ones() as usize;
             }
 
             result.nodes.push((path, node));
