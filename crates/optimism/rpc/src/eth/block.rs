@@ -4,8 +4,10 @@ use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_rpc_types_eth::{BlockId, Header};
 use op_alloy_rpc_types::OpTransactionReceipt;
 use reth_chainspec::ChainSpecProvider;
+use reth_node_api::NodePrimitives;
 use reth_optimism_chainspec::OpChainSpec;
-use reth_primitives_traits::{HeaderTy, SignedTransaction};
+use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
+use reth_primitives_traits::{BlockBody as _, HeaderTy, SignedTransaction};
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
     types::RpcTypes,
@@ -18,7 +20,10 @@ use super::OpNodeCore;
 
 impl<N> EthBlocks for OpEthApi<N>
 where
-    N: OpNodeCore<Provider: ChainSpecProvider<ChainSpec = OpChainSpec>>,
+    N: OpNodeCore<
+        Primitives: NodePrimitives<Receipt = OpReceipt, SignedTx = OpTransactionSigned>,
+        Provider: ChainSpecProvider<ChainSpec = OpChainSpec>,
+    >,
     Self: LoadBlock<
         Error = OpEthApiError,
         Primitives = N::Primitives,
@@ -45,6 +50,7 @@ where
             return block
                 .body()
                 .transactions()
+                .iter()
                 .zip(receipts.iter())
                 .enumerate()
                 .map(|(idx, (tx, receipt))| -> Result<_, _> {

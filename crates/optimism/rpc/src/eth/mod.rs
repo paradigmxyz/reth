@@ -15,10 +15,10 @@ use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_node_api::{FullNodeComponents, NodeTypes, PrimitivesTy};
+use reth_node_api::{FullNodeComponents, NodePrimitives, NodeTypes, PrimitivesTy};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
-use reth_optimism_primitives::{OpBlock, OpPrimitives, OpReceipt, OpTransactionSigned};
-use reth_primitives_traits::{BlockTy, ReceiptTy, TxTy};
+use reth_optimism_primitives::OpPrimitives;
+use reth_primitives_traits::{BlockTy, HeaderTy, ReceiptTy, TxTy};
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
     helpers::{
@@ -51,24 +51,24 @@ pub type EthApiNodeBackend<N> = EthApiInner<
 /// A helper trait with requirements for [`RpcNodeCore`] to be used in [`OpEthApi`].
 pub trait OpNodeCore:
     RpcNodeCore<
-    Primitives = OpPrimitives,
+    Primitives: NodePrimitives,
     Provider: BlockReader<
-        Block = OpBlock,
-        Header = alloy_consensus::Header,
-        Transaction = OpTransactionSigned,
-        Receipt = OpReceipt,
+        Block = BlockTy<Self::Primitives>,
+        Header = HeaderTy<Self::Primitives>,
+        Transaction = TxTy<Self::Primitives>,
+        Receipt = ReceiptTy<Self::Primitives>,
     >,
 >
 {
 }
 impl<T> OpNodeCore for T where
     T: RpcNodeCore<
-        Primitives = OpPrimitives,
+        Primitives: NodePrimitives,
         Provider: BlockReader<
-            Block = OpBlock,
-            Header = alloy_consensus::Header,
-            Transaction = OpTransactionSigned,
-            Receipt = OpReceipt,
+            Block = BlockTy<Self::Primitives>,
+            Header = HeaderTy<Self::Primitives>,
+            Transaction = TxTy<Self::Primitives>,
+            Receipt = ReceiptTy<Self::Primitives>,
         >,
     >
 {

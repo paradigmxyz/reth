@@ -6,6 +6,7 @@ use alloy_rpc_types_eth::{Log, TransactionReceipt};
 use op_alloy_consensus::{OpDepositReceipt, OpDepositReceiptWithBloom, OpReceiptEnvelope};
 use op_alloy_rpc_types::{L1BlockInfo, OpTransactionReceipt, OpTransactionReceiptFields};
 use reth_chainspec::ChainSpecProvider;
+use reth_node_api::NodePrimitives;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_forks::OpHardforks;
@@ -20,7 +21,10 @@ use super::OpNodeCore;
 
 impl<N> LoadReceipt for OpEthApi<N>
 where
-    N: OpNodeCore<Provider: ChainSpecProvider<ChainSpec = OpChainSpec>>,
+    N: OpNodeCore<
+        Primitives: NodePrimitives<Receipt = OpReceipt, SignedTx = OpTransactionSigned>,
+        Provider: ChainSpecProvider<ChainSpec = OpChainSpec>,
+    >,
     Self: RpcNodeCoreExt<Primitives = N::Primitives>,
 {
     async fn build_transaction_receipt(

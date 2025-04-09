@@ -37,7 +37,7 @@ where
             prev_randao: B256::random(),
             gas_limit: parent.gas_limit(),
             parent_beacon_block_root: parent.parent_beacon_block_root(),
-            extra_data: parent.extra_data.clone(),
+            extra_data: parent.extra_data().clone(),
         })
     }
 

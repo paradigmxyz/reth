@@ -5,6 +5,7 @@ use alloy_primitives::{Bytes, PrimitiveSignature as Signature, Sealable, Sealed,
 use alloy_rpc_types_eth::TransactionInfo;
 use op_alloy_consensus::OpTxEnvelope;
 use op_alloy_rpc_types::{OpTransactionRequest, Transaction};
+use reth_node_api::NodePrimitives;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use reth_primitives_traits::TxTy;
 use reth_rpc_eth_api::{
@@ -72,7 +73,7 @@ where
 
 impl<N> TransactionCompat<OpTransactionSigned> for OpEthApi<N>
 where
-    N: OpNodeCore,
+    N: OpNodeCore<Primitives: NodePrimitives<Receipt = OpReceipt>>,
 {
     type Transaction = Transaction;
     type Error = OpEthApiError;
