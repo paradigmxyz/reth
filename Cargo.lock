@@ -3539,8 +3539,7 @@ version = "0.0.0"
 dependencies = [
  "eyre",
  "futures",
- "reth-chainspec",
- "reth-network",
+ "reth-ethereum",
  "reth-tracing",
  "tokio",
 ]
