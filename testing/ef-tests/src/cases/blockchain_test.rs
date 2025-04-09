@@ -12,8 +12,8 @@ use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_primitives::{BlockBody, SealedBlock, StaticFileSegment};
 use reth_provider::{
     providers::StaticFileWriter, test_utils::create_test_provider_factory_with_chain_spec,
-    DatabaseProviderFactory, ExecutionOutcome, HashingWriter, LatestStateProviderRef,
-    OriginalValuesKnown, StateWriter, StaticFileProviderFactory, StorageLocation,
+    DatabaseProviderFactory, ExecutionOutcome, HashingWriter, OriginalValuesKnown, StateWriter,
+    StaticFileProviderFactory, StorageLocation,
 };
 use reth_revm::database::StateProviderDatabase;
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
@@ -92,15 +92,23 @@ impl Case for BlockchainTestCase {
                     .database_provider_rw()
                     .unwrap();
 
+                let chain_spec_genesis_hash = chain_spec.genesis_hash();
+
                 // Insert initial test state into the provider.
-                provider.insert_historical_block(
-                    SealedBlock::<reth_primitives::Block>::from_sealed_parts(
-                        case.genesis_block_header.clone().into(),
-                        BlockBody::default(),
-                    )
-                    .try_recover()
-                    .unwrap(),
-                )?;
+                let genesis_block = SealedBlock::<reth_primitives::Block>::from_sealed_parts(
+                    case.genesis_block_header.clone().into(),
+                    BlockBody::default(),
+                )
+                .try_recover()
+                .unwrap();
+
+                assert_eq!(
+                    chain_spec_genesis_hash,
+                    genesis_block.hash_slow(),
+                    "shouldn't these hashes be the same?"
+                );
+
+                provider.insert_historical_block(genesis_block)?;
                 case.pre.write_to_db(provider.tx_ref())?;
 
                 // Initialize receipts static file with genesis
