@@ -14,7 +14,6 @@ use reth_revm::revm::{
 use std::sync::Arc;
 
 /// Type alias for the LRU cache used within the [`PrecompileCache`].
-#[allow(dead_code)]
 type PrecompileLRUCache = Cache<(SpecId, Bytes, u64), Result<InterpreterResult, String>>;
 
 /// A cache for precompile inputs / outputs.
@@ -25,40 +24,37 @@ type PrecompileLRUCache = Cache<(SpecId, Bytes, u64), Result<InterpreterResult, 
 /// NOTE: This does not work with "context stateful precompiles", ie `ContextStatefulPrecompile` or
 /// `ContextStatefulPrecompileMut`. They are explicitly banned.
 #[derive(Debug, Default)]
-#[allow(dead_code)]
-pub(crate) struct PrecompileCache {
+struct PrecompileCache {
     /// Caches for each precompile input / output.
     cache: DashMap<Address, PrecompileLRUCache>,
 }
 
-/// A custom precompile that contains the cache and precompile it wraps.
-#[derive(Clone)]
-#[allow(dead_code)]
-pub(crate) struct WrappedPrecompile<P> {
-    /// The precompile to wrap.
-    precompile: P,
+/// A custom precompile provider that contains the cache and precompile provider it wraps.
+#[derive(Clone, Debug)]
+pub struct CachedPrecompileProvider<P> {
+    /// The precompile provider to wrap.
+    precompile_provider: P,
     /// The cache to use.
     cache: Arc<PrecompileCache>,
     /// The spec id to use.
     spec: SpecId,
 }
 
-#[allow(dead_code)]
-impl<P> WrappedPrecompile<P> {
-    /// Given a [`PrecompileProvider`] and cache for a specific precompiles, create a
-    /// wrapper that can be used inside Evm.
-    pub(crate) fn new(precompile: P, cache: Arc<PrecompileCache>) -> Self {
-        Self { precompile, cache, spec: SpecId::default() }
+impl<P> CachedPrecompileProvider<P> {
+    /// Given a [`PrecompileProvider`] create a cached wrapper that can be used inside Evm.
+    pub fn new(precompile_provider: P) -> Self {
+        let cache = Arc::new(Default::default());
+        Self { precompile_provider, cache, spec: SpecId::default() }
     }
 }
 
 impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> PrecompileProvider<CTX>
-    for WrappedPrecompile<P>
+    for CachedPrecompileProvider<P>
 {
     type Output = P::Output;
 
     fn set_spec(&mut self, spec: <CTX::Cfg as Cfg>::Spec) -> bool {
-        self.precompile.set_spec(spec.clone());
+        self.precompile_provider.set_spec(spec.clone());
         self.spec = spec.into();
         true
     }
@@ -81,7 +77,7 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
         }
 
         // call the precompile if cache miss
-        let output = self.precompile.run(context, address, inputs, is_static, gas_limit);
+        let output = self.precompile_provider.run(context, address, inputs, is_static, gas_limit);
 
         if let Some(output) = output.clone().transpose() {
             // insert the result into the cache
@@ -99,11 +95,11 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
     }
 
     fn warm_addresses(&self) -> Box<impl Iterator<Item = Address>> {
-        self.precompile.warm_addresses()
+        self.precompile_provider.warm_addresses()
     }
 
     fn contains(&self, address: &Address) -> bool {
-        self.precompile.contains(address)
+        self.precompile_provider.contains(address)
     }
 }
 
