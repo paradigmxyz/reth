@@ -1,68 +1,48 @@
-use futures::StreamExt;
+use futures_util::stream::{FuturesOrdered, Stream, StreamExt};
+use pin_project::pin_project;
 use reqwest::{Client, IntoUrl, Url};
-use std::{path::Path, str::FromStr};
-use tokio::{fs::File, sync::mpsc};
+use std::{
+    future::Future,
+    path::Path,
+    pin::Pin,
+    str::FromStr,
+    task::{Context, Poll},
+};
+use tokio::fs::File;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EraClient {
     client: Client,
     max_files: usize,
     max_concurrent_downloads: usize,
     url: Url,
     folder: Box<Path>,
-    processed_files: mpsc::Receiver<Box<Path>>,
-    downloaded_files: mpsc::Sender<Box<Path>>,
     pending: usize,
 }
 
 impl EraClient {
-    pub async fn download(&mut self) -> eyre::Result<()> {
-        loop {
-            let count = self.files_count().await.saturating_sub(self.max_files);
+    pub async fn download_to_file(&mut self, url: impl IntoUrl) -> eyre::Result<Box<Path>> {
+        self.pending += 1;
+        let path = self.folder.to_path_buf();
 
-            for _ in 0..count {
-                if let Some(url) = self.next_url().await {
-                    self.pending += 1;
-                    let path = self.folder.to_path_buf();
+        let url = url.into_url()?;
+        let client = self.client.clone();
+        let file_name = url.path_segments().unwrap().last().unwrap();
+        let path = path.join(file_name);
 
-                    let url = url.into_url().unwrap();
-                    let client = self.client.clone();
-                    let file_name = url.path_segments().unwrap().last().unwrap();
-                    let path = path.join(file_name);
-                    let channel = self.downloaded_files.clone();
+        let response = client.get(url).send().await?;
 
-                    tokio::spawn(async move {
-                        let response = client.get(url).send().await;
+        let mut stream = response.bytes_stream();
+        let mut file = File::create(&path).await?;
 
-                        if let Ok(response) = response {
-                            let mut stream = response.bytes_stream();
-                            let mut file = File::create(path).await.unwrap();
-
-                            while let Some(item) = stream.next().await {
-                                tokio::io::copy(&mut item.unwrap().as_ref(), &mut file)
-                                    .await
-                                    .unwrap();
-                            }
-
-                            channel.send(path.into_boxed_path()).await.unwrap();
-                        }
-                    });
-                }
-            }
-
-            if self.pending == 0 {
-                break;
-            }
-
-            if let Some(file) = self.processed_files.recv().await {
-                self.delete_file(&file).await?;
-            }
+        while let Some(item) = stream.next().await {
+            tokio::io::copy(&mut item?.as_ref(), &mut file).await?;
         }
 
-        Ok(())
+        Ok(path.into_boxed_path())
     }
 
-    async fn next_url(&self) -> Option<impl IntoUrl> {
+    async fn next_url(&self) -> Option<Url> {
         let mut max = None;
 
         for mut dir in tokio::fs::read_dir(&self.folder).await {
@@ -81,7 +61,7 @@ impl EraClient {
 
         let number = max.unwrap_or(0);
 
-        Some(self.number_to_file_name(number))
+        Some(Url::from_str(&self.number_to_file_name(number)).unwrap())
     }
 
     async fn files_count(&self) -> usize {
@@ -98,5 +78,133 @@ impl EraClient {
 
     fn file_name_to_number(&self, file_name: &str) -> Option<u64> {
         file_name.split("-").skip(1).next().map(|v| u64::from_str(v).ok()).flatten()
+    }
+}
+
+struct EraStream {
+    pub download_stream: DownloadStream,
+    pub starting_stream: StartingStream,
+}
+
+impl Stream for EraStream {
+    type Item = eyre::Result<Box<Path>>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match Pin::new(&mut self.starting_stream).poll_next(cx) {
+            Poll::Ready(fut) => match fut {
+                Some(fut) => self.download_stream.downloads.push_back(fut),
+                None => {}
+            },
+            Poll::Pending => {}
+        }
+
+        let downloading = self.download_stream.downloads.len();
+        self.starting_stream.downloading(downloading);
+
+        Pin::new(&mut self.download_stream).poll_next(cx)
+    }
+}
+
+#[pin_project]
+struct DownloadStream {
+    #[pin]
+    pub downloads: FuturesOrdered<Pin<Box<dyn Future<Output = eyre::Result<Box<Path>>>>>>,
+}
+
+impl Stream for DownloadStream {
+    type Item = eyre::Result<Box<Path>>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let project = self.project();
+        project.downloads.poll_next(cx)
+    }
+}
+
+#[pin_project]
+struct StartingStream {
+    pub client: EraClient,
+    pub filler: Pin<Box<dyn Future<Output = ()>>>,
+    pub downloading: usize,
+    pub files_count: Pin<Box<dyn Future<Output = usize> + Send + Sync + 'static>>,
+    pub next_url: Pin<Box<dyn Future<Output = Option<Url>> + Send + Sync + 'static>>,
+    pub files_count_ready: bool,
+    pub state: State,
+}
+
+#[derive(Debug, PartialEq)]
+enum State {
+    Initial,
+    Missing(usize),
+    NextUrl(usize),
+}
+
+impl StartingStream {
+    fn downloading(&mut self, downloading: usize) {
+        self.downloading = downloading;
+
+        if !self.files_count_ready {
+            let client = self.client.clone();
+
+            Pin::new(&mut self.files_count)
+                .set(Box::pin(async move { client.files_count().await }));
+            self.files_count_ready = true;
+        }
+    }
+}
+
+impl Stream for StartingStream {
+    type Item = Pin<Box<dyn Future<Output = eyre::Result<Box<Path>>>>>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let downloading = self.downloading;
+
+        if self.state == State::Initial {
+            if self.files_count_ready {
+                match Pin::new(&mut self.files_count).poll(cx) {
+                    Poll::Ready(downloaded) => {
+                        let max_missing = (downloaded + downloading)
+                            .saturating_sub(self.client.max_files)
+                            .max(self.client.max_concurrent_downloads);
+
+                        self.files_count_ready = false;
+                        self.state = State::Missing(max_missing);
+                    }
+                    Poll::Pending => return Poll::Pending,
+                }
+            }
+        }
+
+        if let State::Missing(max_missing) = self.state {
+            if max_missing > 0 {
+                let client = self.client.clone();
+
+                Pin::new(&mut self.next_url).set(Box::pin(async move { client.next_url().await }));
+
+                self.state = State::NextUrl(max_missing);
+            } else {
+                self.state = State::Initial;
+            }
+        }
+
+        if let State::NextUrl(max_missing) = self.state {
+            return match Pin::new(&mut self.next_url).poll(cx) {
+                Poll::Ready(url) => {
+                    self.state = State::Missing(max_missing.saturating_sub(1));
+
+                    if let Some(url) = url {
+                        let mut client = self.client.clone();
+
+                        Poll::Ready(Some(Box::pin(
+                            async move { client.download_to_file(url).await },
+                        )))
+                    } else {
+                        Poll::Ready(None)
+                    }
+                }
+                Poll::Pending => Poll::Pending,
+            }
+        }
+
+        Poll::Pending
     }
 }
