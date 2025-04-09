@@ -198,13 +198,13 @@ impl RlpDecodableReceipt for Receipt {
 
 impl Decodable2718 for Receipt {
     fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
-        let receipt_with_bloom = Self::rlp_decode_inner(buf, TxType::try_from(ty)?)?;
-        Ok(receipt_with_bloom.receipt)
+        let receipt = Self::rlp_decode_inner_without_bloom(buf, TxType::try_from(ty)?)?;
+        Ok(receipt)
     }
 
     fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
-        let receipt_with_bloom = Self::rlp_decode_inner(buf, TxType::Legacy)?;
-        Ok(receipt_with_bloom.receipt)
+        let receipt = Self::rlp_decode_inner_without_bloom(buf, TxType::Legacy)?;
+        Ok(receipt)
     }
 }
 
