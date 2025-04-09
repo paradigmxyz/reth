@@ -133,7 +133,7 @@ impl Case for BlockchainTestCase {
 
                 let executor_provider = EthExecutorProvider::ethereum(chain_spec);
                 for block in blocks {
-                    let state_provider = LatestStateProviderRef::new(&provider);
+                    let state_provider = provider.history_by_block_hash(block.parent_hash)?;
                     let state_db = StateProviderDatabase(state_provider);
                     let executor = executor_provider.executor(state_db);
 
