@@ -232,10 +232,10 @@ pub trait EthApi<T: RpcObject, B: RpcObject, R: RpcObject, H: RpcObject> {
     #[method(name = "callMany")]
     async fn call_many(
         &self,
-        bundle: Bundle,
+        bundles: Vec<Bundle>,
         state_context: Option<StateContext>,
         state_override: Option<StateOverride>,
-    ) -> RpcResult<Vec<EthCallResponse>>;
+    ) -> RpcResult<Vec<Vec<EthCallResponse>>>;
 
     /// Generates an access list for a transaction.
     ///
@@ -656,12 +656,12 @@ where
     /// Handler for: `eth_callMany`
     async fn call_many(
         &self,
-        bundle: Bundle,
+        bundles: Vec<Bundle>,
         state_context: Option<StateContext>,
         state_override: Option<StateOverride>,
-    ) -> RpcResult<Vec<EthCallResponse>> {
-        trace!(target: "rpc::eth", ?bundle, ?state_context, ?state_override, "Serving eth_callMany");
-        Ok(EthCall::call_many(self, bundle, state_context, state_override).await?)
+    ) -> RpcResult<Vec<Vec<EthCallResponse>>> {
+        trace!(target: "rpc::eth", ?bundles, ?state_context, ?state_override, "Serving eth_callMany");
+        Ok(EthCall::call_many(self, bundles, state_context, state_override).await?)
     }
 
     /// Handler for: `eth_createAccessList`

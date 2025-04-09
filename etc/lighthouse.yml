@@ -1,18 +1,17 @@
-version: '3.9'
+version: "3.9"
 name: reth
-
 services:
   lighthouse:
     restart: unless-stopped
-    image: sigp/lighthouse:v5.1.3-modern
+    image: sigp/lighthouse:v7.0.0-beta.5
     depends_on:
       - reth
     ports:
-      - '5052:5052/tcp' # rpc
-      - '5053:5053/tcp'
-      - '5054:5054/tcp' # metrics
-      - '9000:9000/tcp' # p2p
-      - '9000:9000/udp' # p2p
+      - "5052:5052/tcp" # rpc
+      - "5053:5053/tcp"
+      - "5054:5054/tcp" # metrics
+      - "9000:9000/tcp" # p2p
+      - "9000:9000/udp" # p2p
     volumes:
       - lighthousedata:/root/.lighthouse
       - ./jwttoken:/root/jwt:ro
@@ -26,7 +25,8 @@ services:
       --execution-endpoint http://reth:8551
       --metrics --metrics-address 0.0.0.0
       --execution-jwt /root/jwt/jwt.hex
-      --checkpoint-sync-url https://mainnet.checkpoint.sigp.io
+      --checkpoint-sync-url https://sync-mainnet.beaconcha.in
+      --checkpoint-sync-url-timeout=300
 
   metrics-exporter:
     restart: unless-stopped
