@@ -122,6 +122,7 @@ serde-bincode-compat = [
     "serde_with",
     "alloy-consensus/serde-bincode-compat",
     "alloy-eips/serde-bincode-compat",
+    "op-alloy-consensus?/serde",
     "op-alloy-consensus?/serde-bincode-compat",
 ]
 serde = [
