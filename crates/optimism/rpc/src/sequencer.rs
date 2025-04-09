@@ -117,17 +117,16 @@ impl SequencerClient {
         method: &str,
         params: Params,
     ) -> Result<Resp, SequencerClientError> {
-        let resp = self
-            .client()
-            .request::<Params, Resp>(method.to_string(), params)
-            .await
-            .inspect_err(|err| {
-                warn!(
-                    target: "rpc::sequencer",
-                    %err,
-                    "HTTP request to sequencer failed",
-                );
-            })?;
+        let resp =
+            self.client().request::<Params, Resp>(method.to_string(), params).await.inspect_err(
+                |err| {
+                    warn!(
+                        target: "rpc::sequencer",
+                        %err,
+                        "HTTP request to sequencer failed",
+                    );
+                },
+            )?;
         Ok(resp)
     }
 
