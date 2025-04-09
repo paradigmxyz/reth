@@ -131,8 +131,8 @@ where
 {
     type EthApi = EthApiFor<N>;
 
-    fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> Self::EthApi {
-        reth_rpc::EthApiBuilder::new(
+    async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
+        let api = reth_rpc::EthApiBuilder::new(
             ctx.components.provider().clone(),
             ctx.components.pool().clone(),
             ctx.components.network().clone(),
@@ -146,7 +146,8 @@ where
         .fee_history_cache_config(ctx.config.fee_history_cache)
         .proof_permits(ctx.config.proof_permits)
         .gas_oracle_config(ctx.config.gas_oracle)
-        .build()
+        .build();
+        Ok(api)
     }
 }
 
