@@ -596,7 +596,7 @@ where
     pub async fn debug_execution_witness_by_block_hash(
         &self,
         hash: B256,
-    ) -> Result<(ExecutionWitness, Vec<Bytes>), Eth::Error> {
+    ) -> Result<ExecutionWitness, Eth::Error> {
         let this = self.clone();
         let block = this
             .eth_api()
@@ -614,7 +614,7 @@ where
     pub async fn debug_execution_witness(
         &self,
         block_id: BlockNumberOrTag,
-    ) -> Result<(ExecutionWitness, Vec<Bytes>), Eth::Error> {
+    ) -> Result<ExecutionWitness, Eth::Error> {
         let this = self.clone();
         let block = this
             .eth_api()
@@ -629,11 +629,11 @@ where
     pub async fn debug_execution_witness_for_block(
         &self,
         block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
-    ) -> Result<(ExecutionWitness, Vec<Bytes>), Eth::Error> {
+    ) -> Result<ExecutionWitness, Eth::Error> {
         let this = self.clone();
         let block_number = block.header().number();
 
-        let (exec_witness, lowest_block_number) = self
+        let (mut exec_witness, lowest_block_number) = self
             .eth_api()
             .spawn_with_state_at_block(block.parent_hash().into(), move |state_provider| {
                 let db = StateProviderDatabase::new(&state_provider);
@@ -653,7 +653,10 @@ where
                 let state = state_provider
                     .witness(Default::default(), hashed_state)
                     .map_err(EthApiError::from)?;
-                Ok((ExecutionWitness { state, codes, keys }, lowest_block_number))
+                Ok((
+                    ExecutionWitness { state, codes, keys, headers: Vec::new() },
+                    lowest_block_number,
+                ))
             })
             .await?;
 
@@ -668,7 +671,7 @@ where
 
         let range = smallest..block_number;
         // TODO: Check if headers_range errors when one of the headers in the range is missing
-        let headers: Vec<Bytes> = self
+        exec_witness.headers = self
             .provider()
             .headers_range(range)
             .map_err(EthApiError::from)?
@@ -680,7 +683,7 @@ where
             })
             .collect();
 
-        Ok((exec_witness, headers))
+        Ok(exec_witness)
     }
 
     /// Returns the code associated with a given hash at the specified block ID. If no code is
@@ -1035,7 +1038,7 @@ where
         block: BlockNumberOrTag,
     ) -> RpcResult<ExecutionWitness> {
         let _permit = self.acquire_trace_permit().await;
-        Self::debug_execution_witness(self, block).await.map_err(Into::into).map(|p| p.0)
+        Self::debug_execution_witness(self, block).await.map_err(Into::into)
     }
 
     /// Handler for `debug_executionWitnessByBlockHash`
@@ -1044,10 +1047,7 @@ where
         hash: B256,
     ) -> RpcResult<ExecutionWitness> {
         let _permit = self.acquire_trace_permit().await;
-        Self::debug_execution_witness_by_block_hash(self, hash)
-            .await
-            .map_err(Into::into)
-            .map(|p| p.0)
+        Self::debug_execution_witness_by_block_hash(self, hash).await.map_err(Into::into)
     }
 
     async fn debug_backtrace_at(&self, _location: &str) -> RpcResult<()> {
