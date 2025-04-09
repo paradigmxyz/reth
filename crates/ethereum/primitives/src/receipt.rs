@@ -91,6 +91,47 @@ impl Receipt {
     pub fn calculate_receipt_root_no_memo(receipts: &[Self]) -> B256 {
         ordered_trie_root_with_encoder(receipts, |r, buf| r.with_bloom_ref().encode_2718(buf))
     }
+
+    /// Returns length of RLP-encoded receipt fields without the given [`Bloom`] without an RLP
+    /// header
+    pub fn rlp_encoded_fields_length_without_bloom(&self) -> usize {
+        self.success.length() + self.cumulative_gas_used.length() + self.logs.length()
+    }
+
+    /// RLP-encodes receipt fields without the given [`Bloom`] without an RLP header.
+    pub fn rlp_encode_fields_without_bloom(&self, out: &mut dyn BufMut) {
+        self.success.encode(out);
+        self.cumulative_gas_used.encode(out);
+        self.logs.encode(out);
+    }
+
+    /// Returns RLP header for inner encoding.
+    pub fn rlp_header_inner_without_bloom(&self) -> Header {
+        Header { list: true, payload_length: self.rlp_encoded_fields_length_without_bloom() }
+    }
+
+    /// RLP-decodes the receipt from the provided buffer. This does not expect a type byte or
+    /// network header.
+    pub fn rlp_decode_inner_without_bloom(
+        buf: &mut &[u8],
+        tx_type: TxType,
+    ) -> alloy_rlp::Result<Self> {
+        let header = Header::decode(buf)?;
+        if !header.list {
+            return Err(alloy_rlp::Error::UnexpectedString);
+        }
+
+        let remaining = buf.len();
+        let success = Decodable::decode(buf)?;
+        let cumulative_gas_used = Decodable::decode(buf)?;
+        let logs = Decodable::decode(buf)?;
+
+        if buf.len() + header.payload_length != remaining {
+            return Err(alloy_rlp::Error::UnexpectedLength);
+        }
+
+        Ok(Self { tx_type, success, cumulative_gas_used, logs })
+    }
 }
 
 impl Eip2718EncodableReceipt for Receipt {
@@ -169,11 +210,14 @@ impl Decodable2718 for Receipt {
 
 impl Encodable2718 for Receipt {
     fn encode_2718_len(&self) -> usize {
-        self.rlp_encoded_length_with_bloom(&self.bloom())
+        !self.tx_type.is_legacy() as usize + self.rlp_encoded_fields_length_without_bloom()
     }
 
     fn encode_2718(&self, out: &mut dyn BufMut) {
-        self.rlp_encode_with_bloom(&self.bloom(), out);
+        if !self.tx_type.is_legacy() {
+            out.put_u8(self.tx_type as u8);
+        }
+        self.rlp_encode_fields_without_bloom(out);
     }
 }
 
