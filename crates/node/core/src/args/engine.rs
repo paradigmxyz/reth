@@ -24,6 +24,11 @@ pub struct EngineArgs {
     #[arg(long = "engine.legacy-state-root", default_value = "false")]
     pub legacy_state_root_task_enabled: bool,
 
+    /// CAUTION: This CLI flag has no effect anymore, use --engine.disable-caching-and-prewarming
+    /// if you want to disable caching and prewarming.
+    #[arg(long = "engine.caching-and-prewarming")]
+    pub caching_and_prewarming_enabled: bool,
+
     /// Disable cross-block caching and parallel prewarming
     #[arg(long = "engine.disable-caching-and-prewarming")]
     pub caching_and_prewarming_disabled: bool,
@@ -49,6 +54,7 @@ impl Default for EngineArgs {
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
             legacy_state_root_task_enabled: false,
             state_root_task_compare_updates: false,
+            caching_and_prewarming_enabled: true,
             caching_and_prewarming_disabled: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB,
             accept_execution_requests_hash: false,
