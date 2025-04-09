@@ -42,6 +42,7 @@ miniz_oxide = { workspace = true, features = ["with-alloc"] }
 # misc
 derive_more.workspace = true
 paste.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 reth-chainspec = { workspace = true, features = ["test-utils"] }
@@ -65,7 +66,7 @@ std = [
     "derive_more/std",
     "reth-network-peers/std",
     "serde_json/std",
-    "op-alloy-consensus/std",
     "serde/std",
     "miniz_oxide/std",
+    "thiserror/std",
 ]
