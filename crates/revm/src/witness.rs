@@ -22,7 +22,8 @@ pub struct ExecutionWitnessRecord {
     /// The lowest block number referenced by any BLOCKHASH opcode call during transaction
     /// execution.
     ///
-    /// This helps determine which ancestor block headers must be included in the ExecutionWitness.
+    /// This helps determine which ancestor block headers must be included in the
+    /// `ExecutionWitness`.
     ///
     /// `None` - when the BLOCKHASH opcode was not called during execution
     pub lowest_block_number: Option<u64>,
