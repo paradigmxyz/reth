@@ -1,28 +1,20 @@
 //! Contains a precompile cache that is backed by a moka cache.
 
 use crate::tree::cached_state::Cache;
-use alloy_evm::{eth::EthEvmContext, EvmFactory};
 use alloy_primitives::{map::DefaultHashBuilder, Address, Bytes};
 use dashmap::DashMap;
 use mini_moka::sync::CacheBuilder;
-use reth_ethereum_primitives::EthPrimitives;
-use reth_evm::{Database, EvmEnv};
 use reth_revm::revm::{
-    context::{Cfg, Context, TxEnv},
-    context_interface::{
-        result::{EVMError, HaltReason},
-        ContextTr,
-    },
-    handler::{EthPrecompiles, PrecompileProvider},
-    inspector::{Inspector, NoOpInspector},
-    interpreter::{interpreter::EthInterpreter, InterpreterResult, InputsImpl},
-    precompile::PrecompileError,
+    context::Cfg,
+    context_interface::ContextTr,
+    handler::PrecompileProvider,
+    interpreter::{InputsImpl, InterpreterResult},
     primitives::hardfork::SpecId,
-    MainBuilder, MainContext,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 /// Type alias for the LRU cache used within the [`PrecompileCache`].
+#[allow(dead_code)]
 type PrecompileLRUCache = Cache<(SpecId, Bytes, u64), Result<InterpreterResult, String>>;
 
 /// A cache for precompile inputs / outputs.
@@ -33,14 +25,16 @@ type PrecompileLRUCache = Cache<(SpecId, Bytes, u64), Result<InterpreterResult, 
 /// NOTE: This does not work with "context stateful precompiles", ie `ContextStatefulPrecompile` or
 /// `ContextStatefulPrecompileMut`. They are explicitly banned.
 #[derive(Debug, Default)]
-pub struct PrecompileCache {
+#[allow(dead_code)]
+pub(crate) struct PrecompileCache {
     /// Caches for each precompile input / output.
     cache: DashMap<Address, PrecompileLRUCache>,
 }
 
 /// A custom precompile that contains the cache and precompile it wraps.
 #[derive(Clone)]
-pub struct WrappedPrecompile<P> {
+#[allow(dead_code)]
+pub(crate) struct WrappedPrecompile<P> {
     /// The precompile to wrap.
     precompile: P,
     /// The cache to use.
@@ -49,11 +43,12 @@ pub struct WrappedPrecompile<P> {
     spec: SpecId,
 }
 
+#[allow(dead_code)]
 impl<P> WrappedPrecompile<P> {
     /// Given a [`PrecompileProvider`] and cache for a specific precompiles, create a
     /// wrapper that can be used inside Evm.
-    fn new(precompile: P, cache: Arc<PrecompileCache>) -> Self {
-        WrappedPrecompile { precompile, cache: cache.clone(), spec: SpecId::default() }
+    pub(crate) fn new(precompile: P, cache: Arc<PrecompileCache>) -> Self {
+        Self { precompile, cache, spec: SpecId::default() }
     }
 }
 
@@ -81,7 +76,7 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
         // get the result if it exists
         if let Some(precompiles) = self.cache.cache.get_mut(address) {
             if let Some(result) = precompiles.get(&key) {
-                return result.clone().map(Some)
+                return result.map(Some)
             }
         }
 
@@ -90,12 +85,13 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
 
         if let Some(output) = output.clone().transpose() {
             // insert the result into the cache
-            self
-                .cache
+            self.cache
                 .cache
                 .entry(*address)
                 // TODO: use a better cache size
-                .or_insert(CacheBuilder::new(10000).build_with_hasher(DefaultHashBuilder::default()))
+                .or_insert(
+                    CacheBuilder::new(10000).build_with_hasher(DefaultHashBuilder::default()),
+                )
                 .insert(key, output);
         }
 
