@@ -62,13 +62,12 @@ pub mod evm {
     #[doc(inline)]
     pub use reth_revm as revm;
 }
-/// Re-exported eth wire types
-#[cfg(feature = "eth-wire")]
-pub use reth_eth_wire as eth_wire;
 
 /// Re-exported reth network types
 #[cfg(feature = "network")]
 pub mod network {
+    #[doc(inline)]
+    pub use reth_eth_wire as eth_wire;
     #[doc(inline)]
     pub use reth_network::*;
     #[doc(inline)]

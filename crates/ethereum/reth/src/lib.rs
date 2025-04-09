@@ -63,13 +63,12 @@ pub use reth_exex as exex;
 #[cfg(feature = "network")]
 pub mod network {
     #[doc(inline)]
+    pub use reth_eth_wire as eth_wire;
+    #[doc(inline)]
     pub use reth_network::*;
     #[doc(inline)]
     pub use reth_network_api as api;
 }
-/// Re-exported eth wire types
-#[cfg(feature = "eth-wire")]
-pub use reth_eth_wire as eth_wire;
 
 /// Re-exported reth provider types
 #[cfg(feature = "provider")]

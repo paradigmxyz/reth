@@ -64,7 +64,6 @@ arbitrary = [
     "reth-primitives-traits/arbitrary",
     "reth-db?/arbitrary",
     "reth-transaction-pool?/arbitrary",
-    "reth-eth-wire?/arbitrary",
 ]
 
 test-utils = [
@@ -81,7 +80,7 @@ test-utils = [
     "reth-transaction-pool?/test-utils",
 ]
 
-full = ["consensus", "evm", "node", "provider", "rpc", "trie", "pool", "network", "eth-wire"]
+full = ["consensus", "evm", "node", "provider", "rpc", "trie", "pool", "network"]
 
 alloy-compat = ["reth-optimism-primitives/alloy-compat"]
 cli = ["dep:reth-optimism-cli"]
@@ -109,9 +108,8 @@ rpc = [
     "dep:reth-optimism-rpc",
 ]
 js-tracer = ["rpc", "reth-rpc/js-tracer"]
-network = ["dep:reth-network", "dep:reth-network-api"]
+network = ["dep:reth-network", "dep:reth-network-api", "dep:reth-eth-wire"]
 provider = ["storage-api", "dep:reth-provider", "dep:reth-db"]
 pool = ["dep:reth-transaction-pool"]
-eth-wire = ["dep:reth-eth-wire"]
 storage-api = ["dep:reth-storage-api"]
 trie = ["dep:reth-trie"]

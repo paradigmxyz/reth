@@ -65,7 +65,6 @@ arbitrary = [
     "reth-db?/arbitrary",
     "alloy-rpc-types-eth?/arbitrary",
     "reth-transaction-pool?/arbitrary",
-    "reth-eth-wire?/arbitrary",
 ]
 
 test-utils = [
@@ -83,7 +82,7 @@ test-utils = [
     "reth-transaction-pool?/test-utils",
 ]
 
-full = ["consensus", "evm", "node", "provider", "rpc", "exex", "trie", "pool", "network", "eth-wire"]
+full = ["consensus", "evm", "node", "provider", "rpc", "exex", "trie", "pool", "network"]
 
 alloy-compat = ["reth-ethereum-primitives/alloy-compat"]
 cli = ["dep:reth-ethereum-cli"]
@@ -105,7 +104,6 @@ node = [
     "trie",
 ]
 pool = ["dep:reth-transaction-pool"]
-eth-wire = ["dep:reth-eth-wire"]
 rpc = [
     "dep:reth-rpc",
     "dep:reth-rpc-builder",
@@ -114,7 +112,7 @@ rpc = [
     "dep:alloy-rpc-types-eth",
 ]
 js-tracer = ["rpc", "reth-rpc/js-tracer"]
-network = ["dep:reth-network", "dep:reth-network-api"]
+network = ["dep:reth-network", "dep:reth-network-api", "dep:reth-eth-wire"]
 provider = ["storage-api", "dep:reth-provider", "dep:reth-db"]
 storage-api = ["dep:reth-storage-api"]
 trie = ["dep:reth-trie"]
