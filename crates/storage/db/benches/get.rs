@@ -2,7 +2,6 @@
 
 use alloy_primitives::TxHash;
 use criterion::{criterion_group, criterion_main, Criterion};
-use pprof::criterion::{Output, PProfProfiler};
 use reth_db::{test_utils::create_test_rw_db_with_path, Database, TransactionHashNumbers};
 use reth_db_api::transaction::DbTx;
 use std::{fs, sync::Arc};
@@ -12,7 +11,7 @@ use utils::BENCH_DB_PATH;
 
 criterion_group! {
     name = benches;
-    config = Criterion::default().with_profiler(PProfProfiler::new(1, Output::Flamegraph(None)));
+    config = Criterion::default();
     targets = get
 }
 criterion_main!(benches);

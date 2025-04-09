@@ -3,19 +3,20 @@
 #![warn(unused_crate_dependencies)]
 
 use reth::{
-    api::NodeTypes,
     builder::{components::PoolBuilder, BuilderContext, FullNodeTypes},
-    chainspec::ChainSpec,
     cli::Cli,
-    primitives::EthPrimitives,
-    providers::CanonStateSubscriptions,
-    transaction_pool::{
-        blobstore::InMemoryBlobStore, EthTransactionPool, TransactionValidationTaskExecutor,
-    },
 };
-use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
+use reth_ethereum::{
+    chainspec::ChainSpec,
+    node::{api::NodeTypes, node::EthereumAddOns, EthereumNode},
+    pool::{
+        blobstore::InMemoryBlobStore, EthTransactionPool, PoolConfig,
+        TransactionValidationTaskExecutor,
+    },
+    provider::CanonStateSubscriptions,
+    EthPrimitives,
+};
 use reth_tracing::tracing::{debug, info};
-use reth_transaction_pool::PoolConfig;
 
 fn main() {
     Cli::parse_args()
@@ -62,7 +63,7 @@ where
             .build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
 
         let transaction_pool =
-            reth_transaction_pool::Pool::eth_pool(validator, blob_store, self.pool_config);
+            reth_ethereum::pool::Pool::eth_pool(validator, blob_store, self.pool_config);
         info!(target: "reth::cli", "Transaction pool initialized");
         let transactions_path = data_dir.txpool_transactions();
 
@@ -72,12 +73,14 @@ where
             let chain_events = ctx.provider().canonical_state_stream();
             let client = ctx.provider().clone();
             let transactions_backup_config =
-                reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
+                reth_ethereum::pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(
+                    transactions_path,
+                );
 
             ctx.task_executor().spawn_critical_with_graceful_shutdown_signal(
                 "local transactions backup task",
                 |shutdown| {
-                    reth_transaction_pool::maintain::backup_local_transactions_task(
+                    reth_ethereum::pool::maintain::backup_local_transactions_task(
                         shutdown,
                         pool.clone(),
                         transactions_backup_config,
@@ -88,12 +91,12 @@ where
             // spawn the maintenance task
             ctx.task_executor().spawn_critical(
                 "txpool maintenance task",
-                reth_transaction_pool::maintain::maintain_transaction_pool_future(
+                reth_ethereum::pool::maintain::maintain_transaction_pool_future(
                     client,
                     pool,
                     chain_events,
                     ctx.task_executor().clone(),
-                    reth_transaction_pool::maintain::MaintainPoolConfig {
+                    reth_ethereum::pool::maintain::MaintainPoolConfig {
                         max_tx_lifetime: transaction_pool.config().max_queued_lifetime,
                         ..Default::default()
                     },
