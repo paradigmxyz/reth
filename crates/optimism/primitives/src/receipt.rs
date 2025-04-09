@@ -87,6 +87,11 @@ impl OpReceipt {
         Header { list: true, payload_length: self.rlp_encoded_fields_length(bloom) }
     }
 
+    /// Returns RLP header for inner encoding without bloom.
+    pub fn rlp_header_inner_without_bloom(&self) -> Header {
+        Header { list: true, payload_length: self.rlp_encoded_fields_length_without_bloom() }
+    }
+
     /// RLP-decodes the receipt from the provided buffer. This does not expect a type byte or
     /// network header.
     pub fn rlp_decode_inner(
@@ -122,25 +127,6 @@ impl OpReceipt {
         }
     }
 
-    /// Returns length of RLP-encoded receipt fields without an RLP header.
-    pub fn rlp_encoded_fields_length_without_bloom(&self) -> usize {
-        match self {
-            Self::Legacy(receipt) |
-            Self::Eip2930(receipt) |
-            Self::Eip1559(receipt) |
-            Self::Eip7702(receipt) => {
-                receipt.status.length() +
-                    receipt.cumulative_gas_used.length() +
-                    receipt.logs.length()
-            }
-            Self::Deposit(receipt) => {
-                receipt.inner.status.length() +
-                    receipt.inner.cumulative_gas_used.length() +
-                    receipt.inner.logs.length()
-            }
-        }
-    }
-
     /// RLP-encodes receipt fields without an RLP header.
     pub fn rlp_encode_fields_without_bloom(&self, out: &mut dyn BufMut) {
         match self {
@@ -156,13 +142,39 @@ impl OpReceipt {
                 receipt.inner.status.encode(out);
                 receipt.inner.cumulative_gas_used.encode(out);
                 receipt.inner.logs.encode(out);
+                if let Some(nonce) = receipt.deposit_nonce {
+                    nonce.encode(out);
+                }
+                if let Some(version) = receipt.deposit_receipt_version {
+                    version.encode(out);
+                }
             }
         }
     }
 
-    /// Returns RLP header for inner encoding without bloom.
-    pub fn rlp_header_inner_without_bloom(&self) -> Header {
-        Header { list: true, payload_length: self.rlp_encoded_fields_length_without_bloom() }
+    /// Returns length of RLP-encoded receipt fields without an RLP header.
+    pub fn rlp_encoded_fields_length_without_bloom(&self) -> usize {
+        match self {
+            Self::Legacy(receipt) |
+            Self::Eip2930(receipt) |
+            Self::Eip1559(receipt) |
+            Self::Eip7702(receipt) => {
+                receipt.status.length() +
+                    receipt.cumulative_gas_used.length() +
+                    receipt.logs.length()
+            }
+            Self::Deposit(receipt) => {
+                receipt.inner.status.length() +
+                    receipt.inner.cumulative_gas_used.length() +
+                    receipt.inner.logs.length() +
+                    if let Some(nonce) = receipt.deposit_nonce { nonce.length() } else { 0 } +
+                    if let Some(version) = receipt.deposit_receipt_version {
+                        version.length()
+                    } else {
+                        0
+                    }
+            }
+        }
     }
 
     /// RLP-decodes the receipt from the provided buffer without bloom.
@@ -179,6 +191,17 @@ impl OpReceipt {
         let success: bool = Decodable::decode(buf)?;
         let cumulative_gas_used = Decodable::decode(buf)?;
         let logs = Decodable::decode(buf)?;
+
+        let mut deposit_nonce = None;
+        let mut deposit_receipt_version = None;
+
+        // For deposit receipts, try to decode nonce and version if they exist
+        if tx_type == OpTxType::Deposit && buf.len() + header.payload_length < remaining {
+            deposit_nonce = Some(Decodable::decode(buf)?);
+            if buf.len() + header.payload_length < remaining {
+                deposit_receipt_version = Some(Decodable::decode(buf)?);
+            }
+        }
 
         if buf.len() + header.payload_length != remaining {
             return Err(alloy_rlp::Error::UnexpectedLength);
@@ -199,8 +222,8 @@ impl OpReceipt {
             }
             OpTxType::Deposit => Ok(Self::Deposit(OpDepositReceipt {
                 inner: Receipt { status: success.into(), cumulative_gas_used, logs },
-                deposit_nonce: None,
-                deposit_receipt_version: None,
+                deposit_nonce,
+                deposit_receipt_version,
             })),
         }
     }
@@ -280,13 +303,15 @@ impl Decodable2718 for OpReceipt {
 
 impl Encodable2718 for OpReceipt {
     fn encode_2718_len(&self) -> usize {
-        !self.tx_type().is_legacy() as usize + self.rlp_encoded_fields_length_without_bloom()
+        !self.tx_type().is_legacy() as usize +
+            self.rlp_header_inner_without_bloom().length_with_payload()
     }
 
     fn encode_2718(&self, out: &mut dyn BufMut) {
         if !self.tx_type().is_legacy() {
             out.put_u8(self.tx_type() as u8);
         }
+        self.rlp_header_inner_without_bloom().encode(out);
         self.rlp_encode_fields_without_bloom(out);
     }
 }

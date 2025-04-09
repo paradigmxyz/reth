@@ -210,13 +210,15 @@ impl Decodable2718 for Receipt {
 
 impl Encodable2718 for Receipt {
     fn encode_2718_len(&self) -> usize {
-        !self.tx_type.is_legacy() as usize + self.rlp_encoded_fields_length_without_bloom()
+        self.rlp_header_inner_without_bloom().length_with_payload()
     }
 
+    // encode the header
     fn encode_2718(&self, out: &mut dyn BufMut) {
         if !self.tx_type.is_legacy() {
             out.put_u8(self.tx_type as u8);
         }
+        self.rlp_header_inner_without_bloom().encode(out);
         self.rlp_encode_fields_without_bloom(out);
     }
 }
