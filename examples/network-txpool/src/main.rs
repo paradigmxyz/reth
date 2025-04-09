@@ -70,7 +70,7 @@ async fn main() -> eyre::Result<()> {
 /// A transaction validator that determines all transactions to be valid.
 ///
 /// An actual validator impl like
-/// [TransactionValidationTaskExecutor](reth_transaction_pool::TransactionValidationTaskExecutor)
+/// [TransactionValidationTaskExecutor](reth_ethereum::pool::TransactionValidationTaskExecutor)
 /// would require up to date db access.
 ///
 /// CAUTION: This validator is not safe to use since it doesn't actually validate the transaction's
