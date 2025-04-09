@@ -65,6 +65,7 @@ arbitrary = [
     "reth-db?/arbitrary",
     "alloy-rpc-types-eth?/arbitrary",
     "reth-transaction-pool?/arbitrary",
+    "reth-eth-wire?/arbitrary",
 ]
 
 test-utils = [
@@ -82,18 +83,7 @@ test-utils = [
     "reth-transaction-pool?/test-utils",
 ]
 
-full = [
-    "consensus",
-    "evm",
-    "node",
-    "provider",
-    "rpc",
-    "exex",
-    "trie",
-    "pool",
-    "network",
-    "eth-wire",
-]
+full = ["consensus", "evm", "node", "provider", "rpc", "exex", "trie", "pool", "network", "eth-wire"]
 
 alloy-compat = ["reth-ethereum-primitives/alloy-compat"]
 cli = ["dep:reth-ethereum-cli"]
