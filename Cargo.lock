@@ -3639,7 +3639,7 @@ dependencies = [
  "clap",
  "futures-util",
  "reth",
- "reth-node-ethereum",
+ "reth-ethereum",
 ]
 
 [[package]]
