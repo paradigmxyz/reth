@@ -65,6 +65,7 @@ arbitrary = [
     "reth-db?/arbitrary",
     "alloy-rpc-types-eth?/arbitrary",
     "reth-transaction-pool?/arbitrary",
+    "reth-eth-wire?/arbitrary",
 ]
 
 test-utils = [
