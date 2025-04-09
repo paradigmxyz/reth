@@ -20,7 +20,7 @@ use reth_network::{
     NetworkProtocols,
 };
 use reth_network_api::{test_utils::PeersHandleProvider, NetworkInfo};
-use reth_node_ethereum::EthereumNode;
+use reth_ethereum::node::EthereumNode;
 use subprotocol::{
     connection::CustomCommand,
     protocol::{
