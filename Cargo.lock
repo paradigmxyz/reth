@@ -5868,9 +5868,9 @@ checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 
 [[package]]
 name = "op-alloy-consensus"
-version = "0.12.1"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0bb67e45d3f7d88d3ecca0cbd75f04b56c2951b82ffe8ced3b83d4fe63d71427"
+checksum = "917f7a65b83e8f9cf06d5209161babf39f5e5768e226a08ad42c033386248a66"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -5894,9 +5894,9 @@ checksum = "11de45c4437943b8100b0a381a5d7b50e320d6f02e7aeab841a9f45448f34366"
 
 [[package]]
 name = "op-alloy-network"
-version = "0.12.1"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58860f0e7f6a7a76edef2b240691a9abf0b75985d9735ce65a3f88ff457abd6e"
+checksum = "fe0bc77b1c554b40077e3a4625540a691a45a389266ff53f41acca7fdd8555b9"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -5909,9 +5909,9 @@ dependencies = [
 
 [[package]]
 name = "op-alloy-rpc-jsonrpsee"
-version = "0.12.1"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4968dec7797a213e30d7b360e9b121091ede1461da555bbd3cd4d31bdb4fc732"
+checksum = "f063674bbdae020ed568b4559bccf76c3f17421bf63ebab53bc049dd5cb059c3"
 dependencies = [
  "alloy-primitives",
  "jsonrpsee",
@@ -5919,9 +5919,9 @@ dependencies = [
 
 [[package]]
 name = "op-alloy-rpc-types"
-version = "0.12.1"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c5ef55aa05b13a6068e9eb4d0f9bbdae289681e47707536b0ea7966fd9bda7b"
+checksum = "57c087949da266a53e4c24d841a68590126ecfd3631b2fe74dbcd6da45702983"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -5937,9 +5937,9 @@ dependencies = [
 
 [[package]]
 name = "op-alloy-rpc-types-engine"
-version = "0.12.1"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9e5b639996d9ec6fc0d46fe4985c9e90dd7e4c25d09f1bfaea3f78ae8555603"
+checksum = "a6c57a07a8f7da6169a247c4af7cf6bb69fec3789dd41b7dcb6742fce01a232e"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
