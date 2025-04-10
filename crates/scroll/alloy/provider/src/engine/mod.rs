@@ -2,23 +2,32 @@ mod provider;
 
 pub use provider::ScrollAuthEngineApiProvider;
 
+mod client;
+pub use client::ScrollAuthApiEngineClient;
+
+use super::error::ScrollEngineApiError;
 use alloy_primitives::{BlockHash, U64};
-use alloy_provider::{Network, Provider};
 use alloy_rpc_types_engine::{
     ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadV1, ForkchoiceState,
     ForkchoiceUpdated, PayloadId, PayloadStatus,
 };
-use alloy_transport::TransportResult;
+
 use scroll_alloy_rpc_types_engine::ScrollPayloadAttributes;
+
+/// A type alias for the result of the Scroll Engine API methods.
+pub type ScrollEngineApiResult<T> = Result<T, ScrollEngineApiError>;
 
 /// Engine API trait for Scroll. Only exposes versions of the API that are supported.
 /// Note:
 /// > The provider should use a JWT authentication layer.
 #[async_trait::async_trait]
-pub trait ScrollEngineApi<N> {
+pub trait ScrollEngineApi {
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_newpayloadv1>
     /// Caution: This should not accept the `withdrawals` field
-    async fn new_payload_v1(&self, payload: ExecutionPayloadV1) -> TransportResult<PayloadStatus>;
+    async fn new_payload_v1(
+        &self,
+        payload: ExecutionPayloadV1,
+    ) -> ScrollEngineApiResult<PayloadStatus>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_forkchoiceupdatedv1>
     /// Caution: This should not accept the `withdrawals` field in the payload attributes.
@@ -32,7 +41,7 @@ pub trait ScrollEngineApi<N> {
         &self,
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<ScrollPayloadAttributes>,
-    ) -> TransportResult<ForkchoiceUpdated>;
+    ) -> ScrollEngineApiResult<ForkchoiceUpdated>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_getpayloadv1>
     ///
@@ -43,13 +52,16 @@ pub trait ScrollEngineApi<N> {
     ///
     /// Note:
     /// > Provider software MAY stop the corresponding build process after serving this call.
-    async fn get_payload_v1(&self, payload_id: PayloadId) -> TransportResult<ExecutionPayloadV1>;
+    async fn get_payload_v1(
+        &self,
+        payload_id: PayloadId,
+    ) -> ScrollEngineApiResult<ExecutionPayloadV1>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1>
     async fn get_payload_bodies_by_hash_v1(
         &self,
         block_hashes: Vec<BlockHash>,
-    ) -> TransportResult<ExecutionPayloadBodiesV1>;
+    ) -> ScrollEngineApiResult<ExecutionPayloadBodiesV1>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyrangev1>
     ///
@@ -67,7 +79,7 @@ pub trait ScrollEngineApi<N> {
         &self,
         start: U64,
         count: U64,
-    ) -> TransportResult<ExecutionPayloadBodiesV1>;
+    ) -> ScrollEngineApiResult<ExecutionPayloadBodiesV1>;
 
     /// This function will return the ClientVersionV1 object.
     /// See also:
@@ -82,65 +94,11 @@ pub trait ScrollEngineApi<N> {
     async fn get_client_version_v1(
         &self,
         client_version: ClientVersionV1,
-    ) -> TransportResult<Vec<ClientVersionV1>>;
+    ) -> ScrollEngineApiResult<Vec<ClientVersionV1>>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/common.md#capabilities>
     async fn exchange_capabilities(
         &self,
         capabilities: Vec<String>,
-    ) -> TransportResult<Vec<String>>;
-}
-
-#[async_trait::async_trait]
-impl<N, P> ScrollEngineApi<N> for P
-where
-    N: Network,
-    P: Provider<N>,
-{
-    async fn new_payload_v1(&self, payload: ExecutionPayloadV1) -> TransportResult<PayloadStatus> {
-        self.client().request("engine_newPayloadV1", (payload,)).await
-    }
-
-    async fn fork_choice_updated_v1(
-        &self,
-        fork_choice_state: ForkchoiceState,
-        payload_attributes: Option<ScrollPayloadAttributes>,
-    ) -> TransportResult<ForkchoiceUpdated> {
-        self.client()
-            .request("engine_forkchoiceUpdatedV1", (fork_choice_state, payload_attributes))
-            .await
-    }
-
-    async fn get_payload_v1(&self, payload_id: PayloadId) -> TransportResult<ExecutionPayloadV1> {
-        self.client().request("engine_getPayloadV1", (payload_id,)).await
-    }
-
-    async fn get_payload_bodies_by_hash_v1(
-        &self,
-        block_hashes: Vec<BlockHash>,
-    ) -> TransportResult<ExecutionPayloadBodiesV1> {
-        self.client().request("engine_getPayloadBodiesByHashV1", (block_hashes,)).await
-    }
-
-    async fn get_payload_bodies_by_range_v1(
-        &self,
-        start: U64,
-        count: U64,
-    ) -> TransportResult<ExecutionPayloadBodiesV1> {
-        self.client().request("engine_getPayloadBodiesByRangeV1", (start, count)).await
-    }
-
-    async fn get_client_version_v1(
-        &self,
-        client_version: ClientVersionV1,
-    ) -> TransportResult<Vec<ClientVersionV1>> {
-        self.client().request("engine_getClientVersionV1", (client_version,)).await
-    }
-
-    async fn exchange_capabilities(
-        &self,
-        capabilities: Vec<String>,
-    ) -> TransportResult<Vec<String>> {
-        self.client().request("engine_exchangeCapabilities", (capabilities,)).await
-    }
+    ) -> ScrollEngineApiResult<Vec<String>>;
 }

@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 # alloy
+alloy-json-rpc.workspace = true
 alloy-provider.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-engine = { workspace = true, features = ["serde"] }
@@ -24,6 +25,12 @@ alloy-transport-http = { workspace = true, features = ["jwt-auth"] }
 scroll-alloy-network.workspace = true
 scroll-alloy-rpc-types-engine = { workspace = true, features = ["serde"] }
 
+# reth
+reth-rpc-api = { workspace = true, features = ["client"] }
+
+# reth-scroll
+reth-scroll-engine-primitives.workspace = true
+
 # misc
 async-trait.workspace = true
 derive_more.workspace = true
@@ -31,6 +38,9 @@ eyre.workspace = true
 http-body-util.workspace = true
 reqwest.workspace = true
 tower.workspace = true
+thiserror.workspace = true
+jsonrpsee.workspace = true
+jsonrpsee-types.workspace = true
 
 [dev-dependencies]
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
@@ -65,4 +75,5 @@ std = [
     "reth-scroll-payload/std",
     "futures-util/std",
     "reth-scroll-chainspec/std",
+    "thiserror/std",
 ]
