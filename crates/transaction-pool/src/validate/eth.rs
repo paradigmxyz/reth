@@ -168,6 +168,8 @@ pub(crate) struct EthTransactionValidatorInner<Client, T> {
     eip7702: bool,
     /// The current max gas limit
     block_gas_limit: AtomicU64,
+    /// The current tx fee cap limit in wei
+    tx_fee_cap: AtomicU64,
     /// Minimum priority fee to enforce for acceptance into the pool.
     minimum_priority_fee: Option<u128>,
     /// Stores the setup and parameters needed for validating KZG proofs.
@@ -287,6 +289,27 @@ where
                     block_gas_limit,
                 ),
             )
+        }
+
+        let cap = self.tx_fee_cap();
+        if cap != 0 {
+            let gas_limit = transaction.gas_limit();
+            let max_fee_per_gas = if transaction.is_dynamic_fee() {
+                transaction.max_fee_per_gas()
+            } else {
+                transaction.gas_price().unwrap_or(0)
+            };
+
+            if let Some(fee) = max_fee_per_gas.checked_mul(gas_limit.into()) {
+                if fee > cap as u128 {
+                    let fee_eth = fee as f64 / 1e18;
+                    let cap_eth = cap as f64 / 1e18;
+                    return TransactionValidationOutcome::Invalid(
+                        transaction,
+                        InvalidPoolTransactionError::ExceedsFeeCap {fee_eth, cap_eth},
+                    );
+                }
+            }
         }
 
         // Ensure max_priority_fee_per_gas (if EIP1559) is less than max_fee_per_gas if any.
@@ -566,6 +589,10 @@ where
     fn max_gas_limit(&self) -> u64 {
         self.block_gas_limit.load(std::sync::atomic::Ordering::Relaxed)
     }
+
+    fn tx_fee_cap(&self) -> u64 {
+        self.tx_fee_cap.load(std::sync::atomic::Ordering::Relaxed)
+    }
 }
 
 /// A builder for [`EthTransactionValidator`] and [`TransactionValidationTaskExecutor`]
@@ -590,6 +617,8 @@ pub struct EthTransactionValidatorBuilder<Client> {
     eip7702: bool,
     /// The current max gas limit
     block_gas_limit: AtomicU64,
+    /// The current tx fee cap in wei
+    tx_fee_cap: AtomicU64,
     /// Minimum priority fee to enforce for acceptance into the pool.
     minimum_priority_fee: Option<u128>,
     /// Determines how many additional tasks to spawn
@@ -623,7 +652,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             kzg_settings: EnvKzgSettings::Default,
             local_transactions_config: Default::default(),
             max_tx_input_bytes: DEFAULT_MAX_TX_INPUT_BYTES,
-
+            tx_fee_cap: AtomicU64::new(1e18 as u64),
             // by default all transaction types are allowed
             eip2718: true,
             eip1559: true,
@@ -770,6 +799,14 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
         self
     }
 
+    /// Sets the block gas limit
+    ///
+    /// Transactions with a gas limit greater than this will be rejected.
+    pub fn set_tx_fee_cap(self, tx_fee_cap: u64) -> Self {
+        self.tx_fee_cap.store(tx_fee_cap, std::sync::atomic::Ordering::Relaxed);
+        self
+    }
+
     /// Builds a the [`EthTransactionValidator`] without spawning validator tasks.
     pub fn build<Tx, S>(self, blob_store: S) -> EthTransactionValidator<Client, Tx>
     where
@@ -785,6 +822,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             eip4844,
             eip7702,
             block_gas_limit,
+            tx_fee_cap,
             minimum_priority_fee,
             kzg_settings,
             local_transactions_config,
@@ -813,6 +851,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             eip4844,
             eip7702,
             block_gas_limit,
+            tx_fee_cap,
             minimum_priority_fee,
             blob_store: Box::new(blob_store),
             kzg_settings,
@@ -1032,6 +1071,42 @@ mod tests {
                 1_015_288, 1_000_000
             ))
         ));
+        let tx = pool.get(transaction.hash());
+        assert!(tx.is_none());
+    }
+
+    #[tokio::test]
+    async fn invalid_on_fee_cap_exceeded() {
+        let transaction = get_transaction();
+        let provider = MockEthProvider::default();
+        provider.add_account(
+            transaction.sender(),
+            ExtendedAccount::new(transaction.nonce(), U256::MAX),
+        );
+
+        let blob_store = InMemoryBlobStore::default();
+        let validator = EthTransactionValidatorBuilder::new(provider)
+            .set_tx_fee_cap(100) // 100 wei cap
+            .build(blob_store.clone());
+
+        let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
+        assert!(outcome.is_invalid());
+
+        if let TransactionValidationOutcome::Invalid(_, err) = outcome {
+            assert!(matches!(
+            err,
+            InvalidPoolTransactionError::ExceedsFeeCap { fee_eth, cap_eth }
+            if (fee_eth > cap_eth)
+        ));
+        }
+
+        let pool = Pool::new(validator, CoinbaseTipOrdering::default(), blob_store, Default::default());
+        let res = pool.add_external_transaction(transaction.clone()).await;
+        assert!(res.is_err());
+        assert!(matches!(
+            res.unwrap_err().kind,
+            PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::ExceedsFeeCap { .. })
+            ));
         let tx = pool.get(transaction.hash());
         assert!(tx.is_none());
     }
