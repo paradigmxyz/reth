@@ -3571,11 +3571,8 @@ name = "example-polygon-p2p"
 version = "0.0.0"
 dependencies = [
  "alloy-genesis",
- "reth-chainspec",
  "reth-discv4",
- "reth-network",
- "reth-network-api",
- "reth-primitives",
+ "reth-ethereum",
  "reth-tracing",
  "secp256k1",
  "serde_json",
