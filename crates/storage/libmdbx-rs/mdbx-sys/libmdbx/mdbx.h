@@ -136,7 +136,7 @@ are only a few cases of changing data.
 | _DELETING_|||
 |Key is absent → Error since no such key      |\ref mdbx_del() or \ref mdbx_replace()|Error \ref MDBX_NOTFOUND|
 |Key exist → Delete by key                    |\ref mdbx_del() with the parameter `data = NULL`|Deletion|
-|Key exist → Delete by key with data matching check|\ref mdbx_del() with the parameter `data` filled with the value which should be match for deletion|Deletion or \ref MDBX_NOTFOUND if the value does not match|
+|Key exist → Delete by key with with data matching check|\ref mdbx_del() with the parameter `data` filled with the value which should be match for deletion|Deletion or \ref MDBX_NOTFOUND if the value does not match|
 |Delete at the current cursor position        |\ref mdbx_cursor_del() with \ref MDBX_CURRENT flag|Deletion|
 |Extract (read & delete) value by the key     |\ref mdbx_replace() with zero flag and parameter `new_data = NULL`|Returning a deleted value|
 
@@ -343,13 +343,14 @@ typedef mode_t mdbx_mode_t;
 #ifdef __deprecated
 #define MDBX_DEPRECATED __deprecated
 #elif defined(DOXYGEN) ||                                                      \
-    (defined(__cplusplus) && __cplusplus >= 201603L &&                         \
-     __has_cpp_attribute(maybe_unused) &&                                      \
-     __has_cpp_attribute(maybe_unused) >= 201603L) ||                          \
+    (defined(__cplusplus) && __cplusplus >= 201403L &&                         \
+     __has_cpp_attribute(deprecated) &&                                        \
+     __has_cpp_attribute(deprecated) >= 201309L) ||                            \
     (!defined(__cplusplus) && defined(__STDC_VERSION__) &&                     \
-     __STDC_VERSION__ > 202005L)
+     __STDC_VERSION__ >= 202304L)
 #define MDBX_DEPRECATED [[deprecated]]
-#elif defined(__GNUC__) || __has_attribute(__deprecated__)
+#elif (defined(__GNUC__) && __GNUC__ > 5) ||                                   \
+    (__has_attribute(__deprecated__) && !defined(__GNUC__))
 #define MDBX_DEPRECATED __attribute__((__deprecated__))
 #elif defined(_MSC_VER)
 #define MDBX_DEPRECATED __declspec(deprecated)
@@ -1413,7 +1414,7 @@ enum MDBX_env_flags_t {
    * \ref mdbx_env_set_syncbytes() and \ref mdbx_env_set_syncperiod() functions
    * could be very useful with `MDBX_SAFE_NOSYNC` flag.
    *
-   * The number and volume of disk IOPs with MDBX_SAFE_NOSYNC flag will
+   * The number and volume of of disk IOPs with MDBX_SAFE_NOSYNC flag will
    * exactly the as without any no-sync flags. However, you should expect a
    * larger process's [work set](https://bit.ly/2kA2tFX) and significantly worse
    * a [locality of reference](https://bit.ly/2mbYq2J), due to the more
@@ -2079,7 +2080,7 @@ enum MDBX_option_t {
    * for all processes interacting with the database.
    *
    * \details This defines the number of slots in the lock table that is used to
-   * track readers in the environment. The default is about 100 for 4K
+   * track readers in the the environment. The default is about 100 for 4K
    * system page size. Starting a read-only transaction normally ties a lock
    * table slot to the current thread until the environment closes or the thread
    * exits. If \ref MDBX_NOTLS is in use, \ref mdbx_txn_begin() instead ties the
@@ -2161,7 +2162,8 @@ enum MDBX_option_t {
    * spill to disk instead.
    *
    * The `MDBX_opt_txn_dp_limit` controls described threshold for the current
-   * process. Default is 65536, it is usually enough for most cases. */
+   * process. Default is 1/42 of the sum of whole and currently available RAM
+   * size, which the same ones are reported by \ref mdbx_get_sysraminfo(). */
   MDBX_opt_txn_dp_limit,
 
   /** \brief Controls the in-process initial allocation size for dirty pages
@@ -2389,7 +2391,7 @@ enum MDBX_env_delete_mode_t {
   /** \brief Just delete the environment's files and directory if any.
    * \note On POSIX systems, processes already working with the database will
    * continue to work without interference until it close the environment.
-   * \note On Windows, the behavior of `MDB_ENV_JUST_DELETE` is different
+   * \note On Windows, the behavior of `MDBX_ENV_JUST_DELETE` is different
    * because the system does not support deleting files that are currently
    * memory mapped. */
   MDBX_ENV_JUST_DELETE = 0,
@@ -3343,7 +3345,7 @@ mdbx_limits_txnsize_max(intptr_t pagesize);
  * \ingroup c_settings
  *
  * \details This defines the number of slots in the lock table that is used to
- * track readers in the environment. The default is about 100 for 4K system
+ * track readers in the the environment. The default is about 100 for 4K system
  * page size. Starting a read-only transaction normally ties a lock table slot
  * to the current thread until the environment closes or the thread exits. If
  * \ref MDBX_NOTLS is in use, \ref mdbx_txn_begin() instead ties the slot to the
@@ -5037,7 +5039,7 @@ LIBMDBX_API int mdbx_cursor_del(MDBX_cursor *cursor, MDBX_put_flags_t flags);
  * sorted duplicate data items \ref MDBX_DUPSORT.
  *
  * \param [in] cursor    A cursor handle returned by \ref mdbx_cursor_open().
- * \param [out] pcount   Address where the count will be stored.
+ * \param [out] count    Address where the count will be stored.
  *
  * \returns A non-zero error value on failure and 0 on success,
  *          some possible errors are:
@@ -5045,7 +5047,7 @@ LIBMDBX_API int mdbx_cursor_del(MDBX_cursor *cursor, MDBX_put_flags_t flags);
  *                               by current thread.
  * \retval MDBX_EINVAL   Cursor is not initialized, or an invalid parameter
  *                       was specified. */
-LIBMDBX_API int mdbx_cursor_count(const MDBX_cursor *cursor, size_t *pcount);
+LIBMDBX_API int mdbx_cursor_count(const MDBX_cursor *cursor, size_t *count);
 
 /** \brief Determines whether the cursor is pointed to a key-value pair or not,
  * i.e. was not positioned or points to the end of data.
@@ -5264,7 +5266,7 @@ LIBMDBX_API int mdbx_dbi_sequence(MDBX_txn *txn, MDBX_dbi dbi, uint64_t *result,
  * This returns a comparison as if the two data items were keys in the
  * specified database.
  *
- * \warning There is a Undefined behavior if one of arguments is invalid.
+ * \warning There ss a Undefined behavior if one of arguments is invalid.
  *
  * \param [in] txn   A transaction handle returned by \ref mdbx_txn_begin().
  * \param [in] dbi   A database handle returned by \ref mdbx_dbi_open().

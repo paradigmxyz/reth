@@ -12,7 +12,7 @@
  * <http://www.OpenLDAP.org/license.html>. */
 
 #define xMDBX_ALLOY 1
-#define MDBX_BUILD_SOURCERY 1ace89d775502777988b9d1e1705e124f14115eac6bc96d4a8e4c7d003066d9a_v0_12_10_52_g8cc3dba7
+#define MDBX_BUILD_SOURCERY e156c1a97c017ce89d6541cd9464ae5a9761d76b3fd2f1696521f5f3792904fc_v0_12_13_0_g1fff1f67
 #ifdef MDBX_CONFIG_H
 #include MDBX_CONFIG_H
 #endif
@@ -91,8 +91,8 @@
 #endif
 #if _MSC_VER > 1914
 #pragma warning(                                                               \
-        disable : 5105) /* winbase.h(9531): warning C5105: macro expansion     \
-                           producing 'defined' has undefined behavior */
+    disable : 5105) /* winbase.h(9531): warning C5105: macro expansion         \
+                       producing 'defined' has undefined behavior */
 #endif
 #if _MSC_VER > 1930
 #pragma warning(disable : 6235) /* <expression> is always a constant */
@@ -121,8 +121,8 @@
 #pragma warning(disable : 4204) /* nonstandard extension used: non-constant    \
                                    aggregate initializer */
 #pragma warning(                                                               \
-        disable : 4505) /* unreferenced local function has been removed */
-#endif                  /* _MSC_VER (warnings) */
+    disable : 4505) /* unreferenced local function has been removed */
+#endif              /* _MSC_VER (warnings) */
 
 #if defined(__GNUC__) && __GNUC__ < 9
 #pragma GCC diagnostic ignored "-Wattributes"
@@ -225,6 +225,10 @@
 
 #ifndef __has_extension
 #define __has_extension(x) (0)
+#endif
+
+#ifndef __has_builtin
+#define __has_builtin(x) (0)
 #endif
 
 #if __has_feature(thread_sanitizer)
@@ -640,7 +644,7 @@ __extern_C key_t ftok(const char *, int);
 
 #ifndef container_of
 #define container_of(ptr, type, member)                                        \
-  ((type *)((char *)(ptr)-offsetof(type, member)))
+  ((type *)((char *)(ptr) - offsetof(type, member)))
 #endif /* container_of */
 
 /*----------------------------------------------------------------------------*/
@@ -651,7 +655,7 @@ __extern_C key_t ftok(const char *, int);
 #elif defined(_MSC_VER)
 #define __always_inline __forceinline
 #else
-#define __always_inline
+#define __always_inline __inline
 #endif
 #endif /* __always_inline */
 
@@ -2936,7 +2940,7 @@ typedef struct MDBX_page {
 #define P_LOOSE 0x4000u      /* page was dirtied then freed, can be reused */
 #define P_FROZEN 0x8000u     /* used for retire page with known status */
 #define P_ILL_BITS                                                             \
-  ((uint16_t) ~(P_BRANCH | P_LEAF | P_LEAF2 | P_OVERFLOW | P_SPILLED))
+  ((uint16_t)~(P_BRANCH | P_LEAF | P_LEAF2 | P_OVERFLOW | P_SPILLED))
   uint16_t mp_flags;
   union {
     uint32_t mp_pages; /* number of overflow pages */
@@ -3555,8 +3559,8 @@ struct MDBX_cursor {
 #define C_SUB 0x04         /* Cursor is a sub-cursor */
 #define C_DEL 0x08         /* last op was a cursor_del */
 #define C_UNTRACK 0x10     /* Un-track cursor when closing */
-#define C_GCU                                                                                  \
-  0x20 /* Происходит подготовка к обновлению GC, поэтому \
+#define C_GCU                                                                  \
+  0x20 /* Происходит подготовка к обновлению GC, поэтому                     \
         * можно брать страницы из GC даже для FREE_DBI */
   uint8_t mc_flags;
 
@@ -4061,10 +4065,14 @@ MDBX_MAYBE_UNUSED static void static_checks(void) {
 #endif /* MinGW */
 
 /* Workaround for MSVC' header `extern "C"` vs `std::` redefinition bug */
-#if defined(_MSC_VER) && defined(__SANITIZE_ADDRESS__) &&                      \
-    !defined(_DISABLE_VECTOR_ANNOTATION)
+#if defined(_MSC_VER)
+#if defined(__SANITIZE_ADDRESS__) && !defined(_DISABLE_VECTOR_ANNOTATION)
 #define _DISABLE_VECTOR_ANNOTATION
 #endif /* _DISABLE_VECTOR_ANNOTATION */
+#ifndef _SILENCE_EXPERIMENTAL_FILESYSTEM_DEPRECATION_WARNING
+#define _SILENCE_EXPERIMENTAL_FILESYSTEM_DEPRECATION_WARNING
+#endif /* #define _SILENCE_EXPERIMENTAL_FILESYSTEM_DEPRECATION_WARNING */
+#endif /* _MSC_VER */
 
 
 
@@ -4291,6 +4299,21 @@ struct temp_buffer {
 
 } // namespace
 
+#ifndef MDBX_CXX_ENDL
+/* Манипулятор std::endl выталкивате буфферизированый вывод, что здесь не
+ * требуется.
+ *
+ * Кроме этого, при сборке libmdbx для символов по-умолчанию выключается
+ * видимость вне DSO, из-за чего обращение к std::endl иногда укачивает
+ * линковщики, если комплятор ошибочно формируют direct access к global weak
+ * symbol, коим является std::endl. */
+#if 0
+#define MDBX_CXX_ENDL ::std::endl
+#else
+#define MDBX_CXX_ENDL "\n"
+#endif
+#endif /* MDBX_CXX_ENDL */
+
 //------------------------------------------------------------------------------
 
 namespace mdbx {
@@ -4439,6 +4462,7 @@ __cold void error::throw_exception() const {
     CASE_EXCEPTION(incompatible_operation, MDBX_INCOMPATIBLE);
     CASE_EXCEPTION(internal_page_full, MDBX_PAGE_FULL);
     CASE_EXCEPTION(internal_problem, MDBX_PROBLEM);
+    CASE_EXCEPTION(key_exists, MDBX_KEYEXIST);
     CASE_EXCEPTION(key_mismatch, MDBX_EKEYMISMATCH);
     CASE_EXCEPTION(max_maps_reached, MDBX_DBS_FULL);
     CASE_EXCEPTION(max_readers_reached, MDBX_READERS_FULL);
@@ -4707,7 +4731,7 @@ char *to_hex::write_bytes(char *__restrict const dest, size_t dest_size) const {
       unsigned width = 0;
       for (const auto end = source.end_byte_ptr(); src != end; ++src) {
         if (wrap_width && width >= wrap_width) {
-          out << ::std::endl;
+          out << MDBX_CXX_ENDL;
           width = 0;
         }
         const int8_t hi = *src >> 4;
@@ -4902,7 +4926,7 @@ char *to_base58::write_bytes(char *__restrict const dest,
       while (MDBX_LIKELY(begin < end) && *begin == 0) {
         out.put('1');
         if (wrap_width && ++width >= wrap_width) {
-          out << ::std::endl;
+          out << MDBX_CXX_ENDL;
           width = 0;
         }
         ++begin;
@@ -4916,7 +4940,7 @@ char *to_base58::write_bytes(char *__restrict const dest,
         for (size_t i = 0; i < chunk.length(); ++i) {
           out.put(chunk.char_ptr()[i]);
           if (wrap_width && ++width >= wrap_width) {
-            out << ::std::endl;
+            out << MDBX_CXX_ENDL;
             width = 0;
           }
         }
@@ -5093,7 +5117,7 @@ char *to_base64::write_bytes(char *__restrict const dest,
           src += 3;
           out.write(&buf.front(), 4);
           if (wrap_width && (width += 4) >= wrap_width && left) {
-            out << ::std::endl;
+            out << MDBX_CXX_ENDL;
             width = 0;
           }
           continue;
@@ -5327,7 +5351,7 @@ bool env::is_pristine() const {
 
 bool env::is_empty() const { return get_stat().ms_leaf_pages == 0; }
 
-env &env::copy(filehandle fd, bool compactify, bool force_dynamic_size) {
+__cold env &env::copy(filehandle fd, bool compactify, bool force_dynamic_size) {
   error::success_or_throw(
       ::mdbx_env_copy2fd(handle_, fd,
                          (compactify ? MDBX_CP_COMPACT : MDBX_CP_DEFAULTS) |
@@ -5336,8 +5360,8 @@ env &env::copy(filehandle fd, bool compactify, bool force_dynamic_size) {
   return *this;
 }
 
-env &env::copy(const char *destination, bool compactify,
-               bool force_dynamic_size) {
+__cold env &env::copy(const char *destination, bool compactify,
+                      bool force_dynamic_size) {
   error::success_or_throw(
       ::mdbx_env_copy(handle_, destination,
                       (compactify ? MDBX_CP_COMPACT : MDBX_CP_DEFAULTS) |
@@ -5346,14 +5370,14 @@ env &env::copy(const char *destination, bool compactify,
   return *this;
 }
 
-env &env::copy(const ::std::string &destination, bool compactify,
-               bool force_dynamic_size) {
+__cold env &env::copy(const ::std::string &destination, bool compactify,
+                      bool force_dynamic_size) {
   return copy(destination.c_str(), compactify, force_dynamic_size);
 }
 
 #if defined(_WIN32) || defined(_WIN64)
-env &env::copy(const wchar_t *destination, bool compactify,
-               bool force_dynamic_size) {
+__cold env &env::copy(const wchar_t *destination, bool compactify,
+                      bool force_dynamic_size) {
   error::success_or_throw(
       ::mdbx_env_copyW(handle_, destination,
                        (compactify ? MDBX_CP_COMPACT : MDBX_CP_DEFAULTS) |
@@ -5369,13 +5393,13 @@ env &env::copy(const ::std::wstring &destination, bool compactify,
 #endif /* Windows */
 
 #ifdef MDBX_STD_FILESYSTEM_PATH
-env &env::copy(const MDBX_STD_FILESYSTEM_PATH &destination, bool compactify,
-               bool force_dynamic_size) {
+__cold env &env::copy(const MDBX_STD_FILESYSTEM_PATH &destination,
+                      bool compactify, bool force_dynamic_size) {
   return copy(destination.native(), compactify, force_dynamic_size);
 }
 #endif /* MDBX_STD_FILESYSTEM_PATH */
 
-path env::get_path() const {
+__cold path env::get_path() const {
 #if defined(_WIN32) || defined(_WIN64)
   const wchar_t *c_wstr;
   error::success_or_throw(::mdbx_env_get_pathW(handle_, &c_wstr));
@@ -5389,29 +5413,30 @@ path env::get_path() const {
 #endif
 }
 
-bool env::remove(const char *pathname, const remove_mode mode) {
-  return error::boolean_or_throw(
+__cold bool env::remove(const char *pathname, const remove_mode mode) {
+  return !error::boolean_or_throw(
       ::mdbx_env_delete(pathname, MDBX_env_delete_mode_t(mode)));
 }
 
-bool env::remove(const ::std::string &pathname, const remove_mode mode) {
+__cold bool env::remove(const ::std::string &pathname, const remove_mode mode) {
   return remove(pathname.c_str(), mode);
 }
 
 #if defined(_WIN32) || defined(_WIN64)
-bool env::remove(const wchar_t *pathname, const remove_mode mode) {
-  return error::boolean_or_throw(
+__cold bool env::remove(const wchar_t *pathname, const remove_mode mode) {
+  return !error::boolean_or_throw(
       ::mdbx_env_deleteW(pathname, MDBX_env_delete_mode_t(mode)));
 }
 
-bool env::remove(const ::std::wstring &pathname, const remove_mode mode) {
+__cold bool env::remove(const ::std::wstring &pathname,
+                        const remove_mode mode) {
   return remove(pathname.c_str(), mode);
 }
 #endif /* Windows */
 
 #ifdef MDBX_STD_FILESYSTEM_PATH
-bool env::remove(const MDBX_STD_FILESYSTEM_PATH &pathname,
-                 const remove_mode mode) {
+__cold bool env::remove(const MDBX_STD_FILESYSTEM_PATH &pathname,
+                        const remove_mode mode) {
   return remove(pathname.native(), mode);
 }
 #endif /* MDBX_STD_FILESYSTEM_PATH */
@@ -5425,13 +5450,13 @@ static inline MDBX_env *create_env() {
   return ptr;
 }
 
-env_managed::~env_managed() noexcept {
+__cold env_managed::~env_managed() noexcept {
   if (MDBX_UNLIKELY(handle_))
     MDBX_CXX20_UNLIKELY error::success_or_panic(
         ::mdbx_env_close(handle_), "mdbx::~env()", "mdbx_env_close");
 }
 
-void env_managed::close(bool dont_sync) {
+__cold void env_managed::close(bool dont_sync) {
   const error rc =
       static_cast<MDBX_error_t>(::mdbx_env_close_ex(handle_, dont_sync));
   switch (rc.code()) {
@@ -5581,7 +5606,7 @@ void txn_managed::commit(commit_latency *latency) {
 
 //------------------------------------------------------------------------------
 
-bool txn::drop_map(const char *name, bool throw_if_absent) {
+__cold bool txn::drop_map(const char *name, bool throw_if_absent) {
   map_handle map;
   const int err = ::mdbx_dbi_open(handle_, name, MDBX_DB_ACCEDE, &map.dbi);
   switch (err) {
@@ -5598,7 +5623,7 @@ bool txn::drop_map(const char *name, bool throw_if_absent) {
   }
 }
 
-bool txn::clear_map(const char *name, bool throw_if_absent) {
+__cold bool txn::clear_map(const char *name, bool throw_if_absent) {
   map_handle map;
   const int err = ::mdbx_dbi_open(handle_, name, MDBX_DB_ACCEDE, &map.dbi);
   switch (err) {
@@ -5674,21 +5699,20 @@ __cold ::std::ostream &operator<<(::std::ostream &out,
     const char *suffix;
   } static const scales[] = {
 #if MDBX_WORDBITS > 32
-    {env_managed::geometry::EiB, "EiB"},
-    {env_managed::geometry::EB, "EB"},
-    {env_managed::geometry::PiB, "PiB"},
-    {env_managed::geometry::PB, "PB"},
-    {env_managed::geometry::TiB, "TiB"},
-    {env_managed::geometry::TB, "TB"},
+      {env_managed::geometry::EiB, "EiB"},
+      {env_managed::geometry::EB, "EB"},
+      {env_managed::geometry::PiB, "PiB"},
+      {env_managed::geometry::PB, "PB"},
+      {env_managed::geometry::TiB, "TiB"},
+      {env_managed::geometry::TB, "TB"},
 #endif
-    {env_managed::geometry::GiB, "GiB"},
-    {env_managed::geometry::GB, "GB"},
-    {env_managed::geometry::MiB, "MiB"},
-    {env_managed::geometry::MB, "MB"},
-    {env_managed::geometry::KiB, "KiB"},
-    {env_managed::geometry::kB, "kB"},
-    {1, " bytes"}
-  };
+      {env_managed::geometry::GiB, "GiB"},
+      {env_managed::geometry::GB, "GB"},
+      {env_managed::geometry::MiB, "MiB"},
+      {env_managed::geometry::MB, "MB"},
+      {env_managed::geometry::KiB, "KiB"},
+      {env_managed::geometry::kB, "kB"},
+      {1, " bytes"}};
 
   for (const auto i : scales)
     if (bytes % i.one == 0)
