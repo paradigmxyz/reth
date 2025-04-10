@@ -1,8 +1,5 @@
 #![allow(missing_docs)]
-use alloy_primitives::{
-    private::proptest::test_runner::{RngAlgorithm, TestRng},
-    U256,
-};
+use alloy_primitives::U256;
 use criterion::*;
 use futures::StreamExt;
 use reth_network::{test_utils::Testnet, NetworkEventListenerProvider};

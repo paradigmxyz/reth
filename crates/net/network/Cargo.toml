@@ -126,6 +126,7 @@ serde = [
     "reth-transaction-pool/serde",
     "reth-ethereum-primitives/serde",
     "reth-network-api/serde",
+    "rand_08/serde",
 ]
 test-utils = [
     "reth-transaction-pool/test-utils",

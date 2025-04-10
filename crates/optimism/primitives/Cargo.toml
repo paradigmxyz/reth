@@ -107,6 +107,7 @@ serde = [
     "op-revm/serde",
     "alloy-rpc-types-eth?/serde",
     "revm-context/serde",
+    "rand/serde",
 ]
 serde-bincode-compat = [
     "serde",

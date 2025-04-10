@@ -438,7 +438,7 @@ mod tests {
         test_utils::create_test_provider_factory_with_chain_spec,
         ChainSpecProvider, HashingWriter,
     };
-    use reth_testing_utils::generators::{self};
+    use reth_testing_utils::generators;
     use reth_trie::{test_utils::state_root, HashedPostState, TrieInput};
     use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
     use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
@@ -461,7 +461,10 @@ mod tests {
                         let slot = U256::from(rng.random::<u64>());
                         storage.insert(
                             slot,
-                            EvmStorageSlot::new_changed(U256::ZERO, U256::from(rng.random::<u64>())),
+                            EvmStorageSlot::new_changed(
+                                U256::ZERO,
+                                U256::from(rng.random::<u64>()),
+                            ),
                         );
                     }
                 }

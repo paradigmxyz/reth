@@ -106,4 +106,5 @@ serde = [
     "reth-primitives-traits/serde",
     "revm-context/serde",
     "secp256k1?/serde",
+    "rand/serde",
 ]

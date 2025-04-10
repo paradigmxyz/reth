@@ -362,8 +362,9 @@ mod tests {
                             )?;
                             tx.put::<tables::Transactions>(next_tx_num, transaction.clone())?;
 
-                            let (addr, _) =
-                                accounts.get_mut((rng.random::<u64>() % n_accounts) as usize).unwrap();
+                            let (addr, _) = accounts
+                                .get_mut((rng.random::<u64>() % n_accounts) as usize)
+                                .unwrap();
 
                             for _ in 0..2 {
                                 let new_entry = StorageEntry {

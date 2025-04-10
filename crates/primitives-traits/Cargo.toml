@@ -142,6 +142,7 @@ serde = [
     "alloy-trie/serde",
     "revm-bytecode/serde",
     "revm-state/serde",
+    "rand_08/serde",
 ]
 reth-codec = [
     "dep:reth-codecs",

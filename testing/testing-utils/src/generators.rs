@@ -14,6 +14,7 @@ use reth_primitives::{
 };
 
 use rand::distr::uniform::SampleRange;
+pub use rand::Rng;
 use reth_primitives_traits::{crypto::secp256k1::sign_message, proofs, Block as _};
 use secp256k1::{Keypair, Secp256k1};
 use std::{
@@ -21,7 +22,6 @@ use std::{
     collections::BTreeMap,
     ops::{Range, RangeInclusive},
 };
-pub use rand::Rng;
 
 /// Used to pass arguments for random block generation function in tests
 #[derive(Debug, Default)]

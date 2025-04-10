@@ -1,5 +1,5 @@
 use alloy_eips::eip4895::Withdrawals;
-use alloy_primitives::{hex, Signature, TxKind};
+use alloy_primitives::{hex, private::getrandom, Signature, TxKind};
 use arbitrary::Arbitrary;
 use eyre::{Context, Result};
 use proptest::{
@@ -35,7 +35,6 @@ use reth_stages_types::{
 use reth_trie::{hash_builder::HashBuilderValue, TrieMask};
 use reth_trie_common::{hash_builder::HashBuilderState, StoredNibbles, StoredNibblesSubKey};
 use std::{fs::File, io::BufReader};
-use alloy_primitives::private::getrandom;
 
 pub const VECTORS_FOLDER: &str = "testdata/micro/compact";
 pub const VECTOR_SIZE: usize = 100;
