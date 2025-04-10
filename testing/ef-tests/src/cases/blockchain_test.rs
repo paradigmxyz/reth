@@ -14,8 +14,8 @@ use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_primitives::{BlockBody, RecoveredBlock, SealedBlock, TransactionSigned};
 use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockHashReader, BlockWriter,
-    DBProvider, DatabaseProviderFactory, ExecutionOutcome, HashingWriter, LatestStateProviderRef,
-    OriginalValuesKnown, StateCommitmentProvider, StateProofProvider, StateWriter, StorageLocation,
+    DBProvider, DatabaseProviderFactory, ExecutionOutcome, HashingWriter, OriginalValuesKnown,
+    StateCommitmentProvider, StateProvider, StateWriter, StorageLocation,
 };
 use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord, State};
 use reth_stateless::validation::{stateless_validation, Input};
@@ -137,7 +137,12 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     }
     let last_block = blocks_with_genesis.last().cloned();
 
-    match execute_blocks(&provider, &blocks_with_genesis, chain_spec.clone()) {
+    match execute_blocks(&provider, &blocks_with_genesis, chain_spec.clone(), |maybe_block| {
+        match maybe_block {
+            Some(block) => provider.history_by_block_hash(block.parent_hash).unwrap(),
+            None => provider.latest(),
+        }
+    }) {
         Err(Error::BlockExecutionFailed) => {
             // If block execution failed, then we don't generate a stateless witness, but we still
             // do the post state checks
@@ -189,33 +194,44 @@ fn execute_blocks<
         + StateWriter<Receipt = reth_primitives::Receipt>
         + BlockHashReader
         + StateCommitmentProvider,
+    F: FnMut(Option<&RecoveredBlock<Block<TransactionSigned>>>) -> SP,
+    SP: StateProvider,
 >(
     provider: &Provider,
     blocks_with_genesis: &[RecoveredBlock<Block<TransactionSigned>>],
     chain_spec: Arc<ChainSpec>,
+    mut create_state_provider: F,
 ) -> Result<Vec<ExecutionWitness>, Error> {
     let executor_provider = EthExecutorProvider::ethereum(chain_spec);
 
-    let mut exec_witnesses = Vec::new();
-
+    // First execute all of the blocks
+    // TODO: Have one loop
     for block in blocks_with_genesis.iter().skip(1) {
-        let state_provider = LatestStateProviderRef::new(provider);
+        let state_provider = create_state_provider(None);
         let state_db = StateProviderDatabase(&state_provider);
         let block_executor = executor_provider.executor(state_db);
-
-        let mut witness_record = ExecutionWitnessRecord::default();
-
-        let output = block_executor
-            .execute_with_state_closure(&(*block).clone(), |statedb: &State<_>| {
-                witness_record.record_executed_state(statedb);
-            })
-            .map_err(|_| Error::BlockExecutionFailed)?;
-
+        let output = block_executor.execute(block).unwrap();
         provider.write_state(
             &ExecutionOutcome::single(block.number, output),
             OriginalValuesKnown::Yes,
             StorageLocation::Database,
         )?;
+    }
+
+    let mut exec_witnesses = Vec::new();
+
+    for block in blocks_with_genesis.iter().skip(1) {
+        let state_provider = create_state_provider(Some(block));
+        let state_db = StateProviderDatabase(&state_provider);
+        let block_executor = executor_provider.executor(state_db);
+
+        let mut witness_record = ExecutionWitnessRecord::default();
+
+        block_executor
+            .execute_with_state_closure(&(*block).clone(), |statedb: &State<_>| {
+                witness_record.record_executed_state(statedb);
+            })
+            .map_err(|_| Error::BlockExecutionFailed)?;
 
         let ExecutionWitnessRecord { hashed_state, codes, keys } = witness_record;
         let state = state_provider.witness(Default::default(), hashed_state)?;
