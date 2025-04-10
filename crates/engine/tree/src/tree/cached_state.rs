@@ -368,6 +368,10 @@ impl ProviderCaches {
             }
         }
 
+        for (code_hash, bytecode) in &state_updates.contracts {
+            self.code_cache.insert(*code_hash, Some(Bytecode(bytecode.clone())));
+        }
+
         Ok(())
     }
 }
