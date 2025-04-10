@@ -142,6 +142,11 @@ impl TreeConfig {
         self.max_execute_block_batch_size
     }
 
+    /// Return the maximum proof task concurrency.
+    pub const fn max_proof_task_concurrency(&self) -> u64 {
+        self.max_proof_task_concurrency
+    }
+
     /// Returns whether to use the legacy state root calculation method instead
     /// of the new state root task
     pub const fn legacy_state_root(&self) -> bool {
