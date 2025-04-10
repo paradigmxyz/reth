@@ -740,8 +740,8 @@ Engine:
           Enables accepting requests hash instead of an array of requests in `engine_newPayloadV4`
 
       --engine.max-proof-task-concurrency <MAX_PROOF_TASK_CONCURRENCY>
-           Configure the maximum number of concurrent proof tasks
- 
+          Configure the maximum number of concurrent proof tasks
+
           [default: 256]
 
 Ress:
