@@ -9,10 +9,8 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::{
-    fs,
-    fs::File,
-    io,
-    io::{AsyncBufReadExt, AsyncWriteExt},
+    fs::{self, File},
+    io::{self, AsyncBufReadExt, AsyncWriteExt},
 };
 
 /// An HTTP client with features for downloading ERA files from an external HTTP accessible
@@ -48,7 +46,7 @@ impl EraClient {
         let mut file = File::create(&path).await?;
 
         while let Some(item) = stream.next().await {
-            tokio::io::copy(&mut item?.as_ref(), &mut file).await?;
+            io::copy(&mut item?.as_ref(), &mut file).await?;
         }
 
         Ok(path.into_boxed_path())
@@ -82,7 +80,7 @@ impl EraClient {
     }
 
     async fn files_count(&self) -> usize {
-        tokio::fs::read_dir(&self.folder).await.iter().count().saturating_sub(2)
+        fs::read_dir(&self.folder).await.iter().count().saturating_sub(2)
     }
 
     /// Fetches the list of ERA1 files from `url` and stores it in a file located within `folder`.
@@ -107,7 +105,7 @@ impl EraClient {
 
         while let Some(line) = lines.next_line().await? {
             if let Some(j) = line.find(".era1") {
-                if let Some(i) = line.find("\"") {
+                if let Some(i) = line[..j].rfind(|c: char| !c.is_alphanumeric() && c != '-') {
                     let era = &line[i + 1..j + 5];
                     writer.write_all(era.as_bytes()).await?;
                     writer.write_all(b"\n").await?;
@@ -264,5 +262,34 @@ impl Stream for StartingStream {
         }
 
         Poll::Pending
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use test_case::test_case;
+
+    impl EraClient {
+        fn empty() -> Self {
+            EraClient::new(
+                Client::new(),
+                Url::from_str("file:///").unwrap(),
+                PathBuf::new().into_boxed_path(),
+            )
+        }
+    }
+
+    #[test_case("mainnet-00600-a81ae85f.era1", Some(600))]
+    #[test_case("mainnet-00000-a81ae85f.era1", Some(0))]
+    #[test_case("00000-a81ae85f.era1", None)]
+    #[test_case("", None)]
+    fn test_file_name_to_number(file_name: &str, expected_number: Option<u64>) {
+        let client = EraClient::empty();
+
+        let actual_number = client.file_name_to_number(file_name);
+
+        assert_eq!(actual_number, expected_number);
     }
 }
