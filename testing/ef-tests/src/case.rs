@@ -39,7 +39,7 @@ impl<T: Case> Cases<T> {
             .par_iter()
             // TODO: REMOVE, just for CI
             .filter(|(path, _)| !path.ends_with("notxs.json"))
-            .map(|(path, case)| CaseResult::new(dbg!(path), case, case.run()))
+            .map(|(path, case)| CaseResult::new(path, case, case.run()))
             .collect()
     }
 }
