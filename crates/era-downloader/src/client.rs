@@ -8,8 +8,15 @@ use std::{
     str::FromStr,
     task::{Context, Poll},
 };
-use tokio::fs::File;
+use tokio::{
+    fs,
+    fs::File,
+    io,
+    io::{AsyncBufReadExt, AsyncWriteExt},
+};
 
+/// An HTTP client with features for downloading ERA files from an external HTTP accessible
+/// endpoint.
 #[derive(Debug, Clone)]
 pub struct EraClient {
     client: Client,
@@ -18,6 +25,15 @@ pub struct EraClient {
 }
 
 impl EraClient {
+    /// Constructs [`EraClient`] using `client` to download from `url` into `folder`.
+    pub fn new(client: Client, url: Url, folder: Box<Path>) -> Self {
+        Self { client, url, folder }
+    }
+}
+
+impl EraClient {
+    /// Performs a GET request on `url` and stores the response body into a file located within
+    /// the `folder`.
     pub async fn download_to_file(&mut self, url: impl IntoUrl) -> eyre::Result<Box<Path>> {
         let path = self.folder.to_path_buf();
 
@@ -41,8 +57,8 @@ impl EraClient {
     async fn next_url(&self) -> Option<Url> {
         let mut max = None;
 
-        for mut dir in tokio::fs::read_dir(&self.folder).await {
-            for entry in dir.next_entry().await {
+        while let Ok(mut dir) = fs::read_dir(&self.folder).await {
+            while let Ok(entry) = dir.next_entry().await {
                 if let Some(entry) = entry {
                     if let Some(name) = entry.file_name().to_str() {
                         if let Some(number) = self.file_name_to_number(name) {
@@ -57,15 +73,63 @@ impl EraClient {
 
         let number = max.unwrap_or(0);
 
-        Some(Url::from_str(&self.number_to_file_name(number)).unwrap())
+        self.number_to_file_name(number)
+            .await
+            .unwrap()
+            .map(|name| Url::from_str(&name))
+            .transpose()
+            .unwrap()
     }
 
     async fn files_count(&self) -> usize {
-        tokio::fs::read_dir(&self.folder).await.iter().count()
+        tokio::fs::read_dir(&self.folder).await.iter().count().saturating_sub(2)
     }
 
-    fn number_to_file_name(&self, number: u64) -> String {
-        String::new()
+    /// Fetches the list of ERA1 files from `url` and stores it in a file located within `folder`.
+    pub async fn fetch_file_list(&self) -> eyre::Result<()> {
+        let response = self.client.get(self.url.clone()).send().await.unwrap();
+
+        let mut stream = response.bytes_stream();
+        let path = self.folder.to_path_buf().join("index.html");
+        let mut file = File::create(&path).await?;
+
+        while let Some(item) = stream.next().await {
+            io::copy(&mut item?.as_ref(), &mut file).await?;
+        }
+
+        let file = File::open(&path).await?;
+        let reader = io::BufReader::new(file);
+        let mut lines = reader.lines();
+
+        let path = self.folder.to_path_buf().join("index");
+        let file = File::create(&path).await?;
+        let mut writer = io::BufWriter::new(file);
+
+        while let Some(line) = lines.next_line().await? {
+            if let Some(j) = line.find(".era1") {
+                if let Some(i) = line.find("\"") {
+                    let era = &line[i + 1..j + 5];
+                    writer.write_all(era.as_bytes()).await?;
+                    writer.write_all(b"\n").await?;
+                }
+            }
+        }
+        writer.flush().await?;
+
+        Ok(())
+    }
+
+    /// Returns ERA1 file name that is ordered at `number`.
+    pub async fn number_to_file_name(&self, number: u64) -> eyre::Result<Option<String>> {
+        let path = self.folder.to_path_buf().join("index");
+        let file = File::open(&path).await?;
+        let reader = io::BufReader::new(file);
+        let mut lines = reader.lines();
+        for _ in 0..number {
+            lines.next_line().await?;
+        }
+
+        Ok(lines.next_line().await?)
     }
 
     fn file_name_to_number(&self, file_name: &str) -> Option<u64> {
