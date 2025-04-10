@@ -74,7 +74,7 @@ pub mod node_record;
 pub use node_record::{NodeRecord, NodeRecordParseError};
 
 pub mod trusted_peer;
-pub use trusted_peer::TrustedPeer;
+pub use trusted_peer::{TrustedPeer, TrustedPeersResolver};
 
 mod bootnodes;
 pub use bootnodes::*;

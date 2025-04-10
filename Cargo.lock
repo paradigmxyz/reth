@@ -8374,12 +8374,14 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "enr",
+ "futures",
  "rand 0.8.5",
  "secp256k1",
  "serde_json",
  "serde_with",
  "thiserror 2.0.12",
  "tokio",
+ "tracing",
  "url",
 ]
 
