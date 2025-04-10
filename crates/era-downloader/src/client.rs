@@ -37,7 +37,7 @@ impl EraClient {
 
         let url = url.into_url()?;
         let client = self.client.clone();
-        let file_name = url.path_segments().unwrap().last().unwrap();
+        let file_name = url.path_segments().unwrap().next_back().unwrap();
         let path = path.join(file_name);
 
         let response = client.get(url).send().await?;
@@ -131,7 +131,7 @@ impl EraClient {
     }
 
     fn file_name_to_number(&self, file_name: &str) -> Option<u64> {
-        file_name.split("-").skip(1).next().map(|v| u64::from_str(v).ok()).flatten()
+        file_name.split('-').nth(1).and_then(|v| u64::from_str(v).ok())
     }
 }
 
@@ -144,12 +144,8 @@ impl Stream for EraStream {
     type Item = eyre::Result<Box<Path>>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match Pin::new(&mut self.starting_stream).poll_next(cx) {
-            Poll::Ready(fut) => match fut {
-                Some(fut) => self.download_stream.downloads.push_back(fut),
-                None => {}
-            },
-            Poll::Pending => {}
+        if let Poll::Ready(Some(fut)) = Pin::new(&mut self.starting_stream).poll_next(cx) {
+            self.download_stream.downloads.push_back(fut);
         }
 
         let downloading = self.download_stream.downloads.len();
@@ -159,10 +155,12 @@ impl Stream for EraStream {
     }
 }
 
+type DownloadFuture = Pin<Box<dyn Future<Output = eyre::Result<Box<Path>>>>>;
+
 #[pin_project]
 struct DownloadStream {
     #[pin]
-    pub downloads: FuturesOrdered<Pin<Box<dyn Future<Output = eyre::Result<Box<Path>>>>>>,
+    pub downloads: FuturesOrdered<DownloadFuture>,
 }
 
 impl Stream for DownloadStream {
@@ -214,19 +212,17 @@ impl Stream for StartingStream {
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let downloading = self.downloading;
 
-        if self.state == State::Initial {
-            if self.files_count_ready {
-                match Pin::new(&mut self.files_count).poll(cx) {
-                    Poll::Ready(downloaded) => {
-                        let max_missing = (downloaded + downloading)
-                            .saturating_sub(self.max_files)
-                            .max(self.max_concurrent_downloads);
+        if self.state == State::Initial && self.files_count_ready {
+            match Pin::new(&mut self.files_count).poll(cx) {
+                Poll::Ready(downloaded) => {
+                    let max_missing = (downloaded + downloading)
+                        .saturating_sub(self.max_files)
+                        .max(self.max_concurrent_downloads);
 
-                        self.files_count_ready = false;
-                        self.state = State::Missing(max_missing);
-                    }
-                    Poll::Pending => return Poll::Pending,
+                    self.files_count_ready = false;
+                    self.state = State::Missing(max_missing);
                 }
+                Poll::Pending => return Poll::Pending,
             }
         }
 
@@ -273,7 +269,7 @@ mod tests {
 
     impl EraClient {
         fn empty() -> Self {
-            EraClient::new(
+            Self::new(
                 Client::new(),
                 Url::from_str("file:///").unwrap(),
                 PathBuf::new().into_boxed_path(),
