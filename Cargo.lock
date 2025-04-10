@@ -3554,8 +3554,7 @@ dependencies = [
  "clap",
  "jsonrpsee",
  "reth",
- "reth-node-ethereum",
- "reth-transaction-pool",
+ "reth-ethereum",
  "tokio",
 ]
 
