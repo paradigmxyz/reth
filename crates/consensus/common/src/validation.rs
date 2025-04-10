@@ -87,16 +87,28 @@ where
     B: BlockBody,
     H: BlockHeader,
 {
-    let ommers_hash = body.calculate_ommers_root();
-    if Some(header.ommers_hash()) != ommers_hash {
+match ommers_hash {
+    Some(calculated_hash) => {
+        if header.ommers_hash() != calculated_hash {
+            return Err(ConsensusError::BodyOmmersHashDiff(
+                GotExpected {
+                    got: calculated_hash,
+                    expected: header.ommers_hash(),
+                }
+                .into(),
+            ));
+        }
+    }
+    None => {
         return Err(ConsensusError::BodyOmmersHashDiff(
             GotExpected {
-                got: ommers_hash.unwrap_or(EMPTY_OMMER_ROOT_HASH),
+                got: EMPTY_OMMER_ROOT_HASH,
                 expected: header.ommers_hash(),
             }
             .into(),
-        ))
+        ));
     }
+}
 
     let tx_root = body.calculate_tx_root();
     if header.transactions_root() != tx_root {
