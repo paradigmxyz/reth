@@ -14,7 +14,7 @@ use revm::{
     Context, Inspector, MainBuilder, MainContext,
 };
 
-/// Factory producing [`CachedPrecompileEthEvm`].
+/// Factory producing [`CachedPrecompileEthEvmFactory`].
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
 #[allow(dead_code)]
