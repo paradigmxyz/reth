@@ -5,13 +5,14 @@ use crate::{
         parse_access_list_items_to_inbox_entries, ExecutingDescriptor, InteropTxValidatorError,
     },
     InvalidCrossTx,
+    metrics::OpTxPoolMetrics,
 };
 use alloy_eips::eip2930::AccessList;
 use alloy_primitives::{TxHash, B256};
 use alloy_rpc_client::ReqwestClient;
 use futures_util::future::BoxFuture;
 use op_alloy_consensus::interop::SafetyLevel;
-use std::{borrow::Cow, future::IntoFuture, time::Duration};
+use std::{borrow::Cow, future::IntoFuture, time::{Duration, Instant}};
 use tracing::trace;
 
 /// Supervisor hosted by op-labs
@@ -145,7 +146,10 @@ impl<'a> IntoFuture for CheckAccessListRequest<'a> {
     fn into_future(self) -> Self::IntoFuture {
         let Self { client, inbox_entries, executing_descriptor, timeout, safety } = self;
         Box::pin(async move {
-            tokio::time::timeout(
+            let metrics = OpTxPoolMetrics::default();
+            let start = Instant::now();
+
+            let result = tokio::time::timeout(
                 timeout,
                 client.request(
                     "supervisor_checkAccessList",
@@ -154,7 +158,11 @@ impl<'a> IntoFuture for CheckAccessListRequest<'a> {
             )
             .await
             .map_err(|_| InteropTxValidatorError::ValidationTimeout(timeout.as_secs()))?
-            .map_err(InteropTxValidatorError::client)
+            .map_err(InteropTxValidatorError::client);
+
+            metrics.record_supervisor_query(start.elapsed());
+
+            result
         })
     }
 }
