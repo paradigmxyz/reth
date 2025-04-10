@@ -739,6 +739,9 @@ Engine:
       --engine.accept-execution-requests-hash
           Enables accepting requests hash instead of an array of requests in `engine_newPayloadV4`
 
+      --engine.max-proof-task-concurrency
+          Configure the maximum number of concurrent proof tasks
+
 Ress:
       --ress.enable
           Enable support for `ress` subprotocol
