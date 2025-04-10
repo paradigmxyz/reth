@@ -43,7 +43,7 @@ impl DevSigner {
     pub fn random_signers<T: Decodable2718>(num: u32) -> Vec<Box<dyn EthSigner<T> + 'static>> {
         let mut signers = Vec::with_capacity(num as usize);
         for _ in 0..num {
-            let sk = PrivateKeySigner::random_with(&mut rand::thread_rng());
+            let sk = PrivateKeySigner::random();
 
             let address = sk.address();
             let addresses = vec![address];

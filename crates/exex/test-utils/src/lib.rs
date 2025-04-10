@@ -28,7 +28,7 @@ use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::test_utils::MockExecutorProvider;
 use reth_execution_types::Chain;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification, ExExNotifications, Wal};
-use reth_network::{config::SecretKey, NetworkConfigBuilder, NetworkManager};
+use reth_network::{NetworkConfigBuilder, NetworkManager};
 use reth_node_api::{
     FullNodeTypes, FullNodeTypesAdapter, NodePrimitives, NodeTypes, NodeTypesWithDBAdapter,
 };
@@ -55,6 +55,7 @@ use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 use tempfile::TempDir;
 use thiserror::Error;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
+use reth_network::config::rng_secret_key;
 
 /// A test [`PoolBuilder`] that builds a [`TestPool`].
 #[derive(Debug, Default, Clone, Copy)]
@@ -272,7 +273,7 @@ pub async fn test_exex_context_with_chain_spec(
     let provider = BlockchainProvider::new(provider_factory.clone())?;
 
     let network_manager = NetworkManager::new(
-        NetworkConfigBuilder::new(SecretKey::new(&mut rand::thread_rng()))
+        NetworkConfigBuilder::new(rng_secret_key())
             .with_unused_discovery_port()
             .with_unused_listener_port()
             .build(provider_factory.clone()),

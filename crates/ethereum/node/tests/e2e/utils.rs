@@ -10,6 +10,7 @@ use alloy_rpc_types_engine::PayloadAttributes;
 use alloy_rpc_types_eth::TransactionRequest;
 use alloy_signer::SignerSync;
 use rand::{seq::SliceRandom, Rng};
+use rand::seq::IndexedRandom;
 use reth_e2e_test_utils::{wallet::Wallet, NodeHelperType, TmpDB};
 use reth_ethereum_engine_primitives::EthPayloadBuilderAttributes;
 use reth_ethereum_primitives::TxType;

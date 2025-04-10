@@ -31,7 +31,6 @@ typenum.workspace = true
 byteorder.workspace = true
 
 # crypto
-rand.workspace = true
 ctr.workspace = true
 digest.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery", "rand"] }

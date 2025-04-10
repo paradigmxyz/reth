@@ -1,5 +1,5 @@
 use alloy_consensus::Header;
-use alloy_primitives::{hex, private::getrandom::getrandom};
+use alloy_primitives::{hex, private::getrandom};
 use arbitrary::Arbitrary;
 use eyre::Result;
 use proptest::{
@@ -24,7 +24,7 @@ const PER_TABLE: usize = 1000;
 pub fn generate_vectors(mut tables: Vec<String>) -> Result<()> {
     // Prepare random seed for test (same method as used by proptest)
     let mut seed = [0u8; 32];
-    getrandom(&mut seed)?;
+    getrandom::fill(&mut seed)?;
     println!("Seed for table test vectors: {:?}", hex::encode_prefixed(seed));
 
     // Start the runner with the seed

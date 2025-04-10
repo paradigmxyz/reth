@@ -1,5 +1,5 @@
 use alloy_eips::eip4895::Withdrawals;
-use alloy_primitives::{hex, private::getrandom::getrandom, Signature, TxKind};
+use alloy_primitives::{hex, Signature, TxKind};
 use arbitrary::Arbitrary;
 use eyre::{Context, Result};
 use proptest::{
@@ -35,6 +35,7 @@ use reth_stages_types::{
 use reth_trie::{hash_builder::HashBuilderValue, TrieMask};
 use reth_trie_common::{hash_builder::HashBuilderState, StoredNibbles, StoredNibblesSubKey};
 use std::{fs::File, io::BufReader};
+use alloy_primitives::private::getrandom;
 
 pub const VECTORS_FOLDER: &str = "testdata/micro/compact";
 pub const VECTOR_SIZE: usize = 100;
@@ -148,7 +149,7 @@ pub fn read_vectors() -> Result<()> {
 pub fn generate_vectors_with(gen: &[fn(&mut TestRunner) -> eyre::Result<()>]) -> Result<()> {
     // Prepare random seed for test (same method as used by proptest)
     let mut seed = [0u8; 32];
-    getrandom(&mut seed)?;
+    getrandom::fill(&mut seed)?;
     println!("Seed for compact test vectors: {:?}", hex::encode_prefixed(seed));
 
     // Start the runner with the seed

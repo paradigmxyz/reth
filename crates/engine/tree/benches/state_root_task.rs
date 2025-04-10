@@ -8,7 +8,7 @@ use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{Address, B256};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use proptest::test_runner::TestRunner;
-use rand::Rng;
+use rand_08::Rng;
 use reth_chain_state::EthPrimitives;
 use reth_chainspec::ChainSpec;
 use reth_db_common::init::init_genesis;

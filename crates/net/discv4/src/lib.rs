@@ -214,15 +214,13 @@ impl Discv4 {
     ///
     /// ```
     /// # use std::io;
-    /// use rand::thread_rng;
     /// use reth_discv4::{Discv4, Discv4Config};
     /// use reth_network_peers::{pk2id, NodeRecord, PeerId};
     /// use secp256k1::SECP256K1;
     /// use std::{net::SocketAddr, str::FromStr};
     /// # async fn t() -> io::Result<()> {
     /// // generate a (random) keypair
-    /// let mut rng = thread_rng();
-    /// let (secret_key, pk) = SECP256K1.generate_keypair(&mut rng);
+    /// let (secret_key, pk) = SECP256K1.generate_keypair(&mut rand_08::thread_rng());
     /// let id = pk2id(&pk);
     ///
     /// let socket = SocketAddr::from_str("0.0.0.0:0").unwrap();

@@ -7,7 +7,7 @@ use alloy_eips::{
     NumHash,
 };
 use alloy_primitives::{Address, BlockNumber, Bytes, TxKind, B256, B64, U256};
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::{rngs::StdRng, SeedableRng};
 use reth_primitives::{
     Account, BlockBody, Log, Receipt, SealedBlock, SealedHeader, StorageEntry, Transaction,
     TransactionSigned,
@@ -21,6 +21,7 @@ use std::{
     collections::BTreeMap,
     ops::{Range, RangeInclusive},
 };
+pub use rand::Rng;
 
 /// Used to pass arguments for random block generation function in tests
 #[derive(Debug, Default)]
