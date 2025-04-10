@@ -9,6 +9,7 @@ mod call;
 mod pending_block;
 
 use alloy_primitives::U256;
+use eyre::WrapErr;
 use op_alloy_network::Optimism;
 pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
 use reth_chain_state::CanonStateSubscriptions;
@@ -324,7 +325,7 @@ where
 {
     type EthApi = OpEthApi<N>;
 
-    fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> Self::EthApi {
+    async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
         let Self { sequencer_url } = self;
         let eth_api = reth_rpc::EthApiBuilder::new(
             ctx.components.provider().clone(),
@@ -342,14 +343,12 @@ where
         .gas_oracle_config(ctx.config.gas_oracle)
         .build_inner();
 
-        let sequencer_client = sequencer_url.map(|url| {
-            ctx.components
-                .task_executor()
-                .handle()
-                .block_on(SequencerClient::new(url))
-                .expect("Failed to init sequencer client")
-        });
+        let sequencer_client = if let Some(url) = sequencer_url {
+            Some(SequencerClient::new(url).await.context("Failed to init sequencer client")?)
+        } else {
+            None
+        };
 
-        OpEthApi { inner: Arc::new(OpEthApiInner { eth_api, sequencer_client }) }
+        Ok(OpEthApi { inner: Arc::new(OpEthApiInner { eth_api, sequencer_client }) })
     }
 }
