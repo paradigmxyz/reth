@@ -299,21 +299,24 @@ where
             )
         }
 
-        if let Some(cap) = self.tx_fee_cap {
-            let max_fee_per_gas = if transaction.is_dynamic_fee() {
-                transaction.max_fee_per_gas()
-            } else {
-                transaction.gas_price().unwrap_or(0)
-            };
+        match self.tx_fee_cap {
+            Some(0) | None => {} // Skip if cap is 0 or None
+            Some(cap) => {
+                let max_fee_per_gas = if transaction.is_dynamic_fee() {
+                    transaction.max_fee_per_gas()
+                } else {
+                    transaction.gas_price().unwrap_or(0)
+                };
 
-            let fee = max_fee_per_gas * (transaction.gas_limit() as u128);
-            if fee > cap {
-                let fee_eth = fee as f64 / 1e18;
-                let cap_eth = cap as f64 / 1e18;
-                return TransactionValidationOutcome::Invalid(
-                    transaction,
-                    InvalidPoolTransactionError::ExceedsFeeCap { fee_eth, cap_eth },
-                );
+                let fee = max_fee_per_gas * (transaction.gas_limit() as u128);
+                if fee > cap {
+                    let fee_eth = fee as f64 / 1e18;
+                    let cap_eth = cap as f64 / 1e18;
+                    return TransactionValidationOutcome::Invalid(
+                        transaction,
+                        InvalidPoolTransactionError::ExceedsFeeCap { fee_eth, cap_eth },
+                    );
+                }
             }
         }
 
@@ -1102,5 +1105,23 @@ mod tests {
             ));
         let tx = pool.get(transaction.hash());
         assert!(tx.is_none());
+    }
+
+    #[tokio::test]
+    async fn valid_on_zero_fee_cap() {
+        let transaction = get_transaction();
+        let provider = MockEthProvider::default();
+        provider.add_account(
+            transaction.sender(),
+            ExtendedAccount::new(transaction.nonce(), U256::MAX),
+        );
+
+        let blob_store = InMemoryBlobStore::default();
+        let validator = EthTransactionValidatorBuilder::new(provider)
+            .set_tx_fee_cap(0) // no cap
+            .build(blob_store.clone());
+
+        let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
+        assert!(outcome.is_valid());
     }
 }
