@@ -21,7 +21,7 @@ use reth_evm::{
     ConfigureEvm, EvmEnvFor, TxEnvFor,
 };
 use reth_primitives_traits::{
-    Block as _, BlockBody, NodePrimitives, ReceiptWithBloom, RecoveredBlock, SignedTransaction,
+    Block as _, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock, SignedTransaction,
 };
 use reth_revm::{
     database::StateProviderDatabase,
@@ -31,13 +31,13 @@ use reth_revm::{
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
-    EthApiTypes, FromEthApiError, RpcNodeCore,
+    FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
-    BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderBlock, ReceiptProviderIdExt,
-    StateProofProvider, StateProvider, StateProviderFactory, TransactionVariant,
+    BlockIdReader, BlockReaderIdExt, HeaderProvider, ReceiptProviderIdExt, StateProofProvider,
+    StateProvider, StateProviderFactory, TransactionVariant,
 };
 use reth_tasks::pool::BlockingTaskGuard;
 use revm::{context_interface::Transaction, state::EvmState, DatabaseCommit};
@@ -84,9 +84,8 @@ impl<Eth: RpcNodeCore, BlockExecutor> DebugApi<Eth, BlockExecutor> {
 
 impl<Eth, BlockExecutor> DebugApi<Eth, BlockExecutor>
 where
-    Eth: EthApiTypes + TraceExt + 'static,
-    BlockExecutor:
-        BlockExecutorProvider<Primitives: NodePrimitives<Block = ProviderBlock<Eth::Provider>>>,
+    Eth: TraceExt + 'static,
+    BlockExecutor: BlockExecutorProvider<Primitives = Eth::Primitives>,
 {
     /// Acquires a permit to execute a tracing call.
     async fn acquire_trace_permit(&self) -> Result<OwnedSemaphorePermit, AcquireError> {
@@ -96,7 +95,7 @@ where
     /// Trace the entire block asynchronously
     async fn trace_block(
         &self,
-        block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
+        block: Arc<RecoveredBlock<BlockTy<Eth::Primitives>>>,
         evm_env: EvmEnvFor<Eth::Evm>,
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
@@ -154,7 +153,7 @@ where
         rlp_block: Bytes,
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
-        let block: ProviderBlock<Eth::Provider> = Decodable::decode(&mut rlp_block.as_ref())
+        let block: BlockTy<Eth::Primitives> = Decodable::decode(&mut rlp_block.as_ref())
             .map_err(BlockError::RlpDecodeRawBlock)
             .map_err(Eth::Error::from_eth_err)?;
 
@@ -628,7 +627,7 @@ where
     /// Generates an execution witness, using the given recovered block.
     pub async fn debug_execution_witness_for_block(
         &self,
-        block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
+        block: Arc<RecoveredBlock<BlockTy<Eth::Primitives>>>,
     ) -> Result<ExecutionWitness, Eth::Error> {
         let this = self.clone();
         self.eth_api()
@@ -843,9 +842,8 @@ where
 #[async_trait]
 impl<Eth, BlockExecutor> DebugApiServer for DebugApi<Eth, BlockExecutor>
 where
-    Eth: EthApiTypes + EthTransactions + TraceExt + 'static,
-    BlockExecutor:
-        BlockExecutorProvider<Primitives: NodePrimitives<Block = ProviderBlock<Eth::Provider>>>,
+    Eth: EthTransactions + TraceExt + 'static,
+    BlockExecutor: BlockExecutorProvider<Primitives = Eth::Primitives>,
 {
     /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {

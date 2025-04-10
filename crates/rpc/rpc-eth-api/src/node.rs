@@ -1,8 +1,9 @@
 //! Helper trait for interfacing with [`FullNodeComponents`].
 
-use reth_node_api::{FullNodeComponents, NodeTypes, PrimitivesTy};
+use reth_node_api::{FullNodeComponents, NodePrimitives, NodeTypes, PrimitivesTy};
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_provider::{BlockReader, ProviderBlock, ProviderReceipt};
+use reth_primitives_traits::{BlockTy, ReceiptTy, TxTy};
+use reth_provider::BlockReader;
 use reth_rpc_eth_types::EthStateCache;
 
 /// Helper trait to relax trait bounds on [`FullNodeComponents`].
@@ -81,9 +82,16 @@ where
 
 /// Additional components, asides the core node components, needed to run `eth_` namespace API
 /// server.
-pub trait RpcNodeCoreExt: RpcNodeCore<Provider: BlockReader> {
+pub trait RpcNodeCoreExt:
+    RpcNodeCore<
+    Primitives: NodePrimitives,
+    Provider: BlockReader<
+        Block = BlockTy<Self::Primitives>,
+        Receipt = ReceiptTy<Self::Primitives>,
+        Transaction = TxTy<Self::Primitives>,
+    >,
+>
+{
     /// Returns handle to RPC cache service.
-    fn cache(
-        &self,
-    ) -> &EthStateCache<ProviderBlock<Self::Provider>, ProviderReceipt<Self::Provider>>;
+    fn cache(&self) -> &EthStateCache<BlockTy<Self::Primitives>, ReceiptTy<Self::Primitives>>;
 }

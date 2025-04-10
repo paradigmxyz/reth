@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use futures::future::TryFutureExt;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
+use reth_primitives_traits::{BlockTy, ReceiptTy};
 use reth_rpc_eth_api::{
     EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcNodeCoreExt,
     RpcTransaction, TransactionCompat,
@@ -20,8 +21,7 @@ use reth_rpc_eth_types::{
 };
 use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
 use reth_storage_api::{
-    BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, HeaderProvider, ProviderBlock,
-    ProviderReceipt,
+    BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, HeaderProvider,
 };
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
@@ -406,9 +406,7 @@ where
     }
 
     /// Access the underlying [`EthStateCache`].
-    fn eth_cache(
-        &self,
-    ) -> &EthStateCache<ProviderBlock<Eth::Provider>, ProviderReceipt<Eth::Provider>> {
+    fn eth_cache(&self) -> &EthStateCache<BlockTy<Eth::Primitives>, ReceiptTy<Eth::Primitives>> {
         self.eth_api.cache()
     }
 
