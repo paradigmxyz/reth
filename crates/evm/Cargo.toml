@@ -16,6 +16,7 @@ reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
 reth-metrics = { workspace = true, optional = true }
 reth-primitives-traits.workspace = true
+reth-revm.workspace = true
 reth-storage-api.workspace = true
 reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
@@ -32,9 +33,11 @@ alloy-evm.workspace = true
 alloy-consensus.workspace = true
 
 auto_impl.workspace = true
+dashmap = { workspace = true, features = ["inline"] }
 derive_more.workspace = true
 futures-util.workspace = true
 metrics = { workspace = true, optional = true }
+mini-moka.workspace = true
 parking_lot = { workspace = true, optional = true }
 
 [dev-dependencies]
