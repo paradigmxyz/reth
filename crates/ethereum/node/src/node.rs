@@ -57,7 +57,7 @@ impl EthereumNode {
         EthereumPoolBuilder,
         BasicPayloadServiceBuilder<EthereumPayloadBuilder>,
         EthereumNetworkBuilder,
-        EthereumExecutorBuilder,
+        CachedPrecompileEthereumExecutorBuilder,
         EthereumConsensusBuilder,
     >
     where
@@ -73,7 +73,7 @@ impl EthereumNode {
             .pool(EthereumPoolBuilder::default())
             .payload(BasicPayloadServiceBuilder::default())
             .network(EthereumNetworkBuilder::default())
-            .executor(EthereumExecutorBuilder::default())
+            .executor(CachedPrecompileEthereumExecutorBuilder::default())
             .consensus(EthereumConsensusBuilder::default())
     }
 
@@ -258,7 +258,7 @@ where
         EthereumPoolBuilder,
         BasicPayloadServiceBuilder<EthereumPayloadBuilder>,
         EthereumNetworkBuilder,
-        EthereumExecutorBuilder,
+        CachedPrecompileEthereumExecutorBuilder,
         EthereumConsensusBuilder,
     >;
 
