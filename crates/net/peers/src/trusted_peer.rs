@@ -9,17 +9,7 @@ use core::{
     str::FromStr,
 };
 use serde_with::{DeserializeFromStr, SerializeDisplay};
-use std::task::{Context, Poll};
 use url::Host;
-
-use futures::{
-    future::BoxFuture,
-    stream::{FuturesUnordered, StreamExt},
-    FutureExt,
-};
-use std::io;
-use tokio::time::Interval;
-use tracing::warn;
 
 /// Represents the node record of a trusted peer. The only difference between this and a
 /// [`NodeRecord`] is that this does not contain the IP address of the peer, but rather a domain
@@ -184,61 +174,6 @@ impl From<NodeRecord> for TrustedPeer {
         };
 
         Self { host, tcp_port: record.tcp_port, udp_port: record.udp_port, id: record.id }
-    }
-}
-
-/// TrustedPeersResolver periodically spawns DNS resolution tasks for trusted peers.
-/// It returns a resolved (PeerId, NodeRecord) update when one of its in‑flight tasks completes.
-#[cfg(any(test, feature = "net"))]
-#[derive(Debug)]
-pub struct TrustedPeersResolver {
-    trusted_peers: Vec<TrustedPeer>,
-    /// The timer that triggers a new resolution cycle.
-    interval: Interval,
-    /// Futures for currently in‑flight resolution tasks.
-    pending: FuturesUnordered<BoxFuture<'static, (TrustedPeer, Result<NodeRecord, io::Error>)>>,
-}
-
-impl TrustedPeersResolver {
-    /// Create a new resolver with the given trusted peers and resolution interval.
-    pub fn new(trusted_peers: Vec<TrustedPeer>, resolve_interval: Interval) -> Self {
-        Self { trusted_peers, interval: resolve_interval, pending: FuturesUnordered::new() }
-    }
-
-    /// update interval for testing purposes
-    pub fn set_interval(&mut self, interval: Interval) {
-        self.interval = interval;
-    }
-
-    /// Polls the resolver.
-    /// When the internal interval ticks and no resolution tasks are pending,
-    /// new resolve futures are spawned. Then the resolver polls the futures.
-    /// If a future completes successfully, it returns the resolved (PeerId, NodeRecord).
-    pub fn poll(&mut self, cx: &mut Context<'_>) -> Poll<Option<(PeerId, NodeRecord)>> {
-        if self.pending.is_empty() {
-            if let Poll::Ready(_) = self.interval.poll_tick(cx) {
-                for trusted in self.trusted_peers.iter().cloned() {
-                    let task = async move {
-                        let res = trusted.resolve().await;
-                        (trusted, res)
-                    }
-                    .boxed();
-                    self.pending.push(task);
-                }
-            }
-        }
-
-        match self.pending.poll_next_unpin(cx) {
-            Poll::Ready(Some((_, res))) => match res {
-                Ok(record) => Poll::Ready(Some((record.id, record))),
-                Err(e) => {
-                    warn!(target: "net::peers", "Failed to resolve trusted peer: {:?}", e);
-                    Poll::Pending
-                }
-            },
-            Poll::Ready(None) => Poll::Ready(None),
-            Poll::Pending => Poll::Pending,
-        }
     }
 }
 

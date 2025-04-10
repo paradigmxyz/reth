@@ -5,12 +5,13 @@ use crate::{
     session::{Direction, PendingSessionHandshakeError},
     swarm::NetworkConnectionState,
 };
-use futures::StreamExt;
+use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
+
 use reth_eth_wire::{errors::EthStreamError, DisconnectReason};
 use reth_ethereum_forks::ForkId;
 use reth_net_banlist::BanList;
 use reth_network_api::test_utils::{PeerCommand, PeersHandle};
-use reth_network_peers::{trusted_peer::TrustedPeersResolver, NodeRecord, PeerId};
+use reth_network_peers::{NodeRecord, PeerId, TrustedPeer};
 use reth_network_types::{
     peers::{
         config::PeerBackoffDurations,
@@ -35,6 +36,57 @@ use tokio::{
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{trace, warn};
 
+/// `TrustedPeersResolver` periodically spawns DNS resolution tasks for trusted peers.
+/// It returns a resolved (`PeerId`, `NodeRecord`) update when one of its in‑flight tasks completes.
+#[derive(Debug)]
+pub struct TrustedPeersResolver {
+    /// The timer that triggers a new resolution cycle.
+    pub trusted_peers: Vec<TrustedPeer>,
+    /// The timer that triggers a new resolution cycle.
+    pub interval: Interval,
+    /// Futures for currently in‑flight resolution tasks.
+    pub pending: FuturesUnordered<BoxFuture<'static, (PeerId, Result<NodeRecord, io::Error>)>>,
+}
+
+impl TrustedPeersResolver {
+    /// Create a new resolver with the given trusted peers and resolution interval.
+    pub fn new(trusted_peers: Vec<TrustedPeer>, resolve_interval: Interval) -> Self {
+        Self { trusted_peers, interval: resolve_interval, pending: FuturesUnordered::new() }
+    }
+
+    /// Update the resolution interval (useful for testing purposes)
+    pub fn set_interval(&mut self, interval: Interval) {
+        self.interval = interval;
+    }
+
+    /// Poll the resolver.
+    /// When the interval ticks, new resolution futures for each trusted peer are spawned.
+    /// If a future completes successfully, it returns the resolved (`PeerId`, `NodeRecord`).
+    pub fn poll(&mut self, cx: &mut Context<'_>) -> Poll<Option<(PeerId, NodeRecord)>> {
+        if self.pending.is_empty() && self.interval.poll_tick(cx).is_ready() {
+            for trusted in self.trusted_peers.iter().cloned() {
+                let peer_id = trusted.id;
+                let task = async move {
+                    let result = trusted.resolve().await;
+                    (peer_id, result)
+                }
+                .boxed();
+                self.pending.push(task);
+            }
+        }
+
+        match self.pending.poll_next_unpin(cx) {
+            Poll::Ready(Some((peer_id, Ok(record)))) => Poll::Ready(Some((peer_id, record))),
+            Poll::Ready(Some((peer_id, Err(e)))) => {
+                warn!(target: "net::peers", "Failed to resolve trusted peer {:?}: {:?}", peer_id, e);
+                Poll::Pending
+            }
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
 /// Maintains the state of _all_ the peers known to the network.
 ///
 /// This is supposed to be owned by the network itself, but can be reached via the [`PeersHandle`].
@@ -50,6 +102,8 @@ pub struct PeersManager {
     /// This tracks peer ids that are considered trusted, but for which we don't necessarily have
     /// an address: [`Self::add_trusted_peer_id`]
     trusted_peer_ids: HashSet<PeerId>,
+    /// A resolver used to periodically resolve DNS names for trusted peers. This updates the
+    /// peer's address when the DNS records change.
     trusted_peers_resolver: TrustedPeersResolver,
     /// Copy of the sender half, so new [`PeersHandle`] can be created on demand.
     manager_tx: mpsc::UnboundedSender<PeerCommand>,
