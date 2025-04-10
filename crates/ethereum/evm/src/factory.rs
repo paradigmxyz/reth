@@ -1,4 +1,6 @@
-use reth_engine_tree::tree::CachedPrecompileProvider;
+use std::sync::Arc;
+
+use reth_engine_tree::tree::{precompile_cache::PrecompileCache, CachedPrecompileProvider};
 use reth_evm::{eth::EthEvmContext, Database, EthEvm, EvmEnv, EvmFactory};
 use revm::{
     context::{
@@ -12,10 +14,12 @@ use revm::{
 };
 
 /// Factory producing [`EthEvm`].
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 #[non_exhaustive]
 #[allow(dead_code)]
-struct CachedPrecompileEthEvmFactory;
+struct CachedPrecompileEthEvmFactory {
+    precompile_cache: Arc<PrecompileCache>,
+}
 
 type CachedPrecompileEthEvm<DB, I> = EthEvm<DB, I, CachedPrecompileProvider<EthPrecompiles>>;
 
@@ -28,13 +32,17 @@ impl EvmFactory for CachedPrecompileEthEvmFactory {
     type Spec = SpecId;
 
     fn create_evm<DB: Database>(&self, db: DB, input: EvmEnv) -> Self::Evm<DB, NoOpInspector> {
+        let precompile_cache = self.precompile_cache.clone();
         EthEvm::new(
             Context::mainnet()
                 .with_block(input.block_env)
                 .with_cfg(input.cfg_env)
                 .with_db(db)
                 .build_mainnet_with_inspector(NoOpInspector {})
-                .with_precompiles(CachedPrecompileProvider::new(EthPrecompiles::default())),
+                .with_precompiles(CachedPrecompileProvider::new(
+                    EthPrecompiles::default(),
+                    precompile_cache,
+                )),
             false,
         )
     }
@@ -45,13 +53,17 @@ impl EvmFactory for CachedPrecompileEthEvmFactory {
         input: EvmEnv,
         inspector: I,
     ) -> Self::Evm<DB, I> {
+        let precompile_cache = self.precompile_cache.clone();
         EthEvm::new(
             Context::mainnet()
                 .with_block(input.block_env)
                 .with_cfg(input.cfg_env)
                 .with_db(db)
                 .build_mainnet_with_inspector(inspector)
-                .with_precompiles(CachedPrecompileProvider::new(EthPrecompiles::default())),
+                .with_precompiles(CachedPrecompileProvider::new(
+                    EthPrecompiles::default(),
+                    precompile_cache,
+                )),
             true,
         )
     }

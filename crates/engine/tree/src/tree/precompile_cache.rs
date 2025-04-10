@@ -24,7 +24,7 @@ type PrecompileLRUCache = Cache<(SpecId, Bytes, u64), Result<InterpreterResult, 
 /// NOTE: This does not work with "context stateful precompiles", ie `ContextStatefulPrecompile` or
 /// `ContextStatefulPrecompileMut`. They are explicitly banned.
 #[derive(Debug, Default)]
-struct PrecompileCache {
+pub struct PrecompileCache {
     /// Caches for each precompile input / output.
     cache: DashMap<Address, PrecompileLRUCache>,
 }
@@ -41,9 +41,9 @@ pub struct CachedPrecompileProvider<P> {
 }
 
 impl<P> CachedPrecompileProvider<P> {
-    /// Given a [`PrecompileProvider`] create a cached wrapper that can be used inside Evm.
-    pub fn new(precompile_provider: P) -> Self {
-        let cache = Arc::new(Default::default());
+    /// Given a [`PrecompileProvider`]  and cache for a specific precompile provider,
+    /// create a cached wrapper that can be used inside Evm.
+    pub fn new(precompile_provider: P, cache: Arc<PrecompileCache>) -> Self {
         Self { precompile_provider, cache, spec: SpecId::default() }
     }
 }
