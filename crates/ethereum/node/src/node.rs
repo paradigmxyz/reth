@@ -14,6 +14,7 @@ use reth_evm::{
     execute::BasicBlockExecutorProvider, ConfigureEvm, EvmFactory, EvmFactoryFor,
     NextBlockEnvAttributes,
 };
+use reth_evm_ethereum::CachedPrecompileEthEvmFactory;
 use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, TxTy};
 use reth_node_builder::{
@@ -304,7 +305,7 @@ where
     Node: FullNodeTypes<Types = Types>,
 {
     type EVM = EthEvmConfig;
-    type Executor = BasicBlockExecutorProvider<EthEvmConfig>;
+    type Executor = BasicBlockExecutorProvider<Self::EVM>;
 
     async fn build_evm(
         self,
@@ -312,6 +313,34 @@ where
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
         let evm_config = EthEvmConfig::new(ctx.chain_spec())
             .with_extra_data(ctx.payload_builder_config().extra_data_bytes());
+        let executor = BasicBlockExecutorProvider::new(evm_config.clone());
+
+        Ok((evm_config, executor))
+    }
+}
+
+/// An ethereum evm and executor builder with cached precompiles.
+#[derive(Debug, Default, Clone, Copy)]
+#[non_exhaustive]
+pub struct CachedPrecompileEthereumExecutorBuilder;
+
+impl<Types, Node> ExecutorBuilder<Node> for CachedPrecompileEthereumExecutorBuilder
+where
+    Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
+    Node: FullNodeTypes<Types = Types>,
+{
+    type EVM = EthEvmConfig<CachedPrecompileEthEvmFactory>;
+    type Executor = BasicBlockExecutorProvider<Self::EVM>;
+
+    async fn build_evm(
+        self,
+        ctx: &BuilderContext<Node>,
+    ) -> eyre::Result<(Self::EVM, Self::Executor)> {
+        let evm_config = EthEvmConfig::new_with_evm_factory(
+            ctx.chain_spec(),
+            CachedPrecompileEthEvmFactory::default(),
+        )
+        .with_extra_data(ctx.payload_builder_config().extra_data_bytes());
         let executor = BasicBlockExecutorProvider::new(evm_config.clone());
 
         Ok((evm_config, executor))
