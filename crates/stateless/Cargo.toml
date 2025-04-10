@@ -11,6 +11,9 @@ exclude.workspace = true
 [lints]
 workspace = true
 
+[features]
+ef-tests = ["dep:alloy-eips"]
+
 [dependencies]
 # alloy
 alloy-primitives.workspace = true
@@ -18,6 +21,7 @@ alloy-rlp.workspace = true
 alloy-trie.workspace = true
 alloy-rpc-types-debug.workspace = true
 alloy-consensus.workspace = true
+alloy-eips = { workspace = true, optional = true }
 
 # reth
 reth-ethereum-consensus.workspace = true
