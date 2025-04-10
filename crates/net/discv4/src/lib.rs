@@ -2547,7 +2547,6 @@ mod tests {
             enr_sq: Some(rng.gen()),
         };
 
-        // let id = PeerId::random_with(&mut rng);
         let id = PeerId::random();
         service.on_ping(ping, addr, id, B256::random());
 
@@ -2580,9 +2579,7 @@ mod tests {
             enr_sq: Some(rng.gen()),
         };
 
-        // let id = PeerId::random_with(&mut rng);
         let id = PeerId::random();
-        // service.on_ping(ping, addr, id, rng.gen());
         service.on_ping(ping, addr, id, B256::random());
 
         let key = kad_key(id);
