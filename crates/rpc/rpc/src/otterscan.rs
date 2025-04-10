@@ -14,7 +14,6 @@ use alloy_rpc_types_trace::{
 use async_trait::async_trait;
 use futures::{stream::FuturesUnordered, StreamExt};
 use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
-use reth_provider::BlockReader;
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
@@ -22,6 +21,7 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{utils::binary_search, EthApiError};
 use reth_rpc_server_types::result::internal_rpc_err;
+use reth_storage_api::BlockReader;
 use revm::context_interface::result::ExecutionResult;
 use revm_inspectors::{
     tracing::{types::CallTraceNode, TracingInspectorConfig},
@@ -357,7 +357,7 @@ where
             let blocks = self
                 .eth
                 .provider()
-                .sealed_block_with_senders_range(start..=end)
+                .recovered_block_range(start..=end)
                 .map_err(|_| EthApiError::HeaderRangeNotFound(start.into(), end.into()))?
                 .into_iter()
                 .map(Arc::new)
@@ -553,7 +553,7 @@ where
             let blocks = self
                 .eth
                 .provider()
-                .sealed_block_with_senders_range(start..=end)
+                .recovered_block_range(start..=end)
                 .map_err(|_| EthApiError::HeaderRangeNotFound(start.into(), end.into()))?
                 .into_iter()
                 .map(Arc::new)
