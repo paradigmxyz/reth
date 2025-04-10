@@ -153,7 +153,7 @@ impl<'a> IntoFuture for CheckAccessListRequest<'a> {
                 ),
             )
             .await
-            .map_err(|_| InteropTxValidatorError::ValidationTimeout(timeout.as_secs()))?
+            .map_err(|_| InteropTxValidatorError::Timeout(timeout.as_secs()))?
             .map_err(InteropTxValidatorError::client)
         })
     }
