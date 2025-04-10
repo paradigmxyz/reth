@@ -45,7 +45,7 @@ pub struct EngineArgs {
     #[arg(long = "engine.max-proof-task-concurrency", default_value_t = DEFAULT_MAX_PROOF_TASK_CONCURRENCY)]
     pub max_proof_task_concurrency: u64,
 
-    /// Enable precompila cache
+    /// Enable precompile cache
     #[arg(long = "engine.precompile-cache", default_value = "false")]
     pub precompile_cache_enabled: bool,
 }
