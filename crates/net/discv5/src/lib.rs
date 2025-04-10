@@ -348,10 +348,9 @@ impl Discv5 {
             IpMode::Ip6 => enr.tcp6(),
             IpMode::DualStack => unimplemented!("dual-stack support not implemented for rlpx"),
         })
-        .unwrap_or(
+        .unwrap_or_else(||
             // tcp socket is missing from ENR, or is wrong IP version
-            socket.port(),
-        );
+            socket.port());
 
         Ok(NodeRecord { address: socket.ip(), tcp_port, udp_port: socket.port(), id })
     }

@@ -1,7 +1,5 @@
 //! Errors interfacing with [`discv5::Discv5`].
 
-use discv5::IpMode;
-
 /// Errors interfacing with [`discv5::Discv5`].
 #[derive(thiserror::Error, Debug)]
 pub enum Error {

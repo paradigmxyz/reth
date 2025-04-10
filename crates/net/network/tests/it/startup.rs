@@ -72,7 +72,7 @@ async fn test_discovery_addr_in_use() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_discv4_socket_precedence_over_discv5() {
+async fn test_discv5_and_discv4_same_socket_fails() {
     let secret_key = SecretKey::new(&mut rand::thread_rng());
     let config = NetworkConfigBuilder::eth(secret_key)
         .listener_port(DEFAULT_DISCOVERY_PORT)
@@ -96,7 +96,7 @@ async fn test_discv4_socket_precedence_over_discv5() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_discv5_and_rlpx_same_socket_without_discv4() {
+async fn test_discv5_and_rlpx_same_socket_ok_without_discv4() {
     let secret_key = SecretKey::new(&mut rand::thread_rng());
     let config = NetworkConfigBuilder::eth(secret_key)
         .listener_port(DEFAULT_DISCOVERY_PORT)
@@ -113,7 +113,7 @@ async fn test_discv5_and_rlpx_same_socket_without_discv4() {
         )
         .disable_dns_discovery()
         .build(NoopProvider::default());
-    let _ = NetworkManager::new(config).await.unwrap();
+    let _network = NetworkManager::new(config).await.expect("should build");
 }
 
 // <https://github.com/paradigmxyz/reth/issues/8851>
