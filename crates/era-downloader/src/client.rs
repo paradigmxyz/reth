@@ -52,29 +52,28 @@ impl EraClient {
         Ok(path.into_boxed_path())
     }
 
-    async fn next_url(&self) -> Option<Url> {
+    /// Returns a url for the next file to download.
+    pub async fn next_url(&self) -> Option<Url> {
         let mut max = None;
 
-        while let Ok(mut dir) = fs::read_dir(&self.folder).await {
-            while let Ok(entry) = dir.next_entry().await {
-                if let Some(entry) = entry {
-                    if let Some(name) = entry.file_name().to_str() {
-                        if let Some(number) = self.file_name_to_number(name) {
-                            if max.is_none() || number > max.unwrap() {
-                                max.replace(number);
-                            }
+        if let Ok(mut dir) = fs::read_dir(&self.folder).await {
+            while let Ok(Some(entry)) = dir.next_entry().await {
+                if let Some(name) = entry.file_name().to_str() {
+                    if let Some(number) = self.file_name_to_number(name) {
+                        if max.is_none() || number > max.unwrap() {
+                            max.replace(number);
                         }
                     }
                 }
             }
         }
 
-        let number = max.unwrap_or(0);
+        let number = max.map(|v| v + 1).unwrap_or(0);
 
         self.number_to_file_name(number)
             .await
             .unwrap()
-            .map(|name| Url::from_str(&name))
+            .map(|name| self.url.join(&name))
             .transpose()
             .unwrap()
     }
@@ -175,7 +174,6 @@ impl Stream for DownloadStream {
 #[pin_project]
 struct StartingStream {
     client: EraClient,
-    filler: Pin<Box<dyn Future<Output = ()>>>,
     downloading: usize,
     files_count: Pin<Box<dyn Future<Output = usize> + Send + Sync + 'static>>,
     next_url: Pin<Box<dyn Future<Output = Option<Url>> + Send + Sync + 'static>>,

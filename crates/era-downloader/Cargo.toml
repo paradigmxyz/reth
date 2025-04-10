@@ -11,7 +11,8 @@ exclude.workspace = true
 [dependencies]
 # http
 reqwest.workspace = true
-reqwest.features = ["stream", "rustls-tls"]
+reqwest.default-features = false
+reqwest.features = ["stream", "rustls-tls-native-roots"]
 
 # async
 pin-project.workspace = true
