@@ -1,3 +1,4 @@
+use alloc::sync::Arc;
 use reth_evm::{
     eth::EthEvmContext, CachedPrecompileProvider, Database, EthEvm, EvmEnv, EvmFactory,
     PrecompileCache,
@@ -12,7 +13,6 @@ use revm::{
     primitives::hardfork::SpecId,
     Context, Inspector, MainBuilder, MainContext,
 };
-use std::sync::Arc;
 
 /// Factory producing [`CachedPrecompileEthEvm`].
 #[derive(Debug, Default, Clone)]
