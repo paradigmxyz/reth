@@ -1,8 +1,8 @@
-.\" Copyright 2015-2024 Leonid Yuriev <leo@yuriev.ru>.
+.\" Copyright 2015-2025 Leonid Yuriev <leo@yuriev.ru>.
 .\" Copyright 2015,2016 Peter-Service R&D LLC <http://billing.ru/>.
 .\" Copyright 2012-2015 Howard Chu, Symas Corp. All Rights Reserved.
 .\" Copying restrictions apply.  See COPYRIGHT/LICENSE.
-.TH MDBX_COPY 1 "2024-03-13" "MDBX 0.12.10"
+.TH MDBX_COPY 1 "2024-08-29" "MDBX 0.13"
 .SH NAME
 mdbx_copy \- MDBX environment copy tool
 .SH SYNOPSIS
@@ -13,6 +13,10 @@ mdbx_copy \- MDBX environment copy tool
 .BR \-q ]
 [\c
 .BR \-c ]
+[\c
+.BR \-d ]
+[\c
+.BR \-p ]
 [\c
 .BR \-n ]
 .B src_path
@@ -44,6 +48,22 @@ Compact while copying. Only current data pages will be copied; freed
 or unused pages will be omitted from the copy. This option will
 slow down the backup process as it is more CPU-intensive.
 Currently it fails if the environment has suffered a page leak.
+.TP
+.BR \-d
+Alters geometry to enforce the copy to be a dynamic size DB,
+which could be growth and shrink by reasonable steps on the fly.
+.TP
+.BR \-p
+Use read transaction parking/ousting during copying MVCC-snapshot.
+This allows the writing transaction to oust the read
+transaction used to copy the database if copying takes so long
+that it will interfere with the recycling old MVCC snapshots
+and may lead to an overflow of the database.
+However, if the reading transaction is ousted the copy will
+be aborted until successful completion. Thus, this option
+allows copy the database without interfering with write
+transactions and a threat of database overflow, but at the cost
+that copying will be aborted to prevent such conditions.
 .TP
 .BR \-u
 Warms up the DB before copying via notifying OS kernel of subsequent access to the database pages.
