@@ -1,3 +1,4 @@
+#![warn(clippy::iter_over_hash_type)]
 //! Era and Era1 files support for Ethereum history expiry.
 //!
 //!
