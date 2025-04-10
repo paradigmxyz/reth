@@ -203,7 +203,9 @@ pub enum InvalidPoolTransactionError {
     /// respect the tx fee exceeds the configured cap
     #[error("tx fee ({fee_eth:.2} ether) exceeds the configured cap ({cap_eth:.2} ether)")]
     ExceedsFeeCap {
+        /// new tx fee
         fee_eth: f64,
+        /// configured fee cap
         cap_eth: f64,
     },
     /// Thrown when a new transaction is added to the pool, but then immediately discarded to
