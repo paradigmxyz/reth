@@ -409,6 +409,7 @@ where
                     ctx.task_executor().clone(),
                     reth_transaction_pool::maintain::MaintainPoolConfig {
                         max_tx_lifetime: transaction_pool.config().max_queued_lifetime,
+                        no_local_exemptions: false,
                         ..Default::default()
                     },
                 ),
