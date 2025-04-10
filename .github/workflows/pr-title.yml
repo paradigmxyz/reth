@@ -1,0 +1,81 @@
+name: Pull Request
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - edited
+      - synchronize
+
+permissions:
+  pull-requests: read
+  contents: read
+
+jobs:
+  conventional-title:
+    name: Validate PR title is Conventional Commit
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Check title
+        id: lint_pr_title
+        uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            fix
+            feat
+            chore
+            test
+            perf
+            refactor
+            docs
+            ci
+            revert
+        continue-on-error: true
+      - name: Add PR Comment for Invalid Title
+        if: steps.lint_pr_title.outcome == 'failure'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: pr-title-lint-error
+          message: |
+            Your PR title doesn't follow the Conventional Commit guidelines.
+
+            **Example of valid titles:**
+            - `feat: add new user login`
+            - `fix: correct button size`
+            - `docs: update README`
+
+            **Usage:**
+            - `feat`: Introduces a new feature
+            - `fix`: Patches a bug
+            - `chore`: General maintenance tasks or updates
+            - `test`: Adding new tests or modifying existing tests
+            - `perf`: Performance improvements
+            - `refactor`: Changes to improve code structure
+            - `docs`: Documentation updates
+            - `ci`: Changes to CI/CD configurations
+            
+            **Breaking Changes**
+
+            Breaking changes are noted by using an exclamation mark. For example:
+            - `feat!: changed the API`
+            - `chore(node)!: Removed unused public function`
+            
+            **Help**
+
+            For more information, follow the guidelines here: https://www.conventionalcommits.org/en/v1.0.0/
+      
+      - name: Remove Comment for Valid Title
+        if: steps.lint_pr_title.outcome == 'success'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: pr-title-lint-error
+          delete: true
+
+      - name: Fail workflow if title invalid
+        if: steps.lint_pr_title.outcome == 'failure'
+        run: exit 1

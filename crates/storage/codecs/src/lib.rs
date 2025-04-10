@@ -762,7 +762,6 @@ mod tests {
     }
 
     #[cfg(test)]
-    #[allow(dead_code)]
     #[test_fuzz::test_fuzz]
     fn compact_test_enum_all_variants(var0: TestEnum, var1: TestEnum, var2: TestEnum) {
         let mut buf = vec![];

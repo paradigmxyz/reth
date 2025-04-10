@@ -176,7 +176,6 @@ where
     N: NodePrimitives,
 {
     /// Create a new instance of the builder
-    #[allow(clippy::too_many_arguments)]
     pub const fn new(
         provider: Provider,
         pool: Pool,
@@ -1632,7 +1631,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                 .http_only()
                 .set_http_middleware(
                     tower::ServiceBuilder::new()
-                        .option_layer(Self::maybe_cors_layer(self.ws_cors_domains.clone())?)
+                        .option_layer(Self::maybe_cors_layer(self.http_cors_domains.clone())?)
                         .option_layer(Self::maybe_jwt_layer(self.jwt_secret))
                         .option_layer(Self::maybe_compression_layer()),
                 )
@@ -1945,14 +1944,14 @@ impl TransportRpcModules {
 
     /// Returns all unique endpoints installed for the given module.
     ///
-    /// Note: In case of duplicate method names this only record the first occurrance.
+    /// Note: In case of duplicate method names this only record the first occurrence.
     pub fn methods_by_module<F>(&self, module: RethRpcModule) -> Methods {
         self.methods_by(|name| name.starts_with(module.as_str()))
     }
 
     /// Returns all unique endpoints installed in any of the configured modules.
     ///
-    /// Note: In case of duplicate method names this only record the first occurrance.
+    /// Note: In case of duplicate method names this only record the first occurrence.
     pub fn methods_by<F>(&self, mut filter: F) -> Methods
     where
         F: FnMut(&str) -> bool,

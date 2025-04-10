@@ -566,7 +566,6 @@ where
 {
     provider: P,
     executor_provider: E,
-    evm_config: C,
     consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
     payload_validator: V,
     /// Keeps track of internals such as executed and buffered blocks.
@@ -616,7 +615,6 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineApiTreeHandler")
             .field("provider", &self.provider)
-            .field("evm_config", &self.evm_config)
             .field("executor_provider", &self.executor_provider)
             .field("consensus", &self.consensus)
             .field("payload_validator", &self.payload_validator)
@@ -673,12 +671,11 @@ where
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
 
         let payload_processor =
-            PayloadProcessor::new(WorkloadExecutor::default(), evm_config.clone(), &config);
+            PayloadProcessor::new(WorkloadExecutor::default(), evm_config, &config);
 
         Self {
             provider,
             executor_provider,
-            evm_config,
             consensus,
             payload_validator,
             incoming,
@@ -2531,7 +2528,8 @@ where
             maybe_state_root
         } else {
             // fallback is to compute the state root regularly in sync
-            debug!(target: "engine::tree", block=?block_num_hash, ?persisting_kind, "Failed to compute state root in parallel");
+            warn!(target: "engine::tree", block=?block_num_hash, ?persisting_kind, "Failed to compute state root in parallel");
+            self.metrics.block_validation.state_root_parallel_fallback_total.increment(1);
             let (root, updates) = state_provider.state_root_with_updates(hashed_state.clone())?;
             (root, updates, root_time.elapsed())
         };
@@ -3080,7 +3078,6 @@ mod tests {
     /// This is a test channel that allows you to `release` any value that is in the channel.
     ///
     /// If nothing has been sent, then the next value will be immediately sent.
-    #[allow(dead_code)]
     struct TestChannel<T> {
         /// If an item is sent to this channel, an item will be released in the wrapped channel
         release: Receiver<()>,
@@ -3092,7 +3089,6 @@ mod tests {
 
     impl<T: Send + 'static> TestChannel<T> {
         /// Creates a new test channel
-        #[allow(dead_code)]
         fn spawn_channel() -> (Sender<T>, Receiver<T>, TestChannelHandle) {
             let (original_tx, original_rx) = channel();
             let (wrapped_tx, wrapped_rx) = channel();
@@ -3156,7 +3152,7 @@ mod tests {
             Self::with_persistence_channel(chain_spec, action_tx, action_rx)
         }
 
-        #[allow(dead_code)]
+        #[expect(dead_code)]
         fn with_test_channel(chain_spec: Arc<ChainSpec>) -> (Self, TestChannelHandle) {
             let (action_tx, action_rx, handle) = TestChannel::spawn_channel();
             (Self::with_persistence_channel(chain_spec, action_tx, action_rx), handle)

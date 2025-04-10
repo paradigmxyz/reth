@@ -11,7 +11,7 @@ use alloy_eips::{
     eip2930::AccessList,
     eip7702::SignedAuthorization,
 };
-use alloy_evm::FromRecoveredTx;
+use alloy_evm::{FromRecoveredTx, FromTxWithEncoded};
 use alloy_primitives::{
     bytes::BufMut, keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash,
     TxKind, B256, U256,
@@ -355,6 +355,11 @@ impl TransactionSigned {
     fn recalculate_hash(&self) -> B256 {
         keccak256(self.encoded_2718())
     }
+
+    /// Returns the signature of the transaction
+    pub fn signature(&self) -> &Signature {
+        &self.signature
+    }
 }
 
 impl Hash for TransactionSigned {
@@ -394,12 +399,6 @@ impl TransactionSigned {
     #[inline]
     pub fn hash(&self) -> &B256 {
         self.hash.get_or_init(|| self.recalculate_hash())
-    }
-
-    /// Returns the transaction signature.
-    #[inline]
-    pub const fn signature(&self) -> &Signature {
-        &self.signature
     }
 
     /// Creates a new signed transaction from the given transaction and signature without the hash.
@@ -618,7 +617,7 @@ impl From<TransactionSigned> for Signed<Transaction> {
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        #[allow(unused_mut)]
+        #[expect(unused_mut)]
         let mut transaction = Transaction::arbitrary(u)?;
 
         let secp = secp256k1::Secp256k1::new();
@@ -888,13 +887,21 @@ impl FromRecoveredTx<TransactionSigned> for TxEnv {
     }
 }
 
+impl FromTxWithEncoded<TransactionSigned> for TxEnv {
+    fn from_encoded_tx(tx: &TransactionSigned, sender: Address, encoded: Bytes) -> Self {
+        match &tx.transaction {
+            Transaction::Legacy(tx) => Self::from_encoded_tx(tx, sender, encoded),
+            Transaction::Eip2930(tx) => Self::from_encoded_tx(tx, sender, encoded),
+            Transaction::Eip1559(tx) => Self::from_encoded_tx(tx, sender, encoded),
+            Transaction::Eip4844(tx) => Self::from_encoded_tx(tx, sender, encoded),
+            Transaction::Eip7702(tx) => Self::from_encoded_tx(tx, sender, encoded),
+        }
+    }
+}
+
 impl SignedTransaction for TransactionSigned {
     fn tx_hash(&self) -> &TxHash {
         self.hash.get_or_init(|| self.recalculate_hash())
-    }
-
-    fn signature(&self) -> &Signature {
-        &self.signature
     }
 
     fn recover_signer(&self) -> Result<Address, RecoveryError> {
@@ -1141,7 +1148,7 @@ mod tests {
         // Block number: 46170
         let raw_tx = hex!("f86d8085746a52880082520894c93f2250589a6563f5359051c1ea25746549f0d889208686e75e903bc000801ba034b6fdc33ea520e8123cf5ac4a9ff476f639cab68980cd9366ccae7aef437ea0a0e517caa5f50e27ca0d1e9a92c503b4ccb039680c6d9d0c71203ed611ea4feb33");
         let tx = TransactionSigned::decode_2718(&mut &raw_tx[..]).unwrap();
-        let signature = tx.signature();
+        let signature = &tx.signature;
 
         // make sure we know it's greater than SECP256K1N_HALF
         assert!(signature.s() > SECP256K1N_HALF);

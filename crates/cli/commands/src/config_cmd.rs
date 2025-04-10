@@ -1,11 +1,9 @@
 //! CLI command to show configs.
 
-use std::path::PathBuf;
-
 use clap::Parser;
 use eyre::{bail, WrapErr};
 use reth_config::Config;
-
+use std::path::PathBuf;
 /// `reth config` command
 #[derive(Debug, Parser)]
 pub struct Command {

@@ -16,21 +16,21 @@ use alloy_primitives::Address;
 use alloy_rpc_types_eth::{state::EvmOverrides, TransactionRequest};
 use clap::Parser;
 use futures_util::StreamExt;
-use reth::{
-    builder::NodeHandle,
-    chainspec::EthereumChainSpecParser,
-    cli::Cli,
-    revm::{
-        bytecode::opcode::OpCode,
-        context_interface::ContextTr,
-        inspector::Inspector,
-        interpreter::{interpreter::EthInterpreter, interpreter_types::Jumps, Interpreter},
+use reth::{builder::NodeHandle, chainspec::EthereumChainSpecParser, cli::Cli};
+use reth_ethereum::{
+    evm::{
+        primitives::ConfigureEvm,
+        revm::revm::{
+            bytecode::opcode::OpCode,
+            context_interface::ContextTr,
+            inspector::Inspector,
+            interpreter::{interpreter::EthInterpreter, interpreter_types::Jumps, Interpreter},
+        },
     },
+    node::EthereumNode,
+    pool::TransactionPool,
     rpc::api::eth::helpers::Call,
-    transaction_pool::TransactionPool,
 };
-use reth_evm::ConfigureEvm;
-use reth_node_ethereum::node::EthereumNode;
 
 fn main() {
     Cli::<EthereumChainSpecParser, RethCliTxpoolExt>::parse()

@@ -1,7 +1,7 @@
 use futures_util::Future;
 use reth::tasks::TaskSpawner;
 use reth_basic_payload_builder::{HeaderForPayload, PayloadBuilder, PayloadConfig};
-use reth_node_api::PayloadKind;
+use reth_ethereum::node::api::PayloadKind;
 use reth_payload_builder::{KeepPayloadJobAlive, PayloadBuilderError, PayloadJob};
 
 use std::{

@@ -1,9 +1,9 @@
 //! Optimism-specific implementation and utilities for the executor
 
-use crate::{error::L1BlockInfoError, OpBlockExecutionError};
+use crate::{error::L1BlockInfoError, revm_spec_by_timestamp_after_bedrock, OpBlockExecutionError};
 use alloy_consensus::Transaction;
 use alloy_primitives::{hex, U256};
-use op_revm::{L1BlockInfo, OpSpecId};
+use op_revm::L1BlockInfo;
 use reth_execution_errors::BlockExecutionError;
 use reth_optimism_forks::OpHardforks;
 use reth_primitives_traits::BlockBody;
@@ -13,9 +13,6 @@ const L1_BLOCK_ECOTONE_SELECTOR: [u8; 4] = hex!("440a5e20");
 
 /// The function selector of the "setL1BlockValuesIsthmus" function in the `L1Block` contract.
 const L1_BLOCK_ISTHMUS_SELECTOR: [u8; 4] = hex!("098999be");
-
-/// The function selector of the "setL1BlockValuesInterop" function in the `L1Block` contract.
-const L1_BLOCK_INTEROP_SELECTOR: [u8; 4] = hex!("760ee04d");
 
 /// Extracts the [`L1BlockInfo`] from the L2 block. The L1 info transaction is always the first
 /// transaction in the L2 block.
@@ -54,13 +51,12 @@ pub fn extract_l1_info_from_tx<T: Transaction>(
 /// # Panics
 /// If the input is shorter than 4 bytes.
 pub fn parse_l1_info(input: &[u8]) -> Result<L1BlockInfo, OpBlockExecutionError> {
-    // If the first 4 bytes of the calldata are the L1BlockInfoEcotone selector, then we parse the
-    // calldata as an Ecotone hardfork L1BlockInfo transaction. Otherwise, we parse it as a
-    // Bedrock hardfork L1BlockInfo transaction.
-    if input[0..4] == L1_BLOCK_INTEROP_SELECTOR {
-        // TODO: update once interop is compatible with isthmus, for now it only works with ecotone: <https://github.com/paradigmxyz/reth/pull/14869/files#r1987107404>
-        parse_l1_info_tx_ecotone(input[4..].as_ref())
-    } else if input[0..4] == L1_BLOCK_ISTHMUS_SELECTOR {
+    // Parse the L1 info transaction into an L1BlockInfo struct, depending on the function selector.
+    // There are currently 3 variants:
+    // - Isthmus
+    // - Ecotone
+    // - Bedrock
+    if input[0..4] == L1_BLOCK_ISTHMUS_SELECTOR {
         parse_l1_info_tx_isthmus(input[4..].as_ref())
     } else if input[0..4] == L1_BLOCK_ECOTONE_SELECTOR {
         parse_l1_info_tx_ecotone(input[4..].as_ref())
@@ -230,7 +226,6 @@ pub trait RethL1BlockInfo {
         &mut self,
         chain_spec: impl OpHardforks,
         timestamp: u64,
-        block: u64,
         input: &[u8],
         is_deposit: bool,
     ) -> Result<U256, BlockExecutionError>;
@@ -245,7 +240,6 @@ pub trait RethL1BlockInfo {
         &self,
         chain_spec: impl OpHardforks,
         timestamp: u64,
-        block_number: u64,
         input: &[u8],
     ) -> Result<U256, BlockExecutionError>;
 }
@@ -255,7 +249,6 @@ impl RethL1BlockInfo for L1BlockInfo {
         &mut self,
         chain_spec: impl OpHardforks,
         timestamp: u64,
-        block_number: u64,
         input: &[u8],
         is_deposit: bool,
     ) -> Result<U256, BlockExecutionError> {
@@ -263,19 +256,7 @@ impl RethL1BlockInfo for L1BlockInfo {
             return Ok(U256::ZERO);
         }
 
-        let spec_id = if chain_spec.is_fjord_active_at_timestamp(timestamp) {
-            OpSpecId::FJORD
-        } else if chain_spec.is_ecotone_active_at_timestamp(timestamp) {
-            OpSpecId::ECOTONE
-        } else if chain_spec.is_regolith_active_at_timestamp(timestamp) {
-            OpSpecId::REGOLITH
-        } else if chain_spec.is_bedrock_active_at_block(block_number) {
-            OpSpecId::BEDROCK
-        } else {
-            return Err(
-                OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::HardforksNotActive).into()
-            );
-        };
+        let spec_id = revm_spec_by_timestamp_after_bedrock(&chain_spec, timestamp);
         Ok(self.calculate_tx_l1_cost(input, spec_id))
     }
 
@@ -283,20 +264,9 @@ impl RethL1BlockInfo for L1BlockInfo {
         &self,
         chain_spec: impl OpHardforks,
         timestamp: u64,
-        block_number: u64,
         input: &[u8],
     ) -> Result<U256, BlockExecutionError> {
-        let spec_id = if chain_spec.is_fjord_active_at_timestamp(timestamp) {
-            OpSpecId::FJORD
-        } else if chain_spec.is_regolith_active_at_timestamp(timestamp) {
-            OpSpecId::REGOLITH
-        } else if chain_spec.is_bedrock_active_at_block(block_number) {
-            OpSpecId::BEDROCK
-        } else {
-            return Err(
-                OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::HardforksNotActive).into()
-            );
-        };
+        let spec_id = revm_spec_by_timestamp_after_bedrock(&chain_spec, timestamp);
         Ok(self.data_gas(input, spec_id))
     }
 }

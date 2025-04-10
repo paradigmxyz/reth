@@ -41,14 +41,14 @@ pub const DEFAULT_DISCOVERY_V5_LISTEN_CONFIG: ListenConfig =
 
 /// Default interval in seconds at which to run a lookup up query.
 ///
-/// Default is 60 seconds.
-pub const DEFAULT_SECONDS_LOOKUP_INTERVAL: u64 = 60;
+/// Default is 20 seconds.
+pub const DEFAULT_SECONDS_LOOKUP_INTERVAL: u64 = 20;
 
 /// Default number of times to do pulse lookup queries, at bootstrap (pulse intervals, defaulting
 /// to 5 seconds).
 ///
-/// Default is 100 counts.
-pub const DEFAULT_COUNT_BOOTSTRAP_LOOKUPS: u64 = 100;
+/// Default is 200 counts.
+pub const DEFAULT_COUNT_BOOTSTRAP_LOOKUPS: u64 = 200;
 
 /// Default duration of the pulse lookup interval at bootstrap.
 ///

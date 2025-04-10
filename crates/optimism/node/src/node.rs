@@ -18,7 +18,7 @@ use reth_node_builder::{
         BasicPayloadServiceBuilder, ComponentsBuilder, ConsensusBuilder, ExecutorBuilder,
         NetworkBuilder, PayloadBuilderBuilder, PoolBuilder, PoolBuilderConfigOverrides,
     },
-    node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
+    node::{FullNodeTypes, NodeTypes},
     rpc::{
         EngineValidatorAddOn, EngineValidatorBuilder, EthApiBuilder, RethRpcAddOns, RpcAddOns,
         RpcHandle,
@@ -103,7 +103,7 @@ impl OpNode {
     >
     where
         Node: FullNodeTypes<
-            Types: NodeTypesWithEngine<
+            Types: NodeTypes<
                 Payload = OpEngineTypes,
                 ChainSpec = OpChainSpec,
                 Primitives = OpPrimitives,
@@ -171,7 +171,7 @@ impl OpNode {
 impl<N> Node<N> for OpNode
 where
     N: FullNodeTypes<
-        Types: NodeTypesWithEngine<
+        Types: NodeTypes<
             Payload = OpEngineTypes,
             ChainSpec = OpChainSpec,
             Primitives = OpPrimitives,
@@ -227,9 +227,6 @@ impl NodeTypes for OpNode {
     type ChainSpec = OpChainSpec;
     type StateCommitment = MerklePatriciaTrie;
     type Storage = OpStorage;
-}
-
-impl NodeTypesWithEngine for OpNode {
     type Payload = OpEngineTypes;
 }
 
@@ -281,7 +278,7 @@ where
 impl<N> NodeAddOns<N> for OpAddOns<N>
 where
     N: FullNodeComponents<
-        Types: NodeTypesWithEngine<
+        Types: NodeTypes<
             ChainSpec = OpChainSpec,
             Primitives = OpPrimitives,
             Storage = OpStorage,
@@ -360,7 +357,7 @@ where
 impl<N> RethRpcAddOns<N> for OpAddOns<N>
 where
     N: FullNodeComponents<
-        Types: NodeTypesWithEngine<
+        Types: NodeTypes<
             ChainSpec = OpChainSpec,
             Primitives = OpPrimitives,
             Storage = OpStorage,
@@ -382,7 +379,7 @@ where
 impl<N> EngineValidatorAddOn<N> for OpAddOns<N>
 where
     N: FullNodeComponents<
-        Types: NodeTypesWithEngine<
+        Types: NodeTypes<
             ChainSpec = OpChainSpec,
             Primitives = OpPrimitives,
             Payload = OpEngineTypes,
@@ -584,26 +581,35 @@ where
             pool_config_overrides.apply(ctx.pool_config()),
         );
         info!(target: "reth::cli", "Transaction pool initialized");
-        let transactions_path = data_dir.txpool_transactions();
 
         // spawn txpool maintenance tasks
         {
             let pool = transaction_pool.clone();
             let chain_events = ctx.provider().canonical_state_stream();
             let client = ctx.provider().clone();
-            let transactions_backup_config =
-                reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
+            if !ctx.config().txpool.disable_transactions_backup {
+                // Use configured backup path or default to data dir
+                let transactions_path = ctx
+                    .config()
+                    .txpool
+                    .transactions_backup_path
+                    .clone()
+                    .unwrap_or_else(|| data_dir.txpool_transactions());
 
-            ctx.task_executor().spawn_critical_with_graceful_shutdown_signal(
-                "local transactions backup task",
-                |shutdown| {
-                    reth_transaction_pool::maintain::backup_local_transactions_task(
-                        shutdown,
-                        pool.clone(),
-                        transactions_backup_config,
-                    )
-                },
-            );
+                let transactions_backup_config =
+                    reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
+
+                ctx.task_executor().spawn_critical_with_graceful_shutdown_signal(
+                    "local transactions backup task",
+                    |shutdown| {
+                        reth_transaction_pool::maintain::backup_local_transactions_task(
+                            shutdown,
+                            pool.clone(),
+                            transactions_backup_config,
+                        )
+                    },
+                );
+            }
 
             // spawn the main maintenance task
             ctx.task_executor().spawn_critical(
@@ -615,23 +621,39 @@ where
                     ctx.task_executor().clone(),
                     reth_transaction_pool::maintain::MaintainPoolConfig {
                         max_tx_lifetime: pool.config().max_queued_lifetime,
+                        no_local_exemptions: transaction_pool
+                            .config()
+                            .local_transactions_config
+                            .no_exemptions,
                         ..Default::default()
                     },
                 ),
             );
             debug!(target: "reth::cli", "Spawned txpool maintenance task");
 
+            // spawn the Op txpool maintenance task
+            let chain_events = ctx.provider().canonical_state_stream();
+            ctx.task_executor().spawn_critical(
+                "Op txpool interop maintenance task",
+                reth_optimism_txpool::maintain::maintain_transaction_pool_interop_future(
+                    pool.clone(),
+                    chain_events,
+                    supervisor_client,
+                ),
+            );
+            debug!(target: "reth::cli", "Spawned Op interop txpool maintenance task");
+
             if self.enable_tx_conditional {
                 // spawn the Op txpool maintenance task
                 let chain_events = ctx.provider().canonical_state_stream();
                 ctx.task_executor().spawn_critical(
-                    "Op txpool maintenance task",
-                    reth_optimism_txpool::maintain::maintain_transaction_pool_future(
+                    "Op txpool conditional maintenance task",
+                    reth_optimism_txpool::maintain::maintain_transaction_pool_conditional_future(
                         pool,
                         chain_events,
                     ),
                 );
-                debug!(target: "reth::cli", "Spawned Op txpool maintenance task");
+                debug!(target: "reth::cli", "Spawned Op conditional txpool maintenance task");
             }
         }
 
@@ -691,7 +713,7 @@ impl<Txs> OpPayloadBuilder<Txs> {
     ) -> eyre::Result<reth_optimism_payload_builder::OpPayloadBuilder<Pool, Node::Provider, Evm, Txs>>
     where
         Node: FullNodeTypes<
-            Types: NodeTypesWithEngine<
+            Types: NodeTypes<
                 Payload = OpEngineTypes,
                 ChainSpec = OpChainSpec,
                 Primitives = OpPrimitives,
@@ -718,7 +740,7 @@ impl<Txs> OpPayloadBuilder<Txs> {
 impl<Node, Pool, Txs> PayloadBuilderBuilder<Node, Pool> for OpPayloadBuilder<Txs>
 where
     Node: FullNodeTypes<
-        Types: NodeTypesWithEngine<
+        Types: NodeTypes<
             Payload = OpEngineTypes,
             ChainSpec = OpChainSpec,
             Primitives = OpPrimitives,
@@ -854,11 +876,7 @@ pub struct OpEngineValidatorBuilder;
 
 impl<Node, Types> EngineValidatorBuilder<Node> for OpEngineValidatorBuilder
 where
-    Types: NodeTypesWithEngine<
-        ChainSpec = OpChainSpec,
-        Primitives = OpPrimitives,
-        Payload = OpEngineTypes,
-    >,
+    Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives, Payload = OpEngineTypes>,
     Node: FullNodeComponents<Types = Types>,
 {
     type Validator = OpEngineValidator<Node::Provider>;
