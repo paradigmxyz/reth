@@ -3571,12 +3571,9 @@ dependencies = [
  "futures-util",
  "reth",
  "reth-basic-payload-builder",
- "reth-chainspec",
+ "reth-ethereum",
  "reth-ethereum-payload-builder",
- "reth-node-api",
- "reth-node-ethereum",
  "reth-payload-builder",
- "reth-primitives",
  "tracing",
 ]
 
@@ -3589,10 +3586,7 @@ dependencies = [
  "futures",
  "rand 0.9.0",
  "reth",
- "reth-eth-wire",
- "reth-network",
- "reth-network-api",
- "reth-node-ethereum",
+ "reth-ethereum",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -3644,8 +3638,7 @@ version = "0.0.0"
 dependencies = [
  "eyre",
  "futures",
- "reth-network",
- "reth-provider",
+ "reth-ethereum",
  "tokio",
 ]
 
@@ -3655,8 +3648,7 @@ version = "0.0.0"
 dependencies = [
  "eyre",
  "futures",
- "reth-chainspec",
- "reth-network",
+ "reth-ethereum",
  "reth-tracing",
  "tokio",
 ]
@@ -3667,9 +3659,7 @@ version = "0.0.0"
 dependencies = [
  "alloy-consensus",
  "eyre",
- "reth-network",
- "reth-provider",
- "reth-transaction-pool",
+ "reth-ethereum",
  "tokio",
 ]
 
@@ -3680,8 +3670,7 @@ dependencies = [
  "clap",
  "jsonrpsee",
  "reth",
- "reth-node-ethereum",
- "reth-transaction-pool",
+ "reth-ethereum",
  "tokio",
 ]
 
@@ -3690,7 +3679,7 @@ name = "example-node-event-hooks"
 version = "0.0.0"
 dependencies = [
  "reth",
- "reth-node-ethereum",
+ "reth-ethereum",
 ]
 
 [[package]]
@@ -3720,12 +3709,7 @@ dependencies = [
  "eyre",
  "parking_lot",
  "reth",
- "reth-chainspec",
- "reth-evm",
- "reth-node-api",
- "reth-node-core",
- "reth-node-ethereum",
- "reth-primitives",
+ "reth-ethereum",
  "reth-tracing",
  "schnellru",
  "tokio",
@@ -3755,7 +3739,7 @@ dependencies = [
  "clap",
  "futures-util",
  "reth",
- "reth-node-ethereum",
+ "reth-ethereum",
 ]
 
 [[package]]
@@ -7981,6 +7965,7 @@ dependencies = [
  "reth-consensus",
  "reth-consensus-common",
  "reth-db",
+ "reth-eth-wire",
  "reth-ethereum-cli",
  "reth-ethereum-consensus",
  "reth-ethereum-primitives",
@@ -7988,6 +7973,7 @@ dependencies = [
  "reth-evm-ethereum",
  "reth-exex",
  "reth-network",
+ "reth-network-api",
  "reth-node-api",
  "reth-node-core",
  "reth-node-ethereum",
@@ -8824,8 +8810,10 @@ dependencies = [
  "reth-consensus",
  "reth-consensus-common",
  "reth-db",
+ "reth-eth-wire",
  "reth-evm",
  "reth-network",
+ "reth-network-api",
  "reth-node-api",
  "reth-node-core",
  "reth-optimism-chainspec",
@@ -9141,6 +9129,7 @@ dependencies = [
  "alloy-transport-http",
  "async-trait",
  "derive_more 2.0.1",
+ "eyre",
  "jsonrpsee",
  "jsonrpsee-core",
  "jsonrpsee-types",
