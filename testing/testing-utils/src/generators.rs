@@ -1,5 +1,7 @@
 //! Generators for different data structures like block headers, block bodies and ranges of those.
 
+// TODO(rand): update ::random calls after rand_09 migration
+
 use alloy_consensus::{Block, Header, SignableTransaction, Transaction as _, TxLegacy};
 use alloy_eips::{
     eip1898::BlockWithParent,
@@ -7,14 +9,12 @@ use alloy_eips::{
     NumHash,
 };
 use alloy_primitives::{Address, BlockNumber, Bytes, TxKind, B256, B64, U256};
-use rand::{rngs::StdRng, SeedableRng};
+pub use rand::Rng;
+use rand::{distr::uniform::SampleRange, rngs::StdRng, SeedableRng};
 use reth_primitives::{
     Account, BlockBody, Log, Receipt, SealedBlock, SealedHeader, StorageEntry, Transaction,
     TransactionSigned,
 };
-
-use rand::distr::uniform::SampleRange;
-pub use rand::Rng;
 use reth_primitives_traits::{crypto::secp256k1::sign_message, proofs, Block as _};
 use secp256k1::{Keypair, Secp256k1};
 use std::{
