@@ -172,9 +172,13 @@ where
 ///  * `parent_beacon_block_root` exists as a header field
 ///  * `blob_gas_used` is a multiple of `DATA_GAS_PER_BLOB`
 ///  * `excess_blob_gas` is a multiple of `DATA_GAS_PER_BLOB`
+///  * `blob_gas_used` doesn't exceed the max allowed blob gas based on the given params
 ///
 /// Note: This does not enforce any restrictions on `blob_gas_used`
-pub fn validate_4844_header_standalone<H: BlockHeader>(header: &H) -> Result<(), ConsensusError> {
+pub fn validate_4844_header_standalone<H: BlockHeader>(
+    header: &H,
+    blob_params: BlobParams,
+) -> Result<(), ConsensusError> {
     let blob_gas_used = header.blob_gas_used().ok_or(ConsensusError::BlobGasUsedMissing)?;
     let excess_blob_gas = header.excess_blob_gas().ok_or(ConsensusError::ExcessBlobGasMissing)?;
 
@@ -195,6 +199,13 @@ pub fn validate_4844_header_standalone<H: BlockHeader>(header: &H) -> Result<(),
         return Err(ConsensusError::ExcessBlobGasNotMultipleOfBlobGasPerBlob {
             excess_blob_gas,
             blob_gas_per_blob: DATA_GAS_PER_BLOB,
+        })
+    }
+
+    if blob_gas_used > blob_params.max_blob_gas_per_block() {
+        return Err(ConsensusError::BlobGasUsedExceedsMaxBlobGasPerBlock {
+            blob_gas_used,
+            max_blob_gas_per_block: blob_params.max_blob_gas_per_block(),
         })
     }
 
