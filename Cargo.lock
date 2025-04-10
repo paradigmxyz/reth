@@ -3564,7 +3564,7 @@ name = "example-node-event-hooks"
 version = "0.0.0"
 dependencies = [
  "reth",
- "reth-node-ethereum",
+ "reth-ethereum",
 ]
 
 [[package]]
