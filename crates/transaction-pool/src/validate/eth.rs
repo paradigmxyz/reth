@@ -299,23 +299,25 @@ where
             )
         }
 
-        match self.tx_fee_cap {
-            Some(0) | None => {} // Skip if cap is 0 or None
-            Some(cap) => {
-                let max_fee_per_gas = if transaction.is_dynamic_fee() {
-                    transaction.max_fee_per_gas()
-                } else {
-                    transaction.gas_price().unwrap_or(0)
-                };
+        if self.local_transactions_config.is_local(origin, transaction.sender_ref()) {
+            match self.tx_fee_cap {
+                Some(0) | None => {} // Skip if cap is 0 or None
+                Some(cap) => {
+                    let max_fee_per_gas = if transaction.is_dynamic_fee() {
+                        transaction.max_fee_per_gas()
+                    } else {
+                        transaction.gas_price().unwrap_or(0)
+                    };
 
-                let fee = max_fee_per_gas * (transaction.gas_limit() as u128);
-                if fee > cap {
-                    let fee_eth = fee as f64 / 1e18;
-                    let cap_eth = cap as f64 / 1e18;
-                    return TransactionValidationOutcome::Invalid(
-                        transaction,
-                        InvalidPoolTransactionError::ExceedsFeeCap { fee_eth, cap_eth },
-                    );
+                    let fee = max_fee_per_gas * (transaction.gas_limit() as u128);
+                    if fee > cap {
+                        let fee_eth = fee as f64 / 1e18;
+                        let cap_eth = cap as f64 / 1e18;
+                        return TransactionValidationOutcome::Invalid(
+                            transaction,
+                            InvalidPoolTransactionError::ExceedsFeeCap { fee_eth, cap_eth },
+                        );
+                    }
                 }
             }
         }
@@ -1085,7 +1087,7 @@ mod tests {
             .set_tx_fee_cap(100) // 100 wei cap
             .build(blob_store.clone());
 
-        let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
+        let outcome = validator.validate_one(TransactionOrigin::Local, transaction.clone());
         assert!(outcome.is_invalid());
 
         if let TransactionValidationOutcome::Invalid(_, err) = outcome {
@@ -1097,7 +1099,7 @@ mod tests {
         }
 
         let pool = Pool::new(validator, CoinbaseTipOrdering::default(), blob_store, Default::default());
-        let res = pool.add_external_transaction(transaction.clone()).await;
+        let res = pool.add_transaction(TransactionOrigin::Local, transaction.clone()).await;
         assert!(res.is_err());
         assert!(matches!(
             res.unwrap_err().kind,
@@ -1121,7 +1123,25 @@ mod tests {
             .set_tx_fee_cap(0) // no cap
             .build(blob_store.clone());
 
-        let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
+        let outcome = validator.validate_one(TransactionOrigin::Local, transaction.clone());
+        assert!(outcome.is_valid());
+    }
+
+    #[tokio::test]
+    async fn valid_on_normal_fee_cap() {
+        let transaction = get_transaction();
+        let provider = MockEthProvider::default();
+        provider.add_account(
+            transaction.sender(),
+            ExtendedAccount::new(transaction.nonce(), U256::MAX),
+        );
+
+        let blob_store = InMemoryBlobStore::default();
+        let validator = EthTransactionValidatorBuilder::new(provider)
+            .set_tx_fee_cap(2e18 as u128) // 2 ETH cap
+            .build(blob_store.clone());
+
+        let outcome = validator.validate_one(TransactionOrigin::Local, transaction.clone());
         assert!(outcome.is_valid());
     }
 }
