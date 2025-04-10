@@ -83,7 +83,9 @@ impl EthChainSpec for ChainSpec {
     }
 
     fn blob_params_at_timestamp(&self, timestamp: u64) -> Option<BlobParams> {
-        if self.is_prague_active_at_timestamp(timestamp) {
+        if self.is_osaka_active_at_timestamp(timestamp) {
+            Some(self.blob_params.osaka)
+        } else if self.is_prague_active_at_timestamp(timestamp) {
             Some(self.blob_params.prague)
         } else if self.is_cancun_active_at_timestamp(timestamp) {
             Some(self.blob_params.cancun)

@@ -26,7 +26,6 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
-use reth_rpc_server_types::result::internal_rpc_err;
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
@@ -40,7 +39,7 @@ pub type EngineApiSender<Ok> = oneshot::Sender<EngineApiResult<Ok>>;
 /// The upper limit for payload bodies request.
 const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
 
-/// The upper limit blobs `eth_getBlobs`.
+/// The upper limit for blobs in `engine_getBlobsVx`.
 const MAX_BLOB_LIMIT: usize = 128;
 
 /// The Engine API implementation that grants the Consensus layer access to data and
@@ -561,6 +560,46 @@ where
         res
     }
 
+    /// TODO:
+    pub async fn get_payload_v5(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV5> {
+        // First we fetch the payload attributes to check the timestamp
+        let attributes = self.get_payload_attributes(payload_id).await?;
+
+        // validate timestamp according to engine rules
+        validate_payload_timestamp(
+            &self.inner.chain_spec,
+            EngineApiMessageVersion::V5,
+            attributes.timestamp(),
+        )?;
+
+        // Now resolve the payload
+        self.inner
+            .payload_store
+            .resolve(payload_id)
+            .await
+            .ok_or(EngineApiError::UnknownPayload)?
+            .map_err(|_| EngineApiError::UnknownPayload)?
+            .try_into()
+            .map_err(|_| {
+                warn!("could not transform built payload into ExecutionPayloadV3");
+                EngineApiError::UnknownPayload
+            })
+    }
+
+    /// Metrics version of `get_payload_v5`
+    pub async fn get_payload_v5_metered(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV5> {
+        let start = Instant::now();
+        let res = Self::get_payload_v5(self, payload_id).await;
+        self.inner.metrics.latency.get_payload_v5.record(start.elapsed());
+        res
+    }
+
     /// Fetches all the blocks for the provided range starting at `start`, containing `count`
     /// blocks and returns the mapped payload bodies.
     pub async fn get_payload_bodies_by_range_with<F, R>(
@@ -850,7 +889,7 @@ where
 
         self.inner
             .tx_pool
-            .get_blobs_for_versioned_hashes(&versioned_hashes)
+            .get_blobs_for_versioned_hashes_v1(&versioned_hashes)
             .map_err(|err| EngineApiError::Internal(Box::new(err)))
     }
 
@@ -862,6 +901,40 @@ where
         let start = Instant::now();
         let res = Self::get_blobs_v1(self, versioned_hashes);
         self.inner.metrics.latency.get_blobs_v1.record(start.elapsed());
+
+        if let Ok(blobs) = &res {
+            let blobs_found = blobs.iter().flatten().count();
+            let blobs_missed = hashes_len - blobs_found;
+
+            self.inner.metrics.blob_metrics.blob_count.increment(blobs_found as u64);
+            self.inner.metrics.blob_metrics.blob_misses.increment(blobs_missed as u64);
+        }
+
+        res
+    }
+
+    fn get_blobs_v2(
+        &self,
+        versioned_hashes: Vec<B256>,
+    ) -> EngineApiResult<Vec<Option<BlobAndProofV2>>> {
+        if versioned_hashes.len() > MAX_BLOB_LIMIT {
+            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() })
+        }
+
+        self.inner
+            .tx_pool
+            .get_blobs_for_versioned_hashes_v2(&versioned_hashes)
+            .map_err(|err| EngineApiError::Internal(Box::new(err)))
+    }
+
+    fn get_blobs_v2_metered(
+        &self,
+        versioned_hashes: Vec<B256>,
+    ) -> EngineApiResult<Vec<Option<BlobAndProofV2>>> {
+        let hashes_len = versioned_hashes.len();
+        let start = Instant::now();
+        let res = Self::get_blobs_v2(self, versioned_hashes);
+        self.inner.metrics.latency.get_blobs_v2.record(start.elapsed());
 
         if let Ok(blobs) = &res {
             let blobs_found = blobs.iter().flatten().count();
@@ -1081,6 +1154,15 @@ where
         Ok(self.get_payload_v4_metered(payload_id).await?)
     }
 
+    /// TODO:
+    async fn get_payload_v5(
+        &self,
+        payload_id: PayloadId,
+    ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV5> {
+        trace!(target: "rpc::engine", "Serving engine_getPayloadV5");
+        Ok(self.get_payload_v5_metered(payload_id).await?)
+    }
+
     /// Handler for `engine_getPayloadBodiesByHashV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1>
     async fn get_payload_bodies_by_hash_v1(
@@ -1151,12 +1233,11 @@ where
         Ok(self.get_blobs_v1_metered(versioned_hashes)?)
     }
 
-    async fn get_blobs_v2(
-        &self,
-        _versioned_hashes: Vec<B256>,
-    ) -> RpcResult<Vec<Option<BlobAndProofV2>>> {
+    async fn get_blobs_v2(&self, versioned_hashes: Vec<B256>) -> RpcResult<Vec<BlobAndProofV2>> {
         trace!(target: "rpc::engine", "Serving engine_getBlobsV2");
-        Err(internal_rpc_err("unimplemented"))
+        let result = self.get_blobs_v2_metered(versioned_hashes)?;
+        // 2. Client software **MUST** return an empty array in case of any missing blobs.
+        Ok(result.into_iter().collect::<Option<Vec<_>>>().unwrap_or_default())
     }
 }
 

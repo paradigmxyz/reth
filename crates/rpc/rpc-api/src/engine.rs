@@ -167,6 +167,13 @@ pub trait EngineApi<Engine: EngineTypes> {
         payload_id: PayloadId,
     ) -> RpcResult<Engine::ExecutionPayloadEnvelopeV4>;
 
+    /// TODO:
+    #[method(name = "getPayloadV5")]
+    async fn get_payload_v5(
+        &self,
+        payload_id: PayloadId,
+    ) -> RpcResult<Engine::ExecutionPayloadEnvelopeV5>;
+
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1>
     #[method(name = "getPayloadBodiesByHashV1")]
     async fn get_payload_bodies_by_hash_v1(
@@ -235,10 +242,7 @@ pub trait EngineApi<Engine: EngineTypes> {
 
     /// Fetch blobs for the consensus layer from the blob store.
     #[method(name = "getBlobsV2")]
-    async fn get_blobs_v2(
-        &self,
-        versioned_hashes: Vec<B256>,
-    ) -> RpcResult<Vec<Option<BlobAndProofV2>>>;
+    async fn get_blobs_v2(&self, versioned_hashes: Vec<B256>) -> RpcResult<Vec<BlobAndProofV2>>;
 }
 
 /// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
