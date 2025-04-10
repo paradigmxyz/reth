@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use reth_engine_tree::tree::{precompile_cache::PrecompileCache, CachedPrecompileProvider};
 use reth_evm::{eth::EthEvmContext, Database, EthEvm, EvmEnv, EvmFactory};
 use revm::{
@@ -12,12 +10,13 @@ use revm::{
     primitives::hardfork::SpecId,
     Context, Inspector, MainBuilder, MainContext,
 };
+use std::sync::Arc;
 
-/// Factory producing [`EthEvm`].
+/// Factory producing [`CachedPrecompileEthEvm`].
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
 #[allow(dead_code)]
-struct CachedPrecompileEthEvmFactory {
+pub struct CachedPrecompileEthEvmFactory {
     precompile_cache: Arc<PrecompileCache>,
 }
 
