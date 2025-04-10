@@ -381,6 +381,11 @@ impl<P> RevealedSparseTrie<P> {
         self.updates.take().unwrap_or_default()
     }
 
+    /// Reserves capacity for at least `additional` more nodes to be inserted.
+    pub fn reserve_nodes(&mut self, additional: usize) {
+        self.nodes.reserve(additional);
+    }
+
     /// Reveal the trie node only if it was not known already.
     pub fn reveal_node(
         &mut self,
