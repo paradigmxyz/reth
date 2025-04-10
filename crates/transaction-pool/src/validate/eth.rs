@@ -169,7 +169,7 @@ pub(crate) struct EthTransactionValidatorInner<Client, T> {
     /// The current max gas limit
     block_gas_limit: AtomicU64,
     /// The current tx fee cap limit in wei
-    tx_fee_cap: AtomicU64,
+    tx_fee_cap: Option<u128>,
     /// Minimum priority fee to enforce for acceptance into the pool.
     minimum_priority_fee: Option<u128>,
     /// Stores the setup and parameters needed for validating KZG proofs.
@@ -291,33 +291,30 @@ where
             )
         }
 
-        let cap = self.tx_fee_cap();
-        if cap != 0 {
-            let gas_limit = transaction.gas_limit();
-            let max_fee_per_gas = if transaction.is_dynamic_fee() {
-                transaction.max_fee_per_gas()
-            } else {
-                transaction.gas_price().unwrap_or(0)
-            };
-
-            if let Some(fee) = max_fee_per_gas.checked_mul(gas_limit.into()) {
-                if fee > cap as u128 {
-                    let fee_eth = fee as f64 / 1e18;
-                    let cap_eth = cap as f64 / 1e18;
-                    return TransactionValidationOutcome::Invalid(
-                        transaction,
-                        InvalidPoolTransactionError::ExceedsFeeCap {fee_eth, cap_eth},
-                    );
-                }
-            }
-        }
-
         // Ensure max_priority_fee_per_gas (if EIP1559) is less than max_fee_per_gas if any.
         if transaction.max_priority_fee_per_gas() > Some(transaction.max_fee_per_gas()) {
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::TipAboveFeeCap.into(),
             )
+        }
+
+        if let Some(cap) = self.tx_fee_cap {
+            let max_fee_per_gas = if transaction.is_dynamic_fee() {
+                transaction.max_fee_per_gas()
+            } else {
+                transaction.gas_price().unwrap_or(0)
+            };
+
+            let fee = max_fee_per_gas * (transaction.gas_limit() as u128);
+            if fee > cap {
+                let fee_eth = fee as f64 / 1e18;
+                let cap_eth = cap as f64 / 1e18;
+                return TransactionValidationOutcome::Invalid(
+                    transaction,
+                    InvalidPoolTransactionError::ExceedsFeeCap { fee_eth, cap_eth },
+                );
+            }
         }
 
         // Drop non-local transactions with a fee lower than the configured fee for acceptance into
@@ -589,10 +586,6 @@ where
     fn max_gas_limit(&self) -> u64 {
         self.block_gas_limit.load(std::sync::atomic::Ordering::Relaxed)
     }
-
-    fn tx_fee_cap(&self) -> u64 {
-        self.tx_fee_cap.load(std::sync::atomic::Ordering::Relaxed)
-    }
 }
 
 /// A builder for [`EthTransactionValidator`] and [`TransactionValidationTaskExecutor`]
@@ -618,7 +611,7 @@ pub struct EthTransactionValidatorBuilder<Client> {
     /// The current max gas limit
     block_gas_limit: AtomicU64,
     /// The current tx fee cap in wei
-    tx_fee_cap: AtomicU64,
+    tx_fee_cap: Option<u128>,
     /// Minimum priority fee to enforce for acceptance into the pool.
     minimum_priority_fee: Option<u128>,
     /// Determines how many additional tasks to spawn
@@ -652,7 +645,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             kzg_settings: EnvKzgSettings::Default,
             local_transactions_config: Default::default(),
             max_tx_input_bytes: DEFAULT_MAX_TX_INPUT_BYTES,
-            tx_fee_cap: AtomicU64::new(1e18 as u64),
+            tx_fee_cap: Some(1e18 as u128),
             // by default all transaction types are allowed
             eip2718: true,
             eip1559: true,
@@ -802,8 +795,8 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
     /// Sets the block gas limit
     ///
     /// Transactions with a gas limit greater than this will be rejected.
-    pub fn set_tx_fee_cap(self, tx_fee_cap: u64) -> Self {
-        self.tx_fee_cap.store(tx_fee_cap, std::sync::atomic::Ordering::Relaxed);
+    pub fn set_tx_fee_cap(mut self, tx_fee_cap: u128) -> Self {
+        self.tx_fee_cap = Some(tx_fee_cap);
         self
     }
 
