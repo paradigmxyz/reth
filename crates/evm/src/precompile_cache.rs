@@ -1,6 +1,6 @@
 //! Contains a precompile cache that is backed by a moka cache.
 
-use crate::tree::cached_state::Cache;
+use alloc::{boxed::Box, string::String, sync::Arc};
 use alloy_primitives::{map::DefaultHashBuilder, Address, Bytes};
 use dashmap::DashMap;
 use mini_moka::sync::CacheBuilder;
@@ -11,7 +11,8 @@ use reth_revm::revm::{
     interpreter::{InputsImpl, InterpreterResult},
     primitives::hardfork::SpecId,
 };
-use std::sync::Arc;
+
+type Cache<K, V> = mini_moka::sync::Cache<K, V, alloy_primitives::map::DefaultHashBuilder>;
 
 /// Type alias for the LRU cache used within the [`PrecompileCache`].
 type PrecompileLRUCache = Cache<(SpecId, Bytes, u64), Result<InterpreterResult, String>>;
