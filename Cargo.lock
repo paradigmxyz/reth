@@ -2479,9 +2479,9 @@ checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
 
 [[package]]
 name = "crossbeam-channel"
-version = "0.5.14"
+version = "0.5.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06ba6d68e24814cb8de6bb986db8222d3a027d15872cabc0d18817bc3c0e4471"
+checksum = "82b8f8f868b36967f9606790d1903570de9ceaf870a7bf9fbbd3016d636a2cb2"
 dependencies = [
  "crossbeam-utils",
 ]
@@ -3415,22 +3415,15 @@ dependencies = [
  "op-alloy-rpc-types-engine",
  "op-revm",
  "reth-chain-state",
- "reth-chainspec",
  "reth-codecs",
- "reth-evm",
- "reth-network",
+ "reth-ethereum",
  "reth-network-peers",
- "reth-node-api",
  "reth-node-builder",
- "reth-optimism-chainspec",
+ "reth-op",
  "reth-optimism-forks",
- "reth-optimism-node",
- "reth-optimism-primitives",
  "reth-payload-builder",
- "reth-primitives-traits",
  "reth-rpc-api",
  "reth-rpc-engine-api",
- "reth-transaction-pool",
  "revm",
  "revm-primitives",
  "serde",
@@ -3455,12 +3448,9 @@ dependencies = [
  "futures-util",
  "reth",
  "reth-basic-payload-builder",
- "reth-chainspec",
+ "reth-ethereum",
  "reth-ethereum-payload-builder",
- "reth-node-api",
- "reth-node-ethereum",
  "reth-payload-builder",
- "reth-primitives",
  "tracing",
 ]
 
@@ -3473,10 +3463,7 @@ dependencies = [
  "futures",
  "rand 0.8.5",
  "reth",
- "reth-eth-wire",
- "reth-network",
- "reth-network-api",
- "reth-node-ethereum",
+ "reth-ethereum",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -3511,13 +3498,10 @@ dependencies = [
  "alloy-consensus",
  "eyre",
  "futures",
- "reth-chainspec",
  "reth-discv4",
  "reth-ecies",
- "reth-eth-wire",
- "reth-network",
+ "reth-ethereum",
  "reth-network-peers",
- "reth-primitives",
  "secp256k1",
  "tokio",
 ]
@@ -3528,8 +3512,7 @@ version = "0.0.0"
 dependencies = [
  "eyre",
  "futures",
- "reth-network",
- "reth-provider",
+ "reth-ethereum",
  "tokio",
 ]
 
@@ -3539,8 +3522,7 @@ version = "0.0.0"
 dependencies = [
  "eyre",
  "futures",
- "reth-chainspec",
- "reth-network",
+ "reth-ethereum",
  "reth-tracing",
  "tokio",
 ]
@@ -3562,8 +3544,7 @@ dependencies = [
  "clap",
  "jsonrpsee",
  "reth",
- "reth-node-ethereum",
- "reth-transaction-pool",
+ "reth-ethereum",
  "tokio",
 ]
 
@@ -3572,7 +3553,7 @@ name = "example-node-event-hooks"
 version = "0.0.0"
 dependencies = [
  "reth",
- "reth-node-ethereum",
+ "reth-ethereum",
 ]
 
 [[package]]
@@ -3580,11 +3561,8 @@ name = "example-polygon-p2p"
 version = "0.0.0"
 dependencies = [
  "alloy-genesis",
- "reth-chainspec",
  "reth-discv4",
- "reth-network",
- "reth-network-api",
- "reth-primitives",
+ "reth-ethereum",
  "reth-tracing",
  "secp256k1",
  "serde_json",
@@ -3602,12 +3580,7 @@ dependencies = [
  "eyre",
  "parking_lot",
  "reth",
- "reth-chainspec",
- "reth-evm",
- "reth-node-api",
- "reth-node-core",
- "reth-node-ethereum",
- "reth-primitives",
+ "reth-ethereum",
  "reth-tracing",
  "schnellru",
  "tokio",
@@ -3621,10 +3594,7 @@ dependencies = [
  "futures",
  "jsonrpsee",
  "reth",
- "reth-chainspec",
- "reth-db",
- "reth-node-ethereum",
- "reth-provider",
+ "reth-ethereum",
  "tokio",
 ]
 
@@ -3637,7 +3607,7 @@ dependencies = [
  "clap",
  "futures-util",
  "reth",
- "reth-node-ethereum",
+ "reth-ethereum",
 ]
 
 [[package]]
@@ -7856,6 +7826,7 @@ dependencies = [
  "reth-consensus",
  "reth-consensus-common",
  "reth-db",
+ "reth-eth-wire",
  "reth-ethereum-cli",
  "reth-ethereum-consensus",
  "reth-ethereum-primitives",
@@ -7863,6 +7834,7 @@ dependencies = [
  "reth-evm-ethereum",
  "reth-exex",
  "reth-network",
+ "reth-network-api",
  "reth-node-api",
  "reth-node-core",
  "reth-node-ethereum",
@@ -8696,8 +8668,10 @@ dependencies = [
  "reth-consensus",
  "reth-consensus-common",
  "reth-db",
+ "reth-eth-wire",
  "reth-evm",
  "reth-network",
+ "reth-network-api",
  "reth-node-api",
  "reth-node-core",
  "reth-optimism-chainspec",
@@ -9012,6 +8986,7 @@ dependencies = [
  "alloy-transport-http",
  "async-trait",
  "derive_more 2.0.1",
+ "eyre",
  "jsonrpsee",
  "jsonrpsee-core",
  "jsonrpsee-types",

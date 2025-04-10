@@ -9,8 +9,8 @@ pub use tx::*;
 pub mod extended_op_tx_envelope;
 pub use extended_op_tx_envelope::*;
 
-use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
-use reth_primitives_traits::NodePrimitives;
+use reth_ethereum::primitives::NodePrimitives;
+use reth_op::{OpReceipt, OpTransactionSigned};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CustomNodePrimitives;

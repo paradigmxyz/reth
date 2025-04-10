@@ -34,6 +34,7 @@ jobs:
             refactor
             docs
             ci
+            revert
         continue-on-error: true
       - name: Add PR Comment for Invalid Title
         if: steps.lint_pr_title.outcome == 'failure'

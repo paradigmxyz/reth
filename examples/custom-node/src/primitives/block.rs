@@ -1,5 +1,5 @@
 use crate::primitives::CustomHeader;
-use reth_optimism_primitives::OpTransactionSigned;
+use reth_op::OpTransactionSigned;
 
 /// The Block type of this node
 pub type Block = alloy_consensus::Block<OpTransactionSigned, CustomHeader>;

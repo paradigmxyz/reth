@@ -13,15 +13,17 @@
 #![warn(unused_crate_dependencies)]
 
 use futures::StreamExt;
-use reth_chainspec::DEV;
-use reth_network::{
-    config::rng_secret_key,
-    eth_requests::IncomingEthRequest,
-    p2p::HeadersClient,
-    transactions::NetworkTransactionEvent,
-    types::{BlockHashOrNumber, NewPooledTransactionHashes68},
-    BlockDownloaderProvider, FetchClient, NetworkConfig, NetworkEventListenerProvider,
-    NetworkHandle, NetworkInfo, NetworkManager, Peers,
+use reth_ethereum::{
+    chainspec::DEV,
+    network::{
+        config::rng_secret_key,
+        eth_requests::IncomingEthRequest,
+        p2p::HeadersClient,
+        transactions::NetworkTransactionEvent,
+        types::{BlockHashOrNumber, NewPooledTransactionHashes68},
+        BlockDownloaderProvider, FetchClient, NetworkConfig, NetworkEventListenerProvider,
+        NetworkHandle, NetworkInfo, NetworkManager, Peers,
+    },
 };
 
 #[tokio::main]

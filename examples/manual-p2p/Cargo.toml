@@ -6,11 +6,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-reth-chainspec.workspace = true
-reth-primitives.workspace = true
-reth-network.workspace = true
 reth-discv4.workspace = true
-reth-eth-wire.workspace = true
+reth-ethereum = { workspace = true, features = ["network"] }
 reth-ecies.workspace = true
 reth-network-peers.workspace = true
 

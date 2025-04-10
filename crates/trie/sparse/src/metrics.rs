@@ -36,24 +36,24 @@ impl SparseStateTrieMetrics {
             .record(self.multiproof_total_storage_nodes as f64);
     }
 
-    /// Increment the skipped account nodes counter
-    pub(crate) fn increment_skipped_account_nodes(&mut self) {
-        self.multiproof_skipped_account_nodes += 1;
+    /// Increment the skipped account nodes counter by the given count
+    pub(crate) fn increment_skipped_account_nodes(&mut self, count: u64) {
+        self.multiproof_skipped_account_nodes += count;
     }
 
-    /// Increment the total account nodes counter
-    pub(crate) fn increment_total_account_nodes(&mut self) {
-        self.multiproof_total_account_nodes += 1;
+    /// Increment the total account nodes counter by the given count
+    pub(crate) fn increment_total_account_nodes(&mut self, count: u64) {
+        self.multiproof_total_account_nodes += count;
     }
 
-    /// Increment the skipped storage nodes counter
-    pub(crate) fn increment_skipped_storage_nodes(&mut self) {
-        self.multiproof_skipped_storage_nodes += 1;
+    /// Increment the skipped storage nodes counter by the given count
+    pub(crate) fn increment_skipped_storage_nodes(&mut self, count: u64) {
+        self.multiproof_skipped_storage_nodes += count;
     }
 
-    /// Increment the total storage nodes counter
-    pub(crate) fn increment_total_storage_nodes(&mut self) {
-        self.multiproof_total_storage_nodes += 1;
+    /// Increment the total storage nodes counter by the given count
+    pub(crate) fn increment_total_storage_nodes(&mut self, count: u64) {
+        self.multiproof_total_storage_nodes += count;
     }
 }
 

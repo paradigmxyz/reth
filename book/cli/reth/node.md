@@ -723,10 +723,7 @@ Engine:
           Enable legacy state root
 
       --engine.caching-and-prewarming
-          CAUTION: This CLI flag has no effect anymore, use --engine.disable-caching-and-prewarming if you want to disable caching and prewarming
-
-      --engine.disable-caching-and-prewarming
-          Disable cross-block caching and parallel prewarming
+          Enable cross-block caching and parallel prewarming
 
       --engine.cross-block-cache-size <CROSS_BLOCK_CACHE_SIZE>
           Configure the size of cross-block cache in megabytes

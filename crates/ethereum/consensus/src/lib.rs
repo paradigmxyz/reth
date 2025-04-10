@@ -9,7 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
-use alloy_eips::merge::ALLOWED_FUTURE_BLOCK_TIME_SECONDS;
+use alloy_eips::{eip7840::BlobParams, merge::ALLOWED_FUTURE_BLOCK_TIME_SECONDS};
 use alloy_primitives::U256;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
@@ -150,7 +150,12 @@ where
 
         // Ensures that EIP-4844 fields are valid once cancun is active.
         if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp()) {
-            validate_4844_header_standalone(header.header())?;
+            validate_4844_header_standalone(
+                header.header(),
+                self.chain_spec
+                    .blob_params_at_timestamp(header.timestamp())
+                    .unwrap_or_else(BlobParams::cancun),
+            )?;
         } else if header.blob_gas_used().is_some() {
             return Err(ConsensusError::BlobGasUsedUnexpected)
         } else if header.excess_blob_gas().is_some() {

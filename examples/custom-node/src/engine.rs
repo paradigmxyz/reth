@@ -1,13 +1,17 @@
 use crate::primitives::CustomNodePrimitives;
 use op_alloy_rpc_types_engine::{OpExecutionData, OpExecutionPayload};
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
-use reth_node_api::{
-    BuiltPayload, ExecutionPayload, NodePrimitives, PayloadAttributes, PayloadBuilderAttributes,
-    PayloadTypes,
+use reth_ethereum::{
+    node::api::{
+        BuiltPayload, ExecutionPayload, NodePrimitives, PayloadAttributes,
+        PayloadBuilderAttributes, PayloadTypes,
+    },
+    primitives::SealedBlock,
 };
-use reth_optimism_node::{OpBuiltPayload, OpPayloadAttributes, OpPayloadBuilderAttributes};
-use reth_optimism_primitives::OpTransactionSigned;
-use reth_primitives_traits::SealedBlock;
+use reth_op::{
+    node::{OpBuiltPayload, OpPayloadAttributes, OpPayloadBuilderAttributes},
+    OpTransactionSigned,
+};
 use revm_primitives::U256;
 use serde::{Deserialize, Serialize};
 

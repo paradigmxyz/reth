@@ -8,10 +8,7 @@ license.workspace = true
 [dependencies]
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
 tokio.workspace = true
-reth-network.workspace = true
-reth-chainspec.workspace = true
-reth-network-api.workspace = true
-reth-primitives.workspace = true
+reth-ethereum = { workspace = true, features = ["network"] }
 serde_json.workspace = true
 reth-tracing.workspace = true
 tokio-stream.workspace = true
