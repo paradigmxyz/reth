@@ -3,10 +3,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use tracing::instrument;
 
 use super::{TrieCursor, TrieCursorFactory};
-use crate::{
-    mock::{KeyVisit, KeyVisitType},
-    BranchNodeCompact, Nibbles,
-};
+use crate::{mock::KeyVisit, BranchNodeCompact, Nibbles};
 use alloy_primitives::{map::B256Map, B256};
 use reth_storage_errors::db::DatabaseError;
 
@@ -111,10 +108,9 @@ impl TrieCursor for MockTrieCursor {
         if let Some((key, _)) = &entry {
             self.current_key = Some(key.clone());
         }
-        self.visited_keys.lock().push(KeyVisit {
-            visit_type: KeyVisitType::SeekExact(key),
-            visited_key: entry.as_ref().map(|(k, _)| k.clone()),
-        });
+        self.visited_keys
+            .lock()
+            .push(KeyVisit::seek_exact(key, entry.as_ref().map(|(k, _)| k.clone())));
         Ok(entry)
     }
 
@@ -129,10 +125,9 @@ impl TrieCursor for MockTrieCursor {
         if let Some((key, _)) = &entry {
             self.current_key = Some(key.clone());
         }
-        self.visited_keys.lock().push(KeyVisit {
-            visit_type: KeyVisitType::SeekNonExact(key),
-            visited_key: entry.as_ref().map(|(k, _)| k.clone()),
-        });
+        self.visited_keys
+            .lock()
+            .push(KeyVisit::seek_non_exact(key, entry.as_ref().map(|(k, _)| k.clone())));
         Ok(entry)
     }
 
@@ -148,10 +143,7 @@ impl TrieCursor for MockTrieCursor {
         if let Some((key, _)) = &entry {
             self.current_key = Some(key.clone());
         }
-        self.visited_keys.lock().push(KeyVisit {
-            visit_type: KeyVisitType::Next,
-            visited_key: entry.as_ref().map(|(k, _)| k.clone()),
-        });
+        self.visited_keys.lock().push(KeyVisit::next(entry.as_ref().map(|(k, _)| k.clone())));
         Ok(entry)
     }
 
