@@ -283,8 +283,8 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     ) -> SparseStateTrieResult<()> {
         let DecodedProofNodes { nodes, total_nodes, skipped_nodes, new_nodes } =
             decode_proof_nodes(account_subtree, &self.revealed_account_paths)?;
-        self.metrics.increment_total_account_nodes(total_nodes);
-        self.metrics.increment_skipped_account_nodes(skipped_nodes);
+        self.metrics.increment_total_account_nodes(total_nodes as u64);
+        self.metrics.increment_skipped_account_nodes(skipped_nodes as u64);
         let mut account_nodes = nodes.into_iter().peekable();
 
         if let Some(root_node) = Self::validate_root_node_decoded(&mut account_nodes)? {
@@ -334,8 +334,8 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
 
         let DecodedProofNodes { nodes, total_nodes, skipped_nodes, new_nodes } =
             decode_proof_nodes(storage_subtree.subtree, revealed_nodes)?;
-        self.metrics.increment_total_storage_nodes(total_nodes);
-        self.metrics.increment_skipped_storage_nodes(skipped_nodes);
+        self.metrics.increment_total_storage_nodes(total_nodes as u64);
+        self.metrics.increment_skipped_storage_nodes(skipped_nodes as u64);
         let mut nodes = nodes.into_iter().peekable();
 
         if let Some(root_node) = Self::validate_root_node_decoded(&mut nodes)? {
@@ -784,14 +784,14 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
 }
 
 /// Result of [`decode_proof_nodes`].
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 struct DecodedProofNodes {
     /// Filtered, decoded and sorted proof nodes.
     nodes: Vec<(Nibbles, TrieNode)>,
     /// Number of nodes in the proof.
-    total_nodes: u64,
+    total_nodes: usize,
     /// Number of nodes that were skipped because they were already revealed.
-    skipped_nodes: u64,
+    skipped_nodes: usize,
     /// Number of new nodes that will be revealed. This includes all children of branch nodes, even
     /// if they are not in the proof.
     new_nodes: usize,
@@ -1184,6 +1184,37 @@ mod tests {
                     }
                 )]),
                 removed_nodes: HashSet::default()
+            }
+        );
+    }
+
+    #[test]
+    fn test_decode_proof_nodes() {
+        let revealed_nodes = HashSet::from_iter([Nibbles::from_nibbles([0x0])]);
+        let leaf = TrieNode::Leaf(LeafNode::new(Nibbles::default(), alloy_rlp::encode([])));
+        let leaf_encoded = alloy_rlp::encode(&leaf);
+        let branch = TrieNode::Branch(BranchNode::new(
+            vec![RlpNode::from_rlp(&leaf_encoded), RlpNode::from_rlp(&leaf_encoded)],
+            TrieMask::new(0b11),
+        ));
+        let proof_nodes = ProofNodes::from_iter([
+            (Nibbles::default(), alloy_rlp::encode(&branch).into()),
+            (Nibbles::from_nibbles([0x0]), leaf_encoded.clone().into()),
+            (Nibbles::from_nibbles([0x1]), leaf_encoded.into()),
+        ]);
+
+        let decoded = decode_proof_nodes(proof_nodes, &revealed_nodes).unwrap();
+
+        assert_eq!(
+            decoded,
+            DecodedProofNodes {
+                nodes: vec![(Nibbles::default(), branch), (Nibbles::from_nibbles([0x1]), leaf)],
+                // Branch, leaf, leaf
+                total_nodes: 3,
+                // Revealed leaf node with path 0x1
+                skipped_nodes: 1,
+                // Branch, two of its children, one leaf
+                new_nodes: 4
             }
         );
     }
