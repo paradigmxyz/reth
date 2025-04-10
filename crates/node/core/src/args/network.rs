@@ -156,7 +156,7 @@ pub struct NetworkArgs {
     #[arg(long = "net-if.experimental", conflicts_with = "addr", value_name = "IF_NAME")]
     pub net_if: Option<String>,
 
-    /// Transaction Propogation Policy
+    /// Transaction Propagation Policy
     ///
     /// The policy determines which peers transactions are gossiped to.
     #[arg(long = "tx-propagation-policy", default_value_t = TransactionPropagationKind::All)]
