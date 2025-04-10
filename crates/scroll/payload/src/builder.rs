@@ -20,7 +20,9 @@ use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::PayloadId;
 use reth_payload_primitives::{PayloadBuilderAttributes, PayloadBuilderError};
 use reth_payload_util::{BestPayloadTransactions, NoopPayloadTransactions, PayloadTransactions};
-use reth_primitives_traits::{NodePrimitives, SealedHeader, SignedTransaction, TxTy};
+use reth_primitives_traits::{
+    NodePrimitives, RecoveredBlock, SealedHeader, SignedTransaction, TxTy,
+};
 use reth_revm::{cancelled::CancelOnDrop, database::StateProviderDatabase, db::State};
 use reth_scroll_engine_primitives::{ScrollBuiltPayload, ScrollPayloadBuilderAttributes};
 use reth_scroll_primitives::{ScrollPrimitives, ScrollTransactionSigned};
@@ -242,8 +244,19 @@ impl<Txs> ScrollBuilder<'_, Txs> {
             }
         }
 
-        let BlockBuilderOutcome { execution_result, hashed_state, trie_updates, block } =
+        let BlockBuilderOutcome { execution_result, hashed_state, trie_updates, mut block } =
             builder.finish(state_provider)?;
+
+        // set the block extra data and difficulty fields using the payload attributes.
+        if let Some(block_data) = &ctx.config.attributes.block_data_hint {
+            let (mut scroll_block, senders) = block.split();
+            scroll_block = scroll_block.map_header(|mut header| {
+                header.extra_data = block_data.extra_data.clone();
+                header.difficulty = block_data.difficulty;
+                header
+            });
+            block = RecoveredBlock::new_unhashed(scroll_block, senders)
+        }
 
         let sealed_block = Arc::new(block.sealed_block().clone());
         tracing::debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), sealed_block_header = ?sealed_block.header(), "sealed built block");

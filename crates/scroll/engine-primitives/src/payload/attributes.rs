@@ -11,7 +11,7 @@ use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_primitives::transaction::WithEncoded;
 use reth_scroll_primitives::ScrollTransactionSigned;
-use scroll_alloy_rpc_types_engine::ScrollPayloadAttributes;
+use scroll_alloy_rpc_types_engine::{BlockDataHint, ScrollPayloadAttributes};
 
 /// Scroll Payload Builder Attributes
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -23,6 +23,9 @@ pub struct ScrollPayloadBuilderAttributes {
     /// Decoded transactions and the original EIP-2718 encoded bytes as received in the payload
     /// attributes.
     pub transactions: Vec<WithEncoded<ScrollTransactionSigned>>,
+    /// The pre-Euclid block data hint, necessary for the block builder to derive the correct block
+    /// hash.
+    pub block_data_hint: Option<BlockDataHint>,
 }
 
 impl PayloadBuilderAttributes for ScrollPayloadBuilderAttributes {
@@ -62,7 +65,12 @@ impl PayloadBuilderAttributes for ScrollPayloadBuilderAttributes {
             parent_beacon_block_root: attributes.payload_attributes.parent_beacon_block_root,
         };
 
-        Ok(Self { payload_attributes, no_tx_pool: attributes.no_tx_pool, transactions })
+        Ok(Self {
+            payload_attributes,
+            no_tx_pool: attributes.no_tx_pool,
+            transactions,
+            block_data_hint: attributes.block_data_hint,
+        })
     }
 
     fn payload_id(&self) -> PayloadId {
@@ -134,6 +142,11 @@ pub(crate) fn payload_id_scroll(
         }
     }
 
+    if let Some(block_data) = &attributes.block_data_hint {
+        hasher.update(&block_data.extra_data);
+        hasher.update(block_data.difficulty.to_be_bytes::<32>());
+    }
+
     let mut out = hasher.finalize();
     out[0] = payload_version;
     PayloadId::new(out.as_slice()[..8].try_into().expect("sufficient length"))
@@ -149,14 +162,14 @@ impl From<EthPayloadBuilderAttributes> for ScrollPayloadBuilderAttributes {
 mod tests {
     use super::*;
     use alloc::str::FromStr;
-    use alloy_primitives::{address, b256, bytes, FixedBytes};
+    use alloy_primitives::{address, b256, bytes, FixedBytes, U256};
     use alloy_rpc_types_engine::PayloadAttributes;
     use reth_payload_primitives::EngineApiMessageVersion;
 
     #[test]
     fn test_payload_id() {
         let expected =
-            PayloadId::new(FixedBytes::<8>::from_str("0x03aa2163b02acd8a").unwrap().into());
+            PayloadId::new(FixedBytes::<8>::from_str("0x0322b5f17cf26e85").unwrap().into());
         let attrs = ScrollPayloadAttributes {
             payload_attributes: PayloadAttributes {
                 timestamp: 1728933301,
@@ -167,6 +180,7 @@ mod tests {
             },
             transactions: Some([bytes!("7ef8f8a0dc19cfa777d90980e4875d0a548a881baaa3f83f14d1bc0d3038bc329350e54194deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f424080b8a4440a5e20000f424000000000000000000000000300000000670d6d890000000000000125000000000000000000000000000000000000000000000000000000000000000700000000000000000000000000000000000000000000000000000000000000014bf9181db6e381d4384bbf69c48b0ee0eed23c6ca26143c6d2544f9d39997a590000000000000000000000007f83d659683caf2767fd3c720981d51f5bc365bc")].into()),
             no_tx_pool: false,
+            block_data_hint: Some(BlockDataHint{ extra_data: bytes!("476574682f76312e302e302f6c696e75782f676f312e342e32"), difficulty: U256::from(10) } ),
         };
 
         assert_eq!(

@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 use alloy_consensus::{proofs, BlockBody, Header, TxReceipt, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::merge::BEACON_NONCE;
 use alloy_evm::block::{BlockExecutionError, BlockExecutorFactory};
-use alloy_primitives::logs_bloom;
+use alloy_primitives::{logs_bloom, Address};
 use reth_evm::execute::{BlockAssembler, BlockAssemblerInput};
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::SignedTransaction;
@@ -62,7 +62,7 @@ where
         let header = Header {
             parent_hash: ctx.parent_hash,
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
-            beneficiary: evm_env.block_env.beneficiary,
+            beneficiary: Address::ZERO,
             state_root,
             transactions_root,
             receipts_root,
@@ -71,7 +71,10 @@ where
             timestamp,
             mix_hash: evm_env.block_env.prevrandao.unwrap_or_default(),
             nonce: BEACON_NONCE.into(),
-            base_fee_per_gas: Some(evm_env.block_env.basefee),
+            base_fee_per_gas: self
+                .chain_spec
+                .is_curie_active_at_block(evm_env.block_env.number)
+                .then_some(evm_env.block_env.basefee),
             number: evm_env.block_env.number,
             gas_limit: evm_env.block_env.gas_limit,
             difficulty: evm_env.block_env.difficulty,

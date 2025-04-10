@@ -3,6 +3,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 mod attributes;
-pub use attributes::ScrollPayloadAttributes;
+pub use attributes::{BlockDataHint, ScrollPayloadAttributes};
 
 extern crate alloc;

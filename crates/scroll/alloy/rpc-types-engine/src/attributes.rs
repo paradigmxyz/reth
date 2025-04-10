@@ -1,7 +1,7 @@
 //! Scroll-specific payload attributes.
 
 use alloc::vec::Vec;
-use alloy_primitives::Bytes;
+use alloy_primitives::{Bytes, U256};
 use alloy_rpc_types_engine::PayloadAttributes;
 
 /// The payload attributes for block building tailored for Scroll.
@@ -15,6 +15,27 @@ pub struct ScrollPayloadAttributes {
     pub transactions: Option<Vec<Bytes>>,
     /// Indicates whether the payload building job should happen with or without pool transactions.
     pub no_tx_pool: bool,
+    /// The pre-Euclid block data hint, necessary for the block builder to derive the correct block
+    /// hash.
+    pub block_data_hint: Option<BlockDataHint>,
+}
+
+/// Block data provided as a hint to the payload attributes.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
+pub struct BlockDataHint {
+    /// The extra data for the block.
+    pub extra_data: Bytes,
+    /// The difficulty for the block.
+    pub difficulty: U256,
+}
+
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for BlockDataHint {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self { extra_data: Bytes::arbitrary(u)?, difficulty: U256::arbitrary(u)? })
+    }
 }
 
 #[cfg(feature = "arbitrary")]
@@ -30,6 +51,7 @@ impl<'a> arbitrary::Arbitrary<'a> for ScrollPayloadAttributes {
             },
             transactions: Some(Vec::arbitrary(u)?),
             no_tx_pool: bool::arbitrary(u)?,
+            block_data_hint: Some(BlockDataHint::arbitrary(u)?),
         })
     }
 }
@@ -52,6 +74,10 @@ mod test {
             },
             transactions: Some(vec![b"hello".to_vec().into()]),
             no_tx_pool: true,
+            block_data_hint: Some(BlockDataHint {
+                extra_data: b"world".into(),
+                difficulty: U256::from(10),
+            }),
         };
 
         let ser = serde_json::to_string(&attributes).unwrap();

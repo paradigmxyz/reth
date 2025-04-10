@@ -75,6 +75,7 @@ where
             payload_attributes: self.build(timestamp),
             transactions: None,
             no_tx_pool: false,
+            block_data_hint: None,
         }
     }
 }
