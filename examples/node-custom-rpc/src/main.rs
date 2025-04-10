@@ -21,8 +21,7 @@ use jsonrpsee::{
     PendingSubscriptionSink, SubscriptionMessage,
 };
 use reth::{chainspec::EthereumChainSpecParser, cli::Cli};
-use reth_node_ethereum::EthereumNode;
-use reth_transaction_pool::TransactionPool;
+use reth_ethereum::{node::EthereumNode, pool::TransactionPool};
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -131,7 +130,7 @@ mod tests {
     use jsonrpsee::{
         http_client::HttpClientBuilder, server::ServerBuilder, ws_client::WsClientBuilder,
     };
-    use reth_transaction_pool::noop::NoopTransactionPool;
+    use reth_ethereum::pool::noop::NoopTransactionPool;
 
     #[cfg(test)]
     impl<Pool> TxpoolExtApiServer for TxpoolExt<Pool>
