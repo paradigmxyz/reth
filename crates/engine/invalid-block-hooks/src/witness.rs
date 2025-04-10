@@ -75,6 +75,21 @@ where
         // Initialize a map of preimages.
         let mut state_preimages = Vec::default();
 
+        // Get codes
+        let codes = db
+            .cache
+            .contracts
+            .values()
+            .map(|code| code.original_bytes())
+            .chain(
+                // cache state does not have all the contracts, especially when
+                // a contract is created within the block
+                // the contract only exists in bundle state, therefore we need
+                // to include them as well
+                bundle_state.contracts.values().map(|code| code.original_bytes()),
+            )
+            .collect();
+
         // Grab all account proofs for the data accessed during block execution.
         //
         // Note: We grab *all* accounts in the cache here, as the `BundleState` prunes
@@ -110,7 +125,7 @@ where
         let state = state_provider.witness(Default::default(), hashed_state.clone())?;
 
         // Write the witness to the output directory.
-        let response = ExecutionWitness { state, codes: Default::default(), keys: state_preimages };
+        let response = ExecutionWitness { state, codes, keys: state_preimages };
         let re_executed_witness_path = self.save_file(
             format!("{}_{}.witness.re_executed.json", block.number(), block.hash()),
             &response,
