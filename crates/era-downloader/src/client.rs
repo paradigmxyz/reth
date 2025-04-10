@@ -78,8 +78,17 @@ impl EraClient {
             .unwrap()
     }
 
-    async fn files_count(&self) -> usize {
-        fs::read_dir(&self.folder).await.iter().count().saturating_sub(2)
+    /// Returns the number of files in the `folder`.
+    pub async fn files_count(&self) -> usize {
+        let mut count = 0usize;
+
+        if let Ok(mut dir) = fs::read_dir(&self.folder).await {
+            while let Ok(Some(_)) = dir.next_entry().await {
+                count += 1;
+            }
+        }
+
+        count.saturating_sub(2)
     }
 
     /// Fetches the list of ERA1 files from `url` and stores it in a file located within `folder`.
