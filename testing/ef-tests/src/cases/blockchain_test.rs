@@ -210,7 +210,7 @@ fn execute_blocks<
         let state_provider = create_state_provider(None);
         let state_db = StateProviderDatabase(&state_provider);
         let block_executor = executor_provider.executor(state_db);
-        let output = block_executor.execute(block)?;
+        let output = block_executor.execute(block).map_err(|_| Error::BlockExecutionFailed)?;
         provider.write_state(
             &ExecutionOutcome::single(block.number, output),
             OriginalValuesKnown::Yes,
