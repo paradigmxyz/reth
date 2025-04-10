@@ -16,7 +16,7 @@ use reth_network_types::{
         config::PeerBackoffDurations,
         reputation::{DEFAULT_REPUTATION, MAX_TRUSTED_PEER_REPUTATION_CHANGE},
     },
-    ConnectionsConfig, Peer, PeerAddr, PeerConnectionState, PeerKind, PeersConfig,
+    BackoffKind, ConnectionsConfig, Peer, PeerAddr, PeerConnectionState, PeerKind, PeersConfig,
     ReputationChangeKind, ReputationChangeOutcome, ReputationChangeWeights,
 };
 use std::{
@@ -116,7 +116,10 @@ impl PeersManager {
                 Ok(NodeRecord { address, tcp_port, udp_port, id }) => {
                     trusted_peer_ids.insert(id);
                     peers.entry(id).or_insert_with(|| {
-                        Peer::trusted(PeerAddr::new_with_ports(address, tcp_port, Some(udp_port)))
+                        Peer::trusted(
+                            PeerAddr::new_with_ports(address, tcp_port, Some(udp_port)),
+                            trusted_peer.clone(),
+                        )
                     });
                 }
                 Err(err) => {
@@ -907,6 +910,31 @@ impl PeersManager {
                 };
 
                 trace!(target: "net::peers", ?peer_id, addr=?peer.addr, "schedule outbound connection");
+
+                // For trusted peers, use the stored TrustedPeer for resolution
+                if peer.is_trusted() {
+                    trace!(target: "net::peers", ?peer_id, "Resolving trusted peer information");
+
+                    if let Some(trusted_peer) = &peer.trusted_peer_info {
+                        match trusted_peer.resolve_blocking() {
+                            Ok(NodeRecord { address, tcp_port, udp_port, id: _ }) => {
+                                // Update the peer's address with the newly resolved one
+                                peer.addr =
+                                    PeerAddr::new_with_ports(address, tcp_port, Some(udp_port));
+                            }
+                            Err(err) => {
+                                warn!(target: "net::peers", ?peer_id, ?trusted_peer, ?err, "Failed to re-resolve trusted peer, backing off");
+                                let backoff_counter = peer.severe_backoff_counter;
+                                self.backoff_peer_until(
+                                    peer_id,
+                                    self.backoff_durations
+                                        .backoff_until(BackoffKind::Low, backoff_counter),
+                                );
+                                continue;
+                            }
+                        }
+                    }
+                }
 
                 peer.state = PeerConnectionState::PendingOut;
                 PeerAction::Connect { peer_id, remote_addr: peer.addr.tcp() }
