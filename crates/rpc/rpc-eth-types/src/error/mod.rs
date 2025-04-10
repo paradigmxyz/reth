@@ -678,6 +678,9 @@ pub enum RpcPoolError {
     /// When the transaction exceeds the block gas limit
     #[error("exceeds block gas limit")]
     ExceedsGasLimit,
+    /// When the transaction exceeds eth tx fee cap
+    #[error("exceeds the configured cap")]
+    ExceedsFeeCap,
     /// When a negative value is encountered
     #[error("negative value")]
     NegativeValue,
@@ -743,6 +746,9 @@ impl From<InvalidPoolTransactionError> for RpcPoolError {
         match err {
             InvalidPoolTransactionError::Consensus(err) => Self::Invalid(err.into()),
             InvalidPoolTransactionError::ExceedsGasLimit(_, _) => Self::ExceedsGasLimit,
+            InvalidPoolTransactionError::ExceedsFeeCap{ fee_eth: _, cap_eth: _ } => {
+                Self::ExceedsFeeCap
+            },
             InvalidPoolTransactionError::ExceedsMaxInitCodeSize(_, _) => {
                 Self::ExceedsMaxInitCodeSize
             }
