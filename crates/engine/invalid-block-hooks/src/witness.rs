@@ -75,7 +75,7 @@ where
         // Initialize a map of preimages.
         let mut state_preimages = Vec::default();
 
-        //Get codes
+        // Get codes
         let codes = db
             .cache
             .contracts
