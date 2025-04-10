@@ -38,7 +38,7 @@ pub enum StatelessValidationError {
 
     /// Error during stateless block execution.
     #[error("stateless block execution failed")]
-    StatelessExecutionFailed,
+    StatelessExecutionFailed(String),
 
     /// Error during stateless post-execution validation.
     #[error("stateless post-execution validation failed: {0}")]
@@ -157,7 +157,7 @@ pub fn stateless_validation(
     let executor = basic_block_executor.executor(db);
     let output = executor
         .execute(&current_block)
-        .map_err(|_e| StatelessValidationError::StatelessExecutionFailed)?;
+        .map_err(|e| StatelessValidationError::StatelessExecutionFailed(e.to_string()))?;
 
     // Post validation checks
     validate_block_post_execution(&current_block, &chain_spec, &output.receipts, &output.requests)
