@@ -49,7 +49,7 @@ pub struct EngineArgs {
     #[arg(long = "engine.reserved-cpu-cores", default_value_t = DEFAULT_RESERVED_CPU_CORES)]
     pub reserved_cpu_cores: usize,
 
-    /// Enable precompila cache
+    /// Enable precompile cache
     #[arg(long = "engine.precompile-cache", default_value = "false")]
     pub precompile_cache_enabled: bool,
 }
