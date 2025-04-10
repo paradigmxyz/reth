@@ -4,7 +4,7 @@ use reth_metrics::{metrics::Histogram, Metrics};
 use std::time::Duration;
 
 /// Optimism transaction pool metrics
-#[derive(Metrics)]
+#[derive(Metrics, Clone)]
 #[metrics(scope = "optimism_transaction_pool")]
 pub struct OpTxPoolMetrics {
     /// How long it takes to query the supervisor in the Optimism transaction pool
