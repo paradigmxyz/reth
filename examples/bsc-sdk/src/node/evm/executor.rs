@@ -1,28 +1,28 @@
 use super::patch::{patch_mainnet_after_tx, patch_mainnet_before_tx};
 use crate::{
     hardforks::BscHardforks,
-    system_contracts::{SystemContract, get_upgrade_system_contracts, is_system_transaction},
+    system_contracts::{get_upgrade_system_contracts, is_system_transaction, SystemContract},
 };
 use alloy_consensus::{Transaction, TxReceipt};
-use alloy_eips::{Encodable2718, eip7685::Requests};
+use alloy_eips::{eip7685::Requests, Encodable2718};
 use alloy_evm::{block::ExecutableTx, eth::receipt_builder::ReceiptBuilderCtx};
 use alloy_primitives::Address;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_evm::{
-    Database, Evm, FromRecoveredTx, FromTxWithEncoded, OnStateHook,
     block::BlockValidationError,
-    eth::{EthBlockExecutionCtx, receipt_builder::ReceiptBuilder},
+    eth::{receipt_builder::ReceiptBuilder, EthBlockExecutionCtx},
     execute::{BlockExecutionError, BlockExecutor},
     state_change::post_block_balance_increments,
+    Database, Evm, FromRecoveredTx, FromTxWithEncoded, OnStateHook,
 };
 use reth_primitives::{Log, Recovered, TransactionSigned};
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::BlockExecutionResult;
 use reth_revm::State;
 use revm::{
-    Database as RevmDatabase, DatabaseCommit,
     context::result::{ExecutionResult, ResultAndState},
     state::Bytecode,
+    Database as RevmDatabase, DatabaseCommit,
 };
 
 pub struct BscBlockExecutor<'a, EVM, Spec, R: ReceiptBuilder>

@@ -29,16 +29,7 @@ use reth_primitives::TransactionSigned;
 use reth_provider::{providers::BlockchainProvider, BlockNumReader};
 use std::{fs::File, sync::Arc, time::Duration};
 use tokio::task;
-
 use tracing::{error, info};
-
-pub fn read_blocks_from_file<P: AsRef<std::path::Path>>(
-    path: P,
-) -> Result<Vec<Block<TransactionSigned>>, Box<dyn std::error::Error>> {
-    let file = File::open(path)?;
-    let blocks: Vec<Block<TransactionSigned>> = serde_json::from_reader(file)?;
-    Ok(blocks)
-}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn can_sync_blocks() -> eyre::Result<()> {
@@ -69,76 +60,85 @@ async fn can_sync_blocks() -> eyre::Result<()> {
         }
     }));
 
-    let handle = node.network.clone();
+    // let handle = node.network.clone();
 
-    handle.update_sync_state(SyncState::Syncing);
-    let h = handle.clone();
-    task::spawn(async move {
-        loop {
-            tokio::time::sleep(Duration::from_secs(5)).await;
-            dbg!(h.num_connected_peers());
-        }
-    });
+    // handle.update_sync_state(SyncState::Syncing);
+    // let h = handle.clone();
+    // task::spawn(async move {
+    //     loop {
+    //         tokio::time::sleep(Duration::from_secs(5)).await;
+    //         dbg!(h.num_connected_peers());
+    //     }
+    // });
 
-    let fetcher = handle.fetch_client().await.unwrap();
+    // let fetcher = handle.fetch_client().await.unwrap();
 
-    let headers = {
-        loop {
-            let Ok(headers) = fetcher
-                .get_headers(HeadersRequest {
-                    start: HashOrNumber::Number(1),
-                    limit: 10,
-                    direction: HeadersDirection::Rising,
-                })
-                .await
-            else {
-                continue
-            };
+    // let headers = {
+    //     loop {
+    //         let Ok(headers) = fetcher
+    //             .get_headers(HeadersRequest {
+    //                 start: HashOrNumber::Number(1),
+    //                 limit: 10,
+    //                 direction: HeadersDirection::Rising,
+    //             })
+    //             .await
+    //         else {
+    //             continue
+    //         };
 
-            info!("Received {} headers", headers.1.len());
+    //         info!("Received {} headers", headers.1.len());
 
-            if headers.1.len() == 10 {
-                break headers.1;
-            }
-        }
+    //         if headers.1.len() == 10 {
+    //             break headers.1;
+    //         }
+    //     }
+    // };
+
+    // info!("Successfully retrieved {} headers", headers.len());
+    // let hashes: Vec<B256> = headers.iter().map(|h| h.hash_slow()).collect::<Vec<_>>();
+    // let bodies: Vec<Block<TransactionSigned>> = {
+    //     loop {
+    //         let Ok(bodies) = fetcher.get_block_bodies(hashes.clone()).await else { continue };
+    //         if bodies.1.len() == hashes.len() {
+    //             let mut blocks = Vec::new();
+    //             for (i, b) in bodies.1.iter().enumerate() {
+    //                 let header = headers[i].clone();
+    //                 let block = b.clone().into_block(header);
+    //                 blocks.push(block);
+    //             }
+    //             break blocks;
+    //         }
+    //     }
+    // };
+
+    // info!("Successfully retrieved {} bodies", bodies.len());
+
+    // for b in bodies {
+    //     let td = U128::from(b.header.difficulty);
+    //     let block = NewBlockMessage {
+    //         hash: b.header.hash_slow(),
+    //         block: Arc::new(NewBlock { block: b.clone(), td }),
+    //     };
+
+    //     if let Err(err) = block_handle.send_block(block, PeerId::random()) {
+    //         error!("Error sending block: {}", err);
+    //     }
+    // }
+
+    // read blocks from file
+    let blocks = read_blocks_from_file("blocks.json").unwrap();
+    info!("Successfully read {} blocks from blocks.json", blocks.len());
+    let b = blocks.first().unwrap();
+
+    let td = U128::from(b.header.difficulty);
+    let block = NewBlockMessage {
+        hash: b.header.hash_slow(),
+        block: Arc::new(NewBlock { block: b.clone(), td }),
     };
 
-    info!("Successfully retrieved {} headers", headers.len());
-    let hashes: Vec<B256> = headers.iter().map(|h| h.hash_slow()).collect::<Vec<_>>();
-    let bodies: Vec<Block<TransactionSigned>> = {
-        loop {
-            let Ok(bodies) = fetcher.get_block_bodies(hashes.clone()).await else { continue };
-            if bodies.1.len() == hashes.len() {
-                let mut blocks = Vec::new();
-                for (i, b) in bodies.1.iter().enumerate() {
-                    let header = headers[i].clone();
-                    let block = b.clone().into_block(header);
-                    blocks.push(block);
-                }
-                break blocks;
-            }
-        }
-    };
-
-    info!("Successfully retrieved {} bodies", bodies.len());
-
-    let mut blocks_to_write = Vec::new();
-    for b in bodies {
-        let td = U128::from(b.header.difficulty);
-        let block = NewBlockMessage {
-            hash: b.header.hash_slow(),
-            block: Arc::new(NewBlock { block: b.clone(), td }),
-        };
-
-        blocks_to_write.push(b);
-        if let Err(err) = block_handle.send_block(block, PeerId::random()) {
-            error!("Error sending block: {}", err);
-        }
+    if let Err(err) = block_handle.send_block(block, PeerId::random()) {
+        error!("Error sending block: {}", err);
     }
-
-    let file = File::create("blocks.json").unwrap();
-    serde_json::to_writer_pretty(file, &blocks_to_write).unwrap();
-    info!("Successfully wrote {} blocks to blocks.json", blocks_to_write.len());
 
     // give time to commit the blocks
     tokio::time::sleep(Duration::from_secs(10)).await;
@@ -148,19 +148,10 @@ async fn can_sync_blocks() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn can_read_blocks_from_file() -> eyre::Result<()> {
-    reth_tracing::init_test_tracing();
-
-    // Read blocks from the file
-    let blocks = read_blocks_from_file("blocks.json").unwrap();
-    info!("Successfully read {} blocks from blocks.json", blocks.len());
-
-    // Process the blocks
-    for (i, block) in blocks.iter().enumerate() {
-        let header = block.clone().into_header();
-        info!("Block {}: hash={:?}, number={}", i, header.hash_slow(), header.number);
-    }
-
-    Ok(())
+fn read_blocks_from_file<P: AsRef<std::path::Path>>(
+    path: P,
+) -> Result<Vec<Block<TransactionSigned>>, Box<dyn std::error::Error>> {
+    let file = File::open(path)?;
+    let blocks: Vec<Block<TransactionSigned>> = serde_json::from_reader(file)?;
+    Ok(blocks)
 }
