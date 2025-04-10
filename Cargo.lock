@@ -9012,6 +9012,7 @@ dependencies = [
  "alloy-transport-http",
  "async-trait",
  "derive_more 2.0.1",
+ "eyre",
  "jsonrpsee",
  "jsonrpsee-core",
  "jsonrpsee-types",
