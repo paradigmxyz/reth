@@ -43,7 +43,7 @@ use reth_optimism_rpc::{
 use reth_optimism_txpool::{
     conditional::MaybeConditionalTransaction,
     interop::MaybeInteropTransaction,
-    supervisor::{SupervisorClient, DEFAULT_SUPERVISOR_URL},
+    supervisor::{SupervisorClientBuilder, DEFAULT_SUPERVISOR_URL},
     OpPooledTx,
 };
 use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage};
@@ -553,8 +553,10 @@ where
                 "Default supervisor url is used, consider changing --rollup.supervisor-http."
             );
         }
-        let supervisor_client =
-            Arc::new(SupervisorClient::new(supervisor_http, supervisor_safety_level).await);
+        let supervisor_client = SupervisorClientBuilder::new(supervisor_http)
+            .minimum_safety(supervisor_safety_level)
+            .build()
+            .await;
 
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
             .no_eip4844()

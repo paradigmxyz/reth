@@ -13,7 +13,9 @@ pub use validator::{OpL1BlockInfo, OpTransactionValidator};
 
 pub mod conditional;
 pub mod supervisor;
-pub use supervisor::{InteropTxValidatorError, InvalidInboxEntry, SupervisorClient};
+pub use supervisor::{
+    InteropTxValidatorError, InvalidInboxEntry, SupervisorClient, SupervisorClientBuilder,
+};
 mod transaction;
 pub use transaction::{OpPooledTransaction, OpPooledTx};
 mod error;

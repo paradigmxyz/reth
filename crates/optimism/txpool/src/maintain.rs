@@ -10,7 +10,7 @@ const MAX_SUPERVISOR_QUERIES: usize = 10;
 use crate::{
     conditional::MaybeConditionalTransaction,
     interop::{is_stale_interop, is_valid_interop, MaybeInteropTransaction},
-    supervisor::SupervisorClient,
+    SupervisorClient,
 };
 use alloy_consensus::{conditional::BlockConditionalAttributes, BlockHeader, Transaction};
 use futures_util::{future::BoxFuture, FutureExt, Stream, StreamExt};
@@ -19,7 +19,6 @@ use reth_chain_state::CanonStateNotification;
 use reth_metrics::{metrics::Counter, Metrics};
 use reth_primitives_traits::NodePrimitives;
 use reth_transaction_pool::{error::PoolTransactionError, PoolTransaction, TransactionPool};
-use std::sync::Arc;
 
 /// Transaction pool maintenance metrics
 #[derive(Metrics)]
@@ -124,7 +123,7 @@ where
 pub fn maintain_transaction_pool_interop_future<N, Pool, St>(
     pool: Pool,
     events: St,
-    supervisor_client: Arc<SupervisorClient>,
+    supervisor_client: SupervisorClient,
 ) -> BoxFuture<'static, ()>
 where
     N: NodePrimitives,
@@ -145,7 +144,7 @@ where
 pub async fn maintain_transaction_pool_interop<N, Pool, St>(
     pool: Pool,
     mut events: St,
-    supervisor_client: Arc<SupervisorClient>,
+    supervisor_client: SupervisorClient,
 ) where
     N: NodePrimitives,
     Pool: TransactionPool,
@@ -154,7 +153,7 @@ pub async fn maintain_transaction_pool_interop<N, Pool, St>(
 {
     let metrics = MaintainPoolInteropMetrics::default();
     loop {
-        supervisor_client.metrics.update(); // periodically update supervisor metrics
+        supervisor_client.update_metrics(); // periodically update supervisor metrics
 
         let Some(event) = events.next().await else { break };
         if let CanonStateNotification::Commit { new } = event {

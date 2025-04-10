@@ -52,7 +52,7 @@ pub struct OpTransactionValidator<Client, Tx> {
     /// L2 block.
     require_l1_data_gas_fee: bool,
     /// Client used to check transaction validity with op-supervisor
-    supervisor_client: Option<Arc<SupervisorClient>>,
+    supervisor_client: Option<SupervisorClient>,
     /// tracks activated forks relevant for transaction validation
     fork_tracker: Arc<OpForkTracker>,
 }
@@ -128,7 +128,7 @@ where
     }
 
     /// Set the supervisor client and safety level
-    pub fn with_supervisor(mut self, supervisor_client: Arc<SupervisorClient>) -> Self {
+    pub fn with_supervisor(mut self, supervisor_client: SupervisorClient) -> Self {
         self.supervisor_client = Some(supervisor_client);
         self
     }
@@ -305,7 +305,7 @@ where
             .await;
 
         if let Some(Err(ref err)) = res {
-            client.metrics.maybe_increment_safety_level_counter(err)
+            client.weak_update_metrics(err);
         }
 
         res
