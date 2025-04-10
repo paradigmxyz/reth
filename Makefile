@@ -33,6 +33,125 @@ EF_TESTS_DIR := ./testing/ef-tests/ethereum-tests
 # The docker image name
 DOCKER_IMAGE_NAME ?= ghcr.io/paradigmxyz/reth
 
+# Dependency check macros
+define check_cmd
+	@if ! command -v $(1) &> /dev/null; then \
+		echo "\033[31mERROR: Command '$(1)' not found.\033[0m"; \
+		echo "To install $(1): $(2)"; \
+		exit 1; \
+	fi
+endef
+
+define check_file_dir
+	@if [ ! -d $(1) ]; then \
+		echo "\033[31mERROR: Required directory '$(1)' not found.\033[0m"; \
+		echo "$(2)"; \
+		exit 1; \
+	fi
+endef
+
+# Enhanced dependency check - tries to provide useful diagnostics
+define check_cmd_diagnostic
+	@if ! command -v $(1) &> /dev/null; then \
+		echo "\033[31m========== ERROR: MISSING DEPENDENCY ==========\033[0m"; \
+		echo "\033[31mRequired command '$(1)' not found in your PATH.\033[0m"; \
+		echo ""; \
+		echo "How to install $(1):"; \
+		echo "$(2)"; \
+		echo ""; \
+		echo "After installing, run your command again."; \
+		echo "\033[31m===============================================\033[0m"; \
+		exit 1; \
+	fi
+endef
+
+# Enhanced directory check - provides diagnostics on why a directory might be missing
+define check_dir_diagnostic
+	@if [ ! -d $(1) ]; then \
+		echo "\033[31m============= ERROR: MISSING DIRECTORY =============\033[0m"; \
+		echo "\033[31mDirectory '$(1)' not found.\033[0m"; \
+		echo ""; \
+		echo "This might be because:"; \
+		echo "1. You haven't downloaded the required files"; \
+		echo "2. The download failed or was interrupted"; \
+		echo "3. The files were moved or deleted"; \
+		echo ""; \
+		echo "How to fix:"; \
+		echo "$(2)"; \
+		echo ""; \
+		echo "\033[31m====================================================\033[0m"; \
+		exit 1; \
+	fi
+endef
+
+# Dependency check functions
+.PHONY: ensure-wget
+ensure-wget:
+	@if ! command -v wget &> /dev/null; then \
+		echo "\033[31m========== ERROR: MISSING DEPENDENCY ==========\033[0m"; \
+		echo "\033[31mRequired command 'wget' not found in your PATH.\033[0m"; \
+		echo ""; \
+		echo "How to install wget:"; \
+		echo "- Ubuntu/Debian: sudo apt-get install wget"; \
+		echo "- macOS: brew install wget"; \
+		echo "- Windows: Install using chocolatey with 'choco install wget' or download from https://eternallybored.org/misc/wget/"; \
+		echo ""; \
+		echo "After installing, run your command again."; \
+		echo "\033[31m===============================================\033[0m"; \
+		exit 1; \
+	fi
+
+.PHONY: ensure-tar
+ensure-tar:
+	@if ! command -v tar &> /dev/null; then \
+		echo "\033[31m========== ERROR: MISSING DEPENDENCY ==========\033[0m"; \
+		echo "\033[31mRequired command 'tar' not found in your PATH.\033[0m"; \
+		echo ""; \
+		echo "How to install tar:"; \
+		echo "- Ubuntu/Debian: sudo apt-get install tar"; \
+		echo "- macOS: Already included in the system"; \
+		echo "- Windows: Install using chocolatey with 'choco install tar' or use Git Bash"; \
+		echo ""; \
+		echo "After installing, run your command again."; \
+		echo "\033[31m===============================================\033[0m"; \
+		exit 1; \
+	fi
+
+.PHONY: ensure-cargo-nextest
+ensure-cargo-nextest:
+	@if ! cargo nextest --version &> /dev/null; then \
+		echo "\033[31m========== ERROR: MISSING DEPENDENCY ==========\033[0m"; \
+		echo "\033[31mcargo-nextest not found.\033[0m"; \
+		echo ""; \
+		echo "To install cargo-nextest run:"; \
+		echo "  cargo install cargo-nextest --locked"; \
+		echo ""; \
+		echo "After installing, run your command again."; \
+		echo "\033[31m===============================================\033[0m"; \
+		exit 1; \
+	fi
+
+.PHONY: ensure-ef-tests
+ensure-ef-tests:
+	@if [ ! -d $(EF_TESTS_DIR) ]; then \
+		echo "\033[31m============= ERROR: MISSING DIRECTORY =============\033[0m"; \
+		echo "\033[31mDirectory '$(EF_TESTS_DIR)' not found.\033[0m"; \
+		echo ""; \
+		echo "This might be because:"; \
+		echo "1. You haven't downloaded the required files"; \
+		echo "2. The download failed or was interrupted"; \
+		echo "3. The files were moved or deleted"; \
+		echo ""; \
+		echo "How to fix:"; \
+		echo "To download the Ethereum Foundation test vectors, run:"; \
+		echo "  make ef-tests"; \
+		echo ""; \
+		echo "This will download and extract the test vectors from $(EF_TESTS_URL)"; \
+		echo ""; \
+		echo "\033[31m====================================================\033[0m"; \
+		exit 1; \
+	fi
+
 ##@ Help
 
 .PHONY: help
@@ -163,7 +282,7 @@ endef
 #
 # Note: This excludes macOS tarballs because of SDK licensing issues.
 .PHONY: build-release-tarballs
-build-release-tarballs: ## Create a series of `.tar.gz` files in the BIN_DIR directory, each containing a `reth` binary for a different target.
+build-release-tarballs: ensure-tar ## Create a series of `.tar.gz` files in the BIN_DIR directory, each containing a `reth` binary for a different target.
 	[ -d $(BIN_DIR) ] || mkdir -p $(BIN_DIR)
 	$(MAKE) build-x86_64-unknown-linux-gnu
 	$(call tarball_release_binary,"x86_64-unknown-linux-gnu","reth","")
@@ -178,13 +297,12 @@ UNIT_TEST_ARGS := --locked --workspace --features 'jemalloc-prof' -E 'kind(lib)'
 COV_FILE := lcov.info
 
 .PHONY: test-unit
-test-unit: ## Run unit tests.
-	cargo install cargo-nextest --locked
+test-unit: ensure-cargo-nextest ## Run unit tests.
 	cargo nextest run $(UNIT_TEST_ARGS)
 
 
 .PHONY: cov-unit
-cov-unit: ## Run unit tests with coverage.
+cov-unit: ensure-cargo-nextest ## Run unit tests with coverage.
 	rm -f $(COV_FILE)
 	cargo llvm-cov nextest --lcov --output-path $(COV_FILE) $(UNIT_TEST_ARGS)
 
@@ -196,14 +314,79 @@ cov-report-html: cov-unit ## Generate a HTML coverage report and open it in the 
 # Downloads and unpacks Ethereum Foundation tests in the `$(EF_TESTS_DIR)` directory.
 #
 # Requires `wget` and `tar`
-$(EF_TESTS_DIR):
-	mkdir $(EF_TESTS_DIR)
-	wget $(EF_TESTS_URL) -O ethereum-tests.tar.gz
-	tar -xzf ethereum-tests.tar.gz --strip-components=1 -C $(EF_TESTS_DIR)
-	rm ethereum-tests.tar.gz
+$(EF_TESTS_DIR): ensure-wget ensure-tar
+	@echo "\033[33mDownloading Ethereum Foundation test vectors...\033[0m"
+	@mkdir -p $(EF_TESTS_DIR)
+	@if ! wget $(EF_TESTS_URL) -O ethereum-tests.tar.gz; then \
+		echo "\033[31m========== ERROR: DOWNLOAD FAILED ==========\033[0m"; \
+		echo "\033[31mFailed to download Ethereum Foundation test vectors.\033[0m"; \
+		echo ""; \
+		echo "This could be due to:"; \
+		echo "1. No internet connection"; \
+		echo "2. The URL might have changed ($(EF_TESTS_URL))"; \
+		echo "3. GitHub might be temporarily unavailable"; \
+		echo ""; \
+		echo "Please check your internet connection and try again later."; \
+		echo "\033[31m===========================================\033[0m"; \
+		rm -rf $(EF_TESTS_DIR); \
+		exit 1; \
+	fi
+	@if ! tar -xzf ethereum-tests.tar.gz --strip-components=1 -C $(EF_TESTS_DIR); then \
+		echo "\033[31m========== ERROR: EXTRACTION FAILED ==========\033[0m"; \
+		echo "\033[31mFailed to extract Ethereum Foundation test vectors.\033[0m"; \
+		echo ""; \
+		echo "This could be due to:"; \
+		echo "1. Corrupted download"; \
+		echo "2. Not enough disk space"; \
+		echo "3. Permission issues"; \
+		echo ""; \
+		echo "Please try downloading again:"; \
+		echo "  rm -rf $(EF_TESTS_DIR) ethereum-tests.tar.gz"; \
+		echo "  make ef-tests"; \
+		echo "\033[31m===============================================\033[0m"; \
+		rm -f ethereum-tests.tar.gz; \
+		rm -rf $(EF_TESTS_DIR); \
+		exit 1; \
+	fi
+	@rm -f ethereum-tests.tar.gz
+	@echo "\033[32mSuccessfully downloaded and extracted test vectors to $(EF_TESTS_DIR)\033[0m"
 
 .PHONY: ef-tests
-ef-tests: $(EF_TESTS_DIR) ## Runs Ethereum Foundation tests.
+ef-tests: ensure-cargo-nextest ## Runs Ethereum Foundation tests.
+	@if [ ! -d $(EF_TESTS_DIR) ]; then \
+		echo "\033[31m========== ERROR: ETHEREUM TESTS MISSING ==========\033[0m"; \
+		echo "Ethereum Foundation test vectors are required for these tests."; \
+		echo ""; \
+		echo "To download the test vectors (~1GB), run:"; \
+		echo "  make ef-tests-download"; \
+		echo ""; \
+		echo "\033[31m===================================================\033[0m"; \
+		exit 1; \
+	fi
+	@if [ ! -d $(EF_TESTS_DIR)/BlockchainTests ] || [ ! -d $(EF_TESTS_DIR)/GeneralStateTests ]; then \
+		echo "\033[31m========== ERROR: INVALID TEST VECTORS ==========\033[0m"; \
+		echo "The test vectors directory exists but has an invalid structure."; \
+		echo ""; \
+		echo "Try cleaning and redownloading:"; \
+		echo "  make clean-ef-tests"; \
+		echo "  make ef-tests-download"; \
+		echo ""; \
+		echo "\033[31m================================================\033[0m"; \
+		exit 1; \
+	fi
+	@# Verify specific test directories exist to prevent multiple test failures
+	@if [ ! -d $(EF_TESTS_DIR)/BlockchainTests/GeneralStateTests ]; then \
+		echo "\033[31m========== ERROR: MISSING TEST SUBDIRECTORIES ==========\033[0m"; \
+		echo "The GeneralStateTests subdirectory is missing from BlockchainTests."; \
+		echo ""; \
+		echo "Try downloading the test vectors again:"; \
+		echo "  make clean-ef-tests"; \
+		echo "  make ef-tests-download"; \
+		echo ""; \
+		echo "\033[31m======================================================\033[0m"; \
+		exit 1; \
+	fi
+	@echo "\033[32mRunning Ethereum Foundation tests with properly installed test vectors...\033[0m"
 	cargo nextest run -p ef-tests --features ef-tests
 
 ##@ Docker
@@ -331,9 +514,16 @@ endef
 
 .PHONY: clean
 clean: ## Perform a `cargo` clean and remove the binary and test vectors directories.
+	@echo "\033[33m=== Cleaning project ===\033[0m"
 	cargo clean
 	rm -rf $(BIN_DIR)
-	rm -rf $(EF_TESTS_DIR)
+	@if [ -d $(EF_TESTS_DIR) ]; then \
+		echo "\033[33mWARNING: Removing Ethereum Foundation test vectors at $(EF_TESTS_DIR)\033[0m"; \
+		echo "These will need to be redownloaded before running tests (>1GB download)."; \
+		rm -rf $(EF_TESTS_DIR); \
+	fi
+	@echo "\033[32m=== Project cleaned ===\033[0m"
+	@echo "To re-download test vectors, run: make ef-tests"
 
 .PHONY: db-tools
 db-tools: ## Compile MDBX debugging tools.
@@ -454,26 +644,102 @@ rustdocs: ## Runs `cargo docs` to generate the Rust documents in the `target/doc
 	--document-private-items
 
 cargo-test:
+	@echo "\033[1m=== Running regular cargo tests (NOT including EF tests) ===\033[0m"
 	cargo test \
 	--workspace \
+	--exclude ef-tests \
 	--bin "op-reth" \
 	--lib --examples \
 	--tests \
 	--benches \
 	--all-features
+	@echo "\033[33mNote: Ethereum Foundation tests were excluded from this run.\033[0m"
+	@echo "To run all tests including EF tests, use: make test"
 
 test-doc:
 	cargo test --doc --workspace --all-features
 
-test:
-	make cargo-test && \
+.PHONY: test
+test: ## Run all tests including EF tests
+	@echo "\033[1m=== Running regular cargo tests ===\033[0m"
+	make cargo-test
+	@echo "\033[1m=== Running doc tests ===\033[0m"
 	make test-doc
+	@echo "\033[1m=== Running Ethereum Foundation tests ===\033[0m"
+	@make check-ef-tests || (echo "\033[31mSkipping EF tests due to missing test vectors\033[0m" && exit 1)
+	make ef-tests
 
-pr:
-	make lint && \
-	make update-book-cli && \
-	cargo docs --document-private-items && \
-	make test
+# Check if EF tests are available and correctly downloaded
+.PHONY: check-ef-tests
+check-ef-tests: ensure-cargo-nextest
+	@if [ ! -d $(EF_TESTS_DIR) ]; then \
+		echo "\033[31m========== ERROR: ETHEREUM TESTS MISSING ==========\033[0m"; \
+		echo "Ethereum Foundation test vectors are missing."; \
+		echo ""; \
+		echo "These test vectors are REQUIRED to run the PR validation."; \
+		echo ""; \
+		echo "To download them, run:"; \
+		echo "  make ef-tests-download"; \
+		echo ""; \
+		echo "This will download ~1GB of test vectors."; \
+		echo "\033[31m===================================================\033[0m"; \
+		exit 1; \
+	fi
+	@if [ ! -d $(EF_TESTS_DIR)/BlockchainTests ] || [ ! -d $(EF_TESTS_DIR)/GeneralStateTests ]; then \
+		echo "\033[31m========== ERROR: INCOMPLETE TEST VECTORS ==========\033[0m"; \
+		echo "The test vectors directory exists but is missing key subdirectories."; \
+		echo ""; \
+		echo "To fix this issue:"; \
+		echo "  make clean-ef-tests"; \
+		echo "  make ef-tests-download"; \
+		echo ""; \
+		echo "This will download ~1GB of test vectors."; \
+		echo "\033[31m====================================================\033[0m"; \
+		exit 1; \
+	fi
+	@echo "\033[32mEthereum Foundation test vectors are correctly installed.\033[0m"
+
+.PHONY: clean-ef-tests
+clean-ef-tests: ## Remove Ethereum Foundation test vectors to free up disk space
+	@echo "\033[33m=== Cleaning Ethereum Foundation test vectors ===\033[0m"
+	@if [ ! -d $(EF_TESTS_DIR) ]; then \
+		echo "No test vectors found at $(EF_TESTS_DIR). Nothing to clean."; \
+		exit 0; \
+	fi
+	@echo "Removing test vectors directory ($(EF_TESTS_DIR))..."
+	@rm -rf $(EF_TESTS_DIR)
+	@rm -f ethereum-tests.tar.gz
+	@echo "\033[32m=== Test vectors removed successfully ===\033[0m"
+	@echo "Test vectors will need to be redownloaded before running tests."
+	@echo "To download them again, run: make ef-tests-download"
+
+.PHONY: ef-tests-download
+ef-tests-download: ensure-wget ensure-tar ## Download Ethereum Foundation test vectors (required for running tests)
+	@echo "\033[1m=== Downloading Ethereum Foundation test vectors ===\033[0m"
+	@echo "This will download around 1GB of test vectors, which is required for running tests."
+	@echo "Download will start in 3 seconds..."
+	@sleep 3
+	@if [ -d $(EF_TESTS_DIR) ]; then \
+		echo "\033[33mWARNING: Test vectors directory already exists at $(EF_TESTS_DIR)\033[0m"; \
+		echo "To force a clean download, run:"; \
+		echo "  make clean-ef-tests"; \
+		echo "  make ef-tests-download"; \
+		exit 1; \
+	fi
+	@echo "\033[33mStarting download of Ethereum Foundation test vectors...\033[0m"
+	@$(MAKE) $(EF_TESTS_DIR)
+	@if [ -d $(EF_TESTS_DIR)/BlockchainTests ] && [ -d $(EF_TESTS_DIR)/GeneralStateTests ]; then \
+		echo "\033[32m=== Test vectors downloaded successfully! ===\033[0m"; \
+		echo "You can now run: make test"; \
+	else \
+		echo "\033[31m=== Downloaded test vectors are incomplete ===\033[0m"; \
+		echo "The download appears to have failed or the test repository structure has changed."; \
+		echo ""; \
+		echo "Try cleaning and redownloading:"; \
+		echo "  make clean-ef-tests"; \
+		echo "  make ef-tests-download"; \
+		exit 1; \
+	fi
 
 check-features:
 	cargo hack check \
@@ -481,3 +747,169 @@ check-features:
 		--package reth-primitives-traits \
 		--package reth-primitives \
 		--feature-powerset
+
+.PHONY: check-dependencies
+check-dependencies: ## Check all required dependencies
+	@echo "\033[1m=== Checking required dependencies ===\033[0m"
+	@ERROR_COUNT=0; \
+	if ! command -v wget &> /dev/null; then \
+		echo "\033[31mERROR: wget not found\033[0m"; \
+		echo "To install wget:"; \
+		echo "- Ubuntu/Debian: sudo apt-get install wget"; \
+		echo "- macOS: brew install wget"; \
+		echo "- Windows: choco install wget or download from https://eternallybored.org/misc/wget/"; \
+		echo ""; \
+		ERROR_COUNT=$$((ERROR_COUNT+1)); \
+	else \
+		echo "\033[32m✓ wget is installed\033[0m"; \
+	fi; \
+	if ! command -v tar &> /dev/null; then \
+		echo "\033[31mERROR: tar not found\033[0m"; \
+		echo "To install tar:"; \
+		echo "- Ubuntu/Debian: sudo apt-get install tar"; \
+		echo "- macOS: Already included in the system"; \
+		echo "- Windows: choco install tar or use Git Bash"; \
+		echo ""; \
+		ERROR_COUNT=$$((ERROR_COUNT+1)); \
+	else \
+		echo "\033[32m✓ tar is installed\033[0m"; \
+	fi; \
+	if ! cargo nextest --version &> /dev/null; then \
+		echo "\033[31mERROR: cargo-nextest not found\033[0m"; \
+		echo "To install cargo-nextest:"; \
+		echo "  cargo install cargo-nextest --locked"; \
+		echo ""; \
+		ERROR_COUNT=$$((ERROR_COUNT+1)); \
+	else \
+		echo "\033[32m✓ cargo-nextest is installed\033[0m"; \
+	fi; \
+	if [ ! -d $(EF_TESTS_DIR) ]; then \
+		echo "\033[33mWARNING: Ethereum Foundation test vectors not found\033[0m"; \
+		echo "To download them:"; \
+		echo "  make ef-tests"; \
+		echo ""; \
+	else \
+		echo "\033[32m✓ Ethereum Foundation test vectors are available\033[0m"; \
+		if [ ! -d $(EF_TESTS_DIR)/BlockchainTests ] || [ ! -d $(EF_TESTS_DIR)/GeneralStateTests ]; then \
+			echo "\033[31mERROR: Test vectors appear to be incomplete or corrupted\033[0m"; \
+			echo "To fix:"; \
+			echo "  rm -rf $(EF_TESTS_DIR)"; \
+			echo "  make ef-tests"; \
+			echo ""; \
+			ERROR_COUNT=$$((ERROR_COUNT+1)); \
+		fi; \
+	fi; \
+	if [ $$ERROR_COUNT -gt 0 ]; then \
+		echo "\033[31m=== Found $$ERROR_COUNT error(s) ===\033[0m"; \
+		echo "Run 'make setup' to fix installation issues."; \
+		exit 1; \
+	else \
+		echo "\033[32m=== All required dependencies are properly installed ===\033[0m"; \
+	fi
+
+.PHONY: setup
+setup: ## Install or verify all required dependencies
+	@echo "\033[1m=== Setting up required dependencies ===\033[0m"
+	
+	@# Check for Cargo
+	@if ! command -v cargo &> /dev/null; then \
+		echo "\033[31m========== ERROR: RUST NOT INSTALLED ==========\033[0m"; \
+		echo "\033[31mRust and Cargo not found\033[0m"; \
+		echo ""; \
+		echo "Rust is required to build and test this project."; \
+		echo ""; \
+		echo "To install Rust:"; \
+		echo "  Visit https://rustup.rs/ and follow the instructions"; \
+		echo "  Or run 'curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh'"; \
+		echo ""; \
+		echo "After installing, restart your terminal and run 'make setup' again."; \
+		echo "\033[31m=================================================\033[0m"; \
+		exit 1; \
+	else \
+		echo "\033[32m✓ Rust and Cargo are installed\033[0m"; \
+	fi
+	
+	@# Check for wget
+	@if ! command -v wget &> /dev/null; then \
+		echo "\033[33m=== wget not found, installation required ===\033[0m"; \
+		echo "Installing wget is system-dependent and must be done manually:"; \
+		echo "- Ubuntu/Debian: sudo apt-get install wget"; \
+		echo "- macOS: brew install wget"; \
+		echo "- Windows: choco install wget or download from https://eternallybored.org/misc/wget/"; \
+		echo ""; \
+		echo "Please install wget and run 'make setup' again."; \
+		exit 1; \
+	else \
+		echo "\033[32m✓ wget is installed\033[0m"; \
+	fi
+	
+	@# Check for tar
+	@if ! command -v tar &> /dev/null; then \
+		echo "\033[33m=== tar not found, installation required ===\033[0m"; \
+		echo "Installing tar is system-dependent and must be done manually:"; \
+		echo "- Ubuntu/Debian: sudo apt-get install tar"; \
+		echo "- macOS: Already included in the system"; \
+		echo "- Windows: choco install tar or use Git Bash"; \
+		echo ""; \
+		echo "Please install tar and run 'make setup' again."; \
+		exit 1; \
+	else \
+		echo "\033[32m✓ tar is installed\033[0m"; \
+	fi
+	
+	@# Check for cargo-nextest
+	@if ! cargo nextest --version &> /dev/null; then \
+		echo "\033[33m=== Installing cargo-nextest ===\033[0m"; \
+		if ! cargo install cargo-nextest --locked; then \
+			echo "\033[31mFailed to install cargo-nextest\033[0m"; \
+			echo ""; \
+			echo "This could be due to:"; \
+			echo "1. Network issues"; \
+			echo "2. Insufficient permissions"; \
+			echo "3. Disk space issues"; \
+			echo ""; \
+			echo "Try running the following command manually:"; \
+			echo "  cargo install cargo-nextest --locked"; \
+			exit 1; \
+		fi; \
+		echo "\033[32m✓ cargo-nextest installed successfully\033[0m"; \
+	else \
+		echo "\033[32m✓ cargo-nextest is already installed\033[0m"; \
+	fi
+	
+	@# Check for EF tests
+	@if [ ! -d $(EF_TESTS_DIR) ]; then \
+		echo "\033[33m=== Downloading Ethereum Foundation test vectors ===\033[0m"; \
+		if ! $(MAKE) $(EF_TESTS_DIR); then \
+			echo "\033[31mFailed to download EF test vectors\033[0m"; \
+			echo ""; \
+			echo "Try downloading them manually later using:"; \
+			echo "  make ef-tests"; \
+			exit 1; \
+		fi; \
+	else \
+		if [ ! -d $(EF_TESTS_DIR)/BlockchainTests ] || [ ! -d $(EF_TESTS_DIR)/GeneralStateTests ]; then \
+			echo "\033[33m=== Test vectors appear incomplete, redownloading ===\033[0m"; \
+			rm -rf $(EF_TESTS_DIR); \
+			if ! $(MAKE) $(EF_TESTS_DIR); then \
+				echo "\033[31mFailed to download EF test vectors\033[0m"; \
+				echo ""; \
+				echo "Try downloading them manually later using:"; \
+				echo "  make ef-tests"; \
+				exit 1; \
+			fi; \
+		else \
+			echo "\033[32m✓ Ethereum Foundation test vectors are already downloaded\033[0m"; \
+		fi; \
+	fi
+	
+	@echo "\033[32m=== All dependencies have been set up successfully! ===\033[0m"
+	@echo "You can now run tests with: make test"
+
+.PHONY: pr
+pr: ## Full check for PR validation
+	@make check-ef-tests || exit 1
+	make lint
+	make update-book-cli
+	cargo docs --document-private-items
+	make test
