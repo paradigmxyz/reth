@@ -65,7 +65,6 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     /// The transactions are packed into individual blocks. Overrides can be provided.
     ///
     /// See also: <https://github.com/ethereum/go-ethereum/pull/27720>
-    #[allow(clippy::type_complexity)]
     fn simulate_v1(
         &self,
         payload: SimulatePayload,
@@ -229,7 +228,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         bundles: Vec<Bundle>,
         state_context: Option<StateContext>,
         mut state_override: Option<StateOverride>,
-    ) -> impl Future<Output = Result<Vec<EthCallResponse>, Self::Error>> + Send {
+    ) -> impl Future<Output = Result<Vec<Vec<EthCallResponse>>, Self::Error>> + Send {
         async move {
             // Check if the vector of bundles is empty
             if bundles.is_empty() {
@@ -279,7 +278,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
             let this = self.clone();
             self.spawn_with_state_at_block(at.into(), move |state| {
-                let mut results = Vec::new();
+                let mut all_results = Vec::with_capacity(bundles.len());
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
                 if replay_block_txs {
@@ -301,6 +300,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         continue;
                     }
 
+                    let mut bundle_results = Vec::with_capacity(transactions.len());
                     let block_overrides = block_override.map(Box::new);
 
                     // transact all transactions in the bundle
@@ -316,10 +316,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                         match ensure_success::<_, Self::Error>(res.result) {
                             Ok(output) => {
-                                results.push(EthCallResponse { value: Some(output), error: None });
+                                bundle_results
+                                    .push(EthCallResponse { value: Some(output), error: None });
                             }
                             Err(err) => {
-                                results.push(EthCallResponse {
+                                bundle_results.push(EthCallResponse {
                                     value: None,
                                     error: Some(err.to_string()),
                                 });
@@ -330,9 +331,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         // see the updates
                         db.commit(res.state);
                     }
+
+                    all_results.push(bundle_results);
                 }
 
-                Ok(results)
+                Ok(all_results)
             })
             .await
         }
