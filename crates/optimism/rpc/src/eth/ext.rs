@@ -7,9 +7,9 @@ use alloy_primitives::{Bytes, StorageKey, B256, U256};
 use alloy_rpc_types_eth::erc4337::{AccountStorage, TransactionConditional};
 use jsonrpsee_core::RpcResult;
 use reth_optimism_txpool::conditional::MaybeConditionalTransaction;
-use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use reth_rpc_eth_api::L2EthApiExtServer;
 use reth_rpc_eth_types::utils::recover_raw_transaction;
+use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 use std::sync::Arc;
 use tokio::sync::Semaphore;
@@ -23,7 +23,6 @@ const MAX_CONCURRENT_CONDITIONAL_VALIDATIONS: usize = 3;
 ///
 /// Separate from [`super::OpEthApi`] to allow to enable it conditionally,
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub struct OpEthExtApi<Pool, Provider> {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
@@ -56,7 +55,7 @@ where
         self.inner.provider()
     }
 
-    /// Validates the conditional's `known acounts` settings against the current state.
+    /// Validates the conditional's `known accounts` settings against the current state.
     async fn validate_known_accounts(
         &self,
         condition: &TransactionConditional,

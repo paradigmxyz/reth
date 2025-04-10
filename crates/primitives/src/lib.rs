@@ -26,7 +26,7 @@ pub mod transaction;
 #[cfg(any(test, feature = "arbitrary"))]
 pub use block::{generate_valid_header, valid_header_strategy};
 pub use block::{Block, BlockBody, SealedBlock};
-#[allow(deprecated)]
+#[expect(deprecated)]
 pub use block::{BlockWithSenders, SealedBlockFor, SealedBlockWithSenders};
 
 pub use receipt::{gas_spent_by_transactions, Receipt};
@@ -50,7 +50,7 @@ pub use transaction::{
     util::secp256k1::{public_key_to_address, recover_signer_unchecked, sign_message},
     InvalidTransactionError, Transaction, TransactionSigned, TxType,
 };
-#[allow(deprecated)]
+#[expect(deprecated)]
 pub use transaction::{PooledTransactionsElementEcRecovered, TransactionSignedEcRecovered};
 
 // Re-exports

@@ -728,7 +728,7 @@ mod tests {
 
     const fn assert_send_sync<T: Send + Sync>() {}
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     const fn test_txn_send_sync() {
         assert_send_sync::<Transaction<RO>>();
         assert_send_sync::<Transaction<RW>>();

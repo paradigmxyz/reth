@@ -8,21 +8,16 @@ mod block;
 mod call;
 mod pending_block;
 
-pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
-
 use alloy_primitives::U256;
 use op_alloy_network::Optimism;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
+pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
+use reth_chain_state::CanonStateSubscriptions;
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_node_api::{BlockTy, FullNodeComponents, ReceiptTy};
-use reth_node_builder::rpc::EthApiBuilder;
+use reth_node_api::{FullNodeComponents, NodePrimitives};
+use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
 use reth_optimism_primitives::OpPrimitives;
-use reth_provider::{
-    BlockNumReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
-    ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx, StageCheckpointReader,
-    StateProviderFactory,
-};
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
     helpers::{
@@ -31,7 +26,11 @@ use reth_rpc_eth_api::{
     },
     EthApiTypes, FromEvmError, FullEthApiServer, RpcNodeCore, RpcNodeCoreExt,
 };
-use reth_rpc_eth_types::{EthConfig, EthStateCache, FeeHistoryCache, GasPriceOracle};
+use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
+use reth_storage_api::{
+    BlockNumReader, BlockReader, BlockReaderIdExt, ProviderBlock, ProviderHeader, ProviderReceipt,
+    ProviderTx, StageCheckpointReader, StateProviderFactory,
+};
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner,
@@ -250,8 +249,10 @@ where
     Self: RpcNodeCore<Provider: BlockReader>
         + LoadState<
             Evm: ConfigureEvm<
-                Header = ProviderHeader<Self::Provider>,
-                Transaction = ProviderTx<Self::Provider>,
+                Primitives: NodePrimitives<
+                    BlockHeader = ProviderHeader<Self::Provider>,
+                    SignedTx = ProviderTx<Self::Provider>,
+                >,
             >,
             Error: FromEvmError<Self::Evm>,
         >,
@@ -275,7 +276,6 @@ impl<N: OpNodeCore> fmt::Debug for OpEthApi<N> {
 }
 
 /// Container type `OpEthApi`
-#[allow(missing_debug_implementations)]
 struct OpEthApiInner<N: OpNodeCore> {
     /// Gateway to node's core components.
     eth_api: EthApiNodeBackend<N>,
@@ -324,28 +324,24 @@ where
 {
     type EthApi = OpEthApi<N>;
 
-    fn build_eth_api(
-        self,
-        core_components: &N,
-        config: EthConfig,
-        cache: EthStateCache<BlockTy<N::Types>, ReceiptTy<N::Types>>,
-    ) -> Self::EthApi {
+    async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
         let Self { sequencer_client } = self;
         let eth_api = reth_rpc::EthApiBuilder::new(
-            core_components.provider().clone(),
-            core_components.pool().clone(),
-            core_components.network().clone(),
-            core_components.evm_config().clone(),
+            ctx.components.provider().clone(),
+            ctx.components.pool().clone(),
+            ctx.components.network().clone(),
+            ctx.components.evm_config().clone(),
         )
-        .eth_cache(cache)
-        .task_spawner(core_components.task_executor().clone())
-        .gas_cap(config.rpc_gas_cap.into())
-        .max_simulate_blocks(config.rpc_max_simulate_blocks)
-        .eth_proof_window(config.eth_proof_window)
-        .fee_history_cache_config(config.fee_history_cache)
-        .proof_permits(config.proof_permits)
+        .eth_cache(ctx.cache)
+        .task_spawner(ctx.components.task_executor().clone())
+        .gas_cap(ctx.config.rpc_gas_cap.into())
+        .max_simulate_blocks(ctx.config.rpc_max_simulate_blocks)
+        .eth_proof_window(ctx.config.eth_proof_window)
+        .fee_history_cache_config(ctx.config.fee_history_cache)
+        .proof_permits(ctx.config.proof_permits)
+        .gas_oracle_config(ctx.config.gas_oracle)
         .build_inner();
 
-        OpEthApi { inner: Arc::new(OpEthApiInner { eth_api, sequencer_client }) }
+        Ok(OpEthApi { inner: Arc::new(OpEthApiInner { eth_api, sequencer_client }) })
     }
 }

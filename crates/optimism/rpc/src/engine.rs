@@ -1,7 +1,7 @@
 //! Implements the Optimism engine API RPC methods.
 
 use alloy_eips::eip7685::Requests;
-use alloy_primitives::{BlockHash, B256, U64};
+use alloy_primitives::{BlockHash, B256, B64, U64};
 use alloy_rpc_types_engine::{
     ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV3,
     ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
@@ -9,19 +9,23 @@ use alloy_rpc_types_engine::{
 use derive_more::Constructor;
 use jsonrpsee::proc_macros::rpc;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
-use op_alloy_rpc_types_engine::{OpExecutionData, OpExecutionPayloadV4};
+use op_alloy_rpc_types_engine::{
+    OpExecutionData, OpExecutionPayloadV4, ProtocolVersion, ProtocolVersionFormatV0,
+    SuperchainSignal,
+};
 use reth_chainspec::EthereumHardforks;
 use reth_node_api::{EngineTypes, EngineValidator};
-use reth_provider::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::IntoEngineApiRpcModule;
 use reth_rpc_engine_api::EngineApi;
+use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
-use tracing::trace;
+use tracing::{info, trace};
 
 /// The list of all supported Engine capabilities available over the engine endpoint.
 ///
 /// Spec: <https://specs.optimism.io/protocol/exec-engine.html>
 pub const OP_ENGINE_CAPABILITIES: &[&str] = &[
+    "engine_forkchoiceUpdatedV1",
     "engine_forkchoiceUpdatedV2",
     "engine_forkchoiceUpdatedV3",
     "engine_exchangeTransitionConfigurationV1",
@@ -34,7 +38,18 @@ pub const OP_ENGINE_CAPABILITIES: &[&str] = &[
     "engine_newPayloadV4",
     "engine_getPayloadBodiesByHashV1",
     "engine_getPayloadBodiesByRangeV1",
+    "engine_signalSuperchainV1",
 ];
+
+/// OP Stack protocol version
+/// See also: <https://github.com/ethereum-optimism/op-geth/blob/c3a989eb882d150a936df27bcfa791838b474d55/params/superchain.go#L13-L13>
+pub const OP_STACK_SUPPORT: ProtocolVersion = ProtocolVersion::V0(ProtocolVersionFormatV0 {
+    build: B64::ZERO,
+    major: 9,
+    minor: 0,
+    patch: 0,
+    pre_release: 0,
+});
 
 /// Extension trait that gives access to Optimism engine API RPC methods.
 ///
@@ -86,6 +101,18 @@ pub trait OpEngineApi<Engine: EngineTypes> {
         parent_beacon_block_root: B256,
         execution_requests: Requests,
     ) -> RpcResult<PayloadStatus>;
+
+    /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_forkchoiceupdatedv1>
+    ///
+    /// This exists because it is used by op-node: <https://github.com/ethereum-optimism/optimism/blob/0bc5fe8d16155dc68bcdf1fa5733abc58689a618/op-node/rollup/types.go#L615-L617>
+    ///
+    /// Caution: This should not accept the `withdrawals` field in the payload attributes.
+    #[method(name = "forkchoiceUpdatedV1")]
+    async fn fork_choice_updated_v1(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<Engine::PayloadAttributes>,
+    ) -> RpcResult<ForkchoiceUpdated>;
 
     /// Updates the execution layer client with the given fork choice, as specified for the Shanghai
     /// fork.
@@ -194,6 +221,12 @@ pub trait OpEngineApi<Engine: EngineTypes> {
         count: U64,
     ) -> RpcResult<ExecutionPayloadBodiesV1>;
 
+    /// Signals superchain information to the Engine.
+    /// Returns the latest supported OP-Stack protocol version of the execution engine.
+    /// See also <https://specs.optimism.io/protocol/exec-engine.html#engine_signalsuperchainv1>
+    #[method(name = "engine_signalSuperchainV1")]
+    async fn signal_superchain_v1(&self, _signal: SuperchainSignal) -> RpcResult<ProtocolVersion>;
+
     /// Returns the execution client version information.
     ///
     /// Note:
@@ -266,11 +299,20 @@ where
         Ok(self.inner.new_payload_v4_metered(payload).await?)
     }
 
+    async fn fork_choice_updated_v1(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<EngineT::PayloadAttributes>,
+    ) -> RpcResult<ForkchoiceUpdated> {
+        Ok(self.inner.fork_choice_updated_v1_metered(fork_choice_state, payload_attributes).await?)
+    }
+
     async fn fork_choice_updated_v2(
         &self,
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<EngineT::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
+        trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV2");
         Ok(self.inner.fork_choice_updated_v2_metered(fork_choice_state, payload_attributes).await?)
     }
 
@@ -279,6 +321,7 @@ where
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<EngineT::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
+        trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV3");
         Ok(self.inner.fork_choice_updated_v3_metered(fork_choice_state, payload_attributes).await?)
     }
 
@@ -286,6 +329,7 @@ where
         &self,
         payload_id: PayloadId,
     ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV2> {
+        trace!(target: "rpc::engine", "Serving engine_getPayloadV2");
         Ok(self.inner.get_payload_v2_metered(payload_id).await?)
     }
 
@@ -293,6 +337,7 @@ where
         &self,
         payload_id: PayloadId,
     ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV3> {
+        trace!(target: "rpc::engine", "Serving engine_getPayloadV3");
         Ok(self.inner.get_payload_v3_metered(payload_id).await?)
     }
 
@@ -300,6 +345,7 @@ where
         &self,
         payload_id: PayloadId,
     ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV4> {
+        trace!(target: "rpc::engine", "Serving engine_getPayloadV4");
         Ok(self.inner.get_payload_v4_metered(payload_id).await?)
     }
 
@@ -307,6 +353,7 @@ where
         &self,
         block_hashes: Vec<BlockHash>,
     ) -> RpcResult<ExecutionPayloadBodiesV1> {
+        trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByHashV1");
         Ok(self.inner.get_payload_bodies_by_hash_v1_metered(block_hashes).await?)
     }
 
@@ -315,13 +362,27 @@ where
         start: U64,
         count: U64,
     ) -> RpcResult<ExecutionPayloadBodiesV1> {
+        trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByRangeV1");
         Ok(self.inner.get_payload_bodies_by_range_v1_metered(start.to(), count.to()).await?)
+    }
+
+    async fn signal_superchain_v1(&self, signal: SuperchainSignal) -> RpcResult<ProtocolVersion> {
+        trace!(target: "rpc::engine", "Serving signal_superchain_v1");
+        info!(
+            target: "rpc::engine",
+            "Received superchain version signal local={:?} required={:?} recommended={:?}",
+            OP_STACK_SUPPORT,
+            signal.required,
+            signal.recommended
+        );
+        Ok(OP_STACK_SUPPORT)
     }
 
     async fn get_client_version_v1(
         &self,
         client: ClientVersionV1,
     ) -> RpcResult<Vec<ClientVersionV1>> {
+        trace!(target: "rpc::engine", "Serving engine_getClientVersionV1");
         Ok(self.inner.get_client_version_v1(client)?)
     }
 

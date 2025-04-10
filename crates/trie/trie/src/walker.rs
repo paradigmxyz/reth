@@ -1,10 +1,11 @@
 use crate::{
     prefix_set::PrefixSet,
-    trie_cursor::{CursorSubNode, TrieCursor},
+    trie_cursor::{subnode::SubNodePosition, CursorSubNode, TrieCursor},
     BranchNodeCompact, Nibbles,
 };
 use alloy_primitives::{map::HashSet, B256};
 use reth_storage_errors::db::DatabaseError;
+use tracing::{instrument, trace};
 
 #[cfg(feature = "metrics")]
 use crate::metrics::WalkerMetrics;
@@ -95,28 +96,34 @@ impl<C> TrieWalker<C> {
         self.stack.last().is_some_and(|n| n.tree_flag())
     }
 
-    /// Returns the next unprocessed key in the trie.
-    pub fn next_unprocessed_key(&self) -> Option<B256> {
+    /// Returns the next unprocessed key in the trie along with its raw [`Nibbles`] representation.
+    #[instrument(level = "trace", skip(self), ret)]
+    pub fn next_unprocessed_key(&self) -> Option<(B256, Nibbles)> {
         self.key()
-            .and_then(|key| {
-                if self.can_skip_current_node {
-                    key.increment().map(|inc| inc.pack())
-                } else {
-                    Some(key.pack())
-                }
-            })
-            .map(|mut key| {
-                key.resize(32, 0);
-                B256::from_slice(key.as_slice())
+            .and_then(
+                |key| if self.can_skip_current_node { key.increment() } else { Some(key.clone()) },
+            )
+            .map(|key| {
+                let mut packed = key.pack();
+                packed.resize(32, 0);
+                (B256::from_slice(packed.as_slice()), key)
             })
     }
 
     /// Updates the skip node flag based on the walker's current state.
     fn update_skip_node(&mut self) {
+        let old = self.can_skip_current_node;
         self.can_skip_current_node = self
             .stack
             .last()
             .is_some_and(|node| !self.changes.contains(node.full_key()) && node.hash_flag());
+        trace!(
+            target: "trie::walker",
+            old,
+            new = self.can_skip_current_node,
+            last = ?self.stack.last(),
+            "updated skip node flag"
+        );
     }
 }
 
@@ -153,13 +160,19 @@ impl<C: TrieCursor> TrieWalker<C> {
     pub fn advance(&mut self) -> Result<(), DatabaseError> {
         if let Some(last) = self.stack.last() {
             if !self.can_skip_current_node && self.children_are_in_trie() {
+                trace!(
+                    target: "trie::walker",
+                    position = ?last.position(),
+                    "cannot skip current node and children are in the trie"
+                );
                 // If we can't skip the current node and the children are in the trie,
                 // either consume the next node or move to the next sibling.
-                match last.nibble() {
-                    -1 => self.move_to_next_sibling(true)?,
-                    _ => self.consume_node()?,
+                match last.position() {
+                    SubNodePosition::ParentBranch => self.move_to_next_sibling(true)?,
+                    SubNodePosition::Child(_) => self.consume_node()?,
                 }
             } else {
+                trace!(target: "trie::walker", "can skip current node");
                 // If we can skip the current node, move to the next sibling.
                 self.move_to_next_sibling(false)?;
             }
@@ -184,6 +197,7 @@ impl<C: TrieCursor> TrieWalker<C> {
     }
 
     /// Consumes the next node in the trie, updating the stack.
+    #[instrument(level = "trace", skip(self), ret)]
     fn consume_node(&mut self) -> Result<(), DatabaseError> {
         let Some((key, node)) = self.node(false)? else {
             // If no next node is found, clear the stack.
@@ -195,7 +209,7 @@ impl<C: TrieCursor> TrieWalker<C> {
         // We need to sync the stack with the trie structure when consuming a new node. This is
         // necessary for proper traversal and accurately representing the trie in the stack.
         if !key.is_empty() && !self.stack.is_empty() {
-            self.stack[0].set_nibble(key[0] as i8);
+            self.stack[0].set_nibble(key[0]);
         }
 
         // The current tree mask might have been set incorrectly.
@@ -213,13 +227,13 @@ impl<C: TrieCursor> TrieWalker<C> {
 
         // Create a new CursorSubNode and push it to the stack.
         let subnode = CursorSubNode::new(key, Some(node));
-        let nibble = subnode.nibble();
+        let position = subnode.position();
         self.stack.push(subnode);
         self.update_skip_node();
 
         // Delete the current node if it's included in the prefix set or it doesn't contain the root
         // hash.
-        if !self.can_skip_current_node || nibble != -1 {
+        if !self.can_skip_current_node || position.is_child() {
             if let Some((keys, key)) = self.removed_keys.as_mut().zip(self.cursor.current()?) {
                 keys.insert(key);
             }
@@ -229,6 +243,7 @@ impl<C: TrieCursor> TrieWalker<C> {
     }
 
     /// Moves to the next sibling node in the trie, updating the stack.
+    #[instrument(level = "trace", skip(self), ret)]
     fn move_to_next_sibling(
         &mut self,
         allow_root_to_child_nibble: bool,
@@ -237,7 +252,9 @@ impl<C: TrieCursor> TrieWalker<C> {
 
         // Check if the walker needs to backtrack to the previous level in the trie during its
         // traversal.
-        if subnode.nibble() >= 0xf || (subnode.nibble() < 0 && !allow_root_to_child_nibble) {
+        if subnode.position().is_last_child() ||
+            (subnode.position().is_parent() && !allow_root_to_child_nibble)
+        {
             self.stack.pop();
             self.move_to_next_sibling(false)?;
             return Ok(())
@@ -251,10 +268,13 @@ impl<C: TrieCursor> TrieWalker<C> {
 
         // Find the next sibling with state.
         loop {
+            let position = subnode.position();
             if subnode.state_flag() {
+                trace!(target: "trie::walker", ?position, "found next sibling with state");
                 return Ok(())
             }
-            if subnode.nibble() == 0xf {
+            if position.is_last_child() {
+                trace!(target: "trie::walker", ?position, "checked all siblings");
                 break
             }
             subnode.inc_nibble();

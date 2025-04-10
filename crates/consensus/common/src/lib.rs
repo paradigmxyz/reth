@@ -11,6 +11,3 @@
 
 /// Collection of consensus validation methods.
 pub mod validation;
-
-/// Various calculation methods (e.g. block rewards)
-pub mod calc;

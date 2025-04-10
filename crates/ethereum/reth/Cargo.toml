@@ -15,13 +15,18 @@ workspace = true
 reth-primitives-traits.workspace = true
 reth-chainspec.workspace = true
 reth-network = { workspace = true, optional = true }
+reth-network-api = { workspace = true, optional = true }
+reth-eth-wire = { workspace = true, optional = true }
 reth-provider = { workspace = true, optional = true }
 reth-db = { workspace = true, optional = true, features = ["mdbx"] }
 reth-storage-api = { workspace = true, optional = true }
 reth-node-api = { workspace = true, optional = true }
+reth-node-core = { workspace = true, optional = true }
 reth-consensus = { workspace = true, optional = true }
 reth-consensus-common = { workspace = true, optional = true }
 reth-evm = { workspace = true, optional = true }
+reth-revm = { workspace = true, optional = true }
+reth-transaction-pool = { workspace = true, optional = true }
 reth-rpc = { workspace = true, optional = true }
 reth-rpc-api = { workspace = true, optional = true }
 reth-rpc-eth-types = { workspace = true, optional = true }
@@ -50,6 +55,7 @@ std = [
     "alloy-rpc-types-eth?/std",
     "reth-storage-api?/std",
     "reth-evm?/std",
+    "reth-revm?/std",
 ]
 arbitrary = [
     "std",
@@ -58,6 +64,8 @@ arbitrary = [
     "reth-primitives-traits/arbitrary",
     "reth-db?/arbitrary",
     "alloy-rpc-types-eth?/arbitrary",
+    "reth-transaction-pool?/arbitrary",
+    "reth-eth-wire?/arbitrary",
 ]
 
 test-utils = [
@@ -66,25 +74,46 @@ test-utils = [
     "reth-db?/test-utils",
     "reth-ethereum-primitives/test-utils",
     "reth-evm?/test-utils",
+    "reth-revm?/test-utils",
     "reth-network?/test-utils",
     "reth-node-ethereum?/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-provider?/test-utils",
     "reth-trie?/test-utils",
+    "reth-transaction-pool?/test-utils",
 ]
 
-full = ["consensus", "evm", "node", "provider", "rpc", "exex", "trie"]
+full = ["consensus", "evm", "node", "provider", "rpc", "exex", "trie", "pool", "network"]
 
 alloy-compat = ["reth-ethereum-primitives/alloy-compat"]
 cli = ["dep:reth-ethereum-cli"]
-consensus = ["dep:reth-consensus", "dep:reth-consensus-common", "dep:reth-ethereum-consensus"]
-evm = ["dep:reth-evm", "dep:reth-evm-ethereum"]
+consensus = [
+    "dep:reth-consensus",
+    "dep:reth-consensus-common",
+    "dep:reth-ethereum-consensus",
+]
+evm = ["dep:reth-evm", "dep:reth-evm-ethereum", "dep:reth-revm"]
 exex = ["provider", "dep:reth-exex"]
-node-api = ["dep:reth-node-api"]
-node = ["provider", "consensus", "evm", "node-api", "dep:reth-node-ethereum", "rpc", "trie"]
-rpc = ["dep:reth-rpc", "dep:reth-rpc-builder", "dep:reth-rpc-api", "dep:reth-rpc-eth-types", "dep:alloy-rpc-types-eth"]
+node-api = ["dep:reth-node-api", "dep:reth-node-core"]
+node = [
+    "provider",
+    "consensus",
+    "evm",
+    "node-api",
+    "dep:reth-node-ethereum",
+    "rpc",
+    "trie",
+]
+pool = ["dep:reth-transaction-pool"]
+rpc = [
+    "dep:reth-rpc",
+    "dep:reth-rpc-builder",
+    "dep:reth-rpc-api",
+    "dep:reth-rpc-eth-types",
+    "dep:alloy-rpc-types-eth",
+]
 js-tracer = ["rpc", "reth-rpc/js-tracer"]
-network = ["dep:reth-network"]
+network = ["dep:reth-network", "dep:reth-network-api", "dep:reth-eth-wire"]
 provider = ["storage-api", "dep:reth-provider", "dep:reth-db"]
 storage-api = ["dep:reth-storage-api"]
 trie = ["dep:reth-trie"]

@@ -1,5 +1,4 @@
 //! Command for debugging block building.
-use crate::primitives::kzg::KzgSettings;
 use alloy_consensus::{BlockHeader, TxEip4844};
 use alloy_eips::{
     eip2718::Encodable2718,
@@ -49,10 +48,6 @@ pub struct Command<C: ChainSpecParser> {
     #[command(flatten)]
     env: EnvironmentArgs<C>,
 
-    /// Overrides the KZG trusted setup by reading from the supplied file.
-    #[arg(long, value_name = "PATH")]
-    trusted_setup_file: Option<PathBuf>,
-
     #[arg(long)]
     parent_beacon_block_root: Option<B256>,
 
@@ -100,18 +95,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         ))
     }
 
-    /// Loads the trusted setup params from a given file path or falls back to
-    /// `EnvKzgSettings::Default`.
+    /// Returns the default KZG settings
     fn kzg_settings(&self) -> eyre::Result<EnvKzgSettings> {
-        if let Some(ref trusted_setup_file) = self.trusted_setup_file {
-            let trusted_setup = KzgSettings::load_trusted_setup_file(trusted_setup_file)
-                .wrap_err_with(|| {
-                    format!("Failed to load trusted setup file: {:?}", trusted_setup_file)
-                })?;
-            Ok(EnvKzgSettings::Custom(Arc::new(trusted_setup)))
-        } else {
-            Ok(EnvKzgSettings::Default)
-        }
+        Ok(EnvKzgSettings::Default)
     }
 
     /// Execute `debug in-memory-merkle` command
@@ -171,7 +157,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
                     let pooled = transaction
                         .clone()
-                        .into_tx()
+                        .into_inner()
                         .try_into_pooled_eip4844(sidecar.clone())
                         .expect("should not fail to convert blob tx if it is already eip4844");
                     let encoded_length = pooled.encode_2718_len();
@@ -276,5 +262,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         };
 
         Ok(())
+    }
+    /// Returns the underlying chain being used to run this command
+    pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+        Some(&self.env.chain)
     }
 }

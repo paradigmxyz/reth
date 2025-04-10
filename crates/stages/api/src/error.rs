@@ -23,10 +23,7 @@ pub enum BlockErrorKind {
 impl BlockErrorKind {
     /// Returns `true` if the error is a state root error.
     pub const fn is_state_root_error(&self) -> bool {
-        match self {
-            Self::Validation(err) => err.is_state_root_error(),
-            Self::Execution(err) => err.is_state_root_error(),
-        }
+        matches!(self, Self::Validation(err) if err.is_state_root_error())
     }
 }
 

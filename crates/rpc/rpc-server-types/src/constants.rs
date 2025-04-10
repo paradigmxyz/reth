@@ -15,6 +15,9 @@ pub const DEFAULT_MAX_BLOCKS_PER_FILTER: u64 = 100_000;
 /// The default maximum of logs in a single response.
 pub const DEFAULT_MAX_LOGS_PER_RESPONSE: usize = 20_000;
 
+/// The default maximum number of blocks for `trace_filter` requests.
+pub const DEFAULT_MAX_TRACE_FILTER_BLOCKS: u64 = 100;
+
 /// The default maximum number tracing requests we're allowing concurrently.
 /// Tracing is mostly CPU bound so we're limiting the number of concurrent requests to something
 /// lower that the number of cores, in order to minimize the impact on the rest of the system.
@@ -65,7 +68,7 @@ pub mod gas_oracle {
     /// The default maximum number of blocks to use for the gas price oracle.
     pub const MAX_HEADER_HISTORY: u64 = 1024;
 
-    /// The default maximum nunber of allowed reward percentiles
+    /// The default maximum number of allowed reward percentiles
     pub const MAX_REWARD_PERCENTILE_COUNT: u64 = 100;
 
     /// Number of recent blocks to check for gas price

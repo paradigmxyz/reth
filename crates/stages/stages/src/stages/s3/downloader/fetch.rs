@@ -173,7 +173,7 @@ mod tests {
     async fn test_download() {
         reth_tracing::init_test_tracing();
 
-        let b3sum = b256!("e9908f4992ae39c4d1fe9984dd743ae3f8e9a84a4a5af768128833605ff72723");
+        let b3sum = b256!("0xe9908f4992ae39c4d1fe9984dd743ae3f8e9a84a4a5af768128833605ff72723");
         let url = "https://link.testfile.org/15MB";
 
         let file = tempfile::NamedTempFile::new().unwrap();

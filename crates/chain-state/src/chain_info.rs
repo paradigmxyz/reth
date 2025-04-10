@@ -3,7 +3,7 @@ use alloy_eips::BlockNumHash;
 use alloy_primitives::BlockNumber;
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
-use reth_primitives::{NodePrimitives, SealedHeader};
+use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use std::{
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -88,7 +88,6 @@ where
     }
 
     /// Returns the canonical head of the chain.
-    #[allow(dead_code)]
     pub fn get_canonical_num_hash(&self) -> BlockNumHash {
         self.inner.canonical_head.read().num_hash()
     }
@@ -156,7 +155,7 @@ where
 
 /// Container type for all chain info fields
 #[derive(Debug)]
-struct ChainInfoInner<N: NodePrimitives = reth_primitives::EthPrimitives> {
+struct ChainInfoInner<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
     /// Timestamp when we received the last fork choice update.
     ///
     /// This is mainly used to track if we're connected to a beacon node.
@@ -178,7 +177,7 @@ struct ChainInfoInner<N: NodePrimitives = reth_primitives::EthPrimitives> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::EthPrimitives;
+    use reth_ethereum_primitives::EthPrimitives;
     use reth_testing_utils::{generators, generators::random_header};
 
     #[test]

@@ -44,15 +44,15 @@ use reth_db_api::{
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_network_p2p::headers::downloader::SyncTarget;
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
-use reth_primitives::{
-    Account, Bytecode, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
-    StaticFileSegment, StorageEntry,
+use reth_primitives_traits::{
+    Account, Block as _, BlockBody as _, Bytecode, GotExpected, NodePrimitives, RecoveredBlock,
+    SealedBlock, SealedHeader, SignedTransaction, StorageEntry,
 };
-use reth_primitives_traits::{Block as _, BlockBody as _, SignedTransaction};
 use reth_prune_types::{
     PruneCheckpoint, PruneMode, PruneModes, PruneSegment, MINIMUM_PRUNING_DISTANCE,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
+use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, BlockBodyReader, NodePrimitivesProvider, OmmersProvider,
     StateProvider, StorageChangeSetReader, TryIntoHistoricalStateProvider,
@@ -222,7 +222,7 @@ impl<TX, N: NodeTypes> StaticFileProviderFactory for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: Send + Sync, N: NodeTypes<ChainSpec: EthChainSpec + 'static>> ChainSpecProvider
+impl<TX: Debug + Send + Sync, N: NodeTypes<ChainSpec: EthChainSpec + 'static>> ChainSpecProvider
     for DatabaseProvider<TX, N>
 {
     type ChainSpec = N::ChainSpec;
@@ -550,7 +550,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         )
     }
 
-    fn block_with_senders<H, HF, B, BF>(
+    fn recovered_block<H, HF, B, BF>(
         &self,
         id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
@@ -1217,12 +1217,12 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
     /// If the header for this block is not found, this returns `None`.
     /// If the header is found, but the transactions either do not exist, or are not indexed, this
     /// will return None.
-    fn block_with_senders(
+    fn recovered_block(
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        self.block_with_senders(
+        self.recovered_block(
             id,
             transaction_kind,
             |block_number| self.header_by_number(block_number),
@@ -1243,7 +1243,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        self.block_with_senders(
+        self.recovered_block(
             id,
             transaction_kind,
             |block_number| self.sealed_header(block_number),
@@ -1282,7 +1282,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
         )
     }
 
-    fn sealed_block_with_senders_range(
+    fn recovered_block_range(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
@@ -2759,7 +2759,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockExecu
         // get execution res
         let execution_state = self.take_state_above(block, remove_from)?;
 
-        let blocks = self.sealed_block_with_senders_range(range)?;
+        let blocks = self.recovered_block_range(range)?;
 
         // remove block bodies it is needed for both get block range and get block execution results
         // that is why it is deleted afterwards.

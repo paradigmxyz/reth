@@ -94,13 +94,11 @@ impl<T: Hash + Eq + fmt::Debug> LruCache<T> {
     }
 
     /// Returns number of elements currently in cache.
-    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.inner.len()
     }
 
     /// Returns `true` if there are currently no elements in the cache.
-    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
@@ -254,7 +252,7 @@ mod test {
     }
 
     #[test]
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     fn test_debug_impl_lru_map() {
         #[derive(Debug)]
         struct Value(i8);
@@ -271,7 +269,6 @@ mod test {
     }
 
     #[test]
-    #[allow(dead_code)]
     fn test_debug_impl_lru_cache() {
         let mut cache = LruCache::new(2);
         let key_1 = Key(1);

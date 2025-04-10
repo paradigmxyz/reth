@@ -429,7 +429,7 @@ impl Info {
     /// Return the mode of the database
     #[inline]
     pub const fn mode(&self) -> Mode {
-        let mode = self.0.mi_mode;
+        let mode = self.0.mi_mode as ffi::MDBX_env_flags_t;
         if (mode & ffi::MDBX_RDONLY) != 0 {
             Mode::ReadOnly
         } else if (mode & ffi::MDBX_UTTERLY_NOSYNC) != 0 {
@@ -914,7 +914,6 @@ pub(crate) mod read_transactions {
 }
 
 /// Converts a [`HandleSlowReadersCallback`] to the actual FFI function pointer.
-#[allow(clippy::missing_transmute_annotations)]
 fn convert_hsr_fn(callback: Option<HandleSlowReadersCallback>) -> ffi::MDBX_hsr_func {
     unsafe { std::mem::transmute(callback) }
 }

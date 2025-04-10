@@ -22,15 +22,14 @@ pub use payload::*;
 pub use pool::*;
 use reth_network_p2p::BlockClient;
 use reth_payload_builder::PayloadBuilderHandle;
+use std::fmt::Debug;
 
 use crate::{ConfigureEvm, FullNodeTypes};
 use reth_consensus::{ConsensusError, FullConsensus};
-use reth_evm::execute::{BlockExecutionStrategyFactory, BlockExecutorProvider};
+use reth_evm::execute::BlockExecutorProvider;
 use reth_network::{NetworkHandle, NetworkPrimitives};
 use reth_network_api::FullNetwork;
-use reth_node_api::{
-    BlockTy, BodyTy, HeaderTy, NodeTypes, NodeTypesWithEngine, PrimitivesTy, TxTy,
-};
+use reth_node_api::{BlockTy, BodyTy, HeaderTy, NodeTypes, PrimitivesTy, TxTy};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
 /// An abstraction over the components of a node, consisting of:
@@ -38,12 +37,12 @@ use reth_transaction_pool::{PoolTransaction, TransactionPool};
 ///  - transaction pool
 ///  - network
 ///  - payload builder.
-pub trait NodeComponents<T: FullNodeTypes>: Clone + Unpin + Send + Sync + 'static {
+pub trait NodeComponents<T: FullNodeTypes>: Clone + Debug + Unpin + Send + Sync + 'static {
     /// The transaction pool of the node.
     type Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<T::Types>>> + Unpin;
 
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
-    type Evm: BlockExecutionStrategyFactory<Primitives = <T::Types as NodeTypes>::Primitives>;
+    type Evm: ConfigureEvm<Primitives = <T::Types as NodeTypes>::Primitives>;
 
     /// The type that knows how to execute blocks.
     type Executor: BlockExecutorProvider<Primitives = <T::Types as NodeTypes>::Primitives>;
@@ -74,9 +73,7 @@ pub trait NodeComponents<T: FullNodeTypes>: Clone + Unpin + Send + Sync + 'stati
 
     /// Returns the handle to the payload builder service handling payload building requests from
     /// the engine.
-    fn payload_builder_handle(
-        &self,
-    ) -> &PayloadBuilderHandle<<T::Types as NodeTypesWithEngine>::Engine>;
+    fn payload_builder_handle(&self) -> &PayloadBuilderHandle<<T::Types as NodeTypes>::Payload>;
 }
 
 /// All the components of the node.
@@ -95,7 +92,7 @@ pub struct Components<Node: FullNodeTypes, N: NetworkPrimitives, Pool, EVM, Exec
     /// The network implementation of the node.
     pub network: NetworkHandle<N>,
     /// The handle to the payload builder service.
-    pub payload_builder_handle: PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>,
+    pub payload_builder_handle: PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>,
 }
 
 impl<Node, Pool, EVM, Executor, Cons, N> NodeComponents<Node>
@@ -110,7 +107,7 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
         + 'static,
-    EVM: BlockExecutionStrategyFactory<Primitives = PrimitivesTy<Node::Types>> + 'static,
+    EVM: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>> + 'static,
     Executor: BlockExecutorProvider<Primitives = PrimitivesTy<Node::Types>>,
     Cons:
         FullConsensus<PrimitivesTy<Node::Types>, Error = ConsensusError> + Clone + Unpin + 'static,
@@ -141,9 +138,7 @@ where
         &self.network
     }
 
-    fn payload_builder_handle(
-        &self,
-    ) -> &PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine> {
+    fn payload_builder_handle(&self) -> &PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload> {
         &self.payload_builder_handle
     }
 }

@@ -21,7 +21,6 @@ where
     /// Returns a new instance with the additional handlers for the `eth` namespace.
     ///
     /// This will spawn all necessary tasks for the additional handlers.
-    #[allow(clippy::too_many_arguments)]
     pub fn bootstrap<Tasks>(config: EthConfig, executor: Tasks, eth_api: EthApi) -> Self
     where
         Tasks: TaskSpawner + Clone + 'static,

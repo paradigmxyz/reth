@@ -11,33 +11,37 @@ use reth::{
         BuilderContext, NodeBuilder,
     },
     payload::{EthBuiltPayload, EthPayloadBuilderAttributes},
-    revm::{
-        context::{Cfg, Context, TxEnv},
-        context_interface::{
-            result::{EVMError, HaltReason},
-            ContextTr,
-        },
-        handler::{EthPrecompiles, PrecompileProvider},
-        inspector::{Inspector, NoOpInspector},
-        interpreter::{interpreter::EthInterpreter, InterpreterResult},
-        precompile::{PrecompileFn, PrecompileOutput, PrecompileResult, Precompiles},
-        specification::hardfork::SpecId,
-        MainBuilder, MainContext,
-    },
     rpc::types::engine::PayloadAttributes,
     tasks::TaskManager,
-    transaction_pool::{PoolTransaction, TransactionPool},
 };
-use reth_chainspec::{Chain, ChainSpec};
-use reth_evm::{Database, EvmEnv};
-use reth_evm_ethereum::{EthEvm, EthEvmConfig};
-use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithEngine, PayloadTypes};
-use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
-use reth_node_ethereum::{
-    node::{EthereumAddOns, EthereumPayloadBuilder},
-    BasicBlockExecutorProvider, EthereumNode,
+use reth_ethereum::{
+    chainspec::{Chain, ChainSpec},
+    evm::{
+        primitives::{Database, EvmEnv},
+        revm::{
+            context::{Cfg, Context, TxEnv},
+            context_interface::{
+                result::{EVMError, HaltReason},
+                ContextTr,
+            },
+            handler::{EthPrecompiles, PrecompileProvider},
+            inspector::{Inspector, NoOpInspector},
+            interpreter::{interpreter::EthInterpreter, InputsImpl, InterpreterResult},
+            precompile::{PrecompileFn, PrecompileOutput, PrecompileResult, Precompiles},
+            primitives::hardfork::SpecId,
+            MainBuilder, MainContext,
+        },
+        EthEvm, EthEvmConfig,
+    },
+    node::{
+        api::{FullNodeTypes, NodeTypes, PayloadTypes},
+        core::{args::RpcServerArgs, node_config::NodeConfig},
+        node::{EthereumAddOns, EthereumPayloadBuilder},
+        BasicBlockExecutorProvider, EthereumNode,
+    },
+    pool::{PoolTransaction, TransactionPool},
+    EthPrimitives, TransactionSigned,
 };
-use reth_primitives::{EthPrimitives, TransactionSigned};
 use reth_tracing::{RethTracer, Tracer};
 use std::sync::OnceLock;
 
@@ -48,7 +52,7 @@ pub struct MyEvmFactory;
 
 impl EvmFactory for MyEvmFactory {
     type Evm<DB: Database, I: Inspector<EthEvmContext<DB>, EthInterpreter>> =
-        EthEvm<DB, I, CustomPrecompiles<EthEvmContext<DB>>>;
+        EthEvm<DB, I, CustomPrecompiles>;
     type Tx = TxEnv;
     type Error<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
     type HaltReason = HaltReason;
@@ -107,12 +111,12 @@ pub struct MyPayloadBuilder {
 
 impl<Types, Node, Pool> PayloadBuilderBuilder<Node, Pool> for MyPayloadBuilder
 where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
+    Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>
         + Unpin
         + 'static,
-    Types::Engine: PayloadTypes<
+    Types::Payload: PayloadTypes<
         BuiltPayload = EthBuiltPayload,
         PayloadAttributes = PayloadAttributes,
         PayloadBuilderAttributes = EthPayloadBuilderAttributes,
@@ -137,11 +141,11 @@ where
 
 /// A custom precompile that contains static precompiles.
 #[derive(Clone)]
-pub struct CustomPrecompiles<CTX> {
-    pub precompiles: EthPrecompiles<CTX>,
+pub struct CustomPrecompiles {
+    pub precompiles: EthPrecompiles,
 }
 
-impl<CTX: ContextTr> CustomPrecompiles<CTX> {
+impl CustomPrecompiles {
     /// Given a [`PrecompileProvider`] and cache for a specific precompiles, create a
     /// wrapper that can be used inside Evm.
     fn new() -> Self {
@@ -156,7 +160,7 @@ pub fn prague_custom() -> &'static Precompiles {
         let mut precompiles = Precompiles::prague().clone();
         // Custom precompile.
         precompiles.extend([(
-            address!("0000000000000000000000000000000000000999"),
+            address!("0x0000000000000000000000000000000000000999"),
             |_, _| -> PrecompileResult {
                 PrecompileResult::Ok(PrecompileOutput::new(0, Bytes::new()))
             } as PrecompileFn,
@@ -166,35 +170,36 @@ pub fn prague_custom() -> &'static Precompiles {
     })
 }
 
-impl<CTX: ContextTr> PrecompileProvider for CustomPrecompiles<CTX> {
-    type Context = CTX;
+impl<CTX: ContextTr> PrecompileProvider<CTX> for CustomPrecompiles {
     type Output = InterpreterResult;
 
-    fn set_spec(&mut self, spec: <<Self::Context as ContextTr>::Cfg as Cfg>::Spec) {
+    fn set_spec(&mut self, spec: <CTX::Cfg as Cfg>::Spec) -> bool {
         let spec_id = spec.clone().into();
         if spec_id == SpecId::PRAGUE {
-            self.precompiles = EthPrecompiles { precompiles: prague_custom(), ..Default::default() }
+            self.precompiles = EthPrecompiles { precompiles: prague_custom(), spec: spec.into() }
         } else {
-            self.precompiles.set_spec(spec);
+            PrecompileProvider::<CTX>::set_spec(&mut self.precompiles, spec);
         }
+        true
     }
 
     fn run(
         &mut self,
-        context: &mut Self::Context,
+        context: &mut CTX,
         address: &Address,
-        bytes: &Bytes,
+        inputs: &InputsImpl,
+        is_static: bool,
         gas_limit: u64,
-    ) -> Result<Option<Self::Output>, reth::revm::precompile::PrecompileErrors> {
-        self.precompiles.run(context, address, bytes, gas_limit)
+    ) -> Result<Option<Self::Output>, String> {
+        self.precompiles.run(context, address, inputs, is_static, gas_limit)
+    }
+
+    fn warm_addresses(&self) -> Box<impl Iterator<Item = Address>> {
+        self.precompiles.warm_addresses()
     }
 
     fn contains(&self, address: &Address) -> bool {
         self.precompiles.contains(address)
-    }
-
-    fn warm_addresses(&self) -> Box<impl Iterator<Item = Address> + '_> {
-        self.precompiles.warm_addresses()
     }
 }
 

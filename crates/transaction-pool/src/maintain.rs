@@ -19,8 +19,9 @@ use reth_chain_state::CanonStateNotification;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
-use reth_primitives::SealedHeader;
-use reth_primitives_traits::{NodePrimitives, SignedTransaction};
+use reth_primitives_traits::{
+    transaction::signed::SignedTransaction, NodePrimitives, SealedHeader,
+};
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{
@@ -55,6 +56,13 @@ pub struct MaintainPoolConfig {
     /// Maximum amount of time non-executable, non local transactions are queued.
     /// Default: 3 hours
     pub max_tx_lifetime: Duration,
+
+    /// Apply no exemptions to the locally received transactions.
+    ///
+    /// This includes:
+    ///   - no price exemptions
+    ///   - no eviction exemptions
+    pub no_local_exemptions: bool,
 }
 
 impl Default for MaintainPoolConfig {
@@ -63,6 +71,7 @@ impl Default for MaintainPoolConfig {
             max_update_depth: 64,
             max_reload_accounts: 100,
             max_tx_lifetime: MAX_QUEUED_TRANSACTION_LIFETIME,
+            no_local_exemptions: false,
         }
     }
 }
@@ -256,8 +265,8 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                     .queued_transactions()
                     .into_iter()
                     .filter(|tx| {
-                        // filter stale external txs
-                        tx.origin.is_external() && tx.timestamp.elapsed() > config.max_tx_lifetime
+                        // filter stale transactions based on config
+                        (tx.origin.is_external() || config.no_local_exemptions) && tx.timestamp.elapsed() > config.max_tx_lifetime
                     })
                     .map(|tx| *tx.hash())
                     .collect();
@@ -641,7 +650,7 @@ where
 
     let local_transactions = local_transactions
         .into_iter()
-        .map(|tx| tx.transaction.clone_into_consensus().into_tx())
+        .map(|tx| tx.transaction.clone_into_consensus().into_inner())
         .collect::<Vec<_>>();
 
     let num_txs = local_transactions.len();
@@ -707,10 +716,11 @@ mod tests {
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
         CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionOrigin,
     };
+    use alloy_consensus::transaction::PooledTransaction;
     use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, U256};
+    use reth_ethereum_primitives::TransactionSigned;
     use reth_fs_util as fs;
-    use reth_primitives::{PooledTransaction, TransactionSigned};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_tasks::TaskManager;
 

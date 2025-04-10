@@ -8,7 +8,7 @@ use reth_trie::{
 };
 
 /// The `StateCommitment` trait provides associated types for state commitment operations.
-pub trait StateCommitment: std::fmt::Debug + Send + Sync + Unpin + 'static {
+pub trait StateCommitment: std::fmt::Debug + Clone + Send + Sync + Unpin + 'static {
     /// The state root type.
     type StateRoot<'a, TX: DbTx + 'a>: DatabaseStateRoot<'a, TX>;
     /// The storage root type.
@@ -22,7 +22,7 @@ pub trait StateCommitment: std::fmt::Debug + Send + Sync + Unpin + 'static {
 }
 
 /// The state commitment type for Ethereum's Merkle Patricia Trie.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct MerklePatriciaTrie;
 

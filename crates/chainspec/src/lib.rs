@@ -31,7 +31,7 @@ pub use info::ChainInfo;
 pub use spec::test_fork_ids;
 pub use spec::{
     make_genesis_header, BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder,
-    ChainSpecProvider, DepositContract, ForkBaseFeeParams, HardforkBlobParams, DEV, HOLESKY,
+    ChainSpecProvider, DepositContract, ForkBaseFeeParams, HardforkBlobParams, DEV, HOLESKY, HOODI,
     MAINNET, SEPOLIA,
 };
 

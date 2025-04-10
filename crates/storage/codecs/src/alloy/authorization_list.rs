@@ -81,16 +81,14 @@ mod tests {
     fn test_roundtrip_compact_authorization_list_item() {
         let authorization = AlloyAuthorization {
             chain_id: U256::from(1),
-            address: address!("dac17f958d2ee523a2206206994597c13d831ec7"),
+            address: address!("0xdac17f958d2ee523a2206206994597c13d831ec7"),
             nonce: 1,
         }
-        .into_signed(
-            alloy_primitives::PrimitiveSignature::new(
-                b256!("1fd474b1f9404c0c5df43b7620119ffbc3a1c3f942c73b6e14e9f55255ed9b1d").into(),
-                b256!("29aca24813279a901ec13b5f7bb53385fa1fc627b946592221417ff74a49600d").into(),
-                false,
-            )
-        );
+        .into_signed(alloy_primitives::PrimitiveSignature::new(
+            b256!("0x1fd474b1f9404c0c5df43b7620119ffbc3a1c3f942c73b6e14e9f55255ed9b1d").into(),
+            b256!("0x29aca24813279a901ec13b5f7bb53385fa1fc627b946592221417ff74a49600d").into(),
+            false,
+        ));
         let mut compacted_authorization = Vec::<u8>::new();
         let len = authorization.to_compact(&mut compacted_authorization);
         let (decoded_authorization, _) =

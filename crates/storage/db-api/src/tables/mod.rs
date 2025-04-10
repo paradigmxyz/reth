@@ -28,8 +28,8 @@ use crate::{
 };
 use alloy_consensus::Header;
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
-use reth_primitives::{Receipt, StorageEntry, TransactionSigned};
-use reth_primitives_traits::{Account, Bytecode};
+use reth_ethereum_primitives::{Receipt, TransactionSigned};
+use reth_primitives_traits::{Account, Bytecode, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
 use reth_trie_common::{BranchNodeCompact, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey};
@@ -263,7 +263,7 @@ macro_rules! tables {
         }
 
         // Need constants to match on in the `FromStr` implementation.
-        #[allow(non_upper_case_globals)]
+        #[expect(non_upper_case_globals)]
         mod table_names {
             $(
                 pub(super) const $name: &'static str = stringify!($name);

@@ -23,7 +23,6 @@ alloy-eips = { workspace = true, features = ["k256"] }
 alloy-primitives.workspace = true
 alloy-network = { workspace = true, optional = true }
 alloy-consensus = { workspace = true, features = ["serde"] }
-alloy-serde = { workspace = true, optional = true }
 alloy-rlp.workspace = true
 alloy-rpc-types-eth = { workspace = true, optional = true }
 revm-context.workspace = true
@@ -34,7 +33,8 @@ derive_more.workspace = true
 modular-bitfield = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 secp256k1 = { workspace = true, optional = true, features = ["rand"] }
-serde.workspace = true
+serde = { workspace = true, optional = true }
+serde_with = { workspace = true, optional = true }
 
 [dev-dependencies]
 arbitrary.workspace = true
@@ -55,21 +55,21 @@ test-utils = [
     "reth-codecs?/test-utils",
     "reth-primitives-traits/test-utils",
 ]
-alloy-compat = ["dep:alloy-network", "dep:alloy-serde", "dep:alloy-rpc-types-eth"]
+alloy-compat = ["dep:alloy-network", "dep:alloy-rpc-types-eth"]
 std = [
     "alloy-consensus/std",
     "alloy-primitives/std",
     "alloy-rlp/std",
     "reth-primitives-traits/std",
     "reth-zstd-compressors?/std",
-    "serde/std",
+    "serde?/std",
     "alloy-eips/std",
     "derive_more/std",
     "secp256k1?/std",
-    "alloy-serde?/std",
     "alloy-rpc-types-eth?/std",
     "revm-context/std",
     "alloy-evm/std",
+    "serde_with?/std",
 ]
 reth-codec = [
     "std",
@@ -86,11 +86,23 @@ arbitrary = [
     "reth-codecs?/arbitrary",
     "reth-primitives-traits/arbitrary",
     "alloy-eips/arbitrary",
-    "alloy-serde?/arbitrary",
     "alloy-rpc-types-eth?/arbitrary",
 ]
 serde-bincode-compat = [
+    "dep:serde_with",
     "alloy-consensus/serde-bincode-compat",
     "alloy-eips/serde-bincode-compat",
     "reth-primitives-traits/serde-bincode-compat",
+]
+serde = [
+    "dep:serde",
+    "alloy-consensus/serde",
+    "alloy-eips/serde",
+    "alloy-primitives/serde",
+    "alloy-rpc-types-eth?/serde",
+    "rand?/serde",
+    "reth-codecs?/serde",
+    "reth-primitives-traits/serde",
+    "revm-context/serde",
+    "secp256k1?/serde",
 ]

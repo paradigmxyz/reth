@@ -164,7 +164,7 @@ mod tests {
         transaction::DbTx,
         BlockNumberList,
     };
-    use reth_primitives::StorageEntry;
+    use reth_primitives_traits::StorageEntry;
     use reth_provider::{providers::StaticFileWriter, DatabaseProviderFactory};
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_contract_account_range,
@@ -172,9 +172,9 @@ mod tests {
     };
     use std::collections::BTreeMap;
 
-    const ADDRESS: Address = address!("0000000000000000000000000000000000000001");
+    const ADDRESS: Address = address!("0x0000000000000000000000000000000000000001");
     const STORAGE_KEY: B256 =
-        b256!("0000000000000000000000000000000000000000000000000000000000000001");
+        b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
 
     const LAST_BLOCK_IN_FULL_SHARD: BlockNumber = NUM_OF_INDICES_IN_SHARD as BlockNumber;
     const MAX_BLOCK: BlockNumber = NUM_OF_INDICES_IN_SHARD as BlockNumber + 2;

@@ -9,7 +9,7 @@ use alloy_sol_types::{ContractError, RevertReason};
 pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use core::time::Duration;
 use reth_errors::{BlockExecutionError, RethError};
-use reth_primitives_traits::transaction::signed::RecoveryError;
+use reth_primitives_traits::transaction::{error::InvalidTransactionError, signed::RecoveryError};
 use reth_rpc_server_types::result::{
     block_id_to_str, internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
 };
@@ -142,9 +142,6 @@ pub enum EthApiError {
     /// 7702 bytecode.
     #[error("Invalid bytecode: {0}")]
     InvalidBytecode(String),
-    /// Evm precompile error
-    #[error("Revm precompile error: {0}")]
-    EvmPrecompile(String),
     /// Error encountered when converting a transaction type
     #[error("Transaction conversion error")]
     TransactionConversionError,
@@ -186,6 +183,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::BothStateAndStateDiffInOverride(_) |
             EthApiError::InvalidTracerConfig |
             EthApiError::TransactionConversionError |
+            EthApiError::InvalidRewardPercentiles |
             EthApiError::InvalidBytecode(_) => invalid_params_rpc_err(error.to_string()),
             EthApiError::InvalidTransaction(err) => err.into(),
             EthApiError::PoolError(err) => err.into(),
@@ -193,12 +191,9 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::ExcessBlobGasNotSet |
             EthApiError::InvalidBlockData(_) |
             EthApiError::Internal(_) |
-            EthApiError::TransactionNotFound |
-            EthApiError::EvmCustom(_) |
-            EthApiError::EvmPrecompile(_) |
             EthApiError::ReceiptNotFound |
-            EthApiError::InvalidRewardPercentiles => internal_rpc_err(error.to_string()),
-            EthApiError::UnknownBlockOrTxIndex => {
+            EthApiError::EvmCustom(_) => internal_rpc_err(error.to_string()),
+            EthApiError::UnknownBlockOrTxIndex | EthApiError::TransactionNotFound => {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
             }
             // TODO(onbjerg): We rewrite the error message here because op-node does string matching
@@ -307,7 +302,6 @@ where
             EVMError::Header(err) => err.into(),
             EVMError::Database(err) => err.into(),
             EVMError::Custom(err) => Self::EvmCustom(err),
-            EVMError::Precompile(err) => Self::EvmPrecompile(err),
         }
     }
 }
@@ -544,11 +538,11 @@ impl From<InvalidTransaction> for RpcInvalidTransactionError {
                 // tx.gas > block.gas_limit
                 Self::GasTooHigh
             }
-            InvalidTransaction::CallGasCostMoreThanGasLimit => {
+            InvalidTransaction::CallGasCostMoreThanGasLimit { .. } => {
                 // tx.gas < cost
                 Self::GasTooLow
             }
-            InvalidTransaction::GasFloorMoreThanGasLimit => {
+            InvalidTransaction::GasFloorMoreThanGasLimit { .. } => {
                 // Post prague EIP-7623 tx floor calldata gas cost > tx.gas_limit
                 // where floor gas is the minimum amount of gas that will be spent
                 // In other words, the tx's gas limit is lower that the minimum gas requirements of
@@ -574,7 +568,7 @@ impl From<InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::BlobVersionNotSupported => Self::BlobHashVersionMismatch,
             InvalidTransaction::TooManyBlobs { have, .. } => Self::TooManyBlobs { have },
             InvalidTransaction::BlobCreateTransaction => Self::BlobTransactionIsCreate,
-            InvalidTransaction::EofCrateShouldHaveToAddress => Self::EofCrateShouldHaveToAddress,
+            InvalidTransaction::EofCreateShouldHaveToAddress => Self::EofCrateShouldHaveToAddress,
             InvalidTransaction::AuthorizationListNotSupported => {
                 Self::AuthorizationListNotSupported
             }
@@ -588,9 +582,9 @@ impl From<InvalidTransaction> for RpcInvalidTransactionError {
     }
 }
 
-impl From<reth_primitives::InvalidTransactionError> for RpcInvalidTransactionError {
-    fn from(err: reth_primitives::InvalidTransactionError) -> Self {
-        use reth_primitives::InvalidTransactionError;
+impl From<InvalidTransactionError> for RpcInvalidTransactionError {
+    fn from(err: InvalidTransactionError) -> Self {
+        use InvalidTransactionError;
         // This conversion is used to convert any transaction errors that could occur inside the
         // txpool (e.g. `eth_sendRawTransaction`) to their corresponding RPC
         match err {
@@ -815,7 +809,7 @@ pub fn ensure_success<Halt, Error: FromEvmHalt<Halt> + FromEthApiError>(
 mod tests {
     use super::*;
     use alloy_sol_types::{Revert, SolError};
-    use revm_primitives::b256;
+    use revm::primitives::b256;
 
     #[test]
     fn timed_out_error() {
@@ -827,13 +821,13 @@ mod tests {
     fn header_not_found_message() {
         let err: jsonrpsee_types::error::ErrorObject<'static> =
             EthApiError::HeaderNotFound(BlockId::hash(b256!(
-                "1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
+                "0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
             )))
             .into();
         assert_eq!(err.message(), "block not found: hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9");
         let err: jsonrpsee_types::error::ErrorObject<'static> =
             EthApiError::HeaderNotFound(BlockId::hash_canonical(b256!(
-                "1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
+                "0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
             )))
             .into();
         assert_eq!(err.message(), "block not found: canonical hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9");

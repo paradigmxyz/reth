@@ -3,7 +3,7 @@ use alloy_primitives::B256;
 use derive_more::{Deref, DerefMut};
 use reth_db_api::table::Decompress;
 use reth_nippy_jar::{DataReader, NippyJar, NippyJarCursor};
-use reth_primitives::static_file::SegmentHeader;
+use reth_static_file_types::SegmentHeader;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::sync::Arc;
 

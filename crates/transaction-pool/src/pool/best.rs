@@ -8,7 +8,7 @@ use alloy_consensus::Transaction;
 use alloy_eips::Typed2718;
 use alloy_primitives::Address;
 use core::fmt;
-use reth_primitives::InvalidTransactionError;
+use reth_primitives_traits::transaction::error::InvalidTransactionError;
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet, VecDeque},
     sync::Arc,
@@ -144,8 +144,7 @@ impl<T: TransactionOrdering> BestTransactions<T> {
     /// set.
     fn pop_best(&mut self) -> Option<PendingTransaction<T>> {
         self.independent.pop_last().inspect(|best| {
-            let removed = self.all.remove(best.transaction.id());
-            debug_assert!(removed.is_some(), "must be present in both sets");
+            self.all.remove(best.transaction.id());
         })
     }
 
@@ -772,17 +771,24 @@ mod tests {
 
         // Add 5 plain transactions from different senders with increasing gas price
         for gas_price in 0..5 {
-            let tx = MockTransaction::eip1559().with_gas_price(gas_price);
+            let tx = MockTransaction::eip1559().with_gas_price((gas_price + 1) * 10);
             let valid_tx = f.validated(tx);
             pool.add_transaction(Arc::new(valid_tx), 0);
         }
 
-        // Add another transaction with 0 gas price that's going to be prioritized by sender
-        let prioritized_tx = MockTransaction::eip1559().with_gas_price(0);
+        // Add another transaction with 5 gas price that's going to be prioritized by sender
+        let prioritized_tx = MockTransaction::eip1559().with_gas_price(5).with_gas_limit(200);
         let valid_prioritized_tx = f.validated(prioritized_tx.clone());
         pool.add_transaction(Arc::new(valid_prioritized_tx), 0);
 
-        let prioritized_senders = HashSet::from([prioritized_tx.sender()]);
+        // Add another transaction with 3 gas price that should not be prioritized by sender because
+        // of gas limit.
+        let prioritized_tx2 = MockTransaction::eip1559().with_gas_price(3);
+        let valid_prioritized_tx2 = f.validated(prioritized_tx2.clone());
+        pool.add_transaction(Arc::new(valid_prioritized_tx2), 0);
+
+        let prioritized_senders =
+            HashSet::from([prioritized_tx.sender(), prioritized_tx2.sender()]);
         let best =
             BestTransactionsWithPrioritizedSenders::new(prioritized_senders, 200, pool.best());
 
@@ -790,13 +796,17 @@ mod tests {
         // and the rest are returned in the reverse order of gas price
         let mut iter = best.into_iter();
         let top_of_block_tx = iter.next().unwrap();
-        assert_eq!(top_of_block_tx.max_fee_per_gas(), 0);
+        assert_eq!(top_of_block_tx.max_fee_per_gas(), 5);
         assert_eq!(top_of_block_tx.sender(), prioritized_tx.sender());
         for gas_price in (0..5).rev() {
-            assert_eq!(iter.next().unwrap().max_fee_per_gas(), gas_price);
+            assert_eq!(iter.next().unwrap().max_fee_per_gas(), (gas_price + 1) * 10);
         }
 
-        // TODO: Test that gas limits for prioritized transactions are respected
+        // Due to the gas limit, the transaction from second prioritized sender was not
+        // prioritized.
+        let top_of_block_tx2 = iter.next().unwrap();
+        assert_eq!(top_of_block_tx2.max_fee_per_gas(), 3);
+        assert_eq!(top_of_block_tx2.sender(), prioritized_tx2.sender());
     }
 
     #[test]

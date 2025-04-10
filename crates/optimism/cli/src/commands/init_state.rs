@@ -9,12 +9,12 @@ use reth_optimism_primitives::{
     bedrock::{BEDROCK_HEADER, BEDROCK_HEADER_HASH, BEDROCK_HEADER_TTD},
     OpPrimitives,
 };
-use reth_primitives::SealedHeader;
+use reth_primitives_traits::SealedHeader;
 use reth_provider::{
     BlockNumReader, ChainSpecProvider, DatabaseProviderFactory, StaticFileProviderFactory,
     StaticFileWriter,
 };
-use std::io::BufReader;
+use std::{io::BufReader, sync::Arc};
 use tracing::info;
 
 /// Initializes the database with the genesis block.
@@ -82,5 +82,12 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> InitStateCommandOp<C> {
 
         info!(target: "reth::cli", hash = ?hash, "Genesis block written");
         Ok(())
+    }
+}
+
+impl<C: ChainSpecParser> InitStateCommandOp<C> {
+    /// Returns the underlying chain being used to run this command
+    pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+        self.init_state.chain_spec()
     }
 }

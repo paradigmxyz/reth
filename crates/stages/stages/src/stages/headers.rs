@@ -13,8 +13,7 @@ use reth_db_api::{
 };
 use reth_etl::Collector;
 use reth_network_p2p::headers::{downloader::HeaderDownloader, error::HeadersDownloaderError};
-use reth_primitives::{NodePrimitives, SealedHeader, StaticFileSegment};
-use reth_primitives_traits::{serde_bincode_compat, FullBlockHeader};
+use reth_primitives_traits::{serde_bincode_compat, FullBlockHeader, NodePrimitives, SealedHeader};
 use reth_provider::{
     providers::StaticFileWriter, BlockHashReader, DBProvider, HeaderProvider, HeaderSyncGap,
     HeaderSyncGapProvider, StaticFileProviderFactory,
@@ -23,6 +22,7 @@ use reth_stages_api::{
     BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput,
     HeadersCheckpoint, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
+use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderError;
 use std::{
     sync::Arc,
@@ -407,8 +407,9 @@ mod tests {
     };
     use alloy_primitives::B256;
     use assert_matches::assert_matches;
+    use reth_ethereum_primitives::BlockBody;
     use reth_execution_types::ExecutionOutcome;
-    use reth_primitives::{BlockBody, RecoveredBlock, SealedBlock};
+    use reth_primitives_traits::{RecoveredBlock, SealedBlock};
     use reth_provider::{BlockWriter, ProviderFactory, StaticFileProviderFactory};
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators::{self, random_header, random_header_range};

@@ -8,10 +8,10 @@ use alloy_rpc_types_eth::{
 use reth_evm::TransactionEnv;
 use revm::{
     context::BlockEnv,
+    database::{CacheDB, State},
     state::{Account, AccountStatus, Bytecode, EvmStorageSlot},
     Database, DatabaseCommit,
 };
-use revm_database::{CacheDB, State};
 use std::{
     cmp::min,
     collections::{BTreeMap, HashMap},
@@ -203,7 +203,8 @@ pub trait OverrideBlockHashes {
 
 impl<DB> OverrideBlockHashes for CacheDB<DB> {
     fn override_block_hashes(&mut self, block_hashes: BTreeMap<u64, B256>) {
-        self.block_hashes
+        self.cache
+            .block_hashes
             .extend(block_hashes.into_iter().map(|(num, hash)| (U256::from(num), hash)))
     }
 }

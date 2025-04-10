@@ -1,13 +1,14 @@
 //! RPC errors specific to OP.
 
 use alloy_rpc_types_eth::{error::EthRpcErrorCode, BlockError};
+use alloy_transport::{RpcError, TransportErrorKind};
 use jsonrpsee_types::error::{INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE};
+use op_revm::{OpHaltReason, OpTransactionError};
 use reth_optimism_evm::OpBlockExecutionError;
 use reth_rpc_eth_api::AsEthApiError;
 use reth_rpc_eth_types::{error::api::FromEvmHalt, EthApiError};
 use reth_rpc_server_types::result::{internal_rpc_err, rpc_err};
 use revm::context_interface::result::{EVMError, InvalidTransaction};
-use revm_optimism::{OpHaltReason, OpTransactionError};
 use std::fmt::Display;
 
 /// Optimism specific errors, that extend [`EthApiError`].
@@ -136,9 +137,9 @@ impl From<TxConditionalErr> for jsonrpsee_types::error::ErrorObject<'static> {
 /// Error type when interacting with the Sequencer
 #[derive(Debug, thiserror::Error)]
 pub enum SequencerClientError {
-    /// Wrapper around an [`reqwest::Error`].
+    /// Wrapper around an [`RpcError<TransportErrorKind>`].
     #[error(transparent)]
-    HttpError(#[from] reqwest::Error),
+    HttpError(#[from] RpcError<TransportErrorKind>),
     /// Thrown when serializing transaction to forward to sequencer
     #[error("invalid sequencer transaction")]
     InvalidSequencerTransaction,
@@ -172,7 +173,6 @@ where
             },
             EVMError::Database(err) => Self::Eth(err.into()),
             EVMError::Header(err) => Self::Eth(err.into()),
-            EVMError::Precompile(err) => Self::Eth(EthApiError::EvmPrecompile(err)),
             EVMError::Custom(err) => Self::Eth(EthApiError::EvmCustom(err)),
         }
     }

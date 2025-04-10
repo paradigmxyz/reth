@@ -6,9 +6,9 @@ use alloy_consensus::TxLegacy;
 use alloy_primitives::{PrimitiveSignature as Signature, U256};
 use futures::StreamExt;
 use rand::thread_rng;
+use reth_ethereum_primitives::TransactionSigned;
 use reth_network::{test_utils::Testnet, NetworkEvent, NetworkEventListenerProvider};
 use reth_network_api::{events::PeerEvent, PeersInfo};
-use reth_primitives::TransactionSigned;
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 use reth_transaction_pool::{test_utils::TransactionGenerator, PoolTransaction, TransactionPool};
@@ -81,7 +81,7 @@ async fn test_4844_tx_gossip_penalization() {
     }
 
     let signed_txs: Vec<Arc<TransactionSigned>> =
-        txs.iter().map(|tx| Arc::new(tx.transaction().clone().into_tx())).collect();
+        txs.iter().map(|tx| Arc::new(tx.transaction().clone().into_inner())).collect();
 
     let network_handle = peer0.network();
 

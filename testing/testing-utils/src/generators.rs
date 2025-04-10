@@ -441,7 +441,7 @@ pub fn random_receipt<R: Rng>(
 ) -> Receipt {
     let success = rng.gen::<bool>();
     let logs_count = logs_count.unwrap_or_else(|| rng.gen::<u8>());
-    #[allow(clippy::needless_update)] // side-effect of optimism fields
+    #[expect(clippy::needless_update)] // side-effect of optimism fields
     Receipt {
         tx_type: transaction.tx_type(),
         success,

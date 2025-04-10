@@ -14,13 +14,13 @@ pub use reth_engine_tree::{
     chain::{ChainEvent, ChainOrchestrator},
     engine::EngineApiEvent,
 };
+use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_network_p2p::BlockClient;
-use reth_node_types::{BlockTy, HeaderTy, NodeTypes, NodeTypesWithEngine, TxTy};
+use reth_node_types::{BlockTy, NodeTypes};
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_primitives::EthPrimitives;
 use reth_provider::{
-    providers::{BlockchainProvider, EngineNodeTypes},
+    providers::{BlockchainProvider, ProviderNodeTypes},
     ProviderFactory,
 };
 use reth_prune::PrunerWithFactory;
@@ -40,10 +40,10 @@ pub type EngineMessageStream<T> = Pin<Box<dyn Stream<Item = BeaconEngineMessage<
 type EngineServiceType<N, Client> = ChainOrchestrator<
     EngineHandler<
         EngineApiRequestHandler<
-            EngineApiRequest<<N as NodeTypesWithEngine>::Engine, <N as NodeTypes>::Primitives>,
+            EngineApiRequest<<N as NodeTypes>::Payload, <N as NodeTypes>::Primitives>,
             <N as NodeTypes>::Primitives,
         >,
-        EngineMessageStream<<N as NodeTypesWithEngine>::Engine>,
+        EngineMessageStream<<N as NodeTypes>::Payload>,
         BasicBlockDownloader<Client, BlockTy<N>>,
     >,
     PipelineSync<N>,
@@ -51,13 +51,13 @@ type EngineServiceType<N, Client> = ChainOrchestrator<
 
 /// The type that drives the chain forward and communicates progress.
 #[pin_project]
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 // TODO(mattsse): remove hidde once fixed : <https://github.com/rust-lang/rust/issues/135363>
 //  otherwise rustdoc fails to resolve the alias
 #[doc(hidden)]
 pub struct EngineService<N, Client, E>
 where
-    N: EngineNodeTypes,
+    N: ProviderNodeTypes,
     Client: BlockClient<Block = BlockTy<N>> + 'static,
     E: BlockExecutorProvider + 'static,
 {
@@ -67,24 +67,24 @@ where
 
 impl<N, Client, E> EngineService<N, Client, E>
 where
-    N: EngineNodeTypes,
+    N: ProviderNodeTypes,
     Client: BlockClient<Block = BlockTy<N>> + 'static,
     E: BlockExecutorProvider<Primitives = N::Primitives> + 'static,
 {
     /// Constructor for `EngineService`.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new<V, C>(
         consensus: Arc<dyn FullConsensus<N::Primitives, Error = ConsensusError>>,
         executor_factory: E,
         chain_spec: Arc<N::ChainSpec>,
         client: Client,
-        incoming_requests: EngineMessageStream<N::Engine>,
+        incoming_requests: EngineMessageStream<N::Payload>,
         pipeline: Pipeline<N>,
         pipeline_task_spawner: Box<dyn TaskSpawner>,
         provider: ProviderFactory<N>,
         blockchain_db: BlockchainProvider<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
-        payload_builder: PayloadBuilderHandle<N::Engine>,
+        payload_builder: PayloadBuilderHandle<N::Payload>,
         payload_validator: V,
         tree_config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook<N::Primitives>>,
@@ -92,8 +92,8 @@ where
         evm_config: C,
     ) -> Self
     where
-        V: EngineValidator<N::Engine, Block = BlockTy<N>>,
-        C: ConfigureEvm<Header = HeaderTy<N>, Transaction = TxTy<N>> + 'static,
+        V: EngineValidator<N::Payload, Block = BlockTy<N>>,
+        C: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
         let engine_kind =
             if chain_spec.is_optimism() { EngineApiKind::OpStack } else { EngineApiKind::Ethereum };
@@ -139,7 +139,7 @@ where
 
 impl<N, Client, E> Stream for EngineService<N, Client, E>
 where
-    N: EngineNodeTypes,
+    N: ProviderNodeTypes,
     Client: BlockClient<Block = BlockTy<N>> + 'static,
     E: BlockExecutorProvider + 'static,
 {
@@ -168,7 +168,7 @@ mod tests {
     use reth_exex_types::FinishedExExHeight;
     use reth_network_p2p::test_utils::TestFullBlockClient;
     use reth_node_ethereum::EthereumEngineValidator;
-    use reth_primitives::SealedHeader;
+    use reth_primitives_traits::SealedHeader;
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
     };

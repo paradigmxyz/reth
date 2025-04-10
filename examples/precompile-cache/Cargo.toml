@@ -1,0 +1,19 @@
+[package]
+name = "example-precompile-cache"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth.workspace = true
+reth-ethereum = { workspace = true, features = ["test-utils", "evm", "node-api", "node"] }
+reth-tracing.workspace = true
+alloy-evm.workspace = true
+alloy-genesis.workspace = true
+alloy-primitives.workspace = true
+
+eyre.workspace = true
+parking_lot.workspace = true
+schnellru.workspace = true
+tokio.workspace = true

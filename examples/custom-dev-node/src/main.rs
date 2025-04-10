@@ -10,13 +10,17 @@ use alloy_primitives::{b256, hex};
 use futures_util::StreamExt;
 use reth::{
     builder::{NodeBuilder, NodeHandle},
-    providers::CanonStateSubscriptions,
-    rpc::api::eth::helpers::EthTransactions,
     tasks::TaskManager,
 };
-use reth_chainspec::ChainSpec;
-use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig, primitives::SignedTransaction};
-use reth_node_ethereum::EthereumNode;
+use reth_ethereum::{
+    chainspec::ChainSpec,
+    node::{
+        core::{args::RpcServerArgs, node_config::NodeConfig, primitives::SignedTransaction},
+        EthereumNode,
+    },
+    provider::CanonStateSubscriptions,
+    rpc::api::eth::helpers::EthTransactions,
+};
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
@@ -43,7 +47,7 @@ async fn main() -> eyre::Result<()> {
 
     let hash = eth_api.send_raw_transaction(raw_tx.into()).await?;
 
-    let expected = b256!("b1c6512f4fc202c04355fbda66755e0e344b152e633010e8fd75ecec09b63398");
+    let expected = b256!("0xb1c6512f4fc202c04355fbda66755e0e344b152e633010e8fd75ecec09b63398");
 
     assert_eq!(hash, expected);
     println!("submitted transaction: {hash}");

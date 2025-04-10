@@ -381,6 +381,11 @@ impl<P> RevealedSparseTrie<P> {
         self.updates.take().unwrap_or_default()
     }
 
+    /// Reserves capacity for at least `additional` more nodes to be inserted.
+    pub fn reserve_nodes(&mut self, additional: usize) {
+        self.nodes.reserve(additional);
+    }
+
     /// Reveal the trie node only if it was not known already.
     pub fn reveal_node(
         &mut self,
@@ -1591,7 +1596,7 @@ mod tests {
         node_iter::{TrieElement, TrieNodeIter},
         trie_cursor::{noop::NoopAccountTrieCursor, TrieCursor, TrieCursorFactory},
         walker::TrieWalker,
-        BranchNode, ExtensionNode, HashedPostState, LeafNode,
+        BranchNode, ExtensionNode, HashedPostState, LeafNode, TrieType,
     };
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
@@ -1648,6 +1653,7 @@ mod tests {
                 NoopHashedAccountCursor::default(),
                 hashed_post_state.accounts(),
             ),
+            TrieType::State,
         );
 
         while let Some(node) = node_iter.try_next().unwrap() {
@@ -2254,7 +2260,6 @@ mod tests {
         assert_eq!(sparse, sparse_old);
     }
 
-    #[allow(clippy::type_complexity)]
     #[test]
     fn sparse_trie_fuzz() {
         // Having only the first 3 nibbles set, we narrow down the range of keys

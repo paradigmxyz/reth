@@ -9,7 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
-use alloy_eips::merge::ALLOWED_FUTURE_BLOCK_TIME_SECONDS;
+use alloy_eips::{eip7840::BlobParams, merge::ALLOWED_FUTURE_BLOCK_TIME_SECONDS};
 use alloy_primitives::U256;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
@@ -20,10 +20,9 @@ use reth_consensus_common::validation::{
     validate_header_base_fee, validate_header_extra_data, validate_header_gas,
 };
 use reth_execution_types::BlockExecutionResult;
-use reth_primitives::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_primitives_traits::{
     constants::{GAS_LIMIT_BOUND_DIVISOR, MINIMUM_GAS_LIMIT},
-    Block, BlockHeader,
+    Block, BlockHeader, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
 use std::{fmt::Debug, sync::Arc, time::SystemTime};
 
@@ -151,7 +150,12 @@ where
 
         // Ensures that EIP-4844 fields are valid once cancun is active.
         if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp()) {
-            validate_4844_header_standalone(header.header())?;
+            validate_4844_header_standalone(
+                header.header(),
+                self.chain_spec
+                    .blob_params_at_timestamp(header.timestamp())
+                    .unwrap_or_else(BlobParams::cancun),
+            )?;
         } else if header.blob_gas_used().is_some() {
             return Err(ConsensusError::BlobGasUsedUnexpected)
         } else if header.excess_blob_gas().is_some() {
@@ -262,7 +266,7 @@ mod tests {
     use reth_primitives_traits::proofs;
 
     fn header_with_gas_limit(gas_limit: u64) -> SealedHeader {
-        let header = reth_primitives::Header { gas_limit, ..Default::default() };
+        let header = reth_primitives_traits::Header { gas_limit, ..Default::default() };
         SealedHeader::new(header, B256::ZERO)
     }
 
@@ -342,7 +346,7 @@ mod tests {
         // that the header is valid
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().shanghai_activated().build());
 
-        let header = reth_primitives::Header {
+        let header = reth_primitives_traits::Header {
             base_fee_per_gas: Some(1337),
             withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
             ..Default::default()

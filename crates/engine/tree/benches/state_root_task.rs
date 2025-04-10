@@ -4,6 +4,7 @@
 #![allow(missing_docs)]
 
 use alloy_consensus::constants::KECCAK_EMPTY;
+use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{Address, B256};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use proptest::test_runner::TestRunner;
@@ -14,7 +15,7 @@ use reth_db_common::init::init_genesis;
 use reth_engine_tree::tree::{
     executor::WorkloadExecutor, PayloadProcessor, StateProviderBuilder, TreeConfig,
 };
-use reth_evm::system_calls::{OnStateHook, StateChangeSource};
+use reth_evm::OnStateHook;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{Account as RethAccount, StorageEntry};
 use reth_provider::{

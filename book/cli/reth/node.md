@@ -17,7 +17,7 @@ Options:
           Possible values are either a built-in chain or the path to a chain specification file.
 
           Built-in chains:
-              mainnet, sepolia, holesky, dev
+              mainnet, sepolia, holesky, hoodi, dev
 
           [default: mainnet]
 
@@ -28,9 +28,7 @@ Options:
 
           Max number of instances is 200. It is chosen in a way so that it's not possible to have port numbers that conflict with each other.
 
-          Changes to the following port numbers: - `DISCOVERY_PORT`: default + `instance` - 1 - `AUTH_PORT`: default + `instance` * 100 - 100 - `HTTP_RPC_PORT`: default - `instance` + 1 - `WS_RPC_PORT`: default + `instance` * 2 - 2
-
-          [default: 1]
+          Changes to the following port numbers: - `DISCOVERY_PORT`: default + `instance` - 1 - `AUTH_PORT`: default + `instance` * 100 - 100 - `HTTP_RPC_PORT`: default - `instance` + 1 - `WS_RPC_PORT`: default + `instance` * 2 - 2 - `IPC_PATH`: default + `-instance`
 
       --with-unused-ports
           Sets all ports to unused, allowing the OS to choose random unused ports when sockets are bound.
@@ -106,7 +104,7 @@ Networking:
       --discovery.v5.lookup-interval <DISCOVERY_V5_LOOKUP_INTERVAL>
           The interval in seconds at which to carry out periodic lookup queries, for the whole run of the program
 
-          [default: 60]
+          [default: 20]
 
       --discovery.v5.bootstrap.lookup-interval <DISCOVERY_V5_BOOTSTRAP_LOOKUP_INTERVAL>
           The interval in seconds at which to carry out boost lookup queries, for a fixed number of times, at bootstrap
@@ -116,7 +114,7 @@ Networking:
       --discovery.v5.bootstrap.lookup-countdown <DISCOVERY_V5_BOOTSTRAP_LOOKUP_COUNTDOWN>
           The number of times to carry out boost lookup queries at bootstrap
 
-          [default: 100]
+          [default: 200]
 
       --trusted-peers <TRUSTED_PEERS>
           Comma separated enode URLs of trusted peers for P2P connections.
@@ -337,6 +335,11 @@ RPC:
 
           [default: <NUM CPU CORES-2>]
 
+      --rpc.max-trace-filter-blocks <COUNT>
+          Maximum number of blocks for `trace_filter` requests
+
+          [default: 100]
+
       --rpc.max-blocks-per-filter <COUNT>
           Maximum number of blocks that could be scanned per filter request. (0 = entire chain)
 
@@ -453,6 +456,9 @@ TxPool:
 
           [default: 20]
 
+      --txpool.blob-cache-size <BLOB_CACHE_SIZE>
+          Max number of entries for the in memory cache of the blob store
+
       --txpool.max-account-slots <MAX_ACCOUNT_SLOTS>
           Max number of executable transaction slots guaranteed per account
 
@@ -521,6 +527,12 @@ TxPool:
           Maximum amount of time non-executable transaction are queued
 
           [default: 10800]
+
+      --txpool.transactions-backup <PATH>
+          Path to store the local transaction backup at, to survive node restarts
+
+      --txpool.disable-transactions-backup
+          Disables transaction backup to disk on node shutdown
 
 Builder:
       --builder.extradata <EXTRA_DATA>
@@ -720,6 +732,33 @@ Engine:
 
       --engine.state-root-task-compare-updates
           Enable comparing trie updates from the state root task to the trie updates from the regular state root calculation
+
+      --engine.accept-execution-requests-hash
+          Enables accepting requests hash instead of an array of requests in `engine_newPayloadV4`
+
+Ress:
+      --ress.enable
+          Enable support for `ress` subprotocol
+
+      --ress.max-active-connections <MAX_ACTIVE_CONNECTIONS>
+          The maximum number of active connections for `ress` subprotocol
+
+          [default: 5]
+
+      --ress.max-witness-window <MAX_WITNESS_WINDOW>
+          The maximum witness lookback window
+
+          [default: 1024]
+
+      --ress.witness-max-parallel <WITNESS_MAX_PARALLEL>
+          The maximum number of witnesses to generate in parallel
+
+          [default: 5]
+
+      --ress.witness-cache-size <WITNESS_CACHE_SIZE>
+          Witness cache size
+
+          [default: 10]
 
 Logging:
       --log.stdout.format <FORMAT>

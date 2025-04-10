@@ -3,7 +3,7 @@ use reth_exex::ExExContext;
 use reth_node_ethereum::EthereumNode;
 
 async fn my_exex<Node: FullNodeComponents>(mut _ctx: ExExContext<Node>) -> eyre::Result<()> {
-    #[allow(clippy::empty_loop)]
+    #[expect(clippy::empty_loop)]
     loop {}
 }
 

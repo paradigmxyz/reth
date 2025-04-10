@@ -17,25 +17,27 @@
 
 extern crate alloc;
 
-use alloc::sync::Arc;
+use alloc::{borrow::Cow, sync::Arc};
 use alloy_consensus::{BlockHeader, Header};
 pub use alloy_evm::EthEvm;
-use alloy_evm::{EthEvmFactory, FromRecoveredTx};
+use alloy_evm::{
+    eth::{EthBlockExecutionCtx, EthBlockExecutorFactory},
+    EthEvmFactory, FromRecoveredTx, FromTxWithEncoded,
+};
 use alloy_primitives::{Bytes, U256};
 use core::{convert::Infallible, fmt::Debug};
 use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
-use reth_evm::{
-    ConfigureEvm, ConfigureEvmEnv, EvmEnv, EvmFactory, NextBlockEnvAttributes, TransactionEnv,
-};
-use reth_primitives::TransactionSigned;
+use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
+use reth_evm::{ConfigureEvm, EvmEnv, EvmFactory, NextBlockEnvAttributes, TransactionEnv};
+use reth_primitives_traits::{SealedBlock, SealedHeader};
 use revm::{
     context::{BlockEnv, CfgEnv},
     context_interface::block::BlobExcessGasAndPrice,
-    specification::hardfork::SpecId,
+    primitives::hardfork::SpecId,
 };
 
 mod config;
-use alloy_eips::eip1559::INITIAL_BASE_FEE;
+use alloy_eips::{eip1559::INITIAL_BASE_FEE, eip7840::BlobParams};
 pub use config::{revm_spec, revm_spec_by_timestamp_and_block_number};
 use reth_ethereum_forks::EthereumHardfork;
 
@@ -44,18 +46,16 @@ pub mod execute;
 mod build;
 pub use build::EthBlockAssembler;
 
-/// Ethereum DAO hardfork state change data.
-pub mod dao_fork;
-
-/// [EIP-6110](https://eips.ethereum.org/EIPS/eip-6110) handling.
-pub mod eip6110;
+mod receipt;
+pub use receipt::RethReceiptBuilder;
 
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone)]
 pub struct EthEvmConfig<EvmFactory = EthEvmFactory> {
-    chain_spec: Arc<ChainSpec>,
-    evm_factory: EvmFactory,
-    block_assembler: EthBlockAssembler<ChainSpec>,
+    /// Inner [`EthBlockExecutorFactory`].
+    pub executor_factory: EthBlockExecutorFactory<RethReceiptBuilder, Arc<ChainSpec>, EvmFactory>,
+    /// Ethereum block assembler.
+    pub block_assembler: EthBlockAssembler<ChainSpec>,
 }
 
 impl EthEvmConfig {
@@ -80,14 +80,17 @@ impl<EvmFactory> EthEvmConfig<EvmFactory> {
     pub fn new_with_evm_factory(chain_spec: Arc<ChainSpec>, evm_factory: EvmFactory) -> Self {
         Self {
             block_assembler: EthBlockAssembler::new(chain_spec.clone()),
-            chain_spec,
-            evm_factory,
+            executor_factory: EthBlockExecutorFactory::new(
+                RethReceiptBuilder::default(),
+                chain_spec,
+                evm_factory,
+            ),
         }
     }
 
     /// Returns the chain spec associated with this configuration.
     pub const fn chain_spec(&self) -> &Arc<ChainSpec> {
-        &self.chain_spec
+        self.executor_factory.spec()
     }
 
     /// Sets the extra data for the block assembler.
@@ -97,26 +100,49 @@ impl<EvmFactory> EthEvmConfig<EvmFactory> {
     }
 }
 
-impl<EvmF> ConfigureEvmEnv for EthEvmConfig<EvmF>
+impl<EvmF> ConfigureEvm for EthEvmConfig<EvmF>
 where
-    EvmF: EvmFactory<Tx: TransactionEnv + FromRecoveredTx<TransactionSigned>, Spec = SpecId>
+    EvmF: EvmFactory<
+            Tx: TransactionEnv
+                    + FromRecoveredTx<TransactionSigned>
+                    + FromTxWithEncoded<TransactionSigned>,
+            Spec = SpecId,
+        > + Clone
+        + Debug
         + Send
         + Sync
         + Unpin
-        + Clone,
+        + 'static,
 {
-    type Header = Header;
-    type Transaction = TransactionSigned;
+    type Primitives = EthPrimitives;
     type Error = Infallible;
-    type TxEnv = EvmF::Tx;
-    type Spec = SpecId;
     type NextBlockEnvCtx = NextBlockEnvAttributes;
+    type BlockExecutorFactory = EthBlockExecutorFactory<RethReceiptBuilder, Arc<ChainSpec>, EvmF>;
+    type BlockAssembler = EthBlockAssembler<ChainSpec>;
 
-    fn evm_env(&self, header: &Self::Header) -> EvmEnv {
+    fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
+        &self.executor_factory
+    }
+
+    fn block_assembler(&self) -> &Self::BlockAssembler {
+        &self.block_assembler
+    }
+
+    fn evm_env(&self, header: &Header) -> EvmEnv {
         let spec = config::revm_spec(self.chain_spec(), header);
 
         // configure evm env based on parent block
-        let cfg_env = CfgEnv::new().with_chain_id(self.chain_spec.chain().id()).with_spec(spec);
+        let cfg_env = CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec);
+
+        // derive the EIP-4844 blob fees from the header's `excess_blob_gas` and the current
+        // blobparams
+        let blob_excess_gas_and_price = header
+            .excess_blob_gas
+            .zip(self.chain_spec().blob_params_at_timestamp(header.timestamp))
+            .map(|(excess_blob_gas, params)| {
+                let blob_gasprice = params.calc_blob_fee(excess_blob_gas);
+                BlobExcessGasAndPrice { excess_blob_gas, blob_gasprice }
+            });
 
         let block_env = BlockEnv {
             number: header.number(),
@@ -126,10 +152,7 @@ where
             prevrandao: if spec >= SpecId::MERGE { header.mix_hash() } else { None },
             gas_limit: header.gas_limit(),
             basefee: header.base_fee_per_gas().unwrap_or_default(),
-            // EIP-4844 excess blob gas of this block, introduced in Cancun
-            blob_excess_gas_and_price: header.excess_blob_gas.map(|excess_blob_gas| {
-                BlobExcessGasAndPrice::new(excess_blob_gas, spec >= SpecId::PRAGUE)
-            }),
+            blob_excess_gas_and_price,
         };
 
         EvmEnv { cfg_env, block_env }
@@ -137,39 +160,43 @@ where
 
     fn next_evm_env(
         &self,
-        parent: &Self::Header,
+        parent: &Header,
         attributes: &NextBlockEnvAttributes,
     ) -> Result<EvmEnv, Self::Error> {
         // ensure we're not missing any timestamp based hardforks
         let spec_id = revm_spec_by_timestamp_and_block_number(
-            &self.chain_spec,
+            self.chain_spec(),
             attributes.timestamp,
             parent.number() + 1,
         );
 
         // configure evm env based on parent block
-        let cfg = CfgEnv::new().with_chain_id(self.chain_spec.chain().id()).with_spec(spec_id);
+        let cfg = CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec_id);
 
+        let blob_params = self.chain_spec().blob_params_at_timestamp(attributes.timestamp);
         // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
         // cancun now, we need to set the excess blob gas to the default value(0)
         let blob_excess_gas_and_price = parent
-            .maybe_next_block_excess_blob_gas(
-                self.chain_spec.blob_params_at_timestamp(attributes.timestamp),
-            )
+            .maybe_next_block_excess_blob_gas(blob_params)
             .or_else(|| (spec_id == SpecId::CANCUN).then_some(0))
-            .map(|gas| BlobExcessGasAndPrice::new(gas, spec_id >= SpecId::PRAGUE));
+            .map(|excess_blob_gas| {
+                let blob_gasprice =
+                    blob_params.unwrap_or_else(BlobParams::cancun).calc_blob_fee(excess_blob_gas);
+                BlobExcessGasAndPrice { excess_blob_gas, blob_gasprice }
+            });
 
         let mut basefee = parent.next_block_base_fee(
-            self.chain_spec.base_fee_params_at_timestamp(attributes.timestamp),
+            self.chain_spec().base_fee_params_at_timestamp(attributes.timestamp),
         );
 
         let mut gas_limit = attributes.gas_limit;
 
         // If we are on the London fork boundary, we need to multiply the parent's gas limit by the
         // elasticity multiplier to get the new gas limit.
-        if self.chain_spec.fork(EthereumHardfork::London).transitions_at_block(parent.number + 1) {
+        if self.chain_spec().fork(EthereumHardfork::London).transitions_at_block(parent.number + 1)
+        {
             let elasticity_multiplier = self
-                .chain_spec
+                .chain_spec()
                 .base_fee_params_at_timestamp(attributes.timestamp)
                 .elasticity_multiplier;
 
@@ -195,20 +222,27 @@ where
 
         Ok((cfg, block_env).into())
     }
-}
 
-impl<EvmF> ConfigureEvm for EthEvmConfig<EvmF>
-where
-    EvmF: EvmFactory<Tx: TransactionEnv + FromRecoveredTx<TransactionSigned>, Spec = SpecId>
-        + Send
-        + Sync
-        + Unpin
-        + Clone,
-{
-    type EvmFactory = EvmF;
+    fn context_for_block<'a>(&self, block: &'a SealedBlock<Block>) -> EthBlockExecutionCtx<'a> {
+        EthBlockExecutionCtx {
+            parent_hash: block.header().parent_hash,
+            parent_beacon_block_root: block.header().parent_beacon_block_root,
+            ommers: &block.body().ommers,
+            withdrawals: block.body().withdrawals.as_ref().map(Cow::Borrowed),
+        }
+    }
 
-    fn evm_factory(&self) -> &Self::EvmFactory {
-        &self.evm_factory
+    fn context_for_next_block(
+        &self,
+        parent: &SealedHeader,
+        attributes: Self::NextBlockEnvCtx,
+    ) -> EthBlockExecutionCtx<'_> {
+        EthBlockExecutionCtx {
+            parent_hash: parent.hash(),
+            parent_beacon_block_root: attributes.parent_beacon_block_root,
+            ommers: &[],
+            withdrawals: attributes.withdrawals.map(Cow::Owned),
+        }
     }
 }
 
@@ -301,7 +335,7 @@ mod tests {
         assert_eq!(evm.block, evm_env.block_env);
 
         // Default spec ID
-        assert_eq!(evm.cfg.spec, SpecId::LATEST);
+        assert_eq!(evm.cfg.spec, SpecId::default());
     }
 
     #[test]
@@ -348,7 +382,7 @@ mod tests {
 
         // Check that the EVM environment is set with custom configuration
         assert_eq!(evm.cfg, cfg_env);
-        assert_eq!(evm.cfg.spec, SpecId::LATEST);
+        assert_eq!(evm.cfg.spec, SpecId::default());
     }
 
     #[test]
@@ -365,7 +399,7 @@ mod tests {
 
         // Verify that the block and transaction environments are set correctly
         assert_eq!(evm.block, evm_env.block_env);
-        assert_eq!(evm.cfg.spec, SpecId::LATEST);
+        assert_eq!(evm.cfg.spec, SpecId::default());
     }
 
     #[test]

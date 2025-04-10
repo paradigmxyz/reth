@@ -9,7 +9,7 @@ use reth_eth_wire::{
     DedupPayload, Eth68TxMetadata, HandleMempoolData, PartiallyValidData, ValidAnnouncementData,
     MAX_MESSAGE_SIZE,
 };
-use reth_primitives::TxType;
+use reth_ethereum_primitives::TxType;
 use std::{fmt, fmt::Display, mem};
 use tracing::trace;
 
@@ -42,7 +42,7 @@ pub trait ValidateTx68 {
 
     /// Returns the reasonable minimum encoded transaction length, if any. This property is not
     /// spec'ed out but can be inferred by looking at which
-    /// [`reth_primitives::PooledTransaction`] will successfully pass decoding
+    /// [`alloy_consensus::transaction::PooledTransaction`] will successfully pass decoding
     /// for any given transaction type.
     fn min_encoded_tx_length(&self, ty: TxType) -> Option<usize>;
 
@@ -244,7 +244,7 @@ impl ValidateTx68 for EthMessageFilter {
     fn max_encoded_tx_length(&self, ty: TxType) -> Option<usize> {
         // the biggest transaction so far is a blob transaction, which is currently max 2^17,
         // encoded length, nonetheless, the blob tx may become bigger in the future.
-        #[allow(unreachable_patterns, clippy::match_same_arms)]
+        #[expect(clippy::match_same_arms)]
         match ty {
             TxType::Legacy | TxType::Eip2930 | TxType::Eip1559 => Some(MAX_MESSAGE_SIZE),
             TxType::Eip4844 => None,

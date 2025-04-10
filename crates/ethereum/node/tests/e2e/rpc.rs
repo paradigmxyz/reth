@@ -66,7 +66,7 @@ async fn test_fee_history() -> eyre::Result<()> {
     let receipt = builder.get_receipt().await?;
     assert!(receipt.status());
 
-    let block = provider.get_block_by_number(1.into(), false.into()).await?.unwrap();
+    let block = provider.get_block_by_number(1.into()).await?.unwrap();
     assert_eq!(block.header.gas_used, receipt.gas_used,);
     assert_eq!(block.header.base_fee_per_gas.unwrap(), expected_first_base_fee as u64);
 
@@ -86,7 +86,7 @@ async fn test_fee_history() -> eyre::Result<()> {
         let fee_history = provider.get_fee_history(block_count, latest_block.into(), &[]).await?;
 
         let mut prev_header = provider
-            .get_block_by_number((latest_block + 1 - block_count).into(), false.into())
+            .get_block_by_number((latest_block + 1 - block_count).into())
             .await?
             .unwrap()
             .header;
@@ -98,10 +98,9 @@ async fn test_fee_history() -> eyre::Result<()> {
                 chain_spec.base_fee_params_at_block(block),
             );
 
-            let header =
-                provider.get_block_by_number(block.into(), false.into()).await?.unwrap().header;
+            let header = provider.get_block_by_number(block.into()).await?.unwrap().header;
 
-            assert_eq!(header.base_fee_per_gas.unwrap(), expected_base_fee as u64);
+            assert_eq!(header.base_fee_per_gas.unwrap(), expected_base_fee);
             assert_eq!(
                 header.base_fee_per_gas.unwrap(),
                 fee_history.base_fee_per_gas[(block + block_count - 1 - latest_block) as usize]

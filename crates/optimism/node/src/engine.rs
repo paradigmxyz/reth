@@ -23,7 +23,7 @@ use reth_optimism_payload_builder::{
     OpBuiltPayload, OpExecutionPayloadValidator, OpPayloadBuilderAttributes,
 };
 use reth_optimism_primitives::{OpBlock, OpPrimitives, ADDRESS_L2_TO_L1_MESSAGE_PASSER};
-use reth_primitives::{RecoveredBlock, SealedBlock};
+use reth_primitives_traits::{RecoveredBlock, SealedBlock};
 use reth_provider::StateProviderFactory;
 use reth_trie_common::{HashedPostState, KeyHasher};
 use std::sync::Arc;
@@ -35,13 +35,28 @@ pub struct OpEngineTypes<T: PayloadTypes = OpPayloadTypes> {
     _marker: std::marker::PhantomData<T>,
 }
 
-impl<T: PayloadTypes> PayloadTypes for OpEngineTypes<T> {
+impl<
+        T: PayloadTypes<
+            ExecutionData = OpExecutionData,
+            BuiltPayload: BuiltPayload<Primitives: NodePrimitives<Block = OpBlock>>,
+        >,
+    > PayloadTypes for OpEngineTypes<T>
+{
+    type ExecutionData = T::ExecutionData;
     type BuiltPayload = T::BuiltPayload;
     type PayloadAttributes = T::PayloadAttributes;
     type PayloadBuilderAttributes = T::PayloadBuilderAttributes;
+
+    fn block_to_payload(
+        block: SealedBlock<
+            <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
+        >,
+    ) -> <T as PayloadTypes>::ExecutionData {
+        OpExecutionData::from_block_unchecked(block.hash(), &block.into_block())
+    }
 }
 
-impl<T: PayloadTypes> EngineTypes for OpEngineTypes<T>
+impl<T: PayloadTypes<ExecutionData = OpExecutionData>> EngineTypes for OpEngineTypes<T>
 where
     T::BuiltPayload: BuiltPayload<Primitives: NodePrimitives<Block = OpBlock>>
         + TryInto<ExecutionPayloadV1>
@@ -53,15 +68,6 @@ where
     type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadEnvelopeV3 = OpExecutionPayloadEnvelopeV3;
     type ExecutionPayloadEnvelopeV4 = OpExecutionPayloadEnvelopeV4;
-    type ExecutionData = OpExecutionData;
-
-    fn block_to_payload(
-        block: SealedBlock<
-            <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
-        >,
-    ) -> OpExecutionData {
-        OpExecutionData::from_block_unchecked(block.hash(), &block.into_block())
-    }
 }
 
 /// A default payload type for [`OpEngineTypes`]
@@ -69,10 +75,22 @@ where
 #[non_exhaustive]
 pub struct OpPayloadTypes<N: NodePrimitives = OpPrimitives>(core::marker::PhantomData<N>);
 
-impl<N: NodePrimitives> PayloadTypes for OpPayloadTypes<N> {
+impl<N: NodePrimitives> PayloadTypes for OpPayloadTypes<N>
+where
+    OpBuiltPayload<N>: BuiltPayload<Primitives: NodePrimitives<Block = OpBlock>>,
+{
+    type ExecutionData = OpExecutionData;
     type BuiltPayload = OpBuiltPayload<N>;
     type PayloadAttributes = OpPayloadAttributes;
     type PayloadBuilderAttributes = OpPayloadBuilderAttributes<N::SignedTx>;
+
+    fn block_to_payload(
+        block: SealedBlock<
+            <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
+        >,
+    ) -> Self::ExecutionData {
+        OpExecutionData::from_block_unchecked(block.hash(), &block.into_block())
+    }
 }
 
 /// Validator for Optimism engine API.
@@ -147,22 +165,9 @@ where
 
 impl<Types, P> EngineValidator<Types> for OpEngineValidator<P>
 where
-    Types: EngineTypes<PayloadAttributes = OpPayloadAttributes, ExecutionData = OpExecutionData>,
+    Types: PayloadTypes<PayloadAttributes = OpPayloadAttributes, ExecutionData = OpExecutionData>,
     P: StateProviderFactory + Unpin + 'static,
 {
-    fn validate_execution_requests(
-        &self,
-        requests: &alloy_eips::eip7685::Requests,
-    ) -> Result<(), EngineObjectValidationError> {
-        // according to op spec, execution requests must be empty
-        if !requests.is_empty() {
-            return Err(EngineObjectValidationError::InvalidParams(
-                "NonEmptyExecutionRequests".to_string().into(),
-            ))
-        }
-        Ok(())
-    }
-
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,

@@ -6,14 +6,19 @@ use reth_storage_errors::db::DatabaseError;
 mod in_memory;
 
 /// Cursor for iterating over a subtrie.
-mod subnode;
+pub mod subnode;
 
 /// Noop trie cursor implementations.
 pub mod noop;
 
+/// Mock trie cursor implementations.
+#[cfg(test)]
+pub mod mock;
+
 pub use self::{in_memory::*, subnode::CursorSubNode};
 
 /// Factory for creating trie cursors.
+#[auto_impl::auto_impl(&)]
 pub trait TrieCursorFactory {
     /// The account trie cursor type.
     type AccountTrieCursor: TrieCursor;

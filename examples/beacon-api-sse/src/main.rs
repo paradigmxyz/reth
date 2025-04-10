@@ -13,7 +13,7 @@
 //! **NOTE**: This expects that the CL client is running an http server on `localhost:5052` and is
 //! configured to emit payload attributes events.
 //!
-//! See lighthouse beacon Node API: <https://lighthouse-book.sigmaprime.io/api-bn.html#beacon-node-api>
+//! See lighthouse beacon Node API: <https://lighthouse-book.sigmaprime.io/api_bn.html#beacon-node-api>
 
 #![warn(unused_crate_dependencies)]
 
@@ -22,7 +22,7 @@ use clap::Parser;
 use futures_util::stream::StreamExt;
 use mev_share_sse::{client::EventStream, EventClient};
 use reth::{chainspec::EthereumChainSpecParser, cli::Cli};
-use reth_node_ethereum::EthereumNode;
+use reth_ethereum::node::EthereumNode;
 use std::net::{IpAddr, Ipv4Addr};
 use tracing::{info, warn};
 

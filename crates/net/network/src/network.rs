@@ -51,7 +51,7 @@ pub struct NetworkHandle<N: NetworkPrimitives = EthNetworkPrimitives> {
 
 impl<N: NetworkPrimitives> NetworkHandle<N> {
     /// Creates a single new instance.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         num_active_peers: Arc<AtomicUsize>,
         listener_address: Arc<Mutex<SocketAddr>>,

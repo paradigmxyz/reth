@@ -101,7 +101,7 @@ where
             }
 
             let gas = provider
-                .estimate_gas(&tx)
+                .estimate_gas(tx.clone())
                 .block(BlockId::Number(BlockNumberOrTag::Pending))
                 .await
                 .unwrap_or(1_000_000);
@@ -120,12 +120,8 @@ where
         if finalize {
             node.update_forkchoice(payload.block().hash(), payload.block().hash()).await?;
         } else {
-            let last_safe = provider
-                .get_block_by_number(BlockNumberOrTag::Safe, false.into())
-                .await?
-                .unwrap()
-                .header
-                .hash;
+            let last_safe =
+                provider.get_block_by_number(BlockNumberOrTag::Safe).await?.unwrap().header.hash;
             node.update_forkchoice(last_safe, payload.block().hash()).await?;
         }
 

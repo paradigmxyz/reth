@@ -1,5 +1,6 @@
 use alloy_consensus::BlockHeader as _;
 use alloy_eips::BlockId;
+use alloy_evm::block::calc::{base_block_reward_pre_merge, block_reward, ommer_reward};
 use alloy_primitives::{map::HashSet, Bytes, B256, U256};
 use alloy_rpc_types_eth::{
     state::{EvmOverrides, StateOverride},
@@ -14,15 +15,14 @@ use alloy_rpc_types_trace::{
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::{EthChainSpec, EthereumHardfork, MAINNET, SEPOLIA};
-use reth_consensus_common::calc::{base_block_reward_pre_merge, block_reward, ommer_reward};
-use reth_evm::ConfigureEvmEnv;
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardfork, MAINNET, SEPOLIA};
+use reth_evm::ConfigureEvm;
 use reth_primitives_traits::{BlockBody, BlockHeader};
-use reth_provider::{BlockNumReader, BlockReader, ChainSpecProvider};
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_eth_api::{helpers::TraceExt, FromEthApiError, RpcNodeCore};
-use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction};
+use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction, EthConfig};
+use reth_storage_api::{BlockNumReader, BlockReader};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
 use revm::DatabaseCommit;
@@ -44,8 +44,12 @@ pub struct TraceApi<Eth> {
 
 impl<Eth> TraceApi<Eth> {
     /// Create a new instance of the [`TraceApi`]
-    pub fn new(eth_api: Eth, blocking_task_guard: BlockingTaskGuard) -> Self {
-        let inner = Arc::new(TraceApiInner { eth_api, blocking_task_guard });
+    pub fn new(
+        eth_api: Eth,
+        blocking_task_guard: BlockingTaskGuard,
+        eth_config: EthConfig,
+    ) -> Self {
+        let inner = Arc::new(TraceApiInner { eth_api, blocking_task_guard, eth_config });
         Self { inner }
     }
 
@@ -110,7 +114,7 @@ where
         block_id: Option<BlockId>,
     ) -> Result<TraceResults, Eth::Error> {
         let tx = recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(&tx)?
-            .map_transaction(<Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus);
+            .map(<Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus);
 
         let (evm_env, at) = self.eth_api().evm_env_at(block_id.unwrap_or_default()).await?;
         let tx_env = self.eth_api().evm_config().tx_env(tx);
@@ -242,11 +246,13 @@ where
         let matcher = Arc::new(filter.matcher());
         let TraceFilter { from_block, to_block, after, count, .. } = filter;
         let start = from_block.unwrap_or(0);
-        let end = if let Some(to_block) = to_block {
-            to_block
-        } else {
-            self.provider().best_block_number().map_err(Eth::Error::from_eth_err)?
-        };
+
+        let latest_block = self.provider().best_block_number().map_err(Eth::Error::from_eth_err)?;
+        if start > latest_block {
+            // can't trace that range
+            return Err(EthApiError::HeaderNotFound(start.into()).into());
+        }
+        let end = to_block.unwrap_or(latest_block);
 
         if start > end {
             return Err(EthApiError::InvalidParams(
@@ -257,7 +263,7 @@ where
 
         // ensure that the range is not too large, since we need to fetch all blocks in the range
         let distance = end.saturating_sub(start);
-        if distance > 100 {
+        if distance > self.inner.eth_config.max_trace_filter_blocks {
             return Err(EthApiError::InvalidParams(
                 "Block range too large; currently limited to 100 blocks".to_string(),
             )
@@ -267,7 +273,7 @@ where
         // fetch all blocks in that range
         let blocks = self
             .provider()
-            .sealed_block_with_senders_range(start..=end)
+            .recovered_block_range(start..=end)
             .map_err(Eth::Error::from_eth_err)?
             .into_iter()
             .map(Arc::new)
@@ -374,7 +380,7 @@ where
             },
         );
 
-        let block = self.eth_api().block_with_senders(block_id);
+        let block = self.eth_api().recovered_block(block_id);
         let (maybe_traces, maybe_block) = futures::try_join!(traces, block)?;
 
         let mut maybe_traces =
@@ -472,9 +478,7 @@ where
 
         let Some(transactions) = res else { return Ok(None) };
 
-        let Some(block) = self.eth_api().block_with_senders(block_id).await? else {
-            return Ok(None)
-        };
+        let Some(block) = self.eth_api().recovered_block(block_id).await? else { return Ok(None) };
 
         Ok(Some(BlockOpcodeGas {
             block_hash: block.hash(),
@@ -687,6 +691,8 @@ struct TraceApiInner<Eth> {
     eth_api: Eth,
     // restrict the number of concurrent calls to `trace_*`
     blocking_task_guard: BlockingTaskGuard,
+    // eth config settings
+    eth_config: EthConfig,
 }
 
 /// Helper to construct a [`LocalizedTransactionTrace`] that describes a reward to the block

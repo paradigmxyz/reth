@@ -224,7 +224,7 @@ where
         limit: usize,
     ) -> EthResult<Option<(B256, Vec<U256>)>> {
         // check the cache (this will hit the disk if the block is not cached)
-        let Some(block) = self.cache.get_sealed_block_with_senders(block_hash).await? else {
+        let Some(block) = self.cache.get_recovered_block(block_hash).await? else {
             return Ok(None)
         };
 

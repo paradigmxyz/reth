@@ -5,8 +5,11 @@ name: kurtosis-op
 on:
   workflow_dispatch:
   schedule:
-    # run every 12 hours
     - cron: "0 */12 * * *"
+
+  push:
+    tags:
+      - '*'
 
 env:
   CARGO_TERM_COLOR: always

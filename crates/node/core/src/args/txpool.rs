@@ -49,6 +49,10 @@ pub struct TxPoolArgs {
     #[arg(long = "txpool.blobpool-max-size", alias = "txpool.blobpool_max_size", default_value_t = TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT)]
     pub blobpool_max_size: usize,
 
+    /// Max number of entries for the in memory cache of the blob store.
+    #[arg(long = "txpool.blob-cache-size", alias = "txpool.blob_cache_size")]
+    pub blob_cache_size: Option<u32>,
+
     /// Max number of executable transaction slots guaranteed per account
     #[arg(long = "txpool.max-account-slots", alias = "txpool.max_account_slots", default_value_t = TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER)]
     pub max_account_slots: usize,
@@ -106,6 +110,18 @@ pub struct TxPoolArgs {
     /// Maximum amount of time non-executable transaction are queued.
     #[arg(long = "txpool.lifetime", value_parser = parse_duration_from_secs_or_ms, default_value = "10800", value_name = "DURATION")]
     pub max_queued_lifetime: Duration,
+
+    /// Path to store the local transaction backup at, to survive node restarts.
+    #[arg(long = "txpool.transactions-backup", alias = "txpool.journal", value_name = "PATH")]
+    pub transactions_backup_path: Option<std::path::PathBuf>,
+
+    /// Disables transaction backup to disk on node shutdown.
+    #[arg(
+        long = "txpool.disable-transactions-backup",
+        alias = "txpool.disable-journal",
+        conflicts_with = "transactions_backup_path"
+    )]
+    pub disable_transactions_backup: bool,
 }
 
 impl Default for TxPoolArgs {
@@ -119,6 +135,7 @@ impl Default for TxPoolArgs {
             queued_max_size: TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
             blobpool_max_count: TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
             blobpool_max_size: TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
+            blob_cache_size: None,
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             price_bump: DEFAULT_PRICE_BUMP,
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
@@ -134,6 +151,8 @@ impl Default for TxPoolArgs {
             new_tx_listener_buffer_size: NEW_TX_LISTENER_BUFFER_SIZE,
             max_new_pending_txs_notifications: MAX_NEW_PENDING_TXS_NOTIFICATIONS,
             max_queued_lifetime: MAX_QUEUED_TRANSACTION_LIFETIME,
+            transactions_backup_path: None,
+            disable_transactions_backup: false,
         }
     }
 }
@@ -163,6 +182,7 @@ impl RethTransactionPoolConfig for TxPoolArgs {
                 max_txs: self.blobpool_max_count,
                 max_size: self.blobpool_max_size.saturating_mul(1024 * 1024),
             },
+            blob_cache_size: self.blob_cache_size,
             max_account_slots: self.max_account_slots,
             price_bumps: PriceBumpConfig {
                 default_price_bump: self.price_bump,

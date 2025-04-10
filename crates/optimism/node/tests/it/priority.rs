@@ -1,6 +1,6 @@
 //! Node builder test that customizes priority of transactions in the block.
 
-use alloy_consensus::{SignableTransaction, TxEip1559};
+use alloy_consensus::{transaction::Recovered, SignableTransaction, TxEip1559};
 use alloy_genesis::Genesis;
 use alloy_network::TxSignerSync;
 use alloy_primitives::{Address, ChainId, TxKind};
@@ -10,7 +10,7 @@ use reth_db::test_utils::create_test_rw_db_with_path;
 use reth_e2e_test_utils::{
     node::NodeTestContext, transaction::TransactionTestContext, wallet::Wallet,
 };
-use reth_node_api::{FullNodeTypes, NodeTypesWithEngine};
+use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{
     components::{BasicPayloadServiceBuilder, ComponentsBuilder},
     EngineNodeLauncher, NodeBuilder, NodeConfig,
@@ -33,7 +33,6 @@ use reth_payload_util::{
     BestPayloadTransactions, PayloadTransactions, PayloadTransactionsChain,
     PayloadTransactionsFixed,
 };
-use reth_primitives::Recovered;
 use reth_provider::providers::BlockchainProvider;
 use reth_tasks::TaskManager;
 use reth_transaction_pool::PoolTransaction;
@@ -101,8 +100,8 @@ fn build_components<Node>(
 >
 where
     Node: FullNodeTypes<
-        Types: NodeTypesWithEngine<
-            Engine = OpEngineTypes,
+        Types: NodeTypes<
+            Payload = OpEngineTypes,
             ChainSpec = OpChainSpec,
             Primitives = OpPrimitives,
         >,

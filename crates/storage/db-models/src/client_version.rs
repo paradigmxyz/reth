@@ -1,12 +1,12 @@
 //! Client version model.
 
 use alloc::string::String;
-use serde::{Deserialize, Serialize};
 
 /// Client version that accessed the database.
-#[derive(Clone, Eq, PartialEq, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Default)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ClientVersion {
     /// Client version
     pub version: String,
@@ -23,7 +23,7 @@ impl ClientVersion {
     }
 }
 
-#[cfg(feature = "reth-codec")]
+#[cfg(any(test, feature = "reth-codec"))]
 impl reth_codecs::Compact for ClientVersion {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where

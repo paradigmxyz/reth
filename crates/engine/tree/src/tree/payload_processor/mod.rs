@@ -10,15 +10,13 @@ use crate::tree::{
     StateProviderBuilder, TreeConfig,
 };
 use alloy_consensus::{transaction::Recovered, BlockHeader};
+use alloy_evm::block::StateChangeSource;
 use alloy_primitives::B256;
 use executor::WorkloadExecutor;
 use multiproof::*;
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
-use reth_evm::{
-    system_calls::{OnStateHook, StateChangeSource},
-    ConfigureEvm, ConfigureEvmEnvFor,
-};
+use reth_evm::{ConfigureEvm, OnStateHook};
 use reth_primitives_traits::{NodePrimitives, SealedHeaderFor};
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateCommitmentProvider,
@@ -26,7 +24,10 @@ use reth_provider::{
 };
 use reth_revm::{db::BundleState, state::EvmState};
 use reth_trie::TrieInput;
-use reth_trie_parallel::root::ParallelStateRootError;
+use reth_trie_parallel::{
+    proof_task::{ProofTaskCtx, ProofTaskManager},
+    root::ParallelStateRootError,
+};
 use std::{
     collections::VecDeque,
     sync::{
@@ -77,10 +78,7 @@ impl<N, Evm> PayloadProcessor<N, Evm> {
 impl<N, Evm> PayloadProcessor<N, Evm>
 where
     N: NodePrimitives,
-    Evm: ConfigureEvmEnvFor<N>
-        + 'static
-        + ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>
-        + 'static,
+    Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Spawns all background tasks and returns a handle connected to the tasks.
     ///
@@ -134,8 +132,31 @@ where
         let (to_sparse_trie, sparse_trie_rx) = channel();
         // spawn multiproof task
         let state_root_config = MultiProofConfig::new_from_input(consistent_view, trie_input);
-        let multi_proof_task =
-            MultiProofTask::new(state_root_config.clone(), self.executor.clone(), to_sparse_trie);
+
+        // Create and spawn the storage proof task
+        let task_ctx = ProofTaskCtx::new(
+            state_root_config.nodes_sorted.clone(),
+            state_root_config.state_sorted.clone(),
+            state_root_config.prefix_sets.clone(),
+        );
+        let max_proof_task_concurrency = 256;
+        let proof_task = ProofTaskManager::new(
+            self.executor.handle().clone(),
+            state_root_config.consistent_view.clone(),
+            task_ctx,
+            max_proof_task_concurrency,
+        );
+
+        // We set it to half of the proof task concurrency, because often for each multiproof we
+        // spawn one Tokio task for the account proof, and one Tokio task for the storage proof.
+        let max_multi_proof_task_concurrency = max_proof_task_concurrency / 2;
+        let multi_proof_task = MultiProofTask::new(
+            state_root_config,
+            self.executor.clone(),
+            proof_task.handle(),
+            to_sparse_trie,
+            max_multi_proof_task_concurrency,
+        );
 
         // wire the multiproof task to the prewarm task
         let to_multi_proof = Some(multi_proof_task.state_root_message_sender());
@@ -148,18 +169,30 @@ where
             multi_proof_task.run();
         });
 
-        let sparse_trie_task = SparseTrieTask {
-            executor: self.executor.clone(),
-            updates: sparse_trie_rx,
-            config: state_root_config,
-            metrics: self.trie_metrics.clone(),
-        };
+        let sparse_trie_task = SparseTrieTask::new(
+            self.executor.clone(),
+            sparse_trie_rx,
+            proof_task.handle(),
+            self.trie_metrics.clone(),
+        );
 
         // wire the sparse trie to the state root response receiver
         let (state_root_tx, state_root_rx) = channel();
         self.executor.spawn_blocking(move || {
             let res = sparse_trie_task.run();
             let _ = state_root_tx.send(res);
+        });
+
+        // spawn the proof task
+        self.executor.spawn_blocking(move || {
+            if let Err(err) = proof_task.run() {
+                // At least log if there is an error at any point
+                tracing::error!(
+                    target: "engine::root",
+                    ?err,
+                    "Storage proof task returned an error"
+                );
+            }
         });
 
         PayloadHandle { to_multi_proof, prewarm_handle, state_root: Some(state_root_rx) }
@@ -371,7 +404,7 @@ impl ExecutionCache {
     }
 
     /// Clears the tracked cache
-    #[allow(unused)]
+    #[expect(unused)]
     pub(crate) fn clear(&self) {
         self.inner.write().take();
     }
@@ -392,10 +425,11 @@ mod tests {
         },
         StateProviderBuilder, TreeConfig,
     };
+    use alloy_evm::block::StateChangeSource;
     use reth_chainspec::ChainSpec;
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::EthPrimitives;
-    use reth_evm::system_calls::{OnStateHook, StateChangeSource};
+    use reth_evm::OnStateHook;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{
@@ -524,12 +558,12 @@ mod tests {
         }
         drop(state_hook);
 
-        let root_from_task = handle.state_root().expect("task failed").state_root.0;
+        let root_from_task = handle.state_root().expect("task failed").state_root;
         let root_from_regular = state_root(accumulated_state);
 
         assert_eq!(
             root_from_task, root_from_regular,
-            "State root mismatch: task={root_from_task:?}, base={root_from_regular:?}"
+            "State root mismatch: task={root_from_task}, base={root_from_regular}"
         );
     }
 }
