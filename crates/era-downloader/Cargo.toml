@@ -11,7 +11,7 @@ exclude.workspace = true
 [dependencies]
 # http
 reqwest.workspace = true
-reqwest.features = ["stream"]
+reqwest.features = ["stream", "rustls-tls"]
 
 # async
 pin-project.workspace = true
@@ -21,6 +21,10 @@ futures-util.workspace = true
 
 # errors
 eyre.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+tokio.features = ["fs", "io-util", "macros"]
 
 [lints]
 workspace = true
