@@ -15,6 +15,8 @@ workspace = true
 reth-primitives-traits.workspace = true
 reth-chainspec.workspace = true
 reth-network = { workspace = true, optional = true }
+reth-network-api = { workspace = true, optional = true }
+reth-eth-wire = { workspace = true, optional = true }
 reth-provider = { workspace = true, optional = true }
 reth-db = { workspace = true, optional = true, features = ["mdbx"] }
 reth-storage-api = { workspace = true, optional = true }
@@ -63,6 +65,7 @@ arbitrary = [
     "reth-db?/arbitrary",
     "alloy-rpc-types-eth?/arbitrary",
     "reth-transaction-pool?/arbitrary",
+    "reth-eth-wire?/arbitrary",
 ]
 
 test-utils = [
@@ -80,7 +83,7 @@ test-utils = [
     "reth-transaction-pool?/test-utils",
 ]
 
-full = ["consensus", "evm", "node", "provider", "rpc", "exex", "trie", "pool"]
+full = ["consensus", "evm", "node", "provider", "rpc", "exex", "trie", "pool", "network"]
 
 alloy-compat = ["reth-ethereum-primitives/alloy-compat"]
 cli = ["dep:reth-ethereum-cli"]
@@ -110,7 +113,7 @@ rpc = [
     "dep:alloy-rpc-types-eth",
 ]
 js-tracer = ["rpc", "reth-rpc/js-tracer"]
-network = ["dep:reth-network"]
+network = ["dep:reth-network", "dep:reth-network-api", "dep:reth-eth-wire"]
 provider = ["storage-api", "dep:reth-provider", "dep:reth-db"]
 storage-api = ["dep:reth-storage-api"]
 trie = ["dep:reth-trie"]
