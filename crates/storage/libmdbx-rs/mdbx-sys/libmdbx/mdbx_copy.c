@@ -1009,7 +1009,7 @@ __Wpedantic_format_voidptr(const void *ptr) {
 #endif /* MDBX_EXCLUDE_FOR_GPROF */
 
 #ifdef __cplusplus
-extern "C" {
+unsafe extern "C" {
 #endif
 
 /* https://en.wikipedia.org/wiki/Operating_system_abstraction_layer */

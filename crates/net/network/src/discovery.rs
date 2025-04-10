@@ -200,6 +200,7 @@ impl Discovery {
     }
 
     /// Add a node to the discv4 table.
+    #[expect(clippy::result_large_err)]
     pub(crate) fn add_discv5_node(&self, enr: Enr<SecretKey>) -> Result<(), NetworkError> {
         if let Some(discv5) = &self.discv5 {
             discv5.add_node(enr).map_err(NetworkError::Discv5Error)?;

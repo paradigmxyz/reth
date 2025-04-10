@@ -83,6 +83,7 @@ impl Discv5 {
     ////////////////////////////////////////////////////////////////////////////////////////////////
 
     /// Adds the node to the table, if it is not already present.
+    #[expect(clippy::result_large_err)]
     pub fn add_node(&self, node_record: Enr<SecretKey>) -> Result<(), Error> {
         let EnrCombinedKeyWrapper(enr) = node_record.into();
         self.discv5.add_enr(enr).map_err(Error::AddNodeFailed)
@@ -335,6 +336,7 @@ impl Discv5 {
 
     /// Tries to convert an [`Enr`](discv5::Enr) into the backwards compatible type [`NodeRecord`],
     /// w.r.t. local `RLPx` [`IpMode`]. Uses source socket as udp socket.
+    #[expect(clippy::result_large_err)]
     pub fn try_into_reachable(
         &self,
         enr: &discv5::Enr,
@@ -364,6 +366,7 @@ impl Discv5 {
 
     /// Returns the [`ForkId`] of the given [`Enr`](discv5::Enr) w.r.t. the local node's network
     /// stack, if field is set.
+    #[expect(clippy::result_large_err)]
     pub fn get_fork_id<K: discv5::enr::EnrKey>(
         &self,
         enr: &discv5::enr::Enr<K>,
@@ -608,7 +611,7 @@ pub fn get_lookup_target(
         // Clear.
         target[byte] &= !bits_to_randomize;
         // Randomize.
-        target[byte] |= rng.gen::<u8>() & bits_to_randomize;
+        target[byte] |= rng.r#gen::<u8>() & bits_to_randomize;
     }
     // Randomize remaining bytes.
     rng.fill_bytes(&mut target[byte + 1..]);

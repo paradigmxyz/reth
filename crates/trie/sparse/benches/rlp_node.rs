@@ -38,7 +38,7 @@ fn update_rlp_node_level(c: &mut Criterion) {
                 sparse
                     .update_leaf(
                         Nibbles::unpack(key),
-                        alloy_rlp::encode_fixed_size(&rng.gen::<U256>()).to_vec(),
+                        alloy_rlp::encode_fixed_size(&rng.r#gen::<U256>()).to_vec(),
                     )
                     .unwrap();
             }
