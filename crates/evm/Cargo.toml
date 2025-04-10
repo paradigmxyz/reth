@@ -66,6 +66,7 @@ std = [
     "derive_more/std",
     "reth-storage-api/std",
     "reth-trie-common/std",
+    "reth-revm/std",
 ]
 metrics = ["std", "dep:metrics", "dep:reth-metrics"]
 test-utils = [
