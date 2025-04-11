@@ -45,4 +45,6 @@ impl reth_primitives_traits::NodePrimitives for EthPrimitives {
     type BlockBody = crate::BlockBody;
     type SignedTx = crate::TransactionSigned;
     type Receipt = crate::Receipt;
+    type Header = alloy_consensus::Header;
+    type StateCommitment = crate::MerklePatriciaTrie;
 }
