@@ -28,7 +28,12 @@ Get the Keccak-256 hash of the given data.
 
 ### Example
 
+```text
+// > echo -n "rust is awesome" | xxd -p
+7275737420697320617765736f6d65
+```
+
 ```js
-// > {"jsonrpc":"2.0","id":1,"method":"web3_sha3","params":["rust is awesome"]}
+// > {"jsonrpc":"2.0","id":1,"method":"web3_sha3","params":["0x7275737420697320617765736f6d65"]}
 {"jsonrpc":"2.0","id":1,"result":"0xe421b3428564a5c509ac118bad93a3b84485ec3f927e214b0c4c23076d4bc4e0"}
 ```
