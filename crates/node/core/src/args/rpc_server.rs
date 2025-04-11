@@ -475,6 +475,7 @@ mod tests {
         let args = CommandParser::<RpcServerArgs>::parse_from([
             "reth"
         ]).args;
-        assert_eq!(args.rpc_tx_fee_cap, U256::from(U256::from(1_000_000_000_000_000_000u64))); // 0 = no cap
+        let expected = U256::from(1_000_000_000_000_000_000u64);
+        assert_eq!(args.rpc_tx_fee_cap, expected); // 1 ETH default cap
     }
 }

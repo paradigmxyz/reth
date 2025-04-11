@@ -296,7 +296,7 @@ impl InvalidPoolTransactionError {
                 }
             }
             Self::ExceedsGasLimit(_, _) => true,
-            Self::ExceedsFeeCap { fee_eth: _, cap_eth: _ } => {false},
+            Self::ExceedsFeeCap { fee_eth: _, cap_eth: _ } => true,
             Self::ExceedsMaxInitCodeSize(_, _) => true,
             Self::OversizedData(_, _) => true,
             Self::Underpriced => {
