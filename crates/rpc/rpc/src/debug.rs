@@ -631,7 +631,10 @@ where
         block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
     ) -> Result<ExecutionWitness, Eth::Error> {
         let this = self.clone();
-        self.eth_api()
+        let block_number = block.header().number();
+
+        let (mut exec_witness, lowest_block_number) = self
+            .eth_api()
             .spawn_with_state_at_block(block.parent_hash().into(), move |state_provider| {
                 let db = StateProviderDatabase::new(&state_provider);
                 let block_executor = this.inner.block_executor.executor(db);
@@ -644,14 +647,43 @@ where
                     })
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 
-                let ExecutionWitnessRecord { hashed_state, codes, keys } = witness_record;
+                let ExecutionWitnessRecord { hashed_state, codes, keys, lowest_block_number } =
+                    witness_record;
 
                 let state = state_provider
                     .witness(Default::default(), hashed_state)
                     .map_err(EthApiError::from)?;
-                Ok(ExecutionWitness { state, codes, keys, headers: vec![] })
+                Ok((
+                    ExecutionWitness { state, codes, keys, ..Default::default() },
+                    lowest_block_number,
+                ))
             })
-            .await
+            .await?;
+
+        let smallest = match lowest_block_number {
+            Some(smallest) => smallest,
+            None => {
+                // Return only the parent header, if there were no calls to the
+                // BLOCKHASH opcode.
+                block_number.saturating_sub(1)
+            }
+        };
+
+        let range = smallest..block_number;
+        // TODO: Check if headers_range errors when one of the headers in the range is missing
+        exec_witness.headers = self
+            .provider()
+            .headers_range(range)
+            .map_err(EthApiError::from)?
+            .into_iter()
+            .map(|header| {
+                let mut serialized_header = Vec::new();
+                header.encode(&mut serialized_header);
+                serialized_header.into()
+            })
+            .collect();
+
+        Ok(exec_witness)
     }
 
     /// Returns the code associated with a given hash at the specified block ID. If no code is
