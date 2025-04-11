@@ -27,7 +27,7 @@ async fn test_getting_file_url_after_fetching_file_list(url: &str) {
     client.fetch_file_list().await.unwrap();
 
     let expected_url = Some(Url::from_str(&format!("{url}mainnet-00000-5ec1ffb8.era1")).unwrap());
-    let actual_url = client.next_url(0).await;
+    let actual_url = client.url(0).await.unwrap();
 
     assert_eq!(actual_url, expected_url);
 }
@@ -51,7 +51,7 @@ async fn test_getting_file_after_fetching_file_list(url: &str) {
 
     client.fetch_file_list().await.unwrap();
 
-    let url = client.next_url(0).await.unwrap();
+    let url = client.url(0).await.unwrap().unwrap();
 
     let expected_count = 0;
     let actual_count = client.files_count().await;

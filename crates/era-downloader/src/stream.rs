@@ -32,7 +32,7 @@ impl EraStream {
             starting_stream: StartingStream {
                 client,
                 files_count: Box::pin(async move { usize::MAX }),
-                next_url: Box::pin(async move { None }),
+                next_url: Box::pin(async move { Ok(None) }),
                 recover_index: Box::pin(async move { 0 }),
                 state: Default::default(),
                 max_files,
@@ -111,7 +111,7 @@ impl Stream for DownloadStream {
 struct StartingStream {
     client: EraClient,
     files_count: Pin<Box<dyn Future<Output = usize> + Send + Sync + 'static>>,
-    next_url: Pin<Box<dyn Future<Output = Option<Url>> + Send + Sync + 'static>>,
+    next_url: Pin<Box<dyn Future<Output = eyre::Result<Option<Url>>> + Send + Sync + 'static>>,
     recover_index: Pin<Box<dyn Future<Output = u64> + Send + Sync + 'static>>,
     state: State,
     max_files: usize,
@@ -186,8 +186,7 @@ impl Stream for StartingStream {
                 self.downloading += 1;
                 let client = self.client.clone();
 
-                Pin::new(&mut self.next_url)
-                    .set(Box::pin(async move { client.next_url(index).await }));
+                Pin::new(&mut self.next_url).set(Box::pin(async move { client.url(index).await }));
 
                 self.state = State::NextUrl(max_missing);
             } else {
@@ -204,7 +203,7 @@ impl Stream for StartingStream {
             if let Poll::Ready(url) = self.next_url.poll_unpin(cx) {
                 self.state = State::Missing(max_missing.saturating_sub(1));
 
-                return Poll::Ready(if let Some(url) = url {
+                return Poll::Ready(if let Ok(Some(url)) = url {
                     let mut client = self.client.clone();
 
                     Some(Box::pin(async move { client.download_to_file(url).await }))
