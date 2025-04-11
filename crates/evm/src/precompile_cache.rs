@@ -16,9 +16,9 @@ use alloy_primitives::{map::DefaultHashBuilder, Bytes};
 use dashmap::DashMap;
 #[cfg(feature = "metrics")]
 use metrics::Gauge;
-#[cfg(feature = "metrics")]
-use mini_moka::sync::CacheBuilder;
 #[cfg(feature = "std")]
+use mini_moka::sync::CacheBuilder;
+#[cfg(feature = "metrics")]
 use reth_metrics::Metrics;
 
 #[cfg(feature = "std")]
@@ -43,7 +43,7 @@ pub struct PrecompileCache {
 }
 
 /// Metrics for the cached precompile provider, showing hits / misses for each cache
-#[cfg(feature = "std")]
+#[cfg(feature = "metrics")]
 #[derive(Metrics, Clone)]
 #[metrics(scope = "sync.caching")]
 pub(crate) struct CachedPrecompileMetrics {
@@ -148,7 +148,9 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
 
             if let Some(output) = output.clone().transpose() {
                 // Check if entry exists for this address before insertion
+                #[cfg(feature = "metrics")]
                 let is_new_address = !cache.cache.contains_key(address);
+                #[cfg(feature = "metrics")]
                 let entry_count_before = if is_new_address {
                     0
                 } else if let Some(precompile_cache) = cache.cache.get(address) {
