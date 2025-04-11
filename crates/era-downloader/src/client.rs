@@ -43,8 +43,8 @@ impl EraClient {
         Ok(path.into_boxed_path())
     }
 
-    /// Returns a url for the next file to download.
-    pub async fn next_url(&self) -> Option<Url> {
+    /// Recovers index of file following the latest downloaded file from a different run.
+    pub async fn recover_index(&self) -> u64 {
         let mut max = None;
 
         if let Ok(mut dir) = fs::read_dir(&self.folder).await {
@@ -59,8 +59,11 @@ impl EraClient {
             }
         }
 
-        let number = max.map(|v| v + 1).unwrap_or(0);
+        max.map(|v| v + 1).unwrap_or(0)
+    }
 
+    /// Returns a url for the next file to download.
+    pub async fn next_url(&self, number: u64) -> Option<Url> {
         self.number_to_file_name(number)
             .await
             .unwrap()
