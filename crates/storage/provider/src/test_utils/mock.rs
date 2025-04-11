@@ -54,7 +54,7 @@ pub struct MockEthProvider<
     /// Local block store
     pub blocks: Arc<Mutex<HashMap<B256, T::Block>>>,
     /// Local header store
-    pub headers: Arc<Mutex<HashMap<B256, T::Header>>>,
+    pub headers: Arc<Mutex<HashMap<B256, Header>>>,
     /// Local account store
     pub accounts: Arc<Mutex<HashMap<Address, ExtendedAccount>>>,
     /// Local chain spec
@@ -68,7 +68,6 @@ pub struct MockEthProvider<
 impl<T: NodePrimitives, ChainSpec> Clone for MockEthProvider<T, ChainSpec>
 where
     T::Block: Clone,
-    T::Header: Clone,
 {
     fn clone(&self) -> Self {
         Self {
@@ -100,7 +99,7 @@ impl<T: NodePrimitives> MockEthProvider<T> {
 
 impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
     /// Add block to local block store
-    pub fn add_block(&self, hash: B256, block: T::Block) {
+    pub fn add_block(&self, hash: B256, block: reth_ethereum_primitives::Block) {
         self.add_header(hash, block.header.clone());
         self.blocks.lock().insert(hash, block);
     }
@@ -108,7 +107,7 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
     /// Add multiple blocks to local block store
     pub fn extend_blocks(
         &self,
-        iter: impl IntoIterator<Item = (B256, T::Block)>,
+        iter: impl IntoIterator<Item = (B256, reth_ethereum_primitives::Block)>,
     ) {
         for (hash, block) in iter {
             self.add_header(hash, block.header.clone());
@@ -117,12 +116,12 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
     }
 
     /// Add header to local header store
-    pub fn add_header(&self, hash: B256, header: T::Header) {
+    pub fn add_header(&self, hash: B256, header: Header) {
         self.headers.lock().insert(hash, header);
     }
 
     /// Add multiple headers to local header store
-    pub fn extend_headers(&self, iter: impl IntoIterator<Item = (B256, T::Header)>) {
+    pub fn extend_headers(&self, iter: impl IntoIterator<Item = (B256, Header)>) {
         for (hash, header) in iter {
             self.add_header(hash, header)
         }
@@ -260,43 +259,26 @@ impl<T: NodePrimitives,ChainSpec: EthChainSpec + 'static> DBProvider for MockEth
     }
 }
 
-pub trait HeaderFields {
-    fn number(&self) -> BlockNumber;
-    fn difficulty(&self) -> U256;
-}
-
-impl HeaderFields for Header {
-    fn number(&self) -> BlockNumber {
-        self.number
-    }
-
-    fn difficulty(&self) -> U256 {
-        self.difficulty
-    }
-}
-
 impl<T: NodePrimitives, ChainSpec> HeaderProvider for MockEthProvider<T, ChainSpec>
-where
-    T::Header: Clone + HeaderFields,
 {
-    type Header = T::Header;
+    type Header = Header;
 
-    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<T::Header>> {
+    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         let lock = self.headers.lock();
         Ok(lock.get(block_hash).cloned())
     }
 
     fn header_by_number(&self, num: u64) -> ProviderResult<Option<T::Header>> {
         let lock = self.headers.lock();
-        Ok(lock.values().find(|h| h.number() == num).cloned())
+        Ok(lock.values().find(|h| h.number == num).cloned())
     }
 
     fn header_td(&self, hash: &BlockHash) -> ProviderResult<Option<U256>> {
         let lock = self.headers.lock();
         Ok(lock.get(hash).map(|target| {
             lock.values()
-                .filter(|h| h.number() < target.number())
-                .fold(target.difficulty(), |td, h| td + h.difficulty())
+                .filter(|h| h.number < target.number)
+                .fold(target.difficulty, |td, h| td + h.difficulty)
         }))
     }
 
@@ -304,28 +286,30 @@ where
         let lock = self.headers.lock();
         let sum = lock
             .values()
-            .filter(|h| h.number() <= number)
-            .fold(U256::ZERO, |td, h| td + h.difficulty());
+            .filter(|h| h.number <= number)
+            .fold(U256::ZERO, |td, h| td + h.difficulty);
         Ok(Some(sum))
     }
 
-    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<T::Header>> {
+    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
         let lock = self.headers.lock();
+
         let mut headers: Vec<_> =
-            lock.values().filter(|h| range.contains(&h.number())).cloned().collect();
-        headers.sort_by_key(|h| h.number());
+            lock.values().filter(|header| range.contains(&header.number)).cloned().collect();
+        headers.sort_by_key(|header| header.number);
+
         Ok(headers)
     }
 
-    fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader<T::Header>>> {
+    fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
         Ok(self.header_by_number(number)?.map(SealedHeader::seal_slow))
     }
 
     fn sealed_headers_while(
         &self,
         range: impl RangeBounds<BlockNumber>,
-        mut predicate: impl FnMut(&SealedHeader<T::Header>) -> bool,
-    ) -> ProviderResult<Vec<SealedHeader<T::Header>>> {
+        mut predicate: impl FnMut(&SealedHeader) -> bool,
+    ) -> ProviderResult<Vec<SealedHeader>> {
         Ok(self
             .headers_range(range)?
             .into_iter()
@@ -343,30 +327,21 @@ impl<ChainSpec: EthChainSpec + 'static> ChainSpecProvider for MockEthProvider<Ch
     }
 }
 
-pub trait HasTransactions<Tx> {
-    fn transactions(&self) -> &[Tx];
-}
-
-pub trait TransactionAccess {
-    fn tx_hash(&self) -> &TxHash;
-    fn recover_signer(&self) -> Result<Address, SignerError>;
-}
-
-impl<T: NodePrimitives, ChainSpec> TransactionsProvider for MockEthProvider<T, ChainSpec>
+impl<T, ChainSpec> TransactionsProvider for MockEthProvider<T, ChainSpec>
 where
-    T::Block: HasTransactions<T::Transaction> + HeaderProviderAccess,
-    T::Transaction: Clone + TransactionAccess,
+    T: NodePrimitives<Transaction = reth_ethereum_primitives::TransactionSigned>,
+    ChainSpec: EthChainSpec,
 {
-    type Transaction = T::Transaction;
+
+    type Transaction = reth_ethereum_primitives::TransactionSigned;
 
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         let lock = self.blocks.lock();
         let tx_number = lock
             .values()
-            .flat_map(|block| block.transactions())
+            .flat_map(|block| &block.body.transactions)
             .position(|tx| *tx.tx_hash() == tx_hash)
             .map(|pos| pos as TxNumber);
-    
         Ok(tx_number)
     }    
 
@@ -460,12 +435,11 @@ where
         let lock = self.blocks.lock();
         let transactions = lock
             .values()
-            .flat_map(|block| block.transactions())
+            .flat_map(|block| &block.body.transactions)
             .enumerate()
-            .filter(|(tx_number, _)| range.contains(&(*tx_number as TxNumber)))
+            .filter(|&(tx_number, _)| range.contains(&(tx_number as TxNumber)))
             .map(|(_, tx)| tx.clone())
             .collect();
-    
         Ok(transactions)
     }    
 
@@ -550,7 +524,6 @@ impl<T: NodePrimitives,ChainSpec> BlockHashReader for MockEthProvider<T, ChainSp
 
 impl<T: NodePrimitives, ChainSpec> BlockNumReader for MockEthProvider<T, ChainSpec>
 where
-    T::Header: HeaderFields,
     T::Block: BlockFields,
     {
         fn chain_info(&self) -> ProviderResult<ChainInfo> {
@@ -559,16 +532,16 @@ where
 
         Ok(lock
             .iter()
-            .find(|(_, h)| h.number() == best_block_number)
-            .map(|(hash, h)| ChainInfo { best_hash: *hash, best_number: h.number() })
+            .find(|(_, header)| header.number == best_block_number)
+            .map(|(hash, header)| ChainInfo { best_hash: *hash, best_number: header.number })
             .unwrap_or_default())
     }
 
     fn best_block_number(&self) -> ProviderResult<BlockNumber> {
         let lock = self.headers.lock();
         lock.iter()
-            .max_by_key(|h| h.number())
-            .map(|(_, h)| h.number())
+            .max_by_key(|h| h.1.number)
+            .map(|(_, header)| header.number)
             .ok_or(ProviderError::BestBlockNotFound)
     }
 
@@ -677,9 +650,7 @@ pub trait HasHeader {
 }
 
 impl<T: NodePrimitives, ChainSpec> BlockReaderIdExt for MockEthProvider<T, ChainSpec> where
-T: NodePrimitives,
-T::Block: Clone + HasHeader<Header = T::Header>,
-T::Header: Clone 
+ T::Block: Clone + HasHeader<Header = Header>,
 {
     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<T::Block>> {
         match id {
@@ -688,20 +659,18 @@ T::Header: Clone
         }
     }
 
-    fn sealed_header_by_id(&self, id: BlockId) -> ProviderResult<Option<SealedHeader<T::Header>>> {
-        self.header_by_id(id)?
-            .map(|h| SealedHeader::seal_slow(h))
-            .map_or(Ok(None), |h| Ok(Some(h)))
+    fn sealed_header_by_id(&self, id: BlockId) -> ProviderResult<Option<SealedHeader>> {
+        self.header_by_id(id)?.map_or_else(|| Ok(None), |h| Ok(Some(SealedHeader::seal_slow(h))))
     }
 
-    fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<T::Header>> {
+    fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<Header>> {
         match self.block_by_id(id)? {
             None => Ok(None),
             Some(block) => Ok(Some(block.header().clone())),
         }
     }
 
-    fn ommers_by_id(&self, id: BlockId) -> ProviderResult<Option<Vec<T::Header>>> {
+    fn ommers_by_id(&self, id: BlockId) -> ProviderResult<Option<Vec<Header>>> {
         match id {
             BlockId::Number(num) => self.ommers_by_number_or_tag(num),
             BlockId::Hash(hash) => self.ommers(BlockHashOrNumber::Hash(hash.block_hash)),
@@ -897,7 +866,7 @@ impl<T: NodePrimitives, ChainSpec> WithdrawalsProvider for MockEthProvider<T, Ch
 }
 
 impl<T: NodePrimitives, ChainSpec> OmmersProvider for MockEthProvider<T, ChainSpec> {
-    fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<T::Header>>> {
+    fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
         Ok(None)
     }
 }
