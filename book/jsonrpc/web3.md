@@ -28,7 +28,7 @@ Get the Keccak-256 hash of the given data.
 
 ### Example
 
-```rust
+```text
 // > echo -n "rust is awesome" | xxd -p
 7275737420697320617765736f6d65
 ```
