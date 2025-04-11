@@ -38,6 +38,7 @@ use std::{
     time::Instant,
 };
 use tokio::sync::Mutex;
+use tracing::info;
 
 /// Validator for Ethereum transactions.
 /// It is a [`TransactionValidator`] implementation that validates ethereum transaction.
@@ -298,6 +299,12 @@ where
                 InvalidTransactionError::TipAboveFeeCap.into(),
             )
         }
+
+        info!(target: "reth::cli", "ill::remove local_transactions_config {}", self.local_transactions_config.is_local(origin, transaction.sender_ref()));
+        info!(target: "reth::cli", "ill::remove origin.is_local {}", origin.is_local());
+        info!(target: "reth::cli", "ill::remove max_fee_per_gas {}", transaction.max_fee_per_gas());
+        info!(target: "reth::cli", "ill::remove gas_price {}", transaction.gas_price().unwrap());
+        info!(target: "reth::cli", "ill::remove tx_fee_cap {}", self.tx_fee_cap.unwrap());
 
         if self.local_transactions_config.is_local(origin, transaction.sender_ref()) {
             match self.tx_fee_cap {
