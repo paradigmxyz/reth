@@ -1962,10 +1962,6 @@ mod tests {
         (transactions, network)
     }
 
-    pub(super) fn default_cache<T: hash::Hash + Eq + fmt::Debug>() -> LruCache<T> {
-        LruCache::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS as u32)
-    }
-
     pub(super) fn buffer_hash_to_tx_fetcher(
         tx_fetcher: &mut TransactionFetcher,
         hash: TxHash,
