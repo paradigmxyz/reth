@@ -2423,7 +2423,14 @@ where
                 .trie_input_duration
                 .record(trie_input_start.elapsed().as_secs_f64());
 
-            self.payload_processor.spawn(header, txs, provider_builder, consistent_view, trie_input)
+            self.payload_processor.spawn(
+                header,
+                txs,
+                provider_builder,
+                consistent_view,
+                trie_input,
+                &self.config,
+            )
         } else {
             self.payload_processor.spawn_cache_exclusive(header, txs, provider_builder)
         };
