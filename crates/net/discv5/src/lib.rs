@@ -600,7 +600,7 @@ pub fn get_lookup_target(
     target[byte] ^= 1 << (7 - bit);
 
     // Randomize the bits after the target.
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     // Randomize remaining bits in the byte we modified.
     if bit < 7 {
         // Compute the mask of the bits that need to be randomized.
@@ -608,7 +608,7 @@ pub fn get_lookup_target(
         // Clear.
         target[byte] &= !bits_to_randomize;
         // Randomize.
-        target[byte] |= rng.gen::<u8>() & bits_to_randomize;
+        target[byte] |= rng.random::<u8>() & bits_to_randomize;
     }
     // Randomize remaining bytes.
     rng.fill_bytes(&mut target[byte + 1..]);
@@ -655,7 +655,7 @@ pub async fn lookup(
 mod test {
     use super::*;
     use ::enr::{CombinedKey, EnrKey};
-    use rand::thread_rng;
+    use rand_08::thread_rng;
     use reth_chainspec::MAINNET;
     use tracing::trace;
 

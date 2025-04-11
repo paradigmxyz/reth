@@ -254,14 +254,13 @@ mod tests {
         providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
     };
     use reth_testing_utils::generators;
-    use secp256k1::Keypair;
 
     #[test]
     fn test_backfill() -> eyre::Result<()> {
         reth_tracing::init_test_tracing();
 
         // Create a key pair for the sender
-        let key_pair = Keypair::new_global(&mut generators::rng());
+        let key_pair = generators::generate_key(&mut generators::rng());
         let address = public_key_to_address(key_pair.public_key());
 
         let chain_spec = chain_spec(address);
@@ -297,7 +296,7 @@ mod tests {
         reth_tracing::init_test_tracing();
 
         // Create a key pair for the sender
-        let key_pair = Keypair::new_global(&mut generators::rng());
+        let key_pair = generators::generate_key(&mut generators::rng());
         let address = public_key_to_address(key_pair.public_key());
 
         let chain_spec = chain_spec(address);

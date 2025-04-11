@@ -1321,8 +1321,8 @@ mod tests {
         );
 
         // A random block number should return None as the block is not found
-        let mut rng = rand::thread_rng();
-        let random_block_number: u64 = rng.gen();
+        let mut rng = rand::rng();
+        let random_block_number: u64 = rng.random();
         assert_eq!(provider.block_body_indices(random_block_number)?, None);
 
         Ok(())
