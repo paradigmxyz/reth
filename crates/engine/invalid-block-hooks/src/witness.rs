@@ -1,5 +1,5 @@
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{keccak256, B256};
+use alloy_primitives::{keccak256, Address, B256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use pretty_assertions::Comparison;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
@@ -7,12 +7,60 @@ use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{
+    database::StateProviderDatabase,
+    db::{BundleAccount, BundleState},
+};
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
 use reth_trie::{updates::TrieUpdates, HashedStorage};
+use revm_bytecode::Bytecode;
+use revm_database::states::reverts::Reverts;
 use serde::Serialize;
-use std::{fmt::Debug, fs::File, io::Write, path::PathBuf};
+use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
+
+#[derive(Debug, PartialEq, Eq)]
+struct BundleStateIntermediate<'a, 'b, 'c, 'd, 'e> {
+    /// Account state
+    pub state: BTreeMap<&'a Address, &'b BundleAccount>,
+    /// All created contracts in this block.
+    pub contracts: BTreeMap<&'c B256, &'d Bytecode>,
+    /// Changes to revert
+    ///
+    /// **Note**: Inside vector is *not* sorted by address.
+    ///
+    /// But it is unique by address.
+    pub reverts: &'e Reverts,
+    /// The size of the plain state in the bundle state
+    pub state_size: usize,
+    /// The size of reverts in the bundle state
+    pub reverts_size: usize,
+}
+
+impl BundleStateIntermediate<'_, '_, '_, '_, '_> {
+    fn from_bundle_state(
+        bundle_state: &'_ BundleState,
+    ) -> BundleStateIntermediate<'_, '_, '_, '_, '_> {
+        let mut state: BTreeMap<&'_ Address, &'_ BundleAccount> = BTreeMap::new();
+        let mut contracts: BTreeMap<&'_ B256, &'_ Bytecode> = BTreeMap::new();
+
+        for (k, v) in &bundle_state.state {
+            state.insert(k, v);
+        }
+
+        for (k, v) in &bundle_state.contracts {
+            contracts.insert(k, v);
+        }
+
+        BundleStateIntermediate {
+            state,
+            contracts,
+            reverts: &bundle_state.reverts,
+            state_size: bundle_state.state_size,
+            reverts_size: bundle_state.reverts_size,
+        }
+    }
+}
 
 /// Generates a witness for the given block and saves it to a file.
 #[derive(Debug)]
@@ -184,7 +232,15 @@ where
             )?;
 
             let filename = format!("{}_{}.bundle_state.diff", block.number(), block.hash());
-            let diff_path = self.save_diff(filename, &bundle_state, &output.state)?;
+            // Convert bundle state to intermediate struct which has BTreeMap instead of HashMap to
+            // have deterministric ordering
+            let bundle_state_intermediate =
+                BundleStateIntermediate::from_bundle_state(&bundle_state);
+            let output_state_intermediate =
+                BundleStateIntermediate::from_bundle_state(&output.state);
+
+            let diff_path =
+                self.save_diff(filename, &bundle_state_intermediate, &output_state_intermediate)?;
 
             warn!(
                 target: "engine::invalid_block_hooks::witness",
