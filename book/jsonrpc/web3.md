@@ -22,9 +22,9 @@ Get the web3 client version.
 
 Get the Keccak-256 hash of the given data.
 
-| Client | Method invocation                            |
-|--------|----------------------------------------------|
-| RPC    | `{"method": "web3_sha3", "params": [bytes]}` |
+| Client | Method invocation                              |
+|--------|------------------------------------------------|
+| RPC    | `{"method": "web3_sha3", "params": ["0x..."]}` |
 
 ### Example
 
