@@ -11,9 +11,6 @@ exclude.workspace = true
 [lints]
 workspace = true
 
-[features]
-ef-tests = ["dep:alloy-eips"]
-
 [dependencies]
 # alloy
 alloy-primitives.workspace = true
@@ -21,7 +18,7 @@ alloy-rlp.workspace = true
 alloy-trie.workspace = true
 alloy-rpc-types-debug.workspace = true
 alloy-consensus.workspace = true
-alloy-eips = { workspace = true, optional = true }
+alloy-eips = { workspace = true }
 
 # reth
 reth-ethereum-consensus.workspace = true
@@ -30,7 +27,7 @@ reth-provider.workspace = true
 reth-evm.workspace = true
 reth-evm-ethereum.workspace = true
 reth-revm.workspace = true
-reth-trie.workspace = true
+reth-trie = { workspace = true, default-features = false }
 reth-trie-sparse.workspace = true
 reth-chainspec.workspace = true
 
