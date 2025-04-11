@@ -1,5 +1,5 @@
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{keccak256, Address, B256};
+use alloy_primitives::{keccak256, Address, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use pretty_assertions::Comparison;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
@@ -15,50 +15,82 @@ use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
 use reth_trie::{updates::TrieUpdates, HashedStorage};
 use revm_bytecode::Bytecode;
-use revm_database::states::reverts::Reverts;
+use revm_database::states::{
+    reverts::{AccountInfoRevert, RevertToSlot},
+    AccountStatus,
+};
 use serde::Serialize;
 use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
 
 #[derive(Debug, PartialEq, Eq)]
-struct BundleStateIntermediate<'a, 'b, 'c, 'd, 'e> {
+struct AccountRevertIntermediate {
+    pub account: AccountInfoRevert,
+    pub storage: BTreeMap<U256, RevertToSlot>,
+    pub previous_status: AccountStatus,
+    pub wipe_storage: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct RevertsIntermediate(Vec<Vec<(Address, AccountRevertIntermediate)>>);
+
+#[derive(Debug, PartialEq, Eq)]
+struct BundleStateIntermediate {
     /// Account state
-    pub state: BTreeMap<&'a Address, &'b BundleAccount>,
+    pub state: BTreeMap<Address, BundleAccount>,
     /// All created contracts in this block.
-    pub contracts: BTreeMap<&'c B256, &'d Bytecode>,
+    pub contracts: BTreeMap<B256, Bytecode>,
     /// Changes to revert
     ///
     /// **Note**: Inside vector is *not* sorted by address.
     ///
     /// But it is unique by address.
-    pub reverts: &'e Reverts,
+    pub reverts: RevertsIntermediate,
     /// The size of the plain state in the bundle state
     pub state_size: usize,
     /// The size of reverts in the bundle state
     pub reverts_size: usize,
 }
 
-impl BundleStateIntermediate<'_, '_, '_, '_, '_> {
-    fn from_bundle_state(
-        bundle_state: &'_ BundleState,
-    ) -> BundleStateIntermediate<'_, '_, '_, '_, '_> {
-        let mut state: BTreeMap<&'_ Address, &'_ BundleAccount> = BTreeMap::new();
-        let mut contracts: BTreeMap<&'_ B256, &'_ Bytecode> = BTreeMap::new();
+impl BundleStateIntermediate {
+    fn from_bundle_state(bundle_state: &BundleState) -> BundleStateIntermediate {
+        let mut state: BTreeMap<Address, BundleAccount> = BTreeMap::new();
+        let mut contracts: BTreeMap<B256, Bytecode> = BTreeMap::new();
+        let mut reverts: RevertsIntermediate = RevertsIntermediate(vec![]);
 
-        for (k, v) in &bundle_state.state {
+        for (k, v) in bundle_state.state.clone() {
             state.insert(k, v);
         }
 
-        for (k, v) in &bundle_state.contracts {
+        for (k, v) in bundle_state.contracts.clone() {
             contracts.insert(k, v);
         }
 
-        BundleStateIntermediate {
-            state,
-            contracts,
-            reverts: &bundle_state.reverts,
-            state_size: bundle_state.state_size,
-            reverts_size: bundle_state.reverts_size,
+        let state_size = bundle_state.state_size;
+        let reverts_size = bundle_state.reverts_size;
+
+        for revert_item in bundle_state.reverts.iter() {
+            let mut new_revert_item: Vec<(Address, AccountRevertIntermediate)> = vec![];
+            for (address, account_revert) in revert_item {
+                let mut storage: BTreeMap<U256, RevertToSlot> = BTreeMap::new();
+
+                for (k, v) in account_revert.storage.clone() {
+                    storage.insert(k, v);
+                }
+
+                new_revert_item.push((
+                    address.clone(),
+                    AccountRevertIntermediate {
+                        account: account_revert.account.clone(),
+                        previous_status: account_revert.previous_status,
+                        wipe_storage: account_revert.wipe_storage,
+                        storage,
+                    },
+                ));
+            }
+            reverts.0.push(new_revert_item);
         }
+
+        BundleStateIntermediate { state, contracts, reverts, state_size, reverts_size }
     }
 }
 
