@@ -14,7 +14,7 @@ use reth_evm::{
     execute::BasicBlockExecutorProvider, ConfigureEvm, EvmFactory, EvmFactoryFor,
     NextBlockEnvAttributes,
 };
-use reth_evm_ethereum::CachedPrecompileEthEvmFactory;
+use reth_evm_ethereum::MaybeCachedPrecompileEthEvmFactory;
 use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, TxTy};
 use reth_node_builder::{
@@ -57,7 +57,7 @@ impl EthereumNode {
         EthereumPoolBuilder,
         BasicPayloadServiceBuilder<EthereumPayloadBuilder>,
         EthereumNetworkBuilder,
-        CachedPrecompileEthereumExecutorBuilder,
+        MaybeCachedPrecompileEthereumExecutorBuilder,
         EthereumConsensusBuilder,
     >
     where
@@ -73,7 +73,7 @@ impl EthereumNode {
             .pool(EthereumPoolBuilder::default())
             .payload(BasicPayloadServiceBuilder::default())
             .network(EthereumNetworkBuilder::default())
-            .executor(CachedPrecompileEthereumExecutorBuilder::default())
+            .executor(MaybeCachedPrecompileEthereumExecutorBuilder::default())
             .consensus(EthereumConsensusBuilder::default())
     }
 
@@ -258,7 +258,7 @@ where
         EthereumPoolBuilder,
         BasicPayloadServiceBuilder<EthereumPayloadBuilder>,
         EthereumNetworkBuilder,
-        CachedPrecompileEthereumExecutorBuilder,
+        MaybeCachedPrecompileEthereumExecutorBuilder,
         EthereumConsensusBuilder,
     >;
 
@@ -319,17 +319,17 @@ where
     }
 }
 
-/// An ethereum evm and executor builder with cached precompiles.
+/// An ethereum evm and executor builder with potentially cached precompiles.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
-pub struct CachedPrecompileEthereumExecutorBuilder;
+pub struct MaybeCachedPrecompileEthereumExecutorBuilder;
 
-impl<Types, Node> ExecutorBuilder<Node> for CachedPrecompileEthereumExecutorBuilder
+impl<Types, Node> ExecutorBuilder<Node> for MaybeCachedPrecompileEthereumExecutorBuilder
 where
     Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
 {
-    type EVM = EthEvmConfig<CachedPrecompileEthEvmFactory>;
+    type EVM = EthEvmConfig<MaybeCachedPrecompileEthEvmFactory>;
     type Executor = BasicBlockExecutorProvider<Self::EVM>;
 
     async fn build_evm(
@@ -338,7 +338,7 @@ where
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
         let evm_config = EthEvmConfig::new_with_evm_factory(
             ctx.chain_spec(),
-            CachedPrecompileEthEvmFactory::default(),
+            MaybeCachedPrecompileEthEvmFactory::new(ctx.config().engine.precompile_cache_enabled),
         )
         .with_extra_data(ctx.payload_builder_config().extra_data_bytes());
         let executor = BasicBlockExecutorProvider::new(evm_config.clone());
