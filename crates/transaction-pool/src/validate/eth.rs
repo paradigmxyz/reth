@@ -303,8 +303,8 @@ where
         info!(target: "reth::cli", "ill::remove local_transactions_config {}", self.local_transactions_config.is_local(origin, transaction.sender_ref()));
         info!(target: "reth::cli", "ill::remove origin.is_local {}", origin.is_local());
         info!(target: "reth::cli", "ill::remove max_fee_per_gas {}", transaction.max_fee_per_gas());
-        info!(target: "reth::cli", "ill::remove gas_price {}", transaction.gas_price().unwrap());
-        info!(target: "reth::cli", "ill::remove tx_fee_cap {}", self.tx_fee_cap.unwrap());
+        info!(target: "reth::cli", "ill::remove gas_price {}", transaction.gas_price().unwrap_or(1));
+        info!(target: "reth::cli", "ill::remove tx_fee_cap {}", self.tx_fee_cap.unwrap_or(1));
 
         if self.local_transactions_config.is_local(origin, transaction.sender_ref()) {
             match self.tx_fee_cap {
