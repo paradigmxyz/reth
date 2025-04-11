@@ -74,5 +74,6 @@ test-utils = [
     "reth-ethereum-primitives/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",
+    "reth-revm/test-utils",
 ]
 op = ["op-revm", "alloy-evm/op", "reth-primitives-traits/op"]
