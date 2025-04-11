@@ -524,12 +524,6 @@ impl<T: NodePrimitives, ChainSpec> ReceiptProviderIdExt for MockEthProvider<T, C
         fn number(&self) -> u64;
     }
 
-    pub trait HeaderFields {
-        fn number(&self) -> u64;
-        fn difficulty(&self) -> U256;
-    }
-
-
 impl<T: NodePrimitives,ChainSpec> BlockHashReader for MockEthProvider<T, ChainSpec> where T::Block: BlockFields{
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         let lock = self.blocks.lock();
