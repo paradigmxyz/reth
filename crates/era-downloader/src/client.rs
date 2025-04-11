@@ -1,3 +1,4 @@
+use eyre::OptionExt;
 use futures_util::stream::StreamExt;
 use reqwest::{Client, IntoUrl, Url};
 use std::{path::Path, str::FromStr};
@@ -28,7 +29,11 @@ impl EraClient {
 
         let url = url.into_url()?;
         let client = self.client.clone();
-        let file_name = url.path_segments().unwrap().next_back().unwrap();
+        let file_name = url
+            .path_segments()
+            .ok_or_eyre("cannot-be-a-base")?
+            .next_back()
+            .ok_or_eyre("empty path segments")?;
         let path = path.join(file_name);
 
         let response = client.get(url).send().await?;
@@ -51,7 +56,7 @@ impl EraClient {
             while let Ok(Some(entry)) = dir.next_entry().await {
                 if let Some(name) = entry.file_name().to_str() {
                     if let Some(number) = self.file_name_to_number(name) {
-                        if max.is_none() || number > max.unwrap() {
+                        if max.is_none() || matches!(max, Some(max) if number > max) {
                             max.replace(number);
                         }
                     }
@@ -62,14 +67,9 @@ impl EraClient {
         max.map(|v| v + 1).unwrap_or(0)
     }
 
-    /// Returns a url for the next file to download.
-    pub async fn next_url(&self, number: u64) -> Option<Url> {
-        self.number_to_file_name(number)
-            .await
-            .unwrap()
-            .map(|name| self.url.join(&name))
-            .transpose()
-            .unwrap()
+    /// Returns a download URL for the file corresponding to `number`.
+    pub async fn url(&self, number: u64) -> eyre::Result<Option<Url>> {
+        Ok(self.number_to_file_name(number).await?.map(|name| self.url.join(&name)).transpose()?)
     }
 
     /// Returns the number of files in the `folder`.
