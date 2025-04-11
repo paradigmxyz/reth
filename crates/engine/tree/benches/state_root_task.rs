@@ -233,6 +233,7 @@ fn bench_state_root(c: &mut Criterion) {
                                 StateProviderBuilder::new(provider.clone(), genesis_hash, None),
                                 ConsistentDbView::new_with_latest_tip(provider).unwrap(),
                                 TrieInput::default(),
+                                &TreeConfig::default(),
                             );
 
                             let mut state_hook = handle.state_hook();
