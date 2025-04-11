@@ -12,7 +12,11 @@ pub use self::constants::{
     tx_fetcher::DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
-pub use config::{TransactionFetcherConfig, TransactionPropagationMode, TransactionsManagerConfig};
+use config::TransactionPropagationKind;
+pub use config::{
+    TransactionFetcherConfig, TransactionPropagationMode, TransactionPropagationPolicy,
+    TransactionsManagerConfig,
+};
 pub use validation::*;
 
 pub(crate) use fetcher::{FetchEvent, TransactionFetcher};
@@ -42,7 +46,7 @@ use reth_ethereum_primitives::TransactionSigned;
 use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
 use reth_network_api::{
     events::{PeerEvent, SessionInfo},
-    NetworkEvent, NetworkEventListenerProvider, PeerRequest, PeerRequestSender, Peers,
+    NetworkEvent, NetworkEventListenerProvider, PeerKind, PeerRequest, PeerRequestSender, Peers,
 };
 use reth_network_p2p::{
     error::{RequestError, RequestResult},
@@ -234,7 +238,11 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
 /// propagate new transactions over the network.
 #[derive(Debug)]
 #[must_use = "Manager does nothing unless polled."]
-pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives> {
+pub struct TransactionsManager<
+    Pool,
+    N: NetworkPrimitives = EthNetworkPrimitives,
+    P: TransactionPropagationPolicy = TransactionPropagationKind,
+> {
     /// Access to the transaction pool.
     pool: Pool,
     /// Network access.
@@ -290,6 +298,8 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     transaction_events: UnboundedMeteredReceiver<NetworkTransactionEvent<N>>,
     /// How the `TransactionsManager` is configured.
     config: TransactionsManagerConfig,
+    /// The policy to use when propagating transactions.
+    propagation_policy: P,
     /// `TransactionsManager` metrics
     metrics: TransactionsManagerMetrics,
 }
@@ -303,6 +313,29 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         pool: Pool,
         from_network: mpsc::UnboundedReceiver<NetworkTransactionEvent<N>>,
         transactions_manager_config: TransactionsManagerConfig,
+    ) -> Self {
+        Self::with_policy(
+            network,
+            pool,
+            from_network,
+            transactions_manager_config,
+            TransactionPropagationKind::default(),
+        )
+    }
+}
+
+impl<Pool: TransactionPool, N: NetworkPrimitives, P: TransactionPropagationPolicy>
+    TransactionsManager<Pool, N, P>
+{
+    /// Sets up a new instance with given the settings.
+    ///
+    /// Note: This expects an existing [`NetworkManager`](crate::NetworkManager) instance.
+    pub fn with_policy(
+        network: NetworkHandle<N>,
+        pool: Pool,
+        from_network: mpsc::UnboundedReceiver<NetworkTransactionEvent<N>>,
+        transactions_manager_config: TransactionsManagerConfig,
+        propagation_policy: P,
     ) -> Self {
         let network_events = network.event_listener();
 
@@ -341,6 +374,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
                 NETWORK_POOL_TRANSACTIONS_SCOPE,
             ),
             config: transactions_manager_config,
+            propagation_policy,
             metrics,
         }
     }
@@ -471,10 +505,11 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     }
 }
 
-impl<Pool, N> TransactionsManager<Pool, N>
+impl<Pool, N, Policy> TransactionsManager<Pool, N, Policy>
 where
     Pool: TransactionPool,
     N: NetworkPrimitives,
+    Policy: TransactionPropagationPolicy,
 {
     /// Processes a batch import results.
     fn on_batch_import_result(&mut self, batch_results: Vec<PoolResult<TxHash>>) {
@@ -697,7 +732,7 @@ where
     }
 }
 
-impl<Pool, N> TransactionsManager<Pool, N>
+impl<Pool, N, Policy> TransactionsManager<Pool, N, Policy>
 where
     Pool: TransactionPool + 'static,
     N: NetworkPrimitives<
@@ -706,6 +741,7 @@ where
     >,
     Pool::Transaction:
         PoolTransaction<Consensus = N::BroadcastedTransaction, Pooled = N::PooledTransaction>,
+    Policy: TransactionPropagationPolicy,
 {
     /// Invoked when transactions in the local mempool are considered __pending__.
     ///
@@ -891,6 +927,10 @@ where
 
         // Note: Assuming ~random~ order due to random state of the peers map hasher
         for (peer_idx, (peer_id, peer)) in self.peers.iter_mut().enumerate() {
+            if !self.propagation_policy.can_propagate(peer) {
+                // skip peers we should not propagate to
+                continue
+            }
             // determine whether to send full tx objects or hashes.
             let mut builder = if peer_idx > max_num_full {
                 PropagateTransactionsBuilder::pooled(peer.version)
@@ -1051,6 +1091,8 @@ where
     }
 
     /// Handles session establishment and peer transactions initialization.
+    ///
+    /// This is invoked when a new session is established.
     fn handle_peer_session(
         &mut self,
         info: SessionInfo,
@@ -1064,6 +1106,7 @@ where
             version,
             client_version,
             self.config.max_transactions_seen_by_peer_history,
+            info.peer_kind,
         );
         let peer = match self.peers.entry(peer_id) {
             Entry::Occupied(mut entry) => {
@@ -1072,6 +1115,8 @@ where
             }
             Entry::Vacant(entry) => entry.insert(peer),
         };
+
+        self.propagation_policy.on_session_established(peer);
 
         // Send a `NewPooledTransactionHashes` to the peer with up to
         // `SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE`
@@ -1107,7 +1152,11 @@ where
         match event_result {
             NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, .. }) => {
                 // remove the peer
-                self.peers.remove(&peer_id);
+
+                let peer = self.peers.remove(&peer_id);
+                if let Some(mut peer) = peer {
+                    self.propagation_policy.on_session_closed(&mut peer);
+                }
                 self.transaction_fetcher.remove_peer(&peer_id);
             }
             NetworkEvent::ActivePeerSession { info, messages } => {
@@ -1332,7 +1381,7 @@ where
 //
 // spawned in `NodeConfig::start_network`(reth_node_core::NodeConfig) and
 // `NetworkConfig::start_network`(reth_network::NetworkConfig)
-impl<Pool, N> Future for TransactionsManager<Pool, N>
+impl<Pool, N, Policy> Future for TransactionsManager<Pool, N, Policy>
 where
     Pool: TransactionPool + Unpin + 'static,
     N: NetworkPrimitives<
@@ -1341,6 +1390,7 @@ where
     >,
     Pool::Transaction:
         PoolTransaction<Consensus = N::BroadcastedTransaction, Pooled = N::PooledTransaction>,
+    Policy: TransactionPropagationPolicy,
 {
     type Output = ();
 
@@ -1790,6 +1840,8 @@ pub struct PeerMetadata<N: NetworkPrimitives = EthNetworkPrimitives> {
     version: EthVersion,
     /// The peer's client version.
     client_version: Arc<str>,
+    /// The kind of peer.
+    peer_kind: PeerKind,
 }
 
 impl<N: NetworkPrimitives> PeerMetadata<N> {
@@ -1799,12 +1851,14 @@ impl<N: NetworkPrimitives> PeerMetadata<N> {
         version: EthVersion,
         client_version: Arc<str>,
         max_transactions_seen_by_peer: u32,
+        peer_kind: PeerKind,
     ) -> Self {
         Self {
             seen_transactions: LruCache::new(max_transactions_seen_by_peer),
             request_tx,
             version,
             client_version,
+            peer_kind,
         }
     }
 }
@@ -1979,6 +2033,7 @@ mod tests {
                 version,
                 Arc::from(""),
                 DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
+                PeerKind::Trusted,
             ),
             to_mock_session_rx,
         )
@@ -2208,7 +2263,7 @@ mod tests {
 
         // return the transactions corresponding to the transaction hashes.
         response
-            .send(Ok(reth_eth_wire::PooledTransactions(message)))
+            .send(Ok(PooledTransactions(message)))
             .expect("should send peer_1 response to tx manager");
 
         // adance the transaction manager future
@@ -2492,7 +2547,7 @@ mod tests {
             .collect();
         // response partial request
         response
-            .send(Ok(reth_eth_wire::PooledTransactions(message)))
+            .send(Ok(PooledTransactions(message)))
             .expect("should send peer_1 response to tx manager");
         let Some(FetchEvent::TransactionsFetched { peer_id, .. }) = tx_fetcher.next().await else {
             unreachable!()
