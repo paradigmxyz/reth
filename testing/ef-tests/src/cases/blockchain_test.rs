@@ -5,7 +5,7 @@ use crate::{
     Case, Error, Suite,
 };
 use alloy_consensus::Block;
-use alloy_rlp::Decodable;
+use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types_debug::ExecutionWitness;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_chainspec::ChainSpec;
@@ -14,8 +14,9 @@ use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_primitives::{BlockBody, RecoveredBlock, SealedBlock, TransactionSigned};
 use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockHashReader, BlockWriter,
-    DBProvider, DatabaseProviderFactory, ExecutionOutcome, HashingWriter, LatestStateProviderRef,
-    OriginalValuesKnown, StateCommitmentProvider, StateProvider, StateWriter, StorageLocation,
+    DBProvider, DatabaseProviderFactory, ExecutionOutcome, HashingWriter, HeaderProvider,
+    LatestStateProviderRef, OriginalValuesKnown, StateCommitmentProvider, StateProvider,
+    StateWriter, StorageLocation,
 };
 use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord, State};
 use reth_stateless::validation::{stateless_validation, Input};
@@ -155,7 +156,6 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
                 stateless_validation(
                     stateless_input.current_block,
                     stateless_input.execution_witness,
-                    stateless_input.ancestor_headers,
                     stateless_input.chain_spec,
                 )
                 .expect("stateless validation failed");
@@ -193,6 +193,7 @@ fn execute_blocks<
     Provider: DBProvider
         + StateWriter<Receipt = reth_primitives::Receipt>
         + BlockHashReader
+        + HeaderProvider
         + StateCommitmentProvider,
     F: FnMut(Option<&RecoveredBlock<Block<TransactionSigned>>>) -> SP,
     SP: StateProvider,
@@ -222,6 +223,7 @@ fn execute_blocks<
     let mut exec_witnesses = Vec::new();
 
     for block in blocks_with_genesis.iter().skip(1) {
+        let block_number = block.number;
         let state_provider = create_state_provider(Some(block));
         let state_db = StateProviderDatabase(&state_provider);
         let block_executor = executor_provider.executor(state_db);
@@ -234,34 +236,38 @@ fn execute_blocks<
             })
             .map_err(|_| Error::BlockExecutionFailed)?;
 
-        let ExecutionWitnessRecord { hashed_state, codes, keys } = witness_record;
+        // TODO: Most of this code is copy-pasted from debug_executionWitness
+        let ExecutionWitnessRecord { hashed_state, codes, keys, lowest_block_number } =
+            witness_record;
         let state = state_provider.witness(Default::default(), hashed_state)?;
-        let exec_witness = ExecutionWitness { state, codes, keys };
+        let mut exec_witness = ExecutionWitness { state, codes, keys, headers: Default::default() };
+
+        let smallest = match lowest_block_number {
+            Some(smallest) => smallest,
+            None => {
+                // Return only the parent header, if there were no calls to the
+                // BLOCKHASH opcode.
+                block_number.saturating_sub(1)
+            }
+        };
+
+        let range = smallest..block_number;
+
+        exec_witness.headers = provider
+            .headers_range(range)?
+            // .map_err(EthApiError::from)?
+            .into_iter()
+            .map(|header| {
+                let mut serialized_header = Vec::new();
+                header.encode(&mut serialized_header);
+                serialized_header.into()
+            })
+            .collect();
+
         exec_witnesses.push(exec_witness);
     }
 
     Ok(exec_witnesses)
-}
-
-/// Selects a contiguous range of items from a slice, ending just before the specified `end_index`.
-///
-/// # Arguments
-///
-/// * `slice` - The source slice to select items from
-/// * `end_index` - The exclusive end index for selection (items up to but not including this index)
-/// * `num_items_to_select` - The number of items to select
-fn select_items_before_index<T: Clone>(
-    slice: &[T],
-    end_index: usize,
-    num_items_to_select: usize,
-) -> Option<Vec<T>> {
-    if end_index == 0 || end_index > slice.len() || num_items_to_select == 0 {
-        return None;
-    }
-
-    let end_pos = end_index - 1;
-    let start_pos = end_pos.saturating_sub(num_items_to_select - 1);
-    slice.iter().skip(start_pos).take(end_pos - start_pos + 1).cloned().collect::<Vec<_>>().into()
 }
 
 fn compute_stateless_input(
@@ -277,15 +283,9 @@ fn compute_stateless_input(
         // Skip the genesis block, it has no ancestors and no execution
         blocks_with_genesis.iter().skip(1).zip(execution_witnesses)
     {
-        let ancestor_blocks =
-            select_items_before_index(blocks_with_genesis, current_block.number as usize, 256)
-                .expect("could not fetch ancestors");
-        let ancestor_headers =
-            ancestor_blocks.into_iter().map(|block| block.clone_header()).collect();
         guest_inputs.push(Input {
             current_block: current_block.clone(),
             execution_witness,
-            ancestor_headers,
             chain_spec: chain_spec.clone(),
         });
     }
@@ -358,55 +358,4 @@ pub fn should_skip(path: &Path) -> bool {
 fn path_contains(path_str: &str, rhs: &[&str]) -> bool {
     let rhs = rhs.join(std::path::MAIN_SEPARATOR_STR);
     path_str.contains(&rhs)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_valid_selection() {
-        let items = vec![0, 1, 2, 3, 4];
-
-        // Select 3 items ending before index 4
-        assert_eq!(select_items_before_index(&items, 4, 3), Some(vec![1, 2, 3]));
-
-        // Select 2 items ending before index 3
-        assert_eq!(select_items_before_index(&items, 3, 2), Some(vec![1, 2]));
-
-        // Select 1 item ending before index 2
-        assert_eq!(select_items_before_index(&items, 2, 1), Some(vec![1]));
-    }
-
-    #[test]
-    fn test_edge_cases() {
-        let items = vec![0, 1, 2, 3, 4];
-
-        // Select all items before the last
-        assert_eq!(select_items_before_index(&items, 4, 4), Some(vec![0, 1, 2, 3]));
-
-        // Select item before index 1
-        assert_eq!(select_items_before_index(&items, 1, 1), Some(vec![0]));
-
-        // Index is at the end of the slice
-        assert_eq!(select_items_before_index(&items, 5, 2), Some(vec![3, 4]));
-    }
-
-    #[test]
-    fn test_invalid_inputs() {
-        let items = vec![0, 1, 2, 3, 4];
-
-        // end_index is 0
-        assert_eq!(select_items_before_index(&items, 0, 1), None);
-
-        // end_index beyond slice bounds
-        assert_eq!(select_items_before_index(&items, 6, 3), None);
-
-        // num_items_to_select is 0
-        assert_eq!(select_items_before_index(&items, 3, 0), None);
-
-        // Empty slice
-        let empty: Vec<i32> = vec![];
-        assert_eq!(select_items_before_index(&empty, 1, 1), None);
-    }
 }

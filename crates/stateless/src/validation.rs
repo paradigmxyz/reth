@@ -3,6 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use crate::witness_db::WitnessDatabase;
 use alloy_consensus::{Block, BlockHeader, Header};
 use alloy_primitives::{keccak256, map::B256Map, B256};
+use alloy_rlp::Decodable;
 use alloy_rpc_types_debug::ExecutionWitness;
 use reth_chainspec::ChainSpec;
 use reth_ethereum_consensus::validate_block_post_execution;
@@ -84,8 +85,6 @@ pub struct Input {
     /// TODO doc
     pub execution_witness: ExecutionWitness,
     /// TODO doc
-    pub ancestor_headers: Vec<Header>,
-    /// TODO doc
     /// Note: // We need to use this Arc, because `EthEvmConfig` and a lot of internal
     /// reth components require it
     pub chain_spec: Arc<ChainSpec>,
@@ -129,9 +128,20 @@ pub struct Input {
 pub fn stateless_validation(
     current_block: RecoveredBlock<Block<TransactionSigned>>,
     witness: ExecutionWitness,
-    ancestor_headers: Vec<Header>,
     chain_spec: Arc<ChainSpec>,
 ) -> Result<B256, StatelessValidationError> {
+    // TODO: clean this up, the clone and vector allocation is undesirable
+    let _ancestor_headers: Result<Vec<_>, _> = witness
+        .headers
+        .iter()
+        .map(|serialized_header| {
+            let header: Vec<u8> = serialized_header.clone().into();
+            Header::decode(&mut &header[..])
+        })
+        .collect();
+    let ancestor_headers =
+        _ancestor_headers.map_err(|_| StatelessValidationError::InvalidAncestorChain)?;
+
     // Check that the ancestor headers form a contiguous chain and are not just random headers.
     let ancestor_hashes = compute_ancestor_hashes(&current_block, &ancestor_headers)?;
 
