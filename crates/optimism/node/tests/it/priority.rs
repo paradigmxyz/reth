@@ -116,7 +116,7 @@ where
             OpPayloadBuilder::new(compute_pending_block)
                 .with_transactions(CustomTxPriority { chain_id }),
         ))
-        .network(OpNetworkBuilder { disable_txpool_gossip, disable_discovery_v4: !discovery_v4 })
+        .network(OpNetworkBuilder { disable_txpool_gossip, enable_discovery_v4: discovery_v4 })
         .executor(OpExecutorBuilder::default())
         .consensus(OpConsensusBuilder::default())
 }

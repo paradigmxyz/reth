@@ -125,10 +125,7 @@ impl OpNode {
             .payload(BasicPayloadServiceBuilder::new(
                 OpPayloadBuilder::new(compute_pending_block).with_da_config(self.da_config.clone()),
             ))
-            .network(OpNetworkBuilder {
-                disable_txpool_gossip,
-                disable_discovery_v4: !discovery_v4,
-            })
+            .network(OpNetworkBuilder { disable_txpool_gossip, enable_discovery_v4: discovery_v4 })
             .executor(OpExecutorBuilder::default())
             .consensus(OpConsensusBuilder::default())
     }
@@ -769,8 +766,8 @@ where
 pub struct OpNetworkBuilder {
     /// Disable transaction pool gossip
     pub disable_txpool_gossip: bool,
-    /// Disable discovery v4
-    pub disable_discovery_v4: bool,
+    /// Enable discovery v4
+    pub enable_discovery_v4: bool,
 }
 
 impl OpNetworkBuilder {
@@ -784,16 +781,17 @@ impl OpNetworkBuilder {
     where
         Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
     {
-        let Self { disable_txpool_gossip, disable_discovery_v4 } = self.clone();
+        let Self { disable_txpool_gossip, enable_discovery_v4 } = self.clone();
         let args = &ctx.config().network;
         let network_builder = ctx
             .network_config_builder()?
             // apply discovery settings
             .apply(|mut builder| {
                 let rlpx_socket = (args.addr, args.port).into();
-                if disable_discovery_v4 || args.discovery.disable_discovery {
+                if !enable_discovery_v4 {
                     builder = builder.disable_discv4_discovery();
                 }
+                builder = builder.disable_discv4_discovery();
                 if !args.discovery.disable_discovery {
                     builder = builder.discovery_v5(
                         args.discovery.discovery_v5_builder(
