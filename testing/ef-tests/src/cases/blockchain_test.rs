@@ -148,15 +148,12 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
             // If block execution failed, then we don't generate a stateless witness, but we still
             // do the post state checks
         }
-        Ok(execution_witnesses) => {
-            let stateless_inputs =
-                compute_stateless_input(execution_witnesses, &blocks_with_genesis, chain_spec);
-
-            for stateless_input in stateless_inputs {
+        Ok(program_inputs) => {
+            for program_input in program_inputs {
                 stateless_validation(
-                    stateless_input.current_block,
-                    stateless_input.execution_witness,
-                    stateless_input.chain_spec,
+                    program_input.current_block,
+                    program_input.execution_witness,
+                    program_input.chain_spec,
                 )
                 .expect("stateless validation failed");
             }
@@ -202,8 +199,8 @@ fn execute_blocks<
     blocks_with_genesis: &[RecoveredBlock<Block<TransactionSigned>>],
     chain_spec: Arc<ChainSpec>,
     mut create_state_provider: F,
-) -> Result<Vec<ExecutionWitness>, Error> {
-    let executor_provider = EthExecutorProvider::ethereum(chain_spec);
+) -> Result<Vec<Input>, Error> {
+    let executor_provider = EthExecutorProvider::ethereum(chain_spec.clone());
 
     // First execute all of the blocks
     // TODO: We have two loops because if we use provider.latest() the merkle tree path
@@ -220,7 +217,7 @@ fn execute_blocks<
         )?;
     }
 
-    let mut exec_witnesses = Vec::new();
+    let mut program_inputs = Vec::new();
 
     for block in blocks_with_genesis.iter().skip(1) {
         let block_number = block.number;
@@ -264,33 +261,14 @@ fn execute_blocks<
             })
             .collect();
 
-        exec_witnesses.push(exec_witness);
-    }
-
-    Ok(exec_witnesses)
-}
-
-fn compute_stateless_input(
-    execution_witnesses: Vec<ExecutionWitness>,
-    blocks_with_genesis: &[RecoveredBlock<Block<TransactionSigned>>],
-    chain_spec: Arc<ChainSpec>,
-) -> Vec<Input> {
-    let mut guest_inputs = Vec::new();
-
-    assert_eq!(blocks_with_genesis.len() - 1, execution_witnesses.len());
-
-    for (current_block, execution_witness) in
-        // Skip the genesis block, it has no ancestors and no execution
-        blocks_with_genesis.iter().skip(1).zip(execution_witnesses)
-    {
-        guest_inputs.push(Input {
-            current_block: current_block.clone(),
-            execution_witness,
+        program_inputs.push(Input {
+            current_block: block.clone(),
+            execution_witness: exec_witness,
             chain_spec: chain_spec.clone(),
         });
     }
 
-    guest_inputs
+    Ok(program_inputs)
 }
 
 /// Returns whether the test at the given path should be skipped.

@@ -58,6 +58,10 @@ pub enum StatelessValidationError {
     #[error("missing required ancestor headers")]
     MissingAncestorHeader,
 
+    /// Error when deserializing ancestor headers
+    #[error("could not deserialize ancestor headers")]
+    HeaderDeserializationFailed,
+
     /// Error when the computed state root does not match the one in the block header.
     #[error("mismatched post- state root: {got}\n {expected}")]
     PostStateRootMismatch {
@@ -140,7 +144,7 @@ pub fn stateless_validation(
         })
         .collect();
     let ancestor_headers =
-        _ancestor_headers.map_err(|_| StatelessValidationError::InvalidAncestorChain)?;
+        _ancestor_headers.map_err(|_| StatelessValidationError::HeaderDeserializationFailed)?;
 
     // Check that the ancestor headers form a contiguous chain and are not just random headers.
     let ancestor_hashes = compute_ancestor_hashes(&current_block, &ancestor_headers)?;
