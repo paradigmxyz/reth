@@ -141,6 +141,14 @@ impl BlobStore for DiskFileBlobStore {
                 break;
             }
         }
+
+        for (idx, blob_and_proof) in result.iter_mut().enumerate() {
+            if blob_and_proof.is_none() {
+                let versioned_hash = versioned_hashes[idx];
+                let _tx_hash = self.inner.versioned_hashes_to_txhash.lock().get(&versioned_hash);
+            }
+        }
+
         Ok(result)
     }
 
@@ -159,6 +167,7 @@ struct DiskFileBlobStoreInner {
     size_tracker: BlobStoreSize,
     file_lock: RwLock<()>,
     txs_to_delete: RwLock<HashSet<B256>>,
+    versioned_hashes_to_txhash: Mutex<LruMap<B256, B256>>,
 }
 
 impl DiskFileBlobStoreInner {
@@ -170,6 +179,7 @@ impl DiskFileBlobStoreInner {
             size_tracker: Default::default(),
             file_lock: Default::default(),
             txs_to_delete: Default::default(),
+            versioned_hashes_to_txhash: Mutex::new(LruMap::new(ByLength::new(10_000))),
         }
     }
 
@@ -194,6 +204,13 @@ impl DiskFileBlobStoreInner {
 
     /// Ensures blob is in the blob cache and written to the disk.
     fn insert_one(&self, tx: B256, data: BlobTransactionSidecar) -> Result<(), BlobStoreError> {
+        {
+            let mut map = self.versioned_hashes_to_txhash.lock();
+            data.versioned_hashes().for_each(|hash| {
+                map.insert(hash, tx);
+            })
+        }
+
         let mut buf = Vec::with_capacity(data.rlp_encoded_fields_length());
         data.rlp_encode_fields(&mut buf);
         self.blob_cache.lock().insert(tx, Arc::new(data));
@@ -206,6 +223,15 @@ impl DiskFileBlobStoreInner {
 
     /// Ensures blobs are in the blob cache and written to the disk.
     fn insert_many(&self, txs: Vec<(B256, BlobTransactionSidecar)>) -> Result<(), BlobStoreError> {
+        {
+            let mut map = self.versioned_hashes_to_txhash.lock();
+            for (tx, data) in &txs {
+                data.versioned_hashes().for_each(|hash| {
+                    map.insert(hash, *tx);
+                })
+            }
+        }
+
         let raw = txs
             .iter()
             .map(|(tx, data)| {
