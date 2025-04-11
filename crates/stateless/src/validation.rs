@@ -275,6 +275,7 @@ const BLOCKHASH_HISTORICAL_HASH_LIMIT: usize = 256;
 ///
 /// If both checks pass, it returns a [`HashMap`] mapping the block number of each
 /// ancestor header to its corresponding block hash.
+/// TODO: geth stores headers in reverse, we should switch to that to be compatible
 fn compute_ancestor_hashes(
     current_block: &RecoveredBlock<Block<TransactionSigned>>,
     ancestor_headers: &[Header],
