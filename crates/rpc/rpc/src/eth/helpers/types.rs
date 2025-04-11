@@ -2,7 +2,7 @@
 
 use alloy_consensus::{Transaction as _, TxEnvelope};
 use alloy_network::{Ethereum, Network};
-use alloy_primitives::PrimitiveSignature as Signature;
+use alloy_primitives::Signature;
 use alloy_rpc_types::TransactionRequest;
 use alloy_rpc_types_eth::{Transaction, TransactionInfo};
 use reth_ethereum_primitives::TransactionSigned;
@@ -96,7 +96,7 @@ mod tests {
         let builder = EthTxBuilder::default();
         let mut db = CacheDB::<reth_revm::db::EmptyDBTyped<reth_errors::ProviderError>>::default();
         let tx = TransactionRequest::default();
-        let result = resolve_transaction(tx, 21000, 1, &mut db, &builder).unwrap();
+        let result = resolve_transaction(tx, 21000, 0, 1, &mut db, &builder).unwrap();
 
         // For an empty request, we should get a valid transaction with defaults
         let tx = result.into_inner();
@@ -112,7 +112,7 @@ mod tests {
 
         let tx = TransactionRequest { gas_price: Some(100), ..Default::default() };
 
-        let tx = resolve_transaction(tx, 21000, 1, &mut db, &builder).unwrap();
+        let tx = resolve_transaction(tx, 21000, 0, 1, &mut db, &builder).unwrap();
 
         assert_eq!(tx.tx_type(), TxType::Legacy);
 
@@ -132,7 +132,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = resolve_transaction(tx, 21000, 1, &mut db, &builder).unwrap();
+        let result = resolve_transaction(tx, 21000, 0, 1, &mut db, &builder).unwrap();
 
         assert_eq!(result.tx_type(), TxType::Eip1559);
         let tx = result.into_inner();

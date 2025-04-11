@@ -24,7 +24,7 @@ use reth_evm::{
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_primitives::transaction::signed::OpTransaction;
+use reth_optimism_primitives::transaction::OpTransaction;
 use reth_optimism_txpool::{
     interop::{is_valid_interop, MaybeInteropTransaction},
     OpPooledTx,
@@ -384,7 +384,7 @@ impl<Txs> OpBuilder<'_, Txs> {
         let ExecutionWitnessRecord { hashed_state, codes, keys, lowest_block_number: _ } =
             ExecutionWitnessRecord::from_executed_state(&db);
         let state = state_provider.witness(Default::default(), hashed_state)?;
-        Ok(ExecutionWitness { state: state.into_iter().collect(), codes, keys })
+        Ok(ExecutionWitness { state: state.into_iter().collect(), codes, keys, ..Default::default() })
     }
 }
 

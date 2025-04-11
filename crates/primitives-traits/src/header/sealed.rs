@@ -325,7 +325,7 @@ pub(super) mod serde_bincode_compat {
             }
 
             let mut bytes = [0u8; 1024];
-            rand::thread_rng().fill(&mut bytes[..]);
+            rand::rng().fill(&mut bytes[..]);
             let data = Data {
                 transaction: SealedHeader::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
                     .unwrap(),

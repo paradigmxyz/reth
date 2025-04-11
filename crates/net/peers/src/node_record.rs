@@ -236,21 +236,21 @@ impl TryFrom<&Enr<secp256k1::SecretKey>> for NodeRecord {
 mod tests {
     use super::*;
     use alloy_rlp::Decodable;
-    use rand::{thread_rng, Rng, RngCore};
+    use rand::{rng, Rng, RngCore};
     use std::net::Ipv6Addr;
 
     #[test]
     fn test_mapped_ipv6() {
-        let mut rng = thread_rng();
+        let mut rng = rng();
 
         let v4: Ipv4Addr = "0.0.0.0".parse().unwrap();
         let v6 = v4.to_ipv6_mapped();
 
         let record = NodeRecord {
             address: v6.into(),
-            tcp_port: rng.gen(),
-            udp_port: rng.gen(),
-            id: rng.gen(),
+            tcp_port: rng.random(),
+            udp_port: rng.random(),
+            id: rng.random(),
         };
 
         assert!(record.clone().convert_ipv4_mapped());
@@ -259,14 +259,14 @@ mod tests {
 
     #[test]
     fn test_mapped_ipv4() {
-        let mut rng = thread_rng();
+        let mut rng = rng();
         let v4: Ipv4Addr = "0.0.0.0".parse().unwrap();
 
         let record = NodeRecord {
             address: v4.into(),
-            tcp_port: rng.gen(),
-            udp_port: rng.gen(),
-            id: rng.gen(),
+            tcp_port: rng.random(),
+            udp_port: rng.random(),
+            id: rng.random(),
         };
 
         assert!(!record.clone().convert_ipv4_mapped());
@@ -275,15 +275,15 @@ mod tests {
 
     #[test]
     fn test_noderecord_codec_ipv4() {
-        let mut rng = thread_rng();
+        let mut rng = rng();
         for _ in 0..100 {
             let mut ip = [0u8; 4];
             rng.fill_bytes(&mut ip);
             let record = NodeRecord {
                 address: IpAddr::V4(ip.into()),
-                tcp_port: rng.gen(),
-                udp_port: rng.gen(),
-                id: rng.gen(),
+                tcp_port: rng.random(),
+                udp_port: rng.random(),
+                id: rng.random(),
             };
 
             let decoded = NodeRecord::decode(&mut alloy_rlp::encode(record).as_slice()).unwrap();
@@ -293,15 +293,15 @@ mod tests {
 
     #[test]
     fn test_noderecord_codec_ipv6() {
-        let mut rng = thread_rng();
+        let mut rng = rng();
         for _ in 0..100 {
             let mut ip = [0u8; 16];
             rng.fill_bytes(&mut ip);
             let record = NodeRecord {
                 address: IpAddr::V6(ip.into()),
-                tcp_port: rng.gen(),
-                udp_port: rng.gen(),
-                id: rng.gen(),
+                tcp_port: rng.random(),
+                udp_port: rng.random(),
+                id: rng.random(),
             };
 
             let decoded = NodeRecord::decode(&mut alloy_rlp::encode(record).as_slice()).unwrap();

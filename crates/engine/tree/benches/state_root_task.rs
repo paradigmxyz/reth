@@ -8,7 +8,7 @@ use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{Address, B256};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use proptest::test_runner::TestRunner;
-use rand::Rng;
+use rand_08::Rng;
 use reth_chain_state::EthPrimitives;
 use reth_chainspec::ChainSpec;
 use reth_db_common::init::init_genesis;
@@ -41,7 +41,12 @@ struct BenchParams {
 fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
     let mut runner = TestRunner::deterministic();
     let mut rng = runner.rng().clone();
-    let all_addresses: Vec<Address> = (0..params.num_accounts).map(|_| rng.gen()).collect();
+    let all_addresses: Vec<Address> = (0..params.num_accounts)
+        .map(|_| {
+            // TODO: rand08
+            Address::random()
+        })
+        .collect();
     let mut updates = Vec::new();
 
     for _ in 0..params.updates_per_account {

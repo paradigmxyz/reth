@@ -770,7 +770,7 @@ mod tests {
     use super::*;
     use alloy_consensus::Typed2718;
     use alloy_eips::eip2718::Encodable2718;
-    use alloy_primitives::{b256, hex, PrimitiveSignature as Signature, U256};
+    use alloy_primitives::{b256, hex, Signature, U256};
     use reth_ethereum_primitives::{Transaction, TransactionSigned};
     use std::str::FromStr;
 

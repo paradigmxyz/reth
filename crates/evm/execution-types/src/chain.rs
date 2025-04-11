@@ -461,7 +461,6 @@ impl<B: Block> IntoIterator for ChainBlocks<'_, B> {
     type IntoIter = alloc::collections::btree_map::IntoIter<BlockNumber, RecoveredBlock<B>>;
 
     fn into_iter(self) -> Self::IntoIter {
-        #[allow(clippy::unnecessary_to_owned)]
         self.blocks.into_owned().into_iter()
     }
 }
@@ -681,7 +680,7 @@ pub(super) mod serde_bincode_compat {
             }
 
             let mut bytes = [0u8; 1024];
-            rand::thread_rng().fill(bytes.as_mut_slice());
+            rand::rng().fill(bytes.as_mut_slice());
             let data = Data {
                 chain: Chain::new(
                     vec![RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))

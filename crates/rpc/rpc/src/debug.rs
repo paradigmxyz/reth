@@ -654,7 +654,7 @@ where
                     .witness(Default::default(), hashed_state)
                     .map_err(EthApiError::from)?;
                 Ok((
-                    ExecutionWitness { state, codes, keys, headers: Vec::new() },
+                    ExecutionWitness { state, codes, keys, ..Default::default() },
                     lowest_block_number,
                 ))
             })

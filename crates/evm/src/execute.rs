@@ -263,9 +263,17 @@ pub trait BlockBuilder {
     /// Provides mutable access to the inner [`BlockExecutor`].
     fn executor_mut(&mut self) -> &mut Self::Executor;
 
-    /// Helper to access inner [`BlockExecutor::Evm`].
+    /// Provides access to the inner [`BlockExecutor`].
+    fn executor(&self) -> &Self::Executor;
+
+    /// Helper to access inner [`BlockExecutor::Evm`] mutably.
     fn evm_mut(&mut self) -> &mut <Self::Executor as BlockExecutor>::Evm {
         self.executor_mut().evm_mut()
+    }
+
+    /// Helper to access inner [`BlockExecutor::Evm`].
+    fn evm(&self) -> &<Self::Executor as BlockExecutor>::Evm {
+        self.executor().evm()
     }
 
     /// Consumes the type and returns the underlying [`BlockExecutor`].
@@ -388,6 +396,10 @@ where
         &mut self.executor
     }
 
+    fn executor(&self) -> &Self::Executor {
+        &self.executor
+    }
+
     fn into_executor(self) -> Self::Executor {
         self.executor
     }
@@ -433,7 +445,7 @@ where
 
 /// A generic block executor that uses a [`BlockExecutor`] to
 /// execute blocks.
-#[allow(missing_debug_implementations, dead_code)]
+#[expect(missing_debug_implementations)]
 pub struct BasicBlockExecutor<F, DB> {
     /// Block execution strategy.
     pub(crate) strategy_factory: F,

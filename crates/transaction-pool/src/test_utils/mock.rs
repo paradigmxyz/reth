@@ -22,14 +22,9 @@ use alloy_eips::{
     eip4844::{BlobTransactionSidecar, BlobTransactionValidationError, DATA_GAS_PER_BLOB},
     eip7702::SignedAuthorization,
 };
-use alloy_primitives::{
-    Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
-};
+use alloy_primitives::{Address, Bytes, ChainId, Signature, TxHash, TxKind, B256, U256};
 use paste::paste;
-use rand::{
-    distributions::{Uniform, WeightedIndex},
-    prelude::Distribution,
-};
+use rand::{distr::Uniform, prelude::Distribution};
 use reth_ethereum_primitives::{Transaction, TransactionSigned};
 use reth_primitives_traits::{
     transaction::error::{TransactionConversionError, TryFromRecoveredTransactionError},
@@ -37,6 +32,7 @@ use reth_primitives_traits::{
 };
 
 use alloy_eips::eip4844::env_settings::KzgSettings;
+use rand::distr::weighted::WeightedIndex;
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
 
 /// A transaction pool implementation using [`MockOrdering`] for transaction ordering.
@@ -1443,10 +1439,10 @@ impl MockFeeRange {
             "max_fee_range should be strictly below the priority fee range"
         );
         Self {
-            gas_price: gas_price.into(),
-            priority_fee: priority_fee.into(),
-            max_fee: max_fee.into(),
-            max_fee_blob: max_fee_blob.into(),
+            gas_price: gas_price.try_into().unwrap(),
+            priority_fee: priority_fee.try_into().unwrap(),
+            max_fee: max_fee.try_into().unwrap(),
+            max_fee_blob: max_fee_blob.try_into().unwrap(),
         }
     }
 
@@ -1498,9 +1494,9 @@ impl MockTransactionDistribution {
     ) -> Self {
         Self {
             transaction_ratio,
-            gas_limit_range: gas_limit_range.into(),
+            gas_limit_range: gas_limit_range.try_into().unwrap(),
             fee_ranges,
-            size_range: size_range.into(),
+            size_range: size_range.try_into().unwrap(),
         }
     }
 
@@ -1710,7 +1706,7 @@ impl MockTransactionSet {
 
         let mut prev_nonce = 0;
         for tx in &mut self.transactions {
-            if rng.gen_bool(gap_pct as f64 / 100.0) {
+            if rng.random_bool(gap_pct as f64 / 100.0) {
                 prev_nonce += gap_range.start;
             } else {
                 prev_nonce += 1;
