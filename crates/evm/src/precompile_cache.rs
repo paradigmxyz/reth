@@ -14,8 +14,12 @@ use reth_revm::revm::{
 use alloy_primitives::{map::DefaultHashBuilder, Bytes};
 #[cfg(feature = "std")]
 use dashmap::DashMap;
-#[cfg(feature = "std")]
+#[cfg(feature = "metrics")]
+use metrics::Gauge;
+#[cfg(feature = "metrics")]
 use mini_moka::sync::CacheBuilder;
+#[cfg(feature = "std")]
+use reth_metrics::Metrics;
 
 #[cfg(feature = "std")]
 type Cache<K, V> = mini_moka::sync::Cache<K, V, alloy_primitives::map::DefaultHashBuilder>;
@@ -38,6 +42,24 @@ pub struct PrecompileCache {
     cache: DashMap<Address, PrecompileLRUCache>,
 }
 
+/// Metrics for the cached precompile provider, showing hits / misses for each cache
+#[cfg(feature = "std")]
+#[derive(Metrics, Clone)]
+#[metrics(scope = "sync.caching")]
+pub(crate) struct CachedPrecompileMetrics {
+    /// Precompile cache hits
+    precompile_cache_hits: Gauge,
+
+    /// Precompile cache misses
+    precompile_cache_misses: Gauge,
+
+    /// Precompile cache size
+    ///
+    /// NOTE: this uses the moka caches' `entry_count`, NOT the `weighted_size` method to calculate
+    /// size.
+    precompile_cache_size: Gauge,
+}
+
 /// A custom precompile provider that wraps a precompile provider and potentially a cache for it.
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
@@ -48,6 +70,9 @@ pub struct MaybeCachedPrecompileProvider<P> {
     cache: Option<Arc<PrecompileCache>>,
     /// The spec id to use.
     spec: SpecId,
+    /// Cache metrics.
+    #[cfg(feature = "metrics")]
+    metrics: CachedPrecompileMetrics,
 }
 
 impl<P> MaybeCachedPrecompileProvider<P> {
@@ -55,12 +80,24 @@ impl<P> MaybeCachedPrecompileProvider<P> {
     /// create a cached wrapper that can be used inside Evm.
     #[cfg(feature = "std")]
     pub fn new_with_cache(precompile_provider: P, cache: Arc<PrecompileCache>) -> Self {
-        Self { precompile_provider, cache: Some(cache), spec: SpecId::default() }
+        Self {
+            precompile_provider,
+            cache: Some(cache),
+            spec: SpecId::default(),
+            #[cfg(feature = "metrics")]
+            metrics: Default::default(),
+        }
     }
 
     /// Creates a new `MaybeCachedPrecompileProvider` with cache disabled.
     pub fn new_without_cache(precompile_provider: P) -> Self {
-        Self { precompile_provider, cache: None, spec: Default::default() }
+        Self {
+            precompile_provider,
+            cache: None,
+            spec: Default::default(),
+            #[cfg(feature = "metrics")]
+            metrics: Default::default(),
+        }
     }
 
     #[cfg(not(feature = "std"))]
@@ -96,16 +133,30 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
 
             // get the result if it exists
             if let Some(precompiles) = cache.cache.get_mut(address) {
+                #[cfg(feature = "metrics")]
+                self.metrics.precompile_cache_hits.increment(1);
                 if let Some(result) = precompiles.get(&key) {
                     return result.map(Some)
                 }
             }
+            #[cfg(feature = "metrics")]
+            self.metrics.precompile_cache_misses.increment(1);
 
             // call the precompile if cache miss
             let output =
                 self.precompile_provider.run(context, address, inputs, is_static, gas_limit);
 
             if let Some(output) = output.clone().transpose() {
+                // Check if entry exists for this address before insertion
+                let is_new_address = !cache.cache.contains_key(address);
+                let entry_count_before = if is_new_address {
+                    0
+                } else if let Some(precompile_cache) = cache.cache.get(address) {
+                    precompile_cache.entry_count()
+                } else {
+                    0
+                };
+
                 // insert the result into the cache
                 cache
                     .cache
@@ -115,6 +166,17 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
                         CacheBuilder::new(10000).build_with_hasher(DefaultHashBuilder::default()),
                     )
                     .insert(key, output);
+
+                #[cfg(feature = "metrics")]
+                if let Some(precompile_cache) = cache.cache.get(address) {
+                    let new_entry_count = precompile_cache.entry_count();
+                    if new_entry_count > entry_count_before {
+                        // Increment the cache size metric by the number of new entries
+                        self.metrics
+                            .precompile_cache_size
+                            .increment((new_entry_count - entry_count_before) as f64);
+                    }
+                }
             }
 
             output
