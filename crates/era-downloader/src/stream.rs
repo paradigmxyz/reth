@@ -97,11 +97,9 @@ impl Stream for DownloadStream {
         let project = self.project();
         let poll = project.downloads.poll_next(cx);
 
-        if let Poll::Ready(None) = poll {
-            if !ended {
-                cx.waker().wake_by_ref();
-                return Poll::Pending;
-            }
+        if matches!(poll, Poll::Ready(None)) && !ended {
+            cx.waker().wake_by_ref();
+            return Poll::Pending;
         }
 
         poll
