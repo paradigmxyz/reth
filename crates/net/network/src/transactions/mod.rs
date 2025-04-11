@@ -1928,9 +1928,7 @@ mod tests {
     };
     use secp256k1::SecretKey;
     use std::{
-        fmt,
         future::poll_fn,
-        hash,
         net::{IpAddr, Ipv4Addr, SocketAddr},
         str::FromStr,
     };
