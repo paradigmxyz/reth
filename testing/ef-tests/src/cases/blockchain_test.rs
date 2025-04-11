@@ -140,11 +140,8 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     }
     let last_block = blocks_with_genesis.last().cloned();
 
-    match execute_blocks(&provider, &blocks_with_genesis, chain_spec.clone(), |maybe_block| {
-        match maybe_block {
-            Some(block) => provider.history_by_block_hash(block.parent_hash).unwrap(),
-            None => Box::new(LatestStateProviderRef::new(&provider)),
-        }
+    match execute_blocks(&provider, &blocks_with_genesis, chain_spec.clone(), |block| {
+        provider.history_by_block_hash(block.parent_hash).unwrap()
     }) {
         Err(Error::BlockExecutionFailed) => {
             // If block execution failed, then we don't generate a stateless witness, but we still
@@ -190,7 +187,7 @@ fn execute_blocks<
         + BlockHashReader
         + HeaderProvider
         + StateCommitmentProvider,
-    F: FnMut(Option<&SignedRecoveredBlock>) -> SP,
+    F: FnMut(&SignedRecoveredBlock) -> SP,
     SP: StateProvider,
 >(
     provider: &Provider,
@@ -199,15 +196,16 @@ fn execute_blocks<
     mut create_state_provider: F,
 ) -> Result<Vec<(SignedRecoveredBlock, ExecutionWitness)>, Error> {
     let executor_provider = EthExecutorProvider::ethereum(chain_spec);
-
-    // First execute all of the blocks
     // TODO: We have two loops because if we use provider.latest() the merkle tree path
     // TODO: is not correct
+    // First execute all of the blocks
     for block in blocks_with_genesis.iter().skip(1) {
-        let state_provider = create_state_provider(None);
+        let state_provider = LatestStateProviderRef::new(provider);
         let state_db = StateProviderDatabase(&state_provider);
         let block_executor = executor_provider.executor(state_db);
+
         let output = block_executor.execute(block).map_err(|_| Error::BlockExecutionFailed)?;
+
         provider.write_state(
             &ExecutionOutcome::single(block.number, output),
             OriginalValuesKnown::Yes,
@@ -219,7 +217,8 @@ fn execute_blocks<
 
     for block in blocks_with_genesis.iter().skip(1) {
         let block_number = block.number;
-        let state_provider = create_state_provider(Some(block));
+
+        let state_provider = create_state_provider(block);
         let state_db = StateProviderDatabase(&state_provider);
         let block_executor = executor_provider.executor(state_db);
 
