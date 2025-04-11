@@ -1,0 +1,32 @@
+[package]
+name = "reth-era-downloader"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[dependencies]
+# http
+reqwest.workspace = true
+reqwest.default-features = false
+reqwest.features = ["stream", "rustls-tls-native-roots"]
+
+# async
+pin-project.workspace = true
+tokio.workspace = true
+tokio.features = ["fs", "io-util"]
+futures-util.workspace = true
+
+# errors
+eyre.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+tokio.features = ["fs", "io-util", "macros"]
+test-case.workspace = true
+
+[lints]
+workspace = true
