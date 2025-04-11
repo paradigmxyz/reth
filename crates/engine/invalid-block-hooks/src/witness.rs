@@ -44,11 +44,11 @@ impl BundleStateIntermediate<'_, '_, '_, '_, '_> {
         let mut state: BTreeMap<&'_ Address, &'_ BundleAccount> = BTreeMap::new();
         let mut contracts: BTreeMap<&'_ B256, &'_ Bytecode> = BTreeMap::new();
 
-        for (k, v) in bundle_state.state.iter() {
+        for (k, v) in &bundle_state.state {
             state.insert(k, v);
         }
 
-        for (k, v) in bundle_state.contracts.iter() {
+        for (k, v) in &bundle_state.contracts {
             contracts.insert(k, v);
         }
 
@@ -231,7 +231,8 @@ where
             )?;
 
             let filename = format!("{}_{}.bundle_state.diff", block.number(), block.hash());
-            // Convert bundle state to intermediate struct which has BTreeMap instead of HashMap to have deterministric ordering
+            // Convert bundle state to intermediate struct which has BTreeMap instead of HashMap to
+            // have deterministric ordering
             let bundle_state_intermediate =
                 BundleStateIntermediate::from_bundle_state(&bundle_state);
             let output_state_intermediate =
