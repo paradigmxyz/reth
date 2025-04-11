@@ -290,8 +290,12 @@ where
         let mut hash_builder = HashBuilder::default()
             .with_proof_retainer(retainer)
             .with_updates(self.collect_branch_node_masks);
-        let mut storage_node_iter =
-            TrieNodeIter::new(walker, hashed_storage_cursor, TrieType::Storage);
+        let mut storage_node_iter = TrieNodeIter::new(
+            walker,
+            hashed_storage_cursor,
+            #[cfg(feature = "metrics")]
+            TrieType::Storage,
+        );
         while let Some(node) = storage_node_iter.try_next()? {
             match node {
                 TrieElement::Branch(node) => {
