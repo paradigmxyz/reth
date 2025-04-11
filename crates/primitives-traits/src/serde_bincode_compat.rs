@@ -42,6 +42,7 @@ pub type BincodeReprFor<'a, T> = <T as SerdeBincodeCompat>::BincodeRepr<'a>;
 mod block_bincode {
     use crate::serde_bincode_compat::SerdeBincodeCompat;
     use alloc::{borrow::Cow, vec::Vec};
+    use alloy_consensus::TxEip4844;
     use alloy_eips::eip4895::Withdrawals;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
@@ -205,6 +206,19 @@ mod block_bincode {
         for alloy_consensus::BlockBody<T, H>
     {
         type BincodeRepr<'a> = BlockBody<'a, T, H>;
+
+        fn as_repr(&self) -> Self::BincodeRepr<'_> {
+            self.into()
+        }
+
+        fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
+            repr.into()
+        }
+    }
+
+    impl super::SerdeBincodeCompat for alloy_consensus::EthereumTxEnvelope<TxEip4844> {
+        type BincodeRepr<'a> =
+            alloy_consensus::serde_bincode_compat::transaction::EthereumTxEnvelope<'a>;
 
         fn as_repr(&self) -> Self::BincodeRepr<'_> {
             self.into()
