@@ -4,7 +4,7 @@ use std::{
 };
 
 use reth_chainspec::MAINNET;
-use reth_discv4::{Discv4Config, NatResolver};
+use reth_discv4::{Discv4Config, NatResolver, DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
 use reth_network::{
     error::{NetworkError, ServiceKind},
     Discovery, NetworkConfigBuilder, NetworkManager,
@@ -18,6 +18,9 @@ fn is_addr_in_use_kind(err: &NetworkError, kind: ServiceKind) -> bool {
     match err {
         NetworkError::AddressAlreadyInUse { kind: k, error } => {
             *k == kind && error.kind() == io::ErrorKind::AddrInUse
+        }
+        NetworkError::Discv5Error(reth_discv5::Error::Discv5Error(discv5::Error::Io(err))) => {
+            err.kind() == io::ErrorKind::AddrInUse
         }
         _ => false,
     }
@@ -66,6 +69,51 @@ async fn test_discovery_addr_in_use() {
     let disc_config = Discv4Config::default();
     let result = Discovery::new(addr, addr, secret_key, Some(disc_config), None, None).await;
     assert!(is_addr_in_use_kind(&result.err().unwrap(), ServiceKind::Discovery(addr)));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_discv5_and_discv4_same_socket_fails() {
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+    let config = NetworkConfigBuilder::eth(secret_key)
+        .listener_port(DEFAULT_DISCOVERY_PORT)
+        .discovery_v5(
+            reth_discv5::Config::builder((DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT).into())
+                .discv5_config(
+                    discv5::ConfigBuilder::new(discv5::ListenConfig::from_ip(
+                        DEFAULT_DISCOVERY_ADDR,
+                        DEFAULT_DISCOVERY_PORT,
+                    ))
+                    .build(),
+                ),
+        )
+        .disable_dns_discovery()
+        .build(NoopProvider::default());
+    let addr = config.listener_addr;
+    let result = NetworkManager::new(config).await;
+    let err = result.err().unwrap();
+
+    assert!(is_addr_in_use_kind(&err, ServiceKind::Listener(addr)), "{err:?}")
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_discv5_and_rlpx_same_socket_ok_without_discv4() {
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+    let config = NetworkConfigBuilder::eth(secret_key)
+        .listener_port(DEFAULT_DISCOVERY_PORT)
+        .disable_discv4_discovery()
+        .discovery_v5(
+            reth_discv5::Config::builder((DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT).into())
+                .discv5_config(
+                    discv5::ConfigBuilder::new(discv5::ListenConfig::from_ip(
+                        DEFAULT_DISCOVERY_ADDR,
+                        DEFAULT_DISCOVERY_PORT,
+                    ))
+                    .build(),
+                ),
+        )
+        .disable_dns_discovery()
+        .build(NoopProvider::default());
+    let _network = NetworkManager::new(config).await.expect("should build");
 }
 
 // <https://github.com/paradigmxyz/reth/issues/8851>
