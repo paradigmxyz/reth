@@ -334,7 +334,7 @@ impl Discv5 {
     }
 
     /// Tries to recover an unreachable [`Enr`](discv5::Enr) received via
-    /// [`discv5::Event::UnverifiableEnr`], into a [`NodeRecord`] usable by RLPx.
+    /// [`discv5::Event::UnverifiableEnr`], into a [`NodeRecord`] usable by `RLPx`.
     ///
     /// NOTE: Fallback solution to be compatible with Geth which includes peers into the discv5
     /// WAN topology which, for example, advertise in their ENR that localhost is their UDP socket.
@@ -358,9 +358,10 @@ impl Discv5 {
             IpMode::Ip6 => enr.tcp6(),
             IpMode::DualStack => unimplemented!("dual-stack support not implemented for rlpx"),
         })
-        .unwrap_or_else(||
+        .unwrap_or(
             // tcp socket is missing from ENR, or is wrong IP version
-            udp_port);
+            udp_port,
+        );
 
         Ok(NodeRecord { address, tcp_port, udp_port, id })
     }
