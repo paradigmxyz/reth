@@ -11,7 +11,7 @@ use reth_chainspec::EthChainSpec;
 use reth_config::Config;
 use reth_discv4::{NodeRecord, DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
 use reth_discv5::{
-    discv5::ListenConfig, DEFAULT_COUNT_BOOTSTRAP_LOOKUPS, DEFAULT_DISCOVERY_V5_PORT,
+    config::DEFAULT_DISCOVERY_V5_PORT, discv5::ListenConfig, DEFAULT_COUNT_BOOTSTRAP_LOOKUPS,
     DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL, DEFAULT_SECONDS_LOOKUP_INTERVAL,
 };
 use reth_net_nat::{NatResolver, DEFAULT_NET_IF_NAME};

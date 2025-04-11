@@ -39,8 +39,8 @@ pub mod network_stack_id;
 pub use discv5::{self, IpMode};
 
 pub use config::{
-    BootNode, Config, ConfigBuilder, DEFAULT_COUNT_BOOTSTRAP_LOOKUPS, DEFAULT_DISCOVERY_V5_ADDR,
-    DEFAULT_DISCOVERY_V5_ADDR_IPV6, DEFAULT_DISCOVERY_V5_LISTEN_CONFIG, DEFAULT_DISCOVERY_V5_PORT,
+    default_discovery_v5_listen_config, default_discovery_v5_port, BootNode, Config, ConfigBuilder,
+    DEFAULT_COUNT_BOOTSTRAP_LOOKUPS, DEFAULT_DISCOVERY_V5_ADDR, DEFAULT_DISCOVERY_V5_ADDR_IPV6,
     DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL, DEFAULT_SECONDS_LOOKUP_INTERVAL,
 };
 pub use enr::enr_to_discv4_id;
@@ -666,7 +666,7 @@ mod test {
                 discv5::Discv5::new(
                     Enr::empty(&sk).unwrap(),
                     sk,
-                    discv5::ConfigBuilder::new(DEFAULT_DISCOVERY_V5_LISTEN_CONFIG).build(),
+                    discv5::ConfigBuilder::new(default_discovery_v5_listen_config(false)).build(),
                 )
                 .unwrap(),
             ),
