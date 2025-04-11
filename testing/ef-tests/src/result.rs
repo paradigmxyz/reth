@@ -20,6 +20,9 @@ pub enum Error {
     /// No post state found in test
     #[error("no post state found for validation")]
     MissingPostState,
+    /// Block execution failed
+    #[error("block execution failed")]
+    BlockExecutionFailed,
     /// An IO error occurred
     #[error("an error occurred interacting with the file system at {path}: {error}")]
     Io {

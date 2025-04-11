@@ -4,16 +4,22 @@ use crate::{
     models::{BlockchainTest, ForkSpec},
     Case, Error, Suite,
 };
-use alloy_rlp::Decodable;
+use alloy_consensus::Block;
+use alloy_rlp::{Decodable, Encodable};
+use alloy_rpc_types_debug::ExecutionWitness;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_chainspec::ChainSpec;
-use reth_ethereum_consensus::EthBeaconConsensus;
-use reth_primitives::{BlockBody, SealedBlock, StaticFileSegment};
+use reth_evm::execute::{BlockExecutorProvider, Executor};
+use reth_evm_ethereum::execute::EthExecutorProvider;
+use reth_primitives::{BlockBody, RecoveredBlock, SealedBlock, TransactionSigned};
 use reth_provider::{
-    providers::StaticFileWriter, test_utils::create_test_provider_factory_with_chain_spec,
-    DatabaseProviderFactory, HashingWriter, StaticFileProviderFactory,
+    test_utils::create_test_provider_factory_with_chain_spec, BlockHashReader, BlockWriter,
+    DBProvider, DatabaseProviderFactory, ExecutionOutcome, HashingWriter, HeaderProvider,
+    LatestStateProviderRef, OriginalValuesKnown, StateCommitmentProvider, StateProvider,
+    StateWriter, StorageLocation,
 };
-use reth_stages::{stages::ExecutionStage, ExecInput, Stage};
+use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord, State};
+use reth_stateless::validation::stateless_validation;
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 
 /// A handler for the blockchain test suite.
@@ -83,85 +89,180 @@ impl Case for BlockchainTestCase {
                 )
             })
             .par_bridge()
-            .try_for_each(|case| {
-                // Create a new test database and initialize a provider for the test case.
-                let chain_spec: Arc<ChainSpec> = Arc::new(case.network.into());
-                let provider = create_test_provider_factory_with_chain_spec(chain_spec.clone())
-                    .database_provider_rw()
-                    .unwrap();
-
-                // Insert initial test state into the provider.
-                provider.insert_historical_block(
-                    SealedBlock::<reth_primitives::Block>::from_sealed_parts(
-                        case.genesis_block_header.clone().into(),
-                        BlockBody::default(),
-                    )
-                    .try_recover()
-                    .unwrap(),
-                )?;
-                case.pre.write_to_db(provider.tx_ref())?;
-
-                // Initialize receipts static file with genesis
-                {
-                    let static_file_provider = provider.static_file_provider();
-                    let mut receipts_writer =
-                        static_file_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
-                    receipts_writer.increment_block(0).unwrap();
-                    receipts_writer.commit_without_sync_all().unwrap();
-                }
-
-                // Decode and insert blocks, creating a chain of blocks for the test case.
-                let last_block = case.blocks.iter().try_fold(None, |_, block| {
-                    let decoded =
-                        SealedBlock::<reth_primitives::Block>::decode(&mut block.rlp.as_ref())?;
-                    provider.insert_historical_block(decoded.clone().try_recover().unwrap())?;
-                    Ok::<Option<SealedBlock>, Error>(Some(decoded))
-                })?;
-                provider
-                    .static_file_provider()
-                    .latest_writer(StaticFileSegment::Headers)
-                    .unwrap()
-                    .commit_without_sync_all()
-                    .unwrap();
-
-                // Execute the execution stage using the EVM processor factory for the test case
-                // network.
-                let _ = ExecutionStage::new_with_executor(
-                    reth_evm_ethereum::execute::EthExecutorProvider::ethereum(chain_spec.clone()),
-                    Arc::new(EthBeaconConsensus::new(chain_spec)),
-                )
-                .execute(
-                    &provider,
-                    ExecInput { target: last_block.as_ref().map(|b| b.number), checkpoint: None },
-                );
-
-                // Validate the post-state for the test case.
-                match (&case.post_state, &case.post_state_hash) {
-                    (Some(state), None) => {
-                        // Validate accounts in the state against the provider's database.
-                        for (&address, account) in state {
-                            account.assert_db(address, provider.tx_ref())?;
-                        }
-                    }
-                    (None, Some(expected_state_root)) => {
-                        // Insert state hashes into the provider based on the expected state root.
-                        let last_block = last_block.unwrap_or_default();
-                        provider.insert_hashes(
-                            0..=last_block.number,
-                            last_block.hash(),
-                            *expected_state_root,
-                        )?;
-                    }
-                    _ => return Err(Error::MissingPostState),
-                }
-
-                // Drop the provider without committing to the database.
-                drop(provider);
-                Ok(())
-            })?;
+            .try_for_each(run_case)?;
 
         Ok(())
     }
+}
+
+type SignedRecoveredBlock = RecoveredBlock<Block<TransactionSigned>>;
+
+/// Executes a single `BlockchainTest`, returning an error if the blockchain state
+/// does not match the expected outcome after all blocks are executed.
+///
+/// A `BlockchainTest` represents a self-contained scenario:
+/// - It initializes a fresh blockchain state.
+/// - It sequentially decodes, executes, and inserts a predefined set of blocks.
+/// - It then verifies that the resulting blockchain state (post-state) matches the expected
+///   outcome.
+///
+/// Returns:
+/// - `Ok(())` if all blocks execute successfully and the final state is correct.
+/// - `Err(Error)` if any block fails to execute correctly, or if the post-state validation fails.
+fn run_case(case: &BlockchainTest) -> Result<(), Error> {
+    // Create a new test database and initialize a provider for the test case.
+    let chain_spec: Arc<ChainSpec> = Arc::new(case.network.into());
+    let provider = create_test_provider_factory_with_chain_spec(chain_spec.clone())
+        .database_provider_rw()
+        .unwrap();
+
+    // Insert the genesis block and the initial test state into the provider
+    let genesis_block = SealedBlock::<reth_primitives::Block>::from_sealed_parts(
+        case.genesis_block_header.clone().into(),
+        BlockBody::default(),
+    )
+    .try_recover()
+    .unwrap();
+
+    provider.insert_block(genesis_block.clone(), StorageLocation::Database)?;
+    case.pre.write_to_db(provider.tx_ref())?;
+
+    // Decode and insert blocks, creating a chain of blocks for the test case.
+    let mut blocks_with_genesis = Vec::with_capacity(case.blocks.len() + 1);
+    blocks_with_genesis.push(genesis_block);
+    for block in &case.blocks {
+        let decoded = SealedBlock::<reth_primitives::Block>::decode(&mut block.rlp.as_ref())?;
+        let recovered_block = decoded.clone().try_recover().unwrap();
+
+        provider.insert_block(recovered_block.clone(), StorageLocation::Database)?;
+
+        blocks_with_genesis.push(recovered_block);
+    }
+    let last_block = blocks_with_genesis.last().cloned();
+
+    match execute_blocks(&provider, &blocks_with_genesis, chain_spec.clone(), |maybe_block| {
+        match maybe_block {
+            Some(block) => provider.history_by_block_hash(block.parent_hash).unwrap(),
+            None => Box::new(LatestStateProviderRef::new(&provider)),
+        }
+    }) {
+        Err(Error::BlockExecutionFailed) => {
+            // If block execution failed, then we don't generate a stateless witness, but we still
+            // do the post state checks
+        }
+        Ok(program_inputs) => {
+            for (block, execution_witness) in program_inputs {
+                stateless_validation(block, execution_witness, chain_spec.clone())
+                    .expect("stateless validation failed");
+            }
+        }
+        Err(err) => return Err(err),
+    };
+
+    // Validate the post-state for the test case.
+    match (&case.post_state, &case.post_state_hash) {
+        (Some(state), None) => {
+            // Validate accounts in the state against the provider's database.
+            for (&address, account) in state {
+                account.assert_db(address, provider.tx_ref())?;
+            }
+        }
+        (None, Some(expected_state_root)) => {
+            // Insert state hashes into the provider based on the expected state root.
+            let last_block = last_block.unwrap_or_default();
+            provider.insert_hashes(
+                0..=last_block.number,
+                last_block.hash(),
+                *expected_state_root,
+            )?;
+        }
+        _ => return Err(Error::MissingPostState),
+    }
+
+    // Drop the provider without committing to the database.
+    drop(provider);
+    Ok(())
+}
+
+fn execute_blocks<
+    Provider: DBProvider
+        + StateWriter<Receipt = reth_primitives::Receipt>
+        + BlockHashReader
+        + HeaderProvider
+        + StateCommitmentProvider,
+    F: FnMut(Option<&SignedRecoveredBlock>) -> SP,
+    SP: StateProvider,
+>(
+    provider: &Provider,
+    blocks_with_genesis: &[SignedRecoveredBlock],
+    chain_spec: Arc<ChainSpec>,
+    mut create_state_provider: F,
+) -> Result<Vec<(SignedRecoveredBlock, ExecutionWitness)>, Error> {
+    let executor_provider = EthExecutorProvider::ethereum(chain_spec);
+
+    // First execute all of the blocks
+    // TODO: We have two loops because if we use provider.latest() the merkle tree path
+    // TODO: is not correct
+    for block in blocks_with_genesis.iter().skip(1) {
+        let state_provider = create_state_provider(None);
+        let state_db = StateProviderDatabase(&state_provider);
+        let block_executor = executor_provider.executor(state_db);
+        let output = block_executor.execute(block).map_err(|_| Error::BlockExecutionFailed)?;
+        provider.write_state(
+            &ExecutionOutcome::single(block.number, output),
+            OriginalValuesKnown::Yes,
+            StorageLocation::Database,
+        )?;
+    }
+
+    let mut program_inputs = Vec::new();
+
+    for block in blocks_with_genesis.iter().skip(1) {
+        let block_number = block.number;
+        let state_provider = create_state_provider(Some(block));
+        let state_db = StateProviderDatabase(&state_provider);
+        let block_executor = executor_provider.executor(state_db);
+
+        let mut witness_record = ExecutionWitnessRecord::default();
+
+        block_executor
+            .execute_with_state_closure(&(*block).clone(), |statedb: &State<_>| {
+                witness_record.record_executed_state(statedb);
+            })
+            .map_err(|_| Error::BlockExecutionFailed)?;
+
+        // TODO: Most of this code is copy-pasted from debug_executionWitness
+        let ExecutionWitnessRecord { hashed_state, codes, keys, lowest_block_number } =
+            witness_record;
+        let state = state_provider.witness(Default::default(), hashed_state)?;
+        let mut exec_witness = ExecutionWitness { state, codes, keys, headers: Default::default() };
+
+        let smallest = match lowest_block_number {
+            Some(smallest) => smallest,
+            None => {
+                // Return only the parent header, if there were no calls to the
+                // BLOCKHASH opcode.
+                block_number.saturating_sub(1)
+            }
+        };
+
+        let range = smallest..block_number;
+
+        exec_witness.headers = provider
+            .headers_range(range)?
+            // .map_err(EthApiError::from)?
+            .into_iter()
+            .map(|header| {
+                let mut serialized_header = Vec::new();
+                header.encode(&mut serialized_header);
+                serialized_header.into()
+            })
+            .collect();
+
+        program_inputs.push((block.clone(), exec_witness));
+    }
+
+    Ok(program_inputs)
 }
 
 /// Returns whether the test at the given path should be skipped.

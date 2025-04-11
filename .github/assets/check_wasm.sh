@@ -54,6 +54,7 @@ exclude_crates=(
   reth-rpc-eth-types
   reth-rpc-layer
   reth-stages
+  reth-stateless
   reth-engine-local
   reth-ress-protocol
   reth-ress-provider
