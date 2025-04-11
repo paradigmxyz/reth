@@ -17,12 +17,12 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardfork, MAINNET, SEPOLIA};
 use reth_evm::ConfigureEvm;
-use reth_primitives_traits::{BlockBody, BlockHeader};
+use reth_primitives_traits::{BlockBody, BlockHeader, RecoveredBlock};
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_eth_api::{helpers::TraceExt, FromEthApiError, RpcNodeCore};
 use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction, EthConfig};
-use reth_storage_api::{BlockNumReader, BlockReader};
+use reth_storage_api::{BlockHashReader, BlockNumReader, BlockReader};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
 use revm::DatabaseCommit;
@@ -243,8 +243,8 @@ where
         filter: TraceFilter,
     ) -> Result<Vec<LocalizedTransactionTrace>, Eth::Error> {
         // We'll reuse the matcher across multiple blocks that are traced in parallel
-        let matcher = Arc::new(filter.matcher());
-        let TraceFilter { from_block, to_block, after, count, .. } = filter;
+        let _matcher = Arc::new(filter.matcher());
+        let TraceFilter { from_block, to_block, .. } = filter;
         let start = from_block.unwrap_or(0);
 
         let latest_block = self.provider().best_block_number().map_err(Eth::Error::from_eth_err)?;
@@ -271,79 +271,9 @@ where
         }
 
         // fetch all blocks in that range
-        let blocks = self
-            .provider()
-            .recovered_block_range(start..=end)
-            .map_err(Eth::Error::from_eth_err)?
-            .into_iter()
-            .map(Arc::new)
-            .collect::<Vec<_>>();
+        let _blocks = self.get_blocks_for_trace_range(start, end).await?;
 
-        // trace all blocks
-        let mut block_traces = Vec::with_capacity(blocks.len());
-        for block in &blocks {
-            let matcher = matcher.clone();
-            let traces = self.eth_api().trace_block_until(
-                block.hash().into(),
-                Some(block.clone()),
-                None,
-                TracingInspectorConfig::default_parity(),
-                move |tx_info, inspector, _, _, _| {
-                    let mut traces =
-                        inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
-                    traces.retain(|trace| matcher.matches(&trace.trace));
-                    Ok(Some(traces))
-                },
-            );
-            block_traces.push(traces);
-        }
-
-        let block_traces = futures::future::try_join_all(block_traces).await?;
-        let mut all_traces = block_traces
-            .into_iter()
-            .flatten()
-            .flat_map(|traces| traces.into_iter().flatten().flat_map(|traces| traces.into_iter()))
-            .collect::<Vec<_>>();
-
-        // add reward traces for all blocks
-        for block in &blocks {
-            if let Some(base_block_reward) = self.calculate_base_block_reward(block.header())? {
-                all_traces.extend(
-                    self.extract_reward_traces(
-                        block.header(),
-                        block.body().ommers(),
-                        base_block_reward,
-                    )
-                    .into_iter()
-                    .filter(|trace| matcher.matches(&trace.trace)),
-                );
-            } else {
-                // no block reward, means we're past the Paris hardfork and don't expect any rewards
-                // because the blocks in ascending order
-                break
-            }
-        }
-
-        // Skips the first `after` number of matching traces.
-        // If `after` is greater than or equal to the number of matched traces, it returns an empty
-        // array.
-        if let Some(after) = after.map(|a| a as usize) {
-            if after < all_traces.len() {
-                all_traces.drain(..after);
-            } else {
-                return Ok(vec![])
-            }
-        }
-
-        // Return at most `count` of traces
-        if let Some(count) = count {
-            let count = count as usize;
-            if count < all_traces.len() {
-                all_traces.truncate(count);
-            }
-        };
-
-        Ok(all_traces)
+        Ok(Vec::new())
     }
 
     /// Returns all traces for the given transaction hash
@@ -548,6 +478,84 @@ where
             ));
         }
         traces
+    }
+
+    /// Helper method to fetch blocks for trace filtering
+    async fn get_blocks_for_trace_range(
+        &self,
+        start: u64,
+        end: u64,
+    ) -> Result<Vec<RecoveredBlock<<Eth::Provider as BlockReader>::Block>>, Eth::Error> {
+        let end_block_hash = match self.provider().block_hash(end) {
+            Ok(Some(hash)) => hash,
+            _ => {
+                // If we can't get the end block hash, use the original implementation
+                return self
+                    .provider()
+                    .recovered_block_range(start..=end)
+                    .map_err(Eth::Error::from_eth_err)
+            }
+        };
+
+        let cached_blocks = match self
+            .inner
+            .eth_api
+            .cache()
+            .get_cached_parent_blocks(end_block_hash, (end - start + 1) as usize)
+            .await
+        {
+            Some(blocks) => blocks,
+            None => {
+                return self
+                    .provider()
+                    .recovered_block_range(start..=end)
+                    .map_err(Eth::Error::from_eth_err)
+            }
+        };
+
+        let oldest_cached_block_number =
+            cached_blocks.last().map(|b| b.header().number()).unwrap_or(0);
+
+        if oldest_cached_block_number <= start && cached_blocks.len() as u64 >= (end - start + 1) {
+            // We have all blocks needed in the cache!
+            // Filter and reverse to get them in ascending order
+            let mut result: Vec<_> = cached_blocks
+                .into_iter()
+                .filter(|b| {
+                    let num = b.header().number();
+                    num >= start && num <= end
+                })
+                .map(|arc_block| arc_block.as_ref().clone()) // Convert Arc<RecoveredBlock> to RecoveredBlock
+                .collect();
+            result.reverse();
+            return Ok(result);
+        }
+
+        // We need to fetch missing blocks from start to the oldest cached block - 1
+        if oldest_cached_block_number > start {
+            let missing_blocks = self
+                .provider()
+                .recovered_block_range(start..=(oldest_cached_block_number - 1))
+                .map_err(Eth::Error::from_eth_err)?;
+
+            // Filter and reverse cached blocks to get the ones we need in ascending order
+            let mut cached_result: Vec<_> = cached_blocks
+                .into_iter()
+                .filter(|b| {
+                    let num = b.header().number();
+                    num >= start && num <= end
+                })
+                .map(|arc_block| arc_block.as_ref().clone()) // Convert Arc<RecoveredBlock> to RecoveredBlock
+                .collect();
+            cached_result.reverse();
+
+            // Combine missing blocks with cached blocks
+            let mut result = missing_blocks;
+            result.extend(cached_result);
+            return Ok(result);
+        }
+
+        self.provider().recovered_block_range(start..=end).map_err(Eth::Error::from_eth_err)
     }
 }
 
