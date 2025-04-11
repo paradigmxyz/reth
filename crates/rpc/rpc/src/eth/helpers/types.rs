@@ -2,7 +2,7 @@
 
 use alloy_consensus::{Transaction as _, TxEnvelope};
 use alloy_network::{Ethereum, Network};
-use alloy_primitives::PrimitiveSignature as Signature;
+use alloy_primitives::Signature;
 use alloy_rpc_types::TransactionRequest;
 use alloy_rpc_types_eth::{Transaction, TransactionInfo};
 use reth_ethereum_primitives::TransactionSigned;

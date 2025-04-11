@@ -1965,7 +1965,7 @@ mod tests {
     use super::*;
     use crate::{test_utils::Testnet, NetworkConfigBuilder, NetworkManager};
     use alloy_consensus::{transaction::PooledTransaction, TxEip1559, TxLegacy};
-    use alloy_primitives::{hex, PrimitiveSignature as Signature, TxKind, U256};
+    use alloy_primitives::{hex, Signature, TxKind, U256};
     use alloy_rlp::Decodable;
     use constants::tx_fetcher::DEFAULT_MAX_COUNT_FALLBACK_PEERS;
     use futures::FutureExt;
@@ -1994,7 +1994,7 @@ mod tests {
     async fn new_tx_manager(
     ) -> (TransactionsManager<TestPool, EthNetworkPrimitives>, NetworkManager<EthNetworkPrimitives>)
     {
-        let secret_key = SecretKey::new(&mut rand::thread_rng());
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
         let client = NoopProvider::default();
 
         let config = NetworkConfigBuilder::new(secret_key)
@@ -2053,7 +2053,7 @@ mod tests {
 
         let listener0 = handle0.event_listener();
         handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
-        let secret_key = SecretKey::new(&mut rand::thread_rng());
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
 
         let client = NoopProvider::default();
         let pool = testing_pool();
@@ -2121,7 +2121,7 @@ mod tests {
 
         let listener0 = handle0.event_listener();
         handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
-        let secret_key = SecretKey::new(&mut rand::thread_rng());
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
 
         let client = NoopProvider::default();
         let pool = testing_pool();
@@ -2186,7 +2186,7 @@ mod tests {
     async fn test_handle_incoming_transactions_hashes() {
         reth_tracing::init_test_tracing();
 
-        let secret_key = SecretKey::new(&mut rand::thread_rng());
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
         let client = NoopProvider::default();
 
         let config = NetworkConfigBuilder::new(secret_key)
@@ -2293,7 +2293,7 @@ mod tests {
         let listener0 = handle0.event_listener();
 
         handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
-        let secret_key = SecretKey::new(&mut rand::thread_rng());
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
 
         let client = NoopProvider::default();
         let pool = testing_pool();
@@ -2369,7 +2369,7 @@ mod tests {
         let listener0 = handle0.event_listener();
 
         handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
-        let secret_key = SecretKey::new(&mut rand::thread_rng());
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
 
         let client = NoopProvider::default();
         let pool = testing_pool();

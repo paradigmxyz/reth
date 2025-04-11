@@ -4,7 +4,7 @@ use alloy_consensus::{
     TxEip4844WithSidecar, TxEip7702, TxLegacy, TxType,
 };
 use alloy_eips::eip4895::Withdrawals;
-use alloy_primitives::{PrimitiveSignature as Signature, TxHash, B256};
+use alloy_primitives::{Signature, TxHash, B256};
 use revm_primitives::Log;
 
 /// Trait for calculating a heuristic for the in-memory size of a struct.
