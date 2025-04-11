@@ -1,5 +1,5 @@
 use alloy_eips::eip4895::Withdrawals;
-use alloy_primitives::{hex, Signature, TxKind, B256};
+use alloy_primitives::{hex, private::getrandom::getrandom, PrimitiveSignature, TxKind};
 use arbitrary::Arbitrary;
 use eyre::{Context, Result};
 use proptest::{
@@ -128,7 +128,7 @@ compact_types!(
     ],
     // These types require an extra identifier which is usually stored elsewhere (eg. parent type).
     identifier: [
-        Signature,
+        PrimitiveSignature,
         Transaction,
         TxType,
         TxKind
@@ -147,12 +147,13 @@ pub fn read_vectors() -> Result<()> {
 /// Generates a vector of type `T` to a file.
 pub fn generate_vectors_with(gen: &[fn(&mut TestRunner) -> eyre::Result<()>]) -> Result<()> {
     // Prepare random seed for test (same method as used by proptest)
-    let seed = B256::random();
+    let mut seed = [0u8; 32];
+    getrandom(&mut seed)?;
     println!("Seed for compact test vectors: {:?}", hex::encode_prefixed(seed));
 
     // Start the runner with the seed
     let config = ProptestConfig::default();
-    let rng = TestRng::from_seed(config.rng_algorithm, &seed.0);
+    let rng = TestRng::from_seed(config.rng_algorithm, &seed);
     let mut runner = TestRunner::new_with_rng(config, rng);
 
     fs::create_dir_all(VECTORS_FOLDER)?;

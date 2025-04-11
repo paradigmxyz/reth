@@ -49,6 +49,7 @@ mod tests {
         state::{AccountInfo, Bytecode, EvmState},
         Database,
     };
+    use secp256k1::{Keypair, Secp256k1};
     use std::sync::mpsc;
 
     fn create_database_with_beacon_root_contract() -> CacheDB<EmptyDB> {
@@ -678,7 +679,8 @@ mod tests {
 
         let mut db = create_database_with_withdrawal_requests_contract();
 
-        let sender_key_pair = generators::generate_key(&mut generators::rng());
+        let secp = Secp256k1::new();
+        let sender_key_pair = Keypair::new(&secp, &mut generators::rng());
         let sender_address = public_key_to_address(sender_key_pair.public_key());
 
         db.insert_account_info(
@@ -746,8 +748,10 @@ mod tests {
         // Create a state provider with the withdrawal requests contract pre-deployed
         let mut db = create_database_with_withdrawal_requests_contract();
 
+        // Initialize Secp256k1 for key pair generation
+        let secp = Secp256k1::new();
         // Generate a new key pair for the sender
-        let sender_key_pair = generators::generate_key(&mut generators::rng());
+        let sender_key_pair = Keypair::new(&secp, &mut generators::rng());
         // Get the sender's address from the public key
         let sender_address = public_key_to_address(sender_key_pair.public_key());
 

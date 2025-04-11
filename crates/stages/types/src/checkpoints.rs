@@ -412,13 +412,13 @@ mod tests {
 
     #[test]
     fn merkle_checkpoint_roundtrip() {
-        let mut rng = rand::rng();
+        let mut rng = rand::thread_rng();
         let checkpoint = MerkleCheckpoint {
-            target_block: rng.random(),
-            last_account_key: rng.random(),
+            target_block: rng.gen(),
+            last_account_key: rng.gen(),
             walker_stack: vec![StoredSubNode {
                 key: B256::random_with(&mut rng).to_vec(),
-                nibble: Some(rng.random()),
+                nibble: Some(rng.gen()),
                 node: None,
             }],
             state: HashBuilderState::default(),

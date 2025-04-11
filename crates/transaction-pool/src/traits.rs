@@ -1472,7 +1472,7 @@ mod tests {
         TxEnvelope, TxLegacy,
     };
     use alloy_eips::eip4844::DATA_GAS_PER_BLOB;
-    use alloy_primitives::Signature;
+    use alloy_primitives::PrimitiveSignature as Signature;
 
     #[test]
     fn test_pool_size_invariants() {
