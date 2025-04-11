@@ -81,19 +81,6 @@ pub enum StatelessValidationError {
     },
 }
 
-#[derive(Debug)]
-/// TODO doc
-pub struct Input {
-    /// TODO doc
-    pub current_block: RecoveredBlock<Block<TransactionSigned>>,
-    /// TODO doc
-    pub execution_witness: ExecutionWitness,
-    /// TODO doc
-    /// Note: // We need to use this Arc, because `EthEvmConfig` and a lot of internal
-    /// reth components require it
-    pub chain_spec: Arc<ChainSpec>,
-}
-
 /// Performs stateless validation of a block using the provided witness data.
 ///
 /// This function attempts to fully validate a given `current_block` statelessly, ie without access

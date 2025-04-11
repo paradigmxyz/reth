@@ -19,7 +19,7 @@ use reth_provider::{
     StateWriter, StorageLocation,
 };
 use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord, State};
-use reth_stateless::validation::{stateless_validation, Input};
+use reth_stateless::validation::stateless_validation;
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 
 /// A handler for the blockchain test suite.
@@ -149,13 +149,9 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
             // do the post state checks
         }
         Ok(program_inputs) => {
-            for program_input in program_inputs {
-                stateless_validation(
-                    program_input.current_block,
-                    program_input.execution_witness,
-                    program_input.chain_spec,
-                )
-                .expect("stateless validation failed");
+            for (block, execution_witness) in program_inputs {
+                stateless_validation(block, execution_witness, chain_spec.clone())
+                    .expect("stateless validation failed");
             }
         }
         Err(err) => return Err(err),
@@ -199,8 +195,8 @@ fn execute_blocks<
     blocks_with_genesis: &[RecoveredBlock<Block<TransactionSigned>>],
     chain_spec: Arc<ChainSpec>,
     mut create_state_provider: F,
-) -> Result<Vec<Input>, Error> {
-    let executor_provider = EthExecutorProvider::ethereum(chain_spec.clone());
+) -> Result<Vec<(RecoveredBlock<Block<TransactionSigned>>, ExecutionWitness)>, Error> {
+    let executor_provider = EthExecutorProvider::ethereum(chain_spec);
 
     // First execute all of the blocks
     // TODO: We have two loops because if we use provider.latest() the merkle tree path
@@ -261,11 +257,7 @@ fn execute_blocks<
             })
             .collect();
 
-        program_inputs.push(Input {
-            current_block: block.clone(),
-            execution_witness: exec_witness,
-            chain_spec: chain_spec.clone(),
-        });
+        program_inputs.push((block.clone(), exec_witness));
     }
 
     Ok(program_inputs)
