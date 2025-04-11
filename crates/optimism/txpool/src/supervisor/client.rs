@@ -5,13 +5,14 @@ use crate::{
         parse_access_list_items_to_inbox_entries, ExecutingDescriptor, InteropTxValidatorError,
     },
     InvalidCrossTx,
+    metrics::OpTxPoolMetrics,
 };
 use alloy_eips::eip2930::AccessList;
 use alloy_primitives::{TxHash, B256};
 use alloy_rpc_client::ReqwestClient;
 use futures_util::future::BoxFuture;
 use op_alloy_consensus::interop::SafetyLevel;
-use std::{borrow::Cow, future::IntoFuture, time::Duration};
+use std::{borrow::Cow, future::IntoFuture, time::{Duration, Instant}};
 use tracing::trace;
 
 /// Supervisor hosted by op-labs
@@ -29,6 +30,8 @@ pub struct SupervisorClient {
     safety: SafetyLevel,
     /// The default request timeout
     timeout: Duration,
+    /// Metrics for tracking supervisor operations
+    metrics: OpTxPoolMetrics,
 }
 
 impl SupervisorClient {
@@ -38,7 +41,7 @@ impl SupervisorClient {
             .connect(supervisor_endpoint.into().as_str())
             .await
             .expect("building supervisor client");
-        Self { client, safety, timeout: DEFAULT_REQUEST_TIMOUT }
+        Self { client, safety, timeout: DEFAULT_REQUEST_TIMOUT, metrics: OpTxPoolMetrics::default(), }
     }
 
     /// Configures a custom timeout
@@ -53,17 +56,18 @@ impl SupervisorClient {
     }
 
     /// Executes a `supervisor_checkAccessList` with the configured safety level.
-    pub fn check_access_list<'a>(
-        &self,
+    pub fn check_access_list<'a, 'b>(
+        &'b self,
         inbox_entries: &'a [B256],
         executing_descriptor: ExecutingDescriptor,
-    ) -> CheckAccessListRequest<'a> {
+    ) -> CheckAccessListRequest<'a, 'b> {
         CheckAccessListRequest {
             client: self.client.clone(),
             inbox_entries: Cow::Borrowed(inbox_entries),
             executing_descriptor,
             timeout: self.timeout,
             safety: self.safety,
+            metrics: &self.metrics,
         }
     }
 
@@ -116,15 +120,16 @@ impl SupervisorClient {
 
 /// A Request future that issues a `supervisor_checkAccessList` request.
 #[derive(Debug, Clone)]
-pub struct CheckAccessListRequest<'a> {
+pub struct CheckAccessListRequest<'a, 'b> {
     client: ReqwestClient,
     inbox_entries: Cow<'a, [B256]>,
     executing_descriptor: ExecutingDescriptor,
     timeout: Duration,
     safety: SafetyLevel,
+    metrics: &'b OpTxPoolMetrics,
 }
 
-impl CheckAccessListRequest<'_> {
+impl<'a, 'b> CheckAccessListRequest<'a, 'b> {
     /// Configures the timeout to use for the request if any.
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
@@ -138,14 +143,16 @@ impl CheckAccessListRequest<'_> {
     }
 }
 
-impl<'a> IntoFuture for CheckAccessListRequest<'a> {
+impl<'a, 'b: 'a> IntoFuture for CheckAccessListRequest<'a, 'b> {
     type Output = Result<(), InteropTxValidatorError>;
     type IntoFuture = BoxFuture<'a, Self::Output>;
 
     fn into_future(self) -> Self::IntoFuture {
-        let Self { client, inbox_entries, executing_descriptor, timeout, safety } = self;
+        let Self { client, inbox_entries, executing_descriptor, timeout, safety, metrics } = self;
         Box::pin(async move {
-            tokio::time::timeout(
+            let start = Instant::now();
+
+            let result = tokio::time::timeout(
                 timeout,
                 client.request(
                     "supervisor_checkAccessList",
@@ -154,7 +161,11 @@ impl<'a> IntoFuture for CheckAccessListRequest<'a> {
             )
             .await
             .map_err(|_| InteropTxValidatorError::ValidationTimeout(timeout.as_secs()))?
-            .map_err(InteropTxValidatorError::client)
+            .map_err(InteropTxValidatorError::client);
+
+            metrics.record_supervisor_query(start.elapsed());
+
+            result
         })
     }
 }
