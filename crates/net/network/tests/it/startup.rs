@@ -73,7 +73,7 @@ async fn test_discovery_addr_in_use() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_discv5_and_discv4_same_socket_fails() {
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let config = NetworkConfigBuilder::eth(secret_key)
         .listener_port(DEFAULT_DISCOVERY_PORT)
         .discovery_v5(
@@ -97,7 +97,7 @@ async fn test_discv5_and_discv4_same_socket_fails() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_discv5_and_rlpx_same_socket_ok_without_discv4() {
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let config = NetworkConfigBuilder::eth(secret_key)
         .listener_port(DEFAULT_DISCOVERY_PORT)
         .disable_discv4_discovery()
