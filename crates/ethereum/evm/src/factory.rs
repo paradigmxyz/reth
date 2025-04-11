@@ -14,7 +14,7 @@ use revm::{
     Context, Inspector, MainBuilder, MainContext,
 };
 
-/// Factory producing [`CachedPrecompileEthEvmFactory`].
+/// Factory producing [`MaybeCachedPrecompileEthEvmFactory`].
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
 #[allow(dead_code)]
@@ -24,7 +24,7 @@ pub struct MaybeCachedPrecompileEthEvmFactory {
 }
 
 impl MaybeCachedPrecompileEthEvmFactory {
-    /// Creates a new `CachedPrecompileEthEvmFactory`.
+    /// Creates a new `MaybeCachedPrecompileEthEvmFactory`.
     pub fn new(cache_enabled: bool) -> Self {
         Self { cache_enabled, precompile_cache: Default::default() }
     }
