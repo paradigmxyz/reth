@@ -1,9 +1,7 @@
 //! Contains a precompile cache that is backed by a moka cache.
 
 use alloc::{boxed::Box, string::String, sync::Arc};
-use alloy_primitives::{map::DefaultHashBuilder, Address, Bytes};
-use dashmap::DashMap;
-use mini_moka::sync::CacheBuilder;
+use alloy_primitives::Address;
 use reth_revm::revm::{
     context::Cfg,
     context_interface::ContextTr,
@@ -12,8 +10,17 @@ use reth_revm::revm::{
     primitives::hardfork::SpecId,
 };
 
+#[cfg(feature = "std")]
+use alloy_primitives::{map::DefaultHashBuilder, Bytes};
+#[cfg(feature = "std")]
+use dashmap::DashMap;
+#[cfg(feature = "std")]
+use mini_moka::sync::CacheBuilder;
+
+#[cfg(feature = "std")]
 type Cache<K, V> = mini_moka::sync::Cache<K, V, alloy_primitives::map::DefaultHashBuilder>;
 
+#[cfg(feature = "std")]
 /// Type alias for the LRU cache used within the [`PrecompileCache`].
 type PrecompileLRUCache = Cache<(SpecId, Bytes, u64), Result<InterpreterResult, String>>;
 
@@ -27,11 +34,13 @@ type PrecompileLRUCache = Cache<(SpecId, Bytes, u64), Result<InterpreterResult, 
 #[derive(Debug, Default)]
 pub struct PrecompileCache {
     /// Caches for each precompile input / output.
+    #[cfg(feature = "std")]
     cache: DashMap<Address, PrecompileLRUCache>,
 }
 
 /// A custom precompile provider that wraps a precompile provider and potentially a cache for it.
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct MaybeCachedPrecompileProvider<P> {
     /// The precompile provider to wrap.
     precompile_provider: P,
@@ -44,6 +53,7 @@ pub struct MaybeCachedPrecompileProvider<P> {
 impl<P> MaybeCachedPrecompileProvider<P> {
     /// Given a [`PrecompileProvider`]  and cache for a specific precompile provider,
     /// create a cached wrapper that can be used inside Evm.
+    #[cfg(feature = "std")]
     pub fn new_with_cache(precompile_provider: P, cache: Arc<PrecompileCache>) -> Self {
         Self { precompile_provider, cache: Some(cache), spec: SpecId::default() }
     }
@@ -51,6 +61,13 @@ impl<P> MaybeCachedPrecompileProvider<P> {
     /// Creates a new `MaybeCachedPrecompileProvider` with cache disabled.
     pub fn new_without_cache(precompile_provider: P) -> Self {
         Self { precompile_provider, cache: None, spec: Default::default() }
+    }
+
+    #[cfg(not(feature = "std"))]
+    /// Creates a new `MaybeCachedPrecompileProvider` with cache disabled in no-std environments.
+    pub fn new_with_cache(precompile_provider: P, _cache: Arc<PrecompileCache>) -> Self {
+        // In no-std environments, always return no-cache version
+        Self::new_without_cache(precompile_provider)
     }
 }
 
@@ -65,6 +82,7 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
         true
     }
 
+    #[cfg(feature = "std")]
     fn run(
         &mut self,
         context: &mut CTX,
@@ -105,6 +123,19 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
         }
     }
 
+    #[cfg(not(feature = "std"))]
+    fn run(
+        &mut self,
+        context: &mut CTX,
+        address: &Address,
+        inputs: &InputsImpl,
+        is_static: bool,
+        gas_limit: u64,
+    ) -> Result<Option<Self::Output>, String> {
+        // In no-std environments, always directly run the precompile without caching
+        self.precompile_provider.run(context, address, inputs, is_static, gas_limit)
+    }
+
     fn warm_addresses(&self) -> Box<impl Iterator<Item = Address>> {
         self.precompile_provider.warm_addresses()
     }
@@ -114,9 +145,11 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
+    use alloy_primitives::map::DefaultHashBuilder;
+    use mini_moka::sync::CacheBuilder;
     use reth_revm::revm::interpreter::{Gas, InstructionResult};
 
     fn precompile_address(num: u8) -> Address {
