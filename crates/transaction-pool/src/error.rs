@@ -201,12 +201,12 @@ pub enum InvalidPoolTransactionError {
     ExceedsGasLimit(u64, u64),
     /// Thrown when a new transaction is added to the pool, but then immediately discarded to
     /// respect the tx fee exceeds the configured cap
-    #[error("tx fee ({fee_eth:.2} ether) exceeds the configured cap ({cap_eth:.2} ether)")]
+    #[error("tx fee ({tx_fee_eth:.2} ether) exceeds the configured cap ({tx_fee_cap_eth:.2} ether)")]
     ExceedsFeeCap {
-        /// new tx fee
-        fee_eth: f64,
-        /// configured fee cap
-        cap_eth: f64,
+        /// new tx fee submitted to the pull (e.g. 0.11534 ETH)
+        tx_fee_eth: f64,
+        /// configured tx fee cap (e.g. 1.0 ETH)
+        tx_fee_cap_eth: f64,
     },
     /// Thrown when a new transaction is added to the pool, but then immediately discarded to
     /// respect the `max_init_code_size`.
@@ -296,7 +296,7 @@ impl InvalidPoolTransactionError {
                 }
             }
             Self::ExceedsGasLimit(_, _) => true,
-            Self::ExceedsFeeCap { fee_eth: _, cap_eth: _ } => true,
+            Self::ExceedsFeeCap { tx_fee_eth: _, tx_fee_cap_eth: _ } => true,
             Self::ExceedsMaxInitCodeSize(_, _) => true,
             Self::OversizedData(_, _) => true,
             Self::Underpriced => {

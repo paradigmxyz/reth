@@ -680,12 +680,12 @@ pub enum RpcPoolError {
     ExceedsGasLimit,
     /// Thrown when a new transaction is added to the pool, but then immediately discarded to
     /// respect the tx fee exceeds the configured cap
-    #[error("tx fee ({fee_eth:.2} ether) exceeds the configured cap ({cap_eth:.2} ether)")]
+    #[error("tx fee ({tx_fee_eth:.2} ether) exceeds the configured cap ({tx_fee_cap_eth:.2} ether)")]
     ExceedsFeeCap {
-        /// new tx fee
-        fee_eth: f64,
-        /// configured fee cap
-        cap_eth: f64,
+        /// new tx fee submitted to the pull (e.g. 0.11534 ETH)
+        tx_fee_eth: f64,
+        /// configured tx fee cap (e.g. 1.0 ETH)
+        tx_fee_cap_eth: f64,
     },
     /// When a negative value is encountered
     #[error("negative value")]
@@ -752,8 +752,8 @@ impl From<InvalidPoolTransactionError> for RpcPoolError {
         match err {
             InvalidPoolTransactionError::Consensus(err) => Self::Invalid(err.into()),
             InvalidPoolTransactionError::ExceedsGasLimit(_, _) => Self::ExceedsGasLimit,
-            InvalidPoolTransactionError::ExceedsFeeCap{ fee_eth, cap_eth } => {
-                Self::ExceedsFeeCap { fee_eth, cap_eth }
+            InvalidPoolTransactionError::ExceedsFeeCap{ tx_fee_eth, tx_fee_cap_eth } => {
+                Self::ExceedsFeeCap { tx_fee_eth, tx_fee_cap_eth }
             },
             InvalidPoolTransactionError::ExceedsMaxInitCodeSize(_, _) => {
                 Self::ExceedsMaxInitCodeSize

@@ -38,7 +38,6 @@ use std::{
     time::Instant,
 };
 use tokio::sync::Mutex;
-use tracing::info;
 
 /// Validator for Ethereum transactions.
 /// It is a [`TransactionValidator`] implementation that validates ethereum transaction.
@@ -169,7 +168,7 @@ pub(crate) struct EthTransactionValidatorInner<Client, T> {
     eip7702: bool,
     /// The current max gas limit
     block_gas_limit: AtomicU64,
-    /// The current tx fee cap limit in wei
+    /// The current tx fee cap limit in wei locally submitted into the pool.
     tx_fee_cap: Option<u128>,
     /// Minimum priority fee to enforce for acceptance into the pool.
     minimum_priority_fee: Option<u128>,
@@ -303,20 +302,21 @@ where
         if self.local_transactions_config.is_local(origin, transaction.sender_ref()) {
             match self.tx_fee_cap {
                 Some(0) | None => {} // Skip if cap is 0 or None
-                Some(cap) => {
+                Some(tx_fee_cap_wei) => {
                     let max_fee_per_gas = if transaction.is_dynamic_fee() {
                         transaction.max_fee_per_gas()
                     } else {
                         transaction.gas_price().unwrap_or(0)
                     };
 
-                    let fee = max_fee_per_gas * (transaction.gas_limit() as u128);
-                    if fee > cap {
-                        let fee_eth = fee as f64 / 1e18;
-                        let cap_eth = cap as f64 / 1e18;
+                    let tx_fee_wei = max_fee_per_gas * (transaction.gas_limit() as u128);
+                    if tx_fee_wei > tx_fee_cap_wei {
                         return TransactionValidationOutcome::Invalid(
                             transaction,
-                            InvalidPoolTransactionError::ExceedsFeeCap { fee_eth, cap_eth },
+                            InvalidPoolTransactionError::ExceedsFeeCap {
+                                tx_fee_eth: tx_fee_wei as f64 / 1e18,
+                                tx_fee_cap_eth: tx_fee_cap_wei as f64 / 1e18
+                            },
                         );
                     }
                 }
@@ -616,7 +616,7 @@ pub struct EthTransactionValidatorBuilder<Client> {
     eip7702: bool,
     /// The current max gas limit
     block_gas_limit: AtomicU64,
-    /// The current tx fee cap in wei
+    /// The current tx fee cap limit in wei locally submitted into the pool.
     tx_fee_cap: Option<u128>,
     /// Minimum priority fee to enforce for acceptance into the pool.
     minimum_priority_fee: Option<u128>,
@@ -1094,8 +1094,8 @@ mod tests {
         if let TransactionValidationOutcome::Invalid(_, err) = outcome {
             assert!(matches!(
             err,
-            InvalidPoolTransactionError::ExceedsFeeCap { fee_eth, cap_eth }
-            if (fee_eth > cap_eth)
+            InvalidPoolTransactionError::ExceedsFeeCap { tx_fee_eth, tx_fee_cap_eth }
+            if (tx_fee_eth > tx_fee_cap_eth)
         ));
         }
 
