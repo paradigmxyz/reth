@@ -1,5 +1,5 @@
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{B256};
+use alloy_primitives::B256;
 use reth_fs_util::FsPathError;
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs},

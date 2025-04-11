@@ -682,7 +682,7 @@ pub enum RpcPoolError {
     /// respect the tx fee exceeds the configured cap
     #[error("tx fee ({max_tx_fee_eth:.2} ether) exceeds the configured cap ({tx_fee_cap_eth:.2} ether)")]
     ExceedsFeeCap {
-        /// new tx fee submitted to the pull (e.g. 0.11534 ETH)
+        /// max fee of new tx submitted to the pull (e.g. 0.11534 ETH)
         max_tx_fee_eth: f64,
         /// configured tx fee cap (e.g. 1.0 ETH)
         tx_fee_cap_eth: f64,
