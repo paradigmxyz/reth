@@ -29,6 +29,9 @@ pub use blocks::*;
 pub mod broadcast;
 pub use broadcast::*;
 
+pub mod eth_snap;
+pub use eth_snap::*;
+
 pub mod transactions;
 pub use transactions::*;
 
