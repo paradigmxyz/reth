@@ -263,13 +263,12 @@ where
             )?;
 
             let filename = format!("{}_{}.bundle_state.diff", block.number(), block.hash());
-            // Convert bundle state to intermediate struct which has BTreeMap instead of HashMap to
+            // Convert bundle state to sorted struct which has BTreeMap instead of HashMap to
             // have deterministric ordering
-            let bundle_state_intermediate = BundleStateSorted::from_bundle_state(&bundle_state);
-            let output_state_intermediate = BundleStateSorted::from_bundle_state(&output.state);
+            let bundle_state_sorted = BundleStateSorted::from_bundle_state(&bundle_state);
+            let output_state_sorted = BundleStateSorted::from_bundle_state(&output.state);
 
-            let diff_path =
-                self.save_diff(filename, &bundle_state_intermediate, &output_state_intermediate)?;
+            let diff_path = self.save_diff(filename, &bundle_state_sorted, &output_state_sorted)?;
 
             warn!(
                 target: "engine::invalid_block_hooks::witness",
