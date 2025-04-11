@@ -6,6 +6,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
@@ -22,6 +23,7 @@ use alloy_chains::Chain;
 use alloy_consensus::{proofs::storage_root_unhashed, Header};
 use alloy_eips::eip7840::BlobParams;
 use alloy_genesis::Genesis;
+use alloy_hardforks::Hardfork;
 use alloy_primitives::{B256, U256};
 pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
@@ -30,10 +32,10 @@ pub use dev::OP_DEV;
 pub use op::OP_MAINNET;
 pub use op_sepolia::OP_SEPOLIA;
 use reth_chainspec::{
-    BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract, EthChainSpec,
-    EthereumHardforks, ForkFilter, ForkId, Hardforks, Head,
+    BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract,
+    DisplayHardforks, EthChainSpec, EthereumHardforks, ForkFilter, ForkId, Hardforks, Head,
 };
-use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
+use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition};
 use reth_network_peers::NodeRecord;
 use reth_optimism_forks::{OpHardfork, OpHardforks, OP_MAINNET_HARDFORKS};
 use reth_optimism_primitives::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
@@ -227,7 +229,12 @@ impl EthChainSpec for OpChainSpec {
     }
 
     fn display_hardforks(&self) -> Box<dyn core::fmt::Display> {
-        Box::new(ChainSpec::display_hardforks(self))
+        // filter only op hardforks
+        let op_forks = self.inner.hardforks.forks_iter().filter(|(fork, _)| {
+            !EthereumHardfork::VARIANTS.iter().any(|h| h.name() == (*fork).name())
+        });
+
+        Box::new(DisplayHardforks::new(op_forks))
     }
 
     fn genesis_header(&self) -> &Self::Header {
@@ -553,7 +560,12 @@ mod tests {
                 ),
                 (
                     Head { number: 0, timestamp: 1732633200, ..Default::default() },
-                    ForkId { hash: ForkHash([0x4a, 0x1c, 0x79, 0x2e]), next: 0 },
+                    ForkId { hash: ForkHash([0x4a, 0x1c, 0x79, 0x2e]), next: 1744905600 },
+                ),
+                // isthmus
+                (
+                    Head { number: 0, timestamp: 1744905600, ..Default::default() },
+                    ForkId { hash: ForkHash([0x6c, 0x62, 0x5e, 0xe1]), next: 0 },
                 ),
             ],
         );
@@ -572,10 +584,47 @@ mod tests {
                     Head { number: 0, ..Default::default() },
                     ForkId { hash: ForkHash([0xca, 0xf5, 0x17, 0xed]), next: 3950000 },
                 ),
-                // TODO: complete these, see https://github.com/paradigmxyz/reth/issues/8012
+                // London
+                (
+                    Head { number: 105235063, ..Default::default() },
+                    ForkId { hash: ForkHash([0xe3, 0x39, 0x8d, 0x7c]), next: 1704992401 },
+                ),
+                // Bedrock
+                (
+                    Head { number: 105235063, ..Default::default() },
+                    ForkId { hash: ForkHash([0xe3, 0x39, 0x8d, 0x7c]), next: 1704992401 },
+                ),
+                // Shanghai
+                (
+                    Head { number: 105235063, timestamp: 1704992401, ..Default::default() },
+                    ForkId { hash: ForkHash([0xbd, 0xd4, 0xfd, 0xb2]), next: 1710374401 },
+                ),
+                // OP activation timestamps
+                // https://specs.optimism.io/protocol/superchain-upgrades.html#activation-timestamps
+                // Canyon
+                (
+                    Head { number: 105235063, timestamp: 1704992401, ..Default::default() },
+                    ForkId { hash: ForkHash([0xbd, 0xd4, 0xfd, 0xb2]), next: 1710374401 },
+                ),
+                // Ecotone
                 (
                     Head { number: 105235063, timestamp: 1710374401, ..Default::default() },
                     ForkId { hash: ForkHash([0x19, 0xda, 0x4c, 0x52]), next: 1720627201 },
+                ),
+                // Fjord
+                (
+                    Head { number: 105235063, timestamp: 1720627201, ..Default::default() },
+                    ForkId { hash: ForkHash([0x49, 0xfb, 0xfe, 0x1e]), next: 1726070401 },
+                ),
+                // Granite
+                (
+                    Head { number: 105235063, timestamp: 1726070401, ..Default::default() },
+                    ForkId { hash: ForkHash([0x44, 0x70, 0x4c, 0xde]), next: 1736445601 },
+                ),
+                // Holocene
+                (
+                    Head { number: 105235063, timestamp: 1736445601, ..Default::default() },
+                    ForkId { hash: ForkHash([0x2b, 0xd9, 0x3d, 0xc8]), next: 0 },
                 ),
             ],
         );
@@ -624,7 +673,12 @@ mod tests {
                 ),
                 (
                     Head { number: 0, timestamp: 1732633200, ..Default::default() },
-                    ForkId { hash: ForkHash([0x8b, 0x5e, 0x76, 0x29]), next: 0 },
+                    ForkId { hash: ForkHash([0x8b, 0x5e, 0x76, 0x29]), next: 1744905600 },
+                ),
+                // isthmus
+                (
+                    Head { number: 0, timestamp: 1744905600, ..Default::default() },
+                    ForkId { hash: ForkHash([0x06, 0x0a, 0x4d, 0x1d]), next: 0 },
                 ),
             ],
         );
@@ -1054,5 +1108,13 @@ mod tests {
         let genesis: Genesis = serde_json::from_str(geth_genesis).unwrap();
         let chainspec = OpChainSpec::from_genesis(genesis);
         assert!(chainspec.is_holocene_active_at_timestamp(1732633200));
+    }
+
+    #[test]
+    fn display_hardorks() {
+        let content = BASE_MAINNET.display_hardforks().to_string();
+        for eth_hf in EthereumHardfork::VARIANTS {
+            assert!(!content.contains(eth_hf.name()));
+        }
     }
 }

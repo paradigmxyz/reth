@@ -21,6 +21,8 @@ use crate::args::{
     GasPriceOracleArgs, RpcStateCacheArgs,
 };
 
+use super::types::MaxOr;
+
 /// Default max number of subscriptions per connection.
 pub(crate) const RPC_DEFAULT_MAX_SUBS_PER_CONN: u32 = 1024;
 
@@ -72,7 +74,7 @@ pub struct RpcServerArgs {
     pub ws_port: u16,
 
     /// Origins from which to accept `WebSocket` requests
-    #[arg(id = "ws.origins", long = "ws.origins")]
+    #[arg(id = "ws.origins", long = "ws.origins", alias = "ws.corsdomain")]
     pub ws_allowed_origins: Option<String>,
 
     /// Rpc Modules to be configured for the WS server
@@ -162,7 +164,7 @@ pub struct RpcServerArgs {
         long = "rpc.gascap",
         alias = "rpc-gascap",
         value_name = "GAS_CAP",
-        value_parser = RangedU64ValueParser::<u64>::new().range(1..),
+        value_parser = MaxOr::new(RangedU64ValueParser::<u64>::new().range(1..)),
         default_value_t = constants::gas_oracle::RPC_DEFAULT_GAS_CAP
     )]
     pub rpc_gas_cap: u64,
@@ -228,7 +230,7 @@ impl RpcServerArgs {
         self
     }
 
-    /// Change rpc port numbers based on the instance number.
+    /// Change rpc port numbers based on the instance number, if provided.
     /// * The `auth_port` is scaled by a factor of `instance * 100`
     /// * The `http_port` is scaled by a factor of `-instance`
     /// * The `ws_port` is scaled by a factor of `instance * 2`
@@ -242,17 +244,16 @@ impl RpcServerArgs {
     /// * `self.auth_port / 100 + (instance - 1)` would overflow `u16`
     ///
     /// In release mode, this will silently wrap around.
-    pub fn adjust_instance_ports(&mut self, instance: u16) {
-        debug_assert_ne!(instance, 0, "instance must be non-zero");
-        // auth port is scaled by a factor of instance * 100
-        self.auth_port += instance * 100 - 100;
-        // http port is scaled by a factor of -instance
-        self.http_port -= instance - 1;
-        // ws port is scaled by a factor of instance * 2
-        self.ws_port += instance * 2 - 2;
-
-        // if multiple instances are being run, append the instance number to the ipc path
-        if instance > 1 {
+    pub fn adjust_instance_ports(&mut self, instance: Option<u16>) {
+        if let Some(instance) = instance {
+            debug_assert_ne!(instance, 0, "instance must be non-zero");
+            // auth port is scaled by a factor of instance * 100
+            self.auth_port += instance * 100 - 100;
+            // http port is scaled by a factor of -instance
+            self.http_port -= instance - 1;
+            // ws port is scaled by a factor of instance * 2
+            self.ws_port += instance * 2 - 2;
+            // append instance file to ipc path
             self.ipcpath = format!("{}-{}", self.ipcpath, instance);
         }
     }
@@ -281,11 +282,8 @@ impl RpcServerArgs {
     /// Append a random string to the ipc path, to prevent possible collisions when multiple nodes
     /// are being run on the same machine.
     pub fn with_ipc_random_path(mut self) -> Self {
-        let random_string: String = rand::thread_rng()
-            .sample_iter(rand::distributions::Alphanumeric)
-            .take(8)
-            .map(char::from)
-            .collect();
+        let random_string: String =
+            rand::rng().sample_iter(rand::distr::Alphanumeric).take(8).map(char::from).collect();
         self.ipcpath = format!("{}-{}", self.ipcpath, random_string);
         self
     }

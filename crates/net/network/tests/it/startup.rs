@@ -28,7 +28,7 @@ fn is_addr_in_use_kind(err: &NetworkError, kind: ServiceKind) -> bool {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_is_default_syncing() {
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let config = NetworkConfigBuilder::eth(secret_key)
         .disable_discovery()
         .listener_port(0)
@@ -39,7 +39,7 @@ async fn test_is_default_syncing() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_listener_addr_in_use() {
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let config = NetworkConfigBuilder::eth(secret_key)
         .disable_discovery()
         .listener_port(0)
@@ -58,7 +58,7 @@ async fn test_listener_addr_in_use() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_discovery_addr_in_use() {
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let disc_config = Discv4Config::default();
     let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0));
     let any_port_listener = TcpListener::bind(addr).await.unwrap();
@@ -119,7 +119,7 @@ async fn test_discv5_and_rlpx_same_socket_ok_without_discv4() {
 // <https://github.com/paradigmxyz/reth/issues/8851>
 #[tokio::test(flavor = "multi_thread")]
 async fn test_tcp_port_node_record_no_discovery() {
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let config = NetworkConfigBuilder::eth(secret_key)
         .listener_port(0)
         .disable_discovery()
@@ -137,7 +137,7 @@ async fn test_tcp_port_node_record_no_discovery() {
 // <https://github.com/paradigmxyz/reth/issues/8851>
 #[tokio::test(flavor = "multi_thread")]
 async fn test_tcp_port_node_record_discovery() {
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let config = NetworkConfigBuilder::eth(secret_key)
         .listener_port(0)
         .discovery_port(0)
@@ -156,7 +156,7 @@ async fn test_tcp_port_node_record_discovery() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_node_record_address_with_nat() {
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let config = NetworkConfigBuilder::eth(secret_key)
         .add_nat(Some(NatResolver::ExternalIp("10.1.1.1".parse().unwrap())))
         .disable_discv4_discovery()
@@ -172,7 +172,7 @@ async fn test_node_record_address_with_nat() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_node_record_address_with_nat_disable_discovery() {
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let config = NetworkConfigBuilder::eth(secret_key)
         .add_nat(Some(NatResolver::ExternalIp("10.1.1.1".parse().unwrap())))
         .disable_discovery()

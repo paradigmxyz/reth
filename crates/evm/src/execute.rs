@@ -3,9 +3,11 @@
 use crate::{ConfigureEvm, Database, OnStateHook};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
+use alloy_eips::eip2718::WithEncoded;
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory};
-use alloy_evm::{Evm, EvmEnv, EvmFactory};
+use alloy_evm::{block::ExecutableTx, Evm, EvmEnv, EvmFactory};
 use alloy_primitives::B256;
+use core::fmt::Debug;
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
 };
@@ -128,7 +130,7 @@ pub trait Executor<DB: Database>: Sized {
 }
 
 /// A type that can create a new executor for block execution.
-pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
+pub trait BlockExecutorProvider: Clone + Debug + Send + Sync + Unpin + 'static {
     /// Receipt type.
     type Primitives: NodePrimitives;
 
@@ -239,7 +241,7 @@ pub trait BlockBuilder {
     /// transaction in internal state.
     fn execute_transaction_with_result_closure(
         &mut self,
-        tx: Recovered<TxTy<Self::Primitives>>,
+        tx: impl ExecutorTx<Self::Executor>,
         f: impl FnOnce(&ExecutionResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::HaltReason>),
     ) -> Result<u64, BlockExecutionError>;
 
@@ -261,9 +263,17 @@ pub trait BlockBuilder {
     /// Provides mutable access to the inner [`BlockExecutor`].
     fn executor_mut(&mut self) -> &mut Self::Executor;
 
-    /// Helper to access inner [`BlockExecutor::Evm`].
+    /// Provides access to the inner [`BlockExecutor`].
+    fn executor(&self) -> &Self::Executor;
+
+    /// Helper to access inner [`BlockExecutor::Evm`] mutably.
     fn evm_mut(&mut self) -> &mut <Self::Executor as BlockExecutor>::Evm {
         self.executor_mut().evm_mut()
+    }
+
+    /// Helper to access inner [`BlockExecutor::Evm`].
+    fn evm(&self) -> &<Self::Executor as BlockExecutor>::Evm {
+        self.executor().evm()
     }
 
     /// Consumes the type and returns the underlying [`BlockExecutor`].
@@ -279,6 +289,37 @@ where
     pub(crate) ctx: F::ExecutionCtx<'a>,
     pub(crate) parent: &'a SealedHeader<HeaderTy<N>>,
     pub(crate) assembler: Builder,
+}
+
+/// Conversions for executable transactions.
+pub trait ExecutorTx<Executor: BlockExecutor> {
+    /// Converts the transaction into [`ExecutableTx`].
+    fn as_executable(&self) -> impl ExecutableTx<Executor>;
+
+    /// Converts the transaction into [`Recovered`].
+    fn into_recovered(self) -> Recovered<Executor::Transaction>;
+}
+
+impl<Executor: BlockExecutor> ExecutorTx<Executor>
+    for WithEncoded<Recovered<Executor::Transaction>>
+{
+    fn as_executable(&self) -> impl ExecutableTx<Executor> {
+        self
+    }
+
+    fn into_recovered(self) -> Recovered<Executor::Transaction> {
+        self.1
+    }
+}
+
+impl<Executor: BlockExecutor> ExecutorTx<Executor> for Recovered<Executor::Transaction> {
+    fn as_executable(&self) -> impl ExecutableTx<Executor> {
+        self
+    }
+
+    fn into_recovered(self) -> Self {
+        self
+    }
 }
 
 impl<'a, F, DB, Executor, Builder, N> BlockBuilder
@@ -307,12 +348,12 @@ where
 
     fn execute_transaction_with_result_closure(
         &mut self,
-        tx: Recovered<TxTy<Self::Primitives>>,
+        tx: impl ExecutorTx<Self::Executor>,
         f: impl FnOnce(&ExecutionResult<<F::EvmFactory as EvmFactory>::HaltReason>),
     ) -> Result<u64, BlockExecutionError> {
         let gas_used =
-            self.executor.execute_transaction_with_result_closure(tx.as_recovered_ref(), f)?;
-        self.transactions.push(tx);
+            self.executor.execute_transaction_with_result_closure(tx.as_executable(), f)?;
+        self.transactions.push(tx.into_recovered());
         Ok(gas_used)
     }
 
@@ -355,6 +396,10 @@ where
         &mut self.executor
     }
 
+    fn executor(&self) -> &Self::Executor {
+        &self.executor
+    }
+
     fn into_executor(self) -> Self::Executor {
         self.executor
     }
@@ -370,7 +415,7 @@ where
 }
 
 /// A generic block executor provider that can create executors using a strategy factory.
-#[expect(missing_debug_implementations)]
+#[derive(Debug)]
 pub struct BasicBlockExecutorProvider<F> {
     strategy_factory: F,
 }
@@ -400,7 +445,7 @@ where
 
 /// A generic block executor that uses a [`BlockExecutor`] to
 /// execute blocks.
-#[allow(missing_debug_implementations, dead_code)]
+#[expect(missing_debug_implementations)]
 pub struct BasicBlockExecutor<F, DB> {
     /// Block execution strategy.
     pub(crate) strategy_factory: F,
@@ -490,7 +535,7 @@ mod tests {
         state::AccountInfo,
     };
 
-    #[derive(Clone, Default)]
+    #[derive(Clone, Debug, Default)]
     struct TestExecutorProvider;
 
     impl BlockExecutorProvider for TestExecutorProvider {

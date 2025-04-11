@@ -638,7 +638,7 @@ where
     where
         C: ChainSpecProvider<ChainSpec: Hardforks>,
     {
-        let secret_key = SecretKey::new(&mut rand::thread_rng());
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
         let config = Self::network_config_builder(secret_key).build(client.clone());
         Self { config, client, secret_key }
     }
@@ -658,7 +658,7 @@ where
     where
         C: ChainSpecProvider<ChainSpec: Hardforks>,
     {
-        let secret_key = SecretKey::new(&mut rand::thread_rng());
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
 
         let builder = Self::network_config_builder(secret_key);
         let hello_message =

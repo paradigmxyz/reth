@@ -6,6 +6,7 @@ use crate::{
     error::{
         Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
     },
+    metrics::TxPoolValidationMetrics,
     traits::TransactionOrigin,
     validate::{ValidTransaction, ValidationTask, MAX_INIT_CODE_BYTE_SIZE},
     EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig,
@@ -34,6 +35,7 @@ use std::{
         atomic::{AtomicBool, AtomicU64},
         Arc,
     },
+    time::Instant,
 };
 use tokio::sync::Mutex;
 
@@ -74,6 +76,21 @@ where
         transaction: Tx,
     ) -> TransactionValidationOutcome<Tx> {
         self.inner.validate_one(origin, transaction)
+    }
+
+    /// Validates a single transaction with the provided state provider.
+    ///
+    /// This allows reusing the same provider across multiple transaction validations,
+    /// which can improve performance when validating many transactions.
+    ///
+    /// If `state` is `None`, a new state provider will be created.
+    pub fn validate_one_with_state(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Tx,
+        state: &mut Option<Box<dyn StateProvider>>,
+    ) -> TransactionValidationOutcome<Tx> {
+        self.inner.validate_one_with_provider(origin, transaction, state)
     }
 
     /// Validates all given transactions.
@@ -161,6 +178,8 @@ pub(crate) struct EthTransactionValidatorInner<Client, T> {
     max_tx_input_bytes: usize,
     /// Marker for the transaction type
     _marker: PhantomData<T>,
+    /// Metrics for tsx pool validation
+    validation_metrics: TxPoolValidationMetrics,
 }
 
 // === impl EthTransactionValidatorInner ===
@@ -463,6 +482,7 @@ where
                     }
                 }
                 EthBlobTransactionSidecar::Present(blob) => {
+                    let now = Instant::now();
                     // validate the blob
                     if let Err(err) = transaction.validate_blob(&blob, self.kzg_settings.get()) {
                         return TransactionValidationOutcome::Invalid(
@@ -472,6 +492,8 @@ where
                             ),
                         )
                     }
+                    // Record the duration of successful blob validation as histogram
+                    self.validation_metrics.blob_validation_duration.record(now.elapsed());
                     // store the extracted blob
                     maybe_blob_sidecar = Some(blob);
                 }
@@ -797,6 +819,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             local_transactions_config,
             max_tx_input_bytes,
             _marker: Default::default(),
+            validation_metrics: TxPoolValidationMetrics::default(),
         };
 
         EthTransactionValidator { inner: Arc::new(inner) }

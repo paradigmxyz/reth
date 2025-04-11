@@ -52,8 +52,6 @@ use reth_network_p2p::error::{RequestError, RequestResult};
 use reth_network_peers::PeerId;
 use reth_primitives_traits::SignedTransaction;
 use schnellru::ByLength;
-#[cfg(debug_assertions)]
-use smallvec::{smallvec, SmallVec};
 use std::{
     collections::HashMap,
     pin::Pin,
@@ -1180,7 +1178,7 @@ impl<T: SignedTransaction> VerifyPooledTransactionsResponse for UnverifiedPooled
         let Self { mut txns } = self;
 
         #[cfg(debug_assertions)]
-        let mut tx_hashes_not_requested: SmallVec<[TxHash; 16]> = smallvec!();
+        let mut tx_hashes_not_requested: smallvec::SmallVec<[TxHash; 16]> = smallvec::smallvec!();
         #[cfg(not(debug_assertions))]
         let mut tx_hashes_not_requested_count = 0;
 

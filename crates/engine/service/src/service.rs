@@ -17,10 +17,10 @@ pub use reth_engine_tree::{
 use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_network_p2p::BlockClient;
-use reth_node_types::{BlockTy, NodeTypes, NodeTypesWithEngine};
+use reth_node_types::{BlockTy, NodeTypes};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::{
-    providers::{BlockchainProvider, EngineNodeTypes},
+    providers::{BlockchainProvider, ProviderNodeTypes},
     ProviderFactory,
 };
 use reth_prune::PrunerWithFactory;
@@ -40,10 +40,10 @@ pub type EngineMessageStream<T> = Pin<Box<dyn Stream<Item = BeaconEngineMessage<
 type EngineServiceType<N, Client> = ChainOrchestrator<
     EngineHandler<
         EngineApiRequestHandler<
-            EngineApiRequest<<N as NodeTypesWithEngine>::Payload, <N as NodeTypes>::Primitives>,
+            EngineApiRequest<<N as NodeTypes>::Payload, <N as NodeTypes>::Primitives>,
             <N as NodeTypes>::Primitives,
         >,
-        EngineMessageStream<<N as NodeTypesWithEngine>::Payload>,
+        EngineMessageStream<<N as NodeTypes>::Payload>,
         BasicBlockDownloader<Client, BlockTy<N>>,
     >,
     PipelineSync<N>,
@@ -57,7 +57,7 @@ type EngineServiceType<N, Client> = ChainOrchestrator<
 #[doc(hidden)]
 pub struct EngineService<N, Client, E>
 where
-    N: EngineNodeTypes,
+    N: ProviderNodeTypes,
     Client: BlockClient<Block = BlockTy<N>> + 'static,
     E: BlockExecutorProvider + 'static,
 {
@@ -67,7 +67,7 @@ where
 
 impl<N, Client, E> EngineService<N, Client, E>
 where
-    N: EngineNodeTypes,
+    N: ProviderNodeTypes,
     Client: BlockClient<Block = BlockTy<N>> + 'static,
     E: BlockExecutorProvider<Primitives = N::Primitives> + 'static,
 {
@@ -139,7 +139,7 @@ where
 
 impl<N, Client, E> Stream for EngineService<N, Client, E>
 where
-    N: EngineNodeTypes,
+    N: ProviderNodeTypes,
     Client: BlockClient<Block = BlockTy<N>> + 'static,
     E: BlockExecutorProvider + 'static,
 {

@@ -322,7 +322,7 @@ where
     }
 
     /// Metrics version of `fork_choice_updated_v1`
-    async fn fork_choice_updated_v1_metered(
+    pub async fn fork_choice_updated_v1_metered(
         &self,
         state: ForkchoiceState,
         payload_attrs: Option<EngineT::PayloadAttributes>,

@@ -1,5 +1,6 @@
 //! A signed Optimism transaction.
 
+use crate::transaction::OpTransaction;
 use alloc::vec::Vec;
 use alloy_consensus::{
     transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx},
@@ -11,10 +12,8 @@ use alloy_eips::{
     eip2930::AccessList,
     eip7702::SignedAuthorization,
 };
-use alloy_evm::FromRecoveredTx;
-use alloy_primitives::{
-    keccak256, Address, Bytes, PrimitiveSignature as Signature, TxHash, TxKind, Uint, B256,
-};
+use alloy_evm::{FromRecoveredTx, FromTxWithEncoded};
+use alloy_primitives::{keccak256, Address, Bytes, Signature, TxHash, TxKind, Uint, B256};
 use alloy_rlp::Header;
 use core::{
     hash::{Hash, Hasher},
@@ -95,10 +94,6 @@ impl OpTransactionSigned {
 impl SignedTransaction for OpTransactionSigned {
     fn tx_hash(&self) -> &TxHash {
         self.hash.get_or_init(|| self.recalculate_hash())
-    }
-
-    fn signature(&self) -> &Signature {
-        &self.signature
     }
 
     fn recover_signer(&self) -> Result<Address, RecoveryError> {
@@ -198,13 +193,6 @@ impl From<Sealed<TxDeposit>> for OpTransactionSigned {
         let (tx, hash) = value.into_parts();
         Self::new(OpTypedTransaction::Deposit(tx), TxDeposit::signature(), hash)
     }
-}
-
-/// A trait that represents an optimism transaction, mainly used to indicate whether or not the
-/// transaction is a deposit transaction.
-pub trait OpTransaction {
-    /// Whether or not the transaction is a dpeosit transaction.
-    fn is_deposit(&self) -> bool;
 }
 
 impl OpTransaction for OpTransactionSigned {
@@ -317,6 +305,50 @@ impl FromRecoveredTx<OpTransactionSigned> for op_revm::OpTransaction<TxEnv> {
                 Default::default()
             },
         }
+    }
+}
+
+impl FromTxWithEncoded<OpTransactionSigned> for op_revm::OpTransaction<TxEnv> {
+    fn from_encoded_tx(tx: &OpTransactionSigned, caller: Address, encoded: Bytes) -> Self {
+        let base = match &tx.transaction {
+            OpTypedTransaction::Legacy(tx) => TxEnv::from_recovered_tx(tx, caller),
+            OpTypedTransaction::Eip1559(tx) => TxEnv::from_recovered_tx(tx, caller),
+            OpTypedTransaction::Eip2930(tx) => TxEnv::from_recovered_tx(tx, caller),
+            OpTypedTransaction::Eip7702(tx) => TxEnv::from_recovered_tx(tx, caller),
+            OpTypedTransaction::Deposit(tx) => {
+                let TxDeposit {
+                    to,
+                    value,
+                    gas_limit,
+                    input,
+                    source_hash: _,
+                    from: _,
+                    mint: _,
+                    is_system_transaction: _,
+                } = tx;
+                TxEnv {
+                    tx_type: tx.ty(),
+                    caller,
+                    gas_limit: *gas_limit,
+                    kind: *to,
+                    value: *value,
+                    data: input.clone(),
+                    ..Default::default()
+                }
+            }
+        };
+
+        let deposit = if let OpTypedTransaction::Deposit(tx) = &tx.transaction {
+            DepositTransactionParts {
+                source_hash: tx.source_hash,
+                mint: tx.mint,
+                is_system_transaction: tx.is_system_transaction,
+            }
+        } else {
+            Default::default()
+        };
+
+        Self { base, enveloped_tx: Some(encoded), deposit }
     }
 }
 
@@ -613,11 +645,10 @@ impl reth_codecs::Compact for OpTransactionSigned {
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for OpTransactionSigned {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        #[allow(unused_mut)]
         let mut transaction = OpTypedTransaction::arbitrary(u)?;
 
         let secp = secp256k1::Secp256k1::new();
-        let key_pair = secp256k1::Keypair::new(&secp, &mut rand::thread_rng());
+        let key_pair = secp256k1::Keypair::new(&secp, &mut rand_08::thread_rng());
         let signature = reth_primitives_traits::crypto::secp256k1::sign_message(
             B256::from_slice(&key_pair.secret_bytes()[..]),
             signature_hash(&transaction),
@@ -697,13 +728,12 @@ pub mod serde_bincode_compat {
     use alloy_consensus::transaction::serde_bincode_compat::{
         TxEip1559, TxEip2930, TxEip7702, TxLegacy,
     };
-    use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
+    use alloy_primitives::{Signature, TxHash};
     use reth_primitives_traits::{serde_bincode_compat::SerdeBincodeCompat, SignedTransaction};
     use serde::{Deserialize, Serialize};
 
     /// Bincode-compatible [`super::OpTypedTransaction`] serde implementation.
     #[derive(Debug, Serialize, Deserialize)]
-    #[allow(missing_docs)]
     enum OpTypedTransaction<'a> {
         Legacy(TxLegacy<'a>),
         Eip2930(TxEip2930<'a>),

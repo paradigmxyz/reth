@@ -15,6 +15,7 @@ use alloy_primitives::{
     Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use core::{
+    fmt::Debug,
     marker::PhantomData,
     ops::{RangeBounds, RangeInclusive},
 };
@@ -106,7 +107,7 @@ impl<ChainSpec: Send + Sync, N: Send + Sync> BlockNumReader for NoopProvider<Cha
     }
 }
 
-impl<ChainSpec: EthChainSpec + 'static, N: Send + Sync + 'static> ChainSpecProvider
+impl<ChainSpec: EthChainSpec + 'static, N: Debug + Send + Sync + 'static> ChainSpecProvider
     for NoopProvider<ChainSpec, N>
 {
     type ChainSpec = ChainSpec;
