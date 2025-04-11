@@ -23,7 +23,7 @@ use reth_ethereum_primitives::{EthPrimitives, Receipt};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::NodeTypes;
 use reth_primitives_traits::{
-    Account, Bytecode, GotExpected, RecoveredBlock, SealedBlock, SealedHeader, SignedTransaction,
+    Account, Bytecode, GotExpected, RecoveredBlock, SealedBlock, SealedHeader, SignedTransaction,NodePrimitives
 };
 use reth_prune_types::PruneModes;
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -47,9 +47,11 @@ use tokio::sync::broadcast;
 
 /// A mock implementation for Provider interfaces.
 #[derive(Debug)]
-pub struct MockEthProvider<ChainSpec = reth_chainspec::ChainSpec> {
+pub struct MockEthProvider<T: NodePrimitives = reth_ethereum_primitives::EthPrimitives,
+    ChainSpec = reth_chainspec::ChainSpec>
+    {
     /// Local block store
-    pub blocks: Arc<Mutex<HashMap<B256, reth_ethereum_primitives::Block>>>,
+    pub blocks: Arc<Mutex<HashMap<B256, T::Block>>>,
     /// Local header store
     pub headers: Arc<Mutex<HashMap<B256, Header>>>,
     /// Local account store
