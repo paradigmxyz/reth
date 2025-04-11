@@ -176,7 +176,7 @@ pub struct RpcServerArgs {
         alias = "rpc-txfeecap",
         value_name = "TX_FEE_CAP",
         value_parser = parse_ether_value,
-        default_value_t = constants::DEFAULT_TX_FEE_CAP
+        default_value = "1.0"
     )]
     pub rpc_tx_fee_cap: U256,
 
@@ -468,5 +468,13 @@ mod tests {
             "0",
         ]).args;
         assert_eq!(args.rpc_tx_fee_cap, U256::from(0)); // 0 = no cap
+    }
+
+    #[test]
+    fn test_rpc_tx_fee_cap_parse_none() {
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth"
+        ]).args;
+        assert_eq!(args.rpc_tx_fee_cap, U256::from(U256::from(1_000_000_000_000_000_000u64))); // 0 = no cap
     }
 }

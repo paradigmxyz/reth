@@ -103,7 +103,7 @@ pub fn parse_ether_value(value: &str) -> eyre::Result<U256> {
         return Err(eyre::eyre!("Ether value cannot be negative"))
     }
     let wei = eth * 1e18;
-    Ok(U256::from(wei as u64))
+    Ok(U256::from(wei as u128))
 }
 
 #[cfg(test)]
