@@ -1,6 +1,4 @@
 //! Testing gossiping of transactions.
-use std::sync::Arc;
-
 use alloy_consensus::TxLegacy;
 use alloy_primitives::{Signature, U256};
 use futures::StreamExt;
@@ -14,6 +12,7 @@ use reth_network_api::{events::PeerEvent, PeerKind, PeersInfo};
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 use reth_transaction_pool::{test_utils::TransactionGenerator, PoolTransaction, TransactionPool};
+use std::sync::Arc;
 use tokio::join;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -75,7 +74,7 @@ async fn test_tx_propagation_policy_trusted_only() {
     let mut peer0_tx_listener = peer_0_handle.pool().unwrap().pending_transactions_listener();
     let mut peer1_tx_listener = peer_1_handle.pool().unwrap().pending_transactions_listener();
 
-    let mut gen = TransactionGenerator::new(thread_rng());
+    let mut gen = TransactionGenerator::new(rand::rng());
     let tx = gen.gen_eip1559_pooled();
 
     // ensure the sender has balance
@@ -102,7 +101,7 @@ async fn test_tx_propagation_policy_trusted_only() {
     peer_0_handle.network().add_trusted_peer(*peer_1_handle.peer_id(), peer_1_handle.local_addr());
     join!(event_stream_0.next_session_established(), event_stream_1.next_session_established());
 
-    let mut gen = TransactionGenerator::new(thread_rng());
+    let mut gen = TransactionGenerator::new(rand::rng());
     let tx = gen.gen_eip1559_pooled();
 
     // ensure the sender has balance
