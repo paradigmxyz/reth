@@ -337,10 +337,10 @@ impl Discv5 {
     /// [`discv5::Event::UnverifiableEnr`], into a [`NodeRecord`] usable by `RLPx`.
     ///
     /// NOTE: Fallback solution to be compatible with Geth which includes peers into the discv5
-    /// WAN topology which, for example, advertise in their ENR that localhost is their UDP socket.
-    /// These peers are only discovered if they initiate a connection attempt, and we by such means
-    /// learn their reachable socket address. If we receive their ENR from any other peer as part
-    /// of a lookup query, we won't find a reachable socket address on which to dial them by
+    /// WAN topology which, for example, advertise in their ENR that localhost is their UDP IP
+    /// address. These peers are only discovered if they initiate a connection attempt, and we by
+    /// such means learn their reachable IP address. If we receive their ENR from any other peer
+    /// as part of a lookup query, we won't find a reachable IP address on which to dial them by
     /// reading their ENR.
     pub fn try_into_reachable(
         &self,
@@ -359,7 +359,11 @@ impl Discv5 {
             IpMode::DualStack => unimplemented!("dual-stack support not implemented for rlpx"),
         })
         .unwrap_or(
-            // tcp socket is missing from ENR, or is wrong IP version
+            // tcp socket is missing from ENR, or is wrong IP version.
+            //
+            // by default geth runs discv5 and discv4 behind the same udp port (the discv4 default
+            // port 30303), so rlpx has a chance of successfully dialing the peer on its discv5
+            // udp port if its running geth's p2p code.
             udp_port,
         );
 
