@@ -50,7 +50,7 @@ mod receipt;
 pub use receipt::RethReceiptBuilder;
 
 mod factory;
-pub use factory::CachedPrecompileEthEvmFactory;
+pub use factory::MaybeCachedPrecompileEthEvmFactory;
 
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone)]

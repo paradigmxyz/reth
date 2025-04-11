@@ -30,27 +30,32 @@ pub struct PrecompileCache {
     cache: DashMap<Address, PrecompileLRUCache>,
 }
 
-/// A custom precompile provider that contains the cache and precompile provider it wraps.
+/// A custom precompile provider that wraps a precompile provider and potentially a cache for it.
 #[derive(Clone, Debug)]
-pub struct CachedPrecompileProvider<P> {
+pub struct MaybeCachedPrecompileProvider<P> {
     /// The precompile provider to wrap.
     precompile_provider: P,
     /// The cache to use.
-    cache: Arc<PrecompileCache>,
+    cache: Option<Arc<PrecompileCache>>,
     /// The spec id to use.
     spec: SpecId,
 }
 
-impl<P> CachedPrecompileProvider<P> {
+impl<P> MaybeCachedPrecompileProvider<P> {
     /// Given a [`PrecompileProvider`]  and cache for a specific precompile provider,
     /// create a cached wrapper that can be used inside Evm.
-    pub fn new(precompile_provider: P, cache: Arc<PrecompileCache>) -> Self {
-        Self { precompile_provider, cache, spec: SpecId::default() }
+    pub fn new_with_cache(precompile_provider: P, cache: Arc<PrecompileCache>) -> Self {
+        Self { precompile_provider, cache: Some(cache), spec: SpecId::default() }
+    }
+
+    /// Creates a new `MaybeCachedPrecompileProvider` with cache disabled.
+    pub fn new_without_cache(precompile_provider: P) -> Self {
+        Self { precompile_provider, cache: None, spec: Default::default() }
     }
 }
 
 impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> PrecompileProvider<CTX>
-    for CachedPrecompileProvider<P>
+    for MaybeCachedPrecompileProvider<P>
 {
     type Output = P::Output;
 
@@ -68,31 +73,36 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
         is_static: bool,
         gas_limit: u64,
     ) -> Result<Option<Self::Output>, String> {
-        let key = (self.spec, inputs.input.clone(), gas_limit);
+        if let Some(cache) = &self.cache {
+            let key = (self.spec, inputs.input.clone(), gas_limit);
 
-        // get the result if it exists
-        if let Some(precompiles) = self.cache.cache.get_mut(address) {
-            if let Some(result) = precompiles.get(&key) {
-                return result.map(Some)
+            // get the result if it exists
+            if let Some(precompiles) = cache.cache.get_mut(address) {
+                if let Some(result) = precompiles.get(&key) {
+                    return result.map(Some)
+                }
             }
+
+            // call the precompile if cache miss
+            let output =
+                self.precompile_provider.run(context, address, inputs, is_static, gas_limit);
+
+            if let Some(output) = output.clone().transpose() {
+                // insert the result into the cache
+                cache
+                    .cache
+                    .entry(*address)
+                    // TODO: use a better cache size
+                    .or_insert(
+                        CacheBuilder::new(10000).build_with_hasher(DefaultHashBuilder::default()),
+                    )
+                    .insert(key, output);
+            }
+
+            output
+        } else {
+            self.precompile_provider.run(context, address, inputs, is_static, gas_limit)
         }
-
-        // call the precompile if cache miss
-        let output = self.precompile_provider.run(context, address, inputs, is_static, gas_limit);
-
-        if let Some(output) = output.clone().transpose() {
-            // insert the result into the cache
-            self.cache
-                .cache
-                .entry(*address)
-                // TODO: use a better cache size
-                .or_insert(
-                    CacheBuilder::new(10000).build_with_hasher(DefaultHashBuilder::default()),
-                )
-                .insert(key, output);
-        }
-
-        output
     }
 
     fn warm_addresses(&self) -> Box<impl Iterator<Item = Address>> {
