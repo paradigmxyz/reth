@@ -3,7 +3,7 @@ use alloy_consensus::{
     transaction::RlpEcdsaEncodableTx, EthereumTxEnvelope, Signed, Transaction, TxEip1559,
     TxEip2930, TxEip7702, TxLegacy, TxType,
 };
-use alloy_primitives::PrimitiveSignature;
+use alloy_primitives::Signature;
 use bytes::{Buf, BufMut};
 
 /// A trait for extracting transaction without type and signature and serializing it using
@@ -42,7 +42,7 @@ pub(super) trait FromTxCompact {
     fn from_tx_compact(
         buf: &[u8],
         tx_type: Self::TxType,
-        signature: PrimitiveSignature,
+        signature: Signature,
     ) -> (Self, &[u8])
     where
         Self: Sized;
@@ -66,7 +66,7 @@ impl<Eip4844: Compact + Transaction> FromTxCompact for EthereumTxEnvelope<Eip484
     fn from_tx_compact(
         buf: &[u8],
         tx_type: TxType,
-        signature: PrimitiveSignature,
+        signature: Signature,
     ) -> (Self, &[u8]) {
         match tx_type {
             TxType::Legacy => {
@@ -99,14 +99,14 @@ impl<Eip4844: Compact + Transaction> FromTxCompact for EthereumTxEnvelope<Eip484
 }
 
 pub(super) trait Envelope: FromTxCompact<TxType: Compact> {
-    fn signature(&self) -> &PrimitiveSignature;
+    fn signature(&self) -> &Signature;
     fn tx_type(&self) -> Self::TxType;
 }
 
 impl<Eip4844: Compact + Transaction + RlpEcdsaEncodableTx> Envelope
     for EthereumTxEnvelope<Eip4844>
 {
-    fn signature(&self) -> &PrimitiveSignature {
+    fn signature(&self) -> &Signature {
         Self::signature(self)
     }
 
@@ -184,7 +184,7 @@ impl<T: Envelope + ToTxCompact + Transaction + Send + Sync> CompactEnvelope for 
         let tx_bits = (flags & 0b110) >> 1;
         let zstd_bit = flags >> 3;
 
-        let (signature, buf) = PrimitiveSignature::from_compact(buf, sig_bit);
+        let (signature, buf) = Signature::from_compact(buf, sig_bit);
         let (tx_type, buf) = T::TxType::from_compact(buf, tx_bits);
 
         let (transaction, buf) = if zstd_bit != 0 {

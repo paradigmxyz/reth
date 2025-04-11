@@ -13,8 +13,7 @@ use alloy_eips::{
 };
 use alloy_evm::{FromRecoveredTx, FromTxWithEncoded};
 use alloy_primitives::{
-    bytes::BufMut, keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash,
-    TxKind, B256, U256,
+    bytes::BufMut, keccak256, Address, Bytes, ChainId, Signature, TxHash, TxKind, B256, U256,
 };
 use alloy_rlp::{Decodable, Encodable};
 use core::hash::{Hash, Hasher};
@@ -621,7 +620,7 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
         let mut transaction = Transaction::arbitrary(u)?;
 
         let secp = secp256k1::Secp256k1::new();
-        let key_pair = secp256k1::Keypair::new(&secp, &mut rand::thread_rng());
+        let key_pair = secp256k1::Keypair::new(&secp, &mut rand_08::thread_rng());
         let signature = reth_primitives_traits::crypto::secp256k1::sign_message(
             B256::from_slice(&key_pair.secret_bytes()[..]),
             transaction.signature_hash(),
@@ -968,7 +967,7 @@ pub(super) mod serde_bincode_compat {
         transaction::serde_bincode_compat::{TxEip1559, TxEip2930, TxEip7702, TxLegacy},
         TxEip4844,
     };
-    use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
+    use alloy_primitives::{Signature, TxHash};
     use reth_primitives_traits::{serde_bincode_compat::SerdeBincodeCompat, SignedTransaction};
 
     /// Bincode-compatible [`super::Transaction`] serde implementation.
@@ -1103,8 +1102,7 @@ mod tests {
         eip7702::constants::SECP256K1N_HALF,
     };
     use alloy_primitives::{
-        address, b256, bytes, hex, Address, Bytes, PrimitiveSignature as Signature, TxKind, B256,
-        U256,
+        address, b256, bytes, hex, Address, Bytes, Signature, TxKind, B256, U256,
     };
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
     use proptest::proptest;

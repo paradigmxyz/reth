@@ -107,7 +107,7 @@ impl_fixed_arbitrary!((BlockNumberAddress, 28), (AddressStorageKey, 52));
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::{thread_rng, Rng};
+    use rand::{rng, Rng};
     use std::str::FromStr;
 
     #[test]
@@ -130,7 +130,7 @@ mod tests {
     #[test]
     fn test_block_number_address_rand() {
         let mut bytes = [0u8; 28];
-        thread_rng().fill(bytes.as_mut_slice());
+        rng().fill(bytes.as_mut_slice());
         let key = BlockNumberAddress::arbitrary(&mut Unstructured::new(&bytes)).unwrap();
         assert_eq!(bytes, Encode::encode(key));
     }
@@ -155,7 +155,7 @@ mod tests {
     #[test]
     fn test_address_storage_key_rand() {
         let mut bytes = [0u8; 52];
-        thread_rng().fill(bytes.as_mut_slice());
+        rng().fill(bytes.as_mut_slice());
         let key = AddressStorageKey::arbitrary(&mut Unstructured::new(&bytes)).unwrap();
         assert_eq!(bytes, Encode::encode(key));
     }
