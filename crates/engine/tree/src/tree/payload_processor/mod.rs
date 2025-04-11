@@ -426,6 +426,7 @@ mod tests {
         StateProviderBuilder, TreeConfig,
     };
     use alloy_evm::block::StateChangeSource;
+    use rand::Rng;
     use reth_chainspec::ChainSpec;
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::EthPrimitives;
@@ -437,38 +438,41 @@ mod tests {
         test_utils::create_test_provider_factory_with_chain_spec,
         ChainSpecProvider, HashingWriter,
     };
-    use reth_testing_utils::generators::{self, Rng};
+    use reth_testing_utils::generators;
     use reth_trie::{test_utils::state_root, HashedPostState, TrieInput};
     use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
     use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
 
     fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {
         let mut rng = generators::rng();
-        let all_addresses: Vec<Address> = (0..num_accounts).map(|_| rng.gen()).collect();
+        let all_addresses: Vec<Address> = (0..num_accounts).map(|_| rng.random()).collect();
         let mut updates = Vec::new();
 
         for _ in 0..updates_per_account {
-            let num_accounts_in_update = rng.gen_range(1..=num_accounts);
+            let num_accounts_in_update = rng.random_range(1..=num_accounts);
             let mut state_update = EvmState::default();
 
             let selected_addresses = &all_addresses[0..num_accounts_in_update];
 
             for &address in selected_addresses {
                 let mut storage = HashMap::default();
-                if rng.gen_bool(0.7) {
-                    for _ in 0..rng.gen_range(1..10) {
-                        let slot = U256::from(rng.gen::<u64>());
+                if rng.random_bool(0.7) {
+                    for _ in 0..rng.random_range(1..10) {
+                        let slot = U256::from(rng.random::<u64>());
                         storage.insert(
                             slot,
-                            EvmStorageSlot::new_changed(U256::ZERO, U256::from(rng.gen::<u64>())),
+                            EvmStorageSlot::new_changed(
+                                U256::ZERO,
+                                U256::from(rng.random::<u64>()),
+                            ),
                         );
                     }
                 }
 
                 let account = revm_state::Account {
                     info: AccountInfo {
-                        balance: U256::from(rng.gen::<u64>()),
-                        nonce: rng.gen::<u64>(),
+                        balance: U256::from(rng.random::<u64>()),
+                        nonce: rng.random::<u64>(),
                         code_hash: KECCAK_EMPTY,
                         code: Some(Default::default()),
                     },

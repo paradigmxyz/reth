@@ -3,9 +3,8 @@
 use std::sync::Arc;
 
 use alloy_consensus::TxLegacy;
-use alloy_primitives::{PrimitiveSignature as Signature, U256};
+use alloy_primitives::{Signature, U256};
 use futures::StreamExt;
-use rand::thread_rng;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_network::{test_utils::Testnet, NetworkEvent, NetworkEventListenerProvider};
 use reth_network_api::{events::PeerEvent, PeersInfo};
@@ -33,7 +32,7 @@ async fn test_tx_gossip() {
     let mut peer0_tx_listener = peer0.pool().unwrap().pending_transactions_listener();
     let mut peer1_tx_listener = peer1.pool().unwrap().pending_transactions_listener();
 
-    let mut gen = TransactionGenerator::new(thread_rng());
+    let mut gen = TransactionGenerator::new(rand::rng());
     let tx = gen.gen_eip1559_pooled();
 
     // ensure the sender has balance
@@ -70,7 +69,7 @@ async fn test_4844_tx_gossip_penalization() {
 
     let mut peer1_tx_listener = peer1.pool().unwrap().pending_transactions_listener();
 
-    let mut gen = TransactionGenerator::new(thread_rng());
+    let mut gen = TransactionGenerator::new(rand::rng());
 
     // peer 0 will be penalized for sending txs[0] over gossip
     let txs = vec![gen.gen_eip4844_pooled(), gen.gen_eip1559_pooled()];

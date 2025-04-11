@@ -1,10 +1,8 @@
 #![allow(missing_docs)]
 
-use alloy_primitives::{
-    private::proptest::test_runner::{RngAlgorithm, TestRng},
-    U256,
-};
+use alloy_primitives::U256;
 use criterion::*;
+use rand::SeedableRng;
 use reth_network::{
     test_utils::Testnet,
     transactions::{
@@ -63,9 +61,8 @@ pub fn tx_fetch_bench(c: &mut Criterion) {
                             let peer_pool = peer.pool().unwrap();
 
                             for _ in 0..num_tx_per_peer {
-                                let mut gen = TransactionGenerator::new(
-                                    TestRng::deterministic_rng(RngAlgorithm::ChaCha),
-                                );
+                                let mut gen =
+                                    TransactionGenerator::new(rand::rngs::StdRng::seed_from_u64(0));
 
                                 let tx = gen.gen_eip1559_pooled();
                                 let sender = tx.sender();
