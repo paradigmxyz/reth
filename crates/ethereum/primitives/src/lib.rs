@@ -1,4 +1,5 @@
 //! Standalone crate for ethereum-specific Reth primitive types.
+use reth_trie_db::MerklePatriciaTrie;
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
