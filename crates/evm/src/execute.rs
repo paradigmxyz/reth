@@ -445,7 +445,7 @@ where
 
 /// A generic block executor that uses a [`BlockExecutor`] to
 /// execute blocks.
-#[allow(missing_debug_implementations, dead_code)]
+#[expect(missing_debug_implementations)]
 pub struct BasicBlockExecutor<F, DB> {
     /// Block execution strategy.
     pub(crate) strategy_factory: F,

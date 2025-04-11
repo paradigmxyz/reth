@@ -381,6 +381,11 @@ impl<P> RevealedSparseTrie<P> {
         self.updates.take().unwrap_or_default()
     }
 
+    /// Reserves capacity for at least `additional` more nodes to be inserted.
+    pub fn reserve_nodes(&mut self, additional: usize) {
+        self.nodes.reserve(additional);
+    }
+
     /// Reveal the trie node only if it was not known already.
     pub fn reveal_node(
         &mut self,
@@ -1583,7 +1588,6 @@ mod tests {
     use prop::sample::SizeRange;
     use proptest::prelude::*;
     use proptest_arbitrary_interop::arb;
-    use rand::seq::IteratorRandom;
     use reth_primitives_traits::Account;
     use reth_provider::{test_utils::create_test_provider_factory, TrieWriter};
     use reth_trie::{
@@ -2255,7 +2259,6 @@ mod tests {
         assert_eq!(sparse, sparse_old);
     }
 
-    #[allow(clippy::type_complexity)]
     #[test]
     fn sparse_trie_fuzz() {
         // Having only the first 3 nibbles set, we narrow down the range of keys
@@ -2358,7 +2361,7 @@ mod tests {
 
         fn transform_updates(
             updates: Vec<BTreeMap<Nibbles, Account>>,
-            mut rng: impl Rng,
+            mut rng: impl rand_08::Rng,
         ) -> Vec<(BTreeMap<Nibbles, Account>, BTreeSet<Nibbles>)> {
             let mut keys = BTreeSet::new();
             updates
@@ -2369,7 +2372,9 @@ mod tests {
                     let keys_to_delete_len = update.len() / 2;
                     let keys_to_delete = (0..keys_to_delete_len)
                         .map(|_| {
-                            let key = keys.iter().choose(&mut rng).unwrap().clone();
+                            let key = rand_08::seq::IteratorRandom::choose(keys.iter(), &mut rng)
+                                .unwrap()
+                                .clone();
                             keys.take(&key).unwrap()
                         })
                         .collect();

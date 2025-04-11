@@ -195,7 +195,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
 
         // Shuffle to propagate to a random sample of peers on every block announcement
         let mut peers: Vec<_> = self.active_peers.iter_mut().collect();
-        peers.shuffle(&mut rand::thread_rng());
+        peers.shuffle(&mut rand::rng());
 
         for (peer_id, peer) in peers {
             if peer.blocks.contains(&msg.hash) {
