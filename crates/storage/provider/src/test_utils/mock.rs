@@ -204,6 +204,7 @@ impl NodeTypes for MockNode {
     type StateCommitment = MerklePatriciaTrie;
     type Storage = EthStorage;
     type Payload = EthEngineTypes;
+    type Database = DatabaseMock;
 }
 
 impl<ChainSpec: EthChainSpec> StateCommitmentProvider for MockEthProvider<ChainSpec> {

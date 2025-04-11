@@ -10,7 +10,7 @@ use reth_db::{
 };
 use reth_errors::ProviderResult;
 use reth_ethereum_engine_primitives::EthEngineTypes;
-use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter};
+use reth_node_types::NodeTypes;
 use reth_primitives_traits::{Account, StorageEntry};
 use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
@@ -25,35 +25,35 @@ pub use noop::NoopProvider;
 pub use reth_chain_state::test_utils::TestCanonStateSubscriptions;
 
 /// Mock [`reth_node_types::NodeTypes`] for testing.
-pub type MockNodeTypes = reth_node_types::AnyNodeTypesWithEngine<
-    reth_ethereum_primitives::EthPrimitives,
-    reth_ethereum_engine_primitives::EthEngineTypes,
-    reth_chainspec::ChainSpec,
-    reth_trie_db::MerklePatriciaTrie,
-    crate::EthStorage,
-    EthEngineTypes,
->;
-
-/// Mock [`reth_node_types::NodeTypesWithDB`] for testing.
-pub type MockNodeTypesWithDB<DB = TempDatabase<DatabaseEnv>> =
-    NodeTypesWithDBAdapter<MockNodeTypes, Arc<DB>>;
+pub type MockNodeTypes<T = Arc<TempDatabase<DatabaseEnv>>> =
+    reth_node_types::AnyNodeTypesWithEngine<
+        reth_ethereum_primitives::EthPrimitives,
+        reth_ethereum_engine_primitives::EthEngineTypes,
+        reth_chainspec::ChainSpec,
+        reth_trie_db::MerklePatriciaTrie,
+        crate::EthStorage,
+        EthEngineTypes,
+        T,
+    >;
 
 /// Creates test provider factory with mainnet chain spec.
-pub fn create_test_provider_factory() -> ProviderFactory<MockNodeTypesWithDB> {
+pub fn create_test_provider_factory() -> ProviderFactory<MockNodeTypes> {
     create_test_provider_factory_with_chain_spec(MAINNET.clone())
 }
 
 /// Creates test provider factory with provided chain spec.
 pub fn create_test_provider_factory_with_chain_spec(
     chain_spec: Arc<ChainSpec>,
-) -> ProviderFactory<MockNodeTypesWithDB> {
+) -> ProviderFactory<MockNodeTypes> {
     create_test_provider_factory_with_node_types::<MockNodeTypes>(chain_spec)
 }
 
 /// Creates test provider factory with provided chain spec.
-pub fn create_test_provider_factory_with_node_types<N: NodeTypes>(
+pub fn create_test_provider_factory_with_node_types<
+    N: NodeTypes<Database = Arc<TempDatabase<DatabaseEnv>>>,
+>(
     chain_spec: Arc<N::ChainSpec>,
-) -> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<TempDatabase<DatabaseEnv>>>> {
+) -> ProviderFactory<N> {
     let (static_dir, _) = create_test_static_files_dir();
     let db = create_test_rw_db();
     ProviderFactory::new(

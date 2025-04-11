@@ -622,7 +622,7 @@ mod tests {
     use reth_consensus::test_utils::TestConsensus;
     use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
     use reth_provider::{
-        providers::StaticFileProvider, test_utils::MockNodeTypesWithDB, ProviderFactory,
+        providers::StaticFileProvider, test_utils::MockNodeTypes, ProviderFactory,
     };
     use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
     use std::collections::HashMap;
@@ -646,7 +646,7 @@ mod tests {
             .build::<reth_ethereum_primitives::Block, _, _>(
                 client.clone(),
                 Arc::new(TestConsensus::default()),
-                ProviderFactory::<MockNodeTypesWithDB>::new(
+                ProviderFactory::<MockNodeTypes>::new(
                     db,
                     MAINNET.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
@@ -691,7 +691,7 @@ mod tests {
             .build::<reth_ethereum_primitives::Block, _, _>(
             client.clone(),
             Arc::new(TestConsensus::default()),
-            ProviderFactory::<MockNodeTypesWithDB>::new(
+            ProviderFactory::<MockNodeTypes>::new(
                 db,
                 MAINNET.clone(),
                 StaticFileProvider::read_write(static_dir_path).unwrap(),
@@ -725,7 +725,7 @@ mod tests {
             .build::<reth_ethereum_primitives::Block, _, _>(
                 client.clone(),
                 Arc::new(TestConsensus::default()),
-                ProviderFactory::<MockNodeTypesWithDB>::new(
+                ProviderFactory::<MockNodeTypes>::new(
                     db,
                     MAINNET.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
@@ -763,7 +763,7 @@ mod tests {
             .build::<reth_ethereum_primitives::Block, _, _>(
             client.clone(),
             Arc::new(TestConsensus::default()),
-            ProviderFactory::<MockNodeTypesWithDB>::new(
+            ProviderFactory::<MockNodeTypes>::new(
                 db,
                 MAINNET.clone(),
                 StaticFileProvider::read_write(static_dir_path).unwrap(),
@@ -809,7 +809,7 @@ mod tests {
             .build::<reth_ethereum_primitives::Block, _, _>(
                 client.clone(),
                 Arc::new(TestConsensus::default()),
-                ProviderFactory::<MockNodeTypesWithDB>::new(
+                ProviderFactory::<MockNodeTypes>::new(
                     db,
                     MAINNET.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
@@ -846,7 +846,7 @@ mod tests {
             .build::<reth_ethereum_primitives::Block, _, _>(
                 client.clone(),
                 Arc::new(TestConsensus::default()),
-                ProviderFactory::<MockNodeTypesWithDB>::new(
+                ProviderFactory::<MockNodeTypes>::new(
                     db,
                     MAINNET.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),

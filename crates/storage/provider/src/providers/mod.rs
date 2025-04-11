@@ -2,7 +2,7 @@
 
 use reth_chainspec::EthereumHardforks;
 use reth_db_api::table::Value;
-use reth_node_types::{FullNodePrimitives, NodeTypes, NodeTypesWithDB};
+use reth_node_types::{FullNodePrimitives, NodeTypes};
 
 mod database;
 pub use database::*;
@@ -52,7 +52,7 @@ impl<T> NodeTypesForProvider for T where
 /// Helper trait keeping common requirements of providers for [`NodeTypesWithDB`].
 pub trait ProviderNodeTypes
 where
-    Self: NodeTypesForProvider + NodeTypesWithDB,
+    Self: NodeTypesForProvider + NodeTypes,
 {
 }
-impl<T> ProviderNodeTypes for T where T: NodeTypesForProvider + NodeTypesWithDB {}
+impl<T> ProviderNodeTypes for T where T: NodeTypesForProvider + NodeTypes {}

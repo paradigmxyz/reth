@@ -75,6 +75,8 @@ where
     type Storage = <N::Types as NodeTypes>::Storage;
 
     type Payload = <N::Types as NodeTypes>::Payload;
+
+    type Database = <N::Types as NodeTypes>::Database;
 }
 
 impl<N, C, AO> Node<N> for AnyNode<N, C, AO>
