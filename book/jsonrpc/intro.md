@@ -65,7 +65,7 @@ reth node --http --http.api all
 ```
 
 ```bash
-reth node --http --http.api All
+reth node --http --http.api all
 ```
 
 You can also restrict who can access the HTTP server by specifying a domain for Cross-Origin requests. This is important, since any application local to your node will be able to access the RPC server:
