@@ -209,13 +209,12 @@ pub fn verify_execution_witness(
         let hash = keccak256(rlp_encoded);
         state_witness.insert(hash, rlp_encoded.clone());
     }
-    for rlp_encoded in &witness.keys {
-        let hash = keccak256(rlp_encoded);
-        state_witness.insert(hash, rlp_encoded.clone());
-    }
+    // for rlp_encoded in &witness.keys {
+    //     let hash = keccak256(rlp_encoded);
+    //     state_witness.insert(hash, rlp_encoded.clone());
+    // }
     for rlp_encoded in &witness.codes {
         let hash = keccak256(rlp_encoded);
-        state_witness.insert(hash, rlp_encoded.clone());
         bytecode.insert(hash, Bytecode::new_raw(rlp_encoded.clone()));
     }
 
