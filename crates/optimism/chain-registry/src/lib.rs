@@ -11,5 +11,7 @@
 //! Downloads and maintains config for different chains which
 //! are part of the op superchain
 mod client;
+mod parser;
 
 pub use client::*;
+// pub use parser::*;
