@@ -333,9 +333,9 @@ impl From<Genesis> for OpChainSpec {
 
         // Time-based hardforks
         let time_hardfork_opts = [
-            (EthereumHardfork::Shanghai.boxed(), Some(0)),
-            (EthereumHardfork::Cancun.boxed(), Some(1706634000)),
-            (EthereumHardfork::Prague.boxed(), Some(1744300800)),
+            (EthereumHardfork::Shanghai.boxed(), genesis_info.canyon_time),
+            (EthereumHardfork::Cancun.boxed(), genesis_info.ecotone_time),
+            (EthereumHardfork::Prague.boxed(), genesis_info.isthmus_time),
             (OpHardfork::Regolith.boxed(), genesis_info.regolith_time),
             (OpHardfork::Canyon.boxed(), genesis_info.canyon_time),
             (OpHardfork::Ecotone.boxed(), genesis_info.ecotone_time),
