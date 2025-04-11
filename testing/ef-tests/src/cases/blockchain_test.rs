@@ -193,6 +193,8 @@ fn execute_blocks<
     provider: &Provider,
     blocks_with_genesis: &[SignedRecoveredBlock],
     chain_spec: Arc<ChainSpec>,
+    // We use this function because ProviderFactory implements `history_by_block_hash`
+    // as a standalone method and not as a trait impl.
     mut create_state_provider: F,
 ) -> Result<Vec<(SignedRecoveredBlock, ExecutionWitness)>, Error> {
     let executor_provider = EthExecutorProvider::ethereum(chain_spec);
