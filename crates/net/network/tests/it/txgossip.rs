@@ -8,7 +8,7 @@ use rand::thread_rng;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_network::{
     test_utils::{NetworkEventStream, Testnet},
-    transactions::{config::TransactionPropagationKind, TransactionsManagerConfig},
+    transactions::config::TransactionPropagationKind,
     NetworkEvent, NetworkEventListenerProvider, Peers,
 };
 use reth_network_api::{events::PeerEvent, PeerKind, PeersInfo};
@@ -56,17 +56,14 @@ async fn test_tx_gossip() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_tx_propagation_policy() {
+async fn test_tx_propagation_policy_trusted_only() {
     reth_tracing::init_test_tracing();
 
     let provider = MockEthProvider::default();
 
-    let cfg = TransactionsManagerConfig {
-        propagation_policy: TransactionPropagationKind::Trusted,
-        ..Default::default()
-    };
+    let policy = TransactionPropagationKind::Trusted;
     let net = Testnet::create_with(2, provider.clone()).await;
-    let net = net.with_eth_pool_config(cfg);
+    let net = net.with_eth_pool_config_and_policy(Default::default(), policy);
 
     let handle = net.spawn();
 

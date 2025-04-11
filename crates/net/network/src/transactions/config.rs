@@ -11,12 +11,11 @@ use crate::transactions::constants::tx_fetcher::{
 };
 use derive_more::{Constructor, Display};
 use reth_eth_wire::NetworkPrimitives;
-use reth_network_api::PeerKind;
 
 /// Configuration for managing transactions within the network.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct TransactionsManagerConfig<P: TransactionPropagationPolicy = TransactionPropagationKind> {
+pub struct TransactionsManagerConfig {
     /// Configuration for fetching transactions.
     pub transaction_fetcher_config: TransactionFetcherConfig,
     /// Max number of seen transactions to store for each peer.
@@ -24,18 +23,14 @@ pub struct TransactionsManagerConfig<P: TransactionPropagationPolicy = Transacti
     /// How new pending transactions are propagated.
     #[cfg_attr(feature = "serde", serde(default))]
     pub propagation_mode: TransactionPropagationMode,
-    /// Policy defining which peers transactions are propagated to.
-    #[cfg_attr(feature = "serde", serde(default))]
-    pub propagation_policy: P,
 }
 
-impl<P: TransactionPropagationPolicy> Default for TransactionsManagerConfig<P> {
+impl Default for TransactionsManagerConfig {
     fn default() -> Self {
         Self {
             transaction_fetcher_config: TransactionFetcherConfig::default(),
             max_transactions_seen_by_peer_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
             propagation_mode: TransactionPropagationMode::default(),
-            propagation_policy: P::default(),
         }
     }
 }
@@ -104,9 +99,11 @@ impl Default for TransactionFetcherConfig {
 }
 
 /// A policy defining which peers pending transactions are gossiped to.
-pub trait TransactionPropagationPolicy: Default + Clone {
+pub trait TransactionPropagationPolicy: Send + Sync + Unpin + 'static {
     /// Filter a given peer based on the policy.
-    fn filter<N: NetworkPrimitives>(&self, peer: &mut PeerMetadata<N>) -> bool;
+    ///
+    /// This determines whether transactions can be propagated to this peer.
+    fn can_propagate<N: NetworkPrimitives>(&self, peer: &mut PeerMetadata<N>) -> bool;
 
     /// A callback on the policy when a new peer session is established.
     fn on_session_established<N: NetworkPrimitives>(&mut self, peer: &mut PeerMetadata<N>);
@@ -116,21 +113,23 @@ pub trait TransactionPropagationPolicy: Default + Clone {
 }
 
 /// Determines which peers pending transactions are propagated to.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Display)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Display)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TransactionPropagationKind {
     /// Propagate transactions to all peers.
+    ///
+    /// No restructions
     #[default]
     All,
-    /// Propagate transactions to only trusted peers.    
+    /// Propagate transactions to only trusted peers.
     Trusted,
 }
 
 impl TransactionPropagationPolicy for TransactionPropagationKind {
-    fn filter<N: NetworkPrimitives>(&self, peer: &mut PeerMetadata<N>) -> bool {
+    fn can_propagate<N: NetworkPrimitives>(&self, peer: &mut PeerMetadata<N>) -> bool {
         match self {
             Self::All => true,
-            Self::Trusted => matches!(peer.peer_kind, PeerKind::Trusted),
+            Self::Trusted => peer.peer_kind.is_trusted(),
         }
     }
 
