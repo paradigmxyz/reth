@@ -121,17 +121,15 @@ pub fn stateless_validation(
     witness: ExecutionWitness,
     chain_spec: Arc<ChainSpec>,
 ) -> Result<B256, StatelessValidationError> {
-    // TODO: clean this up, the clone and vector allocation is undesirable
-    let _ancestor_headers: Result<Vec<_>, _> = witness
+    let ancestor_headers: Vec<Header> = witness
         .headers
         .iter()
         .map(|serialized_header| {
-            let header: Vec<u8> = serialized_header.clone().into();
-            Header::decode(&mut &header[..])
+            let bytes = serialized_header.as_ref();
+            Header::decode(&mut &bytes[..])
+                .map_err(|_| StatelessValidationError::HeaderDeserializationFailed)
         })
-        .collect();
-    let ancestor_headers =
-        _ancestor_headers.map_err(|_| StatelessValidationError::HeaderDeserializationFailed)?;
+        .collect::<Result<_, _>>()?;
 
     // Check that the ancestor headers form a contiguous chain and are not just random headers.
     let ancestor_hashes = compute_ancestor_hashes(&current_block, &ancestor_headers)?;
@@ -262,7 +260,6 @@ const BLOCKHASH_HISTORICAL_HASH_LIMIT: usize = 256;
 ///
 /// If both checks pass, it returns a [`HashMap`] mapping the block number of each
 /// ancestor header to its corresponding block hash.
-/// TODO: geth stores headers in reverse, we should switch to that to be compatible
 fn compute_ancestor_hashes(
     current_block: &RecoveredBlock<Block<TransactionSigned>>,
     ancestor_headers: &[Header],
