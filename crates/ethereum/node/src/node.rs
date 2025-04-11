@@ -57,7 +57,7 @@ impl EthereumNode {
         EthereumPoolBuilder,
         BasicPayloadServiceBuilder<EthereumPayloadBuilder>,
         EthereumNetworkBuilder,
-        MaybeCachedPrecompileEthereumExecutorBuilder,
+        EthereumExecutorBuilder,
         EthereumConsensusBuilder,
     >
     where
@@ -73,7 +73,7 @@ impl EthereumNode {
             .pool(EthereumPoolBuilder::default())
             .payload(BasicPayloadServiceBuilder::default())
             .network(EthereumNetworkBuilder::default())
-            .executor(MaybeCachedPrecompileEthereumExecutorBuilder::default())
+            .executor(EthereumExecutorBuilder::default())
             .consensus(EthereumConsensusBuilder::default())
     }
 
@@ -258,7 +258,7 @@ where
         EthereumPoolBuilder,
         BasicPayloadServiceBuilder<EthereumPayloadBuilder>,
         EthereumNetworkBuilder,
-        MaybeCachedPrecompileEthereumExecutorBuilder,
+        EthereumExecutorBuilder,
         EthereumConsensusBuilder,
     >;
 
@@ -294,37 +294,12 @@ impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for EthereumNode {
     }
 }
 
-/// A regular ethereum evm and executor builder.
+/// An ethereum evm and executor builder with potentially cached precompiles.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
 pub struct EthereumExecutorBuilder;
 
 impl<Types, Node> ExecutorBuilder<Node> for EthereumExecutorBuilder
-where
-    Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
-    Node: FullNodeTypes<Types = Types>,
-{
-    type EVM = EthEvmConfig;
-    type Executor = BasicBlockExecutorProvider<Self::EVM>;
-
-    async fn build_evm(
-        self,
-        ctx: &BuilderContext<Node>,
-    ) -> eyre::Result<(Self::EVM, Self::Executor)> {
-        let evm_config = EthEvmConfig::new(ctx.chain_spec())
-            .with_extra_data(ctx.payload_builder_config().extra_data_bytes());
-        let executor = BasicBlockExecutorProvider::new(evm_config.clone());
-
-        Ok((evm_config, executor))
-    }
-}
-
-/// An ethereum evm and executor builder with potentially cached precompiles.
-#[derive(Debug, Default, Clone, Copy)]
-#[non_exhaustive]
-pub struct MaybeCachedPrecompileEthereumExecutorBuilder;
-
-impl<Types, Node> ExecutorBuilder<Node> for MaybeCachedPrecompileEthereumExecutorBuilder
 where
     Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
