@@ -119,6 +119,7 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         consistent_view: ConsistentDbView<P>,
         trie_input: TrieInput,
+        config: &TreeConfig,
     ) -> PayloadHandle
     where
         P: DatabaseProviderFactory<Provider: BlockReader>
@@ -139,7 +140,7 @@ where
             state_root_config.state_sorted.clone(),
             state_root_config.prefix_sets.clone(),
         );
-        let max_proof_task_concurrency = 256;
+        let max_proof_task_concurrency = config.max_proof_task_concurrency() as usize;
         let proof_task = ProofTaskManager::new(
             self.executor.handle().clone(),
             state_root_config.consistent_view.clone(),
@@ -553,6 +554,7 @@ mod tests {
             StateProviderBuilder::new(provider.clone(), genesis_hash, None),
             ConsistentDbView::new_with_latest_tip(provider).unwrap(),
             TrieInput::from_state(hashed_state),
+            &TreeConfig::default(),
         );
 
         let mut state_hook = handle.state_hook();
