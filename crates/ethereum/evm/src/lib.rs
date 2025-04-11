@@ -49,6 +49,9 @@ pub use build::EthBlockAssembler;
 mod receipt;
 pub use receipt::RethReceiptBuilder;
 
+mod factory;
+pub use factory::MaybeCachedPrecompileEthEvmFactory;
+
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone)]
 pub struct EthEvmConfig<EvmFactory = EthEvmFactory> {

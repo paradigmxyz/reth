@@ -44,6 +44,10 @@ pub struct EngineArgs {
     /// Configure the maximum number of concurrent proof tasks
     #[arg(long = "engine.max-proof-task-concurrency", default_value_t = DEFAULT_MAX_PROOF_TASK_CONCURRENCY)]
     pub max_proof_task_concurrency: u64,
+
+    /// Enable precompile cache
+    #[arg(long = "engine.precompile-cache", default_value = "false")]
+    pub precompile_cache_enabled: bool,
 }
 
 impl Default for EngineArgs {
@@ -57,6 +61,7 @@ impl Default for EngineArgs {
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB,
             accept_execution_requests_hash: false,
             max_proof_task_concurrency: DEFAULT_MAX_PROOF_TASK_CONCURRENCY,
+            precompile_cache_enabled: false,
         }
     }
 }
