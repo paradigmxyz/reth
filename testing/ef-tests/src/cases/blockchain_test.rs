@@ -95,6 +95,8 @@ impl Case for BlockchainTestCase {
     }
 }
 
+type SignedRecoveredBlock = RecoveredBlock<Block<TransactionSigned>>;
+
 /// Executes a single `BlockchainTest`, returning an error if the blockchain state
 /// does not match the expected outcome after all blocks are executed.
 ///
@@ -188,14 +190,14 @@ fn execute_blocks<
         + BlockHashReader
         + HeaderProvider
         + StateCommitmentProvider,
-    F: FnMut(Option<&RecoveredBlock<Block<TransactionSigned>>>) -> SP,
+    F: FnMut(Option<&SignedRecoveredBlock>) -> SP,
     SP: StateProvider,
 >(
     provider: &Provider,
-    blocks_with_genesis: &[RecoveredBlock<Block<TransactionSigned>>],
+    blocks_with_genesis: &[SignedRecoveredBlock],
     chain_spec: Arc<ChainSpec>,
     mut create_state_provider: F,
-) -> Result<Vec<(RecoveredBlock<Block<TransactionSigned>>, ExecutionWitness)>, Error> {
+) -> Result<Vec<(SignedRecoveredBlock, ExecutionWitness)>, Error> {
     let executor_provider = EthExecutorProvider::ethereum(chain_spec);
 
     // First execute all of the blocks
