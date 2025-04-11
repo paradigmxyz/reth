@@ -7,7 +7,7 @@ use std::{
     path::PathBuf,
 };
 
-use alloy_primitives::{Address, U256};
+use alloy_primitives::Address;
 use alloy_rpc_types_engine::JwtSecret;
 use clap::{
     builder::{PossibleValue, RangedU64ValueParser, TypedValueParser},
@@ -178,7 +178,7 @@ pub struct RpcServerArgs {
         value_parser = parse_ether_value,
         default_value = "1.0"
     )]
-    pub rpc_tx_fee_cap: U256,
+    pub rpc_tx_fee_cap: u128,
 
     /// Maximum number of blocks for `eth_simulateV1` call.
     #[arg(
@@ -445,7 +445,7 @@ mod tests {
             "--rpc.txfeecap",
             "2",
         ]).args;
-        let expected = U256::from(2_000_000_000_000_000_000u64); // 2 ETH in wei
+        let expected = 2_000_000_000_000_000_000u128; // 2 ETH in wei
         assert_eq!(args.rpc_tx_fee_cap, expected);
     }
 
@@ -456,7 +456,7 @@ mod tests {
             "--rpc.txfeecap",
             "1.5",
         ]).args;
-        let expected = U256::from(1_500_000_000_000_000_000u64); // 1.5 ETH in wei
+        let expected = 1_500_000_000_000_000_000u128; // 1.5 ETH in wei
         assert_eq!(args.rpc_tx_fee_cap, expected);
     }
 
@@ -467,7 +467,7 @@ mod tests {
             "--rpc.txfeecap",
             "0",
         ]).args;
-        assert_eq!(args.rpc_tx_fee_cap, U256::from(0)); // 0 = no cap
+        assert_eq!(args.rpc_tx_fee_cap, 0); // 0 = no cap
     }
 
     #[test]
@@ -475,7 +475,7 @@ mod tests {
         let args = CommandParser::<RpcServerArgs>::parse_from([
             "reth"
         ]).args;
-        let expected = U256::from(1_000_000_000_000_000_000u64);
+        let expected = 1_000_000_000_000_000_000u128;
         assert_eq!(args.rpc_tx_fee_cap, expected); // 1 ETH default cap
     }
 }

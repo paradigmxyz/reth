@@ -1,5 +1,5 @@
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{B256, U256};
+use alloy_primitives::{B256};
 use reth_fs_util::FsPathError;
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs},
@@ -97,13 +97,13 @@ pub fn read_json_from_file<T: serde::de::DeserializeOwned>(path: &str) -> Result
 /// # Examples
 /// - "1.05" -> 1.05 ETH = 1.05 * 10^18 wei
 /// - "2" -> 2 ETH = 2 * 10^18 wei
-pub fn parse_ether_value(value: &str) -> eyre::Result<U256> {
+pub fn parse_ether_value(value: &str) -> eyre::Result<u128> {
     let eth = value.parse::<f64>()?;
     if eth.is_sign_negative() {
         return Err(eyre::eyre!("Ether value cannot be negative"))
     }
     let wei = eth * 1e18;
-    Ok(U256::from(wei as u128))
+    Ok(wei as u128)
 }
 
 #[cfg(test)]
@@ -153,15 +153,15 @@ mod tests {
     fn parse_ether_values() {
         // Test basic decimal value
         let wei = parse_ether_value("1.05").unwrap();
-        assert_eq!(wei, U256::from(1_050_000_000_000_000_000u64));
+        assert_eq!(wei, 1_050_000_000_000_000_000u128);
 
         // Test integer value
         let wei = parse_ether_value("2").unwrap();
-        assert_eq!(wei, U256::from(2_000_000_000_000_000_000u64));
+        assert_eq!(wei, 2_000_000_000_000_000_000u128);
 
         // Test zero
         let wei = parse_ether_value("0").unwrap();
-        assert_eq!(wei, U256::from(0));
+        assert_eq!(wei, 0);
 
         // Test negative value fails
         assert!(parse_ether_value("-1").is_err());
