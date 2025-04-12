@@ -16,8 +16,9 @@ use reth_cli_util::get_secret_key;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_exex::ExExContext;
 use reth_network::{
-    transactions::TransactionsManagerConfig, NetworkBuilder, NetworkConfig, NetworkConfigBuilder,
-    NetworkHandle, NetworkManager, NetworkPrimitives,
+    transactions::{TransactionPropagationPolicy, TransactionsManagerConfig},
+    NetworkBuilder, NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
+    NetworkPrimitives,
 };
 use reth_node_api::{
     FullNodePrimitives, FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes,
@@ -677,20 +678,26 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
             + 'static,
         Node::Provider: BlockReaderFor<N>,
     {
-        self.start_network_with(builder, pool, Default::default())
+        self.start_network_with(
+            builder,
+            pool,
+            self.config().network.transactions_manager_config(),
+            self.config().network.tx_propagation_policy,
+        )
     }
 
     /// Convenience function to start the network tasks.
     ///
-    /// Accepts the config for the transaction task.
+    /// Accepts the config for the transaction task and the policy for propagation.
     ///
     /// Spawns the configured network and associated tasks and returns the [`NetworkHandle`]
     /// connected to that network.
-    pub fn start_network_with<Pool, N>(
+    pub fn start_network_with<Pool, N, Policy>(
         &self,
         builder: NetworkBuilder<(), (), N>,
         pool: Pool,
         tx_config: TransactionsManagerConfig,
+        propagation_policy: Policy,
     ) -> NetworkHandle<N>
     where
         N: NetworkPrimitives,
@@ -702,9 +709,10 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
             > + Unpin
             + 'static,
         Node::Provider: BlockReaderFor<N>,
+        Policy: TransactionPropagationPolicy,
     {
         let (handle, network, txpool, eth) = builder
-            .transactions(pool, tx_config)
+            .transactions_with_policy(pool, tx_config, propagation_policy)
             .request_handler(self.provider().clone())
             .split_with_handle();
 

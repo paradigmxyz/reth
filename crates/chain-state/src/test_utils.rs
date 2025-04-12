@@ -13,7 +13,7 @@ use alloy_primitives::{Address, BlockNumber, B256, U256};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
 use core::marker::PhantomData;
-use rand::{thread_rng, Rng};
+use rand::Rng;
 use reth_chainspec::{ChainSpec, EthereumHardfork, MIN_TRANSACTION_GAS};
 use reth_ethereum_primitives::{
     Block, BlockBody, EthPrimitives, Receipt, Transaction, TransactionSigned,
@@ -96,7 +96,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         number: BlockNumber,
         parent_hash: B256,
     ) -> RecoveredBlock<reth_ethereum_primitives::Block> {
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
 
         let mock_tx = |nonce: u64| -> Recovered<_> {
             let tx = Transaction::Eip1559(TxEip1559 {
@@ -114,7 +114,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             TransactionSigned::new_unhashed(tx, signature).with_signer(self.signer)
         };
 
-        let num_txs = rng.gen_range(0..5);
+        let num_txs = rng.random_range(0..5);
         let signer_balance_decrease = Self::single_tx_cost() * U256::from(num_txs);
         let transactions: Vec<Recovered<_>> = (0..num_txs)
             .map(|_| {
@@ -232,7 +232,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         receipts: Vec<Vec<Receipt>>,
         parent_hash: B256,
     ) -> ExecutedBlockWithTrieUpdates {
-        let number = rand::thread_rng().gen::<u64>();
+        let number = rand::rng().random::<u64>();
         self.get_executed_block(number, receipts, parent_hash)
     }
 

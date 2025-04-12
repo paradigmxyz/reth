@@ -7,7 +7,7 @@ use alloy_primitives::{
 
 use alloy_consensus::Header;
 use alloy_eips::eip4895::{Withdrawal, Withdrawals};
-use alloy_primitives::PrimitiveSignature as Signature;
+use alloy_primitives::Signature;
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices, tables};
 use reth_ethereum_primitives::{BlockBody, Receipt, Transaction, TransactionSigned, TxType};
 use reth_node_types::NodeTypes;
