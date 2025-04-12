@@ -65,12 +65,12 @@ impl<S, N> EthSnapStream<S, N>
 where
     N: NetworkPrimitives,
 {
-    /// Create a new ETH+SNAP protocol stream
+    /// Create a new eth and snap protocol stream
     pub fn new(stream: S, eth_version: EthVersion) -> Self {
         Self { eth_snap: EthSnapStreamInner::new(eth_version), inner: stream }
     }
 
-    /// Returns the ETH version
+    /// Returns the eth version
     #[inline]
     pub const fn eth_version(&self) -> EthVersion {
         self.eth_snap.eth_version()
@@ -148,7 +148,9 @@ where
     }
 }
 
-/// Stream Handling combined ETH+SNAP protocol logic
+/// Stream handling combined eth and snap protocol logic
+/// Snap version is not critical to specify yet, 
+/// Only one version, snap/1, does exist.
 #[derive(Debug, Clone)]
 struct EthSnapStreamInner<N> {
     /// ETH protocol version
@@ -161,7 +163,7 @@ impl<N> EthSnapStreamInner<N>
 where
     N: NetworkPrimitives,
 {
-    /// Create a new ETH+SNAP protocol stream
+    /// Create a new eth and snap protocol stream
     const fn new(eth_version: EthVersion) -> Self {
         Self { eth_version, _pd: PhantomData }
     }
@@ -171,6 +173,8 @@ where
         self.eth_version
     }
 
+
+    /// Decode a message from the stream
     fn decode_message(&self, bytes: BytesMut) -> Result<EthSnapMessage<N>, EthSnapStreamError> {
         if bytes.len() > MAX_MESSAGE_SIZE {
             return Err(EthSnapStreamError::MessageTooLarge(bytes.len(), MAX_MESSAGE_SIZE));
@@ -207,6 +211,7 @@ where
         }
     }
 
+    /// Encode an eth message
     fn encode_eth_message(&self, item: EthMessage<N>) -> Result<Bytes, EthSnapStreamError> {
         if matches!(item, EthMessage::Status(_)) {
             return Err(EthSnapStreamError::StatusNotInHandshake);
@@ -218,6 +223,7 @@ where
         Ok(Bytes::from(buf))
     }
 
+    /// Encode an snap message
     fn encode_snap_message(&self, message: SnapProtocolMessage) -> Bytes {
         message.encode().into()
     }
