@@ -9,9 +9,10 @@ use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types_debug::ExecutionWitness;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_chainspec::ChainSpec;
+use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_evm_ethereum::execute::EthExecutorProvider;
-use reth_primitives::{BlockBody, RecoveredBlock, SealedBlock, TransactionSigned};
+use reth_primitives_traits::{RecoveredBlock, SealedBlock};
 use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockHashReader, BlockWriter,
     DBProvider, DatabaseProviderFactory, ExecutionOutcome, HashingWriter, HeaderProvider,
@@ -117,9 +118,9 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
         .unwrap();
 
     // Insert the genesis block and the initial test state into the provider
-    let genesis_block = SealedBlock::<reth_primitives::Block>::from_sealed_parts(
+    let genesis_block = SealedBlock::<Block<TransactionSigned>>::from_sealed_parts(
         case.genesis_block_header.clone().into(),
-        BlockBody::default(),
+        Default::default(),
     )
     .try_recover()
     .unwrap();
@@ -131,7 +132,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     let mut blocks_with_genesis = Vec::with_capacity(case.blocks.len() + 1);
     blocks_with_genesis.push(genesis_block);
     for block in &case.blocks {
-        let decoded = SealedBlock::<reth_primitives::Block>::decode(&mut block.rlp.as_ref())?;
+        let decoded = SealedBlock::<Block<TransactionSigned>>::decode(&mut block.rlp.as_ref())?;
         let recovered_block = decoded.clone().try_recover().unwrap();
 
         provider.insert_block(recovered_block.clone(), StorageLocation::Database)?;
@@ -183,7 +184,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
 
 fn execute_blocks<
     Provider: DBProvider
-        + StateWriter<Receipt = reth_primitives::Receipt>
+        + StateWriter<Receipt = Receipt>
         + BlockHashReader
         + HeaderProvider
         + StateCommitmentProvider,
