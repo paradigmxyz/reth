@@ -1982,9 +1982,7 @@ mod tests {
     };
     use secp256k1::SecretKey;
     use std::{
-        fmt,
         future::poll_fn,
-        hash,
         net::{IpAddr, Ipv4Addr, SocketAddr},
         str::FromStr,
     };
@@ -2016,8 +2014,33 @@ mod tests {
         (transactions, network)
     }
 
-    pub(super) fn default_cache<T: hash::Hash + Eq + fmt::Debug>() -> LruCache<T> {
-        LruCache::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS as u32)
+    pub(super) fn buffer_hash_to_tx_fetcher(
+        tx_fetcher: &mut TransactionFetcher,
+        hash: TxHash,
+        peer_id: PeerId,
+        retries: u8,
+        tx_encoded_length: Option<usize>,
+    ) {
+        match tx_fetcher.hashes_fetch_inflight_and_pending_fetch.get_or_insert(hash, || {
+            TxFetchMetadata::new(
+                retries,
+                LruCache::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS as u32),
+                tx_encoded_length,
+            )
+        }) {
+            Some(metadata) => {
+                metadata.fallback_peers_mut().insert(peer_id);
+            }
+            None => {
+                trace!(target: "net::tx",
+                        peer_id=format!("{peer_id:#}"),
+                        %hash,
+                        "failed to insert hash from peer in schnellru::LruMap, dropping hash"
+                )
+            }
+        }
+
+        tx_fetcher.hashes_pending_fetch.insert(hash);
     }
 
     // Returns (peer, channel-to-send-get-pooled-tx-response-on).
@@ -2503,20 +2526,8 @@ mod tests {
         peer_1.seen_transactions.insert(txs_hashes[1]);
         tx_manager.peers.insert(peer_id_1, peer_1);
 
-        let mut backups = default_cache();
-        backups.insert(peer_id_1);
-
-        let mut backups1 = default_cache();
-        backups1.insert(peer_id_1);
-
-        tx_fetcher
-            .hashes_fetch_inflight_and_pending_fetch
-            .insert(txs_hashes[0], TxFetchMetadata::new(1, backups, None));
-        tx_fetcher
-            .hashes_fetch_inflight_and_pending_fetch
-            .insert(txs_hashes[1], TxFetchMetadata::new(1, backups1, None));
-        tx_fetcher.hashes_pending_fetch.insert(txs_hashes[0]);
-        tx_fetcher.hashes_pending_fetch.insert(txs_hashes[1]);
+        buffer_hash_to_tx_fetcher(tx_fetcher, txs_hashes[0], peer_id_1, 0, None);
+        buffer_hash_to_tx_fetcher(tx_fetcher, txs_hashes[1], peer_id_1, 0, None);
 
         // peer_1 is idle
         assert!(tx_fetcher.is_idle(&peer_id_1));
@@ -2525,7 +2536,7 @@ mod tests {
         // sends requests for buffered hashes to peer_1
         tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers, |_| true);
 
-        assert!(tx_fetcher.hashes_pending_fetch.is_empty());
+        assert_eq!(tx_fetcher.num_pending_hashes(), 0);
         // as long as request is in flight peer_1 is not idle
         assert!(!tx_fetcher.is_idle(&peer_id_1));
         assert_eq!(tx_fetcher.active_peers.len(), 1);
@@ -2557,7 +2568,7 @@ mod tests {
         assert!(tx_fetcher.is_idle(&peer_id));
         assert_eq!(tx_fetcher.active_peers.len(), 0);
         // failing peer_1's request buffers requested hashes for retry.
-        assert_eq!(tx_fetcher.hashes_pending_fetch.len(), 1);
+        assert_eq!(tx_fetcher.num_pending_hashes(), 1);
     }
 
     #[tokio::test]
@@ -2582,19 +2593,8 @@ mod tests {
         // hashes are seen and currently not inflight, with one fallback peer, and are buffered
         // for first retry in reverse order to make index 0 lru
         let retries = 1;
-        let mut backups = default_cache();
-        backups.insert(peer_id_1);
-
-        let mut backups1 = default_cache();
-        backups1.insert(peer_id_1);
-        tx_fetcher
-            .hashes_fetch_inflight_and_pending_fetch
-            .insert(seen_hashes[1], TxFetchMetadata::new(retries, backups, None));
-        tx_fetcher
-            .hashes_fetch_inflight_and_pending_fetch
-            .insert(seen_hashes[0], TxFetchMetadata::new(retries, backups1, None));
-        tx_fetcher.hashes_pending_fetch.insert(seen_hashes[1]);
-        tx_fetcher.hashes_pending_fetch.insert(seen_hashes[0]);
+        buffer_hash_to_tx_fetcher(tx_fetcher, seen_hashes[1], peer_id_1, retries, None);
+        buffer_hash_to_tx_fetcher(tx_fetcher, seen_hashes[0], peer_id_1, retries, None);
 
         // peer_1 is idle
         assert!(tx_fetcher.is_idle(&peer_id_1));
@@ -2605,7 +2605,7 @@ mod tests {
 
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 
-        assert!(tx_fetcher.hashes_pending_fetch.is_empty());
+        assert_eq!(tx_fetcher.num_pending_hashes(), 0);
         // as long as request is in inflight peer_1 is not idle
         assert!(!tx_fetcher.is_idle(&peer_id_1));
         assert_eq!(tx_fetcher.active_peers.len(), 1);
@@ -2634,7 +2634,7 @@ mod tests {
         assert!(tx_fetcher.is_idle(&peer_id));
         assert_eq!(tx_fetcher.active_peers.len(), 0);
         // failing peer_1's request buffers requested hashes for retry
-        assert_eq!(tx_fetcher.hashes_pending_fetch.len(), 2);
+        assert_eq!(tx_fetcher.num_pending_hashes(), 2);
 
         let (peer_2, mut to_mock_session_rx) = new_mock_session(peer_id_2, eth_version);
         tx_manager.peers.insert(peer_id_2, peer_2);
@@ -2650,9 +2650,9 @@ mod tests {
         assert_eq!(tx_fetcher.active_peers.len(), 1);
 
         // since hashes are already seen, no changes to length of unknown hashes
-        assert_eq!(tx_fetcher.hashes_fetch_inflight_and_pending_fetch.len(), 2);
+        assert_eq!(tx_fetcher.num_all_hashes(), 2);
         // but hashes are taken out of buffer and packed into request to peer_2
-        assert!(tx_fetcher.hashes_pending_fetch.is_empty());
+        assert_eq!(tx_fetcher.num_pending_hashes(), 0);
 
         // mock session of peer_2 receives request
         let req = to_mock_session_rx
@@ -2669,7 +2669,7 @@ mod tests {
 
         // `MAX_REQUEST_RETRIES_PER_TX_HASH`, 2, for hashes reached so this time won't be buffered
         // for retry
-        assert!(tx_fetcher.hashes_pending_fetch.is_empty());
+        assert_eq!(tx_fetcher.num_pending_hashes(), 0);
         assert_eq!(tx_fetcher.active_peers.len(), 0);
     }
 
