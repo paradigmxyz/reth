@@ -72,7 +72,7 @@ pub trait SignedTransaction:
     /// value_.
     ///
     /// Returns `RecoveryError` if the transaction's signature is invalid, see also
-    /// `reth_primitives::transaction::recover_signer_unchecked`.
+    /// `reth_primitive_traits::crypto::secp256k1::recover_signer_unchecked`.
     fn recover_signer_unchecked(&self) -> Result<Address, RecoveryError> {
         self.recover_signer_unchecked_with_buf(&mut Vec::new())
     }
