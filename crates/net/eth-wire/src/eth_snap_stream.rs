@@ -149,7 +149,7 @@ where
 }
 
 /// Stream handling combined eth and snap protocol logic
-/// Snap version is not critical to specify yet, 
+/// Snap version is not critical to specify yet,
 /// Only one version, snap/1, does exist.
 #[derive(Debug, Clone)]
 struct EthSnapStreamInner<N> {
@@ -172,7 +172,6 @@ where
     const fn eth_version(&self) -> EthVersion {
         self.eth_version
     }
-
 
     /// Decode a message from the stream
     fn decode_message(&self, bytes: BytesMut) -> Result<EthSnapMessage<N>, EthSnapStreamError> {
