@@ -46,12 +46,12 @@ impl<T> RpcNodeCore for T
 where
     T: FullNodeComponents,
 {
-    type Primitives = PrimitivesTy<T::Types>;
+    type Primitives = PrimitivesTy<T>;
     type Provider = T::Provider;
     type Pool = T::Pool;
     type Evm = T::Evm;
     type Network = T::Network;
-    type PayloadBuilder = PayloadBuilderHandle<<T::Types as NodeTypes>::Payload>;
+    type PayloadBuilder = PayloadBuilderHandle<<T as NodeTypes>::Payload>;
 
     #[inline]
     fn pool(&self) -> &Self::Pool {

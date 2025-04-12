@@ -34,7 +34,7 @@ impl<L> DebugNodeLauncher<L> {
 
 impl<L, Target, N, AddOns> LaunchNode<Target> for DebugNodeLauncher<L>
 where
-    N: FullNodeComponents<Types: DebugNode<N>>,
+    N: FullNodeComponents + DebugNode<N>,
     AddOns: RethRpcAddOns<N>,
     L: LaunchNode<Target, Node = NodeHandle<N, AddOns>>,
 {
@@ -65,7 +65,7 @@ where
                         "etherscan api key not found for rpc consensus client for chain: {chain}"
                     )
                 })?,
-                N::Types::rpc_to_primitive_block,
+                N::rpc_to_primitive_block,
             );
             let rpc_consensus_client = DebugConsensusClient::new(
                 handle.node.add_ons_handle.beacon_engine_handle.clone(),

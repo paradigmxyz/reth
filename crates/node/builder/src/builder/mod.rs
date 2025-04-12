@@ -409,7 +409,7 @@ where
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>,
 {
     /// Returns a reference to the node builder's config.
-    pub const fn config(&self) -> &NodeConfig<<T::Types as NodeTypes>::ChainSpec> {
+    pub const fn config(&self) -> &NodeConfig<<T as NodeTypes>::ChainSpec> {
         &self.builder.config
     }
 
@@ -567,7 +567,7 @@ where
         self,
     ) -> eyre::Result<<DebugNodeLauncher as LaunchNode<NodeBuilderWithComponents<T, CB, AO>>>::Node>
     where
-        T::Types: DebugNode<NodeAdapter<T, CB::Components>>,
+        T: DebugNode<NodeAdapter<T, CB::Components>>,
         DebugNodeLauncher: LaunchNode<NodeBuilderWithComponents<T, CB, AO>>,
     {
         let Self { builder, task_executor } = self;
@@ -592,7 +592,7 @@ pub struct BuilderContext<Node: FullNodeTypes> {
     /// The executor of the node.
     pub(crate) executor: TaskExecutor,
     /// Config container
-    pub(crate) config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
+    pub(crate) config_container: WithConfigs<<Node as NodeTypes>::ChainSpec>,
 }
 
 impl<Node: FullNodeTypes> BuilderContext<Node> {
@@ -601,7 +601,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         head: Head,
         provider: Node::Provider,
         executor: TaskExecutor,
-        config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
+        config_container: WithConfigs<<Node as NodeTypes>::ChainSpec>,
     ) -> Self {
         Self { head, provider, executor, config_container }
     }
@@ -617,7 +617,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     }
 
     /// Returns the config of the node.
-    pub const fn config(&self) -> &NodeConfig<<Node::Types as NodeTypes>::ChainSpec> {
+    pub const fn config(&self) -> &NodeConfig<<Node as NodeTypes>::ChainSpec> {
         &self.config_container.config
     }
 
@@ -634,7 +634,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     }
 
     /// Returns the chain spec of the node.
-    pub fn chain_spec(&self) -> Arc<<Node::Types as NodeTypes>::ChainSpec> {
+    pub fn chain_spec(&self) -> Arc<<Node as NodeTypes>::ChainSpec> {
         self.provider().chain_spec()
     }
 
@@ -759,13 +759,13 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     ) -> NetworkConfig<Node::Provider, N>
     where
         N: NetworkPrimitives,
-        Node::Types: NodeTypes<ChainSpec: Hardforks>,
+        Node: NodeTypes<ChainSpec: Hardforks>,
     {
         network_builder.build(self.provider.clone())
     }
 }
 
-impl<Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>> BuilderContext<Node> {
+impl<Node: FullNodeTypes + NodeTypes<ChainSpec: Hardforks>> BuilderContext<Node> {
     /// Creates the [`NetworkBuilder`] for the node.
     pub async fn network_builder<N>(&self) -> eyre::Result<NetworkBuilder<(), (), N>>
     where

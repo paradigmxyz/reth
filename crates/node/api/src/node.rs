@@ -9,7 +9,7 @@ use reth_engine_primitives::{BeaconConsensusEngineEvent, BeaconConsensusEngineHa
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_network_api::FullNetwork;
 use reth_node_core::node_config::NodeConfig;
-use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter, TxTy};
+use reth_node_types::{NodeTypes, NodeTypesWithDB, NodeTypesWithDBAdapter, TxTy};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
@@ -21,18 +21,36 @@ use std::{fmt::Debug, future::Future, marker::PhantomData};
 /// components to the node.
 ///
 /// Its types are configured by node internally and are not intended to be user configurable.
-pub trait FullNodeTypes: Clone + Debug + Send + Sync + Unpin + 'static {
-    /// Node's types with the database.
-    type Types: NodeTypes;
-    /// Underlying database type used by the node to store and retrieve data.
-    type DB: Database + DatabaseMetrics + Clone + Unpin + 'static;
+pub trait FullNodeTypes: NodeTypesWithDB + Clone + Debug + Send + Sync + Unpin + 'static {
     /// The provider type used to interact with the node.
-    type Provider: FullProvider<NodeTypesWithDBAdapter<Self::Types, Self::DB>>;
+    type Provider: FullProvider<Self>;
 }
 
 /// An adapter type that adds the builtin provider type to the user configured node types.
 #[derive(Clone, Debug)]
 pub struct FullNodeTypesAdapter<Types, DB, Provider>(PhantomData<(Types, DB, Provider)>);
+
+impl<Types, DB, Provider> NodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
+where
+    Types: NodeTypes,
+    DB: Debug + Clone + Unpin + Send + Sync + 'static,
+    Provider: Debug + Clone + Unpin + Send + Sync + 'static,
+{
+    type Primitives = <Types as NodeTypes>::Primitives;
+    type StateCommitment = <Types as NodeTypes>::StateCommitment;
+    type ChainSpec = <Types as NodeTypes>::ChainSpec;
+    type Storage = <Types as NodeTypes>::Storage;
+    type Payload = <Types as NodeTypes>::Payload;
+}
+
+impl<Types, DB, Provider> NodeTypesWithDB for FullNodeTypesAdapter<Types, DB, Provider>
+where
+    Types: NodeTypes,
+    DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
+    Provider: Debug + Clone + Unpin + Send + Sync + 'static,
+{
+    type DB = DB;
+}
 
 impl<Types, DB, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
 where
@@ -40,8 +58,6 @@ where
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
     Provider: FullProvider<NodeTypesWithDBAdapter<Types, DB>>,
 {
-    type Types = Types;
-    type DB = DB;
     type Provider = Provider;
 }
 
@@ -65,16 +81,16 @@ impl<T, N: NodeTypes> PayloadBuilderFor<N> for T where
 /// Encapsulates all types and components of the node.
 pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     /// The transaction pool of the node.
-    type Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Types>>> + Unpin;
+    type Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self>>> + Unpin;
 
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
-    type Evm: ConfigureEvm<Primitives = <Self::Types as NodeTypes>::Primitives>;
+    type Evm: ConfigureEvm<Primitives = <Self as NodeTypes>::Primitives>;
 
     /// The type that knows how to execute blocks.
-    type Executor: BlockExecutorProvider<Primitives = <Self::Types as NodeTypes>::Primitives>;
+    type Executor: BlockExecutorProvider<Primitives = <Self as NodeTypes>::Primitives>;
 
     /// The consensus type of the node.
-    type Consensus: FullConsensus<<Self::Types as NodeTypes>::Primitives, Error = ConsensusError>
+    type Consensus: FullConsensus<<Self as NodeTypes>::Primitives, Error = ConsensusError>
         + Clone
         + Unpin
         + 'static;
@@ -99,7 +115,7 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
 
     /// Returns the handle to the payload builder service handling payload building requests from
     /// the engine.
-    fn payload_builder_handle(&self) -> &PayloadBuilderHandle<<Self::Types as NodeTypes>::Payload>;
+    fn payload_builder_handle(&self) -> &PayloadBuilderHandle<<Self as NodeTypes>::Payload>;
 
     /// Returns the provider of the node.
     fn provider(&self) -> &Self::Provider;
@@ -114,11 +130,11 @@ pub struct AddOnsContext<'a, N: FullNodeComponents> {
     /// Node with all configured components.
     pub node: N,
     /// Node configuration.
-    pub config: &'a NodeConfig<<N::Types as NodeTypes>::ChainSpec>,
+    pub config: &'a NodeConfig<<N as NodeTypes>::ChainSpec>,
     /// Handle to the beacon consensus engine.
-    pub beacon_engine_handle: BeaconConsensusEngineHandle<<N::Types as NodeTypes>::Payload>,
+    pub beacon_engine_handle: BeaconConsensusEngineHandle<<N as NodeTypes>::Payload>,
     /// Notification channel for engine API events
-    pub engine_events: EventSender<BeaconConsensusEngineEvent<<N::Types as NodeTypes>::Primitives>>,
+    pub engine_events: EventSender<BeaconConsensusEngineEvent<<N as NodeTypes>::Primitives>>,
     /// JWT secret for the node.
     pub jwt_secret: JwtSecret,
 }

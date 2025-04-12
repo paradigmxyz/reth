@@ -16,7 +16,7 @@ pub struct ExExContext<Node: FullNodeComponents> {
     /// The current head of the blockchain at launch.
     pub head: BlockNumHash,
     /// The config of the node
-    pub config: NodeConfig<<Node::Types as NodeTypes>::ChainSpec>,
+    pub config: NodeConfig<<Node as NodeTypes>::ChainSpec>,
     /// The loaded node config
     pub reth_config: reth_config::Config,
     /// Channel used to send [`ExExEvent`]s to the rest of the node.
@@ -59,21 +59,19 @@ where
 
 impl<Node> ExExContext<Node>
 where
-    Node: FullNodeComponents,
+    Node: FullNodeComponents + NodeTypes<Primitives: NodePrimitives>,
     Node::Provider: Debug + BlockReader,
     Node::Executor: Debug,
-    Node::Types: NodeTypes<Primitives: NodePrimitives>,
 {
     /// Returns dynamic version of the context
-    pub fn into_dyn(self) -> ExExContextDyn<PrimitivesTy<Node::Types>> {
+    pub fn into_dyn(self) -> ExExContextDyn<PrimitivesTy<Node>> {
         ExExContextDyn::from(self)
     }
 }
 
 impl<Node> ExExContext<Node>
 where
-    Node: FullNodeComponents,
-    Node::Types: NodeTypes<Primitives: NodePrimitives>,
+    Node: FullNodeComponents + NodeTypes<Primitives: NodePrimitives>,
 {
     /// Returns the transaction pool of the node.
     pub fn pool(&self) -> &Node::Pool {
@@ -101,9 +99,7 @@ where
     }
 
     /// Returns the handle to the payload builder service.
-    pub fn payload_builder_handle(
-        &self,
-    ) -> &PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload> {
+    pub fn payload_builder_handle(&self) -> &PayloadBuilderHandle<<Node as NodeTypes>::Payload> {
         self.components.payload_builder_handle()
     }
 

@@ -307,9 +307,9 @@ where
         Node,
         PoolB::Pool,
         Primitives: NetworkPrimitives<
-            BlockHeader = HeaderTy<Node::Types>,
-            BlockBody = BodyTy<Node::Types>,
-            Block = BlockTy<Node::Types>,
+            BlockHeader = HeaderTy<Node>,
+            BlockBody = BodyTy<Node>,
+            Block = BlockTy<Node>,
         >,
     >,
     PayloadB: PayloadServiceBuilder<Node, PoolB::Pool>,
@@ -392,20 +392,17 @@ pub trait NodeComponentsBuilder<Node: FullNodeTypes>: Send {
 impl<Node, N, F, Fut, Pool, EVM, Executor, Cons> NodeComponentsBuilder<Node> for F
 where
     N: NetworkPrimitives<
-        BlockHeader = HeaderTy<Node::Types>,
-        BlockBody = BodyTy<Node::Types>,
-        Block = BlockTy<Node::Types>,
+        BlockHeader = HeaderTy<Node>,
+        BlockBody = BodyTy<Node>,
+        Block = BlockTy<Node>,
     >,
     Node: FullNodeTypes,
     F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
     Fut: Future<Output = eyre::Result<Components<Node, N, Pool, EVM, Executor, Cons>>> + Send,
-    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
-        + Unpin
-        + 'static,
-    EVM: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>> + 'static,
-    Executor: BlockExecutorProvider<Primitives = PrimitivesTy<Node::Types>>,
-    Cons:
-        FullConsensus<PrimitivesTy<Node::Types>, Error = ConsensusError> + Clone + Unpin + 'static,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node>>> + Unpin + 'static,
+    EVM: ConfigureEvm<Primitives = PrimitivesTy<Node>> + 'static,
+    Executor: BlockExecutorProvider<Primitives = PrimitivesTy<Node>>,
+    Cons: FullConsensus<PrimitivesTy<Node>, Error = ConsensusError> + Clone + Unpin + 'static,
 {
     type Components = Components<Node, N, Pool, EVM, Executor, Cons>;
 

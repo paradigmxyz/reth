@@ -18,8 +18,7 @@ pub trait PayloadServiceBuilder<Node: FullNodeTypes, Pool: TransactionPool>: Sen
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> impl Future<Output = eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>>>
-           + Send;
+    ) -> impl Future<Output = eyre::Result<PayloadBuilderHandle<<Node as NodeTypes>::Payload>>> + Send;
 }
 
 impl<Node, F, Fut, Pool> PayloadServiceBuilder<Node, Pool> for F
@@ -27,14 +26,13 @@ where
     Node: FullNodeTypes,
     Pool: TransactionPool,
     F: Fn(&BuilderContext<Node>, Pool) -> Fut + Send,
-    Fut: Future<Output = eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>>>
-        + Send,
+    Fut: Future<Output = eyre::Result<PayloadBuilderHandle<<Node as NodeTypes>::Payload>>> + Send,
 {
     fn spawn_payload_builder_service(
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> impl Future<Output = eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>>>
+    ) -> impl Future<Output = eyre::Result<PayloadBuilderHandle<<Node as NodeTypes>::Payload>>>
     {
         self(ctx, pool)
     }
@@ -43,7 +41,7 @@ where
 /// A type that knows how to build a payload builder to plug into [`BasicPayloadServiceBuilder`].
 pub trait PayloadBuilderBuilder<Node: FullNodeTypes, Pool: TransactionPool>: Send + Sized {
     /// Payload builder implementation.
-    type PayloadBuilder: PayloadBuilderFor<Node::Types> + Unpin + 'static;
+    type PayloadBuilder: PayloadBuilderFor<Node> + Unpin + 'static;
 
     /// Spawns the payload service and returns the handle to it.
     ///
@@ -76,7 +74,7 @@ where
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>> {
+    ) -> eyre::Result<PayloadBuilderHandle<<Node as NodeTypes>::Payload>> {
         let payload_builder = self.0.build_payload_builder(ctx, pool).await?;
 
         let conf = ctx.config().builder.clone();
