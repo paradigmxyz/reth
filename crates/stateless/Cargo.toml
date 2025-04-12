@@ -23,7 +23,7 @@ alloy-eips = { workspace = true }
 # reth
 reth-ethereum-consensus.workspace = true
 reth-primitives.workspace = true
-reth-provider.workspace = true
+reth-errors.workspace = true
 reth-evm.workspace = true
 reth-evm-ethereum.workspace = true
 reth-revm.workspace = true

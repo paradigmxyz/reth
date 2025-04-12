@@ -4,7 +4,7 @@
 use alloy_primitives::{keccak256, map::B256Map, Address, B256, U256};
 use alloy_rlp::Decodable;
 use alloy_trie::TrieAccount;
-use reth_provider::ProviderError;
+use reth_errors::ProviderError;
 use reth_revm::{bytecode::Bytecode, state::AccountInfo, Database};
 use reth_trie_sparse::SparseStateTrie;
 use std::collections::HashMap;
@@ -69,8 +69,6 @@ impl Database for WitnessDatabase<'_> {
     /// in the underlying [`SparseStateTrie`].
     ///
     /// Returns `Ok(None)` if the account is not found in the trie.
-    // TODO: This was copied from ress -- Should it not return an Error if no account was found?
-    // TODO: See the other methods.
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         let hashed_address = keccak256(address);
         trace!(target: "reth-stateless::evm", %address, %hashed_address, "retrieving account");
@@ -97,10 +95,12 @@ impl Database for WitnessDatabase<'_> {
         let hashed_address = keccak256(address);
         let hashed_slot = keccak256(slot);
         trace!(target: "reth-stateless::evm", %address, %hashed_address, %slot, %hashed_slot, "retrieving storage slot");
-        let value = match self.trie.get_storage_slot_value(&hashed_address, &hashed_slot) {
-            Some(value) => U256::decode(&mut value.as_slice())?,
-            None => U256::ZERO,
-        };
+        let value =
+            if let Some(value) = self.trie.get_storage_slot_value(&hashed_address, &hashed_slot) {
+                U256::decode(&mut value.as_slice())?
+            } else {
+                U256::ZERO
+            };
         trace!(target: "reth-stateless::evm", %address, %hashed_address, %slot, %hashed_slot, %value, "storage slot retrieved");
         Ok(value)
     }
