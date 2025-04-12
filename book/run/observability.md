@@ -26,9 +26,11 @@ We're finally getting somewhere! As a final step, though, wouldn't it be great t
 
 We're going to use Prometheus to scrape the metrics from our node, and use Grafana to on a dashboard.
 
-Let's begin by installing both Prometheus and Grafana, which one can do with e.g. Homebrew:
+Let's begin by installing both Prometheus and Grafana:
 
-<!-- TODO: Provide cross-platform guidance -->
+### macOS
+
+Using Homebrew:
 
 ```bash
 brew update
@@ -36,11 +38,61 @@ brew install prometheus
 brew install grafana
 ```
 
+### Linux
+
+#### Debian/Ubuntu
+```bash
+# Install Prometheus
+wget https://github.com/prometheus/prometheus/releases/download/v2.47.0/prometheus-2.47.0.linux-amd64.tar.gz
+tar xvfz prometheus-*.tar.gz
+cd prometheus-*
+
+# Install Grafana
+sudo apt-get install -y apt-transport-https software-properties-common
+wget -q -O - https://packages.grafana.com/gpg.key | sudo apt-key add -
+echo "deb https://packages.grafana.com/oss/deb stable main" | sudo tee -a /etc/apt/sources.list.d/grafana.list
+sudo apt-get update
+sudo apt-get install grafana
+```
+
+#### Fedora/RHEL/CentOS
+```bash
+# Install Prometheus
+wget https://github.com/prometheus/prometheus/releases/download/v2.47.0/prometheus-2.47.0.linux-amd64.tar.gz
+tar xvfz prometheus-*.tar.gz
+cd prometheus-*
+
+# Install Grafana
+sudo dnf install -y https://dl.grafana.com/oss/release/grafana-10.0.3-1.x86_64.rpm
+```
+
+### Windows
+
+#### Using Chocolatey
+```powershell
+choco install prometheus
+choco install grafana
+```
+
+#### Manual installation
+1. Download Prometheus from [prometheus.io](https://prometheus.io/download/)
+2. Download Grafana from [grafana.com](https://grafana.com/grafana/download)
+3. Extract/install both applications following their respective installation guides
+
 Then, kick off the Prometheus and Grafana services:
 
 ```bash
+# For macOS
 brew services start prometheus
 brew services start grafana
+
+# For Linux (systemd-based distributions)
+sudo systemctl start prometheus
+sudo systemctl start grafana-server
+
+# For Windows (if installed as services)
+Start-Service prometheus
+Start-Service grafana
 ```
 
 This will start a Prometheus service which [by default scrapes itself about the current instance](https://prometheus.io/docs/introduction/first_steps/#:~:text=The%20job%20contains%20a%20single,%3A%2F%2Flocalhost%3A9090%2Fmetrics.). So you'll need to change its config to hit your Reth nodes metrics endpoint at `localhost:9001` which you set using the `--metrics` flag.
