@@ -5,7 +5,7 @@ use crate::{
     EthMessage, EthNetworkPrimitives, EthVersion, NetworkPrimitives, ProtocolMessage,
     SnapMessageId, SnapProtocolMessage,
 };
-use alloy_rlp::{Bytes, BytesMut, Decodable, Encodable};
+use alloy_rlp::{Bytes, BytesMut, Encodable};
 use core::fmt::Debug;
 use futures::{Sink, SinkExt};
 use pin_project::pin_project;
@@ -198,45 +198,10 @@ where
         } else if message_id <= SnapMessageId::TrieNodes as u8 {
             let mut buf = &bytes[1..];
 
-            // Decode based on message ID
-            //TODO: need to add this decoding part to the snap module
-            let snap_msg = match message_id {
-                x if x == SnapMessageId::GetAccountRange as u8 => {
-                    let msg = crate::snap::GetAccountRangeMessage::decode(&mut buf)?;
-                    SnapProtocolMessage::GetAccountRange(msg)
-                }
-                x if x == SnapMessageId::AccountRange as u8 => {
-                    let msg = crate::snap::AccountRangeMessage::decode(&mut buf)?;
-                    SnapProtocolMessage::AccountRange(msg)
-                }
-                x if x == SnapMessageId::GetStorageRanges as u8 => {
-                    let msg = crate::snap::GetStorageRangesMessage::decode(&mut buf)?;
-                    SnapProtocolMessage::GetStorageRanges(msg)
-                }
-                x if x == SnapMessageId::StorageRanges as u8 => {
-                    let msg = crate::snap::StorageRangesMessage::decode(&mut buf)?;
-                    SnapProtocolMessage::StorageRanges(msg)
-                }
-                x if x == SnapMessageId::GetByteCodes as u8 => {
-                    let msg = crate::snap::GetByteCodesMessage::decode(&mut buf)?;
-                    SnapProtocolMessage::GetByteCodes(msg)
-                }
-                x if x == SnapMessageId::ByteCodes as u8 => {
-                    let msg = crate::snap::ByteCodesMessage::decode(&mut buf)?;
-                    SnapProtocolMessage::ByteCodes(msg)
-                }
-                x if x == SnapMessageId::GetTrieNodes as u8 => {
-                    let msg = crate::snap::GetTrieNodesMessage::decode(&mut buf)?;
-                    SnapProtocolMessage::GetTrieNodes(msg)
-                }
-                x if x == SnapMessageId::TrieNodes as u8 => {
-                    let msg = crate::snap::TrieNodesMessage::decode(&mut buf)?;
-                    SnapProtocolMessage::TrieNodes(msg)
-                }
-                _ => return Err(EthSnapStreamError::UnknownMessageId(message_id)),
-            };
-
-            Ok(EthSnapMessage::Snap(snap_msg))
+            match SnapProtocolMessage::decode(message_id, &mut buf) {
+                Ok(snap_msg) => Ok(EthSnapMessage::Snap(snap_msg)),
+                Err(err) => Err(EthSnapStreamError::Rlp(err)),
+            }
         } else {
             Err(EthSnapStreamError::UnknownMessageId(message_id))
         }
@@ -253,26 +218,7 @@ where
         Ok(Bytes::from(buf))
     }
 
-    //TODO: need to add this encoding part to the snap module
     fn encode_snap_message(&self, message: SnapProtocolMessage) -> Bytes {
-        let message_id = message.message_id();
-        let mut buf = Vec::new();
-
-        // Encode the message ID as the first byte
-        buf.push(message_id as u8);
-
-        // Encode the message body
-        match message {
-            SnapProtocolMessage::GetAccountRange(msg) => msg.encode(&mut buf),
-            SnapProtocolMessage::AccountRange(msg) => msg.encode(&mut buf),
-            SnapProtocolMessage::GetStorageRanges(msg) => msg.encode(&mut buf),
-            SnapProtocolMessage::StorageRanges(msg) => msg.encode(&mut buf),
-            SnapProtocolMessage::GetByteCodes(msg) => msg.encode(&mut buf),
-            SnapProtocolMessage::ByteCodes(msg) => msg.encode(&mut buf),
-            SnapProtocolMessage::GetTrieNodes(msg) => msg.encode(&mut buf),
-            SnapProtocolMessage::TrieNodes(msg) => msg.encode(&mut buf),
-        }
-
-        Bytes::from(buf)
+        message.encode().into()
     }
 }
