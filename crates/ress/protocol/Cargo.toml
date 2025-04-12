@@ -21,6 +21,7 @@ reth-ethereum-primitives.workspace = true
 # alloy
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
+alloy-rpc-types-debug.workspace = true
 alloy-consensus.workspace = true
 
 # misc

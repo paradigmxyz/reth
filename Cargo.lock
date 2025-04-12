@@ -9392,6 +9392,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-primitives 1.0.0",
  "alloy-rlp",
+ "alloy-rpc-types-debug",
  "arbitrary",
  "futures",
  "proptest",
@@ -9417,6 +9418,8 @@ version = "1.3.8"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives 1.0.0",
+ "alloy-rlp",
+ "alloy-rpc-types-debug",
  "eyre",
  "futures",
  "parking_lot",
