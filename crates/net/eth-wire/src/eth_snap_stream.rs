@@ -203,9 +203,14 @@ where
                     Err(EthSnapStreamError::InvalidMessage(self.eth_version, err.to_string()))
                 }
             }
-        } else if message_id <= SnapMessageId::TrieNodes as u8 {
-            // Adjust `message_id`` to get the actual snap message ID
-            // by subtracting the eth message range.
+        } else if message_id > EthMessageID::max() &&
+            message_id <= EthMessageID::max() + 1 + SnapMessageId::TrieNodes as u8
+        {
+            // Checks for multiplexed snap message IDs :
+            // - message_id > EthMessageID::max() : ensures it's not an eth message
+            // - message_id <= EthMessageID::max() + 1 + snap_max : ensures it's within valid snap
+            //   range
+            // Message IDs are assigned lexicographically during capability negotiation
             // So real_snap_id = multiplexed_id - num_eth_messages
             let adjusted_message_id = message_id - (EthMessageID::max() + 1);
             let mut buf = &bytes[1..];
@@ -234,5 +239,108 @@ where
     /// Encode an snap message
     fn encode_snap_message(&self, message: SnapProtocolMessage) -> Bytes {
         message.encode().into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{EthMessage, SnapMessageId, SnapProtocolMessage};
+    use alloy_eips::BlockHashOrNumber;
+    use alloy_primitives::B256;
+    use alloy_rlp::Encodable;
+    use reth_eth_wire_types::{
+        message::RequestPair, GetAccountRangeMessage, GetBlockHeaders, HeadersDirection,
+    };
+
+    // Helper to create eth message bytes
+    fn create_eth_message_bytes() -> BytesMut {
+        let eth_msg = EthMessage::<EthNetworkPrimitives>::GetBlockHeaders(RequestPair {
+            request_id: 1,
+            message: GetBlockHeaders {
+                start_block: BlockHashOrNumber::Number(1),
+                limit: 10,
+                skip: 0,
+                direction: HeadersDirection::Rising,
+            },
+        });
+        let protocol_msg = ProtocolMessage::from(eth_msg);
+
+        let mut buf = Vec::new();
+        protocol_msg.encode(&mut buf);
+        BytesMut::from(&buf[..])
+    }
+
+    // Helper to create snap message bytes
+    fn create_snap_message_bytes() -> BytesMut {
+        let snap_msg = SnapProtocolMessage::GetAccountRange(GetAccountRangeMessage {
+            request_id: 1,
+            root_hash: B256::default(),
+            starting_hash: B256::default(),
+            limit_hash: B256::default(),
+            response_bytes: 1000,
+        });
+        let encoded = snap_msg.encode();
+
+        let adjusted_id = SnapMessageId::GetAccountRange as u8 + EthMessageID::max() + 1;
+
+        let mut adjusted = Vec::with_capacity(encoded.len());
+        adjusted.push(adjusted_id);
+        adjusted.extend_from_slice(&encoded[1..]);
+
+        BytesMut::from(&adjusted[..])
+    }
+
+    #[test]
+    fn test_decode_eth_message() {
+        let eth_bytes = create_eth_message_bytes();
+        let inner = EthSnapStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth67);
+
+        let result = inner.decode_message(eth_bytes);
+        assert!(matches!(result, Ok(EthSnapMessage::Eth(_))));
+    }
+
+    #[test]
+    fn test_encode_eth_message() {
+        let inner = EthSnapStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth67);
+
+        let eth_msg = EthMessage::<EthNetworkPrimitives>::GetBlockHeaders(RequestPair {
+            request_id: 1,
+            message: GetBlockHeaders {
+                start_block: BlockHashOrNumber::Number(1),
+                limit: 10,
+                skip: 0,
+                direction: HeadersDirection::Rising,
+            },
+        });
+
+        let result = inner.encode_eth_message(eth_msg);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_encode_snap_message() {
+        let inner = EthSnapStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth67);
+
+        let snap_msg = SnapProtocolMessage::GetAccountRange(GetAccountRangeMessage {
+            request_id: 1,
+            root_hash: B256::default(),
+            starting_hash: B256::default(),
+            limit_hash: B256::default(),
+            response_bytes: 1000,
+        });
+
+        let bytes = inner.encode_snap_message(snap_msg);
+        assert!(!bytes.is_empty());
+    }
+
+    #[test]
+    fn test_decode_snap_message() {
+        let snap_bytes = create_snap_message_bytes();
+
+        let inner = EthSnapStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth67);
+        let result = inner.decode_message(snap_bytes);
+
+        assert!(matches!(result, Ok(EthSnapMessage::Snap(_))));
     }
 }
