@@ -3,21 +3,22 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use alloy_consensus::BlockHeader as _;
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::{keccak256, Bytes, B256};
+use alloy_rlp::Encodable;
 use parking_lot::Mutex;
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, MemoryOverlayStateProvider};
 use reth_ethereum_primitives::{Block, BlockBody, EthPrimitives};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_primitives_traits::{Block as _, Header, RecoveredBlock};
 use reth_provider::{
-    BlockReader, BlockSource, ProviderError, ProviderResult, StateProvider, StateProviderFactory,
+    BlockReader, BlockSource, ProviderError, ProviderResult, StateProviderFactory,
 };
-use reth_ress_protocol::RessProtocolProvider;
+use reth_ress_protocol::{RLPExecutionWitness, RessProtocolProvider};
 use reth_revm::{database::StateProviderDatabase, db::State, witness::ExecutionWitnessRecord};
 use reth_tasks::TaskSpawner;
 use reth_trie::{MultiProofTargets, Nibbles, TrieInput};
 use schnellru::{ByLength, LruMap};
-use std::{sync::Arc, time::Instant};
+use std::{collections::HashSet, sync::Arc, time::Instant};
 use tokio::sync::{oneshot, Semaphore};
 use tracing::*;
 
@@ -35,7 +36,9 @@ pub struct RethRessProtocolProvider<P, E> {
     task_spawner: Box<dyn TaskSpawner>,
     max_witness_window: u64,
     witness_semaphore: Arc<Semaphore>,
-    witness_cache: Arc<Mutex<LruMap<B256, Arc<Vec<Bytes>>>>>,
+    witness_cache: Arc<Mutex<LruMap<B256, Arc<RLPExecutionWitness>>>>,
+    proof_semaphore: Arc<Semaphore>,
+    proof_cache: Arc<Mutex<LruMap<B256, Arc<Bytes>>>>,
     pending_state: PendingState<EthPrimitives>,
 }
 
@@ -48,6 +51,8 @@ impl<P: Clone, E: Clone> Clone for RethRessProtocolProvider<P, E> {
             max_witness_window: self.max_witness_window,
             witness_semaphore: self.witness_semaphore.clone(),
             witness_cache: self.witness_cache.clone(),
+            proof_semaphore: self.proof_semaphore.clone(),
+            proof_cache: self.proof_cache.clone(),
             pending_state: self.pending_state.clone(),
         }
     }
@@ -63,6 +68,8 @@ where
         provider: P,
         block_executor: E,
         task_spawner: Box<dyn TaskSpawner>,
+        // TODO: Add a config to save X amounts of proofs, where X is related to the
+        // TODO: reorg depth
         max_witness_window: u64,
         witness_max_parallel: usize,
         cache_size: u32,
@@ -75,6 +82,9 @@ where
             max_witness_window,
             witness_semaphore: Arc::new(Semaphore::new(witness_max_parallel)),
             witness_cache: Arc::new(Mutex::new(LruMap::new(ByLength::new(cache_size)))),
+            // TODO: Technically we should only have one proof that we are accounting for
+            proof_semaphore: Arc::new(Semaphore::new(witness_max_parallel)),
+            proof_cache: Arc::new(Mutex::new(LruMap::new(ByLength::new(cache_size)))),
             pending_state,
         })
     }
@@ -100,8 +110,20 @@ where
         Ok(maybe_block)
     }
 
+    /// Generate execution proof
+    pub fn generate_proof(&self, block_hash: B256) -> ProviderResult<Bytes> {
+        // TODO: This is just a placeholder, how the proof is created is not important
+        // TODO: right now.
+
+        let proof: Bytes = keccak256(block_hash).into();
+        // Insert proof into the cache.
+        self.proof_cache.lock().insert(block_hash, Arc::new(proof.clone()));
+
+        Ok(proof)
+    }
+
     /// Generate state witness
-    pub fn generate_witness(&self, block_hash: B256) -> ProviderResult<Vec<Bytes>> {
+    pub fn generate_witness(&self, block_hash: B256) -> ProviderResult<RLPExecutionWitness> {
         if let Some(witness) = self.witness_cache.lock().get(&block_hash).cloned() {
             return Ok(witness.as_ref().clone())
         }
@@ -174,8 +196,9 @@ where
         for block in executed_ancestors.into_iter().rev() {
             trie_input.append_cached_ref(&block.trie, &block.hashed_state);
         }
-        let mut hashed_state = db.into_state();
-        hashed_state.extend(record.hashed_state);
+        let execution_witness_record =
+            merge_execution_witness_records(db.execution_witness_record(), record);
+        let hashed_state = execution_witness_record.hashed_state;
 
         // Gather the state witness.
         let witness = if hashed_state.is_empty() {
@@ -195,10 +218,35 @@ where
             witness_state_provider.witness(trie_input, hashed_state)?
         };
 
-        // Insert witness into the cache.
-        self.witness_cache.lock().insert(block_hash, Arc::new(witness.clone()));
+        // TODO: The code below was partially copied from debug_executionWitness
+        let block_number = block.number();
+        let smallest = match execution_witness_record.lowest_block_number {
+            Some(smallest) => smallest,
+            None => {
+                // Return only the parent header, if there were no calls to the
+                // BLOCKHASH opcode.
+                block_number.saturating_sub(1)
+            }
+        };
 
-        Ok(witness)
+        let range = smallest..block_number;
+        let headers: Vec<Bytes> = self
+            .provider
+            .headers_range(range)?
+            .into_iter()
+            .map(|header| {
+                let mut serialized_header = Vec::new();
+                header.encode(&mut serialized_header);
+                serialized_header.into()
+            })
+            .collect();
+        let execution_witness =
+            RLPExecutionWitness { state: witness, codes: execution_witness_record.codes, headers };
+
+        // Insert witness into the cache.
+        self.witness_cache.lock().insert(block_hash, Arc::new(execution_witness.clone()));
+
+        Ok(execution_witness)
     }
 }
 
@@ -217,20 +265,29 @@ where
         Ok(self.block_by_hash(block_hash)?.map(|b| b.body().clone()))
     }
 
-    fn bytecode(&self, code_hash: B256) -> ProviderResult<Option<Bytes>> {
-        trace!(target: "reth::ress_provider", %code_hash, "Serving bytecode");
-        let maybe_bytecode = 'bytecode: {
-            if let Some(bytecode) = self.pending_state.find_bytecode(code_hash) {
-                break 'bytecode Some(bytecode);
+    async fn proof(&self, block_hash: B256) -> ProviderResult<Bytes> {
+        trace!(target: "reth::ress_provider", %block_hash, "Serving proof");
+        let started_at = Instant::now();
+        let _permit = self.proof_semaphore.acquire().await.map_err(ProviderError::other)?;
+        let this = self.clone();
+        let (tx, rx) = oneshot::channel();
+        self.task_spawner.spawn_blocking(Box::pin(async move {
+            let result = this.generate_proof(block_hash);
+            let _ = tx.send(result);
+        }));
+        match rx.await {
+            Ok(Ok(proof)) => {
+                trace!(target: "reth::ress_provider", %block_hash, elapsed = ?started_at.elapsed(), "Computed proof");
+                Ok(proof)
             }
-
-            self.provider.latest()?.bytecode_by_hash(&code_hash)?
-        };
-
-        Ok(maybe_bytecode.map(|bytecode| bytecode.original_bytes()))
+            Ok(Err(error)) => Err(error),
+            // TODO: We should have a ProofError. Not done in order to keep all changes in this
+            // crate TODO: for now.
+            Err(_) => Err(ProviderError::TrieWitnessError("proof dropped".to_owned())),
+        }
     }
 
-    async fn witness(&self, block_hash: B256) -> ProviderResult<Vec<Bytes>> {
+    async fn witness(&self, block_hash: B256) -> ProviderResult<RLPExecutionWitness> {
         trace!(target: "reth::ress_provider", %block_hash, "Serving witness");
         let started_at = Instant::now();
         let _permit = self.witness_semaphore.acquire().await.map_err(ProviderError::other)?;
@@ -249,4 +306,38 @@ where
             Err(_) => Err(ProviderError::TrieWitnessError("dropped".to_owned())),
         }
     }
+}
+
+// TODO: Possibly put as a method on `ExecutionWitnessRecord`
+// TODO: Leaving it here to keep the changes in the ress directory
+fn merge_execution_witness_records(
+    lhs: ExecutionWitnessRecord,
+    rhs: ExecutionWitnessRecord,
+) -> ExecutionWitnessRecord {
+    // Merge the two execution witness records
+    //
+    // Merge the hashed post state
+    let mut hashed_state = lhs.hashed_state;
+    hashed_state.extend(rhs.hashed_state);
+    //
+    // Merge bytecode
+    let codes: Vec<_> = {
+        let mut merged: HashSet<_> = lhs.codes.into_iter().collect();
+        merged.extend(rhs.codes);
+        merged.into_iter().collect()
+    };
+    // Merge lowest accessed block number
+    let lowest_block_number = {
+        let a = lhs.lowest_block_number;
+        let b = rhs.lowest_block_number;
+        match (a, b) {
+            (Some(a_val), Some(b_val)) => Some(a_val.min(b_val)),
+            // Since we know that they are either both `None` or one of them is `None`
+            // `or` will return the `Some` value or `None` if they are both `None`
+            _ => a.or(b),
+        }
+    };
+
+    // Note: We do not merge the preimages because this is not useful for us
+    ExecutionWitnessRecord { hashed_state, codes, keys: Vec::new(), lowest_block_number }
 }
