@@ -24,6 +24,7 @@ reth-tokio-util.workspace = true
 reth-node-api.workspace = true
 
 # alloy
+alloy-rlp.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 

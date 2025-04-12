@@ -9419,7 +9419,6 @@ dependencies = [
  "alloy-consensus",
  "alloy-primitives 1.0.0",
  "alloy-rlp",
- "alloy-rpc-types-debug",
  "eyre",
  "futures",
  "parking_lot",
