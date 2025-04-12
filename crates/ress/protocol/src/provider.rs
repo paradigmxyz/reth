@@ -1,4 +1,4 @@
-use crate::GetHeaders;
+use crate::{GetHeaders, RLPExecutionWitness};
 use alloy_consensus::Header;
 use alloy_primitives::{Bytes, B256};
 use alloy_rlp::Encodable;
@@ -52,9 +52,12 @@ pub trait RessProtocolProvider: Send + Sync {
         Ok(bodies)
     }
 
-    /// Return bytecode by code hash.
-    fn bytecode(&self, code_hash: B256) -> ProviderResult<Option<Bytes>>;
+    /// Return proof by block hash.
+    fn proof(&self, block_hash: B256) -> impl Future<Output = ProviderResult<Bytes>> + Send;
 
     /// Return witness by block hash.
-    fn witness(&self, block_hash: B256) -> impl Future<Output = ProviderResult<Vec<Bytes>>> + Send;
+    fn witness(
+        &self,
+        block_hash: B256,
+    ) -> impl Future<Output = ProviderResult<RLPExecutionWitness>> + Send;
 }

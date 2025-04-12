@@ -1,6 +1,6 @@
 //! Miscellaneous test utilities.
 
-use crate::RessProtocolProvider;
+use crate::{RLPExecutionWitness, RessProtocolProvider};
 use alloy_consensus::Header;
 use alloy_primitives::{map::B256HashMap, Bytes, B256};
 use reth_ethereum_primitives::BlockBody;
@@ -23,12 +23,12 @@ impl RessProtocolProvider for NoopRessProtocolProvider {
         Ok(None)
     }
 
-    fn bytecode(&self, _code_hash: B256) -> ProviderResult<Option<Bytes>> {
-        Ok(None)
+    async fn proof(&self, _block_hash: B256) -> ProviderResult<Bytes> {
+        Ok(Bytes::new())
     }
 
-    async fn witness(&self, _block_hash: B256) -> ProviderResult<Vec<Bytes>> {
-        Ok(Vec::new())
+    async fn witness(&self, _block_hash: B256) -> ProviderResult<RLPExecutionWitness> {
+        Ok(Default::default())
     }
 }
 
@@ -37,8 +37,8 @@ impl RessProtocolProvider for NoopRessProtocolProvider {
 pub struct MockRessProtocolProvider {
     headers: Arc<Mutex<B256HashMap<Header>>>,
     block_bodies: Arc<Mutex<B256HashMap<BlockBody>>>,
-    bytecodes: Arc<Mutex<B256HashMap<Bytes>>>,
-    witnesses: Arc<Mutex<B256HashMap<Vec<Bytes>>>>,
+    proofs: Arc<Mutex<B256HashMap<Bytes>>>,
+    witnesses: Arc<Mutex<B256HashMap<RLPExecutionWitness>>>,
     witness_delay: Option<Duration>,
 }
 
@@ -69,23 +69,26 @@ impl MockRessProtocolProvider {
         self.block_bodies.lock().unwrap().extend(bodies);
     }
 
-    /// Insert bytecode.
-    pub fn add_bytecode(&self, code_hash: B256, bytecode: Bytes) {
-        self.bytecodes.lock().unwrap().insert(code_hash, bytecode);
+    /// Insert proof.
+    pub fn add_proof(&self, block_hash: B256, proof: Bytes) {
+        self.proofs.lock().unwrap().insert(block_hash, proof);
     }
 
-    /// Extend bytecodes from iterator.
-    pub fn extend_bytecodes(&self, bytecodes: impl IntoIterator<Item = (B256, Bytes)>) {
-        self.bytecodes.lock().unwrap().extend(bytecodes);
+    /// Extend proofs from iterator.
+    pub fn extend_proofs(&self, proofs: impl IntoIterator<Item = (B256, Bytes)>) {
+        self.proofs.lock().unwrap().extend(proofs);
     }
 
     /// Insert witness.
-    pub fn add_witness(&self, block_hash: B256, witness: Vec<Bytes>) {
+    pub fn add_witness(&self, block_hash: B256, witness: RLPExecutionWitness) {
         self.witnesses.lock().unwrap().insert(block_hash, witness);
     }
 
     /// Extend witnesses from iterator.
-    pub fn extend_witnesses(&self, witnesses: impl IntoIterator<Item = (B256, Vec<Bytes>)>) {
+    pub fn extend_witnesses(
+        &self,
+        witnesses: impl IntoIterator<Item = (B256, RLPExecutionWitness)>,
+    ) {
         self.witnesses.lock().unwrap().extend(witnesses);
     }
 }
@@ -99,11 +102,11 @@ impl RessProtocolProvider for MockRessProtocolProvider {
         Ok(self.block_bodies.lock().unwrap().get(&block_hash).cloned())
     }
 
-    fn bytecode(&self, code_hash: B256) -> ProviderResult<Option<Bytes>> {
-        Ok(self.bytecodes.lock().unwrap().get(&code_hash).cloned())
+    async fn proof(&self, block_hash: B256) -> ProviderResult<Bytes> {
+        Ok(self.proofs.lock().unwrap().get(&block_hash).cloned().unwrap_or_default())
     }
 
-    async fn witness(&self, block_hash: B256) -> ProviderResult<Vec<Bytes>> {
+    async fn witness(&self, block_hash: B256) -> ProviderResult<RLPExecutionWitness> {
         if let Some(delay) = self.witness_delay {
             tokio::time::sleep(delay).await;
         }

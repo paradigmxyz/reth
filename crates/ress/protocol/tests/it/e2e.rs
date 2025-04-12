@@ -8,7 +8,8 @@ use reth_network_api::{
 use reth_provider::test_utils::MockEthProvider;
 use reth_ress_protocol::{
     test_utils::{MockRessProtocolProvider, NoopRessProtocolProvider},
-    GetHeaders, NodeType, ProtocolEvent, ProtocolState, RessPeerRequest, RessProtocolHandler,
+    GetHeaders, NodeType, ProtocolEvent, ProtocolState, RLPExecutionWitness, RessPeerRequest,
+    RessProtocolHandler,
 };
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot};
@@ -150,11 +151,11 @@ async fn message_exchange() {
     // send get witness message from peer0 to peer1
     let (tx, rx) = oneshot::channel();
     peer0_conn.send(RessPeerRequest::GetWitness { block_hash: B256::ZERO, tx }).unwrap();
-    assert_eq!(rx.await.unwrap(), Vec::<Bytes>::new());
+    assert_eq!(rx.await.unwrap(), RLPExecutionWitness::default());
 
-    // send get bytecode message from peer0 to peer1
+    // send get proof message from peer0 to peer1
     let (tx, rx) = oneshot::channel();
-    peer0_conn.send(RessPeerRequest::GetBytecode { code_hash: B256::ZERO, tx }).unwrap();
+    peer0_conn.send(RessPeerRequest::GetProof { block_hash: B256::ZERO, tx }).unwrap();
     assert_eq!(rx.await.unwrap(), Bytes::default());
 }
 
@@ -218,15 +219,15 @@ async fn witness_fetching_does_not_block() {
         .send(RessPeerRequest::GetWitness { block_hash: B256::ZERO, tx: witness_tx })
         .unwrap();
 
-    // send get bytecode message from peer0 to peer1
-    let bytecode_requested_at = Instant::now();
+    // send get proof message from peer0 to peer1
+    let proof_requested_at = Instant::now();
     let (tx, rx) = oneshot::channel();
-    peer0_conn.send(RessPeerRequest::GetBytecode { code_hash: B256::ZERO, tx }).unwrap();
+    peer0_conn.send(RessPeerRequest::GetProof { block_hash: B256::ZERO, tx }).unwrap();
     assert_eq!(rx.await.unwrap(), Bytes::default());
-    assert!(bytecode_requested_at.elapsed() < witness_delay);
+    assert!(proof_requested_at.elapsed() < witness_delay);
 
     // await for witness response
-    assert_eq!(witness_rx.await.unwrap(), Vec::<Bytes>::new());
+    assert_eq!(witness_rx.await.unwrap(), RLPExecutionWitness::default());
     assert!(witness_requested_at.elapsed() >= witness_delay);
 }
 
