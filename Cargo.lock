@@ -7879,8 +7879,6 @@ dependencies = [
  "arbitrary",
  "bytes",
  "derive_more 2.0.1",
- "futures",
- "pin-project",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.9.0",
@@ -7890,7 +7888,6 @@ dependencies = [
  "reth-primitives-traits",
  "serde",
  "thiserror 2.0.12",
- "tokio-stream",
 ]
 
 [[package]]

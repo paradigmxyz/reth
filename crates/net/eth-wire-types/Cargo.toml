@@ -27,11 +27,8 @@ alloy-consensus.workspace = true
 
 bytes.workspace = true
 derive_more.workspace = true
-futures.workspace = true
-pin-project.workspace = true
 serde = { workspace = true, optional = true }
 thiserror.workspace = true
-tokio-stream.workspace = true
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
