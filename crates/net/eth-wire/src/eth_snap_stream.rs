@@ -2,7 +2,7 @@
 
 use super::message::MAX_MESSAGE_SIZE;
 use crate::{
-    EthMessage, EthNetworkPrimitives, EthVersion, NetworkPrimitives, ProtocolMessage,
+    EthMessage, EthMessageID, EthNetworkPrimitives, EthVersion, NetworkPrimitives, ProtocolMessage,
     SnapMessageId, SnapProtocolMessage,
 };
 use alloy_rlp::{Bytes, BytesMut, Encodable};
@@ -187,9 +187,10 @@ where
 
         // This check works because capabilities are sorted lexicographically
         // if "eth" before "snap", giving eth messages lower IDs than snap messages,
-        // and eth message IDs are <= [`EthMessageID::max()`], snap message IDs are >
-        // [`EthMessageID::max()`]. See also <https://github.com/paradigmxyz/reth/blob/main/crates/net/eth-wire/src/capability.rs#L272-L283>.
-        if message_id <= crate::message::EthMessageID::max() {
+        // and eth message IDs are <= [`EthMessageID::max()`],
+        // snap message IDs are > [`EthMessageID::max()`].
+        // See also <https://github.com/paradigmxyz/reth/blob/main/crates/net/eth-wire/src/capability.rs#L272-L283>.
+        if message_id <= EthMessageID::max() {
             let mut buf = bytes.as_ref();
             match ProtocolMessage::decode_message(self.eth_version, &mut buf) {
                 Ok(protocol_msg) => {
@@ -203,9 +204,13 @@ where
                 }
             }
         } else if message_id <= SnapMessageId::TrieNodes as u8 {
+            // Adjust `message_id`` to get the actual snap message ID
+            // by subtracting the eth message range.
+            // So real_snap_id = multiplexed_id - num_eth_messages
+            let adjusted_message_id = message_id - (EthMessageID::max() + 1);
             let mut buf = &bytes[1..];
 
-            match SnapProtocolMessage::decode(message_id, &mut buf) {
+            match SnapProtocolMessage::decode(adjusted_message_id, &mut buf) {
                 Ok(snap_msg) => Ok(EthSnapMessage::Snap(snap_msg)),
                 Err(err) => Err(EthSnapStreamError::Rlp(err)),
             }
