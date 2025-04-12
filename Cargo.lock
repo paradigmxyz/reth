@@ -3369,7 +3369,6 @@ dependencies = [
  "reth-eth-wire",
  "reth-eth-wire-types",
  "reth-ethereum-forks",
- "reth-ethereum-primitives",
  "reth-network",
  "reth-network-api",
  "reth-network-peers",

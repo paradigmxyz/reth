@@ -12,7 +12,6 @@ reth-discv4 = { workspace = true, features = ["test-utils"] }
 reth-engine-primitives.workspace = true
 reth-ethereum-forks = { workspace = true, features = ["serde"] }
 reth-eth-wire.workspace = true
-reth-ethereum-primitives.workspace = true
 reth-eth-wire-types.workspace = true
 reth-network = { workspace = true, features = ["test-utils"] }
 reth-network-api.workspace = true
@@ -32,11 +31,7 @@ alloy-rpc-types = { workspace = true, features = ["engine"] }
 bytes.workspace = true
 derive_more.workspace = true
 futures.workspace = true
-secp256k1 = { workspace = true, features = [
-    "global-context",
-    "std",
-    "recovery",
-] }
+secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
 serde = { workspace = true, features = ["derive"], optional = true }
 serde_json.workspace = true
 thiserror.workspace = true
