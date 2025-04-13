@@ -236,16 +236,26 @@ where
         Ok(Bytes::from(buf))
     }
 
-    /// Encode an snap message
+    /// Encode a snap protocol message, adjusting the message ID to follow eth message IDs
+    /// for proper multiplexing.
     fn encode_snap_message(&self, message: SnapProtocolMessage) -> Bytes {
-        message.encode().into()
+        let encoded = message.encode();
+
+        let message_id = encoded[0];
+        let adjusted_id = message_id + EthMessageID::max() + 1;
+
+        let mut adjusted = Vec::with_capacity(encoded.len());
+        adjusted.push(adjusted_id);
+        adjusted.extend_from_slice(&encoded[1..]);
+
+        Bytes::from(adjusted)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{EthMessage, SnapMessageId, SnapProtocolMessage};
+    use crate::{EthMessage, SnapProtocolMessage};
     use alloy_eips::BlockHashOrNumber;
     use alloy_primitives::B256;
     use alloy_rlp::Encodable;
@@ -282,13 +292,10 @@ mod tests {
             response_bytes: 1000,
         });
 
-        let encoded = snap_msg.encode();
-        let adjusted_id = SnapMessageId::GetAccountRange as u8 + EthMessageID::max() + 1;
-        let mut adjusted = Vec::with_capacity(encoded.len());
-        adjusted.push(adjusted_id);
-        adjusted.extend_from_slice(&encoded[1..]);
+        let inner = EthSnapStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth67);
+        let encoded = inner.encode_snap_message(snap_msg.clone());
 
-        (snap_msg, BytesMut::from(&adjusted[..]))
+        (snap_msg, BytesMut::from(&encoded[..]))
     }
 
     #[test]
@@ -339,16 +346,10 @@ mod tests {
             // re-encode message
             let encoded = inner.encode_snap_message(decoded_msg.clone());
 
-            // create new buffer with adjusted ID
-            let adjusted_id = SnapMessageId::GetAccountRange as u8 + EthMessageID::max() + 1;
-            let mut adjusted_vec = Vec::with_capacity(encoded.len());
-            adjusted_vec.push(adjusted_id);
-            adjusted_vec.extend_from_slice(&encoded[1..]);
-
-            let adjusted_bytes = BytesMut::from(&adjusted_vec[..]);
+            let re_encoded_bytes = BytesMut::from(&encoded[..]);
 
             // decode with properly adjusted ID
-            let re_decoded = inner.decode_message(adjusted_bytes);
+            let re_decoded = inner.decode_message(re_encoded_bytes);
 
             assert!(matches!(re_decoded, Ok(EthSnapMessage::Snap(_))));
             if let Ok(EthSnapMessage::Snap(final_msg)) = re_decoded {
