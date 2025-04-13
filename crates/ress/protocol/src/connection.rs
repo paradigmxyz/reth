@@ -3,7 +3,7 @@ use crate::{
     RessProtocolProvider,
 };
 use alloy_consensus::Header;
-use alloy_primitives::{bytes::BytesMut, BlockHash, Bytes, B256};
+use alloy_primitives::{bytes::BytesMut, BlockHash, B256};
 use futures::{stream::FuturesUnordered, Stream, StreamExt};
 use reth_eth_wire::{message::RequestPair, multiplex::ProtocolConnection};
 use reth_ethereum_primitives::BlockBody;
@@ -50,8 +50,6 @@ pub struct RessProtocolConnection<P> {
     inflight_requests: HashMap<u64, RessPeerRequest>,
     /// Pending witness responses.
     pending_witnesses: FuturesUnordered<WitnessFut>,
-    /// Pending proof responses.
-    pending_proofs: FuturesUnordered<ProofFut>,
 }
 
 impl<P> RessProtocolConnection<P> {
@@ -78,7 +76,6 @@ impl<P> RessProtocolConnection<P> {
             next_id: 0,
             inflight_requests: HashMap::default(),
             pending_witnesses: FuturesUnordered::new(),
-            pending_proofs: FuturesUnordered::new(),
         }
     }
 
@@ -105,9 +102,6 @@ impl<P> RessProtocolConnection<P> {
             }
             RessPeerRequest::GetWitness { block_hash, .. } => {
                 RessProtocolMessage::get_witness(next_id, *block_hash)
-            }
-            RessPeerRequest::GetProof { block_hash, .. } => {
-                RessProtocolMessage::get_proof(next_id, *block_hash)
             }
         };
         self.inflight_requests.insert(next_id, command);
@@ -159,26 +153,6 @@ where
         RessProtocolMessage::witness(request.request_id, witness)
     }
 
-    fn on_proof_response(
-        &self,
-        request: RequestPair<B256>,
-        proof_result: ProviderResult<Bytes>,
-    ) -> RessProtocolMessage {
-        let peer_id = self.peer_id;
-        let block_hash = request.message;
-        let proof = match proof_result {
-            Ok(proof) => {
-                trace!(target: "ress::net::connection", %peer_id, %block_hash, proof_len = proof.len(), "proof found");
-                proof
-            }
-            Err(error) => {
-                trace!(target: "ress::net::connection", %peer_id, %block_hash, %error, "error retrieving proof");
-                Default::default()
-            }
-        };
-        RessProtocolMessage::proof(request.request_id, proof)
-    }
-
     fn on_ress_message(&mut self, msg: RessProtocolMessage) -> OnRessMessageOutcome {
         match msg.message {
             RessMessage::NodeType(node_type) => {
@@ -201,15 +175,6 @@ where
                 let response = RessProtocolMessage::block_bodies(req.request_id, bodies);
                 return OnRessMessageOutcome::Response(response.encoded());
             }
-            RessMessage::GetProof(req) => {
-                let block_hash = req.message;
-                trace!(target: "ress::net::connection", peer_id = %self.peer_id, %block_hash, "serving proof");
-                let provider = self.provider.clone();
-                self.pending_proofs.push(Box::pin(async move {
-                    let result = provider.proof(block_hash).await;
-                    (req, result)
-                }));
-            }
             RessMessage::GetWitness(req) => {
                 let block_hash = req.message;
                 trace!(target: "ress::net::connection", peer_id = %self.peer_id, %block_hash, "serving witness");
@@ -230,15 +195,6 @@ where
             }
             RessMessage::BlockBodies(res) => {
                 if let Some(RessPeerRequest::GetBlockBodies { tx, .. }) =
-                    self.inflight_requests.remove(&res.request_id)
-                {
-                    let _ = tx.send(res.message);
-                } else {
-                    self.report_bad_message();
-                }
-            }
-            RessMessage::Proof(res) => {
-                if let Some(RessPeerRequest::GetProof { tx, .. }) =
                     self.inflight_requests.remove(&res.request_id)
                 {
                     let _ = tx.send(res.message);
@@ -301,13 +257,6 @@ where
                 return Poll::Ready(Some(response.encoded()));
             }
 
-            if let Poll::Ready(Some((request, proof_result))) =
-                this.pending_proofs.poll_next_unpin(cx)
-            {
-                let response = this.on_proof_response(request, proof_result);
-                return Poll::Ready(Some(response.encoded()));
-            }
-
             if let Poll::Ready(maybe_msg) = this.conn.poll_next_unpin(cx) {
                 let Some(next) = maybe_msg else { break 'conn };
                 let msg = match RessProtocolMessage::decode_message(&mut &next[..]) {
@@ -343,8 +292,6 @@ where
 type WitnessFut =
     Pin<Box<dyn Future<Output = (RequestPair<B256>, ProviderResult<RLPExecutionWitness>)> + Send>>;
 
-type ProofFut = Pin<Box<dyn Future<Output = (RequestPair<B256>, ProviderResult<Bytes>)> + Send>>;
-
 /// Ress peer request.
 #[derive(Debug)]
 pub enum RessPeerRequest {
@@ -361,15 +308,6 @@ pub enum RessPeerRequest {
         request: Vec<BlockHash>,
         /// The sender for the response.
         tx: oneshot::Sender<Vec<BlockBody>>,
-    },
-    /// Get proof for specific block
-    /// TODO: When syncing we could ask for the latest proof they have
-    /// TODO: then get the tip just so that a node can join the network
-    GetProof {
-        /// Target block hash that we want to get proof for.
-        block_hash: BlockHash,
-        /// The sender for the response.
-        tx: oneshot::Sender<Bytes>,
     },
     /// Get witness for specific block.
     GetWitness {

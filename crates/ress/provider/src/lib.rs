@@ -3,7 +3,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use alloy_consensus::BlockHeader as _;
-use alloy_primitives::{keccak256, Bytes, B256};
+use alloy_primitives::{Bytes, B256};
 use alloy_rlp::Encodable;
 use parking_lot::Mutex;
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, MemoryOverlayStateProvider};
@@ -37,8 +37,6 @@ pub struct RethRessProtocolProvider<P, E> {
     max_witness_window: u64,
     witness_semaphore: Arc<Semaphore>,
     witness_cache: Arc<Mutex<LruMap<B256, Arc<RLPExecutionWitness>>>>,
-    proof_semaphore: Arc<Semaphore>,
-    proof_cache: Arc<Mutex<LruMap<B256, Arc<Bytes>>>>,
     pending_state: PendingState<EthPrimitives>,
 }
 
@@ -51,8 +49,6 @@ impl<P: Clone, E: Clone> Clone for RethRessProtocolProvider<P, E> {
             max_witness_window: self.max_witness_window,
             witness_semaphore: self.witness_semaphore.clone(),
             witness_cache: self.witness_cache.clone(),
-            proof_semaphore: self.proof_semaphore.clone(),
-            proof_cache: self.proof_cache.clone(),
             pending_state: self.pending_state.clone(),
         }
     }
@@ -82,9 +78,6 @@ where
             max_witness_window,
             witness_semaphore: Arc::new(Semaphore::new(witness_max_parallel)),
             witness_cache: Arc::new(Mutex::new(LruMap::new(ByLength::new(cache_size)))),
-            // TODO: Technically we should only have one proof that we are accounting for
-            proof_semaphore: Arc::new(Semaphore::new(witness_max_parallel)),
-            proof_cache: Arc::new(Mutex::new(LruMap::new(ByLength::new(cache_size)))),
             pending_state,
         })
     }
@@ -108,18 +101,6 @@ where
             self.pending_state.invalid_recovered_block(&block_hash)
         };
         Ok(maybe_block)
-    }
-
-    /// Generate execution proof
-    pub fn generate_proof(&self, block_hash: B256) -> ProviderResult<Bytes> {
-        // TODO: This is just a placeholder, how the proof is created is not important
-        // TODO: right now.
-
-        let proof: Bytes = keccak256(block_hash).into();
-        // Insert proof into the cache.
-        self.proof_cache.lock().insert(block_hash, Arc::new(proof.clone()));
-
-        Ok(proof)
     }
 
     /// Generate state witness
@@ -263,28 +244,6 @@ where
     fn block_body(&self, block_hash: B256) -> ProviderResult<Option<BlockBody>> {
         trace!(target: "reth::ress_provider", %block_hash, "Serving block body");
         Ok(self.block_by_hash(block_hash)?.map(|b| b.body().clone()))
-    }
-
-    async fn proof(&self, block_hash: B256) -> ProviderResult<Bytes> {
-        trace!(target: "reth::ress_provider", %block_hash, "Serving proof");
-        let started_at = Instant::now();
-        let _permit = self.proof_semaphore.acquire().await.map_err(ProviderError::other)?;
-        let this = self.clone();
-        let (tx, rx) = oneshot::channel();
-        self.task_spawner.spawn_blocking(Box::pin(async move {
-            let result = this.generate_proof(block_hash);
-            let _ = tx.send(result);
-        }));
-        match rx.await {
-            Ok(Ok(proof)) => {
-                trace!(target: "reth::ress_provider", %block_hash, elapsed = ?started_at.elapsed(), "Computed proof");
-                Ok(proof)
-            }
-            Ok(Err(error)) => Err(error),
-            // TODO: We should have a ProofError. Not done in order to keep all changes in this
-            // crate TODO: for now.
-            Err(_) => Err(ProviderError::TrieWitnessError("proof dropped".to_owned())),
-        }
     }
 
     async fn witness(&self, block_hash: B256) -> ProviderResult<RLPExecutionWitness> {

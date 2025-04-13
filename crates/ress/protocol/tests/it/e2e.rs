@@ -1,4 +1,4 @@
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::B256;
 use futures::StreamExt;
 use reth_network::{test_utils::Testnet, NetworkEventListenerProvider, Peers};
 use reth_network_api::{
@@ -152,15 +152,10 @@ async fn message_exchange() {
     let (tx, rx) = oneshot::channel();
     peer0_conn.send(RessPeerRequest::GetWitness { block_hash: B256::ZERO, tx }).unwrap();
     assert_eq!(rx.await.unwrap(), RLPExecutionWitness::default());
-
-    // send get proof message from peer0 to peer1
-    let (tx, rx) = oneshot::channel();
-    peer0_conn.send(RessPeerRequest::GetProof { block_hash: B256::ZERO, tx }).unwrap();
-    assert_eq!(rx.await.unwrap(), Bytes::default());
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn witness_and_proof_fetching_does_not_block() {
+async fn witness_fetching_does_not_block() {
     reth_tracing::init_test_tracing();
     let mut net = Testnet::create_with(2, MockEthProvider::default()).await;
 
@@ -218,13 +213,6 @@ async fn witness_and_proof_fetching_does_not_block() {
     peer0_conn
         .send(RessPeerRequest::GetWitness { block_hash: B256::ZERO, tx: witness_tx })
         .unwrap();
-
-    // send get proof message from peer0 to peer1
-    let proof_requested_at = Instant::now();
-    let (tx, rx) = oneshot::channel();
-    peer0_conn.send(RessPeerRequest::GetProof { block_hash: B256::ZERO, tx }).unwrap();
-    assert_eq!(rx.await.unwrap(), Bytes::default());
-    assert!(proof_requested_at.elapsed() < witness_delay);
 
     // await for witness response
     assert_eq!(witness_rx.await.unwrap(), RLPExecutionWitness::default());

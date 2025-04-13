@@ -7,7 +7,7 @@ use crate::{NodeType, RLPExecutionWitness};
 use alloy_consensus::Header;
 use alloy_primitives::{
     bytes::{Buf, BufMut},
-    BlockHash, Bytes, B256,
+    BlockHash, B256,
 };
 use alloy_rlp::{BytesMut, Decodable, Encodable, RlpDecodable, RlpEncodable};
 use reth_eth_wire::{message::RequestPair, protocol::Protocol, Capability};
@@ -69,17 +69,6 @@ impl RessProtocolMessage {
             .into_protocol_message()
     }
 
-    /// Proof request.
-    pub fn get_proof(request_id: u64, block_hash: B256) -> Self {
-        RessMessage::GetProof(RequestPair { request_id, message: block_hash })
-            .into_protocol_message()
-    }
-
-    /// Proof response.
-    pub fn proof(request_id: u64, proof: Bytes) -> Self {
-        RessMessage::Proof(RequestPair { request_id, message: proof }).into_protocol_message()
-    }
-
     /// Execution witness request.
     pub fn get_witness(request_id: u64, block_hash: BlockHash) -> Self {
         RessMessage::GetWitness(RequestPair { request_id, message: block_hash })
@@ -107,8 +96,6 @@ impl RessProtocolMessage {
             RessMessageID::Headers => RessMessage::Headers(RequestPair::decode(buf)?),
             RessMessageID::GetBlockBodies => RessMessage::GetBlockBodies(RequestPair::decode(buf)?),
             RessMessageID::BlockBodies => RessMessage::BlockBodies(RequestPair::decode(buf)?),
-            RessMessageID::GetProof => RessMessage::GetProof(RequestPair::decode(buf)?),
-            RessMessageID::Proof => RessMessage::Proof(RequestPair::decode(buf)?),
             RessMessageID::GetWitness => RessMessage::GetWitness(RequestPair::decode(buf)?),
             RessMessageID::Witness => RessMessage::Witness(RequestPair::decode(buf)?),
         };
@@ -146,15 +133,10 @@ pub enum RessMessageID {
     /// Block bodies response message.
     BlockBodies = 0x04,
 
-    /// Proof request message.
-    GetProof = 0x05,
-    /// Proof response message.
-    Proof = 0x06,
-
     /// Witness request message.
-    GetWitness = 0x07,
+    GetWitness = 0x05,
     /// Witness response message.
-    Witness = 0x08,
+    Witness = 0x06,
 }
 
 impl Encodable for RessMessageID {
@@ -175,10 +157,8 @@ impl Decodable for RessMessageID {
             0x02 => Self::Headers,
             0x03 => Self::GetBlockBodies,
             0x04 => Self::BlockBodies,
-            0x05 => Self::GetProof,
-            0x06 => Self::Proof,
-            0x07 => Self::GetWitness,
-            0x08 => Self::Witness,
+            0x05 => Self::GetWitness,
+            0x06 => Self::Witness,
             _ => return Err(alloy_rlp::Error::Custom("Invalid message type")),
         };
         buf.advance(1);
@@ -207,11 +187,6 @@ pub enum RessMessage {
     /// Represents a block bodies response message.
     BlockBodies(RequestPair<Vec<BlockBody>>),
 
-    /// Represents a Proof request message.
-    GetProof(RequestPair<BlockHash>),
-    /// Represents a Proof response message.
-    Proof(RequestPair<Bytes>),
-
     // TODO: Eventually remove this, its the witness + bytecode
     // TODO: which can be gotten via debug_executeWitness.
     // TODO: This is here currently for testing out the protocol
@@ -231,8 +206,6 @@ impl RessMessage {
             Self::Headers(_) => RessMessageID::Headers,
             Self::GetBlockBodies(_) => RessMessageID::GetBlockBodies,
             Self::BlockBodies(_) => RessMessageID::BlockBodies,
-            Self::GetProof(_) => RessMessageID::GetProof,
-            Self::Proof(_) => RessMessageID::Proof,
             Self::GetWitness(_) => RessMessageID::GetWitness,
             Self::Witness(_) => RessMessageID::Witness,
         }
@@ -259,8 +232,7 @@ impl Encodable for RessMessage {
             Self::Headers(header) => header.encode(out),
             Self::GetBlockBodies(request) => request.encode(out),
             Self::BlockBodies(body) => body.encode(out),
-            Self::GetProof(request) | Self::GetWitness(request) => request.encode(out),
-            Self::Proof(proof) => proof.encode(out),
+            Self::GetWitness(request) => request.encode(out),
             Self::Witness(witness) => witness.encode(out),
         }
     }
@@ -272,8 +244,7 @@ impl Encodable for RessMessage {
             Self::Headers(header) => header.length(),
             Self::GetBlockBodies(request) => request.length(),
             Self::BlockBodies(body) => body.length(),
-            Self::GetProof(request) | Self::GetWitness(request) => request.length(),
-            Self::Proof(proof) => proof.length(),
+            Self::GetWitness(request) => request.length(),
             Self::Witness(witness) => witness.length(),
         }
     }

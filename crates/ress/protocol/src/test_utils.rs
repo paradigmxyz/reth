@@ -2,7 +2,7 @@
 
 use crate::{RLPExecutionWitness, RessProtocolProvider};
 use alloy_consensus::Header;
-use alloy_primitives::{map::B256HashMap, Bytes, B256};
+use alloy_primitives::{map::B256HashMap, B256};
 use reth_ethereum_primitives::BlockBody;
 use reth_storage_errors::provider::ProviderResult;
 use std::{
@@ -23,10 +23,6 @@ impl RessProtocolProvider for NoopRessProtocolProvider {
         Ok(None)
     }
 
-    async fn proof(&self, _block_hash: B256) -> ProviderResult<Bytes> {
-        Ok(Bytes::new())
-    }
-
     async fn witness(&self, _block_hash: B256) -> ProviderResult<RLPExecutionWitness> {
         Ok(Default::default())
     }
@@ -37,7 +33,6 @@ impl RessProtocolProvider for NoopRessProtocolProvider {
 pub struct MockRessProtocolProvider {
     headers: Arc<Mutex<B256HashMap<Header>>>,
     block_bodies: Arc<Mutex<B256HashMap<BlockBody>>>,
-    proofs: Arc<Mutex<B256HashMap<Bytes>>>,
     witnesses: Arc<Mutex<B256HashMap<RLPExecutionWitness>>>,
     witness_delay: Option<Duration>,
 }
@@ -69,16 +64,6 @@ impl MockRessProtocolProvider {
         self.block_bodies.lock().unwrap().extend(bodies);
     }
 
-    /// Insert proof.
-    pub fn add_proof(&self, block_hash: B256, proof: Bytes) {
-        self.proofs.lock().unwrap().insert(block_hash, proof);
-    }
-
-    /// Extend proofs from iterator.
-    pub fn extend_proofs(&self, proofs: impl IntoIterator<Item = (B256, Bytes)>) {
-        self.proofs.lock().unwrap().extend(proofs);
-    }
-
     /// Insert witness.
     pub fn add_witness(&self, block_hash: B256, witness: RLPExecutionWitness) {
         self.witnesses.lock().unwrap().insert(block_hash, witness);
@@ -100,10 +85,6 @@ impl RessProtocolProvider for MockRessProtocolProvider {
 
     fn block_body(&self, block_hash: B256) -> ProviderResult<Option<BlockBody>> {
         Ok(self.block_bodies.lock().unwrap().get(&block_hash).cloned())
-    }
-
-    async fn proof(&self, block_hash: B256) -> ProviderResult<Bytes> {
-        Ok(self.proofs.lock().unwrap().get(&block_hash).cloned().unwrap_or_default())
     }
 
     async fn witness(&self, block_hash: B256) -> ProviderResult<RLPExecutionWitness> {
