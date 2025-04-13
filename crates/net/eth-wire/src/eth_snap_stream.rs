@@ -1,4 +1,4 @@
-//! Ethereum ETH and SNAP combined protocol stream implementation.
+//! Ethereum eth and snap combined protocol stream implementation.
 
 use super::message::MAX_MESSAGE_SIZE;
 use crate::{
@@ -253,8 +253,8 @@ mod tests {
         message::RequestPair, GetAccountRangeMessage, GetBlockHeaders, HeadersDirection,
     };
 
-    // Helper to create eth message bytes
-    fn create_eth_message_bytes() -> BytesMut {
+    // Helper to create eth message and its bytes
+    fn create_eth_message() -> (EthMessage<EthNetworkPrimitives>, BytesMut) {
         let eth_msg = EthMessage::<EthNetworkPrimitives>::GetBlockHeaders(RequestPair {
             request_id: 1,
             message: GetBlockHeaders {
@@ -264,15 +264,16 @@ mod tests {
                 direction: HeadersDirection::Rising,
             },
         });
-        let protocol_msg = ProtocolMessage::from(eth_msg);
 
+        let protocol_msg = ProtocolMessage::from(eth_msg.clone());
         let mut buf = Vec::new();
         protocol_msg.encode(&mut buf);
-        BytesMut::from(&buf[..])
+
+        (eth_msg, BytesMut::from(&buf[..]))
     }
 
-    // Helper to create snap message bytes
-    fn create_snap_message_bytes() -> BytesMut {
+    // Helper to create snap message and its bytes
+    fn create_snap_message() -> (SnapProtocolMessage, BytesMut) {
         let snap_msg = SnapProtocolMessage::GetAccountRange(GetAccountRangeMessage {
             request_id: 1,
             root_hash: B256::default(),
@@ -280,67 +281,79 @@ mod tests {
             limit_hash: B256::default(),
             response_bytes: 1000,
         });
+
         let encoded = snap_msg.encode();
-
         let adjusted_id = SnapMessageId::GetAccountRange as u8 + EthMessageID::max() + 1;
-
         let mut adjusted = Vec::with_capacity(encoded.len());
         adjusted.push(adjusted_id);
         adjusted.extend_from_slice(&encoded[1..]);
 
-        BytesMut::from(&adjusted[..])
+        (snap_msg, BytesMut::from(&adjusted[..]))
     }
 
     #[test]
-    fn test_decode_eth_message() {
-        let eth_bytes = create_eth_message_bytes();
+    fn test_eth_message_roundtrip() {
         let inner = EthSnapStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth67);
+        let (eth_msg, eth_bytes) = create_eth_message();
 
-        let result = inner.decode_message(eth_bytes);
-        assert!(matches!(result, Ok(EthSnapMessage::Eth(_))));
+        // Verify encoding
+        let encoded_result = inner.encode_eth_message(eth_msg.clone());
+        assert!(encoded_result.is_ok());
+
+        // Verify decoding
+        let decoded_result = inner.decode_message(eth_bytes.clone());
+        assert!(matches!(decoded_result, Ok(EthSnapMessage::Eth(_))));
+
+        // round trip
+        if let Ok(EthSnapMessage::Eth(decoded_msg)) = inner.decode_message(eth_bytes) {
+            assert_eq!(decoded_msg, eth_msg);
+
+            let re_encoded = inner.encode_eth_message(decoded_msg.clone()).unwrap();
+            let re_encoded_bytes = BytesMut::from(&re_encoded[..]);
+            let re_decoded = inner.decode_message(re_encoded_bytes);
+
+            assert!(matches!(re_decoded, Ok(EthSnapMessage::Eth(_))));
+            if let Ok(EthSnapMessage::Eth(final_msg)) = re_decoded {
+                assert_eq!(final_msg, decoded_msg);
+            }
+        }
     }
 
     #[test]
-    fn test_encode_eth_message() {
+    fn test_snap_protocol() {
         let inner = EthSnapStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth67);
+        let (snap_msg, snap_bytes) = create_snap_message();
 
-        let eth_msg = EthMessage::<EthNetworkPrimitives>::GetBlockHeaders(RequestPair {
-            request_id: 1,
-            message: GetBlockHeaders {
-                start_block: BlockHashOrNumber::Number(1),
-                limit: 10,
-                skip: 0,
-                direction: HeadersDirection::Rising,
-            },
-        });
+        // Verify encoding
+        let encoded_bytes = inner.encode_snap_message(snap_msg.clone());
+        assert!(!encoded_bytes.is_empty());
 
-        let result = inner.encode_eth_message(eth_msg);
-        assert!(result.is_ok());
-    }
+        // Verify decoding
+        let decoded_result = inner.decode_message(snap_bytes.clone());
+        assert!(matches!(decoded_result, Ok(EthSnapMessage::Snap(_))));
 
-    #[test]
-    fn test_encode_snap_message() {
-        let inner = EthSnapStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth67);
+        // round trip
+        if let Ok(EthSnapMessage::Snap(decoded_msg)) = inner.decode_message(snap_bytes) {
+            assert_eq!(decoded_msg, snap_msg);
 
-        let snap_msg = SnapProtocolMessage::GetAccountRange(GetAccountRangeMessage {
-            request_id: 1,
-            root_hash: B256::default(),
-            starting_hash: B256::default(),
-            limit_hash: B256::default(),
-            response_bytes: 1000,
-        });
+            // re-encode message
+            let encoded = inner.encode_snap_message(decoded_msg.clone());
 
-        let bytes = inner.encode_snap_message(snap_msg);
-        assert!(!bytes.is_empty());
-    }
+            // create new buffer with adjusted ID
+            let adjusted_id = SnapMessageId::GetAccountRange as u8 + EthMessageID::max() + 1;
+            let mut adjusted_vec = Vec::with_capacity(encoded.len());
+            adjusted_vec.push(adjusted_id);
+            adjusted_vec.extend_from_slice(&encoded[1..]);
 
-    #[test]
-    fn test_decode_snap_message() {
-        let snap_bytes = create_snap_message_bytes();
+            let adjusted_bytes = BytesMut::from(&adjusted_vec[..]);
 
-        let inner = EthSnapStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth67);
-        let result = inner.decode_message(snap_bytes);
+            // decode with properly adjusted ID
+            let re_decoded = inner.decode_message(adjusted_bytes);
 
-        assert!(matches!(result, Ok(EthSnapMessage::Snap(_))));
+            assert!(matches!(re_decoded, Ok(EthSnapMessage::Snap(_))));
+            if let Ok(EthSnapMessage::Snap(final_msg)) = re_decoded {
+                assert_eq!(final_msg, decoded_msg);
+            }
+        }
     }
 }
