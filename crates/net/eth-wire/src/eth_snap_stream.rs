@@ -357,4 +357,32 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_message_id_boundaries() {
+        let inner = EthSnapStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth67);
+
+        // Create a bytes buffer with eth message ID at the max boundary with minimal content
+        let eth_max_id = EthMessageID::max();
+        let mut eth_boundary_bytes = BytesMut::new();
+        eth_boundary_bytes.extend_from_slice(&[eth_max_id]);
+        eth_boundary_bytes.extend_from_slice(&[0, 0]); 
+
+        // This should be decoded as eth message
+        let eth_boundary_result = inner.decode_message(eth_boundary_bytes);
+        assert!(
+            eth_boundary_result.is_err() ||
+                matches!(eth_boundary_result, Ok(EthSnapMessage::Eth(_)))
+        );
+
+        // Create a bytes buffer with message ID just above eth max, it should be snap min
+        let snap_min_id = eth_max_id + 1;
+        let mut snap_boundary_bytes = BytesMut::new();
+        snap_boundary_bytes.extend_from_slice(&[snap_min_id]);
+        snap_boundary_bytes.extend_from_slice(&[0, 0]);
+
+        // Not a valid snap message yet, only snap id --> error
+        let snap_boundary_result = inner.decode_message(snap_boundary_bytes);
+        assert!(snap_boundary_result.is_err());
+    }
 }
