@@ -223,8 +223,8 @@ impl<ChainSpec: EthChainSpec> StateCommitmentProvider for MockEthProvider<ChainS
     type StateCommitment = <MockNode as NodeTypes>::StateCommitment;
 }
 
-impl<ChainSpec: EthChainSpec + Clone + 'static> DatabaseProviderFactory
-    for MockEthProvider<ChainSpec>
+impl<T: NodePrimitives, ChainSpec: EthChainSpec + Clone + 'static> DatabaseProviderFactory
+    for MockEthProvider<T, ChainSpec>
 {
     type DB = DatabaseMock;
     type Provider = Self;
@@ -245,7 +245,7 @@ impl<ChainSpec: EthChainSpec + Clone + 'static> DatabaseProviderFactory
     }
 }
 
-impl<ChainSpec: EthChainSpec + 'static> DBProvider for MockEthProvider<ChainSpec> {
+impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> DBProvider for MockEthProvider<T, ChainSpec> {
     type Tx = TxMock;
 
     fn tx_ref(&self) -> &Self::Tx {
@@ -844,7 +844,7 @@ impl<ChainSpec: EthChainSpec + 'static> StateProviderFactory for MockEthProvider
     }
 }
 
-impl<ChainSpec: EthChainSpec> WithdrawalsProvider for MockEthProvider<ChainSpec> {
+impl<T: NodePrimitives, ChainSpec> WithdrawalsProvider for MockEthProvider<T, ChainSpec> {
     fn withdrawals_by_block(
         &self,
         _id: BlockHashOrNumber,
@@ -854,13 +854,13 @@ impl<ChainSpec: EthChainSpec> WithdrawalsProvider for MockEthProvider<ChainSpec>
     }
 }
 
-impl<ChainSpec: EthChainSpec> OmmersProvider for MockEthProvider<ChainSpec> {
+impl<T: NodePrimitives, ChainSpec> OmmersProvider for MockEthProvider<T, ChainSpec> {
     fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
         Ok(None)
     }
 }
 
-impl<ChainSpec: EthChainSpec> BlockBodyIndicesProvider for MockEthProvider<ChainSpec> {
+impl<T: NodePrimitives, ChainSpec> BlockBodyIndicesProvider for MockEthProvider<T, ChainSpec> {
     fn block_body_indices(&self, _num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
         Ok(None)
     }
@@ -872,7 +872,7 @@ impl<ChainSpec: EthChainSpec> BlockBodyIndicesProvider for MockEthProvider<Chain
     }
 }
 
-impl<ChainSpec: EthChainSpec> ChangeSetReader for MockEthProvider<ChainSpec> {
+impl<T: NodePrimitives, ChainSpec> ChangeSetReader for MockEthProvider<T, ChainSpec> {
     fn account_block_changeset(
         &self,
         _block_number: BlockNumber,
@@ -881,7 +881,7 @@ impl<ChainSpec: EthChainSpec> ChangeSetReader for MockEthProvider<ChainSpec> {
     }
 }
 
-impl<ChainSpec: EthChainSpec> StateReader for MockEthProvider<ChainSpec> {
+impl<T: NodePrimitives, ChainSpec> StateReader for MockEthProvider<T, ChainSpec> {
     type Receipt = Receipt;
 
     fn get_state(&self, _block: BlockNumber) -> ProviderResult<Option<ExecutionOutcome>> {
@@ -889,12 +889,12 @@ impl<ChainSpec: EthChainSpec> StateReader for MockEthProvider<ChainSpec> {
     }
 }
 
-impl<ChainSpec: EthChainSpec> CanonStateSubscriptions for MockEthProvider<ChainSpec> {
-    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<EthPrimitives> {
+impl<T: NodePrimitives, ChainSpec> CanonStateSubscriptions for MockEthProvider<T, ChainSpec> {
+    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<T> {
         broadcast::channel(1).1
     }
 }
 
-impl<ChainSpec: EthChainSpec> NodePrimitivesProvider for MockEthProvider<ChainSpec> {
-    type Primitives = EthPrimitives;
+impl<T: NodePrimitives, ChainSpec> NodePrimitivesProvider for MockEthProvider<T, ChainSpec> {
+    type Primitives = T;
 }
