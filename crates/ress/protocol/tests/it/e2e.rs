@@ -160,7 +160,7 @@ async fn message_exchange() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn witness_fetching_does_not_block() {
+async fn witness_and_proof_fetching_does_not_block() {
     reth_tracing::init_test_tracing();
     let mut net = Testnet::create_with(2, MockEthProvider::default()).await;
 
