@@ -249,8 +249,8 @@ dependencies = [
  "c-kzg",
  "derive_more 2.0.1",
  "either",
- "ethereum_ssz 0.9.0",
- "ethereum_ssz_derive 0.9.0",
+ "ethereum_ssz",
+ "ethereum_ssz_derive",
  "serde",
  "sha2 0.10.8",
 ]
@@ -645,8 +645,8 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives 1.0.0",
  "alloy-rpc-types-engine",
- "ethereum_ssz 0.9.0",
- "ethereum_ssz_derive 0.9.0",
+ "ethereum_ssz",
+ "ethereum_ssz_derive",
  "serde",
  "serde_with",
  "thiserror 2.0.12",
@@ -676,8 +676,8 @@ dependencies = [
  "alloy-rlp",
  "alloy-serde",
  "derive_more 2.0.1",
- "ethereum_ssz 0.9.0",
- "ethereum_ssz_derive 0.9.0",
+ "ethereum_ssz",
+ "ethereum_ssz_derive",
  "jsonrpsee-types",
  "jsonwebtoken",
  "rand 0.8.5",
@@ -3256,19 +3256,6 @@ dependencies = [
 
 [[package]]
 name = "ethereum_serde_utils"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70cbccfccf81d67bff0ab36e591fa536c8a935b078a7b0e58c1d00d418332fc9"
-dependencies = [
- "alloy-primitives 0.8.25",
- "hex",
- "serde",
- "serde_derive",
- "serde_json",
-]
-
-[[package]]
-name = "ethereum_serde_utils"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3dc1355dbb41fbbd34ec28d4fb2a57d9a70c67ac3c19f6a5ca4d4a176b9e997a"
@@ -3282,44 +3269,17 @@ dependencies = [
 
 [[package]]
 name = "ethereum_ssz"
-version = "0.8.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86da3096d1304f5f28476ce383005385459afeaf0eea08592b65ddbc9b258d16"
-dependencies = [
- "alloy-primitives 0.8.25",
- "ethereum_serde_utils 0.7.0",
- "itertools 0.13.0",
- "serde",
- "serde_derive",
- "smallvec",
- "typenum",
-]
-
-[[package]]
-name = "ethereum_ssz"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ca8ba45b63c389c6e115b095ca16381534fdcc03cf58176a3f8554db2dbe19b"
 dependencies = [
  "alloy-primitives 1.0.0",
- "ethereum_serde_utils 0.8.0",
+ "ethereum_serde_utils",
  "itertools 0.13.0",
  "serde",
  "serde_derive",
  "smallvec",
  "typenum",
-]
-
-[[package]]
-name = "ethereum_ssz_derive"
-version = "0.8.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d832a5c38eba0e7ad92592f7a22d693954637fbb332b4f669590d66a5c3183e5"
-dependencies = [
- "darling",
- "proc-macro2",
- "quote",
- "syn 2.0.100",
 ]
 
 [[package]]
@@ -6007,7 +5967,7 @@ dependencies = [
  "alloy-serde",
  "arbitrary",
  "derive_more 2.0.1",
- "ethereum_ssz 0.9.0",
+ "ethereum_ssz",
  "op-alloy-consensus",
  "serde",
  "snap",
@@ -7833,8 +7793,8 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives 1.0.0",
  "alloy-rlp",
- "ethereum_ssz 0.8.3",
- "ethereum_ssz_derive 0.8.3",
+ "ethereum_ssz",
+ "ethereum_ssz_derive",
  "snap",
  "tempfile",
  "thiserror 2.0.12",
@@ -12100,7 +12060,7 @@ checksum = "ee44f4cef85f88b4dea21c0b1f58320bdf35715cf56d840969487cff00613321"
 dependencies = [
  "alloy-primitives 1.0.0",
  "ethereum_hashing",
- "ethereum_ssz 0.9.0",
+ "ethereum_ssz",
  "smallvec",
  "typenum",
 ]
