@@ -77,7 +77,10 @@ where T::Block: Clone {
     }
 }
 
-impl <T: NodePrimitives>MockEthProvider<T> {
+impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec>
+where
+    ChainSpec: Default + EthChainSpec,
+{
     /// Create a new, empty instance
     pub fn new() -> Self {
         Self {
@@ -91,20 +94,29 @@ impl <T: NodePrimitives>MockEthProvider<T> {
         }
     }
 }
-impl<ChainSpec> MockEthProvider<ChainSpec> {
+pub trait HasHeader {
+    type Header;
+
+    fn header(&self) -> &Self::Header;
+}
+
+impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec>
+where
+    T::Block: HasHeader<Header = Header>,
+{
     /// Add block to local block store
-    pub fn add_block(&self, hash: B256, block: reth_ethereum_primitives::Block) {
-        self.add_header(hash, block.header.clone());
+    pub fn add_block(&self, hash: B256, block: T::Block) {
+        self.add_header(hash, block.header().clone());
         self.blocks.lock().insert(hash, block);
     }
 
     /// Add multiple blocks to local block store
     pub fn extend_blocks(
         &self,
-        iter: impl IntoIterator<Item = (B256, reth_ethereum_primitives::Block)>,
+        iter: impl IntoIterator<Item = (B256, T::Block)>,
     ) {
         for (hash, block) in iter {
-            self.add_header(hash, block.header.clone());
+            self.add_header(hash, block.header().clone());
             self.add_block(hash, block)
         }
     }
@@ -139,7 +151,7 @@ impl<ChainSpec> MockEthProvider<ChainSpec> {
     }
 
     /// Set chain spec.
-    pub fn with_chain_spec<C>(self, chain_spec: C) -> MockEthProvider<C> {
+    pub fn with_chain_spec<C>(self, chain_spec: C) -> MockEthProvider<T, C> {
         MockEthProvider {
             blocks: self.blocks,
             headers: self.headers,
