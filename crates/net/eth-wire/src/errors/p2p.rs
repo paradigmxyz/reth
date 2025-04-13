@@ -74,6 +74,15 @@ pub enum P2PStreamError {
     /// Unknown disconnect reason error.
     #[error("unknown disconnect reason: {0}")]
     UnknownDisconnectReason(#[from] UnknownDisconnectReason),
+
+    /// Thrown when a (malicious) packet has a high compression ratio.
+    #[error("message has high compression ratio({decompressed_size}/{compressed_message_size})")]
+    HighSnappyCompressionRatio {
+        /// The size of the snappy compressed message.
+        compressed_message_size: usize,
+        /// The decompressed size according to the snappy header
+        decompressed_size: usize,
+    },
 }
 
 // === impl P2PStreamError ===

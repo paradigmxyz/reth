@@ -443,6 +443,24 @@ where
                 })))
             }
 
+            // snappy decoder requires allocated space for the decompressed len, however there's not
+            // guarantee that the `decompressed_len` decoded from the snappy header is accurate. The
+            // expected compression ration here is <2, to be conservative we enforce a <3 expected
+            // compression ratio.
+            if decompressed_len > bytes.len() * 3 {
+                debug!(
+                    compressed=%bytes.len(),
+                    decompressed=%decompressed_len,
+                    msg=%hex::encode(&bytes[1..]),
+                    "high compression ratio"
+                );
+
+                return Poll::Ready(Some(Err(P2PStreamError::HighSnappyCompressionRatio {
+                    compressed_message_size: bytes.len(),
+                    decompressed_size: decompressed_len,
+                })))
+            }
+
             // create a buffer to hold the decompressed message, adding a byte to the length for
             // the message ID byte, which is the first byte in this buffer
             let mut decompress_buf = BytesMut::zeroed(decompressed_len + 1);
