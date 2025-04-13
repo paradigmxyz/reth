@@ -38,7 +38,7 @@ impl RessProtocolMessage {
 
     /// Returns the protocol for the `ress` protocol.
     pub fn protocol() -> Protocol {
-        Protocol::new(Self::capability(), 9)
+        Protocol::new(Self::capability(), 7)
     }
 
     /// Create node type message.
