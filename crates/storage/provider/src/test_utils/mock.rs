@@ -23,7 +23,7 @@ use reth_ethereum_primitives::{EthPrimitives, Receipt};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::NodeTypes;
 use reth_primitives_traits::{
-    Account, Bytecode, GotExpected, RecoveredBlock, SealedBlock, SealedHeader, SignedTransaction,NodePrimitives
+    Account, Bytecode, GotExpected, RecoveredBlock, SealedBlock, SealedHeader, SignedTransaction,NodePrimitives,
 };
 use reth_prune_types::PruneModes;
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -47,10 +47,8 @@ use tokio::sync::broadcast;
 
 /// A mock implementation for Provider interfaces.
 #[derive(Debug)]
-pub struct MockEthProvider<T: NodePrimitives = reth_ethereum_primitives::EthPrimitives,
-    ChainSpec = reth_chainspec::ChainSpec>
-    {
-    /// Local block store
+pub struct MockEthProvider<T: NodePrimitives = reth_ethereum_primitives::EthPrimitives,ChainSpec = reth_chainspec::ChainSpec>{
+    ///local block store
     pub blocks: Arc<Mutex<HashMap<B256, T::Block>>>,
     /// Local header store
     pub headers: Arc<Mutex<HashMap<B256, Header>>>,
@@ -64,7 +62,8 @@ pub struct MockEthProvider<T: NodePrimitives = reth_ethereum_primitives::EthPrim
     prune_modes: Arc<PruneModes>,
 }
 
-impl<ChainSpec> Clone for MockEthProvider<ChainSpec> {
+impl<T: NodePrimitives, ChainSpec> Clone for MockEthProvider<T, ChainSpec>
+where T::Block: Clone {
     fn clone(&self) -> Self {
         Self {
             blocks: self.blocks.clone(),
@@ -78,7 +77,7 @@ impl<ChainSpec> Clone for MockEthProvider<ChainSpec> {
     }
 }
 
-impl MockEthProvider {
+impl <T: NodePrimitives>MockEthProvider<T> {
     /// Create a new, empty instance
     pub fn new() -> Self {
         Self {
