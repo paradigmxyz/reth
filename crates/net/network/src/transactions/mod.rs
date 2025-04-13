@@ -1861,6 +1861,26 @@ impl<N: NetworkPrimitives> PeerMetadata<N> {
             peer_kind,
         }
     }
+
+    /// Returns a reference to the peer's request sender channel.
+    pub fn request_tx(&self) -> &PeerRequestSender<PeerRequest<N>> {
+        &self.request_tx
+    }
+
+    /// Returns the negotiated `EthVersion` of the session.
+    pub const fn version(&self) -> EthVersion {
+        self.version
+    }
+
+    /// Returns a reference to the peer's client version string.
+    pub fn client_version(&self) -> &str {
+        &self.client_version
+    }
+
+    /// Returns the peer's kind.
+    pub const fn peer_kind(&self) -> PeerKind {
+        self.peer_kind
+    }
 }
 
 /// Commands to send to the [`TransactionsManager`]
