@@ -672,7 +672,7 @@ impl<ChainSpec: EthChainSpec> AccountReader for MockEthProvider<ChainSpec> {
     }
 }
 
-impl<ChainSpec: EthChainSpec> StageCheckpointReader for MockEthProvider<ChainSpec> {
+impl<T: NodePrimitives, ChainSpec> StageCheckpointReader for MockEthProvider<T, ChainSpec> {
     fn get_stage_checkpoint(&self, _id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
         Ok(None)
     }
@@ -686,7 +686,7 @@ impl<ChainSpec: EthChainSpec> StageCheckpointReader for MockEthProvider<ChainSpe
     }
 }
 
-impl<ChainSpec: EthChainSpec> StateRootProvider for MockEthProvider<ChainSpec> {
+impl<T: NodePrimitives, ChainSpec> StateRootProvider for MockEthProvider<T, ChainSpec> {
     fn state_root(&self, _state: HashedPostState) -> ProviderResult<B256> {
         Ok(self.state_roots.lock().pop().unwrap_or_default())
     }
@@ -712,7 +712,7 @@ impl<ChainSpec: EthChainSpec> StateRootProvider for MockEthProvider<ChainSpec> {
     }
 }
 
-impl<ChainSpec: EthChainSpec> StorageRootProvider for MockEthProvider<ChainSpec> {
+impl<T: NodePrimitives, ChainSpec> StorageRootProvider for MockEthProvider<T, ChainSpec> {
     fn storage_root(
         &self,
         _address: Address,
@@ -740,7 +740,7 @@ impl<ChainSpec: EthChainSpec> StorageRootProvider for MockEthProvider<ChainSpec>
     }
 }
 
-impl<ChainSpec: EthChainSpec> StateProofProvider for MockEthProvider<ChainSpec> {
+impl<T: NodePrimitives, ChainSpec> StateProofProvider for MockEthProvider<T, ChainSpec> {
     fn proof(
         &self,
         _input: TrieInput,
@@ -763,13 +763,13 @@ impl<ChainSpec: EthChainSpec> StateProofProvider for MockEthProvider<ChainSpec> 
     }
 }
 
-impl<ChainSpec: EthChainSpec + 'static> HashedPostStateProvider for MockEthProvider<ChainSpec> {
+impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> HashedPostStateProvider for MockEthProvider<T ,ChainSpec> {
     fn hashed_post_state(&self, _state: &revm_database::BundleState) -> HashedPostState {
         HashedPostState::default()
     }
 }
 
-impl<ChainSpec: EthChainSpec + 'static> StateProvider for MockEthProvider<ChainSpec> {
+impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> StateProvider for MockEthProvider<T, ChainSpec> {
     fn storage(
         &self,
         account: Address,
@@ -792,7 +792,11 @@ impl<ChainSpec: EthChainSpec + 'static> StateProvider for MockEthProvider<ChainS
     }
 }
 
-impl<ChainSpec: EthChainSpec + 'static> StateProviderFactory for MockEthProvider<ChainSpec> {
+impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> StateProviderFactory
+    for MockEthProvider<T, ChainSpec>
+where
+    T::Block: Clone,
+{
     fn latest(&self) -> ProviderResult<StateProviderBox> {
         Ok(Box::new(self.clone()))
     }
@@ -804,17 +808,12 @@ impl<ChainSpec: EthChainSpec + 'static> StateProviderFactory for MockEthProvider
         match number_or_tag {
             BlockNumberOrTag::Latest => self.latest(),
             BlockNumberOrTag::Finalized => {
-                // we can only get the finalized state by hash, not by num
                 let hash =
                     self.finalized_block_hash()?.ok_or(ProviderError::FinalizedBlockNotFound)?;
-
-                // only look at historical state
                 self.history_by_block_hash(hash)
             }
             BlockNumberOrTag::Safe => {
-                // we can only get the safe state by hash, not by num
                 let hash = self.safe_block_hash()?.ok_or(ProviderError::SafeBlockNotFound)?;
-
                 self.history_by_block_hash(hash)
             }
             BlockNumberOrTag::Earliest => self.history_by_block_number(0),
@@ -843,6 +842,7 @@ impl<ChainSpec: EthChainSpec + 'static> StateProviderFactory for MockEthProvider
         Ok(Some(Box::new(self.clone())))
     }
 }
+
 
 impl<T: NodePrimitives, ChainSpec> WithdrawalsProvider for MockEthProvider<T, ChainSpec> {
     fn withdrawals_by_block(
