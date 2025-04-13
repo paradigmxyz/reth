@@ -1867,7 +1867,7 @@ impl<N: NetworkPrimitives> PeerMetadata<N> {
         &self.request_tx
     }
 
-    /// Returns the negotiated EthVersion of the session.
+    /// Returns the negotiated `EthVersion` of the session.
     pub fn version(&self) -> EthVersion {
         self.version
     }
