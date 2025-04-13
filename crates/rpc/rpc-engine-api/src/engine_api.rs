@@ -938,10 +938,17 @@ where
 
         if let Ok(blobs) = &res {
             let blobs_found = blobs.iter().flatten().count();
-            let blobs_missed = hashes_len - blobs_found;
 
-            self.inner.metrics.blob_metrics.blob_count.increment(blobs_found as u64);
-            self.inner.metrics.blob_metrics.blob_misses.increment(blobs_missed as u64);
+            self.inner.metrics.blob_metrics.get_blobs_requests_blobs_total.increment(hashes_len as u64);
+            self.inner.metrics.blob_metrics.get_blobs_requests_blobs_in_blobpool_total.increment(blobs_found as u64);
+
+            if blobs_found == hashes_len {
+                self.inner.metrics.blob_metrics.get_blobs_requests_success_total.increment(1);
+            } else {
+                self.inner.metrics.blob_metrics.get_blobs_requests_failure_total.increment(1);
+            }
+        } else {
+            self.inner.metrics.blob_metrics.get_blobs_requests_failure_total.increment(1);
         }
 
         res
