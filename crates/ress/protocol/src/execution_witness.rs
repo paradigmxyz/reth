@@ -36,7 +36,7 @@ impl RLPExecutionWitness {
     /// we do not receive the execution witness.
     ///
     /// TODO: We keep the headers for now to test the networking stack and
-    /// TODO not make too many changes to the ExecutionWitness
+    /// TODO not make too many changes to the `ExecutionWitness`
     pub fn size_without_headers(&self) -> usize {
         self.state.len() + self.codes.len()
     }
