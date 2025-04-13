@@ -167,12 +167,8 @@ impl OpReceipt {
                 receipt.inner.status.length() +
                     receipt.inner.cumulative_gas_used.length() +
                     receipt.inner.logs.length() +
-                    if let Some(nonce) = receipt.deposit_nonce { nonce.length() } else { 0 } +
-                    if let Some(version) = receipt.deposit_receipt_version {
-                        version.length()
-                    } else {
-                        0
-                    }
+                    receipt.deposit_nonce.map_or(0, |nonce| nonce.length()) +
+                    receipt.deposit_receipt_version.map_or(0, |version| version.length())
             }
         }
     }
@@ -196,9 +192,9 @@ impl OpReceipt {
         let mut deposit_receipt_version = None;
 
         // For deposit receipts, try to decode nonce and version if they exist
-        if tx_type == OpTxType::Deposit && buf.len() + header.payload_length < remaining {
+        if tx_type == OpTxType::Deposit && buf.len() + header.payload_length > remaining {
             deposit_nonce = Some(Decodable::decode(buf)?);
-            if buf.len() + header.payload_length < remaining {
+            if buf.len() + header.payload_length > remaining {
                 deposit_receipt_version = Some(Decodable::decode(buf)?);
             }
         }
@@ -771,5 +767,65 @@ mod tests {
             legacy_receipt.encode_2718_len(),
             "Encoded length for legacy receipt should match the actual encoded data length"
         );
+    }
+
+    #[test]
+    fn test_roundtrip_without_bloom_legacy() {
+        let receipt = OpReceipt::Legacy(Receipt {
+            status: Eip658Value::Eip658(true),
+            cumulative_gas_used: 21000,
+            logs: vec![Log::new_unchecked(
+                address!("0x0000000000000000000000000000000000000011"),
+                vec![
+                    b256!("0x000000000000000000000000000000000000000000000000000000000000dead"),
+                    b256!("0x000000000000000000000000000000000000000000000000000000000000beef"),
+                ],
+                bytes!("0100ff"),
+            )],
+        });
+
+        let mut buf = Vec::new();
+        receipt.rlp_encode_fields_without_bloom(&mut buf);
+        let decoded =
+            OpReceipt::rlp_decode_inner_without_bloom(&mut &buf[..], OpTxType::Legacy).unwrap();
+        assert_eq!(decoded, receipt);
+    }
+
+    #[test]
+    fn test_roundtrip_without_bloom_deposit() {
+        let receipt = OpReceipt::Deposit(OpDepositReceipt {
+            inner: Receipt {
+                status: Eip658Value::Eip658(true),
+                cumulative_gas_used: 46913,
+                logs: vec![],
+            },
+            deposit_nonce: Some(4012991),
+            deposit_receipt_version: Some(1),
+        });
+
+        let mut buf = Vec::new();
+        receipt.rlp_encode_fields_without_bloom(&mut buf);
+        let decoded =
+            OpReceipt::rlp_decode_inner_without_bloom(&mut &buf[..], OpTxType::Deposit).unwrap();
+        assert_eq!(decoded, receipt);
+    }
+
+    #[test]
+    fn test_roundtrip_without_bloom_eip1559() {
+        let receipt = OpReceipt::Eip1559(Receipt {
+            status: Eip658Value::Eip658(true),
+            cumulative_gas_used: 21000,
+            logs: vec![Log::new_unchecked(
+                address!("0x4bf56695415f725e43c3e04354b604bcfb6dfb6e"),
+                vec![b256!("0xc69dc3d7ebff79e41f525be431d5cd3cc08f80eaf0f7819054a726eeb7086eb9")],
+                bytes!("0100ff"),
+            )],
+        });
+
+        let mut buf = Vec::new();
+        receipt.rlp_encode_fields_without_bloom(&mut buf);
+        let decoded =
+            OpReceipt::rlp_decode_inner_without_bloom(&mut &buf[..], OpTxType::Eip1559).unwrap();
+        assert_eq!(decoded, receipt);
     }
 }
