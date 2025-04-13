@@ -1,6 +1,6 @@
 //! Ethereum and snap combined protocol stream implementation.
 //!
-//! A stream type for handling both eth and snap protocol messages over a single RLPx connection.
+//! A stream type for handling both eth and snap protocol messages over a single `RLPx` connection.
 //! Provides message encoding/decoding, ID multiplexing, and protocol message processing.
 
 use super::message::MAX_MESSAGE_SIZE;
