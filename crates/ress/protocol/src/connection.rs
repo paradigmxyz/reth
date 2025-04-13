@@ -159,6 +159,26 @@ where
         RessProtocolMessage::witness(request.request_id, witness)
     }
 
+    fn on_proof_response(
+        &self,
+        request: RequestPair<B256>,
+        proof_result: ProviderResult<Bytes>,
+    ) -> RessProtocolMessage {
+        let peer_id = self.peer_id;
+        let block_hash = request.message;
+        let proof = match proof_result {
+            Ok(proof) => {
+                trace!(target: "ress::net::connection", %peer_id, %block_hash, proof_len = proof.len(), "proof found");
+                proof
+            }
+            Err(error) => {
+                trace!(target: "ress::net::connection", %peer_id, %block_hash, %error, "error retrieving proof");
+                Default::default()
+            }
+        };
+        RessProtocolMessage::proof(request.request_id, proof)
+    }
+
     fn on_ress_message(&mut self, msg: RessProtocolMessage) -> OnRessMessageOutcome {
         match msg.message {
             RessMessage::NodeType(node_type) => {
@@ -278,6 +298,13 @@ where
                 this.pending_witnesses.poll_next_unpin(cx)
             {
                 let response = this.on_witness_response(request, witness_result);
+                return Poll::Ready(Some(response.encoded()));
+            }
+
+            if let Poll::Ready(Some((request, proof_result))) =
+                this.pending_proofs.poll_next_unpin(cx)
+            {
+                let response = this.on_proof_response(request, proof_result);
                 return Poll::Ready(Some(response.encoded()));
             }
 
