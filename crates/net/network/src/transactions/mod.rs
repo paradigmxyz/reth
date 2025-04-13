@@ -1868,17 +1868,17 @@ impl<N: NetworkPrimitives> PeerMetadata<N> {
     }
 
     /// Returns the negotiated `EthVersion` of the session.
-    pub fn version(&self) -> EthVersion {
+    pub const fn version(&self) -> EthVersion {
         self.version
     }
 
     /// Returns a reference to the peer's client version string.
-    pub fn client_version(&self) -> &Arc<str> {
+    pub fn client_version(&self) -> &str {
         &self.client_version
     }
 
     /// Returns the peer's kind.
-    pub fn peer_kind(&self) -> PeerKind {
+    pub const fn peer_kind(&self) -> PeerKind {
         self.peer_kind
     }
 }
