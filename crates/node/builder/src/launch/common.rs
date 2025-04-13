@@ -135,8 +135,8 @@ impl LaunchContext {
     }
 
     /// Convenience function to [`Self::configure_globals`]
-    pub fn with_configured_globals(self) -> Self {
-        self.configure_globals();
+    pub fn with_configured_globals(self, reserved_cpu_cores: u64) -> Self {
+        self.configure_globals(reserved_cpu_cores);
         self
     }
 
@@ -144,7 +144,7 @@ impl LaunchContext {
     ///
     /// - Raising the file descriptor limit
     /// - Configuring the global rayon thread pool
-    pub fn configure_globals(&self) {
+    pub fn configure_globals(&self, reserved_cpu_cores: u64) {
         // Raise the fd limit of the process.
         // Does not do anything on windows.
         match fdlimit::raise_fd_limit() {
@@ -155,10 +155,12 @@ impl LaunchContext {
             Err(err) => warn!(%err, "Failed to raise file descriptor limit"),
         }
 
-        // Limit the global rayon thread pool, reserving 1 core for the rest of the system.
-        // If the system only has 1 core the pool will use it.
-        let num_threads =
-            available_parallelism().map_or(0, |num| num.get().saturating_sub(1).max(1));
+        // Limit the global rayon thread pool, reserving 1 core for the rest of the system by
+        // default. Users can reserver more cores by setting engine.reserved-cpu-cores
+        // The pool will use at least one core.
+        let num_threads = available_parallelism().map_or(0, |num| {
+            num.get().saturating_sub(reserved_cpu_cores.try_into().unwrap()).max(1)
+        });
         if let Err(err) = ThreadPoolBuilder::new()
             .num_threads(num_threads)
             .thread_name(|i| format!("reth-rayon-{i}"))
@@ -187,8 +189,8 @@ impl<T> LaunchContextWith<T> {
     ///
     /// - Raising the file descriptor limit
     /// - Configuring the global rayon thread pool
-    pub fn configure_globals(&self) {
-        self.inner.configure_globals();
+    pub fn configure_globals(&self, reserved_cpu_cores: u64) {
+        self.inner.configure_globals(reserved_cpu_cores);
     }
 
     /// Returns the data directory.

@@ -42,6 +42,9 @@ pub const DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB: u64 = 4 * 1024;
 /// Default maximum concurrency for proof tasks
 pub const DEFAULT_MAX_PROOF_TASK_CONCURRENCY: u64 = 256;
 
+/// Default number of reserved CPU cores for non-reth processes
+pub const DEFAULT_RESERVED_CPU_CORES: u64 = 1;
+
 /// This includes all necessary configuration to launch the node.
 /// The individual configuration options can be overwritten before launching the node.
 ///
