@@ -2,8 +2,9 @@
 
 use super::message::MAX_MESSAGE_SIZE;
 use crate::{
+    message::{EthBroadcastMessage, ProtocolBroadcastMessage},
     EthMessage, EthMessageID, EthNetworkPrimitives, EthVersion, NetworkPrimitives, ProtocolMessage,
-    SnapMessageId, SnapProtocolMessage,
+    RawCapabilityMessage, SnapMessageId, SnapProtocolMessage,
 };
 use alloy_rlp::{Bytes, BytesMut, Encodable};
 use core::fmt::Debug;
@@ -16,7 +17,7 @@ use std::{
 };
 use tokio_stream::Stream;
 
-/// Error type for the ETH+SNAP stream
+/// Error type for the eth and snap stream
 #[derive(thiserror::Error, Debug)]
 pub enum EthSnapStreamError {
     /// Invalid message for protocol version
@@ -40,16 +41,16 @@ pub enum EthSnapStreamError {
     StatusNotInHandshake,
 }
 
-/// Combined message type that include either ETH or SNAP protocol messages
+/// Combined message type that include either eth or snao protocol messages
 #[derive(Debug)]
 pub enum EthSnapMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// An Ethereum protocol message
     Eth(EthMessage<N>),
-    /// A SNAP protocol message
+    /// A snap protocol message
     Snap(SnapProtocolMessage),
 }
 
-/// A stream implementation that can handle both ETH and SNAP protocol messages
+/// A stream implementation that can handle both eth and snap protocol messages
 /// over a single connection.
 #[pin_project]
 #[derive(Debug, Clone)]
@@ -92,6 +93,35 @@ where
     #[inline]
     pub fn into_inner(self) -> S {
         self.inner
+    }
+}
+
+impl<S, E, N> EthSnapStream<S, N>
+where
+    S: Sink<Bytes, Error = E> + Unpin,
+    EthSnapStreamError: From<E>,
+    N: NetworkPrimitives,
+{
+    /// Same as [`Sink::start_send`] but accepts a [`EthBroadcastMessage`] instead.
+    pub fn start_send_broadcast(
+        &mut self,
+        item: EthBroadcastMessage<N>,
+    ) -> Result<(), EthSnapStreamError> {
+        self.inner.start_send_unpin(Bytes::from(alloy_rlp::encode(
+            ProtocolBroadcastMessage::from(item),
+        )))?;
+
+        Ok(())
+    }
+
+    /// Sends a raw capability message directly over the stream
+    pub fn start_send_raw(&mut self, msg: RawCapabilityMessage) -> Result<(), EthSnapStreamError> {
+        let mut bytes = Vec::with_capacity(msg.payload.len() + 1);
+        msg.id.encode(&mut bytes);
+        bytes.extend_from_slice(&msg.payload);
+
+        self.inner.start_send_unpin(bytes.into())?;
+        Ok(())
     }
 }
 
@@ -153,7 +183,7 @@ where
 /// Only one version, snap/1, does exist.
 #[derive(Debug, Clone)]
 struct EthSnapStreamInner<N> {
-    /// ETH protocol version
+    /// Eth protocol version
     eth_version: EthVersion,
     /// Type marker
     _pd: PhantomData<N>,
@@ -366,7 +396,7 @@ mod tests {
         let eth_max_id = EthMessageID::max();
         let mut eth_boundary_bytes = BytesMut::new();
         eth_boundary_bytes.extend_from_slice(&[eth_max_id]);
-        eth_boundary_bytes.extend_from_slice(&[0, 0]); 
+        eth_boundary_bytes.extend_from_slice(&[0, 0]);
 
         // This should be decoded as eth message
         let eth_boundary_result = inner.decode_message(eth_boundary_bytes);
