@@ -11,6 +11,8 @@ pub struct RLPExecutionWitness {
     /// Serialized bytecode
     pub codes: Vec<Bytes>,
     /// Serialized headers
+    /// TODO: This is not needed for stateless if we are re-executing blocks since the client will
+    /// TODO: store the previous blocks
     pub headers: Vec<Bytes>,
 }
 
@@ -21,9 +23,22 @@ impl RLPExecutionWitness {
     }
 
     /// Returns the total number of bytes needed to represent
-    /// the witness
-    pub fn size(&self) -> usize {
+    /// the whole witness
+    pub fn size_with_headers(&self) -> usize {
         self.state.len() + self.codes.len() + self.headers.len()
+    }
+
+    /// Returns the total number of bytes needed to represent
+    /// the witness minus the headers.
+    ///
+    /// Note: This is useful because if we are re-executing,
+    /// we do not receive the headers and if we are verifying a proof,
+    /// we do not receive the execution witness.
+    ///
+    /// TODO: We keep the headers for now to test the networking stack and
+    /// TODO not make too many changes to the ExecutionWitness
+    pub fn size_without_headers(&self) -> usize {
+        self.state.len() + self.codes.len()
     }
 
     /// Returns the number of trie nodes in the witness
