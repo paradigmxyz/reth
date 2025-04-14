@@ -58,6 +58,7 @@ std = [
     "op-alloy-consensus/std",
     "serde_json/std",
     "serde_with?/std",
+    "alloy-eips/std",
 ]
 alloy-compat = ["op-alloy-consensus/alloy-compat"]
 reth-codec = [
@@ -77,6 +78,8 @@ serde = [
     "bytes?/serde",
     "reth-codecs?/serde",
     "op-alloy-consensus/serde",
+    "alloy-eips/serde",
+    "rand/serde",
 ]
 serde-bincode-compat = [
     "serde",
@@ -84,6 +87,7 @@ serde-bincode-compat = [
     "alloy-consensus/serde-bincode-compat",
     "op-alloy-consensus/serde-bincode-compat",
     "reth-primitives-traits/serde-bincode-compat",
+    "alloy-eips/serde-bincode-compat",
 ]
 arbitrary = [
     "std",
@@ -93,4 +97,5 @@ arbitrary = [
     "op-alloy-consensus/arbitrary",
     "alloy-consensus/arbitrary",
     "alloy-primitives/arbitrary",
+    "alloy-eips/arbitrary",
 ]
