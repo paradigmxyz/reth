@@ -4,6 +4,9 @@ mod tx_type;
 
 pub use op_alloy_consensus::OpTxType;
 
+#[cfg(test)]
+mod signed;
+
 /// Signed transaction.
 pub type OpTransactionSigned = op_alloy_consensus::OpTxEnvelope;
 

@@ -44,6 +44,11 @@ rstest.workspace = true
 serde_json.workspace = true
 bincode.workspace = true
 
+proptest-arbitrary-interop.workspace = true
+proptest.workspace = true
+rand_08.workspace = true
+secp256k1 = { workspace = true, features = ["rand"] }
+
 [features]
 default = ["std"]
 std = [
@@ -59,6 +64,7 @@ std = [
     "serde_json/std",
     "serde_with?/std",
     "alloy-eips/std",
+    "secp256k1/std",
 ]
 alloy-compat = ["op-alloy-consensus/alloy-compat"]
 reth-codec = [
@@ -80,6 +86,8 @@ serde = [
     "op-alloy-consensus/serde",
     "alloy-eips/serde",
     "rand/serde",
+    "rand_08/serde",
+    "secp256k1/serde",
 ]
 serde-bincode-compat = [
     "serde",
