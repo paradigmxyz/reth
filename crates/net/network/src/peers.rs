@@ -937,7 +937,7 @@ impl PeersManager {
 
             if peer.addr != new_addr {
                 peer.addr = new_addr;
-                trace!(target: "net::peers", ?peer_id, "Updated trusted peer address via DNS resolution");
+                trace!(target: "net::peers", ?peer_id, addre=?peer.addr, "Updated resolved trusted peer address");
             }
         }
     }
@@ -1014,7 +1014,7 @@ impl PeersManager {
                 self.fill_outbound_slots();
             }
 
-            if let Poll::Ready(Some((peer_id, new_record))) = self.trusted_peers_resolver.poll(cx) {
+            if let Poll::Ready((peer_id, new_record)) = self.trusted_peers_resolver.poll(cx) {
                 self.on_resolved_peer(peer_id, new_record);
             }
 

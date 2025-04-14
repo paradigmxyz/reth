@@ -36,7 +36,7 @@ impl TrustedPeersResolver {
     /// Poll the resolver.
     /// When the interval ticks, new resolution futures for each trusted peer are spawned.
     /// If a future completes successfully, it returns the resolved (`PeerId`, `NodeRecord`).
-    pub fn poll(&mut self, cx: &mut Context<'_>) -> Poll<Option<(PeerId, NodeRecord)>> {
+    pub fn poll(&mut self, cx: &mut Context<'_>) -> Poll<(PeerId, NodeRecord)> {
         if self.trusted_peers.is_empty() {
             return Poll::Pending;
         }
@@ -56,12 +56,12 @@ impl TrustedPeersResolver {
         }
 
         match ready!(self.pending.poll_next_unpin(cx)) {
-            Some((peer_id, Ok(record))) => Poll::Ready(Some((peer_id, record))),
+            Some((peer_id, Ok(record))) => Poll::Ready((peer_id, record)),
             Some((peer_id, Err(e))) => {
                 warn!(target: "net::peers", "Failed to resolve trusted peer {:?}: {:?}", peer_id, e);
                 Poll::Pending
             }
-            None => Poll::Ready(None),
+            None => Poll::Pending,
         }
     }
 }
