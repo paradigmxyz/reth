@@ -448,7 +448,7 @@ revm-inspector = { version = "3.0.0", default-features = false }
 revm-context = { version = "3.0.0", default-features = false }
 revm-context-interface = { version = "3.0.0", default-features = false }
 revm-database-interface = { version = "3.0.0", default-features = false }
-op-revm = { version = "3.0.0", default-features = false }
+op-revm = { version = "3.0.1", default-features = false }
 revm-inspectors = "0.19.0"
 
 # eth
