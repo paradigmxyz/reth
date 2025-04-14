@@ -29,6 +29,7 @@ members = [
     "crates/engine/tree/",
     "crates/engine/util/",
     "crates/era",
+    "crates/era-downloader",
     "crates/errors/",
     "crates/ethereum-forks/",
     "crates/ethereum/cli/",
@@ -344,6 +345,7 @@ reth-engine-service = { path = "crates/engine/service" }
 reth-engine-util = { path = "crates/engine/util" }
 reth-errors = { path = "crates/errors" }
 reth-era = { path = "crates/era" }
+reth-era-downloader = { path = "crates/era-downloader" }
 reth-eth-wire = { path = "crates/net/eth-wire" }
 reth-eth-wire-types = { path = "crates/net/eth-wire-types" }
 reth-ethereum-cli = { path = "crates/ethereum/cli" }
@@ -624,6 +626,7 @@ similar-asserts = { version = "1.5.0", features = ["serde"] }
 tempfile = "3.8"
 test-fuzz = "7"
 rstest = "0.24.0"
+test-case = "3"
 
 # ssz encoding
 ethereum_ssz = "0.9.0"
