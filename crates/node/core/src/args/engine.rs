@@ -4,8 +4,8 @@ use clap::Args;
 use reth_engine_primitives::TreeConfig;
 
 use crate::node_config::{
-    DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB, DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
-    DEFAULT_PERSISTENCE_THRESHOLD,
+    DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB, DEFAULT_MAX_PROOF_TASK_CONCURRENCY,
+    DEFAULT_MEMORY_BLOCK_BUFFER_TARGET, DEFAULT_PERSISTENCE_THRESHOLD,
 };
 
 /// Parameters for configuring the engine driver.
@@ -40,6 +40,10 @@ pub struct EngineArgs {
     /// Enables accepting requests hash instead of an array of requests in `engine_newPayloadV4`.
     #[arg(long = "engine.accept-execution-requests-hash")]
     pub accept_execution_requests_hash: bool,
+
+    /// Configure the maximum number of concurrent proof tasks
+    #[arg(long = "engine.max-proof-task-concurrency", default_value_t = DEFAULT_MAX_PROOF_TASK_CONCURRENCY)]
+    pub max_proof_task_concurrency: u64,
 }
 
 impl Default for EngineArgs {
@@ -52,6 +56,7 @@ impl Default for EngineArgs {
             caching_and_prewarming_enabled: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB,
             accept_execution_requests_hash: false,
+            max_proof_task_concurrency: DEFAULT_MAX_PROOF_TASK_CONCURRENCY,
         }
     }
 }
@@ -66,6 +71,7 @@ impl EngineArgs {
             .with_caching_and_prewarming(self.caching_and_prewarming_enabled)
             .with_always_compare_trie_updates(self.state_root_task_compare_updates)
             .with_cross_block_cache_size(self.cross_block_cache_size * 1024 * 1024)
+            .with_max_proof_task_concurrency(self.max_proof_task_concurrency)
     }
 }
 

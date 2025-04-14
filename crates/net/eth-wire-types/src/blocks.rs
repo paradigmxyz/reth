@@ -97,7 +97,7 @@ mod tests {
     };
     use alloy_consensus::{Header, TxLegacy};
     use alloy_eips::BlockHashOrNumber;
-    use alloy_primitives::{hex, PrimitiveSignature as Signature, TxKind, U256};
+    use alloy_primitives::{hex, Signature, TxKind, U256};
     use alloy_rlp::{Decodable, Encodable};
     use reth_ethereum_primitives::{BlockBody, Transaction, TransactionSigned};
     use std::str::FromStr;

@@ -107,7 +107,7 @@ mod tests {
 
     #[test]
     fn parse_socket_address_random() {
-        let port: u16 = rand::thread_rng().gen();
+        let port: u16 = rand::rng().random();
 
         for value in [format!("localhost:{port}"), format!(":{port}"), port.to_string()] {
             let socket_addr = parse_socket_address(&value)

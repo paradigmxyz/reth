@@ -9,7 +9,7 @@ use alloy_primitives::{ChainId, TxHash};
 use alloy_rlp::{BufMut, Decodable, Encodable, Result as RlpResult};
 use op_alloy_consensus::{OpTxEnvelope, OpTxType};
 use reth_codecs::Compact;
-use reth_primitives_traits::{
+use reth_ethereum::primitives::{
     serde_bincode_compat::SerdeBincodeCompat, transaction::signed::RecoveryError, InMemorySize,
     SignedTransaction,
 };

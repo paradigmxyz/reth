@@ -234,6 +234,13 @@ Networking:
 
           If flag is set, but no value is passed, the default interface for docker `eth0` is tried.
 
+      --tx-propagation-policy <TX_PROPAGATION_POLICY>
+          Transaction Propagation Policy
+
+          The policy determines which peers transactions are gossiped to.
+
+          [default: All]
+
       --to <TO>
           The maximum block height
 

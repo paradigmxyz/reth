@@ -797,7 +797,7 @@ mod tests {
         let provider = factory.provider_rw().unwrap();
 
         let mut rng = generators::rng();
-        let consensus_tip = rng.gen();
+        let consensus_tip = rng.random();
         let (_tip_tx, tip_rx) = watch::channel(consensus_tip);
 
         // Genesis

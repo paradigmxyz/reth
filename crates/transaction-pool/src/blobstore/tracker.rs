@@ -90,7 +90,7 @@ pub enum BlobStoreUpdates {
 mod tests {
     use super::*;
     use alloy_consensus::{Header, Signed};
-    use alloy_primitives::PrimitiveSignature as Signature;
+    use alloy_primitives::Signature;
     use reth_ethereum_primitives::Transaction;
     use reth_execution_types::Chain;
     use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
