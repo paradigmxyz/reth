@@ -7788,6 +7788,7 @@ version = "1.3.9"
 dependencies = [
  "bytes",
  "eyre",
+ "futures",
  "futures-util",
  "reqwest",
  "test-case",

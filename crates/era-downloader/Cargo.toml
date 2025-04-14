@@ -27,6 +27,7 @@ eyre.workspace = true
 tokio.workspace = true
 tokio.features = ["fs", "io-util", "macros"]
 test-case.workspace = true
+futures.workspace = true
 
 [lints]
 workspace = true

@@ -1,4 +1,5 @@
 //! Tests fetching a file
+use crate::StubClient;
 use reqwest::Url;
 use reth_era_downloader::EraClient;
 use std::{
@@ -22,7 +23,7 @@ async fn test_getting_file_url_after_fetching_file_list(url: &str) {
         .join(format!("{:x}", hasher.finish()))
         .into_boxed_path();
     let _ = std::fs::create_dir(&folder);
-    let client = EraClient::new(reqwest::Client::new(), base_url, folder);
+    let client = EraClient::new(StubClient, base_url, folder);
 
     client.fetch_file_list().await.unwrap();
 
@@ -47,7 +48,7 @@ async fn test_getting_file_after_fetching_file_list(url: &str) {
         .into_boxed_path();
     let _ = std::fs::remove_dir_all(&folder);
     let _ = std::fs::create_dir(&folder);
-    let mut client = EraClient::new(reqwest::Client::new(), base_url, folder);
+    let mut client = EraClient::new(StubClient, base_url, folder);
 
     client.fetch_file_list().await.unwrap();
 

@@ -1,4 +1,5 @@
 //! Tests downloading files and streaming their filenames
+use crate::StubClient;
 use futures_util::StreamExt;
 use reqwest::Url;
 use reth_era_downloader::{EraClient, EraStream, EraStreamConfig};
@@ -24,7 +25,7 @@ async fn test_streaming_files_after_fetching_file_list(url: &str) {
         .into_boxed_path();
     let _ = std::fs::remove_dir_all(&folder);
     let _ = std::fs::create_dir(&folder);
-    let client = EraClient::new(reqwest::Client::new(), base_url, folder.clone());
+    let client = EraClient::new(StubClient, base_url, folder.clone());
 
     client.fetch_file_list().await.unwrap();
 
