@@ -1846,7 +1846,7 @@ pub struct PeerMetadata<N: NetworkPrimitives = EthNetworkPrimitives> {
 
 impl<N: NetworkPrimitives> PeerMetadata<N> {
     /// Returns a new instance of [`PeerMetadata`].
-    fn new(
+    pub fn new(
         request_tx: PeerRequestSender<PeerRequest<N>>,
         version: EthVersion,
         client_version: Arc<str>,
@@ -1865,6 +1865,11 @@ impl<N: NetworkPrimitives> PeerMetadata<N> {
     /// Returns a reference to the peer's request sender channel.
     pub fn request_tx(&self) -> &PeerRequestSender<PeerRequest<N>> {
         &self.request_tx
+    }
+
+    /// Return a
+    pub fn seen_transactions_mut(&mut self) -> &mut LruCache<TxHash> {
+        &mut self.seen_transactions
     }
 
     /// Returns the negotiated `EthVersion` of the session.
@@ -1983,11 +1988,16 @@ struct TxManagerPollDurations {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{test_utils::Testnet, NetworkConfigBuilder, NetworkManager};
+    use crate::{
+        test_utils::{
+            transactions::{buffer_hash_to_tx_fetcher, new_mock_session, new_tx_manager},
+            Testnet,
+        },
+        NetworkConfigBuilder, NetworkManager,
+    };
     use alloy_consensus::{transaction::PooledTransaction, TxEip1559, TxLegacy};
     use alloy_primitives::{hex, Signature, TxKind, U256};
     use alloy_rlp::Decodable;
-    use constants::tx_fetcher::DEFAULT_MAX_COUNT_FALLBACK_PEERS;
     use futures::FutureExt;
     use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_ethereum_primitives::{Transaction, TransactionSigned};
@@ -1998,7 +2008,7 @@ mod tests {
     };
     use reth_storage_api::noop::NoopProvider;
     use reth_transaction_pool::test_utils::{
-        testing_pool, MockTransaction, MockTransactionFactory, TestPool,
+        testing_pool, MockTransaction, MockTransactionFactory,
     };
     use secp256k1::SecretKey;
     use std::{
@@ -2006,81 +2016,7 @@ mod tests {
         net::{IpAddr, Ipv4Addr, SocketAddr},
         str::FromStr,
     };
-    use tests::fetcher::TxFetchMetadata;
     use tracing::error;
-
-    async fn new_tx_manager(
-    ) -> (TransactionsManager<TestPool, EthNetworkPrimitives>, NetworkManager<EthNetworkPrimitives>)
-    {
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-        let client = NoopProvider::default();
-
-        let config = NetworkConfigBuilder::new(secret_key)
-            // let OS choose port
-            .listener_port(0)
-            .disable_discovery()
-            .build(client);
-
-        let pool = testing_pool();
-
-        let transactions_manager_config = config.transactions_manager_config.clone();
-        let (_network_handle, network, transactions, _) = NetworkManager::new(config)
-            .await
-            .unwrap()
-            .into_builder()
-            .transactions(pool.clone(), transactions_manager_config)
-            .split_with_handle();
-
-        (transactions, network)
-    }
-
-    pub(super) fn buffer_hash_to_tx_fetcher(
-        tx_fetcher: &mut TransactionFetcher,
-        hash: TxHash,
-        peer_id: PeerId,
-        retries: u8,
-        tx_encoded_length: Option<usize>,
-    ) {
-        match tx_fetcher.hashes_fetch_inflight_and_pending_fetch.get_or_insert(hash, || {
-            TxFetchMetadata::new(
-                retries,
-                LruCache::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS as u32),
-                tx_encoded_length,
-            )
-        }) {
-            Some(metadata) => {
-                metadata.fallback_peers_mut().insert(peer_id);
-            }
-            None => {
-                trace!(target: "net::tx",
-                        peer_id=format!("{peer_id:#}"),
-                        %hash,
-                        "failed to insert hash from peer in schnellru::LruMap, dropping hash"
-                )
-            }
-        }
-
-        tx_fetcher.hashes_pending_fetch.insert(hash);
-    }
-
-    // Returns (peer, channel-to-send-get-pooled-tx-response-on).
-    pub(super) fn new_mock_session(
-        peer_id: PeerId,
-        version: EthVersion,
-    ) -> (PeerMetadata<EthNetworkPrimitives>, mpsc::Receiver<PeerRequest>) {
-        let (to_mock_session_tx, to_mock_session_rx) = mpsc::channel(1);
-
-        (
-            PeerMetadata::new(
-                PeerRequestSender::new(peer_id, to_mock_session_tx),
-                version,
-                Arc::from(""),
-                DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
-                PeerKind::Trusted,
-            ),
-            to_mock_session_rx,
-        )
-    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_ignored_tx_broadcasts_while_initially_syncing() {
