@@ -902,3 +902,20 @@ impl NetworkPrimitives for OpNetworkPrimitives {
     type PooledTransaction = OpPooledTransaction;
     type Receipt = OpReceipt;
 }
+
+#[cfg(test)]
+mod test {
+    use reth_optimism_chainspec::BASE_MAINNET;
+    use reth_provider::providers::ProviderNodeTypes;
+
+    use super::*;
+
+    fn foo<T: ProviderNodeTypes>(bar: T) {}
+
+    #[test]
+    fn op_node_sdk() {
+        let provider =
+            OpNode::provider_factory_builder().open_read_only(BASE_MAINNET.clone(), "").unwrap();
+        foo(provider);
+    }
+}

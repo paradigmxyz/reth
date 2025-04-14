@@ -197,6 +197,18 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     }
 }
 
+impl<N: NodeTypesWithDB> NodeTypes for ProviderFactory<N> {
+    type Primitives = N::Primitives;
+    type ChainSpec = N::ChainSpec;
+    type StateCommitment = N::StateCommitment;
+    type Storage = N::Storage;
+    type Payload = N::Payload;
+}
+
+impl<N: NodeTypesWithDB> NodeTypesWithDB for ProviderFactory<N> {
+    type DB = N::DB;
+}
+
 impl<N: NodeTypesWithDB> NodePrimitivesProvider for ProviderFactory<N> {
     type Primitives = N::Primitives;
 }
