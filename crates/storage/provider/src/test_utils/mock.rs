@@ -221,8 +221,12 @@ impl NodeTypes for MockNode {
     type Payload = EthEngineTypes;
 }
 
-impl<ChainSpec: EthChainSpec> StateCommitmentProvider for MockEthProvider<ChainSpec> {
-    type StateCommitment = <MockNode as NodeTypes>::StateCommitment;
+impl<T,ChainSpec> StateCommitmentProvider for MockEthProvider<T, ChainSpec>
+where
+    T: NodePrimitives,
+    ChainSpec: EthChainSpec + Send + Sync + 'static,
+{
+    type StateCommitment = T::StateCommitment;
 }
 
 impl<T: NodePrimitives, ChainSpec: EthChainSpec + Clone + 'static> DatabaseProviderFactory
@@ -267,15 +271,19 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> DBProvider for MockEt
     }
 }
 
-impl<ChainSpec: EthChainSpec> HeaderProvider for MockEthProvider<ChainSpec> {
+impl<T, ChainSpec> HeaderProvider for MockEthProvider<T, ChainSpec>
+where
+    T: NodePrimitives,
+    ChainSpec: EthChainSpec + Send + Sync + 'static,
+    {
     type Header = Header;
 
-    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
+    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
         let lock = self.headers.lock();
         Ok(lock.get(block_hash).cloned())
     }
 
-    fn header_by_number(&self, num: u64) -> ProviderResult<Option<Header>> {
+    fn header_by_number(&self, num: u64) -> ProviderResult<Option<Self::Header>> {
         let lock = self.headers.lock();
         Ok(lock.values().find(|h| h.number == num).cloned())
     }
@@ -326,10 +334,14 @@ impl<ChainSpec: EthChainSpec> HeaderProvider for MockEthProvider<ChainSpec> {
     }
 }
 
-impl<ChainSpec: EthChainSpec + 'static> ChainSpecProvider for MockEthProvider<ChainSpec> {
+impl<T, ChainSpec> ChainSpecProvider for MockEthProvider<T, ChainSpec>
+where
+    T: NodePrimitives,
+    ChainSpec: EthChainSpec + 'static + Debug + Send + Sync,
+{
     type ChainSpec = ChainSpec;
 
-    fn chain_spec(&self) -> Arc<ChainSpec> {
+    fn chain_spec(&self) -> Arc<Self::ChainSpec> {
         self.chain_spec.clone()
     }
 }
@@ -876,7 +888,12 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> WithdrawalsProvider for MockEthP
     }
 }
 
-impl<T: NodePrimitives, ChainSpec: Send + Sync> OmmersProvider for MockEthProvider<T, ChainSpec> {
+impl<T, ChainSpec> OmmersProvider for MockEthProvider<T, ChainSpec> 
+where 
+    T: NodePrimitives,
+    ChainSpec: Send + Sync,
+    Self: HeaderProvider,
+{
     fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
         Ok(None)
     }
