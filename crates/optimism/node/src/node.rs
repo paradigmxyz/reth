@@ -215,7 +215,7 @@ where
         reth_optimism_primitives::OpBlock {
             header: header.inner,
             body: reth_optimism_primitives::OpBlockBody {
-                transactions: transactions.into_transactions().map(Into::into).collect(),
+                transactions: transactions.into_transactions().collect(),
                 ..Default::default()
             },
         }
@@ -621,6 +621,10 @@ where
                     ctx.task_executor().clone(),
                     reth_transaction_pool::maintain::MaintainPoolConfig {
                         max_tx_lifetime: pool.config().max_queued_lifetime,
+                        no_local_exemptions: transaction_pool
+                            .config()
+                            .local_transactions_config
+                            .no_exemptions,
                         ..Default::default()
                     },
                 ),

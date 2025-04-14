@@ -83,7 +83,6 @@ parking_lot.workspace = true
 tracing.workspace = true
 tracing-futures.workspace = true
 futures.workspace = true
-rand.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 derive_more.workspace = true
@@ -95,6 +94,7 @@ reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 
 alloy-consensus.workspace = true
+rand.workspace = true
 
 jsonrpsee-types.workspace = true
 jsonrpsee = { workspace = true, features = ["client"] }

@@ -807,9 +807,9 @@ mod tests {
     fn test_block_range_iter() {
         let mut rng = generators::rng();
 
-        let start = rng.gen::<u32>() as u64;
-        let end = start.saturating_add(rng.gen::<u32>() as u64);
-        let step = rng.gen::<u16>() as u64;
+        let start = rng.random::<u32>() as u64;
+        let end = start.saturating_add(rng.random::<u32>() as u64);
+        let step = rng.random::<u16>() as u64;
         let range = start..=end;
         let mut iter = BlockRangeInclusiveIter::new(range.clone(), step);
         let (from, mut end) = iter.next().unwrap();

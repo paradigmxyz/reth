@@ -33,7 +33,7 @@ alloy_sol_types::sol! {
 async fn test_fee_history() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let seed: [u8; 32] = rand::thread_rng().gen();
+    let seed: [u8; 32] = rand::rng().random();
     let mut rng = StdRng::from_seed(seed);
     println!("Seed: {:?}", seed);
 
@@ -71,8 +71,9 @@ async fn test_fee_history() -> eyre::Result<()> {
     assert_eq!(block.header.base_fee_per_gas.unwrap(), expected_first_base_fee as u64);
 
     for _ in 0..100 {
-        let _ =
-            GasWaster::deploy_builder(&provider, U256::from(rng.gen_range(0..1000))).send().await?;
+        let _ = GasWaster::deploy_builder(&provider, U256::from(rng.random_range(0..1000)))
+            .send()
+            .await?;
 
         node.advance_block().await?;
     }
@@ -80,8 +81,8 @@ async fn test_fee_history() -> eyre::Result<()> {
     let latest_block = provider.get_block_number().await?;
 
     for _ in 0..100 {
-        let latest_block = rng.gen_range(0..=latest_block);
-        let block_count = rng.gen_range(1..=(latest_block + 1));
+        let latest_block = rng.random_range(0..=latest_block);
+        let block_count = rng.random_range(1..=(latest_block + 1));
 
         let fee_history = provider.get_fee_history(block_count, latest_block.into(), &[]).await?;
 
