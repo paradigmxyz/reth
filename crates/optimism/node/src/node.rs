@@ -910,7 +910,7 @@ mod test {
 
     use super::*;
 
-    fn foo<T: ProviderNodeTypes>(bar: T) {}
+    fn foo<T: ProviderNodeTypes>(_bar: T) {}
 
     #[test]
     fn op_node_sdk() {
