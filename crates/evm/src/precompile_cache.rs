@@ -11,16 +11,7 @@ use reth_revm::revm::{
 };
 
 #[cfg(feature = "std")]
-use alloc::sync::Arc;
-#[cfg(feature = "std")]
-use alloy_primitives::Bytes;
-#[cfg(feature = "metrics")]
-use metrics::Gauge;
-#[cfg(feature = "metrics")]
-use reth_metrics::Metrics;
-
-#[cfg(feature = "std")]
-type Cache<K, V> = mini_moka::sync::Cache<K, V>;
+type Cache<K, V> = mini_moka::sync::Cache<K, V, alloy_primitives::map::DefaultHashBuilder>;
 
 /// Complete cache key combining address, spec id and input bytes.
 #[cfg(feature = "std")]
@@ -31,7 +22,7 @@ struct PrecompileKey {
     /// Protocol specification.
     spec: SpecId,
     /// Input data.
-    input: Bytes,
+    input: alloy_primitives::Bytes,
 }
 
 /// Combined entry containing both the result and gas bounds.
@@ -64,26 +55,29 @@ pub struct PrecompileCache {
 #[cfg(feature = "std")]
 impl Default for PrecompileCache {
     fn default() -> Self {
-        Self { cache: Cache::new(10_000) }
+        Self {
+            cache: mini_moka::sync::CacheBuilder::new(100_000)
+                .build_with_hasher(alloy_primitives::map::DefaultHashBuilder::default()),
+        }
     }
 }
 
 /// Metrics for the cached precompile provider, showing hits / misses for each cache
 #[cfg(feature = "metrics")]
-#[derive(Metrics, Clone)]
+#[derive(reth_metrics::Metrics, Clone)]
 #[metrics(scope = "sync.caching")]
 pub(crate) struct CachedPrecompileMetrics {
     /// Precompile cache hits
-    precompile_cache_hits: Gauge,
+    precompile_cache_hits: metrics::Gauge,
 
     /// Precompile cache misses
-    precompile_cache_misses: Gauge,
+    precompile_cache_misses: metrics::Gauge,
 
     /// Precompile cache size
     ///
     /// NOTE: this uses the moka caches' `entry_count`, NOT the `weighted_size` method to calculate
     /// size.
-    precompile_cache_size: Gauge,
+    precompile_cache_size: metrics::Gauge,
 }
 
 /// A custom precompile provider that wraps a precompile provider and potentially a cache for it.
@@ -94,7 +88,7 @@ pub struct MaybeCachedPrecompileProvider<P> {
     precompile_provider: P,
     /// The cache to use.
     #[cfg(feature = "std")]
-    cache: Option<Arc<PrecompileCache>>,
+    cache: Option<alloc::sync::Arc<PrecompileCache>>,
     /// The spec id to use.
     spec: SpecId,
     /// Cache metrics.
@@ -106,7 +100,10 @@ impl<P> MaybeCachedPrecompileProvider<P> {
     /// Given a [`PrecompileProvider`]  and cache for a specific precompile provider,
     /// create a cached wrapper that can be used inside Evm.
     #[cfg(feature = "std")]
-    pub fn new_with_cache(precompile_provider: P, cache: Arc<PrecompileCache>) -> Self {
+    pub fn new_with_cache(
+        precompile_provider: P,
+        cache: alloc::sync::Arc<PrecompileCache>,
+    ) -> Self {
         Self {
             precompile_provider,
             #[cfg(feature = "std")]
@@ -165,7 +162,7 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
                     let result = InterpreterResult {
                         result: InstructionResult::PrecompileOOG,
                         gas: Gas::new(gas_limit),
-                        output: Bytes::new(),
+                        output: alloy_primitives::Bytes::new(),
                     };
 
                     return Ok(Some(result));
@@ -325,14 +322,14 @@ mod tests {
 
     #[test]
     fn test_precompile_cache_basic() {
-        let cache = Arc::new(PrecompileCache::default());
+        let cache = PrecompileCache::default();
 
         let address = precompile_address(1);
         let key = PrecompileKey { address, spec: SpecId::PRAGUE, input: b"test_input".into() };
 
         let result = Ok(InterpreterResult::new(
             InstructionResult::Return,
-            Bytes::copy_from_slice(b"cached_result"),
+            alloy_primitives::Bytes::copy_from_slice(b"cached_result"),
             Gas::new(50),
         ));
 
