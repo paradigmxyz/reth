@@ -91,19 +91,20 @@ reth-codec = [
     "dep:reth-zstd-compressors",
 ]
 serde = [
-    "dep:serde",
-    "scroll-alloy-consensus/serde",
-    "secp256k1?/serde",
-    "alloy-consensus/serde",
-    "alloy-eips/serde",
-    "alloy-primitives/serde",
-    "bytes?/serde",
-    "rand_08?/serde",
-    "reth-codecs?/serde",
-    "reth-primitives-traits/serde",
-    "revm-scroll/serde",
-    "revm-context/serde",
-    "scroll-alloy-evm/serde",
+	"dep:serde",
+	"scroll-alloy-consensus/serde",
+	"secp256k1?/serde",
+	"alloy-consensus/serde",
+	"alloy-eips/serde",
+	"alloy-primitives/serde",
+	"bytes?/serde",
+	"rand_08?/serde",
+	"reth-codecs?/serde",
+	"reth-primitives-traits/serde",
+	"revm-scroll/serde",
+	"revm-context/serde",
+	"scroll-alloy-evm/serde",
+	"rand/serde"
 ]
 serde-bincode-compat = [
     "alloy-consensus/serde-bincode-compat",
