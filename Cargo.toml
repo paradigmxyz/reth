@@ -626,8 +626,8 @@ test-fuzz = "7"
 rstest = "0.24.0"
 
 # ssz encoding
-ethereum_ssz = "0.8.3"
-ethereum_ssz_derive = "0.8.3"
+ethereum_ssz = "0.9.0"
+ethereum_ssz_derive = "0.9.0"
 
 # allocators
 tikv-jemalloc-ctl = "0.6"
