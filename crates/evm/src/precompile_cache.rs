@@ -161,8 +161,7 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
                 if gas_limit <= entry.lower_gas_limit {
                     let result = InterpreterResult {
                         result: InstructionResult::PrecompileOOG,
-                        // all gas consumed in OOG
-                        gas: Gas::new_spent(gas_limit),
+                        gas: Gas::new(gas_limit),
                         output: Bytes::new(),
                     };
 
