@@ -450,7 +450,7 @@ revm-inspector = { version = "3.0.0", default-features = false }
 revm-context = { version = "3.0.0", default-features = false }
 revm-context-interface = { version = "3.0.0", default-features = false }
 revm-database-interface = { version = "3.0.0", default-features = false }
-op-revm = { version = "3.0.0", default-features = false }
+op-revm = { version = "3.0.1", default-features = false }
 revm-inspectors = "0.19.0"
 
 # eth
@@ -462,7 +462,7 @@ alloy-primitives = { version = "1.0.0", default-features = false, features = ["m
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
 alloy-sol-macro = "1.0.0"
 alloy-sol-types = { version = "1.0.0", default-features = false }
-alloy-trie = { version = "0.8.0", default-features = false }
+alloy-trie = { version = "0.8.1", default-features = false }
 
 alloy-hardforks = "0.2.0"
 
@@ -628,8 +628,8 @@ test-fuzz = "7"
 rstest = "0.24.0"
 
 # ssz encoding
-ethereum_ssz = "0.8.3"
-ethereum_ssz_derive = "0.8.3"
+ethereum_ssz = "0.9.0"
+ethereum_ssz_derive = "0.9.0"
 
 # allocators
 tikv-jemalloc-ctl = "0.6"

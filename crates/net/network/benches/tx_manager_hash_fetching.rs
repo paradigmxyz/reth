@@ -1,23 +1,70 @@
 #![allow(missing_docs)]
 
-use alloy_primitives::U256;
-use criterion::*;
+use alloy_primitives::{B256, U256};
+use criterion::{measurement::WallTime, *};
 use rand::SeedableRng;
+use reth_eth_wire::EthVersion;
+use reth_eth_wire_types::EthNetworkPrimitives;
 use reth_network::{
-    test_utils::Testnet,
+    test_utils::{
+        transactions::{buffer_hash_to_tx_fetcher, new_mock_session},
+        Testnet,
+    },
     transactions::{
-        TransactionFetcherConfig, TransactionPropagationMode::Max, TransactionsManagerConfig,
+        fetcher::TransactionFetcher, TransactionFetcherConfig, TransactionPropagationMode::Max,
+        TransactionsManagerConfig,
     },
 };
+use reth_network_peers::PeerId;
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 use reth_transaction_pool::{test_utils::TransactionGenerator, PoolTransaction, TransactionPool};
+use std::collections::HashMap;
 use tokio::runtime::Runtime as TokioRuntime;
 
 criterion_group!(
     name = tx_fetch_benches;
     config = Criterion::default();
-    targets = tx_fetch_bench
+    targets = tx_fetch_bench, fetch_pending_hashes,
 );
+
+pub fn benchmark_fetch_pending_hashes(group: &mut BenchmarkGroup<'_, WallTime>, peers_num: usize) {
+    let setup = || {
+        let mut tx_fetcher = TransactionFetcher::<EthNetworkPrimitives>::default();
+        let mut peers = HashMap::default();
+
+        for _i in 0..peers_num {
+            // NOTE: the worst case, each tx in the cache belongs to a differenct peer.
+            let peer = PeerId::random();
+            let hash = B256::random();
+
+            let (mut peer_data, _) = new_mock_session(peer, EthVersion::Eth66);
+            peer_data.seen_transactions_mut().insert(hash);
+            peers.insert(peer, peer_data);
+
+            buffer_hash_to_tx_fetcher(&mut tx_fetcher, hash, peer, 0, None);
+        }
+
+        (tx_fetcher, peers)
+    };
+
+    let group_id = format!("fetch pending hashes, peers num: {}", peers_num);
+
+    group.bench_function(group_id, |b| {
+        b.iter_with_setup(setup, |(mut tx_fetcher, peers)| {
+            tx_fetcher.on_fetch_pending_hashes(&peers, |_| true);
+        });
+    });
+}
+
+pub fn fetch_pending_hashes(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Fetch Pending Hashes");
+
+    for peers in [5, 10, 20, 100, 1000, 10000, 100000] {
+        benchmark_fetch_pending_hashes(&mut group, peers);
+    }
+
+    group.finish();
+}
 
 pub fn tx_fetch_bench(c: &mut Criterion) {
     let rt = TokioRuntime::new().unwrap();
