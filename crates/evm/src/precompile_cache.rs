@@ -1,6 +1,6 @@
 //! Contains a precompile cache that is backed by a moka cache.
 
-use alloc::{boxed::Box, string::String, sync::Arc};
+use alloc::{boxed::Box, string::String};
 use alloy_primitives::Address;
 use reth_revm::revm::{
     context::Cfg,
@@ -10,6 +10,8 @@ use reth_revm::revm::{
     primitives::hardfork::SpecId,
 };
 
+#[cfg(feature = "std")]
+use alloc::sync::Arc;
 #[cfg(feature = "std")]
 use alloy_primitives::Bytes;
 #[cfg(feature = "metrics")]
@@ -52,6 +54,7 @@ struct CacheEntry {
 /// NOTE: This does not work with "context stateful precompiles", ie `ContextStatefulPrecompile` or
 /// `ContextStatefulPrecompileMut`. They are explicitly banned.
 #[derive(Debug)]
+#[cfg(feature = "std")]
 pub struct PrecompileCache {
     /// Cache for precompile results and gas bounds.
     #[cfg(feature = "std")]
@@ -90,6 +93,7 @@ pub struct MaybeCachedPrecompileProvider<P> {
     /// The precompile provider to wrap.
     precompile_provider: P,
     /// The cache to use.
+    #[cfg(feature = "std")]
     cache: Option<Arc<PrecompileCache>>,
     /// The spec id to use.
     spec: SpecId,
@@ -105,6 +109,7 @@ impl<P> MaybeCachedPrecompileProvider<P> {
     pub fn new_with_cache(precompile_provider: P, cache: Arc<PrecompileCache>) -> Self {
         Self {
             precompile_provider,
+            #[cfg(feature = "std")]
             cache: Some(cache),
             spec: Default::default(),
             #[cfg(feature = "metrics")]
@@ -116,18 +121,12 @@ impl<P> MaybeCachedPrecompileProvider<P> {
     pub fn new_without_cache(precompile_provider: P) -> Self {
         Self {
             precompile_provider,
+            #[cfg(feature = "std")]
             cache: None,
             spec: Default::default(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
-    }
-
-    #[cfg(not(feature = "std"))]
-    /// Creates a new `MaybeCachedPrecompileProvider` with cache disabled in no-std environments.
-    pub fn new_with_cache(precompile_provider: P, _cache: Arc<PrecompileCache>) -> Self {
-        // In no-std environments, always return no-cache version
-        Self::new_without_cache(precompile_provider)
     }
 }
 

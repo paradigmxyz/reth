@@ -1,7 +1,5 @@
-use alloc::sync::Arc;
 use reth_evm::{
     eth::EthEvmContext, Database, EthEvm, EvmEnv, EvmFactory, MaybeCachedPrecompileProvider,
-    PrecompileCache,
 };
 use revm::{
     context::{
@@ -14,30 +12,41 @@ use revm::{
     Context, Inspector, MainBuilder, MainContext,
 };
 
+#[cfg(feature = "std")]
+use alloc::sync::Arc;
+#[cfg(feature = "std")]
+use reth_evm::PrecompileCache;
+
 /// Factory producing [`MaybeCachedPrecompileEthEvmFactory`].
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
-#[allow(dead_code)]
 pub struct MaybeCachedPrecompileEthEvmFactory {
     cache_enabled: bool,
+    #[cfg(feature = "std")]
     precompile_cache: Arc<PrecompileCache>,
 }
 
 impl MaybeCachedPrecompileEthEvmFactory {
     /// Creates a new `MaybeCachedPrecompileEthEvmFactory`.
     pub fn new(cache_enabled: bool) -> Self {
-        Self { cache_enabled, precompile_cache: Default::default() }
+        Self {
+            cache_enabled,
+            #[cfg(feature = "std")]
+            precompile_cache: Default::default(),
+        }
     }
 
     fn precompile_provider(&self) -> MaybeCachedPrecompileProvider<EthPrecompiles> {
         if self.cache_enabled {
-            MaybeCachedPrecompileProvider::new_with_cache(
+            #[cfg(feature = "std")]
+            return MaybeCachedPrecompileProvider::new_with_cache(
                 EthPrecompiles::default(),
                 self.precompile_cache.clone(),
-            )
-        } else {
-            MaybeCachedPrecompileProvider::new_without_cache(EthPrecompiles::default())
+            );
+            #[cfg(not(feature = "std"))]
+            return MaybeCachedPrecompileProvider::new_without_cache(EthPrecompiles::default());
         }
+        MaybeCachedPrecompileProvider::new_without_cache(EthPrecompiles::default())
     }
 }
 
