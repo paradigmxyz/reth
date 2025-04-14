@@ -460,7 +460,7 @@ alloy-primitives = { version = "1.0.0", default-features = false, features = ["m
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
 alloy-sol-macro = "1.0.0"
 alloy-sol-types = { version = "1.0.0", default-features = false }
-alloy-trie = { version = "0.8.0", default-features = false }
+alloy-trie = { version = "0.8.1", default-features = false }
 
 alloy-hardforks = "0.2.0"
 
