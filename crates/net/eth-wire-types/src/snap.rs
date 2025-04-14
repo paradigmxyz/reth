@@ -208,15 +208,6 @@ pub enum SnapProtocolMessage {
     TrieNodes(TrieNodesMessage),
 }
 
-/// Decoding protocol message variants based on message ID
-macro_rules! decode_snap_message_variant {
-    ($message_id:expr, $buf:expr, $id:expr, $variant:ident, $msg_type:ty) => {
-        if $message_id == $id as u8 {
-            return Ok(Self::$variant(<$msg_type>::decode($buf)?));
-        }
-    };
-}
-
 impl SnapProtocolMessage {
     /// Returns the protocol message ID for this message type.
     ///
@@ -257,6 +248,15 @@ impl SnapProtocolMessage {
 
     /// Decodes a SNAP protocol message from its message ID and RLP-encoded body.
     pub fn decode(message_id: u8, buf: &mut &[u8]) -> Result<Self, alloy_rlp::Error> {
+        // Decoding protocol message variants based on message ID
+        macro_rules! decode_snap_message_variant {
+            ($message_id:expr, $buf:expr, $id:expr, $variant:ident, $msg_type:ty) => {
+                if $message_id == $id as u8 {
+                    return Ok(Self::$variant(<$msg_type>::decode($buf)?));
+                }
+            };
+        }
+
         // Try to decode each message type based on the message ID
         decode_snap_message_variant!(
             message_id,
