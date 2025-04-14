@@ -82,7 +82,6 @@ pub(crate) struct CachedPrecompileMetrics {
 
 /// A custom precompile provider that wraps a precompile provider and potentially a cache for it.
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub struct MaybeCachedPrecompileProvider<P> {
     /// The precompile provider to wrap.
     precompile_provider: P,
