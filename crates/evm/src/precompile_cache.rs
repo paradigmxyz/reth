@@ -48,7 +48,6 @@ struct CacheEntry {
 #[cfg(feature = "std")]
 pub struct PrecompileCache {
     /// Cache for precompile results and gas bounds.
-    #[cfg(feature = "std")]
     cache: Cache<PrecompileKey, CacheEntry>,
 }
 
