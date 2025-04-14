@@ -905,8 +905,13 @@ impl NetworkPrimitives for OpNetworkPrimitives {
 
 #[cfg(test)]
 mod test {
+    use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
+    use reth_node_api::NodeTypesWithDBAdapter;
     use reth_optimism_chainspec::BASE_MAINNET;
-    use reth_provider::providers::ProviderNodeTypes;
+    use reth_provider::{
+        providers::{ProviderNodeTypes, StaticFileProvider},
+        ProviderFactory,
+    };
 
     use super::*;
 
@@ -914,8 +919,13 @@ mod test {
 
     #[test]
     fn op_node_sdk() {
-        let provider =
-            OpNode::provider_factory_builder().open_read_only(BASE_MAINNET.clone(), "").unwrap();
+        let (static_dir, _) = create_test_static_files_dir();
+        let db = create_test_rw_db();
+        let provider: ProviderFactory<NodeTypesWithDBAdapter<OpNode, _>> = ProviderFactory::new(
+            db,
+            BASE_MAINNET.clone(),
+            StaticFileProvider::read_write(static_dir.into_path()).expect("static file provider"),
+        );
         foo(provider);
     }
 }
