@@ -2,10 +2,11 @@
 
 mod tx_type;
 
-pub use op_alloy_consensus::OpTxType;
-
+/// Kept for concistency tests
 #[cfg(test)]
 mod signed;
+
+pub use op_alloy_consensus::OpTxType;
 
 /// Signed transaction.
 pub type OpTransactionSigned = op_alloy_consensus::OpTxEnvelope;
