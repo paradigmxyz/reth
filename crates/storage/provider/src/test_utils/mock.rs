@@ -13,7 +13,7 @@ use alloy_primitives::{
 };
 use parking_lot::Mutex;
 use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions};
-use reth_chainspec::{ChainInfo, EthChainSpec, Head};
+use reth_chainspec::{ChainInfo, EthChainSpec};
 use reth_db_api::{
     mock::{DatabaseMock, TxMock},
     models::{AccountBeforeTx, StoredBlockBodyIndices},
@@ -788,7 +788,10 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> HashedPostStateProvid
     }
 }
 
-impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> StateProvider for MockEthProvider<T, ChainSpec> {
+impl<T, ChainSpec> StateProvider for MockEthProvider<T, ChainSpec>
+where 
+    T:NodePrimitives,
+    ChainSpec: EthChainSpec + Send + Sync +'static {
     fn storage(
         &self,
         account: Address,
@@ -863,7 +866,7 @@ where
 }
 
 
-impl<T: NodePrimitives, ChainSpec> WithdrawalsProvider for MockEthProvider<T, ChainSpec> {
+impl<T: NodePrimitives, ChainSpec: Send + Sync> WithdrawalsProvider for MockEthProvider<T, ChainSpec> {
     fn withdrawals_by_block(
         &self,
         _id: BlockHashOrNumber,
@@ -873,13 +876,13 @@ impl<T: NodePrimitives, ChainSpec> WithdrawalsProvider for MockEthProvider<T, Ch
     }
 }
 
-impl<T: NodePrimitives, ChainSpec> OmmersProvider for MockEthProvider<T, ChainSpec> {
-    fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
+impl<T: NodePrimitives, ChainSpec: Send + Sync> OmmersProvider for MockEthProvider<T, ChainSpec> {
+    fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
         Ok(None)
     }
 }
 
-impl<T: NodePrimitives, ChainSpec> BlockBodyIndicesProvider for MockEthProvider<T, ChainSpec> {
+impl<T: NodePrimitives, ChainSpec: Send + Sync> BlockBodyIndicesProvider for MockEthProvider<T, ChainSpec> {
     fn block_body_indices(&self, _num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
         Ok(None)
     }
@@ -891,7 +894,7 @@ impl<T: NodePrimitives, ChainSpec> BlockBodyIndicesProvider for MockEthProvider<
     }
 }
 
-impl<T: NodePrimitives, ChainSpec> ChangeSetReader for MockEthProvider<T, ChainSpec> {
+impl<T: NodePrimitives, ChainSpec: Send + Sync> ChangeSetReader for MockEthProvider<T, ChainSpec> {
     fn account_block_changeset(
         &self,
         _block_number: BlockNumber,
@@ -900,7 +903,7 @@ impl<T: NodePrimitives, ChainSpec> ChangeSetReader for MockEthProvider<T, ChainS
     }
 }
 
-impl<T: NodePrimitives, ChainSpec> StateReader for MockEthProvider<T, ChainSpec> {
+impl<T: NodePrimitives, ChainSpec: Send + Sync> StateReader for MockEthProvider<T, ChainSpec> {
     type Receipt = Receipt;
 
     fn get_state(&self, _block: BlockNumber) -> ProviderResult<Option<ExecutionOutcome>> {
@@ -908,12 +911,12 @@ impl<T: NodePrimitives, ChainSpec> StateReader for MockEthProvider<T, ChainSpec>
     }
 }
 
-impl<T: NodePrimitives, ChainSpec> CanonStateSubscriptions for MockEthProvider<T, ChainSpec> {
+impl<T: NodePrimitives, ChainSpec: Send + Sync> CanonStateSubscriptions for MockEthProvider<T, ChainSpec> {
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<T> {
         broadcast::channel(1).1
     }
 }
 
-impl<T: NodePrimitives, ChainSpec> NodePrimitivesProvider for MockEthProvider<T, ChainSpec> {
+impl<T: NodePrimitives, ChainSpec: Send + Sync> NodePrimitivesProvider for MockEthProvider<T, ChainSpec> {
     type Primitives = T;
 }
