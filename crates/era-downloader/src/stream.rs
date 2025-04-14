@@ -1,6 +1,5 @@
 use crate::EraClient;
 use futures_util::{stream::FuturesOrdered, FutureExt, Stream, StreamExt};
-use pin_project::pin_project;
 use reqwest::Url;
 use std::{
     collections::VecDeque,
@@ -36,7 +35,6 @@ impl EraStream {
                 recover_index: Box::pin(async move { 0 }),
                 state: Default::default(),
                 max_files,
-                max_concurrent_downloads,
                 index: 0,
                 downloading: 0,
             },
@@ -68,10 +66,8 @@ impl Stream for EraStream {
 
 type DownloadFuture = Pin<Box<dyn Future<Output = eyre::Result<Box<Path>>>>>;
 
-#[pin_project]
 struct DownloadStream {
-    #[pin]
-    pub downloads: FuturesOrdered<DownloadFuture>,
+    downloads: FuturesOrdered<DownloadFuture>,
     scheduled: VecDeque<DownloadFuture>,
     max_concurrent_downloads: usize,
     ended: bool,
@@ -94,8 +90,7 @@ impl Stream for DownloadStream {
         }
 
         let ended = self.ended;
-        let project = self.project();
-        let poll = project.downloads.poll_next(cx);
+        let poll = self.downloads.poll_next_unpin(cx);
 
         if matches!(poll, Poll::Ready(None)) && !ended {
             cx.waker().wake_by_ref();
@@ -113,7 +108,6 @@ struct StartingStream {
     recover_index: Pin<Box<dyn Future<Output = u64> + Send + Sync + 'static>>,
     state: State,
     max_files: usize,
-    max_concurrent_downloads: usize,
     index: u64,
     downloading: usize,
 }
@@ -122,8 +116,8 @@ impl Debug for StartingStream {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "StartingStream{{ max_files: {}, max_concurrent_downloads: {} }}",
-            self.max_files, self.max_concurrent_downloads
+            "StartingStream{{ max_files: {}, index: {}, downloading: {} }}",
+            self.max_files, self.index, self.downloading
         )
     }
 }
@@ -138,35 +132,18 @@ enum State {
     NextUrl(usize),
 }
 
-impl StartingStream {
-    fn downloaded(&mut self) {
-        self.downloading = self.downloading.saturating_sub(1);
-    }
-}
-
 impl Stream for StartingStream {
     type Item = Pin<Box<dyn Future<Output = eyre::Result<Box<Path>>>>>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if self.state == State::Initial {
-            let client = self.client.clone();
-
-            Pin::new(&mut self.recover_index)
-                .set(Box::pin(async move { client.recover_index().await }));
-
-            self.state = State::RecoverIndex;
+            self.recover_index();
         }
 
         if self.state == State::RecoverIndex {
             if let Poll::Ready(index) = self.recover_index.poll_unpin(cx) {
                 self.index = index;
-
-                let client = self.client.clone();
-
-                Pin::new(&mut self.files_count)
-                    .set(Box::pin(async move { client.files_count().await }));
-
-                self.state = State::CountFiles;
+                self.count_files();
             }
         }
 
@@ -182,35 +159,55 @@ impl Stream for StartingStream {
                 let index = self.index;
                 self.index += 1;
                 self.downloading += 1;
-                let client = self.client.clone();
-
-                Pin::new(&mut self.next_url).set(Box::pin(async move { client.url(index).await }));
-
-                self.state = State::NextUrl(max_missing);
+                self.next_url(index, max_missing);
             } else {
-                let client = self.client.clone();
-
-                Pin::new(&mut self.files_count)
-                    .set(Box::pin(async move { client.files_count().await }));
-
-                self.state = State::CountFiles;
+                self.count_files();
             }
         }
 
         if let State::NextUrl(max_missing) = self.state {
             if let Poll::Ready(url) = self.next_url.poll_unpin(cx) {
-                self.state = State::Missing(max_missing.saturating_sub(1));
+                self.state = State::Missing(max_missing - 1);
 
-                return Poll::Ready(if let Ok(Some(url)) = url {
+                return Poll::Ready(url.transpose().map(|url| -> DownloadFuture {
                     let mut client = self.client.clone();
 
-                    Some(Box::pin(async move { client.download_to_file(url).await }))
-                } else {
-                    None
-                });
+                    Box::pin(async move { client.download_to_file(url?).await })
+                }));
             }
         }
 
         Poll::Pending
+    }
+}
+
+impl StartingStream {
+    fn downloaded(&mut self) {
+        self.downloading = self.downloading.saturating_sub(1);
+    }
+
+    fn recover_index(&mut self) {
+        let client = self.client.clone();
+
+        Pin::new(&mut self.recover_index)
+            .set(Box::pin(async move { client.recover_index().await }));
+
+        self.state = State::RecoverIndex;
+    }
+
+    fn count_files(&mut self) {
+        let client = self.client.clone();
+
+        Pin::new(&mut self.files_count).set(Box::pin(async move { client.files_count().await }));
+
+        self.state = State::CountFiles;
+    }
+
+    fn next_url(&mut self, index: u64, max_missing: usize) {
+        let client = self.client.clone();
+
+        Pin::new(&mut self.next_url).set(Box::pin(async move { client.url(index).await }));
+
+        self.state = State::NextUrl(max_missing);
     }
 }

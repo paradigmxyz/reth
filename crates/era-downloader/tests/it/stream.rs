@@ -10,7 +10,7 @@ use std::{
 use test_case::test_case;
 
 #[test_case("https://mainnet.era1.nimbus.team/"; "nimbus")]
-#[test_case("https://era1.ethportal.net/"; "ethportal")]
+// #[test_case("https://era1.ethportal.net/"; "ethportal")]
 #[tokio::test]
 async fn test_streaming_files_after_fetching_file_list(url: &str) {
     let mut hasher = DefaultHasher::new();

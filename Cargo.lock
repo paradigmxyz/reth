@@ -7788,7 +7788,6 @@ version = "1.3.9"
 dependencies = [
  "eyre",
  "futures-util",
- "pin-project",
  "reqwest",
  "test-case",
  "tokio",

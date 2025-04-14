@@ -15,7 +15,6 @@ reqwest.default-features = false
 reqwest.features = ["stream", "rustls-tls-native-roots"]
 
 # async
-pin-project.workspace = true
 tokio.workspace = true
 tokio.features = ["fs", "io-util"]
 futures-util.workspace = true
