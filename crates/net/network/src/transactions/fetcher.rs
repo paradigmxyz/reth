@@ -370,6 +370,16 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         self.buffer_hashes(hashes, None)
     }
 
+    /// Number of hashes pending fetch.
+    pub fn num_pending_hashes(&self) -> usize {
+        self.hashes_pending_fetch.len()
+    }
+
+    /// Number of all transaction hashes in the fetcher.
+    pub fn num_all_hashes(&self) -> usize {
+        self.hashes_fetch_inflight_and_pending_fetch.len()
+    }
+
     /// Buffers hashes. Note: Only peers that haven't yet tried to request the hashes should be
     /// passed as `fallback_peer` parameter! For re-buffering hashes on failed request, use
     /// [`TransactionFetcher::try_buffer_hashes_for_retry`]. Hashes that have been re-requested
@@ -1291,7 +1301,7 @@ struct TxFetcherSearchDurations {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::transactions::tests::{default_cache, new_mock_session};
+    use crate::transactions::tests::{buffer_hash_to_tx_fetcher, new_mock_session};
     use alloy_primitives::{hex, B256};
     use alloy_rlp::Decodable;
     use derive_more::IntoIterator;
@@ -1414,45 +1424,30 @@ mod test {
         peers.insert(peer_1, peer_1_data);
         peers.insert(peer_2, peer_2_data);
 
-        let mut backups = default_cache();
-        backups.insert(peer_2);
         // insert seen_hashes into tx fetcher
         for i in 0..3 {
             // insert peer_2 as fallback peer for seen_hashes
-            let mut backups = default_cache();
-            backups.insert(peer_2);
-            let meta = TxFetchMetadata::new(0, backups, Some(seen_eth68_hashes_sizes[i]));
-            tx_fetcher.hashes_fetch_inflight_and_pending_fetch.insert(seen_hashes[i], meta);
+            buffer_hash_to_tx_fetcher(
+                tx_fetcher,
+                seen_hashes[i],
+                peer_2,
+                0,
+                Some(seen_eth68_hashes_sizes[i]),
+            );
         }
-        let meta = TxFetchMetadata::new(0, backups, None);
-        tx_fetcher.hashes_fetch_inflight_and_pending_fetch.insert(seen_hashes[3], meta);
+        buffer_hash_to_tx_fetcher(tx_fetcher, seen_hashes[3], peer_2, 0, None);
 
-        let mut backups = default_cache();
-        backups.insert(peer_2);
         // insert pending hash without peer_1 as fallback peer, only with peer_2 as fallback peer
         let hash_other = B256::from_slice(&[5; 32]);
-        tx_fetcher
-            .hashes_fetch_inflight_and_pending_fetch
-            .insert(hash_other, TxFetchMetadata::new(0, backups, None));
-        tx_fetcher.hashes_pending_fetch.insert(hash_other);
+        buffer_hash_to_tx_fetcher(tx_fetcher, hash_other, peer_2, 0, None);
 
         // add peer_1 as lru fallback peer for seen hashes
         for hash in &seen_hashes {
-            tx_fetcher
-                .hashes_fetch_inflight_and_pending_fetch
-                .get(hash)
-                .unwrap()
-                .fallback_peers_mut()
-                .insert(peer_1);
-        }
-
-        // mark seen hashes as pending fetch
-        for hash in &seen_hashes {
-            tx_fetcher.hashes_pending_fetch.insert(*hash);
+            buffer_hash_to_tx_fetcher(tx_fetcher, *hash, peer_1, 0, None);
         }
 
         // seen hashes and the random hash from peer_2 are pending fetch
-        assert_eq!(tx_fetcher.hashes_pending_fetch.len(), 5);
+        assert_eq!(tx_fetcher.num_pending_hashes(), 5);
 
         // TEST
 

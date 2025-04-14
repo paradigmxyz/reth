@@ -283,7 +283,7 @@ async fn test_connect_to_non_multiplex_peer() {
 
     let net = Testnet::create(1).await;
 
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
 
     let config = NetworkConfigBuilder::eth(secret_key)
         .listener_port(0)

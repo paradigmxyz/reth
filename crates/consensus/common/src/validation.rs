@@ -172,9 +172,13 @@ where
 ///  * `parent_beacon_block_root` exists as a header field
 ///  * `blob_gas_used` is a multiple of `DATA_GAS_PER_BLOB`
 ///  * `excess_blob_gas` is a multiple of `DATA_GAS_PER_BLOB`
+///  * `blob_gas_used` doesn't exceed the max allowed blob gas based on the given params
 ///
 /// Note: This does not enforce any restrictions on `blob_gas_used`
-pub fn validate_4844_header_standalone<H: BlockHeader>(header: &H) -> Result<(), ConsensusError> {
+pub fn validate_4844_header_standalone<H: BlockHeader>(
+    header: &H,
+    blob_params: BlobParams,
+) -> Result<(), ConsensusError> {
     let blob_gas_used = header.blob_gas_used().ok_or(ConsensusError::BlobGasUsedMissing)?;
     let excess_blob_gas = header.excess_blob_gas().ok_or(ConsensusError::ExcessBlobGasMissing)?;
 
@@ -195,6 +199,13 @@ pub fn validate_4844_header_standalone<H: BlockHeader>(header: &H) -> Result<(),
         return Err(ConsensusError::ExcessBlobGasNotMultipleOfBlobGasPerBlob {
             excess_blob_gas,
             blob_gas_per_blob: DATA_GAS_PER_BLOB,
+        })
+    }
+
+    if blob_gas_used > blob_params.max_blob_gas_per_block() {
+        return Err(ConsensusError::BlobGasUsedExceedsMaxBlobGasPerBlock {
+            blob_gas_used,
+            max_blob_gas_per_block: blob_params.max_blob_gas_per_block(),
         })
     }
 
@@ -337,14 +348,14 @@ mod tests {
     use super::*;
     use alloy_consensus::{BlockBody, Header, TxEip4844};
     use alloy_eips::eip4895::Withdrawals;
-    use alloy_primitives::{Address, Bytes, PrimitiveSignature as Signature, U256};
+    use alloy_primitives::{Address, Bytes, Signature, U256};
     use rand::Rng;
     use reth_chainspec::ChainSpecBuilder;
     use reth_ethereum_primitives::{Transaction, TransactionSigned};
     use reth_primitives_traits::proofs;
 
     fn mock_blob_tx(nonce: u64, num_blobs: usize) -> TransactionSigned {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let request = Transaction::Eip4844(TxEip4844 {
             chain_id: 1u64,
             nonce,
@@ -356,7 +367,9 @@ mod tests {
             value: U256::from(3_u64),
             input: Bytes::from(vec![1, 2]),
             access_list: Default::default(),
-            blob_versioned_hashes: std::iter::repeat_with(|| rng.r#gen()).take(num_blobs).collect(),
+            blob_versioned_hashes: std::iter::repeat_with(|| rng.random())
+                .take(num_blobs)
+                .collect(),
         });
 
         let signature = Signature::new(U256::default(), U256::default(), true);

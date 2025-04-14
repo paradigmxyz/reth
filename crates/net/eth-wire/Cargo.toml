@@ -54,6 +54,7 @@ tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 tokio-util = { workspace = true, features = ["io", "codec"] }
 rand.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
+rand_08.workspace = true
 
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
@@ -87,6 +88,7 @@ serde = [
     "reth-primitives-traits/serde",
     "reth-ethereum-forks/serde",
     "alloy-consensus/serde",
+    "rand_08/serde",
 ]
 
 [[test]]
