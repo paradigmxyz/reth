@@ -12,18 +12,13 @@ use revm::{
     Context, Inspector, MainBuilder, MainContext,
 };
 
-#[cfg(feature = "std")]
-use alloc::sync::Arc;
-#[cfg(feature = "std")]
-use reth_evm::PrecompileCache;
-
 /// Factory producing [`MaybeCachedPrecompileEthEvmFactory`].
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
 pub struct MaybeCachedPrecompileEthEvmFactory {
     cache_enabled: bool,
     #[cfg(feature = "std")]
-    precompile_cache: Arc<PrecompileCache>,
+    precompile_cache: alloc::sync::Arc<reth_evm::PrecompileCache>,
 }
 
 impl MaybeCachedPrecompileEthEvmFactory {

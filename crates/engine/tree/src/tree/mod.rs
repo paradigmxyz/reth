@@ -71,7 +71,6 @@ mod invalid_headers;
 mod metrics;
 mod payload_processor;
 mod persistence_state;
-
 // TODO(alexey): compare trie updates in `insert_block_inner`
 #[expect(unused)]
 mod trie_updates;
