@@ -161,7 +161,8 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
                 if gas_limit <= entry.lower_gas_limit {
                     let result = InterpreterResult {
                         result: InstructionResult::PrecompileOOG,
-                        gas: Gas::new(gas_limit),
+                        // all gas consumed in OOG
+                        gas: Gas::new_spent(gas_limit),
                         output: Bytes::new(),
                     };
 
@@ -172,6 +173,19 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
                 if gas_limit >= entry.upper_gas_limit {
                     #[cfg(feature = "metrics")]
                     self.metrics.precompile_cache_hits.increment(1);
+
+                    // for successful results, we need to ensure gas costs are correct when
+                    // gas_limit differs
+                    if let Ok(mut result) = entry.result.clone() {
+                        if result.result == InstructionResult::Return {
+                            let mut adjusted_gas = Gas::new(gas_limit);
+                            adjusted_gas.set_spent(result.gas.spent());
+
+                            result.gas = adjusted_gas;
+                        }
+
+                        return Ok(Some(result));
+                    }
 
                     return entry.result.map(Some);
                 }
