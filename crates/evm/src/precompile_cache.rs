@@ -159,6 +159,9 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
             if let Some(entry) = cache.cache.get(&key) {
                 // if gas_limit is below known lower bound, we know it will fail with OOG
                 if gas_limit <= entry.lower_gas_limit {
+                    #[cfg(feature = "metrics")]
+                    self.metrics.precompile_cache_hits.increment(1);
+
                     let result = InterpreterResult {
                         result: InstructionResult::PrecompileOOG,
                         gas: Gas::new(gas_limit),
