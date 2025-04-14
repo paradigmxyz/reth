@@ -2,8 +2,8 @@
 
 use crate::{
     supervisor::{
-        parse_access_list_items_to_inbox_entries, ExecutingDescriptor, InteropTxValidatorError,
-        metrics::SupervisorMetrics,
+        metrics::SupervisorMetrics, parse_access_list_items_to_inbox_entries, ExecutingDescriptor,
+        InteropTxValidatorError,
     },
     InvalidCrossTx,
 };
@@ -12,7 +12,11 @@ use alloy_primitives::{TxHash, B256};
 use alloy_rpc_client::ReqwestClient;
 use futures_util::future::BoxFuture;
 use op_alloy_consensus::interop::SafetyLevel;
-use std::{borrow::Cow, future::IntoFuture, time::{Duration, Instant}};
+use std::{
+    borrow::Cow,
+    future::IntoFuture,
+    time::{Duration, Instant},
+};
 use tracing::trace;
 
 /// Supervisor hosted by op-labs
@@ -41,7 +45,12 @@ impl SupervisorClient {
             .connect(supervisor_endpoint.into().as_str())
             .await
             .expect("building supervisor client");
-        Self { client, safety, timeout: DEFAULT_REQUEST_TIMOUT, metrics: SupervisorMetrics::default(), }
+        Self {
+            client,
+            safety,
+            timeout: DEFAULT_REQUEST_TIMOUT,
+            metrics: SupervisorMetrics::default(),
+        }
     }
 
     /// Configures a custom timeout
@@ -161,9 +170,10 @@ impl<'a, 'b: 'a> IntoFuture for CheckAccessListRequest<'a, 'b> {
             )
             .await;
             metrics.record_supervisor_query(start.elapsed());
-        
-            result.map_err(|_| InteropTxValidatorError::ValidationTimeout(timeout.as_secs()))?
-            .map_err(InteropTxValidatorError::client)
+
+            result
+                .map_err(|_| InteropTxValidatorError::Timeout(timeout.as_secs()))?
+                .map_err(InteropTxValidatorError::other)
         })
     }
 }
