@@ -1,4 +1,4 @@
-//! This file contains the legacy reth OpTransactionSigned type that has been replaced with
+//! This file contains the legacy reth `OpTransactionSigned` type that has been replaced with
 //! op-alloy's OpTransactionSigned To test for consistency this is kept
 
 use crate::transaction::OpTransaction;
