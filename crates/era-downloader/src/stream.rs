@@ -1,4 +1,4 @@
-use crate::EraClient;
+use crate::{client::HttpClient, EraClient};
 use futures_util::{stream::FuturesOrdered, FutureExt, Stream, StreamExt};
 use reqwest::Url;
 use std::{
@@ -46,15 +46,15 @@ impl EraStreamConfig {
 
 /// An asynchronous stream of ERA1 files.
 #[derive(Debug)]
-pub struct EraStream {
+pub struct EraStream<Http> {
     download_stream: DownloadStream,
-    starting_stream: StartingStream,
+    starting_stream: StartingStream<Http>,
 }
 
-impl EraStream {
+impl<Http> EraStream<Http> {
     /// Constructs a new [`EraStream`] that downloads concurrently up to `max_concurrent_downloads`
     /// ERA1 files to `client` `folder`, keeping their count up to `max_files`.
-    pub fn new(client: EraClient, config: EraStreamConfig) -> Self {
+    pub fn new(client: EraClient<Http>, config: EraStreamConfig) -> Self {
         Self {
             download_stream: DownloadStream {
                 downloads: Default::default(),
@@ -76,7 +76,7 @@ impl EraStream {
     }
 }
 
-impl Stream for EraStream {
+impl<Http: HttpClient + Clone + Send + Sync + 'static + Unpin> Stream for EraStream<Http> {
     type Item = eyre::Result<Box<Path>>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -135,8 +135,8 @@ impl Stream for DownloadStream {
     }
 }
 
-struct StartingStream {
-    client: EraClient,
+struct StartingStream<Http> {
+    client: EraClient<Http>,
     files_count: Pin<Box<dyn Future<Output = usize> + Send + Sync + 'static>>,
     next_url: Pin<Box<dyn Future<Output = eyre::Result<Option<Url>>> + Send + Sync + 'static>>,
     recover_index: Pin<Box<dyn Future<Output = u64> + Send + Sync + 'static>>,
@@ -146,7 +146,7 @@ struct StartingStream {
     downloading: usize,
 }
 
-impl Debug for StartingStream {
+impl<Http> Debug for StartingStream<Http> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -166,7 +166,7 @@ enum State {
     NextUrl(usize),
 }
 
-impl Stream for StartingStream {
+impl<Http: HttpClient + Clone + Send + Sync + 'static + Unpin> Stream for StartingStream<Http> {
     type Item = Pin<Box<dyn Future<Output = eyre::Result<Box<Path>>>>>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -215,11 +215,13 @@ impl Stream for StartingStream {
     }
 }
 
-impl StartingStream {
+impl<Http> StartingStream<Http> {
     fn downloaded(&mut self) {
         self.downloading = self.downloading.saturating_sub(1);
     }
+}
 
+impl<Http: HttpClient + Clone + Send + Sync + 'static> StartingStream<Http> {
     fn recover_index(&mut self) {
         let client = self.client.clone();
 

@@ -1,24 +1,45 @@
+use bytes::Bytes;
 use eyre::OptionExt;
-use futures_util::stream::StreamExt;
+use futures_util::{stream::StreamExt, Stream, TryStreamExt};
 use reqwest::{Client, IntoUrl, Url};
-use std::{path::Path, str::FromStr};
+use std::{future::Future, path::Path, str::FromStr};
 use tokio::{
     fs::{self, File},
     io::{self, AsyncBufReadExt, AsyncWriteExt},
 };
 
+/// Accesses the network over HTTP.
+pub trait HttpClient {
+    /// Makes an HTTP GET request to `url`. Returns a stream of response body bytes.
+    fn get<U: IntoUrl>(
+        &self,
+        url: U,
+    ) -> impl Future<Output = eyre::Result<impl Stream<Item = eyre::Result<Bytes>> + Unpin>>;
+}
+
+impl HttpClient for Client {
+    async fn get<U: IntoUrl>(
+        &self,
+        url: U,
+    ) -> eyre::Result<impl Stream<Item = eyre::Result<Bytes>> + Unpin> {
+        let response = Self::get(self, url).send().await?;
+
+        Ok(response.bytes_stream().map_err(|e| eyre::Error::new(e)))
+    }
+}
+
 /// An HTTP client with features for downloading ERA files from an external HTTP accessible
 /// endpoint.
 #[derive(Debug, Clone)]
-pub struct EraClient {
-    client: Client,
+pub struct EraClient<Http> {
+    client: Http,
     url: Url,
     folder: Box<Path>,
 }
 
-impl EraClient {
+impl<Http: HttpClient + Clone> EraClient<Http> {
     /// Constructs [`EraClient`] using `client` to download from `url` into `folder`.
-    pub fn new(client: Client, url: Url, folder: Box<Path>) -> Self {
+    pub fn new(client: Http, url: Url, folder: Box<Path>) -> Self {
         Self { client, url, folder }
     }
 
@@ -36,9 +57,7 @@ impl EraClient {
             .ok_or_eyre("empty path segments")?;
         let path = path.join(file_name);
 
-        let response = client.get(url).send().await?;
-
-        let mut stream = response.bytes_stream();
+        let mut stream = client.get(url).await?;
         let mut file = File::create(&path).await?;
 
         while let Some(item) = stream.next().await {
@@ -87,9 +106,7 @@ impl EraClient {
 
     /// Fetches the list of ERA1 files from `url` and stores it in a file located within `folder`.
     pub async fn fetch_file_list(&self) -> eyre::Result<()> {
-        let response = self.client.get(self.url.clone()).send().await?;
-
-        let mut stream = response.bytes_stream();
+        let mut stream = self.client.get(self.url.clone()).await?;
         let path = self.folder.to_path_buf().join("index.html");
         let mut file = File::create(&path).await?;
 
@@ -143,7 +160,7 @@ mod tests {
     use std::path::PathBuf;
     use test_case::test_case;
 
-    impl EraClient {
+    impl EraClient<Client> {
         fn empty() -> Self {
             Self::new(
                 Client::new(),

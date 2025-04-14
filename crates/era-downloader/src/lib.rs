@@ -37,5 +37,5 @@
 mod client;
 mod stream;
 
-pub use client::EraClient;
+pub use client::{EraClient, HttpClient};
 pub use stream::{EraStream, EraStreamConfig};
