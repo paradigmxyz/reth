@@ -2,12 +2,12 @@ use crate::{EthPooledTransaction, PoolTransaction};
 use alloy_consensus::{SignableTransaction, TxEip1559, TxEip4844, TxLegacy};
 use alloy_eips::{eip1559::MIN_PROTOCOL_BASE_FEE, eip2718::Encodable2718, eip2930::AccessList};
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
-use rand::Rng;
+use rand::{Rng, RngCore};
 use reth_chainspec::MAINNET;
 use reth_ethereum_primitives::{Transaction, TransactionSigned};
-use reth_primitives_traits::transaction::signed::SignedTransaction;
-
-use reth_primitives_traits::crypto::secp256k1::sign_message;
+use reth_primitives_traits::{
+    crypto::secp256k1::sign_message, transaction::signed::SignedTransaction,
+};
 
 /// A generator for transactions for testing purposes.
 #[derive(Debug)]
@@ -22,7 +22,7 @@ pub struct TransactionGenerator<R> {
     pub gas_limit: u64,
 }
 
-impl<R: Rng> TransactionGenerator<R> {
+impl<R: RngCore> TransactionGenerator<R> {
     /// Initializes the generator with 10 random signers
     pub fn new(rng: R) -> Self {
         Self::with_num_signers(rng, 10)
@@ -76,7 +76,7 @@ impl<R: Rng> TransactionGenerator<R> {
 
     /// Returns a random signer from the set
     fn rng_signer(&mut self) -> B256 {
-        let idx = self.rng.gen_range(0..self.signer_keys.len());
+        let idx = self.rng.random_range(0..self.signer_keys.len());
         self.signer_keys[idx]
     }
 
@@ -359,11 +359,11 @@ impl Default for TransactionBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::thread_rng;
+    use rand::rng;
 
     #[test]
     fn test_generate_transaction() {
-        let rng = thread_rng();
+        let rng = rng();
         let mut gen = TransactionGenerator::new(rng);
         let _tx = gen.transaction().into_legacy();
         let _tx = gen.transaction().into_eip1559();

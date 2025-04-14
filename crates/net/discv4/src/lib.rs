@@ -214,15 +214,13 @@ impl Discv4 {
     ///
     /// ```
     /// # use std::io;
-    /// use rand::thread_rng;
     /// use reth_discv4::{Discv4, Discv4Config};
     /// use reth_network_peers::{pk2id, NodeRecord, PeerId};
     /// use secp256k1::SECP256K1;
     /// use std::{net::SocketAddr, str::FromStr};
     /// # async fn t() -> io::Result<()> {
     /// // generate a (random) keypair
-    /// let mut rng = thread_rng();
-    /// let (secret_key, pk) = SECP256K1.generate_keypair(&mut rng);
+    /// let (secret_key, pk) = SECP256K1.generate_keypair(&mut rand_08::thread_rng());
     /// let id = pk2id(&pk);
     ///
     /// let socket = SocketAddr::from_str("0.0.0.0:0").unwrap();
@@ -2399,7 +2397,7 @@ mod tests {
     use crate::test_utils::{create_discv4, create_discv4_with_config, rng_endpoint, rng_record};
     use alloy_primitives::hex;
     use alloy_rlp::{Decodable, Encodable};
-    use rand::{thread_rng, Rng};
+    use rand_08::Rng;
     use reth_ethereum_forks::{EnrForkIdEntry, ForkHash};
     use reth_network_peers::mainnet_nodes;
     use std::future::poll_fn;
@@ -2534,7 +2532,7 @@ mod tests {
     #[tokio::test]
     async fn test_mapped_ipv4() {
         reth_tracing::init_test_tracing();
-        let mut rng = thread_rng();
+        let mut rng = rand_08::thread_rng();
         let config = Discv4Config::builder().build();
         let (_discv4, mut service) = create_discv4_with_config(config).await;
 
@@ -2549,8 +2547,8 @@ mod tests {
             enr_sq: Some(rng.gen()),
         };
 
-        let id = PeerId::random_with(&mut rng);
-        service.on_ping(ping, addr, id, rng.gen());
+        let id = PeerId::random();
+        service.on_ping(ping, addr, id, B256::random());
 
         let key = kad_key(id);
         match service.kbuckets.entry(&key) {
@@ -2566,7 +2564,7 @@ mod tests {
     #[tokio::test]
     async fn test_respect_ping_expiration() {
         reth_tracing::init_test_tracing();
-        let mut rng = thread_rng();
+        let mut rng = rand_08::thread_rng();
         let config = Discv4Config::builder().build();
         let (_discv4, mut service) = create_discv4_with_config(config).await;
 
@@ -2581,8 +2579,8 @@ mod tests {
             enr_sq: Some(rng.gen()),
         };
 
-        let id = PeerId::random_with(&mut rng);
-        service.on_ping(ping, addr, id, rng.gen());
+        let id = PeerId::random();
+        service.on_ping(ping, addr, id, B256::random());
 
         let key = kad_key(id);
         match service.kbuckets.entry(&key) {
@@ -2979,7 +2977,7 @@ mod tests {
 
     #[test]
     fn test_insert() {
-        let local_node_record = rng_record(&mut rand::thread_rng());
+        let local_node_record = rng_record(&mut rand_08::thread_rng());
         let mut kbuckets: KBucketsTable<NodeKey, NodeEntry> = KBucketsTable::new(
             NodeKey::from(&local_node_record).into(),
             Duration::from_secs(60),
@@ -2988,7 +2986,7 @@ mod tests {
             None,
         );
 
-        let new_record = rng_record(&mut rand::thread_rng());
+        let new_record = rng_record(&mut rand_08::thread_rng());
         let key = kad_key(new_record.id);
         match kbuckets.entry(&key) {
             kbucket::Entry::Absent(entry) => {
