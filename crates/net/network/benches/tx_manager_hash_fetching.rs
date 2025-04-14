@@ -1,33 +1,25 @@
 #![allow(missing_docs)]
 
-use alloy_primitives::{
-    private::proptest::test_runner::{RngAlgorithm, TestRng},
-    B256, U256,
-};
+use alloy_primitives::{B256, U256};
 use criterion::{measurement::WallTime, *};
-use pprof::criterion::{Output, PProfProfiler};
+use rand::SeedableRng;
 use reth_eth_wire::EthVersion;
 use reth_eth_wire_types::EthNetworkPrimitives;
 use reth_network::{
-    cache::LruCache,
-    test_utils::Testnet,
+    test_utils::{
+        transactions::{buffer_hash_to_tx_fetcher, new_mock_session},
+        Testnet,
+    },
     transactions::{
-        constants::{
-            tx_fetcher::DEFAULT_MAX_COUNT_FALLBACK_PEERS,
-            tx_manager::DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
-        },
-        fetcher::{TransactionFetcher, TxFetchMetadata},
-        PeerMetadata, TransactionFetcherConfig,
-        TransactionPropagationMode::Max,
+        fetcher::TransactionFetcher, TransactionFetcherConfig, TransactionPropagationMode::Max,
         TransactionsManagerConfig,
     },
 };
-use reth_network_api::{PeerRequest, PeerRequestSender};
 use reth_network_peers::PeerId;
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 use reth_transaction_pool::{test_utils::TransactionGenerator, PoolTransaction, TransactionPool};
-use std::{collections::HashMap, fmt, hash, sync::Arc};
-use tokio::{runtime::Runtime as TokioRuntime, sync::mpsc};
+use std::collections::HashMap;
+use tokio::runtime::Runtime as TokioRuntime;
 
 criterion_group!(
     name = tx_fetch_benches;
@@ -35,47 +27,21 @@ criterion_group!(
     targets = tx_fetch_bench, fetch_pending_hashes,
 );
 
-// Returns (peer, channel-to-send-get-pooled-tx-response-on).
-pub fn new_mock_session(
-    peer_id: PeerId,
-    version: EthVersion,
-) -> (PeerMetadata<EthNetworkPrimitives>, mpsc::Receiver<PeerRequest>) {
-    let (to_mock_session_tx, to_mock_session_rx) = mpsc::channel(1);
-
-    (
-        PeerMetadata::new(
-            PeerRequestSender::new(peer_id, to_mock_session_tx),
-            version,
-            Arc::from(""),
-            DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
-        ),
-        to_mock_session_rx,
-    )
-}
-
-pub fn default_cache<T: hash::Hash + Eq + fmt::Debug>() -> LruCache<T> {
-    LruCache::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS as u32)
-}
-
 pub fn benchmark_fetch_pending_hashes(group: &mut BenchmarkGroup<'_, WallTime>, peers_num: usize) {
     let setup = || {
         let mut tx_fetcher = TransactionFetcher::<EthNetworkPrimitives>::default();
         let mut peers = HashMap::default();
 
-        for i in 0..peers_num {
+        for _i in 0..peers_num {
             // NOTE: the worst case, each tx in the cache belongs to a differenct peer.
             let peer = PeerId::random();
             let hash = B256::random();
 
             let (mut peer_data, _) = new_mock_session(peer, EthVersion::Eth66);
-            peer_data.seen_transactions.insert(hash);
+            peer_data.seen_transactions_mut().insert(hash);
             peers.insert(peer, peer_data);
 
-            let mut backups = default_cache();
-            backups.insert(peer);
-            let meta = TxFetchMetadata::new(0, backups, None);
-            tx_fetcher.hashes_fetch_inflight_and_pending_fetch.insert(hash, meta);
-            tx_fetcher.hashes_pending_fetch.insert(hash);
+            buffer_hash_to_tx_fetcher(&mut tx_fetcher, hash, peer, 0, None);
         }
 
         (tx_fetcher, peers)

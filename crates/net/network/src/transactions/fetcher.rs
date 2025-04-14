@@ -1301,7 +1301,7 @@ struct TxFetcherSearchDurations {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::transactions::tests::{buffer_hash_to_tx_fetcher, new_mock_session};
+    use crate::test_utils::transactions::{buffer_hash_to_tx_fetcher, new_mock_session};
     use alloy_primitives::{hex, B256};
     use alloy_rlp::Decodable;
     use derive_more::IntoIterator;
