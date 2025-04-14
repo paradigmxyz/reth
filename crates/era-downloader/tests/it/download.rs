@@ -2,27 +2,17 @@
 use crate::StubClient;
 use reqwest::Url;
 use reth_era_downloader::EraClient;
-use std::{
-    hash::{DefaultHasher, Hash, Hasher},
-    path::PathBuf,
-    str::FromStr,
-};
+use std::str::FromStr;
+use tempfile::tempdir;
 use test_case::test_case;
 
 #[test_case("https://mainnet.era1.nimbus.team/"; "nimbus")]
 #[test_case("https://era1.ethportal.net/"; "ethportal")]
 #[tokio::test]
 async fn test_getting_file_url_after_fetching_file_list(url: &str) {
-    let mut hasher = DefaultHasher::new();
-    url.hash(&mut hasher);
-    "url".hash(&mut hasher);
-
     let base_url = Url::from_str(url).unwrap();
-    let folder = PathBuf::from_str(env!("CARGO_TARGET_TMPDIR"))
-        .unwrap()
-        .join(format!("{:x}", hasher.finish()))
-        .into_boxed_path();
-    let _ = std::fs::create_dir(&folder);
+    let folder = tempdir().unwrap();
+    let folder = folder.path().to_owned().into_boxed_path();
     let client = EraClient::new(StubClient, base_url, folder);
 
     client.fetch_file_list().await.unwrap();
@@ -37,17 +27,9 @@ async fn test_getting_file_url_after_fetching_file_list(url: &str) {
 #[test_case("https://era1.ethportal.net/"; "ethportal")]
 #[tokio::test]
 async fn test_getting_file_after_fetching_file_list(url: &str) {
-    let mut hasher = DefaultHasher::new();
-    url.hash(&mut hasher);
-    "file".hash(&mut hasher);
-
     let base_url = Url::from_str(url).unwrap();
-    let folder = PathBuf::from_str(env!("CARGO_TARGET_TMPDIR"))
-        .unwrap()
-        .join(format!("{:x}", hasher.finish()))
-        .into_boxed_path();
-    let _ = std::fs::remove_dir_all(&folder);
-    let _ = std::fs::create_dir(&folder);
+    let folder = tempdir().unwrap();
+    let folder = folder.path().to_owned().into_boxed_path();
     let mut client = EraClient::new(StubClient, base_url, folder);
 
     client.fetch_file_list().await.unwrap();
