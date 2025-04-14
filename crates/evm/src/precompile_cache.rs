@@ -150,6 +150,8 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
         is_static: bool,
         gas_limit: u64,
     ) -> Result<Option<Self::Output>, String> {
+        use revm::interpreter::{Gas, InstructionResult};
+
         if let Some(cache) = &self.cache {
             let key =
                 PrecompileKey { address: *address, spec: self.spec, input: inputs.input.clone() };
@@ -157,7 +159,13 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
             if let Some(entry) = cache.cache.get(&key) {
                 // if gas_limit is below known lower bound, we know it will fail with OOG
                 if gas_limit <= entry.lower_gas_limit {
-                    return Err("out of gas".to_string());
+                    let result = InterpreterResult {
+                        result: InstructionResult::PrecompileOOG,
+                        gas: Gas::new(gas_limit),
+                        output: Bytes::new(),
+                    };
+
+                    return Ok(Some(result));
                 }
 
                 // if gas_limit is above upper bound, use the cached result
@@ -181,10 +189,37 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
                     #[cfg(feature = "metrics")]
                     let entry_count_before = cache.cache.entry_count();
 
-                    if let Some(mut entry) = cache.cache.get(&key) {
-                        entry.result = Ok(result.clone());
-                        entry.upper_gas_limit = entry.upper_gas_limit.min(gas_limit);
+                    if result.result == InstructionResult::PrecompileOOG {
+                        // oog error
+                        if let Some(mut entry) = cache.cache.get(&key) {
+                            entry.lower_gas_limit = entry.lower_gas_limit.max(gas_limit);
+                        } else {
+                            cache.cache.insert(
+                                key,
+                                CacheEntry {
+                                    result: Ok(result.clone()),
+                                    upper_gas_limit: u64::MAX,
+                                    lower_gas_limit: gas_limit,
+                                },
+                            );
+                        }
+                    } else if result.result == InstructionResult::Return {
+                        // success
+                        if let Some(mut entry) = cache.cache.get(&key) {
+                            entry.result = Ok(result.clone());
+                            entry.upper_gas_limit = entry.upper_gas_limit.min(gas_limit);
+                        } else {
+                            cache.cache.insert(
+                                key,
+                                CacheEntry {
+                                    result: Ok(result.clone()),
+                                    upper_gas_limit: gas_limit,
+                                    lower_gas_limit: 0,
+                                },
+                            );
+                        }
                     } else {
+                        // for other errors cache the result
                         cache.cache.insert(
                             key,
                             CacheEntry {
@@ -206,36 +241,18 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
                     }
                 }
                 Err(err) => {
+                    // fatal error
                     #[cfg(feature = "metrics")]
                     let entry_count_before = cache.cache.entry_count();
 
-                    if err.contains("out of gas") {
-                        // update the lower gas limit for OOG errors
-                        if let Some(mut entry) = cache.cache.get(&key) {
-                            entry.lower_gas_limit = entry.lower_gas_limit.max(gas_limit);
-                        } else {
-                            // First time seeing this input, create a new entry with just the lower
-                            // bound
-                            cache.cache.insert(
-                                key,
-                                CacheEntry {
-                                    result: Err(err.clone()),
-                                    upper_gas_limit: u64::MAX,
-                                    lower_gas_limit: gas_limit,
-                                },
-                            );
-                        }
-                    } else {
-                        // for non-OOG errors, cache the error result
-                        cache.cache.insert(
-                            key,
-                            CacheEntry {
-                                result: Err(err.clone()),
-                                upper_gas_limit: gas_limit,
-                                lower_gas_limit: 0,
-                            },
-                        );
-                    }
+                    cache.cache.insert(
+                        key,
+                        CacheEntry {
+                            result: Err(err.clone()),
+                            upper_gas_limit: gas_limit,
+                            lower_gas_limit: 0,
+                        },
+                    );
 
                     #[cfg(feature = "metrics")]
                     {
