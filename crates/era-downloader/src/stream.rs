@@ -10,6 +10,40 @@ use std::{
     task::{Context, Poll},
 };
 
+/// Parameters that alter the behavior of [`EraStream`].
+///
+/// # Examples
+/// ```
+/// use reth_era_downloader::EraStreamConfig;
+///
+/// EraStreamConfig::default().with_max_files(10).with_max_concurrent_downloads(2);
+/// ```
+#[derive(Debug, Clone)]
+pub struct EraStreamConfig {
+    max_files: usize,
+    max_concurrent_downloads: usize,
+}
+
+impl Default for EraStreamConfig {
+    fn default() -> Self {
+        Self { max_files: 5, max_concurrent_downloads: 3 }
+    }
+}
+
+impl EraStreamConfig {
+    /// The maximum amount of downloaded ERA1 files kept in the download directory.
+    pub fn with_max_files(mut self, max_files: usize) -> Self {
+        self.max_files = max_files;
+        self
+    }
+
+    /// The maximum amount of downloads happening at the same time.
+    pub fn with_max_concurrent_downloads(mut self, max_concurrent_downloads: usize) -> Self {
+        self.max_concurrent_downloads = max_concurrent_downloads;
+        self
+    }
+}
+
 /// An asynchronous stream of ERA1 files.
 #[derive(Debug)]
 pub struct EraStream {
@@ -20,12 +54,12 @@ pub struct EraStream {
 impl EraStream {
     /// Constructs a new [`EraStream`] that downloads concurrently up to `max_concurrent_downloads`
     /// ERA1 files to `client` `folder`, keeping their count up to `max_files`.
-    pub fn new(client: EraClient, max_files: usize, max_concurrent_downloads: usize) -> Self {
+    pub fn new(client: EraClient, config: EraStreamConfig) -> Self {
         Self {
             download_stream: DownloadStream {
                 downloads: Default::default(),
                 scheduled: Default::default(),
-                max_concurrent_downloads,
+                max_concurrent_downloads: config.max_concurrent_downloads,
                 ended: false,
             },
             starting_stream: StartingStream {
@@ -34,7 +68,7 @@ impl EraStream {
                 next_url: Box::pin(async move { Ok(None) }),
                 recover_index: Box::pin(async move { 0 }),
                 state: Default::default(),
-                max_files,
+                max_files: config.max_files,
                 index: 0,
                 downloading: 0,
             },

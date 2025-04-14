@@ -1,7 +1,7 @@
 //! Tests downloading files and streaming their filenames
 use futures_util::StreamExt;
 use reqwest::Url;
-use reth_era_downloader::{EraClient, EraStream};
+use reth_era_downloader::{EraClient, EraStream, EraStreamConfig};
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
     path::PathBuf,
@@ -10,7 +10,7 @@ use std::{
 use test_case::test_case;
 
 #[test_case("https://mainnet.era1.nimbus.team/"; "nimbus")]
-// #[test_case("https://era1.ethportal.net/"; "ethportal")]
+#[test_case("https://era1.ethportal.net/"; "ethportal")]
 #[tokio::test]
 async fn test_streaming_files_after_fetching_file_list(url: &str) {
     let mut hasher = DefaultHasher::new();
@@ -28,7 +28,10 @@ async fn test_streaming_files_after_fetching_file_list(url: &str) {
 
     client.fetch_file_list().await.unwrap();
 
-    let mut stream = EraStream::new(client, 2, 1);
+    let mut stream = EraStream::new(
+        client,
+        EraStreamConfig::default().with_max_files(2).with_max_concurrent_downloads(1),
+    );
 
     let expected_file = folder.join("mainnet-00000-5ec1ffb8.era1").into_boxed_path();
     let actual_file = stream.next().await.unwrap().unwrap();

@@ -4,7 +4,7 @@
 //! ```
 //! use futures_util::StreamExt;
 //! use reqwest::{Client, Url};
-//! use reth_era_downloader::{EraClient, EraStream};
+//! use reth_era_downloader::{EraClient, EraStream, EraStreamConfig};
 //! use std::{path::PathBuf, str::FromStr};
 //!
 //! # async fn f() -> Result<(), Box<dyn std::error::Error + 'static>> {
@@ -16,14 +16,14 @@
 //!
 //! let client = EraClient::new(Client::new(), url, folder);
 //!
-//! // Keep up to 2 ERA1 files in the `folder`.
-//! // More downloads won't start until some of the files are removed.
-//! let max_files = 2;
+//! let config = EraStreamConfig::default()
+//!     // Keep up to 2 ERA1 files in the `folder`.
+//!     // More downloads won't start until some of the files are removed.
+//!     .with_max_files(2)
+//!     // Do not download more than 2 files at the same time.
+//!     .with_max_concurrent_downloads(2);
 //!
-//! // Do not download more than 2 files at the same time.
-//! let max_concurrent_downloads = 2;
-//!
-//! let mut stream = EraStream::new(client, max_files, max_concurrent_downloads);
+//! let mut stream = EraStream::new(client, config);
 //!
 //! # return Ok(());
 //! while let Some(file) = stream.next().await {
@@ -38,4 +38,4 @@ mod client;
 mod stream;
 
 pub use client::EraClient;
-pub use stream::EraStream;
+pub use stream::{EraStream, EraStreamConfig};
