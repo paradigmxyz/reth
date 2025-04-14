@@ -330,8 +330,22 @@ impl ProviderCaches {
 
     /// Inserts the [`BundleState`] entries into the cache.
     ///
-    /// Returns an error if state can't be cached and the should be discarded.
+    /// Entries are inserted in the following order:
+    /// 1. Bytecodes
+    /// 2. Storage slots
+    /// 3. Accounts
+    ///
+    /// The order is important, because the access patterns are Account -> Bytecode and Account ->
+    /// Storage slot. If we update the account first, it may point to a code hash that doesn't have
+    /// the associated bytecode anywhere yet.
+    ///
+    /// Returns an error if the state can't be cached and should be discarded.
     pub(crate) fn insert_state(&self, state_updates: &BundleState) -> Result<(), ()> {
+        // Insert bytecodes
+        for (code_hash, bytecode) in &state_updates.contracts {
+            self.code_cache.insert(*code_hash, Some(Bytecode(bytecode.clone())));
+        }
+
         for (addr, account) in &state_updates.state {
             // If the account was not modified, as in not changed and not destroyed, then we have
             // nothing to do w.r.t. this particular account and can move on
@@ -339,16 +353,16 @@ impl ProviderCaches {
                 continue
             }
 
-            // if the account was destroyed, invalidate from the account / storage caches
+            // If the account was destroyed, invalidate from the account / storage caches
             if account.was_destroyed() {
-                // invalidate the account cache entry if destroyed
+                // Invalidate the account cache entry if destroyed
                 self.account_cache.invalidate(addr);
 
                 self.invalidate_account_storage(addr);
                 continue
             }
 
-            // if we have an account that was modified, but it has a `None` account info, some wild
+            // If we have an account that was modified, but it has a `None` account info, some wild
             // error has occurred because this state should be unrepresentable. An account with
             // `None` current info, should be destroyed.
             let Some(ref account_info) = account.info else {
@@ -356,16 +370,16 @@ impl ProviderCaches {
                 return Err(())
             };
 
-            // insert will update if present, so we just use the new account info as the new value
-            // for the account cache
-            self.account_cache.insert(*addr, Some(Account::from(account_info)));
-
-            // now we iterate over all storage and make updates to the cached storage values
+            // Now we iterate over all storage and make updates to the cached storage values
             for (storage_key, slot) in &account.storage {
-                // we convert the storage key from U256 to B256 because that is how it's represented
+                // We convert the storage key from U256 to B256 because that is how it's represented
                 // in the cache
                 self.insert_storage(*addr, (*storage_key).into(), Some(slot.present_value));
             }
+
+            // Insert will update if present, so we just use the new account info as the new value
+            // for the account cache
+            self.account_cache.insert(*addr, Some(Account::from(account_info)));
         }
 
         Ok(())
