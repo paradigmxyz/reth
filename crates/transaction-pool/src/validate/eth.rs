@@ -27,7 +27,7 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_primitives_traits::{
     transaction::error::InvalidTransactionError, Block, GotExpected, SealedBlock,
 };
-use reth_storage_api::{StateProvider, StateProviderFactory};
+use reth_storage_api::{StateProvider, StateProviderBox, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{
     marker::PhantomData,
@@ -84,12 +84,15 @@ where
     /// which can improve performance when validating many transactions.
     ///
     /// If `state` is `None`, a new state provider will be created.
-    pub fn validate_one_with_state(
+    pub fn validate_one_with_state<P>(
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
-        state: &mut Option<Box<dyn StateProvider>>,
-    ) -> TransactionValidationOutcome<Tx> {
+        state: Option<P>,
+    ) -> TransactionValidationOutcome<Tx>
+    where
+        P: StateProvider,
+    {
         self.inner.validate_one_with_provider(origin, transaction, state)
     }
 
@@ -204,12 +207,15 @@ where
     /// Validates a single transaction using an optional cached state provider.
     /// If no provider is passed, a new one will be created. This allows reusing
     /// the same provider across multiple txs.
-    fn validate_one_with_provider(
+    fn validate_one_with_provider<P>(
         &self,
         origin: TransactionOrigin,
         mut transaction: Tx,
-        maybe_state: &mut Option<Box<dyn StateProvider>>,
-    ) -> TransactionValidationOutcome<Tx> {
+        maybe_state: Option<P>,
+    ) -> TransactionValidationOutcome<Tx>
+    where
+        P: StateProvider,
+    {
         // Checks for tx_type
         match transaction.ty() {
             LEGACY_TX_TYPE_ID => {
@@ -377,18 +383,15 @@ where
         }
 
         // If we don't have a state provider yet, fetch the latest state
-        if maybe_state.is_none() {
-            match self.client.latest() {
-                Ok(new_state) => {
-                    *maybe_state = Some(new_state);
-                }
+        let state = match maybe_state {
+            Some(state) => Box::new(state),
+            None => match self.client.latest() {
+                Ok(new_state) => new_state,
                 Err(err) => {
                     return TransactionValidationOutcome::Error(*transaction.hash(), Box::new(err))
                 }
-            }
-        }
-
-        let state = maybe_state.as_deref().expect("provider is set");
+            },
+        };
 
         // Use provider to get account info
         let account = match state.basic_account(transaction.sender_ref()) {
@@ -522,8 +525,7 @@ where
         origin: TransactionOrigin,
         transaction: Tx,
     ) -> TransactionValidationOutcome<Tx> {
-        let mut provider = None;
-        self.validate_one_with_provider(origin, transaction, &mut provider)
+        self.validate_one_with_provider::<StateProviderBox>(origin, transaction, None)
     }
 
     /// Validates all given transactions.
@@ -531,10 +533,11 @@ where
         &self,
         transactions: Vec<(TransactionOrigin, Tx)>,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
-        let mut provider = None;
         transactions
             .into_iter()
-            .map(|(origin, tx)| self.validate_one_with_provider(origin, tx, &mut provider))
+            .map(|(origin, tx)| {
+                self.validate_one_with_provider::<StateProviderBox>(origin, tx, None)
+            })
             .collect()
     }
 
