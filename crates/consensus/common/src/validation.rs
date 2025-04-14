@@ -348,14 +348,14 @@ mod tests {
     use super::*;
     use alloy_consensus::{BlockBody, Header, TxEip4844};
     use alloy_eips::eip4895::Withdrawals;
-    use alloy_primitives::{Address, Bytes, PrimitiveSignature as Signature, U256};
+    use alloy_primitives::{Address, Bytes, Signature, U256};
     use rand::Rng;
     use reth_chainspec::ChainSpecBuilder;
     use reth_ethereum_primitives::{Transaction, TransactionSigned};
     use reth_primitives_traits::proofs;
 
     fn mock_blob_tx(nonce: u64, num_blobs: usize) -> TransactionSigned {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let request = Transaction::Eip4844(TxEip4844 {
             chain_id: 1u64,
             nonce,
@@ -367,7 +367,9 @@ mod tests {
             value: U256::from(3_u64),
             input: Bytes::from(vec![1, 2]),
             access_list: Default::default(),
-            blob_versioned_hashes: std::iter::repeat_with(|| rng.gen()).take(num_blobs).collect(),
+            blob_versioned_hashes: std::iter::repeat_with(|| rng.random())
+                .take(num_blobs)
+                .collect(),
         });
 
         let signature = Signature::new(U256::default(), U256::default(), true);

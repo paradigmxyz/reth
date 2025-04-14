@@ -495,7 +495,7 @@ mod tests {
     }
 
     fn rng_blobs(num: usize) -> Vec<(TxHash, BlobTransactionSidecar)> {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         (0..num)
             .map(|_| {
                 let tx = TxHash::random_with(&mut rng);
