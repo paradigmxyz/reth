@@ -25,8 +25,34 @@ use reth_metrics::Metrics;
 type Cache<K, V> = mini_moka::sync::Cache<K, V, alloy_primitives::map::DefaultHashBuilder>;
 
 #[cfg(feature = "std")]
+type CacheKey = (SpecId, Bytes);
+
+#[cfg(feature = "std")]
 /// Type alias for the LRU cache used within the [`PrecompileCache`].
-type PrecompileLRUCache = Cache<(SpecId, Bytes, u64), Result<InterpreterResult, String>>;
+type PrecompileLRUCache = Cache<CacheKey, Result<InterpreterResult, String>>;
+
+/// Gas interval outside of which we can we know how the precompile behaves in
+/// terms of gas.
+///
+/// Our precompile cache contains the results of the precompile calls, and those
+/// depend both on the input and the gas limit. If we include the gas limit in
+/// the cache key the hit rate will be very low.
+/// Together with the precompile address we store in this struct the gas limit
+/// values that determine when the precompile fails because of out of gas. We
+/// don't know exactly what is the gas cost of each precompile, and store these
+/// values according to the results we observe.
+/// This will help to optimize the cache perfomance:
+///   * if a request comes with enough gas we know it won't fail with out of gas and can store it in
+///     the cache without the concrete gas limit
+///   * if a request comes with not enough gas we know it will fail with out of gas
+#[derive(Debug)]
+#[cfg(feature = "std")]
+struct PrecompileGasBounds {
+    /// Observed gas limit above which the precompile does not fail with out of gas.
+    upper_gas_limit: u64,
+    /// Observed gas limit below which the precompile fails with out of gas.
+    lower_gas_limit: u64,
+}
 
 /// A cache for precompile inputs / outputs.
 ///
@@ -40,6 +66,10 @@ pub struct PrecompileCache {
     /// Caches for each precompile input / output.
     #[cfg(feature = "std")]
     cache: DashMap<Address, PrecompileLRUCache>,
+
+    /// Precompile gas bounds.
+    #[cfg(feature = "std")]
+    precompile_gas_bounds: DashMap<Address, PrecompileGasBounds>,
 }
 
 /// Metrics for the cached precompile provider, showing hits / misses for each cache
@@ -129,16 +159,30 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
         gas_limit: u64,
     ) -> Result<Option<Self::Output>, String> {
         if let Some(cache) = &self.cache {
-            let key = (self.spec, inputs.input.clone(), gas_limit);
+            // First, check if we have precompile info and can make a quick decision
+            if let Some(info) = cache.precompile_gas_bounds.get(address) {
+                // If gas_limit is below known lower bound, we know it will fail with OOG
+                if gas_limit <= info.lower_gas_limit {
+                    return Err("out of gas".to_string());
+                }
 
-            // get the result if it exists
-            if let Some(precompiles) = cache.cache.get_mut(address) {
-                #[cfg(feature = "metrics")]
-                self.metrics.precompile_cache_hits.increment(1);
-                if let Some(result) = precompiles.get(&key) {
-                    return result.map(Some)
+                // We have enough information to use the cache without the gas limit
+                if gas_limit >= info.upper_gas_limit {
+                    // Create a key without the gas limit
+                    let key = (self.spec, inputs.input.clone());
+
+                    // Check if we have a cached result
+                    if let Some(precompiles) = cache.cache.get(address) {
+                        #[cfg(feature = "metrics")]
+                        self.metrics.precompile_cache_hits.increment(1);
+
+                        if let Some(result) = precompiles.get(&key) {
+                            return result.map(Some);
+                        }
+                    }
                 }
             }
+
             #[cfg(feature = "metrics")]
             self.metrics.precompile_cache_misses.increment(1);
 
@@ -146,38 +190,64 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
             let output =
                 self.precompile_provider.run(context, address, inputs, is_static, gas_limit);
 
-            if let Some(output) = output.clone().transpose() {
-                // Check if entry exists for this address before insertion
-                #[cfg(feature = "metrics")]
-                let is_new_address = !cache.cache.contains_key(address);
-                #[cfg(feature = "metrics")]
-                let entry_count_before = if is_new_address {
-                    0
-                } else if let Some(precompile_cache) = cache.cache.get(address) {
-                    precompile_cache.entry_count()
-                } else {
-                    0
-                };
+            match &output {
+                Ok(Some(result)) => {
+                    // Create or update the precompile info
+                    cache
+                        .precompile_gas_bounds
+                        .entry(*address)
+                        .and_modify(|info| {
+                            // Update the upper gas limit if this was successful
+                            info.upper_gas_limit = info.upper_gas_limit.min(gas_limit);
+                        })
+                        .or_insert(PrecompileGasBounds {
+                            upper_gas_limit: gas_limit,
+                            lower_gas_limit: 0, // We don't know the lower bound yet
+                        });
 
-                // insert the result into the cache
-                cache
-                    .cache
-                    .entry(*address)
-                    // TODO: use a better cache size
-                    .or_insert(
-                        CacheBuilder::new(10000).build_with_hasher(DefaultHashBuilder::default()),
-                    )
-                    .insert(key, output);
+                    // Cache the successful result without the gas limit
+                    let key = (self.spec, inputs.input.clone());
 
-                #[cfg(feature = "metrics")]
-                if let Some(precompile_cache) = cache.cache.get(address) {
-                    let new_entry_count = precompile_cache.entry_count();
-                    if new_entry_count > entry_count_before {
-                        // Increment the cache size metric by the number of new entries
-                        self.metrics
-                            .precompile_cache_size
-                            .increment((new_entry_count - entry_count_before) as f64);
+                    cache_result(
+                        cache,
+                        address,
+                        key,
+                        Ok(result.clone()),
+                        #[cfg(feature = "metrics")]
+                        &self.metrics,
+                    );
+                }
+                Err(err) => {
+                    // If error is "out of gas", update the lower gas limit
+                    if err.contains("out of gas") {
+                        // update the gas bounds for out of gas errors
+                        cache
+                            .precompile_gas_bounds
+                            .entry(*address)
+                            .and_modify(|info| {
+                                // Update the lower gas limit if this was an OOG failure
+                                info.lower_gas_limit = info.lower_gas_limit.max(gas_limit);
+                            })
+                            .or_insert(PrecompileGasBounds {
+                                upper_gas_limit: u64::MAX, // We don't know the upper bound yet
+                                lower_gas_limit: gas_limit,
+                            });
+                    } else {
+                        // for non-OOG errors, still cache the error
+                        let key = (self.spec, inputs.input.clone());
+                        cache_result(
+                            cache,
+                            address,
+                            key,
+                            Err(err.clone()),
+                            #[cfg(feature = "metrics")]
+                            &self.metrics,
+                        );
                     }
+                }
+                Ok(None) => {
+                    // precompile chose not to handle this request
+                    // no caching needed
                 }
             }
 
@@ -209,6 +279,41 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
     }
 }
 
+#[cfg(feature = "std")]
+fn cache_result(
+    cache: &PrecompileCache,
+    address: &Address,
+    key: CacheKey,
+    result: Result<InterpreterResult, String>,
+    #[cfg(feature = "metrics")] metrics: &CachedPrecompileMetrics,
+) {
+    // Create or get the cache for this address
+    #[cfg(feature = "metrics")]
+    let is_new_address = !cache.cache.contains_key(address);
+    #[cfg(feature = "metrics")]
+    let entry_count_before = if is_new_address {
+        0
+    } else if let Some(precompile_cache) = cache.cache.get(address) {
+        precompile_cache.entry_count()
+    } else {
+        0
+    };
+
+    cache
+        .cache
+        .entry(*address)
+        .or_insert(CacheBuilder::new(10000).build_with_hasher(DefaultHashBuilder::default()))
+        .insert(key, result);
+
+    #[cfg(feature = "metrics")]
+    if let Some(precompile_cache) = cache.cache.get(address) {
+        let new_entry_count = precompile_cache.entry_count();
+        if new_entry_count > entry_count_before {
+            metrics.precompile_cache_size.increment((new_entry_count - entry_count_before) as f64);
+        }
+    }
+}
+
 #[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
@@ -220,8 +325,8 @@ mod tests {
         Address::from_slice(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, num])
     }
 
-    fn test_input(data: &[u8], gas: u64) -> (SpecId, Bytes, u64) {
-        (SpecId::PRAGUE, Bytes::copy_from_slice(data), gas)
+    fn test_input(data: &[u8]) -> (SpecId, Bytes) {
+        (SpecId::PRAGUE, Bytes::copy_from_slice(data))
     }
 
     #[test]
@@ -229,7 +334,7 @@ mod tests {
         let cache = Arc::new(PrecompileCache::default());
 
         let address = precompile_address(1);
-        let key = test_input(b"test_input", 100);
+        let key = test_input(b"test_input");
 
         let expected = Ok(InterpreterResult::new(
             InstructionResult::Return,
