@@ -97,7 +97,8 @@ impl<'a> RpcServiceT<'a> for RpcService {
                             subscription_permit: p,
                         };
 
-                        let fut = callback(id.clone(), params, sink.clone(), conn_state, extensions);
+                        let fut =
+                            callback(id.clone(), params, sink.clone(), conn_state, extensions);
                         ResponseFuture::future(fut)
                     } else {
                         let max = bounded_subscriptions.max();
