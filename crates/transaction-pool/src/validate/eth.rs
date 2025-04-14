@@ -533,11 +533,10 @@ where
         &self,
         transactions: Vec<(TransactionOrigin, Tx)>,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
+        let state = self.client.latest().ok();
         transactions
             .into_iter()
-            .map(|(origin, tx)| {
-                self.validate_one_with_provider::<StateProviderBox>(origin, tx, None)
-            })
+            .map(|(origin, tx)| self.validate_one_with_provider(origin, tx, state.as_ref()))
             .collect()
     }
 
