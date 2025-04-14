@@ -33,7 +33,6 @@ alloy-evm.workspace = true
 alloy-consensus.workspace = true
 
 auto_impl.workspace = true
-dashmap = { workspace = true, features = ["inline"], optional = true }
 derive_more.workspace = true
 futures-util.workspace = true
 metrics = { workspace = true, optional = true }
@@ -67,7 +66,6 @@ std = [
     "reth-storage-api/std",
     "reth-trie-common/std",
     "reth-revm/std",
-    "dashmap",
     "mini-moka",
 ]
 metrics = ["std", "dep:metrics", "dep:reth-metrics"]
