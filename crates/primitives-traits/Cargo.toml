@@ -71,6 +71,7 @@ byteorder.workspace = true
 proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
 rand.workspace = true
+rand_08.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 test-fuzz.workspace = true
@@ -129,6 +130,7 @@ serde-bincode-compat = [
     "serde_with",
     "alloy-consensus/serde-bincode-compat",
     "alloy-eips/serde-bincode-compat",
+    "op-alloy-consensus?/serde",
     "op-alloy-consensus?/serde-bincode-compat",
     "scroll-alloy-consensus?/serde-bincode-compat",
 ]
@@ -148,6 +150,7 @@ serde = [
     "alloy-trie/serde",
     "revm-bytecode/serde",
     "revm-state/serde",
+    "rand_08/serde",
     "scroll-alloy-consensus?/serde",
 ]
 reth-codec = [

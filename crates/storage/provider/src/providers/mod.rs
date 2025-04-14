@@ -19,9 +19,6 @@ pub use state::{
     latest::{LatestStateProvider, LatestStateProviderRef},
 };
 
-mod bundle_state_provider;
-pub use bundle_state_provider::BundleStateProvider;
-
 mod consistent_view;
 pub use consistent_view::{ConsistentDbView, ConsistentViewError};
 

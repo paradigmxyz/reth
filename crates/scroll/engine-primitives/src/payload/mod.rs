@@ -222,11 +222,11 @@ mod tests {
     #[test]
     fn test_can_convert_execution_v1_payload_into_block() -> eyre::Result<()> {
         let mut bytes = [0u8; 1024];
-        rand::thread_rng().fill(bytes.as_mut_slice());
+        rand::rng().fill(bytes.as_mut_slice());
         let mut u = Unstructured::new(&bytes);
 
         let mut extra_data = [0u8; 64];
-        rand::thread_rng().fill(extra_data.as_mut_slice());
+        rand::rng().fill(extra_data.as_mut_slice());
 
         let execution_payload = ExecutionPayload::V1(ExecutionPayloadV1 {
             parent_hash: B256::random(),
@@ -255,11 +255,11 @@ mod tests {
     #[test]
     fn test_can_convert_execution_v2_payload_into_block() -> eyre::Result<()> {
         let mut bytes = [0u8; 1024];
-        rand::thread_rng().fill(bytes.as_mut_slice());
+        rand::rng().fill(bytes.as_mut_slice());
         let mut u = Unstructured::new(&bytes);
 
         let mut extra_data = [0u8; 64];
-        rand::thread_rng().fill(extra_data.as_mut_slice());
+        rand::rng().fill(extra_data.as_mut_slice());
 
         let execution_payload = ExecutionPayload::V2(ExecutionPayloadV2 {
             payload_inner: ExecutionPayloadV1 {
@@ -291,11 +291,11 @@ mod tests {
     #[test]
     fn test_can_convert_execution_v3_payload_into_block() -> eyre::Result<()> {
         let mut bytes = [0u8; 1024];
-        rand::thread_rng().fill(bytes.as_mut_slice());
+        rand::rng().fill(bytes.as_mut_slice());
         let mut u = Unstructured::new(&bytes);
 
         let mut extra_data = [0u8; 64];
-        rand::thread_rng().fill(extra_data.as_mut_slice());
+        rand::rng().fill(extra_data.as_mut_slice());
 
         let execution_payload = ExecutionPayload::V3(ExecutionPayloadV3 {
             payload_inner: ExecutionPayloadV2 {

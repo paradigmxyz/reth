@@ -24,5 +24,8 @@ snap.workspace = true
 ethereum_ssz.workspace = true
 ethereum_ssz_derive.workspace = true
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [lints]
 workspace = true

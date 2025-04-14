@@ -535,7 +535,7 @@ mod tests {
     #[test]
     fn eip1559_decode() {
         use alloy_consensus::SignableTransaction;
-        use alloy_primitives::PrimitiveSignature;
+        use alloy_primitives::Signature;
         let tx = TxEip1559 {
             chain_id: 1u64,
             nonce: 2,
@@ -547,7 +547,7 @@ mod tests {
             input: vec![8].into(),
             access_list: Default::default(),
         };
-        let sig = PrimitiveSignature::test_signature();
+        let sig = Signature::test_signature();
         let tx_signed = tx.into_signed(sig);
         let envelope: ScrollTxEnvelope = tx_signed.into();
         let encoded = envelope.encoded_2718();

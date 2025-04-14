@@ -84,7 +84,7 @@ impl<R: Rng> MockTransactionSimulator<R> {
         let senders = config.addresses(&mut rng);
         Self {
             base_fee: config.base_fee,
-            balances: senders.iter().copied().map(|a| (a, rng.gen())).collect(),
+            balances: senders.iter().copied().map(|a| (a, rng.random())).collect(),
             nonces: senders.iter().copied().map(|a| (a, 0)).collect(),
             senders,
             scenarios: config.scenarios,
@@ -97,13 +97,13 @@ impl<R: Rng> MockTransactionSimulator<R> {
 
     /// Returns a random address from the senders set
     fn rng_address(&mut self) -> Address {
-        let idx = self.rng.gen_range(0..self.senders.len());
+        let idx = self.rng.random_range(0..self.senders.len());
         self.senders[idx]
     }
 
     /// Returns a random scenario from the scenario set
     fn rng_scenario(&mut self) -> ScenarioType {
-        let idx = self.rng.gen_range(0..self.scenarios.len());
+        let idx = self.rng.random_range(0..self.scenarios.len());
         self.scenarios[idx].clone()
     }
 
@@ -226,10 +226,10 @@ mod tests {
         };
 
         let fee_ranges = MockFeeRange {
-            gas_price: (10u128..100).into(),
-            priority_fee: (10u128..100).into(),
-            max_fee: (100u128..110).into(),
-            max_fee_blob: (1u128..100).into(),
+            gas_price: (10u128..100).try_into().unwrap(),
+            priority_fee: (10u128..100).try_into().unwrap(),
+            max_fee: (100u128..110).try_into().unwrap(),
+            max_fee_blob: (1u128..100).try_into().unwrap(),
         };
 
         let config = MockSimulatorConfig {
@@ -243,7 +243,7 @@ mod tests {
                 10..100,
             ),
         };
-        let mut simulator = MockTransactionSimulator::new(rand::thread_rng(), config);
+        let mut simulator = MockTransactionSimulator::new(rand::rng(), config);
         let mut pool = MockPool::default();
 
         simulator.next(&mut pool);

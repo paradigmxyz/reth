@@ -639,10 +639,10 @@ mod tests {
     fn measure_storage_cache_overhead() {
         let (base_overhead, cache) = measure_allocation(|| AccountStorageCache::new(1000));
         println!("Base AccountStorageCache overhead: {} bytes", base_overhead);
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         let key = StorageKey::random();
-        let value = StorageValue::from(rng.gen::<u128>());
+        let value = StorageValue::from(rng.random::<u128>());
         let (first_slot, _) = measure_allocation(|| {
             cache.insert_storage(key, Some(value));
         });
@@ -652,7 +652,7 @@ mod tests {
         let (test_slots, _) = measure_allocation(|| {
             for _ in 0..TOTAL_SLOTS {
                 let key = StorageKey::random();
-                let value = StorageValue::from(rng.gen::<u128>());
+                let value = StorageValue::from(rng.random::<u128>());
                 cache.insert_storage(key, Some(value));
             }
         });

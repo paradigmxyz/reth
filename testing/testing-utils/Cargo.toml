@@ -22,6 +22,7 @@ alloy-eips.workspace = true
 
 rand.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }
+rand_08.workspace = true
 
 [dev-dependencies]
 alloy-eips.workspace = true

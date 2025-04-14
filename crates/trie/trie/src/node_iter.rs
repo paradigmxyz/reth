@@ -62,7 +62,7 @@ pub struct TrieNodeIter<C, H: HashedCursor> {
 
     /// The last seeked hashed entry.
     ///
-    /// We use it to not seek the same hashed entry twice, and instead re-use it.
+    /// We use it to not seek the same hashed entry twice, and instead reuse it.
     last_seeked_hashed_entry: Option<SeekedHashedEntry<H::Value>>,
 
     #[cfg(feature = "metrics")]

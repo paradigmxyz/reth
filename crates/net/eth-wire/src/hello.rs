@@ -47,7 +47,7 @@ impl HelloMessageWithProtocols {
     /// use reth_eth_wire::HelloMessageWithProtocols;
     /// use reth_network_peers::pk2id;
     /// use secp256k1::{SecretKey, SECP256K1};
-    /// let secret_key = SecretKey::new(&mut rand::thread_rng());
+    /// let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     /// let id = pk2id(&secret_key.public_key(SECP256K1));
     /// let status = HelloMessageWithProtocols::builder(id).build();
     /// ```
@@ -130,7 +130,7 @@ impl HelloMessage {
     /// use reth_eth_wire::HelloMessage;
     /// use reth_network_peers::pk2id;
     /// use secp256k1::{SecretKey, SECP256K1};
-    /// let secret_key = SecretKey::new(&mut rand::thread_rng());
+    /// let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     /// let id = pk2id(&secret_key.public_key(SECP256K1));
     /// let status = HelloMessage::builder(id).build();
     /// ```
@@ -222,7 +222,7 @@ mod tests {
 
     #[test]
     fn test_hello_encoding_round_trip() {
-        let secret_key = SecretKey::new(&mut rand::thread_rng());
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
         let id = pk2id(&secret_key.public_key(SECP256K1));
         let hello = P2PMessage::Hello(HelloMessage {
             protocol_version: ProtocolVersion::V5,
@@ -242,7 +242,7 @@ mod tests {
 
     #[test]
     fn hello_encoding_length() {
-        let secret_key = SecretKey::new(&mut rand::thread_rng());
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
         let id = pk2id(&secret_key.public_key(SECP256K1));
         let hello = P2PMessage::Hello(HelloMessage {
             protocol_version: ProtocolVersion::V5,
@@ -261,7 +261,7 @@ mod tests {
     #[test]
     fn hello_message_id_prefix() {
         // ensure that the hello message id is prefixed
-        let secret_key = SecretKey::new(&mut rand::thread_rng());
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
         let id = pk2id(&secret_key.public_key(SECP256K1));
         let hello = P2PMessage::Hello(HelloMessage {
             protocol_version: ProtocolVersion::V5,

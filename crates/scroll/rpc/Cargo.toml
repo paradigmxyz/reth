@@ -50,4 +50,5 @@ tokio.workspace = true
 jsonrpsee-types.workspace = true
 
 # misc
+eyre.workspace = true
 thiserror.workspace = true
