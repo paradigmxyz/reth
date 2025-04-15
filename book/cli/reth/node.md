@@ -748,6 +748,11 @@ Engine:
 
           [default: 256]
 
+      --engine.reserved-cpu-cores <RESERVED_CPU_CORES>
+          Configure the number of reserved CPU cores for non-reth processes
+
+          [default: 1]
+
 Ress:
       --ress.enable
           Enable support for `ress` subprotocol
