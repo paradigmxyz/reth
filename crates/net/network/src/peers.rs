@@ -647,9 +647,12 @@ impl PeersManager {
                 self.connection_info.decr_state(peer.state);
                 peer.state = PeerConnectionState::Idle;
 
-                if peer.severe_backoff_counter > self.max_backoff_count && !peer.is_trusted() {
+                if peer.severe_backoff_counter > self.max_backoff_count &&
+                    !peer.is_trusted() &&
+                    !peer.is_static()
+                {
                     // mark peer for removal if it has been backoff too many times and is _not_
-                    // trusted
+                    // trusted or static
                     remove_peer = true;
                 }
             }
