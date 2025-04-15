@@ -93,6 +93,8 @@ impl SparseTrie {
     /// # Examples
     ///
     /// ```
+    /// use reth_trie_sparse::SparseTrie;
+    ///
     /// let trie = SparseTrie::blind();
     /// assert!(trie.is_blind());
     /// let trie = SparseTrie::default();
@@ -107,6 +109,8 @@ impl SparseTrie {
     /// # Examples
     ///
     /// ```
+    /// use reth_trie_sparse::SparseTrie;
+    ///
     /// let trie = SparseTrie::revealed_empty();
     /// assert!(!trie.is_blind());
     /// ```
