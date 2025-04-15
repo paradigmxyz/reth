@@ -14,9 +14,11 @@ use reth_trie::metrics::TrieRootMetrics;
 /// Extends [`StorageRoot`] with operations specific for working with a database transaction.
 pub trait DatabaseStorageRoot {
     /// Create a new storage root calculator from database transaction and raw address.
+    #[allow(clippy::wrong_self_convention)]
     fn from_tx(&self, address: Address) -> Self;
 
     /// Create a new storage root calculator from database transaction and hashed address.
+    #[allow(clippy::wrong_self_convention)]
     fn from_tx_hashed(&self, hashed_address: B256) -> Self;
 
     /// Calculates the storage root for this [`HashedStorage`] and returns it.
