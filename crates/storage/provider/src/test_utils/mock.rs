@@ -600,7 +600,10 @@ where
 }
 
 //look
-impl<ChainSpec: EthChainSpec> BlockReader for MockEthProvider<ChainSpec> {
+impl<ChainSpec> BlockReader for MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSpec>
+where 
+    ChainSpec: EthChainSpec + Send + Sync + 'static,
+{
     type Block = reth_ethereum_primitives::Block;
 
     fn find_block_by_hash(
@@ -675,11 +678,8 @@ impl<ChainSpec: EthChainSpec> BlockReader for MockEthProvider<ChainSpec> {
 }
 
 //look
-impl<T: NodePrimitives, ChainSpec> BlockReaderIdExt for MockEthProvider<T, ChainSpec>
+impl<ChainSpec> BlockReaderIdExt for MockEthProvider<reth_ethereum_primitives::Eth, ChainSpec>
 where 
-    T: NodePrimitives,
-    T::Block: HasHeader<Header = T::Header>,
-    T::Header: Clone,
     ChainSpec: EthChainSpec,
 {
     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<reth_ethereum_primitives::Block>> {
@@ -824,10 +824,8 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> HashedPostStateProvid
 }
 
 //look
-impl<T, ChainSpec> StateProvider for MockEthProvider<T, ChainSpec>
+impl<ChainSpec> StateProvider for MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSpec>
 where 
-    T: NodePrimitives,
-    T::Block: HasHeader<Header = Header>,
     ChainSpec: EthChainSpec + Send + Sync + 'static,
 {
     fn storage(
@@ -852,12 +850,7 @@ where
     }
 }
 
-//look
-impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> StateProviderFactory
-    for MockEthProvider<T, ChainSpec>
-where
-    T::Block: Clone,
-{
+impl<ChainSpec: EthChainSpec + 'static> StateProviderFactory for MockEthProvider<ChainSpec> {
     fn latest(&self) -> ProviderResult<StateProviderBox> {
         Ok(Box::new(self.clone()))
     }
@@ -869,12 +862,17 @@ where
         match number_or_tag {
             BlockNumberOrTag::Latest => self.latest(),
             BlockNumberOrTag::Finalized => {
+                // we can only get the finalized state by hash, not by num
                 let hash =
                     self.finalized_block_hash()?.ok_or(ProviderError::FinalizedBlockNotFound)?;
+
+                // only look at historical state
                 self.history_by_block_hash(hash)
             }
             BlockNumberOrTag::Safe => {
+                // we can only get the safe state by hash, not by num
                 let hash = self.safe_block_hash()?.ok_or(ProviderError::SafeBlockNotFound)?;
+
                 self.history_by_block_hash(hash)
             }
             BlockNumberOrTag::Earliest => self.history_by_block_number(0),
