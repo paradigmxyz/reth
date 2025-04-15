@@ -299,6 +299,8 @@ where
             )
         }
 
+        // Ensure max possible transaction fee doesn't exceed configured transaction fee cap.
+        // Only for transactions locally submitted for acceptance into the pool.
         if self.local_transactions_config.is_local(origin, transaction.sender_ref()) {
             match self.tx_fee_cap {
                 Some(0) | None => {} // Skip if cap is 0 or None
@@ -309,13 +311,13 @@ where
                         transaction.gas_price().unwrap_or(0)
                     };
 
-                    let max_tx_fee_wei = gas_price * (transaction.gas_limit() as u128);
+                    let max_tx_fee_wei = gas_price.saturating_mul(transaction.gas_limit() as u128);
                     if max_tx_fee_wei > tx_fee_cap_wei {
                         return TransactionValidationOutcome::Invalid(
                             transaction,
                             InvalidPoolTransactionError::ExceedsFeeCap {
-                                max_tx_fee_eth: max_tx_fee_wei as f64 / 1e18,
-                                tx_fee_cap_eth: tx_fee_cap_wei as f64 / 1e18
+                                max_tx_fee_wei,
+                                tx_fee_cap_wei
                             },
                         );
                     }
@@ -1094,8 +1096,8 @@ mod tests {
         if let TransactionValidationOutcome::Invalid(_, err) = outcome {
             assert!(matches!(
             err,
-            InvalidPoolTransactionError::ExceedsFeeCap { max_tx_fee_eth, tx_fee_cap_eth }
-            if (max_tx_fee_eth > tx_fee_cap_eth)
+            InvalidPoolTransactionError::ExceedsFeeCap { max_tx_fee_wei, tx_fee_cap_wei }
+            if (max_tx_fee_wei > tx_fee_cap_wei)
         ));
         }
 
