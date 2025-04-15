@@ -20,9 +20,7 @@ use alloy_eips::{
     eip7702::SignedAuthorization,
 };
 use alloy_evm::{FromRecoveredTx, FromTxWithEncoded};
-use alloy_primitives::{
-    keccak256, Address, Bytes, PrimitiveSignature as Signature, TxHash, TxKind, Uint, B256,
-};
+use alloy_primitives::{keccak256, Address, Bytes, Signature, TxHash, TxKind, Uint, B256};
 use alloy_rlp::Header;
 #[cfg(feature = "reth-codec")]
 use arbitrary as _;
@@ -452,7 +450,7 @@ impl<'a> arbitrary::Arbitrary<'a> for ScrollTransactionSigned {
         let mut transaction = ScrollTypedTransaction::arbitrary(u)?;
 
         let secp = secp256k1::Secp256k1::new();
-        let key_pair = secp256k1::Keypair::new(&secp, &mut rand::thread_rng());
+        let key_pair = secp256k1::Keypair::new(&secp, &mut rand_08::thread_rng());
         let signature = reth_primitives_traits::crypto::secp256k1::sign_message(
             B256::from_slice(&key_pair.secret_bytes()[..]),
             transaction.signature_hash(),
@@ -672,7 +670,7 @@ impl FromRecoveredTx<ScrollTransactionSigned> for ScrollTransactionIntoTxEnv<TxE
 pub mod serde_bincode_compat {
     use alloc::borrow::Cow;
     use alloy_consensus::transaction::serde_bincode_compat::{TxEip1559, TxEip2930, TxLegacy};
-    use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
+    use alloy_primitives::{Signature, TxHash};
     use reth_primitives_traits::{serde_bincode_compat::SerdeBincodeCompat, SignedTransaction};
     use serde::{Deserialize, Serialize};
 

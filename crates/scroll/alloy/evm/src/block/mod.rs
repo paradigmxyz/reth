@@ -214,6 +214,10 @@ where
     fn evm_mut(&mut self) -> &mut Self::Evm {
         &mut self.evm
     }
+
+    fn evm(&self) -> &Self::Evm {
+        &self.evm
+    }
 }
 
 /// An extension of the [`Evm`] trait for Scroll.

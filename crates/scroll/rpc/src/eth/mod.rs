@@ -304,7 +304,7 @@ where
 {
     type EthApi = ScrollEthApi<N>;
 
-    fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> Self::EthApi {
+    async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
         let eth_api = reth_rpc::EthApiBuilder::new(
             ctx.components.provider().clone(),
             ctx.components.pool().clone(),
@@ -320,6 +320,6 @@ where
         .proof_permits(ctx.config.proof_permits)
         .build_inner();
 
-        ScrollEthApi { inner: Arc::new(ScrollEthApiInner { eth_api }) }
+        Ok(ScrollEthApi { inner: Arc::new(ScrollEthApiInner { eth_api }) })
     }
 }

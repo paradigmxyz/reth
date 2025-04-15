@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use alloy_consensus::{Header, TxEip2930};
-use alloy_primitives::{Bytes, PrimitiveSignature as Signature, TxKind, U256};
+use alloy_primitives::{Bytes, Signature, TxKind, U256};
 use rand::Rng;
 use reth_eth_wire::HeadersDirection;
 use reth_ethereum_primitives::{Block, Transaction, TransactionSigned};
@@ -22,12 +22,12 @@ use reth_provider::test_utils::MockEthProvider;
 /// Returns a new [`TransactionSigned`] with some random parameters
 pub fn rng_transaction(rng: &mut impl rand::RngCore) -> TransactionSigned {
     let request = Transaction::Eip2930(TxEip2930 {
-        chain_id: rng.gen(),
-        nonce: rng.gen(),
-        gas_price: rng.gen(),
-        gas_limit: rng.gen(),
+        chain_id: rng.random(),
+        nonce: rng.random(),
+        gas_price: rng.random(),
+        gas_limit: rng.random(),
         to: TxKind::Create,
-        value: U256::from(rng.gen::<u128>()),
+        value: U256::from(rng.random::<u128>()),
         input: Bytes::from(vec![1, 2]),
         access_list: Default::default(),
     });
@@ -39,7 +39,7 @@ pub fn rng_transaction(rng: &mut impl rand::RngCore) -> TransactionSigned {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_get_body() {
     reth_tracing::init_test_tracing();
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mock_provider = Arc::new(MockEthProvider::default());
 
     let mut net = Testnet::create_with(2, mock_provider.clone()).await;
@@ -63,7 +63,7 @@ async fn test_get_body() {
     // request some blocks
     for _ in 0..100 {
         // Set a new random block to the mock storage and request it via the network
-        let block_hash = rng.gen();
+        let block_hash = rng.random();
         let mut block: Block = Block::default();
         block.body.transactions.push(rng_transaction(&mut rng));
 
@@ -81,7 +81,7 @@ async fn test_get_body() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_get_header() {
     reth_tracing::init_test_tracing();
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mock_provider = Arc::new(MockEthProvider::default());
 
     let mut net = Testnet::create_with(2, mock_provider.clone()).await;
@@ -102,13 +102,13 @@ async fn test_get_header() {
     let connected = events0.next_session_established().await.unwrap();
     assert_eq!(connected, *handle1.peer_id());
 
-    let start: u64 = rng.gen();
-    let mut hash = rng.gen();
+    let start: u64 = rng.random();
+    let mut hash = rng.random();
     // request some headers
     for idx in 0..100 {
         // Set a new random header to the mock storage and request it via the network
         let header = Header { number: start + idx, parent_hash: hash, ..Default::default() };
-        hash = rng.gen();
+        hash = rng.random();
 
         mock_provider.add_header(hash, header.clone());
 

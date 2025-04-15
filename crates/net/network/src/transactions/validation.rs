@@ -3,7 +3,7 @@
 //! announcements. Validation and filtering of announcements is network dependent.
 
 use crate::metrics::{AnnouncedTxTypesMetrics, TxTypesCounter};
-use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
+use alloy_primitives::{Signature, TxHash};
 use derive_more::{Deref, DerefMut};
 use reth_eth_wire::{
     DedupPayload, Eth68TxMetadata, HandleMempoolData, PartiallyValidData, ValidAnnouncementData,
@@ -244,7 +244,7 @@ impl ValidateTx68 for EthMessageFilter {
     fn max_encoded_tx_length(&self, ty: TxType) -> Option<usize> {
         // the biggest transaction so far is a blob transaction, which is currently max 2^17,
         // encoded length, nonetheless, the blob tx may become bigger in the future.
-        #[allow(unreachable_patterns, clippy::match_same_arms)]
+        #[expect(clippy::match_same_arms)]
         match ty {
             TxType::Legacy | TxType::Eip2930 | TxType::Eip1559 => Some(MAX_MESSAGE_SIZE),
             TxType::Eip4844 => None,

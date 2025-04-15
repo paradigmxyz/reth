@@ -1,7 +1,7 @@
 use alloy_consensus::{
     Sealed, SignableTransaction, Signed, TxEip1559, TxEip4844, TypedTransaction,
 };
-use alloy_primitives::{Address, PrimitiveSignature as Signature, TxKind, U256};
+use alloy_primitives::{Address, Signature, TxKind, U256};
 use alloy_rpc_types_eth::{AccessList, TransactionInput, TransactionRequest};
 use serde::{Deserialize, Serialize};
 

@@ -918,7 +918,6 @@ pub(crate) mod read_transactions {
 }
 
 /// Converts a [`HandleSlowReadersCallback`] to the actual FFI function pointer.
-#[allow(clippy::missing_transmute_annotations)]
 fn convert_hsr_fn(callback: Option<HandleSlowReadersCallback>) -> ffi::MDBX_hsr_func {
     unsafe { std::mem::transmute(callback) }
 }

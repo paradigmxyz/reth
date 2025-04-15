@@ -8,7 +8,7 @@ use alloy_eips::eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2
 use alloy_primitives::{
     keccak256,
     private::alloy_rlp::{Encodable, Header},
-    Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
+    Address, Bytes, ChainId, Signature, TxHash, TxKind, B256, U256,
 };
 use alloy_rlp::Decodable;
 #[cfg(any(test, feature = "reth-codec"))]
@@ -419,7 +419,7 @@ mod tests {
     #[test]
     fn test_bincode_roundtrip() {
         let mut bytes = [0u8; 1024];
-        rand::thread_rng().fill(bytes.as_mut_slice());
+        rand::rng().fill(bytes.as_mut_slice());
         let tx = TxL1Message::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
 
         let encoded = bincode::serialize(&tx).unwrap();

@@ -214,7 +214,7 @@ mod tests {
     use crate::{ScrollPooledTransaction, ScrollTransactionValidator};
     use alloy_consensus::transaction::Recovered;
     use alloy_eips::eip2718::Encodable2718;
-    use alloy_primitives::PrimitiveSignature as Signature;
+    use alloy_primitives::Signature;
     use reth_provider::test_utils::MockEthProvider;
     use reth_scroll_chainspec::SCROLL_MAINNET;
     use reth_scroll_primitives::ScrollTransactionSigned;

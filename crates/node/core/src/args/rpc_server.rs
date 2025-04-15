@@ -282,11 +282,8 @@ impl RpcServerArgs {
     /// Append a random string to the ipc path, to prevent possible collisions when multiple nodes
     /// are being run on the same machine.
     pub fn with_ipc_random_path(mut self) -> Self {
-        let random_string: String = rand::thread_rng()
-            .sample_iter(rand::distributions::Alphanumeric)
-            .take(8)
-            .map(char::from)
-            .collect();
+        let random_string: String =
+            rand::rng().sample_iter(rand::distr::Alphanumeric).take(8).map(char::from).collect();
         self.ipcpath = format!("{}-{}", self.ipcpath, random_string);
         self
     }

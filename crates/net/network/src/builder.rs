@@ -2,7 +2,7 @@
 
 use crate::{
     eth_requests::EthRequestHandler,
-    transactions::{TransactionsManager, TransactionsManagerConfig},
+    transactions::{TransactionPropagationPolicy, TransactionsManager, TransactionsManagerConfig},
     NetworkHandle, NetworkManager,
 };
 use reth_eth_wire::{EthNetworkPrimitives, NetworkPrimitives};
@@ -72,11 +72,27 @@ impl<Tx, Eth, N: NetworkPrimitives> NetworkBuilder<Tx, Eth, N> {
         pool: Pool,
         transactions_manager_config: TransactionsManagerConfig,
     ) -> NetworkBuilder<TransactionsManager<Pool, N>, Eth, N> {
+        self.transactions_with_policy(pool, transactions_manager_config, Default::default())
+    }
+
+    /// Creates a new [`TransactionsManager`] and wires it to the network.
+    pub fn transactions_with_policy<Pool: TransactionPool, P: TransactionPropagationPolicy>(
+        self,
+        pool: Pool,
+        transactions_manager_config: TransactionsManagerConfig,
+        propagation_policy: P,
+    ) -> NetworkBuilder<TransactionsManager<Pool, N, P>, Eth, N> {
         let Self { mut network, request_handler, .. } = self;
         let (tx, rx) = mpsc::unbounded_channel();
         network.set_transactions(tx);
         let handle = network.handle().clone();
-        let transactions = TransactionsManager::new(handle, pool, rx, transactions_manager_config);
+        let transactions = TransactionsManager::with_policy(
+            handle,
+            pool,
+            rx,
+            transactions_manager_config,
+            propagation_policy,
+        );
         NetworkBuilder { network, request_handler, transactions }
     }
 }

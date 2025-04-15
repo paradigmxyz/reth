@@ -65,7 +65,6 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     /// The transactions are packed into individual blocks. Overrides can be provided.
     ///
     /// See also: <https://github.com/ethereum/go-ethereum/pull/27720>
-    #[allow(clippy::type_complexity)]
     fn simulate_v1(
         &self,
         payload: SimulatePayload,
@@ -170,7 +169,6 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         simulate::execute_transactions(
                             builder,
                             calls,
-                            validation,
                             default_gas_limit,
                             chain_id,
                             this.tx_resp_builder(),
@@ -181,7 +179,6 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         simulate::execute_transactions(
                             builder,
                             calls,
-                            validation,
                             default_gas_limit,
                             chain_id,
                             this.tx_resp_builder(),
@@ -228,16 +225,14 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     /// optionality of state overrides
     fn call_many(
         &self,
-        bundle: Bundle,
+        bundles: Vec<Bundle>,
         state_context: Option<StateContext>,
         mut state_override: Option<StateOverride>,
-    ) -> impl Future<Output = Result<Vec<EthCallResponse>, Self::Error>> + Send {
+    ) -> impl Future<Output = Result<Vec<Vec<EthCallResponse>>, Self::Error>> + Send {
         async move {
-            let Bundle { transactions, block_override } = bundle;
-            if transactions.is_empty() {
-                return Err(
-                    EthApiError::InvalidParams(String::from("transactions are empty.")).into()
-                )
+            // Check if the vector of bundles is empty
+            if bundles.is_empty() {
+                return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into());
             }
 
             let StateContext { transaction_index, block_number } =
@@ -283,52 +278,64 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
             let this = self.clone();
             self.spawn_with_state_at_block(at.into(), move |state| {
-                let mut results = Vec::with_capacity(transactions.len());
+                let mut all_results = Vec::with_capacity(bundles.len());
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
                 if replay_block_txs {
                     // only need to replay the transactions in the block if not all transactions are
                     // to be replayed
-                    let transactions = block.transactions_recovered().take(num_txs);
-                    for tx in transactions {
+                    let block_transactions = block.transactions_recovered().take(num_txs);
+                    for tx in block_transactions {
                         let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);
                         let (res, _) = this.transact(&mut db, evm_env.clone(), tx_env)?;
                         db.commit(res.state);
                     }
                 }
 
-                let block_overrides = block_override.map(Box::new);
-
-                let mut transactions = transactions.into_iter().peekable();
-                while let Some(tx) = transactions.next() {
-                    // apply state overrides only once, before the first transaction
-                    let state_overrides = state_override.take();
-                    let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
-
-                    let (evm_env, tx) =
-                        this.prepare_call_env(evm_env.clone(), tx, &mut db, overrides)?;
-                    let (res, _) = this.transact(&mut db, evm_env, tx)?;
-
-                    match ensure_success::<_, Self::Error>(res.result) {
-                        Ok(output) => {
-                            results.push(EthCallResponse { value: Some(output), error: None });
-                        }
-                        Err(err) => {
-                            results.push(EthCallResponse {
-                                value: None,
-                                error: Some(err.to_string()),
-                            });
-                        }
+                // transact all bundles
+                for bundle in bundles {
+                    let Bundle { transactions, block_override } = bundle;
+                    if transactions.is_empty() {
+                        // Skip empty bundles
+                        continue;
                     }
 
-                    if transactions.peek().is_some() {
-                        // need to apply the state changes of this call before executing the next
-                        // call
+                    let mut bundle_results = Vec::with_capacity(transactions.len());
+                    let block_overrides = block_override.map(Box::new);
+
+                    // transact all transactions in the bundle
+                    for tx in transactions {
+                        // Apply overrides, state overrides are only applied for the first tx in the
+                        // request
+                        let overrides =
+                            EvmOverrides::new(state_override.take(), block_overrides.clone());
+
+                        let (current_evm_env, prepared_tx) =
+                            this.prepare_call_env(evm_env.clone(), tx, &mut db, overrides)?;
+                        let (res, _) = this.transact(&mut db, current_evm_env, prepared_tx)?;
+
+                        match ensure_success::<_, Self::Error>(res.result) {
+                            Ok(output) => {
+                                bundle_results
+                                    .push(EthCallResponse { value: Some(output), error: None });
+                            }
+                            Err(err) => {
+                                bundle_results.push(EthCallResponse {
+                                    value: None,
+                                    error: Some(err.to_string()),
+                                });
+                            }
+                        }
+
+                        // Commit state changes after each transaction to allow subsequent calls to
+                        // see the updates
                         db.commit(res.state);
                     }
+
+                    all_results.push(bundle_results);
                 }
 
-                Ok(results)
+                Ok(all_results)
             })
             .await
         }

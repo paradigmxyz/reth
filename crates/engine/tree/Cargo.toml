@@ -98,6 +98,7 @@ criterion.workspace = true
 crossbeam-channel.workspace = true
 proptest.workspace = true
 rand.workspace = true
+rand_08.workspace = true
 
 [[bench]]
 name = "channel_perf"
