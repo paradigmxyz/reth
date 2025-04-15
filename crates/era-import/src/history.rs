@@ -1,17 +1,25 @@
 use alloy_consensus::{BlockHeader, EthereumTxEnvelope, TxEip4844};
+use alloy_primitives::BlockNumber;
 use eyre::OptionExt;
 use futures_util::StreamExt;
 use reth_db_api::transaction::DbTxMut;
 use reth_era_downloader::{EraStream, HttpClient};
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     ProviderError, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
 };
-use reth_storage_api::{DBProvider, HeaderProvider};
-use tokio::fs::File;
+use reth_storage_api::{DBProvider, HeaderProvider, NodePrimitivesProvider};
+use std::fs::File;
 
-pub async fn import<P>(mut downloader: EraStream<impl HttpClient>, provider: &P) -> eyre::Result<()>
+/// Imports blocks from `downloader` using `provider`.
+///
+/// Returns current block height.
+pub async fn import<H, P>(mut downloader: EraStream<H>, provider: &P) -> eyre::Result<BlockNumber>
 where
+    H: HttpClient + Clone + Send + Sync + 'static + Unpin,
     P: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory,
+    <P as NodePrimitivesProvider>::Primitives:
+        NodePrimitives<BlockHeader = alloy_consensus::Header>,
 {
     let static_file_provider = provider.static_file_provider();
 
@@ -40,20 +48,21 @@ where
             .ok_or_eyre("Non UTF-8 file name")?
             .to_owned();
 
-        let file = File::open(file).await?;
+        let file = File::open(file)?;
         let mut reader = reth_era::era1_file::Era1Reader::new(file);
         let era = reader.read(name)?;
 
-        for block in era.group.blocks.iter() {
+        for block in &era.group.blocks {
             let block = block.to_alloy_block::<EthereumTxEnvelope<TxEip4844>>()?;
 
             // Increase total difficulty
             td += block.header.difficulty();
+            last_header_number = block.header.number();
 
             // Append to Headers segment
             writer.append_header(&block.header, td, &block.header.hash_slow())?;
         }
     }
 
-    Ok(())
+    Ok(last_header_number)
 }
