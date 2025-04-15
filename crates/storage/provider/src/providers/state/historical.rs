@@ -3,7 +3,7 @@ use crate::{
     HashedPostStateProvider, ProviderError, StateProvider, StateRootProvider,
 };
 use alloy_eips::merge::EPOCH_SLOTS;
-use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     models::{storage_sharded_key::StorageShardedKey, ShardedKey},
@@ -25,8 +25,7 @@ use reth_trie::{
     StorageMultiProof, StorageRoot, TrieInput,
 };
 use reth_trie_db::{
-    DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,
-    DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness, StateCommitment,
+    DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieCursorFactory, DatabaseHashedCursorFactory, DatabaseTrieWitness, StateCommitment
 };
 use std::fmt::Debug;
 
@@ -331,7 +330,15 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StorageRoo
     ) -> ProviderResult<B256> {
         let mut revert_storage = self.revert_storage(address)?;
         revert_storage.extend(&hashed_storage);
-        StorageRoot::overlay_root(self.tx(), address, revert_storage)
+        let storage_root = StorageRoot::new_hashed(
+            DatabaseTrieCursorFactory::new(self.tx()),
+            DatabaseHashedCursorFactory::new(self.tx()),
+            keccak256(address),
+            Default::default(),
+            reth_trie::metrics::TrieRootMetrics::new(reth_trie::TrieType::Storage)     
+        );
+        storage_root
+            .overlay_root(address, revert_storage)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 

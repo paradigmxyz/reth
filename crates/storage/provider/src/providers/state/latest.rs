@@ -2,7 +2,7 @@ use crate::{
     providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
     HashedPostStateProvider, StateProvider, StateRootProvider,
 };
-use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
@@ -18,7 +18,7 @@ use reth_trie::{
 };
 use reth_trie_db::{
     DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
-    DatabaseTrieWitness, StateCommitment,
+    DatabaseTrieWitness, StateCommitment, DatabaseTrieCursorFactory, DatabaseHashedCursorFactory,
 };
 
 /// State provider over latest state that takes tx reference.
@@ -98,7 +98,15 @@ impl<Provider: DBProvider + StateCommitmentProvider> StorageRootProvider
         address: Address,
         hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
-        StorageRoot::overlay_root(self.tx(), address, hashed_storage)
+        let storage_root = StorageRoot::new_hashed(
+            DatabaseTrieCursorFactory::new(self.tx()),
+            DatabaseHashedCursorFactory::new(self.tx()),
+            keccak256(address),
+            Default::default(),
+            reth_trie::metrics::TrieRootMetrics::new(reth_trie::TrieType::Storage)     
+        );
+        storage_root
+            .overlay_root(address, hashed_storage)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 

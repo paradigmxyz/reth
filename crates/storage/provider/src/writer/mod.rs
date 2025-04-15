@@ -1307,10 +1307,19 @@ mod tests {
         state.storages.insert(hashed_address, init_storage.clone());
         provider_rw.write_hashed_state(&state.clone().into_sorted()).unwrap();
 
+        // Create stateful StorageRoot instance
+        let storage_root = StorageRoot::new_hashed(
+            reth_trie_db::DatabaseTrieCursorFactory::new(tx),
+            reth_trie_db::DatabaseHashedCursorFactory::new(tx),
+            hashed_address,
+            Default::default(),
+            reth_trie::metrics::TrieRootMetrics::new(reth_trie::TrieType::Storage),
+        );
+
         // calculate database storage root and write intermediate storage nodes.
-        let (storage_root, _, storage_updates) =
-            StorageRoot::from_tx_hashed(tx, hashed_address).calculate(true).unwrap();
-        assert_eq!(storage_root, storage_root_prehashed(init_storage.storage));
+        let (storage_root_updates, _, storage_updates) =
+            storage_root.calculate(true).unwrap();
+        assert_eq!(storage_root_updates, storage_root_prehashed(init_storage.storage));
         assert!(!storage_updates.is_empty());
         provider_rw
             .write_individual_storage_trie_updates(hashed_address, &storage_updates)
@@ -1330,8 +1339,15 @@ mod tests {
         state.storages.insert(hashed_address, updated_storage.clone());
         provider_rw.write_hashed_state(&state.clone().into_sorted()).unwrap();
 
-        // re-calculate database storage root
-        let storage_root = StorageRoot::overlay_root(tx, address, updated_storage.clone()).unwrap();
-        assert_eq!(storage_root, storage_root_prehashed(updated_storage.storage));
+        let storage_root = StorageRoot::new_hashed(
+            reth_trie_db::DatabaseTrieCursorFactory::new(tx),
+            reth_trie_db::DatabaseHashedCursorFactory::new(tx),
+            hashed_address,
+            Default::default(),
+            reth_trie::metrics::TrieRootMetrics::new(reth_trie::TrieType::Storage),
+        );
+        // re-calculate database storage root with new instance
+        let storage_root_value = storage_root.overlay_root(address, updated_storage.clone()).unwrap();
+        assert_eq!(storage_root_value, storage_root_prehashed(updated_storage.storage));
     }
 }

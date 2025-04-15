@@ -12,16 +12,16 @@ use reth_trie::{
 use reth_trie::metrics::TrieRootMetrics;
 
 /// Extends [`StorageRoot`] with operations specific for working with a database transaction.
-pub trait DatabaseStorageRoot<'a, TX> {
+pub trait DatabaseStorageRoot {
     /// Create a new storage root calculator from database transaction and raw address.
-    fn from_tx(tx: &'a TX, address: Address) -> Self;
+    fn from_tx(&self, address: Address) -> Self;
 
     /// Create a new storage root calculator from database transaction and hashed address.
-    fn from_tx_hashed(tx: &'a TX, hashed_address: B256) -> Self;
+    fn from_tx_hashed(&self, hashed_address: B256) -> Self;
 
     /// Calculates the storage root for this [`HashedStorage`] and returns it.
     fn overlay_root(
-        tx: &'a TX,
+        &self,
         address: Address,
         hashed_storage: HashedStorage,
     ) -> Result<B256, StorageRootError>;
@@ -34,13 +34,13 @@ pub trait DatabaseHashedStorage<TX>: Sized {
     fn from_reverts(tx: &TX, address: Address, from: BlockNumber) -> Result<Self, DatabaseError>;
 }
 
-impl<'a, TX: DbTx> DatabaseStorageRoot<'a, TX>
+impl<'a, TX: DbTx> DatabaseStorageRoot
     for StorageRoot<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>
 {
-    fn from_tx(tx: &'a TX, address: Address) -> Self {
+    fn from_tx(&self, address: Address) -> Self {
         Self::new(
-            DatabaseTrieCursorFactory::new(tx),
-            DatabaseHashedCursorFactory::new(tx),
+            self.trie_cursor_factory.clone(),
+            self.hashed_cursor_factory.clone(),
             address,
             Default::default(),
             #[cfg(feature = "metrics")]
@@ -48,10 +48,10 @@ impl<'a, TX: DbTx> DatabaseStorageRoot<'a, TX>
         )
     }
 
-    fn from_tx_hashed(tx: &'a TX, hashed_address: B256) -> Self {
+    fn from_tx_hashed(&self, hashed_address: B256) -> Self {
         Self::new_hashed(
-            DatabaseTrieCursorFactory::new(tx),
-            DatabaseHashedCursorFactory::new(tx),
+            self.trie_cursor_factory.clone(),
+            self.hashed_cursor_factory.clone(),
             hashed_address,
             Default::default(),
             #[cfg(feature = "metrics")]
@@ -60,7 +60,7 @@ impl<'a, TX: DbTx> DatabaseStorageRoot<'a, TX>
     }
 
     fn overlay_root(
-        tx: &'a TX,
+        &self,
         address: Address,
         hashed_storage: HashedStorage,
     ) -> Result<B256, StorageRootError> {
@@ -68,8 +68,8 @@ impl<'a, TX: DbTx> DatabaseStorageRoot<'a, TX>
         let state_sorted =
             HashedPostState::from_hashed_storage(keccak256(address), hashed_storage).into_sorted();
         StorageRoot::new(
-            DatabaseTrieCursorFactory::new(tx),
-            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
+            self.trie_cursor_factory.clone(),
+            HashedPostStateCursorFactory::new(self.hashed_cursor_factory.clone(), &state_sorted),
             address,
             prefix_set,
             #[cfg(feature = "metrics")]
