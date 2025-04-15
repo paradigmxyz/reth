@@ -242,9 +242,10 @@ where
         &self,
         filter: TraceFilter,
     ) -> Result<Vec<LocalizedTransactionTrace>, Eth::Error> {
-        // We'll reuse the matcher across multiple blocks that are traced in parallel
-        let _matcher = Arc::new(filter.matcher());
-        let TraceFilter { from_block, to_block, .. } = filter;
+        #[allow(unused_variables)]
+        let matcher = Arc::new(filter.matcher());
+        #[allow(unused_variables)]
+        let TraceFilter { from_block, to_block, after, count, .. } = filter;
         let start = from_block.unwrap_or(0);
 
         let latest_block = self.provider().best_block_number().map_err(Eth::Error::from_eth_err)?;
@@ -486,10 +487,23 @@ where
         start: u64,
         end: u64,
     ) -> Result<Vec<RecoveredBlock<<Eth::Provider as BlockReader>::Block>>, Eth::Error> {
+        // Only try to use the cache if we're close to the latest block
+        const CACHE_THRESHOLD: u64 = 15;
+
+        let latest_block = self.provider().best_block_number().map_err(Eth::Error::from_eth_err)?;
+        let distance_to_latest = latest_block.saturating_sub(end);
+
+        // If we're not close to the latest block, just use direct retrieval
+        if distance_to_latest > CACHE_THRESHOLD {
+            return self
+                .provider()
+                .recovered_block_range(start..=end)
+                .map_err(Eth::Error::from_eth_err);
+        }
+
         let end_block_hash = match self.provider().block_hash(end) {
             Ok(Some(hash)) => hash,
             _ => {
-                // If we can't get the end block hash, use the original implementation
                 return self
                     .provider()
                     .recovered_block_range(start..=end)
@@ -497,6 +511,7 @@ where
             }
         };
 
+        // Get blocks from cache
         let cached_blocks = match self
             .inner
             .eth_api
@@ -513,48 +528,33 @@ where
             }
         };
 
-        let oldest_cached_block_number =
-            cached_blocks.last().map(|b| b.header().number()).unwrap_or(0);
+        // Find the oldest block we have in cache
+        if let Some(oldest_block) = cached_blocks.last() {
+            let oldest_number = oldest_block.header().number();
 
-        if oldest_cached_block_number <= start && cached_blocks.len() as u64 >= (end - start + 1) {
-            // We have all blocks needed in the cache!
-            // Filter and reverse to get them in ascending order
-            let mut result: Vec<_> = cached_blocks
-                .into_iter()
-                .filter(|b| {
-                    let num = b.header().number();
-                    num >= start && num <= end
-                })
-                .map(|arc_block| arc_block.as_ref().clone()) // Convert Arc<RecoveredBlock> to RecoveredBlock
-                .collect();
-            result.reverse();
-            return Ok(result);
+            // If we need blocks before the oldest cached block, fetch them
+            if oldest_number > start {
+                // Get the missing blocks from the start to just before our oldest cached block
+                let missing_blocks = self
+                    .provider()
+                    .recovered_block_range(start..=(oldest_number - 1))
+                    .map_err(Eth::Error::from_eth_err)?;
+
+                let mut result = missing_blocks;
+
+                // Take only cached blocks in our range and convert to the right format
+                for block in cached_blocks.iter().rev() {
+                    let num = block.header().number();
+                    if num >= start && num <= end {
+                        result.push(block.as_ref().clone());
+                    }
+                }
+
+                return Ok(result);
+            }
         }
 
-        // We need to fetch missing blocks from start to the oldest cached block - 1
-        if oldest_cached_block_number > start {
-            let missing_blocks = self
-                .provider()
-                .recovered_block_range(start..=(oldest_cached_block_number - 1))
-                .map_err(Eth::Error::from_eth_err)?;
-
-            // Filter and reverse cached blocks to get the ones we need in ascending order
-            let mut cached_result: Vec<_> = cached_blocks
-                .into_iter()
-                .filter(|b| {
-                    let num = b.header().number();
-                    num >= start && num <= end
-                })
-                .map(|arc_block| arc_block.as_ref().clone()) // Convert Arc<RecoveredBlock> to RecoveredBlock
-                .collect();
-            cached_result.reverse();
-
-            // Combine missing blocks with cached blocks
-            let mut result = missing_blocks;
-            result.extend(cached_result);
-            return Ok(result);
-        }
-
+        // If we didn't hit the special case above, fall back to direct retrieval
         self.provider().recovered_block_range(start..=end).map_err(Eth::Error::from_eth_err)
     }
 }
