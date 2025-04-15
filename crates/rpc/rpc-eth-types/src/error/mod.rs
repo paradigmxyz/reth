@@ -21,6 +21,7 @@ use revm::context_interface::result::{
     EVMError, ExecutionResult, HaltReason, InvalidHeader, InvalidTransaction, OutOfGasError,
 };
 use revm_inspectors::tracing::MuxError;
+use std::convert::Infallible;
 use tracing::error;
 
 /// A trait to convert an error to an RPC error.
@@ -305,6 +306,12 @@ where
 impl From<RecoveryError> for EthApiError {
     fn from(_: RecoveryError) -> Self {
         Self::InvalidTransactionSignature
+    }
+}
+
+impl From<Infallible> for EthApiError {
+    fn from(_: Infallible) -> Self {
+        unreachable!()
     }
 }
 
