@@ -19,7 +19,6 @@ use std::{
     sync::{Arc, Mutex},
 };
 use tempfile::TempDir;
-use tokio::runtime::Runtime;
 
 /// Default nimbus mainnet url
 /// for downloading mainnet `.era1` files
@@ -31,28 +30,25 @@ const MAINNET_URL: &str = "https://mainnet.era1.nimbus.team/";
 const ERA1_FILES_NAMES: [&str; 3] =
     ["mainnet-00000-5ec1ffb8.era1", "mainnet-00003-d8b8a40b.era1", "mainnet-00151-e322efe1.era1"];
 
-/// Helper for downloading `.era1` files for tests
+/// Utility for downloading `.era1` files for tests
 /// in a temporary directory
 /// and caching them in memory
 #[derive(Debug)]
 pub struct Era1TestDownloader {
+    /// Temporary directory for storing downloaded files
     temp_dir: TempDir,
-    runtime: Runtime,
+    /// Cache mapping file names to their paths
     file_cache: Arc<Mutex<HashMap<String, PathBuf>>>,
 }
 
 impl Era1TestDownloader {
     /// Create a new downloader instance with a temporary directory
-    pub fn new() -> Result<Self, E2sError> {
-        let runtime = Runtime::new().map_err(|e| {
-            E2sError::Io(std::io::Error::other(format!("Failed to create tokio runtime: {}", e)))
-        })?;
-
+    pub async fn new() -> Result<Self, E2sError> {
         let temp_dir = TempDir::new().map_err(|e| {
             E2sError::Io(std::io::Error::other(format!("Failed to create temp directory: {}", e)))
         })?;
 
-        Ok(Self { temp_dir, runtime, file_cache: Arc::new(Mutex::new(HashMap::new())) })
+        Ok(Self { temp_dir, file_cache: Arc::new(Mutex::new(HashMap::new())) })
     }
 
     /// Get the temporary directory path
@@ -61,7 +57,7 @@ impl Era1TestDownloader {
     }
 
     /// Download a specific .era1 file by name
-    pub fn download_file(&self, filename: &str) -> Result<PathBuf, E2sError> {
+    pub async fn download_file(&self, filename: &str) -> Result<PathBuf, E2sError> {
         // check cache first
         {
             let cache = self.file_cache.lock().unwrap();
@@ -85,27 +81,23 @@ impl Era1TestDownloader {
 
         let folder = self.temp_dir.path().to_owned().into_boxed_path();
 
-        let downloaded_path = self.runtime.block_on(async {
-            // set up the client
-            let client = EraClient::new(Client::new(), url, folder);
+        // set up the client
+        let client = EraClient::new(Client::new(), url, folder);
 
-            // set up the file list, required before we can download files
-            client.fetch_file_list().await.map_err(|e| {
-                E2sError::Io(std::io::Error::other(format!("Failed to fetch file list: {}", e)))
-            })?;
+        // set up the file list, required before we can download files
+        client.fetch_file_list().await.map_err(|e| {
+            E2sError::Io(std::io::Error::other(format!("Failed to fetch file list: {}", e)))
+        })?;
 
-            // create an url for the file
-            let file_url = Url::parse(&format!("{}{}", MAINNET_URL, filename)).map_err(|e| {
-                E2sError::Io(std::io::Error::other(format!("Failed to create URL: {}", e)))
-            })?;
+        // create an url for the file
+        let file_url = Url::parse(&format!("{}{}", MAINNET_URL, filename)).map_err(|e| {
+            E2sError::Io(std::io::Error::other(format!("Failed to create URL: {}", e)))
+        })?;
 
-            // download the file
-            let mut client = client;
-            let path = client.download_to_file(file_url).await.map_err(|e| {
-                E2sError::Io(std::io::Error::other(format!("Failed to download file: {}", e)))
-            })?;
-
-            Ok::<_, E2sError>(path)
+        // download the file
+        let mut client = client;
+        let downloaded_path = client.download_to_file(file_url).await.map_err(|e| {
+            E2sError::Io(std::io::Error::other(format!("Failed to download file: {}", e)))
         })?;
 
         // update the cache
@@ -118,15 +110,15 @@ impl Era1TestDownloader {
     }
 
     /// open .era1 file, downloading it if necessary
-    pub fn open_era1_file(&self, filename: &str) -> Result<Era1File, E2sError> {
-        let path = self.download_file(filename)?;
+    pub async fn open_era1_file(&self, filename: &str) -> Result<Era1File, E2sError> {
+        let path = self.download_file(filename).await?;
         Era1Reader::open(&path, "mainnet")
     }
 }
 
 /// Open a test file by name,
 /// downloading only if it is necessary
-pub fn open_test_file(
+pub async fn open_test_file(
     file_path: &str,
     downloader: &Era1TestDownloader,
 ) -> Result<Era1File, E2sError> {
@@ -138,16 +130,16 @@ pub fn open_test_file(
             ))
         })?;
 
-    downloader.open_era1_file(filename)
+    downloader.open_era1_file(filename).await
 }
 
-#[test]
-fn test_decompression_on_original_files() -> Result<(), E2sError> {
-    let downloader = Era1TestDownloader::new().expect("Failed to create downloader");
+#[tokio::test(flavor = "multi_thread")]
+async fn test_decompression_on_original_files() -> Result<(), E2sError> {
+    let downloader = Era1TestDownloader::new().await.expect("Failed to create downloader");
 
     for &filename in &ERA1_FILES_NAMES {
         println!("Testing decompression on: {}", filename);
-        let original_file = open_test_file(filename, &downloader)?;
+        let original_file = open_test_file(filename, &downloader).await?;
 
         // Test block decompression across different positions in the file
         let test_block_indices = [
@@ -207,10 +199,10 @@ fn test_decompression_on_original_files() -> Result<(), E2sError> {
     Ok(())
 }
 
-#[test]
-fn test_era1_file_genesis_cases() -> Result<(), E2sError> {
-    let downloader = Era1TestDownloader::new()?;
-    let genesis_file = downloader.open_era1_file(ERA1_FILES_NAMES[0])?;
+#[tokio::test(flavor = "multi_thread")]
+async fn test_era1_file_genesis_cases() -> Result<(), E2sError> {
+    let downloader = Era1TestDownloader::new().await?;
+    let genesis_file = downloader.open_era1_file(ERA1_FILES_NAMES[0]).await?;
 
     // For genesis file, verify special properties
     assert_eq!(
@@ -247,15 +239,15 @@ fn test_era1_file_genesis_cases() -> Result<(), E2sError> {
     Ok(())
 }
 
-#[test]
-fn test_data_preservation_roundtrip() -> Result<(), E2sError> {
-    let downloader = Era1TestDownloader::new()?;
+#[tokio::test(flavor = "multi_thread")]
+async fn test_data_preservation_roundtrip() -> Result<(), E2sError> {
+    let downloader = Era1TestDownloader::new().await?;
 
     for &filename in &ERA1_FILES_NAMES {
         println!("Testing data preservation roundtrip: {}", filename);
 
         // open original file
-        let original_file = downloader.open_era1_file(filename)?;
+        let original_file = downloader.open_era1_file(filename).await?;
 
         let mut buffer = Vec::new();
         {
