@@ -61,8 +61,8 @@ impl OpTransactionSigned {
             OpTypedTransaction::Legacy(tx) => &mut tx.input,
             OpTypedTransaction::Eip2930(tx) => &mut tx.input,
             OpTypedTransaction::Eip1559(tx) => &mut tx.input,
-            OpTypedTransaction::Eip7702(tx) =>  &mut tx.input,
-            OpTypedTransaction::Deposit(tx) =>  &mut tx.input,
+            OpTypedTransaction::Eip7702(tx) => &mut tx.input,
+            OpTypedTransaction::Deposit(tx) => &mut tx.input,
         }
     }
 

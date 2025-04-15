@@ -135,7 +135,7 @@ impl Transaction {
             Self::Eip2930(tx) => &mut tx.input,
             Self::Eip1559(tx) => &mut tx.input,
             Self::Eip4844(tx) => &mut tx.input,
-            Self::Eip7702(tx) =>  &mut tx.input,
+            Self::Eip7702(tx) => &mut tx.input,
         }
     }
 }
