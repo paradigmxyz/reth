@@ -157,18 +157,6 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     }
 }
 
-impl<N: NodeTypesWithDB> NodeTypes for BlockchainProvider<N> {
-    type Primitives = N::Primitives;
-    type ChainSpec = N::ChainSpec;
-    type StateCommitment = N::StateCommitment;
-    type Storage = N::Storage;
-    type Payload = N::Payload;
-}
-
-impl<N: NodeTypesWithDB> NodeTypesWithDB for BlockchainProvider<N> {
-    type DB = N::DB;
-}
-
 impl<N: NodeTypesWithDB> NodePrimitivesProvider for BlockchainProvider<N> {
     type Primitives = N::Primitives;
 }
