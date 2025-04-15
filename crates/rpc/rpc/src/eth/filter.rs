@@ -96,10 +96,10 @@ where
     /// use reth_provider::noop::NoopProvider;
     /// use reth_rpc::{EthApi, EthFilter};
     /// use reth_tasks::TokioTaskExecutor;
-    /// use reth_transaction_pool::noop::NoopTransactionPool;
+    /// use reth_transaction_pool::{EthPooledTransaction, noop::NoopTransactionPool};
     /// let eth_api = EthApi::builder(
     ///     NoopProvider::default(),
-    ///     NoopTransactionPool::default(),
+    ///     NoopTransactionPool::<EthPooledTransaction>default(),
     ///     NoopNetwork::default(),
     ///     EthEvmConfig::mainnet(),
     /// )
