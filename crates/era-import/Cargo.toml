@@ -10,18 +10,15 @@ repository.workspace = true
 exclude.workspace = true
 
 [dependencies]
+# alloy
+alloy-consensus.workspace = true
+
 # reth
 reth-db-api.workspace = true
 reth-era.workspace = true
 reth-era-downloader.workspace = true
 reth-provider.workspace = true
 reth-storage-api.workspace = true
-
-# http
-bytes.workspace = true
-reqwest.workspace = true
-reqwest.default-features = false
-reqwest.features = ["stream", "rustls-tls-native-roots"]
 
 # async
 tokio.workspace = true
@@ -34,9 +31,6 @@ eyre.workspace = true
 [dev-dependencies]
 tokio.workspace = true
 tokio.features = ["fs", "io-util", "macros"]
-tempfile.workspace = true
-test-case.workspace = true
-futures.workspace = true
 
 [lints]
 workspace = true

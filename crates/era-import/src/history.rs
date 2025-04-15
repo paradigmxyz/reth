@@ -1,3 +1,5 @@
+use alloy_consensus::{BlockHeader, EthereumTxEnvelope, TxEip4844};
+use eyre::OptionExt;
 use futures_util::StreamExt;
 use reth_db_api::transaction::DbTxMut;
 use reth_era_downloader::{EraStream, HttpClient};
@@ -5,6 +7,7 @@ use reth_provider::{
     ProviderError, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
 };
 use reth_storage_api::{DBProvider, HeaderProvider};
+use tokio::fs::File;
 
 pub async fn import<P>(mut downloader: EraStream<impl HttpClient>, provider: &P) -> eyre::Result<()>
 where
@@ -30,9 +33,26 @@ where
     while let Some(file) = downloader.next().await {
         let file = file?;
 
-        // reth_era::era1_file::Era1Reader::new()
+        let name = file
+            .file_name()
+            .ok_or_eyre("Missing file name")?
+            .to_str()
+            .ok_or_eyre("Non UTF-8 file name")?
+            .to_owned();
 
-        // writer.append_header(&header, td, &header_hash)?;
+        let file = File::open(file).await?;
+        let mut reader = reth_era::era1_file::Era1Reader::new(file);
+        let era = reader.read(name)?;
+
+        for block in era.group.blocks.iter() {
+            let block = block.to_alloy_block::<EthereumTxEnvelope<TxEip4844>>()?;
+
+            // Increase total difficulty
+            td += block.header.difficulty();
+
+            // Append to Headers segment
+            writer.append_header(&block.header, td, &block.header.hash_slow())?;
+        }
     }
 
     Ok(())
