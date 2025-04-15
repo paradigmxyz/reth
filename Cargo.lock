@@ -7115,7 +7115,6 @@ dependencies = [
  "itertools 0.14.0",
  "proptest",
  "proptest-arbitrary-interop",
- "rand 0.8.5",
  "ratatui",
  "reth-chainspec",
  "reth-cli",

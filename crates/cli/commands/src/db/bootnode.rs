@@ -1,11 +1,9 @@
 use clap::Parser;
-use rand::thread_rng;
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config};
 use reth_discv5::{discv5::Event, Config, Discv5};
 use reth_net_nat::NatResolver;
 use reth_network::error::{NetworkError, ServiceKind};
 use reth_network_peers::NodeRecord;
-use secp256k1::SECP256K1;
 use std::{net::SocketAddr, str::FromStr};
 use tokio::select;
 use tokio_stream::StreamExt;
@@ -41,9 +39,8 @@ impl Command {
     pub async fn execute(self) -> Result<(), NetworkError> {
         info!("Bootnode started with config: {:?}", self);
         // generate a (random) keypair
-        let mut rng = thread_rng();
-        let (sk, _pk) = SECP256K1.generate_keypair(&mut rng);
 
+        let sk = reth_network::config::rng_secret_key();
         let socket_addr = SocketAddr::from_str(&self.addr).expect("Invalid addr");
         let local_enr = NodeRecord::from_secret_key(socket_addr, &sk);
 
@@ -91,7 +88,7 @@ impl Command {
                 }
                 //if discv5, discv5 update stream, else do nothing
                 update = async {
-                    if let Some(ref mut updates) = discv5_updates {
+                    if let Some(updates) = &mut discv5_updates {
                         updates.recv().await
                     } else {
                         futures::future::pending().await

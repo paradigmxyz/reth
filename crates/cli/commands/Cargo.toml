@@ -71,7 +71,6 @@ serde_json.workspace = true
 tracing.workspace = true
 backon.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
-rand.workspace = true
 tokio-stream.workspace = true
 
 # io
