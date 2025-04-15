@@ -51,12 +51,13 @@ impl EraStreamConfig {
 /// use futures_util::StreamExt;
 /// use reth_era_downloader::{EraStream, HttpClient};
 ///
-/// async fn import(mut stream: EraStream<impl HttpClient>) {
-///     while let Some(file) = stream.next().await {
-///         let file = file?;
-///         // Process `file: Box<Path>`
-///     }
+/// # async fn import(mut stream: EraStream<impl HttpClient + Clone + Send + Sync + 'static + Unpin>) -> eyre::Result<()> {
+/// while let Some(file) = stream.next().await {
+///     let file = file?;
+///     // Process `file: Box<Path>`
 /// }
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Debug)]
 pub struct EraStream<Http> {
