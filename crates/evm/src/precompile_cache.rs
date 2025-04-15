@@ -151,7 +151,9 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
             let key =
                 PrecompileKey { address: *address, spec: self.spec, input: inputs.input.clone() };
 
-            if let Some(entry) = cache.cache.get(&key) {
+            let cache_result = cache.cache.get(&key);
+
+            if let Some(ref entry) = cache_result {
                 // if gas_limit is below known lower bound, we know it will fail with OOG
                 if gas_limit <= entry.lower_gas_limit {
                     #[cfg(feature = "metrics")]
@@ -184,7 +186,7 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
                         return Ok(Some(result));
                     }
 
-                    return entry.result.map(Some);
+                    return entry.result.clone().map(Some);
                 }
             }
 
@@ -202,7 +204,7 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
 
                     if result.result == InstructionResult::PrecompileOOG {
                         // oog error
-                        if let Some(mut entry) = cache.cache.get(&key) {
+                        if let Some(mut entry) = cache_result {
                             entry.lower_gas_limit = entry.lower_gas_limit.max(gas_limit);
                         } else {
                             cache.cache.insert(
@@ -216,7 +218,7 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
                         }
                     } else if result.result == InstructionResult::Return {
                         // success
-                        if let Some(mut entry) = cache.cache.get(&key) {
+                        if let Some(mut entry) = cache_result {
                             entry.result = Ok(result.clone());
                             entry.upper_gas_limit = entry.upper_gas_limit.min(gas_limit);
                         } else {
