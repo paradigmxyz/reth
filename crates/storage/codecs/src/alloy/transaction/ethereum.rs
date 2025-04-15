@@ -185,16 +185,18 @@ impl<T: Envelope + ToTxCompact + Transaction + Send + Sync> CompactEnvelope for 
         let zstd_bit = flags >> 3;
 
         let (signature, buf) = Signature::from_compact(buf, sig_bit);
-        let (tx_type, buf) = T::TxType::from_compact(buf, tx_bits);
+
 
         let (transaction, buf) = if zstd_bit != 0 {
             #[cfg(feature = "std")]
             {
                 reth_zstd_compressors::TRANSACTION_DECOMPRESSOR.with(|decompressor| {
                     let mut decompressor = decompressor.borrow_mut();
+                    let decompressed = decompressor.decompress(buf);
 
+                    let (tx_type, tx_buf) = T::TxType::from_compact(decompressed, tx_bits);
                     let (tx, _) =
-                        Self::from_tx_compact(decompressor.decompress(buf), tx_type, signature);
+                        Self::from_tx_compact(tx_buf, tx_type, signature);
 
                     (tx, buf)
                 })
@@ -202,13 +204,15 @@ impl<T: Envelope + ToTxCompact + Transaction + Send + Sync> CompactEnvelope for 
             #[cfg(not(feature = "std"))]
             {
                 let mut decompressor = reth_zstd_compressors::create_tx_decompressor();
-
+                let decompressed = decompressor.decompress(buf);
+                let (tx_type, tx_buf) = T::TxType::from_compact(decompressed, tx_bits);
                 let (tx, _) =
-                    Self::from_tx_compact(decompressor.decompress(buf), tx_type, signature);
+                    Self::from_tx_compact(tx_buf, tx_type, signature);
 
                 (tx, buf)
             }
         } else {
+            let (tx_type, buf) = T::TxType::from_compact(buf, tx_bits);
             Self::from_tx_compact(buf, tx_type, signature)
         };
 
