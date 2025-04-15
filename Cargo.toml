@@ -440,7 +440,7 @@ reth-ress-protocol = { path = "crates/ress/protocol" }
 reth-ress-provider = { path = "crates/ress/provider" }
 
 # revm
-revm = { version = "22.0.0", default-features = false }
+revm = { version = "22.0.1", default-features = false }
 revm-bytecode = { version = "3.0.0", default-features = false }
 revm-database = { version = "3.0.0", default-features = false }
 revm-state = { version = "3.0.0", default-features = false }
@@ -450,7 +450,7 @@ revm-inspector = { version = "3.0.0", default-features = false }
 revm-context = { version = "3.0.0", default-features = false }
 revm-context-interface = { version = "3.0.0", default-features = false }
 revm-database-interface = { version = "3.0.0", default-features = false }
-op-revm = { version = "3.0.1", default-features = false }
+op-revm = { version = "3.0.2", default-features = false }
 revm-inspectors = "0.19.0"
 
 # eth
