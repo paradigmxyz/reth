@@ -1125,9 +1125,9 @@ mod tests {
         let blob_store = InMemoryBlobStore::default();
         let validator = EthTransactionValidatorBuilder::new(provider)
             .set_tx_fee_cap(0) // no cap
-            .build(blob_store.clone());
+            .build(blob_store);
 
-        let outcome = validator.validate_one(TransactionOrigin::Local, transaction.clone());
+        let outcome = validator.validate_one(TransactionOrigin::Local, transaction);
         assert!(outcome.is_valid());
     }
 
@@ -1143,9 +1143,9 @@ mod tests {
         let blob_store = InMemoryBlobStore::default();
         let validator = EthTransactionValidatorBuilder::new(provider)
             .set_tx_fee_cap(2e18 as u128) // 2 ETH cap
-            .build(blob_store.clone());
+            .build(blob_store);
 
-        let outcome = validator.validate_one(TransactionOrigin::Local, transaction.clone());
+        let outcome = validator.validate_one(TransactionOrigin::Local, transaction);
         assert!(outcome.is_valid());
     }
 }
