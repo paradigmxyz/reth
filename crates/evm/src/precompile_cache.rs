@@ -156,8 +156,7 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
             if let Some(ref entry) = cache_result {
                 // if gas_limit is below known lower bound, we know it will fail with OOG
                 if gas_limit <= entry.lower_gas_limit {
-                    #[cfg(feature = "metrics")]
-                    self.metrics.precompile_cache_hits.increment(1);
+                    self.increment_by_one_precompile_cache_hits();
 
                     let result = InterpreterResult {
                         result: InstructionResult::PrecompileOOG,
@@ -170,8 +169,7 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
 
                 // if gas_limit is above upper bound, use the cached result
                 if gas_limit >= entry.upper_gas_limit {
-                    #[cfg(feature = "metrics")]
-                    self.metrics.precompile_cache_hits.increment(1);
+                    self.increment_by_one_precompile_cache_hits();
 
                     // for successful results, we need to ensure gas costs are correct when
                     // gas_limit differs
@@ -196,8 +194,8 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
 
             match &output {
                 Ok(Some(result)) => {
-                    #[cfg(feature = "metrics")]
-                    let entry_count_before = cache.cache.entry_count();
+                    self.increment_by_one_precompile_cache_misses();
+                    let previous_entry_count = self.cache_entry_count();
 
                     if result.result == InstructionResult::PrecompileOOG {
                         // oog error
@@ -239,22 +237,12 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
                             },
                         );
                     }
-
-                    #[cfg(feature = "metrics")]
-                    {
-                        self.metrics.precompile_cache_misses.increment(1);
-                        let new_entry_count = cache.cache.entry_count();
-                        if new_entry_count > entry_count_before {
-                            self.metrics
-                                .precompile_cache_size
-                                .increment((new_entry_count - entry_count_before) as f64);
-                        }
-                    }
+                    self.update_precompile_cache_size(previous_entry_count);
                 }
                 Err(err) => {
                     // fatal error
-                    #[cfg(feature = "metrics")]
-                    let entry_count_before = cache.cache.entry_count();
+                    self.increment_by_one_precompile_cache_misses();
+                    let previous_entry_count = self.cache_entry_count();
 
                     cache.cache.insert(
                         key,
@@ -264,17 +252,7 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
                             lower_gas_limit: 0,
                         },
                     );
-
-                    #[cfg(feature = "metrics")]
-                    {
-                        self.metrics.precompile_cache_misses.increment(1);
-                        let new_entry_count = cache.cache.entry_count();
-                        if new_entry_count > entry_count_before {
-                            self.metrics
-                                .precompile_cache_size
-                                .increment((new_entry_count - entry_count_before) as f64);
-                        }
-                    }
+                    self.update_precompile_cache_size(previous_entry_count);
                 }
                 Ok(None) => {
                     // precompile not found in inner provider
@@ -306,6 +284,43 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
 
     fn contains(&self, address: &Address) -> bool {
         self.precompile_provider.contains(address)
+    }
+}
+
+#[allow(dead_code, unused_variables)]
+impl<P> MaybeCachedPrecompileProvider<P> {
+    fn increment_by_one_precompile_cache_hits(&self) {
+        #[cfg(feature = "metrics")]
+        self.metrics.precompile_cache_hits.increment(1);
+    }
+
+    fn increment_by_one_precompile_cache_misses(&self) {
+        #[cfg(feature = "metrics")]
+        self.metrics.precompile_cache_misses.increment(1);
+    }
+
+    fn cache_entry_count(&self) -> u64 {
+        #[cfg(feature = "metrics")]
+        {
+            self.cache.as_ref().map_or(0, |cache| cache.cache.entry_count())
+        }
+
+        #[cfg(not(feature = "metrics"))]
+        {
+            0
+        }
+    }
+
+    fn update_precompile_cache_size(&self, previous_entry_count: u64) {
+        #[cfg(feature = "metrics")]
+        {
+            let new_entry_count = self.cache.as_ref().map_or(0, |cache| cache.cache.entry_count());
+            if new_entry_count > previous_entry_count {
+                self.metrics
+                    .precompile_cache_size
+                    .increment((new_entry_count - previous_entry_count) as f64);
+            }
+        }
     }
 }
 
