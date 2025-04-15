@@ -142,10 +142,33 @@ impl BlobStore for DiskFileBlobStore {
             }
         }
 
-        for (idx, blob_and_proof) in result.iter_mut().enumerate() {
+        let mut missing_tx_hashes = Vec::new();
+        let mut missing_indices = Vec::new();
+
+        for (idx, blob_and_proof) in result.iter().enumerate() {
             if blob_and_proof.is_none() {
                 let versioned_hash = versioned_hashes[idx];
-                let _tx_hash = self.inner.versioned_hashes_to_txhash.lock().get(&versioned_hash);
+                if let Some(tx_hash) =
+                    self.inner.versioned_hashes_to_txhash.lock().get(&versioned_hash).copied()
+                {
+                    missing_tx_hashes.push(tx_hash);
+                    missing_indices.push(idx);
+                }
+            }
+        }
+
+        // If we have missing blobs, try to read them from disk
+        if !missing_tx_hashes.is_empty() {
+            let blobs_from_disk = self.inner.read_many_decoded(missing_tx_hashes);
+            for ((_, blob_sidecar), idx) in blobs_from_disk.into_iter().zip(missing_indices.iter())
+            {
+                for (hash_idx, match_result) in
+                    blob_sidecar.match_versioned_hashes(versioned_hashes)
+                {
+                    if hash_idx == *idx {
+                        result[hash_idx] = Some(match_result);
+                    }
+                }
             }
         }
 
