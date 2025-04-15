@@ -135,8 +135,8 @@ impl LaunchContext {
     }
 
     /// Convenience function to [`Self::configure_globals`]
-    pub fn with_configured_globals(self, reserved_cpu_cores: u64) -> Self {
-        self.configure_globals(reserved_cpu_cores.try_into().unwrap());
+    pub fn with_configured_globals(self, reserved_cpu_cores: usize) -> Self {
+        self.configure_globals(reserved_cpu_cores);
         self
     }
 

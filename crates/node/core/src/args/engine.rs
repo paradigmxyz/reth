@@ -47,7 +47,7 @@ pub struct EngineArgs {
 
     /// Configure the number of reserved CPU cores for non-reth processes
     #[arg(long = "engine.reserved-cpu-cores", default_value_t = DEFAULT_RESERVED_CPU_CORES)]
-    pub reserved_cpu_cores: u64,
+    pub reserved_cpu_cores: usize,
 }
 
 impl Default for EngineArgs {
