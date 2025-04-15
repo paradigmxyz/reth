@@ -320,8 +320,8 @@ impl OpEthApiBuilder {
         self
     }
 
-    /// Creates a new minimal [`OpEthApi`] with only provider component and [`OpEvmConfig`]
-    /// component.
+    /// Creates a new minimal [`OpEthApi`] with only database provider component and
+    /// [`OpEvmConfig`] component.
     pub fn build_minimal_with_evm<P>(
         self,
         provider: P,
