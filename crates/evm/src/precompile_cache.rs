@@ -131,9 +131,14 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
     type Output = P::Output;
 
     fn set_spec(&mut self, spec: <CTX::Cfg as Cfg>::Spec) -> bool {
-        self.precompile_provider.set_spec(spec.clone());
-        self.spec = spec.into();
-        true
+        let old_spec = self.spec;
+        self.spec = spec.clone().into();
+
+        if self.precompile_provider.set_spec(spec) {
+            return true;
+        }
+
+        old_spec != self.spec
     }
 
     #[cfg(feature = "std")]
