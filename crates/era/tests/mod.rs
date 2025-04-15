@@ -212,8 +212,6 @@ fn test_era1_file_genesis_cases() -> Result<(), E2sError> {
     let downloader = Era1TestDownloader::new()?;
     let genesis_file = downloader.open_era1_file(ERA1_FILES_NAMES[0])?;
 
-    println!("Testing genesis file: {:?}", genesis_file);
-
     // For genesis file, verify special properties
     assert_eq!(
         genesis_file.group.block_index.starting_number, 0,
