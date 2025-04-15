@@ -7812,6 +7812,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-era-import"
+version = "1.3.9"
+dependencies = [
+ "bytes",
+ "eyre",
+ "futures",
+ "futures-util",
+ "reqwest",
+ "reth-db-api",
+ "reth-era",
+ "reth-era-downloader",
+ "reth-provider",
+ "reth-storage-api",
+ "tempfile",
+ "test-case",
+ "tokio",
+]
+
+[[package]]
 name = "reth-errors"
 version = "1.3.12"
 dependencies = [

@@ -45,6 +45,19 @@ impl EraStreamConfig {
 }
 
 /// An asynchronous stream of ERA1 files.
+///
+/// # Examples
+/// ```
+/// use futures_util::StreamExt;
+/// use reth_era_downloader::{EraStream, HttpClient};
+///
+/// async fn import(mut stream: EraStream<impl HttpClient>) {
+///     while let Some(file) = stream.next().await {
+///         let file = file?;
+///         // Process `file: Box<Path>`
+///     }
+/// }
+/// ```
 #[derive(Debug)]
 pub struct EraStream<Http> {
     download_stream: DownloadStream,
