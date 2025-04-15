@@ -190,9 +190,6 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
                 }
             }
 
-            #[cfg(feature = "metrics")]
-            self.metrics.precompile_cache_misses.increment(1);
-
             // call the precompile if cache miss
             let output =
                 self.precompile_provider.run(context, address, inputs, is_static, gas_limit);
@@ -245,6 +242,7 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
 
                     #[cfg(feature = "metrics")]
                     {
+                        self.metrics.precompile_cache_misses.increment(1);
                         let new_entry_count = cache.cache.entry_count();
                         if new_entry_count > entry_count_before {
                             self.metrics
@@ -269,6 +267,7 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
 
                     #[cfg(feature = "metrics")]
                     {
+                        self.metrics.precompile_cache_misses.increment(1);
                         let new_entry_count = cache.cache.entry_count();
                         if new_entry_count > entry_count_before {
                             self.metrics
@@ -278,8 +277,7 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
                     }
                 }
                 Ok(None) => {
-                    // precompile chose not to handle this request
-                    // no caching needed
+                    // precompile not found in inner provider
                 }
             }
 
