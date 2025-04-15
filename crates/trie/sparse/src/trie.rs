@@ -510,8 +510,8 @@ impl<P> RevealedSparseTrie<P> {
     /// because the value has not been revealed.
     /// Hence a `None` indicates two possibilities:
     /// - The value does not exists in the trie, so it cannot be revealed
-    /// - The value has not yet been revealed
-    /// In order to determine which is true, one would need an exclusion proof.
+    /// - The value has not yet been revealed In order to determine which is true, one would need an
+    ///   exclusion proof.
     pub fn get_leaf_value(&self, path: &Nibbles) -> Option<&Vec<u8>> {
         self.values.get(path)
     }
