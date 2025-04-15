@@ -181,7 +181,8 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
                     self.increment_by_one_precompile_cache_hits();
 
                     // for successful results, we need to ensure gas costs are correct when
-                    // gas_limit differs
+                    // gas_limit differs. we only do this for successful results because it is the
+                    // only case in which the inner precompile provider records gas costs.
                     if let Ok(mut result) = entry.result.clone() {
                         if result.result == InstructionResult::Return {
                             let mut adjusted_gas = Gas::new(gas_limit);
