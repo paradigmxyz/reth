@@ -33,6 +33,7 @@ use tracing::*;
 
 pub use reth_engine_primitives::{
     DEFAULT_MAX_PROOF_TASK_CONCURRENCY, DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
+    DEFAULT_RESERVED_CPU_CORES,
 };
 
 /// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
