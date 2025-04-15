@@ -88,7 +88,7 @@ fn incremental_vs_full_root(inputs: &[&str], modified: &str) {
         Default::default(),
         reth_trie::metrics::TrieRootMetrics::new(reth_trie::TrieType::Storage),
     );
-    
+
     let loader = storage_root.from_tx_hashed(hashed_address);
     let modified_root = loader.root().unwrap();
 
@@ -98,8 +98,8 @@ fn incremental_vs_full_root(inputs: &[&str], modified: &str) {
     // 3. Calculate the incremental root
     let mut storage_changes = PrefixSetMut::default();
     storage_changes.insert(Nibbles::unpack(modified_key));
-    let loader = storage_root.from_tx_hashed(hashed_address)
-        .with_prefix_set(storage_changes.freeze());
+    let loader =
+        storage_root.from_tx_hashed(hashed_address).with_prefix_set(storage_changes.freeze());
     let incremental_root = loader.root().unwrap();
 
     assert_eq!(modified_root, incremental_root);
@@ -146,7 +146,7 @@ fn arbitrary_storage_root() {
             Default::default(),
             reth_trie::metrics::TrieRootMetrics::new(reth_trie::TrieType::Storage),
         );
-        
+
         let got = storage_root_instance.from_tx(address).root().unwrap();
         let expected = storage_root(storage.into_iter());
         assert_eq!(expected, got);
@@ -214,7 +214,7 @@ fn test_empty_storage_root() {
         Default::default(),
         reth_trie::metrics::TrieRootMetrics::new(reth_trie::TrieType::Storage),
     );
-    
+
     let got = storage_root_instance.from_tx(address).root().unwrap();
     assert_eq!(got, EMPTY_ROOT_HASH);
 }
@@ -247,7 +247,7 @@ fn test_storage_root() {
         Default::default(),
         reth_trie::metrics::TrieRootMetrics::new(reth_trie::TrieType::Storage),
     );
-    
+
     let got = storage_root_instance.from_tx(address).root().unwrap();
 
     assert_eq!(storage_root(storage.into_iter()), got);
@@ -365,7 +365,7 @@ fn storage_root_regression() {
         Default::default(),
         reth_trie::metrics::TrieRootMetrics::new(reth_trie::TrieType::Storage),
     );
-    
+
     let account3_storage_root = storage_root_instance.from_tx(address3).root().unwrap();
     let expected_root = storage_root_prehashed(storage);
     assert_eq!(expected_root, account3_storage_root);
@@ -438,7 +438,7 @@ fn account_and_storage_trie() {
         Default::default(),
         reth_trie::metrics::TrieRootMetrics::new(reth_trie::TrieType::Storage),
     );
-    
+
     let account3_storage_root = storage_root_instance.from_tx(address3).root().unwrap();
     hash_builder
         .add_leaf(Nibbles::unpack(key3), &encode_account(account3, Some(account3_storage_root)));
@@ -743,11 +743,8 @@ fn storage_trie_around_extension_node() {
         reth_trie::metrics::TrieRootMetrics::new(reth_trie::TrieType::Storage),
     );
 
-    let (got, _, updates) = 
-    storage_root_instance.
-    from_tx_hashed(hashed_address)
-    .root_with_updates()
-    .unwrap();
+    let (got, _, updates) =
+        storage_root_instance.from_tx_hashed(hashed_address).root_with_updates().unwrap();
 
     assert_eq!(expected_root, got);
     assert_eq!(expected_updates, updates);

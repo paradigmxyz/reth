@@ -74,7 +74,7 @@ impl<'a, ProviderDB, ProviderSF> UnifiedStorageWriter<'a, ProviderDB, ProviderSF
     #[expect(unused)]
     const fn ensure_static_file(&self) -> Result<(), UnifiedStorageWriterError> {
         if self.static_file.is_none() {
-            return Err(UnifiedStorageWriterError::MissingStaticFileWriter)
+            return Err(UnifiedStorageWriterError::MissingStaticFileWriter);
         }
         Ok(())
     }
@@ -139,7 +139,7 @@ where
     {
         if blocks.is_empty() {
             debug!(target: "provider::storage_writer", "Attempted to write empty block range");
-            return Ok(())
+            return Ok(());
         }
 
         // NOTE: checked non-empty above
@@ -1317,8 +1317,7 @@ mod tests {
         );
 
         // calculate database storage root and write intermediate storage nodes.
-        let (storage_root_updates, _, storage_updates) =
-            storage_root.calculate(true).unwrap();
+        let (storage_root_updates, _, storage_updates) = storage_root.calculate(true).unwrap();
         assert_eq!(storage_root_updates, storage_root_prehashed(init_storage.storage));
         assert!(!storage_updates.is_empty());
         provider_rw
@@ -1347,7 +1346,8 @@ mod tests {
             reth_trie::metrics::TrieRootMetrics::new(reth_trie::TrieType::Storage),
         );
         // re-calculate database storage root with new instance
-        let storage_root_value = storage_root.overlay_root(address, updated_storage.clone()).unwrap();
+        let storage_root_value =
+            storage_root.overlay_root(address, updated_storage.clone()).unwrap();
         assert_eq!(storage_root_value, storage_root_prehashed(updated_storage.storage));
     }
 }

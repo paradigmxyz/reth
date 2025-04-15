@@ -17,8 +17,8 @@ use reth_trie::{
     StorageMultiProof, StorageRoot, TrieInput,
 };
 use reth_trie_db::{
-    DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
-    DatabaseTrieWitness, StateCommitment, DatabaseTrieCursorFactory, DatabaseHashedCursorFactory,
+    DatabaseHashedCursorFactory, DatabaseProof, DatabaseStateRoot, DatabaseStorageProof,
+    DatabaseStorageRoot, DatabaseTrieCursorFactory, DatabaseTrieWitness, StateCommitment,
 };
 
 /// State provider over latest state that takes tx reference.
@@ -103,7 +103,7 @@ impl<Provider: DBProvider + StateCommitmentProvider> StorageRootProvider
             DatabaseHashedCursorFactory::new(self.tx()),
             keccak256(address),
             Default::default(),
-            reth_trie::metrics::TrieRootMetrics::new(reth_trie::TrieType::Storage)     
+            reth_trie::metrics::TrieRootMetrics::new(reth_trie::TrieType::Storage),
         );
         storage_root
             .overlay_root(address, hashed_storage)
@@ -180,7 +180,7 @@ impl<Provider: DBProvider + BlockHashReader + StateCommitmentProvider> StateProv
         let mut cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
         if let Some(entry) = cursor.seek_by_key_subkey(account, storage_key)? {
             if entry.key == storage_key {
-                return Ok(Some(entry.value))
+                return Ok(Some(entry.value));
             }
         }
         Ok(None)
