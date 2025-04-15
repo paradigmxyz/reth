@@ -95,13 +95,13 @@ where
         }
     }
 }
-pub trait HasHeader {
-    type Header;
-    fn header(&self) -> &Self::Header;
-}
-pub trait BlockFields {
-    fn number(&self) -> u64;
-}
+// pub trait HasHeader {
+//     type Header;
+//     fn header(&self) -> &Self::Header;
+// }
+// pub trait BlockFields {
+//     fn number(&self) -> u64;
+// }
 
 impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec>
 where
@@ -271,68 +271,68 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> DBProvider for MockEt
         &self.prune_modes
     }
 }
-//look
-impl<ChainSpec> HeaderProvider for MockEthProvider<reth_ethereum_primitives::EthPrimitives,ChainSpec>
-where
-    ChainSpec: EthChainSpec + Send + Sync + 'static,
-    {
-    type Header = Header;
+// //look
+// impl<ChainSpec> HeaderProvider for MockEthProvider<reth_ethereum_primitives::EthPrimitives,ChainSpec>
+// where
+//     ChainSpec: EthChainSpec + Send + Sync + 'static,
+//     {
+//     type Header = Header;
 
-    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
-        let lock = self.headers.lock();
-        Ok(lock.get(block_hash).cloned())
-    }
+//     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
+//         let lock = self.headers.lock();
+//         Ok(lock.get(block_hash).cloned())
+//     }
 
-    fn header_by_number(&self, num: u64) -> ProviderResult<Option<Self::Header>> {
-        let lock = self.headers.lock();
-        Ok(lock.values().find(|h| h.number == num).cloned())
-    }
+//     fn header_by_number(&self, num: u64) -> ProviderResult<Option<Self::Header>> {
+//         let lock = self.headers.lock();
+//         Ok(lock.values().find(|h| h.number == num).cloned())
+//     }
 
-    fn header_td(&self, hash: &BlockHash) -> ProviderResult<Option<U256>> {
-        let lock = self.headers.lock();
-        Ok(lock.get(hash).map(|target| {
-            lock.values()
-                .filter(|h| h.number < target.number)
-                .fold(target.difficulty, |td, h| td + h.difficulty)
-        }))
-    }
+//     fn header_td(&self, hash: &BlockHash) -> ProviderResult<Option<U256>> {
+//         let lock = self.headers.lock();
+//         Ok(lock.get(hash).map(|target| {
+//             lock.values()
+//                 .filter(|h| h.number < target.number)
+//                 .fold(target.difficulty, |td, h| td + h.difficulty)
+//         }))
+//     }
 
-    fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
-        let lock = self.headers.lock();
-        let sum = lock
-            .values()
-            .filter(|h| h.number <= number)
-            .fold(U256::ZERO, |td, h| td + h.difficulty);
-        Ok(Some(sum))
-    }
+//     fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
+//         let lock = self.headers.lock();
+//         let sum = lock
+//             .values()
+//             .filter(|h| h.number <= number)
+//             .fold(U256::ZERO, |td, h| td + h.difficulty);
+//         Ok(Some(sum))
+//     }
 
-    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
-        let lock = self.headers.lock();
+//     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
+//         let lock = self.headers.lock();
 
-        let mut headers: Vec<_> =
-            lock.values().filter(|header| range.contains(&header.number)).cloned().collect();
-        headers.sort_by_key(|header| header.number);
+//         let mut headers: Vec<_> =
+//             lock.values().filter(|header| range.contains(&header.number)).cloned().collect();
+//         headers.sort_by_key(|header| header.number);
 
-        Ok(headers)
-    }
+//         Ok(headers)
+//     }
 
-    fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
-        Ok(self.header_by_number(number)?.map(SealedHeader::seal_slow))
-    }
+//     fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
+//         Ok(self.header_by_number(number)?.map(SealedHeader::seal_slow))
+//     }
 
-    fn sealed_headers_while(
-        &self,
-        range: impl RangeBounds<BlockNumber>,
-        mut predicate: impl FnMut(&SealedHeader) -> bool,
-    ) -> ProviderResult<Vec<SealedHeader>> {
-        Ok(self
-            .headers_range(range)?
-            .into_iter()
-            .map(SealedHeader::seal_slow)
-            .take_while(|h| predicate(h))
-            .collect())
-    }
-}
+//     fn sealed_headers_while(
+//         &self,
+//         range: impl RangeBounds<BlockNumber>,
+//         mut predicate: impl FnMut(&SealedHeader) -> bool,
+//     ) -> ProviderResult<Vec<SealedHeader>> {
+//         Ok(self
+//             .headers_range(range)?
+//             .into_iter()
+//             .map(SealedHeader::seal_slow)
+//             .take_while(|h| predicate(h))
+//             .collect())
+//     }
+// }
 
 impl<T, ChainSpec> ChainSpecProvider for MockEthProvider<T, ChainSpec>
 where
@@ -346,367 +346,367 @@ where
     }
 }
 
-//look
-impl<T, ChainSpec> TransactionsProvider for MockEthProvider<T, ChainSpec>
-where
-    T: NodePrimitives,
-    ChainSpec: EthChainSpec + Send + Sync + 'static,
-    T::Transaction: SignedTransaction + Clone + Send + Sync,
-{
-    type Transaction = T::Transaction;
+// //look
+// impl<T, ChainSpec> TransactionsProvider for MockEthProvider<T, ChainSpec>
+// where
+//     T: NodePrimitives,
+//     ChainSpec: EthChainSpec + Send + Sync + 'static,
+//     T::Transaction: SignedTransaction + Clone + Send + Sync,
+// {
+//     type Transaction = T::Transaction;
 
-    fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
-        let lock = self.blocks.lock().unwrap();
-        let tx_number = lock
-            .values()
-            .flat_map(|block| &block.body.transactions)
-            .position(|tx| *tx.tx_hash() == tx_hash)
-            .map(|pos| pos as TxNumber);
+//     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
+//         let lock = self.blocks.lock().unwrap();
+//         let tx_number = lock
+//             .values()
+//             .flat_map(|block| &block.body.transactions)
+//             .position(|tx| *tx.tx_hash() == tx_hash)
+//             .map(|pos| pos as TxNumber);
 
-        Ok(tx_number)
-    }
+//         Ok(tx_number)
+//     }
 
-    fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
-        let lock = self.blocks.lock().unwrap();
-        let transaction =
-            lock.values().flat_map(|block| &block.body.transactions).nth(id as usize).cloned();
+//     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
+//         let lock = self.blocks.lock().unwrap();
+//         let transaction =
+//             lock.values().flat_map(|block| &block.body.transactions).nth(id as usize).cloned();
 
-        Ok(transaction)
-    }
+//         Ok(transaction)
+//     }
 
-    fn transaction_by_id_unhashed(&self, id: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
-        self.transaction_by_id(id)
-    }
+//     fn transaction_by_id_unhashed(&self, id: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
+//         self.transaction_by_id(id)
+//     }
 
-    fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Transaction>> {
-        Ok(self.blocks.lock().unwrap().iter().find_map(|(_, block)| {
-            block.body.transactions.iter().find(|tx| *tx.tx_hash() == hash).cloned()
-        }))
-    }
+//     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Transaction>> {
+//         Ok(self.blocks.lock().unwrap().iter().find_map(|(_, block)| {
+//             block.body.transactions.iter().find(|tx| *tx.tx_hash() == hash).cloned()
+//         }))
+//     }
 
-    fn transaction_by_hash_with_meta(
-        &self,
-        hash: TxHash,
-    ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
-        let lock = self.blocks.lock().unwrap();
-        for (block_hash, block) in lock.iter() {
-            for (index, tx) in block.body.transactions.iter().enumerate() {
-                if *tx.tx_hash() == hash {
-                    let meta = TransactionMeta {
-                        tx_hash: hash,
-                        index: index as u64,
-                        block_hash: *block_hash,
-                        block_number: block.header.number,
-                        base_fee: block.header.base_fee_per_gas,
-                        excess_blob_gas: block.header.excess_blob_gas,
-                        timestamp: block.header.timestamp,
-                    };
-                    return Ok(Some((tx.clone(), meta)));
-                }
-            }
-        }
-        Ok(None)
-    }
+//     fn transaction_by_hash_with_meta(
+//         &self,
+//         hash: TxHash,
+//     ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
+//         let lock = self.blocks.lock().unwrap();
+//         for (block_hash, block) in lock.iter() {
+//             for (index, tx) in block.body.transactions.iter().enumerate() {
+//                 if *tx.tx_hash() == hash {
+//                     let meta = TransactionMeta {
+//                         tx_hash: hash,
+//                         index: index as u64,
+//                         block_hash: *block_hash,
+//                         block_number: block.header.number,
+//                         base_fee: block.header.base_fee_per_gas,
+//                         excess_blob_gas: block.header.excess_blob_gas,
+//                         timestamp: block.header.timestamp,
+//                     };
+//                     return Ok(Some((tx.clone(), meta)));
+//                 }
+//             }
+//         }
+//         Ok(None)
+//     }
 
-    fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        let lock = self.blocks.lock().unwrap();
-        let mut current_tx_number: TxNumber = 0;
-        for block in lock.values() {
-            let block_tx_count = block.body.transactions.len() as TxNumber;
-            if current_tx_number + block_tx_count > id {
-                return Ok(Some(block.header.number));
-            }
-            current_tx_number += block_tx_count;
-        }
-        Ok(None)
-    }
+//     fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
+//         let lock = self.blocks.lock().unwrap();
+//         let mut current_tx_number: TxNumber = 0;
+//         for block in lock.values() {
+//             let block_tx_count = block.body.transactions.len() as TxNumber;
+//             if current_tx_number + block_tx_count > id {
+//                 return Ok(Some(block.header.number));
+//             }
+//             current_tx_number += block_tx_count;
+//         }
+//         Ok(None)
+//     }
 
-    fn transactions_by_block(
-        &self,
-        id: BlockHashOrNumber,
-    ) -> ProviderResult<Option<Vec<Self::Transaction>>> {
-        Ok(self.block(id)?.map(|b| b.body.transactions.clone()))
-    }
+//     fn transactions_by_block(
+//         &self,
+//         id: BlockHashOrNumber,
+//     ) -> ProviderResult<Option<Vec<Self::Transaction>>> {
+//         Ok(self.block(id)?.map(|b| b.body.transactions.clone()))
+//     }
 
-    fn transactions_by_block_range(
-        &self,
-        range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<Vec<Self::Transaction>>> {
-        let mut map = BTreeMap::new();
-        for (_, block) in self.blocks.lock().unwrap().iter() {
-            if range.contains(&block.number) {
-                map.insert(block.number, block.body.transactions.clone());
-            }
-        }
+//     fn transactions_by_block_range(
+//         &self,
+//         range: impl RangeBounds<BlockNumber>,
+//     ) -> ProviderResult<Vec<Vec<Self::Transaction>>> {
+//         let mut map = BTreeMap::new();
+//         for (_, block) in self.blocks.lock().unwrap().iter() {
+//             if range.contains(&block.number) {
+//                 map.insert(block.number, block.body.transactions.clone());
+//             }
+//         }
 
-        Ok(map.into_values().collect())
-    }
+//         Ok(map.into_values().collect())
+//     }
 
-    fn transactions_by_tx_range(
-        &self,
-        range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<Self::Transaction>> {
-        let lock = self.blocks.lock().unwrap();
-        let transactions = lock
-            .values()
-            .flat_map(|block| &block.body.transactions)
-            .enumerate()
-            .filter(|&(tx_number, _)| range.contains(&(tx_number as TxNumber)))
-            .map(|(_, tx)| tx.clone())
-            .collect();
+//     fn transactions_by_tx_range(
+//         &self,
+//         range: impl RangeBounds<TxNumber>,
+//     ) -> ProviderResult<Vec<Self::Transaction>> {
+//         let lock = self.blocks.lock().unwrap();
+//         let transactions = lock
+//             .values()
+//             .flat_map(|block| &block.body.transactions)
+//             .enumerate()
+//             .filter(|&(tx_number, _)| range.contains(&(tx_number as TxNumber)))
+//             .map(|(_, tx)| tx.clone())
+//             .collect();
 
-        Ok(transactions)
-    }
+//         Ok(transactions)
+//     }
 
-    fn senders_by_tx_range(
-        &self,
-        range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<Address>> {
-        let lock = self.blocks.lock().unwrap();
-        let senders = lock
-            .values()
-            .flat_map(|block| &block.body.transactions)
-            .enumerate()
-            .filter_map(|(tx_number, tx)| {
-                if range.contains(&(tx_number as TxNumber)) {
-                    tx.recover_signer().ok()
-                } else {
-                    None
-                }
-            })
-            .collect();
+//     fn senders_by_tx_range(
+//         &self,
+//         range: impl RangeBounds<TxNumber>,
+//     ) -> ProviderResult<Vec<Address>> {
+//         let lock = self.blocks.lock().unwrap();
+//         let senders = lock
+//             .values()
+//             .flat_map(|block| &block.body.transactions)
+//             .enumerate()
+//             .filter_map(|(tx_number, tx)| {
+//                 if range.contains(&(tx_number as TxNumber)) {
+//                     tx.recover_signer().ok()
+//                 } else {
+//                     None
+//                 }
+//             })
+//             .collect();
 
-        Ok(senders)
-    }
+//         Ok(senders)
+//     }
 
-    fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
-        self.transaction_by_id(id)
-            .map(|tx_opt| tx_opt.map(|tx| tx.recover_signer().unwrap()))
-    }
-}
+//     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
+//         self.transaction_by_id(id)
+//             .map(|tx_opt| tx_opt.map(|tx| tx.recover_signer().unwrap()))
+//     }
+// }
 
-//look
-impl<ChainSpec> ReceiptProvider for MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSpec>
-where
-    ChainSpec: EthChainSpec + Send + Sync + 'static,
-{
-    type Receipt = Receipt;
+// //look
+// impl<ChainSpec> ReceiptProvider for MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSpec>
+// where
+//     ChainSpec: EthChainSpec + Send + Sync + 'static,
+// {
+//     type Receipt = Receipt;
 
-    fn receipt(&self, _id: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
-        Ok(None)
-    }
+//     fn receipt(&self, _id: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
+//         Ok(None)
+//     }
 
-    fn receipt_by_hash(&self, _hash: TxHash) -> ProviderResult<Option<Self::Receipt>> {
-        Ok(None)
-    }
+//     fn receipt_by_hash(&self, _hash: TxHash) -> ProviderResult<Option<Self::Receipt>> {
+//         Ok(None)
+//     }
 
-    fn receipts_by_block(&self, _block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Receipt>>> {
-        Ok(None)
-    }
+//     fn receipts_by_block(&self, _block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Receipt>>> {
+//         Ok(None)
+//     }
 
-    fn receipts_by_tx_range(
-        &self,
-        _range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<Self::Receipt>> {
-        Ok(vec![])
-    }
-}
+//     fn receipts_by_tx_range(
+//         &self,
+//         _range: impl RangeBounds<TxNumber>,
+//     ) -> ProviderResult<Vec<Self::Receipt>> {
+//         Ok(vec![])
+//     }
+// }
 
-//look
-impl<ChainSpec> ReceiptProviderIdExt for MockEthProvider<reth_ethereum_primitives::EthPrimitives ,ChainSpec> {}
+// //look
+// impl<ChainSpec> ReceiptProviderIdExt for MockEthProvider<reth_ethereum_primitives::EthPrimitives ,ChainSpec> {}
 
-//look
-impl<T, ChainSpec> BlockHashReader for MockEthProvider<T, ChainSpec> 
-where 
-    T: NodePrimitives,
-    T::Block: HasHeader<Header = Header>,
-    ChainSpec: Send + Sync +'static,
-{
-    fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        let lock = self.blocks.lock();
+// //look
+// impl<T, ChainSpec> BlockHashReader for MockEthProvider<T, ChainSpec> 
+// where 
+//     T: NodePrimitives,
+//     T::Block: HasHeader<Header = Header>,
+//     ChainSpec: Send + Sync +'static,
+// {
+//     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
+//         let lock = self.blocks.lock();
 
-        let hash = lock.iter().find_map(|(hash, b)| (b.number == number).then_some(*hash));
-        Ok(hash)
-    }
+//         let hash = lock.iter().find_map(|(hash, b)| (b.number == number).then_some(*hash));
+//         Ok(hash)
+//     }
 
-    fn canonical_hashes_range(
-        &self,
-        start: BlockNumber,
-        end: BlockNumber,
-    ) -> ProviderResult<Vec<B256>> {
-        let range = start..end;
-        let lock = self.blocks.lock();
+//     fn canonical_hashes_range(
+//         &self,
+//         start: BlockNumber,
+//         end: BlockNumber,
+//     ) -> ProviderResult<Vec<B256>> {
+//         let range = start..end;
+//         let lock = self.blocks.lock();
 
-        let mut hashes: Vec<_> =
-            lock.iter().filter(|(_, block)| range.contains(&block.number)).collect();
-        hashes.sort_by_key(|(_, block)| block.number);
+//         let mut hashes: Vec<_> =
+//             lock.iter().filter(|(_, block)| range.contains(&block.number)).collect();
+//         hashes.sort_by_key(|(_, block)| block.number);
 
-        Ok(hashes.into_iter().map(|(hash, _)| *hash).collect())
-    }
-}
+//         Ok(hashes.into_iter().map(|(hash, _)| *hash).collect())
+//     }
+// }
 
-//look
-impl<T: NodePrimitives, ChainSpec> BlockNumReader for MockEthProvider<T, ChainSpec> 
-where 
-    T::Block: BlockFields,
-    {
-    fn chain_info(&self) -> ProviderResult<ChainInfo> {
-        let best_block_number = self.best_block_number()?;
-        let lock = self.headers.lock();
+// //look
+// impl<T: NodePrimitives, ChainSpec> BlockNumReader for MockEthProvider<T, ChainSpec> 
+// where 
+//     T::Block: BlockFields,
+//     {
+//     fn chain_info(&self) -> ProviderResult<ChainInfo> {
+//         let best_block_number = self.best_block_number()?;
+//         let lock = self.headers.lock();
 
-        Ok(lock
-            .iter()
-            .find(|(_, header)| header.number == best_block_number)
-            .map(|(hash, header)| ChainInfo { best_hash: *hash, best_number: header.number })
-            .unwrap_or_default())
-    }
+//         Ok(lock
+//             .iter()
+//             .find(|(_, header)| header.number == best_block_number)
+//             .map(|(hash, header)| ChainInfo { best_hash: *hash, best_number: header.number })
+//             .unwrap_or_default())
+//     }
 
-    fn best_block_number(&self) -> ProviderResult<BlockNumber> {
-        let lock = self.headers.lock();
-        lock.iter()
-            .max_by_key(|h| h.1.number)
-            .map(|(_, header)| header.number)
-            .ok_or(ProviderError::BestBlockNotFound)
-    }
+//     fn best_block_number(&self) -> ProviderResult<BlockNumber> {
+//         let lock = self.headers.lock();
+//         lock.iter()
+//             .max_by_key(|h| h.1.number)
+//             .map(|(_, header)| header.number)
+//             .ok_or(ProviderError::BestBlockNotFound)
+//     }
 
-    fn last_block_number(&self) -> ProviderResult<BlockNumber> {
-        self.best_block_number()
-    }
+//     fn last_block_number(&self) -> ProviderResult<BlockNumber> {
+//         self.best_block_number()
+//     }
 
-    fn block_number(&self, hash: B256) -> ProviderResult<Option<alloy_primitives::BlockNumber>> {
-        let lock = self.blocks.lock();
-        let num = lock.iter().find_map(|(h, b)| (*h == hash).then_some(b.number()));
-        Ok(num)
-    }
-}
+//     fn block_number(&self, hash: B256) -> ProviderResult<Option<alloy_primitives::BlockNumber>> {
+//         let lock = self.blocks.lock();
+//         let num = lock.iter().find_map(|(h, b)| (*h == hash).then_some(b.number()));
+//         Ok(num)
+//     }
+// }
 
-//look
-impl<T, ChainSpec> BlockIdReader for MockEthProvider<T ,ChainSpec>
-where 
-    T: NodePrimitives,
-    T::Block: HasHeader<Header = Header>,
-{
-    fn pending_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
-        Ok(None)
-    }
+// //look
+// impl<T, ChainSpec> BlockIdReader for MockEthProvider<T ,ChainSpec>
+// where 
+//     T: NodePrimitives,
+//     T::Block: HasHeader<Header = Header>,
+// {
+//     fn pending_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
+//         Ok(None)
+//     }
 
-    fn safe_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
-        Ok(None)
-    }
+//     fn safe_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
+//         Ok(None)
+//     }
 
-    fn finalized_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
-        Ok(None)
-    }
-}
+//     fn finalized_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
+//         Ok(None)
+//     }
+// }
 
-//look
-impl<ChainSpec> BlockReader for MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSpec>
-where 
-    ChainSpec: EthChainSpec + Send + Sync + 'static,
-{
-    type Block = reth_ethereum_primitives::Block;
+// //look
+// impl<ChainSpec> BlockReader for MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSpec>
+// where 
+//     ChainSpec: EthChainSpec + Send + Sync + 'static,
+// {
+//     type Block = reth_ethereum_primitives::Block;
 
-    fn find_block_by_hash(
-        &self,
-        hash: B256,
-        _source: BlockSource,
-    ) -> ProviderResult<Option<Self::Block>> {
-        self.block(hash.into())
-    }
+//     fn find_block_by_hash(
+//         &self,
+//         hash: B256,
+//         _source: BlockSource,
+//     ) -> ProviderResult<Option<Self::Block>> {
+//         self.block(hash.into())
+//     }
 
-    fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
-        let lock = self.blocks.lock();
-        match id {
-            BlockHashOrNumber::Hash(hash) => Ok(lock.get(&hash).cloned()),
-            BlockHashOrNumber::Number(num) => Ok(lock.values().find(|b| b.number == num).cloned()),
-        }
-    }
+//     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
+//         let lock = self.blocks.lock();
+//         match id {
+//             BlockHashOrNumber::Hash(hash) => Ok(lock.get(&hash).cloned()),
+//             BlockHashOrNumber::Number(num) => Ok(lock.values().find(|b| b.number == num).cloned()),
+//         }
+//     }
 
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Self::Block>>> {
-        Ok(None)
-    }
+//     fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Self::Block>>> {
+//         Ok(None)
+//     }
 
-    fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        Ok(None)
-    }
+//     fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+//         Ok(None)
+//     }
 
-    fn pending_block_and_receipts(
-        &self,
-    ) -> ProviderResult<Option<(SealedBlock<Self::Block>, Vec<Receipt>)>> {
-        Ok(None)
-    }
+//     fn pending_block_and_receipts(
+//         &self,
+//     ) -> ProviderResult<Option<(SealedBlock<Self::Block>, Vec<Receipt>)>> {
+//         Ok(None)
+//     }
 
-    fn recovered_block(
-        &self,
-        _id: BlockHashOrNumber,
-        _transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        Ok(None)
-    }
+//     fn recovered_block(
+//         &self,
+//         _id: BlockHashOrNumber,
+//         _transaction_kind: TransactionVariant,
+//     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+//         Ok(None)
+//     }
 
-    fn sealed_block_with_senders(
-        &self,
-        _id: BlockHashOrNumber,
-        _transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        Ok(None)
-    }
+//     fn sealed_block_with_senders(
+//         &self,
+//         _id: BlockHashOrNumber,
+//         _transaction_kind: TransactionVariant,
+//     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+//         Ok(None)
+//     }
 
-    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Self::Block>> {
-        let lock = self.blocks.lock();
+//     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Self::Block>> {
+//         let lock = self.blocks.lock();
 
-        let mut blocks: Vec<_> =
-            lock.values().filter(|block| range.contains(&block.number)).cloned().collect();
-        blocks.sort_by_key(|block| block.number);
+//         let mut blocks: Vec<_> =
+//             lock.values().filter(|block| range.contains(&block.number)).cloned().collect();
+//         blocks.sort_by_key(|block| block.number);
 
-        Ok(blocks)
-    }
+//         Ok(blocks)
+//     }
 
-    fn block_with_senders_range(
-        &self,
-        _range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
-        Ok(vec![])
-    }
+//     fn block_with_senders_range(
+//         &self,
+//         _range: RangeInclusive<BlockNumber>,
+//     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
+//         Ok(vec![])
+//     }
 
-    fn recovered_block_range(
-        &self,
-        _range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
-        Ok(vec![])
-    }
-}
+//     fn recovered_block_range(
+//         &self,
+//         _range: RangeInclusive<BlockNumber>,
+//     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
+//         Ok(vec![])
+//     }
+// }
 
-//look
-impl<ChainSpec> BlockReaderIdExt for MockEthProvider<reth_ethereum_primitives::Eth, ChainSpec>
-where 
-    ChainSpec: EthChainSpec,
-{
-    fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<reth_ethereum_primitives::Block>> {
-        match id {
-            BlockId::Number(num) => self.block_by_number_or_tag(num),
-            BlockId::Hash(hash) => self.block_by_hash(hash.block_hash),
-        }
-    }
+// //look
+// impl<ChainSpec> BlockReaderIdExt for MockEthProvider<reth_ethereum_primitives::Eth, ChainSpec>
+// where 
+//     ChainSpec: EthChainSpec,
+// {
+//     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<reth_ethereum_primitives::Block>> {
+//         match id {
+//             BlockId::Number(num) => self.block_by_number_or_tag(num),
+//             BlockId::Hash(hash) => self.block_by_hash(hash.block_hash),
+//         }
+//     }
 
-    fn sealed_header_by_id(&self, id: BlockId) -> ProviderResult<Option<SealedHeader>> {
-        self.header_by_id(id)?.map_or_else(|| Ok(None), |h| Ok(Some(SealedHeader::seal_slow(h))))
-    }
+//     fn sealed_header_by_id(&self, id: BlockId) -> ProviderResult<Option<SealedHeader>> {
+//         self.header_by_id(id)?.map_or_else(|| Ok(None), |h| Ok(Some(SealedHeader::seal_slow(h))))
+//     }
 
-    fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<Header>> {
-        match self.block_by_id(id)? {
-            None => Ok(None),
-            Some(block) => Ok(Some(block.header().clone())),
-        }
-    }
+//     fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<Header>> {
+//         match self.block_by_id(id)? {
+//             None => Ok(None),
+//             Some(block) => Ok(Some(block.header().clone())),
+//         }
+//     }
 
-    fn ommers_by_id(&self, id: BlockId) -> ProviderResult<Option<Vec<Header>>> {
-        match id {
-            BlockId::Number(num) => self.ommers_by_number_or_tag(num),
-            BlockId::Hash(hash) => self.ommers(BlockHashOrNumber::Hash(hash.block_hash)),
-        }
-    }
-}
+//     fn ommers_by_id(&self, id: BlockId) -> ProviderResult<Option<Vec<Header>>> {
+//         match id {
+//             BlockId::Number(num) => self.ommers_by_number_or_tag(num),
+//             BlockId::Hash(hash) => self.ommers(BlockHashOrNumber::Hash(hash.block_hash)),
+//         }
+//     }
+// }
 
 impl<T: NodePrimitives, ChainSpec: Send + Sync> AccountReader for MockEthProvider<T, ChainSpec> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
@@ -824,31 +824,31 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> HashedPostStateProvid
 }
 
 //look
-impl<ChainSpec> StateProvider for MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSpec>
-where 
-    ChainSpec: EthChainSpec + Send + Sync + 'static,
-{
-    fn storage(
-        &self,
-        account: Address,
-        storage_key: StorageKey,
-    ) -> ProviderResult<Option<StorageValue>> {
-        let lock = self.accounts.lock().unwrap();
-        Ok(lock.get(&account).and_then(|account| account.storage.get(&storage_key)).copied())
-    }
+// impl<ChainSpec> StateProvider for MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSpec>
+// where 
+//     ChainSpec: EthChainSpec + Send + Sync + 'static,
+// {
+//     fn storage(
+//         &self,
+//         account: Address,
+//         storage_key: StorageKey,
+//     ) -> ProviderResult<Option<StorageValue>> {
+//         let lock = self.accounts.lock().unwrap();
+//         Ok(lock.get(&account).and_then(|account| account.storage.get(&storage_key)).copied())
+//     }
 
-    fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
-        let lock = self.accounts.lock().unwrap();
-        Ok(lock.values().find_map(|account| {
-            match (account.account.bytecode_hash.as_ref(), account.bytecode.as_ref()) {
-                (Some(bytecode_hash), Some(bytecode)) if bytecode_hash == code_hash => {
-                    Some(bytecode.clone())
-                }
-                _ => None,
-            }
-        }))
-    }
-}
+//     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
+//         let lock = self.accounts.lock().unwrap();
+//         Ok(lock.values().find_map(|account| {
+//             match (account.account.bytecode_hash.as_ref(), account.bytecode.as_ref()) {
+//                 (Some(bytecode_hash), Some(bytecode)) if bytecode_hash == code_hash => {
+//                     Some(bytecode.clone())
+//                 }
+//                 _ => None,
+//             }
+//         }))
+//     }
+// }
 
 impl<ChainSpec: EthChainSpec + 'static> StateProviderFactory for MockEthProvider<ChainSpec> {
     fn latest(&self) -> ProviderResult<StateProviderBox> {
