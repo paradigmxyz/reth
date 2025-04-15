@@ -1057,7 +1057,194 @@ impl<P> RevealedSparseTrie<P> {
     }
 }
 
+/// Error type for leaf finding operations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LeafLookupError {
+    /// The path leads to a blinded node, cannot determine if leaf exists.
+    /// This means the witness is not complete.
+    BlindedNode {
+        /// Path to the blinded node.
+        path: Nibbles,
+        /// Hash of the blinded node.
+        hash: B256,
+    },
+    /// The path leads to a leaf with a different value than expected.
+    /// This means the witness is malformed.
+    /// TODO: double check the code to see if this can happen
+    ValueMismatch {
+        /// Path to the leaf.
+        path: Nibbles,
+        /// Expected value.
+        expected: Option<Vec<u8>>,
+        /// Actual value found.
+        actual: Vec<u8>,
+    },
+}
+
+/// Result of a leaf finding operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LeafLookup {
+    /// Leaf exists with expected value.
+    Found,
+    /// Leaf does not exist (exclusion proof found).
+    NotFound {
+        /// Path where the search diverged from the target path.
+        diverged_at: Nibbles,
+    },
+}
+
 impl<P: BlindedProvider> RevealedSparseTrie<P> {
+    /// Attempts to find a leaf node at the specified path.
+    ///
+    /// This method traverses the trie from the root down to the given path, checking
+    /// if a leaf exists at that path. It can be used to verify the existence of a leaf
+    /// or to generate an exclusion proof (proof that a leaf does not exist).
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: The path to search for.
+    /// - `expected_value`: Optional expected value. If provided, will verify the leaf value
+    ///   matches.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(FindLeafResult::Found)` if the leaf exists with the expected value.
+    /// - `Ok(FindLeafResult::NotFound)` if the leaf definitely does not exist (exclusion proof).
+    /// - `Err(FindLeafError)` if the search encountered a blinded node or found a different value.
+    pub fn find_leaf(
+        &self,
+        path: &Nibbles,
+        expected_value: Option<&Vec<u8>>,
+    ) -> Result<LeafLookup, LeafLookupError> {
+        let mut current = Nibbles::default(); // Start at the root
+
+        // Inclusion proof
+        //
+        // First, do a quick check if the value exists in our values map.
+        // We assume that if there exists a leaf node, then its value will
+        // be in the `values` map.
+        if let Some(actual_value) = self.values.get(path) {
+            // We found the leaf, check if the value matches (if expected value was provided)
+            if let Some(expected) = expected_value {
+                if actual_value != expected {
+                    return Err(LeafLookupError::ValueMismatch {
+                        path: path.clone(),
+                        expected: Some(expected.clone()),
+                        actual: actual_value.clone(),
+                    });
+                }
+            }
+            return Ok(LeafLookup::Found);
+        }
+
+        // If the value does not exist in the `values` map, then this means that the leaf either:
+        // - Does not exist in the trie
+        // - Is missing from the witness
+        // We traverse the trie to find the location where this leaf would have been, showing
+        // that it is not in the trie. Or we find a blinded node, showing that the witness is
+        // not complete.
+        while current.len() < path.len() {
+            match self.nodes.get(&current) {
+                None => {
+                    // No node at current path - this provides an exclusion proof.
+                    return Ok(LeafLookup::NotFound { diverged_at: current });
+                }
+                Some(SparseNode::Empty) => {
+                    // Empty node means the trie is empty - exclusion proof
+                    // TODO: double check the diff between None and Empty.
+                    return Ok(LeafLookup::NotFound { diverged_at: current });
+                }
+                Some(&SparseNode::Hash(hash)) => {
+                    // We hit a blinded node - cannot determine if leaf exists
+                    return Err(LeafLookupError::BlindedNode { path: current.clone(), hash });
+                }
+                Some(SparseNode::Leaf { key, .. }) => {
+                    // We found a leaf node before reaching our target depth
+                    let mut full_path = current.clone();
+                    full_path.extend_from_slice_unchecked(key);
+
+                    if &full_path == path {
+                        // TODO: This should be handled by the values map check above
+                        // But it's here for consistency
+                        if let Some(value) = self.values.get(path) {
+                            if let Some(expected) = expected_value {
+                                if value != expected {
+                                    return Err(LeafLookupError::ValueMismatch {
+                                        path: path.clone(),
+                                        expected: Some(expected.clone()),
+                                        actual: value.clone(),
+                                    });
+                                }
+                            }
+                            return Ok(LeafLookup::Found);
+                        }
+                    }
+
+                    // The leaf node's path doesn't match our target path,
+                    // providing an exclusion proof
+                    return Ok(LeafLookup::NotFound { diverged_at: current });
+                }
+                Some(SparseNode::Extension { key, .. }) => {
+                    // Check if the path matches the extension key prefix
+                    let mut extended_path = current.clone();
+                    extended_path.extend_from_slice_unchecked(key);
+
+                    if path.len() < extended_path.len() || !path.starts_with(&extended_path) {
+                        // Path doesn't match extension - exclusion proof
+                        return Ok(LeafLookup::NotFound { diverged_at: current });
+                    }
+
+                    // Continue traversal with the extended path
+                    current = extended_path;
+                }
+                Some(SparseNode::Branch { state_mask, .. }) => {
+                    // Check if branch has a child at the next nibble in our path
+                    let nibble = path[current.len()];
+                    if !state_mask.is_bit_set(nibble) {
+                        // No child at this nibble - exclusion proof
+                        return Ok(LeafLookup::NotFound { diverged_at: current });
+                    }
+
+                    // Continue down the branch
+                    current.push_unchecked(nibble);
+                }
+            }
+        }
+
+        // We've traversed to the end of the path and didn't find a leaf
+        // Check if there's a node exactly at our target path
+        match self.nodes.get(path) {
+            Some(SparseNode::Leaf { key, .. }) if key.is_empty() => {
+                // We found a leaf with an empty key (exact match)
+                // This should be handled by the values map check above
+                if let Some(value) = self.values.get(path) {
+                    if let Some(expected) = expected_value {
+                        if value != expected {
+                            return Err(LeafLookupError::ValueMismatch {
+                                path: path.clone(),
+                                expected: Some(expected.clone()),
+                                actual: value.clone(),
+                            });
+                        }
+                    }
+                    return Ok(LeafLookup::Found);
+                }
+            }
+            Some(&SparseNode::Hash(hash)) => {
+                return Err(LeafLookupError::BlindedNode { path: path.clone(), hash });
+            }
+            _ => {
+                // No leaf at exactly the target path - exclusion proof
+                let parent_path =
+                    if path.len() > 0 { path.slice(0..path.len() - 1) } else { Nibbles::default() };
+                return Ok(LeafLookup::NotFound { diverged_at: parent_path });
+            }
+        }
+
+        // If we get here, there's no leaf at the target path
+        Ok(LeafLookup::NotFound { diverged_at: current })
+    }
+
     /// Update the leaf node with provided value.
     pub fn update_leaf(&mut self, path: Nibbles, value: Vec<u8>) -> SparseTrieResult<()> {
         self.prefix_set.insert(path.clone());
