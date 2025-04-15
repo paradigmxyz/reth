@@ -227,7 +227,7 @@ where
     T: NodePrimitives,
     ChainSpec: EthChainSpec + Send + Sync + 'static,
 {
-    type StateCommitment = T::StateCommitment;
+    type StateCommitment = <MockNode as NodeTypes>::StateCommitment;
 }
 
 impl<T: NodePrimitives, ChainSpec: EthChainSpec + Clone + 'static> DatabaseProviderFactory
@@ -272,9 +272,8 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> DBProvider for MockEt
     }
 }
 //look
-impl<T, ChainSpec> HeaderProvider for MockEthProvider<T, ChainSpec>
+impl<ChainSpec> HeaderProvider for MockEthProvider<reth_ethereum_primitives::EthPrimitives,ChainSpec>
 where
-    T: NodePrimitives,
     ChainSpec: EthChainSpec + Send + Sync + 'static,
     {
     type Header = Header;
@@ -487,8 +486,11 @@ where
 }
 
 //look
-impl<T: NodePrimitives, ChainSpec> ReceiptProvider for MockEthProvider<T, ChainSpec> {
-    type Receipt = T::Receipt;
+impl<ChainSpec> ReceiptProvider for MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSpec>
+where
+    ChainSpec: EthChainSpec + Send + Sync + 'static,
+{
+    type Receipt = Receipt;
 
     fn receipt(&self, _id: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
         Ok(None)
@@ -511,7 +513,7 @@ impl<T: NodePrimitives, ChainSpec> ReceiptProvider for MockEthProvider<T, ChainS
 }
 
 //look
-impl<T: NodePrimitives, ChainSpec> ReceiptProviderIdExt for MockEthProvider<T ,ChainSpec> {}
+impl<ChainSpec> ReceiptProviderIdExt for MockEthProvider<reth_ethereum_primitives::EthPrimitives ,ChainSpec> {}
 
 //look
 impl<T, ChainSpec> BlockHashReader for MockEthProvider<T, ChainSpec> 
@@ -706,14 +708,12 @@ where
     }
 }
 
-//look
 impl<T: NodePrimitives, ChainSpec: Send + Sync> AccountReader for MockEthProvider<T, ChainSpec> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         Ok(self.accounts.lock().get(address).cloned().map(|a| a.account))
     }
 }
 
-//look
 impl<T: NodePrimitives, ChainSpec: Send + Sync> StageCheckpointReader for MockEthProvider<T, ChainSpec> {
     fn get_stage_checkpoint(&self, _id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
         Ok(None)
@@ -728,7 +728,6 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StageCheckpointReader for MockEt
     }
 }
 
-//look
 impl<T, ChainSpec> StateRootProvider for MockEthProvider<T, ChainSpec> 
 where 
     T: NodePrimitives,
@@ -759,7 +758,6 @@ where
     }
 }
 
-//look
 impl<T, ChainSpec> StorageRootProvider for MockEthProvider<T, ChainSpec> 
 where 
     T: NodePrimitives,
@@ -792,7 +790,6 @@ where
     }
 }
 
-//look
 impl<T, ChainSpec> StateProofProvider for MockEthProvider<T, ChainSpec>
 where
     T: NodePrimitives,
@@ -907,7 +904,6 @@ where
     }
 }
 
-
 impl<T: NodePrimitives, ChainSpec: Send + Sync> WithdrawalsProvider for MockEthProvider<T, ChainSpec> {
     fn withdrawals_by_block(
         &self,
@@ -918,7 +914,6 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> WithdrawalsProvider for MockEthP
     }
 }
 
-//look
 impl<T, ChainSpec> OmmersProvider for MockEthProvider<T, ChainSpec> 
 where 
     T: NodePrimitives,
