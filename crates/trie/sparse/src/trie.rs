@@ -1755,12 +1755,18 @@ impl SparseNode {
 /// during a deletion operation.
 #[derive(Debug)]
 struct RemovedSparseNode {
-    /// The path at whcih the node was located.
+    /// The path at which the node was located.
     path: Nibbles,
     /// The removed node
     node: SparseNode,
     /// For branch nodes, an optional nibble that should be unset due to the node being removed.
-    /// TODO: check where this is being used.
+    ///
+    /// During leaf deletion, this identifies the specific branch nibble path that
+    /// connects to the leaf being deleted. Then when restructuring the trie after deletion,
+    /// this nibble position will be cleared from the branch node's to
+    /// indicate that the child no longer exists.
+    ///
+    /// This is only set for branch nodes that have a direct path to the leaf being deleted.
     unset_branch_nibble: Option<u8>,
 }
 
