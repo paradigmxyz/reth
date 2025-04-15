@@ -93,7 +93,7 @@ impl<N: ProviderNodeTypes> PipelineSync<N> {
     pub fn new(pipeline: Pipeline<N>, pipeline_task_spawner: Box<dyn TaskSpawner>) -> Self {
         Self {
             pipeline_task_spawner,
-            pipeline_state: PipelineState::Idle(Some(pipeline)),
+            pipeline_state: PipelineState::Idle(Some(Box::new(pipeline))),
             pending_pipeline_target: None,
         }
     }
@@ -165,7 +165,7 @@ impl<N: ProviderNodeTypes> PipelineSync<N> {
         };
         let ev = match res {
             Ok((pipeline, result)) => {
-                self.pipeline_state = PipelineState::Idle(Some(pipeline));
+                self.pipeline_state = PipelineState::Idle(Some(Box::new(pipeline)));
                 BackfillEvent::Finished(result)
             }
             Err(why) => {
@@ -212,10 +212,9 @@ impl<N: ProviderNodeTypes> BackfillSync for PipelineSync<N> {
 /// blockchain tree any messages that would result in database writes, since it would result in a
 /// deadlock.
 #[derive(Debug)]
-#[expect(clippy::large_enum_variant)]
 enum PipelineState<N: ProviderNodeTypes> {
     /// Pipeline is idle.
-    Idle(Option<Pipeline<N>>),
+    Idle(Option<Box<Pipeline<N>>>),
     /// Pipeline is running and waiting for a response
     Running(oneshot::Receiver<PipelineWithResult<N>>),
 }

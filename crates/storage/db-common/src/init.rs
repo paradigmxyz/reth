@@ -45,11 +45,15 @@ const SOFT_LIMIT_COUNT_FLUSHED_UPDATES: usize = 1_000_000;
 #[derive(Debug, thiserror::Error, Clone)]
 pub enum InitStorageError {
     /// Genesis header found on static files but the database is empty.
-    #[error("static files found, but the database is uninitialized. If attempting to re-syncing, delete both.")]
+    #[error(
+        "static files found, but the database is uninitialized. If attempting to re-syncing, delete both."
+    )]
     UninitializedDatabase,
     /// An existing genesis block was found in the database, and its hash did not match the hash of
     /// the chainspec.
-    #[error("genesis hash in the storage does not match the specified chainspec: chainspec is {chainspec_hash}, database is {storage_hash}")]
+    #[error(
+        "genesis hash in the storage does not match the specified chainspec: chainspec is {chainspec_hash}, database is {storage_hash}"
+    )]
     GenesisHashMismatch {
         /// Expected genesis hash.
         chainspec_hash: B256,

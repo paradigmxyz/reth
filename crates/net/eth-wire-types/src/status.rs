@@ -273,21 +273,13 @@ impl Debug for StatusEth69 {
             write!(
                 f,
                 "Status {{\n\tversion: {:?},\n\tchain: {:?},\n\tblockhash: {},\n\tgenesis: {},\n\tforkid: {:X?}\n}}",
-                self.version,
-                self.chain,
-                hexed_blockhash,
-                hexed_genesis,
-                self.forkid
+                self.version, self.chain, hexed_blockhash, hexed_genesis, self.forkid
             )
         } else {
             write!(
                 f,
                 "Status {{ version: {:?}, chain: {:?}, blockhash: {}, genesis: {}, forkid: {:X?} }}",
-                self.version,
-                self.chain,
-                hexed_blockhash,
-                hexed_genesis,
-                self.forkid
+                self.version, self.chain, hexed_blockhash, hexed_genesis, self.forkid
             )
         }
     }
@@ -399,7 +391,9 @@ mod tests {
 
     #[test]
     fn encode_eth_status_message() {
-        let expected = hex!("f85643018a07aac59dabcdd74bc567a0feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13da0d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3c684b715077d80");
+        let expected = hex!(
+            "f85643018a07aac59dabcdd74bc567a0feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13da0d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3c684b715077d80"
+        );
         let status = Status {
             version: EthVersion::Eth67,
             chain: Chain::from_named(NamedChain::Mainnet),
@@ -419,7 +413,9 @@ mod tests {
 
     #[test]
     fn decode_eth_status_message() {
-        let data = hex!("f85643018a07aac59dabcdd74bc567a0feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13da0d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3c684b715077d80");
+        let data = hex!(
+            "f85643018a07aac59dabcdd74bc567a0feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13da0d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3c684b715077d80"
+        );
         let expected = Status {
             version: EthVersion::Eth67,
             chain: Chain::from_named(NamedChain::Mainnet),
@@ -464,7 +460,9 @@ mod tests {
 
     #[test]
     fn encode_eth69_status_message() {
-        let expected = hex!("f84b4501a0feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13da0d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3c684b715077d80");
+        let expected = hex!(
+            "f84b4501a0feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13da0d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3c684b715077d80"
+        );
         let status = StatusEth69 {
             version: EthVersion::Eth69,
             chain: Chain::from_named(NamedChain::Mainnet),
@@ -497,7 +495,9 @@ mod tests {
 
     #[test]
     fn decode_eth69_status_message() {
-        let data = hex!("0xf84b4501a0feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13da0d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3c684b715077d80");
+        let data = hex!(
+            "0xf84b4501a0feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13da0d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3c684b715077d80"
+        );
         let expected = StatusEth69 {
             version: EthVersion::Eth69,
             chain: Chain::from_named(NamedChain::Mainnet),
@@ -514,7 +514,9 @@ mod tests {
 
     #[test]
     fn encode_network_status_message() {
-        let expected = hex!("f850423884024190faa0f8514c4680ef27700751b08f37645309ce65a449616a3ea966bf39dd935bb27ba00d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5bc6845d43d2fd80");
+        let expected = hex!(
+            "f850423884024190faa0f8514c4680ef27700751b08f37645309ce65a449616a3ea966bf39dd935bb27ba00d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5bc6845d43d2fd80"
+        );
         let status = Status {
             version: EthVersion::Eth66,
             chain: Chain::from_named(NamedChain::BinanceSmartChain),
@@ -537,7 +539,9 @@ mod tests {
 
     #[test]
     fn decode_network_status_message() {
-        let data = hex!("f850423884024190faa0f8514c4680ef27700751b08f37645309ce65a449616a3ea966bf39dd935bb27ba00d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5bc6845d43d2fd80");
+        let data = hex!(
+            "f850423884024190faa0f8514c4680ef27700751b08f37645309ce65a449616a3ea966bf39dd935bb27ba00d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5bc6845d43d2fd80"
+        );
         let expected = Status {
             version: EthVersion::Eth66,
             chain: Chain::from_named(NamedChain::BinanceSmartChain),
@@ -558,7 +562,9 @@ mod tests {
 
     #[test]
     fn decode_another_network_status_message() {
-        let data = hex!("f86142820834936d68fcffffffffffffffffffffffffdeab81b8a0523e8163a6d620a4cc152c547a05f28a03fec91a2a615194cb86df9731372c0ca06499dccdc7c7def3ebb1ce4c6ee27ec6bd02aee570625ca391919faf77ef27bdc6841a67ccd880");
+        let data = hex!(
+            "f86142820834936d68fcffffffffffffffffffffffffdeab81b8a0523e8163a6d620a4cc152c547a05f28a03fec91a2a615194cb86df9731372c0ca06499dccdc7c7def3ebb1ce4c6ee27ec6bd02aee570625ca391919faf77ef27bdc6841a67ccd880"
+        );
         let expected = Status {
             version: EthVersion::Eth66,
             chain: Chain::from_id(2100),

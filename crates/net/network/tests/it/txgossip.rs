@@ -139,10 +139,10 @@ async fn test_4844_tx_gossip_penalization() {
 
     let mut peer1_tx_listener = peer1.pool().unwrap().pending_transactions_listener();
 
-    let mut gen = TransactionGenerator::new(rand::rng());
+    let mut tx_gen = TransactionGenerator::new(rand::rng());
 
     // peer 0 will be penalized for sending txs[0] over gossip
-    let txs = vec![gen.gen_eip4844_pooled(), gen.gen_eip1559_pooled()];
+    let txs = vec![tx_gen.gen_eip4844_pooled(), tx_gen.gen_eip1559_pooled()];
 
     for tx in &txs {
         let sender = tx.sender();

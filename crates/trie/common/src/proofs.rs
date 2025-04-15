@@ -617,6 +617,7 @@ impl AccountProof {
     }
 
     /// Verify the storage proofs and account proof against the provided state root.
+    #[expect(clippy::result_large_err)]
     pub fn verify(&self, root: B256) -> Result<(), ProofVerificationError> {
         // Verify storage proofs.
         for storage_proof in &self.storage_proofs {
@@ -710,6 +711,7 @@ impl StorageProof {
     }
 
     /// Verify the proof against the provided storage root.
+    #[expect(clippy::result_large_err)]
     pub fn verify(&self, root: B256) -> Result<(), ProofVerificationError> {
         let expected =
             if self.value.is_zero() { None } else { Some(encode_fixed_size(&self.value).to_vec()) };

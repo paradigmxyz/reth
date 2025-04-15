@@ -24,7 +24,7 @@ fn create_bench_state(num_accounts: usize) -> EvmState {
             info: AccountInfo {
                 balance: U256::from(100),
                 nonce: 10,
-                code_hash: B256::from_slice(&rng.gen::<[u8; 32]>()),
+                code_hash: B256::from_slice(&rng.r#gen::<[u8; 32]>()),
                 code: Default::default(),
             },
             storage,
