@@ -27,11 +27,14 @@ use std::{borrow::Cow, fmt};
 #[derive(Debug)]
 pub struct TrieMasks {
     /// Branch node hash mask, if any.
+    ///
     /// When a bit is set, the corresponding child node's hash is stored in the trie.
+    ///
+    /// This mask enables selective hashing of child nodes.
     pub hash_mask: Option<TrieMask>,
     /// Branch node tree mask, if any.
+    ///
     /// When a bit is set, the corresponding child subtree is stored in the database.
-    // TODO: This is a guess, on first pass should double check
     pub tree_mask: Option<TrieMask>,
 }
 
@@ -276,7 +279,6 @@ pub struct RevealedSparseTrie<P = DefaultBlindedProvider> {
     nodes: HashMap<Nibbles, SparseNode>,
     /// Mask information for branch nodes that require tree storage.
     /// When a branch is set, the corresponding child subtree is stored in the database.
-    /// TODO: Double check this
     branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
     /// Mask information for branch nodes that require hash storage.
     /// When a bit is set, the cooresponding child is stored as a hash in the database.
@@ -990,7 +992,6 @@ impl<P> RevealedSparseTrie<P> {
     /// # Panics
     ///
     /// If the node at provided path does not exist.
-    /// TODO: I think this function is too big
     pub fn rlp_node(
         &mut self,
         prefix_set: &mut PrefixSet,
