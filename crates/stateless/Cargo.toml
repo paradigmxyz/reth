@@ -30,6 +30,7 @@ reth-revm.workspace = true
 reth-trie = { workspace = true, default-features = false }
 reth-trie-sparse.workspace = true
 reth-chainspec.workspace = true
+reth-consensus.workspace = true
 
 # misc
 tracing.workspace = true

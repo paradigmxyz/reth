@@ -9875,6 +9875,7 @@ dependencies = [
  "itertools 0.14.0",
  "rayon",
  "reth-chainspec",
+ "reth-consensus",
  "reth-errors",
  "reth-ethereum-consensus",
  "reth-evm",

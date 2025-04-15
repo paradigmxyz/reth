@@ -2,11 +2,13 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::witness_db::WitnessDatabase;
 use alloy_consensus::{Block, BlockHeader, Header};
-use alloy_primitives::{keccak256, map::B256Map, B256};
+use alloy_primitives::{keccak256, map::B256Map, B256, U256};
 use alloy_rlp::Decodable;
 use alloy_rpc_types_debug::ExecutionWitness;
 use reth_chainspec::ChainSpec;
-use reth_ethereum_consensus::validate_block_post_execution;
+use reth_consensus::{Consensus, HeaderValidator};
+use reth_errors::ConsensusError;
+use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_primitives::{RecoveredBlock, TransactionSigned};
@@ -41,10 +43,9 @@ pub enum StatelessValidationError {
     #[error("stateless block execution failed")]
     StatelessExecutionFailed(String),
 
-    /// Error during stateless post-execution validation.
-    #[error("stateless post-execution validation failed: {0}")]
-    // StatelessPostValidationFailed(#[from] ConsensusError),
-    StatelessPostValidationFailed(String),
+    /// Error during consensus validation of the block.
+    #[error("consensus validation failed: {0}")]
+    ConsensusValidationFailed(#[from] ConsensusError),
 
     /// Error during stateless state root calculation.
     #[error("stateless state root calculation failed")]
@@ -121,7 +122,7 @@ pub fn stateless_validation(
     witness: ExecutionWitness,
     chain_spec: Arc<ChainSpec>,
 ) -> Result<B256, StatelessValidationError> {
-    let ancestor_headers: Vec<Header> = witness
+    let mut ancestor_headers: Vec<Header> = witness
         .headers
         .iter()
         .map(|serialized_header| {
@@ -130,6 +131,12 @@ pub fn stateless_validation(
                 .map_err(|_| StatelessValidationError::HeaderDeserializationFailed)
         })
         .collect::<Result<_, _>>()?;
+    // Sort the headers by their block number to ensure that they are in
+    // ascending order.
+    ancestor_headers.sort_by_key(|header| header.number());
+
+    // Validate block against pre-execution consensus rules
+    validate_block_consensus(chain_spec.clone(), &current_block)?;
 
     // Check that the ancestor headers form a contiguous chain and are not just random headers.
     let ancestor_hashes = compute_ancestor_hashes(&current_block, &ancestor_headers)?;
@@ -160,7 +167,7 @@ pub fn stateless_validation(
 
     // Post validation checks
     validate_block_post_execution(&current_block, &chain_spec, &output.receipts, &output.requests)
-        .map_err(|err| StatelessValidationError::StatelessPostValidationFailed(err.to_string()))?;
+        .map_err(StatelessValidationError::ConsensusValidationFailed)?;
 
     // Compute and check the post state root
     // TODO: Remove rayon
@@ -177,6 +184,41 @@ pub fn stateless_validation(
 
     // Return block hash
     Ok(current_block.hash_slow())
+}
+
+/// Performs consensus validation checks on a block without execution or state validation.
+///
+/// This function validates a block against Ethereum consensus rules by:
+///
+/// 1. **Difficulty Validation:** Validates the header with total difficulty to verify proof-of-work
+///    (pre-merge) or to enforce post-merge requirements.
+///
+/// 2. **Header Validation:** Validates the sealed header against protocol specifications,
+///    including:
+///    - Gas limit checks
+///    - Base fee validation for EIP-1559
+///    - Withdrawals root validation for Shanghai fork
+///    - Blob-related fields validation for Cancun fork
+///
+/// 3. **Pre-Execution Validation:** Validates block structure, transaction format, signature
+///    validity, and other pre-execution requirements.
+///
+/// This function acts as a preliminary validation before executing and validating the state
+/// transition function.
+fn validate_block_consensus(
+    chain_spec: Arc<ChainSpec>,
+    block: &RecoveredBlock<Block<TransactionSigned>>,
+) -> Result<(), StatelessValidationError> {
+    let consensus = EthBeaconConsensus::new(chain_spec);
+
+    // For the beacon chain, total difficulty is ignored.
+    consensus.validate_header_with_total_difficulty(block.header(), U256::MAX)?;
+
+    consensus.validate_header(block.sealed_header())?;
+
+    consensus.validate_block_pre_execution(block)?;
+
+    Ok(())
 }
 
 /// Verifies execution witness [`ExecutionWitness`] against an expected pre-state root.
@@ -233,25 +275,16 @@ pub fn verify_execution_witness(
     }
 }
 
-/// `BLOCKHASH_HISTORICAL_HASH_LIMIT` specifies the maximum number of historical
-/// block hashes that the [BLOCKHASH](https://www.evm.codes/?fork=cancun#40)
-/// opcode is specified to allow.
-const BLOCKHASH_HISTORICAL_HASH_LIMIT: usize = 256;
-
 /// Verifies the contiguity, number of ancestor headers and extracts their hashes.
 ///
 /// This function is used to prepare the data required for the `BLOCKHASH`
 /// opcode in a stateless execution context.
 ///
-/// It performs two main checks:
-///
-/// 1. Ensures that the number of provided `ancestor_headers` does not exceed the
-///    `BLOCKHASH_HISTORICAL_HASH_LIMIT` (256). This limit is defined by the `BLOCKHASH` opcode and
-///    has nothing to do with stateless.
-/// 2. Verifies that the provided `ancestor_headers` form a valid, unbroken chain leading back from
+/// It verifies that the provided `ancestor_headers` form a valid, unbroken chain leading back from
 ///    the parent of the `current_block`.
 ///
 /// Note: This function becomes obsolete if EIP-2935 is implemented.
+/// Note: The headers are assumed to be in ascending order.
 ///
 /// If both checks pass, it returns a [`HashMap`] mapping the block number of each
 /// ancestor header to its corresponding block hash.
@@ -259,14 +292,6 @@ fn compute_ancestor_hashes(
     current_block: &RecoveredBlock<Block<TransactionSigned>>,
     ancestor_headers: &[Header],
 ) -> Result<HashMap<u64, B256>, StatelessValidationError> {
-    // Check that we have `BLOCKHASH_HISTORICAL_HASH_LIMIT` number of
-    // ancestors.
-    if ancestor_headers.len() >= BLOCKHASH_HISTORICAL_HASH_LIMIT {
-        return Err(StatelessValidationError::AncestorHeaderLimitExceeded {
-            count: ancestor_headers.len(),
-            limit: BLOCKHASH_HISTORICAL_HASH_LIMIT,
-        });
-    }
     let mut ancestor_hashes = HashMap::with_capacity(ancestor_headers.len());
 
     let mut child_header = current_block.header();
