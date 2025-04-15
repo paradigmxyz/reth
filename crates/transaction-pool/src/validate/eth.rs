@@ -299,26 +299,25 @@ where
             )
         }
 
+        // determine the transaction should be treated as local
+        let is_local = self.local_transactions_config.is_local(origin, transaction.sender_ref());
+
         // Ensure max possible transaction fee doesn't exceed configured transaction fee cap.
         // Only for transactions locally submitted for acceptance into the pool.
-        if self.local_transactions_config.is_local(origin, transaction.sender_ref()) {
+        if is_local {
             match self.tx_fee_cap {
                 Some(0) | None => {} // Skip if cap is 0 or None
                 Some(tx_fee_cap_wei) => {
                     // max possible tx fee is (gas_price * gas_limit)
                     // (if EIP1559) max possible tx fee is (max_fee_per_gas * gas_limit)
-                    let gas_price = if transaction.is_dynamic_fee() {
-                        transaction.max_fee_per_gas()
-                    } else {
-                        transaction.gas_price().unwrap_or(0)
-                    };
+                    let gas_price = transaction.max_fee_per_gas();
                     let max_tx_fee_wei = gas_price.saturating_mul(transaction.gas_limit() as u128);
                     if max_tx_fee_wei > tx_fee_cap_wei {
                         return TransactionValidationOutcome::Invalid(
                             transaction,
                             InvalidPoolTransactionError::ExceedsFeeCap {
                                 max_tx_fee_wei,
-                                tx_fee_cap_wei
+                                tx_fee_cap_wei,
                             },
                         );
                     }
@@ -328,7 +327,7 @@ where
 
         // Drop non-local transactions with a fee lower than the configured fee for acceptance into
         // the pool.
-        if !self.local_transactions_config.is_local(origin, transaction.sender_ref()) &&
+        if !is_local &&
             transaction.is_dynamic_fee() &&
             transaction.max_priority_fee_per_gas() < self.minimum_priority_fee
         {
@@ -1096,19 +1095,20 @@ mod tests {
 
         if let TransactionValidationOutcome::Invalid(_, err) = outcome {
             assert!(matches!(
-            err,
-            InvalidPoolTransactionError::ExceedsFeeCap { max_tx_fee_wei, tx_fee_cap_wei }
-            if (max_tx_fee_wei > tx_fee_cap_wei)
-        ));
+                err,
+                InvalidPoolTransactionError::ExceedsFeeCap { max_tx_fee_wei, tx_fee_cap_wei }
+                if (max_tx_fee_wei > tx_fee_cap_wei)
+            ));
         }
 
-        let pool = Pool::new(validator, CoinbaseTipOrdering::default(), blob_store, Default::default());
+        let pool =
+            Pool::new(validator, CoinbaseTipOrdering::default(), blob_store, Default::default());
         let res = pool.add_transaction(TransactionOrigin::Local, transaction.clone()).await;
         assert!(res.is_err());
         assert!(matches!(
             res.unwrap_err().kind,
             PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::ExceedsFeeCap { .. })
-            ));
+        ));
         let tx = pool.get(transaction.hash());
         assert!(tx.is_none());
     }

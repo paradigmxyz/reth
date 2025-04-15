@@ -440,41 +440,28 @@ mod tests {
 
     #[test]
     fn test_rpc_tx_fee_cap_parse_integer() {
-        let args = CommandParser::<RpcServerArgs>::parse_from([
-            "reth",
-            "--rpc.txfeecap",
-            "2",
-        ]).args;
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.txfeecap", "2"]).args;
         let expected = 2_000_000_000_000_000_000u128; // 2 ETH in wei
         assert_eq!(args.rpc_tx_fee_cap, expected);
     }
 
     #[test]
     fn test_rpc_tx_fee_cap_parse_decimal() {
-        let args = CommandParser::<RpcServerArgs>::parse_from([
-            "reth",
-            "--rpc.txfeecap",
-            "1.5",
-        ]).args;
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.txfeecap", "1.5"]).args;
         let expected = 1_500_000_000_000_000_000u128; // 1.5 ETH in wei
         assert_eq!(args.rpc_tx_fee_cap, expected);
     }
 
     #[test]
     fn test_rpc_tx_fee_cap_parse_zero() {
-        let args = CommandParser::<RpcServerArgs>::parse_from([
-            "reth",
-            "--rpc.txfeecap",
-            "0",
-        ]).args;
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.txfeecap", "0"]).args;
         assert_eq!(args.rpc_tx_fee_cap, 0); // 0 = no cap
     }
 
     #[test]
     fn test_rpc_tx_fee_cap_parse_none() {
-        let args = CommandParser::<RpcServerArgs>::parse_from([
-            "reth"
-        ]).args;
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
         let expected = 1_000_000_000_000_000_000u128;
         assert_eq!(args.rpc_tx_fee_cap, expected); // 1 ETH default cap
     }

@@ -752,9 +752,9 @@ impl From<InvalidPoolTransactionError> for RpcPoolError {
         match err {
             InvalidPoolTransactionError::Consensus(err) => Self::Invalid(err.into()),
             InvalidPoolTransactionError::ExceedsGasLimit(_, _) => Self::ExceedsGasLimit,
-            InvalidPoolTransactionError::ExceedsFeeCap{ max_tx_fee_wei, tx_fee_cap_wei } => {
+            InvalidPoolTransactionError::ExceedsFeeCap { max_tx_fee_wei, tx_fee_cap_wei } => {
                 Self::ExceedsFeeCap { max_tx_fee_wei, tx_fee_cap_wei }
-            },
+            }
             InvalidPoolTransactionError::ExceedsMaxInitCodeSize(_, _) => {
                 Self::ExceedsMaxInitCodeSize
             }
