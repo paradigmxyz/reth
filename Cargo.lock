@@ -7815,18 +7815,14 @@ dependencies = [
 name = "reth-era-import"
 version = "1.3.9"
 dependencies = [
- "bytes",
+ "alloy-consensus",
  "eyre",
- "futures",
  "futures-util",
- "reqwest",
  "reth-db-api",
  "reth-era",
  "reth-era-downloader",
  "reth-provider",
  "reth-storage-api",
- "tempfile",
- "test-case",
  "tokio",
 ]
 
