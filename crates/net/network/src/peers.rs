@@ -626,18 +626,26 @@ impl PeersManager {
 
             if let Some(peer) = self.peers.get_mut(peer_id) {
                 if let Some(kind) = err.should_backoff() {
-                    // Increment peer.backoff_counter
-                    if kind.is_severe() {
-                        peer.severe_backoff_counter = peer.severe_backoff_counter.saturating_add(1);
+                    if peer.is_trusted() || peer.is_static() {
+                        // provide a bit more leeway for trusted peers and use a lower backoff so
+                        // that we keep re-trying them after backing off shortly
+                        let backoff = self.backoff_durations.low / 2;
+                        backoff_until = Some(std::time::Instant::now() + backoff);
+                    } else {
+                        // Increment peer.backoff_counter
+                        if kind.is_severe() {
+                            peer.severe_backoff_counter =
+                                peer.severe_backoff_counter.saturating_add(1);
+                        }
+
+                        let backoff_time =
+                            self.backoff_durations.backoff_until(kind, peer.severe_backoff_counter);
+
+                        // The peer has signaled that it is currently unable to process any more
+                        // connections, so we will hold off on attempting any new connections for a
+                        // while
+                        backoff_until = Some(backoff_time);
                     }
-
-                    let backoff_time =
-                        self.backoff_durations.backoff_until(kind, peer.severe_backoff_counter);
-
-                    // The peer has signaled that it is currently unable to process any more
-                    // connections, so we will hold off on attempting any new connections for a
-                    // while
-                    backoff_until = Some(backoff_time);
                 } else {
                     // If the error was not a backoff error, we reduce the peer's reputation
                     let reputation_change = self.reputation_weights.change(reputation_change);
