@@ -159,7 +159,7 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
             let cache_result = cache.cache.get(&key);
 
             if let Some(ref entry) = cache_result {
-                // for each precompile and input we store in lower_gas_limit the minimum gas for
+                // for each precompile and input we store in lower_gas_limit the maximum gas for
                 // which we have received an out of gas error, any gas limit below that will fail
                 // with OOG too.
                 if gas_limit <= entry.lower_gas_limit {
@@ -174,7 +174,7 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
                     return Ok(Some(result));
                 }
 
-                // for each precompile and input we store in upper_gas_limit the maximum gas for
+                // for each precompile and input we store in upper_gas_limit the minimum gas for
                 // which we obtained a success, any gas limit above that value with succeed with
                 // the same response, we can use it from the cache.
                 if gas_limit >= entry.upper_gas_limit {
