@@ -8,16 +8,20 @@ mod block;
 mod call;
 mod pending_block;
 
+use alloy_consensus::Header;
 use alloy_primitives::U256;
 use op_alloy_network::Optimism;
 pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
-use reth_network_api::NetworkInfo;
+use reth_network_api::{noop::NoopNetwork, NetworkInfo};
 use reth_node_api::{FullNodeComponents, NodePrimitives};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
-use reth_optimism_primitives::OpPrimitives;
+use reth_optimism_evm::OpEvmConfig;
+use reth_optimism_primitives::{OpBlock, OpPrimitives, OpReceipt, OpTransactionSigned};
+use reth_optimism_txpool::OpPooledTransaction;
+use reth_provider::{FullRpcProvider, NodePrimitivesProvider};
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
     helpers::{
@@ -35,7 +39,7 @@ use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner,
 };
-use reth_transaction_pool::TransactionPool;
+use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
 use std::{fmt, sync::Arc};
 
 use crate::{OpEthApiError, SequencerClient};
@@ -315,6 +319,38 @@ impl OpEthApiBuilder {
         self.sequencer_client = sequencer_client;
         self
     }
+
+    /// Creates a new minimal [`OpEthApi`] with only provider component and [`OpEvmConfig`]
+    /// component.
+    pub fn build_minimal_with_evm<P>(
+        self,
+        provider: P,
+        evm_config: OpEvmConfig,
+    ) -> OpEthApi<OpMinimalNodeWithEvm<P>>
+    where
+        P: FullRpcProvider<
+                Block = OpBlock,
+                Header = Header,
+                Receipt = OpReceipt,
+                Transaction = OpTransactionSigned,
+            > + NodePrimitivesProvider<Primitives = OpPrimitives>
+            + CanonStateSubscriptions,
+    {
+        let eth_api = reth_rpc::EthApiBuilder::new(
+            provider,
+            NoopTransactionPool::default(),
+            NoopNetwork::default(),
+            evm_config,
+        )
+        .build_inner();
+
+        OpEthApi {
+            inner: Arc::new(OpEthApiInner::<OpMinimalNodeWithEvm<P>> {
+                eth_api,
+                sequencer_client: None,
+            }),
+        }
+    }
 }
 
 impl<N> EthApiBuilder<N> for OpEthApiBuilder
@@ -343,5 +379,89 @@ where
         .build_inner();
 
         Ok(OpEthApi { inner: Arc::new(OpEthApiInner { eth_api, sequencer_client }) })
+    }
+}
+
+/// Minimal OP node, with only EVM and database, useful for building
+/// [`TraceApi`](reth_rpc::TraceApi) by itself.
+#[derive(Debug, Clone)]
+pub struct OpMinimalNodeWithEvm<P> {
+    provider: P,
+    evm_config: OpEvmConfig,
+    noop_pool: NoopTransactionPool<OpPooledTransaction>,
+    noop_network: NoopNetwork,
+}
+
+impl<P> OpMinimalNodeWithEvm<P> {
+    /// Returns new instance from given provider and [`OpEvmConfig`].
+    pub fn new(provider: P, evm_config: OpEvmConfig) -> Self {
+        Self {
+            provider,
+            evm_config,
+            noop_pool: NoopTransactionPool::<OpPooledTransaction>::default(),
+            noop_network: NoopNetwork::default(),
+        }
+    }
+}
+
+impl<P> RpcNodeCore for OpMinimalNodeWithEvm<P>
+where
+    P: Send + Sync + Clone + Unpin,
+{
+    type Primitives = OpPrimitives;
+    type Provider = P;
+    type Pool = NoopTransactionPool<OpPooledTransaction>;
+    type Evm = OpEvmConfig;
+    type Network = NoopNetwork;
+    type PayloadBuilder = ();
+
+    fn pool(&self) -> &Self::Pool {
+        &self.noop_pool
+    }
+
+    fn evm_config(&self) -> &Self::Evm {
+        &self.evm_config
+    }
+
+    fn network(&self) -> &Self::Network {
+        &self.noop_network
+    }
+
+    fn payload_builder(&self) -> &Self::PayloadBuilder {
+        &()
+    }
+
+    fn provider(&self) -> &Self::Provider {
+        &self.provider
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use alloy_rpc_types_eth::BlockId;
+    use reth_db_common::init::init_genesis;
+    use reth_optimism_chainspec::OP_DEV;
+    use reth_optimism_evm::OpEvmConfig;
+    use reth_optimism_node::OpNode;
+    use reth_provider::{
+        providers::BlockchainProvider, test_utils::create_test_provider_factory_with_node_types,
+    };
+    use reth_rpc::TraceApi;
+    use reth_rpc_eth_types::EthConfig;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn build_trace_api() {
+        let factory = create_test_provider_factory_with_node_types::<OpNode>(OP_DEV.clone());
+        let _ = init_genesis(&factory).expect("should init genesis");
+        let provider = BlockchainProvider::new(factory).expect("should build provider");
+
+        let eth_api =
+            OpEthApiBuilder::default().build_minimal_with_evm(provider, OpEvmConfig::op_dev());
+
+        let trace = TraceApi::new(eth_api, BlockingTaskGuard::new(10), EthConfig::default());
+
+        let _traces = trace.trace_block(BlockId::latest()).await.expect("should get traces");
     }
 }

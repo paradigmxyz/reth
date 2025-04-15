@@ -29,7 +29,7 @@ use reth_db_api::{
 use reth_ethereum_primitives::{Block, EthPrimitives, Receipt, TransactionSigned};
 use reth_evm::{ConfigureEvm, EvmEnv};
 use reth_execution_types::ExecutionOutcome;
-use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
+use reth_node_types::{BlockTy, HeaderTy, NodeTypes, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, BlockBody, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader, StorageEntry,
 };
@@ -155,6 +155,18 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     ) -> ProviderResult<Option<ExecutionOutcome<ReceiptTy<N>>>> {
         self.consistent_provider()?.get_state(range)
     }
+}
+
+impl<N: NodeTypesWithDB> NodeTypes for BlockchainProvider<N> {
+    type Primitives = N::Primitives;
+    type ChainSpec = N::ChainSpec;
+    type StateCommitment = N::StateCommitment;
+    type Storage = N::Storage;
+    type Payload = N::Payload;
+}
+
+impl<N: NodeTypesWithDB> NodeTypesWithDB for BlockchainProvider<N> {
+    type DB = N::DB;
 }
 
 impl<N: NodeTypesWithDB> NodePrimitivesProvider for BlockchainProvider<N> {

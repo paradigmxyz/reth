@@ -22,7 +22,6 @@ pub trait RpcNodeCore: Clone + Send + Sync {
     type Evm: Send + Sync + Clone + Unpin;
     /// Network API.
     type Network: Send + Sync + Clone;
-
     /// Builds new blocks.
     type PayloadBuilder: Send + Sync + Clone;
 
