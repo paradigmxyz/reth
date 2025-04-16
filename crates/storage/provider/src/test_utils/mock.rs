@@ -514,37 +514,32 @@ where
 // impl<ChainSpec> ReceiptProviderIdExt for MockEthProvider<reth_ethereum_primitives::EthPrimitives ,ChainSpec> {}
 
 // //look
-// impl<T, ChainSpec> BlockHashReader for MockEthProvider<T, ChainSpec> 
-// where 
-//     T: NodePrimitives,
-//     T::Block: HasHeader<Header = Header>,
-//     ChainSpec: Send + Sync +'static,
-// {
-//     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-//         let lock = self.blocks.lock();
+impl<T: NodePrimitives, ChainSpec: Send + Sync +'static> BlockHashReader for MockEthProvider<T, ChainSpec>{
+    fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
+        let lock = self.blocks.lock();
 
-//         let hash = lock.iter().find_map(|(hash, b)| (b.number == number).then_some(*hash));
-//         Ok(hash)
-//     }
+        let hash = lock.iter().find_map(|(hash, b)| (b.number == number).then_some(*hash));
+        Ok(hash)
+    }
 
-//     fn canonical_hashes_range(
-//         &self,
-//         start: BlockNumber,
-//         end: BlockNumber,
-//     ) -> ProviderResult<Vec<B256>> {
-//         let range = start..end;
-//         let lock = self.blocks.lock();
+    fn canonical_hashes_range(
+        &self,
+        start: BlockNumber,
+        end: BlockNumber,
+    ) -> ProviderResult<Vec<B256>> {
+        let range = start..end;
+        let lock = self.blocks.lock();
 
-//         let mut hashes: Vec<_> =
-//             lock.iter().filter(|(_, block)| range.contains(&block.number)).collect();
-//         hashes.sort_by_key(|(_, block)| block.number);
+        let mut hashes: Vec<_> =
+            lock.iter().filter(|(_, block)| range.contains(&block.number)).collect();
+        hashes.sort_by_key(|(_, block)| block.number);
 
-//         Ok(hashes.into_iter().map(|(hash, _)| *hash).collect())
-//     }
-// }
+        Ok(hashes.into_iter().map(|(hash, _)| *hash).collect())
+    }
+}
 
 // //look
-impl<T: NodePrimitives, ChainSpec> BlockNumReader for MockEthProvider<T, ChainSpec> 
+impl<T: NodePrimitives, ChainSpec: Send + Sync> BlockNumReader for MockEthProvider<T, ChainSpec> 
     {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
         let best_block_number = self.best_block_number()?;
