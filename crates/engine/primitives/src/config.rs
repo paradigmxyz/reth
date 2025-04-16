@@ -9,6 +9,11 @@ pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 2;
 /// Default maximum concurrency for proof tasks
 pub const DEFAULT_MAX_PROOF_TASK_CONCURRENCY: u64 = 256;
 
+/// Default number of reserved CPU cores for non-reth processes.
+///
+/// This will be deducated from the thread count of main reth global threadpool.
+pub const DEFAULT_RESERVED_CPU_CORES: usize = 1;
+
 const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = 256;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
 const DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE: usize = 4;
@@ -66,6 +71,8 @@ pub struct TreeConfig {
     has_enough_parallelism: bool,
     /// Maximum number of concurrent proof tasks
     max_proof_task_concurrency: u64,
+    /// Number of reserved CPU cores for non-reth processes
+    reserved_cpu_cores: usize,
 }
 
 impl Default for TreeConfig {
@@ -82,6 +89,7 @@ impl Default for TreeConfig {
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
             has_enough_parallelism: has_enough_parallelism(),
             max_proof_task_concurrency: DEFAULT_MAX_PROOF_TASK_CONCURRENCY,
+            reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
         }
     }
 }
@@ -101,6 +109,7 @@ impl TreeConfig {
         cross_block_cache_size: u64,
         has_enough_parallelism: bool,
         max_proof_task_concurrency: u64,
+        reserved_cpu_cores: usize,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -114,6 +123,7 @@ impl TreeConfig {
             cross_block_cache_size,
             has_enough_parallelism,
             max_proof_task_concurrency,
+            reserved_cpu_cores,
         }
     }
 
@@ -145,6 +155,11 @@ impl TreeConfig {
     /// Return the maximum proof task concurrency.
     pub const fn max_proof_task_concurrency(&self) -> u64 {
         self.max_proof_task_concurrency
+    }
+
+    /// Return the number of reserved CPU cores for non-reth processes
+    pub const fn reserved_cpu_cores(&self) -> usize {
+        self.reserved_cpu_cores
     }
 
     /// Returns whether to use the legacy state root calculation method instead
@@ -248,6 +263,12 @@ impl TreeConfig {
         max_proof_task_concurrency: u64,
     ) -> Self {
         self.max_proof_task_concurrency = max_proof_task_concurrency;
+        self
+    }
+
+    /// Setter for the number of reserved CPU cores for any non-reth processes
+    pub const fn with_reserved_cpu_cores(mut self, reserved_cpu_cores: usize) -> Self {
+        self.reserved_cpu_cores = reserved_cpu_cores;
         self
     }
 
