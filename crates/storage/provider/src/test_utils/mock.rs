@@ -344,144 +344,149 @@ where
     }
 }
 
-// //look
-// impl<T, ChainSpec> TransactionsProvider for MockEthProvider<T, ChainSpec>
-// where
-//     T: NodePrimitives,
-//     ChainSpec: EthChainSpec + Send + Sync + 'static,
-//     T::Transaction: SignedTransaction + Clone + Send + Sync,
-// {
-//     type Transaction = T::Transaction;
+//look
+impl<T, ChainSpec> TransactionsProvider for MockEthProvider<T, ChainSpec>
+where
+    T: NodePrimitives,
+    ChainSpec: EthChainSpec + Send + Sync + 'static,
+{
+    type Transaction = reth_ethereum_primitives::TransactionSigned;
 
-//     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
-//         let lock = self.blocks.lock().unwrap();
-//         let tx_number = lock
-//             .values()
-//             .flat_map(|block| &block.body.transactions)
-//             .position(|tx| *tx.tx_hash() == tx_hash)
-//             .map(|pos| pos as TxNumber);
+    fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
+        let lock = self.blocks.lock();
+        let tx_number = lock
+            .values()
+            .flat_map(|block| &block.body.transactions)
+            .position(|tx| *tx.tx_hash() == tx_hash)
+            .map(|pos| pos as TxNumber);
 
-//         Ok(tx_number)
-//     }
+        Ok(tx_number)
+    }
 
-//     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
-//         let lock = self.blocks.lock().unwrap();
-//         let transaction =
-//             lock.values().flat_map(|block| &block.body.transactions).nth(id as usize).cloned();
+    fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
+        let lock = self.blocks.lock();
+        let transaction =
+            lock.values().flat_map(|block| &block.body.transactions).nth(id as usize).cloned();
 
-//         Ok(transaction)
-//     }
+        Ok(transaction)
+    }
 
-//     fn transaction_by_id_unhashed(&self, id: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
-//         self.transaction_by_id(id)
-//     }
+    fn transaction_by_id_unhashed(
+        &self,
+        id: TxNumber,
+    ) -> ProviderResult<Option<Self::Transaction>> {
+        let lock = self.blocks.lock();
+        let transaction =
+            lock.values().flat_map(|block| &block.body.transactions).nth(id as usize).cloned();
 
-//     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Transaction>> {
-//         Ok(self.blocks.lock().unwrap().iter().find_map(|(_, block)| {
-//             block.body.transactions.iter().find(|tx| *tx.tx_hash() == hash).cloned()
-//         }))
-//     }
+        Ok(transaction)
+    }
 
-//     fn transaction_by_hash_with_meta(
-//         &self,
-//         hash: TxHash,
-//     ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
-//         let lock = self.blocks.lock().unwrap();
-//         for (block_hash, block) in lock.iter() {
-//             for (index, tx) in block.body.transactions.iter().enumerate() {
-//                 if *tx.tx_hash() == hash {
-//                     let meta = TransactionMeta {
-//                         tx_hash: hash,
-//                         index: index as u64,
-//                         block_hash: *block_hash,
-//                         block_number: block.header.number,
-//                         base_fee: block.header.base_fee_per_gas,
-//                         excess_blob_gas: block.header.excess_blob_gas,
-//                         timestamp: block.header.timestamp,
-//                     };
-//                     return Ok(Some((tx.clone(), meta)));
-//                 }
-//             }
-//         }
-//         Ok(None)
-//     }
+    fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Transaction>> {
+        Ok(self.blocks.lock().iter().find_map(|(_, block)| {
+            block.body.transactions.iter().find(|tx| *tx.tx_hash() == hash).cloned()
+        }))
+    }
 
-//     fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-//         let lock = self.blocks.lock().unwrap();
-//         let mut current_tx_number: TxNumber = 0;
-//         for block in lock.values() {
-//             let block_tx_count = block.body.transactions.len() as TxNumber;
-//             if current_tx_number + block_tx_count > id {
-//                 return Ok(Some(block.header.number));
-//             }
-//             current_tx_number += block_tx_count;
-//         }
-//         Ok(None)
-//     }
+    fn transaction_by_hash_with_meta(
+        &self,
+        hash: TxHash,
+    ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
+        let lock = self.blocks.lock();
+        for (block_hash, block) in lock.iter() {
+            for (index, tx) in block.body.transactions.iter().enumerate() {
+                if *tx.tx_hash() == hash {
+                    let meta = TransactionMeta {
+                        tx_hash: hash,
+                        index: index as u64,
+                        block_hash: *block_hash,
+                        block_number: block.header.number,
+                        base_fee: block.header.base_fee_per_gas,
+                        excess_blob_gas: block.header.excess_blob_gas,
+                        timestamp: block.header.timestamp,
+                    };
+                    return Ok(Some((tx.clone(), meta)))
+                }
+            }
+        }
+        Ok(None)
+    }
 
-//     fn transactions_by_block(
-//         &self,
-//         id: BlockHashOrNumber,
-//     ) -> ProviderResult<Option<Vec<Self::Transaction>>> {
-//         Ok(self.block(id)?.map(|b| b.body.transactions.clone()))
-//     }
+    fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
+        let lock = self.blocks.lock();
+        let mut current_tx_number: TxNumber = 0;
+        for block in lock.values() {
+            if current_tx_number + (block.body.transactions.len() as TxNumber) > id {
+                return Ok(Some(block.header.number))
+            }
+            current_tx_number += block.body.transactions.len() as TxNumber;
+        }
+        Ok(None)
+    }
 
-//     fn transactions_by_block_range(
-//         &self,
-//         range: impl RangeBounds<BlockNumber>,
-//     ) -> ProviderResult<Vec<Vec<Self::Transaction>>> {
-//         let mut map = BTreeMap::new();
-//         for (_, block) in self.blocks.lock().unwrap().iter() {
-//             if range.contains(&block.number) {
-//                 map.insert(block.number, block.body.transactions.clone());
-//             }
-//         }
+    fn transactions_by_block(
+        &self,
+        id: BlockHashOrNumber,
+    ) -> ProviderResult<Option<Vec<Self::Transaction>>> {
+        Ok(self.block(id)?.map(|b| b.body.transactions))
+    }
 
-//         Ok(map.into_values().collect())
-//     }
+    fn transactions_by_block_range(
+        &self,
+        range: impl RangeBounds<alloy_primitives::BlockNumber>,
+    ) -> ProviderResult<Vec<Vec<Self::Transaction>>> {
+        // init btreemap so we can return in order
+        let mut map = BTreeMap::new();
+        for (_, block) in self.blocks.lock().iter() {
+            if range.contains(&block.number) {
+                map.insert(block.number, block.body.transactions.clone());
+            }
+        }
 
-//     fn transactions_by_tx_range(
-//         &self,
-//         range: impl RangeBounds<TxNumber>,
-//     ) -> ProviderResult<Vec<Self::Transaction>> {
-//         let lock = self.blocks.lock().unwrap();
-//         let transactions = lock
-//             .values()
-//             .flat_map(|block| &block.body.transactions)
-//             .enumerate()
-//             .filter(|&(tx_number, _)| range.contains(&(tx_number as TxNumber)))
-//             .map(|(_, tx)| tx.clone())
-//             .collect();
+        Ok(map.into_values().collect())
+    }
 
-//         Ok(transactions)
-//     }
+    fn transactions_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Self::Transaction>> {
+        let lock = self.blocks.lock();
+        let transactions = lock
+            .values()
+            .flat_map(|block| &block.body.transactions)
+            .enumerate()
+            .filter(|&(tx_number, _)| range.contains(&(tx_number as TxNumber)))
+            .map(|(_, tx)| tx.clone())
+            .collect();
 
-//     fn senders_by_tx_range(
-//         &self,
-//         range: impl RangeBounds<TxNumber>,
-//     ) -> ProviderResult<Vec<Address>> {
-//         let lock = self.blocks.lock().unwrap();
-//         let senders = lock
-//             .values()
-//             .flat_map(|block| &block.body.transactions)
-//             .enumerate()
-//             .filter_map(|(tx_number, tx)| {
-//                 if range.contains(&(tx_number as TxNumber)) {
-//                     tx.recover_signer().ok()
-//                 } else {
-//                     None
-//                 }
-//             })
-//             .collect();
+        Ok(transactions)
+    }
 
-//         Ok(senders)
-//     }
+    fn senders_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Address>> {
+        let lock = self.blocks.lock();
+        let transactions = lock
+            .values()
+            .flat_map(|block| &block.body.transactions)
+            .enumerate()
+            .filter_map(|(tx_number, tx)| {
+                if range.contains(&(tx_number as TxNumber)) {
+                    tx.recover_signer().ok()
+                } else {
+                    None
+                }
+            })
+            .collect();
 
-//     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
-//         self.transaction_by_id(id)
-//             .map(|tx_opt| tx_opt.map(|tx| tx.recover_signer().unwrap()))
-//     }
-// }
+        Ok(transactions)
+    }
+
+    fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
+        self.transaction_by_id(id).map(|tx_option| tx_option.map(|tx| tx.recover_signer().unwrap()))
+    }
+}
 
 // //look
 impl<T, ChainSpec> ReceiptProvider for MockEthProvider<T, ChainSpec>
