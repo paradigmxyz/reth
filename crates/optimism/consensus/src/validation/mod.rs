@@ -51,7 +51,7 @@ where
     match (header.withdrawals_root(), body.calculate_withdrawals_root()) {
         (Some(header_withdrawals_root), Some(withdrawals_root)) => {
             // after isthmus, the withdrawals root field is repurposed and no longer mirrors the
-            // withdrawals root only check
+            // withdrawals root computed from the body
             if chain_spec.is_isthmus_active_at_timestamp(header.timestamp()) {
                 // After isthmus we only ensure that the body has empty withdrawals
                 if withdrawals_root != EMPTY_ROOT_HASH {
@@ -60,7 +60,7 @@ where
                     ))
                 }
             } else {
-                // before isthmust we ensure that the header root matches the body
+                // before isthmus we ensure that the header root matches the body
                 if withdrawals_root != header_withdrawals_root {
                     return Err(ConsensusError::BodyWithdrawalsRootDiff(
                         GotExpected { got: withdrawals_root, expected: header_withdrawals_root }
