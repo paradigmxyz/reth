@@ -1070,7 +1070,6 @@ pub enum LeafLookupError {
     },
     /// The path leads to a leaf with a different value than expected.
     /// This means the witness is malformed.
-    /// TODO: double check the code to see if this can happen
     ValueMismatch {
         /// Path to the leaf.
         path: Nibbles,
