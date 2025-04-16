@@ -95,10 +95,10 @@ where
         }
     }
 }
-// pub trait HasHeader {
-//     type Header;
-//     fn header(&self) -> &Self::Header;
-// }
+pub trait HasHeader {
+     type Header;
+     fn header(&self) -> &Self::Header;
+ }
 // pub trait BlockFields {
 //     fn number(&self) -> u64;
 // }
