@@ -1169,8 +1169,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                     full_path.extend_from_slice_unchecked(key);
 
                     if &full_path == path {
-                        // TODO: This should be handled by the values map check above
-                        // TODO: But it's here for consistency
+                        // This should have been handled by our initial values map check
                         if let Some(value) = self.values.get(path) {
                             check_value_match(value, expected_value, path)?;
                             return Ok(LeafLookup::Found);
