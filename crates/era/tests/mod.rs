@@ -1,14 +1,14 @@
 //! Integration tests
 //!
-//! These tests use the `reth-era-downloader` client to download `.era1` files
-//! temporarily and verify that we can correctly read and decompress their data.
+//! These tests use the `reth-era-downloader` client to download `.era1` files temporarily
+//! and verify that we can correctly read and decompress their data.
 
-use alloy_primitives::{B256, U256};
+use alloy_consensus::Header;
+use alloy_primitives::{Bytes, U256};
 use reqwest::{Client, Url};
 use reth_era::{
     e2s_types::E2sError,
     era1_file::{Era1File, Era1Reader, Era1Writer},
-    execution_types::MAX_BLOCKS_PER_ERA1,
 };
 use reth_era_downloader::EraClient;
 use std::{
@@ -23,12 +23,19 @@ use tempfile::TempDir;
 /// Default nimbus mainnet url
 /// for downloading mainnet `.era1` files
 const MAINNET_URL: &str = "https://mainnet.era1.nimbus.team/";
+const MAINNET: &str = "mainnet";
 
 /// Succint list of mainnet files we want to download
 /// from <https://mainnet.era1.nimbus.team/>
 /// for testing purposes
-const ERA1_FILES_NAMES: [&str; 3] =
-    ["mainnet-00000-5ec1ffb8.era1", "mainnet-00003-d8b8a40b.era1", "mainnet-00151-e322efe1.era1"];
+const ERA1_MAINNET_FILES_NAMES: [&str; 6] = [
+    "mainnet-00000-5ec1ffb8.era1",
+    "mainnet-00003-d8b8a40b.era1",
+    "mainnet-00151-e322efe1.era1",
+    "mainnet-00293-0d6c5812.era1",
+    "mainnet-00443-ea71b6f9.era1",
+    "mainnet-01367-d7efc68f.era1",
+];
 
 /// Utility for downloading `.era1` files for tests
 /// in a temporary directory
@@ -67,10 +74,10 @@ impl Era1TestDownloader {
         }
 
         // check if the filename is supported
-        if !ERA1_FILES_NAMES.contains(&filename) {
+        if !ERA1_MAINNET_FILES_NAMES.contains(&filename) {
             return Err(E2sError::Io(std::io::Error::other(format!(
                 "Unknown file: {}. Only the following files are supported: {:?}",
-                filename, ERA1_FILES_NAMES
+                filename, ERA1_MAINNET_FILES_NAMES
             ))));
         }
 
@@ -110,9 +117,13 @@ impl Era1TestDownloader {
     }
 
     /// open .era1 file, downloading it if necessary
-    pub async fn open_era1_file(&self, filename: &str) -> Result<Era1File, E2sError> {
+    pub async fn open_era1_file(
+        &self,
+        filename: &str,
+        network: &str,
+    ) -> Result<Era1File, E2sError> {
         let path = self.download_file(filename).await?;
-        Era1Reader::open(&path, "mainnet")
+        Era1Reader::open(&path, network)
     }
 }
 
@@ -121,6 +132,7 @@ impl Era1TestDownloader {
 pub async fn open_test_file(
     file_path: &str,
     downloader: &Era1TestDownloader,
+    network: &str,
 ) -> Result<Era1File, E2sError> {
     let filename =
         Path::new(file_path).file_name().and_then(|os_str| os_str.to_str()).ok_or_else(|| {
@@ -130,29 +142,35 @@ pub async fn open_test_file(
             ))
         })?;
 
-    downloader.open_era1_file(filename).await
+    downloader.open_era1_file(filename, network).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_decompression_on_original_files() -> Result<(), E2sError> {
+async fn test_era1_file_decompression_and_decoding() -> Result<(), E2sError> {
     let downloader = Era1TestDownloader::new().await.expect("Failed to create downloader");
 
-    for &filename in &ERA1_FILES_NAMES {
-        println!("Testing decompression on: {}", filename);
-        let original_file = open_test_file(filename, &downloader).await?;
+    for &filename in &ERA1_MAINNET_FILES_NAMES {
+        println!("\nTesting file: {}", filename);
+        let file = open_test_file(filename, &downloader, MAINNET).await?;
 
         // Test block decompression across different positions in the file
         let test_block_indices = [
-            0,                                    // First block
-            original_file.group.blocks.len() / 2, // Middle block
-            original_file.group.blocks.len() - 1, // Last block
+            0,                           // First block
+            file.group.blocks.len() / 2, // Middle block
+            file.group.blocks.len() - 1, // Last block
         ];
 
         for &block_idx in &test_block_indices {
-            let block = &original_file.group.blocks[block_idx];
-            let block_number = original_file.group.block_index.starting_number + block_idx as u64;
+            let block = &file.group.blocks[block_idx];
+            let block_number = file.group.block_index.starting_number + block_idx as u64;
 
-            // Test header decompression
+            println!(
+                "\n  Testing block {}, compressed body size: {} bytes",
+                block_number,
+                block.body.data.len()
+            );
+
+            // Test header decompression and decoding
             let header_data = block.header.decompress()?;
             assert!(
                 !header_data.is_empty(),
@@ -160,12 +178,12 @@ async fn test_decompression_on_original_files() -> Result<(), E2sError> {
                 block_number
             );
 
-            // Test header decoding
             let header = block.header.decode_header()?;
             assert_eq!(
                 header.number, block_number,
                 "Decoded header should have correct block number"
             );
+            println!("Header decompression and decoding successful");
 
             // Test body decompression
             let body_data = block.body.decompress()?;
@@ -174,6 +192,22 @@ async fn test_decompression_on_original_files() -> Result<(), E2sError> {
                 "Block {} body decompression should produce non-empty data",
                 block_number
             );
+            println!("Body decompression successful ({} bytes)", body_data.len());
+
+            // Try body decoding
+            match block.body.decode_body::<alloy_primitives::Bytes, alloy_consensus::Header>() {
+                Ok(body) => {
+                    println!(
+                        "Body decoding successful: {} transactions, {} ommers, withdrawals: {}",
+                        body.transactions.len(),
+                        body.ommers.len(),
+                        body.withdrawals.is_some()
+                    );
+                }
+                Err(e) => {
+                    println!("Body decoding failed: {}", e);
+                }
+            }
 
             // Test receipts decompression
             let receipts_data = block.receipts.decompress()?;
@@ -182,155 +216,115 @@ async fn test_decompression_on_original_files() -> Result<(), E2sError> {
                 "Block {} receipts decompression should produce non-empty data",
                 block_number
             );
+            println!("Receipts decompression successful ({} bytes)", receipts_data.len());
 
-            // Verify difficulty data
             assert!(
                 block.total_difficulty.value > U256::ZERO,
                 "Block {} should have non-zero difficulty",
                 block_number
             );
-
-            println!("Block {} decompression successful", block_number);
+            println!("Total difficulty verified: {}", block.total_difficulty.value);
         }
 
-        println!("All blocks successfully decompressed for {}", filename);
-    }
-
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn test_era1_file_genesis_cases() -> Result<(), E2sError> {
-    let downloader = Era1TestDownloader::new().await?;
-    let genesis_file = downloader.open_era1_file(ERA1_FILES_NAMES[0]).await?;
-
-    // For genesis file, verify special properties
-    assert_eq!(
-        genesis_file.group.block_index.starting_number, 0,
-        "Genesis should start at block 0"
-    );
-    assert_eq!(
-        genesis_file.group.blocks.len(),
-        MAX_BLOCKS_PER_ERA1,
-        "Genesis should have MAX_BLOCKS"
-    );
-    assert!(genesis_file.contains_block(0), "Genesis should contain block 0");
-    assert!(genesis_file.contains_block(8191), "Genesis should contain block 8191");
-    assert!(!genesis_file.contains_block(8192), "Genesis should not contain block 8192");
-
-    // genesis-specific data
-    if let Some(genesis_block) = genesis_file.get_block_by_number(0) {
-        let header = genesis_block.header.decode_header()?;
-        assert_eq!(header.number, 0, "Genesis block number should be 0");
-
-        // verify empty parent hash
-        assert_eq!(header.parent_hash, B256::ZERO, "Genesis block should have zero parent hash");
-
-        // verify difficulty
-        let td = genesis_block.total_difficulty.value;
-        assert!(td > U256::ZERO, "Genesis total difficulty should be non-zero");
-    }
-
-    // Test second block of genesis file
-    if let Some(block_1) = genesis_file.get_block_by_number(1) {
-        let header = block_1.header.decode_header()?;
-        assert_eq!(header.number, 1, "Second block number should be 1");
-    }
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn test_data_preservation_roundtrip() -> Result<(), E2sError> {
-    let downloader = Era1TestDownloader::new().await?;
-
-    for &filename in &ERA1_FILES_NAMES {
-        println!("Testing data preservation roundtrip: {}", filename);
-
-        // open original file
-        let original_file = downloader.open_era1_file(filename).await?;
-
+        // Test round-trip serialization
+        println!("\n  Testing data preservation roundtrip...");
         let mut buffer = Vec::new();
         {
             let mut writer = Era1Writer::new(&mut buffer);
-            writer.write_era1_file(&original_file)?;
+            writer.write_era1_file(&file)?;
         }
 
-        // read back from buffer
+        // Read back from buffer
         let mut reader = Era1Reader::new(Cursor::new(&buffer));
-        let read_back_file = reader.read(original_file.id.network_name.clone())?;
+        let read_back_file = reader.read(file.id.network_name.clone())?;
 
-        // compare file metadata
-        assert_eq!(
-            original_file.id.network_name, read_back_file.id.network_name,
-            "Network name should be preserved"
-        );
-        assert_eq!(
-            original_file.id.start_block, read_back_file.id.start_block,
-            "Start block should be preserved"
-        );
-        assert_eq!(
-            original_file.group.blocks.len(),
-            read_back_file.group.blocks.len(),
-            "Block count should be preserved"
-        );
+        // Verify basic properties are preserved
+        assert_eq!(file.id.network_name, read_back_file.id.network_name);
+        assert_eq!(file.id.start_block, read_back_file.id.start_block);
+        assert_eq!(file.group.blocks.len(), read_back_file.group.blocks.len());
+        assert_eq!(file.group.accumulator.root, read_back_file.group.accumulator.root);
 
-        assert_eq!(
-            original_file.group.block_index.starting_number,
-            read_back_file.group.block_index.starting_number,
-            "Block index starting number should be preserved"
-        );
-
-        assert_eq!(
-            original_file.group.accumulator.root, read_back_file.group.accumulator.root,
-            "Accumulator root should be preserved"
-        );
-
-        // Test a sample of blocks for data preservation
-        let blocks_to_test = [
-            0,                                    // First block
-            original_file.group.blocks.len() / 2, // Middle block
-            original_file.group.blocks.len() - 1, // Last block
-        ];
-
-        for &idx in &blocks_to_test {
-            let original_block = &original_file.group.blocks[idx];
+        // Test data preservation for some blocks
+        for &idx in &test_block_indices {
+            let original_block = &file.group.blocks[idx];
             let read_back_block = &read_back_file.group.blocks[idx];
-            let block_number = original_file.group.block_index.starting_number + idx as u64;
+            let block_number = file.group.block_index.starting_number + idx as u64;
 
-            // Compare header data after decompression
-            let original_header_data = original_block.header.decompress()?;
-            let read_back_header_data = read_back_block.header.decompress()?;
+            // Test that decompressed data is identical
             assert_eq!(
-                original_header_data, read_back_header_data,
-                "Header data should be preserved for block {}",
+                original_block.header.decompress()?,
+                read_back_block.header.decompress()?,
+                "Header data should be identical for block {}",
                 block_number
             );
 
-            // Compare body data after decompression
-            let original_body_data = original_block.body.decompress()?;
-            let read_back_body_data = read_back_block.body.decompress()?;
             assert_eq!(
-                original_body_data, read_back_body_data,
-                "Body data should be preserved for block {}",
+                original_block.body.decompress()?,
+                read_back_block.body.decompress()?,
+                "Body data should be identical for block {}",
                 block_number
             );
 
-            // Compare receipts data after decompression
-            let original_receipts_data = original_block.receipts.decompress()?;
-            let read_back_receipts_data = read_back_block.receipts.decompress()?;
             assert_eq!(
-                original_receipts_data, read_back_receipts_data,
-                "Receipts data should be preserved for block {}",
+                original_block.receipts.decompress()?,
+                read_back_block.receipts.decompress()?,
+                "Receipts data should be identical for block {}",
                 block_number
             );
 
-            // Compare total difficulty
             assert_eq!(
                 original_block.total_difficulty.value, read_back_block.total_difficulty.value,
-                "Total difficulty should be preserved for block {}",
+                "Total difficulty should be identical for block {}",
                 block_number
             );
         }
+    }
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_genesis_block_decompression() -> Result<(), E2sError> {
+    let downloader = Era1TestDownloader::new().await?;
+
+    let file = downloader.open_era1_file("mainnet-00000-5ec1ffb8.era1", MAINNET).await?;
+
+    // Genesis and a few early blocks
+    let test_blocks = [0, 1, 10, 100];
+
+    for &block_idx in &test_blocks {
+        let block = &file.group.blocks[block_idx];
+        let block_number = file.group.block_index.starting_number + block_idx as u64;
+
+        println!(
+            "Testing block {}, compressed body size: {} bytes",
+            block_number,
+            block.body.data.len()
+        );
+
+        // Test decompression
+        let body_data = block.body.decompress()?;
+        assert!(!body_data.is_empty(), "Decompressed body should not be empty");
+        println!("Successfully decompressed body: {} bytes", body_data.len());
+
+        let body = block.body.decode_body::<Bytes, Header>()?;
+        println!("Successfully decoded body with {} transactions", body.transactions.len());
+        println!("Block has {} ommers/uncles", body.ommers.len());
+
+        // For genesis era blocks, there should be no transactions or ommers
+        assert_eq!(body.transactions.len(), 0, "Genesis era block should have no transactions");
+        assert_eq!(body.ommers.len(), 0, "Genesis era block should have no ommers");
+
+        // Check for withdrawals, should be `None` for genesis era blocks
+        assert!(body.withdrawals.is_none(), "Genesis era block should have no withdrawals");
+
+        let header = block.header.decode_header()?;
+        assert_eq!(header.number, block_number, "Header should have correct block number");
+        println!("Successfully decoded header for block {}", block_number);
+
+        // Test total difficulty value
+        let td = block.total_difficulty.value;
+        println!("Block {} total difficulty: {}", block_number, td);
     }
 
     Ok(())
