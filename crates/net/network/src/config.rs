@@ -6,7 +6,7 @@ use crate::{
     transactions::TransactionsManagerConfig,
     NetworkHandle, NetworkManager,
 };
-use reth_chainspec::{Chain, ChainSpecProvider, EthChainSpec, Hardforks};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, Hardforks};
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOVERY_ADDRESS};
 use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
@@ -754,8 +754,7 @@ mod tests {
     fn test_discv5_fork_id_default() {
         const GENESIS_TIME: u64 = 151_515;
 
-        let mut genesis = Genesis::default();
-        genesis.timestamp = GENESIS_TIME;
+        let genesis = Genesis::default().with_timestamp(GENESIS_TIME);
 
         let active_fork = (EthereumHardfork::Shanghai, ForkCondition::Timestamp(GENESIS_TIME));
         let future_fork = (EthereumHardfork::Cancun, ForkCondition::Timestamp(GENESIS_TIME + 1));
@@ -799,13 +798,12 @@ mod tests {
 
         // peers on the odyssey network will check discovered enrs for the 'odyssey' key and
         // decide based on this if they attempt and rlpx connection to the peer or not
-        let advertised_fork_id = local_enr
+        let advertised_fork_id = *local_enr
             .get_decodable::<Vec<ForkId>>(fork_key)
             .expect("should read 'odyssey'")
             .expect("should decode fork id list")
             .first()
-            .expect("should be non-empty")
-            .clone();
+            .expect("should be non-empty");
 
         assert_eq!(advertised_fork_id, fork_id);
     }
