@@ -665,35 +665,35 @@ where
 }
 
 // //look
-// impl<ChainSpec> BlockReaderIdExt for MockEthProvider<reth_ethereum_primitives::Eth, ChainSpec>
-// where 
-//     ChainSpec: EthChainSpec,
-// {
-//     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<reth_ethereum_primitives::Block>> {
-//         match id {
-//             BlockId::Number(num) => self.block_by_number_or_tag(num),
-//             BlockId::Hash(hash) => self.block_by_hash(hash.block_hash),
-//         }
-//     }
+impl<ChainSpec> BlockReaderIdExt for MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSpec>
+where
+    ChainSpec: EthChainSpec + Send + Sync + 'static,
+{
+    fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<reth_ethereum_primitives::Block>> {
+        match id {
+            BlockId::Number(num) => self.block_by_number_or_tag(num),
+            BlockId::Hash(hash) => self.block_by_hash(hash.block_hash),
+        }
+    }
 
-//     fn sealed_header_by_id(&self, id: BlockId) -> ProviderResult<Option<SealedHeader>> {
-//         self.header_by_id(id)?.map_or_else(|| Ok(None), |h| Ok(Some(SealedHeader::seal_slow(h))))
-//     }
+    fn sealed_header_by_id(&self, id: BlockId) -> ProviderResult<Option<SealedHeader>> {
+        self.header_by_id(id)?.map_or_else(|| Ok(None), |h| Ok(Some(SealedHeader::seal_slow(h))))
+    }
 
-//     fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<Header>> {
-//         match self.block_by_id(id)? {
-//             None => Ok(None),
-//             Some(block) => Ok(Some(block.header().clone())),
-//         }
-//     }
+    fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<Header>> {
+        match self.block_by_id(id)? {
+            None => Ok(None),
+            Some(block) => Ok(Some(block.header().clone())),
+        }
+    }
 
-//     fn ommers_by_id(&self, id: BlockId) -> ProviderResult<Option<Vec<Header>>> {
-//         match id {
-//             BlockId::Number(num) => self.ommers_by_number_or_tag(num),
-//             BlockId::Hash(hash) => self.ommers(BlockHashOrNumber::Hash(hash.block_hash)),
-//         }
-//     }
-// }
+    fn ommers_by_id(&self, id: BlockId) -> ProviderResult<Option<Vec<Header>>> {
+        match id {
+            BlockId::Number(num) => self.ommers_by_number_or_tag(num),
+            BlockId::Hash(hash) => self.ommers(BlockHashOrNumber::Hash(hash.block_hash)),
+        }
+    }
+}
 
 impl<T: NodePrimitives, ChainSpec: Send + Sync> AccountReader for MockEthProvider<T, ChainSpec> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
