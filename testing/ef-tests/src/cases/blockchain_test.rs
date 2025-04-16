@@ -8,10 +8,11 @@ use alloy_rlp::Decodable;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_chainspec::ChainSpec;
 use reth_ethereum_consensus::EthBeaconConsensus;
-use reth_primitives::{BlockBody, SealedBlock, StaticFileSegment};
+use reth_ethereum_primitives::Block;
+use reth_primitives_traits::SealedBlock;
 use reth_provider::{
     providers::StaticFileWriter, test_utils::create_test_provider_factory_with_chain_spec,
-    DatabaseProviderFactory, HashingWriter, StaticFileProviderFactory,
+    DatabaseProviderFactory, HashingWriter, StaticFileProviderFactory, StaticFileSegment,
 };
 use reth_stages::{stages::ExecutionStage, ExecInput, Stage};
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
@@ -92,9 +93,9 @@ impl Case for BlockchainTestCase {
 
                 // Insert initial test state into the provider.
                 provider.insert_historical_block(
-                    SealedBlock::<reth_primitives::Block>::from_sealed_parts(
+                    SealedBlock::<Block>::from_sealed_parts(
                         case.genesis_block_header.clone().into(),
-                        BlockBody::default(),
+                        Default::default(),
                     )
                     .try_recover()
                     .unwrap(),
@@ -112,10 +113,9 @@ impl Case for BlockchainTestCase {
 
                 // Decode and insert blocks, creating a chain of blocks for the test case.
                 let last_block = case.blocks.iter().try_fold(None, |_, block| {
-                    let decoded =
-                        SealedBlock::<reth_primitives::Block>::decode(&mut block.rlp.as_ref())?;
+                    let decoded = SealedBlock::<Block>::decode(&mut block.rlp.as_ref())?;
                     provider.insert_historical_block(decoded.clone().try_recover().unwrap())?;
-                    Ok::<Option<SealedBlock>, Error>(Some(decoded))
+                    Ok::<Option<SealedBlock<Block>>, Error>(Some(decoded))
                 })?;
                 provider
                     .static_file_provider()

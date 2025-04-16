@@ -18,21 +18,23 @@ use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
+use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::{metrics, metrics::Gauge, Metrics};
 use reth_node_api::NewPayloadError;
 use reth_primitives_traits::{
     constants::GAS_LIMIT_BOUND_DIVISOR, BlockBody, GotExpected, NodePrimitives, RecoveredBlock,
     SealedBlock, SealedHeaderFor,
 };
-use reth_provider::{BlockExecutionOutput, BlockReaderIdExt, StateProviderFactory};
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
 use reth_rpc_api::BlockSubmissionValidationApiServer;
 use reth_rpc_server_types::result::internal_rpc_err;
+use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use revm_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{oneshot, RwLock};
+use tracing::warn;
 
 /// The type that implements the `validation` rpc namespace trait
 #[derive(Clone, Debug, derive_more::Deref)]
@@ -416,6 +418,7 @@ where
         &self,
         _request: BuilderBlockValidationRequest,
     ) -> RpcResult<()> {
+        warn!(target: "rpc::flashbots", "Method `flashbots_validateBuilderSubmissionV1` is not supported");
         Err(internal_rpc_err("unimplemented"))
     }
 
@@ -423,6 +426,7 @@ where
         &self,
         _request: BuilderBlockValidationRequestV2,
     ) -> RpcResult<()> {
+        warn!(target: "rpc::flashbots", "Method `flashbots_validateBuilderSubmissionV2` is not supported");
         Err(internal_rpc_err("unimplemented"))
     }
 

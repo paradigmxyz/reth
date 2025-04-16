@@ -25,7 +25,6 @@ alloy-rlp.workspace = true
 # misc
 auto_impl.workspace = true
 smallvec = { workspace = true, features = ["const_new"] }
-thiserror.workspace = true
 
 # metrics
 reth-metrics.workspace = true
@@ -48,6 +47,7 @@ pretty_assertions.workspace = true
 proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
 rand.workspace = true
+rand_08.workspace = true
 
 [features]
 test-utils = [

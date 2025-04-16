@@ -1,6 +1,5 @@
 use crate::upgrade_status::{UpgradeStatus, UpgradeStatusExtension};
 use alloy_rlp::Decodable;
-use derive_more::Debug;
 use futures::SinkExt;
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError},

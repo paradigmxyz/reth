@@ -13,7 +13,6 @@ repository.workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-cli.workspace = true
-reth-ethereum-cli.workspace = true
 reth-cli-runner.workspace = true
 reth-cli-util.workspace = true
 reth-codecs.workspace = true
@@ -86,6 +85,7 @@ proptest-arbitrary-interop = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-discv4.workspace = true
+reth-ethereum-cli.workspace = true
 
 [features]
 default = []

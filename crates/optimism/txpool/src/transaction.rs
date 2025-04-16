@@ -1,4 +1,4 @@
-use crate::conditional::MaybeConditionalTransaction;
+use crate::{conditional::MaybeConditionalTransaction, interop::MaybeInteropTransaction};
 use alloy_consensus::{
     transaction::Recovered, BlobTransactionSidecar, BlobTransactionValidationError, Typed2718,
 };
@@ -12,7 +12,13 @@ use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use reth_transaction_pool::{
     EthBlobTransactionSidecar, EthPoolTransaction, EthPooledTransaction, PoolTransaction,
 };
-use std::sync::{Arc, OnceLock};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc, OnceLock,
+};
+
+/// Marker for no-interop transactions
+pub(crate) const NO_INTEROP_TX: u64 = 0;
 
 /// Pool transaction for OP.
 ///
@@ -34,6 +40,9 @@ pub struct OpPooledTransaction<
     /// Optional conditional attached to this transaction.
     conditional: Option<Box<TransactionConditional>>,
 
+    /// Optional interop deadline attached to this transaction.
+    interop: Arc<AtomicU64>,
+
     /// Cached EIP-2718 encoded bytes of the transaction, lazily computed.
     encoded_2718: OnceLock<Bytes>,
 }
@@ -45,6 +54,7 @@ impl<Cons: SignedTransaction, Pooled> OpPooledTransaction<Cons, Pooled> {
             inner: EthPooledTransaction::new(transaction, encoded_length),
             estimated_tx_compressed_size: Default::default(),
             conditional: None,
+            interop: Arc::new(AtomicU64::new(NO_INTEROP_TX)),
             _pd: core::marker::PhantomData,
             encoded_2718: Default::default(),
         }
@@ -79,6 +89,20 @@ impl<Cons, Pooled> MaybeConditionalTransaction for OpPooledTransaction<Cons, Poo
 
     fn conditional(&self) -> Option<&TransactionConditional> {
         self.conditional.as_deref()
+    }
+}
+
+impl<Cons, Pooled> MaybeInteropTransaction for OpPooledTransaction<Cons, Pooled> {
+    fn set_interop_deadline(&self, deadline: u64) {
+        self.interop.store(deadline, Ordering::Relaxed);
+    }
+
+    fn interop_deadline(&self) -> Option<u64> {
+        let interop = self.interop.load(Ordering::Relaxed);
+        if interop > NO_INTEROP_TX {
+            return Some(interop)
+        }
+        None
     }
 }
 
@@ -246,16 +270,22 @@ where
 
 /// Helper trait to provide payload builder with access to conditionals and encoded bytes of
 /// transaction.
-pub trait OpPooledTx: MaybeConditionalTransaction + PoolTransaction {}
-impl<T> OpPooledTx for T where T: MaybeConditionalTransaction + PoolTransaction {}
+pub trait OpPooledTx:
+    MaybeConditionalTransaction + MaybeInteropTransaction + PoolTransaction
+{
+}
+impl<T> OpPooledTx for T where
+    T: MaybeConditionalTransaction + MaybeInteropTransaction + PoolTransaction
+{
+}
 
 #[cfg(test)]
 mod tests {
     use crate::{OpPooledTransaction, OpTransactionValidator};
     use alloy_consensus::transaction::Recovered;
     use alloy_eips::eip2718::Encodable2718;
-    use alloy_primitives::{PrimitiveSignature as Signature, TxKind, U256};
-    use op_alloy_consensus::{OpTypedTransaction, TxDeposit};
+    use alloy_primitives::{TxKind, U256};
+    use op_alloy_consensus::TxDeposit;
     use reth_optimism_chainspec::OP_MAINNET;
     use reth_optimism_primitives::OpTransactionSigned;
     use reth_provider::test_utils::MockEthProvider;
@@ -263,8 +293,8 @@ mod tests {
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder, TransactionOrigin,
         TransactionValidationOutcome,
     };
-    #[test]
-    fn validate_optimism_transaction() {
+    #[tokio::test]
+    async fn validate_optimism_transaction() {
         let client = MockEthProvider::default().with_chain_spec(OP_MAINNET.clone());
         let validator = EthTransactionValidatorBuilder::new(client)
             .no_shanghai()
@@ -274,7 +304,7 @@ mod tests {
 
         let origin = TransactionOrigin::External;
         let signer = Default::default();
-        let deposit_tx = OpTypedTransaction::Deposit(TxDeposit {
+        let deposit_tx = TxDeposit {
             source_hash: Default::default(),
             from: signer,
             to: TxKind::Create,
@@ -283,13 +313,12 @@ mod tests {
             gas_limit: 0,
             is_system_transaction: false,
             input: Default::default(),
-        });
-        let signature = Signature::test_signature();
-        let signed_tx = OpTransactionSigned::new_unhashed(deposit_tx, signature);
+        };
+        let signed_tx: OpTransactionSigned = deposit_tx.into();
         let signed_recovered = Recovered::new_unchecked(signed_tx, signer);
         let len = signed_recovered.encode_2718_len();
         let pooled_tx: OpPooledTransaction = OpPooledTransaction::new(signed_recovered, len);
-        let outcome = validator.validate_one(origin, pooled_tx);
+        let outcome = validator.validate_one(origin, pooled_tx).await;
 
         let err = match outcome {
             TransactionValidationOutcome::Invalid(_, err) => err,

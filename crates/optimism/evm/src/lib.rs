@@ -7,12 +7,13 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 extern crate alloc;
 
 use alloc::sync::Arc;
 use alloy_consensus::{BlockHeader, Header};
-use alloy_evm::FromRecoveredTx;
+use alloy_evm::{FromRecoveredTx, FromTxWithEncoded};
 use alloy_op_evm::{block::receipt_builder::OpReceiptBuilder, OpBlockExecutionCtx};
 use alloy_primitives::U256;
 use core::fmt::Debug;
@@ -108,7 +109,7 @@ where
         BlockBody = alloy_consensus::BlockBody<R::Transaction>,
         Block = alloy_consensus::Block<R::Transaction>,
     >,
-    OpTransaction<TxEnv>: FromRecoveredTx<N::SignedTx>,
+    OpTransaction<TxEnv>: FromRecoveredTx<N::SignedTx> + FromTxWithEncoded<N::SignedTx>,
     R: OpReceiptBuilder<Receipt: DepositReceipt, Transaction: SignedTransaction>,
     Self: Send + Sync + Unpin + Clone + 'static,
 {

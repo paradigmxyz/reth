@@ -43,6 +43,12 @@ pub mod noop;
 /// test helpers for mocking executor
 pub mod test_utils;
 
+mod precompile_cache;
+pub use precompile_cache::MaybeCachedPrecompileProvider;
+
+#[cfg(feature = "std")]
+pub use precompile_cache::PrecompileCache;
+
 pub use alloy_evm::{
     block::{state_changes, system_calls, OnStateHook},
     *,
@@ -89,7 +95,7 @@ pub use alloy_evm::block::state_changes as state_change;
 /// [`NextBlockEnvCtx`]: ConfigureEvm::NextBlockEnvCtx
 /// [`BlockExecutor`]: alloy_evm::block::BlockExecutor
 #[auto_impl::auto_impl(&, Arc)]
-pub trait ConfigureEvm: Send + Sync + Unpin + Clone {
+pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// The primitives type used by the EVM.
     type Primitives: NodePrimitives;
 
@@ -105,7 +111,11 @@ pub trait ConfigureEvm: Send + Sync + Unpin + Clone {
     type BlockExecutorFactory: BlockExecutorFactory<
         Transaction = TxTy<Self::Primitives>,
         Receipt = ReceiptTy<Self::Primitives>,
-        EvmFactory: EvmFactory<Tx: TransactionEnv + FromRecoveredTx<TxTy<Self::Primitives>>>,
+        EvmFactory: EvmFactory<
+            Tx: TransactionEnv
+                    + FromRecoveredTx<TxTy<Self::Primitives>>
+                    + FromTxWithEncoded<TxTy<Self::Primitives>>,
+        >,
     >;
 
     /// A type that knows how to build a block.

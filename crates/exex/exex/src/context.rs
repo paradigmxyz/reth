@@ -1,9 +1,7 @@
 use crate::{ExExContextDyn, ExExEvent, ExExNotifications, ExExNotificationsStream};
 use alloy_eips::BlockNumHash;
 use reth_exex_types::ExExHead;
-use reth_node_api::{
-    FullNodeComponents, NodePrimitives, NodeTypes, NodeTypesWithEngine, PrimitivesTy,
-};
+use reth_node_api::{FullNodeComponents, NodePrimitives, NodeTypes, PrimitivesTy};
 use reth_node_core::node_config::NodeConfig;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::BlockReader;
@@ -105,7 +103,7 @@ where
     /// Returns the handle to the payload builder service.
     pub fn payload_builder_handle(
         &self,
-    ) -> &PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Payload> {
+    ) -> &PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload> {
         self.components.payload_builder_handle()
     }
 
