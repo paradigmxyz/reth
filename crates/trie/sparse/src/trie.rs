@@ -26,7 +26,7 @@ pub struct TrieMasks {
 
 impl TrieMasks {
     /// Helper function, returns both fields `hash_mask` and `tree_mask` as [`None`]
-    pub fn none() -> Self {
+    pub const fn none() -> Self {
         Self { hash_mask: None, tree_mask: None }
     }
 }

@@ -60,7 +60,7 @@ impl<T, S, D> EngineHandler<T, S, D> {
     }
 
     /// Returns a mutable reference to the request handler.
-    pub fn handler_mut(&mut self) -> &mut T {
+    pub const fn handler_mut(&mut self) -> &mut T {
         &mut self.handler
     }
 }

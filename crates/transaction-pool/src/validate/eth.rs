@@ -803,7 +803,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
     /// Sets the block gas limit
     ///
     /// Transactions with a gas limit greater than this will be rejected.
-    pub fn set_tx_fee_cap(mut self, tx_fee_cap: u128) -> Self {
+    pub const fn set_tx_fee_cap(mut self, tx_fee_cap: u128) -> Self {
         self.tx_fee_cap = Some(tx_fee_cap);
         self
     }

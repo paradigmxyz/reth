@@ -70,7 +70,7 @@ where
     N: NetworkPrimitives,
 {
     /// Create a new eth and snap protocol stream
-    pub fn new(stream: S, eth_version: EthVersion) -> Self {
+    pub const fn new(stream: S, eth_version: EthVersion) -> Self {
         Self { eth_snap: EthSnapStreamInner::new(eth_version), inner: stream }
     }
 
@@ -88,7 +88,7 @@ where
 
     /// Returns mutable access to the underlying stream
     #[inline]
-    pub fn inner_mut(&mut self) -> &mut S {
+    pub const fn inner_mut(&mut self) -> &mut S {
         &mut self.inner
     }
 
