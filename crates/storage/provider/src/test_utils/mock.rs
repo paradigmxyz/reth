@@ -95,10 +95,10 @@ where
         }
     }
 }
-pub trait HasHeader {
-     type Header;
-     fn header(&self) -> &Self::Header;
- }
+// pub trait HasHeader {
+//      type Header;
+//      fn header(&self) -> &Self::Header;
+//  }
 // pub trait BlockFields {
 //     fn number(&self) -> u64;
 // }
@@ -581,11 +581,7 @@ where
 // }
 
 // //look
-impl<T, ChainSpec> BlockIdReader for MockEthProvider<T ,ChainSpec>
-where 
-    T: NodePrimitives,
-    T::Block: HasHeader<Header = Header>,
-{
+impl<T: NodePrimitives, ChainSpec> BlockIdReader for MockEthProvider<T, ChainSpec> {
     fn pending_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
         Ok(None)
     }
