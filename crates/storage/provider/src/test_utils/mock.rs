@@ -511,9 +511,12 @@ where
 // }
 
 // //look
-// impl<ChainSpec> ReceiptProviderIdExt for MockEthProvider<reth_ethereum_primitives::EthPrimitives ,ChainSpec> {}
+impl<T, ChainSpec> ReceiptProviderIdExt for MockEthProvider<T, ChainSpec>
+where
+    T: NodePrimitives,
+    MockEthProvider<T, ChainSpec>: ReceiptProvider + BlockIdReader,
+{}
 
-// //look
 impl<T: NodePrimitives, ChainSpec: Send + Sync +'static> BlockHashReader for MockEthProvider<T, ChainSpec>{
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         let lock = self.headers.lock();
@@ -540,7 +543,6 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync +'static> BlockHashReader for Moc
     }
 }
 
-// //look
 impl<T: NodePrimitives, ChainSpec: Send + Sync + 'static> BlockNumReader for MockEthProvider<T, ChainSpec> 
     {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
@@ -572,7 +574,6 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync + 'static> BlockNumReader for Moc
     }
 }
 
-// //look
 impl<T: NodePrimitives, ChainSpec:EthChainSpec + Send + Sync + 'static> BlockIdReader for MockEthProvider<T, ChainSpec> {
     fn pending_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
         Ok(None)
@@ -811,7 +812,6 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> HashedPostStateProvid
     }
 }
 
-//look
 impl<ChainSpec> StateProvider for MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSpec>
 where 
     ChainSpec: EthChainSpec + Send + Sync + 'static,
@@ -821,12 +821,12 @@ where
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        let lock = self.accounts.lock().unwrap();
+        let lock = self.accounts.lock();
         Ok(lock.get(&account).and_then(|account| account.storage.get(&storage_key)).copied())
     }
 
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
-        let lock = self.accounts.lock().unwrap();
+        let lock = self.accounts.lock();
         Ok(lock.values().find_map(|account| {
             match (account.account.bytecode_hash.as_ref(), account.bytecode.as_ref()) {
                 (Some(bytecode_hash), Some(bytecode)) if bytecode_hash == code_hash => {
