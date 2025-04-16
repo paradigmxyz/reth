@@ -516,9 +516,10 @@ where
 // //look
 impl<T: NodePrimitives, ChainSpec: Send + Sync +'static> BlockHashReader for MockEthProvider<T, ChainSpec>{
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        let lock = self.blocks.lock();
-
-        let hash = lock.iter().find_map(|(hash, b)| (b.number == number).then_some(*hash));
+        let lock = self.headers.lock();
+        let hash = lock.iter().find_map(|(hash, header)| {
+            (header.number == number).then_some(*hash)
+        });
         Ok(hash)
     }
 
@@ -527,12 +528,13 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync +'static> BlockHashReader for Moc
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        let range = start..end;
-        let lock = self.blocks.lock();
+        let lock = self.headers.lock();
+        let mut hashes: Vec<_> = lock
+            .iter()
+            .filter(|(_, header)| (start..end).contains(&header.number))
+            .collect();
 
-        let mut hashes: Vec<_> =
-            lock.iter().filter(|(_, block)| range.contains(&block.number)).collect();
-        hashes.sort_by_key(|(_, block)| block.number);
+        hashes.sort_by_key(|(_, header)| header.number);
 
         Ok(hashes.into_iter().map(|(hash, _)| *hash).collect())
     }
@@ -572,7 +574,7 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync + 'static> BlockNumReader for Moc
 }
 
 // //look
-impl<T: NodePrimitives, ChainSpec:EthChainSpec + Send + Sync> BlockIdReader for MockEthProvider<T, ChainSpec> {
+impl<T: NodePrimitives, ChainSpec:EthChainSpec + Send + Sync + 'static> BlockIdReader for MockEthProvider<T, ChainSpec> {
     fn pending_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
         Ok(None)
     }
