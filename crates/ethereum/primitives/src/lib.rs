@@ -1,5 +1,4 @@
 //! Standalone crate for ethereum-specific Reth primitive types.
-use reth_trie_db::MerklePatriciaTrie;
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -46,6 +45,4 @@ impl reth_primitives_traits::NodePrimitives for EthPrimitives {
     type BlockBody = crate::BlockBody;
     type SignedTx = crate::TransactionSigned;
     type Receipt = crate::Receipt;
-    type Header = alloy_consensus::Header;
-    type StateCommitment = crate::MerklePatriciaTrie;
 }
