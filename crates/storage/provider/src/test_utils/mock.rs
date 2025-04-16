@@ -581,23 +581,23 @@ where
 // }
 
 // //look
-// impl<T, ChainSpec> BlockIdReader for MockEthProvider<T ,ChainSpec>
-// where 
-//     T: NodePrimitives,
-//     T::Block: HasHeader<Header = Header>,
-// {
-//     fn pending_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
-//         Ok(None)
-//     }
+impl<T, ChainSpec> BlockIdReader for MockEthProvider<T ,ChainSpec>
+where 
+    T: NodePrimitives,
+    T::Block: HasHeader<Header = Header>,
+{
+    fn pending_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
+        Ok(None)
+    }
 
-//     fn safe_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
-//         Ok(None)
-//     }
+    fn safe_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
+        Ok(None)
+    }
 
-//     fn finalized_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
-//         Ok(None)
-//     }
-// }
+    fn finalized_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
+        Ok(None)
+    }
+}
 
 // //look
 // impl<ChainSpec> BlockReader for MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSpec>
