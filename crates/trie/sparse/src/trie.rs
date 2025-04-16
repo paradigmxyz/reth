@@ -1087,7 +1087,7 @@ pub enum LeafLookup {
     /// Leaf exists with expected value.
     Found,
     /// Leaf does not exist (exclusion proof found).
-    NotFound {
+    NonExistent {
         /// Path where the search diverged from the target path.
         diverged_at: Nibbles,
     },
@@ -1116,15 +1116,12 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
         path: &Nibbles,
         expected_value: Option<&Vec<u8>>,
     ) -> Result<LeafLookup, LeafLookupError> {
-        let mut current = Nibbles::default(); // Start at the root
-
-        // Inclusion proof
-        //
-        // First, do a quick check if the value exists in our values map.
-        // We assume that if there exists a leaf node, then its value will
-        // be in the `values` map.
-        if let Some(actual_value) = self.values.get(path) {
-            // We found the leaf, check if the value matches (if expected value was provided)
+        // Helper function to check if a value matches the expected value
+        fn check_value_match(
+            actual_value: &Vec<u8>,
+            expected_value: Option<&Vec<u8>>,
+            path: &Nibbles,
+        ) -> Result<(), LeafLookupError> {
             if let Some(expected) = expected_value {
                 if actual_value != expected {
                     return Err(LeafLookupError::ValueMismatch {
@@ -1134,6 +1131,19 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                     });
                 }
             }
+            Ok(())
+        }
+
+        let mut current = Nibbles::default(); // Start at the root
+
+        // Inclusion proof
+        //
+        // First, do a quick check if the value exists in our values map.
+        // We assume that if there exists a leaf node, then its value will
+        // be in the `values` map.
+        if let Some(actual_value) = self.values.get(path) {
+            // We found the leaf, check if the value matches (if expected value was provided)
+            check_value_match(actual_value, expected_value, path)?;
             return Ok(LeafLookup::Found);
         }
 
@@ -1148,7 +1158,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                 Some(SparseNode::Empty) | None => {
                     // None implies no node is at the current path (even in the full trie)
                     // Empty node means there is a node at this path and it is "Empty"
-                    return Ok(LeafLookup::NotFound { diverged_at: current });
+                    return Ok(LeafLookup::NonExistent { diverged_at: current });
                 }
                 Some(&SparseNode::Hash(hash)) => {
                     // We hit a blinded node - cannot determine if leaf exists
@@ -1163,22 +1173,14 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                         // TODO: This should be handled by the values map check above
                         // TODO: But it's here for consistency
                         if let Some(value) = self.values.get(path) {
-                            if let Some(expected) = expected_value {
-                                if value != expected {
-                                    return Err(LeafLookupError::ValueMismatch {
-                                        path: path.clone(),
-                                        expected: Some(expected.clone()),
-                                        actual: value.clone(),
-                                    });
-                                }
-                            }
+                            check_value_match(value, expected_value, path)?;
                             return Ok(LeafLookup::Found);
                         }
                     }
 
                     // The leaf node's path doesn't match our target path,
                     // providing an exclusion proof
-                    return Ok(LeafLookup::NotFound { diverged_at: current });
+                    return Ok(LeafLookup::NonExistent { diverged_at: current });
                 }
                 Some(SparseNode::Extension { key, .. }) => {
                     // Check if the path matches the extension key prefix
@@ -1187,7 +1189,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
 
                     if path.len() < extended_path.len() || !path.starts_with(&extended_path) {
                         // Path doesn't match extension - exclusion proof
-                        return Ok(LeafLookup::NotFound { diverged_at: current });
+                        return Ok(LeafLookup::NonExistent { diverged_at: current });
                     }
 
                     // Continue traversal with the extended path
@@ -1198,7 +1200,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                     let nibble = path[current.len()];
                     if !state_mask.is_bit_set(nibble) {
                         // No child at this nibble - exclusion proof
-                        return Ok(LeafLookup::NotFound { diverged_at: current });
+                        return Ok(LeafLookup::NonExistent { diverged_at: current });
                     }
 
                     // Continue down the branch
@@ -1214,15 +1216,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                 // We found a leaf with an empty key (exact match)
                 // This should be handled by the values map check above
                 if let Some(value) = self.values.get(path) {
-                    if let Some(expected) = expected_value {
-                        if value != expected {
-                            return Err(LeafLookupError::ValueMismatch {
-                                path: path.clone(),
-                                expected: Some(expected.clone()),
-                                actual: value.clone(),
-                            });
-                        }
-                    }
+                    check_value_match(value, expected_value, path)?;
                     return Ok(LeafLookup::Found);
                 }
             }
@@ -1236,12 +1230,12 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                 } else {
                     path.slice(0..path.len() - 1)
                 };
-                return Ok(LeafLookup::NotFound { diverged_at: parent_path });
+                return Ok(LeafLookup::NonExistent { diverged_at: parent_path });
             }
         }
 
         // If we get here, there's no leaf at the target path
-        Ok(LeafLookup::NotFound { diverged_at: current })
+        Ok(LeafLookup::NonExistent { diverged_at: current })
     }
 
     /// Update the leaf node with provided value.
@@ -1833,7 +1827,7 @@ mod find_leaf_tests {
         let result = sparse.find_leaf(&path, None);
         assert_matches!(
             result,
-            Ok(LeafLookup::NotFound { diverged_at }) if diverged_at == Nibbles::default()
+            Ok(LeafLookup::NonExistent { diverged_at }) if diverged_at == Nibbles::default()
         );
     }
 
@@ -1845,7 +1839,7 @@ mod find_leaf_tests {
         let result = sparse.find_leaf(&path, None);
 
         // In an empty trie, the search diverges immediately at the root.
-        assert_matches!(result, Ok(LeafLookup::NotFound { diverged_at }) if diverged_at == Nibbles::default());
+        assert_matches!(result, Ok(LeafLookup::NonExistent { diverged_at }) if diverged_at == Nibbles::default());
     }
 
     #[test]
@@ -1883,7 +1877,7 @@ mod find_leaf_tests {
 
         // Diverged at the branch node because nibble '7' is not present.
         let expected_divergence = Nibbles::from_nibbles_unchecked([0x1, 0x2]);
-        assert_matches!(result, Ok(LeafLookup::NotFound { diverged_at }) if diverged_at == expected_divergence);
+        assert_matches!(result, Ok(LeafLookup::NonExistent { diverged_at }) if diverged_at == expected_divergence);
     }
 
     #[test]
@@ -1900,7 +1894,7 @@ mod find_leaf_tests {
 
         // Diverged where the extension node started because the path doesn't match its key prefix.
         let expected_divergence = Nibbles::default();
-        assert_matches!(result, Ok(LeafLookup::NotFound { diverged_at }) if diverged_at == expected_divergence);
+        assert_matches!(result, Ok(LeafLookup::NonExistent { diverged_at }) if diverged_at == expected_divergence);
     }
 
     #[test]
@@ -1917,7 +1911,7 @@ mod find_leaf_tests {
         // than the leaf's key stored there. The code returns the path of the node (root)
         // where the divergence occurred.
         let expected_divergence = Nibbles::default();
-        assert_matches!(result, Ok(LeafLookup::NotFound { diverged_at }) if diverged_at == expected_divergence);
+        assert_matches!(result, Ok(LeafLookup::NonExistent { diverged_at }) if diverged_at == expected_divergence);
     }
 
     #[test]
@@ -1935,7 +1929,7 @@ mod find_leaf_tests {
         // The path ends, but the node at the path is a branch, not a leaf.
         // Diverged at the parent of the node found at the search path.
         let expected_divergence = Nibbles::from_nibbles_unchecked([0x1]);
-        assert_matches!(result, Ok(LeafLookup::NotFound { diverged_at }) if diverged_at == expected_divergence);
+        assert_matches!(result, Ok(LeafLookup::NonExistent { diverged_at }) if diverged_at == expected_divergence);
     }
 
     #[test]
