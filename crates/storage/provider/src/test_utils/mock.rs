@@ -270,67 +270,64 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> DBProvider for MockEt
     }
 }
 // //look
-// impl<ChainSpec> HeaderProvider for MockEthProvider<reth_ethereum_primitives::EthPrimitives,ChainSpec>
-// where
-//     ChainSpec: EthChainSpec + Send + Sync + 'static,
-//     {
-//     type Header = Header;
+impl<ChainSpec: EthChainSpec + Send + Sync + 'static> HeaderProvider for MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSpec> {
+    type Header = Header;
 
-//     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
-//         let lock = self.headers.lock();
-//         Ok(lock.get(block_hash).cloned())
-//     }
+    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
+        let lock = self.headers.lock();
+        Ok(lock.get(block_hash).cloned())
+    }
 
-//     fn header_by_number(&self, num: u64) -> ProviderResult<Option<Self::Header>> {
-//         let lock = self.headers.lock();
-//         Ok(lock.values().find(|h| h.number == num).cloned())
-//     }
+    fn header_by_number(&self, num: u64) -> ProviderResult<Option<Header>> {
+        let lock = self.headers.lock();
+        Ok(lock.values().find(|h| h.number == num).cloned())
+    }
 
-//     fn header_td(&self, hash: &BlockHash) -> ProviderResult<Option<U256>> {
-//         let lock = self.headers.lock();
-//         Ok(lock.get(hash).map(|target| {
-//             lock.values()
-//                 .filter(|h| h.number < target.number)
-//                 .fold(target.difficulty, |td, h| td + h.difficulty)
-//         }))
-//     }
+    fn header_td(&self, hash: &BlockHash) -> ProviderResult<Option<U256>> {
+        let lock = self.headers.lock();
+        Ok(lock.get(hash).map(|target| {
+            lock.values()
+                .filter(|h| h.number < target.number)
+                .fold(target.difficulty, |td, h| td + h.difficulty)
+        }))
+    }
 
-//     fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
-//         let lock = self.headers.lock();
-//         let sum = lock
-//             .values()
-//             .filter(|h| h.number <= number)
-//             .fold(U256::ZERO, |td, h| td + h.difficulty);
-//         Ok(Some(sum))
-//     }
+    fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
+        let lock = self.headers.lock();
+        let sum = lock
+            .values()
+            .filter(|h| h.number <= number)
+            .fold(U256::ZERO, |td, h| td + h.difficulty);
+        Ok(Some(sum))
+    }
 
-//     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
-//         let lock = self.headers.lock();
+    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
+        let lock = self.headers.lock();
 
-//         let mut headers: Vec<_> =
-//             lock.values().filter(|header| range.contains(&header.number)).cloned().collect();
-//         headers.sort_by_key(|header| header.number);
+        let mut headers: Vec<_> =
+            lock.values().filter(|header| range.contains(&header.number)).cloned().collect();
+        headers.sort_by_key(|header| header.number);
 
-//         Ok(headers)
-//     }
+        Ok(headers)
+    }
 
-//     fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
-//         Ok(self.header_by_number(number)?.map(SealedHeader::seal_slow))
-//     }
+    fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
+        Ok(self.header_by_number(number)?.map(SealedHeader::seal_slow))
+    }
 
-//     fn sealed_headers_while(
-//         &self,
-//         range: impl RangeBounds<BlockNumber>,
-//         mut predicate: impl FnMut(&SealedHeader) -> bool,
-//     ) -> ProviderResult<Vec<SealedHeader>> {
-//         Ok(self
-//             .headers_range(range)?
-//             .into_iter()
-//             .map(SealedHeader::seal_slow)
-//             .take_while(|h| predicate(h))
-//             .collect())
-//     }
-// }
+    fn sealed_headers_while(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+        mut predicate: impl FnMut(&SealedHeader) -> bool,
+    ) -> ProviderResult<Vec<SealedHeader>> {
+        Ok(self
+            .headers_range(range)?
+            .into_iter()
+            .map(SealedHeader::seal_slow)
+            .take_while(|h| predicate(h))
+            .collect())
+    }
+}
 
 impl<T, ChainSpec> ChainSpecProvider for MockEthProvider<T, ChainSpec>
 where
