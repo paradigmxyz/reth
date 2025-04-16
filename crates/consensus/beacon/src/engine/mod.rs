@@ -460,6 +460,8 @@ where
         header: &SealedHeader,
         attrs: &mut Option<<N::Engine as PayloadTypes>::PayloadAttributes>,
     ) -> bool {
+        // On Kadena, the consensus layer is allowed to reorg the chain at will.
+        return true;
         // On Optimism, the proposers are allowed to reorg their own chain at will.
         #[cfg(feature = "optimism")]
         if self.blockchain.chain_spec().is_optimism() {
