@@ -1773,7 +1773,8 @@ mod find_leaf_tests {
     // Assuming this exists
     use alloy_rlp::Encodable;
     use assert_matches::assert_matches;
-    use reth_primitives_traits::Account; // Or relevant value type
+    use reth_primitives_traits::Account;
+    use reth_trie_common::LeafNode;
 
     // Helper to create some test values
     fn encode_value(nonce: u64) -> Vec<u8> {
@@ -1965,7 +1966,7 @@ mod find_leaf_tests {
             nodes,
             branch_node_tree_masks: Default::default(),
             branch_node_hash_masks: Default::default(),
-            /* The value is NOT in the values map, or else it would early return */
+            /* The value is not in the values map, or else it would early return */
             values: Default::default(),
             prefix_set: Default::default(),
             updates: None,
@@ -1977,6 +1978,111 @@ mod find_leaf_tests {
         // Should error because it hit the blinded node exactly at the leaf path
         assert_matches!(result, Err(LeafLookupError::BlindedNode { path, hash })
             if path == leaf_path && hash == blinded_hash
+        );
+    }
+
+    #[test]
+    fn find_leaf_error_blinded_node() {
+        let blinded_hash = B256::repeat_byte(0xAA);
+        let path_to_blind = Nibbles::from_nibbles_unchecked([0x1]);
+        let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
+
+        let mut nodes = HashMap::with_hasher(RandomState::default());
+
+        // Root is a branch with child 0x1 (blinded) and 0x5 (revealed leaf)
+        // So we set Bit 1 and Bit 5 in the state_mask
+        let state_mask = TrieMask::new(0b100010);
+        nodes.insert(Nibbles::default(), SparseNode::new_branch(state_mask));
+
+        nodes.insert(path_to_blind.clone(), SparseNode::Hash(blinded_hash));
+        let path_revealed = Nibbles::from_nibbles_unchecked([0x5]);
+        let path_revealed_leaf = Nibbles::from_nibbles_unchecked([0x5, 0x6, 0x7, 0x8]);
+        nodes.insert(
+            path_revealed.clone(),
+            SparseNode::new_leaf(Nibbles::from_nibbles_unchecked([0x6, 0x7, 0x8])),
+        );
+
+        let mut values = HashMap::with_hasher(RandomState::default());
+        values.insert(path_revealed_leaf, VALUE_A());
+
+        let sparse = RevealedSparseTrie {
+            provider: DefaultBlindedProvider::default(),
+            nodes,
+            branch_node_tree_masks: Default::default(),
+            branch_node_hash_masks: Default::default(),
+            values,
+            prefix_set: Default::default(),
+            updates: None,
+            rlp_buf: Vec::new(),
+        };
+
+        let result = sparse.find_leaf(&search_path, None);
+
+        // Should error because it hit the blinded node at path 0x1
+        assert_matches!(result, Err(LeafLookupError::BlindedNode { path, hash })
+            if path == path_to_blind && hash == blinded_hash
+        );
+    }
+
+    #[test]
+    fn find_leaf_error_blinded_node_via_reveal() {
+        let blinded_hash = B256::repeat_byte(0xAA);
+        let path_to_blind = Nibbles::from_nibbles_unchecked([0x1]); // Path of the blinded node itself
+        let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]); // Path we will search for
+
+        let revealed_leaf_prefix = Nibbles::from_nibbles_unchecked([0x5]);
+        let revealed_leaf_suffix = Nibbles::from_nibbles_unchecked([0x6, 0x7, 0x8]);
+        let revealed_leaf_full_path = Nibbles::from_nibbles_unchecked([0x5, 0x6, 0x7, 0x8]);
+        let revealed_value = VALUE_A();
+
+        // 1. Construct the RLP representation of the children for the root branch
+        let rlp_node_child1 = RlpNode::word_rlp(&blinded_hash); // Blinded node
+
+        let leaf_node_child5 = LeafNode::new(revealed_leaf_suffix.clone(), revealed_value.clone());
+        let leaf_node_child5_rlp_buf = alloy_rlp::encode(&leaf_node_child5);
+        let hash_of_child5 = keccak256(&leaf_node_child5_rlp_buf);
+        let rlp_node_child5 = RlpNode::word_rlp(&hash_of_child5);
+
+        // 2. Construct the root BranchNode using the RLP of its children
+        // The stack order depends on the bit indices (1 and 5)
+        let root_branch_node = reth_trie_common::BranchNode::new(
+            vec![rlp_node_child1, rlp_node_child5], // Child 1 first, then Child 5
+            TrieMask::new(0b100010),                // Mask with bits 1 and 5 set
+        );
+        let root_trie_node = TrieNode::Branch(root_branch_node);
+
+        // 3. Initialize the sparse trie using from_root
+        // This will internally create Hash nodes for paths "1" and "5" initially.
+        let mut sparse = RevealedSparseTrie::from_root(root_trie_node, TrieMasks::none(), false)
+            .expect("Failed to create trie from root");
+
+        // Assertions before we reveal child5
+        assert_matches!(sparse.nodes.get(&Nibbles::default()), Some(SparseNode::Branch { state_mask, .. }) if *state_mask == TrieMask::new(0b100010)); // Here we check that 1 and 5 are set in the state_mask
+        assert_matches!(sparse.nodes.get(&path_to_blind), Some(SparseNode::Hash(h)) if *h == blinded_hash );
+        assert!(sparse.nodes.get(&revealed_leaf_prefix).unwrap().is_hash()); // Child 5 is initially a hash of its RLP
+        assert!(sparse.values.is_empty());
+
+        // 4. Explicitly reveal the leaf node for child 5
+        sparse
+            .reveal_node(
+                revealed_leaf_prefix.clone(),
+                TrieNode::Leaf(leaf_node_child5),
+                TrieMasks::none(),
+            )
+            .expect("Failed to reveal leaf node");
+
+        // Assertions after we reveal child 5
+        assert_matches!(sparse.nodes.get(&Nibbles::default()), Some(SparseNode::Branch { state_mask, .. }) if *state_mask == TrieMask::new(0b100010));
+        assert_matches!(sparse.nodes.get(&path_to_blind), Some(SparseNode::Hash(h)) if *h == blinded_hash );
+        assert_matches!(sparse.nodes.get(&revealed_leaf_prefix), Some(SparseNode::Leaf { key, .. }) if *key == revealed_leaf_suffix);
+        assert_eq!(sparse.values.get(&revealed_leaf_full_path), Some(&revealed_value));
+
+        let result = sparse.find_leaf(&search_path, None);
+
+        // 5. Assert the expected error
+        // Should error because it hit the blinded node at path "1" only node at "5" was revealed
+        assert_matches!(result, Err(LeafLookupError::BlindedNode { path, hash })
+            if path == path_to_blind && hash == blinded_hash
         );
     }
 }
