@@ -758,6 +758,9 @@ Engine:
 
           [default: 1]
 
+      --engine.precompile-cache
+          Enable precompile cache
+
 Ress:
       --ress.enable
           Enable support for `ress` subprotocol
