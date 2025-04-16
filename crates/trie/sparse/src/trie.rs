@@ -1145,13 +1145,9 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
         // not complete.
         while current.len() < path.len() {
             match self.nodes.get(&current) {
-                None => {
-                    // No node at current path - this provides an exclusion proof.
-                    return Ok(LeafLookup::NotFound { diverged_at: current });
-                }
-                Some(SparseNode::Empty) => {
-                    // Empty node means the trie is empty - exclusion proof
-                    // TODO: double check the diff between None and Empty.
+                Some(SparseNode::Empty) | None => {
+                    // None implies no node is at the current path (even in the full trie)
+                    // Empty node means there is a node at this path and it is "Empty"
                     return Ok(LeafLookup::NotFound { diverged_at: current });
                 }
                 Some(&SparseNode::Hash(hash)) => {
@@ -1165,7 +1161,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
 
                     if &full_path == path {
                         // TODO: This should be handled by the values map check above
-                        // But it's here for consistency
+                        // TODO: But it's here for consistency
                         if let Some(value) = self.values.get(path) {
                             if let Some(expected) = expected_value {
                                 if value != expected {
@@ -1234,9 +1230,12 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                 return Err(LeafLookupError::BlindedNode { path: path.clone(), hash });
             }
             _ => {
-                // No leaf at exactly the target path - exclusion proof
-                let parent_path =
-                    if path.len() > 0 { path.slice(0..path.len() - 1) } else { Nibbles::default() };
+                // No leaf at exactly the target path
+                let parent_path = if path.is_empty() {
+                    Nibbles::default()
+                } else {
+                    path.slice(0..path.len() - 1)
+                };
                 return Ok(LeafLookup::NotFound { diverged_at: parent_path });
             }
         }
@@ -1910,7 +1909,7 @@ mod find_leaf_tests {
         let existing_leaf_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
         let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4, 0x5, 0x6]);
 
-        sparse.update_leaf(existing_leaf_path.clone(), VALUE_A()).unwrap();
+        sparse.update_leaf(existing_leaf_path, VALUE_A()).unwrap();
 
         let result = sparse.find_leaf(&search_path, None);
 
@@ -1962,7 +1961,7 @@ mod find_leaf_tests {
         nodes.insert(leaf_path.clone(), SparseNode::Hash(blinded_hash)); // Blinded node at 0x1234
 
         let sparse = RevealedSparseTrie {
-            provider: DefaultBlindedProvider::default(),
+            provider: DefaultBlindedProvider,
             nodes,
             branch_node_tree_masks: Default::default(),
             branch_node_hash_masks: Default::default(),
@@ -1998,7 +1997,7 @@ mod find_leaf_tests {
         let path_revealed = Nibbles::from_nibbles_unchecked([0x5]);
         let path_revealed_leaf = Nibbles::from_nibbles_unchecked([0x5, 0x6, 0x7, 0x8]);
         nodes.insert(
-            path_revealed.clone(),
+            path_revealed,
             SparseNode::new_leaf(Nibbles::from_nibbles_unchecked([0x6, 0x7, 0x8])),
         );
 
@@ -2006,7 +2005,7 @@ mod find_leaf_tests {
         values.insert(path_revealed_leaf, VALUE_A());
 
         let sparse = RevealedSparseTrie {
-            provider: DefaultBlindedProvider::default(),
+            provider: DefaultBlindedProvider,
             nodes,
             branch_node_tree_masks: Default::default(),
             branch_node_hash_masks: Default::default(),
