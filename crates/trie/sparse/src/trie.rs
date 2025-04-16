@@ -697,7 +697,7 @@ impl<P> RevealedSparseTrie<P> {
     ///
     /// 1. If the child data represents a hash (32+1=33 bytes), store it as a hash node
     /// 2. Otherwise, decode the data as a [`TrieNode`] and recursively reveal it using
-    ///    [`reveal_node`]
+    ///    `reveal_node`
     ///
     /// # Returns
     ///
