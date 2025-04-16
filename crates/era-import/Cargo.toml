@@ -12,7 +12,6 @@ exclude.workspace = true
 [dependencies]
 # alloy
 alloy-primitives.workspace = true
-alloy-consensus.workspace = true
 
 # reth
 reth-db-api.workspace = true

@@ -1,11 +1,10 @@
-use alloy_consensus::{BlockHeader, EthereumTxEnvelope, TxEip4844};
 use alloy_primitives::BlockNumber;
 use eyre::OptionExt;
 use futures_util::StreamExt;
-use reth_db_api::transaction::DbTxMut;
-use reth_era::era1_file::Era1Reader;
+use reth_db_api::{table::Value, transaction::DbTxMut};
+use reth_era::{era1_file::Era1Reader, execution_types::DecodeCompressed};
 use reth_era_downloader::{EraStream, HttpClient};
-use reth_primitives_traits::NodePrimitives;
+use reth_primitives_traits::{Block, FullBlockBody, FullBlockHeader, NodePrimitives};
 use reth_provider::{
     BlockWriter, ProviderError, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
 };
@@ -15,16 +14,20 @@ use std::{fs::File, sync::mpsc};
 /// Imports blocks from `downloader` using `provider`.
 ///
 /// Returns current block height.
-pub fn import<H, P>(mut downloader: EraStream<H>, provider: &P) -> eyre::Result<BlockNumber>
+pub fn import<H, P, B, BB, BH>(
+    mut downloader: EraStream<H>,
+    provider: &P,
+) -> eyre::Result<BlockNumber>
 where
-    H: HttpClient + Clone + Send + Sync + 'static + Unpin,
-    P: DBProvider<Tx: DbTxMut>
-        + StaticFileProviderFactory
-        + BlockWriter<Block = alloy_consensus::Block<EthereumTxEnvelope<TxEip4844>>>,
-    <P as NodePrimitivesProvider>::Primitives: NodePrimitives<
-        BlockHeader = alloy_consensus::Header,
-        BlockBody = alloy_consensus::BlockBody<EthereumTxEnvelope<TxEip4844>>,
+    B: Block<Header = BH, Body = BB>,
+    BH: FullBlockHeader + Value,
+    BB: FullBlockBody<
+        Transaction = <<P as NodePrimitivesProvider>::Primitives as NodePrimitives>::SignedTx,
+        OmmerHeader = BH,
     >,
+    H: HttpClient + Clone + Send + Sync + 'static + Unpin,
+    P: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory + BlockWriter<Block = B>,
+    <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
 {
     let (tx, rx) = mpsc::channel();
 
@@ -67,18 +70,19 @@ where
         let era = reader.read(name)?;
 
         for block in &era.group.blocks {
-            let block = block.to_alloy_block::<EthereumTxEnvelope<TxEip4844>>()?;
+            let header: BH = block.header.decode()?;
+            let body: BB = block.body.decode()?;
 
             // Increase total difficulty
-            td += block.header.difficulty();
-            last_header_number = block.header.number();
+            td += header.difficulty();
+            last_header_number = header.number();
 
             // Append to Headers segment
-            writer.append_header(&block.header, td, &block.header.hash_slow())?;
+            writer.append_header(&header, td, &header.hash_slow())?;
 
             // Write bodies to database.
             provider.append_block_bodies(
-                vec![(block.number, Some(block.body))],
+                vec![(header.number(), Some(body))],
                 // We are writing transactions directly to static files.
                 StorageLocation::StaticFiles,
             )?;
