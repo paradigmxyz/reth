@@ -319,6 +319,7 @@ mod tests {
 
     #[test]
     fn body_against_header_isthmus() {
+        let chainspec = isthmus_chainspec();
         let header = Header {
             base_fee_per_gas: Some(507),
             gas_used: 4847634,
@@ -335,9 +336,9 @@ mod tests {
             ommers: vec![],
             withdrawals: Some(Default::default()),
         };
-        validate_body_against_header_op(&isthmus_chainspec(), &body, &header).unwrap();
+        validate_body_against_header_op(&chainspec, &body, &header).unwrap();
 
         body.withdrawals.take();
-        validate_body_against_header_op(&isthmus_chainspec(), &body, &header).unwrap_err();
+        validate_body_against_header_op(&chainspec, &body, &header).unwrap_err();
     }
 }
