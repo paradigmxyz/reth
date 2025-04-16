@@ -10,7 +10,7 @@ use reth_trie::{
 /// The `StateCommitment` trait provides associated types for state commitment operations.
 pub trait StateCommitment: std::fmt::Debug + Clone + Send + Sync + Unpin + 'static {
     /// The state root type.
-    type StateRoot<'a, TX: DbTx + 'a>: DatabaseStateRoot<'a, TX>;
+    type StateRoot<'a, TX: DbTx + 'a>: DatabaseStateRoot;
     /// The storage root type.
     type StorageRoot<'a, TX: DbTx + 'a>: DatabaseStorageRoot<'a, TX>;
     /// The state proof type.
@@ -28,7 +28,7 @@ pub struct MerklePatriciaTrie;
 
 impl StateCommitment for MerklePatriciaTrie {
     type StateRoot<'a, TX: DbTx + 'a> =
-        StateRoot<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>;
+        StateRoot<'a, DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>, TX>;
     type StorageRoot<'a, TX: DbTx + 'a> =
         StorageRoot<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>;
     type StateProof<'a, TX: DbTx + 'a> =

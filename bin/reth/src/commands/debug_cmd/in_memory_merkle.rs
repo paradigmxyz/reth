@@ -32,7 +32,7 @@ use reth_revm::database::StateProviderDatabase;
 use reth_stages::StageId;
 use reth_tasks::TaskExecutor;
 use reth_trie::StateRoot;
-use reth_trie_db::DatabaseStateRoot;
+use reth_trie_db::{DatabaseStateRoot, StateRootFromTx};
 use std::{path::PathBuf, sync::Arc};
 use tracing::*;
 
@@ -152,10 +152,10 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let execution_outcome = ExecutionOutcome::from((block_execution_output, block.number()));
 
         // Unpacked `BundleState::state_root_slow` function
-        let (in_memory_state_root, in_memory_updates) = StateRoot::overlay_root_with_updates(
-            provider.tx_ref(),
-            state_provider.hashed_post_state(execution_outcome.state()),
-        )?;
+        let (in_memory_state_root, in_memory_updates) = StateRoot::from_tx(provider.tx_ref())
+            .overlay_root_with_updates(
+                state_provider.hashed_post_state(execution_outcome.state()),
+            )?;
 
         if in_memory_state_root == block.state_root() {
             info!(target: "reth::cli", state_root = ?in_memory_state_root, "Computed in-memory state root matches");
@@ -180,10 +180,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let accounts = provider_rw.basic_accounts(account_lists)?;
         provider_rw.insert_account_for_hashing(accounts)?;
 
-        let (state_root, incremental_trie_updates) = StateRoot::incremental_root_with_updates(
-            provider_rw.tx_ref(),
-            block.number..=block.number(),
-        )?;
+        let (state_root, incremental_trie_updates) = StateRoot::from_tx(provider_rw.tx_ref())
+            .incremental_root_with_updates(block.number..=block.number())?;
         if state_root != block.state_root() {
             eyre::bail!(
                 "Computed incremental state root mismatch. Expected: {:?}. Got: {:?}",

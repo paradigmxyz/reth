@@ -15,7 +15,7 @@ use reth_trie::{
     proof::Proof, witness::TrieWitness, HashedPostState, HashedStorage, MultiProofTargets,
     StateRoot,
 };
-use reth_trie_db::{DatabaseProof, DatabaseStateRoot, DatabaseTrieWitness};
+use reth_trie_db::{DatabaseProof, DatabaseTrieWitness, StateRootFromTx};
 
 #[test]
 fn includes_empty_node_preimage() {
