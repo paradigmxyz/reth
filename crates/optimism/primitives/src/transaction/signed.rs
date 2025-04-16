@@ -1,5 +1,6 @@
 //! A signed Optimism transaction.
 
+use crate::transaction::OpTransaction;
 use alloc::vec::Vec;
 use alloy_consensus::{
     transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx},
@@ -12,9 +13,7 @@ use alloy_eips::{
     eip7702::SignedAuthorization,
 };
 use alloy_evm::{FromRecoveredTx, FromTxWithEncoded};
-use alloy_primitives::{
-    keccak256, Address, Bytes, PrimitiveSignature as Signature, TxHash, TxKind, Uint, B256,
-};
+use alloy_primitives::{keccak256, Address, Bytes, Signature, TxHash, TxKind, Uint, B256};
 use alloy_rlp::Header;
 use core::{
     hash::{Hash, Hasher},
@@ -54,6 +53,17 @@ impl OpTransactionSigned {
     /// Creates a new signed transaction from the given transaction, signature and hash.
     pub fn new(transaction: OpTypedTransaction, signature: Signature, hash: B256) -> Self {
         Self { hash: hash.into(), signature, transaction }
+    }
+
+    #[cfg(test)]
+    fn input_mut(&mut self) -> &mut Bytes {
+        match &mut self.transaction {
+            OpTypedTransaction::Legacy(tx) => &mut tx.input,
+            OpTypedTransaction::Eip2930(tx) => &mut tx.input,
+            OpTypedTransaction::Eip1559(tx) => &mut tx.input,
+            OpTypedTransaction::Eip7702(tx) => &mut tx.input,
+            OpTypedTransaction::Deposit(tx) => &mut tx.input,
+        }
     }
 
     /// Consumes the type and returns the transaction.
@@ -194,13 +204,6 @@ impl From<Sealed<TxDeposit>> for OpTransactionSigned {
         let (tx, hash) = value.into_parts();
         Self::new(OpTypedTransaction::Deposit(tx), TxDeposit::signature(), hash)
     }
-}
-
-/// A trait that represents an optimism transaction, mainly used to indicate whether or not the
-/// transaction is a deposit transaction.
-pub trait OpTransaction {
-    /// Whether or not the transaction is a dpeosit transaction.
-    fn is_deposit(&self) -> bool;
 }
 
 impl OpTransaction for OpTransactionSigned {
@@ -653,11 +656,10 @@ impl reth_codecs::Compact for OpTransactionSigned {
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for OpTransactionSigned {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        #[allow(unused_mut)]
         let mut transaction = OpTypedTransaction::arbitrary(u)?;
 
         let secp = secp256k1::Secp256k1::new();
-        let key_pair = secp256k1::Keypair::new(&secp, &mut rand::thread_rng());
+        let key_pair = secp256k1::Keypair::new(&secp, &mut rand_08::thread_rng());
         let signature = reth_primitives_traits::crypto::secp256k1::sign_message(
             B256::from_slice(&key_pair.secret_bytes()[..]),
             signature_hash(&transaction),
@@ -737,13 +739,12 @@ pub mod serde_bincode_compat {
     use alloy_consensus::transaction::serde_bincode_compat::{
         TxEip1559, TxEip2930, TxEip7702, TxLegacy,
     };
-    use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
+    use alloy_primitives::{Signature, TxHash};
     use reth_primitives_traits::{serde_bincode_compat::SerdeBincodeCompat, SignedTransaction};
     use serde::{Deserialize, Serialize};
 
     /// Bincode-compatible [`super::OpTypedTransaction`] serde implementation.
     #[derive(Debug, Serialize, Deserialize)]
-    #[allow(missing_docs)]
     enum OpTypedTransaction<'a> {
         Legacy(TxLegacy<'a>),
         Eip2930(TxEip2930<'a>),
@@ -829,6 +830,34 @@ mod tests {
     proptest! {
         #[test]
         fn test_roundtrip_compact_encode_envelope(reth_tx in arb::<OpTransactionSigned>()) {
+            let mut expected_buf = Vec::<u8>::new();
+            let expected_len = reth_tx.to_compact(&mut expected_buf);
+
+            let mut actual_but  = Vec::<u8>::new();
+            let alloy_tx = OpTxEnvelope::from(reth_tx);
+            let actual_len = alloy_tx.to_compact(&mut actual_but);
+
+            assert_eq!(actual_but, expected_buf);
+            assert_eq!(actual_len, expected_len);
+        }
+
+        #[test]
+        fn test_roundtrip_compact_decode_envelope_zstd(mut reth_tx in arb::<OpTransactionSigned>()) {
+                 // zstd only kicks in if the input is large enough
+            *reth_tx.input_mut() = vec![0;33].into();
+            let mut buf = Vec::<u8>::new();
+            let len = reth_tx.to_compact(&mut buf);
+
+            let (actual_tx, _) = OpTxEnvelope::from_compact(&buf, len);
+            let expected_tx = OpTxEnvelope::from(reth_tx);
+
+            assert_eq!(actual_tx, expected_tx);
+        }
+
+        #[test]
+        fn test_roundtrip_compact_encode_envelope_zstd(mut reth_tx in arb::<OpTransactionSigned>()) {
+                 // zstd only kicks in if the input is large enough
+            *reth_tx.input_mut() = vec![0;33].into();
             let mut expected_buf = Vec::<u8>::new();
             let expected_len = reth_tx.to_compact(&mut expected_buf);
 

@@ -465,9 +465,10 @@ mod tests {
     use crate::{EthApi, EthApiBuilder};
     use alloy_consensus::{Block, BlockBody, Header};
     use alloy_eips::BlockNumberOrTag;
-    use alloy_primitives::{PrimitiveSignature as Signature, B256, U64};
+    use alloy_primitives::{Signature, B256, U64};
     use alloy_rpc_types::FeeHistory;
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
+    use rand::Rng;
     use reth_chain_state::CanonStateSubscriptions;
     use reth_chainspec::{BaseFeeParams, ChainSpec, ChainSpecProvider};
     use reth_ethereum_primitives::TransactionSigned;
@@ -476,7 +477,7 @@ mod tests {
     use reth_provider::test_utils::{MockEthProvider, NoopProvider};
     use reth_rpc_eth_api::EthApiServer;
     use reth_storage_api::{BlockReader, BlockReaderIdExt, StateProviderFactory};
-    use reth_testing_utils::{generators, generators::Rng};
+    use reth_testing_utils::generators;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 
     fn build_test_eth_api<
@@ -519,11 +520,12 @@ mod tests {
         let mut parent_hash = B256::default();
 
         for i in (0..block_count).rev() {
-            let hash = rng.gen();
+            let hash = rng.random();
             // Note: Generates saner values to avoid invalid overflows later
-            let gas_limit = rng.gen::<u32>() as u64;
-            let base_fee_per_gas: Option<u64> = rng.gen::<bool>().then(|| rng.gen::<u32>() as u64);
-            let gas_used = rng.gen::<u32>() as u64;
+            let gas_limit = rng.random::<u32>() as u64;
+            let base_fee_per_gas: Option<u64> =
+                rng.random::<bool>().then(|| rng.random::<u32>() as u64);
+            let gas_used = rng.random::<u32>() as u64;
 
             let header = Header {
                 number: newest_block - i,
@@ -539,7 +541,7 @@ mod tests {
             const TOTAL_TRANSACTIONS: usize = 100;
             let mut transactions = Vec::with_capacity(TOTAL_TRANSACTIONS);
             for _ in 0..TOTAL_TRANSACTIONS {
-                let random_fee: u128 = rng.gen();
+                let random_fee: u128 = rng.random();
 
                 if let Some(base_fee_per_gas) = header.base_fee_per_gas {
                     let transaction = TransactionSigned::new_unhashed(

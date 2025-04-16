@@ -22,7 +22,6 @@ macro_rules! impl_fuzzer_with_input {
                 #[allow(unused_imports)]
                 use super::inputs::*;
 
-                #[allow(unused_imports)]
                 use crate::models::*;
 
                 /// Encodes and decodes table types returning its encoded size and the decoded object.
