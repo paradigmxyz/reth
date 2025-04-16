@@ -18,7 +18,7 @@ use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockHashReader, BlockWriter,
     DBProvider, DatabaseProviderFactory, ExecutionOutcome, HashingWriter, HeaderProvider,
     HistoryWriter, LatestStateProviderRef, OriginalValuesKnown, StateCommitmentProvider,
-    StateProvider, StateWriter, StorageLocation,
+    StateProofProvider, StateWriter, StorageLocation,
 };
 use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord, State};
 use reth_stateless::validation::stateless_validation;
@@ -149,9 +149,7 @@ fn run_case(name: &str, case: &BlockchainTest) -> Result<(), Error> {
     }
     let last_block = blocks_with_genesis.last().cloned();
 
-    match execute_blocks(&provider, &blocks_with_genesis, chain_spec.clone(), |block| {
-        provider.history_by_block_hash(block.parent_hash).unwrap()
-    }) {
+    match execute_blocks(&provider, &blocks_with_genesis, chain_spec.clone()) {
         Err(Error::BlockExecutionFailed) => {
             // If block execution failed, then we don't generate a stateless witness, but we still
             // do the post state checks
@@ -197,50 +195,25 @@ fn execute_blocks<
         + BlockHashReader
         + HeaderProvider
         + StateCommitmentProvider,
-    F: FnMut(&SignedRecoveredBlock) -> SP,
-    SP: StateProvider,
 >(
     provider: &Provider,
     blocks_with_genesis: &[SignedRecoveredBlock],
     chain_spec: Arc<ChainSpec>,
-    // We use this function because ProviderFactory implements `history_by_block_hash`
-    // as a standalone method and not as a trait impl.
-    mut create_state_provider: F,
 ) -> Result<Vec<(SignedRecoveredBlock, ExecutionWitness)>, Error> {
     let executor_provider = EthExecutorProvider::ethereum(chain_spec);
-    // TODO: We have two loops because if we use provider.latest() the merkle tree path
-    // TODO: is not correct
-    // First execute all of the blocks
-    for block in blocks_with_genesis.iter().skip(1) {
-        let state_provider = LatestStateProviderRef::new(provider);
-        let state_db = StateProviderDatabase(&state_provider);
-        let block_executor = executor_provider.executor(state_db);
-
-        let output = block_executor.execute(block).map_err(|_| Error::BlockExecutionFailed)?;
-        let hashed_state =
-            HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
-
-        provider.write_state(
-            &ExecutionOutcome::single(block.number, output),
-            OriginalValuesKnown::Yes,
-            StorageLocation::Database,
-        )?;
-        provider.write_hashed_state(&hashed_state.into_sorted())?;
-        provider.update_history_indices(block.number..=block.number)?;
-    }
 
     let mut program_inputs = Vec::new();
 
     for block in blocks_with_genesis.iter().skip(1) {
         let block_number = block.number;
 
-        let state_provider = create_state_provider(block);
+        let state_provider = LatestStateProviderRef::new(provider);
         let state_db = StateProviderDatabase(&state_provider);
         let block_executor = executor_provider.executor(state_db);
 
         let mut witness_record = ExecutionWitnessRecord::default();
 
-        block_executor
+        let output = block_executor
             .execute_with_state_closure(&(*block).clone(), |statedb: &State<_>| {
                 tracing::debug!(?statedb.cache, "State db");
                 witness_record.record_executed_state(statedb);
@@ -266,7 +239,6 @@ fn execute_blocks<
 
         exec_witness.headers = provider
             .headers_range(range)?
-            // .map_err(EthApiError::from)?
             .into_iter()
             .map(|header| {
                 let mut serialized_header = Vec::new();
@@ -276,6 +248,19 @@ fn execute_blocks<
             .collect();
 
         program_inputs.push((block.clone(), exec_witness));
+
+        // Correctly update state
+
+        let hashed_state =
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
+
+        provider.write_state(
+            &ExecutionOutcome::single(block.number, output),
+            OriginalValuesKnown::Yes,
+            StorageLocation::Database,
+        )?;
+        provider.write_hashed_state(&hashed_state.into_sorted())?;
+        provider.update_history_indices(block.number..=block.number)?;
     }
 
     Ok(program_inputs)
