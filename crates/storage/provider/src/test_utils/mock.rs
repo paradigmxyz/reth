@@ -567,9 +567,8 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync + 'static> BlockNumReader for Moc
     }
 
     fn block_number(&self, hash: B256) -> ProviderResult<Option<alloy_primitives::BlockNumber>> {
-        let lock = self.blocks.lock();
-        let num = lock.iter().find_map(|(h, b)| (*h == hash).then_some(b.number));
-        Ok(num)
+        let lock = self.headers.lock();
+        Ok(lock.get(&hash).map(|header| header.number))
     }
 }
 
@@ -813,31 +812,31 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> HashedPostStateProvid
 }
 
 //look
-// impl<ChainSpec> StateProvider for MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSpec>
-// where 
-//     ChainSpec: EthChainSpec + Send + Sync + 'static,
-// {
-//     fn storage(
-//         &self,
-//         account: Address,
-//         storage_key: StorageKey,
-//     ) -> ProviderResult<Option<StorageValue>> {
-//         let lock = self.accounts.lock().unwrap();
-//         Ok(lock.get(&account).and_then(|account| account.storage.get(&storage_key)).copied())
-//     }
+impl<ChainSpec> StateProvider for MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSpec>
+where 
+    ChainSpec: EthChainSpec + Send + Sync + 'static,
+{
+    fn storage(
+        &self,
+        account: Address,
+        storage_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>> {
+        let lock = self.accounts.lock().unwrap();
+        Ok(lock.get(&account).and_then(|account| account.storage.get(&storage_key)).copied())
+    }
 
-//     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
-//         let lock = self.accounts.lock().unwrap();
-//         Ok(lock.values().find_map(|account| {
-//             match (account.account.bytecode_hash.as_ref(), account.bytecode.as_ref()) {
-//                 (Some(bytecode_hash), Some(bytecode)) if bytecode_hash == code_hash => {
-//                     Some(bytecode.clone())
-//                 }
-//                 _ => None,
-//             }
-//         }))
-//     }
-// }
+    fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
+        let lock = self.accounts.lock().unwrap();
+        Ok(lock.values().find_map(|account| {
+            match (account.account.bytecode_hash.as_ref(), account.bytecode.as_ref()) {
+                (Some(bytecode_hash), Some(bytecode)) if bytecode_hash == code_hash => {
+                    Some(bytecode.clone())
+                }
+                _ => None,
+            }
+        }))
+    }
+}
 
 impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> StateProviderFactory for MockEthProvider<T,ChainSpec> {
     fn latest(&self) -> ProviderResult<StateProviderBox> {
