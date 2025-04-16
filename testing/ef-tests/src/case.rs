@@ -37,8 +37,6 @@ impl<T: Case> Cases<T> {
     pub fn run(&self) -> Vec<CaseResult> {
         self.test_cases
             .par_iter()
-            // TODO: REMOVE, just for CI
-            .filter(|(path, _)| !path.ends_with("notxs.json"))
             .map(|(path, case)| CaseResult::new(path, case, case.run()))
             .collect()
     }

@@ -21,11 +21,14 @@ reth-primitives-traits.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-db = { workspace = true, features = ["mdbx", "test-utils", "disable-lock"] }
 reth-db-api.workspace = true
+reth-db-common.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-evm-ethereum.workspace = true
 reth-evm.workspace = true
 reth-stateless = { workspace = true }
 reth-revm = { workspace = true, features = ["std", "witness"] }
+reth-trie.workspace = true
+reth-tracing.workspace = true
 
 revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
 
@@ -34,9 +37,11 @@ alloy-primitives.workspace = true
 alloy-eips.workspace = true
 alloy-rpc-types-debug.workspace = true
 alloy-consensus.workspace = true
+alloy-genesis.workspace = true
 
 walkdir.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 rayon.workspace = true
+tracing.workspace = true

@@ -9,6 +9,7 @@ use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types_debug::ExecutionWitness;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_chainspec::ChainSpec;
+use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert_genesis_state};
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_evm_ethereum::execute::EthExecutorProvider;
@@ -16,11 +17,12 @@ use reth_primitives_traits::{RecoveredBlock, SealedBlock};
 use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockHashReader, BlockWriter,
     DBProvider, DatabaseProviderFactory, ExecutionOutcome, HashingWriter, HeaderProvider,
-    LatestStateProviderRef, OriginalValuesKnown, StateCommitmentProvider, StateProvider,
-    StateWriter, StorageLocation,
+    HistoryWriter, LatestStateProviderRef, OriginalValuesKnown, StateCommitmentProvider,
+    StateProvider, StateWriter, StorageLocation,
 };
 use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord, State};
 use reth_stateless::validation::stateless_validation;
+use reth_trie::{HashedPostState, KeccakKeyHasher};
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 
 /// A handler for the blockchain test suite.
@@ -76,8 +78,8 @@ impl Case for BlockchainTestCase {
 
         // Iterate through test cases, filtering by the network type to exclude specific forks.
         self.tests
-            .values()
-            .filter(|case| {
+            .iter()
+            .filter(|(_, case)| {
                 !matches!(
                     case.network,
                     ForkSpec::ByzantiumToConstantinopleAt5 |
@@ -90,7 +92,7 @@ impl Case for BlockchainTestCase {
                 )
             })
             .par_bridge()
-            .try_for_each(run_case)?;
+            .try_for_each(|(name, case)| run_case(name, case))?;
 
         Ok(())
     }
@@ -110,7 +112,9 @@ type SignedRecoveredBlock = RecoveredBlock<Block<TransactionSigned>>;
 /// Returns:
 /// - `Ok(())` if all blocks execute successfully and the final state is correct.
 /// - `Err(Error)` if any block fails to execute correctly, or if the post-state validation fails.
-fn run_case(case: &BlockchainTest) -> Result<(), Error> {
+fn run_case(name: &str, case: &BlockchainTest) -> Result<(), Error> {
+    tracing::info!(%name, "Running blockchain test");
+
     // Create a new test database and initialize a provider for the test case.
     let chain_spec: Arc<ChainSpec> = Arc::new(case.network.into());
     let provider = create_test_provider_factory_with_chain_spec(chain_spec.clone())
@@ -126,7 +130,11 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     .unwrap();
 
     provider.insert_block(genesis_block.clone(), StorageLocation::Database)?;
-    case.pre.write_to_db(provider.tx_ref())?;
+
+    let genesis_state = case.pre.clone().into_genesis_state();
+    insert_genesis_state(&provider, genesis_state.iter())?;
+    insert_genesis_hashes(&provider, genesis_state.iter())?;
+    insert_genesis_history(&provider, genesis_state.iter())?;
 
     // Decode and insert blocks, creating a chain of blocks for the test case.
     let mut blocks_with_genesis = Vec::with_capacity(case.blocks.len() + 1);
@@ -185,6 +193,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
 fn execute_blocks<
     Provider: DBProvider
         + StateWriter<Receipt = Receipt>
+        + HistoryWriter
         + BlockHashReader
         + HeaderProvider
         + StateCommitmentProvider,
@@ -208,12 +217,16 @@ fn execute_blocks<
         let block_executor = executor_provider.executor(state_db);
 
         let output = block_executor.execute(block).map_err(|_| Error::BlockExecutionFailed)?;
+        let hashed_state =
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
 
         provider.write_state(
             &ExecutionOutcome::single(block.number, output),
             OriginalValuesKnown::Yes,
             StorageLocation::Database,
         )?;
+        provider.write_hashed_state(&hashed_state.into_sorted())?;
+        provider.update_history_indices(block.number..=block.number)?;
     }
 
     let mut program_inputs = Vec::new();
@@ -229,6 +242,7 @@ fn execute_blocks<
 
         block_executor
             .execute_with_state_closure(&(*block).clone(), |statedb: &State<_>| {
+                tracing::debug!(?statedb.cache, "State db");
                 witness_record.record_executed_state(statedb);
             })
             .map_err(|_| Error::BlockExecutionFailed)?;
