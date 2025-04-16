@@ -844,7 +844,7 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> HashedPostStateProvid
 
 impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> StateProviderFactory for MockEthProvider<T,ChainSpec> {
     fn latest(&self) -> ProviderResult<StateProviderBox> {
-        Ok(Box::new(self.clone()))
+        //Ok(Box::new(self.clone()))
     }
 
     fn state_by_block_number_or_tag(
@@ -874,23 +874,23 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> StatePr
     }
 
     fn history_by_block_number(&self, _block: BlockNumber) -> ProviderResult<StateProviderBox> {
-        Ok(Box::new(self.clone()))
+        //Ok(Box::new(self.clone()))
     }
 
     fn history_by_block_hash(&self, _block: BlockHash) -> ProviderResult<StateProviderBox> {
-        Ok(Box::new(self.clone()))
+        //Ok(Box::new(self.clone()))
     }
 
     fn state_by_block_hash(&self, _block: BlockHash) -> ProviderResult<StateProviderBox> {
-        Ok(Box::new(self.clone()))
+        //Ok(Box::new(self.clone()))
     }
 
     fn pending(&self) -> ProviderResult<StateProviderBox> {
-        Ok(Box::new(self.clone()))
+        //Ok(Box::new(self.clone()))
     }
 
     fn pending_state_by_hash(&self, _block_hash: B256) -> ProviderResult<Option<StateProviderBox>> {
-        Ok(Some(Box::new(self.clone())))
+        //Ok(Some(Box::new(self.clone())))
     }
 }
 
