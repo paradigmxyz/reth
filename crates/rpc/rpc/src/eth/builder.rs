@@ -80,7 +80,10 @@ where
 
     /// Sets `eth_cache` config for the cache that will be used if no [`EthStateCache`] is
     /// configured.
-    pub const fn eth_state_cache_config(mut self, eth_state_cache_config: EthStateCacheConfig) -> Self {
+    pub const fn eth_state_cache_config(
+        mut self,
+        eth_state_cache_config: EthStateCacheConfig,
+    ) -> Self {
         self.eth_state_cache_config = eth_state_cache_config;
         self
     }

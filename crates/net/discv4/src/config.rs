@@ -155,13 +155,19 @@ impl Discv4ConfigBuilder {
     }
 
     /// Sets the channel size for incoming messages
-    pub const fn udp_ingress_message_buffer(&mut self, udp_ingress_message_buffer: usize) -> &mut Self {
+    pub const fn udp_ingress_message_buffer(
+        &mut self,
+        udp_ingress_message_buffer: usize,
+    ) -> &mut Self {
         self.config.udp_ingress_message_buffer = udp_ingress_message_buffer;
         self
     }
 
     /// Sets the channel size for outgoing messages
-    pub const fn udp_egress_message_buffer(&mut self, udp_egress_message_buffer: usize) -> &mut Self {
+    pub const fn udp_egress_message_buffer(
+        &mut self,
+        udp_egress_message_buffer: usize,
+    ) -> &mut Self {
         self.config.udp_egress_message_buffer = udp_egress_message_buffer;
         self
     }
@@ -291,7 +297,10 @@ impl Discv4ConfigBuilder {
     }
 
     /// Configures if and how the external IP of the node should be resolved.
-    pub const fn external_ip_resolver(&mut self, external_ip_resolver: Option<NatResolver>) -> &mut Self {
+    pub const fn external_ip_resolver(
+        &mut self,
+        external_ip_resolver: Option<NatResolver>,
+    ) -> &mut Self {
         self.config.external_ip_resolver = external_ip_resolver;
         self
     }

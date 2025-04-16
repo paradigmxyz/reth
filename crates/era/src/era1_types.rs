@@ -31,7 +31,11 @@ pub struct Era1Group {
 
 impl Era1Group {
     /// Create a new [`Era1Group`]
-    pub const fn new(blocks: Vec<BlockTuple>, accumulator: Accumulator, block_index: BlockIndex) -> Self {
+    pub const fn new(
+        blocks: Vec<BlockTuple>,
+        accumulator: Accumulator,
+        block_index: BlockIndex,
+    ) -> Self {
         Self { blocks, accumulator, block_index, other_entries: Vec::new() }
     }
     /// Add another entry to this group

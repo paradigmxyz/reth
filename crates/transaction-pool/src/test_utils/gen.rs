@@ -303,7 +303,10 @@ impl TransactionBuilder {
     }
 
     /// Sets the maximum priority fee per gas for the transaction, mutable reference version.
-    pub const fn set_max_priority_fee_per_gas(&mut self, max_priority_fee_per_gas: u128) -> &mut Self {
+    pub const fn set_max_priority_fee_per_gas(
+        &mut self,
+        max_priority_fee_per_gas: u128,
+    ) -> &mut Self {
         self.max_priority_fee_per_gas = max_priority_fee_per_gas;
         self
     }
