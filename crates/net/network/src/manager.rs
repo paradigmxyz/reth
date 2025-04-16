@@ -435,7 +435,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                 .collect(),
             basic: known_peers
                 .iter()
-                .filter(|p| !peers.get_reputation(&p.id).is_some_and(|rep| rep > 0))
+                .filter(|p| peers.get_reputation(&p.id).is_none_or(|rep| rep <= 0))
                 .copied()
                 .collect(),
         };
