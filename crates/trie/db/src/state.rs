@@ -82,7 +82,7 @@ pub trait DatabaseStateRoot: Sized {
     /// use reth_db_api::database::Database;
     /// use reth_primitives_traits::Account;
     /// use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot};
-    /// use reth_trie_db::DatabaseStateRoot;
+    /// use reth_trie_db::{DatabaseStateRoot, StateRootFromTx};
     ///
     /// // Initialize the database
     /// let db = create_test_rw_db();
@@ -96,7 +96,7 @@ pub trait DatabaseStateRoot: Sized {
     ///
     /// // Calculate the state root
     /// let tx = db.tx().expect("failed to create transaction");
-    /// let state_root = StateRoot::overlay_root(&tx, hashed_state);
+    /// let state_root = StateRoot::from_tx(&tx).overlay_root(hashed_state);
     /// ```
     ///
     /// # Returns
