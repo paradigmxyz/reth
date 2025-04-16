@@ -52,7 +52,7 @@ use tokio::sync::broadcast;
 pub struct MockEthProvider<
     T: NodePrimitives = reth_ethereum_primitives::EthPrimitives,
     ChainSpec = reth_chainspec::ChainSpec,
-> {    
+> {
     ///local block store
     pub blocks: Arc<Mutex<HashMap<B256, T::Block>>>,
     /// Local header store
@@ -528,7 +528,7 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync + 'static> BlockHashReader
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         let lock = self.headers.lock();
         let hash =
-        lock.iter().find_map(|(hash, header)| (header.number == number).then_some(*hash));
+            lock.iter().find_map(|(hash, header)| (header.number == number).then_some(*hash));
         Ok(hash)
     }
 
