@@ -344,7 +344,7 @@ where
     }
 }
 
-impl<ChainSpec: EthChainSpec> TransactionsProvider for MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSpec>{
+impl<ChainSpec: EthChainSpec + 'static> TransactionsProvider for MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSpec>{
     type Transaction = reth_ethereum_primitives::TransactionSigned;
 
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
