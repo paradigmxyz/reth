@@ -52,7 +52,8 @@ use tokio::sync::broadcast;
 pub struct MockEthProvider<
     T: NodePrimitives = reth_ethereum_primitives::EthPrimitives,
     ChainSpec = reth_chainspec::ChainSpec,
-> {    ///local block store
+> {    
+    ///local block store
     pub blocks: Arc<Mutex<HashMap<B256, T::Block>>>,
     /// Local header store
     pub headers: Arc<Mutex<HashMap<B256, Header>>>,
@@ -68,7 +69,7 @@ pub struct MockEthProvider<
 
 impl<T: NodePrimitives, ChainSpec> Clone for MockEthProvider<T, ChainSpec>
 where
-    T::Block: Clone
+    T::Block: Clone,
 {
     fn clone(&self) -> Self {
         Self {
@@ -146,10 +147,11 @@ impl<ChainSpec> MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSp
     }
 
     /// Set chain spec.
-        pub fn with_chain_spec<C>(
-            self,
-            chain_spec: C,
-        ) -> MockEthProvider<reth_ethereum_primitives::EthPrimitives, C> {        MockEthProvider {
+    pub fn with_chain_spec<C>(
+        self,
+        chain_spec: C,
+    ) -> MockEthProvider<reth_ethereum_primitives::EthPrimitives, C> {
+        MockEthProvider {
             blocks: self.blocks,
             headers: self.headers,
             accounts: self.accounts,
@@ -499,8 +501,8 @@ where
     }
 
     fn receipts_by_block(
-            &self,
-            _block: BlockHashOrNumber,
+        &self,
+        _block: BlockHashOrNumber,
     ) -> ProviderResult<Option<Vec<Self::Receipt>>> {
         Ok(None)
     }
@@ -525,8 +527,8 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync + 'static> BlockHashReader
 {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         let lock = self.headers.lock();
-        let hash = 
-            lock.iter().find_map(|(hash, header)| (header.number == number).then_some(*hash));
+        let hash =
+        lock.iter().find_map(|(hash, header)| (header.number == number).then_some(*hash));
         Ok(hash)
     }
 
@@ -727,7 +729,7 @@ impl<T, ChainSpec> StateRootProvider for MockEthProvider<T, ChainSpec>
 where
     T: NodePrimitives,
     ChainSpec: Send + Sync,
-{    
+{
     fn state_root(&self, _state: HashedPostState) -> ProviderResult<B256> {
         Ok(self.state_roots.lock().pop().unwrap_or_default())
     }
