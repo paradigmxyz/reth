@@ -850,7 +850,7 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> HashedPostStateProvid
 //     }
 // }
 
-impl<ChainSpec: EthChainSpec + 'static> StateProviderFactory for MockEthProvider<ChainSpec> {
+impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> StateProviderFactory for MockEthProvider<T,ChainSpec> {
     fn latest(&self) -> ProviderResult<StateProviderBox> {
         Ok(Box::new(self.clone()))
     }
