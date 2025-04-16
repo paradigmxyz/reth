@@ -271,10 +271,6 @@ impl Hardforks for OpChainSpec {
         self.inner.fork_id(head)
     }
 
-    fn latest_fork_id(&self) -> ForkId {
-        self.inner.latest_fork_id()
-    }
-
     fn fork_filter(&self, head: Head) -> ForkFilter {
         self.inner.fork_filter(head)
     }

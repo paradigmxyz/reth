@@ -497,7 +497,11 @@ impl ChainSpec {
 
     /// Convenience method to get the latest fork id from the chainspec. Panics if chainspec has no
     /// hardforks.
+    ///
+    /// NOTE: This returns the latest implemented [`ForkId`]. In many cases this will be the future
+    /// [`ForkId`] on given network.
     #[inline]
+    #[cfg(any(test, feature = "test-utils"))]
     pub fn latest_fork_id(&self) -> ForkId {
         self.hardfork_fork_id(self.hardforks.last().unwrap().0).unwrap()
     }
@@ -782,10 +786,6 @@ impl Hardforks for ChainSpec {
 
     fn fork_id(&self, head: &Head) -> ForkId {
         self.fork_id(head)
-    }
-
-    fn latest_fork_id(&self) -> ForkId {
-        self.latest_fork_id()
     }
 
     fn fork_filter(&self, head: Head) -> ForkFilter {

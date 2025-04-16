@@ -6,7 +6,7 @@ use crate::{
     transactions::TransactionsManagerConfig,
     NetworkHandle, NetworkManager,
 };
-use reth_chainspec::{ChainSpecProvider, EthChainSpec, Hardforks};
+use reth_chainspec::{Chain, ChainSpecProvider, EthChainSpec, Hardforks};
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOVERY_ADDRESS};
 use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
@@ -598,9 +598,17 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             handshake,
         } = self;
 
+        let head = head.unwrap_or_else(|| Head {
+            hash: chain_spec.genesis_hash(),
+            number: if chain_spec.chain() == Chain::optimism_mainnet() { 105_235_063 } else { 0 },
+            timestamp: chain_spec.genesis().timestamp,
+            difficulty: chain_spec.genesis().difficulty,
+            total_difficulty: chain_spec.genesis().difficulty,
+        });
+
         discovery_v5_builder = discovery_v5_builder.map(|mut builder| {
             if let Some(network_stack_id) = NetworkStackId::id(&chain_spec) {
-                let fork_id = chain_spec.latest_fork_id();
+                let fork_id = chain_spec.fork_id(&head);
                 builder = builder.fork(network_stack_id, fork_id)
             }
 
@@ -612,14 +620,6 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         let mut hello_message =
             hello_message.unwrap_or_else(|| HelloMessage::builder(peer_id).build());
         hello_message.port = listener_addr.port();
-
-        let head = head.unwrap_or_else(|| Head {
-            hash: chain_spec.genesis_hash(),
-            number: 0,
-            timestamp: chain_spec.genesis().timestamp,
-            difficulty: chain_spec.genesis().difficulty,
-            total_difficulty: chain_spec.genesis().difficulty,
-        });
 
         // set the status
         let status = Status::spec_builder(&chain_spec, &head).build();

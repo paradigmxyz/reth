@@ -34,9 +34,6 @@ pub trait Hardforks: Clone {
     /// Compute the [`ForkId`] for the given [`Head`] following eip-6122 spec
     fn fork_id(&self, head: &Head) -> ForkId;
 
-    /// Returns the [`ForkId`] for the last fork.
-    fn latest_fork_id(&self) -> ForkId;
-
     /// Creates a [`ForkFilter`] for the block described by [Head].
     fn fork_filter(&self, head: Head) -> ForkFilter;
 }
