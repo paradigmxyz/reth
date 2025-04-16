@@ -484,33 +484,33 @@ where
 // }
 
 // //look
-// impl<ChainSpec> ReceiptProvider for MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSpec>
-// where
-//     ChainSpec: EthChainSpec + Send + Sync + 'static,
-// {
-//     type Receipt = Receipt;
+impl<T, ChainSpec> ReceiptProvider for MockEthProvider<T, ChainSpec>
+where
+    T: NodePrimitives,
+    ChainSpec: Send + Sync + 'static,
+{
+    type Receipt = Receipt;
 
-//     fn receipt(&self, _id: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
-//         Ok(None)
-//     }
+    fn receipt(&self, _id: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
+        Ok(None)
+    }
 
-//     fn receipt_by_hash(&self, _hash: TxHash) -> ProviderResult<Option<Self::Receipt>> {
-//         Ok(None)
-//     }
+    fn receipt_by_hash(&self, _hash: TxHash) -> ProviderResult<Option<Self::Receipt>> {
+        Ok(None)
+    }
 
-//     fn receipts_by_block(&self, _block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Receipt>>> {
-//         Ok(None)
-//     }
+    fn receipts_by_block(&self, _block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Receipt>>> {
+        Ok(None)
+    }
 
-//     fn receipts_by_tx_range(
-//         &self,
-//         _range: impl RangeBounds<TxNumber>,
-//     ) -> ProviderResult<Vec<Self::Receipt>> {
-//         Ok(vec![])
-//     }
-// }
+    fn receipts_by_tx_range(
+        &self,
+        _range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Self::Receipt>> {
+        Ok(vec![])
+    }
+}
 
-// //look
 impl<T, ChainSpec> ReceiptProviderIdExt for MockEthProvider<T, ChainSpec>
 where
     T: NodePrimitives,
