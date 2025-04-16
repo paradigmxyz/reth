@@ -697,6 +697,7 @@ mod tests {
     use super::*;
     use alloy_eips::eip2124::ForkHash;
     use alloy_genesis::Genesis;
+    use alloy_primitives::U256;
     use reth_chainspec::{
         Chain, ChainSpecBuilder, EthereumHardfork, ForkCondition, ForkId, MAINNET,
     };
@@ -751,18 +752,39 @@ mod tests {
 
     #[test]
     fn test_discv5_fork_id_default() {
+        const GENESIS_TIME: u64 = 151_515;
+
+        let mut genesis = Genesis::default();
+        genesis.timestamp = GENESIS_TIME;
+
+        let active_fork = (EthereumHardfork::Shanghai, ForkCondition::Timestamp(GENESIS_TIME));
+        let future_fork = (EthereumHardfork::Cancun, ForkCondition::Timestamp(GENESIS_TIME + 1));
+
         let chain_spec = ChainSpecBuilder::default()
             .chain(Chain::dev())
-            .genesis(Genesis::default())
-            .with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(151515))
+            .genesis(genesis)
+            .with_fork(active_fork.0, active_fork.1)
+            .with_fork(future_fork.0, future_fork.1)
             .build();
 
         // get the fork id to advertise on discv5
         let genesis_fork_hash = ForkHash::from(chain_spec.genesis_hash());
-        let fork_id = ForkId { hash: genesis_fork_hash, next: 0 };
-        let fork_key = b"odyssey";
+        let fork_id = ForkId { hash: genesis_fork_hash, next: GENESIS_TIME + 1 };
+        // check the fork id is set to active fork and _not_ yet future fork
+        assert_eq!(
+            fork_id,
+            chain_spec.fork_id(&Head {
+                hash: chain_spec.genesis_hash(),
+                number: 0,
+                timestamp: GENESIS_TIME,
+                difficulty: U256::ZERO,
+                total_difficulty: U256::ZERO,
+            })
+        );
+        assert_ne!(fork_id, chain_spec.latest_fork_id());
 
         // enforce that the fork_id set in local enr
+        let fork_key = b"odyssey";
         let config = builder()
             .discovery_v5(
                 reth_discv5::Config::builder((Ipv4Addr::LOCALHOST, 30303).into())
