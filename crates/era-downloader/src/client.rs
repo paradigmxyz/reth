@@ -39,7 +39,7 @@ pub struct EraClient<Http> {
 
 impl<Http: HttpClient + Clone> EraClient<Http> {
     /// Constructs [`EraClient`] using `client` to download from `url` into `folder`.
-    pub fn new(client: Http, url: Url, folder: Box<Path>) -> Self {
+    pub const fn new(client: Http, url: Url, folder: Box<Path>) -> Self {
         Self { client, url, folder }
     }
 

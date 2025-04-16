@@ -417,7 +417,7 @@ impl<N: NodePrimitives> TreeState<N> {
     }
 
     /// Updates the canonical head to the given block.
-    fn set_canonical_head(&mut self, new_head: BlockNumHash) {
+    const fn set_canonical_head(&mut self, new_head: BlockNumHash) {
         self.current_canonical_head = new_head;
     }
 
@@ -451,7 +451,7 @@ pub struct StateProviderBuilder<N: NodePrimitives, P> {
 impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
     /// Creates a new state provider from the provider factory, historical block hash and optional
     /// overlaid blocks.
-    pub fn new(
+    pub const fn new(
         provider_factory: P,
         historical: B256,
         overlay: Option<Vec<ExecutedBlockWithTrieUpdates<N>>>,
@@ -3042,13 +3042,13 @@ impl PersistingKind {
     ///
     /// We only run the parallel state root if we are not currently persisting any blocks or
     /// persisting blocks that are all ancestors of the one we are calculating the state root for.
-    pub fn can_run_parallel_state_root(&self) -> bool {
+    pub const fn can_run_parallel_state_root(&self) -> bool {
         matches!(self, Self::NotPersisting | Self::PersistingDescendant)
     }
 
     /// Returns true if the blocks are currently being persisted and the input block is a
     /// descendant.
-    pub fn is_descendant(&self) -> bool {
+    pub const fn is_descendant(&self) -> bool {
         matches!(self, Self::PersistingDescendant)
     }
 }

@@ -251,12 +251,12 @@ impl<L, R> LaunchContextWith<Attached<L, R>> {
     }
 
     /// Get a mutable reference to the right value.
-    pub fn left_mut(&mut self) -> &mut L {
+    pub const fn left_mut(&mut self) -> &mut L {
         &mut self.attachment.left
     }
 
     /// Get a mutable reference to the right value.
-    pub fn right_mut(&mut self) -> &mut R {
+    pub const fn right_mut(&mut self) -> &mut R {
         &mut self.attachment.right
     }
 }
@@ -297,7 +297,7 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     }
 
     /// Returns the attached [`NodeConfig`].
-    pub fn node_config_mut(&mut self) -> &mut NodeConfig<ChainSpec> {
+    pub const fn node_config_mut(&mut self) -> &mut NodeConfig<ChainSpec> {
         &mut self.left_mut().config
     }
 
@@ -307,7 +307,7 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     }
 
     /// Returns the attached toml config [`reth_config::Config`].
-    pub fn toml_config_mut(&mut self) -> &mut reth_config::Config {
+    pub const fn toml_config_mut(&mut self) -> &mut reth_config::Config {
         &mut self.left_mut().toml_config
     }
 
@@ -754,7 +754,7 @@ where
     }
 
     /// Returns mutable reference to the configured `NodeAdapter`.
-    pub fn node_adapter_mut(&mut self) -> &mut NodeAdapter<T, CB::Components> {
+    pub const fn node_adapter_mut(&mut self) -> &mut NodeAdapter<T, CB::Components> {
         &mut self.right_mut().node_adapter
     }
 
@@ -981,12 +981,12 @@ impl<L, R> Attached<L, R> {
     }
 
     /// Get a mutable reference to the right value.
-    pub fn left_mut(&mut self) -> &mut R {
+    pub const fn left_mut(&mut self) -> &mut R {
         &mut self.right
     }
 
     /// Get a mutable reference to the right value.
-    pub fn right_mut(&mut self) -> &mut R {
+    pub const fn right_mut(&mut self) -> &mut R {
         &mut self.right
     }
 }
