@@ -257,6 +257,13 @@ pub fn verify_execution_witness(
     }
 
     // Reveal the witness with our state root
+    // This method builds a trie using the sparse trie using the state_witness with
+    // the root being the pre_state_root.
+    // Here are some things to note:
+    // - You can pass in more witnesses than is needed for the block execution.
+    // - If you try to get an account and it has not been seen. This means that the account
+    // was not inserted into the Trie. It does not mean that the account does not exist.
+    // In order to determine an account not existing, we must do an exclusion proof.
     trie.reveal_witness(pre_state_root, &state_witness)
         .map_err(|_e| StatelessValidationError::WitnessRevealFailed { pre_state_root })?;
 
