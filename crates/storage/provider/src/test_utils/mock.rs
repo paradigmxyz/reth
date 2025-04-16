@@ -539,7 +539,7 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync +'static> BlockHashReader for Moc
 }
 
 // //look
-impl<T: NodePrimitives, ChainSpec: Send + Sync> BlockNumReader for MockEthProvider<T, ChainSpec> 
+impl<T: NodePrimitives, ChainSpec: Send + Sync 'static> BlockNumReader for MockEthProvider<T, ChainSpec> 
     {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
         let best_block_number = self.best_block_number()?;
