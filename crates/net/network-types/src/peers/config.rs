@@ -297,14 +297,14 @@ impl PeersConfig {
         optional_file: Option<impl AsRef<Path>>,
     ) -> Result<Self, io::Error> {
         let Some(file_path) = optional_file else { return Ok(self) };
-        let reader = match std::fs::File::open(file_path.as_ref()) {
+        let _reader = match std::fs::File::open(file_path.as_ref()) {
             Ok(file) => io::BufReader::new(file),
             Err(e) if e.kind() == ErrorKind::NotFound => return Ok(self),
             Err(e) => Err(e)?,
         };
         info!(target: "net::peers", file = %file_path.as_ref().display(), "Loading saved peers");
         #[cfg(feature = "serde")]
-        if let Ok(persistent_peers) = serde_json::from_reader::<_, PersistentPeers>(reader) {
+        if let Ok(persistent_peers) = serde_json::from_reader::<_, PersistentPeers>(_reader) {
             return Ok(self
                 .with_trusted_nodes(
                     persistent_peers.trusted.into_iter().map(TrustedPeer::from).collect(),

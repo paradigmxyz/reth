@@ -440,6 +440,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                 .collect(),
         };
         persistent_peers_file.parent().map(fs::create_dir_all).transpose()?;
+        #[cfg(feature = "serde")]
         reth_fs_util::write_json_file(persistent_peers_file, &persistent_peers)?;
         Ok(())
     }
