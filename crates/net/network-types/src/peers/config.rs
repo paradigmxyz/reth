@@ -2,7 +2,6 @@
 
 use reth_net_banlist::BanList;
 use reth_network_peers::{NodeRecord, TrustedPeer};
-use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
     io::{self, ErrorKind},
@@ -119,7 +118,9 @@ impl Default for ConnectionsConfig {
 }
 
 /// A set of peers that are trusted and should be connected to or accepted from.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct PersistentPeers {
     /// Trusted nodes to connect to or accept from
     pub trusted: HashSet<NodeRecord>,

@@ -430,13 +430,13 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
         let persistent_peers = reth_network_types::peers::config::PersistentPeers {
             trusted: known_peers
                 .iter()
-                .filter(|p| peers.get_reputation(&p.id).map_or(false, |rep| rep > 0))
-                .cloned()
+                .filter(|p| peers.get_reputation(&p.id).is_some_and(|rep| rep > 0))
+                .copied()
                 .collect(),
             basic: known_peers
                 .iter()
-                .filter(|p| !peers.get_reputation(&p.id).map_or(false, |rep| rep > 0))
-                .cloned()
+                .filter(|p| !peers.get_reputation(&p.id).is_some_and(|rep| rep > 0))
+                .copied()
                 .collect(),
         };
         persistent_peers_file.parent().map(fs::create_dir_all).transpose()?;
