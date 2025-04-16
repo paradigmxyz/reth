@@ -18,10 +18,6 @@ pub trait NodePrimitives:
     type SignedTx: FullSignedTx;
     /// A receipt.
     type Receipt: Receipt;
-    /// A Header
-    type Header;
-    /// State Commitment
-    type StateCommitment;
 }
 /// Helper trait that sets trait bounds on [`NodePrimitives`].
 pub trait FullNodePrimitives
