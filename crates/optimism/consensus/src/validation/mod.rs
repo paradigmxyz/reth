@@ -7,6 +7,7 @@ use crate::proof::calculate_receipt_root_optimism;
 use alloc::vec::Vec;
 use alloy_consensus::{BlockHeader, TxReceipt, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::{Bloom, B256};
+use alloy_trie::EMPTY_ROOT_HASH;
 use op_alloy_consensus::{decode_holocene_extra_data, EIP1559ParamError};
 use reth_chainspec::{BaseFeeParams, EthChainSpec};
 use reth_consensus::ConsensusError;
@@ -51,7 +52,15 @@ where
         (Some(header_withdrawals_root), Some(withdrawals_root)) => {
             // after isthmus, the withdrawals root field is repurposed and no longer mirrors the
             // withdrawals root only check
-            if !chain_spec.is_isthmus_active_at_timestamp(header.timestamp()) {
+            if chain_spec.is_isthmus_active_at_timestamp(header.timestamp()) {
+                // After isthmus we only ensure that the body has empty withdrawals
+                if withdrawals_root != EMPTY_ROOT_HASH {
+                    return Err(ConsensusError::BodyWithdrawalsRootDiff(
+                        GotExpected { got: withdrawals_root, expected: EMPTY_ROOT_HASH }.into(),
+                    ))
+                }
+            } else {
+                // before isthmust we ensure that the header root matches the body
                 if withdrawals_root != header_withdrawals_root {
                     return Err(ConsensusError::BodyWithdrawalsRootDiff(
                         GotExpected { got: withdrawals_root, expected: header_withdrawals_root }
