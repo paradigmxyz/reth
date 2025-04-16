@@ -39,7 +39,7 @@ use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     AccountReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
-    ChangeSetReader, FullRpcProvider, ProviderBlock, StateProviderFactory,
+    ChangeSetReader, FullRpcProvider, StateProviderFactory,
 };
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthApi, EthApiBuilder, EthBundle, MinerApi, NetApi,
@@ -119,11 +119,11 @@ where
         + CanonStateSubscriptions<Primitives = N>
         + AccountReader
         + ChangeSetReader,
-    Pool: TransactionPool + 'static,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     EvmConfig: ConfigureEvm<Primitives = N>,
-    EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
+    EthApi: FullEthApiServer<Primitives = N, Provider = Provider, Pool = Pool>,
     BlockExecutor: BlockExecutorProvider<Primitives = N>,
 {
     let module_config = module_config.into();
@@ -538,7 +538,7 @@ where
         + CanonStateSubscriptions<Primitives = N>
         + AccountReader
         + ChangeSetReader,
-    Pool: TransactionPool + 'static,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     EvmConfig: ConfigureEvm<Primitives = N>,
@@ -563,7 +563,7 @@ where
         RpcRegistryInner<Provider, Pool, Network, Tasks, EthApi, BlockExecutor, Consensus>,
     )
     where
-        EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
+        EthApi: FullEthApiServer<Primitives = N, Provider = Provider, Pool = Pool>,
     {
         let Self {
             provider, pool, network, executor, evm_config, block_executor, consensus, ..
@@ -626,7 +626,7 @@ where
         eth: EthApi,
     ) -> TransportRpcModules<()>
     where
-        EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
+        EthApi: FullEthApiServer<Primitives = N, Provider = Provider, Pool = Pool>,
     {
         let mut modules = TransportRpcModules::default();
 
@@ -961,8 +961,8 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn register_debug(&mut self) -> &mut Self
     where
-        EthApi: EthApiSpec + EthTransactions + TraceExt,
-        BlockExecutor::Primitives: NodePrimitives<Block = ProviderBlock<EthApi::Provider>>,
+        EthApi: EthApiSpec + EthTransactions<Primitives = N> + TraceExt,
+        BlockExecutor: BlockExecutorProvider<Primitives = N>,
     {
         let debug_api = self.debug_api();
         self.modules.insert(RethRpcModule::Debug, debug_api.into_rpc().into());
@@ -1071,8 +1071,7 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn debug_api(&self) -> DebugApi<EthApi, BlockExecutor>
     where
-        EthApi: EthApiSpec + EthTransactions + TraceExt,
-        BlockExecutor::Primitives: NodePrimitives<Block = ProviderBlock<EthApi::Provider>>,
+        EthApi: EthApiSpec + EthTransactions<Primitives = N> + TraceExt,
     {
         DebugApi::new(
             self.eth_api().clone(),
@@ -1108,10 +1107,10 @@ where
         + CanonStateSubscriptions<Primitives = N>
         + AccountReader
         + ChangeSetReader,
-    Pool: TransactionPool + 'static,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
+    EthApi: FullEthApiServer<Primitives = N, Provider = Provider, Pool = Pool>,
     BlockExecutor: BlockExecutorProvider<Primitives = N>,
     Consensus: FullConsensus<N, Error = ConsensusError> + Clone + 'static,
 {
