@@ -457,7 +457,7 @@ revm-inspectors = "0.19.0"
 alloy-chains = { version = "0.2.0", default-features = false }
 alloy-dyn-abi = "1.0.0"
 alloy-eip2124 = { version = "0.2.0", default-features = false }
-alloy-evm = { version = "0.4.0", default-features = false }
+alloy-evm = { version = "0.5.0", default-features = false }
 alloy-primitives = { version = "1.0.0", default-features = false, features = ["map-foldhash"] }
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
 alloy-sol-macro = "1.0.0"
@@ -496,13 +496,13 @@ alloy-transport-ipc = { version = "0.14.0", default-features = false }
 alloy-transport-ws = { version = "0.14.0", default-features = false }
 
 # op
-alloy-op-evm = { version = "0.4.0", default-features = false }
+alloy-op-evm = { version = "0.5.0", default-features = false }
 alloy-op-hardforks = "0.2.0"
-op-alloy-rpc-types = { version = "0.13.0", default-features = false }
-op-alloy-rpc-types-engine = { version = "0.13.0", default-features = false }
-op-alloy-network = { version = "0.13.0", default-features = false }
-op-alloy-consensus = { version = "0.13.0", default-features = false }
-op-alloy-rpc-jsonrpsee = { version = "0.13.0", default-features = false }
+op-alloy-rpc-types = { version = "0.14.1", default-features = false }
+op-alloy-rpc-types-engine = { version = "0.14.1", default-features = false }
+op-alloy-network = { version = "0.14.1", default-features = false }
+op-alloy-consensus = { version = "0.14.1", default-features = false }
+op-alloy-rpc-jsonrpsee = { version = "0.14.1", default-features = false }
 op-alloy-flz = { version = "0.13.0", default-features = false }
 
 # misc
