@@ -344,7 +344,7 @@ where
     }
 }
 
-impl<ChainSpec: EthChainSpec + 'static> TransactionsProvider for MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSpec>{
+impl<ChainSpec: EthChainSpec> TransactionsProvider for MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSpec>{
     type Transaction = reth_ethereum_primitives::TransactionSigned;
 
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
@@ -588,83 +588,84 @@ impl<T: NodePrimitives, ChainSpec:EthChainSpec + Send + Sync + 'static> BlockIdR
     }
 }
 
-// //look
-// impl<ChainSpec> BlockReader for MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSpec>
-// where 
-//     ChainSpec: EthChainSpec + Send + Sync + 'static,
-// {
-//     type Block = reth_ethereum_primitives::Block;
+//look
+impl<T, ChainSpec> BlockReader for MockEthProvider<T, ChainSpec>
+where
+    T: NodePrimitives<Block = reth_ethereum_primitives::Block>,
+    ChainSpec: EthChainSpec + Send + Sync + 'static,
+{
+    type Block = T::Block;
 
-//     fn find_block_by_hash(
-//         &self,
-//         hash: B256,
-//         _source: BlockSource,
-//     ) -> ProviderResult<Option<Self::Block>> {
-//         self.block(hash.into())
-//     }
+    fn find_block_by_hash(
+        &self,
+        hash: B256,
+        _source: BlockSource,
+    ) -> ProviderResult<Option<Self::Block>> {
+        self.block(hash.into())
+    }
 
-//     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
-//         let lock = self.blocks.lock();
-//         match id {
-//             BlockHashOrNumber::Hash(hash) => Ok(lock.get(&hash).cloned()),
-//             BlockHashOrNumber::Number(num) => Ok(lock.values().find(|b| b.number == num).cloned()),
-//         }
-//     }
+    fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
+        let lock = self.blocks.lock();
+        match id {
+            BlockHashOrNumber::Hash(hash) => Ok(lock.get(&hash).cloned()),
+            BlockHashOrNumber::Number(num) => Ok(lock.values().find(|b| b.number == num).cloned()),
+        }
+    }
 
-//     fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Self::Block>>> {
-//         Ok(None)
-//     }
+    fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Self::Block>>> {
+        Ok(None)
+    }
 
-//     fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-//         Ok(None)
-//     }
+    fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+        Ok(None)
+    }
 
-//     fn pending_block_and_receipts(
-//         &self,
-//     ) -> ProviderResult<Option<(SealedBlock<Self::Block>, Vec<Receipt>)>> {
-//         Ok(None)
-//     }
+    fn pending_block_and_receipts(
+        &self,
+    ) -> ProviderResult<Option<(SealedBlock<Self::Block>, Vec<Receipt>)>> {
+        Ok(None)
+    }
 
-//     fn recovered_block(
-//         &self,
-//         _id: BlockHashOrNumber,
-//         _transaction_kind: TransactionVariant,
-//     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-//         Ok(None)
-//     }
+    fn recovered_block(
+        &self,
+        _id: BlockHashOrNumber,
+        _transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+        Ok(None)
+    }
 
-//     fn sealed_block_with_senders(
-//         &self,
-//         _id: BlockHashOrNumber,
-//         _transaction_kind: TransactionVariant,
-//     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-//         Ok(None)
-//     }
+    fn sealed_block_with_senders(
+        &self,
+        _id: BlockHashOrNumber,
+        _transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+        Ok(None)
+    }
 
-//     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Self::Block>> {
-//         let lock = self.blocks.lock();
+    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Self::Block>> {
+        let lock = self.blocks.lock();
 
-//         let mut blocks: Vec<_> =
-//             lock.values().filter(|block| range.contains(&block.number)).cloned().collect();
-//         blocks.sort_by_key(|block| block.number);
+        let mut blocks: Vec<_> =
+            lock.values().filter(|block| range.contains(&block.number)).cloned().collect();
+        blocks.sort_by_key(|block| block.number);
 
-//         Ok(blocks)
-//     }
+        Ok(blocks)
+    }
 
-//     fn block_with_senders_range(
-//         &self,
-//         _range: RangeInclusive<BlockNumber>,
-//     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
-//         Ok(vec![])
-//     }
+    fn block_with_senders_range(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
+        Ok(vec![])
+    }
 
-//     fn recovered_block_range(
-//         &self,
-//         _range: RangeInclusive<BlockNumber>,
-//     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
-//         Ok(vec![])
-//     }
-// }
+    fn recovered_block_range(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
+        Ok(vec![])
+    }
+}
 
 // //look
 // impl<ChainSpec> BlockReaderIdExt for MockEthProvider<reth_ethereum_primitives::Eth, ChainSpec>
