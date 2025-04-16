@@ -29,6 +29,10 @@ impl Hardforks for CustomChainSpec {
         self.inner.fork_id(head)
     }
 
+    fn latest_fork_id(&self) -> reth_ethereum::chainspec::ForkId {
+        self.inner.latest_fork_id()
+    }
+
     fn fork_filter(
         &self,
         head: reth_ethereum::chainspec::Head,
