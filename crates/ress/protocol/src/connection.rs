@@ -1,6 +1,9 @@
-use crate::{GetHeaders, NodeType, RessMessage, RessProtocolMessage, RessProtocolProvider};
+use crate::{
+    GetHeaders, NodeType, RLPExecutionWitness, RessMessage, RessProtocolMessage,
+    RessProtocolProvider,
+};
 use alloy_consensus::Header;
-use alloy_primitives::{bytes::BytesMut, BlockHash, Bytes, B256};
+use alloy_primitives::{bytes::BytesMut, BlockHash, B256};
 use futures::{stream::FuturesUnordered, Stream, StreamExt};
 use reth_eth_wire::{message::RequestPair, multiplex::ProtocolConnection};
 use reth_ethereum_primitives::BlockBody;
@@ -100,9 +103,6 @@ impl<P> RessProtocolConnection<P> {
             RessPeerRequest::GetWitness { block_hash, .. } => {
                 RessProtocolMessage::get_witness(next_id, *block_hash)
             }
-            RessPeerRequest::GetBytecode { code_hash, .. } => {
-                RessProtocolMessage::get_bytecode(next_id, *code_hash)
-            }
         };
         self.inflight_requests.insert(next_id, command);
         message
@@ -133,30 +133,16 @@ where
         }
     }
 
-    fn on_bytecode_request(&self, code_hash: B256) -> Bytes {
-        match self.provider.bytecode(code_hash) {
-            Ok(Some(bytecode)) => bytecode,
-            Ok(None) => {
-                trace!(target: "ress::net::connection", peer_id = %self.peer_id, %code_hash, "bytecode not found");
-                Default::default()
-            }
-            Err(error) => {
-                trace!(target: "ress::net::connection", peer_id = %self.peer_id, %code_hash, %error, "error retrieving bytecode");
-                Default::default()
-            }
-        }
-    }
-
     fn on_witness_response(
         &self,
         request: RequestPair<B256>,
-        witness_result: ProviderResult<Vec<Bytes>>,
+        witness_result: ProviderResult<RLPExecutionWitness>,
     ) -> RessProtocolMessage {
         let peer_id = self.peer_id;
         let block_hash = request.message;
         let witness = match witness_result {
             Ok(witness) => {
-                trace!(target: "ress::net::connection", %peer_id, %block_hash, len = witness.len(), "witness found");
+                trace!(target: "ress::net::connection", %peer_id, %block_hash, state_len = witness.state.len(), codes_len = witness.codes.len(), headers_len = witness.headers.len(), "witness found");
                 witness
             }
             Err(error) => {
@@ -189,13 +175,6 @@ where
                 let response = RessProtocolMessage::block_bodies(req.request_id, bodies);
                 return OnRessMessageOutcome::Response(response.encoded());
             }
-            RessMessage::GetBytecode(req) => {
-                let code_hash = req.message;
-                trace!(target: "ress::net::connection", peer_id = %self.peer_id, %code_hash, "serving bytecode");
-                let bytecode = self.on_bytecode_request(code_hash);
-                let response = RessProtocolMessage::bytecode(req.request_id, bytecode);
-                return OnRessMessageOutcome::Response(response.encoded());
-            }
             RessMessage::GetWitness(req) => {
                 let block_hash = req.message;
                 trace!(target: "ress::net::connection", peer_id = %self.peer_id, %block_hash, "serving witness");
@@ -216,15 +195,6 @@ where
             }
             RessMessage::BlockBodies(res) => {
                 if let Some(RessPeerRequest::GetBlockBodies { tx, .. }) =
-                    self.inflight_requests.remove(&res.request_id)
-                {
-                    let _ = tx.send(res.message);
-                } else {
-                    self.report_bad_message();
-                }
-            }
-            RessMessage::Bytecode(res) => {
-                if let Some(RessPeerRequest::GetBytecode { tx, .. }) =
                     self.inflight_requests.remove(&res.request_id)
                 {
                     let _ = tx.send(res.message);
@@ -320,7 +290,7 @@ where
 }
 
 type WitnessFut =
-    Pin<Box<dyn Future<Output = (RequestPair<B256>, ProviderResult<Vec<Bytes>>)> + Send>>;
+    Pin<Box<dyn Future<Output = (RequestPair<B256>, ProviderResult<RLPExecutionWitness>)> + Send>>;
 
 /// Ress peer request.
 #[derive(Debug)]
@@ -339,19 +309,12 @@ pub enum RessPeerRequest {
         /// The sender for the response.
         tx: oneshot::Sender<Vec<BlockBody>>,
     },
-    /// Get bytecode for specific code hash
-    GetBytecode {
-        /// Target code hash that we want to get bytecode for.
-        code_hash: B256,
-        /// The sender for the response.
-        tx: oneshot::Sender<Bytes>,
-    },
     /// Get witness for specific block.
     GetWitness {
         /// Target block hash that we want to get witness for.
         block_hash: BlockHash,
         /// The sender for the response.
-        tx: oneshot::Sender<Vec<Bytes>>,
+        tx: oneshot::Sender<RLPExecutionWitness>,
     },
 }
 

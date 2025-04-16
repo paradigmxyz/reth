@@ -26,3 +26,6 @@ pub use connection::{RessPeerRequest, RessProtocolConnection};
 
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
+
+mod execution_witness;
+pub use execution_witness::RLPExecutionWitness;
