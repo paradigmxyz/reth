@@ -590,6 +590,14 @@ impl<T, ChainSpec> BlockReader for MockEthProvider<T, ChainSpec>
 where
     T: NodePrimitives<Block = reth_ethereum_primitives::Block>,
     ChainSpec: EthChainSpec + Send + Sync + 'static,
+    MockEthProvider<T, ChainSpec>: 
+        BlockNumReader
+        + HeaderProvider
+        + BlockBodyIndicesProvider
+        + TransactionsProvider
+        + ReceiptProvider
+        + WithdrawalsProvider
+        + OmmersProvider,
 {
     type Block = T::Block;
 
