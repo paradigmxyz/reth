@@ -600,7 +600,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
 
         let head = head.unwrap_or_else(|| Head {
             hash: chain_spec.genesis_hash(),
-            number: if chain_spec.chain() == Chain::optimism_mainnet() { 105_235_063 } else { 0 },
+            number: 0,
             timestamp: chain_spec.genesis().timestamp,
             difficulty: chain_spec.genesis().difficulty,
             total_difficulty: chain_spec.genesis().difficulty,
