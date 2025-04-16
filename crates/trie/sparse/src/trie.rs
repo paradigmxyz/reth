@@ -93,11 +93,11 @@ impl SparseTrie {
     /// # Examples
     ///
     /// ```
-    /// use reth_trie_sparse::SparseTrie;
+    /// use reth_trie_sparse::{blinded::DefaultBlindedProvider, SparseTrie};
     ///
-    /// let trie = SparseTrie::blind();
+    /// let trie: SparseTrie<DefaultBlindedProvider> = SparseTrie::blind();
     /// assert!(trie.is_blind());
-    /// let trie = SparseTrie::default();
+    /// let trie: SparseTrie<DefaultBlindedProvider> = SparseTrie::default();
     /// assert!(trie.is_blind());
     /// ```
     pub const fn blind() -> Self {
@@ -109,9 +109,9 @@ impl SparseTrie {
     /// # Examples
     ///
     /// ```
-    /// use reth_trie_sparse::SparseTrie;
+    /// use reth_trie_sparse::{blinded::DefaultBlindedProvider, SparseTrie};
     ///
-    /// let trie = SparseTrie::revealed_empty();
+    /// let trie: SparseTrie<DefaultBlindedProvider> = SparseTrie::revealed_empty();
     /// assert!(!trie.is_blind());
     /// ```
     pub fn revealed_empty() -> Self {
