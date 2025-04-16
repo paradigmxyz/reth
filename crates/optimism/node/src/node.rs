@@ -215,7 +215,7 @@ where
         reth_optimism_primitives::OpBlock {
             header: header.inner,
             body: reth_optimism_primitives::OpBlockBody {
-                transactions: transactions.into_transactions().map(Into::into).collect(),
+                transactions: transactions.into_transactions().collect(),
                 ..Default::default()
             },
         }
@@ -560,6 +560,7 @@ where
             .no_eip4844()
             .with_head_timestamp(ctx.head().timestamp)
             .kzg_settings(ctx.kzg_settings()?)
+            .set_tx_fee_cap(ctx.config().rpc.rpc_tx_fee_cap)
             .with_additional_tasks(
                 pool_config_overrides
                     .additional_validation_tasks

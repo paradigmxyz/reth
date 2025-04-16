@@ -127,6 +127,17 @@ impl Transaction {
             Self::Eip7702(tx) => tx.nonce = nonce,
         }
     }
+
+    #[cfg(test)]
+    fn input_mut(&mut self) -> &mut Bytes {
+        match self {
+            Self::Legacy(tx) => &mut tx.input,
+            Self::Eip2930(tx) => &mut tx.input,
+            Self::Eip1559(tx) => &mut tx.input,
+            Self::Eip4844(tx) => &mut tx.input,
+            Self::Eip7702(tx) => &mut tx.input,
+        }
+    }
 }
 
 impl Typed2718 for Transaction {
@@ -969,6 +980,8 @@ pub(super) mod serde_bincode_compat {
     };
     use alloy_primitives::{Signature, TxHash};
     use reth_primitives_traits::{serde_bincode_compat::SerdeBincodeCompat, SignedTransaction};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde_with::{DeserializeAs, SerializeAs};
 
     /// Bincode-compatible [`super::Transaction`] serde implementation.
     #[derive(Debug)]
@@ -1034,6 +1047,28 @@ pub(super) mod serde_bincode_compat {
             }
         }
     }
+
+    impl SerializeAs<super::TransactionSigned> for TransactionSigned<'_> {
+        fn serialize_as<S>(
+            source: &super::TransactionSigned,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            TransactionSigned::from(source).serialize(serializer)
+        }
+    }
+
+    impl<'de> DeserializeAs<'de, super::TransactionSigned> for TransactionSigned<'de> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::TransactionSigned, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            TransactionSigned::deserialize(deserializer).map(Into::into)
+        }
+    }
+
     impl SerdeBincodeCompat for super::TransactionSigned {
         type BincodeRepr<'a> = TransactionSigned<'a>;
 
@@ -1127,6 +1162,36 @@ mod tests {
 
         #[test]
         fn test_roundtrip_compact_decode_envelope(reth_tx in arb::<TransactionSigned>()) {
+            let mut buf = Vec::<u8>::new();
+            let len = reth_tx.to_compact(&mut buf);
+
+            let (actual_tx, _) = EthereumTxEnvelope::<TxEip4844>::from_compact(&buf, len);
+            let expected_tx = EthereumTxEnvelope::<TxEip4844>::from(reth_tx);
+
+            assert_eq!(actual_tx, expected_tx);
+        }
+
+        #[test]
+        fn test_roundtrip_compact_encode_envelope_zstd(mut reth_tx in arb::<TransactionSigned>()) {
+               // zstd only kicks in if the input is large enough
+            *reth_tx.transaction.input_mut() = vec![0;33].into();
+
+            let mut expected_buf = Vec::<u8>::new();
+            let expected_len = reth_tx.to_compact(&mut expected_buf);
+
+            let mut actual_but  = Vec::<u8>::new();
+            let alloy_tx = EthereumTxEnvelope::<TxEip4844>::from(reth_tx);
+            let actual_len = alloy_tx.to_compact(&mut actual_but);
+
+            assert_eq!(actual_but, expected_buf);
+            assert_eq!(actual_len, expected_len);
+        }
+
+        #[test]
+        fn test_roundtrip_compact_decode_envelope_zstd(mut reth_tx in arb::<TransactionSigned>()) {
+            // zstd only kicks in if the input is large enough
+            *reth_tx.transaction.input_mut() = vec![0;33].into();
+
             let mut buf = Vec::<u8>::new();
             let len = reth_tx.to_compact(&mut buf);
 
