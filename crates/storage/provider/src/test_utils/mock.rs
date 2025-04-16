@@ -501,7 +501,7 @@ where
 impl<T, ChainSpec> ReceiptProviderIdExt for MockEthProvider<T, ChainSpec>
 where
     T: NodePrimitives,
-    MockEthProvider<T, ChainSpec>: ReceiptProvider + BlockIdReader,
+    Self: ReceiptProvider + BlockIdReader,
 {}
 
 impl<T: NodePrimitives, ChainSpec: Send + Sync +'static> BlockHashReader for MockEthProvider<T, ChainSpec>{
@@ -671,7 +671,7 @@ where
     fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<Header>> {
         match self.block_by_id(id)? {
             None => Ok(None),
-            Some(block) => Ok(Some(block.header.clone())),
+            Some(block) => Ok(Some(block.header)),
         }
     }
 
