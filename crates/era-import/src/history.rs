@@ -3,24 +3,34 @@ use alloy_primitives::BlockNumber;
 use eyre::OptionExt;
 use futures_util::StreamExt;
 use reth_db_api::transaction::DbTxMut;
+use reth_era::era1_file::Era1Reader;
 use reth_era_downloader::{EraStream, HttpClient};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     ProviderError, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
 };
 use reth_storage_api::{DBProvider, HeaderProvider, NodePrimitivesProvider};
-use std::fs::File;
+use std::{fs::File, sync::mpsc};
 
 /// Imports blocks from `downloader` using `provider`.
 ///
 /// Returns current block height.
-pub async fn import<H, P>(mut downloader: EraStream<H>, provider: &P) -> eyre::Result<BlockNumber>
+pub fn import<H, P>(mut downloader: EraStream<H>, provider: &P) -> eyre::Result<BlockNumber>
 where
     H: HttpClient + Clone + Send + Sync + 'static + Unpin,
     P: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory,
     <P as NodePrimitivesProvider>::Primitives:
         NodePrimitives<BlockHeader = alloy_consensus::Header>,
 {
+    let (tx, rx) = mpsc::channel();
+
+    tokio::spawn(async move {
+        while let Some(file) = downloader.next().await {
+            tx.send(Some(file))?;
+        }
+        tx.send(None)
+    });
+
     let static_file_provider = provider.static_file_provider();
 
     // Consistency check of expected headers in static files vs DB is done on provider::sync_gap
@@ -38,7 +48,7 @@ where
     // order
     let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
 
-    while let Some(file) = downloader.next().await {
+    while let Some(file) = rx.recv()? {
         let file = file?;
 
         let name = file
@@ -49,7 +59,7 @@ where
             .to_owned();
 
         let file = File::open(file)?;
-        let mut reader = reth_era::era1_file::Era1Reader::new(file);
+        let mut reader = Era1Reader::new(file);
         let era = reader.read(name)?;
 
         for block in &era.group.blocks {

@@ -11,14 +11,17 @@ use tokio::{
 /// Accesses the network over HTTP.
 pub trait HttpClient {
     /// Makes an HTTP GET request to `url`. Returns a stream of response body bytes.
-    fn get<U: IntoUrl>(
+    fn get<U: IntoUrl + Send + Sync>(
         &self,
         url: U,
-    ) -> impl Future<Output = eyre::Result<impl Stream<Item = eyre::Result<Bytes>> + Unpin>>;
+    ) -> impl Future<
+        Output = eyre::Result<impl Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>,
+    > + Send
+           + Sync;
 }
 
 impl HttpClient for Client {
-    async fn get<U: IntoUrl>(
+    async fn get<U: IntoUrl + Send + Sync>(
         &self,
         url: U,
     ) -> eyre::Result<impl Stream<Item = eyre::Result<Bytes>> + Unpin> {
