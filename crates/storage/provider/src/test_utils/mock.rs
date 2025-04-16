@@ -810,8 +810,9 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> HashedPostStateProvid
     }
 }
 
-impl<ChainSpec> StateProvider for MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSpec>
-where 
+impl<T, ChainSpec> StateProvider for MockEthProvider<T, ChainSpec>
+where
+    T: NodePrimitives,
     ChainSpec: EthChainSpec + Send + Sync + 'static,
 {
     fn storage(
