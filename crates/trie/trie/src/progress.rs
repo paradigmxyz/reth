@@ -13,7 +13,7 @@ pub enum StateRootProgress {
 }
 
 /// The intermediate state of the state root computation.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IntermediateStateRootState {
     /// Previously constructed hash builder.
     pub hash_builder: HashBuilder,

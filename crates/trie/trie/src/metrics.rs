@@ -3,7 +3,7 @@ use metrics::{Counter, Histogram};
 use reth_metrics::Metrics;
 
 /// Wrapper for state root metrics.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StateRootMetrics {
     /// State trie metrics.
     pub state_trie: TrieRootMetrics,
