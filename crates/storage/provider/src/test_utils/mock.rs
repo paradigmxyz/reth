@@ -95,21 +95,19 @@ where
         }
     }
 }
-// pub trait HasHeader {
-//      type Header;
-//      fn header(&self) -> &Self::Header;
-//  }
+pub trait HasHeader {
+    type Header;
+    fn header(&self) -> &Self::Header;
+}
 // pub trait BlockFields {
 //     fn number(&self) -> u64;
 // }
 
-impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec>
-where
-    T::Block: HasHeader<Header = Header>,
+impl<ChainSpec> MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSpec>
 {
     /// Add block to local block store
-    pub fn add_block(&self, hash: B256, block: T::Block) {
-        self.add_header(hash, block.header().clone());
+    pub fn add_block(&self, hash: B256, block: Block) {
+        self.add_header(hash, block.header.clone());
         self.blocks.lock().insert(hash, block);
     }
 
@@ -119,7 +117,7 @@ where
         iter: impl IntoIterator<Item = (B256, T::Block)>,
     ) {
         for (hash, block) in iter {
-            self.add_header(hash, block.header().clone());
+            self.add_header(hash, block.header.clone());
             self.add_block(hash, block)
         }
     }
@@ -154,7 +152,7 @@ where
     }
 
     /// Set chain spec.
-    pub fn with_chain_spec<C>(self, chain_spec: C) -> MockEthProvider<T, C> {
+    pub fn with_chain_spec<C>(self, chain_spec: C) -> MockEthProvider<reth_ethereum_primitives::EthPrimitives, C> {
         MockEthProvider {
             blocks: self.blocks,
             headers: self.headers,
@@ -581,7 +579,7 @@ where
 // }
 
 // //look
-impl<T: NodePrimitives, ChainSpec> BlockIdReader for MockEthProvider<T, ChainSpec> {
+impl<T: NodePrimitives, ChainSpec:EthChainSpec + Send + Sync> BlockIdReader for MockEthProvider<T, ChainSpec> {
     fn pending_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
         Ok(None)
     }
