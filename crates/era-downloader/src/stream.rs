@@ -112,7 +112,8 @@ impl<Http: HttpClient + Clone + Send + Sync + 'static + Unpin> Stream for EraStr
     }
 }
 
-type DownloadFuture = Pin<Box<dyn Future<Output = eyre::Result<Box<Path>>>>>;
+type DownloadFuture =
+    Pin<Box<dyn Future<Output = eyre::Result<Box<Path>>> + Send + Sync + 'static>>;
 
 struct DownloadStream {
     downloads: FuturesOrdered<DownloadFuture>,
@@ -181,7 +182,7 @@ enum State {
 }
 
 impl<Http: HttpClient + Clone + Send + Sync + 'static + Unpin> Stream for StartingStream<Http> {
-    type Item = Pin<Box<dyn Future<Output = eyre::Result<Box<Path>>>>>;
+    type Item = DownloadFuture;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if self.state == State::Initial {
