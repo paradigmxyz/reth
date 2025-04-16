@@ -3,10 +3,9 @@
 
 use alloc::vec::Vec;
 use alloy_consensus::{
-    transaction::{PooledTransaction, RlpEcdsaDecodableTx, RlpEcdsaEncodableTx},
-    BlobTransactionSidecar, EthereumTxEnvelope, SignableTransaction, Signed, TxEip1559, TxEip2930,
-    TxEip4844, TxEip4844Variant, TxEip4844WithSidecar, TxEip7702, TxEnvelope, TxLegacy, TxType,
-    Typed2718, TypedTransaction,
+    transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx},
+    EthereumTxEnvelope, SignableTransaction, Signed, TxEip1559, TxEip2930, TxEip4844, TxEip7702,
+    TxLegacy, TxType, Typed2718, TypedTransaction,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
@@ -21,7 +20,7 @@ use core::hash::{Hash, Hasher};
 use reth_primitives_traits::{
     crypto::secp256k1::{recover_signer, recover_signer_unchecked},
     sync::OnceLock,
-    transaction::{error::TransactionConversionError, signed::RecoveryError},
+    transaction::signed::RecoveryError,
     InMemorySize, SignedTransaction,
 };
 
@@ -418,44 +417,6 @@ impl TransactionSigned {
         Self { hash: Default::default(), signature, transaction }
     }
 
-    /// Splits the `TransactionSigned` into its transaction and signature.
-    pub fn split(self) -> (Transaction, Signature) {
-        (self.transaction, self.signature)
-    }
-
-    /// Converts from an EIP-4844 transaction to a [`PooledTransaction`] with the given sidecar.
-    ///
-    /// Returns an `Err` containing the original `TransactionSigned` if the transaction is not
-    /// EIP-4844.
-    pub fn try_into_pooled_eip4844(
-        self,
-        sidecar: BlobTransactionSidecar,
-    ) -> Result<PooledTransaction, Self> {
-        let hash = *self.tx_hash();
-        Ok(match self {
-            // If the transaction is an EIP-4844 transaction...
-            Self { transaction: Transaction::Eip4844(tx), signature, .. } => {
-                // Construct a pooled eip488 tx with the provided sidecar.
-                PooledTransaction::Eip4844(Signed::new_unchecked(
-                    TxEip4844WithSidecar { tx, sidecar },
-                    signature,
-                    hash,
-                ))
-            }
-            // If the transaction is not EIP-4844, return an error with the original
-            // transaction.
-            _ => return Err(self),
-        })
-    }
-
-    /// Returns the [`TxEip4844`] if the transaction is an EIP-4844 transaction.
-    pub const fn as_eip4844(&self) -> Option<&TxEip4844> {
-        match &self.transaction {
-            Transaction::Eip4844(tx) => Some(tx),
-            _ => None,
-        }
-    }
-
     /// Provides mutable access to the transaction.
     #[cfg(feature = "test-utils")]
     pub fn transaction_mut(&mut self) -> &mut Transaction {
@@ -554,56 +515,6 @@ impl From<Signed<Transaction>> for TransactionSigned {
     }
 }
 
-impl From<Signed<TxEip4844WithSidecar>> for TransactionSigned {
-    fn from(value: Signed<TxEip4844WithSidecar>) -> Self {
-        let (tx, sig, hash) = value.into_parts();
-        Self::new(tx.tx.into(), sig, hash)
-    }
-}
-
-impl From<TxEip4844Variant> for Transaction {
-    fn from(variant: TxEip4844Variant) -> Self {
-        match variant {
-            TxEip4844Variant::TxEip4844(tx) => Self::Eip4844(tx),
-            TxEip4844Variant::TxEip4844WithSidecar(tx_with_sidecar) => {
-                Self::Eip4844(tx_with_sidecar.tx)
-            }
-        }
-    }
-}
-
-impl From<Signed<TxEip4844Variant>> for TransactionSigned {
-    fn from(value: Signed<TxEip4844Variant>) -> Self {
-        let (tx, sig, hash) = value.into_parts();
-        Self::new(tx.into(), sig, hash)
-    }
-}
-
-impl From<TxEnvelope> for TransactionSigned {
-    fn from(value: TxEnvelope) -> Self {
-        match value {
-            TxEnvelope::Legacy(tx) => tx.into(),
-            TxEnvelope::Eip2930(tx) => tx.into(),
-            TxEnvelope::Eip1559(tx) => tx.into(),
-            TxEnvelope::Eip4844(tx) => tx.into(),
-            TxEnvelope::Eip7702(tx) => tx.into(),
-        }
-    }
-}
-
-impl From<TransactionSigned> for TxEnvelope {
-    fn from(value: TransactionSigned) -> Self {
-        let (tx, signature, hash) = value.into_parts();
-        match tx {
-            Transaction::Legacy(tx) => Signed::new_unchecked(tx, signature, hash).into(),
-            Transaction::Eip2930(tx) => Signed::new_unchecked(tx, signature, hash).into(),
-            Transaction::Eip1559(tx) => Signed::new_unchecked(tx, signature, hash).into(),
-            Transaction::Eip4844(tx) => Signed::new_unchecked(tx, signature, hash).into(),
-            Transaction::Eip7702(tx) => Signed::new_unchecked(tx, signature, hash).into(),
-        }
-    }
-}
-
 impl From<TransactionSigned> for EthereumTxEnvelope<TxEip4844> {
     fn from(value: TransactionSigned) -> Self {
         let (tx, signature, hash) = value.into_parts();
@@ -614,13 +525,6 @@ impl From<TransactionSigned> for EthereumTxEnvelope<TxEip4844> {
             Transaction::Eip4844(tx) => Signed::new_unchecked(tx, signature, hash).into(),
             Transaction::Eip7702(tx) => Signed::new_unchecked(tx, signature, hash).into(),
         }
-    }
-}
-
-impl From<TransactionSigned> for Signed<Transaction> {
-    fn from(value: TransactionSigned) -> Self {
-        let (tx, sig, hash) = value.into_parts();
-        Self::new_unchecked(tx, sig, hash)
     }
 }
 
@@ -830,52 +734,10 @@ impl SignedTransaction for TransactionSigned {
     }
 }
 
-impl TryFrom<TransactionSigned> for PooledTransaction {
-    type Error = TransactionConversionError;
-
-    fn try_from(tx: TransactionSigned) -> Result<Self, Self::Error> {
-        let hash = *tx.tx_hash();
-        match tx {
-            TransactionSigned { transaction: Transaction::Legacy(tx), signature, .. } => {
-                Ok(Self::Legacy(Signed::new_unchecked(tx, signature, hash)))
-            }
-            TransactionSigned { transaction: Transaction::Eip2930(tx), signature, .. } => {
-                Ok(Self::Eip2930(Signed::new_unchecked(tx, signature, hash)))
-            }
-            TransactionSigned { transaction: Transaction::Eip1559(tx), signature, .. } => {
-                Ok(Self::Eip1559(Signed::new_unchecked(tx, signature, hash)))
-            }
-            TransactionSigned { transaction: Transaction::Eip7702(tx), signature, .. } => {
-                Ok(Self::Eip7702(Signed::new_unchecked(tx, signature, hash)))
-            }
-            // Not supported because missing blob sidecar
-            TransactionSigned { transaction: Transaction::Eip4844(_), .. } => {
-                Err(TransactionConversionError::UnsupportedForP2P)
-            }
-        }
-    }
-}
-
-impl From<PooledTransaction> for TransactionSigned {
-    fn from(value: PooledTransaction) -> Self {
-        match value {
-            PooledTransaction::Legacy(tx) => tx.into(),
-            PooledTransaction::Eip2930(tx) => tx.into(),
-            PooledTransaction::Eip1559(tx) => tx.into(),
-            PooledTransaction::Eip7702(tx) => tx.into(),
-            PooledTransaction::Eip4844(tx) => {
-                let (tx, signature, hash) = tx.into_parts();
-                Signed::new_unchecked(tx.tx, signature, hash).into()
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloy_consensus::EthereumTxEnvelope;
-
     use proptest::proptest;
     use proptest_arbitrary_interop::arb;
     use reth_codecs::Compact;
