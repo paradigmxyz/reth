@@ -7,9 +7,9 @@ use reth_era::era1_file::Era1Reader;
 use reth_era_downloader::{EraStream, HttpClient};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    ProviderError, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
+    BlockWriter, ProviderError, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
 };
-use reth_storage_api::{DBProvider, HeaderProvider, NodePrimitivesProvider};
+use reth_storage_api::{DBProvider, HeaderProvider, NodePrimitivesProvider, StorageLocation};
 use std::{fs::File, sync::mpsc};
 
 /// Imports blocks from `downloader` using `provider`.
@@ -18,9 +18,13 @@ use std::{fs::File, sync::mpsc};
 pub fn import<H, P>(mut downloader: EraStream<H>, provider: &P) -> eyre::Result<BlockNumber>
 where
     H: HttpClient + Clone + Send + Sync + 'static + Unpin,
-    P: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory,
-    <P as NodePrimitivesProvider>::Primitives:
-        NodePrimitives<BlockHeader = alloy_consensus::Header>,
+    P: DBProvider<Tx: DbTxMut>
+        + StaticFileProviderFactory
+        + BlockWriter<Block = alloy_consensus::Block<EthereumTxEnvelope<TxEip4844>>>,
+    <P as NodePrimitivesProvider>::Primitives: NodePrimitives<
+        BlockHeader = alloy_consensus::Header,
+        BlockBody = alloy_consensus::BlockBody<EthereumTxEnvelope<TxEip4844>>,
+    >,
 {
     let (tx, rx) = mpsc::channel();
 
@@ -71,6 +75,13 @@ where
 
             // Append to Headers segment
             writer.append_header(&block.header, td, &block.header.hash_slow())?;
+
+            // Write bodies to database.
+            provider.append_block_bodies(
+                vec![(block.number, Some(block.body))],
+                // We are writing transactions directly to static files.
+                StorageLocation::StaticFiles,
+            )?;
         }
     }
 
