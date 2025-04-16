@@ -35,6 +35,7 @@ use crate::{
     transactions::NetworkTransactionEvent,
     FetchClient, NetworkBuilder,
 };
+
 use futures::{Future, StreamExt};
 use parking_lot::Mutex;
 use reth_eth_wire::{DisconnectReason, EthNetworkPrimitives, NetworkPrimitives};
@@ -425,8 +426,21 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     /// `persistent_peers_file`.
     pub fn write_peers_to_file(&self, persistent_peers_file: &Path) -> Result<(), FsPathError> {
         let known_peers = self.all_peers().collect::<Vec<_>>();
+        let peers = self.swarm.state().peers();
+        let persistent_peers = reth_network_types::peers::config::PersistentPeers {
+            trusted: known_peers
+                .iter()
+                .filter(|p| peers.get_reputation(&p.id).map_or(false, |rep| rep > 0))
+                .cloned()
+                .collect(),
+            basic: known_peers
+                .iter()
+                .filter(|p| !peers.get_reputation(&p.id).map_or(false, |rep| rep > 0))
+                .cloned()
+                .collect(),
+        };
         persistent_peers_file.parent().map(fs::create_dir_all).transpose()?;
-        reth_fs_util::write_json_file(persistent_peers_file, &known_peers)?;
+        reth_fs_util::write_json_file(persistent_peers_file, &persistent_peers)?;
         Ok(())
     }
 

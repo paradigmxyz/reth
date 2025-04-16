@@ -1,14 +1,14 @@
 //! Configuration for peering.
 
+use reth_net_banlist::BanList;
+use reth_network_peers::{NodeRecord, TrustedPeer};
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
     io::{self, ErrorKind},
     path::Path,
     time::Duration,
 };
-
-use reth_net_banlist::BanList;
-use reth_network_peers::{NodeRecord, TrustedPeer};
 use tracing::info;
 
 use crate::{BackoffKind, ReputationChangeWeights};
@@ -116,6 +116,15 @@ impl Default for ConnectionsConfig {
             max_concurrent_outbound_dials: DEFAULT_MAX_COUNT_CONCURRENT_OUTBOUND_DIALS,
         }
     }
+}
+
+/// A set of peers that are trusted and should be connected to or accepted from.
+#[derive(Serialize, Deserialize, Debug)]
+pub struct PersistentPeers {
+    /// Trusted nodes to connect to or accept from
+    pub trusted: HashSet<NodeRecord>,
+    /// Basic nodes to connect to.
+    pub basic: HashSet<NodeRecord>,
 }
 
 /// Config type for initiating a `PeersManager` instance.
@@ -293,6 +302,16 @@ impl PeersConfig {
             Err(e) => Err(e)?,
         };
         info!(target: "net::peers", file = %file_path.as_ref().display(), "Loading saved peers");
+        if let Ok(persistent_peers) = serde_json::from_reader::<_, PersistentPeers>(reader) {
+            return Ok(self
+                .with_trusted_nodes(
+                    persistent_peers.trusted.into_iter().map(TrustedPeer::from).collect(),
+                )
+                .with_basic_nodes(persistent_peers.basic));
+        }
+
+        let file = std::fs::File::open(file_path.as_ref())?;
+        let reader = io::BufReader::new(file);
         let nodes: HashSet<NodeRecord> = serde_json::from_reader(reader)?;
         Ok(self.with_basic_nodes(nodes))
     }
