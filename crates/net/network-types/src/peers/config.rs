@@ -303,6 +303,7 @@ impl PeersConfig {
             Err(e) => Err(e)?,
         };
         info!(target: "net::peers", file = %file_path.as_ref().display(), "Loading saved peers");
+        #[cfg(feature = "serde")]
         if let Ok(persistent_peers) = serde_json::from_reader::<_, PersistentPeers>(reader) {
             return Ok(self
                 .with_trusted_nodes(
