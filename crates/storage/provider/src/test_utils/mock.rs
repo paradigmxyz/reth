@@ -106,7 +106,7 @@ where
 impl<ChainSpec> MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSpec>
 {
     /// Add block to local block store
-    pub fn add_block(&self, hash: B256, block: Block) {
+    pub fn add_block(&self, hash: B256, block: reth_ethereum_primitives::Block) {
         self.add_header(hash, block.header.clone());
         self.blocks.lock().insert(hash, block);
     }
@@ -114,7 +114,7 @@ impl<ChainSpec> MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSp
     /// Add multiple blocks to local block store
     pub fn extend_blocks(
         &self,
-        iter: impl IntoIterator<Item = (B256, T::Block)>,
+        iter: impl IntoIterator<Item = (B256, reth_ethereum_primitives::Block)>,
     ) {
         for (hash, block) in iter {
             self.add_header(hash, block.header.clone());
@@ -544,39 +544,37 @@ where
 // }
 
 // //look
-// impl<T: NodePrimitives, ChainSpec> BlockNumReader for MockEthProvider<T, ChainSpec> 
-// where 
-//     T::Block: BlockFields,
-//     {
-//     fn chain_info(&self) -> ProviderResult<ChainInfo> {
-//         let best_block_number = self.best_block_number()?;
-//         let lock = self.headers.lock();
+impl<T: NodePrimitives, ChainSpec> BlockNumReader for MockEthProvider<T, ChainSpec> 
+    {
+    fn chain_info(&self) -> ProviderResult<ChainInfo> {
+        let best_block_number = self.best_block_number()?;
+        let lock = self.headers.lock();
 
-//         Ok(lock
-//             .iter()
-//             .find(|(_, header)| header.number == best_block_number)
-//             .map(|(hash, header)| ChainInfo { best_hash: *hash, best_number: header.number })
-//             .unwrap_or_default())
-//     }
+        Ok(lock
+            .iter()
+            .find(|(_, header)| header.number == best_block_number)
+            .map(|(hash, header)| ChainInfo { best_hash: *hash, best_number: header.number })
+            .unwrap_or_default())
+    }
 
-//     fn best_block_number(&self) -> ProviderResult<BlockNumber> {
-//         let lock = self.headers.lock();
-//         lock.iter()
-//             .max_by_key(|h| h.1.number)
-//             .map(|(_, header)| header.number)
-//             .ok_or(ProviderError::BestBlockNotFound)
-//     }
+    fn best_block_number(&self) -> ProviderResult<BlockNumber> {
+        let lock = self.headers.lock();
+        lock.iter()
+            .max_by_key(|h| h.1.number)
+            .map(|(_, header)| header.number)
+            .ok_or(ProviderError::BestBlockNotFound)
+    }
 
-//     fn last_block_number(&self) -> ProviderResult<BlockNumber> {
-//         self.best_block_number()
-//     }
+    fn last_block_number(&self) -> ProviderResult<BlockNumber> {
+        self.best_block_number()
+    }
 
-//     fn block_number(&self, hash: B256) -> ProviderResult<Option<alloy_primitives::BlockNumber>> {
-//         let lock = self.blocks.lock();
-//         let num = lock.iter().find_map(|(h, b)| (*h == hash).then_some(b.number()));
-//         Ok(num)
-//     }
-// }
+    fn block_number(&self, hash: B256) -> ProviderResult<Option<alloy_primitives::BlockNumber>> {
+        let lock = self.blocks.lock();
+        let num = lock.iter().find_map(|(h, b)| (*h == hash).then_some(b.number));
+        Ok(num)
+    }
+}
 
 // //look
 impl<T: NodePrimitives, ChainSpec:EthChainSpec + Send + Sync> BlockIdReader for MockEthProvider<T, ChainSpec> {
