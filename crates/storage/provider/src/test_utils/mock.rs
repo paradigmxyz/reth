@@ -78,10 +78,7 @@ where T::Block: Clone {
     }
 }
 
-impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec>
-where
-    ChainSpec: Default + EthChainSpec,
-{
+impl<T: NodePrimitives> MockEthProvider<T, reth_chainspec::ChainSpec> {
     /// Create a new, empty instance
     pub fn new() -> Self {
         Self {
@@ -95,13 +92,6 @@ where
         }
     }
 }
-// pub trait HasHeader {
-//     type Header;
-//     fn header(&self) -> &Self::Header;
-// }
-// pub trait BlockFields {
-//     fn number(&self) -> u64;
-// }
 
 impl<ChainSpec> MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSpec>
 {
@@ -586,20 +576,10 @@ impl<T: NodePrimitives, ChainSpec:EthChainSpec + Send + Sync + 'static> BlockIdR
 }
 
 //look
-impl<T, ChainSpec> BlockReader for MockEthProvider<T, ChainSpec>
-where
-    T: NodePrimitives<Block = reth_ethereum_primitives::Block>,
-    ChainSpec: EthChainSpec + Send + Sync + 'static,
-    MockEthProvider<T, ChainSpec>: 
-        BlockNumReader
-        + HeaderProvider
-        + BlockBodyIndicesProvider
-        + TransactionsProvider
-        + ReceiptProvider
-        + WithdrawalsProvider
-        + OmmersProvider,
+impl<ChainSpec: EthChainSpec + Send + Sync + 'static> BlockReader
+    for MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSpec>
 {
-    type Block = T::Block;
+    type Block = reth_ethereum_primitives::Block;
 
     fn find_block_by_hash(
         &self,
