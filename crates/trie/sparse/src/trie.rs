@@ -1057,7 +1057,7 @@ impl<P> RevealedSparseTrie<P> {
     }
 }
 
-/// Error type for leaf finding operations.
+/// Error type for a leaf lookup operation
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LeafLookupError {
     /// The path leads to a blinded node, cannot determine if leaf exists.
@@ -1081,7 +1081,7 @@ pub enum LeafLookupError {
     },
 }
 
-/// Result of a leaf finding operation.
+/// Success value for a leaf lookup operation
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LeafLookup {
     /// Leaf exists with expected value.
