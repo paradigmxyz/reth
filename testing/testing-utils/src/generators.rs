@@ -518,7 +518,7 @@ mod tests {
                 sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), signature_hash)
                     .unwrap();
 
-            let signed = TransactionSigned::new_unhashed(tx.clone(), signature);
+            let signed : TransactionSigned = tx.clone().into_signed(signature).into();
             let recovered = signed.recover_signer().unwrap();
 
             let expected = public_key_to_address(key_pair.public_key());

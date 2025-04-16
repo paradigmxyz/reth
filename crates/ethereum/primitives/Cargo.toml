@@ -71,6 +71,7 @@ reth-codec = [
 arbitrary = [
     "dep:arbitrary",
     "alloy-consensus/arbitrary",
+    "alloy-consensus/k256",
     "alloy-primitives/arbitrary",
     "reth-codecs?/arbitrary",
     "reth-primitives-traits/arbitrary",
