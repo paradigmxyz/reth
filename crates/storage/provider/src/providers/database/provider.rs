@@ -517,7 +517,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     }
 
     /// Pass `DbTx` or `DbTxMut` mutable reference.
-    pub fn tx_mut(&mut self) -> &mut TX {
+    pub const fn tx_mut(&mut self) -> &mut TX {
         &mut self.tx
     }
 

@@ -32,13 +32,13 @@ impl Default for EraStreamConfig {
 
 impl EraStreamConfig {
     /// The maximum amount of downloaded ERA1 files kept in the download directory.
-    pub fn with_max_files(mut self, max_files: usize) -> Self {
+    pub const fn with_max_files(mut self, max_files: usize) -> Self {
         self.max_files = max_files;
         self
     }
 
     /// The maximum amount of downloads happening at the same time.
-    pub fn with_max_concurrent_downloads(mut self, max_concurrent_downloads: usize) -> Self {
+    pub const fn with_max_concurrent_downloads(mut self, max_concurrent_downloads: usize) -> Self {
         self.max_concurrent_downloads = max_concurrent_downloads;
         self
     }
@@ -216,7 +216,7 @@ impl<Http: HttpClient + Clone + Send + Sync + 'static + Unpin> Stream for Starti
 }
 
 impl<Http> StartingStream<Http> {
-    fn downloaded(&mut self) {
+    const fn downloaded(&mut self) {
         self.downloading = self.downloading.saturating_sub(1);
     }
 }

@@ -189,7 +189,7 @@ impl<DB, ChainSpec> NodeBuilder<DB, ChainSpec> {
     }
 
     /// Returns a mutable reference to the node builder's config.
-    pub fn config_mut(&mut self) -> &mut NodeConfig<ChainSpec> {
+    pub const fn config_mut(&mut self) -> &mut NodeConfig<ChainSpec> {
         &mut self.config
     }
 }

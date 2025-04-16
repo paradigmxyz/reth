@@ -285,12 +285,12 @@ impl PeersManager {
 
     /// Invoked when a previous call to [`Self::on_incoming_pending_session`] succeeded but it was
     /// rejected.
-    pub(crate) fn on_incoming_pending_session_rejected_internally(&mut self) {
+    pub(crate) const fn on_incoming_pending_session_rejected_internally(&mut self) {
         self.connection_info.decr_pending_in();
     }
 
     /// Invoked when a pending session was closed.
-    pub(crate) fn on_incoming_pending_session_gracefully_closed(&mut self) {
+    pub(crate) const fn on_incoming_pending_session_gracefully_closed(&mut self) {
         self.connection_info.decr_pending_in()
     }
 
@@ -683,7 +683,7 @@ impl PeersManager {
     ///
     /// If the session was an outgoing connection, this means that the peer initiated a connection
     /// to us at the same time and this connection is already established.
-    pub(crate) fn on_already_connected(&mut self, direction: Direction) {
+    pub(crate) const fn on_already_connected(&mut self, direction: Direction) {
         match direction {
             Direction::Incoming => {
                 // need to decrement the ingoing counter
@@ -954,7 +954,7 @@ impl PeersManager {
     }
 
     /// Keeps track of network state changes.
-    pub fn on_network_state_change(&mut self, state: NetworkConnectionState) {
+    pub const fn on_network_state_change(&mut self, state: NetworkConnectionState) {
         self.net_connection_state = state;
     }
 
@@ -964,7 +964,7 @@ impl PeersManager {
     }
 
     /// Sets `net_connection_state` to `ShuttingDown`.
-    pub fn on_shutdown(&mut self) {
+    pub const fn on_shutdown(&mut self) {
         self.net_connection_state = NetworkConnectionState::ShuttingDown;
     }
 
@@ -1081,7 +1081,7 @@ impl ConnectionInfo {
         self.num_pending_in < self.config.max_inbound
     }
 
-    fn decr_state(&mut self, state: PeerConnectionState) {
+    const fn decr_state(&mut self, state: PeerConnectionState) {
         match state {
             PeerConnectionState::Idle => {}
             PeerConnectionState::DisconnectingIn | PeerConnectionState::In => self.decr_in(),
@@ -1090,35 +1090,35 @@ impl ConnectionInfo {
         }
     }
 
-    fn decr_out(&mut self) {
+    const fn decr_out(&mut self) {
         self.num_outbound -= 1;
     }
 
-    fn inc_out(&mut self) {
+    const fn inc_out(&mut self) {
         self.num_outbound += 1;
     }
 
-    fn inc_pending_out(&mut self) {
+    const fn inc_pending_out(&mut self) {
         self.num_pending_out += 1;
     }
 
-    fn inc_in(&mut self) {
+    const fn inc_in(&mut self) {
         self.num_inbound += 1;
     }
 
-    fn inc_pending_in(&mut self) {
+    const fn inc_pending_in(&mut self) {
         self.num_pending_in += 1;
     }
 
-    fn decr_in(&mut self) {
+    const fn decr_in(&mut self) {
         self.num_inbound -= 1;
     }
 
-    fn decr_pending_out(&mut self) {
+    const fn decr_pending_out(&mut self) {
         self.num_pending_out -= 1;
     }
 
-    fn decr_pending_in(&mut self) {
+    const fn decr_pending_in(&mut self) {
         self.num_pending_in -= 1;
     }
 }

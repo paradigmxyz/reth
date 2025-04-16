@@ -118,7 +118,7 @@ impl Transaction {
     }
 
     /// This sets the transaction's nonce.
-    pub fn set_nonce(&mut self, nonce: u64) {
+    pub const fn set_nonce(&mut self, nonce: u64) {
         match self {
             Self::Legacy(tx) => tx.nonce = nonce,
             Self::Eip2930(tx) => tx.nonce = nonce,
@@ -129,7 +129,7 @@ impl Transaction {
     }
 
     #[cfg(test)]
-    fn input_mut(&mut self) -> &mut Bytes {
+    const fn input_mut(&mut self) -> &mut Bytes {
         match self {
             Self::Legacy(tx) => &mut tx.input,
             Self::Eip2930(tx) => &mut tx.input,
@@ -367,7 +367,7 @@ impl TransactionSigned {
     }
 
     /// Returns the signature of the transaction
-    pub fn signature(&self) -> &Signature {
+    pub const fn signature(&self) -> &Signature {
         &self.signature
     }
 }
@@ -458,7 +458,7 @@ impl TransactionSigned {
 
     /// Provides mutable access to the transaction.
     #[cfg(feature = "test-utils")]
-    pub fn transaction_mut(&mut self) -> &mut Transaction {
+    pub const fn transaction_mut(&mut self) -> &mut Transaction {
         &mut self.transaction
     }
 
