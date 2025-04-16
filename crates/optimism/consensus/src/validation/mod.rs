@@ -21,7 +21,7 @@ use reth_primitives_traits::{receipt::gas_spent_by_transactions, BlockBody, GotE
 ///   - ommer hash
 ///   - transaction root
 ///   - withdrawals root: the body's withdrawals root must only match the header's before isthmus
-pub fn validate_body_against_header<B, H>(
+pub fn validate_body_against_header_op<B, H>(
     chain_spec: impl OpHardforks,
     body: &B,
     header: &H,
@@ -335,9 +335,9 @@ mod tests {
             ommers: vec![],
             withdrawals: Some(Default::default()),
         };
-        validate_body_against_header(&isthmus_chainspec(), &body, &header).unwrap();
+        validate_body_against_header_op(&isthmus_chainspec(), &body, &header).unwrap();
 
         body.withdrawals.take();
-        validate_body_against_header(&isthmus_chainspec(), &body, &header).unwrap_err();
+        validate_body_against_header_op(&isthmus_chainspec(), &body, &header).unwrap_err();
     }
 }
