@@ -566,7 +566,6 @@ where
 {
     provider: P,
     executor_provider: E,
-    evm_config: C,
     consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
     payload_validator: V,
     /// Keeps track of internals such as executed and buffered blocks.
@@ -616,7 +615,6 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineApiTreeHandler")
             .field("provider", &self.provider)
-            .field("evm_config", &self.evm_config)
             .field("executor_provider", &self.executor_provider)
             .field("consensus", &self.consensus)
             .field("payload_validator", &self.payload_validator)
@@ -673,12 +671,11 @@ where
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
 
         let payload_processor =
-            PayloadProcessor::new(WorkloadExecutor::default(), evm_config.clone(), &config);
+            PayloadProcessor::new(WorkloadExecutor::default(), evm_config, &config);
 
         Self {
             provider,
             executor_provider,
-            evm_config,
             consensus,
             payload_validator,
             incoming,
@@ -2426,7 +2423,14 @@ where
                 .trie_input_duration
                 .record(trie_input_start.elapsed().as_secs_f64());
 
-            self.payload_processor.spawn(header, txs, provider_builder, consistent_view, trie_input)
+            self.payload_processor.spawn(
+                header,
+                txs,
+                provider_builder,
+                consistent_view,
+                trie_input,
+                &self.config,
+            )
         } else {
             self.payload_processor.spawn_cache_exclusive(header, txs, provider_builder)
         };

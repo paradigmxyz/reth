@@ -10,12 +10,12 @@ use alloy_rpc_types_engine::{
 };
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc, RpcModule};
-use reth_node_api::{
+use reth_ethereum::node::api::{
     AddOnsContext, BeaconConsensusEngineHandle, EngineApiMessageVersion, FullNodeComponents,
     NodeTypes,
 };
 use reth_node_builder::rpc::EngineApiBuilder;
-use reth_optimism_node::node::OpStorage;
+use reth_op::node::node::OpStorage;
 use reth_payload_builder::PayloadStore;
 use reth_rpc_api::IntoEngineApiRpcModule;
 use reth_rpc_engine_api::EngineApiError;

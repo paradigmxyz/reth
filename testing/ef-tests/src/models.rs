@@ -10,7 +10,7 @@ use reth_db_api::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{Account as RethAccount, Bytecode, SealedHeader, StorageEntry};
+use reth_primitives_traits::{Account as RethAccount, Bytecode, SealedHeader, StorageEntry};
 use serde::Deserialize;
 use std::{collections::BTreeMap, ops::Deref};
 

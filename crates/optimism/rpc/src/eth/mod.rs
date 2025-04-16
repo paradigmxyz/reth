@@ -276,7 +276,6 @@ impl<N: OpNodeCore> fmt::Debug for OpEthApi<N> {
 }
 
 /// Container type `OpEthApi`
-#[allow(missing_debug_implementations)]
 struct OpEthApiInner<N: OpNodeCore> {
     /// Gateway to node's core components.
     eth_api: EthApiNodeBackend<N>,
@@ -325,7 +324,7 @@ where
 {
     type EthApi = OpEthApi<N>;
 
-    fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> Self::EthApi {
+    async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
         let Self { sequencer_client } = self;
         let eth_api = reth_rpc::EthApiBuilder::new(
             ctx.components.provider().clone(),
@@ -340,8 +339,9 @@ where
         .eth_proof_window(ctx.config.eth_proof_window)
         .fee_history_cache_config(ctx.config.fee_history_cache)
         .proof_permits(ctx.config.proof_permits)
+        .gas_oracle_config(ctx.config.gas_oracle)
         .build_inner();
 
-        OpEthApi { inner: Arc::new(OpEthApiInner { eth_api, sequencer_client }) }
+        Ok(OpEthApi { inner: Arc::new(OpEthApiInner { eth_api, sequencer_client }) })
     }
 }

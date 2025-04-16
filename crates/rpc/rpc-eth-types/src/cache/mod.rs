@@ -1,6 +1,7 @@
 //! Async caching support for eth RPC
 
 use super::{EthStateCacheConfig, MultiConsumerLruCache};
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::B256;
 use futures::{future::Either, Stream, StreamExt};
@@ -42,6 +43,9 @@ type CachedBlockResponseSender<B> = oneshot::Sender<Option<Arc<RecoveredBlock<B>
 
 /// The type that can send the response to a requested header
 type HeaderResponseSender<H> = oneshot::Sender<ProviderResult<H>>;
+
+/// The type that can send the response with a chain of cached blocks
+type CachedParentBlocksResponseSender<B> = oneshot::Sender<Vec<Arc<RecoveredBlock<B>>>>;
 
 type BlockLruCache<B, L> = MultiConsumerLruCache<
     B256,
@@ -200,6 +204,33 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetHeader { block_hash, response_tx });
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
+    }
+
+    /// Retrieves a chain of connected blocks from the cache, starting from the given block hash
+    /// and traversing down through parent hashes. Returns blocks in descending order (newest
+    /// first).
+    /// This is useful for efficiently retrieving a sequence of blocks that might already be in
+    /// cache without making separate database requests.
+    /// Returns `None` if no blocks are found in the cache, otherwise returns `Some(Vec<...>)`
+    /// with at least one block.
+    pub async fn get_cached_parent_blocks(
+        &self,
+        block_hash: B256,
+        max_blocks: usize,
+    ) -> Option<Vec<Arc<RecoveredBlock<B>>>> {
+        let (response_tx, rx) = oneshot::channel();
+        let _ = self.to_service.send(CacheAction::GetCachedParentBlocks {
+            block_hash,
+            max_blocks,
+            response_tx,
+        });
+
+        let blocks = rx.await.unwrap_or_default();
+        if blocks.is_empty() {
+            None
+        } else {
+            Some(blocks)
+        }
     }
 }
 
@@ -521,6 +552,30 @@ where
                                 );
                             }
                         }
+                        CacheAction::GetCachedParentBlocks {
+                            block_hash,
+                            max_blocks,
+                            response_tx,
+                        } => {
+                            let mut blocks = Vec::new();
+                            let mut current_hash = block_hash;
+
+                            // Start with the requested block
+                            while blocks.len() < max_blocks {
+                                if let Some(block) =
+                                    this.full_block_cache.get(&current_hash).cloned()
+                                {
+                                    // Get the parent hash for the next iteration
+                                    current_hash = block.header().parent_hash();
+                                    blocks.push(block);
+                                } else {
+                                    // Break the loop if we can't find the current block
+                                    break;
+                                }
+                            }
+
+                            let _ = response_tx.send(blocks);
+                        }
                     };
                     this.update_cached_metrics();
                 }
@@ -531,15 +586,45 @@ where
 
 /// All message variants sent through the channel
 enum CacheAction<B: Block, R> {
-    GetBlockWithSenders { block_hash: B256, response_tx: BlockWithSendersResponseSender<B> },
-    GetHeader { block_hash: B256, response_tx: HeaderResponseSender<B::Header> },
-    GetReceipts { block_hash: B256, response_tx: ReceiptsResponseSender<R> },
-    GetCachedBlock { block_hash: B256, response_tx: CachedBlockResponseSender<B> },
-    BlockWithSendersResult { block_hash: B256, res: ProviderResult<Option<Arc<RecoveredBlock<B>>>> },
-    ReceiptsResult { block_hash: B256, res: ProviderResult<Option<Arc<Vec<R>>>> },
-    HeaderResult { block_hash: B256, res: Box<ProviderResult<B::Header>> },
-    CacheNewCanonicalChain { chain_change: ChainChange<B, R> },
-    RemoveReorgedChain { chain_change: ChainChange<B, R> },
+    GetBlockWithSenders {
+        block_hash: B256,
+        response_tx: BlockWithSendersResponseSender<B>,
+    },
+    GetHeader {
+        block_hash: B256,
+        response_tx: HeaderResponseSender<B::Header>,
+    },
+    GetReceipts {
+        block_hash: B256,
+        response_tx: ReceiptsResponseSender<R>,
+    },
+    GetCachedBlock {
+        block_hash: B256,
+        response_tx: CachedBlockResponseSender<B>,
+    },
+    BlockWithSendersResult {
+        block_hash: B256,
+        res: ProviderResult<Option<Arc<RecoveredBlock<B>>>>,
+    },
+    ReceiptsResult {
+        block_hash: B256,
+        res: ProviderResult<Option<Arc<Vec<R>>>>,
+    },
+    HeaderResult {
+        block_hash: B256,
+        res: Box<ProviderResult<B::Header>>,
+    },
+    CacheNewCanonicalChain {
+        chain_change: ChainChange<B, R>,
+    },
+    RemoveReorgedChain {
+        chain_change: ChainChange<B, R>,
+    },
+    GetCachedParentBlocks {
+        block_hash: B256,
+        max_blocks: usize,
+        response_tx: CachedParentBlocksResponseSender<B>,
+    },
 }
 
 struct BlockReceipts<R> {

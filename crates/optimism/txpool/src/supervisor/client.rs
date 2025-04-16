@@ -2,7 +2,8 @@
 
 use crate::{
     supervisor::{
-        parse_access_list_items_to_inbox_entries, ExecutingDescriptor, InteropTxValidatorError,
+        metrics::SupervisorMetrics, parse_access_list_items_to_inbox_entries, ExecutingDescriptor,
+        InteropTxValidatorError,
     },
     InvalidCrossTx,
 };
@@ -11,7 +12,11 @@ use alloy_primitives::{TxHash, B256};
 use alloy_rpc_client::ReqwestClient;
 use futures_util::future::BoxFuture;
 use op_alloy_consensus::interop::SafetyLevel;
-use std::{borrow::Cow, future::IntoFuture, time::Duration};
+use std::{
+    borrow::Cow,
+    future::IntoFuture,
+    time::{Duration, Instant},
+};
 use tracing::trace;
 
 /// Supervisor hosted by op-labs
@@ -29,6 +34,8 @@ pub struct SupervisorClient {
     safety: SafetyLevel,
     /// The default request timeout
     timeout: Duration,
+    /// Metrics for tracking supervisor operations
+    metrics: SupervisorMetrics,
 }
 
 impl SupervisorClient {
@@ -38,7 +45,12 @@ impl SupervisorClient {
             .connect(supervisor_endpoint.into().as_str())
             .await
             .expect("building supervisor client");
-        Self { client, safety, timeout: DEFAULT_REQUEST_TIMOUT }
+        Self {
+            client,
+            safety,
+            timeout: DEFAULT_REQUEST_TIMOUT,
+            metrics: SupervisorMetrics::default(),
+        }
     }
 
     /// Configures a custom timeout
@@ -64,6 +76,7 @@ impl SupervisorClient {
             executing_descriptor,
             timeout: self.timeout,
             safety: self.safety,
+            metrics: self.metrics.clone(),
         }
     }
 
@@ -122,9 +135,10 @@ pub struct CheckAccessListRequest<'a> {
     executing_descriptor: ExecutingDescriptor,
     timeout: Duration,
     safety: SafetyLevel,
+    metrics: SupervisorMetrics,
 }
 
-impl CheckAccessListRequest<'_> {
+impl<'a> CheckAccessListRequest<'a> {
     /// Configures the timeout to use for the request if any.
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
@@ -143,18 +157,23 @@ impl<'a> IntoFuture for CheckAccessListRequest<'a> {
     type IntoFuture = BoxFuture<'a, Self::Output>;
 
     fn into_future(self) -> Self::IntoFuture {
-        let Self { client, inbox_entries, executing_descriptor, timeout, safety } = self;
+        let Self { client, inbox_entries, executing_descriptor, timeout, safety, metrics } = self;
         Box::pin(async move {
-            tokio::time::timeout(
+            let start = Instant::now();
+
+            let result = tokio::time::timeout(
                 timeout,
                 client.request(
                     "supervisor_checkAccessList",
                     (inbox_entries, safety, executing_descriptor),
                 ),
             )
-            .await
-            .map_err(|_| InteropTxValidatorError::ValidationTimeout(timeout.as_secs()))?
-            .map_err(InteropTxValidatorError::client)
+            .await;
+            metrics.record_supervisor_query(start.elapsed());
+
+            result
+                .map_err(|_| InteropTxValidatorError::Timeout(timeout.as_secs()))?
+                .map_err(InteropTxValidatorError::other)
         })
     }
 }

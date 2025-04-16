@@ -93,7 +93,7 @@ impl<Cons, Pooled> MaybeConditionalTransaction for OpPooledTransaction<Cons, Poo
 }
 
 impl<Cons, Pooled> MaybeInteropTransaction for OpPooledTransaction<Cons, Pooled> {
-    fn set_interop_deadlone(&self, deadline: u64) {
+    fn set_interop_deadline(&self, deadline: u64) {
         self.interop.store(deadline, Ordering::Relaxed);
     }
 
@@ -284,7 +284,7 @@ mod tests {
     use crate::{OpPooledTransaction, OpTransactionValidator};
     use alloy_consensus::transaction::Recovered;
     use alloy_eips::eip2718::Encodable2718;
-    use alloy_primitives::{PrimitiveSignature as Signature, TxKind, U256};
+    use alloy_primitives::{Signature, TxKind, U256};
     use op_alloy_consensus::{OpTypedTransaction, TxDeposit};
     use reth_optimism_chainspec::OP_MAINNET;
     use reth_optimism_primitives::OpTransactionSigned;
