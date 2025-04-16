@@ -36,7 +36,7 @@ pub struct Era1File {
 
 impl Era1File {
     /// Create a new [`Era1File`]
-    pub fn new(group: Era1Group, id: Era1Id) -> Self {
+    pub const fn new(group: Era1Group, id: Era1Id) -> Self {
         Self { version: Version, group, id }
     }
 
