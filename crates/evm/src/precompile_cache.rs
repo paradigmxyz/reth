@@ -152,6 +152,11 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
     ) -> Result<Option<Self::Output>, String> {
         use revm::interpreter::{Gas, InstructionResult};
 
+        // return early if this is not a precompile address
+        if !self.precompile_provider.contains(address) {
+            return Ok(None);
+        }
+
         if let Some(cache) = &self.cache {
             let key =
                 PrecompileKey { address: *address, spec: self.spec, input: inputs.input.clone() };
