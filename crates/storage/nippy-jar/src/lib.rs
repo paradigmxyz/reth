@@ -189,7 +189,7 @@ impl<H: NippyJarHeader> NippyJar<H> {
     }
 
     /// Gets a mutable reference to the compressor.
-    pub fn compressor_mut(&mut self) -> Option<&mut Compressors> {
+    pub const fn compressor_mut(&mut self) -> Option<&mut Compressors> {
         self.compressor.as_mut()
     }
 

@@ -14,6 +14,7 @@ use reth_evm::{
     execute::BasicBlockExecutorProvider, ConfigureEvm, EvmFactory, EvmFactoryFor,
     NextBlockEnvAttributes,
 };
+use reth_evm_ethereum::MaybeCachedPrecompileEthEvmFactory;
 use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, TxTy};
 use reth_node_builder::{
@@ -293,7 +294,7 @@ impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for EthereumNode {
     }
 }
 
-/// A regular ethereum evm and executor builder.
+/// An ethereum evm and executor builder with potentially cached precompiles.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
 pub struct EthereumExecutorBuilder;
@@ -303,15 +304,18 @@ where
     Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
 {
-    type EVM = EthEvmConfig;
-    type Executor = BasicBlockExecutorProvider<EthEvmConfig>;
+    type EVM = EthEvmConfig<MaybeCachedPrecompileEthEvmFactory>;
+    type Executor = BasicBlockExecutorProvider<Self::EVM>;
 
     async fn build_evm(
         self,
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
-        let evm_config = EthEvmConfig::new(ctx.chain_spec())
-            .with_extra_data(ctx.payload_builder_config().extra_data_bytes());
+        let evm_config = EthEvmConfig::new_with_evm_factory(
+            ctx.chain_spec(),
+            MaybeCachedPrecompileEthEvmFactory::new(ctx.config().engine.precompile_cache_enabled),
+        )
+        .with_extra_data(ctx.payload_builder_config().extra_data_bytes());
         let executor = BasicBlockExecutorProvider::new(evm_config.clone());
 
         Ok((evm_config, executor))

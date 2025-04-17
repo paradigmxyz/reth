@@ -49,7 +49,7 @@ impl<K: EnrKeyUnambiguous> SyncTree<K> {
         &self.link
     }
 
-    pub(crate) fn resolved_links_mut(&mut self) -> &mut HashMap<String, LinkEntry<K>> {
+    pub(crate) const fn resolved_links_mut(&mut self) -> &mut HashMap<String, LinkEntry<K>> {
         &mut self.resolved_links
     }
 

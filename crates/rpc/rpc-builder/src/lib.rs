@@ -693,7 +693,7 @@ impl RpcModuleConfig {
     }
 
     /// Get a mutable reference to the eth namespace config
-    pub fn eth_mut(&mut self) -> &mut EthConfig {
+    pub const fn eth_mut(&mut self) -> &mut EthConfig {
         &mut self.eth
     }
 }
@@ -732,7 +732,7 @@ impl RpcModuleConfigBuilder {
     }
 
     /// Get a mutable reference to the eth namespace config, if any
-    pub fn eth_mut(&mut self) -> &mut Option<EthConfig> {
+    pub const fn eth_mut(&mut self) -> &mut Option<EthConfig> {
         &mut self.eth
     }
 
@@ -1732,22 +1732,22 @@ impl TransportRpcModuleConfig {
     }
 
     /// Get a mutable reference to the
-    pub fn http_mut(&mut self) -> &mut Option<RpcModuleSelection> {
+    pub const fn http_mut(&mut self) -> &mut Option<RpcModuleSelection> {
         &mut self.http
     }
 
     /// Get a mutable reference to the
-    pub fn ws_mut(&mut self) -> &mut Option<RpcModuleSelection> {
+    pub const fn ws_mut(&mut self) -> &mut Option<RpcModuleSelection> {
         &mut self.ws
     }
 
     /// Get a mutable reference to the
-    pub fn ipc_mut(&mut self) -> &mut Option<RpcModuleSelection> {
+    pub const fn ipc_mut(&mut self) -> &mut Option<RpcModuleSelection> {
         &mut self.ipc
     }
 
     /// Get a mutable reference to the
-    pub fn config_mut(&mut self) -> &mut Option<RpcModuleConfig> {
+    pub const fn config_mut(&mut self) -> &mut Option<RpcModuleConfig> {
         &mut self.config
     }
 

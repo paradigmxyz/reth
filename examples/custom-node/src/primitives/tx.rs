@@ -8,7 +8,7 @@ use reth_ethereum::primitives::{
     SignedTransaction,
 };
 use reth_op::{
-    serde_bincode_compat::OpTransactionSigned as BincodeCompatOpTransactionSigned,
+    serde_bincode_compat::transaction::OpTxEnvelope as BincodeCompatOpTransactionSigned,
     OpTransactionSigned,
 };
 use revm_primitives::{Address, Bytes};
@@ -94,7 +94,7 @@ impl Transaction for CustomTransaction {
 
 impl SignedTransaction for CustomTransaction {
     fn tx_hash(&self) -> &TxHash {
-        self.inner.tx_hash()
+        self.inner.hash()
     }
 
     fn recover_signer(&self) -> Result<Address, RecoveryError> {
