@@ -115,7 +115,8 @@ impl tokio_util::codec::Decoder for StreamCodec {
                 if depth == 0 && idx != start_idx && idx - start_idx + 1 > whitespaces {
                     let bts = buf.split_to(idx + 1);
                     return match String::from_utf8(bts.into()) {
-                        Ok(val) => Ok(Some(val)),
+                        // Trim to remove surrounding whitespace from a valid JSON block
+                        Ok(val) => Ok(Some(val.trim().to_string())),
                         Err(_) => Ok(None),
                     }
                 }
@@ -210,14 +211,14 @@ mod tests {
             .decode(&mut buf)
             .expect("There should be no error in first 2nd test")
             .expect("There should be aa request in 2nd whitespace test");
-        // TODO: maybe actually trim it out
-        assert_eq!(request2, "\n\n\n\n{ test: 2 }");
+        // Leading/trailing whitespace is trimmed during decoding
+        assert_eq!(request2, "{ test: 2 }");
 
         let request3 = codec
             .decode(&mut buf)
             .expect("There should be no error in first 3rd test")
             .expect("There should be a request in 3rd whitespace test");
-        assert_eq!(request3, "\n\r{\n test: 3 }");
+        assert_eq!(request3, "{ test: 3 }");
 
         let request4 = codec.decode(&mut buf).expect("There should be no error in first 4th test");
         assert!(
