@@ -19,17 +19,15 @@ pub enum Error {
     /// Invalid url
     #[error("Invalid sequencer url: {0}")]
     InvalidUrl(String),
-    /// WS connection yielded error during init
-    #[error("Failed to connect to sequencer by WS")]
-    WsConnection(
+    /// Establishing a connection to the sequencer endpoint resulted in an error.
+    #[error("Failed to connect to sequencer: {0}")]
+    TransportError(
         #[from]
         #[source]
         alloy_transport::TransportError,
     ),
     /// Reqwest failed to init client
-    #[error(
-        "Failed to init reqwest client for sequencer. Probably TLS backend cannot be initialized"
-    )]
+    #[error("Failed to init reqwest client for sequencer: {0}")]
     ReqwestError(
         #[from]
         #[source]
