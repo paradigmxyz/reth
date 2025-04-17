@@ -31,7 +31,7 @@ const MAX_SIZE: usize = 16 * 1024 * 1024; // 16MiB
 const SUPER_CHAIN_CONFIGS_TAR_BYTES: &[u8] = include_bytes!("../res/superchain-configs.tar");
 
 /// Reads the [`Genesis`] from the superchain config tar file for a superchain.
-/// For example, `read_genesis_from_superchain_config("base", "mainnet")`.
+/// For example, `read_genesis_from_superchain_config("unichain", "mainnet")`.
 pub(crate) fn read_superchain_genesis(
     name: &str,
     environment: &str,
@@ -58,7 +58,7 @@ pub(crate) fn read_superchain_genesis(
 }
 
 /// Reads the [`ChainMetadata`] from the superchain config tar file for a superchain.
-/// For example, `read_superchain_config("base", "mainnet")`.
+/// For example, `read_superchain_config("unichain", "mainnet")`.
 fn read_superchain_metadata(
     name: &str,
     environment: &str,
@@ -100,17 +100,17 @@ mod tests {
 
     #[test]
     fn test_read_superchain_genesis_with_workaround() {
-        let genesis = read_superchain_genesis("base", "mainnet").unwrap();
-        assert_eq!(genesis.config.chain_id, 8453);
-        assert_eq!(genesis.timestamp, 1686789347);
+        let genesis = read_superchain_genesis("funki", "mainnet").unwrap();
+        assert_eq!(genesis.config.chain_id, 33979);
+        assert_eq!(genesis.timestamp, 1721211095);
         assert!(genesis.alloc.contains_key(&ADDRESS_L2_TO_L1_MESSAGE_PASSER));
     }
 
     #[test]
     fn test_read_superchain_metadata() {
         let archive = TarArchiveRef::new(SUPER_CHAIN_CONFIGS_TAR_BYTES).unwrap();
-        let chain_config = read_superchain_metadata("base", "mainnet", &archive).unwrap();
-        assert_eq!(chain_config.chain_id, 8453);
+        let chain_config = read_superchain_metadata("funki", "mainnet", &archive).unwrap();
+        assert_eq!(chain_config.chain_id, 33979);
     }
 
     #[test]
