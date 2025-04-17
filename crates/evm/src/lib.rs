@@ -43,12 +43,6 @@ pub mod noop;
 /// test helpers for mocking executor
 pub mod test_utils;
 
-mod precompile_cache;
-pub use precompile_cache::MaybeCachedPrecompileProvider;
-
-#[cfg(feature = "std")]
-pub use precompile_cache::PrecompileCache;
-
 pub use alloy_evm::{
     block::{state_changes, system_calls, OnStateHook},
     *,
