@@ -4,10 +4,9 @@ pub mod canyon;
 pub mod isthmus;
 
 use crate::proof::calculate_receipt_root_optimism;
-use alloc::vec::Vec;
+use alloc::{format, vec::Vec};
 use alloy_consensus::{BlockHeader, TxReceipt, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::{Bloom, B256};
-use alloy_trie::EMPTY_ROOT_HASH;
 use op_alloy_consensus::{decode_holocene_extra_data, EIP1559ParamError};
 use reth_chainspec::{BaseFeeParams, EthChainSpec};
 use reth_consensus::ConsensusError;
@@ -48,31 +47,16 @@ where
         ))
     }
 
-    match (header.withdrawals_root(), body.calculate_withdrawals_root()) {
-        (Some(header_withdrawals_root), Some(withdrawals_root)) => {
-            // after isthmus, the withdrawals root field is repurposed and no longer mirrors the
-            // withdrawals root computed from the body
-            if chain_spec.is_isthmus_active_at_timestamp(header.timestamp()) {
-                // After isthmus we only ensure that the body has empty withdrawals
-                if withdrawals_root != EMPTY_ROOT_HASH {
-                    return Err(ConsensusError::BodyWithdrawalsRootDiff(
-                        GotExpected { got: withdrawals_root, expected: EMPTY_ROOT_HASH }.into(),
-                    ))
-                }
-            } else {
-                // before isthmus we ensure that the header root matches the body
-                if withdrawals_root != header_withdrawals_root {
-                    return Err(ConsensusError::BodyWithdrawalsRootDiff(
-                        GotExpected { got: withdrawals_root, expected: header_withdrawals_root }
-                            .into(),
-                    ))
-                }
-            }
-        }
-        (None, None) => {
-            // this is ok because we assume the fork is not active in this case
-        }
-        _ => return Err(ConsensusError::WithdrawalsRootUnexpected),
+    if chain_spec.is_isthmus_active_at_timestamp(header.timestamp()) {
+        // After isthmus we only ensure that the body has empty withdrawals
+        isthmus::ensure_withdrawals_storage_root_is_some(header).map_err(|err| {
+            ConsensusError::Other(format!("withdrawals‑storage‑root check failed: {err}"))
+        })?;
+    } else {
+        // before isthmus we ensure that the header root matches the body
+        canyon::ensure_empty_withdrawals_root(header).map_err(|err| {
+            ConsensusError::Other(format!("empty‑withdrawals‑root check failed: {err}"))
+        })?;
     }
 
     Ok(())
