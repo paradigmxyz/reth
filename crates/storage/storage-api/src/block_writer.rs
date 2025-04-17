@@ -1,11 +1,9 @@
-use alloy_primitives::BlockNumber;
-use reth_execution_types::Chain;
-use reth_primitives_traits::NodePrimitives;
-use reth_execution_types::ExecutionOutcome;
-use reth_db_api::models::StoredBlockBodyIndices;
-use reth_primitives_traits::{Block, RecoveredBlock};
-use reth_storage_errors::provider::ProviderResult;
 use crate::{NodePrimitivesProvider, StorageLocation};
+use alloy_primitives::BlockNumber;
+use reth_db_api::models::StoredBlockBodyIndices;
+use reth_execution_types::{Chain, ExecutionOutcome};
+use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock};
+use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::{updates::TrieUpdates, HashedPostStateSorted};
 /// `BlockExecution` Writer
 pub trait BlockExecutionWriter:
