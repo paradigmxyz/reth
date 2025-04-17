@@ -22,14 +22,9 @@ use alloy_eips::{
     eip4844::{BlobTransactionSidecar, BlobTransactionValidationError, DATA_GAS_PER_BLOB},
     eip7702::SignedAuthorization,
 };
-use alloy_primitives::{
-    Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
-};
+use alloy_primitives::{Address, Bytes, ChainId, Signature, TxHash, TxKind, B256, U256};
 use paste::paste;
-use rand::{
-    distributions::{Uniform, WeightedIndex},
-    prelude::Distribution,
-};
+use rand::{distr::Uniform, prelude::Distribution};
 use reth_ethereum_primitives::{Transaction, TransactionSigned};
 use reth_primitives_traits::{
     transaction::error::{TransactionConversionError, TryFromRecoveredTransactionError},
@@ -37,6 +32,7 @@ use reth_primitives_traits::{
 };
 
 use alloy_eips::eip4844::env_settings::KzgSettings;
+use rand::distr::weighted::WeightedIndex;
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
 
 /// A transaction pool implementation using [`MockOrdering`] for transaction ordering.
@@ -405,13 +401,13 @@ impl MockTransaction {
     }
 
     /// Sets the max fee per blob gas for EIP-4844 transactions,
-    pub fn with_blob_fee(mut self, val: u128) -> Self {
+    pub const fn with_blob_fee(mut self, val: u128) -> Self {
         self.set_blob_fee(val);
         self
     }
 
     /// Sets the max fee per blob gas for EIP-4844 transactions,
-    pub fn set_blob_fee(&mut self, val: u128) -> &mut Self {
+    pub const fn set_blob_fee(&mut self, val: u128) -> &mut Self {
         if let Self::Eip4844 { max_fee_per_blob_gas, .. } = self {
             *max_fee_per_blob_gas = val;
         }
@@ -419,7 +415,7 @@ impl MockTransaction {
     }
 
     /// Sets the priority fee for dynamic fee transactions (EIP-1559 and EIP-4844)
-    pub fn set_priority_fee(&mut self, val: u128) -> &mut Self {
+    pub const fn set_priority_fee(&mut self, val: u128) -> &mut Self {
         if let Self::Eip1559 { max_priority_fee_per_gas, .. } |
         Self::Eip4844 { max_priority_fee_per_gas, .. } = self
         {
@@ -429,7 +425,7 @@ impl MockTransaction {
     }
 
     /// Sets the priority fee for dynamic fee transactions (EIP-1559 and EIP-4844)
-    pub fn with_priority_fee(mut self, val: u128) -> Self {
+    pub const fn with_priority_fee(mut self, val: u128) -> Self {
         self.set_priority_fee(val);
         self
     }
@@ -445,7 +441,7 @@ impl MockTransaction {
     }
 
     /// Sets the max fee for dynamic fee transactions (EIP-1559 and EIP-4844)
-    pub fn set_max_fee(&mut self, val: u128) -> &mut Self {
+    pub const fn set_max_fee(&mut self, val: u128) -> &mut Self {
         if let Self::Eip1559 { max_fee_per_gas, .. } |
         Self::Eip4844 { max_fee_per_gas, .. } |
         Self::Eip7702 { max_fee_per_gas, .. } = self
@@ -456,7 +452,7 @@ impl MockTransaction {
     }
 
     /// Sets the max fee for dynamic fee transactions (EIP-1559 and EIP-4844)
-    pub fn with_max_fee(mut self, val: u128) -> Self {
+    pub const fn with_max_fee(mut self, val: u128) -> Self {
         self.set_max_fee(val);
         self
     }
@@ -486,7 +482,7 @@ impl MockTransaction {
     }
 
     /// Sets the gas price for the transaction.
-    pub fn set_gas_price(&mut self, val: u128) -> &mut Self {
+    pub const fn set_gas_price(&mut self, val: u128) -> &mut Self {
         match self {
             Self::Legacy { gas_price, .. } | Self::Eip2930 { gas_price, .. } => {
                 *gas_price = val;
@@ -502,7 +498,7 @@ impl MockTransaction {
     }
 
     /// Sets the gas price for the transaction.
-    pub fn with_gas_price(mut self, val: u128) -> Self {
+    pub const fn with_gas_price(mut self, val: u128) -> Self {
         match self {
             Self::Legacy { ref mut gas_price, .. } | Self::Eip2930 { ref mut gas_price, .. } => {
                 *gas_price = val;
@@ -1443,10 +1439,10 @@ impl MockFeeRange {
             "max_fee_range should be strictly below the priority fee range"
         );
         Self {
-            gas_price: gas_price.into(),
-            priority_fee: priority_fee.into(),
-            max_fee: max_fee.into(),
-            max_fee_blob: max_fee_blob.into(),
+            gas_price: gas_price.try_into().unwrap(),
+            priority_fee: priority_fee.try_into().unwrap(),
+            max_fee: max_fee.try_into().unwrap(),
+            max_fee_blob: max_fee_blob.try_into().unwrap(),
         }
     }
 
@@ -1498,9 +1494,9 @@ impl MockTransactionDistribution {
     ) -> Self {
         Self {
             transaction_ratio,
-            gas_limit_range: gas_limit_range.into(),
+            gas_limit_range: gas_limit_range.try_into().unwrap(),
             fee_ranges,
-            size_range: size_range.into(),
+            size_range: size_range.try_into().unwrap(),
         }
     }
 
@@ -1710,7 +1706,7 @@ impl MockTransactionSet {
 
         let mut prev_nonce = 0;
         for tx in &mut self.transactions {
-            if rng.gen_bool(gap_pct as f64 / 100.0) {
+            if rng.random_bool(gap_pct as f64 / 100.0) {
                 prev_nonce += gap_range.start;
             } else {
                 prev_nonce += 1;

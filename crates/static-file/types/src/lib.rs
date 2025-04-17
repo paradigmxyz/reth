@@ -53,7 +53,7 @@ impl HighestStaticFiles {
     }
 
     /// Returns a mutable reference to a static file segment
-    pub fn as_mut(&mut self, segment: StaticFileSegment) -> &mut Option<BlockNumber> {
+    pub const fn as_mut(&mut self, segment: StaticFileSegment) -> &mut Option<BlockNumber> {
         match segment {
             StaticFileSegment::Headers => &mut self.headers,
             StaticFileSegment::Transactions => &mut self.transactions,

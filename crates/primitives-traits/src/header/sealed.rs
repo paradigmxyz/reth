@@ -209,7 +209,7 @@ impl<H: crate::test_utils::TestHeader> SealedHeader<H> {
     }
 
     /// Returns a mutable reference to the header.
-    pub fn header_mut(&mut self) -> &mut H {
+    pub const fn header_mut(&mut self) -> &mut H {
         &mut self.header
     }
 
@@ -325,7 +325,7 @@ pub(super) mod serde_bincode_compat {
             }
 
             let mut bytes = [0u8; 1024];
-            rand::thread_rng().fill(&mut bytes[..]);
+            rand::rng().fill(&mut bytes[..]);
             let data = Data {
                 transaction: SealedHeader::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
                     .unwrap(),

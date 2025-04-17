@@ -123,7 +123,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     }
 
     /// Returns the next request id
-    fn next_id(&mut self) -> u64 {
+    const fn next_id(&mut self) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
         id
@@ -898,7 +898,7 @@ mod tests {
             let fork_filter = self.fork_filter.clone();
             let local_peer_id = self.local_peer_id;
             let mut hello = self.hello.clone();
-            let key = SecretKey::new(&mut rand::thread_rng());
+            let key = SecretKey::new(&mut rand_08::thread_rng());
             hello.id = pk2id(&key.public_key(SECP256K1));
             Box::pin(async move {
                 let outgoing = TcpStream::connect(local_addr).await.unwrap();
@@ -989,7 +989,7 @@ mod tests {
         fn default() -> Self {
             let (active_session_tx, active_session_rx) = mpsc::channel(100);
 
-            let (secret_key, pk) = SECP256K1.generate_keypair(&mut rand::thread_rng());
+            let (secret_key, pk) = SECP256K1.generate_keypair(&mut rand_08::thread_rng());
             let local_peer_id = pk2id(&pk);
 
             Self {

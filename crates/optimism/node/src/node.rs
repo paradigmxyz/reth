@@ -215,7 +215,7 @@ where
         reth_optimism_primitives::OpBlock {
             header: header.inner,
             body: reth_optimism_primitives::OpBlockBody {
-                transactions: transactions.into_transactions().map(Into::into).collect(),
+                transactions: transactions.into_transactions().collect(),
                 ..Default::default()
             },
         }
@@ -427,7 +427,7 @@ impl OpAddOnsBuilder {
     }
 
     /// Configure if transaction conditional should be enabled.
-    pub fn with_enable_tx_conditional(mut self, enable_tx_conditional: bool) -> Self {
+    pub const fn with_enable_tx_conditional(mut self, enable_tx_conditional: bool) -> Self {
         self.enable_tx_conditional = enable_tx_conditional;
         self
     }
@@ -510,7 +510,7 @@ impl<T> Default for OpPoolBuilder<T> {
 
 impl<T> OpPoolBuilder<T> {
     /// Sets the `enable_tx_conditional` flag on the pool builder.
-    pub fn with_enable_tx_conditional(mut self, enable_tx_conditional: bool) -> Self {
+    pub const fn with_enable_tx_conditional(mut self, enable_tx_conditional: bool) -> Self {
         self.enable_tx_conditional = enable_tx_conditional;
         self
     }
@@ -565,6 +565,7 @@ where
             .no_eip4844()
             .with_head_timestamp(ctx.head().timestamp)
             .kzg_settings(ctx.kzg_settings()?)
+            .set_tx_fee_cap(ctx.config().rpc.rpc_tx_fee_cap)
             .with_additional_tasks(
                 pool_config_overrides
                     .additional_validation_tasks

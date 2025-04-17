@@ -16,6 +16,7 @@ reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
 reth-metrics = { workspace = true, optional = true }
 reth-primitives-traits.workspace = true
+reth-revm.workspace = true
 reth-storage-api.workspace = true
 reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
@@ -35,6 +36,7 @@ auto_impl.workspace = true
 derive_more.workspace = true
 futures-util.workspace = true
 metrics = { workspace = true, optional = true }
+mini-moka = { workspace = true, optional = true }
 parking_lot = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -63,6 +65,8 @@ std = [
     "derive_more/std",
     "reth-storage-api/std",
     "reth-trie-common/std",
+    "reth-revm/std",
+    "mini-moka",
 ]
 metrics = ["std", "dep:metrics", "dep:reth-metrics"]
 test-utils = [
@@ -70,5 +74,6 @@ test-utils = [
     "reth-ethereum-primitives/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",
+    "reth-revm/test-utils",
 ]
 op = ["op-revm", "alloy-evm/op", "reth-primitives-traits/op"]

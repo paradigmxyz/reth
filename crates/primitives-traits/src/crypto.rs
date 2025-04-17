@@ -167,7 +167,7 @@ mod tests {
     fn sanity_ecrecover_call_secp256k1() {
         use super::impl_secp256k1::*;
 
-        let (secret, public) = secp256k1::generate_keypair(&mut rand::thread_rng());
+        let (secret, public) = secp256k1::generate_keypair(&mut rand_08::thread_rng());
         let signer = public_key_to_address(public);
 
         let message = b"hello world";
@@ -210,7 +210,7 @@ mod tests {
         use super::{impl_k256, impl_secp256k1};
 
         let (secp256k1_secret, secp256k1_public) =
-            secp256k1::generate_keypair(&mut rand::thread_rng());
+            secp256k1::generate_keypair(&mut rand_08::thread_rng());
         let k256_secret = k256::ecdsa::SigningKey::from_slice(&secp256k1_secret.secret_bytes())
             .expect("k256 secret");
         let k256_public = *k256_secret.verifying_key();

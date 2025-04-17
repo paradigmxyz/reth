@@ -3,13 +3,13 @@ use alloy_eips::{eip2718::Eip2718Result, Decodable2718, Encodable2718, Typed2718
 use alloy_primitives::TxHash;
 use alloy_rlp::{BufMut, Decodable, Encodable, Result as RlpResult};
 use reth_codecs::Compact;
-use reth_optimism_primitives::{
-    serde_bincode_compat::OpTransactionSigned as BincodeCompatOpTransactionSigned,
-    OpTransactionSigned,
-};
-use reth_primitives_traits::{
+use reth_ethereum::primitives::{
     serde_bincode_compat::SerdeBincodeCompat, transaction::signed::RecoveryError, InMemorySize,
     SignedTransaction,
+};
+use reth_op::{
+    serde_bincode_compat::transaction::OpTxEnvelope as BincodeCompatOpTransactionSigned,
+    OpTransactionSigned,
 };
 use revm_primitives::{Address, Bytes};
 
@@ -94,7 +94,7 @@ impl Transaction for CustomTransaction {
 
 impl SignedTransaction for CustomTransaction {
     fn tx_hash(&self) -> &TxHash {
-        self.inner.tx_hash()
+        self.inner.hash()
     }
 
     fn recover_signer(&self) -> Result<Address, RecoveryError> {

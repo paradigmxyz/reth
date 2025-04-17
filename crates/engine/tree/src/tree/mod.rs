@@ -417,7 +417,7 @@ impl<N: NodePrimitives> TreeState<N> {
     }
 
     /// Updates the canonical head to the given block.
-    fn set_canonical_head(&mut self, new_head: BlockNumHash) {
+    const fn set_canonical_head(&mut self, new_head: BlockNumHash) {
         self.current_canonical_head = new_head;
     }
 
@@ -451,7 +451,7 @@ pub struct StateProviderBuilder<N: NodePrimitives, P> {
 impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
     /// Creates a new state provider from the provider factory, historical block hash and optional
     /// overlaid blocks.
-    pub fn new(
+    pub const fn new(
         provider_factory: P,
         historical: B256,
         overlay: Option<Vec<ExecutedBlockWithTrieUpdates<N>>>,
@@ -566,7 +566,6 @@ where
 {
     provider: P,
     executor_provider: E,
-    evm_config: C,
     consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
     payload_validator: V,
     /// Keeps track of internals such as executed and buffered blocks.
@@ -616,7 +615,6 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineApiTreeHandler")
             .field("provider", &self.provider)
-            .field("evm_config", &self.evm_config)
             .field("executor_provider", &self.executor_provider)
             .field("consensus", &self.consensus)
             .field("payload_validator", &self.payload_validator)
@@ -673,12 +671,11 @@ where
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
 
         let payload_processor =
-            PayloadProcessor::new(WorkloadExecutor::default(), evm_config.clone(), &config);
+            PayloadProcessor::new(WorkloadExecutor::default(), evm_config, &config);
 
         Self {
             provider,
             executor_provider,
-            evm_config,
             consensus,
             payload_validator,
             incoming,
@@ -2426,7 +2423,14 @@ where
                 .trie_input_duration
                 .record(trie_input_start.elapsed().as_secs_f64());
 
-            self.payload_processor.spawn(header, txs, provider_builder, consistent_view, trie_input)
+            self.payload_processor.spawn(
+                header,
+                txs,
+                provider_builder,
+                consistent_view,
+                trie_input,
+                &self.config,
+            )
         } else {
             self.payload_processor.spawn_cache_exclusive(header, txs, provider_builder)
         };
@@ -3038,13 +3042,13 @@ impl PersistingKind {
     ///
     /// We only run the parallel state root if we are not currently persisting any blocks or
     /// persisting blocks that are all ancestors of the one we are calculating the state root for.
-    pub fn can_run_parallel_state_root(&self) -> bool {
+    pub const fn can_run_parallel_state_root(&self) -> bool {
         matches!(self, Self::NotPersisting | Self::PersistingDescendant)
     }
 
     /// Returns true if the blocks are currently being persisted and the input block is a
     /// descendant.
-    pub fn is_descendant(&self) -> bool {
+    pub const fn is_descendant(&self) -> bool {
         matches!(self, Self::PersistingDescendant)
     }
 }

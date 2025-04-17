@@ -7,7 +7,7 @@
 
 use alloc::vec::Vec;
 use alloy_primitives::{Bytes, B256};
-use alloy_rlp::{RlpDecodable, RlpEncodable};
+use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use reth_codecs_derive::add_arbitrary_tests;
 
 /// Message IDs for the snap sync protocol
@@ -222,6 +222,202 @@ impl SnapProtocolMessage {
             Self::ByteCodes(_) => SnapMessageId::ByteCodes,
             Self::GetTrieNodes(_) => SnapMessageId::GetTrieNodes,
             Self::TrieNodes(_) => SnapMessageId::TrieNodes,
+        }
+    }
+
+    /// Encode the message to bytes
+    pub fn encode(&self) -> Bytes {
+        let mut buf = Vec::new();
+        // Add message ID as first byte
+        buf.push(self.message_id() as u8);
+
+        // Encode the message body based on its type
+        match self {
+            Self::GetAccountRange(msg) => msg.encode(&mut buf),
+            Self::AccountRange(msg) => msg.encode(&mut buf),
+            Self::GetStorageRanges(msg) => msg.encode(&mut buf),
+            Self::StorageRanges(msg) => msg.encode(&mut buf),
+            Self::GetByteCodes(msg) => msg.encode(&mut buf),
+            Self::ByteCodes(msg) => msg.encode(&mut buf),
+            Self::GetTrieNodes(msg) => msg.encode(&mut buf),
+            Self::TrieNodes(msg) => msg.encode(&mut buf),
+        }
+
+        Bytes::from(buf)
+    }
+
+    /// Decodes a SNAP protocol message from its message ID and RLP-encoded body.
+    pub fn decode(message_id: u8, buf: &mut &[u8]) -> Result<Self, alloy_rlp::Error> {
+        // Decoding protocol message variants based on message ID
+        macro_rules! decode_snap_message_variant {
+            ($message_id:expr, $buf:expr, $id:expr, $variant:ident, $msg_type:ty) => {
+                if $message_id == $id as u8 {
+                    return Ok(Self::$variant(<$msg_type>::decode($buf)?));
+                }
+            };
+        }
+
+        // Try to decode each message type based on the message ID
+        decode_snap_message_variant!(
+            message_id,
+            buf,
+            SnapMessageId::GetAccountRange,
+            GetAccountRange,
+            GetAccountRangeMessage
+        );
+        decode_snap_message_variant!(
+            message_id,
+            buf,
+            SnapMessageId::AccountRange,
+            AccountRange,
+            AccountRangeMessage
+        );
+        decode_snap_message_variant!(
+            message_id,
+            buf,
+            SnapMessageId::GetStorageRanges,
+            GetStorageRanges,
+            GetStorageRangesMessage
+        );
+        decode_snap_message_variant!(
+            message_id,
+            buf,
+            SnapMessageId::StorageRanges,
+            StorageRanges,
+            StorageRangesMessage
+        );
+        decode_snap_message_variant!(
+            message_id,
+            buf,
+            SnapMessageId::GetByteCodes,
+            GetByteCodes,
+            GetByteCodesMessage
+        );
+        decode_snap_message_variant!(
+            message_id,
+            buf,
+            SnapMessageId::ByteCodes,
+            ByteCodes,
+            ByteCodesMessage
+        );
+        decode_snap_message_variant!(
+            message_id,
+            buf,
+            SnapMessageId::GetTrieNodes,
+            GetTrieNodes,
+            GetTrieNodesMessage
+        );
+        decode_snap_message_variant!(
+            message_id,
+            buf,
+            SnapMessageId::TrieNodes,
+            TrieNodes,
+            TrieNodesMessage
+        );
+
+        Err(alloy_rlp::Error::Custom("Unknown message ID"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Helper function to create a B256 from a u64 for testing
+    fn b256_from_u64(value: u64) -> B256 {
+        B256::left_padding_from(&value.to_be_bytes())
+    }
+
+    // Helper function to test roundtrip encoding/decoding
+    fn test_roundtrip(original: SnapProtocolMessage) {
+        let encoded = original.encode();
+
+        // Verify the first byte matches the expected message ID
+        assert_eq!(encoded[0], original.message_id() as u8);
+
+        let mut buf = &encoded[1..];
+        let decoded = SnapProtocolMessage::decode(encoded[0], &mut buf).unwrap();
+
+        // Verify the match
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn test_all_message_roundtrips() {
+        test_roundtrip(SnapProtocolMessage::GetAccountRange(GetAccountRangeMessage {
+            request_id: 42,
+            root_hash: b256_from_u64(123),
+            starting_hash: b256_from_u64(456),
+            limit_hash: b256_from_u64(789),
+            response_bytes: 1024,
+        }));
+
+        test_roundtrip(SnapProtocolMessage::AccountRange(AccountRangeMessage {
+            request_id: 42,
+            accounts: vec![AccountData {
+                hash: b256_from_u64(123),
+                body: Bytes::from(vec![1, 2, 3]),
+            }],
+            proof: vec![Bytes::from(vec![4, 5, 6])],
+        }));
+
+        test_roundtrip(SnapProtocolMessage::GetStorageRanges(GetStorageRangesMessage {
+            request_id: 42,
+            root_hash: b256_from_u64(123),
+            account_hashes: vec![b256_from_u64(456)],
+            starting_hash: b256_from_u64(789),
+            limit_hash: b256_from_u64(101112),
+            response_bytes: 2048,
+        }));
+
+        test_roundtrip(SnapProtocolMessage::StorageRanges(StorageRangesMessage {
+            request_id: 42,
+            slots: vec![vec![StorageData {
+                hash: b256_from_u64(123),
+                data: Bytes::from(vec![1, 2, 3]),
+            }]],
+            proof: vec![Bytes::from(vec![4, 5, 6])],
+        }));
+
+        test_roundtrip(SnapProtocolMessage::GetByteCodes(GetByteCodesMessage {
+            request_id: 42,
+            hashes: vec![b256_from_u64(123)],
+            response_bytes: 1024,
+        }));
+
+        test_roundtrip(SnapProtocolMessage::ByteCodes(ByteCodesMessage {
+            request_id: 42,
+            codes: vec![Bytes::from(vec![1, 2, 3])],
+        }));
+
+        test_roundtrip(SnapProtocolMessage::GetTrieNodes(GetTrieNodesMessage {
+            request_id: 42,
+            root_hash: b256_from_u64(123),
+            paths: vec![TriePath {
+                account_path: Bytes::from(vec![1, 2, 3]),
+                slot_paths: vec![Bytes::from(vec![4, 5, 6])],
+            }],
+            response_bytes: 1024,
+        }));
+
+        test_roundtrip(SnapProtocolMessage::TrieNodes(TrieNodesMessage {
+            request_id: 42,
+            nodes: vec![Bytes::from(vec![1, 2, 3])],
+        }));
+    }
+
+    #[test]
+    fn test_unknown_message_id() {
+        // Create some random data
+        let data = Bytes::from(vec![1, 2, 3, 4]);
+        let mut buf = data.as_ref();
+
+        // Try to decode with an invalid message ID
+        let result = SnapProtocolMessage::decode(255, &mut buf);
+
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert_eq!(e.to_string(), "Unknown message ID");
         }
     }
 }
