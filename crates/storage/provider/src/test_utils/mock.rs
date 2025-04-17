@@ -484,7 +484,6 @@ impl<ChainSpec: EthChainSpec + 'static> TransactionsProvider
     }
 }
 
-// //look
 impl<T, ChainSpec> ReceiptProvider for MockEthProvider<T, ChainSpec>
 where
     T: NodePrimitives,
