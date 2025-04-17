@@ -19,7 +19,7 @@ reth-network-p2p.workspace = true
 reth-tokio-util.workspace = true
 reth-consensus.workspace = true
 reth-prune.workspace = true
-reth-errors = {workspace = true, features = ["std"]}
+reth-errors = { workspace = true, features = ["std"] }
 reth-stages-types.workspace = true
 reth-static-file-types.workspace = true
 

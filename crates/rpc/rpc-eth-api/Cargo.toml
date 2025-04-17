@@ -16,7 +16,7 @@ workspace = true
 revm = { workspace = true, features = ["optional_block_gas_limit", "optional_eip3607", "optional_no_base_fee"] }
 revm-inspectors.workspace = true
 reth-primitives-traits.workspace = true
-reth-errors = {workspace = true, features = ["std"]}
+reth-errors = { workspace = true, features = ["std"] }
 reth-evm.workspace = true
 reth-provider.workspace = true
 reth-revm.workspace = true
