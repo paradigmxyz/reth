@@ -18,9 +18,6 @@ fn main() {
     ];
 
     for chain in AVAILABLE_CHAINS.iter() {
-        if chain.name == "base" {
-            continue
-        }
         if chain.environment == "mainnet" {
             supported_chains.push(chain.name.clone());
         } else {
@@ -45,10 +42,6 @@ fn main() {
 fn generate_chain_value_parser_fn() -> String {
     let mut match_arms: String = String::new();
     for chain in AVAILABLE_CHAINS.iter() {
-        if chain.name == "base" {
-            continue
-        }
-
         let chain_name = if chain.environment == "mainnet" {
             chain.name.clone()
         } else {
