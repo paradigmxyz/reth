@@ -27,19 +27,19 @@ mod test {
     fn test_deserialize_available_superchain() {
         let s = r#"
         {
-          "name": "base",
+          "name": "funki",
           "environment": "mainnet"
         }
         "#;
         let available_superchain: AvailableSuperchain = serde_json::from_str(s).unwrap();
-        assert_eq!(available_superchain.name, "base");
+        assert_eq!(available_superchain.name, "funki");
         assert_eq!(available_superchain.environment, "mainnet");
     }
 
     #[test]
     fn test_read_available_superchain() {
-        let available_superchain = AVAILABLE_CHAINS.iter().find(|&chain| chain.name == "base");
-        assert_eq!(available_superchain.unwrap().name, "base");
+        let available_superchain = AVAILABLE_CHAINS.iter().find(|&chain| chain.name == "funki");
+        assert_eq!(available_superchain.unwrap().name, "funki");
         assert_eq!(available_superchain.unwrap().environment, "mainnet");
     }
 }
