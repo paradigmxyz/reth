@@ -1,12 +1,12 @@
 //! Helpers for optimism specific RPC implementations.
 
-use std::{str::FromStr, sync::Arc};
-
+use crate::SequencerClientError;
 use alloy_json_rpc::{RpcRecv, RpcSend};
 use alloy_primitives::{hex, B256};
 use alloy_rpc_client::{BuiltInConnectionString, ClientBuilder, RpcClient as Client};
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
 use alloy_transport_http::Http;
+use std::{str::FromStr, sync::Arc};
 use thiserror::Error;
 use tracing::warn;
 
@@ -34,8 +34,6 @@ pub enum Error {
         reqwest::Error,
     ),
 }
-
-use crate::SequencerClientError;
 
 /// A client to interact with a Sequencer
 #[derive(Debug, Clone)]
