@@ -135,16 +135,18 @@ impl LaunchContext {
     }
 
     /// Convenience function to [`Self::configure_globals`]
-    pub fn with_configured_globals(self) -> Self {
-        self.configure_globals();
+    pub fn with_configured_globals(self, reserved_cpu_cores: usize) -> Self {
+        self.configure_globals(reserved_cpu_cores);
         self
     }
 
     /// Configure global settings this includes:
     ///
     /// - Raising the file descriptor limit
-    /// - Configuring the global rayon thread pool
-    pub fn configure_globals(&self) {
+    /// - Configuring the global rayon thread pool with available parallelism. Honoring
+    ///   engine.reserved-cpu-cores to reserve given number of cores for O while using at least 1
+    ///   core for the rayon thread pool
+    pub fn configure_globals(&self, reserved_cpu_cores: usize) {
         // Raise the fd limit of the process.
         // Does not do anything on windows.
         match fdlimit::raise_fd_limit() {
@@ -155,10 +157,11 @@ impl LaunchContext {
             Err(err) => warn!(%err, "Failed to raise file descriptor limit"),
         }
 
-        // Limit the global rayon thread pool, reserving 1 core for the rest of the system.
-        // If the system only has 1 core the pool will use it.
-        let num_threads =
-            available_parallelism().map_or(0, |num| num.get().saturating_sub(1).max(1));
+        // Reserving the given number of CPU cores for the rest of OS.
+        // Users can reserve more cores by setting engine.reserved-cpu-cores
+        // Note: The global rayon thread pool will use at least one core.
+        let num_threads = available_parallelism()
+            .map_or(0, |num| num.get().saturating_sub(reserved_cpu_cores).max(1));
         if let Err(err) = ThreadPoolBuilder::new()
             .num_threads(num_threads)
             .thread_name(|i| format!("reth-rayon-{i}"))
@@ -187,8 +190,8 @@ impl<T> LaunchContextWith<T> {
     ///
     /// - Raising the file descriptor limit
     /// - Configuring the global rayon thread pool
-    pub fn configure_globals(&self) {
-        self.inner.configure_globals();
+    pub fn configure_globals(&self, reserved_cpu_cores: u64) {
+        self.inner.configure_globals(reserved_cpu_cores.try_into().unwrap());
     }
 
     /// Returns the data directory.
@@ -248,12 +251,12 @@ impl<L, R> LaunchContextWith<Attached<L, R>> {
     }
 
     /// Get a mutable reference to the right value.
-    pub fn left_mut(&mut self) -> &mut L {
+    pub const fn left_mut(&mut self) -> &mut L {
         &mut self.attachment.left
     }
 
     /// Get a mutable reference to the right value.
-    pub fn right_mut(&mut self) -> &mut R {
+    pub const fn right_mut(&mut self) -> &mut R {
         &mut self.attachment.right
     }
 }
@@ -294,7 +297,7 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     }
 
     /// Returns the attached [`NodeConfig`].
-    pub fn node_config_mut(&mut self) -> &mut NodeConfig<ChainSpec> {
+    pub const fn node_config_mut(&mut self) -> &mut NodeConfig<ChainSpec> {
         &mut self.left_mut().config
     }
 
@@ -304,7 +307,7 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     }
 
     /// Returns the attached toml config [`reth_config::Config`].
-    pub fn toml_config_mut(&mut self) -> &mut reth_config::Config {
+    pub const fn toml_config_mut(&mut self) -> &mut reth_config::Config {
         &mut self.left_mut().toml_config
     }
 
@@ -751,7 +754,7 @@ where
     }
 
     /// Returns mutable reference to the configured `NodeAdapter`.
-    pub fn node_adapter_mut(&mut self) -> &mut NodeAdapter<T, CB::Components> {
+    pub const fn node_adapter_mut(&mut self) -> &mut NodeAdapter<T, CB::Components> {
         &mut self.right_mut().node_adapter
     }
 
@@ -978,12 +981,12 @@ impl<L, R> Attached<L, R> {
     }
 
     /// Get a mutable reference to the right value.
-    pub fn left_mut(&mut self) -> &mut R {
+    pub const fn left_mut(&mut self) -> &mut R {
         &mut self.right
     }
 
     /// Get a mutable reference to the right value.
-    pub fn right_mut(&mut self) -> &mut R {
+    pub const fn right_mut(&mut self) -> &mut R {
         &mut self.right
     }
 }

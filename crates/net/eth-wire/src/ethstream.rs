@@ -202,7 +202,7 @@ impl<S, N: NetworkPrimitives> EthStream<S, N> {
 
     /// Returns mutable access to the underlying stream.
     #[inline]
-    pub fn inner_mut(&mut self) -> &mut S {
+    pub const fn inner_mut(&mut self) -> &mut S {
         &mut self.inner
     }
 

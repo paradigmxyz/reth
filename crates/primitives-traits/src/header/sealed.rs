@@ -209,7 +209,7 @@ impl<H: crate::test_utils::TestHeader> SealedHeader<H> {
     }
 
     /// Returns a mutable reference to the header.
-    pub fn header_mut(&mut self) -> &mut H {
+    pub const fn header_mut(&mut self) -> &mut H {
         &mut self.header
     }
 

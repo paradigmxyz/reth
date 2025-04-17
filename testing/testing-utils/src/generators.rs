@@ -2,7 +2,7 @@
 
 // TODO(rand): update ::random calls after rand_09 migration
 
-use alloy_consensus::{Block, Header, SignableTransaction, Transaction as _, TxLegacy};
+use alloy_consensus::{Header, SignableTransaction, Transaction as _, TxLegacy};
 use alloy_eips::{
     eip1898::BlockWithParent,
     eip4895::{Withdrawal, Withdrawals},
@@ -11,11 +11,12 @@ use alloy_eips::{
 use alloy_primitives::{Address, BlockNumber, Bytes, TxKind, B256, B64, U256};
 pub use rand::Rng;
 use rand::{distr::uniform::SampleRange, rngs::StdRng, SeedableRng};
-use reth_primitives::{
-    Account, BlockBody, Log, Receipt, SealedBlock, SealedHeader, StorageEntry, Transaction,
-    TransactionSigned,
+use reth_ethereum_primitives::{Block, BlockBody, Receipt, Transaction, TransactionSigned};
+use reth_primitives_traits::{
+    crypto::secp256k1::sign_message, proofs, Account, Block as _, Log, SealedBlock, SealedHeader,
+    StorageEntry,
 };
-use reth_primitives_traits::{crypto::secp256k1::sign_message, proofs, Block as _};
+
 use secp256k1::{Keypair, Secp256k1};
 use std::{
     cmp::{max, min},
@@ -201,7 +202,11 @@ pub fn generate_keys<R: Rng>(_rng: &mut R, count: usize) -> Vec<Keypair> {
 /// transactions in the block.
 ///
 /// The ommer headers are not assumed to be valid.
-pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams) -> SealedBlock {
+pub fn random_block<R: Rng>(
+    rng: &mut R,
+    number: u64,
+    block_params: BlockParams,
+) -> SealedBlock<Block> {
     // Generate transactions
     let tx_count = block_params.tx_count.unwrap_or_else(|| rng.random::<u8>());
     let transactions: Vec<TransactionSigned> =
@@ -261,7 +266,7 @@ pub fn random_block_range<R: Rng>(
     rng: &mut R,
     block_numbers: RangeInclusive<BlockNumber>,
     block_range_params: BlockRangeParams,
-) -> Vec<SealedBlock> {
+) -> Vec<SealedBlock<Block>> {
     let mut blocks =
         Vec::with_capacity(block_numbers.end().saturating_sub(*block_numbers.start()) as usize);
     for idx in block_numbers {
@@ -276,7 +281,7 @@ pub fn random_block_range<R: Rng>(
             idx,
             BlockParams {
                 parent: Some(
-                    blocks.last().map(|block: &SealedBlock| block.hash()).unwrap_or(parent),
+                    blocks.last().map(|block: &SealedBlock<Block>| block.hash()).unwrap_or(parent),
                 ),
                 tx_count: Some(tx_count),
                 ommers_count: None,
@@ -304,7 +309,7 @@ pub fn random_changeset_range<'a, R: Rng, IBlk, IAcc>(
     key_range: Range<u64>,
 ) -> (Vec<ChangeSet>, BTreeMap<Address, AccountState>)
 where
-    IBlk: IntoIterator<Item = &'a SealedBlock>,
+    IBlk: IntoIterator<Item = &'a SealedBlock<Block>>,
     IAcc: IntoIterator<Item = (Address, (Account, Vec<StorageEntry>))>,
 {
     let mut state: BTreeMap<_, _> = accounts

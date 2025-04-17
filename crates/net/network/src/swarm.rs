@@ -80,7 +80,7 @@ impl<N: NetworkPrimitives> Swarm<N> {
     }
 
     /// Mutable access to the state.
-    pub(crate) fn state_mut(&mut self) -> &mut NetworkState<N> {
+    pub(crate) const fn state_mut(&mut self) -> &mut NetworkState<N> {
         &mut self.state
     }
 
@@ -95,7 +95,7 @@ impl<N: NetworkPrimitives> Swarm<N> {
     }
 
     /// Mutable access to the [`SessionManager`].
-    pub(crate) fn sessions_mut(&mut self) -> &mut SessionManager<N> {
+    pub(crate) const fn sessions_mut(&mut self) -> &mut SessionManager<N> {
         &mut self.sessions
     }
 }
@@ -265,7 +265,7 @@ impl<N: NetworkPrimitives> Swarm<N> {
     }
 
     /// Set network connection state to `ShuttingDown`
-    pub(crate) fn on_shutdown_requested(&mut self) {
+    pub(crate) const fn on_shutdown_requested(&mut self) {
         self.state_mut().peers_mut().on_shutdown();
     }
 
@@ -276,7 +276,7 @@ impl<N: NetworkPrimitives> Swarm<N> {
     }
 
     /// Set network connection state to `Hibernate` or `Active`
-    pub(crate) fn on_network_state_change(&mut self, network_state: NetworkConnectionState) {
+    pub(crate) const fn on_network_state_change(&mut self, network_state: NetworkConnectionState) {
         self.state_mut().peers_mut().on_network_state_change(network_state);
     }
 }
