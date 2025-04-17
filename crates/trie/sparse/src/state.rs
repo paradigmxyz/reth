@@ -1,7 +1,7 @@
 use crate::{
     blinded::{BlindedProvider, BlindedProviderFactory, DefaultBlindedProviderFactory},
     metrics::SparseStateTrieMetrics,
-    RevealedSparseTrie, SparseTrie, TrieMasks,
+    trace, RevealedSparseTrie, SparseTrie, TrieMasks,
 };
 use alloy_primitives::{
     hex,
@@ -9,17 +9,16 @@ use alloy_primitives::{
     Bytes, B256,
 };
 use alloy_rlp::{Decodable, Encodable};
-use core::fmt;
+use core::{fmt, iter::Peekable};
 use reth_execution_errors::{SparseStateTrieErrorKind, SparseStateTrieResult, SparseTrieErrorKind};
 use reth_primitives_traits::Account;
-use reth_tracing::tracing::trace;
 use reth_trie_common::{
     proof::ProofNodes,
     updates::{StorageTrieUpdates, TrieUpdates},
     MultiProof, Nibbles, RlpNode, StorageMultiProof, TrieAccount, TrieMask, TrieNode,
     EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use std::{collections::VecDeque, iter::Peekable};
+use std::{collections::VecDeque, vec::Vec};
 
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
 pub struct SparseStateTrie<F: BlindedProviderFactory = DefaultBlindedProviderFactory> {
