@@ -3,8 +3,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-#[cfg(not(feature = "std"))]
-extern crate alloc as std;
+extern crate alloc;
 
 /// A macro that expands to a trace! call when std feature is enabled,
 /// and does nothing when `no_std` is enabled.
