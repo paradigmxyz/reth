@@ -1,8 +1,8 @@
+use alloc::{boxed::Box, string::ToString};
+use core::fmt::Display;
 use reth_consensus::ConsensusError;
 use reth_execution_errors::BlockExecutionError;
-use reth_fs_util::FsPathError;
 use reth_storage_errors::{db::DatabaseError, provider::ProviderError};
-use std::fmt::Display;
 
 /// Result alias for [`RethError`].
 pub type RethResult<T> = Result<T, RethError>;
@@ -50,12 +50,6 @@ impl RethError {
     }
 }
 
-impl From<FsPathError> for RethError {
-    fn from(err: FsPathError) -> Self {
-        Self::other(err)
-    }
-}
-
 // Some types are used a lot. Make sure they don't unintentionally get bigger.
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
 mod size_asserts {
@@ -63,7 +57,7 @@ mod size_asserts {
 
     macro_rules! static_assert_size {
         ($t:ty, $sz:expr) => {
-            const _: [(); $sz] = [(); std::mem::size_of::<$t>()];
+            const _: [(); $sz] = [(); core::mem::size_of::<$t>()];
         };
     }
 
