@@ -13,7 +13,7 @@ use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_primitives::{RecoveredBlock, TransactionSigned};
 use reth_revm::state::Bytecode;
-use reth_trie::{iter::IntoParallelRefIterator, HashedPostState, KeccakKeyHasher};
+use reth_trie_common::{iter::IntoParallelRefIterator, HashedPostState, KeccakKeyHasher};
 use reth_trie_sparse::{blinded::DefaultBlindedProviderFactory, SparseStateTrie};
 
 /// Errors that can occur during stateless validation.

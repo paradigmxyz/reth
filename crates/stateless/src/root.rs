@@ -4,7 +4,7 @@ use alloy_primitives::B256;
 use alloy_rlp::{Decodable, Encodable};
 use itertools::Itertools;
 use rayon::prelude::*;
-use reth_trie::{
+use reth_trie_common::{
     HashedPostState, Nibbles, TrieAccount, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_sparse::{errors::SparseStateTrieResult, SparseStateTrie, SparseTrie};
