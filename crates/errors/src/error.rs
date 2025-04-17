@@ -1,8 +1,8 @@
+use alloc::{boxed::Box, string::ToString};
+use core::fmt::Display;
 use reth_consensus::ConsensusError;
 use reth_execution_errors::BlockExecutionError;
 use reth_storage_errors::{db::DatabaseError, provider::ProviderError};
-use core::fmt::Display;
-use alloc::{string::ToString, boxed::Box};
 
 #[cfg(feature = "std")]
 use reth_fs_util::FsPathError;
