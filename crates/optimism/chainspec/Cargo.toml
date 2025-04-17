@@ -36,13 +36,13 @@ op-alloy-rpc-types.workspace = true
 # io
 serde.workspace = true
 serde_json.workspace = true
-tar-no-std.workspace = true
-miniz_oxide = { workspace = true, features = ["with-alloc"] }
+tar-no-std = { workspace = true, optional = true }
+miniz_oxide = { workspace = true, features = ["with-alloc"], optional = true }
 
 # misc
 derive_more.workspace = true
-paste.workspace = true
-thiserror.workspace = true
+paste = {workspace = true, optional = true }
+thiserror = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-chainspec = { workspace = true, features = ["test-utils"] }
@@ -51,6 +51,7 @@ op-alloy-rpc-types.workspace = true
 
 [features]
 default = ["std"]
+superchain-configs = ["miniz_oxide", "paste", "tar-no-std", "thiserror", "thiserror" ]
 std = [
     "alloy-chains/std",
     "alloy-genesis/std",

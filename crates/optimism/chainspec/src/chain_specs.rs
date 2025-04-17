@@ -4,8 +4,6 @@ use crate::create_chain_spec;
 create_chain_spec!("arena-z", "mainnet");
 create_chain_spec!("arena-z-testnet", "sepolia");
 create_chain_spec!("automata", "mainnet");
-create_chain_spec!("base", "mainnet");
-create_chain_spec!("base", "sepolia");
 create_chain_spec!("base-devnet-0", "sepolia-dev-0");
 create_chain_spec!("bob", "mainnet");
 create_chain_spec!("boba", "sepolia");

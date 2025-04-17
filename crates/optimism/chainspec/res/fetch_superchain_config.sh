@@ -110,10 +110,10 @@ echo "Generate available-chains.json and chain_specs.rs..."
 for i in "${!PARENT_CHAINS_ARRAY[@]}"; do
   NAME="${IDENTIFIERS_ARRAY[$i]}"
   ENVIRONMENT="${PARENT_CHAINS_ARRAY[$i]}"
-  # Skip Optimism here because it needs to be handled separately
-    if [ "$NAME" == "op" ]; then
-        continue
-    fi
+  # Skip Optimism and Base here because it is implemented separately
+  if [ "$NAME" == "op" ] || [ "$NAME" == "base" ]; then
+     continue
+  fi
 
   # Validate file existence in our target path <environment>/<name>.json.zst
   FILE_PATH="$GENESIS_TARGET_PATH/${PARENT_CHAINS_ARRAY[$i]}/${IDENTIFIERS_ARRAY[$i]}.json.zz"
