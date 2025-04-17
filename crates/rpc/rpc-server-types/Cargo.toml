@@ -12,7 +12,7 @@ description = "RPC server types and constants"
 workspace = true
 
 [dependencies]
-reth-errors.workspace = true
+reth-errors = {workspace = true, features = ["std"]}
 reth-network-api.workspace = true
 
 # ethereum
