@@ -1,7 +1,11 @@
 use alloy_primitives::{BlockHash, BlockNumber};
 use futures_util::StreamExt;
 use reth_db_api::{
-    cursor::DbCursorRW, table::Value, tables, transaction::DbTxMut, RawKey, RawTable, RawValue,
+    cursor::{DbCursorRO, DbCursorRW},
+    table::Value,
+    tables,
+    transaction::{DbTx, DbTxMut},
+    RawKey, RawTable, RawValue,
 };
 use reth_era::{era1_file::Era1Reader, execution_types::DecodeCompressed};
 use reth_era_downloader::{EraStream, HttpClient};
@@ -60,6 +64,19 @@ where
     // Database cursor for hash to number index
     let mut cursor_header_numbers =
         provider.tx_ref().cursor_write::<RawTable<tables::HeaderNumbers>>()?;
+    let mut first_sync = false;
+
+    // If we only have the genesis block hash, then we are at first sync, and we can remove it,
+    // add it to the collector and use tx.append on all hashes.
+    if provider.tx_ref().entries::<RawTable<tables::HeaderNumbers>>()? == 1 {
+        if let Some((hash, block_number)) = cursor_header_numbers.last()? {
+            if block_number.value()? == 0 {
+                cursor_header_numbers.delete_current()?;
+                first_sync = true;
+                cursor_header_numbers.append(hash, &block_number)?;
+            }
+        }
+    }
 
     while let Some(file) = rx.recv()? {
         let file = File::open(file?)?;
@@ -87,8 +104,14 @@ where
             )?;
 
             // Write block hash to block number index entry
-            cursor_header_numbers
-                .upsert(RawKey::<BlockHash>::from(hash), &RawValue::<BlockNumber>::from(number))?;
+            let key = RawKey::<BlockHash>::from(hash);
+            let value = RawValue::<BlockNumber>::from(number);
+
+            if first_sync {
+                cursor_header_numbers.append(key, &value)?;
+            } else {
+                cursor_header_numbers.upsert(key, &value)?;
+            }
         }
     }
 
