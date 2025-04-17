@@ -144,11 +144,11 @@ impl<'r, R: Read + Seek> BlockTupleIterator<'r, R> {
                 !self.difficulties.is_empty()
             {
                 let header = self.headers.pop_front().unwrap();
-                let bodie = self.bodies.pop_front().unwrap();
+                let body = self.bodies.pop_front().unwrap();
                 let receipt = self.receipts.pop_front().unwrap();
                 let difficulty = self.difficulties.pop_front().unwrap();
 
-                return Ok(Some(BlockTuple::new(header, bodie, receipt, difficulty)));
+                return Ok(Some(BlockTuple::new(header, body, receipt, difficulty)));
             }
         }
     }
@@ -175,53 +175,19 @@ impl<R: Read + Seek> Era1Reader<R> {
             None => return Err(E2sError::Ssz("Empty Era1 file".to_string())),
         };
 
-        // Read all entries
-        let entries = self.reader.entries()?;
+        let mut iter = self.iter();
+        let blocks = (&mut iter).collect::<Result<Vec<_>, _>>()?;
 
-        // Skip the first entry since it's the version
-        let entries = entries.into_iter().skip(1).collect::<Vec<_>>();
-
-        // Temporary storage for block components
-        let mut headers = Vec::new();
-        let mut bodies = Vec::new();
-        let mut receipts = Vec::new();
-        let mut difficulties = Vec::new();
-        let mut other_entries = Vec::new();
-        let mut accumulator = None;
-        let mut block_index = None;
-
-        // Process entries in the order they appear
-        for entry in entries {
-            match entry.entry_type {
-                execution_types::COMPRESSED_HEADER => {
-                    headers.push(CompressedHeader::from_entry(&entry)?);
-                }
-                execution_types::COMPRESSED_BODY => {
-                    bodies.push(CompressedBody::from_entry(&entry)?);
-                }
-                execution_types::COMPRESSED_RECEIPTS => {
-                    receipts.push(CompressedReceipts::from_entry(&entry)?);
-                }
-                execution_types::TOTAL_DIFFICULTY => {
-                    difficulties.push(TotalDifficulty::from_entry(&entry)?);
-                }
-                execution_types::ACCUMULATOR => {
-                    if accumulator.is_some() {
-                        return Err(E2sError::Ssz("Multiple accumulator entries found".to_string()));
-                    }
-                    accumulator = Some(Accumulator::from_entry(&entry)?);
-                }
-                BLOCK_INDEX => {
-                    if block_index.is_some() {
-                        return Err(E2sError::Ssz("Multiple block index entries found".to_string()));
-                    }
-                    block_index = Some(BlockIndex::from_entry(&entry)?);
-                }
-                _ => {
-                    other_entries.push(entry);
-                }
-            }
-        }
+        let BlockTupleIterator {
+            headers,
+            bodies,
+            receipts,
+            difficulties,
+            other_entries,
+            accumulator,
+            block_index,
+            ..
+        } = iter;
 
         // Ensure we have matching counts for block components
         if headers.len() != bodies.len() ||
@@ -229,19 +195,9 @@ impl<R: Read + Seek> Era1Reader<R> {
             headers.len() != difficulties.len()
         {
             return Err(E2sError::Ssz(format!(
-            "Mismatched block component counts: headers={}, bodies={}, receipts={}, difficulties={}",
-            headers.len(), bodies.len(), receipts.len(), difficulties.len()
-        )));
-        }
-
-        let mut blocks = Vec::with_capacity(headers.len());
-        for i in 0..headers.len() {
-            blocks.push(BlockTuple::new(
-                headers[i].clone(),
-                bodies[i].clone(),
-                receipts[i].clone(),
-                difficulties[i].clone(),
-            ));
+                "Mismatched block component counts: headers={}, bodies={}, receipts={}, difficulties={}",
+                headers.len(), bodies.len(), receipts.len(), difficulties.len()
+            )));
         }
 
         let accumulator = accumulator
