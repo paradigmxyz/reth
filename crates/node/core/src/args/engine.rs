@@ -48,10 +48,6 @@ pub struct EngineArgs {
     /// Configure the number of reserved CPU cores for non-reth processes
     #[arg(long = "engine.reserved-cpu-cores", default_value_t = DEFAULT_RESERVED_CPU_CORES)]
     pub reserved_cpu_cores: usize,
-
-    /// Enable precompile cache
-    #[arg(long = "engine.precompile-cache", default_value = "false")]
-    pub precompile_cache_enabled: bool,
 }
 
 impl Default for EngineArgs {
@@ -66,7 +62,6 @@ impl Default for EngineArgs {
             accept_execution_requests_hash: false,
             max_proof_task_concurrency: DEFAULT_MAX_PROOF_TASK_CONCURRENCY,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
-            precompile_cache_enabled: false,
         }
     }
 }
