@@ -41,7 +41,7 @@ miniz_oxide = { workspace = true, features = ["with-alloc"], optional = true }
 
 # misc
 derive_more.workspace = true
-paste = {workspace = true, optional = true }
+paste = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -51,7 +51,7 @@ op-alloy-rpc-types.workspace = true
 
 [features]
 default = ["std"]
-superchain-configs = ["miniz_oxide", "paste", "tar-no-std", "thiserror", "thiserror" ]
+superchain-configs = ["miniz_oxide", "paste", "tar-no-std", "thiserror", "thiserror"]
 std = [
     "alloy-chains/std",
     "alloy-genesis/std",
