@@ -61,7 +61,7 @@ where
     Ok(())
 }
 
-/// Calculate the receipts root, and compare it against against the expected receipts root and logs
+/// Calculate the receipts root, and compare it against the expected receipts root and logs
 /// bloom.
 fn verify_receipts<R: Receipt>(
     expected_receipts_root: B256,
