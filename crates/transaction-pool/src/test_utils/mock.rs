@@ -401,13 +401,13 @@ impl MockTransaction {
     }
 
     /// Sets the max fee per blob gas for EIP-4844 transactions,
-    pub fn with_blob_fee(mut self, val: u128) -> Self {
+    pub const fn with_blob_fee(mut self, val: u128) -> Self {
         self.set_blob_fee(val);
         self
     }
 
     /// Sets the max fee per blob gas for EIP-4844 transactions,
-    pub fn set_blob_fee(&mut self, val: u128) -> &mut Self {
+    pub const fn set_blob_fee(&mut self, val: u128) -> &mut Self {
         if let Self::Eip4844 { max_fee_per_blob_gas, .. } = self {
             *max_fee_per_blob_gas = val;
         }
@@ -415,7 +415,7 @@ impl MockTransaction {
     }
 
     /// Sets the priority fee for dynamic fee transactions (EIP-1559 and EIP-4844)
-    pub fn set_priority_fee(&mut self, val: u128) -> &mut Self {
+    pub const fn set_priority_fee(&mut self, val: u128) -> &mut Self {
         if let Self::Eip1559 { max_priority_fee_per_gas, .. } |
         Self::Eip4844 { max_priority_fee_per_gas, .. } = self
         {
@@ -425,7 +425,7 @@ impl MockTransaction {
     }
 
     /// Sets the priority fee for dynamic fee transactions (EIP-1559 and EIP-4844)
-    pub fn with_priority_fee(mut self, val: u128) -> Self {
+    pub const fn with_priority_fee(mut self, val: u128) -> Self {
         self.set_priority_fee(val);
         self
     }
@@ -441,7 +441,7 @@ impl MockTransaction {
     }
 
     /// Sets the max fee for dynamic fee transactions (EIP-1559 and EIP-4844)
-    pub fn set_max_fee(&mut self, val: u128) -> &mut Self {
+    pub const fn set_max_fee(&mut self, val: u128) -> &mut Self {
         if let Self::Eip1559 { max_fee_per_gas, .. } |
         Self::Eip4844 { max_fee_per_gas, .. } |
         Self::Eip7702 { max_fee_per_gas, .. } = self
@@ -452,7 +452,7 @@ impl MockTransaction {
     }
 
     /// Sets the max fee for dynamic fee transactions (EIP-1559 and EIP-4844)
-    pub fn with_max_fee(mut self, val: u128) -> Self {
+    pub const fn with_max_fee(mut self, val: u128) -> Self {
         self.set_max_fee(val);
         self
     }
@@ -482,7 +482,7 @@ impl MockTransaction {
     }
 
     /// Sets the gas price for the transaction.
-    pub fn set_gas_price(&mut self, val: u128) -> &mut Self {
+    pub const fn set_gas_price(&mut self, val: u128) -> &mut Self {
         match self {
             Self::Legacy { gas_price, .. } | Self::Eip2930 { gas_price, .. } => {
                 *gas_price = val;
@@ -498,7 +498,7 @@ impl MockTransaction {
     }
 
     /// Sets the gas price for the transaction.
-    pub fn with_gas_price(mut self, val: u128) -> Self {
+    pub const fn with_gas_price(mut self, val: u128) -> Self {
         match self {
             Self::Legacy { ref mut gas_price, .. } | Self::Eip2930 { ref mut gas_price, .. } => {
                 *gas_price = val;

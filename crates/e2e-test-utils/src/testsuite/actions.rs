@@ -163,7 +163,7 @@ pub struct PickNextBlockProducer {}
 
 impl PickNextBlockProducer {
     /// Create a new `PickNextBlockProducer` action
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {}
     }
 }

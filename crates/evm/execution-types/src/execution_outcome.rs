@@ -158,12 +158,12 @@ impl<T> ExecutionOutcome<T> {
     }
 
     /// Returns mutable revm bundle state.
-    pub fn state_mut(&mut self) -> &mut BundleState {
+    pub const fn state_mut(&mut self) -> &mut BundleState {
         &mut self.bundle
     }
 
     /// Set first block.
-    pub fn set_first_block(&mut self, first_block: BlockNumber) {
+    pub const fn set_first_block(&mut self, first_block: BlockNumber) {
         self.first_block = first_block;
     }
 
@@ -229,7 +229,7 @@ impl<T> ExecutionOutcome<T> {
     }
 
     /// Returns mutable reference to receipts.
-    pub fn receipts_mut(&mut self) -> &mut Vec<Vec<T>> {
+    pub const fn receipts_mut(&mut self) -> &mut Vec<Vec<T>> {
         &mut self.receipts
     }
 

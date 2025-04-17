@@ -256,7 +256,7 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
 
 impl<N: NetworkPrimitives> EthMessage<N> {
     /// Returns the message's ID.
-    pub fn message_id(&self) -> EthMessageID {
+    pub const fn message_id(&self) -> EthMessageID {
         match self {
             Self::Status(_) => EthMessageID::Status,
             Self::NewBlockHashes(_) => EthMessageID::NewBlockHashes,

@@ -362,6 +362,11 @@ RPC:
 
           [default: 50000000]
 
+      --rpc.txfeecap <TX_FEE_CAP>
+          Maximum eth transaction fee that can be sent via the RPC APIs (0 = no cap)
+
+          [default: 1.0]
+
       --rpc.max-simulate-blocks <BLOCKS_COUNT>
           Maximum number of blocks for `eth_simulateV1` call
 
