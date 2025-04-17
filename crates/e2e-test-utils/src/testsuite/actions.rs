@@ -351,8 +351,8 @@ where
 
                 match EngineApiClient::<Engine>::fork_choice_updated_v3(
                     engine_client,
-                    fork_choice_state.clone(),
-                    payload.clone().map(Into::into),
+                    fork_choice_state,
+                    payload.clone(),
                 )
                 .await
                 {
