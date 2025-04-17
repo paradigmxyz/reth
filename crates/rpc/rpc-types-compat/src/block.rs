@@ -7,7 +7,7 @@ use alloy_rpc_types_eth::{
     Block, BlockTransactions, BlockTransactionsKind, Header, TransactionInfo,
 };
 use reth_primitives_traits::{
-    Block as BlockTrait, BlockBody, RecoveredBlock, SealedHeader, SignedTransaction,
+    Block as BlockTrait, BlockBody, RecoveredBlock, SignedTransaction,
 };
 
 /// Converts the given primitive block into a [`Block`] response with the given
