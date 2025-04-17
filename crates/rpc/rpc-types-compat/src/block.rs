@@ -44,9 +44,11 @@ where
     let (header, body) = block.into_sealed_block().split_sealed_header_body();
 
     let transactions = BlockTransactions::Hashes(transactions);
-    let withdrawals = header.withdrawals_root().is_some().then(|| body.withdrawals().cloned()).flatten();
+    let withdrawals =
+        header.withdrawals_root().is_some().then(|| body.withdrawals().cloned()).flatten();
 
-    let uncles = body.ommers().map(|o| o.iter().map(|h| h.hash_slow()).collect()).unwrap_or_default();
+    let uncles =
+        body.ommers().map(|o| o.iter().map(|h| h.hash_slow()).collect()).unwrap_or_default();
     let header = Header::from_consensus(header.into(), None, Some(U256::from(rlp_length)));
 
     Block { header, uncles, transactions, withdrawals }
