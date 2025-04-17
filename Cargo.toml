@@ -343,7 +343,7 @@ reth-engine-primitives = { path = "crates/engine/primitives", default-features =
 reth-engine-tree = { path = "crates/engine/tree" }
 reth-engine-service = { path = "crates/engine/service" }
 reth-engine-util = { path = "crates/engine/util" }
-reth-errors = { path = "crates/errors" }
+reth-errors = { path = "crates/errors", default-features = false}
 reth-era = { path = "crates/era" }
 reth-era-downloader = { path = "crates/era-downloader" }
 reth-eth-wire = { path = "crates/net/eth-wire" }
