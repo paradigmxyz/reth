@@ -52,6 +52,9 @@ where
         isthmus::ensure_withdrawals_storage_root_is_some(header).map_err(|err| {
             ConsensusError::Other(format!("withdrawals‑storage‑root check failed: {err}"))
         })?;
+        if body.withdrawals().is_none() {
+            return Err(ConsensusError::WithdrawalsRootUnexpected)
+        }
     } else {
         // before isthmus we ensure that the header root matches the body
         canyon::ensure_empty_withdrawals_root(header).map_err(|err| {
