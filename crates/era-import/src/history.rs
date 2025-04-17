@@ -1,6 +1,8 @@
-use alloy_primitives::BlockNumber;
+use alloy_primitives::{BlockHash, BlockNumber};
 use futures_util::StreamExt;
-use reth_db_api::{table::Value, transaction::DbTxMut};
+use reth_db_api::{
+    cursor::DbCursorRW, table::Value, tables, transaction::DbTxMut, RawKey, RawTable, RawValue,
+};
 use reth_era::{era1_file::Era1Reader, execution_types::DecodeCompressed};
 use reth_era_downloader::{EraStream, HttpClient};
 use reth_primitives_traits::{Block, FullBlockBody, FullBlockHeader, NodePrimitives};
@@ -30,6 +32,7 @@ where
 {
     let (tx, rx) = mpsc::channel();
 
+    // Handle IO-bound async download in a background tokio task
     tokio::spawn(async move {
         while let Some(file) = downloader.next().await {
             tx.send(Some(file))?;
@@ -54,6 +57,10 @@ where
     // order
     let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
 
+    // Database cursor for hash to number index
+    let mut cursor_header_numbers =
+        provider.tx_ref().cursor_write::<RawTable<tables::HeaderNumbers>>()?;
+
     while let Some(file) = rx.recv()? {
         let file = File::open(file?)?;
         let mut reader = Era1Reader::new(file);
@@ -62,13 +69,15 @@ where
             let block = block?;
             let header: BH = block.header.decode()?;
             let body: BB = block.body.decode()?;
+            let number = header.number();
+            let hash = header.hash_slow();
+            last_header_number = number;
 
             // Increase total difficulty
             td += header.difficulty();
-            last_header_number = header.number();
 
             // Append to Headers segment
-            writer.append_header(&header, td, &header.hash_slow())?;
+            writer.append_header(&header, td, &hash)?;
 
             // Write bodies to database.
             provider.append_block_bodies(
@@ -76,6 +85,10 @@ where
                 // We are writing transactions directly to static files.
                 StorageLocation::StaticFiles,
             )?;
+
+            // Write block hash to block number index entry
+            cursor_header_numbers
+                .upsert(RawKey::<BlockHash>::from(hash), &RawValue::<BlockNumber>::from(number))?;
         }
     }
 
