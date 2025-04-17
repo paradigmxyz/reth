@@ -17,6 +17,8 @@ alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 
+reth-ethereum-primitives.workspace = true
+
 # compression and decompression
 snap.workspace = true
 

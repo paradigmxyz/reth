@@ -3,14 +3,16 @@
 //! These tests use the `reth-era-downloader` client to download `.era1` files temporarily
 //! and verify that we can correctly read and decompress their data.
 
-use alloy_consensus::Header;
+use alloy_consensus::{BlockBody, Header};
 use alloy_primitives::{Bytes, U256};
 use reqwest::{Client, Url};
 use reth_era::{
     e2s_types::E2sError,
     era1_file::{Era1File, Era1Reader, Era1Writer},
+    execution_types::CompressedBody,
 };
 use reth_era_downloader::EraClient;
+use reth_ethereum_primitives::TransactionSigned;
 use std::{
     collections::HashMap,
     io::Cursor,
@@ -194,20 +196,18 @@ async fn test_era1_file_decompression_and_decoding() -> Result<(), E2sError> {
             );
             println!("Body decompression successful ({} bytes)", body_data.len());
 
-            // Try body decoding
-            match block.body.decode_body::<alloy_primitives::Bytes, alloy_consensus::Header>() {
-                Ok(body) => {
-                    println!(
-                        "Body decoding successful: {} transactions, {} ommers, withdrawals: {}",
-                        body.transactions.len(),
-                        body.ommers.len(),
-                        body.withdrawals.is_some()
-                    );
-                }
-                Err(e) => {
-                    println!("Body decoding failed: {}", e);
-                }
-            }
+            let decoded_body: BlockBody<TransactionSigned> =
+                CompressedBody::decode_body_from_decompressed::<TransactionSigned, Header>(
+                    &body_data,
+                )
+                .expect("Failed to decode body");
+
+            println!(
+                "Body decoding successful: {} transactions, {} ommers, withdrawals: {}",
+                decoded_body.transactions.len(),
+                decoded_body.ommers.len(),
+                decoded_body.withdrawals.is_some()
+            );
 
             // Test receipts decompression
             let receipts_data = block.receipts.decompress()?;

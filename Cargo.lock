@@ -7779,6 +7779,7 @@ dependencies = [
  "ethereum_ssz_derive",
  "reqwest",
  "reth-era-downloader",
+ "reth-ethereum-primitives",
  "snap",
  "tempfile",
  "thiserror 2.0.12",
