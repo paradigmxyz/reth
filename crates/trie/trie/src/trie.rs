@@ -20,13 +20,15 @@ use crate::metrics::{StateRootMetrics, TrieRootMetrics};
 
 /// `StateRoot` is used to compute the root node of a state trie.
 #[derive(Debug)]
-pub struct StateRoot<T, H> {
+pub struct StateRoot<'a, T, H, TX> {
     /// The factory for trie cursors.
     pub trie_cursor_factory: T,
     /// The factory for hashed cursors.
     pub hashed_cursor_factory: H,
     /// A set of prefix sets that have changed.
     pub prefix_sets: TriePrefixSets,
+    /// A database transaction.
+    pub tx: &'a TX,
     /// Previous intermediate state.
     previous_state: Option<IntermediateStateRootState>,
     /// The number of updates after which the intermediate progress should be returned.
@@ -36,17 +38,33 @@ pub struct StateRoot<T, H> {
     metrics: StateRootMetrics,
 }
 
-impl<T, H> StateRoot<T, H> {
+impl<'a, T: Clone, H: Clone, TX> Clone for StateRoot<'a, T, H, TX> {
+    fn clone(&self) -> Self {
+        Self {
+            trie_cursor_factory: self.trie_cursor_factory.clone(),
+            hashed_cursor_factory: self.hashed_cursor_factory.clone(),
+            prefix_sets: self.prefix_sets.clone(),
+            tx: self.tx,
+            previous_state: self.previous_state.clone(),
+            threshold: self.threshold,
+            #[cfg(feature = "metrics")]
+            metrics: self.metrics.clone(),
+        }
+    }
+}
+
+impl<'a, T, H, TX> StateRoot<'a, T, H, TX> {
     /// Creates [`StateRoot`] with `trie_cursor_factory` and `hashed_cursor_factory`. All other
     /// parameters are set to reasonable defaults.
     ///
     /// The cursors created by given factories are then used to walk through the accounts and
     /// calculate the state root value with.
-    pub fn new(trie_cursor_factory: T, hashed_cursor_factory: H) -> Self {
+    pub fn new(trie_cursor_factory: T, hashed_cursor_factory: H, tx: &'a TX) -> Self {
         Self {
             trie_cursor_factory,
             hashed_cursor_factory,
             prefix_sets: TriePrefixSets::default(),
+            tx,
             previous_state: None,
             threshold: 100_000,
             #[cfg(feature = "metrics")]
@@ -79,11 +97,15 @@ impl<T, H> StateRoot<T, H> {
     }
 
     /// Set the hashed cursor factory.
-    pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> StateRoot<T, HF> {
+    pub fn with_hashed_cursor_factory<HF>(
+        self,
+        hashed_cursor_factory: HF,
+    ) -> StateRoot<'a, T, HF, TX> {
         StateRoot {
             trie_cursor_factory: self.trie_cursor_factory,
             hashed_cursor_factory,
             prefix_sets: self.prefix_sets,
+            tx: self.tx,
             threshold: self.threshold,
             previous_state: self.previous_state,
             #[cfg(feature = "metrics")]
@@ -92,11 +114,12 @@ impl<T, H> StateRoot<T, H> {
     }
 
     /// Set the trie cursor factory.
-    pub fn with_trie_cursor_factory<TF>(self, trie_cursor_factory: TF) -> StateRoot<TF, H> {
+    pub fn with_trie_cursor_factory<TF>(self, trie_cursor_factory: TF) -> StateRoot<'a, TF, H, TX> {
         StateRoot {
             trie_cursor_factory,
             hashed_cursor_factory: self.hashed_cursor_factory,
             prefix_sets: self.prefix_sets,
+            tx: self.tx,
             threshold: self.threshold,
             previous_state: self.previous_state,
             #[cfg(feature = "metrics")]
@@ -105,7 +128,7 @@ impl<T, H> StateRoot<T, H> {
     }
 }
 
-impl<T, H> StateRoot<T, H>
+impl<'a, T, H, TX> StateRoot<'a, T, H, TX>
 where
     T: TrieCursorFactory + Clone,
     H: HashedCursorFactory + Clone,

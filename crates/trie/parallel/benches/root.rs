@@ -11,7 +11,7 @@ use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, StateRoot,
     TrieInput,
 };
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseStateRoot};
+use reth_trie_db::{DatabaseHashedCursorFactory, StateRootFromTx};
 use reth_trie_parallel::root::ParallelStateRoot;
 use std::collections::HashMap;
 

@@ -41,7 +41,7 @@ impl TriePrefixSetsMut {
 }
 
 /// Collection of trie prefix sets.
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct TriePrefixSets {
     /// A set of account prefixes that have changed.
     pub account_prefix_set: PrefixSet,
