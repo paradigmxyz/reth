@@ -3,6 +3,7 @@ use crate::{
     metrics::SparseStateTrieMetrics,
     trace, RevealedSparseTrie, SparseTrie, TrieMasks,
 };
+use alloc::{collections::VecDeque, vec::Vec};
 use alloy_primitives::{
     hex,
     map::{B256Map, HashMap, HashSet},
@@ -18,7 +19,6 @@ use reth_trie_common::{
     MultiProof, Nibbles, RlpNode, StorageMultiProof, TrieAccount, TrieMask, TrieNode,
     EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use std::{collections::VecDeque, vec::Vec};
 
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
 pub struct SparseStateTrie<F: BlindedProviderFactory = DefaultBlindedProviderFactory> {

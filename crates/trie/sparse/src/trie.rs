@@ -2,6 +2,14 @@ use crate::{
     blinded::{BlindedProvider, DefaultBlindedProvider, RevealedNode},
     trace,
 };
+use alloc::{
+    borrow::Cow,
+    boxed::Box,
+    fmt,
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
 use alloy_primitives::{
     hex, keccak256,
     map::{Entry, HashMap, HashSet},
@@ -15,14 +23,6 @@ use reth_trie_common::{
     TrieNode, CHILD_INDEX_RANGE, EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
-use std::{
-    borrow::Cow,
-    boxed::Box,
-    fmt,
-    string::{String, ToString},
-    vec,
-    vec::Vec,
-};
 
 /// Struct for passing around `hash_mask` and `tree_mask`
 #[derive(Debug)]
