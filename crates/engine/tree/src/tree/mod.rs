@@ -313,7 +313,7 @@ impl<N: NodePrimitives> TreeState<N> {
         // block, if it exists.
         //
         // For all other blocks, we  first put their children into this vec.
-        // Then, we will iterate over them, removing them, adding their children, etc etc,
+        // Then, we will iterate over them, removing them, adding their children, etc,
         // until the vec is empty.
         let mut blocks_to_remove = self.blocks_by_number.remove(&finalized_num).unwrap_or_default();
 
