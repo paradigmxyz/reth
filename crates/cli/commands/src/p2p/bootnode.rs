@@ -9,7 +9,7 @@ use tokio::select;
 use tokio_stream::StreamExt;
 use tracing::info;
 
-/// The arguments for the `reth db bootnode` command.
+/// The arguments for the `reth bootnode` command.
 /// see https://github.com/ethereum/go-ethereum/blob/14eb8967be7acc54c5dc9a416151ac45c01251b6/cmd/bootnode/main.go#L39-L48
 /// for ref
 #[derive(Parser, Debug)]
@@ -38,8 +38,6 @@ pub struct Command {
 impl Command {
     pub async fn execute(self) -> Result<(), NetworkError> {
         info!("Bootnode started with config: {:?}", self);
-        // generate a (random) keypair
-
         let sk = reth_network::config::rng_secret_key();
         let socket_addr = SocketAddr::from_str(&self.addr).expect("Invalid addr");
         let local_enr = NodeRecord::from_secret_key(socket_addr, &sk);
