@@ -3,10 +3,10 @@ use core::convert::Into;
 use reth_primitives_traits::sync::LazyLock;
 use serde::Deserialize;
 
-/// Contains the info about an available chain genesis config e.g. "base" and "mainnet"
+/// Contains the info about an available chain genesis config e.g. "unichain" and "mainnet"
 #[derive(Debug, Clone, Deserialize)]
 pub struct AvailableSuperchain {
-    /// The name of the superchain e.g. "base"
+    /// The name of the superchain e.g. "unichain"
     pub name: String,
     /// The environment of the superchain e.g. "mainnet"
     pub environment: String,
