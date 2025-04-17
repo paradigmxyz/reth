@@ -344,7 +344,11 @@ where
         .build_inner();
 
         let sequencer_client = if let Some(url) = sequencer_url {
-            Some(SequencerClient::new(url).await.context("Failed to init sequencer client")?)
+            Some(
+                SequencerClient::new(&url)
+                    .await
+                    .wrap_err_with(|| "Failed to init sequencer client with: {url}")?,
+            )
         } else {
             None
         };

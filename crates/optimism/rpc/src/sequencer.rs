@@ -1,10 +1,10 @@
 //! Helpers for optimism specific RPC implementations.
 
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 
 use alloy_json_rpc::{RpcRecv, RpcSend};
 use alloy_primitives::{hex, B256};
-use alloy_rpc_client::{ClientBuilder, RpcClient as Client};
+use alloy_rpc_client::{BuiltInConnectionString, ClientBuilder, RpcClient as Client};
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
 use alloy_transport_http::Http;
 use thiserror::Error;
@@ -46,29 +46,26 @@ pub struct SequencerClient {
 }
 
 impl SequencerClient {
-    /// Creates a new [`SequencerClient`].
+    /// Creates a new [`SequencerClient`] for the given URL.
+    ///
+    /// If the URL is a websocket endpoint we connect a websocket instance.
     pub async fn new(sequencer_endpoint: impl Into<String>) -> Result<Self, Error> {
-        let client = reqwest::Client::builder().use_rustls_tls().build()?;
-        Self::with_client(sequencer_endpoint, client).await
-    }
-
-    /// Creates a new [`SequencerClient`] and tries to guess the transport
-    pub async fn with_client(
-        sequencer_endpoint: impl Into<String>,
-        client: reqwest::Client,
-    ) -> Result<Self, Error> {
         let sequencer_endpoint = sequencer_endpoint.into();
-        let url = sequencer_endpoint
-            .parse::<reqwest::Url>()
-            .map_err(|_| Error::InvalidUrl(sequencer_endpoint.clone()))?;
-        match url.scheme() {
-            "http" | "https" => Self::with_http_client(sequencer_endpoint, client),
-            "ws" | "wss" => Self::with_ws_client(sequencer_endpoint).await,
-            scheme => Err(Error::InvalidScheme(scheme.to_owned())),
+        let endpoint = BuiltInConnectionString::from_str(&sequencer_endpoint)?;
+        if let BuiltInConnectionString::Http(url) = endpoint {
+            let client = reqwest::Client::builder()
+                // we force use tls to prevent native issues
+                .use_rustls_tls()
+                .build()?;
+            Self::with_http_client(url, client)
+        } else {
+            let client = ClientBuilder::default().connect_with(endpoint).await?;
+            let inner = SequencerClientInner { sequencer_endpoint, client };
+            Ok(Self { inner: Arc::new(inner) })
         }
     }
 
-    /// Creates a new [`SequencerClient`] with http transport.
+    /// Creates a new [`SequencerClient`] with http transport with the given http client.
     pub fn with_http_client(
         sequencer_endpoint: impl Into<String>,
         client: reqwest::Client,
@@ -81,21 +78,6 @@ impl SequencerClient {
         let http_client = Http::with_client(client, url);
         let is_local = http_client.guess_local();
         let client = ClientBuilder::default().transport(http_client, is_local);
-
-        let inner = SequencerClientInner { sequencer_endpoint, client };
-        Ok(Self { inner: Arc::new(inner) })
-    }
-
-    /// Creates a new [`SequencerClient`] with websocket transport.
-    pub async fn with_ws_client(sequencer_endpoint: impl Into<String>) -> Result<Self, Error> {
-        let sequencer_endpoint = sequencer_endpoint.into();
-        let url = sequencer_endpoint
-            .parse::<reqwest::Url>()
-            .map_err(|_| Error::InvalidUrl(sequencer_endpoint.clone()))?;
-
-        let client = ClientBuilder::default()
-            .ws(alloy_rpc_client::WsConnect { url: url.to_string(), auth: None, config: None })
-            .await?;
 
         let inner = SequencerClientInner { sequencer_endpoint, client };
         Ok(Self { inner: Arc::new(inner) })
