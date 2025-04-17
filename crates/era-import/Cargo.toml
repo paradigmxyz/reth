@@ -30,8 +30,19 @@ futures-util.workspace = true
 eyre.workspace = true
 
 [dev-dependencies]
+# reth
+reth-provider.workspace = true
+reth-provider.features = ["test-utils"]
+
+# async
 tokio.workspace = true
 tokio.features = ["fs", "io-util", "macros"]
+
+# http
+reqwest.workspace = true
+
+# file system
+tempfile.workspace = true
 
 [lints]
 workspace = true

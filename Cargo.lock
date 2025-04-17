@@ -7818,12 +7818,14 @@ dependencies = [
  "alloy-primitives 1.0.0",
  "eyre",
  "futures-util",
+ "reqwest",
  "reth-db-api",
  "reth-era",
  "reth-era-downloader",
  "reth-primitives-traits",
  "reth-provider",
  "reth-storage-api",
+ "tempfile",
  "tokio",
 ]
 
