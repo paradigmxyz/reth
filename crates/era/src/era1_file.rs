@@ -7,7 +7,7 @@
 
 use crate::{
     e2s_file::{E2StoreReader, E2StoreWriter},
-    e2s_types::{E2sError, Version},
+    e2s_types::{E2sError, Entry, Version},
     era1_types::{BlockIndex, Era1Group, Era1Id, BLOCK_INDEX},
     execution_types::{
         self, Accumulator, BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts,
@@ -16,6 +16,7 @@ use crate::{
 };
 use alloy_primitives::BlockNumber;
 use std::{
+    collections::VecDeque,
     fs::File,
     io::{Read, Seek, Write},
     path::Path,
@@ -64,10 +65,104 @@ pub struct Era1Reader<R: Read> {
     reader: E2StoreReader<R>,
 }
 
+/// An iterator of [`BlockTuple`] streaming from [`E2StoreReader`].
+#[derive(Debug)]
+pub struct BlockTupleIterator<'r, R: Read> {
+    reader: &'r mut E2StoreReader<R>,
+    headers: VecDeque<CompressedHeader>,
+    bodies: VecDeque<CompressedBody>,
+    receipts: VecDeque<CompressedReceipts>,
+    difficulties: VecDeque<TotalDifficulty>,
+    other_entries: Vec<Entry>,
+    accumulator: Option<Accumulator>,
+    block_index: Option<BlockIndex>,
+}
+
+impl<'r, R: Read> BlockTupleIterator<'r, R> {
+    fn new(reader: &'r mut E2StoreReader<R>) -> Self {
+        Self {
+            reader,
+            headers: Default::default(),
+            bodies: Default::default(),
+            receipts: Default::default(),
+            difficulties: Default::default(),
+            other_entries: Default::default(),
+            accumulator: None,
+            block_index: None,
+        }
+    }
+}
+
+impl<'r, R: Read + Seek> Iterator for BlockTupleIterator<'r, R> {
+    type Item = Result<BlockTuple, E2sError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next_result().transpose()
+    }
+}
+
+impl<'r, R: Read + Seek> BlockTupleIterator<'r, R> {
+    fn next_result(&mut self) -> Result<Option<BlockTuple>, E2sError> {
+        loop {
+            let Some(entry) = self.reader.read_next_entry()? else {
+                return Ok(None);
+            };
+
+            match entry.entry_type {
+                execution_types::COMPRESSED_HEADER => {
+                    self.headers.push_back(CompressedHeader::from_entry(&entry)?);
+                }
+                execution_types::COMPRESSED_BODY => {
+                    self.bodies.push_back(CompressedBody::from_entry(&entry)?);
+                }
+                execution_types::COMPRESSED_RECEIPTS => {
+                    self.receipts.push_back(CompressedReceipts::from_entry(&entry)?);
+                }
+                execution_types::TOTAL_DIFFICULTY => {
+                    self.difficulties.push_back(TotalDifficulty::from_entry(&entry)?);
+                }
+                execution_types::ACCUMULATOR => {
+                    if self.accumulator.is_some() {
+                        return Err(E2sError::Ssz("Multiple accumulator entries found".to_string()));
+                    }
+                    self.accumulator = Some(Accumulator::from_entry(&entry)?);
+                }
+                BLOCK_INDEX => {
+                    if self.block_index.is_some() {
+                        return Err(E2sError::Ssz("Multiple block index entries found".to_string()));
+                    }
+                    self.block_index = Some(BlockIndex::from_entry(&entry)?);
+                }
+                _ => {
+                    self.other_entries.push(entry);
+                }
+            }
+
+            if !self.headers.is_empty() &&
+                !self.bodies.is_empty() &&
+                !self.receipts.is_empty() &&
+                !self.difficulties.is_empty()
+            {
+                let header = self.headers.pop_front().unwrap();
+                let bodie = self.bodies.pop_front().unwrap();
+                let receipt = self.receipts.pop_front().unwrap();
+                let difficulty = self.difficulties.pop_front().unwrap();
+
+                return Ok(Some(BlockTuple::new(header, bodie, receipt, difficulty)));
+            }
+        }
+    }
+}
+
 impl<R: Read + Seek> Era1Reader<R> {
     /// Create a new [`Era1Reader`]
     pub fn new(reader: R) -> Self {
         Self { reader: E2StoreReader::new(reader) }
+    }
+
+    /// Returns an iterator of [`BlockTuple`] streaming from `reader`.
+    pub fn iter(&mut self) -> BlockTupleIterator<'_, R> {
+        BlockTupleIterator::new(&mut self.reader)
     }
 
     /// Reads and parses an Era1 file from the underlying reader, assembling all components

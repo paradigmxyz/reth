@@ -1,5 +1,4 @@
 use alloy_primitives::BlockNumber;
-use eyre::OptionExt;
 use futures_util::StreamExt;
 use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_era::{era1_file::Era1Reader, execution_types::DecodeCompressed};
@@ -56,20 +55,11 @@ where
     let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
 
     while let Some(file) = rx.recv()? {
-        let file = file?;
-
-        let name = file
-            .file_name()
-            .ok_or_eyre("Missing file name")?
-            .to_str()
-            .ok_or_eyre("Non UTF-8 file name")?
-            .to_owned();
-
-        let file = File::open(file)?;
+        let file = File::open(file?)?;
         let mut reader = Era1Reader::new(file);
-        let era = reader.read(name)?;
 
-        for block in &era.group.blocks {
+        for block in reader.iter() {
+            let block = block?;
             let header: BH = block.header.decode()?;
             let body: BB = block.body.decode()?;
 
