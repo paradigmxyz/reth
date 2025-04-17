@@ -4,9 +4,6 @@ use reth_consensus::ConsensusError;
 use reth_execution_errors::BlockExecutionError;
 use reth_storage_errors::{db::DatabaseError, provider::ProviderError};
 
-#[cfg(feature = "std")]
-use reth_fs_util::FsPathError;
-
 /// Result alias for [`RethError`].
 pub type RethResult<T> = Result<T, RethError>;
 
@@ -50,13 +47,6 @@ impl RethError {
     /// Create a new `RethError` from a given message.
     pub fn msg(msg: impl Display) -> Self {
         Self::Other(msg.to_string().into())
-    }
-}
-
-#[cfg(feature = "std")]
-impl From<FsPathError> for RethError {
-    fn from(err: FsPathError) -> Self {
-        Self::other(err)
     }
 }
 

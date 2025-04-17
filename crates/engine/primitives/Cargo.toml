@@ -43,7 +43,6 @@ std = [
     "reth-ethereum-primitives/std",
     "reth-primitives-traits/std",
     "reth-trie-common/std",
-    "reth-errors/std",
     "alloy-primitives/std",
     "alloy-consensus/std",
     "alloy-rpc-types-engine/std",
