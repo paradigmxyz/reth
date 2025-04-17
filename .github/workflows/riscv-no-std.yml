@@ -1,0 +1,50 @@
+name: RISC-V & no_std check
+
+concurrency:
+  cancel-in-progress: true
+  group: ${{github.workflow}}-${{github.ref}}
+
+on:
+  push:
+    branches: [main, "release/**"]
+  pull_request:
+    branches: [main, "release/**"]
+  merge_group:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check-no-std:
+    name: check no_std RISCV32
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        features: [""]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: riscv32imac-unknown-none-elf
+      - uses: Swatinem/rust-cache@v2
+      - name: Install dependencies
+        run: rustup component add rust-src
+      - run: |
+          cargo check --target riscv32imac-unknown-none-elf -p reth-trie-sparse --no-default-features --features=${{ matrix.features }}
+          
+  check-no-default-features:
+    name: check no-default-features
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        features: [""]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: |
+          cargo check -p reth-trie-sparse --no-default-features --features=${{ matrix.features }}
