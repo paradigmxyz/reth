@@ -87,7 +87,7 @@ where
                     RequestHandlerEvent::HandlerEvent(ev) => {
                         return match ev {
                             HandlerEvent::BackfillAction(target) => {
-                                // bubble up backfill sync request request
+                                // bubble up backfill sync request
                                 self.downloader.on_action(DownloadAction::Clear);
                                 Poll::Ready(HandlerEvent::BackfillAction(target))
                             }
