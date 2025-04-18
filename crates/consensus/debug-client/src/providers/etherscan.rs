@@ -1,9 +1,10 @@
 use crate::BlockProvider;
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
+use alloy_json_rpc::{Response, ResponsePayload};
 use reqwest::Client;
 use reth_tracing::tracing::warn;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Serialize};
 use std::{sync::Arc, time::Duration};
 use tokio::{sync::mpsc, time::interval};
 
@@ -54,7 +55,24 @@ where
             BlockNumberOrTag::Number(num) => format!("{num:#02x}"),
             tag => tag.to_string(),
         };
-        let block: EtherscanBlockResponse<RpcBlock> = self
+        dbg!(&self.base_url);
+        let block = self
+            .http_client
+            .get(&self.base_url)
+            .query(&[
+                ("module", "proxy"),
+                ("action", "eth_getBlockByNumber"),
+                ("tag", &tag),
+                ("boolean", "true"),
+                ("apikey", &self.api_key),
+            ])
+            .send()
+            .await?
+            .text()
+            .await?;
+        println!("{block}");
+
+        let resp: Response<RpcBlock> = self
             .http_client
             .get(&self.base_url)
             .query(&[
@@ -68,7 +86,12 @@ where
             .await?
             .json()
             .await?;
-        Ok((self.convert)(block.result))
+
+        let payload = resp.payload;
+        match payload {
+            ResponsePayload::Success(block) => Ok((self.convert)(block)),
+            ResponsePayload::Failure(err) => Err(eyre::eyre!("Failed to get block: {err}")),
+        }
     }
 }
 
@@ -112,9 +135,4 @@ where
     async fn get_block(&self, block_number: u64) -> eyre::Result<Self::Block> {
         self.load_block(BlockNumberOrTag::Number(block_number)).await
     }
-}
-
-#[derive(Deserialize, Debug)]
-struct EtherscanBlockResponse<B> {
-    result: B,
 }
