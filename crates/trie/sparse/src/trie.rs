@@ -1595,7 +1595,7 @@ mod tests {
         node_iter::{TrieElement, TrieNodeIter},
         trie_cursor::{noop::NoopAccountTrieCursor, TrieCursor, TrieCursorFactory},
         walker::TrieWalker,
-        BranchNode, ExtensionNode, HashedPostState, LeafNode, TrieType,
+        BranchNode, ExtensionNode, HashedPostState, LeafNode,
     };
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
@@ -1646,13 +1646,12 @@ mod tests {
                 (nibbles.pack().into_inner().unwrap().into(), Some(account))
             }))
             .into_sorted();
-        let mut node_iter = TrieNodeIter::new(
+        let mut node_iter = TrieNodeIter::state_trie(
             walker,
             HashedPostStateAccountCursor::new(
                 NoopHashedAccountCursor::default(),
                 hashed_post_state.accounts(),
             ),
-            TrieType::State,
         );
 
         while let Some(node) = node_iter.try_next().unwrap() {
