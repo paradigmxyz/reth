@@ -180,6 +180,14 @@ pub enum ConsensusError {
         /// The gas limit in the block header.
         gas_limit: u64,
     },
+    /// Error when the gas the gas limit is more than the maximum allowed.
+    #[error(
+        "gas limit ({gas_limit}) exceed the maximum allowed gas limit ({MAXIMUM_GAS_LIMIT_BLOCK})"
+    )]
+    HeaderGasLimitExceedsMax {
+        /// The gas limit in the block header.
+        gas_limit: u64,
+    },
 
     /// Error when block gas used doesn't match expected value
     #[error("block gas used mismatch: {gas}; gas spent by each transaction: {gas_spent_by_tx:?}")]
