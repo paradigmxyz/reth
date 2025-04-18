@@ -423,7 +423,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     }
 
     ///Returns the [`PeersManager`].
-    pub fn peers_manager(&self) -> &PeersManager {
+    pub const fn peers_manager(&self) -> &PeersManager {
         self.swarm.state().peers()
     }
 
