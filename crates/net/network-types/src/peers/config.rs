@@ -121,7 +121,7 @@ impl Default for ConnectionsConfig {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]
-pub struct PersistentPeers {
+pub struct PersistedPeers {
     /// Trusted nodes to connect to or accept from
     pub trusted: HashSet<NodeRecord>,
     /// Basic nodes to connect to.
@@ -292,19 +292,23 @@ impl PeersConfig {
     }
 
     /// Read from file nodes available at launch. Ignored if None.
+    #[cfg(feature = "serde")]
     pub fn with_basic_nodes_from_file(
         self,
         optional_file: Option<impl AsRef<Path>>,
     ) -> Result<Self, io::Error> {
         let Some(file_path) = optional_file else { return Ok(self) };
-        let _reader = match std::fs::File::open(file_path.as_ref()) {
+        let reader = match std::fs::File::open(file_path.as_ref()) {
             Ok(file) => io::BufReader::new(file),
             Err(e) if e.kind() == ErrorKind::NotFound => return Ok(self),
             Err(e) => Err(e)?,
         };
         info!(target: "net::peers", file = %file_path.as_ref().display(), "Loading saved peers");
-        #[cfg(feature = "serde")]
-        if let Ok(persistent_peers) = serde_json::from_reader::<_, PersistentPeers>(_reader) {
+
+        let mut contents = String::new();
+        io::Read::read_to_string(&mut reader.into_inner(), &mut contents)?;
+
+        if let Ok(persistent_peers) = serde_json::from_str::<PersistedPeers>(&contents) {
             return Ok(self
                 .with_trusted_nodes(
                     persistent_peers.trusted.into_iter().map(TrustedPeer::from).collect(),
@@ -312,9 +316,7 @@ impl PeersConfig {
                 .with_basic_nodes(persistent_peers.basic));
         }
 
-        let file = std::fs::File::open(file_path.as_ref())?;
-        let reader = io::BufReader::new(file);
-        let nodes: HashSet<NodeRecord> = serde_json::from_reader(reader)?;
+        let nodes: HashSet<NodeRecord> = serde_json::from_str(&contents)?;
         Ok(self.with_basic_nodes(nodes))
     }
 

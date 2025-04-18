@@ -427,7 +427,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     pub fn write_peers_to_file(&self, persistent_peers_file: &Path) -> Result<(), FsPathError> {
         let known_peers = self.all_peers().collect::<Vec<_>>();
         let peers = self.swarm.state().peers();
-        let persistent_peers = reth_network_types::peers::config::PersistentPeers {
+        let persistent_peers = reth_network_types::peers::config::PersistedPeers {
             trusted: known_peers
                 .iter()
                 .filter(|p| peers.get_reputation(&p.id).is_some_and(|rep| rep > 0))
