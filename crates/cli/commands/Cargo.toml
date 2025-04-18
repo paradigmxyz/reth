@@ -27,6 +27,7 @@ reth-eth-wire.workspace = true
 reth-evm.workspace = true
 reth-exex.workspace = true
 reth-fs-util.workspace = true
+reth-net-nat.workspace = true
 reth-network = { workspace = true, features = ["serde"] }
 reth-network-p2p.workspace = true
 reth-network-peers = { workspace = true, features = ["secp256k1"] }
@@ -47,6 +48,8 @@ reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
 reth-trie-common = { workspace = true, optional = true }
 reth-primitives-traits.workspace = true
+reth-discv4.workspace = true
+reth-discv5.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
@@ -68,6 +71,7 @@ serde_json.workspace = true
 tracing.workspace = true
 backon.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
+tokio-stream.workspace = true
 
 # io
 fdlimit.workspace = true
@@ -84,7 +88,6 @@ arbitrary = { workspace = true, optional = true }
 proptest-arbitrary-interop = { workspace = true, optional = true }
 
 [dev-dependencies]
-reth-discv4.workspace = true
 reth-ethereum-cli.workspace = true
 
 [features]
