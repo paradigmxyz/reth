@@ -17,7 +17,7 @@ use reth_primitives_traits::{proofs::ordered_trie_root_with_encoder, InMemorySiz
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[cfg_attr(feature = "reth-codec", derive(reth_codecs::CompactZstd))]
-#[cfg_attr(feature = "reth-codec", reth_codecs::add_arbitrary_tests)]
+#[cfg_attr(feature = "reth-codec", reth_codecs::add_arbitrary_tests(compact, rlp))]
 #[cfg_attr(feature = "reth-codec", reth_zstd(
     compressor = reth_zstd_compressors::RECEIPT_COMPRESSOR,
     decompressor = reth_zstd_compressors::RECEIPT_DECOMPRESSOR
@@ -196,18 +196,6 @@ impl RlpDecodableReceipt for Receipt {
     }
 }
 
-impl Decodable2718 for Receipt {
-    fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
-        let receipt = Self::rlp_decode_inner_without_bloom(buf, TxType::try_from(ty)?)?;
-        Ok(receipt)
-    }
-
-    fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
-        let receipt = Self::rlp_decode_inner_without_bloom(buf, TxType::Legacy)?;
-        Ok(receipt)
-    }
-}
-
 impl Encodable2718 for Receipt {
     fn encode_2718_len(&self) -> usize {
         (!self.tx_type.is_legacy() as usize) +
@@ -221,6 +209,34 @@ impl Encodable2718 for Receipt {
         }
         self.rlp_header_inner_without_bloom().encode(out);
         self.rlp_encode_fields_without_bloom(out);
+    }
+}
+
+impl Decodable2718 for Receipt {
+    fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
+        let receipt = Self::rlp_decode_inner_without_bloom(buf, TxType::try_from(ty)?)?;
+        Ok(receipt)
+    }
+
+    fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
+        let receipt = Self::rlp_decode_inner_without_bloom(buf, TxType::Legacy)?;
+        Ok(receipt)
+    }
+}
+
+impl Encodable for Receipt {
+    fn encode(&self, out: &mut dyn BufMut) {
+        self.network_encode(out);
+    }
+
+    fn length(&self) -> usize {
+        self.network_len()
+    }
+}
+
+impl Decodable for Receipt {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        Ok(Self::network_decode(buf)?)
     }
 }
 

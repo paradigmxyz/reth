@@ -13,6 +13,7 @@ use reth_primitives_traits::InMemorySize;
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[cfg_attr(feature = "reth-codec", reth_codecs::add_arbitrary_tests(rlp))]
 pub enum OpReceipt {
     /// Legacy receipt
     Legacy(Receipt),
@@ -184,7 +185,7 @@ impl OpReceipt {
         }
 
         let remaining = buf.len();
-        let success: bool = Decodable::decode(buf)?;
+        let status = Decodable::decode(buf)?;
         let cumulative_gas_used = Decodable::decode(buf)?;
         let logs = Decodable::decode(buf)?;
 
@@ -204,20 +205,12 @@ impl OpReceipt {
         }
 
         match tx_type {
-            OpTxType::Legacy => {
-                Ok(Self::Legacy(Receipt { status: success.into(), cumulative_gas_used, logs }))
-            }
-            OpTxType::Eip2930 => {
-                Ok(Self::Eip2930(Receipt { status: success.into(), cumulative_gas_used, logs }))
-            }
-            OpTxType::Eip1559 => {
-                Ok(Self::Eip1559(Receipt { status: success.into(), cumulative_gas_used, logs }))
-            }
-            OpTxType::Eip7702 => {
-                Ok(Self::Eip7702(Receipt { status: success.into(), cumulative_gas_used, logs }))
-            }
+            OpTxType::Legacy => Ok(Self::Legacy(Receipt { status, cumulative_gas_used, logs })),
+            OpTxType::Eip2930 => Ok(Self::Eip2930(Receipt { status, cumulative_gas_used, logs })),
+            OpTxType::Eip1559 => Ok(Self::Eip1559(Receipt { status, cumulative_gas_used, logs })),
+            OpTxType::Eip7702 => Ok(Self::Eip7702(Receipt { status, cumulative_gas_used, logs })),
             OpTxType::Deposit => Ok(Self::Deposit(OpDepositReceipt {
-                inner: Receipt { status: success.into(), cumulative_gas_used, logs },
+                inner: Receipt { status, cumulative_gas_used, logs },
                 deposit_nonce,
                 deposit_receipt_version,
             })),
@@ -287,16 +280,6 @@ impl RlpDecodableReceipt for OpReceipt {
     }
 }
 
-impl Decodable2718 for OpReceipt {
-    fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
-        Ok(Self::rlp_decode_inner_without_bloom(buf, OpTxType::try_from(ty)?)?)
-    }
-
-    fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
-        Ok(Self::rlp_decode_inner_without_bloom(buf, OpTxType::Legacy)?)
-    }
-}
-
 impl Encodable2718 for OpReceipt {
     fn encode_2718_len(&self) -> usize {
         !self.tx_type().is_legacy() as usize +
@@ -309,6 +292,32 @@ impl Encodable2718 for OpReceipt {
         }
         self.rlp_header_inner_without_bloom().encode(out);
         self.rlp_encode_fields_without_bloom(out);
+    }
+}
+
+impl Decodable2718 for OpReceipt {
+    fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
+        Ok(Self::rlp_decode_inner_without_bloom(buf, OpTxType::try_from(ty)?)?)
+    }
+
+    fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
+        Ok(Self::rlp_decode_inner_without_bloom(buf, OpTxType::Legacy)?)
+    }
+}
+
+impl Encodable for OpReceipt {
+    fn encode(&self, out: &mut dyn BufMut) {
+        self.network_encode(out);
+    }
+
+    fn length(&self) -> usize {
+        self.network_len()
+    }
+}
+
+impl Decodable for OpReceipt {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        Ok(Self::network_decode(buf)?)
     }
 }
 
@@ -767,65 +776,5 @@ mod tests {
             legacy_receipt.encode_2718_len(),
             "Encoded length for legacy receipt should match the actual encoded data length"
         );
-    }
-
-    #[test]
-    fn test_roundtrip_without_bloom_legacy() {
-        let receipt = OpReceipt::Legacy(Receipt {
-            status: Eip658Value::Eip658(true),
-            cumulative_gas_used: 21000,
-            logs: vec![Log::new_unchecked(
-                address!("0x0000000000000000000000000000000000000011"),
-                vec![
-                    b256!("0x000000000000000000000000000000000000000000000000000000000000dead"),
-                    b256!("0x000000000000000000000000000000000000000000000000000000000000beef"),
-                ],
-                bytes!("0100ff"),
-            )],
-        });
-
-        let mut buf = Vec::new();
-        receipt.rlp_encode_fields_without_bloom(&mut buf);
-        let decoded =
-            OpReceipt::rlp_decode_inner_without_bloom(&mut &buf[..], OpTxType::Legacy).unwrap();
-        assert_eq!(decoded, receipt);
-    }
-
-    #[test]
-    fn test_roundtrip_without_bloom_deposit() {
-        let receipt = OpReceipt::Deposit(OpDepositReceipt {
-            inner: Receipt {
-                status: Eip658Value::Eip658(true),
-                cumulative_gas_used: 46913,
-                logs: vec![],
-            },
-            deposit_nonce: Some(4012991),
-            deposit_receipt_version: Some(1),
-        });
-
-        let mut buf = Vec::new();
-        receipt.rlp_encode_fields_without_bloom(&mut buf);
-        let decoded =
-            OpReceipt::rlp_decode_inner_without_bloom(&mut &buf[..], OpTxType::Deposit).unwrap();
-        assert_eq!(decoded, receipt);
-    }
-
-    #[test]
-    fn test_roundtrip_without_bloom_eip1559() {
-        let receipt = OpReceipt::Eip1559(Receipt {
-            status: Eip658Value::Eip658(true),
-            cumulative_gas_used: 21000,
-            logs: vec![Log::new_unchecked(
-                address!("0x4bf56695415f725e43c3e04354b604bcfb6dfb6e"),
-                vec![b256!("0xc69dc3d7ebff79e41f525be431d5cd3cc08f80eaf0f7819054a726eeb7086eb9")],
-                bytes!("0100ff"),
-            )],
-        });
-
-        let mut buf = Vec::new();
-        receipt.rlp_encode_fields_without_bloom(&mut buf);
-        let decoded =
-            OpReceipt::rlp_decode_inner_without_bloom(&mut &buf[..], OpTxType::Eip1559).unwrap();
-        assert_eq!(decoded, receipt);
     }
 }
