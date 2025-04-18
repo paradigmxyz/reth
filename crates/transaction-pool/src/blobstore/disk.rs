@@ -131,41 +131,46 @@ impl BlobStore for DiskFileBlobStore {
         &self,
         versioned_hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
+        // the response must always be the same len as the request, misses must be None
         let mut result = vec![None; versioned_hashes.len()];
+
+        // first scan all cached full sidecars
         for (_tx_hash, blob_sidecar) in self.inner.blob_cache.lock().iter() {
             for (hash_idx, match_result) in blob_sidecar.match_versioned_hashes(versioned_hashes) {
                 result[hash_idx] = Some(match_result);
             }
-            // Return early if all blobs are found.
+
+            // return early if all blobs are found.
             if result.iter().all(|blob| blob.is_some()) {
-                break;
+                return Ok(result);
             }
         }
 
-        let mut missing_tx_hashes = Vec::new();
-        let mut missing_indices = Vec::new();
+        // not all versioned hashes were be found, try to look up a matching tx
 
-        for (idx, blob_and_proof) in result.iter().enumerate() {
-            if blob_and_proof.is_none() {
+        let mut missing_tx_hashes = Vec::new();
+
+        {
+            let mut versioned_to_txhashes = self.inner.versioned_hashes_to_txhash.lock();
+            for (idx, _) in
+                result.iter().enumerate().filter(|(_, blob_and_proof)| blob_and_proof.is_none())
+            {
+                // this is safe because the result vec has the same len
                 let versioned_hash = versioned_hashes[idx];
-                if let Some(tx_hash) =
-                    self.inner.versioned_hashes_to_txhash.lock().get(&versioned_hash).copied()
-                {
+                if let Some(tx_hash) = versioned_to_txhashes.get(&versioned_hash).copied() {
                     missing_tx_hashes.push(tx_hash);
-                    missing_indices.push(idx);
                 }
             }
         }
 
-        // If we have missing blobs, try to read them from disk
+        // if we have missing blobs, try to read them from disk and try again
         if !missing_tx_hashes.is_empty() {
             let blobs_from_disk = self.inner.read_many_decoded(missing_tx_hashes);
-            for ((_, blob_sidecar), idx) in blobs_from_disk.into_iter().zip(missing_indices.iter())
-            {
+            for (_, blob_sidecar) in blobs_from_disk {
                 for (hash_idx, match_result) in
                     blob_sidecar.match_versioned_hashes(versioned_hashes)
                 {
-                    if hash_idx == *idx {
+                    if result[hash_idx].is_none() {
                         result[hash_idx] = Some(match_result);
                     }
                 }
@@ -190,6 +195,10 @@ struct DiskFileBlobStoreInner {
     size_tracker: BlobStoreSize,
     file_lock: RwLock<()>,
     txs_to_delete: RwLock<HashSet<B256>>,
+    /// Tracks of known versioned hashes and a transaction they exist in
+    ///
+    /// Note: It is possible that one blob can appear in multiple transactions but this only tracks
+    /// the most recent one.
     versioned_hashes_to_txhash: Mutex<LruMap<B256, B256>>,
 }
 
@@ -202,7 +211,7 @@ impl DiskFileBlobStoreInner {
             size_tracker: Default::default(),
             file_lock: Default::default(),
             txs_to_delete: Default::default(),
-            versioned_hashes_to_txhash: Mutex::new(LruMap::new(ByLength::new(10_000))),
+            versioned_hashes_to_txhash: Mutex::new(LruMap::new(ByLength::new(max_length * 6))),
         }
     }
 
@@ -227,16 +236,19 @@ impl DiskFileBlobStoreInner {
 
     /// Ensures blob is in the blob cache and written to the disk.
     fn insert_one(&self, tx: B256, data: BlobTransactionSidecar) -> Result<(), BlobStoreError> {
+        let mut buf = Vec::with_capacity(data.rlp_encoded_fields_length());
+        data.rlp_encode_fields(&mut buf);
+
         {
+            // cache the versioned hashes to tx hash
             let mut map = self.versioned_hashes_to_txhash.lock();
             data.versioned_hashes().for_each(|hash| {
                 map.insert(hash, tx);
             })
         }
 
-        let mut buf = Vec::with_capacity(data.rlp_encoded_fields_length());
-        data.rlp_encode_fields(&mut buf);
         self.blob_cache.lock().insert(tx, Arc::new(data));
+
         let size = self.write_one_encoded(tx, &buf)?;
 
         self.size_tracker.add_size(size);
@@ -246,15 +258,6 @@ impl DiskFileBlobStoreInner {
 
     /// Ensures blobs are in the blob cache and written to the disk.
     fn insert_many(&self, txs: Vec<(B256, BlobTransactionSidecar)>) -> Result<(), BlobStoreError> {
-        {
-            let mut map = self.versioned_hashes_to_txhash.lock();
-            for (tx, data) in &txs {
-                data.versioned_hashes().for_each(|hash| {
-                    map.insert(hash, *tx);
-                })
-            }
-        }
-
         let raw = txs
             .iter()
             .map(|(tx, data)| {
@@ -265,11 +268,23 @@ impl DiskFileBlobStoreInner {
             .collect::<Vec<_>>();
 
         {
+            // cache versioned hashes to tx hash
+            let mut map = self.versioned_hashes_to_txhash.lock();
+            for (tx, data) in &txs {
+                data.versioned_hashes().for_each(|hash| {
+                    map.insert(hash, *tx);
+                })
+            }
+        }
+
+        {
+            // cache blobs
             let mut cache = self.blob_cache.lock();
             for (tx, data) in txs {
                 cache.insert(tx, Arc::new(data));
             }
         }
+
         let mut add = 0;
         let mut num = 0;
         {
@@ -361,6 +376,8 @@ impl DiskFileBlobStoreInner {
     }
 
     /// Returns decoded blobs read from disk.
+    ///
+    /// Only returns sidecars that were found and successfully decoded.
     fn read_many_decoded(&self, txs: Vec<TxHash>) -> Vec<(TxHash, BlobTransactionSidecar)> {
         self.read_many_raw(txs)
             .into_iter()
