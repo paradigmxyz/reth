@@ -1107,9 +1107,9 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
     ///
     /// # Returns
     ///
-    /// - `Ok(FindLeafResult::Found)` if the leaf exists with the expected value.
-    /// - `Ok(FindLeafResult::NotFound)` if the leaf definitely does not exist (exclusion proof).
-    /// - `Err(FindLeafError)` if the search encountered a blinded node or found a different value.
+    /// - `Ok(LeafLookup::Found)` if the leaf exists with the expected value.
+    /// - `Ok(LeafLookup::NonExistent)` if the leaf definitely does not exist (exclusion proof).
+    /// - `Err(LeafLookupError)` if the search encountered a blinded node or found a different value.
     pub fn find_leaf(
         &self,
         path: &Nibbles,
