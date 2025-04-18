@@ -1451,12 +1451,6 @@ where
                                 // handle the event if any
                                 self.on_maybe_tree_event(maybe_event)?;
                             }
-                            BeaconEngineMessage::TransitionConfigurationExchanged => {
-                                // triggering this hook will record that we received a request from
-                                // the CL
-                                self.canonical_in_memory_state
-                                    .on_transition_configuration_exchanged();
-                            }
                         }
                     }
                 }

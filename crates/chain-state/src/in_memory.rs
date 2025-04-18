@@ -421,16 +421,6 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         self.inner.chain_info_tracker.last_forkchoice_update_received_at()
     }
 
-    /// Hook for transition configuration exchanged.
-    pub fn on_transition_configuration_exchanged(&self) {
-        self.inner.chain_info_tracker.on_transition_configuration_exchanged();
-    }
-
-    /// Returns the timestamp of the last transition configuration exchanged,
-    pub fn last_exchanged_transition_configuration_timestamp(&self) -> Option<Instant> {
-        self.inner.chain_info_tracker.last_transition_configuration_exchanged_at()
-    }
-
     /// Canonical head setter.
     pub fn set_canonical_head(&self, header: SealedHeader<N::BlockHeader>) {
         self.inner.chain_info_tracker.set_canonical_head(header);
