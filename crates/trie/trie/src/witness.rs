@@ -34,7 +34,9 @@ pub struct TrieWitness<T, H> {
     hashed_cursor_factory: H,
     /// A set of prefix sets that have changes.
     prefix_sets: TriePrefixSetsMut,
-    /// Flag indicating whether the root node.
+    /// Flag indicating whether the root node should always be included (even if the target state
+    /// is empty). This setting is useful if the caller wants to verify the witness against the
+    /// parent state root.
     /// Set to `false` by default.
     always_include_root_node: bool,
     /// Recorded witness.
@@ -82,6 +84,8 @@ impl<T, H> TrieWitness<T, H> {
     }
 
     /// Set `always_include_root_node` to true. Root node will be included even on empty state.
+    /// This setting is useful if the caller wants to verify the witness against the
+    /// parent state root.
     pub fn always_include_root_node(mut self) -> Self {
         self.always_include_root_node = true;
         self
