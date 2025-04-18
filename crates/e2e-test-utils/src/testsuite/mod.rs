@@ -8,7 +8,7 @@ use alloy_primitives::B256;
 use eyre::Result;
 use jsonrpsee::http_client::{transport::HttpBackend, HttpClient};
 use reth_engine_local::LocalPayloadAttributesBuilder;
-use reth_node_api::{NodeTypes, PayloadTypes};
+use reth_node_api::{NodeTypes, PayloadTypes,FullNodeTypes};
 use reth_payload_builder::PayloadId;
 use reth_rpc_layer::AuthClientService;
 use setup::Setup;
@@ -166,7 +166,7 @@ impl NodeClient {
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
     ) -> eyre::Result<PayloadStatus> {
-        let mut status = EngineApiClient::new_payload_v3(
+        let mut status = <HttpClient<AuthClientService<HttpBackend>> as EngineApiClient<FullNodeTypes>>::new_payload_v3(
             &self.engine,
             payload.clone(),
             versioned_hashes.clone(),
