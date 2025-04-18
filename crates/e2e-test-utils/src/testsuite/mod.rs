@@ -187,10 +187,13 @@ impl NodeClient {
                 return Err(eyre::eyre!("Payload syncing: no canonical state for parent"));
             }
 
-            status = self
-                .engine
-                .new_payload_v3(payload.clone(), versioned_hashes.clone(), parent_beacon_block_root)
-                .await?;
+            status = EngineApiClient::new_payload_v3(
+                &self.engine,
+                payload.clone(),
+                versioned_hashes.clone(),
+                parent_beacon_block_root,
+            )
+            .await?
         }
 
         Ok(status)
@@ -202,7 +205,7 @@ pub struct BroadcastNextPayload {
     pub parent_beacon_block_root: B256,
 }
 
-impl<I> Action<I> for BroadcastNextPayload {
+impl<I: Send + 'static> Action<I> for BroadcastNextPayload {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<I>) -> BoxFuture<'a, Result<()>> {
         async move {
             let payload = env
