@@ -337,7 +337,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     }
 
     /// Number of hashes pending fetch.
-    pub fn num_pending_hashes(&self) -> usize {
+    pub const fn num_pending_hashes(&self) -> usize {
         self.num_hashes_pending_fetch
     }
 
@@ -505,7 +505,18 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                     *previously_seen_size = Some(*size);
                 }
 
-                return !*is_inflight
+                if !*is_inflight {
+                    if let Some(entry) = self.hashes_pending_fetch_by_peer.get_mut(peer_id) {
+                        entry.remove(hash);
+                    }
+
+                    *is_inflight = true;
+                    self.num_hashes_pending_fetch -= 1;
+
+                    return true;
+                }
+
+                return false
             }
 
             // vacant entry
@@ -918,7 +929,7 @@ impl TxFetchMetadata {
     }
 
     /// Retruns a mutable reference to `is_inflight` flag.
-    pub fn is_inflight_mut(&mut self) -> &mut bool {
+    pub const fn is_inflight_mut(&mut self) -> &mut bool {
         &mut self.is_inflight
     }
 }
