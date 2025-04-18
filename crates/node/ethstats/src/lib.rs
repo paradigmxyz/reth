@@ -6,5 +6,5 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 
+pub mod connection;
 pub mod events;
-pub mod websockets;

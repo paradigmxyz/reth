@@ -9,6 +9,15 @@ repository.workspace = true
 exclude.workspace = true
 
 [dependencies]
+# reth
+reth-storage-api.workspace = true
+
+# alloy
+alloy-primitives.workspace = true
+alloy-consensus.workspace = true
+
+# async
+tokio.workspace = true
 
 [lints]
 workspace = true
