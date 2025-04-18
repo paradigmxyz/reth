@@ -10,7 +10,7 @@ use reth_trie::{
     trie_cursor::{noop::NoopStorageTrieCursor, InMemoryStorageTrieCursor},
     updates::StorageTrieUpdates,
     walker::TrieWalker,
-    HashedStorage, TrieType,
+    HashedStorage,
 };
 use reth_trie_common::{HashBuilder, Nibbles};
 use reth_trie_sparse::SparseTrie;
