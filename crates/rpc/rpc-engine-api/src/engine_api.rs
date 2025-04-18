@@ -1170,6 +1170,7 @@ mod tests {
     }
 
     struct EngineApiTestHandle {
+        #[allow(dead_code)]
         chain_spec: Arc<ChainSpec>,
         provider: Arc<MockEthProvider>,
         from_api: UnboundedReceiver<BeaconEngineMessage<EthEngineTypes>>,
