@@ -7535,6 +7535,7 @@ dependencies = [
  "alloy-signer-local",
  "derive_more",
  "eyre",
+ "futures",
  "futures-util",
  "jsonrpsee",
  "reth-chainspec",
