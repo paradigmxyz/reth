@@ -55,22 +55,6 @@ where
             BlockNumberOrTag::Number(num) => format!("{num:#02x}"),
             tag => tag.to_string(),
         };
-        dbg!(&self.base_url);
-        let block = self
-            .http_client
-            .get(&self.base_url)
-            .query(&[
-                ("module", "proxy"),
-                ("action", "eth_getBlockByNumber"),
-                ("tag", &tag),
-                ("boolean", "true"),
-                ("apikey", &self.api_key),
-            ])
-            .send()
-            .await?
-            .text()
-            .await?;
-        println!("{block}");
 
         let resp: Response<RpcBlock> = self
             .http_client
