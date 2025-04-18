@@ -1166,10 +1166,12 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                 }
                 Some(SparseNode::Leaf { key, .. }) => {
                     // We found a leaf node before reaching our target depth
-                    let mut full_path = current.clone();
-                    full_path.extend_from_slice_unchecked(key);
 
-                    if &full_path == path {
+                    // Temporarily append the leaf key to `current`
+                    let saved_len = current.len();
+                    current.extend_from_slice_unchecked(key);
+
+                    if &current == path {
                         // This should have been handled by our initial values map check
                         if let Some(value) = self.values.get(path) {
                             check_value_match(value, expected_value, path)?;
@@ -1177,22 +1179,23 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                         }
                     }
 
+                    let diverged_at = current.slice(..saved_len);
+
                     // The leaf node's path doesn't match our target path,
                     // providing an exclusion proof
-                    return Ok(LeafLookup::NonExistent { diverged_at: current });
+                    return Ok(LeafLookup::NonExistent { diverged_at });
                 }
                 Some(SparseNode::Extension { key, .. }) => {
-                    // Check if the path matches the extension key prefix
-                    let mut extended_path = current.clone();
-                    extended_path.extend_from_slice_unchecked(key);
+                    // Temporarily append the extension key to `current`
+                    let saved_len = current.len();
+                    current.extend_from_slice_unchecked(key);
 
-                    if path.len() < extended_path.len() || !path.starts_with(&extended_path) {
-                        // Path doesn't match extension - exclusion proof
-                        return Ok(LeafLookup::NonExistent { diverged_at: current });
+                    if path.len() < current.len() || !path.starts_with(&current) {
+                        let diverged_at = current.slice(..saved_len);
+                        current.truncate(saved_len); // restore
+                        return Ok(LeafLookup::NonExistent { diverged_at });
                     }
-
-                    // Continue traversal with the extended path
-                    current = extended_path;
+                    // Prefix matched, so we keep walking with the longer `current`.
                 }
                 Some(SparseNode::Branch { state_mask, .. }) => {
                     // Check if branch has a child at the next nibble in our path
