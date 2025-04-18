@@ -9887,7 +9887,7 @@ dependencies = [
 
 [[package]]
 name = "reth-stateless"
-version = "1.3.10"
+version = "1.3.12"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
