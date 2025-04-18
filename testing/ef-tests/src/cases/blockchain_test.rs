@@ -16,8 +16,7 @@ use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_primitives_traits::{RecoveredBlock, SealedBlock};
 use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, DatabaseProviderFactory,
-    ExecutionOutcome, HashingWriter, HistoryWriter, OriginalValuesKnown, StateWriter,
-    StorageLocation,
+    ExecutionOutcome, HistoryWriter, OriginalValuesKnown, StateWriter, StorageLocation,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
@@ -80,7 +79,6 @@ impl BlockchainTestCase {
     /// expectations encoded in the JSON file.
     fn run_single_case(name: &str, case: &BlockchainTest) -> Result<(), Error> {
         let expectation = Self::expected_failure(case);
-
         match run_case(case) {
             // All blocks executed successfully.
             Ok(()) => {
@@ -262,26 +260,16 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     }
 
     // Validate the post-state for the test case.
-    // Note: This is technically not needed as we are now validating the post state root
-    // after every block is execution.
-    let last_block = blocks.last().cloned();
-    match (&case.post_state, &case.post_state_hash) {
-        (Some(state), None) => {
-            // Validate accounts in the state against the provider's database.
-            for (&address, account) in state {
-                account.assert_db(address, provider.tx_ref())?;
-            }
-        }
-        (None, Some(expected_state_root)) => {
-            // Insert state hashes into the provider based on the expected state root.
-            let last_block = last_block.unwrap_or_default();
-            provider.insert_hashes(
-                0..=last_block.number,
-                last_block.hash(),
-                *expected_state_root,
-            )?;
-        }
-        _ => return Err(Error::MissingPostState),
+    // If we get here then it means that the post state checks
+    // made after we execute each block was successful.
+    // If an error occurs here, then its:
+    // - Either an issue with the test setup
+    // - Possibly an error in the test case where the
+    // post-state root in the last block does not
+    // match the post-state values.
+    let expected_post_state = case.post_state.as_ref().ok_or(Error::MissingPostState)?;
+    for (&address, account) in expected_post_state {
+        account.assert_db(address, provider.tx_ref())?;
     }
 
     // Drop the provider without committing to the database.
