@@ -21,7 +21,7 @@ use reth_consensus_common::validation::{
 };
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{
-    constants::{GAS_LIMIT_BOUND_DIVISOR, MINIMUM_GAS_LIMIT},
+    constants::{GAS_LIMIT_BOUND_DIVISOR, MAXIMUM_GAS_LIMIT_BLOCK, MINIMUM_GAS_LIMIT},
     Block, BlockHeader, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
 use std::{fmt::Debug, sync::Arc, time::SystemTime};
@@ -53,6 +53,15 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
         header: &SealedHeader<H>,
         parent: &SealedHeader<H>,
     ) -> Result<(), ConsensusError> {
+        // TODO: Maybe put this check in another place, it is not really
+        // TODO: related to the parent gas limit
+        // Check that the gas limit is below the maximum allowed gas limit
+        if header.gas_limit() > MAXIMUM_GAS_LIMIT_BLOCK {
+            return Err(ConsensusError::GasLimitInvalidBlockMaximum {
+                block_gas_limit: header.gas_limit(),
+            })
+        }
+
         // Determine the parent gas limit, considering elasticity multiplier on the London fork.
         let parent_gas_limit = if !self.chain_spec.is_london_active_at_block(parent.number()) &&
             self.chain_spec.is_london_active_at_block(header.number())

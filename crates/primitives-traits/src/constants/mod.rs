@@ -10,6 +10,9 @@ pub const RETH_CLIENT_VERSION: &str = concat!("reth/v", env!("CARGO_PKG_VERSION"
 /// Minimum gas limit allowed for transactions.
 pub const MINIMUM_GAS_LIMIT: u64 = 5000;
 
+/// Maximum gas limit allowed for block.
+pub const MAXIMUM_GAS_LIMIT_BLOCK: u64 = 0x7fffffffffffffff;
+
 /// The bound divisor of the gas limit, used in update calculations.
 pub const GAS_LIMIT_BOUND_DIVISOR: u64 = 1024;
 
