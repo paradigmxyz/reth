@@ -15,9 +15,9 @@ use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_primitives_traits::{RecoveredBlock, SealedBlock};
 use reth_provider::{
-    test_utils::create_test_provider_factory_with_chain_spec, BlockWriter,
-    DatabaseProviderFactory, ExecutionOutcome, HashingWriter, HistoryWriter, OriginalValuesKnown,
-    StateWriter, StorageLocation,
+    test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, DatabaseProviderFactory,
+    ExecutionOutcome, HashingWriter, HistoryWriter, OriginalValuesKnown, StateWriter,
+    StorageLocation,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
@@ -135,7 +135,7 @@ impl Case for BlockchainTestCase {
                             assert_eq!(
                                 block_number, expected_block_number,
                                 "Test case: {}\nExpected failure at block {}\nGot failure at block {}",
-                                name, expected_block_number, block_number,  
+                                name, expected_block_number, block_number
                             );
                             return Ok(())
                         }
@@ -207,17 +207,17 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
             .map_err(|_| Error::BlockProcessingFailed { block_number })?;
 
         // Consensus checks before block execution
-        pre_execution_checks(chain_spec.clone(), &parent, &block)
+        pre_execution_checks(chain_spec.clone(), &parent, block)
             .map_err(|_| Error::BlockProcessingFailed { block_number })?;
 
         // Execute the block
         let state_db = StateProviderDatabase(provider.latest());
         let executor = executor_provider.executor(state_db);
         let output =
-            executor.execute(&block).map_err(|_| Error::BlockProcessingFailed { block_number })?;
+            executor.execute(block).map_err(|_| Error::BlockProcessingFailed { block_number })?;
 
         // Consensus checks after block execution
-        validate_block_post_execution(&block, &chain_spec, &output.receipts, &output.requests)
+        validate_block_post_execution(block, &chain_spec, &output.receipts, &output.requests)
             .map_err(|_| Error::BlockProcessingFailed { block_number })?;
 
         // Compute and check the post state root
@@ -299,7 +299,7 @@ fn decode_blocks(
         blocks.push(recovered_block);
     }
 
-    return Ok(blocks)
+    Ok(blocks)
 }
 
 fn pre_execution_checks(
@@ -311,12 +311,11 @@ fn pre_execution_checks(
 
     let sealed_header = block.sealed_header();
     let header = block.header();
-    let body = block.body();
 
     // TODO: add a enum into Error for ConsensusError instead of using Error::Assertion
     <EthBeaconConsensus<ChainSpec> as Consensus<Block>>::validate_body_against_header(
         &consensus,
-        &body,
+        block.body(),
         sealed_header,
     )
     .map_err(|err| Error::Assertion(err.to_string()))?;
@@ -328,7 +327,7 @@ fn pre_execution_checks(
         .map_err(|err| Error::Assertion(err.to_string()))?;
     consensus.validate_header(sealed_header).map_err(|err| Error::Assertion(err.to_string()))?;
     consensus
-        .validate_block_pre_execution(&block)
+        .validate_block_pre_execution(block)
         .map_err(|err| Error::Assertion(err.to_string()))?;
 
     Ok(())
