@@ -1954,7 +1954,7 @@ pub(crate) struct SenderInfo {
 
 impl SenderInfo {
     /// Updates the info with the new values.
-    fn update(&mut self, state_nonce: u64, balance: U256) {
+    const fn update(&mut self, state_nonce: u64, balance: U256) {
         *self = Self { state_nonce, balance };
     }
 }

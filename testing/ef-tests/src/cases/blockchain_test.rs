@@ -92,7 +92,19 @@ impl Case for BlockchainTestCase {
                 )
             })
             .par_bridge()
-            .try_for_each(|(name, case)| run_case(name, case))?;
+            .try_for_each(|(_, case)| {
+                let case_result = run_case(case);
+                let has_failed = case_result.is_err();
+
+                // Check if the test should fail
+                let should_fail = case.blocks.iter().any(|block| block.expect_exception.is_some());
+
+                // A test that fails and should have failed is successful.
+                if has_failed && should_fail {
+                    return Ok(())
+                }
+                case_result
+            })?;
 
         Ok(())
     }
@@ -112,9 +124,7 @@ type SignedRecoveredBlock = RecoveredBlock<Block<TransactionSigned>>;
 /// Returns:
 /// - `Ok(())` if all blocks execute successfully and the final state is correct.
 /// - `Err(Error)` if any block fails to execute correctly, or if the post-state validation fails.
-fn run_case(name: &str, case: &BlockchainTest) -> Result<(), Error> {
-    tracing::info!(%name, "Running blockchain test");
-
+fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     // Create a new test database and initialize a provider for the test case.
     let chain_spec: Arc<ChainSpec> = Arc::new(case.network.into());
     let provider = create_test_provider_factory_with_chain_spec(chain_spec.clone())
@@ -183,8 +193,6 @@ fn run_case(name: &str, case: &BlockchainTest) -> Result<(), Error> {
         _ => return Err(Error::MissingPostState),
     }
 
-    // Drop the provider without committing to the database.
-    drop(provider);
     Ok(())
 }
 

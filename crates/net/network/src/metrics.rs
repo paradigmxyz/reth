@@ -374,7 +374,7 @@ pub struct TxTypesCounter {
 }
 
 impl TxTypesCounter {
-    pub(crate) fn increase_by_tx_type(&mut self, tx_type: TxType) {
+    pub(crate) const fn increase_by_tx_type(&mut self, tx_type: TxType) {
         match tx_type {
             TxType::Legacy => {
                 self.legacy += 1;

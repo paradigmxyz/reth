@@ -120,7 +120,7 @@ impl IpcClientBuilder {
     }
 
     /// Set request timeout (default is 60 seconds).
-    pub fn request_timeout(mut self, timeout: Duration) -> Self {
+    pub const fn request_timeout(mut self, timeout: Duration) -> Self {
         self.request_timeout = timeout;
         self
     }
