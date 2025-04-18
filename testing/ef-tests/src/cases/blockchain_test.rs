@@ -127,8 +127,8 @@ impl Case for BlockchainTestCase {
                         // TODO: Its likely not possible to get an error when checking the post state value
                         // TODO: unless the tests had a bug.
                         if let Err(Error::BlockProcessingFailed { block_number }) = case_result {
-                            // TODO: The Uncles test case is not handled very well, it fails but not at the block we expect
-                            if name.contains("Uncle") {
+                            // TODO: The Uncles test case fails but not at the block we expected.
+                            if name.contains("UncleFromSideChain") {
                                 return Ok(())
                             }
 
