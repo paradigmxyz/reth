@@ -272,9 +272,6 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
         account.assert_db(address, provider.tx_ref())?;
     }
 
-    // Drop the provider without committing to the database.
-    drop(provider);
-
     Ok(())
 }
 
