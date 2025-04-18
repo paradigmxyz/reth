@@ -52,6 +52,73 @@ pub struct BlockchainTestCase {
     skip: bool,
 }
 
+impl BlockchainTestCase {
+    /// Checks if the test case is a particular test called `UncleFromSideChain`
+    ///
+    /// This fixture fails as expected, however it fails at the wrong block number.
+    /// Given we no longer have uncle blocks, this test case was pulled out such
+    /// that we ensure it still fails, however we do not check the block number.
+    #[inline]
+    fn is_uncle_sidechain_case(name: &str) -> bool {
+        name.contains("UncleFromSideChain")
+    }
+
+    /// If the test expects an exception, return the the block number
+    /// at which it must occur together with the original message.
+    ///
+    /// Note: There is a +1 here because the genesis block is not included
+    /// in the set of blocks, so the first block is actual block number 1
+    /// and not block number 0.
+    #[inline]
+    fn expected_failure(case: &BlockchainTest) -> Option<(u64, String)> {
+        case.blocks.iter().enumerate().find_map(|(idx, blk)| {
+            blk.expect_exception.as_ref().map(|msg| ((idx + 1) as u64, msg.clone()))
+        })
+    }
+
+    /// Execute a single `BlockchainTest`, validating the outcome against the
+    /// expectations encoded in the JSON file.
+    fn run_single_case(name: &str, case: &BlockchainTest) -> Result<(), Error> {
+        let expectation = Self::expected_failure(case);
+
+        match run_case(case) {
+            // All blocks executed successfully.
+            Ok(()) => {
+                // Check if the test case specifies that it should have failed
+                if let Some((block, msg)) = expectation {
+                    Err(Error::Assertion(format!(
+                        "Test case: {name}\nExpected failure at block {block} - {msg}, but all blocks succeeded",
+                    )))
+                } else {
+                    Ok(())
+                }
+            }
+
+            // A block processing failure occurred.
+            Err(Error::BlockProcessingFailed { block_number }) => match expectation {
+                // It happened on exactly the block we were told to fail on
+                Some((expected, _)) if block_number == expected => Ok(()),
+
+                // Uncle side‑chain edge case, we accept as long as it failed.
+                // But we don't check the exact block number.
+                _ if Self::is_uncle_sidechain_case(name) => Ok(()),
+
+                // Expected failure, but block number does not match
+                Some((expected, _)) => Err(Error::Assertion(format!(
+                    "Test case: {name}\nExpected failure at block {expected}\nGot failure at block {block_number}",
+                ))),
+
+                // No failure expected at all - bubble up original error.
+                None => Err(Error::BlockProcessingFailed { block_number }),
+            },
+
+            // Non‑processing error – forward as‑is.
+            // TODO: Don't think these can occur anymore since we don't batch execute anymore.
+            Err(other) => Err(other),
+        }
+    }
+}
+
 impl Case for BlockchainTestCase {
     fn load(path: &Path) -> Result<Self, Error> {
         Ok(Self {
@@ -78,7 +145,7 @@ impl Case for BlockchainTestCase {
         // Iterate through test cases, filtering by the network type to exclude specific forks.
         self.tests
             .iter()
-            .filter(|(_,case)| {
+            .filter(|(_, case)| {
                 !matches!(
                     case.network,
                     ForkSpec::ByzantiumToConstantinopleAt5 |
@@ -91,63 +158,7 @@ impl Case for BlockchainTestCase {
                 )
             })
             .par_bridge()
-            .try_for_each(|(name, case)| {
-                // Execute all blocks
-                let case_result = run_case(case);
-                let has_failed = case_result.is_err();
-
-                // Check if we expected a failure
-                //
-                // If we expected a block to fail,
-                // Get the block number for the block that we expected to fail
-                // and the error message
-                let expected_failure = case
-                    .blocks
-                    .iter()
-                    .enumerate()
-                    .find(|(_, block)| block.expect_exception.is_some())
-                    .map(|(block_index, block)| {
-                        // Note: This is plus one because we `enumerate` starts from 0
-                        // whereas the first block is not the genesis block.
-                        let block_number = (block_index +1) as u64;
-                        (block_number, block.expect_exception.clone().unwrap())
-                    });
-
-                    match expected_failure {
-                    Some((expected_block_number, err_msg)) => {
-                        // Here we expected a failure, in particular, we expect a failure at
-                        // `expected_block_number`
-                        //
-                        // Assert that block processing actually failed.
-                        assert!(has_failed, "Test Case: {}\nExpected failure at block {}\nFor reason: {}", name, expected_block_number, err_msg);
-
-                        // Now check that the failure was triggered when processing the block at `expected_block_number`
-                        //
-                        // TODO: Now that we check the post state root after each block is executed
-                        // TODO: Its likely not possible to get an error when checking the post state value
-                        // TODO: unless the tests had a bug.
-                        if let Err(Error::BlockProcessingFailed { block_number }) = case_result {
-                            // TODO: The Uncles test case fails but not at the block we expected.
-                            if name.contains("UncleFromSideChain") {
-                                return Ok(())
-                            }
-
-                            assert_eq!(
-                                block_number, expected_block_number,
-                                "Test case: {}\nExpected failure at block {}\nGot failure at block {}",
-                                name, expected_block_number, block_number
-                            );
-                            return Ok(())
-                        }
-                    }
-                    None => {
-                        // There was no `expect_exception` so the block should not have failed.
-                        assert!(!has_failed, "Test case: {}\n Expected tests to pass\nFailed with reason: {:?}", name, case_result)
-                    },
-                }
-
-                case_result
-            })?;
+            .try_for_each(|(name, case)| Self::run_single_case(name, case))?;
 
         Ok(())
     }
