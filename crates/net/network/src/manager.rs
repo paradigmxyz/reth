@@ -422,11 +422,17 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
         self.swarm.state().peers().handle()
     }
 
+    ///Returns the [`PeersManager`].
+    pub fn peers_manager(&self) -> &PeersManager {
+        self.swarm.state().peers()
+    }
+
     /// Collect the peers from the [`NetworkManager`] and write them to the given
     /// `persistent_peers_file`.
+    #[cfg(feature = "serde")]
     pub fn write_peers_to_file(&self, persistent_peers_file: &Path) -> Result<(), FsPathError> {
         let known_peers = self.all_peers().collect::<Vec<_>>();
-        let peers = self.swarm.state().peers();
+        let peers = self.peers_manager();
         let persistent_peers = reth_network_types::peers::config::PersistedPeers {
             trusted: known_peers
                 .iter()
@@ -440,7 +446,6 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                 .collect(),
         };
         persistent_peers_file.parent().map(fs::create_dir_all).transpose()?;
-        #[cfg(feature = "serde")]
         reth_fs_util::write_json_file(persistent_peers_file, &persistent_peers)?;
         Ok(())
     }
