@@ -17,7 +17,7 @@
 
 extern crate alloc;
 
-use alloc::{borrow::Cow, sync::Arc};
+use alloc::{borrow::Cow, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
 pub use alloy_evm::EthEvm;
 use alloy_evm::{
