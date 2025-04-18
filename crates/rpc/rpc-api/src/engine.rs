@@ -13,7 +13,6 @@ use alloy_primitives::{Address, BlockHash, Bytes, B256, U256, U64};
 use alloy_rpc_types_engine::{
     ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV1,
     ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
-    TransitionConfiguration,
 };
 use alloy_rpc_types_eth::{
     state::StateOverride, transaction::TransactionRequest, BlockOverrides,
@@ -192,19 +191,6 @@ pub trait EngineApi<Engine: EngineTypes> {
         start: U64,
         count: U64,
     ) -> RpcResult<ExecutionPayloadBodiesV1>;
-
-    /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_exchangetransitionconfigurationv1>
-    ///
-    /// Note: This method will be deprecated after the cancun hardfork:
-    ///
-    /// > Consensus and execution layer clients MAY remove support of this method after Cancun. If
-    /// > no longer supported, this method MUST be removed from the engine_exchangeCapabilities
-    /// > request or response list depending on whether it is consensus or execution layer client.
-    #[method(name = "exchangeTransitionConfigurationV1")]
-    async fn exchange_transition_configuration(
-        &self,
-        transition_configuration: TransitionConfiguration,
-    ) -> RpcResult<TransitionConfiguration>;
 
     /// This function will return the ClientVersionV1 object.
     /// See also:
