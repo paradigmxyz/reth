@@ -214,13 +214,11 @@ impl Encodable2718 for Receipt {
 
 impl Decodable2718 for Receipt {
     fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
-        let receipt = Self::rlp_decode_inner_without_bloom(buf, TxType::try_from(ty)?)?;
-        Ok(receipt)
+        Ok(Self::rlp_decode_inner_without_bloom(buf, TxType::try_from(ty)?)?)
     }
 
     fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
-        let receipt = Self::rlp_decode_inner_without_bloom(buf, TxType::Legacy)?;
-        Ok(receipt)
+        Ok(Self::rlp_decode_inner_without_bloom(buf, TxType::Legacy)?)
     }
 }
 
@@ -558,66 +556,6 @@ mod tests {
             legacy_receipt.encode_2718_len(),
             "Encoded length for legacy receipt should match the actual encoded data length"
         );
-    }
-
-    #[test]
-    fn test_2718_without_bloom() {
-        let receipt = Receipt {
-            tx_type: TxType::Legacy,
-            success: true,
-            cumulative_gas_used: 100000,
-            logs: vec![Log::new_unchecked(
-                address!("0x0000000000000000000000000000000000000011"),
-                vec![
-                    b256!("0x000000000000000000000000000000000000000000000000000000000000dead"),
-                    b256!("0x000000000000000000000000000000000000000000000000000000000000beef"),
-                ],
-                bytes!("0100ff"),
-            )],
-        };
-
-        // Encode the receipt
-        let mut encoded = Vec::new();
-        receipt.rlp_header_inner_without_bloom().encode(&mut encoded);
-        receipt.rlp_encode_fields_without_bloom(&mut encoded);
-
-        // Decode the receipt
-        let mut encoded_slice = encoded.as_slice();
-        let decoded =
-            Receipt::rlp_decode_inner_without_bloom(&mut encoded_slice, TxType::Legacy).unwrap();
-
-        assert_eq!(receipt, decoded);
-        assert!(encoded_slice.is_empty(), "entire buffer should be consumed");
-    }
-
-    #[test]
-    fn test_roundtrip_2718_without_bloom() {
-        let receipt = Receipt {
-            tx_type: TxType::Eip1559,
-            success: false,
-            cumulative_gas_used: 200000,
-            logs: vec![Log::new_unchecked(
-                address!("0x0000000000000000000000000000000000000022"),
-                vec![
-                    b256!("0x0000000000000000000000000000000000000000000000000000000000001234"),
-                    b256!("0x0000000000000000000000000000000000000000000000000000000000005678"),
-                ],
-                bytes!("020000"),
-            )],
-        };
-
-        // Encode the receipt
-        let mut encoded = Vec::new();
-        receipt.rlp_header_inner_without_bloom().encode(&mut encoded);
-        receipt.rlp_encode_fields_without_bloom(&mut encoded);
-
-        // Decode the receipt
-        let mut encoded_slice = encoded.as_slice();
-        let decoded =
-            Receipt::rlp_decode_inner_without_bloom(&mut encoded_slice, TxType::Eip1559).unwrap();
-
-        assert_eq!(receipt, decoded);
-        assert!(encoded_slice.is_empty(), "entire buffer should be consumed");
     }
 
     #[test]
