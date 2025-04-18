@@ -26,7 +26,7 @@ use reth_trie::{
     updates::TrieUpdatesSorted,
     walker::TrieWalker,
     HashBuilder, HashedPostStateSorted, MultiProof, MultiProofTargets, Nibbles, StorageMultiProof,
-    TrieType, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::proof::ProofRetainer;
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
