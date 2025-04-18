@@ -20,6 +20,14 @@ pub enum Error {
     /// No post state found in test
     #[error("no post state found for validation")]
     MissingPostState,
+    /// Block processing failed
+    /// Note: This includes but is not limited to execution.
+    /// For example, the header number could be incorrect.
+    #[error("block {block_number} failed to process")]
+    BlockProcessingFailed {
+        /// The block number for the block that failed
+        block_number: u64,
+    },
     /// An IO error occurred
     #[error("an error occurred interacting with the file system at {path}: {error}")]
     Io {
