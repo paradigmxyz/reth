@@ -71,6 +71,7 @@ pub fn buffer_hash_to_tx_fetcher(
             if metadata.fallback_peers_mut().is_empty() && !(*metadata.is_inflight_mut()) {
                 tx_fetcher.num_hashes_pending_fetch += 1;
             }
+            metadata.fallback_peers_mut().insert(peer_id);
         }
         None => {
             trace!(target: "net::tx",

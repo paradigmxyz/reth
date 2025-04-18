@@ -47,7 +47,7 @@ pub fn benchmark_fetch_pending_hashes(group: &mut BenchmarkGroup<'_, WallTime>, 
 
     group.bench_function(group_id, |b| {
         b.iter(|| {
-            tx_fetcher.on_fetch_pending_hashes(&peers, |_| true);
+            tx_fetcher.on_fetch_pending_hashes(&peers);
         });
     });
 }
