@@ -52,6 +52,20 @@ pub struct BlockchainTestCase {
 }
 
 impl BlockchainTestCase {
+    /// Returns `true` if the fork is not supported.
+    fn excluded_fork(network: ForkSpec) -> bool {
+        matches!(
+            network,
+            ForkSpec::ByzantiumToConstantinopleAt5 |
+                ForkSpec::Constantinople |
+                ForkSpec::ConstantinopleFix |
+                ForkSpec::MergeEOF |
+                ForkSpec::MergeMeterInitCode |
+                ForkSpec::MergePush0 |
+                ForkSpec::Unknown
+        )
+    }
+
     /// Checks if the test case is a particular test called `UncleFromSideChain`
     ///
     /// This fixture fails as expected, however it fails at the wrong block number.
@@ -143,18 +157,7 @@ impl Case for BlockchainTestCase {
         // Iterate through test cases, filtering by the network type to exclude specific forks.
         self.tests
             .iter()
-            .filter(|(_, case)| {
-                !matches!(
-                    case.network,
-                    ForkSpec::ByzantiumToConstantinopleAt5 |
-                        ForkSpec::Constantinople |
-                        ForkSpec::ConstantinopleFix |
-                        ForkSpec::MergeEOF |
-                        ForkSpec::MergeMeterInitCode |
-                        ForkSpec::MergePush0 |
-                        ForkSpec::Unknown
-                )
-            })
+            .filter(|(_, case)| !Self::excluded_fork(case.network))
             .par_bridge()
             .try_for_each(|(name, case)| Self::run_single_case(name, case))?;
 
