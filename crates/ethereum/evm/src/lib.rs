@@ -17,7 +17,7 @@
 
 extern crate alloc;
 
-use alloc::{borrow::Cow, sync::Arc};
+use alloc::{borrow::Cow, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
 pub use alloy_evm::EthEvm;
 use alloy_evm::{
@@ -26,7 +26,7 @@ use alloy_evm::{
 };
 use alloy_primitives::{Bytes, U256};
 use core::{convert::Infallible, fmt::Debug};
-use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
+use reth_chainspec::{ChainSpec, EthChainSpec, HardforkBlobParams, MAINNET};
 use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_evm::{ConfigureEvm, EvmEnv, EvmFactory, NextBlockEnvAttributes, TransactionEnv};
 use reth_primitives_traits::{SealedBlock, SealedHeader};
@@ -93,6 +93,16 @@ impl<EvmFactory> EthEvmConfig<EvmFactory> {
         self.executor_factory.spec()
     }
 
+    /// Returns blob params by hard fork as specified in chain spec.
+    /// Blob params are in format `(spec id, target blob count, max blob count)`.
+    pub fn blob_max_and_target_count_by_hardfork(&self) -> Vec<(SpecId, u64, u64)> {
+        let HardforkBlobParams { cancun, prague } = self.chain_spec().blob_params;
+        Vec::from([
+            (SpecId::CANCUN, cancun.target_blob_count, cancun.max_blob_count),
+            (SpecId::PRAGUE, prague.target_blob_count, prague.max_blob_count),
+        ])
+    }
+
     /// Sets the extra data for the block assembler.
     pub fn with_extra_data(mut self, extra_data: Bytes) -> Self {
         self.block_assembler.extra_data = extra_data;
@@ -132,7 +142,10 @@ where
         let spec = config::revm_spec(self.chain_spec(), header);
 
         // configure evm env based on parent block
-        let cfg_env = CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec);
+        let cfg_env = CfgEnv::new()
+            .with_chain_id(self.chain_spec().chain().id())
+            .with_spec(spec)
+            .with_blob_max_and_target_count(self.blob_max_and_target_count_by_hardfork());
 
         // derive the EIP-4844 blob fees from the header's `excess_blob_gas` and the current
         // blobparams
@@ -171,7 +184,10 @@ where
         );
 
         // configure evm env based on parent block
-        let cfg = CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec_id);
+        let cfg = CfgEnv::new()
+            .with_chain_id(self.chain_spec().chain().id())
+            .with_spec(spec_id)
+            .with_blob_max_and_target_count(self.blob_max_and_target_count_by_hardfork());
 
         let blob_params = self.chain_spec().blob_params_at_timestamp(attributes.timestamp);
         // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
