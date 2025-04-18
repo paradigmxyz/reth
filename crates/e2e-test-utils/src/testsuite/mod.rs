@@ -149,3 +149,89 @@ impl<I: 'static> TestBuilder<I> {
         Ok(())
     }
 }
+
+
+impl NodeClient {
+    pub async fn new_payload_v3_wait(
+        &self,
+        payload: ExecutionPayloadV3,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+    ) -> eyre::Result<PayloadStatus> {
+        let mut status = self
+            .engine
+            .new_payload_v3(payload.clone(), versioned_hashes.clone(), parent_beacon_block_root)
+            .await?;
+
+        while !status.is_valid() {
+            if status.is_invalid() {
+                error!(
+                    ?status,
+                    ?payload,
+                    ?versioned_hashes,
+                    ?parent_beacon_block_root,
+                    "Invalid newPayloadV3",
+                );
+                panic!("Invalid newPayloadV3: {status:?}");
+            }
+
+            if status.is_syncing() {
+                return Err(eyre::eyre!("Payload syncing: no canonical state for parent"));
+            }
+
+            status = self
+                .engine
+                .new_payload_v3(payload.clone(), versioned_hashes.clone(), parent_beacon_block_root)
+                .await?;
+        }
+
+        Ok(status)
+    }
+}
+
+pub struct BroadcastNextPayload {
+    pub versioned_hashes: Vec<B256>,
+    pub parent_beacon_block_root: B256,
+}
+
+#[async_trait]
+impl<I> Action<I> for BroadcastNextPayload {
+    async fn execute(&self, env: &mut Environment<I>) -> Result<()> {
+        let payload = env
+            .latest_payload_built
+            .clone()
+            .ok_or_else(|| eyre!("No latest_payload_built in env"))?;
+
+        let mut valid_found = false;
+
+        for client in &env.node_clients {
+            let result = client
+                .new_payload_v3_wait(
+                    payload.clone(),
+                    self.versioned_hashes.clone(),
+                    self.parent_beacon_block_root,
+                )
+                .await;
+
+            match result {
+                Ok(status) if status.is_valid() => {
+                    env.latest_payload_executed = Some(payload.clone());
+                    valid_found = true;
+                    break;
+                }
+                Ok(status) => {
+                    tracing::warn!(?status, "Client did not return valid payload");
+                }
+                Err(err) => {
+                    tracing::error!(?err, "Error during payload broadcast");
+                }
+            }
+        }
+
+        if !valid_found {
+            return Err(eyre!("No client responded with a valid payload"));
+        }
+
+        Ok(())
+    }
+}
