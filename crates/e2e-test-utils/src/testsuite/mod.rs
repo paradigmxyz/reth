@@ -20,6 +20,7 @@ use reth_rpc_api::EngineApiClient;
 use alloy_rpc_types_engine::{ExecutionPayloadV3,PayloadStatus};
 use eyre::eyre;
 use tracing::error;
+use futures::{future::BoxFuture, FutureExt};
 
 #[cfg(test)]
 mod examples;
@@ -158,7 +159,6 @@ impl<I: 'static> TestBuilder<I> {
     }
 }
 
-
 impl NodeClient {
     pub async fn new_payload_v3_wait(
         &self,
@@ -202,44 +202,46 @@ pub struct BroadcastNextPayload {
     pub parent_beacon_block_root: B256,
 }
 
-#[async_trait]
 impl<I> Action<I> for BroadcastNextPayload {
-    async fn execute(&self, env: &mut Environment<I>) -> Result<()> {
-        let payload = env
-            .latest_payload_built
-            .clone()
-            .ok_or_else(|| eyre!("No latest_payload_built in env"))?;
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<I>) -> BoxFuture<'a, Result<()>> {
+        async move {
+            let payload = env
+                .latest_payload_built
+                .clone()
+                .ok_or_else(|| eyre!("No latest_payload_built in env"))?;
 
-        let mut valid_found = false;
+            let mut valid_found = false;
 
-        for client in &env.node_clients {
-            let result = client
-                .new_payload_v3_wait(
-                    payload.clone(),
-                    self.versioned_hashes.clone(),
-                    self.parent_beacon_block_root,
-                )
-                .await;
+            for client in &env.node_clients {
+                let result = client
+                    .new_payload_v3_wait(
+                        payload.clone(),
+                        self.versioned_hashes.clone(),
+                        self.parent_beacon_block_root,
+                    )
+                    .await;
 
-            match result {
-                Ok(status) if status.is_valid() => {
-                    env.latest_payload_executed = Some(payload.clone());
-                    valid_found = true;
-                    break;
-                }
-                Ok(status) => {
-                    tracing::warn!(?status, "Client did not return valid payload");
-                }
-                Err(err) => {
-                    tracing::error!(?err, "Error during payload broadcast");
+                match result {
+                    Ok(status) if status.is_valid() => {
+                        env.latest_payload_executed = Some(payload.clone());
+                        valid_found = true;
+                        break;
+                    }
+                    Ok(status) => {
+                        tracing::warn!(?status, "Client did not return valid payload");
+                    }
+                    Err(err) => {
+                        tracing::error!(?err, "Error during payload broadcast");
+                    }
                 }
             }
-        }
 
-        if !valid_found {
-            return Err(eyre!("No client responded with a valid payload"));
-        }
+            if !valid_found {
+                return Err(eyre!("No client responded with a valid payload"));
+            }
 
-        Ok(())
+            Ok(())
+        }
+        .boxed()
     }
 }
