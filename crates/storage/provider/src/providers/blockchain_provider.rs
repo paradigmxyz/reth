@@ -645,11 +645,11 @@ impl<N: ProviderNodeTypes> CanonChainTracker for BlockchainProvider<N> {
     }
 
     fn on_transition_configuration_exchanged(&self) {
-        self.canonical_in_memory_state.on_transition_configuration_exchanged();
+        todo!()
     }
 
     fn last_exchanged_transition_configuration_timestamp(&self) -> Option<Instant> {
-        self.canonical_in_memory_state.last_exchanged_transition_configuration_timestamp()
+        todo!()
     }
 
     fn set_canonical_head(&self, header: SealedHeader<Self::Header>) {
