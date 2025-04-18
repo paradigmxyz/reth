@@ -141,10 +141,10 @@ where
         let spec = config::revm_spec(self.chain_spec(), header);
 
         // configure evm env based on parent block
-        let mut cfg_env =
-            CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec);
-        cfg_env
-            .set_blob_max_and_target_count(self.blob_max_and_target_count_by_hardfork().to_vec());
+        let cfg_env = CfgEnv::new()
+            .with_chain_id(self.chain_spec().chain().id())
+            .with_spec(spec)
+            .with_blob_max_and_target_count(self.blob_max_and_target_count_by_hardfork().to_vec());
 
         // derive the EIP-4844 blob fees from the header's `excess_blob_gas` and the current
         // blobparams
@@ -183,9 +183,10 @@ where
         );
 
         // configure evm env based on parent block
-        let mut cfg =
-            CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec_id);
-        cfg.set_blob_max_and_target_count(self.blob_max_and_target_count_by_hardfork().to_vec());
+        let cfg = CfgEnv::new()
+            .with_chain_id(self.chain_spec().chain().id())
+            .with_spec(spec_id)
+            .with_blob_max_and_target_count(self.blob_max_and_target_count_by_hardfork().to_vec());
 
         let blob_params = self.chain_spec().blob_params_at_timestamp(attributes.timestamp);
         // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
