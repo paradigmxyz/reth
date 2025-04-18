@@ -94,12 +94,13 @@ impl<EvmFactory> EthEvmConfig<EvmFactory> {
     }
 
     /// Returns blob params by hard fork as specified in chain spec.
-    pub fn blob_max_and_target_count_by_hardfork(&self) -> [(SpecId, u64, u64); 2] {
+    /// Blob params are in format `(spec id, target blob count, max blob count)`.
+    pub fn blob_max_and_target_count_by_hardfork(&self) -> Vec<(SpecId, u64, u64)> {
         let HardforkBlobParams { cancun, prague } = self.chain_spec().blob_params;
-        [
+        Vec::from([
             (SpecId::CANCUN, cancun.target_blob_count, cancun.max_blob_count),
             (SpecId::PRAGUE, prague.target_blob_count, prague.max_blob_count),
-        ]
+        ])
     }
 
     /// Sets the extra data for the block assembler.
@@ -144,7 +145,7 @@ where
         let cfg_env = CfgEnv::new()
             .with_chain_id(self.chain_spec().chain().id())
             .with_spec(spec)
-            .with_blob_max_and_target_count(self.blob_max_and_target_count_by_hardfork().to_vec());
+            .with_blob_max_and_target_count(self.blob_max_and_target_count_by_hardfork());
 
         // derive the EIP-4844 blob fees from the header's `excess_blob_gas` and the current
         // blobparams
@@ -186,7 +187,7 @@ where
         let cfg = CfgEnv::new()
             .with_chain_id(self.chain_spec().chain().id())
             .with_spec(spec_id)
-            .with_blob_max_and_target_count(self.blob_max_and_target_count_by_hardfork().to_vec());
+            .with_blob_max_and_target_count(self.blob_max_and_target_count_by_hardfork());
 
         let blob_params = self.chain_spec().blob_params_at_timestamp(attributes.timestamp);
         // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
