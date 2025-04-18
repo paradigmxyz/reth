@@ -16,7 +16,7 @@ use reth_node_core::{
     utils::get_single_header,
 };
 
-mod bootnode;
+pub mod bootnode;
 mod rlpx;
 
 /// `reth p2p` command

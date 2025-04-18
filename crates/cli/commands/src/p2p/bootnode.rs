@@ -1,17 +1,16 @@
+//! Standalone bootnode command
+
 use clap::Parser;
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config};
 use reth_discv5::{discv5::Event, Config, Discv5};
 use reth_net_nat::NatResolver;
-use reth_network::error::{NetworkError, ServiceKind};
 use reth_network_peers::NodeRecord;
 use std::{net::SocketAddr, str::FromStr};
 use tokio::select;
 use tokio_stream::StreamExt;
 use tracing::info;
 
-/// The arguments for the `reth bootnode` command.
-/// see https://github.com/ethereum/go-ethereum/blob/14eb8967be7acc54c5dc9a416151ac45c01251b6/cmd/bootnode/main.go#L39-L48
-/// for ref
+/// Satrt a discovery only bootnode.
 #[derive(Parser, Debug)]
 pub struct Command {
     /// Listen address for the bootnode (default: ":30301").
@@ -36,17 +35,17 @@ pub struct Command {
 }
 
 impl Command {
-    pub async fn execute(self) -> Result<(), NetworkError> {
+    /// Execute the bootnode command.
+    pub async fn execute(self) -> eyre::Result<()> {
         info!("Bootnode started with config: {:?}", self);
         let sk = reth_network::config::rng_secret_key();
-        let socket_addr = SocketAddr::from_str(&self.addr).expect("Invalid addr");
+        let socket_addr = SocketAddr::from_str(&self.addr)?;
         let local_enr = NodeRecord::from_secret_key(socket_addr, &sk);
 
         let config = Discv4Config::builder().external_ip_resolver(Some(self.nat)).build();
 
-        let (_discv4, mut discv4_service) = Discv4::bind(socket_addr, local_enr, sk, config)
-            .await
-            .map_err(|err| NetworkError::from_io_error(err, ServiceKind::Discovery(socket_addr)))?;
+        let (_discv4, mut discv4_service) =
+            Discv4::bind(socket_addr, local_enr, sk, config).await?;
 
         info!("Started discv4 at address:{:?}", socket_addr);
 
@@ -59,8 +58,7 @@ impl Command {
         if self.v5 {
             info!("Starting discv5");
             let config = Config::builder(socket_addr).build();
-            let (_discv5, updates, _local_enr_discv5) =
-                Discv5::start(&sk, config).await.map_err(NetworkError::Discv5Error)?;
+            let (_discv5, updates, _local_enr_discv5) = Discv5::start(&sk, config).await?;
             discv5_updates = Some(updates);
         };
 
@@ -93,11 +91,8 @@ impl Command {
                     }
                 } => {
                     if let Some(update) = update {
-                        match update {
-                            Event::SessionEstablished(enr, _) => {
-                                info!("(Discv5) new peer added, peer_id={:?}", enr.id());
-                            }
-                            _ => {}
+                     if let Event::SessionEstablished(enr, _) = update {
+                            info!("(Discv5) new peer added, peer_id={:?}", enr.id());
                         }
                     } else {
                         info!("(Discv5) update stream ended.");
