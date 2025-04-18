@@ -1595,7 +1595,7 @@ mod tests {
         node_iter::{TrieElement, TrieNodeIter},
         trie_cursor::{noop::NoopAccountTrieCursor, TrieCursor, TrieCursorFactory},
         walker::TrieWalker,
-        BranchNode, ExtensionNode, HashedPostState, LeafNode, TrieType,
+        BranchNode, ExtensionNode, HashedPostState, LeafNode,
     };
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
