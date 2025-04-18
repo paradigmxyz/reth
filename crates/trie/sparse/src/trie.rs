@@ -1084,7 +1084,7 @@ pub enum LeafLookupError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LeafLookup {
     /// Leaf exists with expected value.
-    Found,
+    Exists,
     /// Leaf does not exist (exclusion proof found).
     NonExistent {
         /// Path where the search diverged from the target path.
@@ -1107,9 +1107,10 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
     ///
     /// # Returns
     ///
-    /// - `Ok(LeafLookup::Found)` if the leaf exists with the expected value.
+    /// - `Ok(LeafLookup::Exists)` if the leaf exists with the expected value.
     /// - `Ok(LeafLookup::NonExistent)` if the leaf definitely does not exist (exclusion proof).
-    /// - `Err(LeafLookupError)` if the search encountered a blinded node or found a different value.
+    /// - `Err(LeafLookupError)` if the search encountered a blinded node or found a different
+    ///   value.
     pub fn find_leaf(
         &self,
         path: &Nibbles,
@@ -1143,7 +1144,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
         if let Some(actual_value) = self.values.get(path) {
             // We found the leaf, check if the value matches (if expected value was provided)
             check_value_match(actual_value, expected_value, path)?;
-            return Ok(LeafLookup::Found);
+            return Ok(LeafLookup::Exists);
         }
 
         // If the value does not exist in the `values` map, then this means that the leaf either:
@@ -1172,7 +1173,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                         // This should have been handled by our initial values map check
                         if let Some(value) = self.values.get(path) {
                             check_value_match(value, expected_value, path)?;
-                            return Ok(LeafLookup::Found);
+                            return Ok(LeafLookup::Exists);
                         }
                     }
 
@@ -1215,7 +1216,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                 // This should be handled by the values map check above
                 if let Some(value) = self.values.get(path) {
                     check_value_match(value, expected_value, path)?;
-                    return Ok(LeafLookup::Found);
+                    return Ok(LeafLookup::Exists);
                 }
             }
             Some(&SparseNode::Hash(hash)) => {
@@ -1790,11 +1791,11 @@ mod find_leaf_tests {
 
         // Check that the leaf exists
         let result = sparse.find_leaf(&path, None);
-        assert_matches!(result, Ok(LeafLookup::Found));
+        assert_matches!(result, Ok(LeafLookup::Exists));
 
         // Check with expected value matching
         let result = sparse.find_leaf(&path, Some(&value));
-        assert_matches!(result, Ok(LeafLookup::Found));
+        assert_matches!(result, Ok(LeafLookup::Exists));
     }
 
     #[test]
@@ -1847,7 +1848,7 @@ mod find_leaf_tests {
         sparse.update_leaf(path.clone(), VALUE_A()).unwrap();
 
         let result = sparse.find_leaf(&path, None);
-        assert_matches!(result, Ok(LeafLookup::Found));
+        assert_matches!(result, Ok(LeafLookup::Exists));
     }
 
     #[test]
@@ -1858,7 +1859,7 @@ mod find_leaf_tests {
         sparse.update_leaf(path.clone(), value.clone()).unwrap();
 
         let result = sparse.find_leaf(&path, Some(&value));
-        assert_matches!(result, Ok(LeafLookup::Found));
+        assert_matches!(result, Ok(LeafLookup::Exists));
     }
 
     #[test]
