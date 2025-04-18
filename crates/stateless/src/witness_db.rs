@@ -52,7 +52,7 @@ impl<'a> WitnessDatabase<'a> {
     ///    to 256 including the current block number). It assumes these hashes correspond to a
     ///    contiguous chain of blocks. The caller is responsible for verifying the contiguity and
     ///    the block limit.
-    pub(crate) fn new(
+    pub(crate) const fn new(
         trie: &'a SparseStateTrie,
         bytecode: B256Map<Bytecode>,
         ancestor_hashes: HashMap<u64, B256>,
