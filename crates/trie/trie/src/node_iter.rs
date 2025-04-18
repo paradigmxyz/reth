@@ -79,7 +79,7 @@ where
             walker,
             hashed_cursor,
             #[cfg(feature = "metrics")]
-            TrieType::State,
+            crate::TrieType::State,
         )
     }
 
@@ -89,7 +89,7 @@ where
             walker,
             hashed_cursor,
             #[cfg(feature = "metrics")]
-            TrieType::Storage,
+            crate::TrieType::Storage,
         )
     }
 
@@ -97,7 +97,7 @@ where
     fn new(
         walker: TrieWalker<C>,
         hashed_cursor: H,
-        #[cfg(feature = "metrics")] trie_type: TrieType,
+        #[cfg(feature = "metrics")] trie_type: crate::TrieType,
     ) -> Self {
         Self {
             walker,
@@ -293,8 +293,18 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
+    use crate::{
+        hashed_cursor::{
+            mock::MockHashedCursorFactory, noop::NoopHashedAccountCursor, HashedCursorFactory,
+            HashedPostStateAccountCursor,
+        },
+        mock::{KeyVisit, KeyVisitType},
+        trie::TrieType,
+        trie_cursor::{
+            mock::MockTrieCursorFactory, noop::NoopAccountTrieCursor, TrieCursorFactory,
+        },
+        walker::TrieWalker,
+    };
     use alloy_primitives::{
         b256,
         map::{B256Map, HashMap},
@@ -308,19 +318,7 @@ mod tests {
         prefix_set::PrefixSetMut, updates::TrieUpdates, BranchNode, HashedPostState, LeafNode,
         RlpNode,
     };
-
-    use crate::{
-        hashed_cursor::{
-            mock::MockHashedCursorFactory, noop::NoopHashedAccountCursor, HashedCursorFactory,
-            HashedPostStateAccountCursor,
-        },
-        mock::{KeyVisit, KeyVisitType},
-        trie::TrieType,
-        trie_cursor::{
-            mock::MockTrieCursorFactory, noop::NoopAccountTrieCursor, TrieCursorFactory,
-        },
-        walker::TrieWalker,
-    };
+    use std::collections::BTreeMap;
 
     use super::{TrieElement, TrieNodeIter};
 
