@@ -58,6 +58,9 @@ pub enum Error {
     /// An error occurred while decoding RLP.
     #[error("an error occurred deserializing RLP: {0}")]
     RlpDecodeError(#[from] alloy_rlp::Error),
+    /// A consensus error occurred.
+    #[error("an error occurred during consensus checks: {0}")]
+    ConsensusError(#[from] reth_consensus::ConsensusError),
 }
 
 /// The result of running a test.

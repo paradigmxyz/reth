@@ -315,23 +315,15 @@ fn pre_execution_checks(
     let sealed_header = block.sealed_header();
     let header = block.header();
 
-    // TODO: add a enum into Error for ConsensusError instead of using Error::Assertion
     <EthBeaconConsensus<ChainSpec> as Consensus<Block>>::validate_body_against_header(
         &consensus,
         block.body(),
         sealed_header,
-    )
-    .map_err(|err| Error::Assertion(err.to_string()))?;
-    consensus
-        .validate_header_against_parent(sealed_header, parent.sealed_header())
-        .map_err(|err| Error::Assertion(err.to_string()))?;
-    consensus
-        .validate_header_with_total_difficulty(header, block.difficulty)
-        .map_err(|err| Error::Assertion(err.to_string()))?;
-    consensus.validate_header(sealed_header).map_err(|err| Error::Assertion(err.to_string()))?;
-    consensus
-        .validate_block_pre_execution(block)
-        .map_err(|err| Error::Assertion(err.to_string()))?;
+    )?;
+    consensus.validate_header_against_parent(sealed_header, parent.sealed_header())?;
+    consensus.validate_header_with_total_difficulty(header, block.difficulty)?;
+    consensus.validate_header(sealed_header)?;
+    consensus.validate_block_pre_execution(block)?;
 
     Ok(())
 }
