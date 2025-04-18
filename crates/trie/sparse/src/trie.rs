@@ -1646,13 +1646,12 @@ mod tests {
                 (nibbles.pack().into_inner().unwrap().into(), Some(account))
             }))
             .into_sorted();
-        let mut node_iter = TrieNodeIter::new(
+        let mut node_iter = TrieNodeIter::state_trie(
             walker,
             HashedPostStateAccountCursor::new(
                 NoopHashedAccountCursor::default(),
                 hashed_post_state.accounts(),
             ),
-            TrieType::State,
         );
 
         while let Some(node) = node_iter.try_next().unwrap() {

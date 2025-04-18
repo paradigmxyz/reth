@@ -1,7 +1,4 @@
-use crate::{
-    hashed_cursor::HashedCursor, trie::TrieType, trie_cursor::TrieCursor, walker::TrieWalker,
-    Nibbles,
-};
+use crate::{hashed_cursor::HashedCursor, trie_cursor::TrieCursor, walker::TrieWalker, Nibbles};
 use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
 use tracing::trace;
@@ -76,8 +73,32 @@ impl<C, H: HashedCursor> TrieNodeIter<C, H>
 where
     H::Value: Copy,
 {
+    /// Creates a new [`TrieNodeIter`] for the state trie.
+    pub fn state_trie(walker: TrieWalker<C>, hashed_cursor: H) -> Self {
+        Self::new(
+            walker,
+            hashed_cursor,
+            #[cfg(feature = "metrics")]
+            TrieType::State,
+        )
+    }
+
+    /// Creates a new [`TrieNodeIter`] for the storage trie.
+    pub fn storage_trie(walker: TrieWalker<C>, hashed_cursor: H) -> Self {
+        Self::new(
+            walker,
+            hashed_cursor,
+            #[cfg(feature = "metrics")]
+            TrieType::Storage,
+        )
+    }
+
     /// Creates a new [`TrieNodeIter`].
-    pub fn new(walker: TrieWalker<C>, hashed_cursor: H, _trie_type: TrieType) -> Self {
+    fn new(
+        walker: TrieWalker<C>,
+        hashed_cursor: H,
+        #[cfg(feature = "metrics")] trie_type: TrieType,
+    ) -> Self {
         Self {
             walker,
             hashed_cursor,
@@ -86,7 +107,7 @@ where
             should_check_walker_key: false,
             last_seeked_hashed_entry: None,
             #[cfg(feature = "metrics")]
-            metrics: crate::metrics::TrieNodeIterMetrics::new(_trie_type),
+            metrics: crate::metrics::TrieNodeIterMetrics::new(trie_type),
             #[cfg(feature = "metrics")]
             previously_advanced_to_key: None,
         }
@@ -320,13 +341,12 @@ mod tests {
             }))
             .into_sorted();
 
-        let mut node_iter = TrieNodeIter::new(
+        let mut node_iter = TrieNodeIter::state_trie(
             walker,
             HashedPostStateAccountCursor::new(
                 NoopHashedAccountCursor::default(),
                 hashed_post_state.accounts(),
             ),
-            TrieType::State,
         );
 
         while let Some(node) = node_iter.try_next().unwrap() {
@@ -456,10 +476,9 @@ mod tests {
             B256Map::default(),
         );
 
-        let mut iter = TrieNodeIter::new(
+        let mut iter = TrieNodeIter::state_trie(
             walker,
             hashed_cursor_factory.hashed_account_cursor().unwrap(),
-            TrieType::State,
         );
 
         // Walk the iterator until it's exhausted.

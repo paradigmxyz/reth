@@ -150,10 +150,9 @@ where
             prefix_sets.account_prefix_set,
         )
         .with_deletions_retained(retain_updates);
-        let mut account_node_iter = TrieNodeIter::new(
+        let mut account_node_iter = TrieNodeIter::state_trie(
             walker,
             hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?,
-            TrieType::State,
         );
 
         let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
