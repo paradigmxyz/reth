@@ -166,10 +166,12 @@ impl NodeClient {
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
     ) -> eyre::Result<PayloadStatus> {
-        let mut status = self
-            .engine
-            .new_payload_v3(payload.clone(), versioned_hashes.clone(), parent_beacon_block_root)
-            .await?;
+        let mut status = EngineApiClient::new_payload_v3(
+            &self.engine,
+            payload.clone(),
+            versioned_hashes.clone(),
+            parent_beacon_block_root,
+        ).await?;
 
         while !status.is_valid() {
             if status.is_invalid() {
