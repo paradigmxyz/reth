@@ -16,6 +16,10 @@ use std::{collections::HashMap, marker::PhantomData};
 pub mod actions;
 pub mod setup;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
+use reth_rpc_api::EngineApiClient;
+use alloy_rpc_types_engine::{ExecutionPayloadV3,PayloadStatus};
+use eyre::eyre;
+use tracing::error;
 
 #[cfg(test)]
 mod examples;
