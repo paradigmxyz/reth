@@ -294,7 +294,7 @@ pub fn verify_execution_witness(
 /// Note: This function becomes obsolete if EIP-2935 is implemented.
 /// Note: The headers are assumed to be in ascending order.
 ///
-/// If both checks pass, it returns a [`HashMap`] mapping the block number of each
+/// If both checks pass, it returns a [`BTreeMap`] mapping the block number of each
 /// ancestor header to its corresponding block hash.
 fn compute_ancestor_hashes(
     current_block: &RecoveredBlock<Block<TransactionSigned>>,
