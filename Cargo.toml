@@ -357,7 +357,7 @@ reth-ethereum-primitives = { path = "crates/ethereum/primitives", default-featur
 reth-ethereum = { path = "crates/ethereum/reth" }
 reth-etl = { path = "crates/etl" }
 reth-evm = { path = "crates/evm", default-features = false }
-reth-evm-ethereum = { path = "crates/ethereum/evm" }
+reth-evm-ethereum = { path = "crates/ethereum/evm", default-features = false }
 reth-optimism-evm = { path = "crates/optimism/evm", default-features = false }
 reth-execution-errors = { path = "crates/evm/execution-errors", default-features = false }
 reth-execution-types = { path = "crates/evm/execution-types", default-features = false }
