@@ -1,14 +1,13 @@
 //! Provides the [`WitnessDatabase`] type, an implementation of [`reth_revm::Database`]
 //! specifically designed for stateless execution environments.
 
+use alloc::{collections::btree_map::BTreeMap, format};
 use alloy_primitives::{keccak256, map::B256Map, Address, B256, U256};
 use alloy_rlp::Decodable;
 use alloy_trie::TrieAccount;
 use reth_errors::ProviderError;
 use reth_revm::{bytecode::Bytecode, state::AccountInfo, Database};
 use reth_trie_sparse::SparseStateTrie;
-use std::collections::HashMap;
-use tracing::trace;
 
 /// An EVM database implementation backed by witness data.
 ///
@@ -26,7 +25,7 @@ pub(crate) struct WitnessDatabase<'a> {
     // TODO: use Vec instead -- ancestors should be contiguous
     // TODO: so we can use the current_block_number and an offset to
     // TODO: get the block number of a particular ancestor
-    block_hashes_by_block_number: HashMap<u64, B256>,
+    block_hashes_by_block_number: BTreeMap<u64, B256>,
     /// Map of code hashes to bytecode.
     /// Used to fetch contract code needed during execution.
     bytecode: B256Map<Bytecode>,
@@ -55,7 +54,7 @@ impl<'a> WitnessDatabase<'a> {
     pub(crate) const fn new(
         trie: &'a SparseStateTrie,
         bytecode: B256Map<Bytecode>,
-        ancestor_hashes: HashMap<u64, B256>,
+        ancestor_hashes: BTreeMap<u64, B256>,
     ) -> Self {
         Self { trie, block_hashes_by_block_number: ancestor_hashes, bytecode }
     }
@@ -71,11 +70,7 @@ impl Database for WitnessDatabase<'_> {
     /// Returns `Ok(None)` if the account is not found in the trie.
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         let hashed_address = keccak256(address);
-        trace!(target: "reth-stateless::evm", %address, %hashed_address, "retrieving account");
-        let Some(bytes) = self.trie.get_account_value(&hashed_address) else {
-            trace!(target: "reth-stateless::evm", %address, %hashed_address, "no account found");
-            return Ok(None)
-        };
+        let Some(bytes) = self.trie.get_account_value(&hashed_address) else { return Ok(None) };
         let account = TrieAccount::decode(&mut bytes.as_slice())?;
         let account_info = AccountInfo {
             balance: account.balance,
@@ -83,7 +78,6 @@ impl Database for WitnessDatabase<'_> {
             code_hash: account.code_hash,
             code: None,
         };
-        trace!(target: "reth-stateless::evm", %address, %hashed_address, ?account_info, "account retrieved");
         Ok(Some(account_info))
     }
 
@@ -94,14 +88,12 @@ impl Database for WitnessDatabase<'_> {
         let slot = B256::from(slot);
         let hashed_address = keccak256(address);
         let hashed_slot = keccak256(slot);
-        trace!(target: "reth-stateless::evm", %address, %hashed_address, %slot, %hashed_slot, "retrieving storage slot");
         let value =
             if let Some(value) = self.trie.get_storage_slot_value(&hashed_address, &hashed_slot) {
                 U256::decode(&mut value.as_slice())?
             } else {
                 U256::ZERO
             };
-        trace!(target: "reth-stateless::evm", %address, %hashed_address, %slot, %hashed_slot, %value, "storage slot retrieved");
         Ok(value)
     }
 
@@ -109,8 +101,6 @@ impl Database for WitnessDatabase<'_> {
     ///
     /// Returns an error if the bytecode for the given hash is not found in the map.
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        trace!(target: "reth-stateless::evm", %code_hash, "retrieving bytecode");
-
         // TODO: This was added because the beacon root contract was not being included
         // TODO: in the witness, when there were no transactions. See `notxs.json` in
         // TODO: the execution spec tests. Once it is fixed, we can remove this.
