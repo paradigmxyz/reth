@@ -20,6 +20,14 @@ pub enum Error {
     /// No post state found in test
     #[error("no post state found for validation")]
     MissingPostState,
+    /// Block processing failed
+    /// Note: This includes but is not limited to execution.
+    /// For example, the header number could be incorrect.
+    #[error("block {block_number} failed to process")]
+    BlockProcessingFailed {
+        /// The block number for the block that failed
+        block_number: u64,
+    },
     /// An IO error occurred
     #[error("an error occurred interacting with the file system at {path}: {error}")]
     Io {
@@ -50,6 +58,9 @@ pub enum Error {
     /// An error occurred while decoding RLP.
     #[error("an error occurred deserializing RLP: {0}")]
     RlpDecodeError(#[from] alloy_rlp::Error),
+    /// A consensus error occurred.
+    #[error("an error occurred during consensus checks: {0}")]
+    ConsensusError(#[from] reth_consensus::ConsensusError),
 }
 
 /// The result of running a test.
