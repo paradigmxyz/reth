@@ -29,7 +29,7 @@ use reth_db_api::{
 use reth_ethereum_primitives::{Block, EthPrimitives, Receipt, TransactionSigned};
 use reth_evm::{ConfigureEvm, EvmEnv};
 use reth_execution_types::ExecutionOutcome;
-use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
+use reth_node_types::{BlockTy, HeaderTy, NodeTypes, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, BlockBody, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader, StorageEntry,
 };

@@ -23,6 +23,7 @@ use reth_tasks::TokioTaskExecutor;
 use reth_transaction_pool::{
     noop::NoopTransactionPool,
     test_utils::{TestPool, TestPoolBuilder},
+    EthPooledTransaction,
 };
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -48,7 +49,7 @@ pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
         MAINNET.clone(),
         beacon_engine_handle,
         spawn_test_payload_service().into(),
-        NoopTransactionPool::default(),
+        NoopTransactionPool::<EthPooledTransaction>::default(),
         Box::<TokioTaskExecutor>::default(),
         client,
         EngineCapabilities::default(),
