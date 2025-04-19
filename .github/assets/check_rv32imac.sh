@@ -7,6 +7,7 @@ crates_to_check=(
     reth-primitives-traits
     reth-network-peers
     reth-trie-common
+    reth-trie-sparse
     reth-chainspec
     reth-consensus
     reth-consensus-common
