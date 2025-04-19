@@ -3084,7 +3084,6 @@ dependencies = [
  "alloy-genesis",
  "alloy-primitives 1.0.0",
  "alloy-rlp",
- "alloy-rpc-types-debug",
  "rayon",
  "reth-chainspec",
  "reth-consensus",
@@ -9898,7 +9897,6 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives 1.0.0",
  "alloy-rlp",
- "alloy-rpc-types-debug",
  "alloy-trie",
  "itertools 0.14.0",
  "reth-chainspec",
@@ -9911,8 +9909,8 @@ dependencies = [
  "reth-revm",
  "reth-trie-common",
  "reth-trie-sparse",
+ "serde",
  "thiserror 2.0.12",
- "tracing",
 ]
 
 [[package]]
