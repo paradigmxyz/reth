@@ -607,6 +607,9 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         });
 
         discovery_v5_builder = discovery_v5_builder.map(|mut builder| {
+            if discovery_v4_builder.is_none() {
+                builder = builder.discv4_disabled();
+            }
             if let Some(network_stack_id) = NetworkStackId::id(&chain_spec) {
                 let fork_id = chain_spec.fork_id(&head);
                 builder = builder.fork(network_stack_id, fork_id)
