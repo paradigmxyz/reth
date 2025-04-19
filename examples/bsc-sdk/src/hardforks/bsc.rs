@@ -1,3 +1,4 @@
+#![allow(unused)]
 use alloy_chains::Chain;
 use core::any::Any;
 use reth_chainspec::ForkCondition;

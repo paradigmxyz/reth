@@ -1,5 +1,5 @@
 use super::{BscEthApi, BscNodeCore};
-use crate::evm::transaction::BscTransaction;
+use crate::evm::transaction::BscTxEnv;
 use alloy_consensus::TxType;
 use alloy_primitives::{TxKind, U256};
 use alloy_rpc_types::TransactionRequest;
@@ -40,7 +40,7 @@ where
                     SignedTx = ProviderTx<Self::Provider>,
                 >,
                 BlockExecutorFactory: BlockExecutorFactory<
-                    EvmFactory: EvmFactory<Tx = BscTransaction<TxEnv>>,
+                    EvmFactory: EvmFactory<Tx = BscTxEnv<TxEnv>>,
                 >,
             >,
             Error: FromEvmError<Self::Evm>,
@@ -63,7 +63,7 @@ where
         evm_env: &EvmEnv<SpecFor<Self::Evm>>,
         request: TransactionRequest,
         mut db: impl Database<Error: Into<EthApiError>>,
-    ) -> Result<BscTransaction<TxEnv>, Self::Error> {
+    ) -> Result<BscTxEnv<TxEnv>, Self::Error> {
         // Ensure that if versioned hashes are set, they're not empty
         if request.blob_versioned_hashes.as_ref().is_some_and(|hashes| hashes.is_empty()) {
             return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into_eth_err())
@@ -154,6 +154,6 @@ where
             authorization_list: authorization_list.unwrap_or_default(),
         };
 
-        Ok(BscTransaction::new(env))
+        Ok(BscTxEnv::new(env))
     }
 }

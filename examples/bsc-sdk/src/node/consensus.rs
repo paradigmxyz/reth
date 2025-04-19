@@ -59,14 +59,14 @@ impl<ChainSpec: EthChainSpec + BscHardforks, B: Block> Consensus<B> for BscConse
 
     fn validate_body_against_header(
         &self,
-        body: &B::Body,
-        header: &SealedHeader<B::Header>,
+        _body: &B::Body,
+        _header: &SealedHeader<B::Header>,
     ) -> Result<(), ConsensusError> {
         // validate_body_against_header(body, header.header())
         Ok(())
     }
 
-    fn validate_block_pre_execution(&self, block: &SealedBlock<B>) -> Result<(), ConsensusError> {
+    fn validate_block_pre_execution(&self, _block: &SealedBlock<B>) -> Result<(), ConsensusError> {
         // Check ommers hash
         // let ommers_hash = block.body().calculate_ommers_root();
         // if Some(block.ommers_hash()) != ommers_hash {
@@ -97,7 +97,7 @@ impl<ChainSpec: EthChainSpec + BscHardforks, B: Block> Consensus<B> for BscConse
 impl<ChainSpec: EthChainSpec + BscHardforks, H: BlockHeader> HeaderValidator<H>
     for BscConsensus<ChainSpec>
 {
-    fn validate_header(&self, header: &SealedHeader<H>) -> Result<(), ConsensusError> {
+    fn validate_header(&self, _header: &SealedHeader<H>) -> Result<(), ConsensusError> {
         // validate_header_gas(header.header())?;
         // validate_header_base_fee(header.header(), &self.chain_spec)
         Ok(())
@@ -105,8 +105,8 @@ impl<ChainSpec: EthChainSpec + BscHardforks, H: BlockHeader> HeaderValidator<H>
 
     fn validate_header_against_parent(
         &self,
-        header: &SealedHeader<H>,
-        parent: &SealedHeader<H>,
+        _header: &SealedHeader<H>,
+        _parent: &SealedHeader<H>,
     ) -> Result<(), ConsensusError> {
         // validate_against_parent_hash_number(header.header(), parent)?;
 
@@ -126,7 +126,7 @@ impl<ChainSpec: EthChainSpec + BscHardforks, H: BlockHeader> HeaderValidator<H>
 
     fn validate_header_with_total_difficulty(
         &self,
-        header: &H,
+        _header: &H,
         _total_difficulty: U256,
     ) -> Result<(), ConsensusError> {
         // if header.nonce() != Some(B64::ZERO) {

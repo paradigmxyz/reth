@@ -1,4 +1,5 @@
 //! Hard forks of bsc protocol.
+#![allow(unused)]
 use bsc::BscHardfork;
 use reth_chainspec::{EthereumHardforks, ForkCondition};
 
@@ -6,7 +7,7 @@ pub mod bsc;
 
 /// Extends [`EthereumHardforks`] with bsc helper methods.
 pub trait BscHardforks: EthereumHardforks {
-    /// Retrieves [`ForkCondition`] by an [`OpHardfork`]. If `fork` is not present, returns
+    /// Retrieves [`ForkCondition`] by an [`BscHardfork`]. If `fork` is not present, returns
     /// [`ForkCondition::Never`].
     fn bsc_fork_activation(&self, fork: BscHardfork) -> ForkCondition;
 
