@@ -31,8 +31,14 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![no_std]
+
+extern crate alloc;
 
 pub(crate) mod root;
 /// Implementation of stateless validation
 pub mod validation;
 pub(crate) mod witness_db;
+
+mod execution_witness;
+pub use execution_witness::ExecutionWitness;
