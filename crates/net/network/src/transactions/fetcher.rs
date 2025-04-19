@@ -99,6 +99,13 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     /// Removes the peer from the active set.
     pub(crate) fn remove_peer(&mut self, peer_id: &PeerId) {
         self.active_peers.remove(peer_id);
+        if let Some(cache) = self.hashes_pending_fetch_by_peer.remove(peer_id) {
+            for hash in cache.iter() {
+                if let Some(entry) = self.hashes_fetch_inflight_and_pending_fetch.get(hash) {
+                    entry.fallback_peers_mut().remove(peer_id);
+                }
+            }
+        }
     }
 
     /// Updates metrics.
