@@ -850,7 +850,7 @@ mod tests {
                     closed = c;
                 }
 
-                // Send back back the error.
+                // Send back the error.
                 Either::Right((Some(Err(e)), _)) => break Err(e.into()),
             }
         }

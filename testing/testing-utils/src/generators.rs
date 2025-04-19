@@ -175,7 +175,7 @@ pub fn sign_tx_with_key_pair(key_pair: Keypair, tx: Transaction) -> TransactionS
     TransactionSigned::new_unhashed(tx, signature)
 }
 
-/// Generates a a new random [Keypair].
+/// Generates a new random [Keypair].
 pub fn generate_key<R: Rng>(_rng: &mut R) -> Keypair {
     let secp = Secp256k1::new();
     Keypair::new(&secp, &mut rand_08::thread_rng())

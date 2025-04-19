@@ -73,7 +73,7 @@ pub struct TrieNodeIterMetrics {
     /// The number of branch nodes returned by the iterator.
     branch_nodes_returned_total: Counter,
     /// The number of times the same hashed cursor key was seeked multiple times in a row by the
-    /// iterator. It does not mean mean the database seek was actually done, as the trie node
+    /// iterator. It does not mean the database seek was actually done, as the trie node
     /// iterator caches the last hashed cursor seek.
     leaf_nodes_same_seeked_total: Counter,
     /// The number of times the same leaf node as we just advanced to was seeked by the iterator.

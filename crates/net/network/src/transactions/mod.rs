@@ -1908,7 +1908,7 @@ enum TransactionsCommand<N: NetworkPrimitives = EthNetworkPrimitives> {
         peers: Vec<PeerId>,
         tx: oneshot::Sender<HashMap<PeerId, HashSet<TxHash>>>,
     },
-    /// Requests a clone of the sender sender channel to the peer.
+    /// Requests a clone of the sender channel to the peer.
     GetPeerSender {
         peer_id: PeerId,
         peer_request_sender: oneshot::Sender<Option<PeerRequestSender<PeerRequest<N>>>>,

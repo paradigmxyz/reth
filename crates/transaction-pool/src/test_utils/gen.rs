@@ -28,7 +28,7 @@ impl<R: RngCore> TransactionGenerator<R> {
         Self::with_num_signers(rng, 10)
     }
 
-    /// Generates random random signers
+    /// Generates random signers
     pub fn with_num_signers(rng: R, num_signers: usize) -> Self {
         Self {
             rng,

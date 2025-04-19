@@ -34,7 +34,7 @@ pub enum MessageError {
     /// Flags an unrecognized message ID for a given protocol version.
     #[error("message id {1:?} is invalid for version {0:?}")]
     Invalid(EthVersion, EthMessageID),
-    /// Thrown when rlp decoding a message message failed.
+    /// Thrown when rlp decoding a message failed.
     #[error("RLP error: {0}")]
     RlpError(#[from] alloy_rlp::Error),
 }
