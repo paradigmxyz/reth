@@ -1,7 +1,7 @@
 use crate::{NodePrimitivesProvider, StorageLocation};
 use alloc::vec::Vec;
 use alloy_primitives::BlockNumber;
-use reth_db_api::models::StoredBlockBodyIndices;
+use reth_db_models::StoredBlockBodyIndices;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock};
 use reth_storage_errors::provider::ProviderResult;
@@ -53,6 +53,7 @@ impl<T: BlockExecutionWriter> BlockExecutionWriter for &T {
         (*self).remove_block_and_execution_above(block, remove_from)
     }
 }
+
 /// Block Writer
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BlockWriter: Send + Sync {
