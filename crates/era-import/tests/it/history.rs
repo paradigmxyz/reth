@@ -4,7 +4,7 @@ use reth_provider::test_utils::create_test_provider_factory;
 use std::str::FromStr;
 use tempfile::tempdir;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_history_imports_from_fresh_state_successfully() {
     // URL where the ERA1 files are hosted
     let url = Url::from_str("https://mainnet.era1.nimbus.team/").unwrap();
