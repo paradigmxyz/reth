@@ -1,5 +1,6 @@
 //! An integration of [`reth-trie`] with [`reth-db`].
 
+#![warn(clippy::iter_over_hash_type)]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 mod commitment;

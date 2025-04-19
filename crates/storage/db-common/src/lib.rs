@@ -1,3 +1,4 @@
+#![warn(clippy::iter_over_hash_type)]
 //! Common db operations
 
 #![doc(
