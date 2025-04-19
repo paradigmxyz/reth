@@ -1,5 +1,6 @@
 // Copied and modified from ress: https://github.com/paradigmxyz/ress/blob/06bf2c4788e45b8fcbd640e38b6243e6f87c4d0e/crates/engine/src/tree/root.rs
 
+use alloc::vec::Vec;
 use alloy_primitives::B256;
 use alloy_rlp::{Decodable, Encodable};
 use itertools::Itertools;
