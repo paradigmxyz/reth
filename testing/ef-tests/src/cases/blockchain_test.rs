@@ -70,7 +70,7 @@ impl BlockchainTestCase {
     ///
     /// This fixture fails as expected, however it fails at the wrong block number.
     /// Given we no longer have uncle blocks, this test case was pulled out such
-    /// that we ensure it still fails, however we do not check the block number.
+    /// that we ensure it still fails as expected, however we do not check the block number.
     #[inline]
     fn is_uncle_sidechain_case(name: &str) -> bool {
         name.contains("UncleFromSideChain")
