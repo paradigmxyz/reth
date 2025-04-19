@@ -21,6 +21,8 @@ use alloy_rpc_types_engine::{ExecutionPayloadV3,PayloadStatus};
 use eyre::eyre;
 use tracing::error;
 use futures_util::{future::BoxFuture,FutureExt};
+use reth_provider::providers::BlockchainProvider;
+use crate::TmpDB;
 
 #[cfg(test)]
 mod examples;
