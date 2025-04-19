@@ -5,7 +5,6 @@ use crate::{
     Case, Error, Suite,
 };
 use alloy_rlp::{Decodable, Encodable};
-use alloy_rpc_types_debug::ExecutionWitness;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_chainspec::ChainSpec;
 use reth_consensus::{Consensus, HeaderValidator};
@@ -21,7 +20,7 @@ use reth_provider::{
     StateWriter, StorageLocation,
 };
 use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord, State};
-use reth_stateless::validation::stateless_validation;
+use reth_stateless::{validation::stateless_validation, ExecutionWitness};
 use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
 use reth_trie_db::DatabaseStateRoot;
 

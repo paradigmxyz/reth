@@ -39,7 +39,6 @@ revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
 alloy-rlp.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
-alloy-rpc-types-debug.workspace = true
 alloy-consensus.workspace = true
 alloy-genesis.workspace = true
 
