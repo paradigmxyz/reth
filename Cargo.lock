@@ -8250,6 +8250,7 @@ dependencies = [
  "pin-project",
  "rand 0.9.0",
  "reth-tracing",
+ "serde",
  "serde_json",
  "thiserror 2.0.12",
  "tokio",
