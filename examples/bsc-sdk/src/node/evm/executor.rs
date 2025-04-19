@@ -12,7 +12,6 @@ use reth_evm::{
     block::BlockValidationError,
     eth::{receipt_builder::ReceiptBuilder, EthBlockExecutionCtx},
     execute::{BlockExecutionError, BlockExecutor},
-    state_change::post_block_balance_increments,
     Database, Evm, FromRecoveredTx, FromTxWithEncoded, OnStateHook,
 };
 use reth_primitives::{Log, TransactionSigned};
@@ -261,26 +260,11 @@ where
             self.deploy_feynman_contracts(self.evm.block().beneficiary)?;
         }
 
-        // increment balances
-        let balance_increments = post_block_balance_increments(
-            &self.spec,
-            self.evm.block(),
-            self.ctx.ommers,
-            self.ctx.withdrawals.as_deref(),
-        );
-
-        self.evm
-            .db_mut()
-            .increment_balances(balance_increments.clone())
-            .map_err(|_| BlockValidationError::IncrementBalanceFailed)?;
+        // TODO: Distribute block rewards
 
         // TODO:
         // Consensus: Slash validator if not in turn
-        // Consensus: Distribute rewards
         // Consensus: Update validator set
-
-        let state = self.evm.db_mut().bundle_state.clone();
-        println!("bundle state: {:?}", state);
 
         Ok((
             self.evm,

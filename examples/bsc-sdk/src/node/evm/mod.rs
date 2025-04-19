@@ -122,10 +122,7 @@ where
         contract: Address,
         data: Bytes,
     ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
-        // TODO: error handling
-        let account = self.db_mut().basic(caller).unwrap().unwrap_or_default();
-
-        println!("account: {:?}", account.nonce);
+        let account = self.db_mut().basic(caller)?.unwrap_or_default();
 
         let tx = TxEnv {
             caller,

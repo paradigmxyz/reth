@@ -38,7 +38,6 @@ impl<Spec: EthChainSpec> SystemContract<Spec> {
     }
 
     pub(crate) fn genesis_contracts_txs(&self) -> Vec<TransactionSigned> {
-        println!("genesis_contracts_txs");
         let function = self.validator_abi.function("init").unwrap().first().unwrap();
         let input = function.abi_encode_input(&[]).unwrap();
 
