@@ -92,10 +92,6 @@ impl BlockchainTestCase {
     /// Execute a single `BlockchainTest`, validating the outcome against the
     /// expectations encoded in the JSON file.
     fn run_single_case(name: &str, case: &BlockchainTest) -> Result<(), Error> {
-        // TODO: Added for CI, remove once PR that fixed it is merged
-        if name.contains("GasLimitHigherThan2p63m1") {
-            return Ok(())
-        }
         let expectation = Self::expected_failure(case);
         match run_case(case) {
             // All blocks executed successfully.
@@ -271,9 +267,8 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     // made after we execute each block was successful.
     // If an error occurs here, then its:
     // - Either an issue with the test setup
-    // - Possibly an error in the test case where the
-    // post-state root in the last block does not
-    // match the post-state values.
+    // - Possibly an error in the test case where the post-state root in the last block does not
+    //   match the post-state values.
     let expected_post_state = case.post_state.as_ref().ok_or(Error::MissingPostState)?;
     for (&address, account) in expected_post_state {
         account.assert_db(address, provider.tx_ref())?;
