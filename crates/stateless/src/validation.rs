@@ -1,10 +1,13 @@
-use std::{collections::HashMap, sync::Arc};
-
-use crate::witness_db::WitnessDatabase;
+use crate::{witness_db::WitnessDatabase, ExecutionWitness};
+use alloc::{
+    collections::BTreeMap,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 use alloy_consensus::{Block, BlockHeader, Header};
 use alloy_primitives::{keccak256, map::B256Map, B256, U256};
 use alloy_rlp::Decodable;
-use alloy_rpc_types_debug::ExecutionWitness;
 use reth_chainspec::ChainSpec;
 use reth_consensus::{Consensus, HeaderValidator};
 use reth_errors::ConsensusError;
@@ -296,8 +299,8 @@ pub fn verify_execution_witness(
 fn compute_ancestor_hashes(
     current_block: &RecoveredBlock<Block<TransactionSigned>>,
     ancestor_headers: &[Header],
-) -> Result<HashMap<u64, B256>, StatelessValidationError> {
-    let mut ancestor_hashes = HashMap::with_capacity(ancestor_headers.len());
+) -> Result<BTreeMap<u64, B256>, StatelessValidationError> {
+    let mut ancestor_hashes = BTreeMap::new();
 
     let mut child_header = current_block.header();
 
