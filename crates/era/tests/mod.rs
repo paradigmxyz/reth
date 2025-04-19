@@ -2,6 +2,12 @@
 //!
 //! These tests use the `reth-era-downloader` client to download `.era1` files temporarily
 //! and verify that we can correctly read and decompress their data.
+//!
+//! Files are downloaded from the Nimbus mainnet server:
+//! <https://mainnet.era1.nimbus.team/>
+//! and
+//! from the Sepolia testnet server:
+//! <https://sepolia.era1.nimbus.team/>
 
 use alloy_consensus::{BlockBody, Header};
 use alloy_primitives::{Bytes, U256};
@@ -39,6 +45,17 @@ const ERA1_MAINNET_FILES_NAMES: [&str; 6] = [
     "mainnet-01367-d7efc68f.era1",
 ];
 
+/// Default sepolia nimbus mainnet url
+/// for downloading sepolia `.era1` files
+const SEPOLIA: &str = "sepolia";
+const SEPOLIA_URL: &str = "https://sepolia.era1.nimbus.team/";
+
+/// Succint list of mainnet files we want to download
+/// from <https://mainnet.era1.nimbus.team/>
+/// for testing purposes
+const ERA1_SEPOLIA_FILES_NAMES: [&str; 3] =
+    ["sepolia-00000-643a00f7.era1", "sepolia-00074-0e81003c.era1", "sepolia-00173-b6924da5.era1"];
+
 /// Utility for downloading `.era1` files for tests
 /// in a temporary directory
 /// and caching them in memory
@@ -66,7 +83,7 @@ impl Era1TestDownloader {
     }
 
     /// Download a specific .era1 file by name
-    pub async fn download_file(&self, filename: &str) -> Result<PathBuf, E2sError> {
+    pub async fn download_file(&self, filename: &str, network: &str) -> Result<PathBuf, E2sError> {
         // check cache first
         {
             let cache = self.file_cache.lock().unwrap();
@@ -76,22 +93,35 @@ impl Era1TestDownloader {
         }
 
         // check if the filename is supported
-        if !ERA1_MAINNET_FILES_NAMES.contains(&filename) {
+        if !ERA1_MAINNET_FILES_NAMES.contains(&filename) &&
+            !ERA1_SEPOLIA_FILES_NAMES.contains(&filename)
+        {
             return Err(E2sError::Io(std::io::Error::other(format!(
-                "Unknown file: {}. Only the following files are supported: {:?}",
-                filename, ERA1_MAINNET_FILES_NAMES
+                "Unknown file: {}. Only the following files are supported: {:?} or {:?}",
+                filename, ERA1_MAINNET_FILES_NAMES, ERA1_SEPOLIA_FILES_NAMES
             ))));
         }
 
         // initialize the client and build url config
-        let url = Url::from_str(MAINNET_URL).map_err(|e| {
+        let url = match network {
+            MAINNET => MAINNET_URL,
+            SEPOLIA => SEPOLIA_URL,
+            _ => {
+                return Err(E2sError::Io(std::io::Error::other(format!(
+                    "Unknown network: {}. Only mainnet and sepolia are supported.",
+                    network
+                ))));
+            }
+        };
+
+        let final_url = Url::from_str(url).map_err(|e| {
             E2sError::Io(std::io::Error::other(format!("Failed to parse URL: {}", e)))
         })?;
 
         let folder = self.temp_dir.path().to_owned().into_boxed_path();
 
         // set up the client
-        let client = EraClient::new(Client::new(), url, folder);
+        let client = EraClient::new(Client::new(), final_url, folder);
 
         // set up the file list, required before we can download files
         client.fetch_file_list().await.map_err(|e| {
@@ -99,7 +129,7 @@ impl Era1TestDownloader {
         })?;
 
         // create an url for the file
-        let file_url = Url::parse(&format!("{}{}", MAINNET_URL, filename)).map_err(|e| {
+        let file_url = Url::parse(&format!("{}{}", url, filename)).map_err(|e| {
             E2sError::Io(std::io::Error::other(format!("Failed to create URL: {}", e)))
         })?;
 
@@ -124,7 +154,7 @@ impl Era1TestDownloader {
         filename: &str,
         network: &str,
     ) -> Result<Era1File, E2sError> {
-        let path = self.download_file(filename).await?;
+        let path = self.download_file(filename, network).await?;
         Era1Reader::open(&path, network)
     }
 }
@@ -148,7 +178,7 @@ pub async fn open_test_file(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_era1_file_decompression_and_decoding() -> Result<(), E2sError> {
+async fn test_mainnet_era1_only_file_decompression_and_decoding() -> Result<(), E2sError> {
     let downloader = Era1TestDownloader::new().await.expect("Failed to create downloader");
 
     for &filename in &ERA1_MAINNET_FILES_NAMES {
@@ -284,10 +314,10 @@ async fn test_era1_file_decompression_and_decoding() -> Result<(), E2sError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_genesis_block_decompression() -> Result<(), E2sError> {
+async fn test_mainnet_genesis_block_decompression() -> Result<(), E2sError> {
     let downloader = Era1TestDownloader::new().await?;
 
-    let file = downloader.open_era1_file("mainnet-00000-5ec1ffb8.era1", MAINNET).await?;
+    let file = downloader.open_era1_file(ERA1_MAINNET_FILES_NAMES[0], MAINNET).await?;
 
     // Genesis and a few early blocks
     let test_blocks = [0, 1, 10, 100];
@@ -308,8 +338,6 @@ async fn test_genesis_block_decompression() -> Result<(), E2sError> {
         println!("Successfully decompressed body: {} bytes", body_data.len());
 
         let body = block.body.decode_body::<Bytes, Header>()?;
-        println!("Successfully decoded body with {} transactions", body.transactions.len());
-        println!("Block has {} ommers/uncles", body.ommers.len());
 
         // For genesis era blocks, there should be no transactions or ommers
         assert_eq!(body.transactions.len(), 0, "Genesis era block should have no transactions");
@@ -327,5 +355,60 @@ async fn test_genesis_block_decompression() -> Result<(), E2sError> {
         println!("Block {} total difficulty: {}", block_number, td);
     }
 
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_sepolia_genesis_block_decompression() -> Result<(), E2sError> {
+    let downloader = Era1TestDownloader::new().await?;
+
+    let file = downloader.open_era1_file(ERA1_SEPOLIA_FILES_NAMES[0], SEPOLIA).await?;
+
+    // Genesis and a few early blocks
+    let test_blocks = [0, 1, 10, 100];
+
+    for &block_idx in &test_blocks {
+        let block = &file.group.blocks[block_idx];
+        let block_number = file.group.block_index.starting_number + block_idx as u64;
+
+        println!(
+            "Testing block {}, compressed body size: {} bytes",
+            block_number,
+            block.body.data.len()
+        );
+
+        // Test decompression
+        let body_data = block.body.decompress()?;
+        assert!(!body_data.is_empty(), "Decompressed body should not be empty");
+        println!("Successfully decompressed body: {} bytes", body_data.len());
+
+        let body = block.body.decode_body::<Bytes, Header>()?;
+
+        // For genesis era blocks, there should be no transactions or ommers
+        assert_eq!(body.transactions.len(), 0, "Genesis era block should have no transactions");
+        assert_eq!(body.ommers.len(), 0, "Genesis era block should have no ommers");
+
+        // Check for withdrawals, should be `None` for genesis era blocks
+        assert!(body.withdrawals.is_none(), "Genesis era block should have no withdrawals");
+
+        let header = block.header.decode_header()?;
+        assert_eq!(header.number, block_number, "Header should have correct block number");
+        println!("Successfully decoded header for block {}", block_number);
+
+        // Test total difficulty value
+        let td = block.total_difficulty.value;
+        println!("Block {} total difficulty: {}", block_number, td);
+    }
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_roundtrip_compression_encoding_mainnet() -> Result<(), E2sError> {
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_roundtrip_compression_encoding_sepolia() -> Result<(), E2sError> {
     Ok(())
 }
