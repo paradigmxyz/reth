@@ -7,7 +7,8 @@ use alloy_eips::{calc_next_block_base_fee, eip4844::DATA_GAS_PER_BLOB, eip7840::
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::ConsensusError;
 use reth_primitives_traits::{
-    Block, BlockBody, BlockHeader, GotExpected, SealedBlock, SealedHeader,
+    constants::MAXIMUM_GAS_LIMIT_BLOCK, Block, BlockBody, BlockHeader, GotExpected, SealedBlock,
+    SealedHeader,
 };
 
 /// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
@@ -18,6 +19,10 @@ pub fn validate_header_gas<H: BlockHeader>(header: &H) -> Result<(), ConsensusEr
             gas_used: header.gas_used(),
             gas_limit: header.gas_limit(),
         })
+    }
+    // Check that the gas limit is below the maximum allowed gas limit
+    if header.gas_limit() > MAXIMUM_GAS_LIMIT_BLOCK {
+        return Err(ConsensusError::HeaderGasLimitExceedsMax { gas_limit: header.gas_limit() })
     }
     Ok(())
 }
