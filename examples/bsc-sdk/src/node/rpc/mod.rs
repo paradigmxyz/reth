@@ -23,8 +23,8 @@ use reth_network::NetworkInfo;
 use reth_optimism_rpc::eth::EthApiNodeBackend;
 use reth_primitives::NodePrimitives;
 use reth_provider::{
-    BlockNumReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ProviderBlock,
-    ProviderHeader, ProviderReceipt, ProviderTx, StageCheckpointReader, StateProviderFactory,
+    BlockNumReader, BlockReader, BlockReaderIdExt, ProviderBlock, ProviderHeader, ProviderReceipt,
+    ProviderTx, StageCheckpointReader, StateProviderFactory,
 };
 use reth_rpc_eth_api::{
     helpers::{
@@ -55,27 +55,6 @@ pub(crate) struct BscEthApiInner<N: BscNodeCore> {
 pub struct BscEthApi<N: BscNodeCore> {
     /// Gateway to node's core components.
     pub(crate) inner: Arc<BscEthApiInner<N>>,
-}
-
-impl<N> BscEthApi<N>
-where
-    N: BscNodeCore<
-        Provider: BlockReaderIdExt
-                      + ChainSpecProvider
-                      + CanonStateSubscriptions<Primitives = EthPrimitives>
-                      + Clone
-                      + 'static,
-    >,
-{
-    /// Returns a reference to the [`EthApiNodeBackend`].
-    pub fn eth_api(&self) -> &EthApiNodeBackend<N> {
-        &self.inner.eth_api
-    }
-
-    /// Build a [`BscEthApi`] using [`BscEthApiBuilder`].
-    pub fn builder() -> BscEthApiBuilder {
-        BscEthApiBuilder::default()
-    }
 }
 
 impl<N: BscNodeCore> fmt::Debug for BscEthApi<N> {

@@ -5,7 +5,7 @@ use alloy_eips::{
 use alloy_primitives::{BlockHash, B256, U64};
 use alloy_rpc_types_engine::{
     ClientVersionV1, ExecutionPayloadBodiesV1, ForkchoiceState, ForkchoiceUpdated, PayloadId,
-    PayloadStatus, TransitionConfiguration,
+    PayloadStatus,
 };
 use derive_more::Constructor;
 use jsonrpsee::proc_macros::rpc;
@@ -177,19 +177,6 @@ pub trait BscEngineApi<Engine: EngineTypes> {
         count: U64,
     ) -> RpcResult<ExecutionPayloadBodiesV1>;
 
-    /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_exchangetransitionconfigurationv1>
-    ///
-    /// Note: This method will be deprecated after the cancun hardfork:
-    ///
-    /// > Consensus and execution layer clients MAY remove support of this method after Cancun. If
-    /// > no longer supported, this method MUST be removed from the engine_exchangeCapabilities
-    /// > request or response list depending on whether it is consensus or execution layer client.
-    #[method(name = "exchangeTransitionConfigurationV1")]
-    async fn exchange_transition_configuration(
-        &self,
-        transition_configuration: TransitionConfiguration,
-    ) -> RpcResult<TransitionConfiguration>;
-
     /// This function will return the ClientVersionV1 object.
     /// See also:
     /// <https://github.com/ethereum/execution-apis/blob/03911ffc053b8b806123f1fc237184b0092a485a/src/engine/identification.md#engine_getclientversionv1>make fmt
@@ -344,13 +331,6 @@ where
         count: U64,
     ) -> RpcResult<ExecutionPayloadBodiesV1> {
         Ok(self.inner.get_payload_bodies_by_range_v1(start.to(), count.to()).await?)
-    }
-
-    async fn exchange_transition_configuration(
-        &self,
-        transition_configuration: TransitionConfiguration,
-    ) -> RpcResult<TransitionConfiguration> {
-        Ok(self.inner.exchange_transition_configuration(transition_configuration)?)
     }
 
     async fn get_client_version_v1(

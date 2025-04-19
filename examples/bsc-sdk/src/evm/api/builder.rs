@@ -13,11 +13,6 @@ pub trait BscBuilder: Sized {
     /// Type of the context.
     type Context;
 
-    /// Build the bsc.
-    fn build_bsc(
-        self,
-    ) -> BscEvmInner<Self::Context, (), EthInstructions<EthInterpreter, Self::Context>>;
-
     /// Build the bsc with an inspector.
     fn build_bsc_with_inspector<INSP>(
         self,
@@ -34,12 +29,6 @@ where
     JOURNAL: JournalTr<Database = DB, FinalOutput = JournalOutput>,
 {
     type Context = Self;
-
-    fn build_bsc(
-        self,
-    ) -> BscEvmInner<Self::Context, (), EthInstructions<EthInterpreter, Self::Context>> {
-        BscEvmInner::new(self, ())
-    }
 
     fn build_bsc_with_inspector<INSP>(
         self,

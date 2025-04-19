@@ -1,6 +1,13 @@
-use alloy_primitives::{BlockNumber, B256};
+use alloy_consensus::constants::ETH_TO_WEI;
+use alloy_primitives::{address, Address, BlockNumber, B256};
 use reth_provider::{BlockNumReader, ProviderError};
 use std::cmp::Ordering;
+
+pub const SYSTEM_ADDRESS: Address = address!("fffffffffffffffffffffffffffffffffffffffe");
+/// The reward percent to system
+pub const SYSTEM_REWARD_PERCENT: usize = 4;
+/// The max reward in system reward contract
+pub const MAX_SYSTEM_REWARD: u128 = 100 * ETH_TO_WEI;
 
 /// Errors that can occur in Parlia consensus
 #[derive(Debug, thiserror::Error)]
@@ -16,14 +23,7 @@ pub enum ParliaConsensusErr {
 /// Parlia consensus implementation
 pub struct ParliaConsensus<P> {
     /// The provider for reading block information
-    provider: P,
-}
-
-impl<P> ParliaConsensus<P> {
-    /// Create a new Parlia consensus instance
-    pub fn new(provider: P) -> Self {
-        Self { provider }
-    }
+    pub provider: P,
 }
 
 impl<P> ParliaConsensus<P>
@@ -123,7 +123,7 @@ mod tests {
 
         for ((curr_hash, curr_num, head_num, head_hash), expected) in test_cases {
             let provider = MockProvider::new(head_num, head_hash);
-            let consensus = ParliaConsensus::new(provider);
+            let consensus = ParliaConsensus { provider };
             let (head_block_hash, current_hash) =
                 consensus.canonical_head(curr_hash, curr_num).unwrap();
             assert_eq!(head_block_hash, expected);

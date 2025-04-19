@@ -16,24 +16,24 @@ pub trait BscTxTr: Transaction {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct BscTransaction<T: Transaction> {
+pub struct BscTxEnv<T: Transaction> {
     pub base: T,
     pub is_system_transaction: Option<bool>,
 }
 
-impl<T: Transaction> BscTransaction<T> {
+impl<T: Transaction> BscTxEnv<T> {
     pub fn new(base: T) -> Self {
         Self { base, is_system_transaction: None }
     }
 }
 
-impl Default for BscTransaction<TxEnv> {
+impl Default for BscTxEnv<TxEnv> {
     fn default() -> Self {
         Self { base: TxEnv::default(), is_system_transaction: None }
     }
 }
 
-impl<T: Transaction> Transaction for BscTransaction<T> {
+impl<T: Transaction> Transaction for BscTxEnv<T> {
     type AccessListItem = T::AccessListItem;
     type Authorization = T::Authorization;
 
@@ -106,25 +106,25 @@ impl<T: Transaction> Transaction for BscTransaction<T> {
     }
 }
 
-impl<T: Transaction> BscTxTr for BscTransaction<T> {
+impl<T: Transaction> BscTxTr for BscTxEnv<T> {
     fn is_system_transaction(&self) -> bool {
         self.is_system_transaction.unwrap_or(false)
     }
 }
 
-impl<T: revm::context::Transaction> IntoTxEnv<Self> for BscTransaction<T> {
+impl<T: revm::context::Transaction> IntoTxEnv<Self> for BscTxEnv<T> {
     fn into_tx_env(self) -> Self {
         self
     }
 }
 
-impl FromRecoveredTx<TransactionSigned> for BscTransaction<TxEnv> {
+impl FromRecoveredTx<TransactionSigned> for BscTxEnv<TxEnv> {
     fn from_recovered_tx(tx: &TransactionSigned, sender: Address) -> Self {
         Self::new(TxEnv::from_recovered_tx(tx, sender))
     }
 }
 
-impl FromTxWithEncoded<TransactionSigned> for BscTransaction<TxEnv> {
+impl FromTxWithEncoded<TransactionSigned> for BscTxEnv<TxEnv> {
     fn from_encoded_tx(tx: &TransactionSigned, sender: Address, _encoded: Bytes) -> Self {
         let base = match &tx.transaction() {
             reth_primitives::Transaction::Legacy(tx) => TxEnv::from_recovered_tx(tx, sender),
@@ -138,7 +138,7 @@ impl FromTxWithEncoded<TransactionSigned> for BscTransaction<TxEnv> {
     }
 }
 
-impl<T: TransactionEnv> TransactionEnv for BscTransaction<T> {
+impl<T: TransactionEnv> TransactionEnv for BscTxEnv<T> {
     fn set_gas_limit(&mut self, gas_limit: u64) {
         self.base.set_gas_limit(gas_limit);
     }
@@ -164,7 +164,7 @@ mod tests {
 
     #[test]
     fn test_bsc_transaction_fields() {
-        let bsc_tx = BscTransaction {
+        let bsc_tx = BscTxEnv {
             base: TxEnv {
                 tx_type: 0,
                 gas_limit: 10,

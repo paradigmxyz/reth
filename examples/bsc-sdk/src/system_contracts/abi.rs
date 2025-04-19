@@ -5868,7 +5868,6 @@ lazy_static! {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Read;
 
     use alloy_dyn_abi::{DynSolValue, FunctionExt, JsonAbiExt};
     use alloy_json_abi::JsonAbi;
@@ -5903,7 +5902,7 @@ mod tests {
 
         let stake_hub_abi: JsonAbi = serde_json::from_str(*STAKE_HUB_ABI).unwrap();
         let function = stake_hub_abi.function("getValidatorElectionInfo").unwrap().first().unwrap();
-        let output = function.abi_decode_output(&output, true).unwrap();
+        let output = function.abi_decode_output(&output).unwrap();
 
         let consensus_address: Vec<Address> = output[0]
             .as_array()

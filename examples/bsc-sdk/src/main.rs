@@ -3,89 +3,51 @@
 //! Run with
 //!
 //! ```sh
-//! cargo run -p bsc-p2p
+//! cargo run -p bsc-sdk
 //! ```
 //!
 //! This launches a regular reth node overriding the engine api payload builder with our custom.
 //!
 //! Credits to: <https://merkle.io/blog/modifying-reth-to-build-the-fastest-transaction-network-on-bsc-and-polygon>
 
-use crate::chainspec::bsc::{bsc_mainnet, head};
-use node::network::{boot_nodes, handshake::BscHandshake};
-use reth_discv4::Discv4ConfigBuilder;
-use reth_network::{
-    EthNetworkPrimitives, NetworkConfig, NetworkEvent, NetworkEventListenerProvider,
-    NetworkManager, PeersInfo,
+use crate::{
+    chainspec::Cli, consensus::ParliaConsensus,
+    node::network::block_import::service::ImportService as BlockImportService,
 };
-use reth_network_api::events::{PeerEvent, SessionInfo};
-use reth_provider::noop::NoopProvider;
-use reth_tracing::{
-    tracing_subscriber::filter::LevelFilter, LayerInfo, LogFormat, RethTracer, Tracer,
-};
-use secp256k1::{rand, SecretKey};
-use std::{
-    net::{Ipv4Addr, SocketAddr},
-    sync::Arc,
-    time::Duration,
-};
-use tokio_stream::StreamExt;
-use tracing::info;
+use chainspec::parser::BscChainSpecParser;
+use clap::{Args, Parser};
+use node::BscNode;
+use reth::builder::NodeHandle;
+use std::sync::Arc;
+use tracing::error;
 
-mod chainspec;
+pub mod chainspec;
 mod consensus;
 mod evm;
 mod hardforks;
 mod node;
 mod system_contracts;
 
-#[tokio::main]
-async fn main() {
-    let _ = RethTracer::new()
-        .with_stdout(LayerInfo::new(
-            LogFormat::Terminal,
-            LevelFilter::INFO.to_string(),
-            "".to_string(),
-            Some("always".to_string()),
-        ))
-        .init();
+/// No Additional arguments
+#[derive(Debug, Clone, Copy, Default, Args)]
+#[non_exhaustive]
+pub struct NoArgs;
 
-    let local_addr = SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 30303);
+fn main() -> eyre::Result<()> {
+    Cli::<BscChainSpecParser, NoArgs>::parse().run(|builder, _| async move {
+        let NodeHandle { node, node_exit_future: exit_future } =
+            builder.node(BscNode::default()).launch().await?;
+        let provider = node.provider.clone();
+        let consensus = Arc::new(ParliaConsensus { provider });
+        let (service, _) = BlockImportService::new(consensus, node.beacon_engine_handle.clone());
 
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
-
-    let bsc_boot_nodes = boot_nodes();
-
-    let net_cfg = NetworkConfig::builder(secret_key)
-        .boot_nodes(bsc_boot_nodes.clone())
-        .set_head(head())
-        .with_pow()
-        .listener_addr(local_addr)
-        .eth_rlpx_handshake(Arc::new(BscHandshake::default()))
-        .build(NoopProvider::eth(Arc::new(bsc_mainnet())));
-
-    let net_cfg = net_cfg.set_discovery_v4(
-        Discv4ConfigBuilder::default()
-            .add_boot_nodes(bsc_boot_nodes)
-            .lookup_interval(Duration::from_millis(500))
-            .build(),
-    );
-    let net_manager = NetworkManager::<EthNetworkPrimitives>::new(net_cfg).await.unwrap();
-
-    let net_handle = net_manager.handle().clone();
-    let mut events = net_handle.event_listener();
-
-    tokio::spawn(net_manager);
-
-    while let Some(evt) = events.next().await {
-        match evt {
-            NetworkEvent::ActivePeerSession { info, .. } => {
-                let SessionInfo { status, client_version, peer_id, .. } = info;
-                info!(peers=%net_handle.num_connected_peers() , %peer_id, chain = %status.chain, ?client_version, "Session established with a new peer.");
+        node.task_executor.spawn(async move {
+            if let Err(e) = service.await {
+                error!("Import service error: {}", e);
             }
-            NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, reason }) => {
-                info!(peers=%net_handle.num_connected_peers() , %peer_id, ?reason, "Session closed.");
-            }
-            _ => {}
-        }
-    }
+        });
+
+        exit_future.await
+    })?;
+    Ok(())
 }

@@ -9,6 +9,8 @@ license.workspace = true
 auto_impl.workspace = true
 # reth
 reth.workspace = true
+reth-cli.workspace = true
+reth-cli-commands.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-db.workspace = true
 reth-chainspec.workspace = true
@@ -50,8 +52,8 @@ alloy-consensus.workspace = true
 alloy-chains.workspace = true
 alloy-eips.workspace = true
 alloy-evm.workspace = true
-alloy-json-abi = { version = "0.8.25", default-features = false }
-alloy-dyn-abi = { version = "0.8.25", default-features = false }
+alloy-json-abi = { version = "1.0.0", default-features = false }
+alloy-dyn-abi = { workspace = true, features = ["eip712"] }
 alloy-network.workspace = true
 
 alloy-primitives.workspace = true
@@ -59,10 +61,13 @@ alloy-rlp.workspace = true
 alloy-rpc-types = { workspace = true, features = ["engine"] }
 alloy-rpc-types-eth.workspace = true
 alloy-rpc-types-engine.workspace = true
+alloy-sol-macro.workspace = true
+alloy-sol-types.workspace = true
 
 # misc
 async-trait.workspace = true
 bytes.workspace = true
+clap.workspace = true
 cfg-if = { version = "1.0", default-features = false }
 derive_more.workspace = true
 eyre.workspace = true
@@ -104,8 +109,6 @@ blst = { version = "0.3.13", optional = true }
 # p256verify precompile
 p256 = { version = "0.13.2", optional = true, default-features = false, features = ["ecdsa"] }
 
-
-
 [features]
 default = ["c-kzg", "secp256k1", "blst", "secp256r1"]
 c-kzg = ["dep:c-kzg"]
@@ -127,6 +130,16 @@ serde = [
     "bytes/serde",
     "reth-network/serde",
     "reth-network-api/serde",
+    "alloy-chains/serde",
+    "alloy-consensus/serde",
+    "alloy-eips/serde",
+    "alloy-rpc-types-engine/serde",
+    "alloy-rpc-types-eth/serde",
+    "reth-ethereum-primitives/serde",
+    "reth-revm/serde",
+    "reth-trie-common/serde",
+    "parking_lot/serde",
+    "reth-trie-db/serde"
 ]
 client = [
     "jsonrpsee/client",
