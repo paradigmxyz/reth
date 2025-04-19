@@ -7802,6 +7802,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-era-import"
+version = "1.3.11"
+dependencies = [
+ "alloy-primitives 1.0.0",
+ "eyre",
+ "futures-util",
+ "reqwest",
+ "reth-db-api",
+ "reth-era",
+ "reth-era-downloader",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-storage-api",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "reth-errors"
 version = "1.3.12"
 dependencies = [
