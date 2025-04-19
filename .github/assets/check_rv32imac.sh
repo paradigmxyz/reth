@@ -14,6 +14,7 @@ crates_to_check=(
     reth-static-file-types
     reth-storage-errors
     reth-execution-errors
+    reth-errors
     reth-execution-types
     reth-db-models
     reth-evm
