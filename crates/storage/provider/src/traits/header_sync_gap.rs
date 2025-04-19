@@ -37,9 +37,8 @@ pub trait HeaderSyncGapProvider: Send + Sync {
     /// uninterrupted block number. Last uninterrupted block represents the block number before
     /// which there are no gaps. It's up to the caller to ensure that last uninterrupted block is
     /// determined correctly.
-    fn sync_gap(
+    fn local_tip_header(
         &self,
-        tip: watch::Receiver<B256>,
         highest_uninterrupted_block: BlockNumber,
-    ) -> ProviderResult<HeaderSyncGap<Self::Header>>;
+    ) -> ProviderResult<Self::Header>;
 }
