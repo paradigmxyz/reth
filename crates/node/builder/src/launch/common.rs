@@ -21,7 +21,7 @@ use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_fs_util as fs;
 use reth_invalid_block_hooks::InvalidBlockWitnessHook;
 use reth_network_p2p::headers::client::HeadersClient;
-use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithDB, NodeTypesWithDBAdapter};
+use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_core::{
     args::InvalidBlockHookType,
     dirs::{ChainPath, DataDirPath},
@@ -466,7 +466,7 @@ where
     T: ProviderNodeTypes,
 {
     /// Returns access to the underlying database.
-    pub const fn database(&self) -> &T::DB {
+    pub const fn database(&self) -> &T::Database {
         self.right().db_ref()
     }
 
@@ -565,16 +565,12 @@ where
     }
 }
 
-impl<N, DB>
-    LaunchContextWith<
-        Attached<WithConfigs<N::ChainSpec>, WithMeteredProvider<NodeTypesWithDBAdapter<N, DB>>>,
-    >
+impl<N> LaunchContextWith<Attached<WithConfigs<N::ChainSpec>, WithMeteredProvider<N>>>
 where
     N: NodeTypes,
-    DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
 {
     /// Returns the configured `ProviderFactory`.
-    const fn provider_factory(&self) -> &ProviderFactory<NodeTypesWithDBAdapter<N, DB>> {
+    const fn provider_factory(&self) -> &ProviderFactory<N> {
         &self.right().provider_factory
     }
 
@@ -585,13 +581,12 @@ where
 
     /// Creates a `BlockchainProvider` and attaches it to the launch context.
     #[expect(clippy::complexity)]
-    pub fn with_blockchain_db<T, F>(
+    pub fn with_blockchain_db<F>(
         self,
         create_blockchain_provider: F,
-    ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<N::ChainSpec>, WithMeteredProviders<T>>>>
+    ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<N::ChainSpec>, WithMeteredProviders<N>>>>
     where
-        T: FullNodeTypes<Types = N, DB = DB>,
-        F: FnOnce(ProviderFactory<NodeTypesWithDBAdapter<N, DB>>) -> eyre::Result<T::Provider>,
+        F: FnOnce(ProviderFactory<N>) -> eyre::Result<N::Provider>,
     {
         let blockchain_db = create_blockchain_provider(self.provider_factory().clone())?;
 
@@ -620,14 +615,12 @@ where
     T: FullNodeTypes<Types: NodeTypesForProvider>,
 {
     /// Returns access to the underlying database.
-    pub const fn database(&self) -> &T::DB {
+    pub const fn database(&self) -> &<<T as FullNodeTypes>::Types as NodeTypes>::Database {
         self.provider_factory().db_ref()
     }
 
     /// Returns the configured `ProviderFactory`.
-    pub const fn provider_factory(
-        &self,
-    ) -> &ProviderFactory<NodeTypesWithDBAdapter<T::Types, T::DB>> {
+    pub const fn provider_factory(&self) -> &ProviderFactory<T> {
         &self.right().db_provider_container.provider_factory
     }
 
@@ -716,9 +709,7 @@ where
     CB: NodeComponentsBuilder<T>,
 {
     /// Returns the configured `ProviderFactory`.
-    pub const fn provider_factory(
-        &self,
-    ) -> &ProviderFactory<NodeTypesWithDBAdapter<T::Types, T::DB>> {
+    pub const fn provider_factory(&self) -> &ProviderFactory<T> {
         &self.right().db_provider_container.provider_factory
     }
 
@@ -737,9 +728,7 @@ where
     }
 
     /// Creates a new [`StaticFileProducer`] with the attached database.
-    pub fn static_file_producer(
-        &self,
-    ) -> StaticFileProducer<ProviderFactory<NodeTypesWithDBAdapter<T::Types, T::DB>>> {
+    pub fn static_file_producer(&self) -> StaticFileProducer<ProviderFactory<T>> {
         StaticFileProducer::new(self.provider_factory().clone(), self.prune_modes())
     }
 
@@ -1010,7 +999,7 @@ impl<ChainSpec> Clone for WithConfigs<ChainSpec> {
 /// Helper container type to bundle the [`ProviderFactory`] and the metrics
 /// sender.
 #[derive(Debug, Clone)]
-pub struct WithMeteredProvider<N: NodeTypesWithDB> {
+pub struct WithMeteredProvider<N: NodeTypes> {
     provider_factory: ProviderFactory<N>,
     metrics_sender: UnboundedSender<MetricEvent>,
 }
@@ -1022,7 +1011,7 @@ pub struct WithMeteredProviders<T>
 where
     T: FullNodeTypes,
 {
-    db_provider_container: WithMeteredProvider<NodeTypesWithDBAdapter<T::Types, T::DB>>,
+    db_provider_container: WithMeteredProvider<T>,
     blockchain_db: T::Provider,
 }
 
@@ -1033,7 +1022,7 @@ where
     T: FullNodeTypes,
     CB: NodeComponentsBuilder<T>,
 {
-    db_provider_container: WithMeteredProvider<NodeTypesWithDBAdapter<T::Types, T::DB>>,
+    db_provider_container: WithMeteredProvider<T>,
     node_adapter: NodeAdapter<T, CB::Components>,
     head: Head,
 }

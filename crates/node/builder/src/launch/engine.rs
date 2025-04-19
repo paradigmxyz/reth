@@ -15,8 +15,8 @@ use reth_exex::ExExManagerHandle;
 use reth_network::{NetworkSyncUpdater, SyncState};
 use reth_network_api::BlockDownloaderProvider;
 use reth_node_api::{
-    BeaconConsensusEngineHandle, BuiltPayload, FullNodeTypes, NodeTypes, NodeTypesWithDBAdapter,
-    PayloadAttributesBuilder, PayloadTypes,
+    BeaconConsensusEngineHandle, BuiltPayload, FullNodeTypes, NodeTypes, PayloadAttributesBuilder,
+    PayloadTypes,
 };
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
@@ -67,11 +67,7 @@ impl<Types, DB, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for 
 where
     Types: NodeTypesForProvider + NodeTypes,
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
-    T: FullNodeTypes<
-        Types = Types,
-        DB = DB,
-        Provider = BlockchainProvider<NodeTypesWithDBAdapter<Types, DB>>,
-    >,
+    T: FullNodeTypes<Types = Types, Provider = BlockchainProvider<Types>>,
     CB: NodeComponentsBuilder<T>,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
         + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,

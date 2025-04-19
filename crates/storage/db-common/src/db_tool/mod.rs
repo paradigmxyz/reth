@@ -10,19 +10,19 @@ use reth_db_api::{
     DatabaseError, RawTable, TableRawRow,
 };
 use reth_fs_util as fs;
-use reth_node_types::NodeTypesWithDB;
+use reth_node_types::NodeTypes;
 use reth_provider::{providers::ProviderNodeTypes, ChainSpecProvider, DBProvider, ProviderFactory};
 use std::{path::Path, rc::Rc, sync::Arc};
 use tracing::info;
 
 /// Wrapper over DB that implements many useful DB queries.
 #[derive(Debug)]
-pub struct DbTool<N: NodeTypesWithDB> {
+pub struct DbTool<N: NodeTypes> {
     /// The provider factory that the db tool will use.
     pub provider_factory: ProviderFactory<N>,
 }
 
-impl<N: NodeTypesWithDB> DbTool<N> {
+impl<N: NodeTypes> DbTool<N> {
     /// Get an [`Arc`] to the underlying chainspec.
     pub fn chain(&self) -> Arc<N::ChainSpec> {
         self.provider_factory.chain_spec()

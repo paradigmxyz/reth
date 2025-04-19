@@ -22,7 +22,6 @@ use reth_network::{
 };
 use reth_node_api::{
     FullNodePrimitives, FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes,
-    NodeTypesWithDBAdapter,
 };
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethTransactionPoolConfig},
@@ -47,8 +46,8 @@ pub use states::*;
 
 /// The adapter type for a reth node with the builtin provider type
 // Note: we need to hardcode this because custom components might depend on it in associated types.
-pub type RethFullAdapter<DB, Types> =
-    FullNodeTypesAdapter<Types, DB, BlockchainProvider<NodeTypesWithDBAdapter<Types, DB>>>;
+pub type RethFullAdapter<DB, Types: NodeTypes> =
+    FullNodeTypesAdapter<Types, DB, BlockchainProvider<Types>>;
 
 #[expect(clippy::doc_markdown)]
 #[cfg_attr(doc, aquamarine::aquamarine)]
@@ -250,8 +249,8 @@ where
         self,
     ) -> NodeBuilderWithTypes<FullNodeTypesAdapter<T, DB, P>>
     where
-        T: NodeTypes<ChainSpec = ChainSpec> + NodeTypesForProvider,
-        P: FullProvider<NodeTypesWithDBAdapter<T, DB>>,
+        T: NodeTypes<ChainSpec = ChainSpec, Database = DB> + NodeTypesForProvider,
+        P: FullProvider<T>,
     {
         NodeBuilderWithTypes::new(self.config, self.database)
     }
@@ -311,8 +310,8 @@ where
         self,
     ) -> WithLaunchContext<NodeBuilderWithTypes<FullNodeTypesAdapter<T, DB, P>>>
     where
-        T: NodeTypes<ChainSpec = ChainSpec> + NodeTypesForProvider,
-        P: FullProvider<NodeTypesWithDBAdapter<T, DB>>,
+        T: NodeTypes<ChainSpec = ChainSpec, Database = DB> + NodeTypesForProvider,
+        P: FullProvider<T>,
     {
         WithLaunchContext {
             builder: self.builder.with_types_and_provider(),

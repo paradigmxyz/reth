@@ -9,7 +9,7 @@ use reth_engine_primitives::{BeaconConsensusEngineEvent, BeaconConsensusEngineHa
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_network_api::FullNetwork;
 use reth_node_core::node_config::NodeConfig;
-use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter, TxTy};
+use reth_node_types::{NodeTypes, TxTy};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
@@ -24,24 +24,35 @@ use std::{fmt::Debug, future::Future, marker::PhantomData};
 pub trait FullNodeTypes: Clone + Debug + Send + Sync + Unpin + 'static {
     /// Node's types with the database.
     type Types: NodeTypes;
-    /// Underlying database type used by the node to store and retrieve data.
-    type DB: Database + DatabaseMetrics + Clone + Unpin + 'static;
     /// The provider type used to interact with the node.
-    type Provider: FullProvider<NodeTypesWithDBAdapter<Self::Types, Self::DB>>;
+    type Provider: FullProvider<Self::Types>;
 }
 
 /// An adapter type that adds the builtin provider type to the user configured node types.
 #[derive(Clone, Debug)]
 pub struct FullNodeTypesAdapter<Types, DB, Provider>(PhantomData<(Types, DB, Provider)>);
 
-impl<Types, DB, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
+impl<Types, DB, Provider> NodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
 where
     Types: NodeTypes,
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
-    Provider: FullProvider<NodeTypesWithDBAdapter<Types, DB>>,
+    Provider: FullProvider<Self>,
+{
+    type Primitives = <Types as NodeTypes>::Primitives;
+    type ChainSpec = <Types as NodeTypes>::ChainSpec;
+    type StateCommitment = <Types as NodeTypes>::StateCommitment;
+    type Storage = <Types as NodeTypes>::Storage;
+    type Payload = <Types as NodeTypes>::Payload;
+    type Database = <Types as NodeTypes>::Database;
+}
+
+impl<Types, DB, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
+where
+    Types: NodeTypes<Database = DB>,
+    DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
+    Provider: FullProvider<Self>,
 {
     type Types = Types;
-    type DB = DB;
     type Provider = Provider;
 }
 
