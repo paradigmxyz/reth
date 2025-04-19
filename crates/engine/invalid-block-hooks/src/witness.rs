@@ -1,5 +1,5 @@
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{keccak256, B256};
+use alloy_primitives::{keccak256, Address, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use pretty_assertions::Comparison;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
@@ -7,12 +7,92 @@ use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{
+    database::StateProviderDatabase,
+    db::{BundleAccount, BundleState},
+};
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
 use reth_trie::{updates::TrieUpdates, HashedStorage};
+use revm_bytecode::Bytecode;
+use revm_database::states::{
+    reverts::{AccountInfoRevert, RevertToSlot},
+    AccountStatus,
+};
 use serde::Serialize;
-use std::{fmt::Debug, fs::File, io::Write, path::PathBuf};
+use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
+
+#[derive(Debug, PartialEq, Eq)]
+struct AccountRevertSorted {
+    pub account: AccountInfoRevert,
+    pub storage: BTreeMap<U256, RevertToSlot>,
+    pub previous_status: AccountStatus,
+    pub wipe_storage: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct RevertsSorted(Vec<Vec<(Address, AccountRevertSorted)>>);
+
+#[derive(Debug, PartialEq, Eq)]
+struct BundleStateSorted {
+    /// Account state
+    pub state: BTreeMap<Address, BundleAccount>,
+    /// All created contracts in this block.
+    pub contracts: BTreeMap<B256, Bytecode>,
+    /// Changes to revert
+    ///
+    /// **Note**: Inside vector is *not* sorted by address.
+    ///
+    /// But it is unique by address.
+    pub reverts: RevertsSorted,
+    /// The size of the plain state in the bundle state
+    pub state_size: usize,
+    /// The size of reverts in the bundle state
+    pub reverts_size: usize,
+}
+
+impl BundleStateSorted {
+    fn from_bundle_state(bundle_state: &BundleState) -> Self {
+        let mut state: BTreeMap<Address, BundleAccount> = BTreeMap::new();
+        let mut contracts: BTreeMap<B256, Bytecode> = BTreeMap::new();
+        let mut reverts: RevertsSorted = RevertsSorted(vec![]);
+
+        for (k, v) in bundle_state.state.clone() {
+            state.insert(k, v);
+        }
+
+        for (k, v) in bundle_state.contracts.clone() {
+            contracts.insert(k, v);
+        }
+
+        let state_size = bundle_state.state_size;
+        let reverts_size = bundle_state.reverts_size;
+
+        for revert_item in bundle_state.reverts.iter() {
+            let mut new_revert_item: Vec<(Address, AccountRevertSorted)> = vec![];
+            for (address, account_revert) in revert_item {
+                let mut storage: BTreeMap<U256, RevertToSlot> = BTreeMap::new();
+
+                for (k, v) in account_revert.storage.clone() {
+                    storage.insert(k, v);
+                }
+
+                new_revert_item.push((
+                    *address,
+                    AccountRevertSorted {
+                        account: account_revert.account.clone(),
+                        previous_status: account_revert.previous_status,
+                        wipe_storage: account_revert.wipe_storage,
+                        storage,
+                    },
+                ));
+            }
+            reverts.0.push(new_revert_item);
+        }
+
+        Self { state, contracts, reverts, state_size, reverts_size }
+    }
+}
 
 /// Generates a witness for the given block and saves it to a file.
 #[derive(Debug)]
@@ -184,7 +264,12 @@ where
             )?;
 
             let filename = format!("{}_{}.bundle_state.diff", block.number(), block.hash());
-            let diff_path = self.save_diff(filename, &bundle_state, &output.state)?;
+            // Convert bundle state to sorted struct which has BTreeMap instead of HashMap to
+            // have deterministric ordering
+            let bundle_state_sorted = BundleStateSorted::from_bundle_state(&bundle_state);
+            let output_state_sorted = BundleStateSorted::from_bundle_state(&output.state);
+
+            let diff_path = self.save_diff(filename, &bundle_state_sorted, &output_state_sorted)?;
 
             warn!(
                 target: "engine::invalid_block_hooks::witness",
