@@ -36,7 +36,6 @@ reth-consensus.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 itertools.workspace = true
-rayon.workspace = true
 
 [dev-dependencies]
 reth-trie-common = { workspace = true }

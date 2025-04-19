@@ -9898,7 +9898,6 @@ dependencies = [
  "alloy-rpc-types-debug",
  "alloy-trie",
  "itertools 0.14.0",
- "rayon",
  "reth-chainspec",
  "reth-consensus",
  "reth-errors",

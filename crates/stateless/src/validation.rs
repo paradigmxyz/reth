@@ -13,7 +13,7 @@ use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_primitives::{RecoveredBlock, TransactionSigned};
 use reth_revm::state::Bytecode;
-use reth_trie_common::{iter::IntoParallelRefIterator, HashedPostState, KeccakKeyHasher};
+use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 use reth_trie_sparse::{blinded::DefaultBlindedProviderFactory, SparseStateTrie};
 
 /// Errors that can occur during stateless validation.
@@ -170,9 +170,8 @@ pub fn stateless_validation(
         .map_err(StatelessValidationError::ConsensusValidationFailed)?;
 
     // Compute and check the post state root
-    // TODO: Remove rayon
     let hashed_state =
-        HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state.par_iter());
+        HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state.iter());
     let state_root = crate::root::calculate_state_root(&mut sparse_trie, hashed_state)
         .map_err(|_e| StatelessValidationError::StatelessStateRootCalculationFailed)?;
     if state_root != current_block.state_root {
