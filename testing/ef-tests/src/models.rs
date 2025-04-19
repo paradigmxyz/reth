@@ -3,6 +3,7 @@
 use crate::{assert::assert_equal, Error};
 use alloy_consensus::Header as RethHeader;
 use alloy_eips::eip4895::Withdrawals;
+use alloy_genesis::GenesisAccount;
 use alloy_primitives::{keccak256, Address, Bloom, Bytes, B256, B64, U256};
 use reth_chainspec::{ChainSpec, ChainSpecBuilder};
 use reth_db_api::{
@@ -27,8 +28,6 @@ pub struct BlockchainTest {
     pub blocks: Vec<Block>,
     /// The expected post state.
     pub post_state: Option<BTreeMap<Address, Account>>,
-    /// The expected post state merkle root.
-    pub post_state_hash: Option<B256>,
     /// The test pre-state.
     pub pre: State,
     /// Hash of the best block.
@@ -192,6 +191,34 @@ impl State {
             }
         }
         Ok(())
+    }
+
+    /// Return state as genesis state.
+    pub fn into_genesis_state(self) -> BTreeMap<Address, GenesisAccount> {
+        self.0
+            .into_iter()
+            .map(|(address, account)| {
+                let storage = account
+                    .storage
+                    .iter()
+                    .filter(|(_, v)| !v.is_zero())
+                    .map(|(k, v)| {
+                        (
+                            B256::from_slice(&k.to_be_bytes::<32>()),
+                            B256::from_slice(&v.to_be_bytes::<32>()),
+                        )
+                    })
+                    .collect();
+                let account = GenesisAccount {
+                    balance: account.balance,
+                    nonce: Some(account.nonce.try_into().unwrap()),
+                    code: Some(account.code).filter(|c| !c.is_empty()),
+                    storage: Some(storage),
+                    private_key: None,
+                };
+                (address, account)
+            })
+            .collect::<BTreeMap<_, _>>()
     }
 }
 
