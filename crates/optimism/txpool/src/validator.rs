@@ -9,7 +9,7 @@ use reth_optimism_forks::OpHardforks;
 use reth_primitives_traits::{
     transaction::error::InvalidTransactionError, Block, BlockBody, GotExpected, SealedBlock,
 };
-use reth_storage_api::{BlockReaderIdExt, StateProvider, StateProviderFactory};
+use reth_storage_api::{BlockReaderIdExt, StateProvider, StateProviderBox, StateProviderFactory};
 use reth_transaction_pool::{
     error::InvalidPoolTransactionError, EthPoolTransaction, EthTransactionValidator,
     TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
@@ -164,7 +164,7 @@ where
         origin: TransactionOrigin,
         transaction: Tx,
     ) -> TransactionValidationOutcome<Tx> {
-        self.validate_one_with_state(origin, transaction, &mut None).await
+        self.validate_one_with_state::<StateProviderBox>(origin, transaction, None).await
     }
 
     /// Validates a single transaction with a provided state provider.
@@ -178,12 +178,15 @@ where
     /// - ensures tx is not eip4844
     /// - ensures cross chain transactions are valid wrt locally configured safety level
     /// - ensures that the account has enough balance to cover the L1 gas cost
-    pub async fn validate_one_with_state(
+    pub async fn validate_one_with_state<P>(
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
-        state: &mut Option<Box<dyn StateProvider>>,
-    ) -> TransactionValidationOutcome<Tx> {
+        state: Option<P>,
+    ) -> TransactionValidationOutcome<Tx>
+    where
+        P: StateProvider,
+    {
         if transaction.is_eip4844() {
             return TransactionValidationOutcome::Invalid(
                 transaction,
@@ -225,8 +228,12 @@ where
         &self,
         transactions: Vec<(TransactionOrigin, Tx)>,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
+        let state: Option<Arc<dyn StateProvider>> =
+            self.inner.client().latest().ok().map(|state| state.into());
         futures_util::future::join_all(
-            transactions.into_iter().map(|(origin, tx)| self.validate_one(origin, tx)),
+            transactions
+                .into_iter()
+                .map(|(origin, tx)| self.validate_one_with_state(origin, tx, state.clone())),
         )
         .await
     }
