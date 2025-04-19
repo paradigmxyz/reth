@@ -80,7 +80,7 @@ impl BlockchainTestCase {
     /// at which it must occur together with the original message.
     ///
     /// Note: There is a +1 here because the genesis block is not included
-    /// in the set of blocks, so the first block is actual block number 1
+    /// in the set of blocks, so the first block is actually block number 1
     /// and not block number 0.
     #[inline]
     fn expected_failure(case: &BlockchainTest) -> Option<(u64, String)> {
