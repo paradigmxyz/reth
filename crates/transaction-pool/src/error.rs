@@ -185,6 +185,19 @@ pub enum Eip7702PoolTransactionError {
     /// Thrown if the transaction has no items in its authorization list
     #[error("no items in authorization list for EIP7702 transaction")]
     MissingEip7702AuthorizationList,
+    /// Returned when a transaction with a nonce
+    /// gap is received from accounts with a deployed delegation or pending delegation.
+    #[error("gapped-nonce tx from delegated accounts")]
+    OutOfOrderTxFromDelegated,
+    /// Returned when the maximum number of in-flight
+    /// transactions is reached for specific accounts.
+    #[error("in-flight transaction limit reached for delegated accounts")]
+    InflightTxLimitReached,
+    /// Returned if a transaction has an authorization
+    /// signed by an address which already has in-flight transactions known to the
+    /// pool.
+    #[error("authority already reserved")]
+    AuthorityReserved,
 }
 
 /// Represents errors that can happen when validating transactions for the pool
@@ -333,7 +346,15 @@ impl InvalidPoolTransactionError {
                 }
             }
             Self::Eip7702(eip7702_err) => match eip7702_err {
-                Eip7702PoolTransactionError::MissingEip7702AuthorizationList => false,
+                Eip7702PoolTransactionError::MissingEip7702AuthorizationList => {
+                    // as EIP-7702 specifies, 7702 transactions must have an non-empty authorization
+                    // list so this is a malformed transaction and should not be
+                    // sent over the network
+                    true
+                }
+                Eip7702PoolTransactionError::OutOfOrderTxFromDelegated => false,
+                Eip7702PoolTransactionError::InflightTxLimitReached => false,
+                Eip7702PoolTransactionError::AuthorityReserved => false,
             },
         }
     }

@@ -88,11 +88,16 @@ impl TransactionValidator for OkValidator {
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
         // Always return valid
+        let authorities = transaction.authorization_list().map(|auths| {
+            auths.iter().flat_map(|auth| auth.recover_authority()).collect::<Vec<_>>()
+        });
         TransactionValidationOutcome::Valid {
             balance: *transaction.cost(),
             state_nonce: transaction.nonce(),
+            bytecode_hash: None,
             transaction: ValidTransaction::Valid(transaction),
             propagate: false,
+            authorities,
         }
     }
 }

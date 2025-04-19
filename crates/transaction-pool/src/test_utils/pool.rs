@@ -122,7 +122,8 @@ impl<R: Rng> MockTransactionSimulator<R> {
                     .with_gas_price(self.base_fee);
                 let valid_tx = self.validator.validated(tx);
 
-                let res = pool.add_transaction(valid_tx, on_chain_balance, on_chain_nonce).unwrap();
+                let res =
+                    pool.add_transaction(valid_tx, on_chain_balance, on_chain_nonce, None).unwrap();
 
                 // TODO(mattsse): need a way expect based on the current state of the pool and tx
                 // settings
