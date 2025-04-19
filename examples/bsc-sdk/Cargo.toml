@@ -50,8 +50,8 @@ alloy-consensus.workspace = true
 alloy-chains.workspace = true
 alloy-eips.workspace = true
 alloy-evm.workspace = true
-alloy-json-abi = { version = "0.8.25", default-features = false }
-alloy-dyn-abi = { version = "0.8.25", default-features = false }
+alloy-json-abi = { version = "1.0.0", default-features = false }
+alloy-dyn-abi = { workspace = true, features = ["eip712"] }
 alloy-network.workspace = true
 
 alloy-primitives.workspace = true

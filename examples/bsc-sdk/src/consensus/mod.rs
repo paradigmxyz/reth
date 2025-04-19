@@ -1,6 +1,13 @@
-use alloy_primitives::{BlockNumber, B256};
+use alloy_consensus::constants::ETH_TO_WEI;
+use alloy_primitives::{address, Address, BlockNumber, B256};
 use reth_provider::{BlockNumReader, ProviderError};
 use std::cmp::Ordering;
+
+pub const SYSTEM_ADDRESS: Address = address!("fffffffffffffffffffffffffffffffffffffffe");
+/// The reward percent to system
+pub const SYSTEM_REWARD_PERCENT: usize = 4;
+/// The max reward in system reward contract
+pub const MAX_SYSTEM_REWARD: u128 = 100 * ETH_TO_WEI;
 
 /// Errors that can occur in Parlia consensus
 #[derive(Debug, thiserror::Error)]

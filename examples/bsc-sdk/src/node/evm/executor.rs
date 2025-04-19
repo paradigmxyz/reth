@@ -1,12 +1,13 @@
 use super::patch::{patch_mainnet_after_tx, patch_mainnet_before_tx};
 use crate::{
+    consensus::{MAX_SYSTEM_REWARD, SYSTEM_ADDRESS, SYSTEM_REWARD_PERCENT},
     hardforks::BscHardforks,
     system_contracts::{get_upgrade_system_contracts, is_system_transaction, SystemContract},
 };
 use alloy_consensus::{Transaction, TxReceipt};
 use alloy_eips::{eip7685::Requests, Encodable2718};
 use alloy_evm::{block::ExecutableTx, eth::receipt_builder::ReceiptBuilderCtx};
-use alloy_primitives::Address;
+use alloy_primitives::{Address, U256};
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_evm::{
     block::BlockValidationError,
@@ -21,7 +22,7 @@ use reth_revm::State;
 use revm::{
     context::result::{ExecutionResult, ResultAndState},
     state::Bytecode,
-    DatabaseCommit,
+    Database as _, DatabaseCommit,
 };
 
 pub struct BscBlockExecutor<'a, EVM, Spec, R: ReceiptBuilder>
@@ -43,7 +44,7 @@ where
     /// System contracts used to trigger fork specific logic.
     system_contracts: SystemContract<Spec>,
     /// Context for block execution.
-    pub ctx: EthBlockExecutionCtx<'a>,
+    ctx: EthBlockExecutionCtx<'a>,
 }
 
 impl<'a, DB, EVM, Spec, R: ReceiptBuilder> BscBlockExecutor<'a, EVM, Spec, R>
@@ -123,10 +124,10 @@ where
 
     pub(crate) fn transact_system_tx(
         &mut self,
-        tx: &mut TransactionSigned,
+        tx: &TransactionSigned,
         sender: Address,
     ) -> Result<(), BlockExecutionError> {
-        // TODO: Consensus handle system txs
+        // TODO: Consensus handle reverting slashing system txs (they shouldnt be in the block)
         // https://github.com/bnb-chain/reth/blob/main/crates/bsc/evm/src/execute.rs#L602
 
         let result_and_state = self
@@ -165,6 +166,57 @@ where
 
         let transition = account.change(info, Default::default());
         self.evm.db_mut().apply_transition(vec![(address, transition)]);
+        Ok(())
+    }
+
+    /// Distributes block rewards to the validator.
+    fn distribute_block_rewards(&mut self, validator: Address) -> Result<(), BlockExecutionError> {
+        let system_account = self
+            .evm
+            .db_mut()
+            .load_cache_account(SYSTEM_ADDRESS)
+            .map_err(BlockExecutionError::other)?;
+
+        if system_account.account.is_none() ||
+            system_account.account.as_ref().unwrap().info.balance == U256::ZERO
+        {
+            return Ok(());
+        }
+
+        let (mut block_reward, mut transition) = system_account.drain_balance();
+        transition.info = None;
+        self.evm.db_mut().apply_transition(vec![(SYSTEM_ADDRESS, transition)]);
+        let balance_increment = vec![(validator, block_reward)];
+
+        self.evm
+            .db_mut()
+            .increment_balances(balance_increment)
+            .map_err(BlockExecutionError::other)?;
+
+        let system_reward_balance = self
+            .evm
+            .db_mut()
+            .basic(SYSTEM_ADDRESS)
+            .map_err(BlockExecutionError::other)?
+            .unwrap_or_default()
+            .balance;
+
+        // Kepler introduced a max system reward limit, so we need to pay the system reward to the
+        // system contract if the limit is not exceeded.
+        if !self.spec.is_kepler_active_at_timestamp(self.evm.block().timestamp) &&
+            system_reward_balance < U256::from(MAX_SYSTEM_REWARD)
+        {
+            let reward_to_system = block_reward >> SYSTEM_REWARD_PERCENT;
+            if reward_to_system > 0 {
+                let tx = self.system_contracts.pay_system_tx(reward_to_system);
+                self.transact_system_tx(&tx, SYSTEM_ADDRESS)?;
+            }
+
+            block_reward -= reward_to_system;
+        }
+
+        let tx = self.system_contracts.pay_validator_tx(validator, block_reward);
+        self.transact_system_tx(&tx, SYSTEM_ADDRESS)?;
         Ok(())
     }
 }
@@ -260,7 +312,7 @@ where
             self.deploy_feynman_contracts(self.evm.block().beneficiary)?;
         }
 
-        // TODO: Distribute block rewards
+        self.distribute_block_rewards(self.evm.block().beneficiary)?;
 
         // TODO:
         // Consensus: Slash validator if not in turn

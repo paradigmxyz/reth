@@ -1,9 +1,8 @@
 use crate::{chainspec::BscChainSpec, hardforks::BscHardforks};
-use alloy_consensus::{BlockHeader, Header, EMPTY_OMMER_ROOT_HASH};
-use alloy_eips::{eip4895::Withdrawal, Decodable2718};
-use alloy_primitives::{B256, U256};
-use alloy_rpc_types_engine::{ExecutionPayloadV1, PayloadAttributes, PayloadError};
-use bytes::BufMut;
+use alloy_consensus::BlockHeader;
+use alloy_eips::eip4895::Withdrawal;
+use alloy_primitives::B256;
+use alloy_rpc_types_engine::{PayloadAttributes, PayloadError};
 use reth::{
     api::{FullNodeComponents, NodeTypes},
     builder::{rpc::EngineValidatorBuilder, AddOnsContext},
@@ -36,7 +35,7 @@ where
     type Validator = BscEngineValidator;
 
     async fn build(self, ctx: &AddOnsContext<'_, Node>) -> eyre::Result<Self::Validator> {
-        Ok(BscEngineValidator::new(Arc::new(ctx.config.chain.clone().as_ref().clone().into())))
+        Ok(BscEngineValidator::new(Arc::new(ctx.config.chain.clone().as_ref().clone())))
     }
 }
 

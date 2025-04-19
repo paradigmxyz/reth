@@ -100,6 +100,10 @@ where
     type HaltReason = HaltReason;
     type Spec = BscSpecId;
 
+    fn chain_id(&self) -> u64 {
+        self.cfg.chain_id
+    }
+
     fn block(&self) -> &BlockEnv {
         &self.block
     }
