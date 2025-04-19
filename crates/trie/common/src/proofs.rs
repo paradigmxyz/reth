@@ -1,6 +1,6 @@
 //! Merkle trie proofs.
 
-use crate::{Nibbles, TrieAccount};
+use crate::{Nibbles, SingleProofTarget, TargetsToFetch, TrieAccount};
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
@@ -23,7 +23,7 @@ use reth_primitives_traits::Account;
 pub struct MultiProofTargets(B256Map<B256Set>);
 
 impl FromIterator<(B256, B256Set)> for MultiProofTargets {
-    fn from_iter<T: IntoIterator<Item = (B256, B256Set)>>(iter: T) -> Self {
+    fn from_iter<I: IntoIterator<Item = (B256, B256Set)>>(iter: I) -> Self {
         Self(B256Map::from_iter(iter))
     }
 }
@@ -47,9 +47,9 @@ impl MultiProofTargets {
         Self(B256Map::from_iter([(hashed_address, slots_iter.into_iter().collect())]))
     }
 
-    /// Create `MultiProofTargets` only from accounts.
+    /// Create `MultiProofTargets` for account proofs only.
     pub fn accounts<I: IntoIterator<Item = B256>>(iter: I) -> Self {
-        Self(iter.into_iter().map(|hashed_address| (hashed_address, Default::default())).collect())
+        Self(iter.into_iter().map(|hashed_address| (hashed_address, B256Set::default())).collect())
     }
 
     /// Retains the targets representing the difference,
@@ -83,11 +83,15 @@ impl MultiProofTargets {
         }
     }
 
-    /// Returns an iterator that yields chunks of the specified size.
-    ///
-    /// See [`ChunkedMultiProofTargets`] for more information.
-    pub fn chunks(self, size: usize) -> ChunkedMultiProofTargets {
-        ChunkedMultiProofTargets::new(self, size)
+    /// Extend multi proof targets with a [`TargetsToFetch`].
+    pub fn extend_targets_to_fetch(&mut self, targets: &TargetsToFetch) {
+        for (hashed_address, slots) in targets.account_targets() {
+            self.entry(*hashed_address).or_default().extend(slots.clone());
+        }
+
+        for (hashed_address, slots) in targets.storage_only_targets() {
+            self.entry(*hashed_address).or_default().extend(slots.clone());
+        }
     }
 }
 
@@ -113,41 +117,63 @@ impl MultiProofTargets {
 /// - If account has no associated storage slots, the account is counted towards the chunk size.
 #[derive(Debug)]
 pub struct ChunkedMultiProofTargets {
-    flattened_targets: alloc::vec::IntoIter<(B256, Option<B256>)>,
+    flattened_targets: alloc::vec::IntoIter<(B256, SingleProofTarget)>,
     size: usize,
 }
 
 impl ChunkedMultiProofTargets {
-    fn new(targets: MultiProofTargets, size: usize) -> Self {
-        let flattened_targets = targets
-            .into_iter()
-            .flat_map(|(address, slots)| {
-                if slots.is_empty() {
-                    // If the account has no storage slots, we still need to yield the account
-                    // address with empty storage slots. `None` here means that
-                    // there's no storage slot to fetch.
-                    itertools::Either::Left(core::iter::once((address, None)))
-                } else {
-                    itertools::Either::Right(
-                        slots.into_iter().map(move |slot| (address, Some(slot))),
-                    )
-                }
-            })
-            .sorted();
+    /// Creates a new iterator that yields chunks of the specified size.
+    pub fn new(targets: TargetsToFetch, size: usize) -> Self {
+        let mut flattened_targets = Vec::new();
+        let (account_targets, storage_only_targets) = targets.into_inner();
+
+        // push account / account with storage targets using the account_targets field
+        for (hashed_address, slots) in account_targets {
+            if slots.is_empty() {
+                flattened_targets.push((hashed_address, SingleProofTarget::Account));
+                continue
+            }
+
+            flattened_targets.extend(
+                slots
+                    .into_iter()
+                    .map(|slot| (hashed_address, SingleProofTarget::AccountWithStorage(slot))),
+            );
+        }
+
+        // now push storage-only targets
+        for (hashed_address, slots) in storage_only_targets {
+            flattened_targets.extend(
+                slots
+                    .into_iter()
+                    .map(|slot| (hashed_address, SingleProofTarget::StorageOnly(slot))),
+            );
+        }
+
+        flattened_targets.sort();
+        let flattened_targets = flattened_targets.into_iter();
         Self { flattened_targets, size }
     }
 }
 
 impl Iterator for ChunkedMultiProofTargets {
-    type Item = MultiProofTargets;
+    type Item = TargetsToFetch;
 
     fn next(&mut self) -> Option<Self::Item> {
         let chunk = self.flattened_targets.by_ref().take(self.size).fold(
-            MultiProofTargets::default(),
+            TargetsToFetch::default(),
             |mut acc, (address, slot)| {
-                let entry = acc.entry(address).or_default();
-                if let Some(slot) = slot {
-                    entry.insert(slot);
+                match slot {
+                    SingleProofTarget::Account => {
+                        // default is `AccountOnly`
+                        acc.insert_account_targets(address, B256Set::default());
+                    }
+                    SingleProofTarget::StorageOnly(slot) => {
+                        acc.insert_storage_only_target(address, slot);
+                    }
+                    SingleProofTarget::AccountWithStorage(slot) => {
+                        acc.insert_account_target(address, slot);
+                    }
                 }
                 acc
             },
