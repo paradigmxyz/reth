@@ -64,9 +64,13 @@ pub fn buffer_hash_to_tx_fetcher(
             retries,
             LruCache::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS as u32),
             tx_encoded_length,
+            false,
         )
     }) {
         Some(metadata) => {
+            if metadata.fallback_peers_mut().is_empty() && !(*metadata.is_inflight_mut()) {
+                tx_fetcher.num_hashes_pending_fetch += 1;
+            }
             metadata.fallback_peers_mut().insert(peer_id);
         }
         None => {
@@ -78,7 +82,7 @@ pub fn buffer_hash_to_tx_fetcher(
         }
     }
 
-    tx_fetcher.hashes_pending_fetch.insert(hash);
+    tx_fetcher.buffer_hash_to_hashes_pending_fetch_by_group(peer_id, hash);
 }
 
 /// Mock a new session, returns (peer, channel-to-send-get-pooled-tx-response-on).

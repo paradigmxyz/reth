@@ -455,14 +455,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives, P: TransactionPropagationPolic
 
     /// Runs an operation to fetch hashes that are cached in [`TransactionFetcher`].
     fn on_fetch_hashes_pending_fetch(&mut self) {
-        // try drain transaction hashes pending fetch
-        let info = &self.pending_pool_imports_info;
-        let max_pending_pool_imports = info.max_pending_pool_imports;
-        let has_capacity_wrt_pending_pool_imports =
-            |divisor| info.has_capacity(max_pending_pool_imports / divisor);
-
-        self.transaction_fetcher
-            .on_fetch_pending_hashes(&self.peers, has_capacity_wrt_pending_pool_imports);
+        self.transaction_fetcher.on_fetch_pending_hashes(&self.peers);
     }
 
     fn on_request_error(&self, peer_id: PeerId, req_err: RequestError) {
@@ -2490,7 +2483,7 @@ mod tests {
         assert_eq!(tx_fetcher.active_peers.len(), 0);
 
         // sends requests for buffered hashes to peer_1
-        tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers, |_| true);
+        tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers);
 
         assert_eq!(tx_fetcher.num_pending_hashes(), 0);
         // as long as request is in flight peer_1 is not idle
@@ -2557,7 +2550,7 @@ mod tests {
         assert_eq!(tx_fetcher.active_peers.len(), 0);
 
         // sends request for buffered hashes to peer_1
-        tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers, |_| true);
+        tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers);
 
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 
