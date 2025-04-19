@@ -125,7 +125,12 @@ impl BlockchainTestCase {
             },
 
             // Non‑processing error – forward as‑is.
-            // TODO: Don't think these can occur anymore since we don't batch execute anymore.
+            //
+            // This should only happen if we get an unexpected error from processing the block.
+            // Since it is unexpected, we treat it as a test failure. 
+            //
+            // One reason for this happening is when one forgets to wrap the error from `run_case`
+            // so that it produces a `Error::BlockProcessingFailed`  
             Err(other) => Err(other),
         }
     }
@@ -263,9 +268,11 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     }
 
     // Validate the post-state for the test case.
-    // If we get here then it means that the post state checks
+    //
+    // If we get here then it means that the post-state root checks
     // made after we execute each block was successful.
-    // If an error occurs here, then its:
+    //
+    // If an error occurs here, then it is:
     // - Either an issue with the test setup
     // - Possibly an error in the test case where the post-state root in the last block does not
     //   match the post-state values.
