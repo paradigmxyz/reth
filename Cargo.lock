@@ -9905,7 +9905,6 @@ dependencies = [
  "reth-evm",
  "reth-evm-ethereum",
  "reth-primitives",
- "reth-primitives-traits",
  "reth-revm",
  "reth-trie-common",
  "reth-trie-sparse",

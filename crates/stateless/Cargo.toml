@@ -36,6 +36,3 @@ reth-consensus.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 itertools.workspace = true
-
-[dev-dependencies]
-reth-primitives-traits = { workspace = true }
