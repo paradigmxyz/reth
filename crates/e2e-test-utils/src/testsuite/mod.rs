@@ -8,7 +8,7 @@ use alloy_primitives::B256;
 use eyre::Result;
 use jsonrpsee::http_client::{transport::HttpBackend, HttpClient};
 use reth_engine_local::LocalPayloadAttributesBuilder;
-use reth_node_api::{NodeTypes, PayloadTypes, FullNodeTypesAdapter, NodeTypesWithDBAdapter};
+use reth_node_api::{TestNode, NodeTypes, PayloadTypes, FullNodeTypesAdapter, NodeTypesWithDBAdapter};
 use reth_payload_builder::PayloadId;
 use reth_rpc_layer::AuthClientService;
 use setup::Setup;
@@ -22,7 +22,7 @@ use eyre::eyre;
 use tracing::error;
 use futures_util::{future::BoxFuture,FutureExt};
 use reth_provider::providers::BlockchainProvider;
-use crate::test_utils::{TestNode, TmpDB};
+use crate::test_utils::TmpDB;
 
 #[cfg(test)]
 mod examples;
@@ -160,7 +160,6 @@ impl<I: 'static> TestBuilder<I> {
     }
 }
 
-// Define the full engine type based on your custom setup
 type Engine = FullNodeTypesAdapter<TestNode, TmpDB, BlockchainProvider<NodeTypesWithDBAdapter<TestNode, TmpDB>>>;
 
 impl NodeClient {
