@@ -12,7 +12,7 @@ pub trait StateCommitment: std::fmt::Debug + Clone + Send + Sync + Unpin + 'stat
     /// The state root type.
     type StateRoot<'a, TX: DbTx + 'a>: DatabaseStateRoot<'a, TX>;
     /// The storage root type.
-    type StorageRoot<'a, TX: DbTx + 'a>: DatabaseStorageRoot<'a, TX>;
+    type StorageRoot<'a, TX: DbTx + 'a>: DatabaseStorageRoot;
     /// The state proof type.
     type StateProof<'a, TX: DbTx + 'a>: DatabaseProof<'a, TX>;
     /// The state witness type.
