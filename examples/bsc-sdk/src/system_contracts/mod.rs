@@ -7,7 +7,7 @@ use crate::{
 use abi::{STAKE_HUB_ABI, VALIDATOR_SET_ABI};
 use alloy_chains::Chain;
 use alloy_consensus::TxLegacy;
-use alloy_dyn_abi::JsonAbiExt;
+use alloy_dyn_abi::{DynSolValue, JsonAbiExt};
 use alloy_json_abi::JsonAbi;
 use alloy_primitives::{hex, Address, BlockNumber, Bytes, Signature, TxKind, U256};
 use include_dir::{include_dir, Dir};
@@ -37,8 +37,46 @@ impl<Spec: EthChainSpec> SystemContract<Spec> {
         Self { validator_abi, stake_hub_abi, chain_spec }
     }
 
+    /// Creates a deposit tx to pay block reward to a validator.
+    pub fn pay_validator_tx(&self, address: Address, block_reward: u128) -> TransactionSigned {
+        let function = self.validator_abi.function("deposit").unwrap().first().unwrap();
+        let input = function.abi_encode_input(&[DynSolValue::Address(address)]).unwrap();
+
+        let signature = Signature::new(Default::default(), Default::default(), false);
+
+        TransactionSigned::new_unhashed(
+            Transaction::Legacy(TxLegacy {
+                chain_id: Some(self.chain_spec.chain().id()),
+                nonce: 0,
+                gas_limit: u64::MAX / 2,
+                gas_price: 0,
+                value: U256::from(block_reward),
+                input: Bytes::from(input),
+                to: TxKind::Call(VALIDATOR_CONTRACT.parse().unwrap()),
+            }),
+            signature,
+        )
+    }
+
+    /// Creates a transaction to pay system reward transfering the reward to the system contract.
+    pub fn pay_system_tx(&self, system_reward: u128) -> TransactionSigned {
+        let signature = Signature::new(Default::default(), Default::default(), false);
+
+        TransactionSigned::new_unhashed(
+            Transaction::Legacy(TxLegacy {
+                chain_id: Some(self.chain_spec.chain().id()),
+                nonce: 0,
+                gas_limit: u64::MAX / 2,
+                gas_price: 0,
+                value: U256::from(system_reward),
+                input: Bytes::default(),
+                to: TxKind::Call(SYSTEM_REWARD_CONTRACT.parse().unwrap()),
+            }),
+            signature,
+        )
+    }
+
     pub(crate) fn genesis_contracts_txs(&self) -> Vec<TransactionSigned> {
-        println!("genesis_contracts_txs");
         let function = self.validator_abi.function("init").unwrap().first().unwrap();
         let input = function.abi_encode_input(&[]).unwrap();
 

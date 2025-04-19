@@ -5,7 +5,7 @@ use crate::evm::{
         ctx::{BscContext, DefaultBsc},
     },
     spec::BscSpecId,
-    transaction::BscTransaction,
+    transaction::BscTxEnv,
 };
 use reth_evm::{EvmEnv, EvmFactory};
 use reth_revm::{Context, Database};
@@ -18,7 +18,7 @@ use revm::{
     Inspector,
 };
 
-/// Factory producing [`EthEvm`].
+/// Factory producing [`BscEvm`].
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
 pub struct BscEvmFactory;
@@ -27,7 +27,7 @@ impl EvmFactory for BscEvmFactory {
     type Evm<DB: Database<Error: Send + Sync + 'static>, I: Inspector<BscContext<DB>>> =
         BscEvm<DB, I>;
     type Context<DB: Database<Error: Send + Sync + 'static>> = BscContext<DB>;
-    type Tx = BscTransaction<TxEnv>;
+    type Tx = BscTxEnv<TxEnv>;
     type Error<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
     type HaltReason = HaltReason;
     type Spec = BscSpecId;

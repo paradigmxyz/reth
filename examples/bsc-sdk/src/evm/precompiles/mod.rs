@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use super::spec::BscSpecId;
 use cfg_if::cfg_if;
 use once_cell::{race::OnceBox, sync::Lazy};
@@ -188,7 +190,6 @@ pub fn cancun() -> &'static Precompiles {
     static INSTANCE: OnceBox<Precompiles> = OnceBox::new();
     INSTANCE.get_or_init(|| {
             let mut precompiles = feynman().clone();
-            
             // EIP-4844: Shard Blob Transactions
             cfg_if! {
                 if #[cfg(any(feature = "c-kzg", feature = "kzg-rs"))] {

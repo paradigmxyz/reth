@@ -4,10 +4,10 @@ use crate::{
         api::{ctx::BscContext, BscEvmInner},
         precompiles::BscPrecompiles,
         spec::BscSpecId,
-        transaction::BscTransaction,
+        transaction::{BscTxEnv, BscTxTr},
     },
 };
-use alloy_primitives::{Address, Bytes, TxKind, U256};
+use alloy_primitives::{Address, Bytes};
 use config::BscEvmConfig;
 use reth::{
     api::{FullNodeTypes, NodeTypes},
@@ -52,23 +52,6 @@ impl<DB: Database, I, P> BscEvm<DB, I, P> {
     pub fn ctx_mut(&mut self) -> &mut BscContext<DB> {
         &mut self.inner.0.data.ctx
     }
-
-    /// Provides a mutable reference to the EVM inspector.
-    pub fn inspector_mut(&mut self) -> &mut I {
-        &mut self.inner.0.data.inspector
-    }
-}
-
-impl<DB: Database, I, P> BscEvm<DB, I, P> {
-    /// Creates a new Bsc EVM instance.
-    ///
-    /// The `inspect` argument determines whether the configured [`Inspector`] of the given
-    pub const fn new(
-        evm: BscEvmInner<BscContext<DB>, I, EthInstructions<EthInterpreter, BscContext<DB>>, P>,
-        inspect: bool,
-    ) -> Self {
-        Self { inner: evm, inspect }
-    }
 }
 
 impl<DB: Database, I, P> Deref for BscEvm<DB, I, P> {
@@ -95,10 +78,14 @@ where
     <DB as revm::Database>::Error: std::marker::Send + std::marker::Sync + 'static,
 {
     type DB = DB;
-    type Tx = BscTransaction<TxEnv>;
+    type Tx = BscTxEnv<TxEnv>;
     type Error = EVMError<DB::Error>;
     type HaltReason = HaltReason;
     type Spec = BscSpecId;
+
+    fn chain_id(&self) -> u64 {
+        self.cfg.chain_id
+    }
 
     fn block(&self) -> &BlockEnv {
         &self.block
@@ -111,6 +98,26 @@ where
         if self.inspect {
             self.inner.set_tx(tx);
             self.inner.inspect_replay()
+        } else if tx.is_system_transaction() {
+            let mut gas_limit = tx.base.gas_limit;
+            let mut basefee = 0;
+            let mut disable_nonce_check = true;
+
+            // ensure the block gas limit is >= the tx
+            core::mem::swap(&mut self.block.gas_limit, &mut gas_limit);
+            // disable the base fee check for this call by setting the base fee to zero
+            core::mem::swap(&mut self.block.basefee, &mut basefee);
+            // disable the nonce check
+            core::mem::swap(&mut self.cfg.disable_nonce_check, &mut disable_nonce_check);
+            let res = self.inner.transact(tx);
+
+            // swap back to the previous gas limit
+            core::mem::swap(&mut self.block.gas_limit, &mut gas_limit);
+            // swap back to the previous base fee
+            core::mem::swap(&mut self.block.basefee, &mut basefee);
+            // swap back to the previous nonce check flag
+            core::mem::swap(&mut self.cfg.disable_nonce_check, &mut disable_nonce_check);
+            return res;
         } else {
             self.inner.transact(tx)
         }
@@ -118,61 +125,11 @@ where
 
     fn transact_system_call(
         &mut self,
-        caller: Address,
-        contract: Address,
-        data: Bytes,
+        _caller: Address,
+        _contract: Address,
+        _data: Bytes,
     ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
-        // TODO: error handling
-        let account = self.db_mut().basic(caller).unwrap().unwrap_or_default();
-
-        println!("account: {:?}", account.nonce);
-
-        let tx = TxEnv {
-            caller,
-            kind: TxKind::Call(contract),
-            nonce: account.nonce,
-            gas_limit: u64::MAX / 2,
-            value: U256::ZERO,
-            data,
-            // Setting the gas price to zero enforces that no value is transferred as part of the
-            // call, and that the call will not count against the block's gas limit
-            gas_price: 0,
-            // The chain ID check is not relevant here and is disabled if set to None
-            chain_id: Some(56),
-            // Setting the gas priority fee to None ensures the effective gas price is derived from
-            // the `gas_price` field, which we need to be zero
-            gas_priority_fee: None,
-            access_list: Default::default(),
-            // blob fields can be None for this tx
-            blob_hashes: Vec::new(),
-            max_fee_per_blob_gas: 0,
-            tx_type: 0,
-            authorization_list: Default::default(),
-        };
-
-        let mut gas_limit = tx.gas_limit;
-        let mut basefee = 0;
-        let mut disable_nonce_check = true;
-
-        // ensure the block gas limit is >= the tx
-        core::mem::swap(&mut self.block.gas_limit, &mut gas_limit);
-        // disable the base fee check for this call by setting the base fee to zero
-        core::mem::swap(&mut self.block.basefee, &mut basefee);
-        // disable the nonce check
-        core::mem::swap(&mut self.cfg.disable_nonce_check, &mut disable_nonce_check);
-
-        let tx = BscTransaction { base: tx, is_system_transaction: Some(true) };
-
-        let res = self.transact(tx);
-
-        // swap back to the previous gas limit
-        core::mem::swap(&mut self.block.gas_limit, &mut gas_limit);
-        // swap back to the previous base fee
-        core::mem::swap(&mut self.block.basefee, &mut basefee);
-        // swap back to the previous nonce check flag
-        core::mem::swap(&mut self.cfg.disable_nonce_check, &mut disable_nonce_check);
-
-        res
+        unimplemented!()
     }
 
     fn db_mut(&mut self) -> &mut Self::DB {
