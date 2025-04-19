@@ -58,13 +58,13 @@ pub struct TreeConfig {
     /// a batch of downloaded blocks.
     max_execute_block_batch_size: usize,
     /// Whether to use the legacy state root calculation method instead of the
-    /// new state root task
+    /// new state root task.
     legacy_state_root: bool,
     /// Whether to always compare trie updates from the state root task to the trie updates from
     /// the regular state root calculation.
     always_compare_trie_updates: bool,
-    /// Whether to use cross-block caching and parallel prewarming
-    use_caching_and_prewarming: bool,
+    /// Whether to disable cross-block caching and parallel prewarming.
+    disable_caching_and_prewarming: bool,
     /// Cross-block cache size in bytes.
     cross_block_cache_size: u64,
     /// Whether the host has enough parallelism to run state root task.
@@ -85,7 +85,7 @@ impl Default for TreeConfig {
             max_execute_block_batch_size: DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE,
             legacy_state_root: false,
             always_compare_trie_updates: false,
-            use_caching_and_prewarming: false,
+            disable_caching_and_prewarming: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
             has_enough_parallelism: has_enough_parallelism(),
             max_proof_task_concurrency: DEFAULT_MAX_PROOF_TASK_CONCURRENCY,
@@ -105,7 +105,7 @@ impl TreeConfig {
         max_execute_block_batch_size: usize,
         legacy_state_root: bool,
         always_compare_trie_updates: bool,
-        use_caching_and_prewarming: bool,
+        disable_caching_and_prewarming: bool,
         cross_block_cache_size: u64,
         has_enough_parallelism: bool,
         max_proof_task_concurrency: u64,
@@ -119,7 +119,7 @@ impl TreeConfig {
             max_execute_block_batch_size,
             legacy_state_root,
             always_compare_trie_updates,
-            use_caching_and_prewarming,
+            disable_caching_and_prewarming,
             cross_block_cache_size,
             has_enough_parallelism,
             max_proof_task_concurrency,
@@ -169,8 +169,8 @@ impl TreeConfig {
     }
 
     /// Returns whether or not cross-block caching and parallel prewarming should be used.
-    pub const fn use_caching_and_prewarming(&self) -> bool {
-        self.use_caching_and_prewarming
+    pub const fn disable_caching_and_prewarming(&self) -> bool {
+        self.disable_caching_and_prewarming
     }
 
     /// Returns whether to always compare trie updates from the state root task to the trie updates
@@ -229,9 +229,12 @@ impl TreeConfig {
         self
     }
 
-    /// Setter for whether to use the new state root task calculation method.
-    pub const fn with_caching_and_prewarming(mut self, use_caching_and_prewarming: bool) -> Self {
-        self.use_caching_and_prewarming = use_caching_and_prewarming;
+    /// Setter for whether to disable cross-block caching and parallel prewarming.
+    pub const fn without_caching_and_prewarming(
+        mut self,
+        disable_caching_and_prewarming: bool,
+    ) -> Self {
+        self.disable_caching_and_prewarming = disable_caching_and_prewarming;
         self
     }
 
