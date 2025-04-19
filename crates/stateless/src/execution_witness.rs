@@ -8,8 +8,8 @@ Currently it does not seem to need "std", so one option is to disable it.
 One could alternatively argue that the type may not belong in rpc-debug-types and
 may belong somewhere like alloy-primitives and re-exported in rpc-types-debug.
 
-Reason being, with all variants of statelessness (when shipped), 
-there is an `ExecutionWitness` that comes with the block, so its 
+Reason being, with all variants of statelessness (when shipped),
+there is an `ExecutionWitness` that comes with the block, so its
 not just used for debugging.
 
 */

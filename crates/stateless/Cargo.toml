@@ -34,4 +34,4 @@ reth-consensus.workspace = true
 # misc
 thiserror.workspace = true
 itertools.workspace = true
-serde.workspace = true #Needed because we copied `ExecutionWitness` into this crate
+serde.workspace = true # Needed because we copied `ExecutionWitness` into this crate
