@@ -33,6 +33,7 @@ eyre.workspace = true
 # reth
 reth-provider.workspace = true
 reth-provider.features = ["test-utils"]
+reth-db-common.workspace = true
 
 # async
 tokio.workspace = true

@@ -1,4 +1,5 @@
 use reqwest::{Client, Url};
+use reth_db_common::init::init_genesis;
 use reth_era_downloader::{EraClient, EraStream, EraStreamConfig};
 use reth_provider::test_utils::create_test_provider_factory;
 use std::str::FromStr;
@@ -21,6 +22,8 @@ async fn test_history_imports_from_fresh_state_successfully() {
 
     let stream = EraStream::new(client, config);
     let pf = create_test_provider_factory();
+
+    init_genesis(&pf).unwrap();
 
     let _result = reth_era_import::import(stream, &pf.provider_rw().unwrap().0).unwrap();
 }

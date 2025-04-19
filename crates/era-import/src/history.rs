@@ -87,6 +87,11 @@ where
             let header: BH = block.header.decode()?;
             let body: BB = block.body.decode()?;
             let number = header.number();
+
+            if number == 0 {
+                continue;
+            }
+
             let hash = header.hash_slow();
             last_header_number = number;
 
