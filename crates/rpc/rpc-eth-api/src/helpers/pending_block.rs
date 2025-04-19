@@ -45,7 +45,6 @@ pub trait LoadPendingBlock:
         Provider: BlockReaderIdExt<Receipt: Receipt>
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                       + StateProviderFactory,
-        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
         Evm: ConfigureEvm<
             Primitives: NodePrimitives<
                 BlockHeader = ProviderHeader<Self::Provider>,
@@ -136,6 +135,8 @@ pub trait LoadPendingBlock:
     > + Send
     where
         Self: SpawnBlocking,
+        Self::Pool:
+            TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
     {
         async move {
             let pending = self.pending_block_env_and_cfg()?;
@@ -203,6 +204,8 @@ pub trait LoadPendingBlock:
         Self::Error,
     >
     where
+        Self::Pool:
+            TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
         EthApiError: From<ProviderError>,
     {
         let state_provider = self
