@@ -17,7 +17,7 @@ use reth::{
     },
 };
 use reth_primitives::{Block, BlockBody, EthPrimitives};
-use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
+use reth_provider::EthStorage;
 use reth_trie_db::MerklePatriciaTrie;
 
 pub mod consensus;
@@ -67,10 +67,6 @@ impl BscNode {
             .network(BscNetworkBuilder::default())
             .executor(BscExecutorBuilder::default())
             .consensus(BscConsensusBuilder::default())
-    }
-
-    pub fn provider_factory_builder() -> ProviderFactoryBuilder<Self> {
-        ProviderFactoryBuilder::default()
     }
 }
 

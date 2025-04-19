@@ -1,14 +1,12 @@
 use super::{executor::BscBlockExecutor, factory::BscEvmFactory};
 use crate::{
     chainspec::BscChainSpec,
-    evm::spec::BscSpecId,
+    evm::{spec::BscSpecId, transaction::BscTxEnv},
     hardforks::{bsc::BscHardfork, BscHardforks},
     system_contracts::SystemContract,
 };
-use alloy_consensus::{BlockHeader, Header, Transaction, TxReceipt};
-use alloy_eips::Encodable2718;
-
-use alloy_primitives::{BlockNumber, Bytes, Log, U256};
+use alloy_consensus::{BlockHeader, Header, TxReceipt};
+use alloy_primitives::{BlockNumber, Log, U256};
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_ethereum_forks::EthereumHardfork;
 use reth_evm::{
@@ -18,16 +16,15 @@ use reth_evm::{
         EthBlockExecutionCtx,
     },
     ConfigureEvm, EvmEnv, EvmFactory, ExecutionCtxFor, FromRecoveredTx, FromTxWithEncoded,
-    NextBlockEnvAttributes,
+    IntoTxEnv, NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::{EthBlockAssembler, RethReceiptBuilder};
 use reth_primitives::{
     BlockTy, EthPrimitives, HeaderTy, SealedBlock, SealedHeader, TransactionSigned,
 };
-use reth_primitives_traits::SignedTransaction;
 use reth_revm::State;
 use revm::{
-    context::{BlockEnv, CfgEnv},
+    context::{BlockEnv, CfgEnv, TxEnv},
     context_interface::block::BlobExcessGasAndPrice,
     primitives::hardfork::SpecId,
     Inspector,
@@ -37,7 +34,7 @@ use std::{borrow::Cow, convert::Infallible, sync::Arc};
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone)]
 pub struct BscEvmConfig {
-    /// Inner [`EthBlockExecutorFactory`].
+    /// Inner [`BscBlockExecutorFactory`].
     pub executor_factory:
         BscBlockExecutorFactory<RethReceiptBuilder, Arc<BscChainSpec>, BscEvmFactory>,
     /// Ethereum block assembler.
@@ -73,12 +70,6 @@ impl BscEvmConfig {
     pub const fn chain_spec(&self) -> &Arc<BscChainSpec> {
         self.executor_factory.spec()
     }
-
-    /// Sets the extra data for the block assembler.
-    pub fn with_extra_data(mut self, extra_data: Bytes) -> Self {
-        self.block_assembler.extra_data = extra_data;
-        self
-    }
 }
 
 /// Ethereum block executor factory.
@@ -112,27 +103,20 @@ impl<R, Spec, EvmFactory> BscBlockExecutorFactory<R, Spec, EvmFactory> {
     pub const fn spec(&self) -> &Spec {
         &self.spec
     }
-
-    /// Exposes the EVM factory.
-    pub const fn evm_factory(&self) -> &EvmFactory {
-        &self.evm_factory
-    }
 }
 
 impl<R, Spec, EvmF> BlockExecutorFactory for BscBlockExecutorFactory<R, Spec, EvmF>
 where
-    R: ReceiptBuilder<
-        Transaction: Transaction + Encodable2718 + SignedTransaction,
-        Receipt: TxReceipt<Log = Log>,
-    >,
+    R: ReceiptBuilder<Transaction = TransactionSigned, Receipt: TxReceipt<Log = Log>>,
     Spec: EthereumHardforks + BscHardforks + EthChainSpec + Hardforks + Clone,
-    EvmF: EvmFactory<Tx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>>,
+    EvmF: EvmFactory<Tx: FromRecoveredTx<TransactionSigned> + FromTxWithEncoded<TransactionSigned>>,
     R::Transaction: From<TransactionSigned> + Clone,
     Self: 'static,
+    BscTxEnv<TxEnv>: IntoTxEnv<<EvmF as EvmFactory>::Tx>,
 {
     type EvmFactory = EvmF;
     type ExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
-    type Transaction = R::Transaction;
+    type Transaction = TransactionSigned;
     type Receipt = R::Receipt;
 
     fn evm_factory(&self) -> &Self::EvmFactory {
