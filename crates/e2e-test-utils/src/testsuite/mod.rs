@@ -8,7 +8,7 @@ use alloy_primitives::B256;
 use eyre::Result;
 use jsonrpsee::http_client::{transport::HttpBackend, HttpClient};
 use reth_engine_local::LocalPayloadAttributesBuilder;
-use reth_node_api::{NodeTypes, PayloadTypes,FullNodeTypes};
+use reth_node_api::{NodeTypes, PayloadTypes, FullNodeTypes, test_utils::TestNodeTypes};
 use reth_payload_builder::PayloadId;
 use reth_rpc_layer::AuthClientService;
 use setup::Setup;
@@ -21,7 +21,9 @@ use alloy_rpc_types_engine::{ExecutionPayloadV3,PayloadStatus};
 use eyre::eyre;
 use tracing::error;
 use futures_util::{future::BoxFuture,FutureExt};
-
+use reth_provider::TestProvider;
+use reth_node_api::test_utils::TestNodeTypes;
+use reth_db::mdbx::MdbxDatabase;
 
 #[cfg(test)]
 mod examples;
@@ -166,7 +168,9 @@ impl NodeClient {
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
     ) -> eyre::Result<PayloadStatus> {
-        let mut status = <HttpClient<AuthClientService<HttpBackend>> as EngineApiClient<FullNodeTypes>>::new_payload_v3(
+        type Engine = FullNodeTypesAdapter<TestNodeTypes, MdbxDatabase, TestProvider>;
+
+        let mut status = <HttpClient<AuthClientService<HttpBackend>> as EngineApiClient<Engine>>::new_payload_v3(
             &self.engine,
             payload.clone(),
             versioned_hashes.clone(),
