@@ -170,8 +170,7 @@ pub fn stateless_validation(
         .map_err(StatelessValidationError::ConsensusValidationFailed)?;
 
     // Compute and check the post state root
-    let hashed_state =
-        HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state.iter());
+    let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(&output.state.state);
     let state_root = crate::root::calculate_state_root(&mut sparse_trie, hashed_state)
         .map_err(|_e| StatelessValidationError::StatelessStateRootCalculationFailed)?;
     if state_root != current_block.state_root {

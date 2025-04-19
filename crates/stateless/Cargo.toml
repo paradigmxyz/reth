@@ -27,7 +27,7 @@ reth-errors.workspace = true
 reth-evm.workspace = true
 reth-evm-ethereum.workspace = true
 reth-revm.workspace = true
-reth-trie-common = { workspace = true }
+reth-trie-common.workspace = true
 reth-trie-sparse.workspace = true
 reth-chainspec.workspace = true
 reth-consensus.workspace = true
@@ -38,5 +38,4 @@ thiserror.workspace = true
 itertools.workspace = true
 
 [dev-dependencies]
-reth-trie-common = { workspace = true }
 reth-primitives-traits = { workspace = true }
