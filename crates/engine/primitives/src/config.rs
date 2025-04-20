@@ -17,7 +17,29 @@ pub const DEFAULT_RESERVED_CPU_CORES: usize = 1;
 const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = 256;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
 const DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE: usize = 4;
-const DEFAULT_CROSS_BLOCK_CACHE_SIZE: u64 = 4 * 1024 * 1024 * 1024;
+const DEFAULT_CROSS_BLOCK_CACHE_SIZE_PERCENT: f64 = 0.3;
+
+fn get_dynamic_cross_block_cache_size() -> u64 {
+    #[cfg(feature = "std")]
+    {
+        use sysinfo::System;
+
+        let mut sys = System::new_all();
+        sys.refresh_memory();
+
+        let total_memory = sys.total_memory();
+        let used_memory = sys.used_memory();
+        let available_memory = total_memory - used_memory;
+
+        let cache_size = (available_memory as f64 * DEFAULT_CROSS_BLOCK_CACHE_SIZE_PERCENT) as u64;
+
+        return cache_size;
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        4 * 1024 * 1024 * 1024
+    }
+}
 
 /// Determines if the host has enough parallelism to run the payload processor.
 ///
@@ -86,7 +108,7 @@ impl Default for TreeConfig {
             legacy_state_root: false,
             always_compare_trie_updates: false,
             use_caching_and_prewarming: false,
-            cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
+            cross_block_cache_size: get_dynamic_cross_block_cache_size(),
             has_enough_parallelism: has_enough_parallelism(),
             max_proof_task_concurrency: DEFAULT_MAX_PROOF_TASK_CONCURRENCY,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,

@@ -35,6 +35,7 @@ futures.workspace = true
 auto_impl.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+sysinfo.workspace = true
 
 [features]
 default = ["std"]
