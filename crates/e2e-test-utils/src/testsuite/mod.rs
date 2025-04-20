@@ -2,7 +2,7 @@
 
 use crate::{
     testsuite::actions::{Action, ActionBox},
-    NodeBuilderHelper, PayloadAttributesBuilder,
+    NodeBuilderHelper, PayloadAttributesBuilder,TmpDB,
 };
 use alloy_primitives::B256;
 use eyre::Result;
@@ -22,7 +22,6 @@ use eyre::eyre;
 use tracing::error;
 use futures_util::{future::BoxFuture,FutureExt};
 use reth_provider::providers::BlockchainProvider;
-use crate::test_utils::TmpDB;
 
 #[cfg(test)]
 mod examples;
@@ -159,7 +158,7 @@ impl<I: 'static> TestBuilder<I> {
         Ok(())
     }
 }
-
+pub type TmpDB = Arc<TempDatabase<DatabaseEnv>>;
 type Engine = FullNodeTypesAdapter<TestNode, TmpDB, BlockchainProvider<NodeTypesWithDBAdapter<TestNode, TmpDB>>>;
 
 impl NodeClient {
