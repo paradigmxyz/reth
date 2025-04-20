@@ -21,7 +21,7 @@ pub fn ensure_well_formed_fields<T: Typed2718>(
 
 /// Checks that Prague fields are not present on sidecar unless Prague is active.
 #[inline]
-pub fn ensure_well_formed_sidecar_fields(
+pub const fn ensure_well_formed_sidecar_fields(
     prague_fields: Option<&PraguePayloadFields>,
     is_prague_active: bool,
 ) -> Result<(), PayloadError> {

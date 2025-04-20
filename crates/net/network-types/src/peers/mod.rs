@@ -76,7 +76,7 @@ impl Peer {
 
     /// Resets the reputation of the peer to the default value. This always returns
     /// [`ReputationChangeOutcome::None`].
-    pub fn reset_reputation(&mut self) -> ReputationChangeOutcome {
+    pub const fn reset_reputation(&mut self) -> ReputationChangeOutcome {
         self.reputation = DEFAULT_REPUTATION;
 
         ReputationChangeOutcome::None
@@ -120,7 +120,7 @@ impl Peer {
 
     /// Unbans the peer by resetting its reputation
     #[inline]
-    pub fn unban(&mut self) {
+    pub const fn unban(&mut self) {
         self.reputation = DEFAULT_REPUTATION
     }
 

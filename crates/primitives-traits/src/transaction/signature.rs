@@ -1,12 +1,12 @@
 //! Signature types and helpers
 
 /// Re-exported signature type
-pub use alloy_primitives::PrimitiveSignature as Signature;
+pub use alloy_primitives::Signature;
 
 #[cfg(test)]
 mod tests {
     use crate::crypto::secp256k1::recover_signer;
-    use alloy_primitives::{address, PrimitiveSignature as Signature, B256, U256};
+    use alloy_primitives::{address, Signature, B256, U256};
     use std::str::FromStr;
 
     #[test]

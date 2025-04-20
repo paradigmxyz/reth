@@ -13,8 +13,7 @@ use alloy_eips::{
 };
 use alloy_evm::{FromRecoveredTx, FromTxWithEncoded};
 use alloy_primitives::{
-    bytes::BufMut, keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash,
-    TxKind, B256, U256,
+    bytes::BufMut, keccak256, Address, Bytes, ChainId, Signature, TxHash, TxKind, B256, U256,
 };
 use alloy_rlp::{Decodable, Encodable};
 use core::hash::{Hash, Hasher};
@@ -119,13 +118,24 @@ impl Transaction {
     }
 
     /// This sets the transaction's nonce.
-    pub fn set_nonce(&mut self, nonce: u64) {
+    pub const fn set_nonce(&mut self, nonce: u64) {
         match self {
             Self::Legacy(tx) => tx.nonce = nonce,
             Self::Eip2930(tx) => tx.nonce = nonce,
             Self::Eip1559(tx) => tx.nonce = nonce,
             Self::Eip4844(tx) => tx.nonce = nonce,
             Self::Eip7702(tx) => tx.nonce = nonce,
+        }
+    }
+
+    #[cfg(test)]
+    const fn input_mut(&mut self) -> &mut Bytes {
+        match self {
+            Self::Legacy(tx) => &mut tx.input,
+            Self::Eip2930(tx) => &mut tx.input,
+            Self::Eip1559(tx) => &mut tx.input,
+            Self::Eip4844(tx) => &mut tx.input,
+            Self::Eip7702(tx) => &mut tx.input,
         }
     }
 }
@@ -357,7 +367,7 @@ impl TransactionSigned {
     }
 
     /// Returns the signature of the transaction
-    pub fn signature(&self) -> &Signature {
+    pub const fn signature(&self) -> &Signature {
         &self.signature
     }
 }
@@ -448,7 +458,7 @@ impl TransactionSigned {
 
     /// Provides mutable access to the transaction.
     #[cfg(feature = "test-utils")]
-    pub fn transaction_mut(&mut self) -> &mut Transaction {
+    pub const fn transaction_mut(&mut self) -> &mut Transaction {
         &mut self.transaction
     }
 
@@ -617,11 +627,11 @@ impl From<TransactionSigned> for Signed<Transaction> {
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        #[allow(unused_mut)]
+        #[expect(unused_mut)]
         let mut transaction = Transaction::arbitrary(u)?;
 
         let secp = secp256k1::Secp256k1::new();
-        let key_pair = secp256k1::Keypair::new(&secp, &mut rand::thread_rng());
+        let key_pair = secp256k1::Keypair::new(&secp, &mut rand_08::thread_rng());
         let signature = reth_primitives_traits::crypto::secp256k1::sign_message(
             B256::from_slice(&key_pair.secret_bytes()[..]),
             transaction.signature_hash(),
@@ -968,8 +978,10 @@ pub(super) mod serde_bincode_compat {
         transaction::serde_bincode_compat::{TxEip1559, TxEip2930, TxEip7702, TxLegacy},
         TxEip4844,
     };
-    use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
+    use alloy_primitives::{Signature, TxHash};
     use reth_primitives_traits::{serde_bincode_compat::SerdeBincodeCompat, SignedTransaction};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde_with::{DeserializeAs, SerializeAs};
 
     /// Bincode-compatible [`super::Transaction`] serde implementation.
     #[derive(Debug)]
@@ -1035,6 +1047,28 @@ pub(super) mod serde_bincode_compat {
             }
         }
     }
+
+    impl SerializeAs<super::TransactionSigned> for TransactionSigned<'_> {
+        fn serialize_as<S>(
+            source: &super::TransactionSigned,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            TransactionSigned::from(source).serialize(serializer)
+        }
+    }
+
+    impl<'de> DeserializeAs<'de, super::TransactionSigned> for TransactionSigned<'de> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::TransactionSigned, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            TransactionSigned::deserialize(deserializer).map(Into::into)
+        }
+    }
+
     impl SerdeBincodeCompat for super::TransactionSigned {
         type BincodeRepr<'a> = TransactionSigned<'a>;
 
@@ -1103,8 +1137,7 @@ mod tests {
         eip7702::constants::SECP256K1N_HALF,
     };
     use alloy_primitives::{
-        address, b256, bytes, hex, Address, Bytes, PrimitiveSignature as Signature, TxKind, B256,
-        U256,
+        address, b256, bytes, hex, Address, Bytes, Signature, TxKind, B256, U256,
     };
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
     use proptest::proptest;
@@ -1129,6 +1162,36 @@ mod tests {
 
         #[test]
         fn test_roundtrip_compact_decode_envelope(reth_tx in arb::<TransactionSigned>()) {
+            let mut buf = Vec::<u8>::new();
+            let len = reth_tx.to_compact(&mut buf);
+
+            let (actual_tx, _) = EthereumTxEnvelope::<TxEip4844>::from_compact(&buf, len);
+            let expected_tx = EthereumTxEnvelope::<TxEip4844>::from(reth_tx);
+
+            assert_eq!(actual_tx, expected_tx);
+        }
+
+        #[test]
+        fn test_roundtrip_compact_encode_envelope_zstd(mut reth_tx in arb::<TransactionSigned>()) {
+               // zstd only kicks in if the input is large enough
+            *reth_tx.transaction.input_mut() = vec![0;33].into();
+
+            let mut expected_buf = Vec::<u8>::new();
+            let expected_len = reth_tx.to_compact(&mut expected_buf);
+
+            let mut actual_but  = Vec::<u8>::new();
+            let alloy_tx = EthereumTxEnvelope::<TxEip4844>::from(reth_tx);
+            let actual_len = alloy_tx.to_compact(&mut actual_but);
+
+            assert_eq!(actual_but, expected_buf);
+            assert_eq!(actual_len, expected_len);
+        }
+
+        #[test]
+        fn test_roundtrip_compact_decode_envelope_zstd(mut reth_tx in arb::<TransactionSigned>()) {
+            // zstd only kicks in if the input is large enough
+            *reth_tx.transaction.input_mut() = vec![0;33].into();
+
             let mut buf = Vec::<u8>::new();
             let len = reth_tx.to_compact(&mut buf);
 

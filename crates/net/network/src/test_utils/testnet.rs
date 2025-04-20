@@ -5,7 +5,10 @@ use crate::{
     error::NetworkError,
     eth_requests::EthRequestHandler,
     protocol::IntoRlpxSubProtocol,
-    transactions::{TransactionsHandle, TransactionsManager, TransactionsManagerConfig},
+    transactions::{
+        config::TransactionPropagationKind, TransactionsHandle, TransactionsManager,
+        TransactionsManagerConfig,
+    },
     NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
 };
 use alloy_consensus::transaction::PooledTransaction;
@@ -206,6 +209,15 @@ where
         self,
         tx_manager_config: TransactionsManagerConfig,
     ) -> Testnet<C, EthTransactionPool<C, InMemoryBlobStore>> {
+        self.with_eth_pool_config_and_policy(tx_manager_config, Default::default())
+    }
+
+    /// Installs an eth pool on each peer with custom transaction manager config and policy.
+    pub fn with_eth_pool_config_and_policy(
+        self,
+        tx_manager_config: TransactionsManagerConfig,
+        policy: TransactionPropagationKind,
+    ) -> Testnet<C, EthTransactionPool<C, InMemoryBlobStore>> {
         self.map_pool(|peer| {
             let blob_store = InMemoryBlobStore::default();
             let pool = TransactionValidationTaskExecutor::eth(
@@ -214,9 +226,10 @@ where
                 TokioTaskExecutor::default(),
             );
 
-            peer.map_transactions_manager_with_config(
+            peer.map_transactions_manager_with(
                 EthTransactionPool::eth_pool(pool, blob_store, Default::default()),
                 tx_manager_config.clone(),
+                policy,
             )
         })
     }
@@ -423,7 +436,7 @@ where
     }
 
     /// Returns mutable access to the network.
-    pub fn network_mut(&mut self) -> &mut NetworkManager<EthNetworkPrimitives> {
+    pub const fn network_mut(&mut self) -> &mut NetworkManager<EthNetworkPrimitives> {
         &mut self.network
     }
 
@@ -493,15 +506,29 @@ where
     where
         P: TransactionPool,
     {
+        self.map_transactions_manager_with(pool, config, Default::default())
+    }
+
+    /// Map transactions manager with custom config and the given policy.
+    pub fn map_transactions_manager_with<P>(
+        self,
+        pool: P,
+        config: TransactionsManagerConfig,
+        policy: TransactionPropagationKind,
+    ) -> Peer<C, P>
+    where
+        P: TransactionPool,
+    {
         let Self { mut network, request_handler, client, secret_key, .. } = self;
         let (tx, rx) = unbounded_channel();
         network.set_transactions(tx);
 
-        let transactions_manager = TransactionsManager::new(
+        let transactions_manager = TransactionsManager::with_policy(
             network.handle().clone(),
             pool.clone(),
             rx,
-            config, // Use provided config
+            config,
+            policy,
         );
 
         Peer {
@@ -638,7 +665,7 @@ where
     where
         C: ChainSpecProvider<ChainSpec: Hardforks>,
     {
-        let secret_key = SecretKey::new(&mut rand::thread_rng());
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
         let config = Self::network_config_builder(secret_key).build(client.clone());
         Self { config, client, secret_key }
     }
@@ -658,7 +685,7 @@ where
     where
         C: ChainSpecProvider<ChainSpec: Hardforks>,
     {
-        let secret_key = SecretKey::new(&mut rand::thread_rng());
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
 
         let builder = Self::network_config_builder(secret_key);
         let hello_message =

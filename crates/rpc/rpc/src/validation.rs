@@ -34,6 +34,7 @@ use revm_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{oneshot, RwLock};
+use tracing::warn;
 
 /// The type that implements the `validation` rpc namespace trait
 #[derive(Clone, Debug, derive_more::Deref)]
@@ -417,6 +418,7 @@ where
         &self,
         _request: BuilderBlockValidationRequest,
     ) -> RpcResult<()> {
+        warn!(target: "rpc::flashbots", "Method `flashbots_validateBuilderSubmissionV1` is not supported");
         Err(internal_rpc_err("unimplemented"))
     }
 
@@ -424,6 +426,7 @@ where
         &self,
         _request: BuilderBlockValidationRequestV2,
     ) -> RpcResult<()> {
+        warn!(target: "rpc::flashbots", "Method `flashbots_validateBuilderSubmissionV2` is not supported");
         Err(internal_rpc_err("unimplemented"))
     }
 
