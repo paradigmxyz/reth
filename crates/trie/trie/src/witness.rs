@@ -27,9 +27,9 @@ use std::sync::{mpsc, Arc};
 #[derive(Debug)]
 pub struct TrieWitness<T, H> {
     /// The cursor factory for traversing trie nodes.
-    trie_cursor_factory: T,
+    pub trie_cursor_factory: T,
     /// The factory for hashed cursors.
-    hashed_cursor_factory: H,
+    pub hashed_cursor_factory: H,
     /// A set of prefix sets that have changes.
     prefix_sets: TriePrefixSetsMut,
     /// Recorded witness.
