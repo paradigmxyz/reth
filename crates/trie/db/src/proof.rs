@@ -83,9 +83,6 @@ impl<'a, TX: DbTx> DatabaseProof<'a, TX>
 
 /// Extends [`StorageProof`] with operations specific for working with a database transaction.
 pub trait DatabaseStorageProof {
-    /// Create a new [`StorageProof`] from self and account address.
-    fn new(&self, address: Address) -> Self;
-
     /// Generates the storage proof for target slot based on [`TrieInput`].
     fn overlay_storage_proof(
         &self,
@@ -106,10 +103,6 @@ pub trait DatabaseStorageProof {
 impl<'a, TX: DbTx> DatabaseStorageProof
     for StorageProof<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>
 {
-    fn new(&self, address: Address) -> Self {
-        Self::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone(), address)
-    }
-
     fn overlay_storage_proof(
         &self,
         address: Address,
@@ -123,7 +116,7 @@ impl<'a, TX: DbTx> DatabaseStorageProof
             HashMap::from_iter([(hashed_address, storage.into_sorted())]),
         );
 
-        self.new(address)
+        Self::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone(), address)
             .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
                 self.hashed_cursor_factory.clone(),
                 &state_sorted,
@@ -145,7 +138,7 @@ impl<'a, TX: DbTx> DatabaseStorageProof
             Default::default(),
             HashMap::from_iter([(hashed_address, storage.into_sorted())]),
         );
-        self.new(address)
+        Self::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone(), address)
             .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
                 self.hashed_cursor_factory.clone(),
                 &state_sorted,
