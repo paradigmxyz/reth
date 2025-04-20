@@ -34,7 +34,8 @@ struct BundleAccountSorted {
     /// Contains both original and present state.
     /// When extracting changeset we compare if original value is different from present value.
     /// If it is different we add it to changeset.
-    /// If Account was destroyed we ignore original value and compare present state with `U256::ZERO`.
+    /// If Account was destroyed we ignore original value and compare present state with
+    /// `U256::ZERO`.
     pub storage: BTreeMap<U256, StorageSlot>,
     /// Account status.
     pub status: AccountStatus,
