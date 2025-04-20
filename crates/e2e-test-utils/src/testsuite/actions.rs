@@ -3,7 +3,7 @@
 use crate::testsuite::Environment;
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::{
-    ExecutionPayloadV3, ForkchoiceState, PayloadAttributes, PayloadStatusEnum,
+    ExecutionPayload, ExecutionPayloadV3, ForkchoiceState, PayloadAttributes, PayloadStatusEnum,
 };
 use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction};
 use eyre::Result;
