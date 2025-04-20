@@ -460,10 +460,10 @@ where
 
                 // Construct and broadcast the execution payload from the latest block
                 // The latest block should contain the latest_payload_built
-                let execution_payload = ExecutionPayloadV3::from_block_slow(&latest_block);
+                let execution_payload_v3 = ExecutionPayloadV3::from_block_slow(&latest_block);
                 let result = EngineApiClient::<Engine>::new_payload_v3(
                     engine,
-                    execution_payload,
+                    execution_payload_v3.clone(),
                     vec![],
                     parent_beacon_block_root,
                 )
@@ -472,9 +472,8 @@ where
                 // Check if broadcast was successful
                 if result.status == PayloadStatusEnum::Valid {
                     successful_broadcast = true;
-                    // We don't need to update the latest payload built since it should be the same.
-                    // env.latest_payload_built = Some(next_new_payload.clone());
-                    env.latest_payload_executed = Some(next_new_payload.clone());
+                    let execution_payload: ExecutionPayload = execution_payload_v3.into();
+                    env.latest_payload_executed = Some(execution_payload);
                     break;
                 } else if let PayloadStatusEnum::Invalid { validation_error } = result.status {
                     debug!(
