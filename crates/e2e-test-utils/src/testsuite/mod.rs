@@ -2,13 +2,13 @@
 
 use crate::{
     testsuite::actions::{Action, ActionBox},
-    NodeBuilderHelper, PayloadAttributesBuilder,TmpDB,{node::TestNode},
+    NodeBuilderHelper, PayloadAttributesBuilder,
 };
 use alloy_primitives::B256;
 use eyre::Result;
 use jsonrpsee::http_client::{transport::HttpBackend, HttpClient};
 use reth_engine_local::LocalPayloadAttributesBuilder;
-use reth_node_api::{NodeTypes, PayloadTypes, FullNodeTypesAdapter, NodeTypesWithDBAdapter};
+use reth_node_api::{NodeTypes, PayloadTypes};
 use reth_payload_builder::PayloadId;
 use reth_rpc_layer::AuthClientService;
 use setup::Setup;
@@ -16,12 +16,6 @@ use std::{collections::HashMap, marker::PhantomData};
 pub mod actions;
 pub mod setup;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
-use reth_rpc_api::EngineApiClient;
-use alloy_rpc_types_engine::{ExecutionPayloadV3,PayloadStatus};
-use eyre::eyre;
-use tracing::error;
-use futures_util::{future::BoxFuture,FutureExt};
-use reth_provider::providers::BlockchainProvider;
 
 #[cfg(test)]
 mod examples;
@@ -68,8 +62,8 @@ pub struct Environment<I> {
     pub latest_fork_choice_state: ForkchoiceState,
     /// Stores the most recent built execution payload
     pub latest_payload_built: Option<PayloadAttributes>,
-    /// recently executed payload after a successful newPayloadV3 broadcast
-    pub latest_payload_executed: Option<ExecutionPayloadV3>,
+    /// sotres recent executed payload after a successful newPayloadV3 broadcast
+    pub latest_payload_executed: Option<ExecutionPayload>,
 }
 
 impl<I> Default for Environment<I> {
@@ -156,100 +150,5 @@ impl<I: 'static> TestBuilder<I> {
         drop(setup);
 
         Ok(())
-    }
-}
-// pub type TmpDB = Arc<TempDatabase<DatabaseEnv>>;
-type Engine = FullNodeTypesAdapter<TestNode, TmpDB, BlockchainProvider<NodeTypesWithDBAdapter<TestNode, TmpDB>>>;
-
-impl NodeClient {
-    pub async fn new_payload_v3_wait(
-        &self,
-        payload: ExecutionPayloadV3,
-        versioned_hashes: Vec<B256>,
-        parent_beacon_block_root: B256,
-    ) -> eyre::Result<PayloadStatus> {
-
-        let mut status = <HttpClient<AuthClientService<HttpBackend>> as EngineApiClient<Engine>>::new_payload_v3(
-            &self.engine,
-            payload.clone(),
-            versioned_hashes.clone(),
-            parent_beacon_block_root,
-        ).await?;
-
-        while !status.is_valid() {
-            if status.is_invalid() {
-                error!(
-                    ?status,
-                    ?payload,
-                    ?versioned_hashes,
-                    ?parent_beacon_block_root,
-                    "Invalid newPayloadV3",
-                );
-                panic!("Invalid newPayloadV3: {status:?}");
-            }
-
-            if status.is_syncing() {
-                return Err(eyre::eyre!("Payload syncing: no canonical state for parent"));
-            }
-
-            status = EngineApiClient::new_payload_v3(
-                &self.engine,
-                payload.clone(),
-                versioned_hashes.clone(),
-                parent_beacon_block_root,
-            )
-            .await?
-        }
-
-        Ok(status)
-    }
-}
-
-pub struct BroadcastNextPayload {
-    pub versioned_hashes: Vec<B256>,
-    pub parent_beacon_block_root: B256,
-}
-
-impl<I: Send + 'static> Action<I> for BroadcastNextPayload {
-    fn execute<'a>(&'a mut self, env: &'a mut Environment<I>) -> BoxFuture<'a, Result<()>> {
-        async move {
-            let payload = env
-                .latest_payload_executed
-                .clone()
-                .ok_or_else(|| eyre!("No latest_payload_executed in env"))?;
-
-            let mut valid_found = false;
-
-            for client in &env.node_clients {
-                let result = client
-                    .new_payload_v3_wait(
-                        payload.clone(),
-                        self.versioned_hashes.clone(),
-                        self.parent_beacon_block_root,
-                    )
-                    .await;
-
-                match result {
-                    Ok(status) if status.is_valid() => {
-                        env.latest_payload_executed = Some(payload.clone());
-                        valid_found = true;
-                        break;
-                    }
-                    Ok(status) => {
-                        tracing::warn!(?status, "Client did not return valid payload");
-                    }
-                    Err(err) => {
-                        tracing::error!(?err, "Error during payload broadcast");
-                    }
-                }
-            }
-
-            if !valid_found {
-                return Err(eyre!("No client responded with a valid payload"));
-            }
-
-            Ok(())
-        }
-        .boxed()
     }
 }
