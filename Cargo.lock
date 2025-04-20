@@ -7823,6 +7823,7 @@ dependencies = [
  "reth-db-common",
  "reth-era",
  "reth-era-downloader",
+ "reth-etl",
  "reth-primitives-traits",
  "reth-provider",
  "reth-storage-api",

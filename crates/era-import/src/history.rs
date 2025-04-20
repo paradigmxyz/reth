@@ -9,12 +9,13 @@ use reth_db_api::{
 };
 use reth_era::{era1_file::Era1Reader, execution_types::DecodeCompressed};
 use reth_era_downloader::{EraStream, HttpClient};
+use reth_etl::Collector;
 use reth_primitives_traits::{Block, FullBlockBody, FullBlockHeader, NodePrimitives};
 use reth_provider::{
     BlockWriter, ProviderError, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
 };
 use reth_storage_api::{DBProvider, HeaderProvider, NodePrimitivesProvider, StorageLocation};
-use std::{fs::File, sync::mpsc};
+use std::{fs, fs::File, sync::mpsc};
 
 /// Imports blocks from `downloader` using `provider`.
 ///
@@ -22,6 +23,7 @@ use std::{fs::File, sync::mpsc};
 pub fn import<H, P, B, BB, BH>(
     mut downloader: EraStream<H>,
     provider: &P,
+    mut hash_collector: Collector<BlockHash, BlockNumber>,
 ) -> eyre::Result<BlockNumber>
 where
     B: Block<Header = BH, Body = BB>,
@@ -61,25 +63,9 @@ where
     // order
     let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
 
-    // Database cursor for hash to number index
-    let mut cursor_header_numbers =
-        provider.tx_ref().cursor_write::<RawTable<tables::HeaderNumbers>>()?;
-    let mut first_sync = false;
-
-    // If we only have the genesis block hash, then we are at first sync, and we can remove it,
-    // add it to the collector and use tx.append on all hashes.
-    if provider.tx_ref().entries::<RawTable<tables::HeaderNumbers>>()? == 1 {
-        if let Some((hash, block_number)) = cursor_header_numbers.last()? {
-            if block_number.value()? == 0 {
-                cursor_header_numbers.delete_current()?;
-                first_sync = true;
-                cursor_header_numbers.append(hash, &block_number)?;
-            }
-        }
-    }
-
-    while let Some(file) = rx.recv()? {
-        let file = File::open(file?)?;
+    while let Some(path) = rx.recv()? {
+        let path = path?;
+        let file = File::open(path.clone())?;
         let mut reader = Era1Reader::new(file);
 
         for block in reader.iter() {
@@ -108,15 +94,40 @@ where
                 StorageLocation::StaticFiles,
             )?;
 
-            // Write block hash to block number index entry
-            let key = RawKey::<BlockHash>::from(hash);
-            let value = RawValue::<BlockNumber>::from(number);
+            hash_collector.insert(hash, number)?;
+        }
 
-            if first_sync {
-                cursor_header_numbers.append(key, &value)?;
-            } else {
-                cursor_header_numbers.upsert(key, &value)?;
+        fs::remove_file(path)?;
+    }
+
+    // Database cursor for hash to number index
+    let mut cursor_header_numbers =
+        provider.tx_ref().cursor_write::<RawTable<tables::HeaderNumbers>>()?;
+    let mut first_sync = false;
+
+    // If we only have the genesis block hash, then we are at first sync, and we can remove it,
+    // add it to the collector and use tx.append on all hashes.
+    if provider.tx_ref().entries::<RawTable<tables::HeaderNumbers>>()? == 1 {
+        if let Some((hash, block_number)) = cursor_header_numbers.last()? {
+            if block_number.value()? == 0 {
+                hash_collector.insert(hash.key()?, 0)?;
+                cursor_header_numbers.delete_current()?;
+                first_sync = true;
             }
+        }
+    }
+
+    // Build block hash to block number index
+    for hash_to_number in hash_collector.iter()? {
+        let (hash, number) = hash_to_number?;
+
+        let hash = RawKey::<BlockHash>::from_vec(hash);
+        let number = RawValue::<BlockNumber>::from_vec(number);
+
+        if first_sync {
+            cursor_header_numbers.append(hash, &number)?;
+        } else {
+            cursor_header_numbers.upsert(hash, &number)?;
         }
     }
 

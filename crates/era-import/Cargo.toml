@@ -17,6 +17,7 @@ alloy-primitives.workspace = true
 reth-db-api.workspace = true
 reth-era.workspace = true
 reth-era-downloader.workspace = true
+reth-etl.workspace = true
 reth-provider.workspace = true
 reth-storage-api.workspace = true
 reth-primitives-traits.workspace = true
