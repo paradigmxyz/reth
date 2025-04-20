@@ -4,7 +4,7 @@ pub mod canyon;
 pub mod isthmus;
 
 use crate::proof::calculate_receipt_root_optimism;
-use alloc::{format, vec::Vec};
+use alloc::{string::ToString, vec::Vec};
 use alloy_consensus::{BlockHeader, TxReceipt, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::{Bloom, B256};
 use op_alloy_consensus::{decode_holocene_extra_data, EIP1559ParamError};
@@ -49,17 +49,11 @@ where
 
     if chain_spec.is_isthmus_active_at_timestamp(header.timestamp()) {
         // After isthmus we only ensure that the body has empty withdrawals
-        isthmus::ensure_withdrawals_storage_root_is_some(header).map_err(|err| {
-            ConsensusError::Other(format!("withdrawals‑storage‑root check failed: {err}"))
-        })?;
-        if body.withdrawals().is_none() {
-            return Err(ConsensusError::WithdrawalsRootUnexpected)
-        }
+        isthmus::ensure_withdrawals_storage_root_is_some(header)
+            .map_err(|err| ConsensusError::Other(err.to_string()))?;
     } else {
         // before isthmus we ensure that the header root matches the body
-        canyon::ensure_empty_withdrawals_root(header).map_err(|err| {
-            ConsensusError::Other(format!("empty‑withdrawals‑root check failed: {err}"))
-        })?;
+        canyon::ensure_empty_withdrawals_root(header)?
     }
 
     Ok(())
