@@ -173,7 +173,7 @@ impl<N: NetworkPrimitives> From<EthBroadcastMessage<N>> for ProtocolBroadcastMes
     }
 }
 
-/// Represents a message in the eth wire protocol, versions 66, 67 and 68.
+/// Represents a message in the eth wire protocol, versions 66, 67, 68 and 69.
 ///
 /// The ethereum wire protocol is a set of messages that are broadcast to the network in two
 /// styles:
@@ -190,6 +190,9 @@ impl<N: NetworkPrimitives> From<EthBroadcastMessage<N>> for ProtocolBroadcastMes
 /// The `eth/68` changes only `NewPooledTransactionHashes` to include `types` and `sized`. For
 /// it, `NewPooledTransactionHashes` is renamed as [`NewPooledTransactionHashes66`] and
 /// [`NewPooledTransactionHashes68`] is defined.
+///
+/// The `eth/69` announces the historical block range served by the node. Removes total difficulty
+/// information. And removes the Bloom field from receipts transfered over the protocol.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
@@ -250,6 +253,12 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
         serde(bound = "N::Receipt: serde::Serialize + serde::de::DeserializeOwned")
     )]
     Receipts(RequestPair<Receipts<N::Receipt>>),
+    /// Represents a Receipts request-response pair for eth/69.
+    #[cfg_attr(
+        feature = "serde",
+        serde(bound = "N::Receipt: serde::Serialize + serde::de::DeserializeOwned")
+    )]
+    Receipts69(RequestPair<Receipts<N::Receipt>>),
     /// Represents an encoded message that doesn't match any other variant
     Other(RawCapabilityMessage),
 }
@@ -274,7 +283,7 @@ impl<N: NetworkPrimitives> EthMessage<N> {
             Self::GetNodeData(_) => EthMessageID::GetNodeData,
             Self::NodeData(_) => EthMessageID::NodeData,
             Self::GetReceipts(_) => EthMessageID::GetReceipts,
-            Self::Receipts(_) => EthMessageID::Receipts,
+            Self::Receipts(_) | Self::Receipts69(_) => EthMessageID::Receipts,
             Self::Other(msg) => EthMessageID::Other(msg.id as u8),
         }
     }
@@ -322,7 +331,7 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::GetNodeData(request) => request.encode(out),
             Self::NodeData(data) => data.encode(out),
             Self::GetReceipts(request) => request.encode(out),
-            Self::Receipts(receipts) => receipts.encode(out),
+            Self::Receipts(receipts) | Self::Receipts69(receipts) => receipts.encode(out),
             Self::Other(unknown) => out.put_slice(&unknown.payload),
         }
     }
@@ -343,7 +352,7 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::GetNodeData(request) => request.length(),
             Self::NodeData(data) => data.length(),
             Self::GetReceipts(request) => request.length(),
-            Self::Receipts(receipts) => receipts.length(),
+            Self::Receipts(receipts) | Self::Receipts69(receipts) => receipts.length(),
             Self::Other(unknown) => unknown.length(),
         }
     }

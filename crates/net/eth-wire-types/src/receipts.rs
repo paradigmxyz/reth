@@ -46,6 +46,31 @@ impl<T: RlpDecodableReceipt> alloy_rlp::Decodable for Receipts<T> {
     }
 }
 
+/// Eth/69 receipt response type that removes bloom filters from the protocol
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
+pub struct Receipts69<T = Receipt>(pub Vec<Vec<T>>);
+
+impl<T: RlpEncodableReceipt + alloy_rlp::Encodable> alloy_rlp::Encodable for Receipts69<T> {
+    #[inline]
+    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
+        self.0.encode(out)
+    }
+    #[inline]
+    fn length(&self) -> usize {
+        self.0.length()
+    }
+}
+
+impl<T: RlpDecodableReceipt + alloy_rlp::Decodable> alloy_rlp::Decodable for Receipts69<T> {
+    #[inline]
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        alloy_rlp::Decodable::decode(buf).map(Self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

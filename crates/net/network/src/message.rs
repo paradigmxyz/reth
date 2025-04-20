@@ -153,6 +153,8 @@ pub enum PeerResponseResult<N: NetworkPrimitives = EthNetworkPrimitives> {
     NodeData(RequestResult<Vec<Bytes>>),
     /// Represents a result containing receipts or an error.
     Receipts(RequestResult<Vec<Vec<ReceiptWithBloom<N::Receipt>>>>),
+    /// Represents a result containing receipts or an error for eth/69.
+    Receipts69(RequestResult<Vec<Vec<N::Receipt>>>),
 }
 
 // === impl PeerResponseResult ===
@@ -187,6 +189,25 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
             Self::Receipts(resp) => {
                 to_message!(resp, Receipts, id)
             }
+            Self::Receipts69(resp) => match resp {
+                Ok(res) => {
+                    let receipts = res
+                        .into_iter()
+                        .map(|batch| {
+                            batch
+                                .into_iter()
+                                .map(|r| ReceiptWithBloom {
+                                    receipt: r,
+                                    logs_bloom: Default::default(),
+                                })
+                                .collect()
+                        })
+                        .collect();
+                    let request = RequestPair { request_id: id, message: Receipts(receipts) };
+                    Ok(EthMessage::Receipts69(request))
+                }
+                Err(err) => Err(err),
+            },
         }
     }
 
@@ -198,6 +219,7 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
             Self::PooledTransactions(res) => res.as_ref().err(),
             Self::NodeData(res) => res.as_ref().err(),
             Self::Receipts(res) => res.as_ref().err(),
+            Self::Receipts69(res) => res.as_ref().err(),
         }
     }
 

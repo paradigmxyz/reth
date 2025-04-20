@@ -251,7 +251,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             EthMessage::GetReceipts(req) => {
                 on_request!(req, Receipts, GetReceipts)
             }
-            EthMessage::Receipts(resp) => {
+            EthMessage::Receipts(resp) | EthMessage::Receipts69(resp) => {
                 on_response!(resp, GetReceipts)
             }
             EthMessage::Other(bytes) => self.try_emit_broadcast(PeerMessage::Other(bytes)).into(),
