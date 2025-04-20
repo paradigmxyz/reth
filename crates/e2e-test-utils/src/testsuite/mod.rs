@@ -15,7 +15,7 @@ use setup::Setup;
 use std::{collections::HashMap, marker::PhantomData};
 pub mod actions;
 pub mod setup;
-use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
+use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes, ExecutionPayload};
 
 #[cfg(test)]
 mod examples;
