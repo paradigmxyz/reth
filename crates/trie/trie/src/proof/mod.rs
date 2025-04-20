@@ -188,9 +188,9 @@ where
 #[derive(Debug)]
 pub struct StorageProof<T, H> {
     /// The factory for traversing trie nodes.
-    trie_cursor_factory: T,
+    pub trie_cursor_factory: T,
     /// The factory for hashed cursors.
-    hashed_cursor_factory: H,
+    pub hashed_cursor_factory: H,
     /// The hashed address of an account.
     hashed_address: B256,
     /// The set of storage slot prefixes that have changed.
