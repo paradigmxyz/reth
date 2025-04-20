@@ -7,17 +7,14 @@ use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
-use reth_revm::{
-    database::StateProviderDatabase,
-    db::{BundleAccount, BundleState},
-};
+use reth_revm::{database::StateProviderDatabase, db::BundleState, state::AccountInfo};
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
 use reth_trie::{updates::TrieUpdates, HashedStorage};
 use revm_bytecode::Bytecode;
 use revm_database::states::{
     reverts::{AccountInfoRevert, RevertToSlot},
-    AccountStatus,
+    AccountStatus, StorageSlot,
 };
 use serde::Serialize;
 use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
@@ -31,12 +28,23 @@ struct AccountRevertSorted {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-struct RevertsSorted(Vec<Vec<(Address, AccountRevertSorted)>>);
+struct BundleAccountSorted {
+    pub info: Option<AccountInfo>,
+    pub original_info: Option<AccountInfo>,
+    /// Contains both original and present state.
+    /// When extracting changeset we compare if original value is different from present value.
+    /// If it is different we add it to changeset.
+    ///
+    /// If Account was destroyed we ignore original value and compare present state with U256::ZERO.
+    pub storage: BTreeMap<U256, StorageSlot>,
+    /// Account status.
+    pub status: AccountStatus,
+}
 
 #[derive(Debug, PartialEq, Eq)]
 struct BundleStateSorted {
     /// Account state
-    pub state: BTreeMap<Address, BundleAccount>,
+    pub state: BTreeMap<Address, BundleAccountSorted>,
     /// All created contracts in this block.
     pub contracts: BTreeMap<B256, Bytecode>,
     /// Changes to revert
@@ -44,7 +52,7 @@ struct BundleStateSorted {
     /// **Note**: Inside vector is *not* sorted by address.
     ///
     /// But it is unique by address.
-    pub reverts: RevertsSorted,
+    pub reverts: Vec<Vec<(Address, AccountRevertSorted)>>,
     /// The size of the plain state in the bundle state
     pub state_size: usize,
     /// The size of reverts in the bundle state
@@ -53,42 +61,42 @@ struct BundleStateSorted {
 
 impl BundleStateSorted {
     fn from_bundle_state(bundle_state: &BundleState) -> Self {
-        let mut state: BTreeMap<Address, BundleAccount> = BTreeMap::new();
-        let mut contracts: BTreeMap<B256, Bytecode> = BTreeMap::new();
-        let mut reverts: RevertsSorted = RevertsSorted(vec![]);
+        let state =
+            BTreeMap::from_iter(bundle_state.state.clone().into_iter().map(|(key, value)| {
+                (
+                    key,
+                    BundleAccountSorted {
+                        info: value.info,
+                        original_info: value.original_info,
+                        status: value.status,
+                        storage: BTreeMap::from_iter(value.storage.clone()),
+                    },
+                )
+            }));
+        let contracts = BTreeMap::from_iter(bundle_state.contracts.clone());
 
-        for (k, v) in bundle_state.state.clone() {
-            state.insert(k, v);
-        }
-
-        for (k, v) in bundle_state.contracts.clone() {
-            contracts.insert(k, v);
-        }
+        let reverts: Vec<Vec<(Address, AccountRevertSorted)>> = bundle_state
+            .reverts
+            .iter()
+            .map(|m| {
+                m.iter()
+                    .map(|(address, account_revert)| {
+                        (
+                            *address,
+                            AccountRevertSorted {
+                                account: account_revert.account.clone(),
+                                previous_status: account_revert.previous_status,
+                                wipe_storage: account_revert.wipe_storage,
+                                storage: BTreeMap::from_iter(account_revert.storage.clone()),
+                            },
+                        )
+                    })
+                    .collect::<Vec<(Address, AccountRevertSorted)>>()
+            })
+            .collect::<Vec<Vec<(Address, AccountRevertSorted)>>>();
 
         let state_size = bundle_state.state_size;
         let reverts_size = bundle_state.reverts_size;
-
-        for revert_item in bundle_state.reverts.iter() {
-            let mut new_revert_item: Vec<(Address, AccountRevertSorted)> = vec![];
-            for (address, account_revert) in revert_item {
-                let mut storage: BTreeMap<U256, RevertToSlot> = BTreeMap::new();
-
-                for (k, v) in account_revert.storage.clone() {
-                    storage.insert(k, v);
-                }
-
-                new_revert_item.push((
-                    *address,
-                    AccountRevertSorted {
-                        account: account_revert.account.clone(),
-                        previous_status: account_revert.previous_status,
-                        wipe_storage: account_revert.wipe_storage,
-                        storage,
-                    },
-                ));
-            }
-            reverts.0.push(new_revert_item);
-        }
 
         Self { state, contracts, reverts, state_size, reverts_size }
     }
