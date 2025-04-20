@@ -2,7 +2,7 @@
 
 use crate::{
     testsuite::actions::{Action, ActionBox},
-    NodeBuilderHelper, PayloadAttributesBuilder,TmpDB,TestNode,
+    NodeBuilderHelper, PayloadAttributesBuilder,TmpDB,{node::TestNode},
 };
 use alloy_primitives::B256;
 use eyre::Result;
@@ -22,8 +22,6 @@ use eyre::eyre;
 use tracing::error;
 use futures_util::{future::BoxFuture,FutureExt};
 use reth_provider::providers::BlockchainProvider;
-use std::sync::Arc;
-use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 
 #[cfg(test)]
 mod examples;
