@@ -2,13 +2,13 @@
 
 use crate::{
     testsuite::actions::{Action, ActionBox},
-    NodeBuilderHelper, PayloadAttributesBuilder,TmpDB,
+    NodeBuilderHelper, PayloadAttributesBuilder,TmpDB,TestNode,
 };
 use alloy_primitives::B256;
 use eyre::Result;
 use jsonrpsee::http_client::{transport::HttpBackend, HttpClient};
 use reth_engine_local::LocalPayloadAttributesBuilder;
-use reth_node_api::{TestNode, NodeTypes, PayloadTypes, FullNodeTypesAdapter, NodeTypesWithDBAdapter};
+use reth_node_api::{NodeTypes, PayloadTypes, FullNodeTypesAdapter, NodeTypesWithDBAdapter};
 use reth_payload_builder::PayloadId;
 use reth_rpc_layer::AuthClientService;
 use setup::Setup;
@@ -22,6 +22,8 @@ use eyre::eyre;
 use tracing::error;
 use futures_util::{future::BoxFuture,FutureExt};
 use reth_provider::providers::BlockchainProvider;
+use std::sync::Arc;
+use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 
 #[cfg(test)]
 mod examples;
@@ -158,7 +160,7 @@ impl<I: 'static> TestBuilder<I> {
         Ok(())
     }
 }
-pub type TmpDB = Arc<TempDatabase<DatabaseEnv>>;
+// pub type TmpDB = Arc<TempDatabase<DatabaseEnv>>;
 type Engine = FullNodeTypesAdapter<TestNode, TmpDB, BlockchainProvider<NodeTypesWithDBAdapter<TestNode, TmpDB>>>;
 
 impl NodeClient {
