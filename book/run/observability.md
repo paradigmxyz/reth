@@ -43,7 +43,9 @@ brew install grafana
 #### Debian/Ubuntu
 ```bash
 # Install Prometheus
-wget https://github.com/prometheus/prometheus/releases/download/v2.47.0/prometheus-2.47.0.linux-amd64.tar.gz
+# Visit https://prometheus.io/download/ for the latest version
+PROM_VERSION=$(curl -s https://api.github.com/repos/prometheus/prometheus/releases/latest | grep tag_name | cut -d '"' -f 4 | cut -c 2-)
+wget https://github.com/prometheus/prometheus/releases/download/v${PROM_VERSION}/prometheus-${PROM_VERSION}.linux-amd64.tar.gz
 tar xvfz prometheus-*.tar.gz
 cd prometheus-*
 
@@ -58,12 +60,15 @@ sudo apt-get install grafana
 #### Fedora/RHEL/CentOS
 ```bash
 # Install Prometheus
-wget https://github.com/prometheus/prometheus/releases/download/v2.47.0/prometheus-2.47.0.linux-amd64.tar.gz
+# Visit https://prometheus.io/download/ for the latest version
+PROM_VERSION=$(curl -s https://api.github.com/repos/prometheus/prometheus/releases/latest | grep tag_name | cut -d '"' -f 4 | cut -c 2-)
+wget https://github.com/prometheus/prometheus/releases/download/v${PROM_VERSION}/prometheus-${PROM_VERSION}.linux-amd64.tar.gz
 tar xvfz prometheus-*.tar.gz
 cd prometheus-*
 
 # Install Grafana
-sudo dnf install -y https://dl.grafana.com/oss/release/grafana-10.0.3-1.x86_64.rpm
+# Visit https://grafana.com/grafana/download for the latest version
+sudo dnf install -y https://dl.grafana.com/oss/release/grafana-latest-1.x86_64.rpm
 ```
 
 ### Windows
@@ -75,9 +80,13 @@ choco install grafana
 ```
 
 #### Manual installation
-1. Download Prometheus from [prometheus.io](https://prometheus.io/download/)
-2. Download Grafana from [grafana.com](https://grafana.com/grafana/download)
-3. Extract/install both applications following their respective installation guides
+1. Download the latest Prometheus from [prometheus.io/download](https://prometheus.io/download/)
+   - Select the Windows binary (.zip) for your architecture (typically windows-amd64)
+2. Download the latest Grafana from [grafana.com/grafana/download](https://grafana.com/grafana/download)
+   - Choose the Windows installer (.msi) or standalone version
+3. Extract Prometheus to a location of your choice (e.g., `C:\prometheus`)
+4. Install Grafana by running the installer or extracting the standalone version
+5. Configure Prometheus and Grafana to run as services if needed
 
 Then, kick off the Prometheus and Grafana services:
 
