@@ -29,9 +29,6 @@ use reth_primitives_traits::{
     Block, BlockHeader, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
 
-#[cfg(feature = "std")]
-use std::time::SystemTime;
-
 mod validation;
 pub use validation::validate_block_post_execution;
 
@@ -248,16 +245,19 @@ where
 
             // Check if timestamp is in the future. Clock can drift but this can be consensus issue.
             #[cfg(feature = "std")]
-            let present_timestamp =
-                SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
-            #[cfg(feature = "std")]
-            if header.timestamp() >
-                present_timestamp + alloy_eips::merge::ALLOWED_FUTURE_BLOCK_TIME_SECONDS
             {
-                return Err(ConsensusError::TimestampIsInFuture {
-                    timestamp: header.timestamp(),
-                    present_timestamp,
-                })
+                let present_timestamp = std::time::SystemTime::now()
+                    .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+                if header.timestamp() >
+                    present_timestamp + alloy_eips::merge::ALLOWED_FUTURE_BLOCK_TIME_SECONDS
+                {
+                    return Err(ConsensusError::TimestampIsInFuture {
+                        timestamp: header.timestamp(),
+                        present_timestamp,
+                    })
+                }
             }
 
             validate_header_extra_data(header)?;
