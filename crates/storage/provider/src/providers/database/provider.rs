@@ -942,7 +942,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderSyncGapProvider
     fn local_tip_header(
         &self,
         highest_uninterrupted_block: BlockNumber,
-    ) -> ProviderResult<Self::Header> {
+    ) -> ProviderResult<SealedHeader<Self::Header>> {
         let static_file_provider = self.static_file_provider();
 
         // Make sure Headers static file is at the same height. If it's further, this
@@ -975,7 +975,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderSyncGapProvider
             .sealed_header(highest_uninterrupted_block)?
             .ok_or_else(|| ProviderError::HeaderNotFound(highest_uninterrupted_block.into()))?;
 
-        Ok(local_head.header().clone())
+        Ok(local_head)
     }
 }
 
