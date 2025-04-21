@@ -388,6 +388,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     }
 }
 
+/// Executes a simulated call.
+#[expect(clippy::too_many_arguments)]
 fn execute_simulated_call<T>(
     this: &T,
     blocks: &mut Vec<SimulatedBlock<RpcBlock<T::NetworkTypes>>>,
@@ -400,11 +402,11 @@ fn execute_simulated_call<T>(
     block: SimBlock,
 ) -> Result<(), T::Error>
 where
-    T: EthCall, /* <Provider: HeaderProvider> */
+    T: EthCall,
 {
     let mut evm_env = this
         .evm_config()
-        .next_evm_env(&parent, &this.next_env_attributes(&parent)?)
+        .next_evm_env(parent, &this.next_env_attributes(parent)?)
         .map_err(RethError::other)
         .map_err(T::Error::from_eth_err)?;
 
@@ -451,13 +453,13 @@ where
         }
     };
 
-    let ctx = this.evm_config().context_for_next_block(&parent, this.next_env_attributes(&parent)?);
+    let ctx = this.evm_config().context_for_next_block(parent, this.next_env_attributes(parent)?);
     let (result, results) = if trace_transfers {
         // prepare inspector to capture transfer inside the evm so they are recorded
         // and included in logs
         let inspector = TransferInspector::new(false).with_logs(true);
         let evm = this.evm_config().evm_with_env_and_inspector(db, evm_env, inspector);
-        let builder = this.evm_config().create_block_builder(evm, &parent, ctx);
+        let builder = this.evm_config().create_block_builder(evm, parent, ctx);
         simulate::execute_transactions(
             builder,
             calls,
@@ -467,7 +469,7 @@ where
         )?
     } else {
         let evm = this.evm_config().evm_with_env(db, evm_env);
-        let builder = this.evm_config().create_block_builder(evm, &parent, ctx);
+        let builder = this.evm_config().create_block_builder(evm, parent, ctx);
         simulate::execute_transactions(
             builder,
             calls,
