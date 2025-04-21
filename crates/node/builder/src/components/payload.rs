@@ -61,7 +61,7 @@ pub struct BasicPayloadServiceBuilder<PB>(PB);
 
 impl<PB> BasicPayloadServiceBuilder<PB> {
     /// Create a new [`BasicPayloadServiceBuilder`].
-    pub fn new(payload_builder_builder: PB) -> Self {
+    pub const fn new(payload_builder_builder: PB) -> Self {
         Self(payload_builder_builder)
     }
 }

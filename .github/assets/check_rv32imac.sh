@@ -15,15 +15,18 @@ crates_to_check=(
     reth-static-file-types
     reth-storage-errors
     reth-execution-errors
+    reth-errors
     reth-execution-types
     reth-db-models
     reth-evm
+    reth-revm
     reth-storage-api
 
     ## ethereum
     reth-evm-ethereum
     reth-ethereum-forks
     reth-ethereum-primitives
+    reth-ethereum-consensus
 
     ## optimism
     reth-optimism-chainspec

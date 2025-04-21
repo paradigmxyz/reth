@@ -28,29 +28,25 @@ criterion_group!(
 );
 
 pub fn benchmark_fetch_pending_hashes(group: &mut BenchmarkGroup<'_, WallTime>, peers_num: usize) {
-    let setup = || {
-        let mut tx_fetcher = TransactionFetcher::<EthNetworkPrimitives>::default();
-        let mut peers = HashMap::default();
+    let mut tx_fetcher = TransactionFetcher::<EthNetworkPrimitives>::default();
+    let mut peers = HashMap::default();
 
-        for _i in 0..peers_num {
-            // NOTE: the worst case, each tx in the cache belongs to a differenct peer.
-            let peer = PeerId::random();
-            let hash = B256::random();
+    for _i in 0..peers_num {
+        // NOTE: the worst case, each tx in the cache belongs to a differenct peer.
+        let peer = PeerId::random();
+        let hash = B256::random();
 
-            let (mut peer_data, _) = new_mock_session(peer, EthVersion::Eth66);
-            peer_data.seen_transactions_mut().insert(hash);
-            peers.insert(peer, peer_data);
+        let (mut peer_data, _) = new_mock_session(peer, EthVersion::Eth66);
+        peer_data.seen_transactions_mut().insert(hash);
+        peers.insert(peer, peer_data);
 
-            buffer_hash_to_tx_fetcher(&mut tx_fetcher, hash, peer, 0, None);
-        }
-
-        (tx_fetcher, peers)
-    };
+        buffer_hash_to_tx_fetcher(&mut tx_fetcher, hash, peer, 0, None);
+    }
 
     let group_id = format!("fetch pending hashes, peers num: {}", peers_num);
 
     group.bench_function(group_id, |b| {
-        b.iter_with_setup(setup, |(mut tx_fetcher, peers)| {
+        b.iter(|| {
             tx_fetcher.on_fetch_pending_hashes(&peers, |_| true);
         });
     });
