@@ -5,7 +5,6 @@ use reth_network_p2p::headers::downloader::SyncTarget;
 use reth_primitives_traits::SealedHeader;
 use reth_storage_errors::provider::ProviderResult;
 
-
 /// Represents a gap to sync: from `local_head` to `target`
 #[derive(Clone, Debug)]
 pub struct HeaderSyncGap<H = Header> {
