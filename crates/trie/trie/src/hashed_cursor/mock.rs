@@ -7,7 +7,7 @@ use alloy_primitives::{map::B256Map, B256, U256};
 use parking_lot::{Mutex, MutexGuard};
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
-use tracing::instrument;
+use reth_tracing::tracing::instrument;
 
 /// Mock hashed cursor factory.
 #[derive(Clone, Default, Debug)]

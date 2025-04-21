@@ -5,7 +5,7 @@ use crate::{
 };
 use alloy_primitives::{map::HashSet, B256};
 use reth_storage_errors::db::DatabaseError;
-use tracing::{instrument, trace};
+use reth_tracing::tracing::{instrument, trace};
 
 #[cfg(feature = "metrics")]
 use crate::metrics::WalkerMetrics;

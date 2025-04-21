@@ -1,6 +1,6 @@
 use parking_lot::{Mutex, MutexGuard};
+use reth_tracing::tracing::instrument;
 use std::{collections::BTreeMap, sync::Arc};
-use tracing::instrument;
 
 use super::{TrieCursor, TrieCursorFactory};
 use crate::{

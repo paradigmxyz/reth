@@ -1,7 +1,7 @@
 use crate::{hashed_cursor::HashedCursor, trie_cursor::TrieCursor, walker::TrieWalker, Nibbles};
 use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
-use tracing::trace;
+use reth_tracing::tracing::trace;
 
 /// Represents a branch node in the trie.
 #[derive(Debug)]
