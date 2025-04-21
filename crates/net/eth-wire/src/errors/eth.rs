@@ -22,7 +22,7 @@ pub enum EthStreamError {
     #[error(transparent)]
     /// Failed Ethereum handshake.
     EthHandshakeError(#[from] EthHandshakeError),
-    /// Thrown when decoding a message message failed.
+    /// Thrown when decoding a message failed.
     #[error(transparent)]
     InvalidMessage(#[from] MessageError),
     #[error("message size ({0}) exceeds max length (10MB)")]
