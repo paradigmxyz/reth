@@ -11,7 +11,7 @@ use crate::{
     },
     AccountReader, BlockBodyWriter, BlockExecutionWriter, BlockHashReader, BlockNumReader,
     BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
-    DBProvider, HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
+    DBProvider, HashingWriter, HeaderProvider, HeaderSyncGapProvider,
     HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter, LatestStateProvider,
     LatestStateProviderRef, OriginalValuesKnown, ProviderError, PruneCheckpointReader,
     PruneCheckpointWriter, RevertsInit, StageCheckpointReader, StateCommitmentProvider,
@@ -42,7 +42,6 @@ use reth_db_api::{
     BlockNumberList, DatabaseError, PlainAccountState, PlainStorageState,
 };
 use reth_execution_types::{Chain, ExecutionOutcome};
-use reth_network_p2p::headers::downloader::SyncTarget;
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, Block as _, BlockBody as _, Bytecode, GotExpected, NodePrimitives, RecoveredBlock,
@@ -74,7 +73,6 @@ use std::{
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::{mpsc, Arc},
 };
-use tokio::sync::watch;
 use tracing::{debug, trace};
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.

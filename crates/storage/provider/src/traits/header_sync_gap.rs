@@ -1,10 +1,10 @@
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{BlockNumber, Sealable, B256};
+use alloy_primitives::{BlockNumber, Sealable};
 use reth_network_p2p::headers::downloader::SyncTarget;
 use reth_primitives_traits::SealedHeader;
 use reth_storage_errors::provider::ProviderResult;
-use tokio::sync::watch;
+
 
 /// Represents a gap to sync: from `local_head` to `target`
 #[derive(Clone, Debug)]
