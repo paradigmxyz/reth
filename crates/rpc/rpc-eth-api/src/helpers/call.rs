@@ -1,8 +1,6 @@
 //! Loads a pending block from database. Helper trait for `eth_` transaction, call and trace RPC
 //! methods.
 
-use std::iter;
-
 use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
 use crate::{
     helpers::estimate::EstimateCall, FromEvmError, FullEthApiTypes, RpcBlock, RpcNodeCore,
@@ -24,7 +22,7 @@ use reth_evm::{
 };
 use reth_node_api::{BlockBody, NodePrimitives};
 use reth_primitives_traits::{Recovered, SealedHeader, SignedTransaction};
-use reth_provider::{BlockIdReader, ProviderHeader, ProviderTx};
+use reth_provider::{BlockIdReader, HeaderProvider, ProviderHeader, ProviderTx};
 use reth_revm::{
     database::StateProviderDatabase,
     db::{CacheDB, State},
@@ -101,146 +99,56 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 let mut blocks: Vec<SimulatedBlock<RpcBlock<Self::NetworkTypes>>> =
                     Vec::with_capacity(block_state_calls.len());
 
-                let block_state_calls = iter::from_fn({
-                    let mut iter = block_state_calls.into_iter();
-                    let mut prev = None;
-
-                    move || {
-                        let block = iter.next()?;
-
-                        let this = block.block_overrides.as_ref().and_then(|b| b.number);
-
-                        let range = iter::successors(prev, |p| U256::checked_add(*p, U256::ONE));
-                        let range = this
-                            .map(|t| range.skip(1).take_while(move |i| i < &t))
-                            .into_iter()
-                            .flatten();
-                        prev = this;
-
-                        let gaps = range.map(|n| {
-                            SimBlock::default().with_block_overrides(BlockOverrides {
-                                number: Some(n),
-                                ..Default::default()
-                            })
-                        });
-
-                        Some(gaps.chain(Some(block)))
-                    }
-                })
-                .flatten();
-
-                let mut previous_block_number = U256::ZERO;
+                let mut previous_block_number = None;
                 for block in block_state_calls {
-                    if let Some(number) = block.block_overrides.as_ref().and_then(|b| b.number) {
-                        if number < previous_block_number {
-                            return Err(EthApiError::InvalidParams(format!(
-                                "Cannot simulate block number reduction from {} to {}",
-                                previous_block_number, number
-                            ))
-                            .into())
-                        }
-                    }
-                    let mut evm_env = this
-                        .evm_config()
-                        .next_evm_env(&parent, &this.next_env_attributes(&parent)?)
-                        .map_err(RethError::other)
-                        .map_err(Self::Error::from_eth_err)?;
+                    if let Some(prev_block_number) = previous_block_number {
+                        if let Some(block_number) =
+                            block.block_overrides.as_ref().and_then(|block| block.number)
+                        {
+                            if block_number < prev_block_number {
+                                return Err(EthApiError::InvalidParams(format!(
+                                    "Cannot simulate block number reduction from {} to {}",
+                                    prev_block_number, block_number
+                                ))
+                                .into())
+                            }
 
-                    // Always disable EIP-3607
-                    evm_env.cfg_env.disable_eip3607 = true;
+                            let mut gap_block_number = prev_block_number + U256::ONE;
+                            while gap_block_number < block_number {
+                                let gap_block =
+                                    SimBlock::default().with_block_overrides(BlockOverrides {
+                                        number: Some(gap_block_number),
+                                        ..Default::default()
+                                    });
 
-                    if !validation {
-                        evm_env.cfg_env.disable_base_fee = !validation;
-                        evm_env.block_env.basefee = 0;
-                    }
+                                execute_simulated_call(
+                                    &this,
+                                    &mut blocks,
+                                    &mut previous_block_number,
+                                    validation,
+                                    &mut parent,
+                                    trace_transfers,
+                                    return_full_transactions,
+                                    &mut db,
+                                    gap_block,
+                                )?;
 
-                    let SimBlock { block_overrides, state_overrides, calls } = block;
-
-                    if let Some(block_overrides) = block_overrides {
-                        // ensure we dont allow uncapped gas limit per block
-                        if let Some(gas_limit_override) = block_overrides.gas_limit {
-                            if gas_limit_override > evm_env.block_env.gas_limit &&
-                                gas_limit_override > this.call_gas_limit()
-                            {
-                                return Err(
-                                    EthApiError::other(EthSimulateError::GasLimitReached).into()
-                                )
+                                gap_block_number += U256::ONE;
                             }
                         }
-                        apply_block_overrides(block_overrides, &mut db, &mut evm_env.block_env);
-                    }
-                    if let Some(state_overrides) = state_overrides {
-                        apply_state_overrides(state_overrides, &mut db)?;
                     }
 
-                    let block_env = evm_env.block_env.clone();
-                    let chain_id = evm_env.cfg_env.chain_id;
-
-                    let default_gas_limit = {
-                        let total_specified_gas = calls.iter().filter_map(|tx| tx.gas).sum::<u64>();
-                        let txs_without_gas_limit =
-                            calls.iter().filter(|tx| tx.gas.is_none()).count();
-
-                        if total_specified_gas > block_env.gas_limit {
-                            return Err(EthApiError::Other(Box::new(
-                                EthSimulateError::BlockGasLimitExceeded,
-                            ))
-                            .into())
-                        }
-
-                        if txs_without_gas_limit > 0 {
-                            (block_env.gas_limit - total_specified_gas) /
-                                txs_without_gas_limit as u64
-                        } else {
-                            0
-                        }
-                    };
-
-                    let ctx = this
-                        .evm_config()
-                        .context_for_next_block(&parent, this.next_env_attributes(&parent)?);
-                    let (result, results) = if trace_transfers {
-                        // prepare inspector to capture transfer inside the evm so they are recorded
-                        // and included in logs
-                        let inspector = TransferInspector::new(false).with_logs(true);
-                        let evm = this
-                            .evm_config()
-                            .evm_with_env_and_inspector(&mut db, evm_env, inspector);
-                        let builder = this.evm_config().create_block_builder(evm, &parent, ctx);
-                        simulate::execute_transactions(
-                            builder,
-                            calls,
-                            default_gas_limit,
-                            chain_id,
-                            this.tx_resp_builder(),
-                        )?
-                    } else {
-                        let evm = this.evm_config().evm_with_env(&mut db, evm_env);
-                        let builder = this.evm_config().create_block_builder(evm, &parent, ctx);
-                        simulate::execute_transactions(
-                            builder,
-                            calls,
-                            default_gas_limit,
-                            chain_id,
-                            this.tx_resp_builder(),
-                        )?
-                    };
-
-                    let block = simulate::build_simulated_block(
-                        result.block,
-                        results,
+                    execute_simulated_call(
+                        &this,
+                        &mut blocks,
+                        &mut previous_block_number,
+                        validation,
+                        &mut parent,
+                        trace_transfers,
                         return_full_transactions,
-                        this.tx_resp_builder(),
+                        &mut db,
+                        block,
                     )?;
-
-                    parent = SealedHeader::new(
-                        block.inner.header.inner.clone(),
-                        block.inner.header.hash,
-                    );
-
-                    previous_block_number = U256::from(block.inner.header.inner.number());
-
-                    blocks.push(block);
                 }
 
                 Ok(blocks)
@@ -478,6 +386,111 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
         Ok(res)
     }
+}
+
+fn execute_simulated_call<T>(
+    this: &T,
+    blocks: &mut Vec<SimulatedBlock<RpcBlock<T::NetworkTypes>>>,
+    previous_block_number: &mut Option<U256>,
+    validation: bool,
+    parent: &mut SealedHeader<<T::Provider as HeaderProvider>::Header>,
+    trace_transfers: bool,
+    return_full_transactions: bool,
+    db: &mut State<StateProviderDatabase<StateProviderTraitObjWrapper<'_>>>,
+    block: SimBlock,
+) -> Result<(), T::Error>
+where
+    T: EthCall, /* <Provider: HeaderProvider> */
+{
+    let mut evm_env = this
+        .evm_config()
+        .next_evm_env(&parent, &this.next_env_attributes(&parent)?)
+        .map_err(RethError::other)
+        .map_err(T::Error::from_eth_err)?;
+
+    // Always disable EIP-3607
+    evm_env.cfg_env.disable_eip3607 = true;
+
+    if !validation {
+        evm_env.cfg_env.disable_base_fee = !validation;
+        evm_env.block_env.basefee = 0;
+    }
+
+    let SimBlock { block_overrides, state_overrides, calls } = block;
+
+    if let Some(block_overrides) = block_overrides {
+        // ensure we dont allow uncapped gas limit per block
+        if let Some(gas_limit_override) = block_overrides.gas_limit {
+            if gas_limit_override > evm_env.block_env.gas_limit &&
+                gas_limit_override > this.call_gas_limit()
+            {
+                return Err(EthApiError::other(EthSimulateError::GasLimitReached).into())
+            }
+        }
+        apply_block_overrides(block_overrides, db, &mut evm_env.block_env);
+    }
+    if let Some(state_overrides) = state_overrides {
+        apply_state_overrides(state_overrides, db)?;
+    }
+
+    let block_env = evm_env.block_env.clone();
+    let chain_id = evm_env.cfg_env.chain_id;
+
+    let default_gas_limit = {
+        let total_specified_gas = calls.iter().filter_map(|tx| tx.gas).sum::<u64>();
+        let txs_without_gas_limit = calls.iter().filter(|tx| tx.gas.is_none()).count();
+
+        if total_specified_gas > block_env.gas_limit {
+            return Err(EthApiError::Other(Box::new(EthSimulateError::BlockGasLimitExceeded)).into())
+        }
+
+        if txs_without_gas_limit > 0 {
+            (block_env.gas_limit - total_specified_gas) / txs_without_gas_limit as u64
+        } else {
+            0
+        }
+    };
+
+    let ctx = this.evm_config().context_for_next_block(&parent, this.next_env_attributes(&parent)?);
+    let (result, results) = if trace_transfers {
+        // prepare inspector to capture transfer inside the evm so they are recorded
+        // and included in logs
+        let inspector = TransferInspector::new(false).with_logs(true);
+        let evm = this.evm_config().evm_with_env_and_inspector(db, evm_env, inspector);
+        let builder = this.evm_config().create_block_builder(evm, &parent, ctx);
+        simulate::execute_transactions(
+            builder,
+            calls,
+            default_gas_limit,
+            chain_id,
+            this.tx_resp_builder(),
+        )?
+    } else {
+        let evm = this.evm_config().evm_with_env(db, evm_env);
+        let builder = this.evm_config().create_block_builder(evm, &parent, ctx);
+        simulate::execute_transactions(
+            builder,
+            calls,
+            default_gas_limit,
+            chain_id,
+            this.tx_resp_builder(),
+        )?
+    };
+
+    let block = simulate::build_simulated_block(
+        result.block,
+        results,
+        return_full_transactions,
+        this.tx_resp_builder(),
+    )?;
+
+    *parent = SealedHeader::new(block.inner.header.inner.clone(), block.inner.header.hash);
+
+    *previous_block_number = Some(U256::from(block.inner.header.inner.number()));
+
+    blocks.push(block);
+
+    Ok(())
 }
 
 /// Executes code on state.
