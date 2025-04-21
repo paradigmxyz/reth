@@ -10183,6 +10183,7 @@ dependencies = [
  "reth-provider",
  "reth-storage-api",
  "reth-testing-utils",
+ "reth-tracing",
  "reth-trie",
  "reth-trie-common",
  "reth-trie-db",

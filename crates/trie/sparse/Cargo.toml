@@ -38,6 +38,7 @@ reth-testing-utils.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-trie-db = { workspace = true, features = ["test-utils"] }
+reth-tracing.workspace = true
 
 arbitrary.workspace = true
 assert_matches.workspace = true
