@@ -3,7 +3,7 @@ use crate::{
     to_range,
     traits::{BlockSource, ReceiptProvider},
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory,
-    HashedPostStateProvider, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, ProviderError,
+    HashedPostStateProvider, HeaderProvider, HeaderSyncGapProvider, ProviderError,
     PruneCheckpointReader, StageCheckpointReader, StateProviderBox, StaticFileProviderFactory,
     TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
@@ -15,7 +15,6 @@ use reth_chainspec::ChainInfo;
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
-use reth_network_p2p::headers::downloader::SyncTarget;
 use reth_node_types::{
     BlockTy, HeaderTy, NodeTypes, NodeTypesWithDB, NodeTypesWithDBAdapter, ReceiptTy, TxTy,
 };
@@ -36,7 +35,7 @@ use std::{
     path::Path,
     sync::Arc,
 };
-use tokio::sync::watch;
+
 use tracing::trace;
 
 mod provider;
@@ -650,8 +649,8 @@ mod tests {
     use crate::{
         providers::{StaticFileProvider, StaticFileWriter},
         test_utils::{blocks::TEST_BLOCK, create_test_provider_factory, MockNodeTypesWithDB},
-        BlockHashReader, BlockNumReader, BlockWriter, DBProvider, HeaderSyncGapProvider,
-        StorageLocation, TransactionsProvider,
+        BlockHashReader, BlockNumReader, BlockWriter, DBProvider, HeaderSyncGap,
+        HeaderSyncGapProvider, StorageLocation, TransactionsProvider,
     };
     use alloy_primitives::{TxNumber, B256, U256};
     use assert_matches::assert_matches;
@@ -662,6 +661,7 @@ mod tests {
         test_utils::{create_test_static_files_dir, ERROR_TEMPDIR},
     };
     use reth_db_api::tables;
+    use reth_network_p2p::headers::downloader::SyncTarget;
     use reth_primitives_traits::SignedTransaction;
     use reth_prune_types::{PruneMode, PruneModes};
     use reth_storage_errors::provider::ProviderError;
