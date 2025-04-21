@@ -55,6 +55,7 @@ std = [
     "alloy-rpc-types-eth?/std",
     "reth-storage-api?/std",
     "reth-evm?/std",
+    "reth-evm-ethereum?/std",
     "reth-revm?/std",
 ]
 arbitrary = [
