@@ -30,7 +30,7 @@ alloy-consensus.workspace = true
 alloy-trie.workspace = true
 
 # tracing
-tracing.workspace = true
+reth-tracing.workspace = true
 
 # misc
 auto_impl.workspace = true
@@ -47,7 +47,6 @@ triehash = { workspace = true, optional = true }
 # reth
 reth-ethereum-primitives = { workspace = true, features = ["arbitrary", "std"] }
 reth-primitives-traits = { workspace = true, features = ["test-utils"] }
-reth-tracing.workspace = true
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 
 # revm
