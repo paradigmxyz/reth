@@ -15,6 +15,7 @@ use reth_chainspec::ChainInfo;
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
+use reth_network_p2p::headers::downloader::SyncTarget;
 use reth_node_types::{
     BlockTy, HeaderTy, NodeTypes, NodeTypesWithDB, NodeTypesWithDBAdapter, ReceiptTy, TxTy,
 };
@@ -805,7 +806,7 @@ mod tests {
 
         // Empty database
         assert_matches!(
-            provider.sync_gap(tip_rx.clone(), checkpoint),
+            provider.local_tip_header(checkpoint),
             Err(ProviderError::HeaderNotFound(block_number))
                 if block_number.as_number().unwrap() == checkpoint
         );
@@ -818,7 +819,9 @@ mod tests {
         static_file_writer.commit().unwrap();
         drop(static_file_writer);
 
-        let gap = provider.sync_gap(tip_rx, checkpoint).unwrap();
+        let local_head = provider.local_tip_header(checkpoint).unwrap();
+        let gap = HeaderSyncGap { local_head, target: SyncTarget::Tip(*tip_rx.borrow()) };
+
         assert_eq!(gap.local_head, head);
         assert_eq!(gap.target.tip(), consensus_tip.into());
     }
