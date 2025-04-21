@@ -349,7 +349,7 @@ reth-era-downloader = { path = "crates/era-downloader" }
 reth-eth-wire = { path = "crates/net/eth-wire" }
 reth-eth-wire-types = { path = "crates/net/eth-wire-types" }
 reth-ethereum-cli = { path = "crates/ethereum/cli" }
-reth-ethereum-consensus = { path = "crates/ethereum/consensus" }
+reth-ethereum-consensus = { path = "crates/ethereum/consensus", default-features = false }
 reth-ethereum-engine-primitives = { path = "crates/ethereum/engine-primitives", default-features = false }
 reth-ethereum-forks = { path = "crates/ethereum-forks", default-features = false }
 reth-ethereum-payload-builder = { path = "crates/ethereum/payload" }
