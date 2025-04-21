@@ -46,6 +46,12 @@ engine-cancun:
 
 sync: []
 
+# https://github.com/ethereum/hive/issues/1277
+engine-auth:
+  - "JWT Authentication: No time drift, correct secret (Paris) (reth)"
+  - "JWT Authentication: Negative time drift, within limit, correct secret (Paris) (reth)"
+  - "JWT Authentication: Positive time drift, within limit, correct secret (Paris) (reth)"
+
 # no fix: it’s too expensive to check whether the storage is empty on each creation
 eest/consume-engine:
   - tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_non_empty_storage[fork_Prague-blockchain_test_engine-zero_nonce]-reth
