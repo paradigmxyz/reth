@@ -62,7 +62,7 @@ pub struct Environment<I> {
     pub latest_fork_choice_state: ForkchoiceState,
     /// Stores the most recent built execution payload
     pub latest_payload_built: Option<PayloadAttributes>,
-    /// sotres recent executed payload after a successful newPayloadV3 broadcast
+    /// Stores recent executed payload after a successful newPayloadV3 broadcast
     pub latest_payload_executed: Option<ExecutionPayload>,
 }
 
