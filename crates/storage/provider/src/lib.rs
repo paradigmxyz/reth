@@ -15,6 +15,7 @@
 /// Various provider traits.
 mod traits;
 pub use traits::*;
+use tokio as _;
 
 /// Provider trait implementations.
 pub mod providers;

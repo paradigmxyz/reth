@@ -230,7 +230,7 @@ where
 
         // Lookup the head and tip of the sync range
         let local_head = self.provider.local_tip_header(current_checkpoint.block_number)?;
-        let target = SyncTarget::Tip(self.tip.borrow().clone());
+        let target = SyncTarget::Tip(*self.tip.borrow());
         let gap = HeaderSyncGap { local_head, target };
         let tip = gap.target.tip();
         self.sync_gap = Some(gap.clone());
