@@ -52,7 +52,7 @@ pub trait SignedTransaction:
 
     /// Recover signer from signature and hash.
     ///
-    /// Returns `RecoveryError` if the transaction's signature is invalid following [EIP-2](https://eips.ethereum.org/EIPS/eip-2), see also `reth_primitives::transaction::recover_signer`.
+    /// Returns `RecoveryError` if the transaction's signature is invalid following [EIP-2](https://eips.ethereum.org/EIPS/eip-2), see also `reth_primitive_traits::crypto::secp256k1::recover_signer`.
     ///
     /// Note:
     ///
@@ -72,7 +72,7 @@ pub trait SignedTransaction:
     /// value_.
     ///
     /// Returns `RecoveryError` if the transaction's signature is invalid, see also
-    /// `reth_primitives::transaction::recover_signer_unchecked`.
+    /// `reth_primitive_traits::crypto::secp256k1::recover_signer_unchecked`.
     fn recover_signer_unchecked(&self) -> Result<Address, RecoveryError> {
         self.recover_signer_unchecked_with_buf(&mut Vec::new())
     }

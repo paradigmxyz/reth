@@ -172,7 +172,7 @@ impl NewPooledTransactionHashes {
     }
 
     /// Returns a mutable reference to transaction hashes.
-    pub fn hashes_mut(&mut self) -> &mut Vec<B256> {
+    pub const fn hashes_mut(&mut self) -> &mut Vec<B256> {
         match self {
             Self::Eth66(msg) => &mut msg.0,
             Self::Eth68(msg) => &mut msg.hashes,
@@ -233,7 +233,7 @@ impl NewPooledTransactionHashes {
     }
 
     /// Returns a mutable reference to the inner type if this an eth68 announcement.
-    pub fn as_eth68_mut(&mut self) -> Option<&mut NewPooledTransactionHashes68> {
+    pub const fn as_eth68_mut(&mut self) -> Option<&mut NewPooledTransactionHashes68> {
         match self {
             Self::Eth66(_) => None,
             Self::Eth68(msg) => Some(msg),
@@ -241,7 +241,7 @@ impl NewPooledTransactionHashes {
     }
 
     /// Returns a mutable reference to the inner type if this an eth66 announcement.
-    pub fn as_eth66_mut(&mut self) -> Option<&mut NewPooledTransactionHashes66> {
+    pub const fn as_eth66_mut(&mut self) -> Option<&mut NewPooledTransactionHashes66> {
         match self {
             Self::Eth66(msg) => Some(msg),
             Self::Eth68(_) => None,

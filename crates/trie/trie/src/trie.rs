@@ -165,7 +165,7 @@ where
                     self.prefix_sets.account_prefix_set,
                 )
                 .with_deletions_retained(retain_updates);
-                let node_iter = TrieNodeIter::new(walker, hashed_account_cursor, TrieType::State)
+                let node_iter = TrieNodeIter::state_trie(walker, hashed_account_cursor)
                     .with_last_hashed_key(state.last_account_key);
                 (hash_builder, node_iter)
             }
@@ -173,7 +173,7 @@ where
                 let hash_builder = HashBuilder::default().with_updates(retain_updates);
                 let walker = TrieWalker::new(trie_cursor, self.prefix_sets.account_prefix_set)
                     .with_deletions_retained(retain_updates);
-                let node_iter = TrieNodeIter::new(walker, hashed_account_cursor, TrieType::State);
+                let node_iter = TrieNodeIter::state_trie(walker, hashed_account_cursor);
                 (hash_builder, node_iter)
             }
         };
@@ -412,8 +412,7 @@ where
 
         let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
 
-        let mut storage_node_iter =
-            TrieNodeIter::new(walker, hashed_storage_cursor, TrieType::Storage);
+        let mut storage_node_iter = TrieNodeIter::storage_trie(walker, hashed_storage_cursor);
         while let Some(node) = storage_node_iter.try_next()? {
             match node {
                 TrieElement::Branch(node) => {

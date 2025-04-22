@@ -168,14 +168,14 @@ impl<H: NippyJarHeader> NippyJarChecker<H> {
     /// Returns a mutable reference to offsets file.
     ///
     /// **Panics** if it does not exist.
-    fn offsets_file(&mut self) -> &mut BufWriter<File> {
+    const fn offsets_file(&mut self) -> &mut BufWriter<File> {
         self.offsets_file.as_mut().expect("should exist")
     }
 
     /// Returns a mutable reference to data file.
     ///
     /// **Panics** if it does not exist.
-    fn data_file(&mut self) -> &mut BufWriter<File> {
+    const fn data_file(&mut self) -> &mut BufWriter<File> {
         self.data_file.as_mut().expect("should exist")
     }
 }

@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use alloy_consensus::{proofs::calculate_receipt_root, BlockHeader, TxReceipt};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{Bloom, B256};
@@ -61,7 +62,7 @@ where
     Ok(())
 }
 
-/// Calculate the receipts root, and compare it against against the expected receipts root and logs
+/// Calculate the receipts root, and compare it against the expected receipts root and logs
 /// bloom.
 pub fn verify_receipts<R: Receipt>(
     expected_receipts_root: B256,

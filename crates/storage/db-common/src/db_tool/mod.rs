@@ -188,7 +188,7 @@ impl ListFilter {
     }
 
     /// Updates the page with new `skip` and `len` values.
-    pub fn update_page(&mut self, skip: usize, len: usize) {
+    pub const fn update_page(&mut self, skip: usize, len: usize) {
         self.skip = skip;
         self.len = len;
     }
