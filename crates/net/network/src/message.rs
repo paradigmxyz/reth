@@ -7,11 +7,12 @@ use alloy_consensus::{BlockHeader, ReceiptWithBloom};
 use alloy_primitives::{Bytes, B256};
 use futures::FutureExt;
 use reth_eth_wire::{
-    capability::RawCapabilityMessage, message::RequestPair, BlockBodies, BlockHeaders, EthMessage,
-    EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, NetworkPrimitives, NewBlock,
-    NewBlockHashes, NewPooledTransactionHashes, NodeData, PooledTransactions, Receipts,
-    SharedTransactions, Transactions,
+    message::RequestPair, BlockBodies, BlockHeaders, EthMessage, EthNetworkPrimitives,
+    GetBlockBodies, GetBlockHeaders, NetworkPrimitives, NewBlock, NewBlockHashes,
+    NewPooledTransactionHashes, NodeData, PooledTransactions, Receipts, SharedTransactions,
+    Transactions,
 };
+use reth_eth_wire_types::RawCapabilityMessage;
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::{RequestError, RequestResult};
 use std::{

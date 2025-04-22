@@ -5,7 +5,7 @@ use crate::{
     commands::debug_cmd,
     version::{LONG_VERSION, SHORT_VERSION},
 };
-use clap::{value_parser, Parser, Subcommand};
+use clap::{Parser, Subcommand};
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{
@@ -41,22 +41,6 @@ pub struct Cli<C: ChainSpecParser = EthereumChainSpecParser, Ext: clap::Args + f
     /// The command to run
     #[command(subcommand)]
     pub command: Commands<C, Ext>,
-
-    /// Add a new instance of a node.
-    ///
-    /// Configures the ports of the node to avoid conflicts with the defaults.
-    /// This is useful for running multiple nodes on the same machine.
-    ///
-    /// Max number of instances is 200. It is chosen in a way so that it's not possible to have
-    /// port numbers that conflict with each other.
-    ///
-    /// Changes to the following port numbers:
-    /// - `DISCOVERY_PORT`: default + `instance` - 1
-    /// - `AUTH_PORT`: default + `instance` * 100 - 100
-    /// - `HTTP_RPC_PORT`: default - `instance` + 1
-    /// - `WS_RPC_PORT`: default + `instance` * 2 - 2
-    #[arg(long, value_name = "INSTANCE", global = true, default_value_t = 1, value_parser = value_parser!(u16).range(..=200))]
-    pub instance: u16,
 
     /// The logging configuration for the CLI.
     #[command(flatten)]
@@ -268,7 +252,7 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Commands<C, Ext> {
     /// Returns the underlying chain being used for commands
-    fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+    pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         match self {
             Self::Node(cmd) => cmd.chain_spec(),
             Self::Init(cmd) => cmd.chain_spec(),
@@ -280,7 +264,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Co
             Self::P2P(cmd) => cmd.chain_spec(),
             #[cfg(feature = "dev")]
             Self::TestVectors(cmd) => cmd.chain_spec(),
-            Self::Config(cmd) => cmd.chain_spec(),
+            Self::Config(_) => None,
             Self::Debug(cmd) => cmd.chain_spec(),
             Self::Recover(cmd) => cmd.chain_spec(),
             Self::Prune(cmd) => cmd.chain_spec(),

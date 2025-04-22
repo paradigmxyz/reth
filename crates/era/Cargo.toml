@@ -1,0 +1,31 @@
+[package]
+name = "reth-era"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+# alloy
+alloy-consensus.workspace = true
+alloy-eips.workspace = true
+alloy-primitives.workspace = true
+alloy-rlp.workspace = true
+
+# compression and decompression
+snap.workspace = true
+
+# ssz encoding and decoding
+ethereum_ssz.workspace = true
+ethereum_ssz_derive.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

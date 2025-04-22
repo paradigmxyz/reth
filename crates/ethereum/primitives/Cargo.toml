@@ -31,7 +31,7 @@ revm-context.workspace = true
 arbitrary = { workspace = true, optional = true, features = ["derive"] }
 derive_more.workspace = true
 modular-bitfield = { workspace = true, optional = true }
-rand = { workspace = true, optional = true }
+rand_08 = { workspace = true, optional = true }
 secp256k1 = { workspace = true, optional = true, features = ["rand"] }
 serde = { workspace = true, optional = true }
 serde_with = { workspace = true, optional = true }
@@ -41,6 +41,7 @@ arbitrary.workspace = true
 bincode.workspace = true
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
+rand_08.workspace = true
 rand.workspace = true
 reth-codecs = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
@@ -79,7 +80,7 @@ reth-codec = [
 ]
 arbitrary = [
     "dep:arbitrary",
-    "dep:rand",
+    "dep:rand_08",
     "dep:secp256k1",
     "alloy-consensus/arbitrary",
     "alloy-primitives/arbitrary",
@@ -100,9 +101,10 @@ serde = [
     "alloy-eips/serde",
     "alloy-primitives/serde",
     "alloy-rpc-types-eth?/serde",
-    "rand?/serde",
+    "rand_08?/serde",
     "reth-codecs?/serde",
     "reth-primitives-traits/serde",
     "revm-context/serde",
     "secp256k1?/serde",
+    "rand/serde",
 ]

@@ -93,7 +93,7 @@ async fn test_already_connected() {
     reth_tracing::init_test_tracing();
     let mut net = Testnet::default();
 
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let client = NoopProvider::default();
     let p1 = PeerConfig::default();
 
@@ -137,8 +137,8 @@ async fn test_get_peer() {
     reth_tracing::init_test_tracing();
 
     let mut net = Testnet::default();
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
-    let secret_key_1 = SecretKey::new(&mut rand::thread_rng());
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+    let secret_key_1 = SecretKey::new(&mut rand_08::thread_rng());
     let client = NoopProvider::default();
 
     let p1 = PeerConfig::default();
@@ -171,8 +171,8 @@ async fn test_get_peer_by_id() {
     reth_tracing::init_test_tracing();
     let mut net = Testnet::default();
 
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
-    let secret_key_1 = SecretKey::new(&mut rand::thread_rng());
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+    let secret_key_1 = SecretKey::new(&mut rand_08::thread_rng());
     let client = NoopProvider::default();
     let p1 = PeerConfig::default();
     let p2 = PeerConfig::with_secret_key(client.clone(), secret_key);
@@ -204,7 +204,7 @@ async fn test_get_peer_by_id() {
 #[ignore]
 async fn test_connect_with_boot_nodes() {
     reth_tracing::init_test_tracing();
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let mut discv4 = Discv4Config::builder();
     discv4.add_boot_nodes(mainnet_nodes());
 
@@ -225,7 +225,7 @@ async fn test_connect_with_boot_nodes() {
 #[ignore]
 async fn test_connect_with_builder() {
     reth_tracing::init_test_tracing();
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let mut discv4 = Discv4Config::builder();
     discv4.add_boot_nodes(mainnet_nodes());
 
@@ -262,7 +262,7 @@ async fn test_connect_with_builder() {
 #[ignore]
 async fn test_connect_to_trusted_peer() {
     reth_tracing::init_test_tracing();
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let discv4 = Discv4Config::builder();
 
     let client = NoopProvider::default();
@@ -319,7 +319,7 @@ async fn test_connect_to_trusted_peer() {
 async fn test_incoming_node_id_blacklist() {
     reth_tracing::init_test_tracing();
     tokio::time::timeout(GETH_TIMEOUT, async move {
-        let secret_key = SecretKey::new(&mut rand::thread_rng());
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
 
         // instantiate geth and add ourselves as a peer
         let temp_dir = tempfile::tempdir().unwrap().into_path();
@@ -374,7 +374,7 @@ async fn test_incoming_node_id_blacklist() {
 async fn test_incoming_connect_with_single_geth() {
     reth_tracing::init_test_tracing();
     tokio::time::timeout(GETH_TIMEOUT, async move {
-        let secret_key = SecretKey::new(&mut rand::thread_rng());
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
 
         // instantiate geth and add ourselves as a peer
         let temp_dir = tempfile::tempdir().unwrap().into_path();
@@ -419,7 +419,7 @@ async fn test_incoming_connect_with_single_geth() {
 async fn test_outgoing_connect_with_single_geth() {
     reth_tracing::init_test_tracing();
     tokio::time::timeout(GETH_TIMEOUT, async move {
-        let secret_key = SecretKey::new(&mut rand::thread_rng());
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
 
         let config = NetworkConfigBuilder::new(secret_key)
             .listener_port(0)
@@ -466,7 +466,7 @@ async fn test_outgoing_connect_with_single_geth() {
 async fn test_geth_disconnect() {
     reth_tracing::init_test_tracing();
     tokio::time::timeout(GETH_TIMEOUT, async move {
-        let secret_key = SecretKey::new(&mut rand::thread_rng());
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
 
         let config = NetworkConfigBuilder::eth(secret_key)
             .listener_port(0)
@@ -587,7 +587,7 @@ async fn test_trusted_peer_only() {
     drop(handles);
     let _handle = net.spawn();
 
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let peers_config = PeersConfig::default().with_trusted_nodes_only(true);
 
     let config = NetworkConfigBuilder::eth(secret_key)
@@ -639,7 +639,7 @@ async fn test_trusted_peer_only() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_network_state_change() {
     let net = Testnet::create(1).await;
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let peers_config =
         PeersConfig::default().with_refill_slots_interval(Duration::from_millis(500));
 
@@ -681,7 +681,7 @@ async fn test_network_state_change() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_exceed_outgoing_connections() {
     let net = Testnet::create(2).await;
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let peers_config = PeersConfig::default().with_max_outbound(1);
 
     let config = NetworkConfigBuilder::eth(secret_key)
@@ -722,7 +722,7 @@ async fn test_exceed_outgoing_connections() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_disconnect_incoming_when_exceeded_incoming_connections() {
     let net = Testnet::create(1).await;
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let peers_config = PeersConfig::default().with_max_inbound(0);
 
     let config = NetworkConfigBuilder::eth(secret_key)
@@ -838,7 +838,7 @@ async fn new_random_peer(
     max_in_bound: usize,
     trusted_nodes: Vec<TrustedPeer>,
 ) -> NetworkManager<EthNetworkPrimitives> {
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let peers_config =
         PeersConfig::default().with_max_inbound(max_in_bound).with_trusted_nodes(trusted_nodes);
 
@@ -909,7 +909,7 @@ async fn test_connect_peer_in_different_network_should_fail() {
     tokio::task::spawn(peer);
 
     // peer in sepolia.
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     // If the remote disconnect first, then we would not get a fatal protocol error. So set
     // max_backoff_count to 0 to speed up the removal of the peer.
     let peers_config = PeersConfig::default().with_max_backoff_count(0);

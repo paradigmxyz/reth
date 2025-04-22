@@ -49,6 +49,8 @@ pub struct HeaderStage<Provider, Downloader: HeaderDownloader> {
     /// Strategy for downloading the headers
     downloader: Downloader,
     /// The tip for the stage.
+    ///
+    /// This determines the sync target of the stage (set by the pipeline).
     tip: watch::Receiver<B256>,
     /// Consensus client implementation
     consensus: Arc<dyn HeaderValidator<Downloader::Header>>,

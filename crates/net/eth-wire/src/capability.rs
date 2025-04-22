@@ -7,63 +7,11 @@ use crate::{
     version::ParseVersionError,
     Capability, EthMessageID, EthVersion,
 };
-use alloy_primitives::bytes::Bytes;
-use alloy_rlp::{BufMut, Decodable, Encodable};
 use derive_more::{Deref, DerefMut};
 use std::{
     borrow::Cow,
     collections::{BTreeSet, HashMap},
 };
-
-/// A Capability message consisting of the message-id and the payload.
-#[derive(Debug, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct RawCapabilityMessage {
-    /// Identifier of the message.
-    pub id: usize,
-    /// Actual __encoded__ payload
-    pub payload: Bytes,
-}
-
-impl RawCapabilityMessage {
-    /// Creates a new capability message with the given id and payload.
-    pub const fn new(id: usize, payload: Bytes) -> Self {
-        Self { id, payload }
-    }
-
-    /// Creates a raw message for the eth sub-protocol.
-    ///
-    /// Caller must ensure that the rlp encoded `payload` matches the given `id`.
-    ///
-    /// See also  [`EthMessage`](crate::EthMessage)
-    pub const fn eth(id: EthMessageID, payload: Bytes) -> Self {
-        Self::new(id as usize, payload)
-    }
-}
-
-impl Encodable for RawCapabilityMessage {
-    /// Encodes the `RawCapabilityMessage` into an RLP byte stream.
-    fn encode(&self, out: &mut dyn BufMut) {
-        self.id.encode(out);
-        out.put_slice(&self.payload);
-    }
-
-    /// Returns the total length of the encoded message.
-    fn length(&self) -> usize {
-        self.id.length() + self.payload.len()
-    }
-}
-
-impl Decodable for RawCapabilityMessage {
-    /// Decodes a `RawCapabilityMessage` from an RLP byte stream.
-    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let id = usize::decode(buf)?;
-        let payload = Bytes::copy_from_slice(buf);
-        *buf = &buf[buf.len()..];
-
-        Ok(Self { id, payload })
-    }
-}
 
 /// This represents a shared capability, its version, and its message id offset.
 ///
@@ -417,6 +365,7 @@ mod tests {
     use crate::{Capabilities, Capability};
     use alloy_primitives::bytes::Bytes;
     use alloy_rlp::{Decodable, Encodable};
+    use reth_eth_wire_types::RawCapabilityMessage;
 
     #[test]
     fn from_eth_68() {

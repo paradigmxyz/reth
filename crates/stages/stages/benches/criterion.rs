@@ -23,13 +23,7 @@ use setup::StageRange;
 // This is currently needed to only instantiate the tokio runtime once.
 #[cfg(not(codspeed))]
 fn benches() {
-    #[cfg(not(windows))]
-    use pprof::criterion::{Output, PProfProfiler};
-
-    let criterion = Criterion::default();
-    #[cfg(not(windows))]
-    let criterion = criterion.with_profiler(PProfProfiler::new(1000, Output::Flamegraph(None)));
-    run_benches(&mut criterion.configure_from_args());
+    run_benches(&mut Criterion::default().configure_from_args());
 }
 
 fn run_benches(criterion: &mut Criterion) {

@@ -55,7 +55,7 @@ where
                 .enumerate()
                 .map(|(idx, (tx, receipt))| -> Result<_, _> {
                     let meta = TransactionMeta {
-                        tx_hash: *tx.tx_hash(),
+                        tx_hash: tx.tx_hash(),
                         index: idx as u64,
                         block_hash,
                         block_number,

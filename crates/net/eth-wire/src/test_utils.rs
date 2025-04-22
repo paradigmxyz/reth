@@ -19,7 +19,7 @@ pub type P2pPassthroughTcpStream = P2PStream<Framed<TcpStream, LengthDelimitedCo
 
 /// Returns a new testing `HelloMessage` and new secretkey
 pub fn eth_hello() -> (HelloMessageWithProtocols, SecretKey) {
-    let server_key = SecretKey::new(&mut rand::thread_rng());
+    let server_key = SecretKey::new(&mut rand_08::thread_rng());
     let protocols = vec![EthVersion::Eth67.into()];
     let hello = HelloMessageWithProtocols {
         protocol_version: ProtocolVersion::V5,

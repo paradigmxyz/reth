@@ -148,7 +148,7 @@ impl OpNode {
     ///     OpNode::provider_factory_builder().open_read_only(BASE_MAINNET.clone(), "datadir").unwrap();
     /// ```
     ///
-    /// # Open a Providerfactory manually with with all required components
+    /// # Open a Providerfactory manually with all required components
     ///
     /// ```no_run
     /// use reth_db::open_db_read_only;
@@ -197,7 +197,7 @@ where
 
     fn add_ons(&self) -> Self::AddOns {
         Self::AddOns::builder()
-            .with_sequencer(self.args.sequencer_http.clone())
+            .with_sequencer(self.args.sequencer.clone())
             .with_da_config(self.da_config.clone())
             .with_enable_tx_conditional(self.args.enable_tx_conditional)
             .build()
@@ -215,7 +215,7 @@ where
         reth_optimism_primitives::OpBlock {
             header: header.inner,
             body: reth_optimism_primitives::OpBlockBody {
-                transactions: transactions.into_transactions().map(Into::into).collect(),
+                transactions: transactions.into_transactions().collect(),
                 ..Default::default()
             },
         }
@@ -249,7 +249,7 @@ where
     pub da_config: OpDAConfig,
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
-    pub sequencer_client: Option<SequencerClient>,
+    pub sequencer_url: Option<String>,
     /// Enable transaction conditionals.
     enable_tx_conditional: bool,
 }
@@ -296,7 +296,7 @@ where
         self,
         ctx: reth_node_api::AddOnsContext<'_, N>,
     ) -> eyre::Result<Self::Handle> {
-        let Self { rpc_add_ons, da_config, sequencer_client, enable_tx_conditional } = self;
+        let Self { rpc_add_ons, da_config, sequencer_url, enable_tx_conditional } = self;
 
         let builder = reth_optimism_payload_builder::OpPayloadBuilder::new(
             ctx.node.pool().clone(),
@@ -310,6 +310,12 @@ where
             builder,
         );
         let miner_ext = OpMinerExtApi::new(da_config);
+
+        let sequencer_client = if let Some(url) = sequencer_url {
+            Some(SequencerClient::new(url).await?)
+        } else {
+            None
+        };
 
         let tx_conditional_ext: OpEthExtApi<N::Pool, N::Provider> = OpEthExtApi::new(
             sequencer_client,
@@ -400,7 +406,7 @@ where
 pub struct OpAddOnsBuilder {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
-    sequencer_client: Option<SequencerClient>,
+    sequencer_url: Option<String>,
     /// Data availability configuration for the OP builder.
     da_config: Option<OpDAConfig>,
     /// Enable transaction conditionals.
@@ -410,7 +416,7 @@ pub struct OpAddOnsBuilder {
 impl OpAddOnsBuilder {
     /// With a [`SequencerClient`].
     pub fn with_sequencer(mut self, sequencer_client: Option<String>) -> Self {
-        self.sequencer_client = sequencer_client.map(SequencerClient::new);
+        self.sequencer_url = sequencer_client;
         self
     }
 
@@ -421,7 +427,7 @@ impl OpAddOnsBuilder {
     }
 
     /// Configure if transaction conditional should be enabled.
-    pub fn with_enable_tx_conditional(mut self, enable_tx_conditional: bool) -> Self {
+    pub const fn with_enable_tx_conditional(mut self, enable_tx_conditional: bool) -> Self {
         self.enable_tx_conditional = enable_tx_conditional;
         self
     }
@@ -434,17 +440,16 @@ impl OpAddOnsBuilder {
         N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>,
         OpEthApiBuilder: EthApiBuilder<N>,
     {
-        let Self { sequencer_client, da_config, enable_tx_conditional } = self;
+        let Self { sequencer_url, da_config, enable_tx_conditional } = self;
 
-        let sequencer_client_clone = sequencer_client.clone();
         OpAddOns {
             rpc_add_ons: RpcAddOns::new(
-                OpEthApiBuilder::default().with_sequencer(sequencer_client_clone),
+                OpEthApiBuilder::default().with_sequencer(sequencer_url.clone()),
                 Default::default(),
                 Default::default(),
             ),
             da_config: da_config.unwrap_or_default(),
-            sequencer_client,
+            sequencer_url,
             enable_tx_conditional,
         }
     }
@@ -505,7 +510,7 @@ impl<T> Default for OpPoolBuilder<T> {
 
 impl<T> OpPoolBuilder<T> {
     /// Sets the `enable_tx_conditional` flag on the pool builder.
-    pub fn with_enable_tx_conditional(mut self, enable_tx_conditional: bool) -> Self {
+    pub const fn with_enable_tx_conditional(mut self, enable_tx_conditional: bool) -> Self {
         self.enable_tx_conditional = enable_tx_conditional;
         self
     }
@@ -560,6 +565,7 @@ where
             .no_eip4844()
             .with_head_timestamp(ctx.head().timestamp)
             .kzg_settings(ctx.kzg_settings()?)
+            .set_tx_fee_cap(ctx.config().rpc.rpc_tx_fee_cap)
             .with_additional_tasks(
                 pool_config_overrides
                     .additional_validation_tasks
@@ -581,26 +587,35 @@ where
             pool_config_overrides.apply(ctx.pool_config()),
         );
         info!(target: "reth::cli", "Transaction pool initialized");
-        let transactions_path = data_dir.txpool_transactions();
 
         // spawn txpool maintenance tasks
         {
             let pool = transaction_pool.clone();
             let chain_events = ctx.provider().canonical_state_stream();
             let client = ctx.provider().clone();
-            let transactions_backup_config =
-                reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
+            if !ctx.config().txpool.disable_transactions_backup {
+                // Use configured backup path or default to data dir
+                let transactions_path = ctx
+                    .config()
+                    .txpool
+                    .transactions_backup_path
+                    .clone()
+                    .unwrap_or_else(|| data_dir.txpool_transactions());
 
-            ctx.task_executor().spawn_critical_with_graceful_shutdown_signal(
-                "local transactions backup task",
-                |shutdown| {
-                    reth_transaction_pool::maintain::backup_local_transactions_task(
-                        shutdown,
-                        pool.clone(),
-                        transactions_backup_config,
-                    )
-                },
-            );
+                let transactions_backup_config =
+                    reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
+
+                ctx.task_executor().spawn_critical_with_graceful_shutdown_signal(
+                    "local transactions backup task",
+                    |shutdown| {
+                        reth_transaction_pool::maintain::backup_local_transactions_task(
+                            shutdown,
+                            pool.clone(),
+                            transactions_backup_config,
+                        )
+                    },
+                );
+            }
 
             // spawn the main maintenance task
             ctx.task_executor().spawn_critical(
@@ -612,6 +627,10 @@ where
                     ctx.task_executor().clone(),
                     reth_transaction_pool::maintain::MaintainPoolConfig {
                         max_tx_lifetime: pool.config().max_queued_lifetime,
+                        no_local_exemptions: transaction_pool
+                            .config()
+                            .local_transactions_config
+                            .no_exemptions,
                         ..Default::default()
                     },
                 ),

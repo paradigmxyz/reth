@@ -1,7 +1,7 @@
 //! Loads and formats OP transaction RPC response.
 
-use alloy_consensus::{transaction::Recovered, Transaction as _};
-use alloy_primitives::{Bytes, PrimitiveSignature as Signature, Sealable, Sealed, B256};
+use alloy_consensus::{transaction::Recovered, SignableTransaction, Transaction as _};
+use alloy_primitives::{Bytes, Sealable, Sealed, Signature, B256};
 use alloy_rpc_types_eth::TransactionInfo;
 use op_alloy_consensus::OpTxEnvelope;
 use op_alloy_rpc_types::{OpTransactionRequest, Transaction};
@@ -83,11 +83,11 @@ where
         tx: Recovered<OpTransactionSigned>,
         tx_info: TransactionInfo,
     ) -> Result<Self::Transaction, Self::Error> {
-        let tx = tx.convert::<OpTxEnvelope>();
+        let mut tx = tx.convert::<OpTxEnvelope>();
         let mut deposit_receipt_version = None;
         let mut deposit_nonce = None;
 
-        if tx.is_deposit() {
+        if let OpTxEnvelope::Deposit(tx) = tx.inner_mut() {
             // for depost tx we need to fetch the receipt
             self.inner
                 .eth_api
@@ -100,6 +100,12 @@ where
                         deposit_nonce = receipt.deposit_nonce;
                     }
                 });
+
+            // For consistency with op-geth, we always return `0x0` for mint if it is
+            // missing This is because op-geth does not distinguish
+            // between null and 0, because this value is decoded from RLP where null is
+            // represented as 0
+            tx.inner_mut().mint = Some(tx.mint.unwrap_or_default());
         }
 
         let TransactionInfo {
@@ -143,7 +149,7 @@ where
 
         // Create an empty signature for the transaction.
         let signature = Signature::new(Default::default(), Default::default(), false);
-        Ok(OpTransactionSigned::new_unhashed(tx, signature))
+        Ok(tx.into_signed(signature).into())
     }
 
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {

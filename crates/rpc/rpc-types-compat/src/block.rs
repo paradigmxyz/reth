@@ -44,12 +44,16 @@ where
     let transactions = block.body().transaction_hashes_iter().copied().collect();
     let rlp_length = block.rlp_length();
     let (header, body) = block.into_sealed_block().split_sealed_header_body();
-    from_block_with_transactions::<_, N>(
-        rlp_length,
-        header,
-        body,
-        BlockTransactions::Hashes(transactions),
-    )
+
+    let transactions = BlockTransactions::Hashes(transactions);
+    let withdrawals =
+        header.withdrawals_root().is_some().then(|| body.withdrawals().cloned()).flatten();
+
+    let uncles =
+        body.ommers().map(|o| o.iter().map(|h| h.hash_slow()).collect()).unwrap_or_default();
+    let header = Header::from_consensus(header.into(), None, Some(U256::from(rlp_length)));
+
+    Block { header, uncles, transactions, withdrawals }
 }
 
 /// Create a new [`Block`] response from a [`RecoveredBlock`], using the
@@ -88,24 +92,8 @@ where
         .collect::<Result<Vec<_>, T::Error>>()?;
 
     let (header, body) = block.into_sealed_block().split_sealed_header_body();
-    Ok(from_block_with_transactions::<_, N>(
-        block_length,
-        header,
-        body,
-        BlockTransactions::Full(transactions),
-    ))
-}
 
-#[inline]
-fn from_block_with_transactions<T, N>(
-    block_length: usize,
-    header: SealedHeader<N::BlockHeader>,
-    body: N::BlockBody,
-    transactions: BlockTransactions<T>,
-) -> Block<T, Header<N::BlockHeader>>
-where
-    N: NodePrimitives,
-{
+    let transactions = BlockTransactions::Full(transactions);
     let withdrawals =
         header.withdrawals_root().is_some().then(|| body.withdrawals().cloned()).flatten();
 
@@ -113,5 +101,7 @@ where
         body.ommers().map(|o| o.iter().map(|h| h.hash_slow()).collect()).unwrap_or_default();
     let header = Header::from_consensus(header.into(), None, Some(U256::from(block_length)));
 
-    Block { header, uncles, transactions, withdrawals }
+    let block = Block { header, uncles, transactions, withdrawals };
+
+    Ok(block)
 }

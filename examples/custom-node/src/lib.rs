@@ -10,9 +10,9 @@
 use chainspec::CustomChainSpec;
 use engine::CustomPayloadTypes;
 use primitives::CustomNodePrimitives;
-use reth_node_api::{FullNodeTypes, NodeTypes};
+use reth_ethereum::node::api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{components::ComponentsBuilder, Node, NodeComponentsBuilder};
-use reth_optimism_node::{
+use reth_op::node::{
     node::{OpConsensusBuilder, OpPoolBuilder, OpStorage},
     OpNode,
 };
@@ -20,6 +20,8 @@ use reth_optimism_node::{
 pub mod chainspec;
 pub mod engine;
 pub mod engine_api;
+pub mod evm;
+pub mod network;
 pub mod primitives;
 
 #[derive(Debug, Clone)]

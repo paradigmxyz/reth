@@ -21,6 +21,7 @@ use revm::context_interface::result::{
     EVMError, ExecutionResult, HaltReason, InvalidHeader, InvalidTransaction, OutOfGasError,
 };
 use revm_inspectors::tracing::MuxError;
+use std::convert::Infallible;
 use tracing::error;
 
 /// A trait to convert an error to an RPC error.
@@ -180,6 +181,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::BothStateAndStateDiffInOverride(_) |
             EthApiError::InvalidTracerConfig |
             EthApiError::TransactionConversionError |
+            EthApiError::InvalidRewardPercentiles |
             EthApiError::InvalidBytecode(_) => invalid_params_rpc_err(error.to_string()),
             EthApiError::InvalidTransaction(err) => err.into(),
             EthApiError::PoolError(err) => err.into(),
@@ -187,10 +189,8 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::ExcessBlobGasNotSet |
             EthApiError::InvalidBlockData(_) |
             EthApiError::Internal(_) |
-            EthApiError::TransactionNotFound |
-            EthApiError::EvmCustom(_) |
-            EthApiError::InvalidRewardPercentiles => internal_rpc_err(error.to_string()),
-            EthApiError::UnknownBlockOrTxIndex => {
+            EthApiError::EvmCustom(_) => internal_rpc_err(error.to_string()),
+            EthApiError::UnknownBlockOrTxIndex | EthApiError::TransactionNotFound => {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
             }
             // TODO(onbjerg): We rewrite the error message here because op-node does string matching
@@ -306,6 +306,12 @@ where
 impl From<RecoveryError> for EthApiError {
     fn from(_: RecoveryError) -> Self {
         Self::InvalidTransactionSignature
+    }
+}
+
+impl From<Infallible> for EthApiError {
+    fn from(_: Infallible) -> Self {
+        unreachable!()
     }
 }
 
@@ -679,6 +685,15 @@ pub enum RpcPoolError {
     /// When the transaction exceeds the block gas limit
     #[error("exceeds block gas limit")]
     ExceedsGasLimit,
+    /// Thrown when a new transaction is added to the pool, but then immediately discarded to
+    /// respect the tx fee exceeds the configured cap
+    #[error("tx fee ({max_tx_fee_wei} wei) exceeds the configured cap ({tx_fee_cap_wei} wei)")]
+    ExceedsFeeCap {
+        /// max fee in wei of new tx submitted to the pull (e.g. 0.11534 ETH)
+        max_tx_fee_wei: u128,
+        /// configured tx fee cap in wei (e.g. 1.0 ETH)
+        tx_fee_cap_wei: u128,
+    },
     /// When a negative value is encountered
     #[error("negative value")]
     NegativeValue,
@@ -744,6 +759,9 @@ impl From<InvalidPoolTransactionError> for RpcPoolError {
         match err {
             InvalidPoolTransactionError::Consensus(err) => Self::Invalid(err.into()),
             InvalidPoolTransactionError::ExceedsGasLimit(_, _) => Self::ExceedsGasLimit,
+            InvalidPoolTransactionError::ExceedsFeeCap { max_tx_fee_wei, tx_fee_cap_wei } => {
+                Self::ExceedsFeeCap { max_tx_fee_wei, tx_fee_cap_wei }
+            }
             InvalidPoolTransactionError::ExceedsMaxInitCodeSize(_, _) => {
                 Self::ExceedsMaxInitCodeSize
             }
