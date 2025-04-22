@@ -70,7 +70,7 @@ pub struct ScrollPayloadBuilder<Pool, Client, Evm, Txs = ()> {
 
 impl<Pool, Evm, Client> ScrollPayloadBuilder<Pool, Client, Evm> {
     /// Creates a new [`ScrollPayloadBuilder`].
-    pub fn new(pool: Pool, evm_config: Evm, client: Client) -> Self {
+    pub const fn new(pool: Pool, evm_config: Evm, client: Client) -> Self {
         Self { evm_config, pool, client, best_transactions: () }
     }
 }
@@ -520,7 +520,7 @@ pub struct ExecutionInfo {
 
 impl ExecutionInfo {
     /// Create a new instance with allocated slots.
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self { cumulative_gas_used: 0, cumulative_da_bytes_used: 0, total_fees: U256::ZERO }
     }
 

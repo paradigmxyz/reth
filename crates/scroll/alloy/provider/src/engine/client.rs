@@ -17,7 +17,7 @@ pub struct ScrollAuthApiEngineClient<T> {
 
 impl<T> ScrollAuthApiEngineClient<T> {
     /// Creates a new [`ScrollAuthApiEngineClient`] with the given client.
-    pub fn new(client: T) -> Self {
+    pub const fn new(client: T) -> Self {
         Self { client }
     }
 }

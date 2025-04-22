@@ -56,7 +56,7 @@ impl<DB: Database, I, P> ScrollEvm<DB, I, P> {
     }
 
     /// Provides a mutable reference to the EVM context.
-    pub fn ctx_mut(&mut self) -> &mut ScrollContext<DB> {
+    pub const fn ctx_mut(&mut self) -> &mut ScrollContext<DB> {
         &mut self.inner.0.data.ctx
     }
 }
@@ -91,6 +91,10 @@ where
 
     fn block(&self) -> &BlockEnv {
         &self.block
+    }
+
+    fn chain_id(&self) -> u64 {
+        self.cfg.chain_id
     }
 
     fn transact_raw(

@@ -21,7 +21,7 @@ hardfork!(
 
 impl ScrollHardfork {
     /// Scroll mainnet list of hardforks.
-    pub fn scroll_mainnet() -> [(Self, ForkCondition); 5] {
+    pub const fn scroll_mainnet() -> [(Self, ForkCondition); 5] {
         [
             (Self::Archimedes, ForkCondition::Block(0)),
             (Self::Bernoulli, ForkCondition::Block(5220340)),
@@ -32,7 +32,7 @@ impl ScrollHardfork {
     }
 
     /// Scroll sepolia list of hardforks.
-    pub fn scroll_sepolia() -> [(Self, ForkCondition); 5] {
+    pub const fn scroll_sepolia() -> [(Self, ForkCondition); 5] {
         [
             (Self::Archimedes, ForkCondition::Block(0)),
             (Self::Bernoulli, ForkCondition::Block(3747132)),
