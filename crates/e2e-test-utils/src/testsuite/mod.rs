@@ -62,6 +62,8 @@ pub struct Environment<I> {
     pub latest_fork_choice_state: ForkchoiceState,
     /// Stores the most recent built execution payload
     pub latest_payload_built: Option<PayloadAttributes>,
+    /// Stores the most recent executed payload
+    pub latest_payload_executed: Option<PayloadAttributes>,
 }
 
 impl<I> Default for Environment<I> {
@@ -78,6 +80,7 @@ impl<I> Default for Environment<I> {
             next_payload_id: None,
             latest_fork_choice_state: ForkchoiceState::default(),
             latest_payload_built: None,
+            latest_payload_executed: None,
         }
     }
 }
