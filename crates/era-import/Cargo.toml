@@ -18,6 +18,7 @@ reth-db-api.workspace = true
 reth-era.workspace = true
 reth-era-downloader.workspace = true
 reth-etl.workspace = true
+reth-fs-util.workspace = true
 reth-provider.workspace = true
 reth-storage-api.workspace = true
 reth-primitives-traits.workspace = true
@@ -29,6 +30,7 @@ futures-util.workspace = true
 
 # errors
 eyre.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 # reth

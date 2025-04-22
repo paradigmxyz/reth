@@ -7824,11 +7824,13 @@ dependencies = [
  "reth-era",
  "reth-era-downloader",
  "reth-etl",
+ "reth-fs-util",
  "reth-primitives-traits",
  "reth-provider",
  "reth-storage-api",
  "tempfile",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

@@ -10,12 +10,14 @@ use reth_db_api::{
 use reth_era::{era1_file::Era1Reader, execution_types::DecodeCompressed};
 use reth_era_downloader::{EraStream, HttpClient};
 use reth_etl::Collector;
+use reth_fs_util as fs;
 use reth_primitives_traits::{Block, FullBlockBody, FullBlockHeader, NodePrimitives};
 use reth_provider::{
     BlockWriter, ProviderError, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
 };
 use reth_storage_api::{DBProvider, HeaderProvider, NodePrimitivesProvider, StorageLocation};
-use std::{fs, fs::File, sync::mpsc};
+use std::sync::mpsc;
+use tracing::info;
 
 /// Imports blocks from `downloader` using `provider`.
 ///
@@ -65,7 +67,7 @@ where
 
     while let Some(path) = rx.recv()? {
         let path = path?;
-        let file = File::open(path.clone())?;
+        let file = fs::open(path.clone())?;
         let mut reader = Era1Reader::new(file);
 
         for block in reader.iter() {
@@ -100,6 +102,9 @@ where
         fs::remove_file(path)?;
     }
 
+    let total_headers = hash_collector.len();
+    info!(target: "era::history::import", total = total_headers, "Writing headers hash index");
+
     // Database cursor for hash to number index
     let mut cursor_header_numbers =
         provider.tx_ref().cursor_write::<RawTable<tables::HeaderNumbers>>()?;
@@ -117,9 +122,15 @@ where
         }
     }
 
+    let interval = (total_headers / 10).max(1);
+
     // Build block hash to block number index
-    for hash_to_number in hash_collector.iter()? {
+    for (index, hash_to_number) in hash_collector.iter()?.enumerate() {
         let (hash, number) = hash_to_number?;
+
+        if index > 0 && index % interval == 0 && total_headers > 100 {
+            info!(target: "era::history::import", progress = %format!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers hash index");
+        }
 
         let hash = RawKey::<BlockHash>::from_vec(hash);
         let number = RawValue::<BlockNumber>::from_vec(number);
