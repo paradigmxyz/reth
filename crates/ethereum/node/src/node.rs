@@ -92,7 +92,7 @@ impl EthereumNode {
     ///     .unwrap();
     /// ```
     ///
-    /// # Open a Providerfactory manually with with all required components
+    /// # Open a Providerfactory manually with all required components
     ///
     /// ```no_run
     /// use reth_chainspec::ChainSpecBuilder;
@@ -131,8 +131,8 @@ where
 {
     type EthApi = EthApiFor<N>;
 
-    fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> Self::EthApi {
-        reth_rpc::EthApiBuilder::new(
+    async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
+        let api = reth_rpc::EthApiBuilder::new(
             ctx.components.provider().clone(),
             ctx.components.pool().clone(),
             ctx.components.network().clone(),
@@ -146,7 +146,8 @@ where
         .fee_history_cache_config(ctx.config.fee_history_cache)
         .proof_permits(ctx.config.proof_permits)
         .gas_oracle_config(ctx.config.gas_oracle)
-        .build()
+        .build();
+        Ok(api)
     }
 }
 
@@ -362,6 +363,7 @@ where
             .with_head_timestamp(ctx.head().timestamp)
             .kzg_settings(ctx.kzg_settings()?)
             .with_local_transactions_config(pool_config.local_transactions_config.clone())
+            .set_tx_fee_cap(ctx.config().rpc.rpc_tx_fee_cap)
             .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
             .build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
 
@@ -409,6 +411,10 @@ where
                     ctx.task_executor().clone(),
                     reth_transaction_pool::maintain::MaintainPoolConfig {
                         max_tx_lifetime: transaction_pool.config().max_queued_lifetime,
+                        no_local_exemptions: transaction_pool
+                            .config()
+                            .local_transactions_config
+                            .no_exemptions,
                         ..Default::default()
                     },
                 ),

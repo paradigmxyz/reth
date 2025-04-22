@@ -49,7 +49,7 @@ impl Status {
     }
 
     /// Sets the [`EthVersion`] for the status.
-    pub fn set_eth_version(&mut self, version: EthVersion) {
+    pub const fn set_eth_version(&mut self, version: EthVersion) {
         self.version = version;
     }
 
@@ -70,7 +70,7 @@ impl Status {
     }
 
     /// Converts this [`Status`] into the [Eth69](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7642.md) variant that excludes the total difficulty field.
-    pub fn into_eth69(self) -> StatusEth69 {
+    pub const fn into_eth69(self) -> StatusEth69 {
         StatusEth69 {
             version: EthVersion::Eth69,
             chain: self.chain,
@@ -582,12 +582,12 @@ mod tests {
 
     #[test]
     fn init_custom_status_fields() {
-        let mut rng = rand::thread_rng();
-        let head_hash = rng.gen();
-        let total_difficulty = U256::from(rng.gen::<u64>());
+        let mut rng = rand::rng();
+        let head_hash = rng.random();
+        let total_difficulty = U256::from(rng.random::<u64>());
 
         // create a genesis that has a random part, so we can check that the hash is preserved
-        let genesis = Genesis { nonce: rng.gen(), ..Default::default() };
+        let genesis = Genesis { nonce: rng.random(), ..Default::default() };
 
         // build head
         let head = Head {

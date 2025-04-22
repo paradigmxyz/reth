@@ -126,7 +126,7 @@ impl<'a, Provider> HeaderTablesIter<'a, Provider>
 where
     Provider: DBProvider<Tx: DbTxMut>,
 {
-    fn new(
+    const fn new(
         provider: &'a Provider,
         limiter: &'a mut PruneLimiter,
         headers_walker: Walker<'a, Provider, tables::Headers>,

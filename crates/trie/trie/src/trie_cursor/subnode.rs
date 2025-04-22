@@ -188,17 +188,17 @@ pub enum SubNodePosition {
 
 impl SubNodePosition {
     /// Returns `true` if the position is set to the parent branch node.
-    pub fn is_parent(&self) -> bool {
+    pub const fn is_parent(&self) -> bool {
         matches!(self, Self::ParentBranch)
     }
 
     /// Returns `true` if the position is set to a child node.
-    pub fn is_child(&self) -> bool {
+    pub const fn is_child(&self) -> bool {
         matches!(self, Self::Child(_))
     }
 
     /// Returns the nibble of the child node if the position is set to a child node.
-    pub fn as_child(&self) -> Option<u8> {
+    pub const fn as_child(&self) -> Option<u8> {
         match self {
             Self::Child(nibble) => Some(*nibble),
             _ => None,
@@ -207,14 +207,14 @@ impl SubNodePosition {
 
     /// Returns `true` if the position is set to a last child nibble (i.e. greater than or equal to
     /// 0xf).
-    pub fn is_last_child(&self) -> bool {
+    pub const fn is_last_child(&self) -> bool {
         match self {
             Self::ParentBranch => false,
             Self::Child(nibble) => *nibble >= 0xf,
         }
     }
 
-    fn increment(&mut self) {
+    const fn increment(&mut self) {
         match self {
             Self::ParentBranch => *self = Self::Child(0),
             Self::Child(nibble) => *nibble += 1,

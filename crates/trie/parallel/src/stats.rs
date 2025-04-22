@@ -38,22 +38,22 @@ pub struct ParallelTrieTracker {
 
 impl ParallelTrieTracker {
     /// Set the number of precomputed storage roots.
-    pub fn set_precomputed_storage_roots(&mut self, count: u64) {
+    pub const fn set_precomputed_storage_roots(&mut self, count: u64) {
         self.precomputed_storage_roots = count;
     }
 
     /// Increment the number of branches added to the hash builder during the calculation.
-    pub fn inc_branch(&mut self) {
+    pub const fn inc_branch(&mut self) {
         self.trie.inc_branch();
     }
 
     /// Increment the number of leaves added to the hash builder during the calculation.
-    pub fn inc_leaf(&mut self) {
+    pub const fn inc_leaf(&mut self) {
         self.trie.inc_leaf();
     }
 
     /// Increment the number of added leaf nodes for which we did not precompute the storage root.
-    pub fn inc_missed_leaves(&mut self) {
+    pub const fn inc_missed_leaves(&mut self) {
         self.missed_leaves += 1;
     }
 

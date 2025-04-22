@@ -189,7 +189,7 @@ impl ReadOnlyConfig {
 
     /// Whether the static file directory should be watches for changes, see also
     /// [`StaticFileProvider::read_only`]
-    pub fn set_watch_static_files(&mut self, watch_static_files: bool) {
+    pub const fn set_watch_static_files(&mut self, watch_static_files: bool) {
         self.watch_static_files = watch_static_files;
     }
 
@@ -197,7 +197,7 @@ impl ReadOnlyConfig {
     ///
     /// This is only recommended if this is used without a running node instance that modifies
     /// static files.
-    pub fn no_watch(mut self) -> Self {
+    pub const fn no_watch(mut self) -> Self {
         self.set_watch_static_files(false);
         self
     }

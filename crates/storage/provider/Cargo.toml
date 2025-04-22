@@ -42,9 +42,6 @@ alloy-consensus.workspace = true
 revm-database.workspace = true
 revm-state = { workspace = true, optional = true }
 
-# async
-tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
-
 # tracing
 tracing.workspace = true
 
@@ -63,6 +60,7 @@ eyre.workspace = true
 
 # test-utils
 reth-ethereum-engine-primitives = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["sync"], optional = true }
 
 # parallel utils
 rayon.workspace = true
@@ -84,6 +82,7 @@ assert_matches.workspace = true
 rand.workspace = true
 eyre.workspace = true
 
+tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 alloy-consensus.workspace = true
 
 [features]
@@ -104,4 +103,5 @@ test-utils = [
     "reth-prune-types/test-utils",
     "reth-stages-types/test-utils",
     "revm-state",
+    "tokio",
 ]

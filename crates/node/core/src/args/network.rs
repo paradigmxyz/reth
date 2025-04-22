@@ -17,6 +17,7 @@ use reth_discv5::{
 use reth_net_nat::{NatResolver, DEFAULT_NET_IF_NAME};
 use reth_network::{
     transactions::{
+        config::TransactionPropagationKind,
         constants::{
             tx_fetcher::{
                 DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH, DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
@@ -154,6 +155,12 @@ pub struct NetworkArgs {
     /// If flag is set, but no value is passed, the default interface for docker `eth0` is tried.
     #[arg(long = "net-if.experimental", conflicts_with = "addr", value_name = "IF_NAME")]
     pub net_if: Option<String>,
+
+    /// Transaction Propagation Policy
+    ///
+    /// The policy determines which peers transactions are gossiped to.
+    #[arg(long = "tx-propagation-policy", default_value_t = TransactionPropagationKind::All)]
+    pub tx_propagation_policy: TransactionPropagationKind,
 }
 
 impl NetworkArgs {
@@ -335,6 +342,7 @@ impl Default for NetworkArgs {
             max_seen_tx_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
             max_capacity_cache_txns_pending_fetch: DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
             net_if: None,
+            tx_propagation_policy: TransactionPropagationKind::default()
         }
     }
 }

@@ -85,7 +85,7 @@ mod tests {
                 state_mask: TrieMask::new(1),
                 tree_mask: TrieMask::new(0),
                 hash_mask: TrieMask::new(1),
-                hashes: Arc::new(vec![RlpNode::word_rlp(&B256::ZERO)]),
+                hashes: vec![RlpNode::word_rlp(&B256::ZERO)].into(),
                 root_hash: None,
             }),
         };

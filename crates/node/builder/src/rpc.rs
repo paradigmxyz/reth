@@ -476,7 +476,7 @@ where
         );
 
         let ctx = EthApiCtx { components: &node, config: config.rpc.eth_config(), cache };
-        let eth_api = eth_api_builder.build_eth_api(ctx);
+        let eth_api = eth_api_builder.build_eth_api(ctx).await?;
 
         let auth_config = config.rpc.auth_server_config(jwt_secret)?;
         let module_config = config.rpc.transport_rpc_module_config();
@@ -529,7 +529,7 @@ where
         let launch_auth = auth_module.clone().start_server(auth_config).map_ok(|handle| {
             let addr = handle.local_addr();
             if let Some(ipc_endpoint) = handle.ipc_endpoint() {
-                info!(target: "reth::cli", url=%addr, ipc_endpoint=%ipc_endpoint,"RPC auth server started");
+                info!(target: "reth::cli", url=%addr, ipc_endpoint=%ipc_endpoint, "RPC auth server started");
             } else {
                 info!(target: "reth::cli", url=%addr, "RPC auth server started");
             }
@@ -621,7 +621,10 @@ pub trait EthApiBuilder<N: FullNodeComponents>: Default + Send + 'static {
         + 'static;
 
     /// Builds the [`EthApiServer`](reth_rpc_api::eth::EthApiServer) from the given context.
-    fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> Self::EthApi;
+    fn build_eth_api(
+        self,
+        ctx: EthApiCtx<'_, N>,
+    ) -> impl Future<Output = eyre::Result<Self::EthApi>> + Send;
 }
 
 /// Helper trait that provides the validator for the engine API
