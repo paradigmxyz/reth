@@ -1,0 +1,52 @@
+[package]
+name = "reth-era-import"
+description = "Imports history from ERA files"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[dependencies]
+# alloy
+alloy-primitives.workspace = true
+
+# reth
+reth-db-api.workspace = true
+reth-era.workspace = true
+reth-era-downloader.workspace = true
+reth-etl.workspace = true
+reth-fs-util.workspace = true
+reth-provider.workspace = true
+reth-storage-api.workspace = true
+reth-primitives-traits.workspace = true
+
+# async
+tokio.workspace = true
+tokio.features = ["fs", "io-util"]
+futures-util.workspace = true
+
+# errors
+eyre.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+# reth
+reth-provider.workspace = true
+reth-provider.features = ["test-utils"]
+reth-db-common.workspace = true
+
+# async
+tokio.workspace = true
+tokio.features = ["fs", "io-util", "macros"]
+
+# http
+reqwest.workspace = true
+
+# file system
+tempfile.workspace = true
+
+[lints]
+workspace = true
