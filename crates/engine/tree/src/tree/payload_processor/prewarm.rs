@@ -9,7 +9,11 @@ use crate::tree::{
 };
 use alloy_consensus::transaction::Recovered;
 use alloy_evm::Database;
-use alloy_primitives::{keccak256, map::B256Set, B256};
+use alloy_primitives::{
+    keccak256,
+    map::{B256Map, B256Set},
+    B256,
+};
 use itertools::Itertools;
 use metrics::{Gauge, Histogram};
 use reth_evm::{ConfigureEvm, Evm, EvmFor};
@@ -250,7 +254,10 @@ where
 /// Returns a set of [`MultiProofTargets`] and the total amount of storage targets, based on the
 /// given state.
 fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargets, usize) {
-    let mut targets = MultiProofTargets::with_capacity(state.len());
+    let mut targets = MultiProofTargets::from_target_maps(
+        B256Map::with_capacity_and_hasher(state.len(), Default::default()),
+        Default::default(),
+    );
     let mut storage_targets = 0;
     for (addr, account) in state {
         // if the account was not touched, or if the account was selfdestructed, do not
@@ -276,7 +283,7 @@ fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargets, usize) 
         }
 
         storage_targets += storage_set.len();
-        targets.insert(keccak256(addr), storage_set);
+        targets.insert_account_targets(keccak256(addr), storage_set);
     }
 
     (targets, storage_targets)

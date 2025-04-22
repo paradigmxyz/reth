@@ -2,11 +2,14 @@
 //! <https://github.com/rust-lang/rust/issues/100013> in default implementation of
 //! `reth_rpc_eth_api::helpers::Call`.
 
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{
+    map::{B256Map, B256Set},
+    Address, B256, U256,
+};
 use reth_errors::ProviderResult;
 use reth_revm::{database::StateProviderDatabase, DatabaseRef};
 use reth_storage_api::{HashedPostStateProvider, StateProvider};
-use reth_trie::{HashedStorage, MultiProofTargets};
+use reth_trie::HashedStorage;
 use revm::{
     database::{BundleState, CacheDB},
     state::{AccountInfo, Bytecode},
@@ -92,7 +95,7 @@ impl reth_storage_api::StateProofProvider for StateProviderTraitObjWrapper<'_> {
     fn multiproof(
         &self,
         input: reth_trie::TrieInput,
-        targets: MultiProofTargets,
+        targets: B256Map<B256Set>,
     ) -> ProviderResult<reth_trie::MultiProof> {
         self.0.multiproof(input, targets)
     }

@@ -2,7 +2,10 @@ use crate::{
     providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
     HashedPostStateProvider, StateProvider, StateRootProvider,
 };
-use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use alloy_primitives::{
+    map::{B256Map, B256Set},
+    Address, BlockNumber, Bytes, StorageKey, StorageValue, B256,
+};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
@@ -13,8 +16,8 @@ use reth_trie::{
     proof::{Proof, StorageProof},
     updates::TrieUpdates,
     witness::TrieWitness,
-    AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StateRoot,
-    StorageMultiProof, StorageRoot, TrieInput,
+    AccountProof, HashedPostState, HashedStorage, MultiProof, StateRoot, StorageMultiProof,
+    StorageRoot, TrieInput,
 };
 use reth_trie_db::{
     DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
@@ -138,7 +141,7 @@ impl<Provider: DBProvider + StateCommitmentProvider> StateProofProvider
     fn multiproof(
         &self,
         input: TrieInput,
-        targets: MultiProofTargets,
+        targets: B256Map<B256Set>,
     ) -> ProviderResult<MultiProof> {
         Proof::overlay_multiproof(self.tx(), input, targets).map_err(ProviderError::from)
     }

@@ -3,7 +3,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use alloy_consensus::BlockHeader as _;
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::{map::B256Map, Bytes, B256};
 use parking_lot::Mutex;
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, MemoryOverlayStateProvider};
 use reth_ethereum_primitives::{Block, BlockBody, EthPrimitives};
@@ -15,7 +15,7 @@ use reth_provider::{
 use reth_ress_protocol::RessProtocolProvider;
 use reth_revm::{database::StateProviderDatabase, db::State, witness::ExecutionWitnessRecord};
 use reth_tasks::TaskSpawner;
-use reth_trie::{MultiProofTargets, Nibbles, TrieInput};
+use reth_trie::{Nibbles, TrieInput};
 use schnellru::{ByLength, LruMap};
 use std::{sync::Arc, time::Instant};
 use tokio::sync::{oneshot, Semaphore};
@@ -180,10 +180,8 @@ where
         // Gather the state witness.
         let witness = if hashed_state.is_empty() {
             // If no state was accessed, at least the root node must be present.
-            let multiproof = witness_state_provider.multiproof(
-                trie_input,
-                MultiProofTargets::from_iter([(B256::ZERO, Default::default())]),
-            )?;
+            let multiproof = witness_state_provider
+                .multiproof(trie_input, B256Map::from_iter([(B256::ZERO, Default::default())]))?;
             let mut witness = Vec::new();
             if let Some(root_node) =
                 multiproof.account_subtree.into_inner().remove(&Nibbles::default())

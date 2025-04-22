@@ -25,7 +25,7 @@ use reth_trie::{
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdatesSorted,
     walker::TrieWalker,
-    HashBuilder, HashedPostStateSorted, MultiProof, MultiProofTargets, Nibbles, StorageMultiProof,
+    HashBuilder, HashedPostStateSorted, MultiProof, Nibbles, StorageMultiProof,
     TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::proof::ProofRetainer;
@@ -148,7 +148,7 @@ where
     /// Generate a state multiproof according to specified targets.
     pub fn multiproof(
         self,
-        targets: MultiProofTargets,
+        targets: B256Map<B256Set>,
     ) -> Result<MultiProof, ParallelStateRootError> {
         let mut tracker = ParallelTrieTracker::default();
 
@@ -331,7 +331,7 @@ mod tests {
     use rand::Rng;
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
-    use reth_trie::proof::Proof;
+    use reth_trie::{proof::Proof, MultiProofTargets};
     use tokio::runtime::Runtime;
 
     #[test]
@@ -379,7 +379,7 @@ mod tests {
             provider_rw.commit().unwrap();
         }
 
-        let mut targets = MultiProofTargets::default();
+        let mut targets = B256Map::<B256Set>::default();
         for (address, (_, storage)) in state.iter().take(10) {
             let hashed_address = keccak256(*address);
             let mut target_slots = B256Set::default();

@@ -8,8 +8,9 @@ use crate::{
 use alloy_consensus::{constants::EMPTY_ROOT_HASH, transaction::TransactionMeta, Header};
 use alloy_eips::{eip4895::Withdrawals, BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
-    keccak256, map::HashMap, Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue,
-    TxHash, TxNumber, B256, U256,
+    keccak256,
+    map::{B256Map, B256Set, HashMap},
+    Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use parking_lot::Mutex;
 use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions};
@@ -36,7 +37,7 @@ use reth_storage_api::{
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    StorageMultiProof, StorageProof, TrieInput,
 };
 use reth_trie_db::MerklePatriciaTrie;
 use std::{
@@ -803,7 +804,7 @@ where
     fn multiproof(
         &self,
         _input: TrieInput,
-        _targets: MultiProofTargets,
+        _targets: B256Map<B256Set>,
     ) -> ProviderResult<MultiProof> {
         Ok(MultiProof::default())
     }

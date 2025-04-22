@@ -3,7 +3,10 @@ use crate::{
     HashedPostStateProvider, ProviderError, StateProvider, StateRootProvider,
 };
 use alloy_eips::merge::EPOCH_SLOTS;
-use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use alloy_primitives::{
+    map::{B256Map, B256Set},
+    Address, BlockNumber, Bytes, StorageKey, StorageValue, B256,
+};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     models::{storage_sharded_key::StorageShardedKey, ShardedKey},
@@ -21,8 +24,8 @@ use reth_trie::{
     proof::{Proof, StorageProof},
     updates::TrieUpdates,
     witness::TrieWitness,
-    AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StateRoot,
-    StorageMultiProof, StorageRoot, TrieInput,
+    AccountProof, HashedPostState, HashedStorage, MultiProof, StateRoot, StorageMultiProof,
+    StorageRoot, TrieInput,
 };
 use reth_trie_db::{
     DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,
@@ -377,7 +380,7 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StateProof
     fn multiproof(
         &self,
         mut input: TrieInput,
-        targets: MultiProofTargets,
+        targets: B256Map<B256Set>,
     ) -> ProviderResult<MultiProof> {
         input.prepend(self.revert_state()?);
         Proof::overlay_multiproof(self.tx(), input, targets).map_err(ProviderError::from)

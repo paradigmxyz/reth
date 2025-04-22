@@ -1,6 +1,10 @@
 use super::ExecutedBlockWithTrieUpdates;
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use alloy_primitives::{
+    keccak256,
+    map::{B256Map, B256Set},
+    Address, BlockNumber, Bytes, StorageKey, StorageValue, B256,
+};
 use reth_errors::ProviderResult;
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives};
 use reth_storage_api::{
@@ -9,7 +13,7 @@ use reth_storage_api::{
 };
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, TrieInput,
+    StorageMultiProof, TrieInput,
 };
 use revm_database::BundleState;
 use std::sync::OnceLock;
@@ -193,7 +197,7 @@ impl<N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef<'_,
     fn multiproof(
         &self,
         mut input: TrieInput,
-        targets: MultiProofTargets,
+        targets: B256Map<B256Set>,
     ) -> ProviderResult<MultiProof> {
         let MemoryOverlayTrieState { nodes, state } = self.trie_state().clone();
         input.prepend_cached(nodes, state);

@@ -2,7 +2,7 @@ use core::ops::Not;
 
 use crate::{
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
-    KeyHasher, MultiProofTargets, Nibbles,
+    FetchedProofTargets, KeyHasher, Nibbles,
 };
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_primitives::{
@@ -159,9 +159,9 @@ impl HashedPostState {
     }
 
     /// Create multiproof targets for this state.
-    pub fn multi_proof_targets(&self) -> MultiProofTargets {
+    pub fn multi_proof_targets(&self) -> FetchedProofTargets {
         // Pre-allocate minimum capacity for the targets.
-        let mut targets = MultiProofTargets::with_capacity(self.accounts.len());
+        let mut targets = FetchedProofTargets::with_capacity(self.accounts.len());
         for hashed_address in self.accounts.keys() {
             targets.insert(*hashed_address, Default::default());
         }
@@ -178,9 +178,9 @@ impl HashedPostState {
     /// `MultiProofTargets::retain_difference`, because it does not over allocate the targets map.
     pub fn multi_proof_targets_difference(
         &self,
-        excluded: &MultiProofTargets,
-    ) -> MultiProofTargets {
-        let mut targets = MultiProofTargets::default();
+        excluded: &FetchedProofTargets,
+    ) -> FetchedProofTargets {
+        let mut targets = FetchedProofTargets::default();
         for hashed_address in self.accounts.keys() {
             if !excluded.contains_key(hashed_address) {
                 targets.insert(*hashed_address, Default::default());
@@ -206,7 +206,7 @@ impl HashedPostState {
     ///
     /// CAUTION: The state updates are expected to be applied in order, so that the storage wipes
     /// are done correctly.
-    pub fn partition_by_targets(mut self, targets: &MultiProofTargets) -> (Self, Self) {
+    pub fn partition_by_targets(mut self, targets: &B256Map<B256Set>) -> (Self, Self) {
         let mut state_updates_not_in_targets = Self::default();
 
         self.storages.retain(|&address, storage| {
@@ -777,7 +777,7 @@ mod tests {
     #[test]
     fn test_multi_proof_targets_difference_empty_state() {
         let state = HashedPostState::default();
-        let excluded = MultiProofTargets::default();
+        let excluded = FetchedProofTargets::default();
 
         let targets = state.multi_proof_targets_difference(&excluded);
         assert!(targets.is_empty());
@@ -786,7 +786,7 @@ mod tests {
     #[test]
     fn test_multi_proof_targets_difference_new_account_targets() {
         let state = create_state_for_multi_proof_targets();
-        let excluded = MultiProofTargets::default();
+        let excluded = FetchedProofTargets::default();
 
         // should return all accounts as targets since excluded is empty
         let targets = state.multi_proof_targets_difference(&excluded);
@@ -799,7 +799,7 @@ mod tests {
     #[test]
     fn test_multi_proof_targets_difference_new_storage_targets() {
         let state = create_state_for_multi_proof_targets();
-        let excluded = MultiProofTargets::default();
+        let excluded = FetchedProofTargets::default();
 
         let targets = state.multi_proof_targets_difference(&excluded);
 
@@ -817,7 +817,7 @@ mod tests {
     #[test]
     fn test_multi_proof_targets_difference_filter_excluded_accounts() {
         let state = create_state_for_multi_proof_targets();
-        let mut excluded = MultiProofTargets::default();
+        let mut excluded = FetchedProofTargets::default();
 
         // select an account that has no storage updates
         let excluded_addr = state
@@ -840,7 +840,7 @@ mod tests {
     #[test]
     fn test_multi_proof_targets_difference_filter_excluded_storage() {
         let state = create_state_for_multi_proof_targets();
-        let mut excluded = MultiProofTargets::default();
+        let mut excluded = FetchedProofTargets::default();
 
         // mark one storage slot as excluded
         let (addr, storage) = state.storages.iter().next().unwrap();
@@ -860,7 +860,7 @@ mod tests {
     #[test]
     fn test_multi_proof_targets_difference_mixed_excluded_state() {
         let mut state = HashedPostState::default();
-        let mut excluded = MultiProofTargets::default();
+        let mut excluded = FetchedProofTargets::default();
 
         let addr1 = B256::random();
         let addr2 = B256::random();
@@ -889,7 +889,7 @@ mod tests {
     #[test]
     fn test_multi_proof_targets_difference_unmodified_account_with_storage() {
         let mut state = HashedPostState::default();
-        let excluded = MultiProofTargets::default();
+        let excluded = FetchedProofTargets::default();
 
         let addr = B256::random();
         let slot1 = B256::random();
@@ -936,7 +936,7 @@ mod tests {
                 },
             )]),
         };
-        let targets = MultiProofTargets::from_iter([(addr1, HashSet::from_iter([slot1]))]);
+        let targets = FetchedProofTargets::from_iter([(addr1, HashSet::from_iter([slot1]))]);
 
         let (with_targets, without_targets) = state.partition_by_targets(&targets);
 

@@ -13,9 +13,7 @@ use alloy_primitives::{
 };
 use alloy_rlp::{BufMut, Encodable};
 use reth_execution_errors::trie::StateProofError;
-use reth_trie_common::{
-    proof::ProofRetainer, AccountProof, MultiProof, MultiProofTargets, StorageMultiProof,
-};
+use reth_trie_common::{proof::ProofRetainer, AccountProof, MultiProof, StorageMultiProof};
 
 mod blinded;
 pub use blinded::*;
@@ -93,7 +91,7 @@ where
         slots: &[B256],
     ) -> Result<AccountProof, StateProofError> {
         Ok(self
-            .multiproof(MultiProofTargets::from_iter([(
+            .multiproof(B256Map::from_iter([(
                 keccak256(address),
                 slots.iter().map(keccak256).collect(),
             )]))?
@@ -103,7 +101,7 @@ where
     /// Generate a state multiproof according to specified targets.
     pub fn multiproof(
         mut self,
-        mut targets: MultiProofTargets,
+        mut targets: B256Map<B256Set>,
     ) -> Result<MultiProof, StateProofError> {
         let hashed_account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
         let trie_cursor = self.trie_cursor_factory.account_trie_cursor()?;

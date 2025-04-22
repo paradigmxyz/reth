@@ -1,10 +1,13 @@
 use alloc::vec::Vec;
-use alloy_primitives::{map::B256Map, Address, Bytes, B256};
+use alloy_primitives::{
+    map::{B256Map, B256Set},
+    Address, Bytes, B256,
+};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
-    AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
-    StorageProof, TrieInput,
+    AccountProof, HashedPostState, HashedStorage, MultiProof, StorageMultiProof, StorageProof,
+    TrieInput,
 };
 
 /// A type that can compute the state root of a given post state.
@@ -79,11 +82,8 @@ pub trait StateProofProvider: Send + Sync {
 
     /// Generate [`MultiProof`] for target hashed account and corresponding
     /// hashed storage slot keys.
-    fn multiproof(
-        &self,
-        input: TrieInput,
-        targets: MultiProofTargets,
-    ) -> ProviderResult<MultiProof>;
+    fn multiproof(&self, input: TrieInput, targets: B256Map<B256Set>)
+        -> ProviderResult<MultiProof>;
 
     /// Get trie witness for provided state.
     fn witness(&self, input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>>;

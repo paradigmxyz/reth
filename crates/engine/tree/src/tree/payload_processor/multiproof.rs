@@ -4,7 +4,7 @@ use crate::tree::payload_processor::executor::WorkloadExecutor;
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{
     keccak256,
-    map::{B256Set, HashSet},
+    map::{B256Map, B256Set, HashSet},
     B256,
 };
 use derive_more::derive::Deref;
@@ -17,8 +17,9 @@ use reth_provider::{
 };
 use reth_revm::state::EvmState;
 use reth_trie::{
-    prefix_set::TriePrefixSetsMut, updates::TrieUpdatesSorted, HashedPostState,
-    HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets, TargetsToFetch, TrieInput,
+    prefix_set::TriePrefixSetsMut, updates::TrieUpdatesSorted, FetchedProofTargets,
+    HashedPostState, HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets,
+    TrieInput,
 };
 use reth_trie_parallel::{proof::ParallelProof, proof_task::ProofTaskManagerHandle};
 use std::{
@@ -317,7 +318,7 @@ struct MultiproofInput<Factory> {
     config: MultiProofConfig<Factory>,
     source: Option<StateChangeSource>,
     hashed_state_update: HashedPostState,
-    proof_targets: MultiProofTargets,
+    proof_targets: B256Map<B256Set>,
     proof_sequence_number: u64,
     state_root_message_sender: Sender<MultiProofMessage>,
 }
@@ -623,7 +624,7 @@ pub(super) struct MultiProofTask<Factory: DatabaseProviderFactory> {
     /// Sender for state updates emitted by this type.
     to_sparse_trie: Sender<SparseTrieUpdate>,
     /// Proof targets that have been already fetched.
-    fetched_proof_targets: MultiProofTargets,
+    fetched_proof_targets: FetchedProofTargets,
     /// Proof sequencing handler.
     proof_sequencer: ProofSequencer,
     /// Manages calculation of multiproofs.
@@ -674,8 +675,9 @@ where
     ///
     /// Returns a number of proofs that were spawned.
     fn on_prefetch_proof(&mut self, targets: MultiProofTargets) -> u64 {
-        let proof_targets = TargetsToFetch::from_difference(&self.fetched_proof_targets, targets);
-        self.fetched_proof_targets.extend_targets_to_fetch(&proof_targets);
+        let proof_targets =
+            MultiProofTargets::from_targets_difference(&self.fetched_proof_targets, targets);
+        self.fetched_proof_targets.extend_multi_proof_targets(&proof_targets);
 
         self.metrics
             .prefetch_proof_targets_accounts_histogram
@@ -689,7 +691,7 @@ where
         for proof_targets_chunk in proof_targets.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
             // NOTE: This will be removed once the proof fetching logic is updated to work with
             // `TargetsToFetch` directly.
-            let proof_targets_chunk = proof_targets_chunk.to_multi_proof_targets();
+            let proof_targets_chunk = proof_targets_chunk.to_targets_map();
             self.multiproof_manager.spawn_or_queue(
                 MultiproofInput {
                     config: self.config.clone(),
@@ -754,17 +756,19 @@ where
 
         // Process state updates in chunks.
         let mut chunks = 0;
-        let mut spawned_proof_targets = MultiProofTargets::default();
+        let mut spawned_proof_targets = FetchedProofTargets::default();
         for chunk in not_fetched_state_update.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
-            let proof_targets = get_proof_targets(&chunk, &self.fetched_proof_targets);
+            let targets_to_fetch = get_proof_targets(&chunk, &self.fetched_proof_targets);
 
-            let targets_to_fetch =
-                TargetsToFetch::from_difference(&self.fetched_proof_targets, proof_targets);
+            let targets_to_fetch = MultiProofTargets::from_targets_difference(
+                &self.fetched_proof_targets,
+                targets_to_fetch,
+            );
 
-            self.fetched_proof_targets.extend_targets_to_fetch(&targets_to_fetch);
-            spawned_proof_targets.extend_targets_to_fetch(&targets_to_fetch);
+            self.fetched_proof_targets.extend_multi_proof_targets(&targets_to_fetch);
+            spawned_proof_targets.extend_multi_proof_targets(&targets_to_fetch);
 
-            let targets_to_fetch = targets_to_fetch.to_multi_proof_targets();
+            let targets_to_fetch = targets_to_fetch.to_targets_map();
             self.multiproof_manager.spawn_or_queue(
                 MultiproofInput {
                     config: self.config.clone(),
@@ -876,9 +880,12 @@ where
                             debug!(target: "engine::root", "Started state root calculation");
                         }
 
-                        let account_targets = targets.len();
-                        let storage_targets =
-                            targets.values().map(|slots| slots.len()).sum::<usize>();
+                        let account_targets = targets.account_targets().len();
+                        let storage_targets = targets
+                            .account_targets()
+                            .values()
+                            .map(|slots| slots.len())
+                            .sum::<usize>();
                         prefetch_proofs_requested += self.on_prefetch_proof(targets);
                         debug!(
                             target: "engine::root",
@@ -1034,23 +1041,21 @@ where
     }
 }
 
-/// Returns accounts only with those storages that were not already fetched, and
-/// if there are no such storages and the account itself was already fetched, the
-/// account shouldn't be included.
+/// Returns a [`TargetsToFetch`] containing all accounts and storage slots that
+/// were not previously fetched.
 fn get_proof_targets(
     state_update: &HashedPostState,
-    fetched_proof_targets: &MultiProofTargets,
+    fetched_proof_targets: &B256Map<B256Set>,
 ) -> MultiProofTargets {
     let mut targets = MultiProofTargets::default();
 
     // first collect all new accounts (not previously fetched)
     for &hashed_address in state_update.accounts.keys() {
         if !fetched_proof_targets.contains_key(&hashed_address) {
-            targets.insert(hashed_address, HashSet::default());
+            targets.insert_account_targets(hashed_address, HashSet::default());
         }
     }
 
-    // then process storage slots for all accounts in the state update
     for (hashed_address, storage) in &state_update.storages {
         let fetched = fetched_proof_targets.get(hashed_address);
         let mut changed_slots = storage
@@ -1061,11 +1066,12 @@ fn get_proof_targets(
 
         // If the storage is wiped, we still need to fetch the account proof.
         if storage.wiped && fetched.is_none() {
-            targets.entry(*hashed_address).or_default();
+            targets.insert_account_targets(*hashed_address, HashSet::default());
         }
 
+        // If the storage has changed slots, we need to fetch them.
         if changed_slots.peek().is_some() {
-            targets.entry(*hashed_address).or_default().extend(changed_slots);
+            targets.storage_targets_entry(*hashed_address).or_default().extend(changed_slots);
         }
     }
 
@@ -1180,7 +1186,7 @@ mod tests {
     #[test]
     fn test_get_proof_targets_new_account_targets() {
         let state = create_get_proof_targets_state();
-        let fetched = MultiProofTargets::default();
+        let fetched = FetchedProofTargets::default();
 
         let targets = get_proof_targets(&state, &fetched);
 
@@ -1194,7 +1200,7 @@ mod tests {
     #[test]
     fn test_get_proof_targets_new_storage_targets() {
         let state = create_get_proof_targets_state();
-        let fetched = MultiProofTargets::default();
+        let fetched = FetchedProofTargets::default();
 
         let targets = get_proof_targets(&state, &fetched);
 
@@ -1212,7 +1218,7 @@ mod tests {
     #[test]
     fn test_get_proof_targets_filter_already_fetched_accounts() {
         let state = create_get_proof_targets_state();
-        let mut fetched = MultiProofTargets::default();
+        let mut fetched = FetchedProofTargets::default();
 
         // select an account that has no storage updates
         let fetched_addr = state
@@ -1235,7 +1241,7 @@ mod tests {
     #[test]
     fn test_get_proof_targets_filter_already_fetched_storage() {
         let state = create_get_proof_targets_state();
-        let mut fetched = MultiProofTargets::default();
+        let mut fetched = FetchedProofTargets::default();
 
         // mark one storage slot as already fetched
         let (addr, storage) = state.storages.iter().next().unwrap();
@@ -1255,7 +1261,7 @@ mod tests {
     #[test]
     fn test_get_proof_targets_empty_state() {
         let state = HashedPostState::default();
-        let fetched = MultiProofTargets::default();
+        let fetched = FetchedProofTargets::default();
 
         let targets = get_proof_targets(&state, &fetched);
 
@@ -1265,7 +1271,7 @@ mod tests {
     #[test]
     fn test_get_proof_targets_mixed_fetched_state() {
         let mut state = HashedPostState::default();
-        let mut fetched = MultiProofTargets::default();
+        let mut fetched = FetchedProofTargets::default();
 
         let addr1 = B256::random();
         let addr2 = B256::random();
@@ -1294,7 +1300,7 @@ mod tests {
     #[test]
     fn test_get_proof_targets_unmodified_account_with_storage() {
         let mut state = HashedPostState::default();
-        let fetched = MultiProofTargets::default();
+        let fetched = FetchedProofTargets::default();
 
         let addr = B256::random();
         let slot1 = B256::random();

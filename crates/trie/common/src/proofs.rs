@@ -1,6 +1,6 @@
 //! Merkle trie proofs.
 
-use crate::{Nibbles, SingleProofTarget, TargetsToFetch, TrieAccount};
+use crate::{MultiProofTargets, Nibbles, SingleProofTarget, TrieAccount};
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
@@ -18,17 +18,17 @@ use derive_more::{Deref, DerefMut, IntoIterator};
 use itertools::Itertools;
 use reth_primitives_traits::Account;
 
-/// Proof targets map.
+/// Map representing proof targets that we have already fetched.
 #[derive(Deref, DerefMut, IntoIterator, Clone, PartialEq, Eq, Default, Debug)]
-pub struct MultiProofTargets(B256Map<B256Set>);
+pub struct FetchedProofTargets(B256Map<B256Set>);
 
-impl FromIterator<(B256, B256Set)> for MultiProofTargets {
+impl FromIterator<(B256, B256Set)> for FetchedProofTargets {
     fn from_iter<I: IntoIterator<Item = (B256, B256Set)>>(iter: I) -> Self {
         Self(B256Map::from_iter(iter))
     }
 }
 
-impl MultiProofTargets {
+impl FetchedProofTargets {
     /// Creates an empty `MultiProofTargets` with at least the specified capacity.
     pub fn with_capacity(capacity: usize) -> Self {
         Self(B256Map::with_capacity_and_hasher(capacity, Default::default()))
@@ -83,8 +83,8 @@ impl MultiProofTargets {
         }
     }
 
-    /// Extend multi proof targets with a [`TargetsToFetch`].
-    pub fn extend_targets_to_fetch(&mut self, targets: &TargetsToFetch) {
+    /// Extend multi proof targets with a [`MultiProofTargets`].
+    pub fn extend_multi_proof_targets(&mut self, targets: &MultiProofTargets) {
         for (hashed_address, slots) in targets.account_targets() {
             self.entry(*hashed_address).or_default().extend(slots.clone());
         }
@@ -123,7 +123,7 @@ pub struct ChunkedMultiProofTargets {
 
 impl ChunkedMultiProofTargets {
     /// Creates a new iterator that yields chunks of the specified size.
-    pub fn new(targets: TargetsToFetch, size: usize) -> Self {
+    pub fn new(targets: MultiProofTargets, size: usize) -> Self {
         let mut flattened_targets = Vec::new();
         let (account_targets, storage_only_targets) = targets.into_inner();
 
@@ -157,11 +157,11 @@ impl ChunkedMultiProofTargets {
 }
 
 impl Iterator for ChunkedMultiProofTargets {
-    type Item = TargetsToFetch;
+    type Item = MultiProofTargets;
 
     fn next(&mut self) -> Option<Self::Item> {
         let chunk = self.flattened_targets.by_ref().take(self.size).fold(
-            TargetsToFetch::default(),
+            MultiProofTargets::default(),
             |mut acc, (address, slot)| {
                 match slot {
                     SingleProofTarget::Account => {
@@ -913,23 +913,23 @@ mod tests {
 
     #[test]
     fn test_multi_proof_retain_difference() {
-        let mut empty = MultiProofTargets::default();
+        let mut empty = FetchedProofTargets::default();
         empty.retain_difference(&Default::default());
         assert!(empty.is_empty());
 
-        let targets = MultiProofTargets::accounts((0..10).map(B256::with_last_byte));
+        let targets = FetchedProofTargets::accounts((0..10).map(B256::with_last_byte));
 
         let mut diffed = targets.clone();
-        diffed.retain_difference(&MultiProofTargets::account(B256::with_last_byte(11)));
+        diffed.retain_difference(&FetchedProofTargets::account(B256::with_last_byte(11)));
         assert_eq!(diffed, targets);
 
-        diffed.retain_difference(&MultiProofTargets::accounts((0..5).map(B256::with_last_byte)));
-        assert_eq!(diffed, MultiProofTargets::accounts((5..10).map(B256::with_last_byte)));
+        diffed.retain_difference(&FetchedProofTargets::accounts((0..5).map(B256::with_last_byte)));
+        assert_eq!(diffed, FetchedProofTargets::accounts((5..10).map(B256::with_last_byte)));
 
         diffed.retain_difference(&targets);
         assert!(diffed.is_empty());
 
-        let mut targets = MultiProofTargets::default();
+        let mut targets = FetchedProofTargets::default();
         let (account1, account2, account3) =
             (1..=3).map(B256::with_last_byte).collect_tuple().unwrap();
         let account2_slots = (1..5).map(B256::with_last_byte).collect::<B256Set>();
@@ -938,13 +938,13 @@ mod tests {
         targets.insert(account3, B256Set::from_iter([B256::with_last_byte(1)]));
 
         let mut diffed = targets.clone();
-        diffed.retain_difference(&MultiProofTargets::accounts((1..=3).map(B256::with_last_byte)));
+        diffed.retain_difference(&FetchedProofTargets::accounts((1..=3).map(B256::with_last_byte)));
         assert_eq!(diffed, targets);
 
         // remove last 3 slots for account 2
         let mut account2_slots_expected_len = account2_slots.len();
         for slot in account2_slots.iter().skip(1) {
-            diffed.retain_difference(&MultiProofTargets::account_with_slots(account2, [*slot]));
+            diffed.retain_difference(&FetchedProofTargets::account_with_slots(account2, [*slot]));
             account2_slots_expected_len -= 1;
             assert_eq!(
                 diffed.get(&account2).map(|slots| slots.len()),
@@ -958,7 +958,7 @@ mod tests {
 
     #[test]
     fn test_multi_proof_retain_difference_no_overlap() {
-        let mut targets = MultiProofTargets::default();
+        let mut targets = FetchedProofTargets::default();
 
         // populate some targets
         let (addr1, addr2) = (B256::random(), B256::random());
@@ -971,7 +971,7 @@ mod tests {
         assert_eq!(retained, targets);
 
         // add a different addr and slot to fetched proof targets
-        let mut other_targets = MultiProofTargets::default();
+        let mut other_targets = FetchedProofTargets::default();
         let addr3 = B256::random();
         let slot3 = B256::random();
         other_targets.insert(addr3, B256Set::from_iter([slot3]));
@@ -986,14 +986,14 @@ mod tests {
     #[test]
     fn test_get_prefetch_proof_targets_remove_subset() {
         // populate some targets
-        let mut targets = MultiProofTargets::default();
+        let mut targets = FetchedProofTargets::default();
         let (addr1, addr2) = (B256::random(), B256::random());
         let (slot1, slot2) = (B256::random(), B256::random());
         targets.insert(addr1, B256Set::from_iter([slot1]));
         targets.insert(addr2, B256Set::from_iter([slot2]));
 
         // add a subset of the first target to other proof targets
-        let other_targets = MultiProofTargets::account_with_slots(addr1, [slot1]);
+        let other_targets = FetchedProofTargets::account_with_slots(addr1, [slot1]);
 
         let mut retained = targets.clone();
         retained.retain_difference(&other_targets);
