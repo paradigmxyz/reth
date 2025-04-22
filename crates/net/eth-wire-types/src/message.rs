@@ -34,7 +34,7 @@ pub enum MessageError {
     /// Flags an unrecognized message ID for a given protocol version.
     #[error("message id {1:?} is invalid for version {0:?}")]
     Invalid(EthVersion, EthMessageID),
-    /// Thrown when rlp decoding a message message failed.
+    /// Thrown when rlp decoding a message failed.
     #[error("RLP error: {0}")]
     RlpError(#[from] alloy_rlp::Error),
 }
@@ -256,7 +256,7 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
 
 impl<N: NetworkPrimitives> EthMessage<N> {
     /// Returns the message's ID.
-    pub fn message_id(&self) -> EthMessageID {
+    pub const fn message_id(&self) -> EthMessageID {
         match self {
             Self::Status(_) => EthMessageID::Status,
             Self::NewBlockHashes(_) => EthMessageID::NewBlockHashes,

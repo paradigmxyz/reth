@@ -47,7 +47,7 @@ pub struct SnappyRlpCodec<T> {
 
 impl<T> SnappyRlpCodec<T> {
     /// Create a new codec for the given type
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self { _phantom: PhantomData }
     }
 }
@@ -105,7 +105,7 @@ pub trait DecodeCompressed {
 
 impl CompressedHeader {
     /// Create a new [`CompressedHeader`] from compressed data
-    pub fn new(data: Vec<u8>) -> Self {
+    pub const fn new(data: Vec<u8>) -> Self {
         Self { data }
     }
 
@@ -186,7 +186,7 @@ pub struct CompressedBody {
 
 impl CompressedBody {
     /// Create a new [`CompressedBody`] from compressed data
-    pub fn new(data: Vec<u8>) -> Self {
+    pub const fn new(data: Vec<u8>) -> Self {
         Self { data }
     }
 
@@ -273,7 +273,7 @@ pub struct CompressedReceipts {
 
 impl CompressedReceipts {
     /// Create a new [`CompressedReceipts`] from compressed data
-    pub fn new(data: Vec<u8>) -> Self {
+    pub const fn new(data: Vec<u8>) -> Self {
         Self { data }
     }
 
@@ -366,7 +366,7 @@ pub struct TotalDifficulty {
 
 impl TotalDifficulty {
     /// Create a new [`TotalDifficulty`] from a U256 value
-    pub fn new(value: U256) -> Self {
+    pub const fn new(value: U256) -> Self {
         Self { value }
     }
 
@@ -418,7 +418,7 @@ pub struct Accumulator {
 
 impl Accumulator {
     /// Create a new [`Accumulator`] from a root hash
-    pub fn new(root: B256) -> Self {
+    pub const fn new(root: B256) -> Self {
         Self { root }
     }
 
@@ -468,7 +468,7 @@ pub struct BlockTuple {
 
 impl BlockTuple {
     /// Create a new [`BlockTuple`]
-    pub fn new(
+    pub const fn new(
         header: CompressedHeader,
         body: CompressedBody,
         receipts: CompressedReceipts,

@@ -21,6 +21,7 @@ alloy-consensus = { workspace = true, features = ["serde"] }
 alloy-eips.workspace = true
 alloy-provider = { workspace = true, features = ["ws"] }
 alloy-rpc-types-engine.workspace = true
+alloy-json-rpc.workspace = true
 alloy-primitives.workspace = true
 
 auto_impl.workspace = true

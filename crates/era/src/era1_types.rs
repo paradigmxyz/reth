@@ -31,7 +31,11 @@ pub struct Era1Group {
 
 impl Era1Group {
     /// Create a new [`Era1Group`]
-    pub fn new(blocks: Vec<BlockTuple>, accumulator: Accumulator, block_index: BlockIndex) -> Self {
+    pub const fn new(
+        blocks: Vec<BlockTuple>,
+        accumulator: Accumulator,
+        block_index: BlockIndex,
+    ) -> Self {
         Self { blocks, accumulator, block_index, other_entries: Vec::new() }
     }
     /// Add another entry to this group
@@ -56,7 +60,7 @@ pub struct BlockIndex {
 
 impl BlockIndex {
     /// Create a new [`BlockIndex`]
-    pub fn new(starting_number: BlockNumber, offsets: Vec<i64>) -> Self {
+    pub const fn new(starting_number: BlockNumber, offsets: Vec<i64>) -> Self {
         Self { starting_number, offsets }
     }
 
@@ -165,7 +169,7 @@ impl Era1Id {
     }
 
     /// Add a hash identifier to  [`Era1Id`]
-    pub fn with_hash(mut self, hash: [u8; 4]) -> Self {
+    pub const fn with_hash(mut self, hash: [u8; 4]) -> Self {
         self.hash = Some(hash);
         self
     }

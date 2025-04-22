@@ -18,7 +18,7 @@ pub use load_secret_key::get_secret_key;
 pub mod parsers;
 pub use parsers::{
     hash_or_num_value_parser, parse_duration_from_secs, parse_duration_from_secs_or_ms,
-    parse_socket_address,
+    parse_ether_value, parse_socket_address,
 };
 
 #[cfg(all(unix, any(target_env = "gnu", target_os = "macos")))]

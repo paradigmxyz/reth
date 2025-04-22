@@ -598,9 +598,17 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             handshake,
         } = self;
 
+        let head = head.unwrap_or_else(|| Head {
+            hash: chain_spec.genesis_hash(),
+            number: 0,
+            timestamp: chain_spec.genesis().timestamp,
+            difficulty: chain_spec.genesis().difficulty,
+            total_difficulty: chain_spec.genesis().difficulty,
+        });
+
         discovery_v5_builder = discovery_v5_builder.map(|mut builder| {
             if let Some(network_stack_id) = NetworkStackId::id(&chain_spec) {
-                let fork_id = chain_spec.latest_fork_id();
+                let fork_id = chain_spec.fork_id(&head);
                 builder = builder.fork(network_stack_id, fork_id)
             }
 
@@ -612,14 +620,6 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         let mut hello_message =
             hello_message.unwrap_or_else(|| HelloMessage::builder(peer_id).build());
         hello_message.port = listener_addr.port();
-
-        let head = head.unwrap_or_else(|| Head {
-            hash: chain_spec.genesis_hash(),
-            number: 0,
-            timestamp: chain_spec.genesis().timestamp,
-            difficulty: chain_spec.genesis().difficulty,
-            total_difficulty: chain_spec.genesis().difficulty,
-        });
 
         // set the status
         let status = Status::spec_builder(&chain_spec, &head).build();
@@ -696,10 +696,15 @@ impl NetworkMode {
 mod tests {
     use super::*;
     use alloy_eips::eip2124::ForkHash;
-    use reth_chainspec::{Chain, MAINNET};
+    use alloy_genesis::Genesis;
+    use alloy_primitives::U256;
+    use reth_chainspec::{
+        Chain, ChainSpecBuilder, EthereumHardfork, ForkCondition, ForkId, MAINNET,
+    };
+    use reth_discv5::build_local_enr;
     use reth_dns_discovery::tree::LinkEntry;
     use reth_storage_api::noop::NoopProvider;
-    use std::sync::Arc;
+    use std::{net::Ipv4Addr, sync::Arc};
 
     fn builder() -> NetworkConfigBuilder {
         let secret_key = SecretKey::new(&mut rand_08::thread_rng());
@@ -743,5 +748,63 @@ mod tests {
         // check status and fork_filter forkhash
         assert_eq!(status.forkid.hash, genesis_fork_hash);
         assert_eq!(fork_filter.current().hash, genesis_fork_hash);
+    }
+
+    #[test]
+    fn test_discv5_fork_id_default() {
+        const GENESIS_TIME: u64 = 151_515;
+
+        let genesis = Genesis::default().with_timestamp(GENESIS_TIME);
+
+        let active_fork = (EthereumHardfork::Shanghai, ForkCondition::Timestamp(GENESIS_TIME));
+        let future_fork = (EthereumHardfork::Cancun, ForkCondition::Timestamp(GENESIS_TIME + 1));
+
+        let chain_spec = ChainSpecBuilder::default()
+            .chain(Chain::dev())
+            .genesis(genesis)
+            .with_fork(active_fork.0, active_fork.1)
+            .with_fork(future_fork.0, future_fork.1)
+            .build();
+
+        // get the fork id to advertise on discv5
+        let genesis_fork_hash = ForkHash::from(chain_spec.genesis_hash());
+        let fork_id = ForkId { hash: genesis_fork_hash, next: GENESIS_TIME + 1 };
+        // check the fork id is set to active fork and _not_ yet future fork
+        assert_eq!(
+            fork_id,
+            chain_spec.fork_id(&Head {
+                hash: chain_spec.genesis_hash(),
+                number: 0,
+                timestamp: GENESIS_TIME,
+                difficulty: U256::ZERO,
+                total_difficulty: U256::ZERO,
+            })
+        );
+        assert_ne!(fork_id, chain_spec.latest_fork_id());
+
+        // enforce that the fork_id set in local enr
+        let fork_key = b"odyssey";
+        let config = builder()
+            .discovery_v5(
+                reth_discv5::Config::builder((Ipv4Addr::LOCALHOST, 30303).into())
+                    .fork(fork_key, fork_id),
+            )
+            .build_with_noop_provider(Arc::new(chain_spec));
+
+        let (local_enr, _, _, _) = build_local_enr(
+            &config.secret_key,
+            &config.discovery_v5_config.expect("should build config"),
+        );
+
+        // peers on the odyssey network will check discovered enrs for the 'odyssey' key and
+        // decide based on this if they attempt and rlpx connection to the peer or not
+        let advertised_fork_id = *local_enr
+            .get_decodable::<Vec<ForkId>>(fork_key)
+            .expect("should read 'odyssey'")
+            .expect("should decode fork id list")
+            .first()
+            .expect("should be non-empty");
+
+        assert_eq!(advertised_fork_id, fork_id);
     }
 }

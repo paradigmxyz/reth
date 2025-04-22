@@ -41,7 +41,7 @@ where
     BPF::StorageNodeProvider: BlindedProvider + Send + Sync,
 {
     /// Creates a new sparse trie task.
-    pub(super) fn new(
+    pub(super) const fn new(
         executor: WorkloadExecutor,
         updates: mpsc::Receiver<SparseTrieUpdate>,
         blinded_provider_factory: BPF,

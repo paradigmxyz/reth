@@ -1045,7 +1045,7 @@ mod tests {
 
         // Create an ExExManager with a small max capacity
         let max_capacity = 2;
-        let mut exex_manager = ExExManager::new(
+        let exex_manager = ExExManager::new(
             provider_factory,
             vec![exex_handle_1],
             max_capacity,
