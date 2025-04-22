@@ -1,6 +1,7 @@
 //! Helpers for optimism specific RPC implementations.
 
 use crate::SequencerClientError;
+use crate::optimism::txpool::metrics::SequencerMetrics;
 use alloy_json_rpc::{RpcRecv, RpcSend};
 use alloy_primitives::{hex, B256};
 use alloy_rpc_client::{BuiltInConnectionString, ClientBuilder, RpcClient as Client};
@@ -143,7 +144,7 @@ impl SequencerClient {
                     "Failed to forward transaction conditional for sequencer",
                 );
             })?;
-            self.metrics().record_forward_latency(start.elapsed());
+        self.metrics().record_forward_latency(start.elapsed());
         Ok(tx_hash)
     }
 }
