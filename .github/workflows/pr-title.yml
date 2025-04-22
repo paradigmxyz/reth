@@ -58,6 +58,7 @@ jobs:
             - `refactor`: Changes to improve code structure
             - `docs`: Documentation updates
             - `ci`: Changes to CI/CD configurations
+            - `revert`: Reverts a previously merged PR
             
             **Breaking Changes**
 
