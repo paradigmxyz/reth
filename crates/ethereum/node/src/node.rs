@@ -1,36 +1,48 @@
 //! Ethereum Node types config.
 
-pub use crate::payload::EthereumPayloadBuilder;
+pub use crate::{payload::EthereumPayloadBuilder, EthereumEngineValidator};
 use crate::{EthEngineTypes, EthEvmConfig};
-use reth_chainspec::ChainSpec;
+use alloy_eips::merge::EPOCH_SLOTS;
+use reth_chainspec::{ChainSpec, EthChainSpec};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_ethereum_consensus::EthBeaconConsensus;
-pub use reth_ethereum_engine_primitives::EthereumEngineValidator;
 use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
-use reth_evm::execute::BasicBlockExecutorProvider;
-use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
+use reth_ethereum_primitives::{EthPrimitives, PooledTransaction};
+use reth_evm::{
+    execute::BasicBlockExecutorProvider, ConfigureEvm, EvmFactory, EvmFactoryFor,
+    NextBlockEnvAttributes,
+};
 use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
-use reth_node_api::{AddOnsContext, FullNodeComponents, TxTy};
+use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, TxTy};
 use reth_node_builder::{
     components::{
-        ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder, PoolBuilder,
+        BasicPayloadServiceBuilder, ComponentsBuilder, ConsensusBuilder, ExecutorBuilder,
+        NetworkBuilder, PoolBuilder,
     },
-    node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
-    rpc::{EngineValidatorBuilder, RpcAddOns},
-    BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadTypes,
+    node::{FullNodeTypes, NodeTypes},
+    rpc::{
+        EngineValidatorAddOn, EngineValidatorBuilder, EthApiBuilder, EthApiCtx, RethRpcAddOns,
+        RpcAddOns, RpcHandle,
+    },
+    BuilderContext, DebugNode, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig,
+    PayloadTypes,
 };
-use reth_primitives::{EthPrimitives, PooledTransaction};
-use reth_provider::{CanonStateSubscriptions, EthStorage};
-use reth_rpc::EthApi;
+use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage};
+use reth_rpc::{eth::core::EthApiFor, ValidationApi};
+use reth_rpc_api::{eth::FullEthApiServer, servers::BlockSubmissionValidationApiServer};
+use reth_rpc_builder::config::RethRpcServerConfig;
+use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
+use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, EthTransactionPool, PoolTransaction, TransactionPool,
-    TransactionValidationTaskExecutor,
+    blobstore::{DiskFileBlobStore, DiskFileBlobStoreConfig},
+    EthTransactionPool, PoolTransaction, TransactionPool, TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
-use std::sync::Arc;
+use revm::context::TxEnv;
+use std::{default::Default, sync::Arc, time::SystemTime};
 
 /// Type configuration for a regular Ethereum node.
 #[derive(Debug, Default, Clone, Copy)]
@@ -42,14 +54,14 @@ impl EthereumNode {
     pub fn components<Node>() -> ComponentsBuilder<
         Node,
         EthereumPoolBuilder,
-        EthereumPayloadBuilder,
+        BasicPayloadServiceBuilder<EthereumPayloadBuilder>,
         EthereumNetworkBuilder,
         EthereumExecutorBuilder,
         EthereumConsensusBuilder,
     >
     where
         Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
-        <Node::Types as NodeTypesWithEngine>::Engine: PayloadTypes<
+        <Node::Types as NodeTypes>::Payload: PayloadTypes<
             BuiltPayload = EthBuiltPayload,
             PayloadAttributes = EthPayloadAttributes,
             PayloadBuilderAttributes = EthPayloadBuilderAttributes,
@@ -58,10 +70,45 @@ impl EthereumNode {
         ComponentsBuilder::default()
             .node_types::<Node>()
             .pool(EthereumPoolBuilder::default())
-            .payload(EthereumPayloadBuilder::default())
+            .payload(BasicPayloadServiceBuilder::default())
             .network(EthereumNetworkBuilder::default())
             .executor(EthereumExecutorBuilder::default())
             .consensus(EthereumConsensusBuilder::default())
+    }
+
+    /// Instantiates the [`ProviderFactoryBuilder`] for an ethereum node.
+    ///
+    /// # Open a Providerfactory in read-only mode from a datadir
+    ///
+    /// See also: [`ProviderFactoryBuilder`] and
+    /// [`ReadOnlyConfig`](reth_provider::providers::ReadOnlyConfig).
+    ///
+    /// ```no_run
+    /// use reth_chainspec::MAINNET;
+    /// use reth_node_ethereum::EthereumNode;
+    ///
+    /// let factory = EthereumNode::provider_factory_builder()
+    ///     .open_read_only(MAINNET.clone(), "datadir")
+    ///     .unwrap();
+    /// ```
+    ///
+    /// # Open a Providerfactory manually with all required components
+    ///
+    /// ```no_run
+    /// use reth_chainspec::ChainSpecBuilder;
+    /// use reth_db::open_db_read_only;
+    /// use reth_node_ethereum::EthereumNode;
+    /// use reth_provider::providers::StaticFileProvider;
+    /// use std::sync::Arc;
+    ///
+    /// let factory = EthereumNode::provider_factory_builder()
+    ///     .db(Arc::new(open_db_read_only("db", Default::default()).unwrap()))
+    ///     .chainspec(ChainSpecBuilder::mainnet().build().into())
+    ///     .static_file(StaticFileProvider::read_only("db/static_files", false).unwrap())
+    ///     .build_provider_factory();
+    /// ```
+    pub fn provider_factory_builder() -> ProviderFactoryBuilder<Self> {
+        ProviderFactoryBuilder::default()
     }
 }
 
@@ -70,23 +117,136 @@ impl NodeTypes for EthereumNode {
     type ChainSpec = ChainSpec;
     type StateCommitment = MerklePatriciaTrie;
     type Storage = EthStorage;
+    type Payload = EthEngineTypes;
 }
 
-impl NodeTypesWithEngine for EthereumNode {
-    type Engine = EthEngineTypes;
+/// Builds [`EthApi`](reth_rpc::EthApi) for Ethereum.
+#[derive(Debug, Default)]
+pub struct EthereumEthApiBuilder;
+
+impl<N> EthApiBuilder<N> for EthereumEthApiBuilder
+where
+    N: FullNodeComponents,
+    EthApiFor<N>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
+{
+    type EthApi = EthApiFor<N>;
+
+    async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
+        let api = reth_rpc::EthApiBuilder::new(
+            ctx.components.provider().clone(),
+            ctx.components.pool().clone(),
+            ctx.components.network().clone(),
+            ctx.components.evm_config().clone(),
+        )
+        .eth_cache(ctx.cache)
+        .task_spawner(ctx.components.task_executor().clone())
+        .gas_cap(ctx.config.rpc_gas_cap.into())
+        .max_simulate_blocks(ctx.config.rpc_max_simulate_blocks)
+        .eth_proof_window(ctx.config.eth_proof_window)
+        .fee_history_cache_config(ctx.config.fee_history_cache)
+        .proof_permits(ctx.config.proof_permits)
+        .gas_oracle_config(ctx.config.gas_oracle)
+        .build();
+        Ok(api)
+    }
 }
 
 /// Add-ons w.r.t. l1 ethereum.
-pub type EthereumAddOns<N> = RpcAddOns<
-    N,
-    EthApi<
-        <N as FullNodeTypes>::Provider,
-        <N as FullNodeComponents>::Pool,
-        NetworkHandle,
-        <N as FullNodeComponents>::Evm,
+#[derive(Debug)]
+pub struct EthereumAddOns<N: FullNodeComponents>
+where
+    EthApiFor<N>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
+{
+    inner: RpcAddOns<N, EthereumEthApiBuilder, EthereumEngineValidatorBuilder>,
+}
+
+impl<N: FullNodeComponents> Default for EthereumAddOns<N>
+where
+    EthApiFor<N>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
+{
+    fn default() -> Self {
+        Self { inner: Default::default() }
+    }
+}
+
+impl<N> NodeAddOns<N> for EthereumAddOns<N>
+where
+    N: FullNodeComponents<
+        Types: NodeTypes<
+            ChainSpec = ChainSpec,
+            Primitives = EthPrimitives,
+            Payload = EthEngineTypes,
+        >,
+        Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
-    EthereumEngineValidatorBuilder,
->;
+    EthApiError: FromEvmError<N::Evm>,
+    EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
+{
+    type Handle = RpcHandle<N, EthApiFor<N>>;
+
+    async fn launch_add_ons(
+        self,
+        ctx: reth_node_api::AddOnsContext<'_, N>,
+    ) -> eyre::Result<Self::Handle> {
+        let validation_api = ValidationApi::new(
+            ctx.node.provider().clone(),
+            Arc::new(ctx.node.consensus().clone()),
+            ctx.node.block_executor().clone(),
+            ctx.config.rpc.flashbots_config(),
+            Box::new(ctx.node.task_executor().clone()),
+            Arc::new(EthereumEngineValidator::new(ctx.config.chain.clone())),
+        );
+
+        self.inner
+            .launch_add_ons_with(ctx, move |modules, _, _| {
+                modules.merge_if_module_configured(
+                    RethRpcModule::Flashbots,
+                    validation_api.into_rpc(),
+                )?;
+
+                Ok(())
+            })
+            .await
+    }
+}
+
+impl<N> RethRpcAddOns<N> for EthereumAddOns<N>
+where
+    N: FullNodeComponents<
+        Types: NodeTypes<
+            ChainSpec = ChainSpec,
+            Primitives = EthPrimitives,
+            Payload = EthEngineTypes,
+        >,
+        Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
+    >,
+    EthApiError: FromEvmError<N::Evm>,
+    EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
+{
+    type EthApi = EthApiFor<N>;
+
+    fn hooks_mut(&mut self) -> &mut reth_node_builder::rpc::RpcHooks<N, Self::EthApi> {
+        self.inner.hooks_mut()
+    }
+}
+
+impl<N> EngineValidatorAddOn<N> for EthereumAddOns<N>
+where
+    N: FullNodeComponents<
+        Types: NodeTypes<
+            ChainSpec = ChainSpec,
+            Primitives = EthPrimitives,
+            Payload = EthEngineTypes,
+        >,
+    >,
+    EthApiFor<N>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
+{
+    type Validator = EthereumEngineValidator;
+
+    async fn engine_validator(&self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::Validator> {
+        EthereumEngineValidatorBuilder::default().build(ctx).await
+    }
+}
 
 impl<N> Node<N> for EthereumNode
 where
@@ -95,7 +255,7 @@ where
     type ComponentsBuilder = ComponentsBuilder<
         N,
         EthereumPoolBuilder,
-        EthereumPayloadBuilder,
+        BasicPayloadServiceBuilder<EthereumPayloadBuilder>,
         EthereumNetworkBuilder,
         EthereumExecutorBuilder,
         EthereumConsensusBuilder,
@@ -114,6 +274,25 @@ where
     }
 }
 
+impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for EthereumNode {
+    type RpcBlock = alloy_rpc_types_eth::Block;
+
+    fn rpc_to_primitive_block(rpc_block: Self::RpcBlock) -> reth_ethereum_primitives::Block {
+        let alloy_rpc_types_eth::Block { header, transactions, withdrawals, .. } = rpc_block;
+        reth_ethereum_primitives::Block {
+            header: header.inner,
+            body: reth_ethereum_primitives::BlockBody {
+                transactions: transactions
+                    .into_transactions()
+                    .map(|tx| tx.inner.into_inner().into())
+                    .collect(),
+                ommers: Default::default(),
+                withdrawals,
+            },
+        }
+    }
+}
+
 /// A regular ethereum evm and executor builder.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
@@ -121,20 +300,19 @@ pub struct EthereumExecutorBuilder;
 
 impl<Types, Node> ExecutorBuilder<Node> for EthereumExecutorBuilder
 where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
+    Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
 {
     type EVM = EthEvmConfig;
-    type Executor = BasicBlockExecutorProvider<EthExecutionStrategyFactory>;
+    type Executor = BasicBlockExecutorProvider<EthEvmConfig>;
 
     async fn build_evm(
         self,
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
-        let chain_spec = ctx.chain_spec();
-        let evm_config = EthEvmConfig::new(ctx.chain_spec());
-        let strategy_factory = EthExecutionStrategyFactory::new(chain_spec, evm_config.clone());
-        let executor = BasicBlockExecutorProvider::new(strategy_factory);
+        let evm_config = EthEvmConfig::new(ctx.chain_spec())
+            .with_extra_data(ctx.payload_builder_config().extra_data_bytes());
+        let executor = BasicBlockExecutorProvider::new(evm_config.clone());
 
         Ok((evm_config, executor))
     }
@@ -152,7 +330,7 @@ pub struct EthereumPoolBuilder {
 
 impl<Types, Node> PoolBuilder<Node> for EthereumPoolBuilder
 where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
+    Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
 {
     type Pool = EthTransactionPool<Node::Provider, DiskFileBlobStore>;
@@ -160,41 +338,68 @@ where
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
         let data_dir = ctx.config().datadir();
         let pool_config = ctx.pool_config();
-        let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
-        let validator = TransactionValidationTaskExecutor::eth_builder(ctx.chain_spec())
+
+        let blob_cache_size = if let Some(blob_cache_size) = pool_config.blob_cache_size {
+            blob_cache_size
+        } else {
+            // get the current blob params for the current timestamp
+            let current_timestamp =
+                SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs();
+            let blob_params = ctx
+                .chain_spec()
+                .blob_params_at_timestamp(current_timestamp)
+                .unwrap_or(ctx.chain_spec().blob_params.cancun);
+
+            // Derive the blob cache size from the target blob count, to auto scale it by
+            // multiplying it with the slot count for 2 epochs: 384 for pectra
+            (blob_params.target_blob_count * EPOCH_SLOTS * 2) as u32
+        };
+
+        let custom_config =
+            DiskFileBlobStoreConfig::default().with_max_cached_entries(blob_cache_size);
+
+        let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), custom_config)?;
+        let validator = TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
             .with_head_timestamp(ctx.head().timestamp)
             .kzg_settings(ctx.kzg_settings()?)
             .with_local_transactions_config(pool_config.local_transactions_config.clone())
+            .set_tx_fee_cap(ctx.config().rpc.rpc_tx_fee_cap)
             .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
-            .build_with_tasks(
-                ctx.provider().clone(),
-                ctx.task_executor().clone(),
-                blob_store.clone(),
-            );
+            .build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
 
         let transaction_pool =
             reth_transaction_pool::Pool::eth_pool(validator, blob_store, pool_config);
         info!(target: "reth::cli", "Transaction pool initialized");
-        let transactions_path = data_dir.txpool_transactions();
 
         // spawn txpool maintenance task
         {
             let pool = transaction_pool.clone();
             let chain_events = ctx.provider().canonical_state_stream();
             let client = ctx.provider().clone();
-            let transactions_backup_config =
-                reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
+            // Only spawn backup task if not disabled
+            if !ctx.config().txpool.disable_transactions_backup {
+                // Use configured backup path or default to data dir
+                let transactions_path = ctx
+                    .config()
+                    .txpool
+                    .transactions_backup_path
+                    .clone()
+                    .unwrap_or_else(|| data_dir.txpool_transactions());
 
-            ctx.task_executor().spawn_critical_with_graceful_shutdown_signal(
-                "local transactions backup task",
-                |shutdown| {
-                    reth_transaction_pool::maintain::backup_local_transactions_task(
-                        shutdown,
-                        pool.clone(),
-                        transactions_backup_config,
-                    )
-                },
-            );
+                let transactions_backup_config =
+                    reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
+
+                ctx.task_executor().spawn_critical_with_graceful_shutdown_signal(
+                    "local transactions backup task",
+                    |shutdown| {
+                        reth_transaction_pool::maintain::backup_local_transactions_task(
+                            shutdown,
+                            pool.clone(),
+                            transactions_backup_config,
+                        )
+                    },
+                );
+            }
 
             // spawn the maintenance task
             ctx.task_executor().spawn_critical(
@@ -204,7 +409,14 @@ where
                     pool,
                     chain_events,
                     ctx.task_executor().clone(),
-                    Default::default(),
+                    reth_transaction_pool::maintain::MaintainPoolConfig {
+                        max_tx_lifetime: transaction_pool.config().max_queued_lifetime,
+                        no_local_exemptions: transaction_pool
+                            .config()
+                            .local_transactions_config
+                            .no_exemptions,
+                        ..Default::default()
+                    },
                 ),
             );
             debug!(target: "reth::cli", "Spawned txpool maintenance task");
@@ -252,7 +464,7 @@ impl<Node> ConsensusBuilder<Node> for EthereumConsensusBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
 {
-    type Consensus = Arc<dyn FullConsensus<Error = ConsensusError>>;
+    type Consensus = Arc<dyn FullConsensus<EthPrimitives, Error = ConsensusError>>;
 
     async fn build_consensus(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
         Ok(Arc::new(EthBeaconConsensus::new(ctx.chain_spec())))
@@ -266,11 +478,7 @@ pub struct EthereumEngineValidatorBuilder;
 
 impl<Node, Types> EngineValidatorBuilder<Node> for EthereumEngineValidatorBuilder
 where
-    Types: NodeTypesWithEngine<
-        ChainSpec = ChainSpec,
-        Engine = EthEngineTypes,
-        Primitives = EthPrimitives,
-    >,
+    Types: NodeTypes<ChainSpec = ChainSpec, Payload = EthEngineTypes, Primitives = EthPrimitives>,
     Node: FullNodeComponents<Types = Types>,
 {
     type Validator = EthereumEngineValidator;

@@ -5,12 +5,9 @@ publish = false
 edition.workspace = true
 license.workspace = true
 
-
 [dependencies]
 reth.workspace = true
-reth-chainspec.workspace = true
-reth-node-core.workspace = true
-reth-node-ethereum = { workspace = true, features = ["test-utils"] }
+reth-ethereum = { workspace = true, features = ["node", "test-utils"] }
 futures-util.workspace = true
 
 eyre.workspace = true

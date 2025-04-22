@@ -6,8 +6,13 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-// The `optimism` feature must be enabled to use this crate.
-#![cfg(feature = "optimism")]
+#![cfg_attr(not(feature = "std"), no_std)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
+extern crate alloc;
+
+mod chain;
+pub use chain::OptStorage;
 
 #[cfg(test)]
 mod tests {
@@ -16,7 +21,7 @@ mod tests {
         CompactClientVersion, CompactU256, CompactU64, StoredBlockBodyIndices,
         StoredBlockWithdrawals,
     };
-    use reth_primitives::{Account, Receipt};
+    use reth_primitives_traits::Account;
     use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
     use reth_stages_types::{
         AccountHashingCheckpoint, CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint,
@@ -39,7 +44,6 @@ mod tests {
         assert_eq!(PruneCheckpoint::bitflag_encoded_bytes(), 1);
         assert_eq!(PruneMode::bitflag_encoded_bytes(), 1);
         assert_eq!(PruneSegment::bitflag_encoded_bytes(), 1);
-        assert_eq!(Receipt::bitflag_encoded_bytes(), 2);
         assert_eq!(StageCheckpoint::bitflag_encoded_bytes(), 1);
         assert_eq!(StageUnitCheckpoint::bitflag_encoded_bytes(), 1);
         assert_eq!(StoredBlockBodyIndices::bitflag_encoded_bytes(), 1);
@@ -62,7 +66,6 @@ mod tests {
         validate_bitflag_backwards_compat!(PruneCheckpoint, UnusedBits::NotZero);
         validate_bitflag_backwards_compat!(PruneMode, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(PruneSegment, UnusedBits::Zero);
-        validate_bitflag_backwards_compat!(Receipt, UnusedBits::NotZero);
         validate_bitflag_backwards_compat!(StageCheckpoint, UnusedBits::NotZero);
         validate_bitflag_backwards_compat!(StageUnitCheckpoint, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(StoredBlockBodyIndices, UnusedBits::Zero);

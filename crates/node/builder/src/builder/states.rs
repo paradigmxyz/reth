@@ -16,7 +16,7 @@ use reth_exex::ExExContext;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes};
 use reth_node_core::node_config::NodeConfig;
 use reth_tasks::TaskExecutor;
-use std::{fmt, future::Future};
+use std::{fmt, fmt::Debug, future::Future};
 
 /// A node builder that also has the configured types.
 pub struct NodeBuilderWithTypes<T: FullNodeTypes> {
@@ -72,6 +72,7 @@ impl<T: FullNodeTypes> fmt::Debug for NodeTypesAdapter<T> {
 
 /// Container for the node's types and the components and other internals that can be used by
 /// addons of the node.
+#[derive(Debug)]
 pub struct NodeAdapter<T: FullNodeTypes, C: NodeComponents<T>> {
     /// The components of the node.
     pub components: C,
@@ -93,7 +94,6 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<
     type Executor = C::Executor;
     type Consensus = C::Consensus;
     type Network = C::Network;
-    type PayloadBuilder = C::PayloadBuilder;
 
     fn pool(&self) -> &Self::Pool {
         self.components.pool()
@@ -115,8 +115,12 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<
         self.components.network()
     }
 
-    fn payload_builder(&self) -> &Self::PayloadBuilder {
-        self.components.payload_builder()
+    fn payload_builder_handle(
+        &self,
+    ) -> &reth_payload_builder::PayloadBuilderHandle<
+        <Self::Types as reth_node_api::NodeTypes>::Payload,
+    > {
+        self.components.payload_builder_handle()
     }
 
     fn provider(&self) -> &Self::Provider {

@@ -2,7 +2,7 @@
 
 use crate::{
     eth_requests::EthRequestHandler,
-    transactions::{TransactionsManager, TransactionsManagerConfig},
+    transactions::{TransactionPropagationPolicy, TransactionsManager, TransactionsManagerConfig},
     NetworkHandle, NetworkManager,
 };
 use reth_eth_wire::{EthNetworkPrimitives, NetworkPrimitives};
@@ -15,7 +15,7 @@ use tokio::sync::mpsc;
 pub(crate) const ETH_REQUEST_CHANNEL_CAPACITY: usize = 256;
 
 /// A builder that can configure all components of the network.
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 pub struct NetworkBuilder<Tx, Eth, N: NetworkPrimitives = EthNetworkPrimitives> {
     pub(crate) network: NetworkManager<N>,
     pub(crate) transactions: Tx,
@@ -37,7 +37,7 @@ impl<Tx, Eth, N: NetworkPrimitives> NetworkBuilder<Tx, Eth, N> {
     }
 
     /// Returns the mutable network manager.
-    pub fn network_mut(&mut self) -> &mut NetworkManager<N> {
+    pub const fn network_mut(&mut self) -> &mut NetworkManager<N> {
         &mut self.network
     }
 
@@ -72,11 +72,27 @@ impl<Tx, Eth, N: NetworkPrimitives> NetworkBuilder<Tx, Eth, N> {
         pool: Pool,
         transactions_manager_config: TransactionsManagerConfig,
     ) -> NetworkBuilder<TransactionsManager<Pool, N>, Eth, N> {
+        self.transactions_with_policy(pool, transactions_manager_config, Default::default())
+    }
+
+    /// Creates a new [`TransactionsManager`] and wires it to the network.
+    pub fn transactions_with_policy<Pool: TransactionPool, P: TransactionPropagationPolicy>(
+        self,
+        pool: Pool,
+        transactions_manager_config: TransactionsManagerConfig,
+        propagation_policy: P,
+    ) -> NetworkBuilder<TransactionsManager<Pool, N, P>, Eth, N> {
         let Self { mut network, request_handler, .. } = self;
         let (tx, rx) = mpsc::unbounded_channel();
         network.set_transactions(tx);
         let handle = network.handle().clone();
-        let transactions = TransactionsManager::new(handle, pool, rx, transactions_manager_config);
+        let transactions = TransactionsManager::with_policy(
+            handle,
+            pool,
+            rx,
+            transactions_manager_config,
+            propagation_policy,
+        );
         NetworkBuilder { network, request_handler, transactions }
     }
 }

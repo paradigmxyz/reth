@@ -1,4 +1,5 @@
 use alloy_eips::{BlockId, BlockNumberOrTag};
+use alloy_genesis::ChainConfig;
 use alloy_primitives::{Address, Bytes, B256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_eth::{transaction::TransactionRequest, Block, Bundle, StateContext};
@@ -136,10 +137,22 @@ pub trait DebugApi {
     /// to their preimages that were required during the execution of the block, including during
     /// state root recomputation.
     ///
-    /// The first argument is the block number or block hash.
+    /// The first argument is the block number or tag.
     #[method(name = "executionWitness")]
     async fn debug_execution_witness(&self, block: BlockNumberOrTag)
         -> RpcResult<ExecutionWitness>;
+
+    /// The `debug_executionWitnessByBlockHash` method allows for re-execution of a block with the
+    /// purpose of generating an execution witness. The witness comprises of a map of all hashed
+    /// trie nodes to their preimages that were required during the execution of the block,
+    /// including during state root recomputation.
+    ///
+    /// The first argument is the block hash.
+    #[method(name = "executionWitnessByBlockHash")]
+    async fn debug_execution_witness_by_block_hash(
+        &self,
+        hash: B256,
+    ) -> RpcResult<ExecutionWitness>;
 
     /// Sets the logging backtrace location. When a backtrace location is set and a log message is
     /// emitted at that location, the stack of the goroutine executing the log statement will
@@ -174,9 +187,22 @@ pub trait DebugApi {
     #[method(name = "chaindbCompact")]
     async fn debug_chaindb_compact(&self) -> RpcResult<()>;
 
+    /// Returns the current chain config.
+    #[method(name = "chainConfig")]
+    async fn debug_chain_config(&self) -> RpcResult<ChainConfig>;
+
     /// Returns leveldb properties of the key-value database.
     #[method(name = "chaindbProperty")]
     async fn debug_chaindb_property(&self, property: String) -> RpcResult<()>;
+
+    /// Returns the code associated with a given hash at the specified block ID.
+    /// If no block ID is provided, it defaults to the latest block.
+    #[method(name = "codeByHash")]
+    async fn debug_code_by_hash(
+        &self,
+        hash: B256,
+        block_id: Option<BlockId>,
+    ) -> RpcResult<Option<Bytes>>;
 
     /// Turns on CPU profiling for the given duration and writes profile data to disk.
     #[method(name = "cpuProfile")]

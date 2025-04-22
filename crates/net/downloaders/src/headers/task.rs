@@ -1,3 +1,4 @@
+use alloy_primitives::Sealable;
 use futures::{FutureExt, Stream};
 use futures_util::StreamExt;
 use pin_project::pin_project;
@@ -5,7 +6,7 @@ use reth_network_p2p::headers::{
     downloader::{HeaderDownloader, SyncTarget},
     error::HeadersDownloaderResult,
 };
-use reth_primitives::SealedHeader;
+use reth_primitives_traits::SealedHeader;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
     fmt::Debug,
@@ -23,7 +24,7 @@ pub const HEADERS_TASK_BUFFER_SIZE: usize = 8;
 /// A [HeaderDownloader] that drives a spawned [HeaderDownloader] on a spawned task.
 #[derive(Debug)]
 #[pin_project]
-pub struct TaskDownloader<H> {
+pub struct TaskDownloader<H: Sealable> {
     #[pin]
     from_downloader: ReceiverStream<HeadersDownloaderResult<Vec<SealedHeader<H>>, H>>,
     to_downloader: UnboundedSender<DownloaderUpdates<H>>,
@@ -31,7 +32,7 @@ pub struct TaskDownloader<H> {
 
 // === impl TaskDownloader ===
 
-impl<H: Send + Sync + Unpin + 'static> TaskDownloader<H> {
+impl<H: Sealable + Send + Sync + Unpin + 'static> TaskDownloader<H> {
     /// Spawns the given `downloader` via [`tokio::task::spawn`] and returns a [`TaskDownloader`]
     /// that's connected to that task.
     ///
@@ -83,7 +84,7 @@ impl<H: Send + Sync + Unpin + 'static> TaskDownloader<H> {
     }
 }
 
-impl<H: Debug + Send + Sync + Unpin + 'static> HeaderDownloader for TaskDownloader<H> {
+impl<H: Sealable + Debug + Send + Sync + Unpin + 'static> HeaderDownloader for TaskDownloader<H> {
     type Header = H;
 
     fn update_sync_gap(&mut self, head: SealedHeader<H>, target: SyncTarget) {
@@ -103,7 +104,7 @@ impl<H: Debug + Send + Sync + Unpin + 'static> HeaderDownloader for TaskDownload
     }
 }
 
-impl<H> Stream for TaskDownloader<H> {
+impl<H: Sealable> Stream for TaskDownloader<H> {
     type Item = HeadersDownloaderResult<Vec<SealedHeader<H>>, H>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -174,7 +175,8 @@ impl<T: HeaderDownloader> Future for SpawnedDownloader<T> {
     }
 }
 
-/// Commands delegated tot the spawned [`HeaderDownloader`]
+/// Commands delegated to the spawned [`HeaderDownloader`]
+#[derive(Debug)]
 enum DownloaderUpdates<H> {
     UpdateSyncGap(SealedHeader<H>, SyncTarget),
     UpdateLocalHead(SealedHeader<H>),

@@ -14,4 +14,6 @@ pub(crate) struct CacheMetrics {
     pub(crate) hits_total: Counter,
     /// The number of cache misses.
     pub(crate) misses_total: Counter,
+    /// The memory usage of the cache.
+    pub(crate) memory_usage: Gauge,
 }

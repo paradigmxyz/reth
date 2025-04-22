@@ -1,16 +1,13 @@
 //! Compatibility functions for rpc `Transaction` type.
 
+use alloy_consensus::transaction::Recovered;
+use alloy_rpc_types_eth::{request::TransactionRequest, TransactionInfo};
 use core::error;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use alloy_rpc_types_eth::{request::TransactionRequest, TransactionInfo};
-use reth_primitives::{RecoveredTx, TransactionSigned};
-use serde::{Deserialize, Serialize};
-
 /// Builds RPC transaction w.r.t. network.
-pub trait TransactionCompat<T = TransactionSigned>:
-    Send + Sync + Unpin + Clone + fmt::Debug
-{
+pub trait TransactionCompat<T>: Send + Sync + Unpin + Clone + fmt::Debug {
     /// RPC transaction response type.
     type Transaction: Serialize
         + for<'de> Deserialize<'de>
@@ -26,7 +23,7 @@ pub trait TransactionCompat<T = TransactionSigned>:
     /// Wrapper for `fill()` with default `TransactionInfo`
     /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
     /// environment related fields to `None`.
-    fn fill_pending(&self, tx: RecoveredTx<T>) -> Result<Self::Transaction, Self::Error> {
+    fn fill_pending(&self, tx: Recovered<T>) -> Result<Self::Transaction, Self::Error> {
         self.fill(tx, TransactionInfo::default())
     }
 
@@ -37,7 +34,7 @@ pub trait TransactionCompat<T = TransactionSigned>:
     /// transaction was mined.
     fn fill(
         &self,
-        tx: RecoveredTx<T>,
+        tx: Recovered<T>,
         tx_inf: TransactionInfo,
     ) -> Result<Self::Transaction, Self::Error>;
 
@@ -49,12 +46,4 @@ pub trait TransactionCompat<T = TransactionSigned>:
     // todo: remove in favour of using constructor on `TransactionResponse` or similar
     // <https://github.com/alloy-rs/alloy/issues/1315>.
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction);
-}
-
-/// Convert [`RecoveredTx`] to [`TransactionRequest`]
-pub fn transaction_to_call_request<T: alloy_consensus::Transaction>(
-    tx: RecoveredTx<T>,
-) -> TransactionRequest {
-    let from = tx.signer();
-    TransactionRequest::from_transaction_with_sender(tx.into_tx(), from)
 }

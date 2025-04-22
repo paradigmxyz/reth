@@ -3,7 +3,7 @@ use alloy_genesis::Genesis;
 use alloy_primitives::{b256, hex};
 use futures::StreamExt;
 use reth_chainspec::ChainSpec;
-use reth_node_api::{FullNodeComponents, FullNodePrimitives, NodeTypes};
+use reth_node_api::{BlockBody, FullNodeComponents, FullNodePrimitives, NodeTypes};
 use reth_node_builder::{
     rpc::RethRpcAddOns, EngineNodeLauncher, FullNode, NodeBuilder, NodeConfig, NodeHandle,
 };
@@ -58,14 +58,14 @@ where
 
     let hash = eth_api.send_raw_transaction(raw_tx.into()).await.unwrap();
 
-    let expected = b256!("b1c6512f4fc202c04355fbda66755e0e344b152e633010e8fd75ecec09b63398");
+    let expected = b256!("0xb1c6512f4fc202c04355fbda66755e0e344b152e633010e8fd75ecec09b63398");
 
     assert_eq!(hash, expected);
     println!("submitted transaction: {hash}");
 
     let head = notifications.next().await.unwrap();
 
-    let tx = &head.tip().transactions()[0];
+    let tx = &head.tip().body().transactions()[0];
     assert_eq!(tx.trie_hash(), hash);
     println!("mined transaction: {hash}");
 }

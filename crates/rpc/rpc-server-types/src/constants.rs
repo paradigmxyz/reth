@@ -15,6 +15,9 @@ pub const DEFAULT_MAX_BLOCKS_PER_FILTER: u64 = 100_000;
 /// The default maximum of logs in a single response.
 pub const DEFAULT_MAX_LOGS_PER_RESPONSE: usize = 20_000;
 
+/// The default maximum number of blocks for `trace_filter` requests.
+pub const DEFAULT_MAX_TRACE_FILTER_BLOCKS: u64 = 100;
+
 /// The default maximum number tracing requests we're allowing concurrently.
 /// Tracing is mostly CPU bound so we're limiting the number of concurrent requests to something
 /// lower that the number of cores, in order to minimize the impact on the rest of the system.
@@ -51,6 +54,9 @@ pub const DEFAULT_MAX_SIMULATE_BLOCKS: u64 = 256;
 /// The default eth historical proof window.
 pub const DEFAULT_ETH_PROOF_WINDOW: u64 = 0;
 
+/// The default eth tx fee cap is 1 ETH
+pub const DEFAULT_TX_FEE_CAP_WEI: u128 = 1_000_000_000_000_000_000u128;
+
 /// Maximum eth historical proof window. Equivalent to roughly 6 months of data on a 12
 /// second block time, and a month on a 2 second block time.
 pub const MAX_ETH_PROOF_WINDOW: u64 = 28 * 24 * 60 * 60 / 2;
@@ -64,6 +70,9 @@ pub mod gas_oracle {
 
     /// The default maximum number of blocks to use for the gas price oracle.
     pub const MAX_HEADER_HISTORY: u64 = 1024;
+
+    /// The default maximum number of allowed reward percentiles
+    pub const MAX_REWARD_PERCENTILE_COUNT: u64 = 100;
 
     /// Number of recent blocks to check for gas price
     pub const DEFAULT_GAS_PRICE_BLOCKS: u32 = 20;
@@ -80,8 +89,8 @@ pub mod gas_oracle {
 
     /// The default gas limit for `eth_call` and adjacent calls.
     ///
-    /// This is different from the default to regular 30M block gas limit `ETHEREUM_BLOCK_GAS_LIMIT`
-    /// to allow for more complex calls.
+    /// This is different from the default to regular 30M block gas limit
+    /// `ETHEREUM_BLOCK_GAS_LIMIT_30M` to allow for more complex calls.
     pub const RPC_DEFAULT_GAS_CAP: u64 = 50_000_000;
 
     /// Allowed error ratio for gas estimation

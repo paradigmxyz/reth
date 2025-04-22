@@ -5,9 +5,10 @@ use futures::{
     stream::{FuturesOrdered, Stream},
     StreamExt,
 };
+use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::execute::{BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider};
 use reth_node_api::NodePrimitives;
-use reth_primitives::{BlockWithSenders, EthPrimitives};
+use reth_primitives_traits::RecoveredBlock;
 use reth_provider::{BlockReader, Chain, StateProviderFactory};
 use reth_prune_types::PruneModes;
 use reth_stages_api::ExecutionStageThresholds;
@@ -38,7 +39,7 @@ struct BackfillTaskOutput<T> {
 type BackfillTasks<T> = FuturesOrdered<JoinHandle<BackfillTaskOutput<T>>>;
 
 type SingleBlockStreamItem<N = EthPrimitives> = (
-    BlockWithSenders<<N as NodePrimitives>::Block>,
+    RecoveredBlock<<N as NodePrimitives>::Block>,
     BlockExecutionOutput<<N as NodePrimitives>::Receipt>,
 );
 type BatchBlockStreamItem<N = EthPrimitives> = Chain<N>;
@@ -250,14 +251,13 @@ mod tests {
     };
     use reth_stages_api::ExecutionStageThresholds;
     use reth_testing_utils::generators;
-    use secp256k1::Keypair;
 
     #[tokio::test]
     async fn test_single_blocks() -> eyre::Result<()> {
         reth_tracing::init_test_tracing();
 
         // Create a key pair for the sender
-        let key_pair = Keypair::new_global(&mut generators::rng());
+        let key_pair = generators::generate_key(&mut generators::rng());
         let address = public_key_to_address(key_pair.public_key());
 
         let chain_spec = chain_spec(address);
@@ -278,8 +278,7 @@ mod tests {
         // execute first block
         let (block, mut execution_output) = backfill_stream.next().await.unwrap().unwrap();
         execution_output.state.reverts.sort();
-        let sealed_block_with_senders = blocks_and_execution_outcomes[0].0.clone();
-        let expected_block = sealed_block_with_senders.unseal();
+        let expected_block = blocks_and_execution_outcomes[0].0.clone();
         let expected_output = &blocks_and_execution_outcomes[0].1;
         assert_eq!(block, expected_block);
         assert_eq!(&execution_output, expected_output);
@@ -295,7 +294,7 @@ mod tests {
         reth_tracing::init_test_tracing();
 
         // Create a key pair for the sender
-        let key_pair = Keypair::new_global(&mut generators::rng());
+        let key_pair = generators::generate_key(&mut generators::rng());
         let address = public_key_to_address(key_pair.public_key());
 
         let chain_spec = chain_spec(address);

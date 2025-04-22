@@ -3,7 +3,7 @@ use crate::{
     segments::{PruneInput, Segment},
     PrunerError,
 };
-use reth_db::{table::Value, tables, transaction::DbTxMut};
+use reth_db_api::{table::Value, tables, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::StaticFileProvider, BlockReader, DBProvider, StaticFileProviderFactory,
@@ -98,7 +98,7 @@ mod tests {
         FoldWhile::{Continue, Done},
         Itertools,
     };
-    use reth_db::tables;
+    use reth_db_api::tables;
     use reth_provider::{
         DatabaseProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
         StaticFileProviderFactory,

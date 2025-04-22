@@ -2,20 +2,22 @@
 //!
 //! Run with
 //!
-//! ```not_rust
+//! ```sh
 //! cargo run -p polygon-p2p
 //! ```
 //!
-//! This launch the regular reth node overriding the engine api payload builder with our custom.
+//! This launches a regular reth node overriding the engine api payload builder with our custom.
 //!
 //! Credits to: <https://blog.merkle.io/blog/fastest-transaction-network-eth-polygon-bsc>
+
+#![warn(unused_crate_dependencies)]
+
 use chain_cfg::{boot_nodes, head, polygon_chain_spec};
 use reth_discv4::Discv4ConfigBuilder;
-use reth_network::{
-    config::NetworkMode, EthNetworkPrimitives, NetworkConfig, NetworkEvent,
+use reth_ethereum::network::{
+    api::events::SessionInfo, config::NetworkMode, NetworkConfig, NetworkEvent,
     NetworkEventListenerProvider, NetworkManager,
 };
-use reth_network_api::events::SessionInfo;
 use reth_tracing::{
     tracing::info, tracing_subscriber::filter::LevelFilter, LayerInfo, LogFormat, RethTracer,
     Tracer,
@@ -59,7 +61,7 @@ async fn main() {
     discv4_cfg.add_boot_nodes(boot_nodes()).lookup_interval(interval);
     let net_cfg = net_cfg.set_discovery_v4(discv4_cfg.build());
 
-    let net_manager = NetworkManager::<EthNetworkPrimitives>::new(net_cfg).await.unwrap();
+    let net_manager = NetworkManager::eth(net_cfg).await.unwrap();
 
     // The network handle is our entrypoint into the network.
     let net_handle = net_manager.handle();

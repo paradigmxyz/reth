@@ -20,6 +20,7 @@ reth-network-peers.workspace = true
 
 # op-reth
 reth-optimism-forks.workspace = true
+reth-optimism-primitives.workspace = true
 
 # ethereum
 alloy-chains.workspace = true
@@ -27,18 +28,16 @@ alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
+alloy-hardforks.workspace = true
 
 # op
 op-alloy-rpc-types.workspace = true
-op-alloy-consensus.workspace = true
 
 # io
 serde_json.workspace = true
 
 # misc
-thiserror.workspace = true
 derive_more.workspace = true
-once_cell.workspace = true
 
 [dev-dependencies]
 reth-chainspec = { workspace = true, features = ["test-utils"] }
@@ -48,20 +47,18 @@ op-alloy-rpc-types.workspace = true
 [features]
 default = ["std"]
 std = [
-	"alloy-chains/std",
-	"alloy-genesis/std",
-	"alloy-primitives/std",
-	"alloy-eips/std",
-	"op-alloy-rpc-types/std",
-	"reth-chainspec/std",
-	"reth-ethereum-forks/std",
-	"reth-primitives-traits/std",
-	"reth-optimism-forks/std",
-	"alloy-consensus/std",
-	"once_cell/std",
-	"derive_more/std",
-	"reth-network-peers/std",
-	"thiserror/std",
-	"serde_json/std",
-	"op-alloy-consensus/std"
+    "alloy-chains/std",
+    "alloy-genesis/std",
+    "alloy-primitives/std",
+    "alloy-eips/std",
+    "op-alloy-rpc-types/std",
+    "reth-chainspec/std",
+    "reth-ethereum-forks/std",
+    "reth-primitives-traits/std",
+    "reth-optimism-forks/std",
+    "reth-optimism-primitives/std",
+    "alloy-consensus/std",
+    "derive_more/std",
+    "reth-network-peers/std",
+    "serde_json/std",
 ]

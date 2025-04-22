@@ -1,7 +1,6 @@
 use std::{fmt, io};
 
 use futures::Future;
-use reth_primitives::{Receipt, Receipts};
 use tokio::io::AsyncReadExt;
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Decoder, FramedRead};
@@ -27,10 +26,10 @@ where
 #[derive(Debug)]
 pub struct ReceiptFileClient<D: ReceiptDecoder> {
     /// The buffered receipts, read from file, as nested lists. One list per block number.
-    pub receipts: Receipts<D::Receipt>,
+    pub receipts: Vec<Vec<D::Receipt>>,
     /// First (lowest) block number read from file.
     pub first_block: u64,
-    /// Total number of receipts. Count of elements in [`Receipts`] flattened.
+    /// Total number of receipts. Count of elements in receipts flattened.
     pub total_receipts: usize,
 }
 
@@ -66,7 +65,7 @@ where
     where
         B: AsyncReadExt + Unpin,
     {
-        let mut receipts = Receipts::default();
+        let mut receipts = Vec::default();
 
         // use with_capacity to make sure the internal buffer contains the entire chunk
         let mut stream = FramedRead::with_capacity(reader, D::default(), num_bytes as usize);
@@ -121,13 +120,13 @@ where
                         }
 
                         if block_number == number {
-                            receipts_for_block.push(Some(receipt));
+                            receipts_for_block.push(receipt);
                         } else {
                             receipts.push(receipts_for_block);
 
                             // next block
                             block_number = number;
-                            receipts_for_block = vec![Some(receipt)];
+                            receipts_for_block = vec![receipt];
                         }
                     }
                     None => {
@@ -203,9 +202,9 @@ where
     }
 }
 
-/// [`Receipt`] with block number.
+/// Receipt with block number.
 #[derive(Debug, PartialEq, Eq)]
-pub struct ReceiptWithBlockNumber<R = Receipt> {
+pub struct ReceiptWithBlockNumber<R> {
     /// Receipt.
     pub receipt: R,
     /// Block number.
@@ -215,11 +214,12 @@ pub struct ReceiptWithBlockNumber<R = Receipt> {
 #[cfg(test)]
 mod test {
     use alloy_primitives::{
+        address, b256,
         bytes::{Buf, BytesMut},
-        hex, Address, Bytes, Log, LogData, B256,
+        hex, Bytes, Log, LogData,
     };
     use alloy_rlp::{Decodable, RlpDecodable};
-    use reth_primitives::{Receipt, TxType};
+    use reth_ethereum_primitives::{Receipt, TxType};
     use reth_tracing::init_test_tracing;
     use tokio_util::codec::Decoder;
 
@@ -239,19 +239,18 @@ mod test {
     #[rlp(trailing)]
     struct MockReceiptContainer(Option<MockReceipt>);
 
-    impl TryFrom<MockReceipt> for ReceiptWithBlockNumber {
-        type Error = &'static str;
+    impl TryFrom<MockReceipt> for ReceiptWithBlockNumber<Receipt> {
+        type Error = FileClientError;
         fn try_from(exported_receipt: MockReceipt) -> Result<Self, Self::Error> {
             let MockReceipt { tx_type, status, cumulative_gas_used, logs, block_number: number } =
                 exported_receipt;
 
-            #[allow(clippy::needless_update)]
             let receipt = Receipt {
-                tx_type: TxType::try_from(tx_type.to_be_bytes()[0])?,
+                tx_type: TxType::try_from(tx_type.to_be_bytes()[0])
+                    .map_err(|err| FileClientError::Rlp(err.into(), vec![tx_type]))?,
                 success: status != 0,
                 cumulative_gas_used,
                 logs,
-                ..Default::default()
             };
 
             Ok(Self { receipt, number })
@@ -262,7 +261,7 @@ mod test {
     struct MockReceiptFileCodec;
 
     impl Decoder for MockReceiptFileCodec {
-        type Item = Option<ReceiptWithBlockNumber>;
+        type Item = Option<ReceiptWithBlockNumber<Receipt>>;
         type Error = FileClientError;
 
         fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -276,11 +275,7 @@ mod test {
                 .0;
             src.advance(src.len() - buf_slice.len());
 
-            Ok(Some(
-                receipt
-                    .map(|receipt| receipt.try_into().map_err(FileClientError::from))
-                    .transpose()?,
-            ))
+            Ok(Some(receipt.map(|receipt| receipt.try_into()).transpose()?))
         }
     }
 
@@ -329,20 +324,14 @@ mod test {
         }
     }
 
-    fn receipt_block_1() -> ReceiptWithBlockNumber {
+    fn receipt_block_1() -> ReceiptWithBlockNumber<Receipt> {
         let log_1 = Log {
-            address: Address::from(hex!("8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
+            address: address!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae"),
             data: LogData::new(
                 vec![
-                    B256::from(hex!(
-                        "0109fc6f55cf40689f02fbaad7af7fe7bbac8a3d2186600afc7d3e10cac6027b"
-                    )),
-                    B256::from(hex!(
-                        "0000000000000000000000000000000000000000000000000000000000014218"
-                    )),
-                    B256::from(hex!(
-                        "00000000000000000000000070b17c0fe982ab4a7ac17a4c25485643151a1f2d"
-                    )),
+                    b256!("0x0109fc6f55cf40689f02fbaad7af7fe7bbac8a3d2186600afc7d3e10cac6027b"),
+                    b256!("0x0000000000000000000000000000000000000000000000000000000000014218"),
+                    b256!("0x00000000000000000000000070b17c0fe982ab4a7ac17a4c25485643151a1f2d"),
                 ],
                 Bytes::from(hex!(
                     "00000000000000000000000000000000000000000000000000000000618d8837"
@@ -352,21 +341,13 @@ mod test {
         };
 
         let log_2 = Log {
-            address: Address::from(hex!("8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
+            address: address!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae"),
             data: LogData::new(
                 vec![
-                    B256::from(hex!(
-                        "92e98423f8adac6e64d0608e519fd1cefb861498385c6dee70d58fc926ddc68b"
-                    )),
-                    B256::from(hex!(
-                        "00000000000000000000000000000000000000000000000000000000d0e3ebf0"
-                    )),
-                    B256::from(hex!(
-                        "0000000000000000000000000000000000000000000000000000000000014218"
-                    )),
-                    B256::from(hex!(
-                        "00000000000000000000000070b17c0fe982ab4a7ac17a4c25485643151a1f2d"
-                    )),
+                    b256!("0x92e98423f8adac6e64d0608e519fd1cefb861498385c6dee70d58fc926ddc68b"),
+                    b256!("0x00000000000000000000000000000000000000000000000000000000d0e3ebf0"),
+                    b256!("0x0000000000000000000000000000000000000000000000000000000000014218"),
+                    b256!("0x00000000000000000000000070b17c0fe982ab4a7ac17a4c25485643151a1f2d"),
                 ],
                 Bytes::default(),
             )
@@ -374,51 +355,38 @@ mod test {
         };
 
         let log_3 = Log {
-            address: Address::from(hex!("8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
+            address: address!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae"),
             data: LogData::new(
                 vec![
-                    B256::from(hex!(
-                        "fe25c73e3b9089fac37d55c4c7efcba6f04af04cebd2fc4d6d7dbb07e1e5234f"
-                    )),
-                    B256::from(hex!(
-                        "00000000000000000000000000000000000000000000007edc6ca0bb68348000"
-                    )),
+                    b256!("0xfe25c73e3b9089fac37d55c4c7efcba6f04af04cebd2fc4d6d7dbb07e1e5234f"),
+                    b256!("0x00000000000000000000000000000000000000000000007edc6ca0bb68348000"),
                 ],
                 Bytes::default(),
             )
             .unwrap(),
         };
 
-        // #[allow(clippy::needless_update)] not recognised, ..Default::default() needed so optimism
         // feature must not be brought into scope
         let mut receipt = Receipt {
             tx_type: TxType::Legacy,
             success: true,
             cumulative_gas_used: 202819,
-            ..Default::default()
+            logs: vec![],
         };
         receipt.logs = vec![log_1, log_2, log_3];
 
         ReceiptWithBlockNumber { receipt, number: 1 }
     }
 
-    fn receipt_block_2() -> ReceiptWithBlockNumber {
+    fn receipt_block_2() -> ReceiptWithBlockNumber<Receipt> {
         let log_1 = Log {
-            address: Address::from(hex!("8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
+            address: address!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae"),
             data: LogData::new(
                 vec![
-                    B256::from(hex!(
-                        "92e98423f8adac6e64d0608e519fd1cefb861498385c6dee70d58fc926ddc68d"
-                    )),
-                    B256::from(hex!(
-                        "00000000000000000000000000000000000000000000000000000000d0ea0e40"
-                    )),
-                    B256::from(hex!(
-                        "0000000000000000000000000000000000000000000000000000000000014218"
-                    )),
-                    B256::from(hex!(
-                        "000000000000000000000000e5e7492282fd1e3bfac337a0beccd29b15b7b240"
-                    )),
+                    b256!("0x92e98423f8adac6e64d0608e519fd1cefb861498385c6dee70d58fc926ddc68d"),
+                    b256!("0x00000000000000000000000000000000000000000000000000000000d0ea0e40"),
+                    b256!("0x0000000000000000000000000000000000000000000000000000000000014218"),
+                    b256!("0x000000000000000000000000e5e7492282fd1e3bfac337a0beccd29b15b7b240"),
                 ],
                 Bytes::default(),
             )
@@ -426,51 +394,37 @@ mod test {
         };
 
         let log_2 = Log {
-            address: Address::from(hex!("8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
+            address: address!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae"),
             data: LogData::new(
                 vec![
-                    B256::from(hex!(
-                        "fe25c73e3b9089fac37d55c4c7efcba6f04af04cebd2fc4d6d7dbb07e1e5234e"
-                    )),
-                    B256::from(hex!(
-                        "00000000000000000000000000000000000000000000007eda7867e0c7d48000"
-                    )),
+                    b256!("0xfe25c73e3b9089fac37d55c4c7efcba6f04af04cebd2fc4d6d7dbb07e1e5234e"),
+                    b256!("0x00000000000000000000000000000000000000000000007eda7867e0c7d48000"),
                 ],
                 Bytes::default(),
             )
             .unwrap(),
         };
 
-        // #[allow(clippy::needless_update)] not recognised, ..Default::default() needed so optimism
-        // feature must not be brought into scope
         let mut receipt = Receipt {
             tx_type: TxType::Legacy,
             success: true,
             cumulative_gas_used: 116237,
-            ..Default::default()
+            logs: vec![],
         };
         receipt.logs = vec![log_1, log_2];
 
         ReceiptWithBlockNumber { receipt, number: 2 }
     }
 
-    fn receipt_block_3() -> ReceiptWithBlockNumber {
+    fn receipt_block_3() -> ReceiptWithBlockNumber<Receipt> {
         let log_1 = Log {
-            address: Address::from(hex!("8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
+            address: address!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae"),
             data: LogData::new(
                 vec![
-                    B256::from(hex!(
-                        "92e98423f8adac6e64d0608e519fd1cefb861498385c6dee70d58fc926ddc68d"
-                    )),
-                    B256::from(hex!(
-                        "00000000000000000000000000000000000000000000000000000000d101e54b"
-                    )),
-                    B256::from(hex!(
-                        "0000000000000000000000000000000000000000000000000000000000014218"
-                    )),
-                    B256::from(hex!(
-                        "000000000000000000000000fa011d8d6c26f13abe2cefed38226e401b2b8a99"
-                    )),
+                    b256!("0x92e98423f8adac6e64d0608e519fd1cefb861498385c6dee70d58fc926ddc68d"),
+                    b256!("0x00000000000000000000000000000000000000000000000000000000d101e54b"),
+                    b256!("0x0000000000000000000000000000000000000000000000000000000000014218"),
+                    b256!("0x000000000000000000000000fa011d8d6c26f13abe2cefed38226e401b2b8a99"),
                 ],
                 Bytes::default(),
             )
@@ -478,23 +432,17 @@ mod test {
         };
 
         let log_2 = Log {
-            address: Address::from(hex!("8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
+            address: address!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae"),
             data: LogData::new(
                 vec![
-                    B256::from(hex!(
-                        "fe25c73e3b9089fac37d55c4c7efcba6f04af04cebd2fc4d6d7dbb07e1e5234e"
-                    )),
-                    B256::from(hex!(
-                        "00000000000000000000000000000000000000000000007ed8842f0627748000"
-                    )),
+                    b256!("0xfe25c73e3b9089fac37d55c4c7efcba6f04af04cebd2fc4d6d7dbb07e1e5234e"),
+                    b256!("0x00000000000000000000000000000000000000000000007ed8842f0627748000"),
                 ],
                 Bytes::default(),
             )
             .unwrap(),
         };
 
-        // #[allow(clippy::needless_update)] not recognised, ..Default::default() needed so optimism
-        // feature must not be brought into scope
         let mut receipt = Receipt {
             tx_type: TxType::Legacy,
             success: true,
@@ -531,7 +479,6 @@ mod test {
     }
 
     #[test]
-    #[allow(clippy::needless_update)]
     fn receipts_codec() {
         // rig
 
@@ -588,8 +535,8 @@ mod test {
         assert_eq!(2, total_receipts);
         assert_eq!(0, first_block);
         assert!(receipts[0].is_empty());
-        assert_eq!(receipt_block_1().receipt, receipts[1][0].clone().unwrap());
-        assert_eq!(receipt_block_2().receipt, receipts[2][0].clone().unwrap());
+        assert_eq!(receipt_block_1().receipt, receipts[1][0].clone());
+        assert_eq!(receipt_block_2().receipt, receipts[2][0].clone());
         assert!(receipts[3].is_empty());
     }
 
@@ -624,9 +571,9 @@ mod test {
         assert_eq!(2, total_receipts);
         assert_eq!(0, first_block);
         assert!(receipts[0].is_empty());
-        assert_eq!(receipt_block_1().receipt, receipts[1][0].clone().unwrap());
+        assert_eq!(receipt_block_1().receipt, receipts[1][0].clone());
         assert!(receipts[2].is_empty());
-        assert_eq!(receipt_block_3().receipt, receipts[3][0].clone().unwrap());
+        assert_eq!(receipt_block_3().receipt, receipts[3][0].clone());
     }
 
     #[tokio::test]
@@ -661,9 +608,9 @@ mod test {
         assert_eq!(4, total_receipts);
         assert_eq!(0, first_block);
         assert!(receipts[0].is_empty());
-        assert_eq!(receipt_block_1().receipt, receipts[1][0].clone().unwrap());
-        assert_eq!(receipt_block_2().receipt, receipts[2][0].clone().unwrap());
-        assert_eq!(receipt_block_2().receipt, receipts[2][1].clone().unwrap());
-        assert_eq!(receipt_block_3().receipt, receipts[3][0].clone().unwrap());
+        assert_eq!(receipt_block_1().receipt, receipts[1][0].clone());
+        assert_eq!(receipt_block_2().receipt, receipts[2][0].clone());
+        assert_eq!(receipt_block_2().receipt, receipts[2][1].clone());
+        assert_eq!(receipt_block_3().receipt, receipts[3][0].clone());
     }
 }

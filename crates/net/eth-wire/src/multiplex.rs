@@ -367,12 +367,12 @@ impl Sink<Bytes> for ProtocolProxy {
 }
 
 impl CanDisconnect<Bytes> for ProtocolProxy {
-    async fn disconnect(
+    fn disconnect(
         &mut self,
         _reason: DisconnectReason,
-    ) -> Result<(), <Self as Sink<Bytes>>::Error> {
+    ) -> Pin<Box<dyn Future<Output = Result<(), <Self as Sink<Bytes>>::Error>> + Send + '_>> {
         // TODO handle disconnects
-        Ok(())
+        Box::pin(async move { Ok(()) })
     }
 }
 
@@ -425,7 +425,7 @@ impl<St, Primary> RlpxSatelliteStream<St, Primary> {
 
     /// Returns mutable access to the primary protocol.
     #[inline]
-    pub fn primary_mut(&mut self) -> &mut Primary {
+    pub const fn primary_mut(&mut self) -> &mut Primary {
         &mut self.primary.st
     }
 
@@ -437,7 +437,7 @@ impl<St, Primary> RlpxSatelliteStream<St, Primary> {
 
     /// Returns mutable access to the underlying [`P2PStream`].
     #[inline]
-    pub fn inner_mut(&mut self) -> &mut P2PStream<St> {
+    pub const fn inner_mut(&mut self) -> &mut P2PStream<St> {
         &mut self.inner.conn
     }
 

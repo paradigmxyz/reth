@@ -5,7 +5,6 @@ pub const CAPABILITIES: &[&str] = &[
     "engine_forkchoiceUpdatedV1",
     "engine_forkchoiceUpdatedV2",
     "engine_forkchoiceUpdatedV3",
-    "engine_exchangeTransitionConfigurationV1",
     "engine_getClientVersionV1",
     "engine_getPayloadV1",
     "engine_getPayloadV2",
@@ -29,6 +28,11 @@ pub struct EngineCapabilities {
 }
 
 impl EngineCapabilities {
+    /// Creates a new `EngineCapabilities` instance with the given capabilities.
+    pub fn new(capabilities: impl IntoIterator<Item: Into<String>>) -> Self {
+        Self { inner: capabilities.into_iter().map(Into::into).collect() }
+    }
+
     /// Returns the list of all supported Engine capabilities for Prague spec.
     fn prague() -> Self {
         Self { inner: CAPABILITIES.iter().copied().map(str::to_owned).collect() }
@@ -37,6 +41,16 @@ impl EngineCapabilities {
     /// Returns the list of all supported Engine capabilities.
     pub fn list(&self) -> Vec<String> {
         self.inner.iter().cloned().collect()
+    }
+
+    /// Inserts a new capability.
+    pub fn add_capability(&mut self, capability: impl Into<String>) {
+        self.inner.insert(capability.into());
+    }
+
+    /// Removes a capability.
+    pub fn remove_capability(&mut self, capability: &str) -> Option<String> {
+        self.inner.take(capability)
     }
 }
 

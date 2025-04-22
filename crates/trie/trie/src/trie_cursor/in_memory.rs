@@ -62,7 +62,7 @@ pub struct InMemoryAccountTrieCursor<'a, C> {
 impl<'a, C: TrieCursor> InMemoryAccountTrieCursor<'a, C> {
     /// Create new account trie cursor from underlying cursor and reference to
     /// [`TrieUpdatesSorted`].
-    pub const fn new(cursor: C, trie_updates: &'a TrieUpdatesSorted) -> Self {
+    pub fn new(cursor: C, trie_updates: &'a TrieUpdatesSorted) -> Self {
         let in_memory_cursor = ForwardInMemoryCursor::new(&trie_updates.account_nodes);
         Self {
             cursor,
@@ -157,7 +157,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryAccountTrieCursor<'_, C> {
 /// The cursor to iterate over storage trie updates and corresponding database entries.
 /// It will always give precedence to the data from the trie updates.
 #[derive(Debug)]
-#[allow(dead_code)]
+#[expect(dead_code)]
 pub struct InMemoryStorageTrieCursor<'a, C> {
     /// The hashed address of the account that trie belongs to.
     hashed_address: B256,

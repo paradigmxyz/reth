@@ -8,7 +8,7 @@ use crate::{
 };
 use alloy_primitives::{
     keccak256,
-    map::{B256HashMap, B256HashSet, HashMap, HashSet},
+    map::{B256Map, B256Set, HashMap, HashSet},
     Address, B256,
 };
 use alloy_rlp::{BufMut, Encodable};
@@ -93,7 +93,7 @@ where
         slots: &[B256],
     ) -> Result<AccountProof, StateProofError> {
         Ok(self
-            .multiproof(HashMap::from_iter([(
+            .multiproof(MultiProofTargets::from_iter([(
                 keccak256(address),
                 slots.iter().map(keccak256).collect(),
             )]))?
@@ -121,10 +121,10 @@ where
 
         // Initialize all storage multiproofs as empty.
         // Storage multiproofs for non empty tries will be overwritten if necessary.
-        let mut storages: B256HashMap<_> =
+        let mut storages: B256Map<_> =
             targets.keys().map(|key| (*key, StorageMultiProof::empty())).collect();
         let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
-        let mut account_node_iter = TrieNodeIter::new(walker, hashed_account_cursor);
+        let mut account_node_iter = TrieNodeIter::state_trie(walker, hashed_account_cursor);
         while let Some(account_node) = account_node_iter.try_next()? {
             match account_node {
                 TrieElement::Branch(node) => {
@@ -268,7 +268,7 @@ where
     /// Generate storage proof.
     pub fn storage_multiproof(
         mut self,
-        targets: B256HashSet,
+        targets: B256Set,
     ) -> Result<StorageMultiProof, StateProofError> {
         let mut hashed_storage_cursor =
             self.hashed_cursor_factory.hashed_storage_cursor(self.hashed_address)?;
@@ -288,7 +288,7 @@ where
         let mut hash_builder = HashBuilder::default()
             .with_proof_retainer(retainer)
             .with_updates(self.collect_branch_node_masks);
-        let mut storage_node_iter = TrieNodeIter::new(walker, hashed_storage_cursor);
+        let mut storage_node_iter = TrieNodeIter::storage_trie(walker, hashed_storage_cursor);
         while let Some(node) = storage_node_iter.try_next()? {
             match node {
                 TrieElement::Branch(node) => {

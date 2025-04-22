@@ -3,24 +3,23 @@
 
 use std::sync::Arc;
 
+use crate::{eth::EthTxBuilder, EthApiBuilder};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_network::Ethereum;
 use alloy_primitives::{Bytes, U256};
 use derive_more::Deref;
-use reth_primitives::NodePrimitives;
-use reth_provider::{
-    BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ProviderBlock,
-    ProviderReceipt,
-};
+use reth_node_api::{FullNodeComponents, FullNodeTypes};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
     node::RpcNodeCoreExt,
     EthApiTypes, RpcNodeCore,
 };
 use reth_rpc_eth_types::{
-    EthApiBuilderCtx, EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle,
-    PendingBlock,
+    EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
+};
+use reth_storage_api::{
+    BlockReader, BlockReaderIdExt, NodePrimitivesProvider, ProviderBlock, ProviderReceipt,
 };
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
@@ -28,9 +27,23 @@ use reth_tasks::{
 };
 use tokio::sync::{broadcast, Mutex};
 
-use crate::eth::EthTxBuilder;
-
 const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
+
+/// Helper type alias for [`EthApi`] with components from the given [`FullNodeComponents`].
+pub type EthApiFor<N> = EthApi<
+    <N as FullNodeTypes>::Provider,
+    <N as FullNodeComponents>::Pool,
+    <N as FullNodeComponents>::Network,
+    <N as FullNodeComponents>::Evm,
+>;
+
+/// Helper type alias for [`EthApi`] with components from the given [`FullNodeComponents`].
+pub type EthApiBuilderFor<N> = EthApiBuilder<
+    <N as FullNodeTypes>::Provider,
+    <N as FullNodeComponents>::Pool,
+    <N as FullNodeComponents>::Network,
+    <N as FullNodeComponents>::Evm,
+>;
 
 /// `Eth` API implementation.
 ///
@@ -41,6 +54,11 @@ const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
 /// separately in submodules. The rpc handler implementation can then delegate to the main impls.
 /// This way [`EthApi`] is not limited to [`jsonrpsee`] and can be used standalone or in other
 /// network handlers (for example ipc).
+///
+/// ## Trait requirements
+///
+/// While this type requires various unrestricted generic components, trait bounds are enforced when
+/// additional traits are implemented for this type.
 #[derive(Deref)]
 pub struct EthApi<Provider: BlockReader, Pool, Network, EvmConfig> {
     /// All nested fields bundled together.
@@ -63,8 +81,42 @@ impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConf
 where
     Provider: BlockReaderIdExt,
 {
+    /// Convenience fn to obtain a new [`EthApiBuilder`] instance with mandatory components.
+    ///
+    /// Creating an [`EthApi`] requires a few mandatory components:
+    ///  - provider: The type responsible for fetching requested data from disk.
+    ///  - transaction pool: To interact with the pool, submitting new transactions (e.g.
+    ///    `eth_sendRawTransactions`).
+    ///  - network: required to handle requests related to network state (e.g. `eth_syncing`).
+    ///  - evm config: Knows how create a new EVM instance to transact,estimate,call,trace.
+    ///
+    /// # Create an instance with noop ethereum implementations
+    ///
+    /// ```no_run
+    /// use reth_evm_ethereum::EthEvmConfig;
+    /// use reth_network_api::noop::NoopNetwork;
+    /// use reth_provider::noop::NoopProvider;
+    /// use reth_rpc::EthApi;
+    /// use reth_transaction_pool::noop::NoopTransactionPool;
+    /// let eth_api = EthApi::builder(
+    ///     NoopProvider::default(),
+    ///     NoopTransactionPool::default(),
+    ///     NoopNetwork::default(),
+    ///     EthEvmConfig::mainnet(),
+    /// )
+    /// .build();
+    /// ```
+    pub fn builder(
+        provider: Provider,
+        pool: Pool,
+        network: Network,
+        evm_config: EvmConfig,
+    ) -> EthApiBuilder<Provider, Pool, Network, EvmConfig> {
+        EthApiBuilder::new(provider, pool, network, evm_config)
+    }
+
     /// Creates a new, shareable instance using the default tokio task spawner.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         provider: Provider,
         pool: Pool,
@@ -91,51 +143,8 @@ where
             blocking_task_pool,
             fee_history_cache,
             evm_config,
-            TokioTaskExecutor::default(),
+            TokioTaskExecutor::default().boxed(),
             proof_permits,
-        );
-
-        Self { inner: Arc::new(inner), tx_resp_builder: EthTxBuilder }
-    }
-}
-
-impl<Provider, Pool, EvmConfig, Network> EthApi<Provider, Pool, Network, EvmConfig>
-where
-    Provider: ChainSpecProvider + BlockReaderIdExt + Clone + 'static,
-    Pool: Clone,
-    EvmConfig: Clone,
-    Network: Clone,
-{
-    /// Creates a new, shareable instance.
-    pub fn with_spawner<Tasks, Events>(
-        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
-    ) -> Self
-    where
-        Tasks: TaskSpawner + Clone + 'static,
-        Events: CanonStateSubscriptions<
-            Primitives: NodePrimitives<
-                Block = ProviderBlock<Provider>,
-                Receipt = ProviderReceipt<Provider>,
-            >,
-        >,
-    {
-        let blocking_task_pool =
-            BlockingTaskPool::build().expect("failed to build blocking task pool");
-
-        let inner = EthApiInner::new(
-            ctx.provider.clone(),
-            ctx.pool.clone(),
-            ctx.network.clone(),
-            ctx.cache.clone(),
-            ctx.new_gas_price_oracle(),
-            ctx.config.rpc_gas_cap,
-            ctx.config.rpc_max_simulate_blocks,
-            ctx.config.eth_proof_window,
-            blocking_task_pool,
-            ctx.new_fee_history_cache(),
-            ctx.evm_config.clone(),
-            ctx.executor.clone(),
-            ctx.config.proof_permits,
         );
 
         Self { inner: Arc::new(inner), tx_resp_builder: EthTxBuilder }
@@ -158,11 +167,12 @@ where
 
 impl<Provider, Pool, Network, EvmConfig> RpcNodeCore for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Provider: BlockReader + Clone + Unpin,
+    Provider: BlockReader + NodePrimitivesProvider + Clone + Unpin,
     Pool: Send + Sync + Clone + Unpin,
     Network: Send + Sync + Clone,
     EvmConfig: Send + Sync + Clone + Unpin,
 {
+    type Primitives = Provider::Primitives;
     type Provider = Provider;
     type Pool = Pool;
     type Evm = EvmConfig;
@@ -193,7 +203,7 @@ where
 impl<Provider, Pool, Network, EvmConfig> RpcNodeCoreExt
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Provider: BlockReader + Clone + Unpin,
+    Provider: BlockReader + NodePrimitivesProvider + Clone + Unpin,
     Pool: Send + Sync + Clone + Unpin,
     Network: Send + Sync + Clone,
     EvmConfig: Send + Sync + Clone + Unpin,
@@ -237,7 +247,7 @@ where
 }
 
 /// Container type `EthApi`
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 pub struct EthApiInner<Provider: BlockReader, Pool, Network, EvmConfig> {
     /// The transaction pool.
     pool: Pool,
@@ -282,7 +292,7 @@ where
     Provider: BlockReaderIdExt,
 {
     /// Creates a new, shareable instance using the default tokio task spawner.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         provider: Provider,
         pool: Pool,
@@ -295,7 +305,7 @@ where
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache,
         evm_config: EvmConfig,
-        task_spawner: impl TaskSpawner + 'static,
+        task_spawner: Box<dyn TaskSpawner + 'static>,
         proof_permits: usize,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
@@ -322,7 +332,7 @@ where
             max_simulate_blocks,
             eth_proof_window,
             starting_block,
-            task_spawner: Box::new(task_spawner),
+            task_spawner,
             pending_block: Default::default(),
             blocking_task_pool,
             fee_history_cache,
@@ -452,63 +462,46 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::EthApi;
-    use alloy_consensus::Header;
+    use crate::{EthApi, EthApiBuilder};
+    use alloy_consensus::{Block, BlockBody, Header};
     use alloy_eips::BlockNumberOrTag;
-    use alloy_primitives::{PrimitiveSignature as Signature, B256, U64};
+    use alloy_primitives::{Signature, B256, U64};
     use alloy_rpc_types::FeeHistory;
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
-    use reth_chainspec::{BaseFeeParams, ChainSpec};
+    use rand::Rng;
+    use reth_chain_state::CanonStateSubscriptions;
+    use reth_chainspec::{BaseFeeParams, ChainSpec, ChainSpecProvider};
+    use reth_ethereum_primitives::TransactionSigned;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
-    use reth_primitives::{Block, BlockBody, TransactionSigned};
-    use reth_provider::{
-        test_utils::{MockEthProvider, NoopProvider},
-        BlockReader, BlockReaderIdExt, ChainSpecProvider, StateProviderFactory,
-    };
+    use reth_provider::test_utils::{MockEthProvider, NoopProvider};
     use reth_rpc_eth_api::EthApiServer;
-    use reth_rpc_eth_types::{
-        EthStateCache, FeeHistoryCache, FeeHistoryCacheConfig, GasCap, GasPriceOracle,
-    };
-    use reth_rpc_server_types::constants::{
-        DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
-    };
-    use reth_tasks::pool::BlockingTaskPool;
-    use reth_testing_utils::{generators, generators::Rng};
+    use reth_storage_api::{BlockReader, BlockReaderIdExt, StateProviderFactory};
+    use reth_testing_utils::generators;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 
     fn build_test_eth_api<
         P: BlockReaderIdExt<
-                Block = reth_primitives::Block,
-                Receipt = reth_primitives::Receipt,
-                Header = reth_primitives::Header,
+                Block = reth_ethereum_primitives::Block,
+                Receipt = reth_ethereum_primitives::Receipt,
+                Header = alloy_consensus::Header,
             > + BlockReader
             + ChainSpecProvider<ChainSpec = ChainSpec>
             + StateProviderFactory
+            + CanonStateSubscriptions<Primitives = reth_ethereum_primitives::EthPrimitives>
             + Unpin
             + Clone
             + 'static,
     >(
         provider: P,
     ) -> EthApi<P, TestPool, NoopNetwork, EthEvmConfig> {
-        let evm_config = EthEvmConfig::new(provider.chain_spec());
-        let cache = EthStateCache::spawn(provider.clone(), Default::default());
-        let fee_history_cache = FeeHistoryCache::new(FeeHistoryCacheConfig::default());
-
-        EthApi::new(
+        EthApiBuilder::new(
             provider.clone(),
             testing_pool(),
             NoopNetwork::default(),
-            cache.clone(),
-            GasPriceOracle::new(provider, Default::default(), cache),
-            GasCap::default(),
-            DEFAULT_MAX_SIMULATE_BLOCKS,
-            DEFAULT_ETH_PROOF_WINDOW,
-            BlockingTaskPool::build().expect("failed to build tracing pool"),
-            fee_history_cache,
-            evm_config,
-            DEFAULT_PROOF_PERMITS,
+            EthEvmConfig::new(provider.chain_spec()),
         )
+        .build()
     }
 
     // Function to prepare the EthApi with mock data
@@ -527,11 +520,12 @@ mod tests {
         let mut parent_hash = B256::default();
 
         for i in (0..block_count).rev() {
-            let hash = rng.gen();
+            let hash = rng.random();
             // Note: Generates saner values to avoid invalid overflows later
-            let gas_limit = rng.gen::<u32>() as u64;
-            let base_fee_per_gas: Option<u64> = rng.gen::<bool>().then(|| rng.gen::<u32>() as u64);
-            let gas_used = rng.gen::<u32>() as u64;
+            let gas_limit = rng.random::<u32>() as u64;
+            let base_fee_per_gas: Option<u64> =
+                rng.random::<bool>().then(|| rng.random::<u32>() as u64);
+            let gas_used = rng.random::<u32>() as u64;
 
             let header = Header {
                 number: newest_block - i,
@@ -547,22 +541,24 @@ mod tests {
             const TOTAL_TRANSACTIONS: usize = 100;
             let mut transactions = Vec::with_capacity(TOTAL_TRANSACTIONS);
             for _ in 0..TOTAL_TRANSACTIONS {
-                let random_fee: u128 = rng.gen();
+                let random_fee: u128 = rng.random();
 
                 if let Some(base_fee_per_gas) = header.base_fee_per_gas {
                     let transaction = TransactionSigned::new_unhashed(
-                        reth_primitives::Transaction::Eip1559(alloy_consensus::TxEip1559 {
-                            max_priority_fee_per_gas: random_fee,
-                            max_fee_per_gas: random_fee + base_fee_per_gas as u128,
-                            ..Default::default()
-                        }),
+                        reth_ethereum_primitives::Transaction::Eip1559(
+                            alloy_consensus::TxEip1559 {
+                                max_priority_fee_per_gas: random_fee,
+                                max_fee_per_gas: random_fee + base_fee_per_gas as u128,
+                                ..Default::default()
+                            },
+                        ),
                         Signature::test_signature(),
                     );
 
                     transactions.push(transaction);
                 } else {
                     let transaction = TransactionSigned::new_unhashed(
-                        reth_primitives::Transaction::Legacy(Default::default()),
+                        reth_ethereum_primitives::Transaction::Legacy(Default::default()),
                         Signature::test_signature(),
                     );
 

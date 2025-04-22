@@ -115,6 +115,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![allow(unreachable_pub)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -143,6 +144,7 @@ mod network;
 mod session;
 mod state;
 mod swarm;
+mod trusted_peers_resolver;
 
 pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};
 pub use reth_eth_wire_types::{EthNetworkPrimitives, NetworkPrimitives};
@@ -167,4 +169,14 @@ pub use manager::NetworkManager;
 pub use metrics::TxTypesCounter;
 pub use network::{NetworkHandle, NetworkProtocols};
 pub use swarm::NetworkConnectionState;
-pub use transactions::{FilterAnnouncement, MessageFilter, ValidateTx68};
+pub use transactions::{FilterAnnouncement, MessageFilter};
+
+/// re-export p2p interfaces
+pub use reth_network_p2p as p2p;
+
+/// re-export types crate
+pub use reth_eth_wire_types as types;
+
+use aquamarine as _;
+
+use smallvec as _;

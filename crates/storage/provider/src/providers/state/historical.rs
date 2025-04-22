@@ -3,17 +3,16 @@ use crate::{
     HashedPostStateProvider, ProviderError, StateProvider, StateRootProvider,
 };
 use alloy_eips::merge::EPOCH_SLOTS;
-use alloy_primitives::{
-    map::B256HashMap, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256,
-};
-use reth_db::{tables, BlockNumberList};
+use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     models::{storage_sharded_key::StorageShardedKey, ShardedKey},
     table::Table,
+    tables,
     transaction::DbTx,
+    BlockNumberList,
 };
-use reth_primitives::{Account, Bytecode};
+use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
     BlockNumReader, DBProvider, StateCommitmentProvider, StateProofProvider, StorageRootProvider,
 };
@@ -384,20 +383,18 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StateProof
         Proof::overlay_multiproof(self.tx(), input, targets).map_err(ProviderError::from)
     }
 
-    fn witness(
-        &self,
-        mut input: TrieInput,
-        target: HashedPostState,
-    ) -> ProviderResult<B256HashMap<Bytes>> {
+    fn witness(&self, mut input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
         input.prepend(self.revert_state()?);
-        TrieWitness::overlay_witness(self.tx(), input, target).map_err(ProviderError::from)
+        TrieWitness::overlay_witness(self.tx(), input, target)
+            .map_err(ProviderError::from)
+            .map(|hm| hm.into_values().collect())
     }
 }
 
 impl<Provider: StateCommitmentProvider> HashedPostStateProvider
     for HistoricalStateProviderRef<'_, Provider>
 {
-    fn hashed_post_state(&self, bundle_state: &revm::db::BundleState) -> HashedPostState {
+    fn hashed_post_state(&self, bundle_state: &revm_database::BundleState) -> HashedPostState {
         HashedPostState::from_bundle_state::<
             <Provider::StateCommitment as StateCommitment>::KeyHasher,
         >(bundle_state.state())
@@ -543,24 +540,26 @@ mod tests {
         AccountReader, HistoricalStateProvider, HistoricalStateProviderRef, StateProvider,
     };
     use alloy_primitives::{address, b256, Address, B256, U256};
-    use reth_db::{tables, BlockNumberList};
     use reth_db_api::{
         models::{storage_sharded_key::StorageShardedKey, AccountBeforeTx, ShardedKey},
+        tables,
         transaction::{DbTx, DbTxMut},
+        BlockNumberList,
     };
-    use reth_primitives::{Account, StorageEntry};
+    use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_api::{
         BlockHashReader, BlockNumReader, DBProvider, DatabaseProviderFactory,
         StateCommitmentProvider,
     };
     use reth_storage_errors::provider::ProviderError;
 
-    const ADDRESS: Address = address!("0000000000000000000000000000000000000001");
-    const HIGHER_ADDRESS: Address = address!("0000000000000000000000000000000000000005");
-    const STORAGE: B256 = b256!("0000000000000000000000000000000000000000000000000000000000000001");
+    const ADDRESS: Address = address!("0x0000000000000000000000000000000000000001");
+    const HIGHER_ADDRESS: Address = address!("0x0000000000000000000000000000000000000005");
+    const STORAGE: B256 =
+        b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
 
     const fn assert_state_provider<T: StateProvider>() {}
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     const fn assert_historical_state_provider<
         T: DBProvider + BlockNumReader + BlockHashReader + StateCommitmentProvider,
     >() {

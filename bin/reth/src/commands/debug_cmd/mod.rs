@@ -5,8 +5,9 @@ use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::CliNodeTypes;
 use reth_cli_runner::CliContext;
+use reth_ethereum_primitives::EthPrimitives;
 use reth_node_ethereum::EthEngineTypes;
-use reth_primitives::EthPrimitives;
+use std::sync::Arc;
 
 mod build_block;
 mod execution;
@@ -36,7 +37,11 @@ pub enum Subcommands<C: ChainSpecParser> {
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Execute `debug` command
     pub async fn execute<
-        N: CliNodeTypes<Engine = EthEngineTypes, Primitives = EthPrimitives, ChainSpec = C::ChainSpec>,
+        N: CliNodeTypes<
+            Payload = EthEngineTypes,
+            Primitives = EthPrimitives,
+            ChainSpec = C::ChainSpec,
+        >,
     >(
         self,
         ctx: CliContext,
@@ -46,6 +51,15 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             Subcommands::Merkle(command) => command.execute::<N>(ctx).await,
             Subcommands::InMemoryMerkle(command) => command.execute::<N>(ctx).await,
             Subcommands::BuildBlock(command) => command.execute::<N>(ctx).await,
+        }
+    }
+    /// Returns the underlying chain being used to run this command
+    pub const fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+        match &self.command {
+            Subcommands::Execution(command) => command.chain_spec(),
+            Subcommands::Merkle(command) => command.chain_spec(),
+            Subcommands::InMemoryMerkle(command) => command.chain_spec(),
+            Subcommands::BuildBlock(command) => command.chain_spec(),
         }
     }
 }

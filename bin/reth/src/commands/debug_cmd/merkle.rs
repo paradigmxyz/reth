@@ -1,5 +1,5 @@
 //! Command for debugging merkle tree calculation.
-use crate::{args::NetworkArgs, utils::get_single_header};
+use crate::{args::NetworkArgs, providers::ExecutionOutcome, utils::get_single_header};
 use alloy_eips::BlockHashOrNumber;
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
@@ -10,19 +10,18 @@ use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
 use reth_config::Config;
 use reth_consensus::{Consensus, ConsensusError};
-use reth_db::tables;
-use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
-use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
+use reth_db_api::{cursor::DbCursorRO, tables, transaction::DbTx};
+use reth_ethereum_primitives::EthPrimitives;
+use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_network_p2p::full_block::FullBlockClient;
 use reth_node_api::{BlockTy, NodePrimitives};
 use reth_node_ethereum::{consensus::EthBeaconConsensus, EthExecutorProvider};
-use reth_primitives::EthPrimitives;
 use reth_provider::{
     providers::ProviderNodeTypes, BlockNumReader, BlockWriter, ChainSpecProvider,
-    DatabaseProviderFactory, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
-    ProviderError, ProviderFactory, StateWriter, StorageLocation,
+    DatabaseProviderFactory, LatestStateProviderRef, OriginalValuesKnown, ProviderFactory,
+    StateWriter, StorageLocation,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::{
@@ -60,9 +59,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         N: ProviderNodeTypes<
             ChainSpec = C::ChainSpec,
             Primitives: NodePrimitives<
-                Block = reth_primitives::Block,
-                Receipt = reth_primitives::Receipt,
-                BlockHeader = reth_primitives::Header,
+                Block = reth_ethereum_primitives::Block,
+                Receipt = reth_ethereum_primitives::Receipt,
+                BlockHeader = alloy_consensus::Header,
             >,
         >,
     >(
@@ -112,7 +111,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let executor_provider = EthExecutorProvider::ethereum(provider_factory.chain_spec());
 
         // Initialize the fetch client
-        info!(target: "reth::cli", target_block_number=self.to, "Downloading tip of block range");
+        info!(target: "reth::cli", target_block_number = self.to, "Downloading tip of block range");
         let fetch_client = network.fetch_client().await?;
 
         // fetch the header at `self.to`
@@ -128,7 +127,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         info!(target: "reth::cli", target_block_number=self.to, "Finished downloading tip of block range");
 
         // build the full block client
-        let consensus: Arc<dyn Consensus<Error = ConsensusError>> =
+        let consensus: Arc<dyn Consensus<BlockTy<N>, Error = ConsensusError>> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
         let block_range_client = FullBlockClient::new(fetch_client, consensus);
 
@@ -143,32 +142,24 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             .get_full_block_range(to_header.hash_slow(), self.to - best_block_number)
             .await;
 
-        let mut td = provider_rw
-            .header_td_by_number(best_block_number)?
-            .ok_or(ProviderError::TotalDifficultyNotFound(best_block_number))?;
-
         let mut account_hashing_stage = AccountHashingStage::default();
         let mut storage_hashing_stage = StorageHashingStage::default();
         let mut merkle_stage = MerkleStage::default_execution();
 
         for block in blocks.into_iter().rev() {
             let block_number = block.number;
-            let sealed_block = block
-                .try_seal_with_senders::<BlockTy<N>>()
-                .map_err(|block| eyre::eyre!("Error sealing block with senders: {block:?}"))?;
+            let sealed_block =
+                block.try_recover().map_err(|_| eyre::eyre!("Error sealing block with senders"))?;
             trace!(target: "reth::cli", block_number, "Executing block");
 
             provider_rw.insert_block(sealed_block.clone(), StorageLocation::Database)?;
 
-            td += sealed_block.difficulty;
-            let mut executor = executor_provider.batch_executor(StateProviderDatabase::new(
-                LatestStateProviderRef::new(&provider_rw),
-            ));
-            executor.execute_and_verify_one(&sealed_block.clone().unseal())?;
-            let execution_outcome = executor.finalize();
+            let executor = executor_provider
+                .executor(StateProviderDatabase::new(LatestStateProviderRef::new(&provider_rw)));
+            let output = executor.execute(&sealed_block)?;
 
             provider_rw.write_state(
-                &execution_outcome,
+                &ExecutionOutcome::single(block_number, output),
                 OriginalValuesKnown::Yes,
                 StorageLocation::Database,
             )?;
@@ -310,5 +301,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         info!(target: "reth::cli", ?block_range, "Successfully validated incremental roots");
 
         Ok(())
+    }
+    /// Returns the underlying chain being used to run this command
+    pub const fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+        Some(&self.env.chain)
     }
 }

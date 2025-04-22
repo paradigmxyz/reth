@@ -8,8 +8,8 @@ use crate::{
 };
 use futures::Stream;
 use reth_eth_wire::{
-    capability::CapabilityMessage, errors::EthStreamError, Capabilities, DisconnectReason,
-    EthNetworkPrimitives, EthVersion, NetworkPrimitives, Status,
+    errors::EthStreamError, Capabilities, DisconnectReason, EthNetworkPrimitives, EthVersion,
+    NetworkPrimitives, Status,
 };
 use reth_network_api::{PeerRequest, PeerRequestSender};
 use reth_network_peers::PeerId;
@@ -80,7 +80,7 @@ impl<N: NetworkPrimitives> Swarm<N> {
     }
 
     /// Mutable access to the state.
-    pub(crate) fn state_mut(&mut self) -> &mut NetworkState<N> {
+    pub(crate) const fn state_mut(&mut self) -> &mut NetworkState<N> {
         &mut self.state
     }
 
@@ -95,7 +95,7 @@ impl<N: NetworkPrimitives> Swarm<N> {
     }
 
     /// Mutable access to the [`SessionManager`].
-    pub(crate) fn sessions_mut(&mut self) -> &mut SessionManager<N> {
+    pub(crate) const fn sessions_mut(&mut self) -> &mut SessionManager<N> {
         &mut self.sessions
     }
 }
@@ -148,9 +148,6 @@ impl<N: NetworkPrimitives> Swarm<N> {
             }
             SessionEvent::ValidMessage { peer_id, message } => {
                 Some(SwarmEvent::ValidMessage { peer_id, message })
-            }
-            SessionEvent::InvalidMessage { peer_id, capabilities, message } => {
-                Some(SwarmEvent::InvalidCapabilityMessage { peer_id, capabilities, message })
             }
             SessionEvent::IncomingPendingSessionClosed { remote_addr, error } => {
                 Some(SwarmEvent::IncomingPendingSessionClosed { remote_addr, error })
@@ -268,7 +265,7 @@ impl<N: NetworkPrimitives> Swarm<N> {
     }
 
     /// Set network connection state to `ShuttingDown`
-    pub(crate) fn on_shutdown_requested(&mut self) {
+    pub(crate) const fn on_shutdown_requested(&mut self) {
         self.state_mut().peers_mut().on_shutdown();
     }
 
@@ -279,7 +276,7 @@ impl<N: NetworkPrimitives> Swarm<N> {
     }
 
     /// Set network connection state to `Hibernate` or `Active`
-    pub(crate) fn on_network_state_change(&mut self, network_state: NetworkConnectionState) {
+    pub(crate) const fn on_network_state_change(&mut self, network_state: NetworkConnectionState) {
         self.state_mut().peers_mut().on_network_state_change(network_state);
     }
 }
@@ -343,14 +340,6 @@ pub(crate) enum SwarmEvent<N: NetworkPrimitives = EthNetworkPrimitives> {
         peer_id: PeerId,
         /// Message received from the peer
         message: PeerMessage<N>,
-    },
-    /// Received a message that does not match the announced capabilities of the peer.
-    InvalidCapabilityMessage {
-        peer_id: PeerId,
-        /// Announced capabilities of the remote peer.
-        capabilities: Arc<Capabilities>,
-        /// Message received from the peer.
-        message: CapabilityMessage<N>,
     },
     /// Received a bad message from the peer.
     BadMessage {

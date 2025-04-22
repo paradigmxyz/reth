@@ -94,6 +94,8 @@ pub trait HeadersClient: DownloadClient {
 }
 
 /// A Future that resolves to a single block body.
+///
+/// Returns `None` if the peer responded with an empty header response.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless polled"]
 pub struct SingleHeaderRequest<Fut> {

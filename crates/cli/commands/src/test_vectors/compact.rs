@@ -1,5 +1,5 @@
 use alloy_eips::eip4895::Withdrawals;
-use alloy_primitives::{hex, private::getrandom::getrandom, PrimitiveSignature, TxKind};
+use alloy_primitives::{hex, Signature, TxKind, B256};
 use arbitrary::Arbitrary;
 use eyre::{Context, Result};
 use proptest::{
@@ -17,13 +17,15 @@ use reth_codecs::alloy::{
     withdrawal::Withdrawal,
 };
 use reth_db::{
-    models::{AccountBeforeTx, StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals},
+    models::{
+        AccountBeforeTx, StaticFileBlockWithdrawals, StoredBlockBodyIndices, StoredBlockOmmers,
+        StoredBlockWithdrawals,
+    },
     ClientVersion,
 };
+use reth_ethereum_primitives::{Receipt, Transaction, TransactionSigned, TxType};
 use reth_fs_util as fs;
-use reth_primitives::{
-    Account, Log, LogData, Receipt, StorageEntry, Transaction, TransactionSigned, TxType,
-};
+use reth_primitives_traits::{Account, Log, LogData, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneMode};
 use reth_stages_types::{
     AccountHashingCheckpoint, CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint,
@@ -110,6 +112,7 @@ compact_types!(
         StoredBlockOmmers,
         StoredBlockBodyIndices,
         StoredBlockWithdrawals,
+        StaticFileBlockWithdrawals,
         // Manual implementations
         TransactionSigned,
         // Bytecode, // todo revm arbitrary
@@ -125,7 +128,7 @@ compact_types!(
     ],
     // These types require an extra identifier which is usually stored elsewhere (eg. parent type).
     identifier: [
-        PrimitiveSignature,
+        Signature,
         Transaction,
         TxType,
         TxKind
@@ -144,13 +147,12 @@ pub fn read_vectors() -> Result<()> {
 /// Generates a vector of type `T` to a file.
 pub fn generate_vectors_with(gen: &[fn(&mut TestRunner) -> eyre::Result<()>]) -> Result<()> {
     // Prepare random seed for test (same method as used by proptest)
-    let mut seed = [0u8; 32];
-    getrandom(&mut seed)?;
+    let seed = B256::random();
     println!("Seed for compact test vectors: {:?}", hex::encode_prefixed(seed));
 
     // Start the runner with the seed
     let config = ProptestConfig::default();
-    let rng = TestRng::from_seed(config.rng_algorithm, &seed);
+    let rng = TestRng::from_seed(config.rng_algorithm, &seed.0);
     let mut runner = TestRunner::new_with_rng(config, rng);
 
     fs::create_dir_all(VECTORS_FOLDER)?;
@@ -195,7 +197,7 @@ where
     let type_name = type_name::<T>();
     print!("{}", &type_name);
 
-    let mut bytes = std::iter::repeat(0u8).take(256).collect::<Vec<u8>>();
+    let mut bytes = std::iter::repeat_n(0u8, 256).collect::<Vec<u8>>();
     let mut compact_buffer = vec![];
 
     let mut values = Vec::with_capacity(VECTOR_SIZE);
@@ -211,7 +213,7 @@ where
                 Err(err) => {
                     if tries < 5 && matches!(err, arbitrary::Error::NotEnoughData) {
                         tries += 1;
-                        bytes.extend(std::iter::repeat(0u8).take(256));
+                        bytes.extend(std::iter::repeat_n(0u8, 256));
                     } else {
                         return Err(err)?
                     }

@@ -15,7 +15,7 @@
 //! - `min-error-logs`: Disables all logs below `error` level.
 //! - `min-warn-logs`: Disables all logs below `warn` level.
 //! - `min-info-logs`: Disables all logs below `info` level. This can speed up the node, since fewer
-//!   calls to the logging component is made.
+//!   calls to the logging component are made.
 //! - `min-debug-logs`: Disables all logs below `debug` level.
 //! - `min-trace-logs`: Disables all logs below `trace` level.
 #![doc(
@@ -24,8 +24,6 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-// The `optimism` feature must be enabled to use this crate.
-#![cfg(feature = "optimism")]
 
 /// Re-exported from `reth_optimism_cli`.
 pub mod cli {

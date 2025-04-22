@@ -68,7 +68,7 @@ pub fn maybe_generate_tests(
 
                     // get random instance of type
                     let mut raw = vec![0u8; 1024];
-                    rand::thread_rng().fill_bytes(&mut raw);
+                    rand::rng().fill_bytes(&mut raw);
                     let mut unstructured = arbitrary::Unstructured::new(&raw[..]);
                     let val: Result<super::#type_ident, _> = arbitrary::Arbitrary::arbitrary(&mut unstructured);
                     if val.is_err() {
@@ -98,7 +98,7 @@ pub fn maybe_generate_tests(
     let mut tests = TokenStream2::default();
     if !roundtrips.is_empty() {
         tests = quote! {
-            #[allow(non_snake_case)]
+            #[expect(non_snake_case)]
             #[cfg(test)]
             mod #mod_tests {
                 #(#traits)*

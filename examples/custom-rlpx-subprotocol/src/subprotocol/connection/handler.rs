@@ -2,11 +2,11 @@ use super::CustomRlpxConnection;
 use crate::subprotocol::protocol::{
     event::ProtocolEvent, handler::ProtocolState, proto::CustomRlpxProtoMessage,
 };
-use reth_eth_wire::{
-    capability::SharedCapabilities, multiplex::ProtocolConnection, protocol::Protocol,
+use reth_ethereum::network::{
+    api::{Direction, PeerId},
+    eth_wire::{capability::SharedCapabilities, multiplex::ProtocolConnection, protocol::Protocol},
+    protocol::{ConnectionHandler, OnNotSupported},
 };
-use reth_network::protocol::{ConnectionHandler, OnNotSupported};
-use reth_network_api::{Direction, PeerId};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 

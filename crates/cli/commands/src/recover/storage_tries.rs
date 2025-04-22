@@ -4,14 +4,15 @@ use clap::Parser;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
-use reth_db::tables;
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRW},
+    tables,
     transaction::DbTx,
 };
 use reth_provider::{BlockNumReader, HeaderProvider, ProviderError};
 use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
+use std::sync::Arc;
 use tracing::*;
 
 /// `reth recover storage-tries` command
@@ -64,5 +65,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         info!(target: "reth::cli", deleted = deleted_tries, "Finished recovery");
 
         Ok(())
+    }
+}
+
+impl<C: ChainSpecParser> Command<C> {
+    /// Returns the underlying chain being used to run this command
+    pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+        Some(&self.env.chain)
     }
 }

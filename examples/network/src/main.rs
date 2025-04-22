@@ -2,16 +2,19 @@
 //!
 //! Run with
 //!
-//! ```not_rust
+//! ```sh
 //! cargo run --release -p network
 //! ```
 
+#![warn(unused_crate_dependencies)]
+
 use futures::StreamExt;
-use reth_network::{
-    config::rng_secret_key, EthNetworkPrimitives, NetworkConfig, NetworkEventListenerProvider,
-    NetworkManager,
+use reth_ethereum::{
+    network::{
+        config::rng_secret_key, NetworkConfig, NetworkEventListenerProvider, NetworkManager,
+    },
+    provider::test_utils::NoopProvider,
 };
-use reth_provider::test_utils::NoopProvider;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
@@ -25,7 +28,7 @@ async fn main() -> eyre::Result<()> {
     let config = NetworkConfig::builder(local_key).mainnet_boot_nodes().build(client);
 
     // create the network instance
-    let network = NetworkManager::<EthNetworkPrimitives>::new(config).await?;
+    let network = NetworkManager::eth(config).await?;
 
     // get a handle to the network to interact with it
     let handle = network.handle().clone();

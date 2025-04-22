@@ -1,22 +1,34 @@
 //! Utilities for serving `eth_simulateV1`
 
+use crate::{
+    error::{
+        api::{FromEthApiError, FromEvmHalt},
+        ToRpcError,
+    },
+    EthApiError, RevertError,
+};
 use alloy_consensus::{BlockHeader, Transaction as _, TxType};
+use alloy_eips::eip2718::WithEncoded;
 use alloy_rpc_types_eth::{
     simulate::{SimCallResult, SimulateError, SimulatedBlock},
     transaction::TransactionRequest,
     Block, BlockTransactionsKind, Header,
 };
 use jsonrpsee_types::ErrorObject;
-use reth_primitives::BlockWithSenders;
-use reth_primitives_traits::{block::BlockTx, BlockBody as _, SignedTransaction};
+use reth_evm::{
+    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
+    Evm,
+};
+use reth_primitives_traits::{
+    block::BlockTx, BlockBody as _, Recovered, RecoveredBlock, SignedTransaction, TxTy,
+};
 use reth_rpc_server_types::result::rpc_err;
 use reth_rpc_types_compat::{block::from_block, TransactionCompat};
-use revm::Database;
-use revm_primitives::{Address, Bytes, ExecutionResult, TxKind};
-
-use crate::{
-    error::{api::FromEthApiError, ToRpcError},
-    EthApiError, RevertError, RpcInvalidTransactionError,
+use reth_storage_api::noop::NoopProvider;
+use revm::{
+    context_interface::result::ExecutionResult,
+    primitives::{Address, Bytes, TxKind},
+    Database,
 };
 
 /// Errors which may occur during `eth_simulateV1` execution.
@@ -45,26 +57,72 @@ impl ToRpcError for EthSimulateError {
     }
 }
 
+/// Converts all [`TransactionRequest`]s into [`Recovered`] transactions and applies them to the
+/// given [`BlockExecutor`].
+///
+/// Returns all executed transactions and the result of the execution.
+#[expect(clippy::type_complexity)]
+pub fn execute_transactions<S, T>(
+    mut builder: S,
+    calls: Vec<TransactionRequest>,
+    default_gas_limit: u64,
+    chain_id: u64,
+    tx_resp_builder: &T,
+) -> Result<
+    (
+        BlockBuilderOutcome<S::Primitives>,
+        Vec<ExecutionResult<<<S::Executor as BlockExecutor>::Evm as Evm>::HaltReason>>,
+    ),
+    EthApiError,
+>
+where
+    S: BlockBuilder<Executor: BlockExecutor<Evm: Evm<DB: Database<Error: Into<EthApiError>>>>>,
+    T: TransactionCompat<TxTy<S::Primitives>>,
+{
+    builder.apply_pre_execution_changes()?;
+
+    let mut results = Vec::with_capacity(calls.len());
+    for call in calls {
+        // Resolve transaction, populate missing fields and enforce calls
+        // correctness.
+        let tx = resolve_transaction(
+            call,
+            default_gas_limit,
+            builder.evm().block().basefee,
+            chain_id,
+            builder.evm_mut().db_mut(),
+            tx_resp_builder,
+        )?;
+        // Create transaction with an empty envelope.
+        // The effect for a layer-2 execution client is that it does not charge L1 cost.
+        let tx = WithEncoded::new(Default::default(), tx);
+
+        builder
+            .execute_transaction_with_result_closure(tx, |result| results.push(result.clone()))?;
+    }
+
+    // Pass noop provider to skip state root calculations.
+    let result = builder.finish(NoopProvider::default())?;
+
+    Ok((result, results))
+}
+
 /// Goes over the list of [`TransactionRequest`]s and populates missing fields trying to resolve
 /// them into primitive transactions.
 ///
-/// If validation is enabled, the function will return error if any of the transactions can't be
-/// built right away.
+/// This will set the defaults as defined in <https://github.com/ethereum/execution-apis/blob/e56d3208789259d0b09fa68e9d8594aa4d73c725/docs/ethsimulatev1-notes.md#default-values-for-transactions>
 pub fn resolve_transaction<DB: Database, Tx, T: TransactionCompat<Tx>>(
     mut tx: TransactionRequest,
-    validation: bool,
     default_gas_limit: u64,
+    block_base_fee_per_gas: u64,
     chain_id: u64,
     db: &mut DB,
     tx_resp_builder: &T,
-) -> Result<Tx, EthApiError>
+) -> Result<Recovered<Tx>, EthApiError>
 where
-    EthApiError: From<DB::Error>,
+    DB::Error: Into<EthApiError>,
 {
-    if tx.buildable_type().is_none() && validation {
-        return Err(EthApiError::TransactionConversionError);
-    }
-    // If we're missing any fields and validation is disabled, we try filling nonce, gas and
+    // If we're missing any fields we try to fill nonce, gas and
     // gas price.
     let tx_type = tx.preferred_type();
 
@@ -76,7 +134,8 @@ where
     };
 
     if tx.nonce.is_none() {
-        tx.nonce = Some(db.basic(from)?.map(|acc| acc.nonce).unwrap_or_default());
+        tx.nonce =
+            Some(db.basic(from).map_err(Into::into)?.map(|acc| acc.nonce).unwrap_or_default());
     }
 
     if tx.gas.is_none() {
@@ -91,34 +150,49 @@ where
         tx.to = Some(TxKind::Create);
     }
 
-    match tx_type {
-        TxType::Legacy | TxType::Eip2930 => {
-            if tx.gas_price.is_none() {
-                tx.gas_price = Some(0);
+    // if we can't build the _entire_ transaction yet, we need to check the fee values
+    if tx.buildable_type().is_none() {
+        match tx_type {
+            TxType::Legacy | TxType::Eip2930 => {
+                if tx.gas_price.is_none() {
+                    tx.gas_price = Some(block_base_fee_per_gas as u128);
+                }
             }
-        }
-        _ => {
-            if tx.max_fee_per_gas.is_none() {
-                tx.max_fee_per_gas = Some(0);
-                tx.max_priority_fee_per_gas = Some(0);
+            _ => {
+                // set dynamic 1559 fees
+                if tx.max_fee_per_gas.is_none() {
+                    let mut max_fee_per_gas = block_base_fee_per_gas as u128;
+                    if let Some(prio_fee) = tx.max_priority_fee_per_gas {
+                        // if a prio fee is provided we need to select the max fee accordingly
+                        // because the base fee must be higher than the prio fee.
+                        max_fee_per_gas = prio_fee.max(max_fee_per_gas);
+                    }
+                    tx.max_fee_per_gas = Some(max_fee_per_gas);
+                }
+                if tx.max_priority_fee_per_gas.is_none() {
+                    tx.max_priority_fee_per_gas = Some(0);
+                }
             }
         }
     }
 
-    tx_resp_builder.build_simulate_v1_transaction(tx).map_err(|e| EthApiError::other(e.into()))
+    let tx = tx_resp_builder
+        .build_simulate_v1_transaction(tx)
+        .map_err(|e| EthApiError::other(e.into()))?;
+
+    Ok(Recovered::new_unchecked(tx, from))
 }
 
 /// Handles outputs of the calls execution and builds a [`SimulatedBlock`].
 #[expect(clippy::type_complexity)]
-pub fn build_simulated_block<T, B>(
-    senders: Vec<Address>,
-    results: Vec<ExecutionResult>,
+pub fn build_simulated_block<T, B, Halt: Clone>(
+    block: RecoveredBlock<B>,
+    results: Vec<ExecutionResult<Halt>>,
     full_transactions: bool,
     tx_resp_builder: &T,
-    block: B,
 ) -> Result<SimulatedBlock<Block<T::Transaction, Header<B::Header>>>, T::Error>
 where
-    T: TransactionCompat<BlockTx<B>, Error: FromEthApiError>,
+    T: TransactionCompat<BlockTx<B>, Error: FromEthApiError + FromEvmHalt<Halt>>,
     B: reth_primitives_traits::Block,
 {
     let mut calls: Vec<SimCallResult> = Vec::with_capacity(results.len());
@@ -127,12 +201,12 @@ where
     for (index, (result, tx)) in results.iter().zip(block.body().transactions()).enumerate() {
         let call = match result {
             ExecutionResult::Halt { reason, gas_used } => {
-                let error = RpcInvalidTransactionError::halt(*reason, tx.gas_limit());
+                let error = T::Error::from_evm_halt(reason.clone(), tx.gas_limit());
                 SimCallResult {
                     return_data: Bytes::new(),
                     error: Some(SimulateError {
-                        code: error.error_code(),
                         message: error.to_string(),
+                        code: error.into().code(),
                     }),
                     gas_used: *gas_used,
                     logs: Vec::new(),
@@ -178,11 +252,9 @@ where
         calls.push(call);
     }
 
-    let block = BlockWithSenders::new_unchecked(block, senders);
-
     let txs_kind =
         if full_transactions { BlockTransactionsKind::Full } else { BlockTransactionsKind::Hashes };
 
-    let block = from_block(block, txs_kind, None, tx_resp_builder)?;
+    let block = from_block(block, txs_kind, tx_resp_builder)?;
     Ok(SimulatedBlock { inner: block, calls })
 }

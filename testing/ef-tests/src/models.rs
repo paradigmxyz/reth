@@ -5,12 +5,12 @@ use alloy_consensus::Header as RethHeader;
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::{keccak256, Address, Bloom, Bytes, B256, B64, U256};
 use reth_chainspec::{ChainSpec, ChainSpecBuilder};
-use reth_db::tables;
 use reth_db_api::{
     cursor::DbDupCursorRO,
+    tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{Account as RethAccount, Bytecode, SealedHeader, StorageEntry};
+use reth_primitives_traits::{Account as RethAccount, Bytecode, SealedHeader, StorageEntry};
 use serde::Deserialize;
 use std::{collections::BTreeMap, ops::Deref};
 
@@ -129,6 +129,10 @@ pub struct Block {
     pub block_header: Option<Header>,
     /// RLP encoded block bytes
     pub rlp: Bytes,
+    /// If the execution of the block should fail,
+    /// `expect_exception` is `Some`.
+    /// Its contents detail the reason for the failure.
+    pub expect_exception: Option<String>,
     /// Transactions
     pub transactions: Option<Vec<Transaction>>,
     /// Uncle/ommer headers

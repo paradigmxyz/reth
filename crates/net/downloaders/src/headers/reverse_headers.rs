@@ -4,7 +4,7 @@ use super::task::TaskDownloader;
 use crate::metrics::HeaderDownloaderMetrics;
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{BlockNumber, B256};
+use alloy_primitives::{BlockNumber, Sealable, B256};
 use futures::{stream::Stream, FutureExt};
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use rayon::prelude::*;
@@ -20,7 +20,7 @@ use reth_network_p2p::{
     priority::Priority,
 };
 use reth_network_peers::PeerId;
-use reth_primitives::{GotExpected, SealedHeader};
+use reth_primitives_traits::{GotExpected, SealedHeader};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
     cmp::{Ordering, Reverse},
@@ -31,7 +31,7 @@ use std::{
     task::{ready, Context, Poll},
 };
 use thiserror::Error;
-use tracing::{error, trace};
+use tracing::{debug, error, trace};
 
 /// A heuristic that is used to determine the number of requests that should be prepared for a peer.
 /// This should ensure that there are always requests lined up for peers to handle while the
@@ -40,14 +40,14 @@ const REQUESTS_PER_PEER_MULTIPLIER: usize = 5;
 
 /// Wrapper for internal downloader errors.
 #[derive(Error, Debug)]
-enum ReverseHeadersDownloaderError<H> {
+enum ReverseHeadersDownloaderError<H: Sealable> {
     #[error(transparent)]
     Downloader(#[from] HeadersDownloaderError<H>),
     #[error(transparent)]
     Response(#[from] Box<HeadersResponseError>),
 }
 
-impl<H> From<HeadersResponseError> for ReverseHeadersDownloaderError<H> {
+impl<H: Sealable> From<HeadersResponseError> for ReverseHeadersDownloaderError<H> {
     fn from(value: HeadersResponseError) -> Self {
         Self::Response(Box::new(value))
     }
@@ -203,6 +203,16 @@ where
         self.queued_validated_headers.last().or(self.lowest_validated_header.as_ref())
     }
 
+    /// Resets the request trackers and clears the sync target.
+    ///
+    /// This ensures the downloader will restart after a new sync target has been set.
+    fn reset(&mut self) {
+        debug!(target: "downloaders::headers", "Resetting headers downloader");
+        self.next_request_block_number = 0;
+        self.next_chain_tip_block_number = 0;
+        self.sync_target.take();
+    }
+
     /// Validate that the received header matches the expected sync target.
     fn validate_sync_target(
         &self,
@@ -251,7 +261,8 @@ where
     ) -> Result<(), ReverseHeadersDownloaderError<H::Header>> {
         let mut validated = Vec::with_capacity(headers.len());
 
-        let sealed_headers = headers.into_par_iter().map(SealedHeader::seal).collect::<Vec<_>>();
+        let sealed_headers =
+            headers.into_par_iter().map(SealedHeader::seal_slow).collect::<Vec<_>>();
         for parent in sealed_headers {
             // Validate that the header is the parent header of the last validated header.
             if let Some(validated_header) =
@@ -293,11 +304,23 @@ where
 
             // If the header is valid on its own, but not against its parent, we return it as
             // detached head error.
+            // In stage sync this will trigger an unwind because this means that the local head
+            // is not part of the chain the sync target is on. In other words, the downloader was
+            // unable to connect the sync target with the local head because the sync target and
+            // the local head or on different chains.
             if let Err(error) = self.consensus.validate_header_against_parent(&*last_header, head) {
+                let local_head = head.clone();
                 // Replace the last header with a detached variant
                 error!(target: "downloaders::headers", %error, number = last_header.number(), hash = ?last_header.hash(), "Header cannot be attached to known canonical chain");
+
+                // Reset trackers so that we can start over the next time the sync target is
+                // updated.
+                // The expected event flow when that happens is that the node will unwind the local
+                // chain and restart the downloader.
+                self.reset();
+
                 return Err(HeadersDownloaderError::DetachedHead {
-                    local_head: Box::new(head.clone()),
+                    local_head: Box::new(local_head),
                     header: Box::new(last_header.clone()),
                     error: Box::new(error),
                 }
@@ -378,7 +401,7 @@ where
                 }
 
                 let header = headers.swap_remove(0);
-                let target = SealedHeader::seal(header);
+                let target = SealedHeader::seal_slow(header);
 
                 match sync_target {
                     SyncTargetBlock::Hash(hash) | SyncTargetBlock::HashAndNumber { hash, .. } => {
@@ -673,6 +696,11 @@ where
             // headers are sorted high to low
             self.queued_validated_headers.pop();
         }
+        trace!(
+            target: "downloaders::headers",
+            head=?head.num_hash(),
+            "Updating local head"
+        );
         // update the local head
         self.local_head = Some(head);
     }
@@ -680,6 +708,12 @@ where
     /// If the given target is different from the current target, we need to update the sync target
     fn update_sync_target(&mut self, target: SyncTarget) {
         let current_tip = self.sync_target.as_ref().and_then(|t| t.hash());
+        trace!(
+            target: "downloaders::headers",
+            sync_target=?target,
+            current_tip=?current_tip,
+            "Updating sync target"
+        );
         match target {
             SyncTarget::Tip(tip) => {
                 if Some(tip) != current_tip {
@@ -920,7 +954,7 @@ struct HeadersRequestOutcome<H> {
 // === impl OrderedHeadersResponse ===
 
 impl<H> HeadersRequestOutcome<H> {
-    fn block_number(&self) -> u64 {
+    const fn block_number(&self) -> u64 {
         self.request.start.as_number().expect("is number")
     }
 }
@@ -936,7 +970,7 @@ struct OrderedHeadersResponse<H> {
 // === impl OrderedHeadersResponse ===
 
 impl<H> OrderedHeadersResponse<H> {
-    fn block_number(&self) -> u64 {
+    const fn block_number(&self) -> u64 {
         self.request.start.as_number().expect("is number")
     }
 }
@@ -1033,7 +1067,7 @@ impl SyncTargetBlock {
     ///
     /// If the target block is a hash, this be converted into a `HashAndNumber`, but return `None`.
     /// The semantics should be equivalent to that of `Option::replace`.
-    fn replace_number(&mut self, number: u64) -> Option<u64> {
+    const fn replace_number(&mut self, number: u64) -> Option<u64> {
         match self {
             Self::Hash(hash) => {
                 *self = Self::HashAndNumber { hash: *hash, number };

@@ -90,7 +90,7 @@ pub(crate) fn generate_flag_struct(
     quote! {
         #impl_bitflag_encoded_bytes
         pub use #mod_flags_ident::#flags_ident;
-        #[allow(non_snake_case)]
+        #[expect(non_snake_case)]
         mod #mod_flags_ident {
             use #reth_codecs::__private::Buf;
             use #reth_codecs::__private::modular_bitfield;

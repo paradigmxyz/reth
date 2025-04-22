@@ -3,7 +3,7 @@ use alloy_primitives::{keccak256, map::HashMap, Address, B256, U256};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use reth_trie::{HashedPostState, HashedStorage, KeccakKeyHasher};
-use revm::db::{states::BundleBuilder, BundleAccount};
+use revm_database::{states::BundleBuilder, BundleAccount};
 
 pub fn hash_post_state(c: &mut Criterion) {
     let mut group = c.benchmark_group("Hash Post State");
@@ -11,7 +11,7 @@ pub fn hash_post_state(c: &mut Criterion) {
 
     for size in [100, 1_000, 3_000, 5_000, 10_000] {
         // Too slow.
-        #[allow(unexpected_cfgs)]
+        #[expect(unexpected_cfgs)]
         if cfg!(codspeed) && size > 1_000 {
             continue;
         }

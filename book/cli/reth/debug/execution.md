@@ -9,17 +9,6 @@ $ reth debug execution --help
 Usage: reth debug execution [OPTIONS] --to <TO>
 
 Options:
-      --instance <INSTANCE>
-          Add a new instance of a node.
-
-          Configures the ports of the node to avoid conflicts with the defaults. This is useful for running multiple nodes on the same machine.
-
-          Max number of instances is 200. It is chosen in a way so that it's not possible to have port numbers that conflict with each other.
-
-          Changes to the following port numbers: - `DISCOVERY_PORT`: default + `instance` - 1 - `AUTH_PORT`: default + `instance` * 100 - 100 - `HTTP_RPC_PORT`: default - `instance` + 1 - `WS_RPC_PORT`: default + `instance` * 2 - 2
-
-          [default: 1]
-
   -h, --help
           Print help (see a summary with '-h')
 
@@ -46,7 +35,7 @@ Datadir:
           Possible values are either a built-in chain or the path to a chain specification file.
 
           Built-in chains:
-              mainnet, sepolia, holesky, dev
+              mainnet, sepolia, holesky, hoodi, dev
 
           [default: mainnet]
 
@@ -123,7 +112,7 @@ Networking:
       --discovery.v5.lookup-interval <DISCOVERY_V5_LOOKUP_INTERVAL>
           The interval in seconds at which to carry out periodic lookup queries, for the whole run of the program
 
-          [default: 60]
+          [default: 20]
 
       --discovery.v5.bootstrap.lookup-interval <DISCOVERY_V5_BOOTSTRAP_LOOKUP_INTERVAL>
           The interval in seconds at which to carry out boost lookup queries, for a fixed number of times, at bootstrap
@@ -133,7 +122,7 @@ Networking:
       --discovery.v5.bootstrap.lookup-countdown <DISCOVERY_V5_BOOTSTRAP_LOOKUP_COUNTDOWN>
           The number of times to carry out boost lookup queries at bootstrap
 
-          [default: 100]
+          [default: 200]
 
       --trusted-peers <TRUSTED_PEERS>
           Comma separated enode URLs of trusted peers for P2P connections.
@@ -244,6 +233,13 @@ Networking:
           Name of network interface used to communicate with peers.
 
           If flag is set, but no value is passed, the default interface for docker `eth0` is tried.
+
+      --tx-propagation-policy <TX_PROPAGATION_POLICY>
+          Transaction Propagation Policy
+
+          The policy determines which peers transactions are gossiped to.
+
+          [default: All]
 
       --to <TO>
           The maximum block height

@@ -68,7 +68,7 @@ where
         remote_id: PeerId,
     ) -> Result<Self, ECIESError> {
         let ecies = ECIESCodec::new_client(secret_key, remote_id)
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, "invalid handshake"))?;
+            .map_err(|_| io::Error::other("invalid handshake"))?;
 
         let mut transport = ecies.framed(transport);
 
@@ -137,10 +137,9 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match ready!(self.project().stream.poll_next(cx)) {
             Some(Ok(IngressECIESValue::Message(body))) => Poll::Ready(Some(Ok(body))),
-            Some(other) => Poll::Ready(Some(Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("ECIES stream protocol error: expected message, received {other:?}"),
-            )))),
+            Some(other) => Poll::Ready(Some(Err(io::Error::other(format!(
+                "ECIES stream protocol error: expected message, received {other:?}"
+            ))))),
             None => Poll::Ready(None),
         }
     }
@@ -181,7 +180,7 @@ mod tests {
     async fn can_write_and_read() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let server_key = SecretKey::new(&mut rand::thread_rng());
+        let server_key = SecretKey::new(&mut rand_08::thread_rng());
 
         let handle = tokio::spawn(async move {
             // roughly based off of the design of tokio::net::TcpListener
@@ -196,7 +195,7 @@ mod tests {
         // create the server pubkey
         let server_id = pk2id(&server_key.public_key(SECP256K1));
 
-        let client_key = SecretKey::new(&mut rand::thread_rng());
+        let client_key = SecretKey::new(&mut rand_08::thread_rng());
         let outgoing = TcpStream::connect(addr).await.unwrap();
         let mut client_stream =
             ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
@@ -210,7 +209,7 @@ mod tests {
     async fn connection_should_timeout() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let server_key = SecretKey::new(&mut rand::thread_rng());
+        let server_key = SecretKey::new(&mut rand_08::thread_rng());
 
         let _handle = tokio::spawn(async move {
             // Delay accepting the connection for longer than the client's timeout period
@@ -226,7 +225,7 @@ mod tests {
         // create the server pubkey
         let server_id = pk2id(&server_key.public_key(SECP256K1));
 
-        let client_key = SecretKey::new(&mut rand::thread_rng());
+        let client_key = SecretKey::new(&mut rand_08::thread_rng());
         let outgoing = TcpStream::connect(addr).await.unwrap();
 
         // Attempt to connect, expecting a timeout due to the server's delayed response

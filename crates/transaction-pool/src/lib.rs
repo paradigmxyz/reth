@@ -82,12 +82,14 @@
 //! use reth_chainspec::MAINNET;
 //! use reth_storage_api::StateProviderFactory;
 //! use reth_tasks::TokioTaskExecutor;
+//! use reth_chainspec::ChainSpecProvider;
 //! use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool, TransactionPool};
 //! use reth_transaction_pool::blobstore::InMemoryBlobStore;
-//! async fn t<C>(client: C)  where C: StateProviderFactory + Clone + 'static{
+//! use reth_chainspec::EthereumHardforks;
+//! async fn t<C>(client: C)  where C: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory + Clone + 'static{
 //!     let blob_store = InMemoryBlobStore::default();
 //!     let pool = Pool::eth_pool(
-//!         TransactionValidationTaskExecutor::eth(client, MAINNET.clone(), blob_store.clone(), TokioTaskExecutor::default()),
+//!         TransactionValidationTaskExecutor::eth(client, blob_store.clone(), TokioTaskExecutor::default()),
 //!         blob_store,
 //!         Default::default(),
 //!     );
@@ -126,7 +128,7 @@
 //!     let manager = TaskManager::new(rt.handle().clone());
 //!     let executor = manager.executor();
 //!     let pool = Pool::eth_pool(
-//!         TransactionValidationTaskExecutor::eth(client.clone(), MAINNET.clone(), blob_store.clone(), executor.clone()),
+//!         TransactionValidationTaskExecutor::eth(client.clone(), blob_store.clone(), executor.clone()),
 //!         blob_store,
 //!         Default::default(),
 //!     );
@@ -162,7 +164,7 @@ pub use crate::{
     ordering::{CoinbaseTipOrdering, Priority, TransactionOrdering},
     pool::{
         blob_tx_priority, fee_delta, state::SubPool, AllTransactionsEvents, FullTransactionEvent,
-        TransactionEvent, TransactionEvents,
+        NewTransactionEvent, TransactionEvent, TransactionEvents, TransactionListenerKind,
     },
     traits::*,
     validate::{
@@ -174,10 +176,10 @@ use crate::{identifier::TransactionId, pool::PoolInner};
 use alloy_eips::eip4844::{BlobAndProofV1, BlobTransactionSidecar};
 use alloy_primitives::{Address, TxHash, B256, U256};
 use aquamarine as _;
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
-use reth_primitives::RecoveredTx;
-use reth_primitives_traits::{BlockBody, BlockHeader};
+use reth_primitives_traits::{Block, Recovered};
 use reth_storage_api::StateProviderFactory;
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::mpsc::Receiver;
@@ -276,11 +278,17 @@ where
     pub fn is_exceeded(&self) -> bool {
         self.pool.is_exceeded()
     }
+
+    /// Returns the configured blob store.
+    pub fn blob_store(&self) -> &S {
+        self.pool.blob_store()
+    }
 }
 
 impl<Client, S> EthTransactionPool<Client, S>
 where
-    Client: StateProviderFactory + Clone + 'static,
+    Client:
+        ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory + Clone + 'static,
     S: BlobStore,
 {
     /// Returns a new [`Pool`] that uses the default [`TransactionValidationTaskExecutor`] when
@@ -292,15 +300,16 @@ where
     /// use reth_chainspec::MAINNET;
     /// use reth_storage_api::StateProviderFactory;
     /// use reth_tasks::TokioTaskExecutor;
+    /// use reth_chainspec::ChainSpecProvider;
     /// use reth_transaction_pool::{
     ///     blobstore::InMemoryBlobStore, Pool, TransactionValidationTaskExecutor,
     /// };
-    /// # fn t<C>(client: C)  where C: StateProviderFactory + Clone + 'static {
+    /// use reth_chainspec::EthereumHardforks;
+    /// # fn t<C>(client: C)  where C: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory + Clone + 'static {
     /// let blob_store = InMemoryBlobStore::default();
     /// let pool = Pool::eth_pool(
     ///     TransactionValidationTaskExecutor::eth(
     ///         client,
-    ///         MAINNET.clone(),
     ///         blob_store.clone(),
     ///         TokioTaskExecutor::default(),
     ///     ),
@@ -423,7 +432,7 @@ where
     fn get_pooled_transaction_element(
         &self,
         tx_hash: TxHash,
-    ) -> Option<RecoveredTx<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>>
+    ) -> Option<Recovered<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>>
     {
         self.pool.get_pooled_transaction_element(tx_hash)
     }
@@ -614,10 +623,9 @@ where
         self.pool.set_block_info(info)
     }
 
-    fn on_canonical_state_change<H, B>(&self, update: CanonicalStateUpdate<'_, H, B>)
+    fn on_canonical_state_change<B>(&self, update: CanonicalStateUpdate<'_, B>)
     where
-        H: BlockHeader,
-        B: BlockBody,
+        B: Block,
     {
         self.pool.on_canonical_state_change(update);
     }

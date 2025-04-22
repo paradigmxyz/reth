@@ -14,6 +14,7 @@ mod engine_api;
 
 /// Engine API capabilities.
 pub mod capabilities;
+pub use capabilities::EngineCapabilities;
 
 /// Engine API error.
 mod error;
@@ -28,7 +29,6 @@ pub use error::*;
 pub use reth_rpc_api::EngineApiServer;
 
 #[cfg(test)]
-#[allow(unused_imports)]
 mod tests {
     // silence unused import warning
     use alloy_rlp as _;

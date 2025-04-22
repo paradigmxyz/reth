@@ -49,7 +49,6 @@ reth-tracing.workspace = true
 reth-tasks.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-primitives.workspace = true
-reth-payload-validator.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-static-file.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
@@ -57,14 +56,18 @@ reth-trie-db = { workspace = true, features = ["metrics"] }
 reth-node-api.workspace = true
 reth-node-core.workspace = true
 reth-ethereum-payload-builder.workspace = true
+reth-ethereum-primitives.workspace = true
 reth-node-ethereum = { workspace = true, features = ["js-tracer"] }
 reth-node-builder.workspace = true
 reth-node-events.workspace = true
 reth-node-metrics.workspace = true
 reth-consensus.workspace = true
 reth-prune.workspace = true
+reth-tokio-util.workspace = true
+reth-ress-protocol.workspace = true
+reth-ress-provider.workspace = true
 
-# crypto
+# alloy
 alloy-eips = { workspace = true, features = ["kzg"] }
 alloy-rlp.workspace = true
 alloy-rpc-types = { workspace = true, features = ["engine"] }
@@ -78,12 +81,7 @@ tracing.workspace = true
 serde_json.workspace = true
 
 # async
-tokio = { workspace = true, features = [
-    "sync",
-    "macros",
-    "time",
-    "rt-multi-thread",
-] }
+tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thread"] }
 futures.workspace = true
 
 # misc
@@ -97,14 +95,14 @@ similar-asserts.workspace = true
 tempfile.workspace = true
 
 [features]
-default = ["jemalloc"]
+default = ["jemalloc", "reth-revm/portable"]
 
 dev = ["reth-cli-commands/arbitrary"]
 
 asm-keccak = [
-	"reth-node-core/asm-keccak",
-	"reth-primitives/asm-keccak",
-	"alloy-primitives/asm-keccak"
+    "reth-node-core/asm-keccak",
+    "reth-primitives/asm-keccak",
+    "alloy-primitives/asm-keccak",
 ]
 
 jemalloc = [
@@ -113,10 +111,16 @@ jemalloc = [
     "reth-node-metrics/jemalloc",
 ]
 jemalloc-prof = [
-	"reth-cli-util/jemalloc",
-	"reth-cli-util/jemalloc-prof"
+    "reth-cli-util/jemalloc",
+    "reth-cli-util/jemalloc-prof",
 ]
 tracy-allocator = ["reth-cli-util/tracy-allocator"]
+
+# Because jemalloc is default and preferred over snmalloc when both features are
+# enabled, `--no-default-features` should be used when enabling snmalloc or
+# snmalloc-native.
+snmalloc = ["reth-cli-util/snmalloc"]
+snmalloc-native = ["reth-cli-util/snmalloc-native"]
 
 min-error-logs = ["tracing/release_max_level_error"]
 min-warn-logs = ["tracing/release_max_level_warn"]

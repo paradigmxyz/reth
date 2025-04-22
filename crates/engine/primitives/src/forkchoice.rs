@@ -19,7 +19,7 @@ impl ForkchoiceStateTracker {
     ///
     /// If the status is `VALID`, we also update the last valid forkchoice state and set the
     /// `sync_target` to `None`, since we're now fully synced.
-    pub fn set_latest(&mut self, state: ForkchoiceState, status: ForkchoiceStatus) {
+    pub const fn set_latest(&mut self, state: ForkchoiceState, status: ForkchoiceStatus) {
         if status.is_valid() {
             self.set_valid(state);
         } else if status.is_syncing() {
@@ -30,7 +30,7 @@ impl ForkchoiceStateTracker {
         self.latest = Some(received);
     }
 
-    fn set_valid(&mut self, state: ForkchoiceState) {
+    const fn set_valid(&mut self, state: ForkchoiceState) {
         // we no longer need to sync to this state.
         self.last_syncing = None;
 
@@ -45,31 +45,29 @@ impl ForkchoiceStateTracker {
     }
 
     /// Returns whether the latest received FCU is valid: [`ForkchoiceStatus::Valid`]
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub(crate) fn is_latest_valid(&self) -> bool {
         self.latest_status().is_some_and(|s| s.is_valid())
     }
 
     /// Returns whether the latest received FCU is syncing: [`ForkchoiceStatus::Syncing`]
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub(crate) fn is_latest_syncing(&self) -> bool {
         self.latest_status().is_some_and(|s| s.is_syncing())
     }
 
     /// Returns whether the latest received FCU is syncing: [`ForkchoiceStatus::Invalid`]
-    #[allow(dead_code)]
     pub fn is_latest_invalid(&self) -> bool {
         self.latest_status().is_some_and(|s| s.is_invalid())
     }
 
     /// Returns the last valid head hash.
-    #[allow(dead_code)]
     pub fn last_valid_head(&self) -> Option<B256> {
         self.last_valid.as_ref().map(|s| s.head_block_hash)
     }
 
     /// Returns the head hash of the latest received FCU to which we need to sync.
-    #[allow(dead_code)]
+    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn sync_target(&self) -> Option<B256> {
         self.last_syncing.as_ref().map(|s| s.head_block_hash)
     }
@@ -77,8 +75,8 @@ impl ForkchoiceStateTracker {
     /// Returns the latest received [`ForkchoiceState`].
     ///
     /// Caution: this can be invalid.
-    pub const fn latest_state(&self) -> Option<ForkchoiceState> {
-        self.last_valid
+    pub fn latest_state(&self) -> Option<ForkchoiceState> {
+        self.latest.as_ref().map(|s| s.state)
     }
 
     /// Returns the last valid [`ForkchoiceState`].
@@ -123,7 +121,6 @@ impl ForkchoiceStateTracker {
 
 /// Represents a forkchoice update and tracks the status we assigned to it.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub(crate) struct ReceivedForkchoiceState {
     state: ForkchoiceState,
     status: ForkchoiceStatus,

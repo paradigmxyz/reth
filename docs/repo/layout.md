@@ -82,7 +82,6 @@ The networking component mainly lives in [`net/network`](../../crates/net/networ
 Different consensus mechanisms.
 
 - [`consensus/common`](../../crates/consensus/common): Common consensus functions and traits (e.g. fee calculation)
-- [`consensus/beacon`](../../crates/consensus/beacon): Consensus mechanism that handles messages from a beacon node ("eth2")
 
 ### Execution
 
@@ -97,7 +96,6 @@ Crates related to transaction execution.
 
 These crates implement the main syncing drivers of reth.
 
-- [`blockchain-tree`](../../crates/blockchain-tree): A tree-like structure for handling multiple chains of unfinalized blocks. This is the main component during live sync (i.e. syncing at the tip)
 - [`stages`](../../crates/stages): A pipelined sync, including implementation of various stages. This is used during initial sync and is faster than the tree-like structure for longer sync ranges.
 
 ### RPC
@@ -167,7 +165,9 @@ Small utility crates.
 
 - [`tasks`](../../crates/tasks): An executor-agnostic task abstraction, used to spawn tasks on different async executors. Supports blocking tasks and handles panics gracefully. A tokio implementation is provided by default.
 - [`metrics/common`](../../crates/metrics/src/common): Common metrics types (e.g. metered channels)
+- [`metrics`](https://github.com/metrics-rs/metrics): Reth use [metrics][metrics] for metrics collection, which is a lightweight metrics facade
 - [`metrics/metrics-derive`](https://github.com/rkrasiuk/metrics-derive): A derive-style API for creating metrics
+- [`metrics/reth-node-metrics`](../../crates/node/metrics/): The implementation of metrics server, recorder, hooks.
 - [`tracing`](../../crates/tracing): A small utility crate to install a uniform [`tracing`][tracing] subscriber
 
 [libmdbx-rs]: https://crates.io/crates/libmdbx
@@ -176,3 +176,4 @@ Small utility crates.
 [tracing]: https://crates.io/crates/tracing
 [eip-1459]: https://eips.ethereum.org/EIPS/eip-1459
 [engine-spec]: https://github.com/ethereum/execution-apis/tree/main/src/engine
+[metrics]: https://github.com/metrics-rs/metrics

@@ -1,15 +1,14 @@
 //! Metered cache, which also provides storage for senders in order to queue queries that result in
 //! a cache miss.
 
+use super::metrics::CacheMetrics;
+use reth_primitives_traits::InMemorySize;
+use schnellru::{ByLength, Limiter, LruMap};
 use std::{
     collections::{hash_map::Entry, HashMap},
     fmt::{self, Debug, Formatter},
     hash::Hash,
 };
-
-use schnellru::{ByLength, Limiter, LruMap};
-
-use super::metrics::CacheMetrics;
 
 /// A multi-consumer LRU cache.
 pub struct MultiConsumerLruCache<K, V, L, S>
@@ -23,6 +22,8 @@ where
     queued: HashMap<K, Vec<S>>,
     /// Cache metrics
     metrics: CacheMetrics,
+    // Tracked heap usage
+    memory_usage: usize,
 }
 
 impl<K, V, L, S> Debug for MultiConsumerLruCache<K, V, L, S>
@@ -35,6 +36,7 @@ where
             .field("cache_length", &self.cache.len())
             .field("cache_memory_usage", &self.cache.memory_usage())
             .field("queued_length", &self.queued.len())
+            .field("memory_usage", &self.memory_usage)
             .finish()
     }
 }
@@ -62,8 +64,13 @@ where
     }
 
     /// Remove consumers for a given key, this will also remove the key from the cache.
-    pub fn remove(&mut self, key: &K) -> Option<Vec<S>> {
-        let _ = self.cache.remove(key);
+    pub fn remove(&mut self, key: &K) -> Option<Vec<S>>
+    where
+        V: InMemorySize,
+    {
+        self.cache
+            .remove(key)
+            .inspect(|value| self.memory_usage = self.memory_usage.saturating_sub(value.size()));
         self.queued
             .remove(key)
             .inspect(|removed| self.metrics.queued_consumers_count.decrement(removed.len() as f64))
@@ -89,14 +96,28 @@ where
     pub fn insert<'a>(&mut self, key: L::KeyToInsert<'a>, value: V) -> bool
     where
         L::KeyToInsert<'a>: Hash + PartialEq<K>,
+        V: InMemorySize,
     {
-        self.cache.insert(key, value)
+        let size = value.size();
+        if self.cache.insert(key, value) {
+            self.memory_usage = self.memory_usage.saturating_add(size);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Shrinks the capacity of the queue with a lower limit.
+    #[inline]
+    pub fn shrink_to(&mut self, min_capacity: usize) {
+        self.queued.shrink_to(min_capacity);
     }
 
     /// Update metrics for the inner cache.
     #[inline]
     pub fn update_cached_metrics(&self) {
         self.metrics.cached_count.set(self.cache.len() as f64);
+        self.metrics.memory_usage.set(self.memory_usage as f64);
     }
 }
 
@@ -110,6 +131,7 @@ where
             cache: LruMap::new(ByLength::new(max_len)),
             queued: Default::default(),
             metrics: CacheMetrics::new_with_labels(&[("cache", cache_id.to_string())]),
+            memory_usage: 0,
         }
     }
 }

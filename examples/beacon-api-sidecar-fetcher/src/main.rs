@@ -1,6 +1,6 @@
 //! Run with
 //!
-//! ```not_rust
+//! ```sh
 //! cargo run -p beacon-api-beacon-sidecar-fetcher --node --full
 //! ```
 //!
@@ -11,7 +11,7 @@
 //!
 //! See beacon Node API: <https://ethereum.github.io/beacon-APIs/>
 
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![warn(unused_crate_dependencies)]
 
 use std::{
     collections::VecDeque,
@@ -22,11 +22,8 @@ use alloy_primitives::B256;
 use clap::Parser;
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use mined_sidecar::MinedSidecarStream;
-use reth::{
-    builder::NodeHandle, chainspec::EthereumChainSpecParser, cli::Cli,
-    providers::CanonStateSubscriptions,
-};
-use reth_node_ethereum::EthereumNode;
+use reth::{builder::NodeHandle, chainspec::EthereumChainSpecParser, cli::Cli};
+use reth_ethereum::{node::EthereumNode, provider::CanonStateSubscriptions};
 
 pub mod mined_sidecar;
 

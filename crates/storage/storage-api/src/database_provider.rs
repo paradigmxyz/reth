@@ -1,3 +1,5 @@
+use alloc::vec::Vec;
+use core::ops::{Bound, RangeBounds};
 use reth_db_api::{
     common::KeyValue,
     cursor::DbCursorRO,
@@ -8,10 +10,9 @@ use reth_db_api::{
 };
 use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderResult;
-use std::ops::{Bound, RangeBounds};
 
 /// Database provider.
-pub trait DBProvider: Send + Sync + Sized + 'static {
+pub trait DBProvider: Sized {
     /// Underlying database transaction held by the provider.
     type Tx: DbTx;
 
@@ -157,6 +158,9 @@ pub trait DatabaseProviderFactory: Send + Sync {
     /// Create new read-write database provider.
     fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW>;
 }
+
+/// Helper type alias to get the associated transaction type from a [`DatabaseProviderFactory`].
+pub type FactoryTx<F> = <<F as DatabaseProviderFactory>::DB as Database>::TX;
 
 fn range_size_hint(range: &impl RangeBounds<u64>) -> Option<usize> {
     let start = match range.start_bound().cloned() {

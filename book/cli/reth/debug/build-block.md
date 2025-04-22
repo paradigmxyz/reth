@@ -9,17 +9,6 @@ $ reth debug build-block --help
 Usage: reth debug build-block [OPTIONS] --prev-randao <PREV_RANDAO> --timestamp <TIMESTAMP> --suggested-fee-recipient <SUGGESTED_FEE_RECIPIENT>
 
 Options:
-      --instance <INSTANCE>
-          Add a new instance of a node.
-
-          Configures the ports of the node to avoid conflicts with the defaults. This is useful for running multiple nodes on the same machine.
-
-          Max number of instances is 200. It is chosen in a way so that it's not possible to have port numbers that conflict with each other.
-
-          Changes to the following port numbers: - `DISCOVERY_PORT`: default + `instance` - 1 - `AUTH_PORT`: default + `instance` * 100 - 100 - `HTTP_RPC_PORT`: default - `instance` + 1 - `WS_RPC_PORT`: default + `instance` * 2 - 2
-
-          [default: 1]
-
   -h, --help
           Print help (see a summary with '-h')
 
@@ -46,7 +35,7 @@ Datadir:
           Possible values are either a built-in chain or the path to a chain specification file.
 
           Built-in chains:
-              mainnet, sepolia, holesky, dev
+              mainnet, sepolia, holesky, hoodi, dev
 
           [default: mainnet]
 
@@ -77,9 +66,6 @@ Database:
 
       --db.read-transaction-timeout <READ_TRANSACTION_TIMEOUT>
           Read transaction timeout in seconds, 0 means no timeout
-
-      --trusted-setup-file <PATH>
-          Overrides the KZG trusted setup by reading from the supplied file
 
       --parent-beacon-block-root <PARENT_BEACON_BLOCK_ROOT>
 

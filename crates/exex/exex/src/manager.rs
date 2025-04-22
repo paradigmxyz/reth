@@ -7,11 +7,11 @@ use futures::StreamExt;
 use itertools::Itertools;
 use metrics::Gauge;
 use reth_chain_state::ForkChoiceStream;
-use reth_chainspec::Head;
+use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_metrics::{metrics::Counter, Metrics};
 use reth_node_api::NodePrimitives;
-use reth_primitives::{EthPrimitives, SealedHeader};
+use reth_primitives_traits::SealedHeader;
 use reth_provider::HeaderProvider;
 use reth_tracing::tracing::{debug, warn};
 use std::{
@@ -96,7 +96,7 @@ impl<N: NodePrimitives> ExExHandle<N> {
     /// [`mpsc::Receiver`] for [`ExExNotification`]s that should be given to the `ExEx`.
     pub fn new<P, E: BlockExecutorProvider<Primitives = N>>(
         id: String,
-        node_head: Head,
+        node_head: BlockNumHash,
         provider: P,
         executor: E,
         wal_handle: WalHandle<N>,
@@ -658,13 +658,14 @@ impl<N: NodePrimitives> Clone for ExExManagerHandle<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::wal::WalResult;
     use alloy_primitives::B256;
     use futures::{StreamExt, TryStreamExt};
     use rand::Rng;
     use reth_db_common::init::init_genesis;
     use reth_evm::test_utils::MockExecutorProvider;
     use reth_evm_ethereum::execute::EthExecutorProvider;
-    use reth_primitives::SealedBlockWithSenders;
+    use reth_primitives_traits::RecoveredBlock;
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory, BlockReader,
         BlockWriter, Chain, DatabaseProviderFactory, StorageLocation, TransactionVariant,
@@ -685,7 +686,7 @@ mod tests {
 
         let (mut exex_handle, event_tx, mut _notification_rx) = ExExHandle::new(
             "test_exex".to_string(),
-            Head::default(),
+            Default::default(),
             (),
             MockExecutorProvider::default(),
             wal.handle(),
@@ -705,7 +706,7 @@ mod tests {
 
         let (exex_handle_1, _, _) = ExExHandle::new(
             "test_exex_1".to_string(),
-            Head::default(),
+            Default::default(),
             (),
             MockExecutorProvider::default(),
             wal.handle(),
@@ -727,7 +728,7 @@ mod tests {
 
         let (exex_handle_1, _, _) = ExExHandle::new(
             "test_exex_1".to_string(),
-            Head::default(),
+            Default::default(),
             (),
             MockExecutorProvider::default(),
             wal.handle(),
@@ -755,7 +756,7 @@ mod tests {
 
         let (exex_handle, _, _) = ExExHandle::new(
             "test_exex".to_string(),
-            Head::default(),
+            Default::default(),
             (),
             MockExecutorProvider::default(),
             wal.handle(),
@@ -766,9 +767,9 @@ mod tests {
             ExExManager::new((), vec![exex_handle], 10, wal, empty_finalized_header_stream());
 
         // Define the notification for testing
-        let mut block1: SealedBlockWithSenders = Default::default();
-        block1.block.set_hash(B256::new([0x01; 32]));
-        block1.block.set_block_number(10);
+        let mut block1: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
+        block1.set_hash(B256::new([0x01; 32]));
+        block1.set_block_number(10);
 
         let notification1 = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(vec![block1.clone()], Default::default(), Default::default())),
@@ -784,9 +785,9 @@ mod tests {
         assert_eq!(exex_manager.next_id, 1);
 
         // Push another notification
-        let mut block2: SealedBlockWithSenders = Default::default();
-        block2.block.set_hash(B256::new([0x02; 32]));
-        block2.block.set_block_number(20);
+        let mut block2: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
+        block2.set_hash(B256::new([0x02; 32]));
+        block2.set_block_number(20);
 
         let notification2 = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(vec![block2.clone()], Default::default(), Default::default())),
@@ -810,7 +811,7 @@ mod tests {
 
         let (exex_handle, _, _) = ExExHandle::new(
             "test_exex".to_string(),
-            Head::default(),
+            Default::default(),
             (),
             MockExecutorProvider::default(),
             wal.handle(),
@@ -827,7 +828,7 @@ mod tests {
         );
 
         // Push some notifications to fill part of the buffer
-        let mut block1: SealedBlockWithSenders = Default::default();
+        let mut block1: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
         block1.set_hash(B256::new([0x01; 32]));
         block1.set_block_number(10);
 
@@ -861,7 +862,7 @@ mod tests {
 
         let (exex_handle, event_tx, mut _notification_rx) = ExExHandle::new(
             "test_exex".to_string(),
-            Head::default(),
+            Default::default(),
             (),
             MockExecutorProvider::default(),
             wal.handle(),
@@ -916,14 +917,14 @@ mod tests {
         // Create two `ExExHandle` instances
         let (exex_handle1, event_tx1, _) = ExExHandle::new(
             "test_exex1".to_string(),
-            Head::default(),
+            Default::default(),
             (),
             MockExecutorProvider::default(),
             wal.handle(),
         );
         let (exex_handle2, event_tx2, _) = ExExHandle::new(
             "test_exex2".to_string(),
-            Head::default(),
+            Default::default(),
             (),
             MockExecutorProvider::default(),
             wal.handle(),
@@ -973,14 +974,14 @@ mod tests {
         // Create two `ExExHandle` instances
         let (exex_handle1, event_tx1, _) = ExExHandle::new(
             "test_exex1".to_string(),
-            Head::default(),
+            Default::default(),
             (),
             MockExecutorProvider::default(),
             wal.handle(),
         );
         let (exex_handle2, event_tx2, _) = ExExHandle::new(
             "test_exex2".to_string(),
-            Head::default(),
+            Default::default(),
             (),
             MockExecutorProvider::default(),
             wal.handle(),
@@ -1036,7 +1037,7 @@ mod tests {
 
         let (exex_handle_1, _, _) = ExExHandle::new(
             "test_exex_1".to_string(),
-            Head::default(),
+            Default::default(),
             (),
             MockExecutorProvider::default(),
             wal.handle(),
@@ -1044,7 +1045,7 @@ mod tests {
 
         // Create an ExExManager with a small max capacity
         let max_capacity = 2;
-        let mut exex_manager = ExExManager::new(
+        let exex_manager = ExExManager::new(
             provider_factory,
             vec![exex_handle_1],
             max_capacity,
@@ -1105,7 +1106,7 @@ mod tests {
 
         let (mut exex_handle, _, mut notifications) = ExExHandle::new(
             "test_exex".to_string(),
-            Head::default(),
+            Default::default(),
             provider,
             EthExecutorProvider::mainnet(),
             wal.handle(),
@@ -1116,13 +1117,13 @@ mod tests {
         assert_eq!(exex_handle.next_notification_id, 0);
 
         // Setup two blocks for the chain commit notification
-        let mut block1: SealedBlockWithSenders = Default::default();
-        block1.block.set_hash(B256::new([0x01; 32]));
-        block1.block.set_block_number(10);
+        let mut block1: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
+        block1.set_hash(B256::new([0x01; 32]));
+        block1.set_block_number(10);
 
-        let mut block2: SealedBlockWithSenders = Default::default();
-        block2.block.set_hash(B256::new([0x02; 32]));
-        block2.block.set_block_number(11);
+        let mut block2: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
+        block2.set_hash(B256::new([0x02; 32]));
+        block2.set_block_number(11);
 
         // Setup a notification
         let notification = ExExNotification::ChainCommitted {
@@ -1160,7 +1161,7 @@ mod tests {
 
         let (mut exex_handle, _, mut notifications) = ExExHandle::new(
             "test_exex".to_string(),
-            Head::default(),
+            Default::default(),
             provider,
             EthExecutorProvider::mainnet(),
             wal.handle(),
@@ -1169,9 +1170,9 @@ mod tests {
         // Set finished_height to a value higher than the block tip
         exex_handle.finished_height = Some(BlockNumHash::new(15, B256::random()));
 
-        let mut block1: SealedBlockWithSenders = Default::default();
-        block1.block.set_hash(B256::new([0x01; 32]));
-        block1.block.set_block_number(10);
+        let mut block1: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
+        block1.set_hash(B256::new([0x01; 32]));
+        block1.set_block_number(10);
 
         let notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(vec![block1.clone()], Default::default(), Default::default())),
@@ -1210,7 +1211,7 @@ mod tests {
 
         let (mut exex_handle, _, mut notifications) = ExExHandle::new(
             "test_exex".to_string(),
-            Head::default(),
+            Default::default(),
             provider,
             EthExecutorProvider::mainnet(),
             wal.handle(),
@@ -1253,7 +1254,7 @@ mod tests {
 
         let (mut exex_handle, _, mut notifications) = ExExHandle::new(
             "test_exex".to_string(),
-            Head::default(),
+            Default::default(),
             provider,
             EthExecutorProvider::mainnet(),
             wal.handle(),
@@ -1300,7 +1301,7 @@ mod tests {
             genesis_block.number + 1,
             BlockParams { parent: Some(genesis_hash), ..Default::default() },
         )
-        .seal_with_senders::<reth_primitives::Block>()
+        .try_recover()
         .unwrap();
         let provider_rw = provider_factory.database_provider_rw().unwrap();
         provider_rw.insert_block(block.clone(), StorageLocation::Database).unwrap();
@@ -1313,7 +1314,7 @@ mod tests {
 
         let (exex_handle, events_tx, mut notifications) = ExExHandle::new(
             "test_exex".to_string(),
-            Head::default(),
+            Default::default(),
             provider.clone(),
             EthExecutorProvider::mainnet(),
             wal.handle(),
@@ -1357,7 +1358,7 @@ mod tests {
         );
         // WAL shouldn't contain the genesis notification, because it's finalized
         assert_eq!(
-            exex_manager.wal.iter_notifications()?.collect::<eyre::Result<Vec<_>>>()?,
+            exex_manager.wal.iter_notifications()?.collect::<WalResult<Vec<_>>>()?,
             [notification.clone()]
         );
 
@@ -1365,13 +1366,13 @@ mod tests {
         assert!(exex_manager.as_mut().poll(&mut cx).is_pending());
         // WAL isn't finalized because the ExEx didn't emit the `FinishedHeight` event
         assert_eq!(
-            exex_manager.wal.iter_notifications()?.collect::<eyre::Result<Vec<_>>>()?,
+            exex_manager.wal.iter_notifications()?.collect::<WalResult<Vec<_>>>()?,
             [notification.clone()]
         );
 
         // Send a `FinishedHeight` event with a non-canonical block
         events_tx
-            .send(ExExEvent::FinishedHeight((rng.gen::<u64>(), rng.gen::<B256>()).into()))
+            .send(ExExEvent::FinishedHeight((rng.random::<u64>(), rng.random::<B256>()).into()))
             .unwrap();
 
         finalized_headers_tx.send(Some(block.clone_sealed_header()))?;
@@ -1379,7 +1380,7 @@ mod tests {
         // WAL isn't finalized because the ExEx emitted a `FinishedHeight` event with a
         // non-canonical block
         assert_eq!(
-            exex_manager.wal.iter_notifications()?.collect::<eyre::Result<Vec<_>>>()?,
+            exex_manager.wal.iter_notifications()?.collect::<WalResult<Vec<_>>>()?,
             [notification]
         );
 

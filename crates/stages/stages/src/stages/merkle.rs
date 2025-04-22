@@ -1,10 +1,12 @@
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{BlockNumber, B256};
+use alloy_primitives::{BlockNumber, Sealable, B256};
 use reth_codecs::Compact;
 use reth_consensus::ConsensusError;
-use reth_db::tables;
-use reth_db_api::transaction::{DbTx, DbTxMut};
-use reth_primitives::{GotExpected, SealedHeader};
+use reth_db_api::{
+    tables,
+    transaction::{DbTx, DbTxMut},
+};
+use reth_primitives_traits::{GotExpected, SealedHeader};
 use reth_provider::{
     DBProvider, HeaderProvider, ProviderError, StageCheckpointReader, StageCheckpointWriter,
     StatsReader, TrieWriter,
@@ -277,7 +279,7 @@ where
         // Reset the checkpoint
         self.save_execution_checkpoint(provider, None)?;
 
-        validate_state_root(trie_root, SealedHeader::seal(target_block), to_block)?;
+        validate_state_root(trie_root, SealedHeader::seal_slow(target_block), to_block)?;
 
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(to_block)
@@ -330,7 +332,7 @@ where
                 .header_by_number(input.unwind_to)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(input.unwind_to.into()))?;
 
-            validate_state_root(block_root, SealedHeader::seal(target), input.unwind_to)?;
+            validate_state_root(block_root, SealedHeader::seal_slow(target), input.unwind_to)?;
 
             // Validation passed, apply unwind changes to the database.
             provider.write_trie_updates(&updates)?;
@@ -344,7 +346,7 @@ where
 
 /// Check that the computed state root matches the root in the expected header.
 #[inline]
-fn validate_state_root<H: BlockHeader + Debug>(
+fn validate_state_root<H: BlockHeader + Sealable + Debug>(
     got: B256,
     expected: SealedHeader<H>,
     target_block: BlockNumber,
@@ -372,9 +374,10 @@ mod tests {
     use alloy_primitives::{keccak256, U256};
     use assert_matches::assert_matches;
     use reth_db_api::cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO};
-    use reth_primitives::{SealedBlock, StaticFileSegment, StorageEntry};
+    use reth_primitives_traits::{SealedBlock, StorageEntry};
     use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
     use reth_stages_api::StageUnitCheckpoint;
+    use reth_static_file_types::StaticFileSegment;
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range,
         random_contract_account_range, BlockParams, BlockRangeParams,
@@ -489,7 +492,7 @@ mod tests {
     }
 
     impl ExecuteStageTestRunner for MerkleTestRunner {
-        type Seed = Vec<SealedBlock>;
+        type Seed = Vec<SealedBlock<reth_ethereum_primitives::Block>>;
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let stage_progress = input.checkpoint().block_number;
@@ -525,7 +528,7 @@ mod tests {
                 stage_progress,
                 BlockParams { parent: preblocks.last().map(|b| b.hash()), ..Default::default() },
             )
-            .split();
+            .split_sealed_header_body();
             let mut header = header.unseal();
 
             header.state_root = state_root(
@@ -534,7 +537,10 @@ mod tests {
                     .into_iter()
                     .map(|(address, account)| (address, (account, std::iter::empty()))),
             );
-            let sealed_head = SealedBlock::new(SealedHeader::seal(header), body);
+            let sealed_head = SealedBlock::<reth_ethereum_primitives::Block>::from_sealed_parts(
+                SealedHeader::seal_slow(header),
+                body,
+            );
 
             let head_hash = sealed_head.hash();
             let mut blocks = vec![sealed_head];
@@ -584,8 +590,8 @@ mod tests {
             let static_file_provider = self.db.factory.static_file_provider();
             let mut writer =
                 static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
-            let mut last_header = last_block.header().clone();
-            last_header.state_root = root;
+            let mut last_header = last_block.clone_sealed_header();
+            last_header.set_state_root(root);
 
             let hash = last_header.hash_slow();
             writer.prune_headers(1).unwrap();

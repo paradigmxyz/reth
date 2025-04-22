@@ -22,12 +22,7 @@ reth-network-peers = { workspace = true, features = ["secp256k1"] }
 alloy-primitives = { workspace = true, features = ["rand"] }
 alloy-rlp = { workspace = true, features = ["derive"] }
 discv5.workspace = true
-secp256k1 = { workspace = true, features = [
-    "global-context",
-    "rand-std",
-    "recovery",
-    "serde",
-] }
+secp256k1 = { workspace = true, features = ["global-context", "std", "recovery", "serde"] }
 enr.workspace = true
 
 # async/futures
@@ -39,28 +34,29 @@ schnellru.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 parking_lot.workspace = true
-rand = { workspace = true, optional = true }
+rand_08 = { workspace = true, optional = true }
 generic-array.workspace = true
 serde = { workspace = true, optional = true }
 itertools.workspace = true
 
 [dev-dependencies]
+secp256k1 = { workspace = true, features = ["rand"] }
 assert_matches.workspace = true
-rand.workspace = true
+rand_08.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 reth-tracing.workspace = true
 
 [features]
 default = ["serde"]
 serde = [
-	"dep:serde",
-	"alloy-primitives/serde",
-	"discv5/serde",
-	"enr/serde",
-	"generic-array/serde",
-	"parking_lot/serde",
-	"rand?/serde",
-	"secp256k1/serde",
-	"reth-ethereum-forks/serde"
+    "dep:serde",
+    "alloy-primitives/serde",
+    "discv5/serde",
+    "enr/serde",
+    "generic-array/serde",
+    "parking_lot/serde",
+    "rand_08?/serde",
+    "secp256k1/serde",
+    "reth-ethereum-forks/serde",
 ]
-test-utils = ["dep:rand"]
+test-utils = ["dep:rand_08"]

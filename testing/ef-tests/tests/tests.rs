@@ -12,7 +12,6 @@ macro_rules! general_state_test {
     };
 }
 
-#[allow(missing_docs)]
 mod general_state_tests {
     use super::*;
 
@@ -78,4 +77,14 @@ mod general_state_tests {
     general_state_test!(vm_tests, VMTests);
 }
 
-// TODO: Add ValidBlocks and InvalidBlocks tests
+macro_rules! blockchain_test {
+    ($test_name:ident, $dir:ident) => {
+        #[test]
+        fn $test_name() {
+            BlockchainTests::new(format!("{}", stringify!($dir))).run();
+        }
+    };
+}
+
+blockchain_test!(valid_blocks, ValidBlocks);
+blockchain_test!(invalid_blocks, InvalidBlocks);

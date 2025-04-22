@@ -1,5 +1,6 @@
 //! Test utilities for the block header.
 
+use crate::BlockHeader;
 use alloy_consensus::Header;
 use alloy_primitives::{BlockHash, BlockNumber, B256, U256};
 use proptest::{arbitrary::any, prop_compose};
@@ -8,7 +9,7 @@ use proptest_arbitrary_interop::arb;
 /// A helper trait for [`Header`]s that allows for mutable access to the headers values.
 ///
 /// This allows for modifying the header for testing purposes.
-pub trait TestHeader {
+pub trait TestHeader: BlockHeader {
     /// Updates the parent block hash.
     fn set_parent_hash(&mut self, hash: BlockHash);
 

@@ -24,18 +24,18 @@ use reth_db::{
     DatabaseEnv,
 };
 use reth_db_common::init::init_genesis;
+use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::test_utils::MockExecutorProvider;
 use reth_execution_types::Chain;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification, ExExNotifications, Wal};
-use reth_network::{config::SecretKey, NetworkConfigBuilder, NetworkManager};
+use reth_network::{config::rng_secret_key, NetworkConfigBuilder, NetworkManager};
 use reth_node_api::{
     FullNodeTypes, FullNodeTypesAdapter, NodePrimitives, NodeTypes, NodeTypesWithDBAdapter,
-    NodeTypesWithEngine,
 };
 use reth_node_builder::{
     components::{
-        Components, ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NodeComponentsBuilder,
-        PoolBuilder,
+        BasicPayloadServiceBuilder, Components, ComponentsBuilder, ConsensusBuilder,
+        ExecutorBuilder, NodeComponentsBuilder, PoolBuilder,
     },
     BuilderContext, Node, NodeAdapter, RethFullAdapter,
 };
@@ -45,12 +45,13 @@ use reth_node_ethereum::{
     EthEngineTypes, EthEvmConfig,
 };
 use reth_payload_builder::noop::NoopPayloadBuilderService;
-use reth_primitives::{BlockExt, EthPrimitives, Head, SealedBlockWithSenders, TransactionSigned};
-use reth_provider::{providers::StaticFileProvider, BlockReader, EthStorage, ProviderFactory};
+use reth_primitives_traits::{Block as _, RecoveredBlock};
+use reth_provider::{
+    providers::{BlockchainProvider, StaticFileProvider},
+    BlockReader, EthStorage, ProviderFactory,
+};
 use reth_tasks::TaskManager;
 use reth_transaction_pool::test_utils::{testing_pool, TestPool};
-
-use reth_provider::providers::BlockchainProvider;
 use tempfile::TempDir;
 use thiserror::Error;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
@@ -120,17 +121,14 @@ impl NodeTypes for TestNode {
     type ChainSpec = ChainSpec;
     type StateCommitment = reth_trie_db::MerklePatriciaTrie;
     type Storage = EthStorage;
-}
-
-impl NodeTypesWithEngine for TestNode {
-    type Engine = EthEngineTypes;
+    type Payload = EthEngineTypes;
 }
 
 impl<N> Node<N> for TestNode
 where
     N: FullNodeTypes<
-        Types: NodeTypesWithEngine<
-            Engine = EthEngineTypes,
+        Types: NodeTypes<
+            Payload = EthEngineTypes,
             ChainSpec = ChainSpec,
             Primitives = EthPrimitives,
             Storage = EthStorage,
@@ -140,7 +138,7 @@ where
     type ComponentsBuilder = ComponentsBuilder<
         N,
         TestPoolBuilder,
-        EthereumPayloadBuilder,
+        BasicPayloadServiceBuilder<EthereumPayloadBuilder>,
         EthereumNetworkBuilder,
         TestExecutorBuilder,
         TestConsensusBuilder,
@@ -153,7 +151,7 @@ where
         ComponentsBuilder::default()
             .node_types::<N>()
             .pool(TestPoolBuilder::default())
-            .payload(EthereumPayloadBuilder::default())
+            .payload(BasicPayloadServiceBuilder::default())
             .network(EthereumNetworkBuilder::default())
             .executor(TestExecutorBuilder::default())
             .consensus(TestConsensusBuilder::default())
@@ -185,7 +183,7 @@ pub type TestExExContext = ExExContext<Adapter>;
 #[derive(Debug)]
 pub struct TestExExHandle {
     /// Genesis block that was inserted into the storage
-    pub genesis: SealedBlockWithSenders,
+    pub genesis: RecoveredBlock<reth_ethereum_primitives::Block>,
     /// Provider Factory for accessing the emphemeral storage of the host node
     pub provider_factory: ProviderFactory<NodeTypesWithDBAdapter<TestNode, TmpDB>>,
     /// Channel for receiving events from the Execution Extension
@@ -274,7 +272,7 @@ pub async fn test_exex_context_with_chain_spec(
     let provider = BlockchainProvider::new(provider_factory.clone())?;
 
     let network_manager = NetworkManager::new(
-        NetworkConfigBuilder::new(SecretKey::new(&mut rand::thread_rng()))
+        NetworkConfigBuilder::new(rng_secret_key())
             .with_unused_discovery_port()
             .with_unused_listener_port()
             .build(provider_factory.clone()),
@@ -285,7 +283,7 @@ pub async fn test_exex_context_with_chain_spec(
     let task_executor = tasks.executor();
     tasks.executor().spawn(network_manager);
 
-    let (_, payload_builder) = NoopPayloadBuilderService::<EthEngineTypes>::new();
+    let (_, payload_builder_handle) = NoopPayloadBuilderService::<EthEngineTypes>::new();
 
     let components = NodeAdapter::<FullNodeTypesAdapter<_, _, _>, _> {
         components: Components {
@@ -294,7 +292,7 @@ pub async fn test_exex_context_with_chain_spec(
             executor,
             consensus,
             network,
-            payload_builder,
+            payload_builder_handle,
         },
         task_executor,
         provider,
@@ -304,16 +302,9 @@ pub async fn test_exex_context_with_chain_spec(
         .block_by_hash(genesis_hash)?
         .ok_or_else(|| eyre::eyre!("genesis block not found"))?
         .seal_slow()
-        .seal_with_senders::<reth_primitives::Block>()
-        .ok_or_else(|| eyre::eyre!("failed to recover senders"))?;
+        .try_recover()?;
 
-    let head = Head {
-        number: genesis.number,
-        hash: genesis_hash,
-        difficulty: genesis.difficulty,
-        timestamp: genesis.timestamp,
-        total_difficulty: Default::default(),
-    };
+    let head = genesis.num_hash();
 
     let wal_directory = tempfile::tempdir()?;
     let wal = Wal::new(wal_directory.path())?;

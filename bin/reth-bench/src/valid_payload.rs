@@ -2,19 +2,20 @@
 //! response. This is useful for benchmarking, as it allows us to wait for a payload to be valid
 //! before sending additional calls.
 
+use alloy_eips::eip7685::RequestsOrHash;
 use alloy_primitives::B256;
-use alloy_provider::{ext::EngineApi, Network};
+use alloy_provider::{ext::EngineApi, Network, Provider};
 use alloy_rpc_types_engine::{
-    ExecutionPayload, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3,
-    ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
+    ExecutionPayload, ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1,
+    ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
 };
-use alloy_transport::{Transport, TransportResult};
+use alloy_transport::TransportResult;
 use reth_node_api::EngineApiMessageVersion;
 use tracing::error;
 
 /// An extension trait for providers that implement the engine API, to wait for a VALID response.
 #[async_trait::async_trait]
-pub trait EngineApiValidWaitExt<N, T>: Send + Sync {
+pub trait EngineApiValidWaitExt<N>: Send + Sync {
     /// Calls `engine_newPayloadV1` with the given [ExecutionPayloadV1], and waits until the
     /// response is VALID.
     async fn new_payload_v1_wait(
@@ -36,6 +37,16 @@ pub trait EngineApiValidWaitExt<N, T>: Send + Sync {
         payload: ExecutionPayloadV3,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
+    ) -> TransportResult<PayloadStatus>;
+
+    /// Calls `engine_newPayloadV4` with the given [ExecutionPayloadV3], parent beacon block root,
+    /// versioned hashes, and requests hash, and waits until the response is VALID.
+    async fn new_payload_v4_wait(
+        &self,
+        payload: ExecutionPayloadV3,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+        requests_hash: B256,
     ) -> TransportResult<PayloadStatus>;
 
     /// Calls `engine_forkChoiceUpdatedV1` with the given [ForkchoiceState] and optional
@@ -64,11 +75,10 @@ pub trait EngineApiValidWaitExt<N, T>: Send + Sync {
 }
 
 #[async_trait::async_trait]
-impl<T, N, P> EngineApiValidWaitExt<N, T> for P
+impl<N, P> EngineApiValidWaitExt<N> for P
 where
     N: Network,
-    T: Transport + Clone,
-    P: EngineApi<N, T>,
+    P: Provider<N> + EngineApi<N>,
 {
     async fn new_payload_v1_wait(
         &self,
@@ -120,8 +130,67 @@ where
                 );
                 panic!("Invalid newPayloadV3: {status:?}");
             }
+            if status.is_syncing() {
+                return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
+                    "invalid range: no canonical state found for parent of requested block",
+                ))
+            }
             status = self
                 .new_payload_v3(payload.clone(), versioned_hashes.clone(), parent_beacon_block_root)
+                .await?;
+        }
+        Ok(status)
+    }
+
+    async fn new_payload_v4_wait(
+        &self,
+        payload: ExecutionPayloadV3,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+        requests_hash: B256,
+    ) -> TransportResult<PayloadStatus> {
+        // We cannot use `self.new_payload_v4` because it does not support sending
+        // `RequestsOrHash::Hash`
+
+        let mut status: PayloadStatus = self
+            .client()
+            .request(
+                "engine_newPayloadV4",
+                (
+                    payload.clone(),
+                    versioned_hashes.clone(),
+                    parent_beacon_block_root,
+                    RequestsOrHash::Hash(requests_hash),
+                ),
+            )
+            .await?;
+        while !status.is_valid() {
+            if status.is_invalid() {
+                error!(
+                    ?status,
+                    ?payload,
+                    ?versioned_hashes,
+                    ?parent_beacon_block_root,
+                    "Invalid newPayloadV4",
+                );
+                panic!("Invalid newPayloadV4: {status:?}");
+            }
+            if status.is_syncing() {
+                return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
+                    "invalid range: no canonical state found for parent of requested block",
+                ))
+            }
+            status = self
+                .client()
+                .request(
+                    "engine_newPayloadV4",
+                    (
+                        payload.clone(),
+                        versioned_hashes.clone(),
+                        parent_beacon_block_root,
+                        RequestsOrHash::Hash(requests_hash),
+                    ),
+                )
                 .await?;
         }
         Ok(status)
@@ -144,6 +213,11 @@ where
                     "Invalid forkchoiceUpdatedV1 message",
                 );
                 panic!("Invalid forkchoiceUpdatedV1: {status:?}");
+            }
+            if status.is_syncing() {
+                return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
+                    "invalid range: no canonical state found for parent of requested block",
+                ))
             }
             status =
                 self.fork_choice_updated_v1(fork_choice_state, payload_attributes.clone()).await?;
@@ -169,6 +243,11 @@ where
                     "Invalid forkchoiceUpdatedV2 message",
                 );
                 panic!("Invalid forkchoiceUpdatedV2: {status:?}");
+            }
+            if status.is_syncing() {
+                return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
+                    "invalid range: no canonical state found for parent of requested block",
+                ))
             }
             status =
                 self.fork_choice_updated_v2(fork_choice_state, payload_attributes.clone()).await?;
@@ -208,9 +287,10 @@ where
 ///
 /// # Panics
 /// If the given payload is a V3 payload, but a parent beacon block root is provided as `None`.
-pub(crate) async fn call_new_payload<N, T, P: EngineApiValidWaitExt<N, T>>(
+pub(crate) async fn call_new_payload<N, P: EngineApiValidWaitExt<N>>(
     provider: P,
     payload: ExecutionPayload,
+    sidecar: ExecutionPayloadSidecar,
     parent_beacon_block_root: Option<B256>,
     versioned_hashes: Vec<B256>,
 ) -> TransportResult<EngineApiMessageVersion> {
@@ -218,12 +298,24 @@ pub(crate) async fn call_new_payload<N, T, P: EngineApiValidWaitExt<N, T>>(
         ExecutionPayload::V3(payload) => {
             // We expect the caller
             let parent_beacon_block_root = parent_beacon_block_root
-                .expect("parent_beacon_block_root is required for V3 payloads");
-            provider
-                .new_payload_v3_wait(payload, versioned_hashes, parent_beacon_block_root)
-                .await?;
+                .expect("parent_beacon_block_root is required for V3 payloads and higher");
 
-            Ok(EngineApiMessageVersion::V3)
+            if let Some(requests_hash) = sidecar.requests_hash() {
+                provider
+                    .new_payload_v4_wait(
+                        payload,
+                        versioned_hashes,
+                        parent_beacon_block_root,
+                        requests_hash,
+                    )
+                    .await?;
+                Ok(EngineApiMessageVersion::V4)
+            } else {
+                provider
+                    .new_payload_v3_wait(payload, versioned_hashes, parent_beacon_block_root)
+                    .await?;
+                Ok(EngineApiMessageVersion::V3)
+            }
         }
         ExecutionPayload::V2(payload) => {
             let input = ExecutionPayloadInputV2 {
@@ -246,15 +338,14 @@ pub(crate) async fn call_new_payload<N, T, P: EngineApiValidWaitExt<N, T>>(
 /// Calls the correct `engine_forkchoiceUpdated` method depending on the given
 /// `EngineApiMessageVersion`, using the provided forkchoice state and payload attributes for the
 /// actual engine api message call.
-pub(crate) async fn call_forkchoice_updated<N, T, P: EngineApiValidWaitExt<N, T>>(
+pub(crate) async fn call_forkchoice_updated<N, P: EngineApiValidWaitExt<N>>(
     provider: P,
     message_version: EngineApiMessageVersion,
     forkchoice_state: ForkchoiceState,
     payload_attributes: Option<PayloadAttributes>,
 ) -> TransportResult<ForkchoiceUpdated> {
     match message_version {
-        EngineApiMessageVersion::V4 => todo!("V4 payloads not supported yet"),
-        EngineApiMessageVersion::V3 => {
+        EngineApiMessageVersion::V3 | EngineApiMessageVersion::V4 => {
             provider.fork_choice_updated_v3_wait(forkchoice_state, payload_attributes).await
         }
         EngineApiMessageVersion::V2 => {

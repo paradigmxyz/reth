@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use crate::EngineApiError;
 use alloy_rpc_types_engine::{ForkchoiceUpdated, PayloadStatus, PayloadStatusEnum};
-use metrics::{Counter, Histogram};
+use metrics::{Counter, Gauge, Histogram};
 use reth_metrics::Metrics;
 
 /// All beacon consensus engine metrics
@@ -14,6 +14,8 @@ pub(crate) struct EngineApiMetrics {
     pub(crate) fcu_response: ForkchoiceUpdatedResponseMetrics,
     /// Engine API newPayload response type metrics
     pub(crate) new_payload_response: NewPayloadStatusResponseMetrics,
+    /// Blob-related metrics
+    pub(crate) blob_metrics: BlobMetrics,
 }
 
 /// Beacon consensus engine latency metrics.
@@ -48,8 +50,8 @@ pub(crate) struct EngineApiLatencyMetrics {
     pub(crate) get_payload_bodies_by_range_v1: Histogram,
     /// Latency for `engine_getPayloadBodiesByHashV1`
     pub(crate) get_payload_bodies_by_hash_v1: Histogram,
-    /// Latency for `engine_exchangeTransitionConfigurationV1`
-    pub(crate) exchange_transition_configuration: Histogram,
+    /// Latency for `engine_getBlobsV1`
+    pub(crate) get_blobs_v1: Histogram,
 }
 
 /// Metrics for engine API forkchoiceUpdated responses.
@@ -100,6 +102,17 @@ pub(crate) struct NewPayloadStatusResponseMetrics {
     pub(crate) new_payload_total_gas: Histogram,
     /// The gas per second of valid new payload messages received.
     pub(crate) new_payload_gas_per_second: Histogram,
+    /// Latency for the last `engine_newPayloadV*` call
+    pub(crate) new_payload_last: Gauge,
+}
+
+#[derive(Metrics)]
+#[metrics(scope = "engine.rpc.blobs")]
+pub(crate) struct BlobMetrics {
+    /// Count of blobs successfully retrieved
+    pub(crate) blob_count: Counter,
+    /// Count of blob misses
+    pub(crate) blob_misses: Counter,
 }
 
 impl NewPayloadStatusResponseMetrics {
@@ -110,6 +123,7 @@ impl NewPayloadStatusResponseMetrics {
         gas_used: u64,
         time: Duration,
     ) {
+        self.new_payload_last.set(time);
         match result {
             Ok(status) => match status.status {
                 PayloadStatusEnum::Valid => {

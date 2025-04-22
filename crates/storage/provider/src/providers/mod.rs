@@ -1,9 +1,8 @@
 //! Contains the main provider types and traits for interacting with the blockchain's storage.
 
 use reth_chainspec::EthereumHardforks;
-use reth_db::table::Value;
-use reth_node_types::{FullNodePrimitives, NodeTypes, NodeTypesWithDB, NodeTypesWithEngine};
-use reth_primitives::EthPrimitives;
+use reth_db_api::table::Value;
+use reth_node_types::{FullNodePrimitives, NodeTypes, NodeTypesWithDB};
 
 mod database;
 pub use database::*;
@@ -16,12 +15,9 @@ pub use static_file::{
 
 mod state;
 pub use state::{
-    historical::{HistoricalStateProvider, HistoricalStateProviderRef},
+    historical::{HistoricalStateProvider, HistoricalStateProviderRef, LowestAvailableBlocks},
     latest::{LatestStateProvider, LatestStateProviderRef},
 };
-
-mod bundle_state_provider;
-pub use bundle_state_provider::BundleStateProvider;
 
 mod consistent_view;
 pub use consistent_view::{ConsistentDbView, ConsistentViewError};
@@ -60,24 +56,3 @@ where
 {
 }
 impl<T> ProviderNodeTypes for T where T: NodeTypesForProvider + NodeTypesWithDB {}
-
-/// A helper trait with requirements for [`NodeTypesForProvider`] to be used within legacy
-/// blockchain tree.
-pub trait NodeTypesForTree:
-    NodeTypesForProvider<Primitives = EthPrimitives> + NodeTypesWithEngine
-{
-}
-impl<T> NodeTypesForTree for T where
-    T: NodeTypesForProvider<Primitives = EthPrimitives> + NodeTypesWithEngine
-{
-}
-
-/// Helper trait expressing requirements for node types to be used in engine.
-pub trait EngineNodeTypes: ProviderNodeTypes + NodeTypesWithEngine {}
-
-impl<T> EngineNodeTypes for T where T: ProviderNodeTypes + NodeTypesWithEngine {}
-
-/// Helper trait with requirements for [`ProviderNodeTypes`] to be used within legacy blockchain
-/// tree.
-pub trait TreeNodeTypes: ProviderNodeTypes + NodeTypesForTree {}
-impl<T> TreeNodeTypes for T where T: ProviderNodeTypes + NodeTypesForTree {}

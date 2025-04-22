@@ -10,7 +10,7 @@ use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{Account, StorageEntry};
+use reth_primitives_traits::{Account, StorageEntry};
 use reth_provider::{
     providers::ProviderNodeTypes, test_utils::create_test_provider_factory, DatabaseProviderRW,
     StorageTrieWriter, TrieWriter,

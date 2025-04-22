@@ -93,7 +93,7 @@ impl PruneInput {
                 let last_tx = body.last_tx_num();
                 if last_tx + body.tx_count() == 0 {
                     // Prevents a scenario where the pruner correctly starts at a finalized block,
-                    // but the first transaction (tx_num = 0) only appears on an non-finalized one.
+                    // but the first transaction (tx_num = 0) only appears on a non-finalized one.
                     // Should only happen on a test/hive scenario.
                     return Ok(None)
                 }
@@ -191,7 +191,7 @@ mod tests {
         for block in &blocks {
             provider_rw
                 .insert_historical_block(
-                    block.clone().seal_with_senders().expect("failed to seal block with senders"),
+                    block.clone().try_recover().expect("failed to seal block with senders"),
                 )
                 .expect("failed to insert block");
         }
@@ -229,7 +229,7 @@ mod tests {
         for block in &blocks {
             provider_rw
                 .insert_historical_block(
-                    block.clone().seal_with_senders().expect("failed to seal block with senders"),
+                    block.clone().try_recover().expect("failed to seal block with senders"),
                 )
                 .expect("failed to insert block");
         }
@@ -275,7 +275,7 @@ mod tests {
         for block in &blocks {
             provider_rw
                 .insert_historical_block(
-                    block.clone().seal_with_senders().expect("failed to seal block with senders"),
+                    block.clone().try_recover().expect("failed to seal block with senders"),
                 )
                 .expect("failed to insert block");
         }
@@ -311,7 +311,7 @@ mod tests {
         for block in &blocks {
             provider_rw
                 .insert_historical_block(
-                    block.clone().seal_with_senders().expect("failed to seal block with senders"),
+                    block.clone().try_recover().expect("failed to seal block with senders"),
                 )
                 .expect("failed to insert block");
         }

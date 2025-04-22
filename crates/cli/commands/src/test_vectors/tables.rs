@@ -1,5 +1,5 @@
 use alloy_consensus::Header;
-use alloy_primitives::{hex, private::getrandom::getrandom};
+use alloy_primitives::{hex, B256};
 use arbitrary::Arbitrary;
 use eyre::Result;
 use proptest::{
@@ -8,10 +8,12 @@ use proptest::{
     test_runner::{TestRng, TestRunner},
 };
 use proptest_arbitrary_interop::arb;
-use reth_db::tables;
-use reth_db_api::table::{DupSort, Table, TableRow};
+use reth_db_api::{
+    table::{DupSort, Table, TableRow},
+    tables,
+};
+use reth_ethereum_primitives::TransactionSigned;
 use reth_fs_util as fs;
-use reth_primitives::TransactionSigned;
 use std::collections::HashSet;
 use tracing::error;
 
@@ -21,13 +23,12 @@ const PER_TABLE: usize = 1000;
 /// Generates test vectors for specified `tables`. If list is empty, then generate for all tables.
 pub fn generate_vectors(mut tables: Vec<String>) -> Result<()> {
     // Prepare random seed for test (same method as used by proptest)
-    let mut seed = [0u8; 32];
-    getrandom(&mut seed)?;
+    let seed = B256::random();
     println!("Seed for table test vectors: {:?}", hex::encode_prefixed(seed));
 
     // Start the runner with the seed
     let config = ProptestConfig::default();
-    let rng = TestRng::from_seed(config.rng_algorithm, &seed);
+    let rng = TestRng::from_seed(config.rng_algorithm, &seed.0);
     let mut runner = TestRunner::new_with_rng(config, rng);
 
     fs::create_dir_all(VECTORS_FOLDER)?;
@@ -124,19 +125,19 @@ where
     // We want to control our repeated keys
     let mut seen_keys = HashSet::new();
 
-    let strat_values = proptest::collection::vec(arb::<T::Value>(), 100..300).no_shrink().boxed();
+    let start_values = proptest::collection::vec(arb::<T::Value>(), 100..300).no_shrink().boxed();
 
-    let strat_keys = arb::<T::Key>().no_shrink().boxed();
+    let start_keys = arb::<T::Key>().no_shrink().boxed();
 
     while rows.len() < per_table {
-        let key: T::Key = strat_keys.new_tree(runner).map_err(|e| eyre::eyre!("{e}"))?.current();
+        let key: T::Key = start_keys.new_tree(runner).map_err(|e| eyre::eyre!("{e}"))?.current();
 
         if !seen_keys.insert(key.clone()) {
             continue
         }
 
         let mut values: Vec<T::Value> =
-            strat_values.new_tree(runner).map_err(|e| eyre::eyre!("{e}"))?.current();
+            start_values.new_tree(runner).map_err(|e| eyre::eyre!("{e}"))?.current();
 
         values.sort();
 

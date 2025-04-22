@@ -14,42 +14,30 @@ workspace = true
 [dependencies]
 # reth
 reth-db-api.workspace = true
-reth-primitives = { workspace = true, features = ["reth-codec"] }
-reth-primitives-traits = { workspace = true, features = ["serde", "reth-codec"] }
 reth-fs-util.workspace = true
 reth-storage-errors.workspace = true
 reth-nippy-jar.workspace = true
-reth-prune-types.workspace = true
-reth-stages-types.workspace = true
-reth-trie-common = { workspace = true, features = ["serde"] }
 reth-tracing.workspace = true
+reth-static-file-types.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
-alloy-consensus.workspace = true
 
 # mdbx
-reth-libmdbx = { workspace = true, optional = true, features = [
-    "return-borrowed",
-    "read-tx-timeouts",
-] }
+reth-libmdbx = { workspace = true, optional = true, features = ["return-borrowed", "read-tx-timeouts"] }
 eyre = { workspace = true, optional = true }
-
-# codecs
-serde = { workspace = true, default-features = false }
 
 # metrics
 reth-metrics = { workspace = true, optional = true }
 metrics = { workspace = true, optional = true }
 
 # misc
-bytes.workspace = true
-page_size = { version = "0.6.0", optional = true }
+page_size = { workspace = true, optional = true }
 thiserror.workspace = true
 tempfile = { workspace = true, optional = true }
 derive_more.workspace = true
-rustc-hash = { workspace = true, optional = true }
-sysinfo = { version = "0.32", default-features = false, features = ["system"] }
+rustc-hash = { workspace = true, optional = true, features = ["std"] }
+sysinfo = { workspace = true, features = ["system"] }
 parking_lot = { workspace = true, optional = true }
 
 # arbitrary utils
@@ -57,23 +45,20 @@ strum = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
 # reth libs with arbitrary
-reth-primitives = { workspace = true, features = ["arbitrary"] }
+reth-primitives-traits = { workspace = true, features = ["reth-codec"] }
+
+alloy-primitives = { workspace = true, features = ["getrandom"] }
+alloy-consensus.workspace = true
+
 serde_json.workspace = true
 tempfile.workspace = true
-test-fuzz.workspace = true
 parking_lot.workspace = true
 
-pprof = { workspace = true, features = [
-    "flamegraph",
-    "frame-pointer",
-    "criterion",
-] }
+serde.workspace = true
 criterion.workspace = true
 
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
-
-paste.workspace = true
 
 assert_matches.workspace = true
 
@@ -90,29 +75,24 @@ mdbx = [
 ]
 test-utils = [
     "dep:tempfile",
+    "mdbx",
     "arbitrary",
     "parking_lot",
-    "reth-primitives/test-utils",
-    "reth-primitives-traits/test-utils",
     "reth-db-api/test-utils",
     "reth-nippy-jar/test-utils",
-    "reth-trie-common/test-utils",
-    "reth-prune-types/test-utils",
-    "reth-stages-types/test-utils",
+    "reth-primitives-traits/test-utils",
 ]
-bench = []
+bench = ["reth-db-api/bench"]
 arbitrary = [
-    "reth-primitives/arbitrary",
     "reth-db-api/arbitrary",
-    "reth-primitives-traits/arbitrary",
-    "reth-trie-common/arbitrary",
     "alloy-primitives/arbitrary",
-    "reth-prune-types/arbitrary",
-    "reth-stages-types/arbitrary",
     "alloy-consensus/arbitrary",
+    "reth-primitives-traits/arbitrary",
 ]
-optimism = ["reth-primitives/optimism", "reth-db-api/optimism"]
-op = ["reth-db-api/op"]
+op = [
+    "reth-db-api/op",
+    "reth-primitives-traits/op",
+]
 disable-lock = []
 
 [[bench]]

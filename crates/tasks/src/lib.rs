@@ -113,7 +113,7 @@ pub struct TokioTaskExecutor;
 
 impl TokioTaskExecutor {
     /// Converts the instance to a boxed [`TaskSpawner`].
-    pub fn boxed(self) -> Box<dyn TaskSpawner> {
+    pub fn boxed(self) -> Box<dyn TaskSpawner + 'static> {
         Box::new(self)
     }
 }
@@ -176,7 +176,7 @@ pub struct TaskManager {
 // === impl TaskManager ===
 
 impl TaskManager {
-    /// Returns a a [`TaskManager`] over the currently running Runtime.
+    /// Returns a [`TaskManager`] over the currently running Runtime.
     ///
     /// # Panics
     ///

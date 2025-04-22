@@ -1,5 +1,3 @@
-use std::num::NonZeroUsize;
-
 use crate::{
     db_ext::DbTxPruneExt,
     segments::{PruneInput, Segment},
@@ -7,7 +5,7 @@ use crate::{
 };
 use alloy_primitives::BlockNumber;
 use itertools::Itertools;
-use reth_db::{
+use reth_db_api::{
     cursor::{DbCursorRO, RangeWalker},
     tables,
     transaction::DbTxMut,
@@ -17,6 +15,7 @@ use reth_prune_types::{
     PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
 use reth_static_file_types::StaticFileSegment;
+use std::num::NonZeroUsize;
 use tracing::trace;
 
 /// Number of header tables to prune in one step
@@ -127,7 +126,7 @@ impl<'a, Provider> HeaderTablesIter<'a, Provider>
 where
     Provider: DBProvider<Tx: DbTxMut>,
 {
-    fn new(
+    const fn new(
         provider: &'a Provider,
         limiter: &'a mut PruneLimiter,
         headers_walker: Walker<'a, Provider, tables::Headers>,
@@ -199,8 +198,7 @@ mod tests {
     };
     use alloy_primitives::{BlockNumber, B256, U256};
     use assert_matches::assert_matches;
-    use reth_db::tables;
-    use reth_db_api::transaction::DbTx;
+    use reth_db_api::{tables, transaction::DbTx};
     use reth_provider::{
         DatabaseProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
         StaticFileProviderFactory,

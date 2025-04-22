@@ -83,7 +83,7 @@ impl tokio_util::codec::Decoder for StreamCodec {
 
                 match str::from_utf8(line.as_ref()) {
                     Ok(s) => Ok(Some(s.to_string())),
-                    Err(_) => Err(io::Error::new(io::ErrorKind::Other, "invalid UTF-8")),
+                    Err(_) => Err(io::Error::other("invalid UTF-8")),
                 }
             } else {
                 Ok(None)
@@ -299,5 +299,19 @@ mod tests {
 
         assert_eq!(request, "{ test: 1 }");
         assert_eq!(request2, "{ test: 2 }");
+    }
+
+    #[test]
+    fn serde_json_accepts_whitespace_wrapped_json() {
+        let json = "   { \"key\": \"value\" }   ";
+
+        #[derive(serde::Deserialize, Debug, PartialEq)]
+        struct Obj {
+            key: String,
+        }
+
+        let parsed: Result<Obj, _> = serde_json::from_str(json);
+        assert!(parsed.is_ok(), "serde_json should accept whitespace-wrapped JSON");
+        assert_eq!(parsed.unwrap(), Obj { key: "value".into() });
     }
 }

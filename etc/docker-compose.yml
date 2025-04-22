@@ -14,7 +14,7 @@ services:
       - sepolia_data:/root/.local/share/reth/sepolia
       - holesky_data:/root/.local/share/reth/holesky
       - logs:/root/logs
-      - ./jwttoken:/root/jwt:ro
+      - ./jwttoken:/root/jwt/:ro
     # https://paradigmxyz.github.io/reth/run/troubleshooting.html#concurrent-database-access-error-using-containersdocker
     pid: host
     # For Sepolia, replace `--chain mainnet` with `--chain sepolia`
@@ -53,7 +53,7 @@ services:
     ports:
       - 3000:3000
     environment:
-      PROMETHEUS_URL: http://prometheus:9090
+      PROMETHEUS_URL: ${PROMETHEUS_URL:-http://prometheus:9090}
     volumes:
       - grafanadata:/var/lib/grafana
       - ./grafana/datasources:/etc/grafana/provisioning/datasources

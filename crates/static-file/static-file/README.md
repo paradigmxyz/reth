@@ -104,7 +104,7 @@ graph TD;
 ### Glossary
 In descending order of abstraction hierarchy:
 
-[`StaticFileProducer`](../../static-file/static-file/src/static_file_producer.rs#L25): A `reth` [hook](../../consensus/beacon/src/engine/hooks/static_file.rs) service that when triggered, **copies** finalized data from the database to the latest static file. Upon completion, it updates the internal index at `StaticFileProvider` with the new highest block and transaction on each specific segment.
+[`StaticFileProducer`](../../static-file/static-file/src/static_file_producer.rs#L25): A `reth` hook service that when triggered, **copies** finalized data from the database to the latest static file. Upon completion, it updates the internal index at `StaticFileProvider` with the new highest block and transaction on each specific segment.
 
 [`StaticFileProvider`](../../storage/provider/src/providers/static_file/manager.rs#L44) A provider similar to `DatabaseProvider`, **managing all existing static_file files** and selecting the optimal one (by range and segment type) to fulfill a request. **A single instance is shared across all components and should be instantiated only once within `ProviderFactory`**. An immutable reference is given every time `ProviderFactory` creates a new `DatabaseProvider`.
 

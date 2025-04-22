@@ -3,29 +3,29 @@
 //!
 //! Run with
 //!
-//! ```not_rust
+//! ```sh
 //! cargo run -p custom-payload-builder -- node
 //! ```
 //!
-//! This launch the regular reth node overriding the engine api payload builder with our custom.
+//! This launches a regular reth node overriding the engine api payload builder with our custom.
 
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![warn(unused_crate_dependencies)]
 
-use generator::EmptyBlockPayloadJobGenerator;
+use crate::generator::EmptyBlockPayloadJobGenerator;
 use reth::{
     builder::{components::PayloadServiceBuilder, node::FullNodeTypes, BuilderContext},
     cli::{config::PayloadBuilderConfig, Cli},
-    payload::PayloadBuilderHandle,
-    providers::CanonStateSubscriptions,
-    transaction_pool::{PoolTransaction, TransactionPool},
 };
 use reth_basic_payload_builder::BasicPayloadJobGeneratorConfig;
-use reth_chainspec::ChainSpec;
+use reth_ethereum::{
+    chainspec::ChainSpec,
+    node::{api::NodeTypes, node::EthereumAddOns, EthEngineTypes, EthEvmConfig, EthereumNode},
+    pool::{PoolTransaction, TransactionPool},
+    provider::CanonStateSubscriptions,
+    EthPrimitives, TransactionSigned,
+};
 use reth_ethereum_payload_builder::EthereumBuilderConfig;
-use reth_node_api::NodeTypesWithEngine;
-use reth_node_ethereum::{node::EthereumAddOns, EthEngineTypes, EthEvmConfig, EthereumNode};
-use reth_payload_builder::PayloadBuilderService;
-use reth_primitives::{EthPrimitives, TransactionSigned};
+use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 
 pub mod generator;
 pub mod job;
@@ -37,8 +37,8 @@ pub struct CustomPayloadBuilder;
 impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for CustomPayloadBuilder
 where
     Node: FullNodeTypes<
-        Types: NodeTypesWithEngine<
-            Engine = EthEngineTypes,
+        Types: NodeTypes<
+            Payload = EthEngineTypes,
             ChainSpec = ChainSpec,
             Primitives = EthPrimitives,
         >,
@@ -47,12 +47,20 @@ where
         + Unpin
         + 'static,
 {
-    async fn spawn_payload_service(
+    async fn spawn_payload_builder_service(
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>> {
+    ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>> {
         tracing::info!("Spawning a custom payload builder");
+
+        let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
+            ctx.provider().clone(),
+            pool,
+            EthEvmConfig::new(ctx.chain_spec()),
+            EthereumBuilderConfig::new(),
+        );
+
         let conf = ctx.payload_builder_config();
 
         let payload_job_config = BasicPayloadJobGeneratorConfig::default()
@@ -62,13 +70,9 @@ where
 
         let payload_generator = EmptyBlockPayloadJobGenerator::with_builder(
             ctx.provider().clone(),
-            pool,
             ctx.task_executor().clone(),
             payload_job_config,
-            reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
-                EthEvmConfig::new(ctx.chain_spec()),
-                EthereumBuilderConfig::new(conf.extra_data_bytes()),
-            ),
+            payload_builder,
         );
 
         let (payload_service, payload_builder) =

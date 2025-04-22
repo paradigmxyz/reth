@@ -1,8 +1,10 @@
 //! Transaction pool errors
 
+use std::any::Any;
+
 use alloy_eips::eip4844::BlobTransactionValidationError;
 use alloy_primitives::{Address, TxHash, U256};
-use reth_primitives::InvalidTransactionError;
+use reth_primitives_traits::transaction::error::InvalidTransactionError;
 
 /// Transaction pool result type.
 pub type PoolResult<T> = Result<T, PoolError>;
@@ -17,6 +19,9 @@ pub trait PoolTransactionError: core::error::Error + Send + Sync {
     ///
     /// See [`PoolError::is_bad_transaction`].
     fn is_bad_transaction(&self) -> bool;
+
+    /// Returns a reference to `self` as a `&dyn Any`, enabling downcasting.
+    fn as_any(&self) -> &dyn Any;
 }
 
 // Needed for `#[error(transparent)]`
@@ -97,7 +102,7 @@ impl PoolError {
     /// erroneous transaction.
     #[inline]
     pub fn is_bad_transaction(&self) -> bool {
-        #[allow(clippy::match_same_arms)]
+        #[expect(clippy::match_same_arms)]
         match &self.kind {
             PoolErrorKind::AlreadyImported => {
                 // already imported but not bad
@@ -156,9 +161,9 @@ pub enum Eip4844PoolTransactionError {
     #[error("too many blobs in transaction: have {have}, permitted {permitted}")]
     TooManyEip4844Blobs {
         /// Number of blobs the transaction has
-        have: usize,
+        have: u64,
         /// Number of maximum blobs the transaction can have
-        permitted: usize,
+        permitted: u64,
     },
     /// Thrown if validating the blob sidecar for the transaction failed.
     #[error(transparent)]
@@ -194,6 +199,15 @@ pub enum InvalidPoolTransactionError {
     /// respect the size limits of the pool.
     #[error("transaction's gas limit {0} exceeds block's gas limit {1}")]
     ExceedsGasLimit(u64, u64),
+    /// Thrown when a new transaction is added to the pool, but then immediately discarded to
+    /// respect the tx fee exceeds the configured cap
+    #[error("tx fee ({max_tx_fee_wei} wei) exceeds the configured cap ({tx_fee_cap_wei} wei)")]
+    ExceedsFeeCap {
+        /// max fee in wei of new tx submitted to the pull (e.g. 0.11534 ETH)
+        max_tx_fee_wei: u128,
+        /// configured tx fee cap in wei (e.g. 1.0 ETH)
+        tx_fee_cap_wei: u128,
+    },
     /// Thrown when a new transaction is added to the pool, but then immediately discarded to
     /// respect the `max_init_code_size`.
     #[error("transaction's input size {0} exceeds max_init_code_size {1}")]
@@ -232,11 +246,17 @@ pub enum InvalidPoolTransactionError {
 // === impl InvalidPoolTransactionError ===
 
 impl InvalidPoolTransactionError {
+    /// Returns a new [`InvalidPoolTransactionError::Other`] instance with the given
+    /// [`PoolTransactionError`].
+    pub fn other<E: PoolTransactionError + 'static>(err: E) -> Self {
+        Self::Other(Box::new(err))
+    }
+
     /// Returns `true` if the error was caused by a transaction that is considered bad in the
     /// context of the transaction pool and warrants peer penalization.
     ///
     /// See [`PoolError::is_bad_transaction`].
-    #[allow(clippy::match_same_arms)]
+    #[expect(clippy::match_same_arms)]
     #[inline]
     fn is_bad_transaction(&self) -> bool {
         match self {
@@ -276,6 +296,7 @@ impl InvalidPoolTransactionError {
                 }
             }
             Self::ExceedsGasLimit(_, _) => true,
+            Self::ExceedsFeeCap { max_tx_fee_wei: _, tx_fee_cap_wei: _ } => true,
             Self::ExceedsMaxInitCodeSize(_, _) => true,
             Self::OversizedData(_, _) => true,
             Self::Underpriced => {
@@ -321,5 +342,53 @@ impl InvalidPoolTransactionError {
     pub const fn is_nonce_gap(&self) -> bool {
         matches!(self, Self::Consensus(InvalidTransactionError::NonceNotConsistent { .. })) ||
             matches!(self, Self::Eip4844(Eip4844PoolTransactionError::Eip4844NonceGap))
+    }
+
+    /// Returns the arbitrary error if it is [`InvalidPoolTransactionError::Other`]
+    pub fn as_other(&self) -> Option<&dyn PoolTransactionError> {
+        match self {
+            Self::Other(err) => Some(&**err),
+            _ => None,
+        }
+    }
+
+    /// Returns a reference to the [`InvalidPoolTransactionError::Other`] value if this type is a
+    /// [`InvalidPoolTransactionError::Other`] of that type. Returns None otherwise.
+    pub fn downcast_other_ref<T: core::error::Error + 'static>(&self) -> Option<&T> {
+        let other = self.as_other()?;
+        other.as_any().downcast_ref()
+    }
+
+    /// Returns true if the this type is a [`InvalidPoolTransactionError::Other`] of that error
+    /// type. Returns false otherwise.
+    pub fn is_other<T: core::error::Error + 'static>(&self) -> bool {
+        self.as_other().map(|err| err.as_any().is::<T>()).unwrap_or(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(thiserror::Error, Debug)]
+    #[error("err")]
+    struct E;
+
+    impl PoolTransactionError for E {
+        fn is_bad_transaction(&self) -> bool {
+            false
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    #[test]
+    fn other_downcast() {
+        let err = InvalidPoolTransactionError::Other(Box::new(E));
+        assert!(err.is_other::<E>());
+
+        assert!(err.downcast_other_ref::<E>().is_some());
     }
 }

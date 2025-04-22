@@ -26,10 +26,11 @@ mod builder;
 pub use builder::{add_ons::AddOns, *};
 
 mod launch;
-pub use launch::{engine::EngineNodeLauncher, *};
-
-/// Temporarily re-export engine tree config.
-pub use reth_engine_tree::tree::config as engine_tree_config;
+pub use launch::{
+    debug::{DebugNode, DebugNodeLauncher},
+    engine::EngineNodeLauncher,
+    *,
+};
 
 mod handle;
 pub use handle::NodeHandle;
@@ -37,6 +38,10 @@ pub use handle::NodeHandle;
 pub mod rpc;
 
 pub mod setup;
+
+/// Type aliases for traits that are often used together
+pub mod aliases;
+pub use aliases::*;
 
 /// Support for installing the ExExs (execution extensions) in a node.
 pub mod exex;

@@ -15,7 +15,7 @@ use alloy_rlp::{Encodable, Rlp, RlpEncodable, RlpMaxEncodedLen};
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
 use ctr::Ctr64BE;
 use digest::{crypto_common::KeyIvInit, Digest};
-use rand::{thread_rng, Rng};
+use rand_08::{thread_rng as rng, Rng};
 use reth_network_peers::{id2pk, pk2id};
 use secp256k1::{
     ecdsa::{RecoverableSignature, RecoveryId},
@@ -312,8 +312,9 @@ impl ECIES {
 
     /// Create a new ECIES client with the given static secret key and remote peer ID.
     pub fn new_client(secret_key: SecretKey, remote_id: PeerId) -> Result<Self, ECIESError> {
-        let mut rng = thread_rng();
-        let nonce = rng.gen();
+        // TODO(rand): use rng for nonce
+        let mut rng = rng();
+        let nonce = B256::random();
         let ephemeral_secret_key = SecretKey::new(&mut rng);
         Self::new_static_client(secret_key, remote_id, nonce, ephemeral_secret_key)
     }
@@ -354,19 +355,19 @@ impl ECIES {
 
     /// Create a new ECIES server with the given static secret key.
     pub fn new_server(secret_key: SecretKey) -> Result<Self, ECIESError> {
-        let mut rng = thread_rng();
-        let nonce = rng.gen();
+        let mut rng = rng();
+        let nonce = B256::random();
         let ephemeral_secret_key = SecretKey::new(&mut rng);
         Self::new_static_server(secret_key, nonce, ephemeral_secret_key)
     }
 
     /// Return the contained remote peer ID.
-    pub fn remote_id(&self) -> PeerId {
+    pub const fn remote_id(&self) -> PeerId {
         self.remote_id.unwrap()
     }
 
     fn encrypt_message(&self, data: &[u8], out: &mut BytesMut) {
-        let mut rng = thread_rng();
+        let mut rng = rng();
 
         out.reserve(secp256k1::constants::UNCOMPRESSED_PUBLIC_KEY_SIZE + 16 + data.len() + 32);
 
@@ -382,7 +383,7 @@ impl ECIES {
         let enc_key = B128::from_slice(&key[..16]);
         let mac_key = sha256(&key[16..32]);
 
-        let iv: B128 = rng.gen();
+        let iv = B128::random();
         let mut encryptor = Ctr64BE::<Aes128>::new((&enc_key.0).into(), (&iv.0).into());
 
         let mut encrypted = data.to_vec();
@@ -421,7 +422,7 @@ impl ECIES {
 
         let mut sig_bytes = [0u8; 65];
         sig_bytes[..64].copy_from_slice(&sig);
-        sig_bytes[64] = rec_id.to_i32() as u8;
+        sig_bytes[64] = i32::from(rec_id) as u8;
 
         let id = pk2id(&self.public_key);
 
@@ -442,7 +443,7 @@ impl ECIES {
         }
         .encode(&mut out);
 
-        out.resize(out.len() + thread_rng().gen_range(100..=300), 0);
+        out.resize(out.len() + rng().gen_range(100..=300), 0);
         out
     }
 
@@ -479,7 +480,7 @@ impl ECIES {
         let sigdata = data.get_next::<[u8; 65]>()?.ok_or(ECIESErrorImpl::InvalidAuthData)?;
         let signature = RecoverableSignature::from_compact(
             &sigdata[..64],
-            RecoveryId::from_i32(sigdata[64] as i32)?,
+            RecoveryId::try_from(sigdata[64] as i32)?,
         )?;
         let remote_id = data.get_next()?.ok_or(ECIESErrorImpl::InvalidAuthData)?;
         self.remote_id = Some(remote_id);
@@ -686,7 +687,7 @@ impl ECIES {
         32
     }
 
-    pub fn body_len(&self) -> usize {
+    pub const fn body_len(&self) -> usize {
         let len = self.body_size.unwrap();
         Self::align_16(len) + 16
     }
@@ -763,7 +764,7 @@ mod tests {
 
     #[test]
     fn communicate() {
-        let mut rng = thread_rng();
+        let mut rng = rng();
         let server_secret_key = SecretKey::new(&mut rng);
         let server_public_key = PublicKey::from_secret_key(SECP256K1, &server_secret_key);
         let client_secret_key = SecretKey::new(&mut rng);
@@ -852,7 +853,7 @@ mod tests {
         .unwrap();
 
         let client_nonce =
-            b256!("7e968bba13b6c50e2c4cd7f241cc0d64d1ac25c7f5952df231ac6a2bda8ee5d6");
+            b256!("0x7e968bba13b6c50e2c4cd7f241cc0d64d1ac25c7f5952df231ac6a2bda8ee5d6");
 
         let server_id = pk2id(&PublicKey::from_secret_key(SECP256K1, &eip8_test_server_key()));
 
@@ -867,7 +868,7 @@ mod tests {
         .unwrap();
 
         let server_nonce =
-            b256!("559aead08264d5795d3909718cdd05abd49572e84fe55590eef31a88a08fdffd");
+            b256!("0x559aead08264d5795d3909718cdd05abd49572e84fe55590eef31a88a08fdffd");
 
         ECIES::new_static_server(eip8_test_server_key(), server_nonce, server_ephemeral_key)
             .unwrap()
@@ -970,7 +971,7 @@ mod tests {
         for len in len_range {
             let mut dest = vec![1u8; len];
             kdf(
-                b256!("7000000000000000000000000000000000000000000000000000000000000007"),
+                b256!("0x7000000000000000000000000000000000000000000000000000000000000007"),
                 &[0x01, 0x33, 0x70, 0xbe, 0xef],
                 &mut dest,
             );

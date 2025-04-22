@@ -63,10 +63,14 @@ pub(crate) struct EngineMetrics {
 pub(crate) struct BlockValidationMetrics {
     /// Total number of storage tries updated in the state root calculation
     pub(crate) state_root_storage_tries_updated_total: Counter,
+    /// Total number of times the parallel state root computation fell back to regular.
+    pub(crate) state_root_parallel_fallback_total: Counter,
     /// Histogram of state root duration
     pub(crate) state_root_histogram: Histogram,
     /// Latest state root duration
     pub(crate) state_root_duration: Gauge,
+    /// Trie input computation duration
+    pub(crate) trie_input_duration: Histogram,
 }
 
 impl BlockValidationMetrics {
@@ -82,7 +86,7 @@ impl BlockValidationMetrics {
 /// Metrics for the blockchain tree block buffer
 #[derive(Metrics)]
 #[metrics(scope = "blockchain_tree.block_buffer")]
-pub(super) struct BlockBufferMetrics {
+pub(crate) struct BlockBufferMetrics {
     /// Total blocks in the block buffer
     pub blocks: Gauge,
 }

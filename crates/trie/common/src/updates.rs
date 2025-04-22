@@ -1,7 +1,7 @@
 use crate::{BranchNodeCompact, HashBuilder, Nibbles};
 use alloc::vec::Vec;
 use alloy_primitives::{
-    map::{B256HashMap, B256HashSet, HashMap, HashSet},
+    map::{B256Map, B256Set, HashMap, HashSet},
     B256,
 };
 
@@ -16,7 +16,7 @@ pub struct TrieUpdates {
     #[cfg_attr(any(test, feature = "serde"), serde(with = "serde_nibbles_set"))]
     pub removed_nodes: HashSet<Nibbles>,
     /// Collection of updated storage tries indexed by the hashed address.
-    pub storage_tries: B256HashMap<StorageTrieUpdates>,
+    pub storage_tries: B256Map<StorageTrieUpdates>,
 }
 
 impl TrieUpdates {
@@ -38,7 +38,7 @@ impl TrieUpdates {
     }
 
     /// Returns a reference to updated storage tries.
-    pub const fn storage_tries_ref(&self) -> &B256HashMap<StorageTrieUpdates> {
+    pub const fn storage_tries_ref(&self) -> &B256Map<StorageTrieUpdates> {
         &self.storage_tries
     }
 
@@ -76,6 +76,9 @@ impl TrieUpdates {
         hashed_address: B256,
         storage_updates: StorageTrieUpdates,
     ) {
+        if storage_updates.is_empty() {
+            return;
+        }
         let existing = self.storage_tries.insert(hashed_address, storage_updates);
         debug_assert!(existing.is_none());
     }
@@ -85,7 +88,7 @@ impl TrieUpdates {
         &mut self,
         hash_builder: HashBuilder,
         removed_keys: HashSet<Nibbles>,
-        destroyed_accounts: B256HashSet,
+        destroyed_accounts: B256Set,
     ) {
         // Retrieve updated nodes from hash builder.
         let (_, updated_nodes) = hash_builder.split();
@@ -171,7 +174,7 @@ impl StorageTrieUpdates {
     }
 
     /// Sets `deleted` flag on the storage trie.
-    pub fn set_deleted(&mut self, deleted: bool) {
+    pub const fn set_deleted(&mut self, deleted: bool) {
         self.is_deleted = deleted;
     }
 
@@ -354,9 +357,8 @@ pub struct TrieUpdatesSorted {
     pub account_nodes: Vec<(Nibbles, BranchNodeCompact)>,
     /// The set of removed state node keys.
     pub removed_nodes: HashSet<Nibbles>,
-    /// Storage tries storage stored by hashed address of the account
-    /// the trie belongs to.
-    pub storage_tries: B256HashMap<StorageTrieUpdatesSorted>,
+    /// Storage tries stored by hashed address of the account the trie belongs to.
+    pub storage_tries: B256Map<StorageTrieUpdatesSorted>,
 }
 
 impl TrieUpdatesSorted {
@@ -371,7 +373,7 @@ impl TrieUpdatesSorted {
     }
 
     /// Returns reference to updated storage tries.
-    pub const fn storage_tries_ref(&self) -> &B256HashMap<StorageTrieUpdatesSorted> {
+    pub const fn storage_tries_ref(&self) -> &B256Map<StorageTrieUpdatesSorted> {
         &self.storage_tries
     }
 }
@@ -421,7 +423,7 @@ fn exclude_empty_from_pair<V>(
 pub mod serde_bincode_compat {
     use crate::{BranchNodeCompact, Nibbles};
     use alloc::borrow::Cow;
-    use alloy_primitives::map::{B256HashMap, HashMap, HashSet};
+    use alloy_primitives::map::{B256Map, HashMap, HashSet};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -444,7 +446,7 @@ pub mod serde_bincode_compat {
     pub struct TrieUpdates<'a> {
         account_nodes: Cow<'a, HashMap<Nibbles, BranchNodeCompact>>,
         removed_nodes: Cow<'a, HashSet<Nibbles>>,
-        storage_tries: B256HashMap<StorageTrieUpdates<'a>>,
+        storage_tries: B256Map<StorageTrieUpdates<'a>>,
     }
 
     impl<'a> From<&'a super::TrieUpdates> for TrieUpdates<'a> {

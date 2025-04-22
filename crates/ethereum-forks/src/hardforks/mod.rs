@@ -1,6 +1,5 @@
-/// Ethereum helper methods
-mod ethereum;
-pub use ethereum::EthereumHardforks;
+mod dev;
+pub use dev::DEV_HARDFORKS;
 
 use crate::{ForkCondition, ForkFilter, ForkId, Hardfork, Head};
 #[cfg(feature = "std")]
@@ -36,6 +35,9 @@ pub trait Hardforks: Clone {
     fn fork_id(&self, head: &Head) -> ForkId;
 
     /// Returns the [`ForkId`] for the last fork.
+    ///
+    /// NOTE: This returns the latest implemented [`ForkId`]. In many cases this will be the future
+    /// [`ForkId`] on given network.
     fn latest_fork_id(&self) -> ForkId;
 
     /// Creates a [`ForkFilter`] for the block described by [Head].
@@ -143,5 +145,15 @@ impl core::fmt::Debug for ChainHardforks {
         f.debug_struct("ChainHardforks")
             .field("0", &self.forks_iter().map(|(hf, cond)| (hf.name(), cond)).collect::<Vec<_>>())
             .finish()
+    }
+}
+
+impl<T: Hardfork, const N: usize> From<[(T, ForkCondition); N]> for ChainHardforks {
+    fn from(list: [(T, ForkCondition); N]) -> Self {
+        Self::new(
+            list.into_iter()
+                .map(|(fork, cond)| (Box::new(fork) as Box<dyn Hardfork>, cond))
+                .collect(),
+        )
     }
 }

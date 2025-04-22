@@ -29,17 +29,14 @@ eyre.workspace = true
 tikv-jemalloc-ctl = { workspace = true, optional = true, features = ["stats"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-procfs = "0.16.0"
+procfs = "0.17.0"
 
 [dev-dependencies]
 reqwest.workspace = true
-socket2 = { version = "0.5", default-features = false }
+socket2.workspace = true
 
 [lints]
 workspace = true
 
 [features]
 jemalloc = ["dep:tikv-jemalloc-ctl"]
-
-[build-dependencies]
-vergen = { version = "8.0.0", features = ["build", "cargo", "git", "gitcl"] }

@@ -15,12 +15,12 @@ workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-execution-types.workspace = true
-reth-primitives = { workspace = true, features = ["reth-codec", "secp256k1"] }
-reth-primitives-traits = { workspace = true, features = ["reth-codec"] }
+reth-ethereum-primitives = { workspace = true, features = ["reth-codec"] }
+reth-primitives-traits = { workspace = true, features = ["reth-codec", "secp256k1"] }
 reth-fs-util.workspace = true
 reth-errors.workspace = true
 reth-storage-errors.workspace = true
-reth-storage-api.workspace = true
+reth-storage-api = { workspace = true, features = ["std", "db-api"] }
 reth-network-p2p.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-db-api.workspace = true
@@ -33,16 +33,14 @@ reth-codecs.workspace = true
 reth-evm.workspace = true
 reth-chain-state.workspace = true
 reth-node-types.workspace = true
-
+reth-static-file-types.workspace = true
 # ethereum
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
-revm.workspace = true
-
-# optimism
-reth-optimism-primitives = { workspace = true, features = ["reth-codec"], optional = true }
+revm-database.workspace = true
+revm-state = { workspace = true, optional = true }
 
 # async
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
@@ -57,12 +55,11 @@ metrics.workspace = true
 # misc
 auto_impl.workspace = true
 itertools.workspace = true
-notify = { workspace = true, default-features = false, features = [
-    "macos_fsevent",
-] }
+notify = { workspace = true, default-features = false, features = ["macos_fsevent"] }
 parking_lot.workspace = true
 dashmap = { workspace = true, features = ["inline"] }
 strum.workspace = true
+eyre.workspace = true
 
 # test-utils
 reth-ethereum-engine-primitives = { workspace = true, optional = true }
@@ -72,12 +69,15 @@ rayon.workspace = true
 
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }
-reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }
+reth-primitives-traits = { workspace = true, features = ["arbitrary", "test-utils"] }
 reth-chain-state = { workspace = true, features = ["test-utils"] }
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 reth-ethereum-engine-primitives.workspace = true
+reth-ethereum-primitives.workspace = true
 
+revm-database-interface.workspace = true
+revm-state.workspace = true
 parking_lot.workspace = true
 tempfile.workspace = true
 assert_matches.workspace = true
@@ -87,49 +87,21 @@ eyre.workspace = true
 alloy-consensus.workspace = true
 
 [features]
-optimism = [
-    "reth-primitives/optimism",
-    "reth-execution-types/optimism",
-    "reth-optimism-primitives",
-    "reth-codecs/op",
-    "reth-db/optimism",
-    "reth-db-api/optimism",
-    "revm/optimism",
-    "reth-optimism-primitives/optimism",
-]
-serde = [
-    "dashmap/serde",
-    "notify/serde",
-    "parking_lot/serde",
-    "rand/serde",
-    "alloy-primitives/serde",
-    "alloy-consensus/serde",
-    "alloy-eips/serde",
-    "alloy-rpc-types-engine/serde",
-    "revm/serde",
-    "reth-codecs/serde",
-    "reth-optimism-primitives?/serde",
-    "reth-primitives-traits/serde",
-    "reth-execution-types/serde",
-    "reth-trie-db/serde",
-    "reth-trie/serde",
-]
 test-utils = [
     "reth-db/test-utils",
     "reth-nippy-jar/test-utils",
     "reth-trie/test-utils",
     "reth-chain-state/test-utils",
     "reth-ethereum-engine-primitives",
+    "reth-ethereum-primitives/test-utils",
     "reth-chainspec/test-utils",
     "reth-evm/test-utils",
     "reth-network-p2p/test-utils",
-    "reth-primitives/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-codecs/test-utils",
     "reth-db-api/test-utils",
     "reth-trie-db/test-utils",
-    "revm/test-utils",
     "reth-prune-types/test-utils",
     "reth-stages-types/test-utils",
-    "reth-optimism-primitives?/arbitrary",
+    "revm-state",
 ]

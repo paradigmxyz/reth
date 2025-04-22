@@ -312,7 +312,7 @@ impl Stat {
     }
 
     /// Returns a mut pointer to `ffi::MDB_stat`.
-    pub(crate) fn mdb_stat(&mut self) -> *mut ffi::MDBX_stat {
+    pub(crate) const fn mdb_stat(&mut self) -> *mut ffi::MDBX_stat {
         &mut self.0
     }
 }
@@ -429,7 +429,7 @@ impl Info {
     /// Return the mode of the database
     #[inline]
     pub const fn mode(&self) -> Mode {
-        let mode = self.0.mi_mode;
+        let mode = self.0.mi_mode as ffi::MDBX_env_flags_t;
         if (mode & ffi::MDBX_RDONLY) != 0 {
             Mode::ReadOnly
         } else if (mode & ffi::MDBX_UTTERLY_NOSYNC) != 0 {
@@ -757,7 +757,7 @@ impl EnvironmentBuilder {
     }
 
     /// Configures how this environment will be opened.
-    pub fn set_kind(&mut self, kind: EnvironmentKind) -> &mut Self {
+    pub const fn set_kind(&mut self, kind: EnvironmentKind) -> &mut Self {
         self.kind = kind;
         self
     }
@@ -765,12 +765,12 @@ impl EnvironmentBuilder {
     /// Opens the environment with mdbx WRITEMAP
     ///
     /// See also [`EnvironmentKind`]
-    pub fn write_map(&mut self) -> &mut Self {
+    pub const fn write_map(&mut self) -> &mut Self {
         self.set_kind(EnvironmentKind::WriteMap)
     }
 
     /// Sets the provided options in the environment.
-    pub fn set_flags(&mut self, flags: EnvironmentFlags) -> &mut Self {
+    pub const fn set_flags(&mut self, flags: EnvironmentFlags) -> &mut Self {
         self.flags = flags;
         self
     }
@@ -780,7 +780,7 @@ impl EnvironmentBuilder {
     /// This defines the number of slots in the lock table that is used to track readers in the
     /// the environment. The default is 126. Starting a read-only transaction normally ties a lock
     /// table slot to the [Transaction] object until it or the [Environment] object is destroyed.
-    pub fn set_max_readers(&mut self, max_readers: u64) -> &mut Self {
+    pub const fn set_max_readers(&mut self, max_readers: u64) -> &mut Self {
         self.max_readers = Some(max_readers);
         self
     }
@@ -794,14 +794,14 @@ impl EnvironmentBuilder {
     /// Currently a moderate number of slots are cheap but a huge number gets
     /// expensive: 7-120 words per transaction, and every [`Transaction::open_db()`]
     /// does a linear search of the opened slots.
-    pub fn set_max_dbs(&mut self, v: usize) -> &mut Self {
+    pub const fn set_max_dbs(&mut self, v: usize) -> &mut Self {
         self.max_dbs = Some(v as u64);
         self
     }
 
     /// Sets the interprocess/shared threshold to force flush the data buffers to disk, if
     /// [`SyncMode::SafeNoSync`] is used.
-    pub fn set_sync_bytes(&mut self, v: usize) -> &mut Self {
+    pub const fn set_sync_bytes(&mut self, v: usize) -> &mut Self {
         self.sync_bytes = Some(v as u64);
         self
     }
@@ -815,22 +815,22 @@ impl EnvironmentBuilder {
         self
     }
 
-    pub fn set_rp_augment_limit(&mut self, v: u64) -> &mut Self {
+    pub const fn set_rp_augment_limit(&mut self, v: u64) -> &mut Self {
         self.rp_augment_limit = Some(v);
         self
     }
 
-    pub fn set_loose_limit(&mut self, v: u64) -> &mut Self {
+    pub const fn set_loose_limit(&mut self, v: u64) -> &mut Self {
         self.loose_limit = Some(v);
         self
     }
 
-    pub fn set_dp_reserve_limit(&mut self, v: u64) -> &mut Self {
+    pub const fn set_dp_reserve_limit(&mut self, v: u64) -> &mut Self {
         self.dp_reserve_limit = Some(v);
         self
     }
 
-    pub fn set_txn_dp_limit(&mut self, v: u64) -> &mut Self {
+    pub const fn set_txn_dp_limit(&mut self, v: u64) -> &mut Self {
         self.txn_dp_limit = Some(v);
         self
     }
@@ -863,7 +863,7 @@ impl EnvironmentBuilder {
         self
     }
 
-    pub fn set_log_level(&mut self, log_level: ffi::MDBX_log_level_t) -> &mut Self {
+    pub const fn set_log_level(&mut self, log_level: ffi::MDBX_log_level_t) -> &mut Self {
         self.log_level = Some(log_level);
         self
     }
@@ -903,7 +903,7 @@ pub(crate) mod read_transactions {
 
     impl EnvironmentBuilder {
         /// Set the maximum time a read-only transaction can be open.
-        pub fn set_max_read_transaction_duration(
+        pub const fn set_max_read_transaction_duration(
             &mut self,
             max_read_transaction_duration: MaxReadTransactionDuration,
         ) -> &mut Self {
@@ -914,7 +914,6 @@ pub(crate) mod read_transactions {
 }
 
 /// Converts a [`HandleSlowReadersCallback`] to the actual FFI function pointer.
-#[allow(clippy::missing_transmute_annotations)]
 fn convert_hsr_fn(callback: Option<HandleSlowReadersCallback>) -> ffi::MDBX_hsr_func {
     unsafe { std::mem::transmute(callback) }
 }

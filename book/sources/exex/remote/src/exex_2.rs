@@ -9,7 +9,7 @@ use tokio::sync::{broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{transport::Server, Request, Response, Status};
 
-#[allow(dead_code)]
+#[expect(dead_code)]
 struct ExExService {
     notifications: Arc<broadcast::Sender<ExExNotification>>,
 }

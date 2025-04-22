@@ -2,13 +2,15 @@
 
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_rpc_types_eth::{BlockId, TransactionReceipt};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_primitives_traits::{BlockBody, SignedTransaction};
-use reth_provider::BlockReader;
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
+    types::RpcTypes,
     RpcNodeCoreExt, RpcReceipt,
 };
 use reth_rpc_eth_types::{EthApiError, EthReceiptBuilder};
+use reth_storage_api::BlockReader;
 
 use crate::EthApi;
 
@@ -16,13 +18,13 @@ impl<Provider, Pool, Network, EvmConfig> EthBlocks for EthApi<Provider, Pool, Ne
 where
     Self: LoadBlock<
         Error = EthApiError,
-        NetworkTypes: alloy_network::Network<ReceiptResponse = TransactionReceipt>,
+        NetworkTypes: RpcTypes<Receipt = TransactionReceipt>,
         Provider: BlockReader<
-            Transaction = reth_primitives::TransactionSigned,
-            Receipt = reth_primitives::Receipt,
+            Transaction = reth_ethereum_primitives::TransactionSigned,
+            Receipt = reth_ethereum_primitives::Receipt,
         >,
     >,
-    Provider: BlockReader,
+    Provider: BlockReader + ChainSpecProvider,
 {
     async fn block_receipts(
         &self,
@@ -37,6 +39,7 @@ where
             let block_hash = block.hash();
             let excess_blob_gas = block.excess_blob_gas();
             let timestamp = block.timestamp();
+            let blob_params = self.provider().chain_spec().blob_params_at_timestamp(timestamp);
 
             return block
                 .body()
@@ -54,7 +57,7 @@ where
                         excess_blob_gas,
                         timestamp,
                     };
-                    EthReceiptBuilder::new(tx, meta, receipt, &receipts)
+                    EthReceiptBuilder::new(tx, meta, receipt, &receipts, blob_params)
                         .map(|builder| builder.build())
                 })
                 .collect::<Result<Vec<_>, Self::Error>>()

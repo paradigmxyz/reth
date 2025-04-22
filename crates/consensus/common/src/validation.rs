@@ -1,11 +1,15 @@
 //! Collection of methods for block validation.
 
-use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, BlockHeader, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::{
+    constants::MAXIMUM_EXTRA_DATA_SIZE, BlockHeader as _, EMPTY_OMMER_ROOT_HASH,
+};
 use alloy_eips::{calc_next_block_base_fee, eip4844::DATA_GAS_PER_BLOB, eip7840::BlobParams};
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::ConsensusError;
-use reth_primitives::SealedBlock;
-use reth_primitives_traits::{BlockBody, GotExpected, SealedHeader};
+use reth_primitives_traits::{
+    constants::MAXIMUM_GAS_LIMIT_BLOCK, Block, BlockBody, BlockHeader, GotExpected, SealedBlock,
+    SealedHeader,
+};
 
 /// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
 #[inline]
@@ -15,6 +19,10 @@ pub fn validate_header_gas<H: BlockHeader>(header: &H) -> Result<(), ConsensusEr
             gas_used: header.gas_used(),
             gas_limit: header.gas_limit(),
         })
+    }
+    // Check that the gas limit is below the maximum allowed gas limit
+    if header.gas_limit() > MAXIMUM_GAS_LIMIT_BLOCK {
+        return Err(ConsensusError::HeaderGasLimitExceedsMax { gas_limit: header.gas_limit() })
     }
     Ok(())
 }
@@ -38,8 +46,8 @@ pub fn validate_header_base_fee<H: BlockHeader, ChainSpec: EthereumHardforks>(
 ///
 /// [EIP-4895]: https://eips.ethereum.org/EIPS/eip-4895
 #[inline]
-pub fn validate_shanghai_withdrawals<H: BlockHeader, B: BlockBody>(
-    block: &SealedBlock<H, B>,
+pub fn validate_shanghai_withdrawals<B: Block>(
+    block: &SealedBlock<B>,
 ) -> Result<(), ConsensusError> {
     let withdrawals = block.body().withdrawals().ok_or(ConsensusError::BodyWithdrawalsMissing)?;
     let withdrawals_root = alloy_consensus::proofs::calculate_withdrawals_root(withdrawals);
@@ -59,9 +67,7 @@ pub fn validate_shanghai_withdrawals<H: BlockHeader, B: BlockBody>(
 ///
 /// [EIP-4844]: https://eips.ethereum.org/EIPS/eip-4844
 #[inline]
-pub fn validate_cancun_gas<H: BlockHeader, B: BlockBody>(
-    block: &SealedBlock<H, B>,
-) -> Result<(), ConsensusError> {
+pub fn validate_cancun_gas<B: Block>(block: &SealedBlock<B>) -> Result<(), ConsensusError> {
     // Check that the blob gas used in the header matches the sum of the blob gas used by each
     // blob tx
     let header_blob_gas_used = block.blob_gas_used().ok_or(ConsensusError::BlobGasUsedMissing)?;
@@ -127,13 +133,12 @@ where
 /// - Compares the transactions root in the block header to the block body
 /// - Pre-execution transaction validation
 /// - (Optionally) Compares the receipts root in the block header to the block body
-pub fn validate_block_pre_execution<H, B, ChainSpec>(
-    block: &SealedBlock<H, B>,
+pub fn validate_block_pre_execution<B, ChainSpec>(
+    block: &SealedBlock<B>,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError>
 where
-    H: BlockHeader,
-    B: BlockBody,
+    B: Block,
     ChainSpec: EthereumHardforks,
 {
     // Check ommers hash
@@ -172,9 +177,13 @@ where
 ///  * `parent_beacon_block_root` exists as a header field
 ///  * `blob_gas_used` is a multiple of `DATA_GAS_PER_BLOB`
 ///  * `excess_blob_gas` is a multiple of `DATA_GAS_PER_BLOB`
+///  * `blob_gas_used` doesn't exceed the max allowed blob gas based on the given params
 ///
 /// Note: This does not enforce any restrictions on `blob_gas_used`
-pub fn validate_4844_header_standalone<H: BlockHeader>(header: &H) -> Result<(), ConsensusError> {
+pub fn validate_4844_header_standalone<H: BlockHeader>(
+    header: &H,
+    blob_params: BlobParams,
+) -> Result<(), ConsensusError> {
     let blob_gas_used = header.blob_gas_used().ok_or(ConsensusError::BlobGasUsedMissing)?;
     let excess_blob_gas = header.excess_blob_gas().ok_or(ConsensusError::ExcessBlobGasMissing)?;
 
@@ -195,6 +204,13 @@ pub fn validate_4844_header_standalone<H: BlockHeader>(header: &H) -> Result<(),
         return Err(ConsensusError::ExcessBlobGasNotMultipleOfBlobGasPerBlob {
             excess_blob_gas,
             blob_gas_per_blob: DATA_GAS_PER_BLOB,
+        })
+    }
+
+    if blob_gas_used > blob_params.max_blob_gas_per_block() {
+        return Err(ConsensusError::BlobGasUsedExceedsMaxBlobGasPerBlock {
+            blob_gas_used,
+            max_blob_gas_per_block: blob_params.max_blob_gas_per_block(),
         })
     }
 
@@ -335,15 +351,16 @@ pub fn validate_against_parent_4844<H: BlockHeader>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{Header, TxEip4844};
+    use alloy_consensus::{BlockBody, Header, TxEip4844};
     use alloy_eips::eip4895::Withdrawals;
-    use alloy_primitives::{Address, Bytes, PrimitiveSignature as Signature, U256};
+    use alloy_primitives::{Address, Bytes, Signature, U256};
     use rand::Rng;
     use reth_chainspec::ChainSpecBuilder;
-    use reth_primitives::{proofs, BlockBody, Transaction, TransactionSigned};
+    use reth_ethereum_primitives::{Transaction, TransactionSigned};
+    use reth_primitives_traits::proofs;
 
     fn mock_blob_tx(nonce: u64, num_blobs: usize) -> TransactionSigned {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let request = Transaction::Eip4844(TxEip4844 {
             chain_id: 1u64,
             nonce,
@@ -355,7 +372,9 @@ mod tests {
             value: U256::from(3_u64),
             input: Bytes::from(vec![1, 2]),
             access_list: Default::default(),
-            blob_versioned_hashes: std::iter::repeat_with(|| rng.gen()).take(num_blobs).collect(),
+            blob_versioned_hashes: std::iter::repeat_with(|| rng.random())
+                .take(num_blobs)
+                .collect(),
         });
 
         let signature = Signature::new(U256::default(), U256::default(), true);
@@ -377,15 +396,13 @@ mod tests {
             transactions_root: proofs::calculate_transaction_root(&[transaction.clone()]),
             ..Default::default()
         };
-        let header = SealedHeader::seal(header);
-
         let body = BlockBody {
             transactions: vec![transaction],
             ommers: vec![],
             withdrawals: Some(Withdrawals::default()),
         };
 
-        let block = SealedBlock::new(header, body);
+        let block = SealedBlock::seal_slow(alloy_consensus::Block { header, body });
 
         // 10 blobs times the blob gas per blob.
         let expected_blob_gas_used = 10 * DATA_GAS_PER_BLOB;

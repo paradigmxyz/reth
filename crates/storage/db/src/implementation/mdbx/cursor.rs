@@ -1,8 +1,8 @@
 //! Cursor wrapper for libmdbx-sys.
 
+use super::utils::*;
 use crate::{
     metrics::{DatabaseEnvMetrics, Operation},
-    tables::utils::*,
     DatabaseError,
 };
 use reth_db_api::{
@@ -62,7 +62,7 @@ impl<K: TransactionKind, T: Table> Cursor<K, T> {
 }
 
 /// Decodes a `(key, value)` pair from the database.
-#[allow(clippy::type_complexity)]
+#[expect(clippy::type_complexity)]
 pub fn decode<T>(
     res: Result<Option<(Cow<'_, [u8]>, Cow<'_, [u8]>)>, impl Into<DatabaseErrorInfo>>,
 ) -> PairResult<T>

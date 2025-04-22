@@ -38,26 +38,23 @@ futures.workspace = true
 tokio-stream.workspace = true
 pin-project.workspace = true
 tracing.workspace = true
-snap = "1.0.5"
+snap.workspace = true
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
-reth-primitives = { workspace = true, features = ["arbitrary"] }
 reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
 reth-eth-wire-types = { workspace = true, features = ["arbitrary"] }
 reth-tracing.workspace = true
 
+alloy-consensus.workspace = true
 test-fuzz.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 tokio-util = { workspace = true, features = ["io", "codec"] }
 rand.workspace = true
-secp256k1 = { workspace = true, features = [
-    "global-context",
-    "rand-std",
-    "recovery",
-] }
+secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
+rand_08.workspace = true
 
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
@@ -68,28 +65,30 @@ alloy-eips.workspace = true
 
 [features]
 arbitrary = [
-	"reth-eth-wire-types/arbitrary",
-	"dep:arbitrary",
-	"alloy-eips/arbitrary",
-	"alloy-primitives/arbitrary",
-	"reth-codecs/arbitrary",
-	"alloy-chains/arbitrary",
-	"reth-primitives-traits/arbitrary",
-	"reth-ethereum-forks/arbitrary",
-	"reth-primitives/arbitrary"
+    "reth-eth-wire-types/arbitrary",
+    "dep:arbitrary",
+    "alloy-eips/arbitrary",
+    "alloy-primitives/arbitrary",
+    "reth-codecs/arbitrary",
+    "alloy-chains/arbitrary",
+    "reth-primitives-traits/arbitrary",
+    "reth-ethereum-forks/arbitrary",
+    "alloy-consensus/arbitrary",
 ]
 serde = [
-	"dep:serde",
-	"reth-eth-wire-types/serde",
-	"alloy-eips/serde",
-	"alloy-primitives/serde",
-	"bytes/serde",
-	"rand/serde",
-	"secp256k1/serde",
-	"reth-codecs/serde",
-	"alloy-chains/serde",
-	"reth-primitives-traits/serde",
-	"reth-ethereum-forks/serde"
+    "dep:serde",
+    "reth-eth-wire-types/serde",
+    "alloy-eips/serde",
+    "alloy-primitives/serde",
+    "bytes/serde",
+    "rand/serde",
+    "secp256k1/serde",
+    "reth-codecs/serde",
+    "alloy-chains/serde",
+    "reth-primitives-traits/serde",
+    "reth-ethereum-forks/serde",
+    "alloy-consensus/serde",
+    "rand_08/serde",
 ]
 
 [[test]]

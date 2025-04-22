@@ -3,21 +3,35 @@
 //! This contains the `engine_` namespace and the subset of the `eth_` namespace that is exposed to
 //! the consensus client.
 
-use alloy_eips::{eip4844::BlobAndProofV1, eip7685::Requests, BlockId, BlockNumberOrTag};
+use alloy_eips::{
+    eip4844::{BlobAndProofV1, BlobAndProofV2},
+    eip7685::RequestsOrHash,
+    BlockId, BlockNumberOrTag,
+};
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, BlockHash, Bytes, B256, U256, U64};
 use alloy_rpc_types_engine::{
     ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV1,
     ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
-    TransitionConfiguration,
 };
 use alloy_rpc_types_eth::{
     state::StateOverride, transaction::TransactionRequest, BlockOverrides,
     EIP1186AccountProofResponse, Filter, Log, SyncStatus,
 };
 use alloy_serde::JsonStorageKey;
-use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use jsonrpsee::{core::RpcResult, proc_macros::rpc, RpcModule};
 use reth_engine_primitives::EngineTypes;
+
+/// Helper trait for the engine api server.
+///
+/// This type-erases the concrete [`jsonrpsee`] server implementation and only returns the
+/// [`RpcModule`] that contains all the endpoints of the server.
+pub trait IntoEngineApiRpcModule {
+    /// Consumes the type and returns all the methods and subscriptions defined in the trait and
+    /// returns them as a single [`RpcModule`]
+    fn into_rpc_module(self) -> RpcModule<()>;
+}
+
 // NOTE: We can't use associated types in the `EngineApi` trait because of jsonrpsee, so we use a
 // generic here. It would be nice if the rpc macro would understand which types need to have serde.
 // By default, if the trait has a generic, the rpc macro will add e.g. `Engine: DeserializeOwned` to
@@ -57,7 +71,7 @@ pub trait EngineApi<Engine: EngineTypes> {
         payload: ExecutionPayloadV3,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
-        execution_requests: Requests,
+        execution_requests: RequestsOrHash,
     ) -> RpcResult<PayloadStatus>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_forkchoiceupdatedv1>
@@ -178,19 +192,6 @@ pub trait EngineApi<Engine: EngineTypes> {
         count: U64,
     ) -> RpcResult<ExecutionPayloadBodiesV1>;
 
-    /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_exchangetransitionconfigurationv1>
-    ///
-    /// Note: This method will be deprecated after the cancun hardfork:
-    ///
-    /// > Consensus and execution layer clients MAY remove support of this method after Cancun. If
-    /// > no longer supported, this method MUST be removed from the engine_exchangeCapabilities
-    /// > request or response list depending on whether it is consensus or execution layer client.
-    #[method(name = "exchangeTransitionConfigurationV1")]
-    async fn exchange_transition_configuration(
-        &self,
-        transition_configuration: TransitionConfiguration,
-    ) -> RpcResult<TransitionConfiguration>;
-
     /// This function will return the ClientVersionV1 object.
     /// See also:
     /// <https://github.com/ethereum/execution-apis/blob/03911ffc053b8b806123f1fc237184b0092a485a/src/engine/identification.md#engine_getclientversionv1>make fmt
@@ -217,14 +218,23 @@ pub trait EngineApi<Engine: EngineTypes> {
         &self,
         versioned_hashes: Vec<B256>,
     ) -> RpcResult<Vec<Option<BlobAndProofV1>>>;
+
+    /// Fetch blobs for the consensus layer from the blob store.
+    #[method(name = "getBlobsV2")]
+    async fn get_blobs_v2(
+        &self,
+        versioned_hashes: Vec<B256>,
+    ) -> RpcResult<Vec<Option<BlobAndProofV2>>>;
 }
 
 /// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
 ///
+/// This also includes additional eth functions required by optimism.
+///
 /// Specifically for the engine auth server: <https://github.com/ethereum/execution-apis/blob/main/src/engine/common.md#underlying-protocol>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
-pub trait EngineEthApi<B: RpcObject> {
+pub trait EngineEthApi<B: RpcObject, R: RpcObject> {
     /// Returns an object with data about the sync status or false.
     #[method(name = "syncing")]
     fn syncing(&self) -> RpcResult<SyncStatus>;
@@ -259,9 +269,17 @@ pub trait EngineEthApi<B: RpcObject> {
     #[method(name = "getBlockByNumber")]
     async fn block_by_number(&self, number: BlockNumberOrTag, full: bool) -> RpcResult<Option<B>>;
 
+    /// Returns all transaction receipts for a given block.
+    #[method(name = "getBlockReceipts")]
+    async fn block_receipts(&self, block_id: BlockId) -> RpcResult<Option<Vec<R>>>;
+
     /// Sends signed transaction, returning its hash.
     #[method(name = "sendRawTransaction")]
     async fn send_raw_transaction(&self, bytes: Bytes) -> RpcResult<B256>;
+
+    /// Returns the receipt of a transaction by transaction hash.
+    #[method(name = "getTransactionReceipt")]
+    async fn transaction_receipt(&self, hash: B256) -> RpcResult<Option<R>>;
 
     /// Returns logs matching given filter object.
     #[method(name = "getLogs")]

@@ -579,15 +579,18 @@ impl TransactionPtr {
         self.timed_out.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
+    /// Acquires the inner transaction lock to guarantee exclusive access to the transaction
+    /// pointer.
     fn lock(&self) -> MutexGuard<'_, ()> {
         if let Some(lock) = self.lock.try_lock() {
             lock
         } else {
-            tracing::debug!(
+            tracing::trace!(
                 target: "libmdbx",
                 txn = %self.txn as usize,
-                backtrace = %std::backtrace::Backtrace::force_capture(),
-                "Transaction lock is already acquired, blocking..."
+                backtrace = %std::backtrace::Backtrace::capture(),
+                "Transaction lock is already acquired, blocking...
+                To display the full backtrace, run with `RUST_BACKTRACE=full` env variable."
             );
             self.lock.lock()
         }
@@ -650,7 +653,7 @@ impl CommitLatency {
     }
 
     /// Returns a mut pointer to `ffi::MDBX_commit_latency`.
-    pub(crate) fn mdb_commit_latency(&mut self) -> *mut ffi::MDBX_commit_latency {
+    pub(crate) const fn mdb_commit_latency(&mut self) -> *mut ffi::MDBX_commit_latency {
         &mut self.0
     }
 }
@@ -725,7 +728,7 @@ mod tests {
 
     const fn assert_send_sync<T: Send + Sync>() {}
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     const fn test_txn_send_sync() {
         assert_send_sync::<Transaction<RO>>();
         assert_send_sync::<Transaction<RW>>();

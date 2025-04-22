@@ -8,29 +8,31 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(not(feature = "std"), no_std)]
-
+#![allow(unused)]
 extern crate alloc;
 
 pub mod bedrock;
-pub mod transaction;
 
-use reth_primitives_traits::Block;
-pub use transaction::{signed::OpTransactionSigned, tx_type::OpTxType};
+pub mod predeploys;
+pub use predeploys::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
+
+pub mod transaction;
+pub use transaction::*;
 
 mod receipt;
-pub use receipt::OpReceipt;
+pub use receipt::{DepositReceipt, OpReceipt};
 
 /// Optimism-specific block type.
 pub type OpBlock = alloy_consensus::Block<OpTransactionSigned>;
 
 /// Optimism-specific block body type.
-pub type OpBlockBody = <OpBlock as Block>::Body;
+pub type OpBlockBody = <OpBlock as reth_primitives_traits::Block>::Body;
 
 /// Primitive types for Optimism Node.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OpPrimitives;
 
-#[cfg(feature = "optimism")]
 impl reth_primitives_traits::NodePrimitives for OpPrimitives {
     type Block = OpBlock;
     type BlockHeader = alloy_consensus::Header;
@@ -39,4 +41,9 @@ impl reth_primitives_traits::NodePrimitives for OpPrimitives {
     type Receipt = OpReceipt;
 }
 
-use once_cell as _;
+/// Bincode-compatible serde implementations.
+#[cfg(feature = "serde-bincode-compat")]
+pub mod serde_bincode_compat {
+    pub use super::receipt::serde_bincode_compat::*;
+    pub use op_alloy_consensus::serde_bincode_compat::*;
+}

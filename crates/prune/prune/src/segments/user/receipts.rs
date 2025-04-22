@@ -2,7 +2,7 @@ use crate::{
     segments::{PruneInput, Segment},
     PrunerError,
 };
-use reth_db::{table::Value, transaction::DbTxMut};
+use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     errors::provider::ProviderResult, BlockReader, DBProvider, NodePrimitivesProvider,

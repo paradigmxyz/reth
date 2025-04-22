@@ -52,7 +52,11 @@ where
     fn build(&self, timestamp: u64) -> op_alloy_rpc_types_engine::OpPayloadAttributes {
         op_alloy_rpc_types_engine::OpPayloadAttributes {
             payload_attributes: self.build(timestamp),
-            transactions: None,
+            // Add dummy system transaction
+            transactions: Some(vec![
+                reth_optimism_chainspec::constants::TX_SET_L1_BLOCK_OP_MAINNET_BLOCK_124665056
+                    .into(),
+            ]),
             no_tx_pool: None,
             gas_limit: None,
             eip_1559_params: None,

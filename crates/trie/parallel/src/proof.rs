@@ -1,20 +1,26 @@
-use crate::{root::ParallelStateRootError, stats::ParallelTrieTracker, StorageRootTargets};
+use crate::{
+    metrics::ParallelTrieMetrics,
+    proof_task::{ProofTaskKind, ProofTaskManagerHandle, StorageProofInput},
+    root::ParallelStateRootError,
+    stats::ParallelTrieTracker,
+    StorageRootTargets,
+};
 use alloy_primitives::{
-    map::{B256HashMap, HashMap},
+    map::{B256Map, B256Set, HashMap},
     B256,
 };
 use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
-use reth_db::DatabaseError;
 use reth_execution_errors::StorageRootError;
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, ProviderError,
-    StateCommitmentProvider,
+    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, FactoryTx,
+    ProviderError, StateCommitmentProvider,
 };
+use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     node_iter::{TrieElement, TrieNodeIter},
-    prefix_set::{PrefixSetMut, TriePrefixSetsMut},
+    prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSetsMut},
     proof::StorageProof,
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdatesSorted,
@@ -24,15 +30,15 @@ use reth_trie::{
 };
 use reth_trie_common::proof::ProofRetainer;
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use std::{sync::Arc, time::Instant};
-use tracing::{debug, trace};
+use std::sync::{mpsc::Receiver, Arc};
+use tracing::debug;
 
-#[cfg(feature = "metrics")]
-use crate::metrics::ParallelStateRootMetrics;
-
-/// TODO:
+/// Parallel proof calculator.
+///
+/// This can collect proof for many targets in parallel, spawning a task for each hashed address
+/// that has proof targets.
 #[derive(Debug)]
-pub struct ParallelProof<Factory> {
+pub struct ParallelProof<Factory: DatabaseProviderFactory> {
     /// Consistent view of the database.
     view: ConsistentDbView<Factory>,
     /// The sorted collection of cached in-memory intermediate trie nodes that
@@ -46,21 +52,20 @@ pub struct ParallelProof<Factory> {
     pub prefix_sets: Arc<TriePrefixSetsMut>,
     /// Flag indicating whether to include branch node masks in the proof.
     collect_branch_node_masks: bool,
-    /// Thread pool for local tasks
-    thread_pool: Arc<rayon::ThreadPool>,
-    /// Parallel state root metrics.
+    /// Handle to the storage proof task.
+    storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
     #[cfg(feature = "metrics")]
-    metrics: ParallelStateRootMetrics,
+    metrics: ParallelTrieMetrics,
 }
 
-impl<Factory> ParallelProof<Factory> {
+impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
     /// Create new state proof generator.
     pub fn new(
         view: ConsistentDbView<Factory>,
         nodes_sorted: Arc<TrieUpdatesSorted>,
         state_sorted: Arc<HashedPostStateSorted>,
         prefix_sets: Arc<TriePrefixSetsMut>,
-        thread_pool: Arc<rayon::ThreadPool>,
+        storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
     ) -> Self {
         Self {
             view,
@@ -68,9 +73,9 @@ impl<Factory> ParallelProof<Factory> {
             state_sorted,
             prefix_sets,
             collect_branch_node_masks: false,
-            thread_pool,
+            storage_proof_task_handle,
             #[cfg(feature = "metrics")]
-            metrics: ParallelStateRootMetrics::default(),
+            metrics: ParallelTrieMetrics::new_with_labels(&[("type", "proof")]),
         }
     }
 
@@ -83,13 +88,63 @@ impl<Factory> ParallelProof<Factory> {
 
 impl<Factory> ParallelProof<Factory>
 where
-    Factory: DatabaseProviderFactory<Provider: BlockReader>
-        + StateCommitmentProvider
-        + Clone
-        + Send
-        + Sync
-        + 'static,
+    Factory:
+        DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + Clone + 'static,
 {
+    /// Spawns a storage proof on the storage proof task and returns a receiver for the result.
+    fn spawn_storage_proof(
+        &self,
+        hashed_address: B256,
+        prefix_set: PrefixSet,
+        target_slots: B256Set,
+    ) -> Receiver<Result<StorageMultiProof, ParallelStateRootError>> {
+        let input = StorageProofInput::new(
+            hashed_address,
+            prefix_set,
+            target_slots,
+            self.collect_branch_node_masks,
+        );
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let _ =
+            self.storage_proof_task_handle.queue_task(ProofTaskKind::StorageProof(input, sender));
+        receiver
+    }
+
+    /// Generate a storage multiproof according to the specified targets and hashed address.
+    pub fn storage_proof(
+        self,
+        hashed_address: B256,
+        target_slots: B256Set,
+    ) -> Result<StorageMultiProof, ParallelStateRootError> {
+        let total_targets = target_slots.len();
+        let prefix_set = PrefixSetMut::from(target_slots.iter().map(Nibbles::unpack));
+        let prefix_set = prefix_set.freeze();
+
+        debug!(
+            target: "trie::parallel_proof",
+            total_targets,
+            ?hashed_address,
+            "Starting storage proof generation"
+        );
+
+        let receiver = self.spawn_storage_proof(hashed_address, prefix_set, target_slots);
+        let proof_result = receiver.recv().map_err(|_| {
+            ParallelStateRootError::StorageRoot(StorageRootError::Database(DatabaseError::Other(
+                format!("channel closed for {hashed_address}"),
+            )))
+        })?;
+
+        debug!(
+            target: "trie::parallel_proof",
+            total_targets,
+            ?hashed_address,
+            "Storage proof generation completed"
+        );
+
+        proof_result
+    }
+
     /// Generate a state multiproof according to specified targets.
     pub fn multiproof(
         self,
@@ -103,7 +158,7 @@ where
             account_prefix_set: PrefixSetMut::from(targets.keys().copied().map(Nibbles::unpack)),
             storage_prefix_sets: targets
                 .iter()
-                .filter(|&(_hashed_address, slots)| (!slots.is_empty()))
+                .filter(|&(_hashed_address, slots)| !slots.is_empty())
                 .map(|(hashed_address, slots)| {
                     (*hashed_address, PrefixSetMut::from(slots.iter().map(Nibbles::unpack)))
                 })
@@ -119,7 +174,7 @@ where
         let storage_root_targets_len = storage_root_targets.len();
 
         debug!(
-            target: "trie::parallel_state_root",
+            target: "trie::parallel_proof",
             total_targets = storage_root_targets_len,
             "Starting parallel proof generation"
         );
@@ -127,89 +182,20 @@ where
         // Pre-calculate storage roots for accounts which were changed.
         tracker.set_precomputed_storage_roots(storage_root_targets_len as u64);
 
+        // stores the receiver for the storage proof outcome for the hashed addresses
+        // this way we can lazily await the outcome when we iterate over the map
         let mut storage_proofs =
-            B256HashMap::with_capacity_and_hasher(storage_root_targets.len(), Default::default());
+            B256Map::with_capacity_and_hasher(storage_root_targets.len(), Default::default());
 
         for (hashed_address, prefix_set) in
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
         {
-            let view = self.view.clone();
             let target_slots = targets.get(&hashed_address).cloned().unwrap_or_default();
-            let trie_nodes_sorted = self.nodes_sorted.clone();
-            let hashed_state_sorted = self.state_sorted.clone();
-            let collect_masks = self.collect_branch_node_masks;
+            let receiver = self.spawn_storage_proof(hashed_address, prefix_set, target_slots);
 
-            let (tx, rx) = std::sync::mpsc::sync_channel(1);
-
-            self.thread_pool.spawn_fifo(move || {
-                debug!(
-                    target: "trie::parallel",
-                    ?hashed_address,
-                    "Starting proof calculation"
-                );
-
-                let task_start = Instant::now();
-                let result = (|| -> Result<_, ParallelStateRootError> {
-                    let provider_start = Instant::now();
-                    let provider_ro = view.provider_ro()?;
-                    trace!(
-                        target: "trie::parallel",
-                        ?hashed_address,
-                        provider_time = ?provider_start.elapsed(),
-                        "Got provider"
-                    );
-
-                    let cursor_start = Instant::now();
-                    let trie_cursor_factory = InMemoryTrieCursorFactory::new(
-                        DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
-                        &trie_nodes_sorted,
-                    );
-                    let hashed_cursor_factory = HashedPostStateCursorFactory::new(
-                        DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
-                        &hashed_state_sorted,
-                    );
-                    trace!(
-                        target: "trie::parallel",
-                        ?hashed_address,
-                        cursor_time = ?cursor_start.elapsed(),
-                        "Created cursors"
-                    );
-
-                    let proof_start = Instant::now();
-                    let proof_result = StorageProof::new_hashed(
-                        trie_cursor_factory,
-                        hashed_cursor_factory,
-                        hashed_address,
-                    )
-                    .with_prefix_set_mut(PrefixSetMut::from(prefix_set.iter().cloned()))
-                    .with_branch_node_masks(collect_masks)
-                    .storage_multiproof(target_slots)
-                    .map_err(|e| ParallelStateRootError::Other(e.to_string()));
-
-                    trace!(
-                        target: "trie::parallel",
-                        ?hashed_address,
-                        proof_time = ?proof_start.elapsed(),
-                        "Completed proof calculation"
-                    );
-
-                    proof_result
-                })();
-
-                // We can have the receiver dropped before we send, because we still calculate
-                // storage proofs for deleted accounts, but do not actually walk over them in
-                // `account_node_iter` below.
-                if let Err(e) = tx.send(result) {
-                    debug!(
-                        target: "trie::parallel",
-                        ?hashed_address,
-                        error = ?e,
-                        task_time = ?task_start.elapsed(),
-                        "Failed to send proof result"
-                    );
-                }
-            });
-            storage_proofs.insert(hashed_address, rx);
+            // store the receiver for that result with the hashed address so we can await this in
+            // place when we iterate over the trie
+            storage_proofs.insert(hashed_address, receiver);
         }
 
         let provider_ro = self.view.provider_ro()?;
@@ -237,10 +223,10 @@ where
 
         // Initialize all storage multiproofs as empty.
         // Storage multiproofs for non empty tries will be overwritten if necessary.
-        let mut storages: B256HashMap<_> =
+        let mut storages: B256Map<_> =
             targets.keys().map(|key| (*key, StorageMultiProof::empty())).collect();
         let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
-        let mut account_node_iter = TrieNodeIter::new(
+        let mut account_node_iter = TrieNodeIter::state_trie(
             walker,
             hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?,
         );
@@ -297,8 +283,9 @@ where
         }
         let _ = hash_builder.root();
 
+        let stats = tracker.finish();
         #[cfg(feature = "metrics")]
-        self.metrics.record_state_trie(tracker.finish());
+        self.metrics.record(stats);
 
         let account_subtree = hash_builder.take_proof_nodes();
         let (branch_node_hash_masks, branch_node_tree_masks) = if self.collect_branch_node_masks {
@@ -317,6 +304,17 @@ where
             (HashMap::default(), HashMap::default())
         };
 
+        debug!(
+            target: "trie::parallel_proof",
+            total_targets = storage_root_targets_len,
+            duration = ?stats.duration(),
+            branches_added = stats.branches_added(),
+            leaves_added = stats.leaves_added(),
+            missed_leaves = stats.missed_leaves(),
+            precomputed_storage_roots = stats.precomputed_storage_roots(),
+            "Calculated proof"
+        );
+
         Ok(MultiProof { account_subtree, branch_node_hash_masks, branch_node_tree_masks, storages })
     }
 }
@@ -324,34 +322,36 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proof_task::{ProofTaskCtx, ProofTaskManager};
     use alloy_primitives::{
         keccak256,
-        map::{B256HashSet, DefaultHashBuilder},
+        map::{B256Set, DefaultHashBuilder},
         Address, U256,
     };
     use rand::Rng;
-    use reth_primitives::{Account, StorageEntry};
+    use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
     use reth_trie::proof::Proof;
+    use tokio::runtime::Runtime;
 
     #[test]
     fn random_parallel_proof() {
         let factory = create_test_provider_factory();
         let consistent_view = ConsistentDbView::new(factory.clone(), None);
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let state = (0..100)
             .map(|_| {
                 let address = Address::random();
                 let account =
-                    Account { balance: U256::from(rng.gen::<u64>()), ..Default::default() };
+                    Account { balance: U256::from(rng.random::<u64>()), ..Default::default() };
                 let mut storage = HashMap::<B256, U256, DefaultHashBuilder>::default();
-                let has_storage = rng.gen_bool(0.7);
+                let has_storage = rng.random_bool(0.7);
                 if has_storage {
                     for _ in 0..100 {
                         storage.insert(
-                            B256::from(U256::from(rng.gen::<u64>())),
-                            U256::from(rng.gen::<u64>()),
+                            B256::from(U256::from(rng.random::<u64>())),
+                            U256::from(rng.random::<u64>()),
                         );
                     }
                 }
@@ -382,7 +382,7 @@ mod tests {
         let mut targets = MultiProofTargets::default();
         for (address, (_, storage)) in state.iter().take(10) {
             let hashed_address = keccak256(*address);
-            let mut target_slots = B256HashSet::default();
+            let mut target_slots = B256Set::default();
 
             for (slot, _) in storage.iter().take(5) {
                 target_slots.insert(*slot);
@@ -397,26 +397,49 @@ mod tests {
         let trie_cursor_factory = DatabaseTrieCursorFactory::new(provider_rw.tx_ref());
         let hashed_cursor_factory = DatabaseHashedCursorFactory::new(provider_rw.tx_ref());
 
-        let num_threads =
-            std::thread::available_parallelism().map_or(1, |num| (num.get() / 2).max(1));
+        let rt = Runtime::new().unwrap();
 
-        let state_root_task_pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(num_threads)
-            .thread_name(|i| format!("proof-worker-{}", i))
-            .build()
-            .expect("Failed to create proof worker thread pool");
+        let task_ctx =
+            ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
+        let proof_task =
+            ProofTaskManager::new(rt.handle().clone(), consistent_view.clone(), task_ctx, 1);
+        let proof_task_handle = proof_task.handle();
 
-        assert_eq!(
-            ParallelProof::new(
-                consistent_view,
-                Default::default(),
-                Default::default(),
-                Default::default(),
-                Arc::new(state_root_task_pool)
-            )
-            .multiproof(targets.clone())
-            .unwrap(),
-            Proof::new(trie_cursor_factory, hashed_cursor_factory).multiproof(targets).unwrap()
-        );
+        // keep the join handle around to make sure it does not return any errors
+        // after we compute the state root
+        let join_handle = rt.spawn_blocking(move || proof_task.run());
+
+        let parallel_result = ParallelProof::new(
+            consistent_view,
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            proof_task_handle.clone(),
+        )
+        .multiproof(targets.clone())
+        .unwrap();
+
+        let sequential_result =
+            Proof::new(trie_cursor_factory, hashed_cursor_factory).multiproof(targets).unwrap();
+
+        // to help narrow down what is wrong - first compare account subtries
+        assert_eq!(parallel_result.account_subtree, sequential_result.account_subtree);
+
+        // then compare length of all storage subtries
+        assert_eq!(parallel_result.storages.len(), sequential_result.storages.len());
+
+        // then compare each storage subtrie
+        for (hashed_address, storage_proof) in &parallel_result.storages {
+            let sequential_storage_proof = sequential_result.storages.get(hashed_address).unwrap();
+            assert_eq!(storage_proof, sequential_storage_proof);
+        }
+
+        // then compare the entire thing for any mask differences
+        assert_eq!(parallel_result, sequential_result);
+
+        // drop the handle to terminate the task and then block on the proof task handle to make
+        // sure it does not return any errors
+        drop(proof_task_handle);
+        rt.block_on(join_handle).unwrap().expect("The proof task should not return an error");
     }
 }

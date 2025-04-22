@@ -4,12 +4,12 @@ use crate::{stats::ParallelTrieTracker, storage_root_targets::StorageRootTargets
 use alloy_primitives::B256;
 use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
-use reth_db::DatabaseError;
 use reth_execution_errors::StorageRootError;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, ProviderError,
     StateCommitmentProvider,
 };
+use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     node_iter::{TrieElement, TrieNodeIter},
@@ -150,7 +150,7 @@ where
             prefix_sets.account_prefix_set,
         )
         .with_deletions_retained(retain_updates);
-        let mut account_node_iter = TrieNodeIter::new(
+        let mut account_node_iter = TrieNodeIter::state_trie(
             walker,
             hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?,
         );
@@ -166,7 +166,7 @@ where
                     let (storage_root, _, updates) = match storage_roots.remove(&hashed_address) {
                         Some(rx) => rx.recv().map_err(|_| {
                             ParallelStateRootError::StorageRoot(StorageRootError::Database(
-                                reth_db::DatabaseError::Other(format!(
+                                DatabaseError::Other(format!(
                                     "channel closed for {hashed_address}"
                                 )),
                             ))
@@ -217,7 +217,7 @@ where
             leaves_added = stats.leaves_added(),
             missed_leaves = stats.missed_leaves(),
             precomputed_storage_roots = stats.precomputed_storage_roots(),
-            "calculated state root"
+            "Calculated state root"
         );
 
         Ok((root, trie_updates))
@@ -255,7 +255,7 @@ mod tests {
     use super::*;
     use alloy_primitives::{keccak256, Address, U256};
     use rand::Rng;
-    use reth_primitives::{Account, StorageEntry};
+    use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
     use reth_trie::{test_utils, HashedPostState, HashedStorage};
 
@@ -264,19 +264,19 @@ mod tests {
         let factory = create_test_provider_factory();
         let consistent_view = ConsistentDbView::new(factory.clone(), None);
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut state = (0..100)
             .map(|_| {
                 let address = Address::random();
                 let account =
-                    Account { balance: U256::from(rng.gen::<u64>()), ..Default::default() };
+                    Account { balance: U256::from(rng.random::<u64>()), ..Default::default() };
                 let mut storage = HashMap::<B256, U256>::default();
-                let has_storage = rng.gen_bool(0.7);
+                let has_storage = rng.random_bool(0.7);
                 if has_storage {
                     for _ in 0..100 {
                         storage.insert(
-                            B256::from(U256::from(rng.gen::<u64>())),
-                            U256::from(rng.gen::<u64>()),
+                            B256::from(U256::from(rng.random::<u64>())),
+                            U256::from(rng.random::<u64>()),
                         );
                     }
                 }
@@ -315,17 +315,17 @@ mod tests {
         for (address, (account, storage)) in &mut state {
             let hashed_address = keccak256(address);
 
-            let should_update_account = rng.gen_bool(0.5);
+            let should_update_account = rng.random_bool(0.5);
             if should_update_account {
-                *account = Account { balance: U256::from(rng.gen::<u64>()), ..*account };
+                *account = Account { balance: U256::from(rng.random::<u64>()), ..*account };
                 hashed_state.accounts.insert(hashed_address, Some(*account));
             }
 
-            let should_update_storage = rng.gen_bool(0.3);
+            let should_update_storage = rng.random_bool(0.3);
             if should_update_storage {
                 for (slot, value) in storage.iter_mut() {
                     let hashed_slot = keccak256(slot);
-                    *value = U256::from(rng.gen::<u64>());
+                    *value = U256::from(rng.random::<u64>());
                     hashed_state
                         .storages
                         .entry(hashed_address)

@@ -2,23 +2,27 @@
 //!
 //! Run with
 //!
-//! ```not_rust
+//! ```sh
 //! cargo run -p example-custom-rlpx-subprotocol -- node
 //! ```
 //!
-//! This launch a regular reth node with a custom rlpx subprotocol.
+//! This launches a regular reth node with a custom rlpx subprotocol.
+
+#![warn(unused_crate_dependencies)]
 
 mod subprotocol;
 
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
-use reth::builder::NodeHandle;
-use reth_network::{
-    config::SecretKey, protocol::IntoRlpxSubProtocol, EthNetworkPrimitives, NetworkConfig,
-    NetworkManager, NetworkProtocols,
+use reth::{builder::NodeHandle, network::config::rng_secret_key};
+use reth_ethereum::{
+    network::{
+        api::{test_utils::PeersHandleProvider, NetworkInfo},
+        protocol::IntoRlpxSubProtocol,
+        NetworkConfig, NetworkManager, NetworkProtocols,
+    },
+    node::EthereumNode,
 };
-use reth_network_api::{test_utils::PeersHandleProvider, NetworkInfo};
-use reth_node_ethereum::EthereumNode;
 use subprotocol::{
     connection::CustomCommand,
     protocol::{
@@ -43,7 +47,7 @@ fn main() -> eyre::Result<()> {
         node.network.add_rlpx_sub_protocol(custom_rlpx_handler.into_rlpx_sub_protocol());
 
         // creates a separate network instance and adds the custom network subprotocol
-        let secret_key = SecretKey::new(&mut rand::thread_rng());
+        let secret_key = rng_secret_key();
         let (tx, mut from_peer1) = mpsc::unbounded_channel();
         let custom_rlpx_handler_2 = CustomRlpxProtoHandler { state: ProtocolState { events: tx } };
         let net_cfg = NetworkConfig::builder(secret_key)
@@ -53,7 +57,7 @@ fn main() -> eyre::Result<()> {
             .build_with_noop_provider(node.chain_spec());
 
         // spawn the second network instance
-        let subnetwork = NetworkManager::<EthNetworkPrimitives>::new(net_cfg).await?;
+        let subnetwork = NetworkManager::eth(net_cfg).await?;
         let subnetwork_peer_id = *subnetwork.peer_id();
         let subnetwork_peer_addr = subnetwork.local_addr();
         let subnetwork_handle = subnetwork.peers_handle();

@@ -1,0 +1,116 @@
+[package]
+name = "reth-op"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-primitives-traits = { workspace = true, features = ["op"] }
+reth-chainspec.workspace = true
+reth-network = { workspace = true, optional = true }
+reth-network-api = { workspace = true, optional = true }
+reth-eth-wire = { workspace = true, optional = true }
+reth-provider = { workspace = true, optional = true }
+reth-db = { workspace = true, optional = true, features = ["mdbx", "op"] }
+reth-storage-api = { workspace = true, optional = true }
+reth-node-api = { workspace = true, optional = true }
+reth-node-core = { workspace = true, optional = true }
+reth-consensus = { workspace = true, optional = true }
+reth-consensus-common = { workspace = true, optional = true }
+reth-evm = { workspace = true, optional = true }
+reth-revm = { workspace = true, optional = true }
+reth-rpc = { workspace = true, optional = true }
+reth-rpc-api = { workspace = true, optional = true }
+reth-rpc-eth-types = { workspace = true, optional = true }
+reth-rpc-builder = { workspace = true, optional = true }
+reth-transaction-pool = { workspace = true, optional = true }
+reth-trie = { workspace = true, optional = true }
+
+# reth-op
+reth-optimism-primitives.workspace = true
+reth-optimism-chainspec.workspace = true
+reth-optimism-consensus = { workspace = true, optional = true }
+reth-optimism-evm = { workspace = true, optional = true }
+reth-optimism-node = { workspace = true, optional = true }
+reth-optimism-rpc = { workspace = true, optional = true }
+reth-optimism-cli = { workspace = true, optional = true }
+
+[features]
+default = ["std"]
+std = [
+    "reth-chainspec/std",
+    "reth-consensus?/std",
+    "reth-consensus-common?/std",
+    "reth-optimism-chainspec/std",
+    "reth-optimism-consensus?/std",
+    "reth-optimism-evm?/std",
+    "reth-optimism-primitives/std",
+    "reth-primitives-traits/std",
+    "reth-storage-api?/std",
+    "reth-evm?/std",
+    "reth-revm?/std",
+]
+arbitrary = [
+    "std",
+    "reth-chainspec/arbitrary",
+    "reth-optimism-primitives/arbitrary",
+    "reth-primitives-traits/arbitrary",
+    "reth-db?/arbitrary",
+    "reth-transaction-pool?/arbitrary",
+    "reth-eth-wire?/arbitrary",
+]
+
+test-utils = [
+    "reth-chainspec/test-utils",
+    "reth-consensus?/test-utils",
+    "reth-db?/test-utils",
+    "reth-evm?/test-utils",
+    "reth-revm?/test-utils",
+    "reth-network?/test-utils",
+    "reth-optimism-node?/test-utils",
+    "reth-primitives-traits/test-utils",
+    "reth-provider?/test-utils",
+    "reth-trie?/test-utils",
+    "reth-transaction-pool?/test-utils",
+]
+
+full = ["consensus", "evm", "node", "provider", "rpc", "trie", "pool", "network"]
+
+alloy-compat = ["reth-optimism-primitives/alloy-compat"]
+cli = ["dep:reth-optimism-cli"]
+consensus = [
+    "dep:reth-consensus",
+    "dep:reth-consensus-common",
+    "dep:reth-optimism-consensus",
+]
+evm = ["dep:reth-evm", "dep:reth-optimism-evm", "dep:reth-revm"]
+node-api = ["dep:reth-node-api", "dep:reth-node-core"]
+node = [
+    "provider",
+    "consensus",
+    "evm",
+    "node-api",
+    "dep:reth-optimism-node",
+    "rpc",
+    "trie",
+]
+rpc = [
+    "dep:reth-rpc",
+    "dep:reth-rpc-builder",
+    "dep:reth-rpc-api",
+    "dep:reth-rpc-eth-types",
+    "dep:reth-optimism-rpc",
+]
+js-tracer = ["rpc", "reth-rpc/js-tracer"]
+network = ["dep:reth-network", "dep:reth-network-api", "dep:reth-eth-wire"]
+provider = ["storage-api", "dep:reth-provider", "dep:reth-db"]
+pool = ["dep:reth-transaction-pool"]
+storage-api = ["dep:reth-storage-api"]
+trie = ["dep:reth-trie"]

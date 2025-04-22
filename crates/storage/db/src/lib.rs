@@ -20,7 +20,6 @@ pub mod lockfile;
 #[cfg(feature = "mdbx")]
 mod metrics;
 pub mod static_file;
-pub mod tables;
 #[cfg(feature = "mdbx")]
 mod utils;
 pub mod version;
@@ -29,7 +28,6 @@ pub mod version;
 pub mod mdbx;
 
 pub use reth_storage_errors::db::{DatabaseError, DatabaseWriteOperation};
-pub use tables::*;
 #[cfg(feature = "mdbx")]
 pub use utils::is_database_empty;
 
@@ -46,9 +44,7 @@ pub mod test_utils {
     use crate::mdbx::DatabaseArguments;
     use parking_lot::RwLock;
     use reth_db_api::{
-        database::Database,
-        database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
-        models::ClientVersion,
+        database::Database, database_metrics::DatabaseMetrics, models::ClientVersion,
     };
     use reth_fs_util;
     use reth_libmdbx::MaxReadTransactionDuration;
@@ -107,7 +103,7 @@ pub mod test_utils {
         }
 
         /// Returns the reference to inner db.
-        pub fn db(&self) -> &DB {
+        pub const fn db(&self) -> &DB {
             self.db.as_ref().unwrap()
         }
 
@@ -152,12 +148,6 @@ pub mod test_utils {
     impl<DB: DatabaseMetrics> DatabaseMetrics for TempDatabase<DB> {
         fn report_metrics(&self) {
             self.db().report_metrics()
-        }
-    }
-
-    impl<DB: DatabaseMetadata> DatabaseMetadata for TempDatabase<DB> {
-        fn metadata(&self) -> DatabaseMetadataValue {
-            self.db().metadata()
         }
     }
 

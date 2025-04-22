@@ -7,11 +7,19 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
+use crate::alloc::string::ToString;
+use alloy_primitives::Bytes;
+use reth_chainspec::EthereumHardforks;
+use reth_primitives_traits::{NodePrimitives, SealedBlock};
 
 mod error;
 pub use error::{
-    EngineObjectValidationError, InvalidPayloadAttributesError, PayloadBuilderError,
-    VersionSpecificValidationError,
+    EngineObjectValidationError, InvalidPayloadAttributesError, NewPayloadError,
+    PayloadBuilderError, VersionSpecificValidationError,
 };
 
 /// Contains traits to abstract over payload attributes types and default implementations of the
@@ -22,11 +30,12 @@ pub use traits::{
 };
 
 mod payload;
-pub use payload::PayloadOrAttributes;
+pub use payload::{ExecutionPayload, PayloadOrAttributes};
 
-use reth_chainspec::EthereumHardforks;
 /// The types that are used by the engine API.
 pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static {
+    /// The execution payload type provided as input
+    type ExecutionData: ExecutionPayload;
     /// The built payload type.
     type BuiltPayload: BuiltPayload + Clone + Unpin;
 
@@ -37,6 +46,13 @@ pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static
     type PayloadBuilderAttributes: PayloadBuilderAttributes<RpcPayloadAttributes = Self::PayloadAttributes>
         + Clone
         + Unpin;
+
+    /// Converts a block into an execution payload.
+    fn block_to_payload(
+        block: SealedBlock<
+            <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
+        >,
+    ) -> Self::ExecutionData;
 }
 
 /// Validates the timestamp depending on the version called:
@@ -52,7 +68,7 @@ pub fn validate_payload_timestamp(
     timestamp: u64,
 ) -> Result<(), EngineObjectValidationError> {
     let is_cancun = chain_spec.is_cancun_active_at_timestamp(timestamp);
-    if version == EngineApiMessageVersion::V2 && is_cancun {
+    if version.is_v2() && is_cancun {
         // From the Engine API spec:
         //
         // ### Update the methods of previous forks
@@ -73,7 +89,7 @@ pub fn validate_payload_timestamp(
         return Err(EngineObjectValidationError::UnsupportedFork)
     }
 
-    if version == EngineApiMessageVersion::V3 && !is_cancun {
+    if version.is_v3() && !is_cancun {
         // From the Engine API spec:
         // <https://github.com/ethereum/execution-apis/blob/ff43500e653abde45aec0f545564abfb648317af/src/engine/cancun.md#specification-2>
         //
@@ -96,7 +112,7 @@ pub fn validate_payload_timestamp(
     }
 
     let is_prague = chain_spec.is_prague_active_at_timestamp(timestamp);
-    if version == EngineApiMessageVersion::V4 && !is_prague {
+    if version.is_v4() && !is_prague {
         // From the Engine API spec:
         // <https://github.com/ethereum/execution-apis/blob/7907424db935b93c2fe6a3c0faab943adebe8557/src/engine/prague.md#specification-1>
         //
@@ -296,12 +312,13 @@ impl MessageValidationKind {
 /// either an execution payload, or payload attributes.
 ///
 /// The version is provided by the [`EngineApiMessageVersion`] argument.
-pub fn validate_version_specific_fields<Type, T>(
+pub fn validate_version_specific_fields<Payload, Type, T>(
     chain_spec: &T,
     version: EngineApiMessageVersion,
-    payload_or_attrs: PayloadOrAttributes<'_, Type>,
+    payload_or_attrs: PayloadOrAttributes<'_, Payload, Type>,
 ) -> Result<(), EngineObjectValidationError>
 where
+    Payload: ExecutionPayload,
     Type: PayloadAttributes,
     T: EthereumHardforks,
 {
@@ -341,6 +358,28 @@ pub enum EngineApiMessageVersion {
     V4 = 4,
 }
 
+impl EngineApiMessageVersion {
+    /// Returns true if the version is V1.
+    pub const fn is_v1(&self) -> bool {
+        matches!(self, Self::V1)
+    }
+
+    /// Returns true if the version is V2.
+    pub const fn is_v2(&self) -> bool {
+        matches!(self, Self::V2)
+    }
+
+    /// Returns true if the version is V3.
+    pub const fn is_v3(&self) -> bool {
+        matches!(self, Self::V3)
+    }
+
+    /// Returns true if the version is V4.
+    pub const fn is_v4(&self) -> bool {
+        matches!(self, Self::V4)
+    }
+}
+
 /// Determines how we should choose the payload to return.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PayloadKind {
@@ -363,12 +402,102 @@ pub enum PayloadKind {
     WaitForPending,
 }
 
+/// Validates that execution requests are valid according to Engine API specification.
+///
+/// `executionRequests`: `Array of DATA` - List of execution layer triggered requests. Each list
+/// element is a `requests` byte array as defined by [EIP-7685](https://eips.ethereum.org/EIPS/eip-7685).
+/// The first byte of each element is the `request_type` and the remaining bytes are the
+/// `request_data`. Elements of the list **MUST** be ordered by `request_type` in ascending order.
+/// Elements with empty `request_data` **MUST** be excluded from the list. If any element is out of
+/// order, has a length of 1-byte or shorter, or more than one element has the same type byte,
+/// client software **MUST** return `-32602: Invalid params` error.
+pub fn validate_execution_requests(requests: &[Bytes]) -> Result<(), EngineObjectValidationError> {
+    let mut last_request_type = None;
+    for request in requests {
+        if request.len() <= 1 {
+            return Err(EngineObjectValidationError::InvalidParams(
+                "EmptyExecutionRequest".to_string().into(),
+            ))
+        }
+
+        let request_type = request[0];
+        if Some(request_type) < last_request_type {
+            return Err(EngineObjectValidationError::InvalidParams(
+                "OutOfOrderExecutionRequest".to_string().into(),
+            ))
+        }
+
+        if Some(request_type) == last_request_type {
+            return Err(EngineObjectValidationError::InvalidParams(
+                "DuplicatedExecutionRequestType".to_string().into(),
+            ))
+        }
+
+        last_request_type = Some(request_type);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assert_matches::assert_matches;
 
     #[test]
     fn version_ord() {
         assert!(EngineApiMessageVersion::V4 > EngineApiMessageVersion::V3);
+    }
+
+    #[test]
+    fn execution_requests_validation() {
+        assert_matches!(validate_execution_requests(&[]), Ok(()));
+
+        let valid_requests = [
+            Bytes::from_iter([1, 2]),
+            Bytes::from_iter([2, 3]),
+            Bytes::from_iter([3, 4]),
+            Bytes::from_iter([4, 5]),
+        ];
+        assert_matches!(validate_execution_requests(&valid_requests), Ok(()));
+
+        let requests_with_empty = [
+            Bytes::from_iter([1, 2]),
+            Bytes::from_iter([2, 3]),
+            Bytes::new(),
+            Bytes::from_iter([3, 4]),
+        ];
+        assert_matches!(
+            validate_execution_requests(&requests_with_empty),
+            Err(EngineObjectValidationError::InvalidParams(_))
+        );
+
+        let mut requests_valid_reversed = valid_requests;
+        requests_valid_reversed.reverse();
+        assert_matches!(
+            validate_execution_requests(&requests_with_empty),
+            Err(EngineObjectValidationError::InvalidParams(_))
+        );
+
+        let requests_out_of_order = [
+            Bytes::from_iter([1, 2]),
+            Bytes::from_iter([2, 3]),
+            Bytes::from_iter([4, 5]),
+            Bytes::from_iter([3, 4]),
+        ];
+        assert_matches!(
+            validate_execution_requests(&requests_out_of_order),
+            Err(EngineObjectValidationError::InvalidParams(_))
+        );
+
+        let duplicate_request_types = [
+            Bytes::from_iter([1, 2]),
+            Bytes::from_iter([3, 3]),
+            Bytes::from_iter([4, 5]),
+            Bytes::from_iter([4, 4]),
+        ];
+        assert_matches!(
+            validate_execution_requests(&duplicate_request_types),
+            Err(EngineObjectValidationError::InvalidParams(_))
+        );
     }
 }

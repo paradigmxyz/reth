@@ -21,7 +21,7 @@ use crate::{
     discovery::Discovery,
     error::{NetworkError, ServiceKind},
     eth_requests::IncomingEthRequest,
-    import::{BlockImport, BlockImportOutcome, BlockValidation},
+    import::{BlockImport, BlockImportEvent, BlockImportOutcome, BlockValidation, NewBlockEvent},
     listener::ConnectionListener,
     message::{NewBlockMessage, PeerMessage},
     metrics::{DisconnectMetrics, NetworkMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
@@ -37,10 +37,7 @@ use crate::{
 };
 use futures::{Future, StreamExt};
 use parking_lot::Mutex;
-use reth_eth_wire::{
-    capability::CapabilityMessage, Capabilities, DisconnectReason, EthNetworkPrimitives,
-    NetworkPrimitives,
-};
+use reth_eth_wire::{DisconnectReason, EthNetworkPrimitives, NetworkPrimitives};
 use reth_fs_util::{self as fs, FsPathError};
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
 use reth_network_api::{
@@ -142,16 +139,51 @@ pub struct NetworkManager<N: NetworkPrimitives = EthNetworkPrimitives> {
     disconnect_metrics: DisconnectMetrics,
 }
 
-// === impl NetworkManager ===
+impl NetworkManager {
+    /// Creates the manager of a new network with [`EthNetworkPrimitives`] types.
+    ///
+    /// ```no_run
+    /// # async fn f() {
+    /// use reth_chainspec::MAINNET;
+    /// use reth_network::{NetworkConfig, NetworkManager};
+    /// let config =
+    ///     NetworkConfig::builder_with_rng_secret_key().build_with_noop_provider(MAINNET.clone());
+    /// let manager = NetworkManager::eth(config).await;
+    /// # }
+    /// ```
+    pub async fn eth<C: BlockNumReader + 'static>(
+        config: NetworkConfig<C, EthNetworkPrimitives>,
+    ) -> Result<Self, NetworkError> {
+        Self::new(config).await
+    }
+}
+
 impl<N: NetworkPrimitives> NetworkManager<N> {
-    /// Sets the dedicated channel for events indented for the
+    /// Sets the dedicated channel for events intended for the
+    /// [`TransactionsManager`](crate::transactions::TransactionsManager).
+    pub fn with_transactions(
+        mut self,
+        tx: mpsc::UnboundedSender<NetworkTransactionEvent<N>>,
+    ) -> Self {
+        self.set_transactions(tx);
+        self
+    }
+
+    /// Sets the dedicated channel for events intended for the
     /// [`TransactionsManager`](crate::transactions::TransactionsManager).
     pub fn set_transactions(&mut self, tx: mpsc::UnboundedSender<NetworkTransactionEvent<N>>) {
         self.to_transactions_manager =
             Some(UnboundedMeteredSender::new(tx, NETWORK_POOL_TRANSACTIONS_SCOPE));
     }
 
-    /// Sets the dedicated channel for events indented for the
+    /// Sets the dedicated channel for events intended for the
+    /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler).
+    pub fn with_eth_request_handler(mut self, tx: mpsc::Sender<IncomingEthRequest<N>>) -> Self {
+        self.set_eth_request_handler(tx);
+        self
+    }
+
+    /// Sets the dedicated channel for events intended for the
     /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler).
     pub fn set_eth_request_handler(&mut self, tx: mpsc::Sender<IncomingEthRequest<N>>) {
         self.to_eth_request_handler = Some(tx);
@@ -216,6 +248,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             tx_gossip_disabled,
             transactions_manager_config: _,
             nat,
+            handshake,
         } = config;
 
         let peers_manager = PeersManager::new(peers_config);
@@ -267,6 +300,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             hello_message,
             fork_filter,
             extra_protocols,
+            handshake,
         );
 
         let state = NetworkState::new(
@@ -409,7 +443,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
         let status = sessions.status();
         let hello_message = sessions.hello_message();
 
-        #[allow(deprecated)]
+        #[expect(deprecated)]
         NetworkStatus {
             client_version: hello_message.client_version,
             protocol_version: hello_message.protocol_version as u64,
@@ -421,20 +455,6 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                 config: Default::default(),
             },
         }
-    }
-
-    /// Event hook for an unexpected message from the peer.
-    fn on_invalid_message(
-        &mut self,
-        peer_id: PeerId,
-        _capabilities: Arc<Capabilities>,
-        _message: CapabilityMessage<N>,
-    ) {
-        trace!(target: "net", ?peer_id, "received unexpected message");
-        self.swarm
-            .state_mut()
-            .peers_mut()
-            .apply_reputation_change(&peer_id, ReputationChangeKind::BadProtocol);
     }
 
     /// Sends an event to the [`TransactionsManager`](crate::transactions::TransactionsManager) if
@@ -500,23 +520,39 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     }
 
     /// Invoked after a `NewBlock` message from the peer was validated
-    fn on_block_import_result(&mut self, outcome: BlockImportOutcome<N::Block>) {
-        let BlockImportOutcome { peer, result } = outcome;
-        match result {
-            Ok(validated_block) => match validated_block {
+    fn on_block_import_result(&mut self, event: BlockImportEvent<N::Block>) {
+        match event {
+            BlockImportEvent::Announcement(validation) => match validation {
                 BlockValidation::ValidHeader { block } => {
-                    self.swarm.state_mut().update_peer_block(&peer, block.hash, block.number());
                     self.swarm.state_mut().announce_new_block(block);
                 }
                 BlockValidation::ValidBlock { block } => {
                     self.swarm.state_mut().announce_new_block_hash(block);
                 }
             },
-            Err(_err) => {
-                self.swarm
-                    .state_mut()
-                    .peers_mut()
-                    .apply_reputation_change(&peer, ReputationChangeKind::BadBlock);
+            BlockImportEvent::Outcome(outcome) => {
+                let BlockImportOutcome { peer, result } = outcome;
+                match result {
+                    Ok(validated_block) => match validated_block {
+                        BlockValidation::ValidHeader { block } => {
+                            self.swarm.state_mut().update_peer_block(
+                                &peer,
+                                block.hash,
+                                block.number(),
+                            );
+                            self.swarm.state_mut().announce_new_block(block);
+                        }
+                        BlockValidation::ValidBlock { block } => {
+                            self.swarm.state_mut().announce_new_block_hash(block);
+                        }
+                    },
+                    Err(_err) => {
+                        self.swarm
+                            .state_mut()
+                            .peers_mut()
+                            .apply_reputation_change(&peer, ReputationChangeKind::BadBlock);
+                    }
+                }
             }
         }
     }
@@ -547,14 +583,16 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             PeerMessage::NewBlockHashes(hashes) => {
                 self.within_pow_or_disconnect(peer_id, |this| {
                     // update peer's state, to track what blocks this peer has seen
-                    this.swarm.state_mut().on_new_block_hashes(peer_id, hashes.0)
+                    this.swarm.state_mut().on_new_block_hashes(peer_id, hashes.0.clone());
+                    // start block import process for the hashes
+                    this.block_import.on_new_block(peer_id, NewBlockEvent::Hashes(hashes));
                 })
             }
             PeerMessage::NewBlock(block) => {
                 self.within_pow_or_disconnect(peer_id, move |this| {
                     this.swarm.state_mut().on_new_block(peer_id, block.hash);
                     // start block import process
-                    this.block_import.on_new_block(peer_id, block);
+                    this.block_import.on_new_block(peer_id, NewBlockEvent::Block(block));
                 });
             }
             PeerMessage::PooledTransactions(msg) => {
@@ -684,10 +722,6 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
         // handle event
         match event {
             SwarmEvent::ValidMessage { peer_id, message } => self.on_peer_message(peer_id, message),
-            SwarmEvent::InvalidCapabilityMessage { peer_id, capabilities, message } => {
-                self.on_invalid_message(peer_id, capabilities, message);
-                self.metrics.invalid_messages_received.increment(1);
-            }
             SwarmEvent::TcpListenerClosed { remote_addr } => {
                 trace!(target: "net", ?remote_addr, "TCP listener closed.");
             }
@@ -742,6 +776,13 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
 
                 self.update_active_connection_metrics();
 
+                let peer_kind = self
+                    .swarm
+                    .state()
+                    .peers()
+                    .peer_by_id(peer_id)
+                    .map(|(_, kind)| kind)
+                    .unwrap_or_default();
                 let session_info = SessionInfo {
                     peer_id,
                     remote_addr,
@@ -749,6 +790,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     capabilities,
                     status,
                     version,
+                    peer_kind,
                 };
 
                 self.event_sender
