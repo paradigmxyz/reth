@@ -99,6 +99,8 @@ where
             hash_collector.insert(hash, number)?;
         }
 
+        info!(target: "era::history::import", "Processed {}", path.to_string_lossy());
+
         fs::remove_file(path)?;
     }
 
