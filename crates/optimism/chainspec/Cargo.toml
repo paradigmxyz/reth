@@ -71,3 +71,16 @@ std = [
     "miniz_oxide?/std",
     "thiserror?/std",
 ]
+serde = [
+    "alloy-chains/serde",
+    "alloy-consensus/serde",
+    "alloy-eips/serde",
+    "alloy-hardforks/serde",
+    "alloy-primitives/serde",
+    "miniz_oxide?/serde",
+    "op-alloy-rpc-types/serde",
+    "reth-ethereum-forks/serde",
+    "reth-optimism-forks/serde",
+    "reth-optimism-primitives/serde",
+    "reth-primitives-traits/serde",
+]

@@ -100,4 +100,5 @@ serde = [
     "reth-execution-types/serde",
     "reth-optimism-primitives/serde",
     "reth-primitives-traits/serde",
+    "reth-optimism-chainspec/serde",
 ]
