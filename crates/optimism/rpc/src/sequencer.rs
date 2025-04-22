@@ -43,6 +43,7 @@ pub struct SequencerClient {
 }
 
 impl SequencerClient {
+    /// Returns a reference to the [`SequencerMetrics`] for tracking client metrics.
     pub fn metrics(&self) -> &SequencerMetrics {
         &self.inner.metrics
     }
