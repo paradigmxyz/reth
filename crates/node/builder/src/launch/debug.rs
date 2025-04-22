@@ -46,10 +46,8 @@ where
         if let Some(ws_url) = config.debug.rpc_consensus_ws.clone() {
             info!(target: "reth::cli", "Using RPC WebSocket consensus client: {}", ws_url);
 
-           
             let block_provider =
                 RpcBlockProvider::<AnyNetwork, _>::new(ws_url.as_str(), |block_response| {
-                   
                     let json = serde_json::to_value(block_response)
                         .expect("Block serialization cannot fail");
                     let rpc_block =
@@ -58,7 +56,6 @@ where
                 })
                 .await?;
 
-           
             let rpc_consensus_client = DebugConsensusClient::new(
                 handle.node.add_ons_handle.beacon_engine_handle.clone(),
                 Arc::new(block_provider),
