@@ -67,6 +67,7 @@ pub struct TrieNodeIter<C, H: HashedCursor> {
     /// The key that the [`HashedCursor`] previously advanced to using [`HashedCursor::next`].
     #[cfg(feature = "metrics")]
     previously_advanced_to_key: Option<B256>,
+    last_next_result: Option<(B256, H::Value)>,
 }
 
 impl<C, H: HashedCursor> TrieNodeIter<C, H>
@@ -110,6 +111,7 @@ where
             metrics: crate::metrics::TrieNodeIterMetrics::new(trie_type),
             #[cfg(feature = "metrics")]
             previously_advanced_to_key: None,
+            last_next_result: None,
         }
     }
 
@@ -126,6 +128,7 @@ where
     ///
     /// If `metrics` feature is enabled, also updates the metrics.
     fn seek_hashed_entry(&mut self, key: B256) -> Result<Option<(B256, H::Value)>, DatabaseError> {
+        self.last_next_result = None;
         if let Some(entry) = self
             .last_seeked_hashed_entry
             .as_ref()
@@ -156,6 +159,9 @@ where
     /// If `metrics` feature is enabled, also updates the metrics.
     fn next_hashed_entry(&mut self) -> Result<Option<(B256, H::Value)>, DatabaseError> {
         let result = self.hashed_cursor.next();
+
+        self.last_next_result = result.clone()?;
+        self.last_seeked_hashed_entry = None;
         #[cfg(feature = "metrics")]
         {
             self.metrics.inc_leaf_nodes_advanced();
@@ -282,7 +288,23 @@ where
                         continue
                     }
 
-                    self.current_hashed_entry = self.seek_hashed_entry(seek_key)?;
+                    if let Some((last_next_key, last_next_value)) = self.last_next_result {
+                        if last_next_key == seek_key {
+                            trace!(target: "trie::node_iter", ?seek_key, "skipping redundant hashed seek using last_next_result");
+                            self.current_hashed_entry = Some((last_next_key, last_next_value));
+                            self.last_seeked_hashed_entry = Some(SeekedHashedEntry {
+                                seeked_key: seek_key,
+                                result: self.current_hashed_entry,
+                            });
+                        } else {
+                            trace!(target: "trie::node_iter", ?seek_key, "seeking (last next was different)");
+                            self.current_hashed_entry = self.seek_hashed_entry(seek_key)?;
+                        }
+                        self.last_next_result = None;
+                    } else {
+                        trace!(target: "trie::node_iter", ?seek_key, "seeking (no last next result)");
+                        self.current_hashed_entry = self.seek_hashed_entry(seek_key)?;
+                    }
                 }
             }
         }
@@ -518,12 +540,6 @@ mod tests {
                 // Collect the siblings of the modified account
                 KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_4) },
                 KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_5) },
-                // We seek the account 5 because its hash is not in the branch node, but we already
-                // walked it before, so there should be no need for it.
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_5),
-                    visited_key: Some(account_5)
-                },
                 KeyVisit { visit_type: KeyVisitType::Next, visited_key: None },
             ],
         );
