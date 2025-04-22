@@ -2,8 +2,7 @@
 use alloy_primitives::hex_literal::hex;
 use alloy_rlp::Decodable;
 use criterion::{criterion_group, criterion_main, Criterion};
-use pprof::criterion::{Output, PProfProfiler};
-use reth_primitives::TransactionSigned;
+use reth_ethereum_primitives::TransactionSigned;
 use reth_primitives_traits::SignedTransaction;
 
 /// Benchmarks the recovery of the public key from the ECDSA message using criterion.
@@ -21,7 +20,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
 
 criterion_group! {
     name = benches;
-    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    config = Criterion::default();
     targets = criterion_benchmark
 }
 criterion_main!(benches);

@@ -46,7 +46,6 @@ proptest.workspace = true
 reth-codecs.workspace = true
 
 criterion.workspace = true
-pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
 
 [features]
 default = ["c-kzg", "alloy-compat", "std", "reth-codec", "secp256k1"]

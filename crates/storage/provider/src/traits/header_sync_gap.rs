@@ -1,10 +1,9 @@
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{BlockNumber, Sealable, B256};
+use alloy_primitives::{BlockNumber, Sealable};
 use reth_network_p2p::headers::downloader::SyncTarget;
 use reth_primitives_traits::SealedHeader;
 use reth_storage_errors::provider::ProviderResult;
-use tokio::sync::watch;
 
 /// Represents a gap to sync: from `local_head` to `target`
 #[derive(Clone, Debug)]
@@ -37,9 +36,8 @@ pub trait HeaderSyncGapProvider: Send + Sync {
     /// uninterrupted block number. Last uninterrupted block represents the block number before
     /// which there are no gaps. It's up to the caller to ensure that last uninterrupted block is
     /// determined correctly.
-    fn sync_gap(
+    fn local_tip_header(
         &self,
-        tip: watch::Receiver<B256>,
         highest_uninterrupted_block: BlockNumber,
-    ) -> ProviderResult<HeaderSyncGap<Self::Header>>;
+    ) -> ProviderResult<SealedHeader<Self::Header>>;
 }

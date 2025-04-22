@@ -9,10 +9,12 @@
 use super::{
     broadcast::NewBlockHashes, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
     GetNodeData, GetPooledTransactions, GetReceipts, NewBlock, NewPooledTransactionHashes66,
-    NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, Status, Transactions,
+    NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, Status, StatusEth69,
+    Transactions,
 };
 use crate::{
-    EthNetworkPrimitives, EthVersion, NetworkPrimitives, RawCapabilityMessage, SharedTransactions,
+    status::StatusMessage, EthNetworkPrimitives, EthVersion, NetworkPrimitives,
+    RawCapabilityMessage, SharedTransactions,
 };
 use alloc::{boxed::Box, sync::Arc};
 use alloy_primitives::{
@@ -32,7 +34,7 @@ pub enum MessageError {
     /// Flags an unrecognized message ID for a given protocol version.
     #[error("message id {1:?} is invalid for version {0:?}")]
     Invalid(EthVersion, EthMessageID),
-    /// Thrown when rlp decoding a message message failed.
+    /// Thrown when rlp decoding a message failed.
     #[error("RLP error: {0}")]
     RlpError(#[from] alloy_rlp::Error),
 }
@@ -56,8 +58,14 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
     pub fn decode_message(version: EthVersion, buf: &mut &[u8]) -> Result<Self, MessageError> {
         let message_type = EthMessageID::decode(buf)?;
 
+        // For EIP-7642 (https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7642.md):
+        // pre-merge (legacy) status messages include total difficulty, whereas eth/69 omits it.
         let message = match message_type {
-            EthMessageID::Status => EthMessage::Status(Status::decode(buf)?),
+            EthMessageID::Status => EthMessage::Status(if version < EthVersion::Eth69 {
+                StatusMessage::Legacy(Status::decode(buf)?)
+            } else {
+                StatusMessage::Eth69(StatusEth69::decode(buf)?)
+            }),
             EthMessageID::NewBlockHashes => {
                 if version.is_eth69() {
                     return Err(MessageError::Invalid(version, EthMessageID::NewBlockHashes));
@@ -186,7 +194,7 @@ impl<N: NetworkPrimitives> From<EthBroadcastMessage<N>> for ProtocolBroadcastMes
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Represents a Status message required for the protocol handshake.
-    Status(Status),
+    Status(StatusMessage),
     /// Represents a `NewBlockHashes` message broadcast to the network.
     NewBlockHashes(NewBlockHashes),
     /// Represents a `NewBlock` message broadcast to the network.
@@ -248,7 +256,7 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
 
 impl<N: NetworkPrimitives> EthMessage<N> {
     /// Returns the message's ID.
-    pub fn message_id(&self) -> EthMessageID {
+    pub const fn message_id(&self) -> EthMessageID {
         match self {
             Self::Status(_) => EthMessageID::Status,
             Self::NewBlockHashes(_) => EthMessageID::NewBlockHashes,
