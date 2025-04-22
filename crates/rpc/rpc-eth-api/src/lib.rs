@@ -21,6 +21,9 @@ pub mod node;
 pub mod pubsub;
 pub mod types;
 
+#[cfg(test)]
+mod tests;
+
 pub use bundle::{EthBundleApiServer, EthCallBundleApiServer};
 pub use core::{EthApiServer, FullEthApiServer};
 pub use ext::L2EthApiExtServer;
