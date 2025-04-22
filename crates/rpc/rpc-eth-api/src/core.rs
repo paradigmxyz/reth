@@ -256,6 +256,7 @@ pub trait EthApi<T: RpcObject, B: RpcObject, R: RpcObject, H: RpcObject> {
         &self,
         request: TransactionRequest,
         block_number: Option<BlockId>,
+        state_override: Option<StateOverride>,
     ) -> RpcResult<AccessListResult>;
 
     /// Generates and returns an estimate of how much gas is necessary to allow the transaction to
@@ -669,9 +670,10 @@ where
         &self,
         request: TransactionRequest,
         block_number: Option<BlockId>,
+        state_override: Option<StateOverride>,
     ) -> RpcResult<AccessListResult> {
-        trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_createAccessList");
-        Ok(EthCall::create_access_list_at(self, request, block_number).await?)
+        trace!(target: "rpc::eth", ?request, ?block_number, ?state_override, "Serving eth_createAccessList");
+        Ok(EthCall::create_access_list_at(self, request, block_number, state_override).await?)
     }
 
     /// Handler for: `eth_estimateGas`
