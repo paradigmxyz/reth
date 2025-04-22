@@ -53,4 +53,3 @@ tracing.workspace = true
 #
 # See: https://github.com/eira-fransham/crunchy/issues/13
 crunchy = "=0.2.2"
-
