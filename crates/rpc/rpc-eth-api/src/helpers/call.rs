@@ -376,7 +376,6 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         let state = self.state_at_block_id(at)?;
         let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
-        // Apply state overrides if provided
         if let Some(state_overrides) = state_override {
             apply_state_overrides(state_overrides, &mut db)?;
         }
