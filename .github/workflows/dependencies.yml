@@ -18,3 +18,39 @@ jobs:
     uses: ithacaxyz/ci/.github/workflows/cargo-update-pr.yml@main
     secrets:
       token: ${{ secrets.GITHUB_TOKEN }}
+
+  # re‑pin `crunchy` to version 0.2.2 since 0.2.3 is broken.
+  # The Cargo.toml file states we want `=0.2.2` however cargo update
+  # is not respecting this.
+  # For underlying issue, See: https://github.com/eira-fransham/crunchy/issues/13
+  repin-crunchy:
+    needs: update
+    runs-on: ubuntu-latest
+
+    steps:
+      # The ithaca re-usable workflow will create a PR on
+      # branch `cargo-update`. So we re-check that branch out.
+      - uses: actions/checkout@v4
+        with:
+          ref: cargo-update
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Re-pin crunchy to 0.2.2
+        run: cargo update -p crunchy --precise 0.2.2
+
+      - name: Commit & push if Cargo.lock changed
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! git diff --quiet -- Cargo.lock; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add Cargo.lock
+            git commit -m "ci: re‑pin crunchy to 0.2.2"
+            git push origin cargo-update
+          fi
