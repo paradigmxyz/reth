@@ -32,27 +32,19 @@
 
 extern crate alloc;
 
-#[cfg(feature = "superchain-configs")]
-mod available_chains;
 mod base;
 mod base_sepolia;
-#[cfg(feature = "superchain-configs")]
-mod chain_metadata;
-#[cfg(feature = "superchain-configs")]
-mod chain_spec_macro;
-#[cfg(feature = "superchain-configs")]
-mod chain_specs;
-#[cfg(feature = "superchain-configs")]
-mod configs;
+
 pub mod constants;
 mod dev;
 mod op;
 mod op_sepolia;
 
 #[cfg(feature = "superchain-configs")]
-pub use crate::available_chains::{AvailableSuperchain, AVAILABLE_CHAINS};
+mod superchain;
 #[cfg(feature = "superchain-configs")]
-pub use chain_specs::*;
+pub use superchain::*;
+
 pub use dev::OP_DEV;
 pub use op::OP_MAINNET;
 pub use op_sepolia::OP_SEPOLIA;

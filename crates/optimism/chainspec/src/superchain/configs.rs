@@ -1,4 +1,4 @@
-use crate::chain_metadata::{to_genesis_chain_config, ChainMetadata};
+use crate::superchain::chain_metadata::{to_genesis_chain_config, ChainMetadata};
 use alloc::{
     format,
     string::{String, ToString},
@@ -7,6 +7,12 @@ use alloc::{
 use alloy_genesis::Genesis;
 use miniz_oxide::inflate::decompress_to_vec_zlib_with_limit;
 use tar_no_std::{CorruptDataError, TarArchiveRef};
+
+/// A genesis file can be up to 10MiB. This is a reasonable limit for the genesis file size.
+const MAX_GENESIS_SIZE: usize = 16 * 1024 * 1024; // 16MiB
+
+/// The tar file contains the chain configs and genesis files for all chains.
+const SUPER_CHAIN_CONFIGS_TAR_BYTES: &[u8] = include_bytes!("../../res/superchain-configs.tar");
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum SuperchainConfigError {
@@ -24,12 +30,6 @@ pub(crate) enum SuperchainConfigError {
     DecompressError(String),
 }
 
-/// A genesis file can be up to 10MiB. This is a reasonable limit for the genesis file size.
-const MAX_SIZE: usize = 16 * 1024 * 1024; // 16MiB
-
-/// The tar file contains the chain configs and genesis files for all chains.
-const SUPER_CHAIN_CONFIGS_TAR_BYTES: &[u8] = include_bytes!("../res/superchain-configs.tar");
-
 /// Reads the [`Genesis`] from the superchain config tar file for a superchain.
 /// For example, `read_genesis_from_superchain_config("unichain", "mainnet")`.
 pub(crate) fn read_superchain_genesis(
@@ -42,8 +42,9 @@ pub(crate) fn read_superchain_genesis(
     // Read and decompress the genesis file.
     let compressed_genesis_file =
         read_file(&archive, &format!("genesis/{}/{}.json.zz", environment, name))?;
-    let genesis_file = decompress_to_vec_zlib_with_limit(&compressed_genesis_file, MAX_SIZE)
-        .map_err(|e| SuperchainConfigError::DecompressError(format!("{}", e)))?;
+    let genesis_file =
+        decompress_to_vec_zlib_with_limit(&compressed_genesis_file, MAX_GENESIS_SIZE)
+            .map_err(|e| SuperchainConfigError::DecompressError(format!("{}", e)))?;
 
     // Load the genesis file.
     let mut genesis: Genesis = serde_json::from_slice(&genesis_file)?;

@@ -5,7 +5,7 @@ macro_rules! create_chain_spec {
         paste::paste! {
             /// The Optimism $name $environment spec
             pub static [<$name:upper _ $environment:upper>]: $crate::LazyLock<alloc::sync::Arc<$crate::OpChainSpec>> = $crate::LazyLock::new(|| {
-                $crate::OpChainSpec::from($crate::configs::read_superchain_genesis($name, $environment)
+                $crate::OpChainSpec::from_genesis($crate::superchain::configs::read_superchain_genesis($name, $environment)
                     .expect(&alloc::format!("Can't read {}-{} genesis", $name, $environment)))
                     .into()
             });

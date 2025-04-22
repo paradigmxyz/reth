@@ -14,9 +14,11 @@ pub struct AvailableSuperchain {
 
 /// All available superchain genesis configs
 pub static AVAILABLE_CHAINS: LazyLock<Arc<Vec<AvailableSuperchain>>> = LazyLock::new(|| {
-    serde_json::from_str::<Vec<AvailableSuperchain>>(include_str!("../res/available-chains.json"))
-        .expect("Can't deserialize available-chains.json")
-        .into()
+    serde_json::from_str::<Vec<AvailableSuperchain>>(include_str!(
+        "../../res/available-chains.json"
+    ))
+    .expect("Can't deserialize available-chains.json")
+    .into()
 });
 
 #[cfg(test)]

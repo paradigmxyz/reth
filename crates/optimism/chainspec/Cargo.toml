@@ -34,7 +34,7 @@ alloy-hardforks.workspace = true
 op-alloy-rpc-types.workspace = true
 
 # io
-serde.workspace = true
+serde = { workspace = true, optional = true }
 serde_json.workspace = true
 tar-no-std = { workspace = true, optional = true }
 miniz_oxide = { workspace = true, features = ["with-alloc"], optional = true }
@@ -51,7 +51,7 @@ op-alloy-rpc-types.workspace = true
 
 [features]
 default = ["std"]
-superchain-configs = ["miniz_oxide", "paste", "tar-no-std", "thiserror", "thiserror"]
+superchain-configs = ["miniz_oxide", "paste", "tar-no-std", "thiserror", "thiserror", "serde"]
 std = [
     "alloy-chains/std",
     "alloy-genesis/std",
@@ -67,7 +67,7 @@ std = [
     "derive_more/std",
     "reth-network-peers/std",
     "serde_json/std",
-    "serde/std",
-    "miniz_oxide/std",
-    "thiserror/std",
+    "serde?/std",
+    "miniz_oxide?/std",
+    "thiserror?/std",
 ]

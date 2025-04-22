@@ -5,7 +5,7 @@
 # This will checkout the latest superchain registry commit and create three files.
 # - superchain-configs.tar: A tar archive containing all superchain configs
 # - available-chains.json: A JSON file containing all available chains
-# - ../src/chain_specs.rs: A Rust file containing all chain specs
+# - ../src/superchain/chain_specs.rs: A Rust file containing all chain specs
 
 # Requires:
 # - MacOS: brew install qpdf zstd yq
@@ -130,7 +130,7 @@ done
 echo "$(printf '%s\n' "${RESULTS[@]}" | jq -c -s 'sort_by(.name, .environment)')" > "$SCRIPT_DIR/available-chains.json"
 
 # Write chain_specs.rs
-echo -e "$RESULT_RS" | sed '${/^$/d;}' > "$SCRIPT_DIR/../src/chain_specs.rs"
+echo -e "$RESULT_RS" | sed '${/^$/d;}' > "$SCRIPT_DIR/../src/superchain/chain_specs.rs"
 
 # Clean up
 # shellcheck disable=SC2164
