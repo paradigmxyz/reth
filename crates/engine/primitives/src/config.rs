@@ -19,22 +19,20 @@ const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
 const DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE: usize = 4;
 const DEFAULT_CROSS_BLOCK_CACHE_SIZE: u64 = 4 * 1024 * 1024 * 1024;
 
-/// Determines if the host has enough parallelism to run the payload processor.
-///
-/// It requires at least 5 parallel threads:
-/// - Engine in main thread that spawns the state root task.
+/// State Root task requires at least 6 parallel threads:
+/// - Engine in main thread that spawns the payload processor
 /// - Multiproof task in payload processor
 /// - Sparse Trie task in payload processor
-/// - Multiproof computation spawned in payload processor
-/// - Storage root computation spawned in trie parallel proof
-pub fn has_enough_parallelism() -> bool {
-    #[cfg(feature = "std")]
-    {
-        std::thread::available_parallelism().is_ok_and(|num| num.get() >= 5)
-    }
-    #[cfg(not(feature = "std"))]
-    false
-}
+/// - Proof task in payload processor
+/// - Multiproof computation spawned in multiproof task
+/// - Storage root computation spawned in multiproof computation
+const STATE_ROOT_TASK_THREADS: usize = 6;
+
+/// Prewarming task requires at least 3 parallel threads:
+/// - Engine in main thread that spawns the payload processor
+/// - Prewarming task in payload processor
+/// - Transaction batch task in prewarming task
+const PREWARMING_TASK_THREADS: usize = 3;
 
 /// The configuration of the engine tree.
 #[derive(Debug)]
@@ -67,8 +65,10 @@ pub struct TreeConfig {
     use_caching_and_prewarming: bool,
     /// Cross-block cache size in bytes.
     cross_block_cache_size: u64,
-    /// Whether the host has enough parallelism to run state root task.
-    has_enough_parallelism: bool,
+    /// Force use state root task.
+    force_use_state_root_task: bool,
+    /// Force use prewarming task.
+    force_use_prewarming_task: bool,
     /// Maximum number of concurrent proof tasks
     max_proof_task_concurrency: u64,
     /// Number of reserved CPU cores for non-reth processes
@@ -87,7 +87,8 @@ impl Default for TreeConfig {
             always_compare_trie_updates: false,
             use_caching_and_prewarming: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
-            has_enough_parallelism: has_enough_parallelism(),
+            force_use_state_root_task: false,
+            force_use_prewarming_task: false,
             max_proof_task_concurrency: DEFAULT_MAX_PROOF_TASK_CONCURRENCY,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
         }
@@ -107,7 +108,6 @@ impl TreeConfig {
         always_compare_trie_updates: bool,
         use_caching_and_prewarming: bool,
         cross_block_cache_size: u64,
-        has_enough_parallelism: bool,
         max_proof_task_concurrency: u64,
         reserved_cpu_cores: usize,
     ) -> Self {
@@ -121,7 +121,8 @@ impl TreeConfig {
             always_compare_trie_updates,
             use_caching_and_prewarming,
             cross_block_cache_size,
-            has_enough_parallelism,
+            force_use_state_root_task: false,
+            force_use_prewarming_task: false,
             max_proof_task_concurrency,
             reserved_cpu_cores,
         }
@@ -168,9 +169,14 @@ impl TreeConfig {
         self.legacy_state_root
     }
 
-    /// Returns whether or not cross-block caching and parallel prewarming should be used.
-    pub const fn use_caching_and_prewarming(&self) -> bool {
-        self.use_caching_and_prewarming
+    /// Returns whether or not to use state root task.
+    pub fn use_state_root_task(&self) -> bool {
+        self.has_enough_state_root_task_parallelism() && !self.legacy_state_root
+    }
+
+    /// Returns whether or not parallel prewarming should be used.
+    pub fn use_caching_and_prewarming(&self) -> bool {
+        self.has_enough_prewarming_task_parallelism() && self.use_caching_and_prewarming
     }
 
     /// Returns whether to always compare trie updates from the state root task to the trie updates
@@ -251,10 +257,42 @@ impl TreeConfig {
         self
     }
 
-    /// Setter for has enough parallelism.
-    pub const fn with_has_enough_parallelism(mut self, has_enough_parallelism: bool) -> Self {
-        self.has_enough_parallelism = has_enough_parallelism;
+    /// Setter for force use state root task.
+    pub const fn with_force_use_state_root_task(mut self, has_enough: bool) -> Self {
+        self.force_use_state_root_task = has_enough;
         self
+    }
+
+    /// Determines if the host has enough parallelism to run the state root task.
+    pub fn has_enough_state_root_task_parallelism(&self) -> bool {
+        self.force_use_state_root_task || {
+            #[cfg(feature = "std")]
+            {
+                std::thread::available_parallelism()
+                    .is_ok_and(|num| num.get() - self.reserved_cpu_cores >= STATE_ROOT_TASK_THREADS)
+            }
+            #[cfg(not(feature = "std"))]
+            false
+        }
+    }
+
+    /// Setter for force use prewarming task.
+    pub const fn with_enough_prewarming_task_parallelism(mut self, has_enough: bool) -> Self {
+        self.force_use_prewarming_task = has_enough;
+        self
+    }
+
+    /// Determines if the host has enough parallelism to run the prewarming task.
+    pub fn has_enough_prewarming_task_parallelism(&self) -> bool {
+        self.force_use_prewarming_task || {
+            #[cfg(feature = "std")]
+            {
+                std::thread::available_parallelism()
+                    .is_ok_and(|num| num.get() - self.reserved_cpu_cores >= PREWARMING_TASK_THREADS)
+            }
+            #[cfg(not(feature = "std"))]
+            false
+        }
     }
 
     /// Setter for maximum number of concurrent proof tasks.
@@ -270,10 +308,5 @@ impl TreeConfig {
     pub const fn with_reserved_cpu_cores(mut self, reserved_cpu_cores: usize) -> Self {
         self.reserved_cpu_cores = reserved_cpu_cores;
         self
-    }
-
-    /// Whether or not to use state root task
-    pub const fn use_state_root_task(&self) -> bool {
-        self.has_enough_parallelism && !self.legacy_state_root
     }
 }

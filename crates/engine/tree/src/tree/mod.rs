@@ -3200,7 +3200,7 @@ mod tests {
                 // always assume enough parallelism for tests
                 TreeConfig::default()
                     .with_legacy_state_root(true)
-                    .with_has_enough_parallelism(true),
+                    .with_force_use_state_root_task(true),
                 EngineApiKind::Ethereum,
                 evm_config,
             );
