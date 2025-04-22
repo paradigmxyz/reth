@@ -43,7 +43,6 @@ pub struct SequencerClient {
 }
 
 impl SequencerClient {
-
     pub fn metrics(&self) -> &SequencerMetrics {
         &self.inner.metrics
     }
@@ -62,6 +61,7 @@ impl SequencerClient {
             Self::with_http_client(url, client)
         } else {
             let client = ClientBuilder::default().connect_with(endpoint).await?;
+            let metrics = SequencerMetrics::default();
             let inner = SequencerClientInner { sequencer_endpoint, client, metrics };
             Ok(Self { inner: Arc::new(inner) })
         }
@@ -80,7 +80,7 @@ impl SequencerClient {
         let http_client = Http::with_client(client, url);
         let is_local = http_client.guess_local();
         let client = ClientBuilder::default().transport(http_client, is_local);
-
+        let metrics = SequencerMetrics::default();
         let inner = SequencerClientInner { sequencer_endpoint, client, metrics };
         Ok(Self { inner: Arc::new(inner) })
     }
