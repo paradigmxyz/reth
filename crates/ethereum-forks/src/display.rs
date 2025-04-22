@@ -125,6 +125,9 @@ impl core::fmt::Display for DisplayHardforks {
 
         if !self.with_merge.is_empty() {
             format("Merge hard forks", &self.with_merge, self.post_merge.is_empty(), f)?;
+        } else {
+            // need an extra line here in case we don't have a merge block (optimism)
+            writeln!(f)?;
         }
 
         if !self.post_merge.is_empty() {
