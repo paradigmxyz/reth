@@ -43,6 +43,11 @@ pub struct SequencerClient {
 }
 
 impl SequencerClient {
+
+    pub fn metrics(&self) -> &SequencerMetrics {
+        &self.inner.metrics
+    }
+
     /// Creates a new [`SequencerClient`] for the given URL.
     ///
     /// If the URL is a websocket endpoint we connect a websocket instance.
