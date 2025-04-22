@@ -65,27 +65,29 @@ impl BundleStateSorted {
             .state
             .clone()
             .into_iter()
-            .map(|(key, value)| {
+            .map(|(address, account)| {
                 {
                     (
-                        key,
+                        address,
                         BundleAccountSorted {
-                            info: value.info,
-                            original_info: value.original_info,
-                            status: value.status,
-                            storage: BTreeMap::from_iter(value.storage),
+                            info: account.info,
+                            original_info: account.original_info,
+                            status: account.status,
+                            storage: BTreeMap::from_iter(account.storage),
                         },
                     )
                 }
             })
             .collect();
+
         let contracts = BTreeMap::from_iter(bundle_state.contracts.clone());
 
-        let reverts: Vec<Vec<(Address, AccountRevertSorted)>> = bundle_state
+        let reverts = bundle_state
             .reverts
             .iter()
-            .map(|m| {
-                m.iter()
+            .map(|block| {
+                block
+                    .iter()
                     .map(|(address, account_revert)| {
                         (
                             *address,
@@ -97,9 +99,9 @@ impl BundleStateSorted {
                             },
                         )
                     })
-                    .collect::<Vec<(Address, AccountRevertSorted)>>()
+                    .collect()
             })
-            .collect::<Vec<Vec<(Address, AccountRevertSorted)>>>();
+            .collect();
 
         let state_size = bundle_state.state_size;
         let reverts_size = bundle_state.reverts_size;
