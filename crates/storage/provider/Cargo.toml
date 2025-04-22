@@ -42,9 +42,6 @@ alloy-consensus.workspace = true
 revm-database.workspace = true
 revm-state = { workspace = true, optional = true }
 
-# async
-tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
-
 # tracing
 tracing.workspace = true
 
@@ -78,6 +75,7 @@ reth-ethereum-primitives.workspace = true
 
 revm-database-interface.workspace = true
 revm-state.workspace = true
+tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 parking_lot.workspace = true
 tempfile.workspace = true
 assert_matches.workspace = true
