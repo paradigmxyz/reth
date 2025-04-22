@@ -340,7 +340,7 @@ where
 #[cfg(any(test, feature = "test-utils"))]
 impl<B: crate::test_utils::TestBlock> SealedBlock<B> {
     /// Returns a mutable reference to the header.
-    pub fn header_mut(&mut self) -> &mut B::Header {
+    pub const fn header_mut(&mut self) -> &mut B::Header {
         self.header.header_mut()
     }
 
@@ -350,7 +350,7 @@ impl<B: crate::test_utils::TestBlock> SealedBlock<B> {
     }
 
     /// Returns a mutable reference to the header.
-    pub fn body_mut(&mut self) -> &mut B::Body {
+    pub const fn body_mut(&mut self) -> &mut B::Body {
         &mut self.body
     }
 

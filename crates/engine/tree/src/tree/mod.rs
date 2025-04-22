@@ -313,7 +313,7 @@ impl<N: NodePrimitives> TreeState<N> {
         // block, if it exists.
         //
         // For all other blocks, we  first put their children into this vec.
-        // Then, we will iterate over them, removing them, adding their children, etc etc,
+        // Then, we will iterate over them, removing them, adding their children, etc,
         // until the vec is empty.
         let mut blocks_to_remove = self.blocks_by_number.remove(&finalized_num).unwrap_or_default();
 
@@ -417,7 +417,7 @@ impl<N: NodePrimitives> TreeState<N> {
     }
 
     /// Updates the canonical head to the given block.
-    fn set_canonical_head(&mut self, new_head: BlockNumHash) {
+    const fn set_canonical_head(&mut self, new_head: BlockNumHash) {
         self.current_canonical_head = new_head;
     }
 
@@ -451,7 +451,7 @@ pub struct StateProviderBuilder<N: NodePrimitives, P> {
 impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
     /// Creates a new state provider from the provider factory, historical block hash and optional
     /// overlaid blocks.
-    pub fn new(
+    pub const fn new(
         provider_factory: P,
         historical: B256,
         overlay: Option<Vec<ExecutedBlockWithTrieUpdates<N>>>,
@@ -1451,12 +1451,6 @@ where
                                 // handle the event if any
                                 self.on_maybe_tree_event(maybe_event)?;
                             }
-                            BeaconEngineMessage::TransitionConfigurationExchanged => {
-                                // triggering this hook will record that we received a request from
-                                // the CL
-                                self.canonical_in_memory_state
-                                    .on_transition_configuration_exchanged();
-                            }
                         }
                     }
                 }
@@ -2423,7 +2417,14 @@ where
                 .trie_input_duration
                 .record(trie_input_start.elapsed().as_secs_f64());
 
-            self.payload_processor.spawn(header, txs, provider_builder, consistent_view, trie_input)
+            self.payload_processor.spawn(
+                header,
+                txs,
+                provider_builder,
+                consistent_view,
+                trie_input,
+                &self.config,
+            )
         } else {
             self.payload_processor.spawn_cache_exclusive(header, txs, provider_builder)
         };
@@ -3035,13 +3036,13 @@ impl PersistingKind {
     ///
     /// We only run the parallel state root if we are not currently persisting any blocks or
     /// persisting blocks that are all ancestors of the one we are calculating the state root for.
-    pub fn can_run_parallel_state_root(&self) -> bool {
+    pub const fn can_run_parallel_state_root(&self) -> bool {
         matches!(self, Self::NotPersisting | Self::PersistingDescendant)
     }
 
     /// Returns true if the blocks are currently being persisted and the input block is a
     /// descendant.
-    pub fn is_descendant(&self) -> bool {
+    pub const fn is_descendant(&self) -> bool {
         matches!(self, Self::PersistingDescendant)
     }
 }

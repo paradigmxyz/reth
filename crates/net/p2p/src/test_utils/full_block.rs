@@ -127,7 +127,7 @@ impl TestFullBlockClient {
     }
 
     /// Set the soft response limit.
-    pub fn set_soft_limit(&mut self, limit: usize) {
+    pub const fn set_soft_limit(&mut self, limit: usize) {
         self.soft_limit = limit;
     }
 

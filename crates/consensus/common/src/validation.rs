@@ -7,7 +7,8 @@ use alloy_eips::{calc_next_block_base_fee, eip4844::DATA_GAS_PER_BLOB, eip7840::
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::ConsensusError;
 use reth_primitives_traits::{
-    Block, BlockBody, BlockHeader, GotExpected, SealedBlock, SealedHeader,
+    constants::MAXIMUM_GAS_LIMIT_BLOCK, Block, BlockBody, BlockHeader, GotExpected, SealedBlock,
+    SealedHeader,
 };
 
 /// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
@@ -18,6 +19,10 @@ pub fn validate_header_gas<H: BlockHeader>(header: &H) -> Result<(), ConsensusEr
             gas_used: header.gas_used(),
             gas_limit: header.gas_limit(),
         })
+    }
+    // Check that the gas limit is below the maximum allowed gas limit
+    if header.gas_limit() > MAXIMUM_GAS_LIMIT_BLOCK {
+        return Err(ConsensusError::HeaderGasLimitExceedsMax { gas_limit: header.gas_limit() })
     }
     Ok(())
 }
@@ -348,14 +353,14 @@ mod tests {
     use super::*;
     use alloy_consensus::{BlockBody, Header, TxEip4844};
     use alloy_eips::eip4895::Withdrawals;
-    use alloy_primitives::{Address, Bytes, PrimitiveSignature as Signature, U256};
+    use alloy_primitives::{Address, Bytes, Signature, U256};
     use rand::Rng;
     use reth_chainspec::ChainSpecBuilder;
     use reth_ethereum_primitives::{Transaction, TransactionSigned};
     use reth_primitives_traits::proofs;
 
     fn mock_blob_tx(nonce: u64, num_blobs: usize) -> TransactionSigned {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let request = Transaction::Eip4844(TxEip4844 {
             chain_id: 1u64,
             nonce,
@@ -367,7 +372,9 @@ mod tests {
             value: U256::from(3_u64),
             input: Bytes::from(vec![1, 2]),
             access_list: Default::default(),
-            blob_versioned_hashes: std::iter::repeat_with(|| rng.gen()).take(num_blobs).collect(),
+            blob_versioned_hashes: std::iter::repeat_with(|| rng.random())
+                .take(num_blobs)
+                .collect(),
         });
 
         let signature = Signature::new(U256::default(), U256::default(), true);

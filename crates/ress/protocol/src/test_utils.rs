@@ -44,7 +44,7 @@ pub struct MockRessProtocolProvider {
 
 impl MockRessProtocolProvider {
     /// Configure witness response delay.
-    pub fn with_witness_delay(mut self, delay: Duration) -> Self {
+    pub const fn with_witness_delay(mut self, delay: Duration) -> Self {
         self.witness_delay = Some(delay);
         self
     }

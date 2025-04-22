@@ -109,7 +109,7 @@ impl<N: NodePrimitives> Chain<N> {
     }
 
     /// Get mutable execution outcome of this chain
-    pub fn execution_outcome_mut(&mut self) -> &mut ExecutionOutcome<N::Receipt> {
+    pub const fn execution_outcome_mut(&mut self) -> &mut ExecutionOutcome<N::Receipt> {
         &mut self.execution_outcome
     }
 
@@ -680,7 +680,7 @@ pub(super) mod serde_bincode_compat {
             }
 
             let mut bytes = [0u8; 1024];
-            rand::thread_rng().fill(bytes.as_mut_slice());
+            rand::rng().fill(bytes.as_mut_slice());
             let data = Data {
                 chain: Chain::new(
                     vec![RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))

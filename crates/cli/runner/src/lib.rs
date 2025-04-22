@@ -33,7 +33,7 @@ impl CliRunner {
     }
 
     /// Create a new [`CliRunner`] from a provided tokio [`Runtime`](tokio::runtime::Runtime).
-    pub fn from_runtime(tokio_runtime: tokio::runtime::Runtime) -> Self {
+    pub const fn from_runtime(tokio_runtime: tokio::runtime::Runtime) -> Self {
         Self { tokio_runtime }
     }
 }

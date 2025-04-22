@@ -37,7 +37,7 @@ where
         Self {
             inner: Arc::new(ChainInfoInner {
                 last_forkchoice_update: RwLock::new(None),
-                last_transition_configuration_exchange: RwLock::new(None),
+
                 canonical_head_number: AtomicU64::new(head.number()),
                 canonical_head: RwLock::new(head),
                 safe_block,
@@ -60,16 +60,6 @@ where
     /// Returns the instant when we received the latest forkchoice update.
     pub fn last_forkchoice_update_received_at(&self) -> Option<Instant> {
         *self.inner.last_forkchoice_update.read()
-    }
-
-    /// Update the timestamp when we exchanged a transition configuration.
-    pub fn on_transition_configuration_exchanged(&self) {
-        self.inner.last_transition_configuration_exchange.write().replace(Instant::now());
-    }
-
-    /// Returns the instant when we exchanged the transition configuration last time.
-    pub fn last_transition_configuration_exchanged_at(&self) -> Option<Instant> {
-        *self.inner.last_transition_configuration_exchange.read()
     }
 
     /// Returns the canonical head of the chain.
@@ -160,10 +150,7 @@ struct ChainInfoInner<N: NodePrimitives = reth_ethereum_primitives::EthPrimitive
     ///
     /// This is mainly used to track if we're connected to a beacon node.
     last_forkchoice_update: RwLock<Option<Instant>>,
-    /// Timestamp when we exchanged the transition configuration last time.
-    ///
-    /// This is mainly used to track if we're connected to a beacon node.
-    last_transition_configuration_exchange: RwLock<Option<Instant>>,
+
     /// Tracks the number of the `canonical_head`.
     canonical_head_number: AtomicU64,
     /// The canonical head of the chain.
@@ -215,27 +202,6 @@ mod tests {
 
         // Assert that there is now a timestamp indicating when the forkchoice update was received
         assert!(tracker.last_forkchoice_update_received_at().is_some());
-    }
-
-    #[test]
-    fn test_on_transition_configuration_exchanged() {
-        // Create a random header
-        let mut rng = generators::rng();
-        let header = random_header(&mut rng, 10, None);
-
-        // Create a new chain info tracker with the header
-        let tracker: ChainInfoTracker<EthPrimitives> = ChainInfoTracker::new(header, None, None);
-
-        // Assert that there has been no transition configuration exchange yet (the timestamp is
-        // None)
-        assert!(tracker.last_transition_configuration_exchanged_at().is_none());
-
-        // Call the method to record the transition configuration exchange
-        tracker.on_transition_configuration_exchanged();
-
-        // Assert that there is now a timestamp indicating when the transition configuration
-        // exchange occurred
-        assert!(tracker.last_transition_configuration_exchanged_at().is_some());
     }
 
     #[test]
