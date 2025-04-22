@@ -16,7 +16,6 @@ reth-db.workspace = true
 reth-chainspec.workspace = true
 reth-discv4 = { workspace = true, features = ["test-utils"] }
 reth-engine-primitives.workspace = true
-reth-e2e-test-utils.workspace = true
 reth-ethereum-forks = { workspace = true, features = ["serde"] }
 reth-ethereum-payload-builder.workspace = true
 reth-ethereum-primitives.workspace = true
@@ -78,7 +77,7 @@ once_cell = { workspace = true, default-features = false, features = ["alloc"] }
 parity-bytes = { version = "0.1.2", default-features = false }
 parking_lot.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"], optional = true }
-serde = { workspace = true, features = ["derive"], optional = true }
+serde = { version = "1.0", features = ["derive"], default-features = false }
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
@@ -100,9 +99,6 @@ tendermint = { git = "https://github.com/bnb-chain/tendermint-rs-parlia", rev = 
 # KZG point evaluation precompile
 c-kzg = { workspace = true, optional = true, features = ["ethereum_kzg_settings"] }
 
-# Optionally use `kzg-rs` for a pure Rust implementation of KZG point evaluation.
-kzg-rs = { version = "0.2.3", default-features = false, optional = true }
-
 # BLS12-381 precompiles
 blst = { version = "0.3.13", optional = true }
 
@@ -111,39 +107,44 @@ p256 = { version = "0.13.2", optional = true, default-features = false, features
 
 [features]
 default = ["c-kzg", "secp256k1", "blst", "secp256r1"]
+dev = [
+    "reth-cli-commands/arbitrary",
+    "reth/dev",
+    "revm/dev",
+]
 c-kzg = ["dep:c-kzg"]
-kzg-rs = ["dep:kzg-rs"]
+kzg-rs = []
 secp256k1 = ["dep:secp256k1"]
 secp256r1 = ["dep:p256"]
+
 serde = [
-    "dep:serde",
-    "alloy-primitives/serde",
-    "blst/serde",
-    "c-kzg/serde",
-    "p256/serde",
-    "reth-eth-wire/serde",
-    "reth-eth-wire-types/serde",
-    "reth-ethereum-forks/serde",
-    "reth-primitives-traits/serde",
-    "revm/serde",
-    "secp256k1/serde",
-    "bytes/serde",
-    "reth-network/serde",
-    "reth-network-api/serde",
     "alloy-chains/serde",
     "alloy-consensus/serde",
     "alloy-eips/serde",
+    "alloy-primitives/serde",
     "alloy-rpc-types-engine/serde",
     "alloy-rpc-types-eth/serde",
+    "blst/serde",
+    "bytes/serde",
+    "c-kzg/serde",
+    "p256/serde",
+    "parking_lot/serde",
+    "reth-eth-wire/serde",
+    "reth-eth-wire-types/serde",
+    "reth-ethereum-forks/serde",
     "reth-ethereum-primitives/serde",
+    "reth-network/serde",
+    "reth-network-api/serde",
+    "reth-primitives-traits/serde",
     "reth-revm/serde",
     "reth-trie-common/serde",
-    "parking_lot/serde",
-    "reth-trie-db/serde"
+    "reth-trie-db/serde",
+    "revm/serde",
+    "secp256k1/serde",
 ]
+
 client = [
     "jsonrpsee/client",
     "jsonrpsee/async-client",
     "reth-rpc-eth-api/client",
 ]
-

@@ -11,12 +11,12 @@
 //! Credits to: <https://merkle.io/blog/modifying-reth-to-build-the-fastest-transaction-network-on-bsc-and-polygon>
 
 use crate::{
-    chainspec::Cli, consensus::ParliaConsensus,
+    consensus::ParliaConsensus,
     node::network::block_import::service::ImportService as BlockImportService,
 };
 use chainspec::parser::BscChainSpecParser;
 use clap::{Args, Parser};
-use node::BscNode;
+use node::{cli::Cli, BscNode};
 use reth::builder::NodeHandle;
 use std::sync::Arc;
 use tracing::error;
