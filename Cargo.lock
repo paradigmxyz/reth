@@ -3083,6 +3083,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives 1.0.0",
  "alloy-rlp",
+ "crunchy",
  "rayon",
  "reth-chainspec",
  "reth-db",
