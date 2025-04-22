@@ -46,7 +46,7 @@ where
         .ok_or_else(|| RpcInvalidTransactionError::InsufficientFunds { cost: value, balance })?;
 
     Ok(balance
-        // Calculate the amount of gas the caller can afford with the specified gas price.
+        // Calculate the amount of gas the caller can afford with the specfified gas price.
         .checked_div(U256::from(env.gas_price()))
         // This will be 0 if gas price is 0. It is fine, because we check it before.
         .unwrap_or_default()
