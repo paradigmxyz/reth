@@ -85,17 +85,17 @@ impl<T> ScrollReceiptEnvelope<T> {
     }
 
     /// Return true if the transaction was successful.
-    pub fn is_success(&self) -> bool {
+    pub const fn is_success(&self) -> bool {
         self.status()
     }
 
     /// Returns the success status of the receipt's transaction.
-    pub fn status(&self) -> bool {
+    pub const fn status(&self) -> bool {
         self.as_receipt().unwrap().status.coerce_status()
     }
 
     /// Returns the cumulative gas used at this receipt.
-    pub fn cumulative_gas_used(&self) -> u64 {
+    pub const fn cumulative_gas_used(&self) -> u64 {
         self.as_receipt().unwrap().cumulative_gas_used
     }
 

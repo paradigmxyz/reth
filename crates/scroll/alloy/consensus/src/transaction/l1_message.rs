@@ -54,7 +54,7 @@ pub struct TxL1Message {
 
 impl TxL1Message {
     /// Returns an empty signature for the [`TxL1Message`], which don't include a signature.
-    pub fn signature() -> Signature {
+    pub const fn signature() -> Signature {
         Signature::new(U256::ZERO, U256::ZERO, false)
     }
 

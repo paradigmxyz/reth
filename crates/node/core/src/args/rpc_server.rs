@@ -14,6 +14,7 @@ use clap::{
     Arg, Args, Command,
 };
 use rand::Rng;
+use reth_cli_util::parse_ether_value;
 use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
 
 use crate::args::{
@@ -168,6 +169,16 @@ pub struct RpcServerArgs {
         default_value_t = constants::gas_oracle::RPC_DEFAULT_GAS_CAP
     )]
     pub rpc_gas_cap: u64,
+
+    /// Maximum eth transaction fee that can be sent via the RPC APIs (0 = no cap)
+    #[arg(
+        long = "rpc.txfeecap",
+        alias = "rpc-txfeecap",
+        value_name = "TX_FEE_CAP",
+        value_parser = parse_ether_value,
+        default_value = "1.0"
+    )]
+    pub rpc_tx_fee_cap: u128,
 
     /// Maximum number of blocks for `eth_simulateV1` call.
     #[arg(
@@ -329,6 +340,7 @@ impl Default for RpcServerArgs {
             rpc_max_blocks_per_filter: constants::DEFAULT_MAX_BLOCKS_PER_FILTER.into(),
             rpc_max_logs_per_response: (constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64).into(),
             rpc_gas_cap: constants::gas_oracle::RPC_DEFAULT_GAS_CAP,
+            rpc_tx_fee_cap: constants::DEFAULT_TX_FEE_CAP_WEI,
             rpc_max_simulate_blocks: constants::DEFAULT_MAX_SIMULATE_BLOCKS,
             rpc_eth_proof_window: constants::DEFAULT_ETH_PROOF_WINDOW,
             gas_price_oracle: GasPriceOracleArgs::default(),
@@ -421,5 +433,33 @@ mod tests {
         let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
 
         assert_eq!(args, default_args);
+    }
+
+    #[test]
+    fn test_rpc_tx_fee_cap_parse_integer() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.txfeecap", "2"]).args;
+        let expected = 2_000_000_000_000_000_000u128; // 2 ETH in wei
+        assert_eq!(args.rpc_tx_fee_cap, expected);
+    }
+
+    #[test]
+    fn test_rpc_tx_fee_cap_parse_decimal() {
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.txfeecap", "1.5"]).args;
+        let expected = 1_500_000_000_000_000_000u128; // 1.5 ETH in wei
+        assert_eq!(args.rpc_tx_fee_cap, expected);
+    }
+
+    #[test]
+    fn test_rpc_tx_fee_cap_parse_zero() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.txfeecap", "0"]).args;
+        assert_eq!(args.rpc_tx_fee_cap, 0); // 0 = no cap
+    }
+
+    #[test]
+    fn test_rpc_tx_fee_cap_parse_none() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        let expected = 1_000_000_000_000_000_000u128;
+        assert_eq!(args.rpc_tx_fee_cap, expected); // 1 ETH default cap
     }
 }

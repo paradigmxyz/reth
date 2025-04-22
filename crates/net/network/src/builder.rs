@@ -37,7 +37,7 @@ impl<Tx, Eth, N: NetworkPrimitives> NetworkBuilder<Tx, Eth, N> {
     }
 
     /// Returns the mutable network manager.
-    pub fn network_mut(&mut self) -> &mut NetworkManager<N> {
+    pub const fn network_mut(&mut self) -> &mut NetworkManager<N> {
         &mut self.network
     }
 

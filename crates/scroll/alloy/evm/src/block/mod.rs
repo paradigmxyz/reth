@@ -56,7 +56,7 @@ pub struct ScrollBlockExecutor<Evm, R: ScrollReceiptBuilder, Spec> {
 
 impl<E, R: ScrollReceiptBuilder, Spec> ScrollBlockExecutor<E, R, Spec> {
     /// Returns the spec for [`ScrollBlockExecutor`].
-    pub fn spec(&self) -> &Spec {
+    pub const fn spec(&self) -> &Spec {
         &self.spec
     }
 }
@@ -68,7 +68,7 @@ where
     Spec: ScrollHardforks + Clone,
 {
     /// Creates a new [`ScrollBlockExecutor`].
-    pub fn new(evm: E, spec: Spec, receipt_builder: R) -> Self {
+    pub const fn new(evm: E, spec: Spec, receipt_builder: R) -> Self {
         Self { evm, spec, receipt_builder, receipts: Vec::new(), gas_used: 0 }
     }
 }

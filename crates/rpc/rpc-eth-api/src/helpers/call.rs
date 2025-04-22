@@ -385,6 +385,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         // <https://github.com/ethereum/go-ethereum/blob/8990c92aea01ca07801597b00c0d83d4e2d9b811/internal/ethapi/api.go#L1476-L1476>
         evm_env.cfg_env.disable_base_fee = true;
 
+        // Disabled because eth_createAccessList is sometimes used with non-eoa senders
+        evm_env.cfg_env.disable_eip3607 = true;
+
         if request.gas.is_none() && tx_env.gas_price() > 0 {
             let cap = caller_gas_allowance(&mut db, &tx_env)?;
             // no gas limit was provided in the request, so we need to cap the request's gas limit
