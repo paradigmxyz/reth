@@ -160,6 +160,7 @@ async fn test_file_roundtrip(
 
         println!("Testing full re-encoding/re-compression cycle for block {}", block_number);
 
+        // Re-encode and re-compress the header
         let recompressed_header = CompressedHeader::from_header(&original_header)?;
         let recompressed_header_data = recompressed_header.decompress()?;
         assert_eq!(
@@ -167,6 +168,7 @@ async fn test_file_roundtrip(
             "Re-compressed header data should match original after full cycle"
         );
 
+        // Re-encode and re-compress the body
         let recompressed_body = CompressedBody::from_body(&original_decoded_body)?;
         let recompressed_body_data = recompressed_body.decompress()?;
 
@@ -234,7 +236,7 @@ async fn test_roundtrip_compression_encoding_mainnet() -> Result<(), E2sError> {
 
     let mut rng = rng();
 
-    // pick 3 random files from the mainnet list
+    // pick 4 random files from the mainnet list
     let sample_files: Vec<&str> =
         ERA1_MAINNET_FILES_NAMES.choose_multiple(&mut rng, 4).copied().collect();
 
