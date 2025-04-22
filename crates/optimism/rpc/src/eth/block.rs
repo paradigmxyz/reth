@@ -7,7 +7,7 @@ use reth_chainspec::ChainSpecProvider;
 use reth_node_api::NodePrimitives;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
-use reth_primitives_traits::{BlockBody as _, HeaderTy, SignedTransaction};
+use reth_primitives_traits::{BlockBody as _, HeaderTy};
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
     types::RpcTypes,
