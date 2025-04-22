@@ -1,10 +1,5 @@
 //! Command for debugging in-memory merkle trie calculation.
 
-use crate::{
-    api::BlockTy,
-    args::NetworkArgs,
-    utils::{get_single_body, get_single_header},
-};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
 use backon::{ConstantBuilder, Retryable};
@@ -20,7 +15,11 @@ use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
-use reth_node_api::NodePrimitives;
+use reth_node_api::{BlockTy, NodePrimitives};
+use reth_node_core::{
+    args::NetworkArgs,
+    utils::{get_single_body, get_single_header},
+};
 use reth_node_ethereum::{consensus::EthBeaconConsensus, EthExecutorProvider};
 use reth_primitives_traits::SealedBlock;
 use reth_provider::{
