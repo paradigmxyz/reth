@@ -282,7 +282,7 @@ where
         client,
         call_request.clone(),
         Some(block_number.into()),
-        None, // Add the state_override parameter
+        None,
     )
     .await
     .unwrap_err();
