@@ -1,4 +1,4 @@
-//! Integration tests
+//! Common helpers for integration tests
 //!
 //! These tests use the `reth-era-downloader` client to download `.era1` files temporarily
 //! and verify that we can correctly read and decompress their data.
@@ -10,7 +10,7 @@
 //! <https://sepolia.era1.nimbus.team/>
 
 use alloy_consensus::{BlockBody, Header};
-use alloy_primitives::{Bytes, U256};
+use alloy_primitives::U256;
 use reqwest::{Client, Url};
 use reth_era::{
     e2s_types::E2sError,
@@ -28,15 +28,16 @@ use std::{
 };
 use tempfile::TempDir;
 
+/// Mainnet network name
+pub(crate) const MAINNET: &str = "mainnet";
 /// Default nimbus mainnet url
 /// for downloading mainnet `.era1` files
-const MAINNET_URL: &str = "https://mainnet.era1.nimbus.team/";
-const MAINNET: &str = "mainnet";
+pub(crate) const MAINNET_URL: &str = "https://mainnet.era1.nimbus.team/";
 
 /// Succint list of mainnet files we want to download
 /// from <https://mainnet.era1.nimbus.team/>
 /// for testing purposes
-const ERA1_MAINNET_FILES_NAMES: [&str; 6] = [
+pub(crate) const ERA1_MAINNET_FILES_NAMES: [&str; 6] = [
     "mainnet-00000-5ec1ffb8.era1",
     "mainnet-00003-d8b8a40b.era1",
     "mainnet-00151-e322efe1.era1",
@@ -45,22 +46,24 @@ const ERA1_MAINNET_FILES_NAMES: [&str; 6] = [
     "mainnet-01367-d7efc68f.era1",
 ];
 
+/// Sepolia network name
+pub(crate) const SEPOLIA: &str = "sepolia";
+
 /// Default sepolia nimbus mainnet url
 /// for downloading sepolia `.era1` files
-const SEPOLIA: &str = "sepolia";
-const SEPOLIA_URL: &str = "https://sepolia.era1.nimbus.team/";
+pub(crate) const SEPOLIA_URL: &str = "https://sepolia.era1.nimbus.team/";
 
 /// Succint list of mainnet files we want to download
 /// from <https://mainnet.era1.nimbus.team/>
 /// for testing purposes
-const ERA1_SEPOLIA_FILES_NAMES: [&str; 3] =
+pub(crate) const ERA1_SEPOLIA_FILES_NAMES: [&str; 3] =
     ["sepolia-00000-643a00f7.era1", "sepolia-00074-0e81003c.era1", "sepolia-00173-b6924da5.era1"];
 
 /// Utility for downloading `.era1` files for tests
 /// in a temporary directory
 /// and caching them in memory
 #[derive(Debug)]
-pub struct Era1TestDownloader {
+pub(crate) struct Era1TestDownloader {
     /// Temporary directory for storing downloaded files
     temp_dir: TempDir,
     /// Cache mapping file names to their paths
@@ -69,7 +72,7 @@ pub struct Era1TestDownloader {
 
 impl Era1TestDownloader {
     /// Create a new downloader instance with a temporary directory
-    pub async fn new() -> Result<Self, E2sError> {
+    pub(crate) async fn new() -> Result<Self, E2sError> {
         let temp_dir = TempDir::new().map_err(|e| {
             E2sError::Io(std::io::Error::other(format!("Failed to create temp directory: {}", e)))
         })?;
@@ -77,13 +80,12 @@ impl Era1TestDownloader {
         Ok(Self { temp_dir, file_cache: Arc::new(Mutex::new(HashMap::new())) })
     }
 
-    /// Get the temporary directory path
-    pub fn temp_dir(&self) -> &Path {
-        self.temp_dir.path()
-    }
-
     /// Download a specific .era1 file by name
-    pub async fn download_file(&self, filename: &str, network: &str) -> Result<PathBuf, E2sError> {
+    pub(crate) async fn download_file(
+        &self,
+        filename: &str,
+        network: &str,
+    ) -> Result<PathBuf, E2sError> {
         // check cache first
         {
             let cache = self.file_cache.lock().unwrap();
@@ -149,7 +151,7 @@ impl Era1TestDownloader {
     }
 
     /// open .era1 file, downloading it if necessary
-    pub async fn open_era1_file(
+    pub(crate) async fn open_era1_file(
         &self,
         filename: &str,
         network: &str,
@@ -161,7 +163,7 @@ impl Era1TestDownloader {
 
 /// Open a test file by name,
 /// downloading only if it is necessary
-pub async fn open_test_file(
+pub(crate) async fn open_test_file(
     file_path: &str,
     downloader: &Era1TestDownloader,
     network: &str,
@@ -280,6 +282,11 @@ async fn test_mainnet_era1_only_file_decompression_and_decoding() -> Result<(), 
             let read_back_block = &read_back_file.group.blocks[idx];
             let block_number = file.group.block_index.starting_number + idx as u64;
 
+            println!("Block {} details:", block_number);
+            println!("  Header size: {} bytes", original_block.header.data.len());
+            println!("  Body size: {} bytes", original_block.body.data.len());
+            println!("  Receipts size: {} bytes", original_block.receipts.data.len());
+
             // Test that decompressed data is identical
             assert_eq!(
                 original_block.header.decompress()?,
@@ -310,105 +317,5 @@ async fn test_mainnet_era1_only_file_decompression_and_decoding() -> Result<(), 
         }
     }
 
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn test_mainnet_genesis_block_decompression() -> Result<(), E2sError> {
-    let downloader = Era1TestDownloader::new().await?;
-
-    let file = downloader.open_era1_file(ERA1_MAINNET_FILES_NAMES[0], MAINNET).await?;
-
-    // Genesis and a few early blocks
-    let test_blocks = [0, 1, 10, 100];
-
-    for &block_idx in &test_blocks {
-        let block = &file.group.blocks[block_idx];
-        let block_number = file.group.block_index.starting_number + block_idx as u64;
-
-        println!(
-            "Testing block {}, compressed body size: {} bytes",
-            block_number,
-            block.body.data.len()
-        );
-
-        // Test decompression
-        let body_data = block.body.decompress()?;
-        assert!(!body_data.is_empty(), "Decompressed body should not be empty");
-        println!("Successfully decompressed body: {} bytes", body_data.len());
-
-        let body = block.body.decode_body::<Bytes, Header>()?;
-
-        // For genesis era blocks, there should be no transactions or ommers
-        assert_eq!(body.transactions.len(), 0, "Genesis era block should have no transactions");
-        assert_eq!(body.ommers.len(), 0, "Genesis era block should have no ommers");
-
-        // Check for withdrawals, should be `None` for genesis era blocks
-        assert!(body.withdrawals.is_none(), "Genesis era block should have no withdrawals");
-
-        let header = block.header.decode_header()?;
-        assert_eq!(header.number, block_number, "Header should have correct block number");
-        println!("Successfully decoded header for block {}", block_number);
-
-        // Test total difficulty value
-        let td = block.total_difficulty.value;
-        println!("Block {} total difficulty: {}", block_number, td);
-    }
-
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn test_sepolia_genesis_block_decompression() -> Result<(), E2sError> {
-    let downloader = Era1TestDownloader::new().await?;
-
-    let file = downloader.open_era1_file(ERA1_SEPOLIA_FILES_NAMES[0], SEPOLIA).await?;
-
-    // Genesis and a few early blocks
-    let test_blocks = [0, 1, 10, 100];
-
-    for &block_idx in &test_blocks {
-        let block = &file.group.blocks[block_idx];
-        let block_number = file.group.block_index.starting_number + block_idx as u64;
-
-        println!(
-            "Testing block {}, compressed body size: {} bytes",
-            block_number,
-            block.body.data.len()
-        );
-
-        // Test decompression
-        let body_data = block.body.decompress()?;
-        assert!(!body_data.is_empty(), "Decompressed body should not be empty");
-        println!("Successfully decompressed body: {} bytes", body_data.len());
-
-        let body = block.body.decode_body::<Bytes, Header>()?;
-
-        // For genesis era blocks, there should be no transactions or ommers
-        assert_eq!(body.transactions.len(), 0, "Genesis era block should have no transactions");
-        assert_eq!(body.ommers.len(), 0, "Genesis era block should have no ommers");
-
-        // Check for withdrawals, should be `None` for genesis era blocks
-        assert!(body.withdrawals.is_none(), "Genesis era block should have no withdrawals");
-
-        let header = block.header.decode_header()?;
-        assert_eq!(header.number, block_number, "Header should have correct block number");
-        println!("Successfully decoded header for block {}", block_number);
-
-        // Test total difficulty value
-        let td = block.total_difficulty.value;
-        println!("Block {} total difficulty: {}", block_number, td);
-    }
-
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn test_roundtrip_compression_encoding_mainnet() -> Result<(), E2sError> {
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn test_roundtrip_compression_encoding_sepolia() -> Result<(), E2sError> {
     Ok(())
 }

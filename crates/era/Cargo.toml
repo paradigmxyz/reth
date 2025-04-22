@@ -27,6 +27,7 @@ ethereum_ssz.workspace = true
 ethereum_ssz_derive.workspace = true
 
 [dev-dependencies]
+rand.workspace = true
 reqwest.workspace = true
 reth-era-downloader.workspace = true
 tempfile.workspace = true
