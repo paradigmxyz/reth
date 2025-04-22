@@ -66,15 +66,15 @@ where
     C: Clone + Debug + Send + Sync + Unpin + 'static,
     AO: Clone + Debug + Send + Sync + Unpin + 'static,
 {
-    type Primitives = <N::Types as NodeTypes>::Primitives;
+    type Primitives = <N as NodeTypes>::Primitives;
 
-    type ChainSpec = <N::Types as NodeTypes>::ChainSpec;
+    type ChainSpec = <N as NodeTypes>::ChainSpec;
 
-    type StateCommitment = <N::Types as NodeTypes>::StateCommitment;
+    type StateCommitment = <N as NodeTypes>::StateCommitment;
 
-    type Storage = <N::Types as NodeTypes>::Storage;
+    type Storage = <N as NodeTypes>::Storage;
 
-    type Payload = <N::Types as NodeTypes>::Payload;
+    type Payload = <N as NodeTypes>::Payload;
 }
 
 impl<N, C, AO> Node<N> for AnyNode<N, C, AO>
@@ -111,11 +111,11 @@ pub struct FullNode<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> {
     /// Provider to interact with the node's database
     pub provider: Node::Provider,
     /// Handle to the node's payload builder service.
-    pub payload_builder_handle: PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>,
+    pub payload_builder_handle: PayloadBuilderHandle<<Node as NodeTypes>::Payload>,
     /// Task executor for the node.
     pub task_executor: TaskExecutor,
     /// The initial node config.
-    pub config: NodeConfig<<Node::Types as NodeTypes>::ChainSpec>,
+    pub config: NodeConfig<<Node as NodeTypes>::ChainSpec>,
     /// The data dir of the node.
     pub data_dir: ChainPath<DataDirPath>,
     /// The handle to launched add-ons
@@ -142,11 +142,11 @@ impl<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> Clone for FullNode<Node
 impl<Payload, Node, AddOns> FullNode<Node, AddOns>
 where
     Payload: PayloadTypes,
-    Node: FullNodeComponents<Types: NodeTypes<Payload = Payload>>,
+    Node: FullNodeComponents + NodeTypes<Payload = Payload>,
     AddOns: NodeAddOns<Node>,
 {
     /// Returns the chain spec of the node.
-    pub fn chain_spec(&self) -> Arc<<Node::Types as NodeTypes>::ChainSpec> {
+    pub fn chain_spec(&self) -> Arc<<Node as NodeTypes>::ChainSpec> {
         self.provider.chain_spec()
     }
 }
@@ -154,7 +154,7 @@ where
 impl<Payload, Node, AddOns> FullNode<Node, AddOns>
 where
     Payload: PayloadTypes,
-    Node: FullNodeComponents<Types: NodeTypes<Payload = Payload>>,
+    Node: FullNodeComponents + NodeTypes<Payload = Payload>,
     AddOns: RethRpcAddOns<Node>,
 {
     /// Returns the [`RpcServerHandle`] to the started rpc server.
@@ -171,7 +171,7 @@ where
 impl<Engine, Node, AddOns> FullNode<Node, AddOns>
 where
     Engine: EngineTypes,
-    Node: FullNodeComponents<Types: NodeTypes<Payload = Engine>>,
+    Node: FullNodeComponents + NodeTypes<Payload = Engine>,
     AddOns: RethRpcAddOns<Node>,
 {
     /// Returns the [`EngineApiClient`] interface for the authenticated engine API.

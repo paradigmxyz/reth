@@ -15,8 +15,8 @@ use reth_exex::ExExManagerHandle;
 use reth_network::{NetworkSyncUpdater, SyncState};
 use reth_network_api::BlockDownloaderProvider;
 use reth_node_api::{
-    BeaconConsensusEngineHandle, BuiltPayload, FullNodeTypes, NodeTypes, NodeTypesWithDBAdapter,
-    PayloadAttributesBuilder, PayloadTypes,
+    BeaconConsensusEngineHandle, BuiltPayload, FullNodeComponents, FullNodeTypes, NodeTypes,
+    NodeTypesWithDBAdapter, PayloadAttributesBuilder, PayloadTypes,
 };
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
@@ -63,21 +63,17 @@ impl EngineNodeLauncher {
     }
 }
 
-impl<Types, DB, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
+impl<DB, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
 where
-    Types: NodeTypesForProvider + NodeTypes,
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
-    T: FullNodeTypes<
-        Types = Types,
-        DB = DB,
-        Provider = BlockchainProvider<NodeTypesWithDBAdapter<Types, DB>>,
-    >,
+    T: NodeTypesForProvider
+        + FullNodeTypes<Provider = BlockchainProvider<NodeTypesWithDBAdapter<T, DB>>, DB = DB>,
     CB: NodeComponentsBuilder<T>,
+    NodeAdapter<T, CB::Components>: FullNodeComponents,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
         + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
-    LocalPayloadAttributesBuilder<Types::ChainSpec>: PayloadAttributesBuilder<
-        <<Types as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
-    >,
+    LocalPayloadAttributesBuilder<T::ChainSpec>:
+        PayloadAttributesBuilder<<<T as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes>,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
 
@@ -115,13 +111,13 @@ where
                 debug!(target: "reth::cli", chain=%this.chain_id(), genesis=?this.genesis_hash(), "Initializing genesis");
             })
             .with_genesis()?
-            .inspect(|this: &LaunchContextWith<Attached<WithConfigs<Types::ChainSpec>, _>>| {
+            .inspect(|this: &LaunchContextWith<Attached<WithConfigs<T::ChainSpec>, _>>| {
                 info!(target: "reth::cli", "\n{}", this.chain_spec().display_hardforks());
             })
             .with_metrics_task()
             // passing FullNodeTypes as type parameter here so that we can build
             // later the components.
-            .with_blockchain_db::<T, _>(move |provider_factory| {
+            .with_blockchain_db(move |provider_factory| {
                 Ok(BlockchainProvider::new(provider_factory)?)
             })?
             .with_components(components_builder, on_component_initialized).await?;

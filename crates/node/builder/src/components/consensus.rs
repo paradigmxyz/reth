@@ -8,7 +8,7 @@ use std::future::Future;
 /// A type that knows how to build the consensus implementation.
 pub trait ConsensusBuilder<Node: FullNodeTypes>: Send {
     /// The consensus implementation to build.
-    type Consensus: FullConsensus<PrimitivesTy<Node::Types>, Error = ConsensusError>
+    type Consensus: FullConsensus<PrimitivesTy<Node>, Error = ConsensusError>
         + Clone
         + Unpin
         + 'static;
@@ -23,8 +23,7 @@ pub trait ConsensusBuilder<Node: FullNodeTypes>: Send {
 impl<Node, F, Fut, Consensus> ConsensusBuilder<Node> for F
 where
     Node: FullNodeTypes,
-    Consensus:
-        FullConsensus<PrimitivesTy<Node::Types>, Error = ConsensusError> + Clone + Unpin + 'static,
+    Consensus: FullConsensus<PrimitivesTy<Node>, Error = ConsensusError> + Clone + Unpin + 'static,
     F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
     Fut: Future<Output = eyre::Result<Consensus>> + Send,
 {

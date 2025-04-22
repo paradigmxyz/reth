@@ -10,7 +10,7 @@ use crate::{BuilderContext, FullNodeTypes};
 /// A type that knows how to build the transaction pool.
 pub trait PoolBuilder<Node: FullNodeTypes>: Send {
     /// The transaction pool to build.
-    type Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
+    type Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node>>>
         + Unpin
         + 'static;
 
@@ -24,9 +24,7 @@ pub trait PoolBuilder<Node: FullNodeTypes>: Send {
 impl<Node, F, Fut, Pool> PoolBuilder<Node> for F
 where
     Node: FullNodeTypes,
-    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
-        + Unpin
-        + 'static,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node>>> + Unpin + 'static,
     F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
     Fut: Future<Output = eyre::Result<Pool>> + Send,
 {

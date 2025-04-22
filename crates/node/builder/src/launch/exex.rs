@@ -21,7 +21,7 @@ pub struct ExExLauncher<Node: FullNodeComponents> {
     head: Head,
     extensions: Vec<(String, Box<dyn BoxedLaunchExEx<Node>>)>,
     components: Node,
-    config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
+    config_container: WithConfigs<<Node as NodeTypes>::ChainSpec>,
 }
 
 impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
@@ -30,7 +30,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
         head: Head,
         components: Node,
         extensions: Vec<(String, Box<dyn BoxedLaunchExEx<Node>>)>,
-        config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
+        config_container: WithConfigs<<Node as NodeTypes>::ChainSpec>,
     ) -> Self {
         Self { head, extensions, components, config_container }
     }
@@ -39,9 +39,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
     ///
     /// Spawns all extensions and returns the handle to the exex manager if any extensions are
     /// installed.
-    pub async fn launch(
-        self,
-    ) -> eyre::Result<Option<ExExManagerHandle<PrimitivesTy<Node::Types>>>> {
+    pub async fn launch(self) -> eyre::Result<Option<ExExManagerHandle<PrimitivesTy<Node>>>> {
         let Self { head, extensions, components, config_container } = self;
         let head = BlockNumHash::new(head.number, head.hash);
 

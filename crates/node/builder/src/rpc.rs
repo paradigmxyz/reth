@@ -243,7 +243,7 @@ pub struct RpcContext<'a, Node: FullNodeComponents, EthApi: EthApiTypes> {
     pub(crate) node: Node,
 
     /// Gives access to the node configuration.
-    pub(crate) config: &'a NodeConfig<<Node::Types as NodeTypes>::ChainSpec>,
+    pub(crate) config: &'a NodeConfig<<Node as NodeTypes>::ChainSpec>,
 
     /// A Helper type the holds instances of the configured modules.
     ///
@@ -266,7 +266,7 @@ where
     EthApi: EthApiTypes,
 {
     /// Returns the config of the node.
-    pub const fn config(&self) -> &NodeConfig<<Node::Types as NodeTypes>::ChainSpec> {
+    pub const fn config(&self) -> &NodeConfig<<Node as NodeTypes>::ChainSpec> {
         self.config
     }
 
@@ -291,9 +291,7 @@ where
     }
 
     /// Returns the handle to the payload builder service
-    pub fn payload_builder_handle(
-        &self,
-    ) -> &PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload> {
+    pub fn payload_builder_handle(&self) -> &PayloadBuilderHandle<<Node as NodeTypes>::Payload> {
         self.node.payload_builder_handle()
     }
 }
@@ -308,10 +306,9 @@ pub struct RpcHandle<Node: FullNodeComponents, EthApi: EthApiTypes> {
     ///
     /// Caution: This is a multi-producer, multi-consumer broadcast and allows grants access to
     /// dispatch events
-    pub engine_events:
-        EventSender<BeaconConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>>,
+    pub engine_events: EventSender<BeaconConsensusEngineEvent<<Node as NodeTypes>::Primitives>>,
     /// Handle to the beacon consensus engine.
-    pub beacon_engine_handle: BeaconConsensusEngineHandle<<Node::Types as NodeTypes>::Payload>,
+    pub beacon_engine_handle: BeaconConsensusEngineHandle<<Node as NodeTypes>::Payload>,
 }
 
 impl<Node: FullNodeComponents, EthApi: EthApiTypes> Clone for RpcHandle<Node, EthApi> {
@@ -608,7 +605,7 @@ pub struct EthApiCtx<'a, N: FullNodeTypes> {
     /// Eth API configuration
     pub config: EthConfig,
     /// Cache for eth state
-    pub cache: EthStateCache<BlockTy<N::Types>, ReceiptTy<N::Types>>,
+    pub cache: EthStateCache<BlockTy<N>, ReceiptTy<N>>,
 }
 
 /// A `EthApi` that knows how to build `eth` namespace API from [`FullNodeComponents`].
@@ -630,8 +627,7 @@ pub trait EthApiBuilder<N: FullNodeComponents>: Default + Send + 'static {
 /// Helper trait that provides the validator for the engine API
 pub trait EngineValidatorAddOn<Node: FullNodeComponents>: Send {
     /// The Validator type to use for the engine API.
-    type Validator: EngineValidator<<Node::Types as NodeTypes>::Payload, Block = BlockTy<Node::Types>>
-        + Clone;
+    type Validator: EngineValidator<<Node as NodeTypes>::Payload, Block = BlockTy<Node>> + Clone;
 
     /// Creates the engine validator for an engine API based node.
     fn engine_validator(
@@ -657,8 +653,7 @@ where
 /// A type that knows how to build the engine validator.
 pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone {
     /// The consensus implementation to build.
-    type Validator: EngineValidator<<Node::Types as NodeTypes>::Payload, Block = BlockTy<Node::Types>>
-        + Clone;
+    type Validator: EngineValidator<<Node as NodeTypes>::Payload, Block = BlockTy<Node>> + Clone;
 
     /// Creates the engine validator.
     fn build(
@@ -670,7 +665,7 @@ pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone 
 impl<Node, F, Fut, Validator> EngineValidatorBuilder<Node> for F
 where
     Node: FullNodeComponents,
-    Validator: EngineValidator<<Node::Types as NodeTypes>::Payload, Block = BlockTy<Node::Types>>
+    Validator: EngineValidator<<Node as NodeTypes>::Payload, Block = BlockTy<Node>>
         + Clone
         + Unpin
         + 'static,
@@ -707,20 +702,19 @@ pub struct BasicEngineApiBuilder<EV> {
 
 impl<N, EV> EngineApiBuilder<N> for BasicEngineApiBuilder<EV>
 where
-    N: FullNodeComponents<
-        Types: NodeTypes<
+    N: FullNodeComponents
+        + NodeTypes<
             ChainSpec: EthereumHardforks,
             Payload: PayloadTypes<ExecutionData = ExecutionData> + EngineTypes,
         >,
-    >,
     EV: EngineValidatorBuilder<N>,
 {
     type EngineApi = EngineApi<
         N::Provider,
-        <N::Types as NodeTypes>::Payload,
+        <N as NodeTypes>::Payload,
         N::Pool,
         EV::Validator,
-        <N::Types as NodeTypes>::ChainSpec,
+        <N as NodeTypes>::ChainSpec,
     >;
 
     async fn build_engine_api(self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::EngineApi> {
