@@ -9,14 +9,45 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
+// About the provided chain specs from `res/superchain-configs.tar`:
+// The provided `OpChainSpec` structs are built from config files read from
+// `superchain-configs.tar`. This `superchain-configs.tar` file contains the chain configs and
+// genesis files for all chains. It is created by the `fetch_superchain_config.sh` script in
+// the `res` directory. Where all configs are where initial loaded from
+// <https://github.com/ethereum-optimism/superchain-registry>. See the script for more details.
+//
+// The file is a tar archive containing the following files:
+// - `genesis/<environment>/<chain_name>.json.zz`: The genesis file compressed with deflate. It
+//   contains the initial accounts, etc.
+// - `configs/<environment>/<chain_name>.json`: The chain metadata file containing the chain id,
+//   hard forks, etc.
+//
+// For example, for `UNICHAIN_MAINNET`, the `genesis/mainnet/unichain.json.zz` and
+// `configs/mainnet/base.json` is loaded and combined into the `OpChainSpec` struct.
+// See `read_superchain_genesis` in `configs.rs` for more details.
+//
+// To update the chain specs, run the `fetch_superchain_config.sh` script in the `res` directory.
+// This will fetch the latest chain configs from the superchain registry and create a new
+// `superchain-configs.tar` file. See the script for more details.
+
 extern crate alloc;
 
 mod base;
 mod base_sepolia;
+
 pub mod constants;
 mod dev;
 mod op;
 mod op_sepolia;
+
+#[cfg(feature = "superchain-configs")]
+mod superchain;
+#[cfg(feature = "superchain-configs")]
+pub use superchain::*;
+
+pub use dev::OP_DEV;
+pub use op::OP_MAINNET;
+pub use op_sepolia::OP_SEPOLIA;
 
 use alloc::{boxed::Box, vec, vec::Vec};
 use alloy_chains::Chain;
@@ -28,9 +59,6 @@ use alloy_primitives::{B256, U256};
 pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
 use derive_more::{Constructor, Deref, From, Into};
-pub use dev::OP_DEV;
-pub use op::OP_MAINNET;
-pub use op_sepolia::OP_SEPOLIA;
 use reth_chainspec::{
     BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract,
     DisplayHardforks, EthChainSpec, EthereumHardforks, ForkFilter, ForkId, Hardforks, Head,
@@ -333,9 +361,13 @@ impl From<Genesis> for OpChainSpec {
 
         // Time-based hardforks
         let time_hardfork_opts = [
-            (EthereumHardfork::Shanghai.boxed(), genesis.config.shanghai_time),
-            (EthereumHardfork::Cancun.boxed(), genesis.config.cancun_time),
-            (EthereumHardfork::Prague.boxed(), genesis.config.prague_time),
+            // L1
+            // we need to map the L1 hardforks to the activation timestamps of the correspondong op
+            // hardforks
+            (EthereumHardfork::Shanghai.boxed(), genesis_info.canyon_time),
+            (EthereumHardfork::Cancun.boxed(), genesis_info.ecotone_time),
+            (EthereumHardfork::Prague.boxed(), genesis_info.isthmus_time),
+            // OP
             (OpHardfork::Regolith.boxed(), genesis_info.regolith_time),
             (OpHardfork::Canyon.boxed(), genesis_info.canyon_time),
             (OpHardfork::Ecotone.boxed(), genesis_info.ecotone_time),
@@ -462,6 +494,7 @@ pub fn make_op_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> 
 
 #[cfg(test)]
 mod tests {
+    use alloc::string::String;
     use alloy_genesis::{ChainConfig, Genesis};
     use alloy_primitives::b256;
     use reth_chainspec::{test_fork_ids, BaseFeeParams, BaseFeeParamsKind};
@@ -511,7 +544,12 @@ mod tests {
                 ),
                 (
                     Head { number: 0, timestamp: 1736445601, ..Default::default() },
-                    ForkId { hash: ForkHash([0x3a, 0x2a, 0xf1, 0x83]), next: 0 },
+                    ForkId { hash: ForkHash([0x3a, 0x2a, 0xf1, 0x83]), next: 1746806401 },
+                ),
+                // Isthmus
+                (
+                    Head { number: 0, timestamp: 1746806401, ..Default::default() },
+                    ForkId { hash: ForkHash([0x86, 0x72, 0x8b, 0x4e]), next: 0 },
                 ),
             ],
         );
@@ -560,7 +598,12 @@ mod tests {
                 ),
                 (
                     Head { number: 0, timestamp: 1732633200, ..Default::default() },
-                    ForkId { hash: ForkHash([0x4a, 0x1c, 0x79, 0x2e]), next: 0 },
+                    ForkId { hash: ForkHash([0x4a, 0x1c, 0x79, 0x2e]), next: 1744905600 },
+                ),
+                // isthmus
+                (
+                    Head { number: 0, timestamp: 1744905600, ..Default::default() },
+                    ForkId { hash: ForkHash([0x6c, 0x62, 0x5e, 0xe1]), next: 0 },
                 ),
             ],
         );
@@ -619,7 +662,12 @@ mod tests {
                 // Holocene
                 (
                     Head { number: 105235063, timestamp: 1736445601, ..Default::default() },
-                    ForkId { hash: ForkHash([0x2b, 0xd9, 0x3d, 0xc8]), next: 0 },
+                    ForkId { hash: ForkHash([0x2b, 0xd9, 0x3d, 0xc8]), next: 1746806401 },
+                ),
+                // Isthmus
+                (
+                    Head { number: 105235063, timestamp: 1746806401, ..Default::default() },
+                    ForkId { hash: ForkHash([0x37, 0xbe, 0x75, 0x8f]), next: 0 },
                 ),
             ],
         );
@@ -668,7 +716,12 @@ mod tests {
                 ),
                 (
                     Head { number: 0, timestamp: 1732633200, ..Default::default() },
-                    ForkId { hash: ForkHash([0x8b, 0x5e, 0x76, 0x29]), next: 0 },
+                    ForkId { hash: ForkHash([0x8b, 0x5e, 0x76, 0x29]), next: 1744905600 },
+                ),
+                // isthmus
+                (
+                    Head { number: 0, timestamp: 1744905600, ..Default::default() },
+                    ForkId { hash: ForkHash([0x06, 0x0a, 0x4d, 0x1d]), next: 0 },
                 ),
             ],
         );
@@ -719,7 +772,7 @@ mod tests {
     #[test]
     fn latest_base_mainnet_fork_id() {
         assert_eq!(
-            ForkId { hash: ForkHash([0x3a, 0x2a, 0xf1, 0x83]), next: 0 },
+            ForkId { hash: ForkHash([0x86, 0x72, 0x8b, 0x4e]), next: 0 },
             BASE_MAINNET.latest_fork_id()
         )
     }
@@ -728,7 +781,7 @@ mod tests {
     fn latest_base_mainnet_fork_id_with_builder() {
         let base_mainnet = OpChainSpecBuilder::base_mainnet().build();
         assert_eq!(
-            ForkId { hash: ForkHash([0x3a, 0x2a, 0xf1, 0x83]), next: 0 },
+            ForkId { hash: ForkHash([0x86, 0x72, 0x8b, 0x4e]), next: 0 },
             base_mainnet.latest_fork_id()
         )
     }
@@ -986,6 +1039,7 @@ mod tests {
                 merge_netsplit_block: Some(0),
                 shanghai_time: Some(0),
                 cancun_time: Some(0),
+                prague_time: Some(0),
                 terminal_total_difficulty: Some(U256::ZERO),
                 extra_fields: [
                     (String::from("bedrockBlock"), 0.into()),
@@ -995,6 +1049,7 @@ mod tests {
                     (String::from("fjordTime"), 0.into()),
                     (String::from("graniteTime"), 0.into()),
                     (String::from("holoceneTime"), 0.into()),
+                    (String::from("isthmusTime"), 0.into()),
                 ]
                 .into_iter()
                 .collect(),
@@ -1030,12 +1085,12 @@ mod tests {
             OpHardfork::Fjord.boxed(),
             OpHardfork::Granite.boxed(),
             OpHardfork::Holocene.boxed(),
-            // OpHardfork::Isthmus.boxed(),
+            EthereumHardfork::Prague.boxed(),
+            OpHardfork::Isthmus.boxed(),
             // OpHardfork::Interop.boxed(),
         ];
 
         for (expected, actual) in expected_hardforks.iter().zip(hardforks.iter()) {
-            println!("got {expected:?}, {actual:?}");
             assert_eq!(&**expected, &**actual);
         }
         assert_eq!(expected_hardforks.len(), hardforks.len());
@@ -1098,6 +1153,73 @@ mod tests {
         let genesis: Genesis = serde_json::from_str(geth_genesis).unwrap();
         let chainspec = OpChainSpec::from_genesis(genesis);
         assert!(chainspec.is_holocene_active_at_timestamp(1732633200));
+    }
+
+    #[test]
+    fn json_genesis_mapped_l1_timestamps() {
+        let geth_genesis = r#"
+{
+    "config": {
+        "chainId": 1301,
+        "homesteadBlock": 0,
+        "eip150Block": 0,
+        "eip155Block": 0,
+        "eip158Block": 0,
+        "byzantiumBlock": 0,
+        "constantinopleBlock": 0,
+        "petersburgBlock": 0,
+        "istanbulBlock": 0,
+        "muirGlacierBlock": 0,
+        "berlinBlock": 0,
+        "londonBlock": 0,
+        "arrowGlacierBlock": 0,
+        "grayGlacierBlock": 0,
+        "mergeNetsplitBlock": 0,
+        "bedrockBlock": 0,
+        "regolithTime": 0,
+        "canyonTime": 0,
+        "ecotoneTime": 1712633200,
+        "fjordTime": 0,
+        "graniteTime": 0,
+        "holoceneTime": 1732633200,
+        "isthmusTime": 1742633200,
+        "terminalTotalDifficulty": 0,
+        "terminalTotalDifficultyPassed": true,
+        "optimism": {
+            "eip1559Elasticity": 6,
+            "eip1559Denominator": 50,
+            "eip1559DenominatorCanyon": 250
+        }
+    },
+    "nonce": "0x0",
+    "timestamp": "0x66edad4c",
+    "extraData": "0x424544524f434b",
+    "gasLimit": "0x1c9c380",
+    "difficulty": "0x0",
+    "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "coinbase": "0x4200000000000000000000000000000000000011",
+    "alloc": {},
+    "number": "0x0",
+    "gasUsed": "0x0",
+    "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "baseFeePerGas": "0x3b9aca00",
+    "excessBlobGas": "0x0",
+    "blobGasUsed": "0x0"
+}
+        "#;
+
+        let genesis: Genesis = serde_json::from_str(geth_genesis).unwrap();
+        let chainspec = OpChainSpec::from_genesis(genesis);
+        assert!(chainspec.is_holocene_active_at_timestamp(1732633200));
+
+        assert!(chainspec.is_shanghai_active_at_timestamp(0));
+        assert!(chainspec.is_canyon_active_at_timestamp(0));
+
+        assert!(chainspec.is_ecotone_active_at_timestamp(1712633200));
+        assert!(chainspec.is_cancun_active_at_timestamp(1712633200));
+
+        assert!(chainspec.is_prague_active_at_timestamp(1742633200));
+        assert!(chainspec.is_isthmus_active_at_timestamp(1742633200));
     }
 
     #[test]

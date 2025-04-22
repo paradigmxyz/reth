@@ -217,6 +217,7 @@ async fn main() -> eyre::Result<()> {
         .paris_activated()
         .shanghai_activated()
         .cancun_activated()
+        .prague_activated()
         .build();
 
     let node_config =

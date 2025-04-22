@@ -26,7 +26,7 @@ pub struct TrieMasks {
 
 impl TrieMasks {
     /// Helper function, returns both fields `hash_mask` and `tree_mask` as [`None`]
-    pub fn none() -> Self {
+    pub const fn none() -> Self {
         Self { hash_mask: None, tree_mask: None }
     }
 }
@@ -379,6 +379,11 @@ impl<P> RevealedSparseTrie<P> {
     /// Takes and returns the retained sparse node updates
     pub fn take_updates(&mut self) -> SparseTrieUpdates {
         self.updates.take().unwrap_or_default()
+    }
+
+    /// Reserves capacity for at least `additional` more nodes to be inserted.
+    pub fn reserve_nodes(&mut self, additional: usize) {
+        self.nodes.reserve(additional);
     }
 
     /// Reveal the trie node only if it was not known already.
@@ -1583,7 +1588,6 @@ mod tests {
     use prop::sample::SizeRange;
     use proptest::prelude::*;
     use proptest_arbitrary_interop::arb;
-    use rand::seq::IteratorRandom;
     use reth_primitives_traits::Account;
     use reth_provider::{test_utils::create_test_provider_factory, TrieWriter};
     use reth_trie::{
@@ -1591,7 +1595,7 @@ mod tests {
         node_iter::{TrieElement, TrieNodeIter},
         trie_cursor::{noop::NoopAccountTrieCursor, TrieCursor, TrieCursorFactory},
         walker::TrieWalker,
-        BranchNode, ExtensionNode, HashedPostState, LeafNode, TrieType,
+        BranchNode, ExtensionNode, HashedPostState, LeafNode,
     };
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
@@ -1642,13 +1646,12 @@ mod tests {
                 (nibbles.pack().into_inner().unwrap().into(), Some(account))
             }))
             .into_sorted();
-        let mut node_iter = TrieNodeIter::new(
+        let mut node_iter = TrieNodeIter::state_trie(
             walker,
             HashedPostStateAccountCursor::new(
                 NoopHashedAccountCursor::default(),
                 hashed_post_state.accounts(),
             ),
-            TrieType::State,
         );
 
         while let Some(node) = node_iter.try_next().unwrap() {
@@ -2357,7 +2360,7 @@ mod tests {
 
         fn transform_updates(
             updates: Vec<BTreeMap<Nibbles, Account>>,
-            mut rng: impl Rng,
+            mut rng: impl rand_08::Rng,
         ) -> Vec<(BTreeMap<Nibbles, Account>, BTreeSet<Nibbles>)> {
             let mut keys = BTreeSet::new();
             updates
@@ -2368,7 +2371,9 @@ mod tests {
                     let keys_to_delete_len = update.len() / 2;
                     let keys_to_delete = (0..keys_to_delete_len)
                         .map(|_| {
-                            let key = keys.iter().choose(&mut rng).unwrap().clone();
+                            let key = rand_08::seq::IteratorRandom::choose(keys.iter(), &mut rng)
+                                .unwrap()
+                                .clone();
                             keys.take(&key).unwrap()
                         })
                         .collect();

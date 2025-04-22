@@ -1045,7 +1045,7 @@ mod tests {
 
         // Create an ExExManager with a small max capacity
         let max_capacity = 2;
-        let mut exex_manager = ExExManager::new(
+        let exex_manager = ExExManager::new(
             provider_factory,
             vec![exex_handle_1],
             max_capacity,
@@ -1372,7 +1372,7 @@ mod tests {
 
         // Send a `FinishedHeight` event with a non-canonical block
         events_tx
-            .send(ExExEvent::FinishedHeight((rng.gen::<u64>(), rng.gen::<B256>()).into()))
+            .send(ExExEvent::FinishedHeight((rng.random::<u64>(), rng.random::<B256>()).into()))
             .unwrap();
 
         finalized_headers_tx.send(Some(block.clone_sealed_header()))?;

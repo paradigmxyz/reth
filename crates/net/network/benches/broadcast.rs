@@ -1,10 +1,8 @@
 #![allow(missing_docs)]
-use alloy_primitives::{
-    private::proptest::test_runner::{RngAlgorithm, TestRng},
-    U256,
-};
+use alloy_primitives::U256;
 use criterion::*;
 use futures::StreamExt;
+use rand::SeedableRng;
 use reth_network::{test_utils::Testnet, NetworkEventListenerProvider};
 use reth_network_api::Peers;
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
@@ -50,9 +48,8 @@ pub fn broadcast_ingress_bench(c: &mut Criterion) {
                         }
 
                         // prepare some transactions
-                        let mut gen = TransactionGenerator::new(TestRng::deterministic_rng(
-                            RngAlgorithm::ChaCha,
-                        ));
+                        let mut gen =
+                            TransactionGenerator::new(rand::rngs::StdRng::seed_from_u64(0));
                         let num_broadcasts = 10;
                         for _ in 0..num_broadcasts {
                             for _ in 0..2 {

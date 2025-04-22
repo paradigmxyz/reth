@@ -10,7 +10,7 @@ use reth_trie::{
     trie_cursor::{noop::NoopStorageTrieCursor, InMemoryStorageTrieCursor},
     updates::StorageTrieUpdates,
     walker::TrieWalker,
-    HashedStorage, TrieType,
+    HashedStorage,
 };
 use reth_trie_common::{HashBuilder, Nibbles};
 use reth_trie_sparse::SparseTrie;
@@ -137,13 +137,12 @@ fn calculate_root_from_leaves_repeated(c: &mut Criterion) {
                                     ),
                                     prefix_set,
                                 );
-                                let mut node_iter = TrieNodeIter::new(
+                                let mut node_iter = TrieNodeIter::storage_trie(
                                     walker,
                                     HashedPostStateStorageCursor::new(
                                         NoopHashedStorageCursor::default(),
                                         Some(&storage_sorted),
                                     ),
-                                    TrieType::Storage,
                                 );
 
                                 let mut hb = HashBuilder::default().with_updates(true);

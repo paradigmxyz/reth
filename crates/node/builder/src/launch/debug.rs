@@ -27,7 +27,7 @@ pub struct DebugNodeLauncher<L = EngineNodeLauncher> {
 
 impl<L> DebugNodeLauncher<L> {
     /// Creates a new instance of the [`DebugNodeLauncher`].
-    pub fn new(inner: L) -> Self {
+    pub const fn new(inner: L) -> Self {
         Self { inner }
     }
 }
