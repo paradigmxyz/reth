@@ -24,6 +24,7 @@ optimism_package:
         cl_type: op-node
       - el_type: op-reth
         cl_type: op-node
+        el_image: "ghcr.io/paradigmxyz/op-reth:kurtosis-ci"
       network_params:
         holocene_time_offset: 0
         isthmus_time_offset: 0
