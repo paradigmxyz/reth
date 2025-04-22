@@ -128,22 +128,39 @@ impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
     }
 }
 
+/// Represents the status of a storage slot in the cache
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SlotStatus {
+    /// The account's storage cache doesn't exist
+    NotCached,
+    /// The storage slot is empty (either not in cache or explicitly None)
+    Empty,
+    /// The storage slot has a value
+    Value(StorageValue),
+}
+
 impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
     fn storage(
         &self,
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        if let Some(res) = self.caches.get_storage(&account, &storage_key) {
-            self.metrics.storage_cache_hits.increment(1);
-            return Ok(res)
+        match self.caches.get_storage(&account, &storage_key) {
+            SlotStatus::NotCached => {
+                self.metrics.storage_cache_misses.increment(1);
+                let final_res = self.state_provider.storage(account, storage_key)?;
+                self.caches.insert_storage(account, storage_key, final_res);
+                Ok(final_res)
+            }
+            SlotStatus::Empty => {
+                self.metrics.storage_cache_hits.increment(1);
+                Ok(None)
+            }
+            SlotStatus::Value(value) => {
+                self.metrics.storage_cache_hits.increment(1);
+                Ok(Some(value))
+            }
         }
-
-        self.metrics.storage_cache_misses.increment(1);
-
-        let final_res = self.state_provider.storage(account, storage_key)?;
-        self.caches.insert_storage(account, storage_key, final_res);
-        Ok(final_res)
     }
 
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
@@ -273,13 +290,17 @@ pub(crate) struct ProviderCaches {
 }
 
 impl ProviderCaches {
-    /// Get storage value from hierarchical cache
-    pub(crate) fn get_storage(
-        &self,
-        address: &Address,
-        key: &StorageKey,
-    ) -> Option<Option<StorageValue>> {
-        self.storage_cache.get(address).and_then(|account_cache| account_cache.get_storage(key))
+    /// Get storage value from hierarchical cache.
+    ///
+    /// Returns a `SlotStatus` indicating whether:
+    /// - `NotCached`: The account's storage cache doesn't exist
+    /// - `Empty`: The slot exists in the account's cache but is empty
+    /// - `Value`: The slot exists and has a specific value
+    pub(crate) fn get_storage(&self, address: &Address, key: &StorageKey) -> SlotStatus {
+        match self.storage_cache.get(address) {
+            None => SlotStatus::NotCached,
+            Some(account_cache) => account_cache.get_storage(key),
+        }
     }
 
     /// Insert storage value into hierarchical cache
@@ -309,8 +330,22 @@ impl ProviderCaches {
 
     /// Inserts the [`BundleState`] entries into the cache.
     ///
-    /// Returns an error if state can't be cached and the should be discarded.
+    /// Entries are inserted in the following order:
+    /// 1. Bytecodes
+    /// 2. Storage slots
+    /// 3. Accounts
+    ///
+    /// The order is important, because the access patterns are Account -> Bytecode and Account ->
+    /// Storage slot. If we update the account first, it may point to a code hash that doesn't have
+    /// the associated bytecode anywhere yet.
+    ///
+    /// Returns an error if the state can't be cached and should be discarded.
     pub(crate) fn insert_state(&self, state_updates: &BundleState) -> Result<(), ()> {
+        // Insert bytecodes
+        for (code_hash, bytecode) in &state_updates.contracts {
+            self.code_cache.insert(*code_hash, Some(Bytecode(bytecode.clone())));
+        }
+
         for (addr, account) in &state_updates.state {
             // If the account was not modified, as in not changed and not destroyed, then we have
             // nothing to do w.r.t. this particular account and can move on
@@ -318,16 +353,16 @@ impl ProviderCaches {
                 continue
             }
 
-            // if the account was destroyed, invalidate from the account / storage caches
+            // If the account was destroyed, invalidate from the account / storage caches
             if account.was_destroyed() {
-                // invalidate the account cache entry if destroyed
+                // Invalidate the account cache entry if destroyed
                 self.account_cache.invalidate(addr);
 
                 self.invalidate_account_storage(addr);
                 continue
             }
 
-            // if we have an account that was modified, but it has a `None` account info, some wild
+            // If we have an account that was modified, but it has a `None` account info, some wild
             // error has occurred because this state should be unrepresentable. An account with
             // `None` current info, should be destroyed.
             let Some(ref account_info) = account.info else {
@@ -335,16 +370,16 @@ impl ProviderCaches {
                 return Err(())
             };
 
-            // insert will update if present, so we just use the new account info as the new value
-            // for the account cache
-            self.account_cache.insert(*addr, Some(Account::from(account_info)));
-
-            // now we iterate over all storage and make updates to the cached storage values
+            // Now we iterate over all storage and make updates to the cached storage values
             for (storage_key, slot) in &account.storage {
-                // we convert the storage key from U256 to B256 because that is how it's represented
+                // We convert the storage key from U256 to B256 because that is how it's represented
                 // in the cache
                 self.insert_storage(*addr, (*storage_key).into(), Some(slot.present_value));
             }
+
+            // Insert will update if present, so we just use the new account info as the new value
+            // for the account cache
+            self.account_cache.insert(*addr, Some(Account::from(account_info)));
         }
 
         Ok(())
@@ -483,7 +518,7 @@ impl SavedCache {
     }
 
     /// Returns the [`ProviderCaches`] belonging to the tracked hash.
-    pub(crate) fn cache(&self) -> &ProviderCaches {
+    pub(crate) const fn cache(&self) -> &ProviderCaches {
         &self.caches
     }
 
@@ -510,9 +545,16 @@ impl AccountStorageCache {
         }
     }
 
-    /// Get a storage value
-    pub(crate) fn get_storage(&self, key: &StorageKey) -> Option<Option<StorageValue>> {
-        self.slots.get(key)
+    /// Get a storage value from this account's cache.
+    /// - `NotCached`: The slot is not in the cache
+    /// - `Empty`: The slot is empty
+    /// - `Value`: The slot has a specific value
+    pub(crate) fn get_storage(&self, key: &StorageKey) -> SlotStatus {
+        match self.slots.get(key) {
+            None => SlotStatus::NotCached,
+            Some(None) => SlotStatus::Empty,
+            Some(Some(value)) => SlotStatus::Value(value),
+        }
     }
 
     /// Insert a storage value
@@ -538,7 +580,9 @@ impl Default for AccountStorageCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::{B256, U256};
     use rand::Rng;
+    use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use std::mem::size_of;
 
     mod tracking_allocator {
@@ -609,10 +653,10 @@ mod tests {
     fn measure_storage_cache_overhead() {
         let (base_overhead, cache) = measure_allocation(|| AccountStorageCache::new(1000));
         println!("Base AccountStorageCache overhead: {} bytes", base_overhead);
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         let key = StorageKey::random();
-        let value = StorageValue::from(rng.gen::<u128>());
+        let value = StorageValue::from(rng.random::<u128>());
         let (first_slot, _) = measure_allocation(|| {
             cache.insert_storage(key, Some(value));
         });
@@ -622,7 +666,7 @@ mod tests {
         let (test_slots, _) = measure_allocation(|| {
             for _ in 0..TOTAL_SLOTS {
                 let key = StorageKey::random();
-                let value = StorageValue::from(rng.gen::<u128>());
+                let value = StorageValue::from(rng.random::<u128>());
                 cache.insert_storage(key, Some(value));
             }
         });
@@ -633,5 +677,95 @@ mod tests {
         println!("StorageValue size: {} bytes", size_of::<StorageValue>());
         println!("Option<StorageValue> size: {} bytes", size_of::<Option<StorageValue>>());
         println!("Option<B256> size: {} bytes", size_of::<Option<B256>>());
+    }
+
+    #[test]
+    fn test_empty_storage_cached_state_provider() {
+        // make sure when we have an empty value in storage, we return `Empty` and not `NotCached`
+        let address = Address::random();
+        let storage_key = StorageKey::random();
+        let account = ExtendedAccount::new(0, U256::ZERO);
+
+        // note there is no storage here
+        let provider = MockEthProvider::default();
+        provider.extend_accounts(vec![(address, account)]);
+
+        let caches = ProviderCacheBuilder::default().build_caches(1000);
+        let state_provider =
+            CachedStateProvider::new_with_caches(provider, caches, CachedStateMetrics::zeroed());
+
+        // check that the storage is empty
+        let res = state_provider.storage(address, storage_key);
+        assert!(res.is_ok());
+        assert_eq!(res.unwrap(), None);
+    }
+
+    #[test]
+    fn test_uncached_storage_cached_state_provider() {
+        // make sure when we have something uncached, we get the cached value
+        let address = Address::random();
+        let storage_key = StorageKey::random();
+        let storage_value = U256::from(1);
+        let account =
+            ExtendedAccount::new(0, U256::ZERO).extend_storage(vec![(storage_key, storage_value)]);
+
+        // note that we extend storage here with one value
+        let provider = MockEthProvider::default();
+        provider.extend_accounts(vec![(address, account)]);
+
+        let caches = ProviderCacheBuilder::default().build_caches(1000);
+        let state_provider =
+            CachedStateProvider::new_with_caches(provider, caches, CachedStateMetrics::zeroed());
+
+        // check that the storage is empty
+        let res = state_provider.storage(address, storage_key);
+        assert!(res.is_ok());
+        assert_eq!(res.unwrap(), Some(storage_value));
+    }
+
+    #[test]
+    fn test_get_storage_populated() {
+        // make sure when we have something cached, we get the cached value in the `SlotStatus`
+        let address = Address::random();
+        let storage_key = StorageKey::random();
+        let storage_value = U256::from(1);
+
+        // insert into caches directly
+        let caches = ProviderCacheBuilder::default().build_caches(1000);
+        caches.insert_storage(address, storage_key, Some(storage_value));
+
+        // check that the storage is empty
+        let slot_status = caches.get_storage(&address, &storage_key);
+        assert_eq!(slot_status, SlotStatus::Value(storage_value));
+    }
+
+    #[test]
+    fn test_get_storage_not_cached() {
+        // make sure when we have nothing cached, we get the `NotCached` value in the `SlotStatus`
+        let storage_key = StorageKey::random();
+        let address = Address::random();
+
+        // just create empty caches
+        let caches = ProviderCacheBuilder::default().build_caches(1000);
+
+        // check that the storage is empty
+        let slot_status = caches.get_storage(&address, &storage_key);
+        assert_eq!(slot_status, SlotStatus::NotCached);
+    }
+
+    #[test]
+    fn test_get_storage_empty() {
+        // make sure when we insert an empty value to the cache, we get the `Empty` value in the
+        // `SlotStatus`
+        let address = Address::random();
+        let storage_key = StorageKey::random();
+
+        // insert into caches directly
+        let caches = ProviderCacheBuilder::default().build_caches(1000);
+        caches.insert_storage(address, storage_key, None);
+
+        // check that the storage is empty
+        let slot_status = caches.get_storage(&address, &storage_key);
+        assert_eq!(slot_status, SlotStatus::Empty);
     }
 }

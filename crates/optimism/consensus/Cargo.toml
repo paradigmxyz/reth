@@ -24,7 +24,6 @@ reth-trie-common.workspace = true
 
 # op-reth
 reth-optimism-forks.workspace = true
-reth-optimism-chainspec.workspace = true
 reth-optimism-primitives.workspace = true
 
 # ethereum
@@ -46,6 +45,7 @@ reth-revm.workspace = true
 reth-trie.workspace = true
 reth-optimism-chainspec.workspace = true
 reth-optimism-node.workspace = true
+reth-db-api = { workspace = true, features = ["op"] }
 
 alloy-chains.workspace = true
 alloy-primitives.workspace = true

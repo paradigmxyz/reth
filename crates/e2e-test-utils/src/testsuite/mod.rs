@@ -8,7 +8,7 @@ use alloy_primitives::B256;
 use eyre::Result;
 use jsonrpsee::http_client::{transport::HttpBackend, HttpClient};
 use reth_engine_local::LocalPayloadAttributesBuilder;
-use reth_node_api::{NodeTypesWithEngine, PayloadTypes};
+use reth_node_api::{NodeTypes, PayloadTypes};
 use reth_payload_builder::PayloadId;
 use reth_rpc_layer::AuthClientService;
 use setup::Setup;
@@ -62,6 +62,8 @@ pub struct Environment<I> {
     pub latest_fork_choice_state: ForkchoiceState,
     /// Stores the most recent built execution payload
     pub latest_payload_built: Option<PayloadAttributes>,
+    /// Stores the most recent executed payload
+    pub latest_payload_executed: Option<PayloadAttributes>,
 }
 
 impl<I> Default for Environment<I> {
@@ -78,6 +80,7 @@ impl<I> Default for Environment<I> {
             next_payload_id: None,
             latest_fork_choice_state: ForkchoiceState::default(),
             latest_payload_built: None,
+            latest_payload_executed: None,
         }
     }
 }
@@ -127,7 +130,7 @@ impl<I: 'static> TestBuilder<I> {
     where
         N: NodeBuilderHelper,
         LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
-            <<N as NodeTypesWithEngine>::Payload as PayloadTypes>::PayloadAttributes,
+            <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
         >,
     {
         let mut setup = self.setup.take();

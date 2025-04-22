@@ -1,17 +1,39 @@
 //! Helpers for optimism specific RPC implementations.
 
-use std::sync::{
-    atomic::{self, AtomicUsize},
-    Arc,
-};
-
-use alloy_primitives::hex;
+use crate::SequencerClientError;
+use alloy_json_rpc::{RpcRecv, RpcSend};
+use alloy_primitives::{hex, B256};
+use alloy_rpc_client::{BuiltInConnectionString, ClientBuilder, RpcClient as Client};
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
-use reqwest::Client;
-use serde_json::{json, Value};
+use alloy_transport_http::Http;
+use std::{str::FromStr, sync::Arc};
+use thiserror::Error;
 use tracing::warn;
 
-use crate::SequencerClientError;
+/// Sequencer client error
+#[derive(Error, Debug)]
+pub enum Error {
+    /// Invalid scheme
+    #[error("Invalid scheme of sequencer url: {0}")]
+    InvalidScheme(String),
+    /// Invalid url
+    #[error("Invalid sequencer url: {0}")]
+    InvalidUrl(String),
+    /// Establishing a connection to the sequencer endpoint resulted in an error.
+    #[error("Failed to connect to sequencer: {0}")]
+    TransportError(
+        #[from]
+        #[source]
+        alloy_transport::TransportError,
+    ),
+    /// Reqwest failed to init client
+    #[error("Failed to init reqwest client for sequencer: {0}")]
+    ReqwestError(
+        #[from]
+        #[source]
+        reqwest::Error,
+    ),
+}
 
 /// A client to interact with a Sequencer
 #[derive(Debug, Clone)]
@@ -20,20 +42,41 @@ pub struct SequencerClient {
 }
 
 impl SequencerClient {
-    /// Creates a new [`SequencerClient`].
-    pub fn new(sequencer_endpoint: impl Into<String>) -> Self {
-        let client = Client::builder().use_rustls_tls().build().unwrap();
-        Self::with_client(sequencer_endpoint, client)
+    /// Creates a new [`SequencerClient`] for the given URL.
+    ///
+    /// If the URL is a websocket endpoint we connect a websocket instance.
+    pub async fn new(sequencer_endpoint: impl Into<String>) -> Result<Self, Error> {
+        let sequencer_endpoint = sequencer_endpoint.into();
+        let endpoint = BuiltInConnectionString::from_str(&sequencer_endpoint)?;
+        if let BuiltInConnectionString::Http(url) = endpoint {
+            let client = reqwest::Client::builder()
+                // we force use tls to prevent native issues
+                .use_rustls_tls()
+                .build()?;
+            Self::with_http_client(url, client)
+        } else {
+            let client = ClientBuilder::default().connect_with(endpoint).await?;
+            let inner = SequencerClientInner { sequencer_endpoint, client };
+            Ok(Self { inner: Arc::new(inner) })
+        }
     }
 
-    /// Creates a new [`SequencerClient`].
-    pub fn with_client(sequencer_endpoint: impl Into<String>, http_client: Client) -> Self {
-        let inner = SequencerClientInner {
-            sequencer_endpoint: sequencer_endpoint.into(),
-            http_client,
-            id: AtomicUsize::new(0),
-        };
-        Self { inner: Arc::new(inner) }
+    /// Creates a new [`SequencerClient`] with http transport with the given http client.
+    pub fn with_http_client(
+        sequencer_endpoint: impl Into<String>,
+        client: reqwest::Client,
+    ) -> Result<Self, Error> {
+        let sequencer_endpoint: String = sequencer_endpoint.into();
+        let url = sequencer_endpoint
+            .parse()
+            .map_err(|_| Error::InvalidUrl(sequencer_endpoint.clone()))?;
+
+        let http_client = Http::with_client(client, url);
+        let is_local = http_client.guess_local();
+        let client = ClientBuilder::default().transport(http_client, is_local);
+
+        let inner = SequencerClientInner { sequencer_endpoint, client };
+        Ok(Self { inner: Arc::new(inner) })
     }
 
     /// Returns the network of the client
@@ -42,59 +85,42 @@ impl SequencerClient {
     }
 
     /// Returns the client
-    pub fn http_client(&self) -> &Client {
-        &self.inner.http_client
+    pub fn client(&self) -> &Client {
+        &self.inner.client
     }
 
-    /// Returns the next id for the request
-    fn next_request_id(&self) -> usize {
-        self.inner.id.fetch_add(1, atomic::Ordering::SeqCst)
-    }
-
-    /// Helper function to get body of the request with the given params array.
-    fn request_body(&self, method: &str, params: Value) -> serde_json::Result<String> {
-        let request = json!({
-            "jsonrpc": "2.0",
-            "method": method,
-            "params": params,
-            "id": self.next_request_id()
-        });
-
-        serde_json::to_string(&request)
-    }
-
-    /// Sends a POST request to the sequencer endpoint.
-    async fn post_request(&self, body: String) -> Result<(), reqwest::Error> {
-        self.http_client()
-            .post(self.endpoint())
-            .header(reqwest::header::CONTENT_TYPE, "application/json")
-            .body(body)
-            .send()
-            .await?;
-        Ok(())
+    /// Sends a [`alloy_rpc_client::RpcCall`] request to the sequencer endpoint.
+    async fn send_rpc_call<Params: RpcSend, Resp: RpcRecv>(
+        &self,
+        method: &str,
+        params: Params,
+    ) -> Result<Resp, SequencerClientError> {
+        let resp =
+            self.client().request::<Params, Resp>(method.to_string(), params).await.inspect_err(
+                |err| {
+                    warn!(
+                        target: "rpc::sequencer",
+                        %err,
+                        "HTTP request to sequencer failed",
+                    );
+                },
+            )?;
+        Ok(resp)
     }
 
     /// Forwards a transaction to the sequencer endpoint.
-    pub async fn forward_raw_transaction(&self, tx: &[u8]) -> Result<(), SequencerClientError> {
-        let body = self
-            .request_body("eth_sendRawTransaction", json!([format!("0x{}", hex::encode(tx))]))
-            .map_err(|_| {
+    pub async fn forward_raw_transaction(&self, tx: &[u8]) -> Result<B256, SequencerClientError> {
+        let rlp_hex = hex::encode_prefixed(tx);
+        let tx_hash =
+            self.send_rpc_call("eth_sendRawTransaction", (rlp_hex,)).await.inspect_err(|err| {
                 warn!(
                     target: "rpc::eth",
-                    "Failed to serialize transaction for forwarding to sequencer"
+                    %err,
+                    "Failed to forward transaction to sequencer",
                 );
-                SequencerClientError::InvalidSequencerTransaction
             })?;
 
-        self.post_request(body).await.inspect_err(|err| {
-            warn!(
-                target: "rpc::eth",
-                %err,
-                "Failed to forward transaction to sequencer",
-            );
-        })?;
-
-        Ok(())
+        Ok(tx_hash)
     }
 
     /// Forwards a transaction conditional to the sequencer endpoint.
@@ -102,63 +128,105 @@ impl SequencerClient {
         &self,
         tx: &[u8],
         condition: TransactionConditional,
-    ) -> Result<(), SequencerClientError> {
-        let params = json!([format!("0x{}", hex::encode(tx)), condition]);
-        let body =
-            self.request_body("eth_sendRawTransactionConditional", params).map_err(|_| {
+    ) -> Result<B256, SequencerClientError> {
+        let rlp_hex = hex::encode_prefixed(tx);
+        let tx_hash = self
+            .send_rpc_call("eth_sendRawTransactionConditional", (rlp_hex, condition))
+            .await
+            .inspect_err(|err| {
                 warn!(
                     target: "rpc::eth",
-                    "Failed to serialize transaction for forwarding to sequencer"
+                    %err,
+                    "Failed to forward transaction conditional for sequencer",
                 );
-                SequencerClientError::InvalidSequencerTransaction
             })?;
-
-        self.post_request(body).await.inspect_err(|err| {
-            warn!(
-                target: "rpc::eth",
-                %err,
-                "Failed to forward transaction conditional for sequencer",
-            );
-        })?;
-        Ok(())
+        Ok(tx_hash)
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct SequencerClientInner {
     /// The endpoint of the sequencer
     sequencer_endpoint: String,
-    /// The HTTP client
-    http_client: Client,
-    /// Keeps track of unique request ids
-    id: AtomicUsize,
+    /// The client
+    client: Client,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use alloy_primitives::U64;
 
-    #[test]
-    fn test_body_str() {
-        let client = SequencerClient::new("http://localhost:8545");
-        let params = json!(["0x1234", {"block_number":10}]);
+    #[tokio::test]
+    async fn test_http_body_str() {
+        let client = SequencerClient::new("http://localhost:8545").await.unwrap();
 
-        let body = client.request_body("eth_getBlockByNumber", params).unwrap();
+        let request = client
+            .client()
+            .make_request("eth_getBlockByNumber", (U64::from(10),))
+            .serialize()
+            .unwrap()
+            .take_request();
+        let body = request.get();
 
         assert_eq!(
             body,
-            r#"{"id":0,"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x1234",{"block_number":10}]}"#
+            r#"{"method":"eth_getBlockByNumber","params":["0xa"],"id":0,"jsonrpc":"2.0"}"#
         );
 
         let condition = TransactionConditional::default();
-        let params = json!([format!("0x{}", hex::encode("abcd")), condition]);
 
-        let body = client.request_body("eth_sendRawTransactionConditional", params).unwrap();
+        let request = client
+            .client()
+            .make_request(
+                "eth_sendRawTransactionConditional",
+                (format!("0x{}", hex::encode("abcd")), condition),
+            )
+            .serialize()
+            .unwrap()
+            .take_request();
+        let body = request.get();
 
         assert_eq!(
             body,
-            r#"{"id":1,"jsonrpc":"2.0","method":"eth_sendRawTransactionConditional","params":["0x61626364",{"knownAccounts":{}}]}"#
+            r#"{"method":"eth_sendRawTransactionConditional","params":["0x61626364",{"knownAccounts":{}}],"id":1,"jsonrpc":"2.0"}"#
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "Start if WS is reachable at ws://localhost:8546"]
+    async fn test_ws_body_str() {
+        let client = SequencerClient::new("ws://localhost:8546").await.unwrap();
+
+        let request = client
+            .client()
+            .make_request("eth_getBlockByNumber", (U64::from(10),))
+            .serialize()
+            .unwrap()
+            .take_request();
+        let body = request.get();
+
+        assert_eq!(
+            body,
+            r#"{"method":"eth_getBlockByNumber","params":["0xa"],"id":0,"jsonrpc":"2.0"}"#
+        );
+
+        let condition = TransactionConditional::default();
+
+        let request = client
+            .client()
+            .make_request(
+                "eth_sendRawTransactionConditional",
+                (format!("0x{}", hex::encode("abcd")), condition),
+            )
+            .serialize()
+            .unwrap()
+            .take_request();
+        let body = request.get();
+
+        assert_eq!(
+            body,
+            r#"{"method":"eth_sendRawTransactionConditional","params":["0x61626364",{"knownAccounts":{}}],"id":1,"jsonrpc":"2.0"}"#
         );
     }
 }

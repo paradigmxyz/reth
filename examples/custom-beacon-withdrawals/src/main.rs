@@ -12,26 +12,33 @@ use alloy_evm::{
 use alloy_sol_macro::sol;
 use alloy_sol_types::SolCall;
 use reth::{
-    api::{ConfigureEvm, NodeTypesWithEngine},
-    builder::{components::ExecutorBuilder, BuilderContext, FullNodeTypes},
+    builder::{components::ExecutorBuilder, BuilderContext},
     cli::Cli,
-    providers::BlockExecutionResult,
-    revm::{
-        context::{result::ExecutionResult, TxEnv},
-        db::State,
-        primitives::{address, hardfork::SpecId, Address},
-        DatabaseCommit,
+    primitives::SealedBlock,
+};
+use reth_ethereum::{
+    chainspec::ChainSpec,
+    evm::{
+        primitives::{
+            execute::{BlockExecutionError, BlockExecutor, InternalBlockExecutionError},
+            Database, Evm, EvmEnv, InspectorFor, NextBlockEnvAttributes, OnStateHook,
+        },
+        revm::{
+            context::{result::ExecutionResult, TxEnv},
+            db::State,
+            primitives::{address, hardfork::SpecId, Address},
+            DatabaseCommit,
+        },
+        EthBlockAssembler, EthEvmConfig, RethReceiptBuilder,
     },
-};
-use reth_chainspec::ChainSpec;
-use reth_evm::{
-    execute::{BlockExecutionError, BlockExecutor, InternalBlockExecutionError},
-    Database, Evm, EvmEnv, InspectorFor, NextBlockEnvAttributes, OnStateHook,
-};
-use reth_evm_ethereum::{EthBlockAssembler, EthEvmConfig, RethReceiptBuilder};
-use reth_node_ethereum::{node::EthereumAddOns, BasicBlockExecutorProvider, EthereumNode};
-use reth_primitives::{
-    EthPrimitives, Header, Receipt, SealedBlock, SealedHeader, TransactionSigned,
+    node::{
+        api::{ConfigureEvm, FullNodeTypes, NodeTypes},
+        node::EthereumAddOns,
+        BasicBlockExecutorProvider, EthereumNode,
+    },
+    primitives::{Header, SealedHeader},
+    provider::BlockExecutionResult,
+    EthPrimitives, Receipt, TransactionSigned,
 };
 use std::{fmt::Display, sync::Arc};
 
@@ -65,7 +72,7 @@ pub struct CustomExecutorBuilder;
 
 impl<Types, Node> ExecutorBuilder<Node> for CustomExecutorBuilder
 where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
+    Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
 {
     type EVM = CustomEvmConfig;
@@ -198,6 +205,10 @@ where
 
     fn evm_mut(&mut self) -> &mut Self::Evm {
         self.inner.evm_mut()
+    }
+
+    fn evm(&self) -> &Self::Evm {
+        self.inner.evm()
     }
 }
 

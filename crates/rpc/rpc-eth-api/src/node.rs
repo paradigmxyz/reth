@@ -1,6 +1,6 @@
 //! Helper trait for interfacing with [`FullNodeComponents`].
 
-use reth_node_api::{FullNodeComponents, NodeTypesWithEngine, PrimitivesTy};
+use reth_node_api::{FullNodeComponents, NodeTypes, PrimitivesTy};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::{BlockReader, ProviderBlock, ProviderReceipt};
 use reth_rpc_eth_types::EthStateCache;
@@ -51,7 +51,7 @@ where
     type Pool = T::Pool;
     type Evm = T::Evm;
     type Network = T::Network;
-    type PayloadBuilder = PayloadBuilderHandle<<T::Types as NodeTypesWithEngine>::Payload>;
+    type PayloadBuilder = PayloadBuilderHandle<<T::Types as NodeTypes>::Payload>;
 
     #[inline]
     fn pool(&self) -> &Self::Pool {

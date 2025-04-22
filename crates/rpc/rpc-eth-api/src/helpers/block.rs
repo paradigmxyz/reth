@@ -102,7 +102,6 @@ pub trait EthBlocks: LoadBlock {
     /// Helper function for `eth_getBlockReceipts`.
     ///
     /// Returns all transaction receipts in block, or `None` if block wasn't found.
-    #[allow(clippy::type_complexity)]
     fn block_receipts(
         &self,
         block_id: BlockId,
@@ -111,7 +110,6 @@ pub trait EthBlocks: LoadBlock {
         Self: LoadReceipt;
 
     /// Helper method that loads a block and all its receipts.
-    #[allow(clippy::type_complexity)]
     fn load_block_and_receipts(
         &self,
         block_id: BlockId,

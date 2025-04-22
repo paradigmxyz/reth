@@ -313,7 +313,7 @@ impl<N: NodePrimitives> TreeState<N> {
         // block, if it exists.
         //
         // For all other blocks, we  first put their children into this vec.
-        // Then, we will iterate over them, removing them, adding their children, etc etc,
+        // Then, we will iterate over them, removing them, adding their children, etc,
         // until the vec is empty.
         let mut blocks_to_remove = self.blocks_by_number.remove(&finalized_num).unwrap_or_default();
 
@@ -417,7 +417,7 @@ impl<N: NodePrimitives> TreeState<N> {
     }
 
     /// Updates the canonical head to the given block.
-    fn set_canonical_head(&mut self, new_head: BlockNumHash) {
+    const fn set_canonical_head(&mut self, new_head: BlockNumHash) {
         self.current_canonical_head = new_head;
     }
 
@@ -451,7 +451,7 @@ pub struct StateProviderBuilder<N: NodePrimitives, P> {
 impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
     /// Creates a new state provider from the provider factory, historical block hash and optional
     /// overlaid blocks.
-    pub fn new(
+    pub const fn new(
         provider_factory: P,
         historical: B256,
         overlay: Option<Vec<ExecutedBlockWithTrieUpdates<N>>>,
@@ -566,7 +566,6 @@ where
 {
     provider: P,
     executor_provider: E,
-    evm_config: C,
     consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
     payload_validator: V,
     /// Keeps track of internals such as executed and buffered blocks.
@@ -616,7 +615,6 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineApiTreeHandler")
             .field("provider", &self.provider)
-            .field("evm_config", &self.evm_config)
             .field("executor_provider", &self.executor_provider)
             .field("consensus", &self.consensus)
             .field("payload_validator", &self.payload_validator)
@@ -673,12 +671,11 @@ where
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
 
         let payload_processor =
-            PayloadProcessor::new(WorkloadExecutor::default(), evm_config.clone(), &config);
+            PayloadProcessor::new(WorkloadExecutor::default(), evm_config, &config);
 
         Self {
             provider,
             executor_provider,
-            evm_config,
             consensus,
             payload_validator,
             incoming,
@@ -1453,12 +1450,6 @@ where
 
                                 // handle the event if any
                                 self.on_maybe_tree_event(maybe_event)?;
-                            }
-                            BeaconEngineMessage::TransitionConfigurationExchanged => {
-                                // triggering this hook will record that we received a request from
-                                // the CL
-                                self.canonical_in_memory_state
-                                    .on_transition_configuration_exchanged();
                             }
                         }
                     }
@@ -2426,7 +2417,14 @@ where
                 .trie_input_duration
                 .record(trie_input_start.elapsed().as_secs_f64());
 
-            self.payload_processor.spawn(header, txs, provider_builder, consistent_view, trie_input)
+            self.payload_processor.spawn(
+                header,
+                txs,
+                provider_builder,
+                consistent_view,
+                trie_input,
+                &self.config,
+            )
         } else {
             self.payload_processor.spawn_cache_exclusive(header, txs, provider_builder)
         };
@@ -2531,7 +2529,8 @@ where
             maybe_state_root
         } else {
             // fallback is to compute the state root regularly in sync
-            debug!(target: "engine::tree", block=?block_num_hash, ?persisting_kind, "Failed to compute state root in parallel");
+            warn!(target: "engine::tree", block=?block_num_hash, ?persisting_kind, "Failed to compute state root in parallel");
+            self.metrics.block_validation.state_root_parallel_fallback_total.increment(1);
             let (root, updates) = state_provider.state_root_with_updates(hashed_state.clone())?;
             (root, updates, root_time.elapsed())
         };
@@ -3037,13 +3036,13 @@ impl PersistingKind {
     ///
     /// We only run the parallel state root if we are not currently persisting any blocks or
     /// persisting blocks that are all ancestors of the one we are calculating the state root for.
-    pub fn can_run_parallel_state_root(&self) -> bool {
+    pub const fn can_run_parallel_state_root(&self) -> bool {
         matches!(self, Self::NotPersisting | Self::PersistingDescendant)
     }
 
     /// Returns true if the blocks are currently being persisted and the input block is a
     /// descendant.
-    pub fn is_descendant(&self) -> bool {
+    pub const fn is_descendant(&self) -> bool {
         matches!(self, Self::PersistingDescendant)
     }
 }
@@ -3080,7 +3079,6 @@ mod tests {
     /// This is a test channel that allows you to `release` any value that is in the channel.
     ///
     /// If nothing has been sent, then the next value will be immediately sent.
-    #[allow(dead_code)]
     struct TestChannel<T> {
         /// If an item is sent to this channel, an item will be released in the wrapped channel
         release: Receiver<()>,
@@ -3092,7 +3090,6 @@ mod tests {
 
     impl<T: Send + 'static> TestChannel<T> {
         /// Creates a new test channel
-        #[allow(dead_code)]
         fn spawn_channel() -> (Sender<T>, Receiver<T>, TestChannelHandle) {
             let (original_tx, original_rx) = channel();
             let (wrapped_tx, wrapped_rx) = channel();
@@ -3156,7 +3153,7 @@ mod tests {
             Self::with_persistence_channel(chain_spec, action_tx, action_rx)
         }
 
-        #[allow(dead_code)]
+        #[expect(dead_code)]
         fn with_test_channel(chain_spec: Arc<ChainSpec>) -> (Self, TestChannelHandle) {
             let (action_tx, action_rx, handle) = TestChannel::spawn_channel();
             (Self::with_persistence_channel(chain_spec, action_tx, action_rx), handle)

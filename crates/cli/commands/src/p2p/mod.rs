@@ -16,6 +16,7 @@ use reth_node_core::{
     utils::get_single_header,
 };
 
+pub mod bootnode;
 mod rlpx;
 
 /// `reth p2p` command
@@ -161,5 +162,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         }
 
         Ok(())
+    }
+    /// Returns the underlying chain being used to run this command
+    pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+        Some(&self.chain)
     }
 }

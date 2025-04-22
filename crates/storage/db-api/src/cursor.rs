@@ -21,7 +21,6 @@ pub trait DbCursorRO<T: Table> {
     fn seek(&mut self, key: T::Key) -> PairResult<T>;
 
     /// Position the cursor at the next KV pair, returning it.
-    #[allow(clippy::should_implement_trait)]
     fn next(&mut self) -> PairResult<T>;
 
     /// Position the cursor at the previous KV pair, returning it.
@@ -158,7 +157,7 @@ impl<T: Table, CURSOR: DbCursorRO<T>> Iterator for Walker<'_, T, CURSOR> {
 
 impl<'cursor, T: Table, CURSOR: DbCursorRO<T>> Walker<'cursor, T, CURSOR> {
     /// construct Walker
-    pub fn new(cursor: &'cursor mut CURSOR, start: IterPairResult<T>) -> Self {
+    pub const fn new(cursor: &'cursor mut CURSOR, start: IterPairResult<T>) -> Self {
         Self { cursor, start }
     }
 
@@ -201,7 +200,7 @@ where
 
 impl<'cursor, T: Table, CURSOR: DbCursorRO<T>> ReverseWalker<'cursor, T, CURSOR> {
     /// construct `ReverseWalker`
-    pub fn new(cursor: &'cursor mut CURSOR, start: IterPairResult<T>) -> Self {
+    pub const fn new(cursor: &'cursor mut CURSOR, start: IterPairResult<T>) -> Self {
         Self { cursor, start }
     }
 

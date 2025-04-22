@@ -216,7 +216,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
         removed
     }
 
-    fn next_id(&mut self) -> u64 {
+    const fn next_id(&mut self) -> u64 {
         let id = self.submission_id;
         self.submission_id = self.submission_id.wrapping_add(1);
         id
@@ -240,7 +240,6 @@ impl<T: ParkedOrd> ParkedPool<T> {
 
     /// Returns whether the pool is empty
     #[cfg(test)]
-    #[allow(dead_code)]
     pub(crate) fn is_empty(&self) -> bool {
         self.by_id.is_empty()
     }
@@ -272,7 +271,6 @@ impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
     /// Returns all transactions that satisfy the given basefee.
     ///
     /// Note: this does _not_ remove the transactions
-    #[allow(dead_code)]
     pub(crate) fn satisfy_base_fee_transactions(
         &self,
         basefee: u64,

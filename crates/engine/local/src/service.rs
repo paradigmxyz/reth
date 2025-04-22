@@ -34,7 +34,7 @@ use reth_node_types::BlockTy;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributesBuilder, PayloadTypes};
 use reth_provider::{
-    providers::{BlockchainProvider, EngineNodeTypes},
+    providers::{BlockchainProvider, ProviderNodeTypes},
     ChainSpecProvider, ProviderFactory,
 };
 use reth_prune::PrunerWithFactory;
@@ -49,7 +49,7 @@ use tracing::error;
 /// modifications of the stream
 pub struct LocalEngineService<N>
 where
-    N: EngineNodeTypes,
+    N: ProviderNodeTypes,
 {
     /// Processes requests.
     ///
@@ -61,7 +61,7 @@ where
 
 impl<N> LocalEngineService<N>
 where
-    N: EngineNodeTypes,
+    N: ProviderNodeTypes,
 {
     /// Constructor for [`LocalEngineService`].
     #[expect(clippy::too_many_arguments)]
@@ -126,7 +126,7 @@ where
 
 impl<N> Stream for LocalEngineService<N>
 where
-    N: EngineNodeTypes,
+    N: ProviderNodeTypes,
 {
     type Item = ChainEvent<BeaconConsensusEngineEvent<N::Primitives>>;
 
@@ -159,7 +159,7 @@ where
     }
 }
 
-impl<N: EngineNodeTypes> Debug for LocalEngineService<N> {
+impl<N: ProviderNodeTypes> Debug for LocalEngineService<N> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("LocalEngineService").finish_non_exhaustive()
     }
