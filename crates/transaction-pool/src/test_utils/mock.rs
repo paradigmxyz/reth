@@ -1758,6 +1758,7 @@ fn test_mock_priority() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::Transaction;
     use alloy_primitives::U256;
 
     #[test]
