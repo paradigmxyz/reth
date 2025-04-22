@@ -13,10 +13,7 @@ use reth_era::{
     e2s_types::E2sError,
     era1_file::{Era1File, Era1Reader, Era1Writer},
     era1_types::{Era1Group, Era1Id},
-    execution_types::{
-        BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts, SnappyRlpCodec,
-        TotalDifficulty,
-    },
+    execution_types::{BlockTuple, CompressedBody, CompressedHeader, TotalDifficulty},
 };
 use reth_ethereum_primitives::TransactionSigned;
 use std::io::Cursor;
@@ -73,14 +70,14 @@ async fn test_file_roundtrip(
     );
 
     // Test individual blocks
-    for &block_idx in &test_block_indices {
-        let original_block = &original_file.group.blocks[block_idx];
-        let roundtrip_block = &roundtrip_file.group.blocks[block_idx];
-        let block_number = original_file.group.block_index.starting_number + block_idx as u64;
+    for &block_id in &test_block_indices {
+        let original_block = &original_file.group.blocks[block_id];
+        let roundtrip_block = &roundtrip_file.group.blocks[block_id];
+        let block_number = original_file.group.block_index.starting_number + block_id as u64;
 
         println!("Testing roundtrip for block {}", block_number);
 
-        // Test header compression/decompression
+        // Test header decompression
         let original_header_data = original_block.header.decompress()?;
         let roundtrip_header_data = roundtrip_block.header.decompress()?;
         assert_eq!(
@@ -89,7 +86,7 @@ async fn test_file_roundtrip(
             block_number
         );
 
-        // Test body compression/decompression
+        // Test body decompression
         let original_body_data = original_block.body.decompress()?;
         let roundtrip_body_data = roundtrip_block.body.decompress()?;
         assert_eq!(
@@ -98,18 +95,8 @@ async fn test_file_roundtrip(
             block_number
         );
 
-        // Test receipts compression/decompression
+        // Test receipts decompression
         let original_receipts_data = original_block.receipts.decompress()?;
-        println!("Decompressed receipts data size: {} bytes", original_receipts_data.len());
-
-        if !original_receipts_data.is_empty() {
-            let preview_size = std::cmp::min(20, original_receipts_data.len());
-            println!(
-                "First {} bytes of receipts data: {:?}",
-                preview_size,
-                &original_receipts_data[..preview_size]
-            );
-        }
 
         let roundtrip_receipts_data = roundtrip_block.receipts.decompress()?;
         assert_eq!(
@@ -194,28 +181,12 @@ async fn test_file_roundtrip(
             recompressed_decoded_body.transactions.len(),
             "Transaction count should match after re-compression"
         );
-        let receipts_codec = SnappyRlpCodec::<Vec<u8>>::new();
-
-        let decompressed_receipts = match receipts_codec.decode(&original_block.receipts.data) {
-            Ok(receipts) => {
-                println!("Successfully decoded receipts with length: {}", receipts.len());
-                receipts
-            }
-            Err(e) => {
-                println!("Warning: Failed to decode receipts: {:?}", e);
-                println!("Skipping receipts recompression test for this block");
-                continue;
-            }
-        };
-
-        //TODO: to use in the next step
-        let _recompressed_receipts = CompressedReceipts::from_encodable(&decompressed_receipts)?;
 
         let recompressed_block = BlockTuple::new(
             recompressed_header,
             recompressed_body,
-            original_block.receipts.clone(), /* TODO: to change once there is proper decoding of
-                                              * receipts */
+            original_block.receipts.clone(), /* reuse original receipts direclty as it not
+                                              * possible to decode them */
             TotalDifficulty::new(original_block.total_difficulty.value),
         );
 

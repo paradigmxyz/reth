@@ -328,20 +328,6 @@ impl CompressedReceipts {
         decoder.decode(&self.data)
     }
 
-    /// Decode this [`CompressedReceipts`] into a vector of receipts  
-    pub fn decode_receipts<T: Decodable>(&self) -> Result<Vec<T>, E2sError> {
-        let decompressed = self.decompress()?;
-        Self::decode_receipts_from_decompressed(&decompressed)
-    }
-
-    /// Decode decompressed receipts data into a vector of receipts  
-    pub fn decode_receipts_from_decompressed<T: Decodable>(
-        data: &[u8],
-    ) -> Result<Vec<T>, E2sError> {
-        alloy_rlp::decode_exact::<Vec<T>>(data)
-            .map_err(|e| E2sError::Rlp(format!("Failed to decode RLP receipts data: {}", e)))
-    }
-
     /// Create [`CompressedReceipts`] from an encodable type
     pub fn from_encodable<T: Encodable>(data: &T) -> Result<Self, E2sError> {
         let encoder = SnappyRlpCodec::<T>::new();
