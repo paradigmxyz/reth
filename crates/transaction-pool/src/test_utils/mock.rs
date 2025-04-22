@@ -1754,3 +1754,85 @@ fn test_mock_priority() {
     let hi = lo.next().inc_price();
     assert!(o.priority(&hi, 0) > o.priority(&lo, 0));
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::Transaction;
+    use alloy_primitives::U256;
+
+    #[test]
+    fn test_mock_transaction_factory() {
+        let mut factory = MockTransactionFactory::default();
+
+        // Test legacy transaction creation
+        let legacy = factory.create_legacy();
+        assert_eq!(legacy.transaction.tx_type(), TxType::Legacy);
+
+        // Test EIP1559 transaction creation
+        let eip1559 = factory.create_eip1559();
+        assert_eq!(eip1559.transaction.tx_type(), TxType::Eip1559);
+
+        // Test EIP4844 transaction creation
+        let eip4844 = factory.create_eip4844();
+        assert_eq!(eip4844.transaction.tx_type(), TxType::Eip4844);
+    }
+
+    #[test]
+    fn test_mock_transaction_set() {
+        let sender = Address::random();
+        let nonce_start = 0u64;
+        let count = 3;
+
+        // Test legacy transaction set
+        let legacy_set = MockTransactionSet::dependent(sender, nonce_start, count, TxType::Legacy);
+        assert_eq!(legacy_set.transactions.len(), count);
+        for (idx, tx) in legacy_set.transactions.iter().enumerate() {
+            assert_eq!(tx.tx_type(), TxType::Legacy);
+            assert_eq!(tx.nonce(), nonce_start + idx as u64);
+            assert_eq!(tx.sender(), sender);
+        }
+
+        // Test EIP1559 transaction set
+        let eip1559_set =
+            MockTransactionSet::dependent(sender, nonce_start, count, TxType::Eip1559);
+        assert_eq!(eip1559_set.transactions.len(), count);
+        for (idx, tx) in eip1559_set.transactions.iter().enumerate() {
+            assert_eq!(tx.tx_type(), TxType::Eip1559);
+            assert_eq!(tx.nonce(), nonce_start + idx as u64);
+            assert_eq!(tx.sender(), sender);
+        }
+    }
+
+    #[test]
+    fn test_mock_transaction_modifications() {
+        let tx = MockTransaction::eip1559();
+
+        // Test price increment
+        let original_price = tx.get_gas_price();
+        let tx_inc = tx.inc_price();
+        assert!(tx_inc.get_gas_price() > original_price);
+
+        // Test gas limit increment
+        let original_limit = tx.gas_limit();
+        let tx_inc = tx.inc_limit();
+        assert!(tx_inc.gas_limit() > original_limit);
+
+        // Test nonce increment
+        let original_nonce = tx.nonce();
+        let tx_inc = tx.inc_nonce();
+        assert_eq!(tx_inc.nonce(), original_nonce + 1);
+    }
+
+    #[test]
+    fn test_mock_transaction_cost() {
+        let tx = MockTransaction::eip1559()
+            .with_gas_limit(7_000)
+            .with_max_fee(100)
+            .with_value(U256::ZERO);
+
+        // Cost is calculated as (gas_limit * max_fee_per_gas) + value
+        let expected_cost = U256::from(7_000u64) * U256::from(100u128) + U256::ZERO;
+        assert_eq!(*tx.cost(), expected_cost);
+    }
+}
