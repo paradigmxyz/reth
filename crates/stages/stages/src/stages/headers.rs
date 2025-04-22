@@ -12,7 +12,10 @@ use reth_db_api::{
     DbTxUnwindExt, RawKey, RawTable, RawValue,
 };
 use reth_etl::Collector;
-use reth_network_p2p::headers::{downloader::HeaderDownloader, error::HeadersDownloaderError};
+use reth_network_p2p::headers::{
+    downloader::{HeaderDownloader, SyncTarget},
+    error::HeadersDownloaderError,
+};
 use reth_primitives_traits::{serde_bincode_compat, FullBlockHeader, NodePrimitives, SealedHeader};
 use reth_provider::{
     providers::StaticFileWriter, BlockHashReader, DBProvider, HeaderProvider, HeaderSyncGap,
@@ -226,7 +229,9 @@ where
         }
 
         // Lookup the head and tip of the sync range
-        let gap = self.provider.sync_gap(self.tip.clone(), current_checkpoint.block_number)?;
+        let local_head = self.provider.local_tip_header(current_checkpoint.block_number)?;
+        let target = SyncTarget::Tip(*self.tip.borrow());
+        let gap = HeaderSyncGap { local_head, target };
         let tip = gap.target.tip();
         self.sync_gap = Some(gap.clone());
 
