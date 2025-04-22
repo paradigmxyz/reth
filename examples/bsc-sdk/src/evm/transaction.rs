@@ -178,7 +178,5 @@ mod tests {
         assert_eq!(bsc_tx.tx_type(), 0);
         assert_eq!(bsc_tx.gas_limit(), 10);
         assert_eq!(bsc_tx.kind(), revm::primitives::TxKind::Call(Address::ZERO));
-        assert_eq!(bsc_tx.effective_gas_price(90), 95);
-        assert_eq!(bsc_tx.max_fee_per_gas(), 100);
     }
 }

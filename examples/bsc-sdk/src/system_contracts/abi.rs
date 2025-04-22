@@ -5904,15 +5904,8 @@ mod tests {
         let function = stake_hub_abi.function("getValidatorElectionInfo").unwrap().first().unwrap();
         let output = function.abi_decode_output(&output).unwrap();
 
-        let consensus_address: Vec<Address> = output[0]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|val| {
-                let addr_bytes: [u8; 20] = val.as_bytes().unwrap().try_into().unwrap();
-                Address::from_slice(&addr_bytes)
-            })
-            .collect();
+        let consensus_address: Vec<Address> =
+            output[0].as_array().unwrap().iter().map(|val| val.as_address().unwrap()).collect();
         let voting_powers: Vec<U256> =
             output[1].as_array().unwrap().iter().map(|val| val.as_uint().unwrap().0).collect();
         let vote_addresses: Vec<Vec<u8>> = output[2]

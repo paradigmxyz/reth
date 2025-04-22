@@ -20,6 +20,7 @@ use reth_primitives::{Block, BlockBody, EthPrimitives};
 use reth_provider::EthStorage;
 use reth_trie_db::MerklePatriciaTrie;
 
+pub mod cli;
 pub mod consensus;
 pub mod evm;
 pub mod network;
