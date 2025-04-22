@@ -75,11 +75,11 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     {
         // building network downloaders using the fetch client
         let header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
-            .build(client.clone(), consensus.clone().as_header_validator())
+            .build(client.clone(), consensus.clone())
             .into_task_with(task_executor);
 
         let body_downloader = BodiesDownloaderBuilder::new(config.stages.bodies)
-            .build(client, consensus.clone().as_consensus(), provider_factory.clone())
+            .build(client, consensus.clone(), provider_factory.clone())
             .into_task_with(task_executor);
 
         let stage_conf = &config.stages;
