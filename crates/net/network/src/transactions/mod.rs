@@ -1863,12 +1863,12 @@ impl<N: NetworkPrimitives> PeerMetadata<N> {
     }
 
     /// Returns a reference to the peer's request sender channel.
-    pub fn request_tx(&self) -> &PeerRequestSender<PeerRequest<N>> {
+    pub const fn request_tx(&self) -> &PeerRequestSender<PeerRequest<N>> {
         &self.request_tx
     }
 
     /// Return a
-    pub fn seen_transactions_mut(&mut self) -> &mut LruCache<TxHash> {
+    pub const fn seen_transactions_mut(&mut self) -> &mut LruCache<TxHash> {
         &mut self.seen_transactions
     }
 
@@ -1908,7 +1908,7 @@ enum TransactionsCommand<N: NetworkPrimitives = EthNetworkPrimitives> {
         peers: Vec<PeerId>,
         tx: oneshot::Sender<HashMap<PeerId, HashSet<TxHash>>>,
     },
-    /// Requests a clone of the sender sender channel to the peer.
+    /// Requests a clone of the sender channel to the peer.
     GetPeerSender {
         peer_id: PeerId,
         peer_request_sender: oneshot::Sender<Option<PeerRequestSender<PeerRequest<N>>>>,

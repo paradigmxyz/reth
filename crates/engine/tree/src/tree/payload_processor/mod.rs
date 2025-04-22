@@ -100,7 +100,7 @@ where
     /// output back to this task.
     ///
     /// Receives updates from sequential execution.
-    /// This task runs until it receives a shutdown signal, which should be after after the block
+    /// This task runs until it receives a shutdown signal, which should be after the block
     /// was fully executed.
     ///
     /// ## Sparse trie task

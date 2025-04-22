@@ -518,7 +518,7 @@ impl SavedCache {
     }
 
     /// Returns the [`ProviderCaches`] belonging to the tracked hash.
-    pub(crate) fn cache(&self) -> &ProviderCaches {
+    pub(crate) const fn cache(&self) -> &ProviderCaches {
         &self.caches
     }
 

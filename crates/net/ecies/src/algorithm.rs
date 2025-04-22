@@ -362,7 +362,7 @@ impl ECIES {
     }
 
     /// Return the contained remote peer ID.
-    pub fn remote_id(&self) -> PeerId {
+    pub const fn remote_id(&self) -> PeerId {
         self.remote_id.unwrap()
     }
 
@@ -687,7 +687,7 @@ impl ECIES {
         32
     }
 
-    pub fn body_len(&self) -> usize {
+    pub const fn body_len(&self) -> usize {
         let len = self.body_size.unwrap();
         Self::align_16(len) + 16
     }

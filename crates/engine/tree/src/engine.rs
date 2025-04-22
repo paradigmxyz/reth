@@ -60,7 +60,7 @@ impl<T, S, D> EngineHandler<T, S, D> {
     }
 
     /// Returns a mutable reference to the request handler.
-    pub fn handler_mut(&mut self) -> &mut T {
+    pub const fn handler_mut(&mut self) -> &mut T {
         &mut self.handler
     }
 }
@@ -87,7 +87,7 @@ where
                     RequestHandlerEvent::HandlerEvent(ev) => {
                         return match ev {
                             HandlerEvent::BackfillAction(target) => {
-                                // bubble up backfill sync request request
+                                // bubble up backfill sync request
                                 self.downloader.on_action(DownloadAction::Clear);
                                 Poll::Ready(HandlerEvent::BackfillAction(target))
                             }

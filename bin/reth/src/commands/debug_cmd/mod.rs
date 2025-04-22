@@ -54,7 +54,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         }
     }
     /// Returns the underlying chain being used to run this command
-    pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+    pub const fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         match &self.command {
             Subcommands::Execution(command) => command.chain_spec(),
             Subcommands::Merkle(command) => command.chain_spec(),

@@ -96,7 +96,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     }
 
     /// Returns the default KZG settings
-    fn kzg_settings(&self) -> eyre::Result<EnvKzgSettings> {
+    const fn kzg_settings(&self) -> eyre::Result<EnvKzgSettings> {
         Ok(EnvKzgSettings::Default)
     }
 
@@ -264,7 +264,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         Ok(())
     }
     /// Returns the underlying chain being used to run this command
-    pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+    pub const fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         Some(&self.env.chain)
     }
 }
