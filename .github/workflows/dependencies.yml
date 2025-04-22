@@ -19,7 +19,7 @@ jobs:
     secrets:
       token: ${{ secrets.GITHUB_TOKEN }}
 
-  # re‑pin `crunchy` to version 0.2.2 since v0.2.3 is broken.
+  # re‑pin `crunchy` to version 0.2.2 since 0.2.3 is broken.
   # The Cargo.toml file states we want `=0.2.2` however cargo update
   # is not respecting this.
   # For underlying issue, See: https://github.com/eira-fransham/crunchy/issues/13
