@@ -7,9 +7,13 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
 
+extern crate alloc;
+
+use alloc::{fmt::Debug, sync::Arc};
 use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
-use alloy_eips::{eip7840::BlobParams, merge::ALLOWED_FUTURE_BLOCK_TIME_SECONDS};
+use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::U256;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
@@ -24,7 +28,6 @@ use reth_primitives_traits::{
     constants::{GAS_LIMIT_BOUND_DIVISOR, MINIMUM_GAS_LIMIT},
     Block, BlockHeader, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
-use std::{fmt::Debug, sync::Arc, time::SystemTime};
 
 mod validation;
 pub use validation::validate_block_post_execution;
@@ -241,14 +244,20 @@ where
             // order, making those checks obsolete.
 
             // Check if timestamp is in the future. Clock can drift but this can be consensus issue.
-            let present_timestamp =
-                SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
-
-            if header.timestamp() > present_timestamp + ALLOWED_FUTURE_BLOCK_TIME_SECONDS {
-                return Err(ConsensusError::TimestampIsInFuture {
-                    timestamp: header.timestamp(),
-                    present_timestamp,
-                })
+            #[cfg(feature = "std")]
+            {
+                let present_timestamp = std::time::SystemTime::now()
+                    .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+                if header.timestamp() >
+                    present_timestamp + alloy_eips::merge::ALLOWED_FUTURE_BLOCK_TIME_SECONDS
+                {
+                    return Err(ConsensusError::TimestampIsInFuture {
+                        timestamp: header.timestamp(),
+                        present_timestamp,
+                    })
+                }
             }
 
             validate_header_extra_data(header)?;

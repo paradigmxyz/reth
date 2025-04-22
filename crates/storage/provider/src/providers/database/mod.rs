@@ -3,7 +3,7 @@ use crate::{
     to_range,
     traits::{BlockSource, ReceiptProvider},
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory,
-    HashedPostStateProvider, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, ProviderError,
+    HashedPostStateProvider, HeaderProvider, HeaderSyncGapProvider, ProviderError,
     PruneCheckpointReader, StageCheckpointReader, StateProviderBox, StaticFileProviderFactory,
     TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
@@ -35,7 +35,7 @@ use std::{
     path::Path,
     sync::Arc,
 };
-use tokio::sync::watch;
+
 use tracing::trace;
 
 mod provider;
@@ -228,12 +228,11 @@ impl<N: NodeTypesWithDB> StaticFileProviderFactory for ProviderFactory<N> {
 
 impl<N: ProviderNodeTypes> HeaderSyncGapProvider for ProviderFactory<N> {
     type Header = HeaderTy<N>;
-    fn sync_gap(
+    fn local_tip_header(
         &self,
-        tip: watch::Receiver<B256>,
         highest_uninterrupted_block: BlockNumber,
-    ) -> ProviderResult<HeaderSyncGap<Self::Header>> {
-        self.provider()?.sync_gap(tip, highest_uninterrupted_block)
+    ) -> ProviderResult<SealedHeader<Self::Header>> {
+        self.provider()?.local_tip_header(highest_uninterrupted_block)
     }
 }
 
@@ -650,8 +649,8 @@ mod tests {
     use crate::{
         providers::{StaticFileProvider, StaticFileWriter},
         test_utils::{blocks::TEST_BLOCK, create_test_provider_factory, MockNodeTypesWithDB},
-        BlockHashReader, BlockNumReader, BlockWriter, DBProvider, HeaderSyncGapProvider,
-        StorageLocation, TransactionsProvider,
+        BlockHashReader, BlockNumReader, BlockWriter, DBProvider, HeaderSyncGap,
+        HeaderSyncGapProvider, StorageLocation, TransactionsProvider,
     };
     use alloy_primitives::{TxNumber, B256, U256};
     use assert_matches::assert_matches;
@@ -662,6 +661,7 @@ mod tests {
         test_utils::{create_test_static_files_dir, ERROR_TEMPDIR},
     };
     use reth_db_api::tables;
+    use reth_network_p2p::headers::downloader::SyncTarget;
     use reth_primitives_traits::SignedTransaction;
     use reth_prune_types::{PruneMode, PruneModes};
     use reth_storage_errors::provider::ProviderError;
@@ -806,7 +806,7 @@ mod tests {
 
         // Empty database
         assert_matches!(
-            provider.sync_gap(tip_rx.clone(), checkpoint),
+            provider.local_tip_header(checkpoint),
             Err(ProviderError::HeaderNotFound(block_number))
                 if block_number.as_number().unwrap() == checkpoint
         );
@@ -819,7 +819,9 @@ mod tests {
         static_file_writer.commit().unwrap();
         drop(static_file_writer);
 
-        let gap = provider.sync_gap(tip_rx, checkpoint).unwrap();
+        let local_head = provider.local_tip_header(checkpoint).unwrap();
+        let gap = HeaderSyncGap { local_head, target: SyncTarget::Tip(*tip_rx.borrow()) };
+
         assert_eq!(gap.local_head, head);
         assert_eq!(gap.target.tip(), consensus_tip.into());
     }

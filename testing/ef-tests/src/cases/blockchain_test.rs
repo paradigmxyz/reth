@@ -85,83 +85,114 @@ impl Case for BlockchainTestCase {
             })
             .par_bridge()
             .try_for_each(|case| {
-                // Create a new test database and initialize a provider for the test case.
-                let chain_spec: Arc<ChainSpec> = Arc::new(case.network.into());
-                let provider = create_test_provider_factory_with_chain_spec(chain_spec.clone())
-                    .database_provider_rw()
-                    .unwrap();
+                let case_result = run_case(case);
+                let has_failed = case_result.is_err();
 
-                // Insert initial test state into the provider.
-                provider.insert_historical_block(
-                    SealedBlock::<Block>::from_sealed_parts(
-                        case.genesis_block_header.clone().into(),
-                        Default::default(),
-                    )
-                    .try_recover()
-                    .unwrap(),
-                )?;
-                case.pre.write_to_db(provider.tx_ref())?;
+                // Check if the test should fail
+                let should_fail = case.blocks.iter().any(|block| block.expect_exception.is_some());
 
-                // Initialize receipts static file with genesis
-                {
-                    let static_file_provider = provider.static_file_provider();
-                    let mut receipts_writer =
-                        static_file_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
-                    receipts_writer.increment_block(0).unwrap();
-                    receipts_writer.commit_without_sync_all().unwrap();
+                // A test that fails and should have failed is successful.
+                if has_failed && should_fail {
+                    return Ok(())
                 }
-
-                // Decode and insert blocks, creating a chain of blocks for the test case.
-                let last_block = case.blocks.iter().try_fold(None, |_, block| {
-                    let decoded = SealedBlock::<Block>::decode(&mut block.rlp.as_ref())?;
-                    provider.insert_historical_block(decoded.clone().try_recover().unwrap())?;
-                    Ok::<Option<SealedBlock<Block>>, Error>(Some(decoded))
-                })?;
-                provider
-                    .static_file_provider()
-                    .latest_writer(StaticFileSegment::Headers)
-                    .unwrap()
-                    .commit_without_sync_all()
-                    .unwrap();
-
-                // Execute the execution stage using the EVM processor factory for the test case
-                // network.
-                let _ = ExecutionStage::new_with_executor(
-                    reth_evm_ethereum::execute::EthExecutorProvider::ethereum(chain_spec.clone()),
-                    Arc::new(EthBeaconConsensus::new(chain_spec)),
-                )
-                .execute(
-                    &provider,
-                    ExecInput { target: last_block.as_ref().map(|b| b.number), checkpoint: None },
-                );
-
-                // Validate the post-state for the test case.
-                match (&case.post_state, &case.post_state_hash) {
-                    (Some(state), None) => {
-                        // Validate accounts in the state against the provider's database.
-                        for (&address, account) in state {
-                            account.assert_db(address, provider.tx_ref())?;
-                        }
-                    }
-                    (None, Some(expected_state_root)) => {
-                        // Insert state hashes into the provider based on the expected state root.
-                        let last_block = last_block.unwrap_or_default();
-                        provider.insert_hashes(
-                            0..=last_block.number,
-                            last_block.hash(),
-                            *expected_state_root,
-                        )?;
-                    }
-                    _ => return Err(Error::MissingPostState),
-                }
-
-                // Drop the provider without committing to the database.
-                drop(provider);
-                Ok(())
+                case_result
             })?;
 
         Ok(())
     }
+}
+
+/// Executes a single `BlockchainTest`, returning an error if the blockchain state
+/// does not match the expected outcome after all blocks are executed.
+///
+/// A `BlockchainTest` represents a self-contained scenario:
+/// - It initializes a fresh blockchain state.
+/// - It sequentially decodes, executes, and inserts a predefined set of blocks.
+/// - It then verifies that the resulting blockchain state (post-state) matches the expected
+///   outcome.
+///
+/// Returns:
+/// - `Ok(())` if all blocks execute successfully and the final state is correct.
+/// - `Err(Error)` if any block fails to execute correctly, or if the post-state validation fails.
+fn run_case(case: &BlockchainTest) -> Result<(), Error> {
+    // Create a new test database and initialize a provider for the test case.
+    let chain_spec: Arc<ChainSpec> = Arc::new(case.network.into());
+    let provider = create_test_provider_factory_with_chain_spec(chain_spec.clone())
+        .database_provider_rw()
+        .unwrap();
+
+    // Insert initial test state into the provider.
+    provider.insert_historical_block(
+        SealedBlock::<Block>::from_sealed_parts(
+            case.genesis_block_header.clone().into(),
+            Default::default(),
+        )
+        .try_recover()
+        .unwrap(),
+    )?;
+    case.pre.write_to_db(provider.tx_ref())?;
+
+    // Initialize receipts static file with genesis
+    {
+        let static_file_provider = provider.static_file_provider();
+        let mut receipts_writer =
+            static_file_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
+        receipts_writer.increment_block(0).unwrap();
+        receipts_writer.commit_without_sync_all().unwrap();
+    }
+
+    // Decode and insert blocks, creating a chain of blocks for the test case.
+    let last_block = case.blocks.iter().try_fold(None, |_, block| {
+        let decoded = SealedBlock::<Block>::decode(&mut block.rlp.as_ref())?;
+        provider.insert_historical_block(decoded.clone().try_recover().unwrap())?;
+        Ok::<Option<SealedBlock<Block>>, Error>(Some(decoded))
+    })?;
+
+    provider
+        .static_file_provider()
+        .latest_writer(StaticFileSegment::Headers)
+        .unwrap()
+        .commit_without_sync_all()
+        .unwrap();
+
+    // Execute the execution stage using the EVM processor factory for the test case
+    // network.
+    //
+    // Note: If `execute` fails, we do not check the error because the post state check
+    // will subsequently fail because no state is written on execution failure.
+    let _ = ExecutionStage::new_with_executor(
+        reth_evm_ethereum::execute::EthExecutorProvider::ethereum(chain_spec.clone()),
+        Arc::new(EthBeaconConsensus::new(chain_spec)),
+    )
+    .execute(
+        &provider,
+        ExecInput { target: last_block.as_ref().map(|b| b.number), checkpoint: None },
+    );
+
+    // Validate the post-state for the test case.
+    match (&case.post_state, &case.post_state_hash) {
+        (Some(state), None) => {
+            // Validate accounts in the state against the provider's database.
+            for (&address, account) in state {
+                account.assert_db(address, provider.tx_ref())?;
+            }
+        }
+        (None, Some(expected_state_root)) => {
+            // Insert state hashes into the provider based on the expected state root.
+            let last_block = last_block.unwrap_or_default();
+            provider.insert_hashes(
+                0..=last_block.number,
+                last_block.hash(),
+                *expected_state_root,
+            )?;
+        }
+        _ => return Err(Error::MissingPostState),
+    }
+
+    // Drop the provider without committing to the database.
+    drop(provider);
+
+    Ok(())
 }
 
 /// Returns whether the test at the given path should be skipped.

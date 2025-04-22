@@ -13,7 +13,6 @@ workspace = true
 [dependencies]
 reth-consensus.workspace = true
 reth-execution-errors.workspace = true
-reth-fs-util.workspace = true
 reth-storage-errors.workspace = true
 
 # misc

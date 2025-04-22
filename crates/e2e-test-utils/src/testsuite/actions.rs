@@ -2,7 +2,9 @@
 
 use crate::testsuite::Environment;
 use alloy_primitives::{Bytes, B256};
-use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes, PayloadStatusEnum};
+use alloy_rpc_types_engine::{
+    ExecutionPayloadV3, ForkchoiceState, PayloadAttributes, PayloadStatusEnum,
+};
 use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction};
 use eyre::Result;
 use futures_util::future::BoxFuture;
@@ -370,6 +372,120 @@ impl<I: Sync + Send + 'static> Action<I> for Sequence<I> {
             // Execute each action in sequence
             for action in &mut self.actions {
                 action.execute(env).await?;
+            }
+
+            Ok(())
+        })
+    }
+}
+
+/// Action that braodcasts the next new payload
+#[derive(Debug, Default)]
+pub struct BroadcastNextNewPayload {}
+
+impl<Engine> Action<Engine> for BroadcastNextNewPayload
+where
+    Engine: EngineTypes + PayloadTypes<PayloadAttributes = PayloadAttributes>,
+    reth_node_ethereum::engine::EthPayloadAttributes:
+        From<<Engine as EngineTypes>::ExecutionPayloadEnvelopeV3>,
+{
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            // Get the next new payload to broadcast
+            let next_new_payload = env
+                .latest_payload_built
+                .as_ref()
+                .ok_or_else(|| eyre::eyre!("No next built payload found"))?;
+            let parent_beacon_block_root = next_new_payload
+                .parent_beacon_block_root
+                .ok_or_else(|| eyre::eyre!("No parent beacon block root for next new payload"))?;
+
+            // Loop through all clients and broadcast the next new payload
+            let mut successful_broadcast: bool = false;
+
+            for client in &env.node_clients {
+                let engine = &client.engine;
+                let rpc_client = &client.rpc;
+
+                // Get latest block from the client
+                let rpc_latest_block =
+                    EthApiClient::<Transaction, Block, Receipt, Header>::block_by_number(
+                        rpc_client,
+                        alloy_eips::BlockNumberOrTag::Latest,
+                        false,
+                    )
+                    .await?
+                    .ok_or_else(|| eyre::eyre!("No latest block found from rpc"))?;
+
+                let latest_block = reth_ethereum_primitives::Block {
+                    header: rpc_latest_block.header.inner,
+                    body: reth_ethereum_primitives::BlockBody {
+                        transactions: rpc_latest_block
+                            .transactions
+                            .into_transactions()
+                            .map(|tx| tx.inner.into_inner().into())
+                            .collect(),
+                        ommers: Default::default(),
+                        withdrawals: rpc_latest_block.withdrawals,
+                    },
+                };
+
+                // Validate block number matches expected
+                let latest_block_info = env
+                    .latest_block_info
+                    .as_ref()
+                    .ok_or_else(|| eyre::eyre!("No latest block info found"))?;
+
+                if latest_block.header.number != latest_block_info.number {
+                    return Err(eyre::eyre!(
+                        "Client block number {} does not match expected block number {}",
+                        latest_block.header.number,
+                        latest_block_info.number
+                    ));
+                }
+
+                // Validate parent beacon block root
+                let latest_block_parent_beacon_block_root =
+                    latest_block.parent_beacon_block_root.ok_or_else(|| {
+                        eyre::eyre!("No parent beacon block root for latest block")
+                    })?;
+
+                if parent_beacon_block_root != latest_block_parent_beacon_block_root {
+                    return Err(eyre::eyre!(
+                        "Parent beacon block root mismatch: expected {:?}, got {:?}",
+                        parent_beacon_block_root,
+                        latest_block_parent_beacon_block_root
+                    ));
+                }
+
+                // Construct and broadcast the execution payload from the latest block
+                // The latest block should contain the latest_payload_built
+                let execution_payload = ExecutionPayloadV3::from_block_slow(&latest_block);
+                let result = EngineApiClient::<Engine>::new_payload_v3(
+                    engine,
+                    execution_payload,
+                    vec![],
+                    parent_beacon_block_root,
+                )
+                .await?;
+
+                // Check if broadcast was successful
+                if result.status == PayloadStatusEnum::Valid {
+                    successful_broadcast = true;
+                    // We don't need to update the latest payload built since it should be the same.
+                    // env.latest_payload_built = Some(next_new_payload.clone());
+                    env.latest_payload_executed = Some(next_new_payload.clone());
+                    break;
+                } else if let PayloadStatusEnum::Invalid { validation_error } = result.status {
+                    debug!(
+                        "Invalid payload status returned from broadcast: {:?}",
+                        validation_error
+                    );
+                }
+            }
+
+            if !successful_broadcast {
+                return Err(eyre::eyre!("Failed to successfully broadcast payload to any client"));
             }
 
             Ok(())
