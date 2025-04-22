@@ -356,8 +356,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             let block_id = block_number.unwrap_or_default();
             let (evm_env, at) = self.evm_env_at(block_id).await?;
 
-            self.spawn_blocking_io(move |this| this.create_access_list_with(evm_env, at, request, state_override))
-                .await
+            self.spawn_blocking_io(move |this| {
+                this.create_access_list_with(evm_env, at, request, state_override)
+            })
+            .await
         }
     }
 
