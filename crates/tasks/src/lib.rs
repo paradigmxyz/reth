@@ -32,19 +32,21 @@ use std::{
     task::{ready, Context, Poll},
 };
 use tokio::{
-    runtime::{Handle, Runtime},
+    runtime::Handle,
     sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     task::JoinHandle,
 };
 use tracing::{debug, error};
 use tracing_futures::Instrument;
-///Global [`TaskExecutor`] instance that can be accessed from anywhere.
-static GLOBAL_EXECUTOR: OnceLock<TaskExecutor> = OnceLock::new();
+
 pub mod metrics;
 pub mod shutdown;
 
 #[cfg(feature = "rayon")]
 pub mod pool;
+
+/// Global [`TaskExecutor`] instance that can be accessed from anywhere.
+static GLOBAL_EXECUTOR: OnceLock<TaskExecutor> = OnceLock::new();
 
 /// A type that can spawn tasks.
 ///
@@ -177,7 +179,7 @@ pub struct TaskManager {
 // === impl TaskManager ===
 
 impl TaskManager {
-    /// Returns a [`TaskManager`] over the currently running Runtime.
+    /// Returns a new [`TaskManager`] over the currently running Runtime.
     ///
     /// # Panics
     ///
@@ -188,6 +190,8 @@ impl TaskManager {
     }
 
     /// Create a new instance connected to the given handle's tokio runtime.
+    ///
+    /// This also sets the global [`TaskExecutor`].
     pub fn new(handle: Handle) -> Self {
         let (panicked_tasks_tx, panicked_tasks_rx) = unbounded_channel();
         let (signal, on_shutdown) = signal();
@@ -199,9 +203,10 @@ impl TaskManager {
             on_shutdown,
             graceful_tasks: Arc::new(AtomicUsize::new(0)),
         };
+
         let _ = GLOBAL_EXECUTOR
             .set(manager.executor())
-            .inspect_err(|_| error!("Failed to set global task executor"));
+            .inspect_err(|_| error!("Global executor already set"));
 
         manager
     }
@@ -310,9 +315,11 @@ pub struct TaskExecutor {
 // === impl TaskExecutor ===
 
 impl TaskExecutor {
-    /// Attempts to get the current `TaskExecutor` if one has been initialized
-    pub fn try_current() -> Option<Self> {
-        GLOBAL_EXECUTOR.get().cloned()
+    /// Attempts to get the current `TaskExecutor` if one has been initialized.
+    ///
+    /// Returns an error if no [`TaskExecutor`] has been initialized via [`TaskManager`].
+    pub fn try_current() -> Result<Self, NoCurrentTaskExecutorError> {
+        GLOBAL_EXECUTOR.get().cloned().ok_or_else(NoCurrentTaskExecutorError::default)
     }
 
     /// Returns the current `TaskExecutor`.
@@ -320,26 +327,11 @@ impl TaskExecutor {
     /// # Panics
     ///
     /// Panics if no global executor has been initialized. Use [`try_current`](Self::try_current)
-    /// for a non-panicking version, or [`current_or_create`](Self::current_or_create) to create
-    /// one if it doesn't exist.
+    /// for a non-panicking version.
     pub fn current() -> Self {
-        Self::try_current().expect("No global TaskExecutor has been initialized")
+        Self::try_current().unwrap()
     }
-    /// Returns the current `TaskExecutor` or creates one if none exists
-    pub fn current_or_create() -> Self {
-        Self::try_current().unwrap_or_else(|| {
-            let handle = Handle::try_current().unwrap_or_else(|_| {
-                static RT: OnceLock<Runtime> = OnceLock::new();
-                let rt = RT.get_or_init(|| {
-                    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap()
-                });
-                rt.handle().clone()
-            });
 
-            let manager = TaskManager::new(handle);
-            manager.executor()
-        })
-    }
     /// Returns the [Handle] to the tokio runtime.
     pub const fn handle(&self) -> &Handle {
         &self.handle
@@ -680,6 +672,12 @@ enum TaskKind {
     Blocking,
 }
 
+/// Error returned by `try_current` when no task executor has been configured.
+#[derive(Debug, Default, thiserror::Error)]
+#[error("No current task executor available.")]
+#[non_exhaustive]
+pub struct NoCurrentTaskExecutorError;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -818,5 +816,13 @@ mod tests {
 
         manager.graceful_shutdown_with_timeout(timeout);
         assert!(!val.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn can_access_global() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let handle = runtime.handle().clone();
+        let _manager = TaskManager::new(handle);
+        let _executor = TaskExecutor::try_current().unwrap();
     }
 }
