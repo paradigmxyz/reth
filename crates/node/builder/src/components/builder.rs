@@ -9,7 +9,6 @@ use crate::{
 };
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_evm::execute::BlockExecutorProvider;
-use reth_evm_ethereum::EthEvmConfig;
 use reth_network::NetworkPrimitives;
 use reth_node_api::{BlockTy, BodyTy, HeaderTy, PrimitivesTy, TxTy};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
@@ -212,7 +211,7 @@ where
         payload_builder: PB,
     ) -> ComponentsBuilder<Node, PoolB, PB, NetworkB, ExecB, ConsB>
     where
-        PB: PayloadServiceBuilder<Node, PoolB::Pool>,
+        PB: PayloadServiceBuilder<Node, PoolB::Pool, EvmConfig>,
     {
         let Self {
             pool_builder,
@@ -313,7 +312,7 @@ where
             Block = BlockTy<Node::Types>,
         >,
     >,
-    PayloadB: PayloadServiceBuilder<Node, PoolB::Pool>,
+    PayloadB: PayloadServiceBuilder<Node, PoolB::Pool, EvmConfig>,
     ExecB: ExecutorBuilder<Node>,
     ConsB: ConsensusBuilder<Node>,
 {
@@ -343,11 +342,7 @@ where
         let pool = pool_builder.build_pool(context).await?;
         let network = network_builder.build_network(context, pool.clone()).await?;
         let payload_builder_handle = payload_builder
-            .spawn_payload_builder_service(
-                EthEvmConfig::new(context.chain_spec()),
-                context,
-                pool.clone(),
-            )
+            .spawn_payload_builder_service(evm_config.clone(), context, pool.clone())
             .await?;
         let consensus = consensus_builder.build_consensus(context).await?;
 
