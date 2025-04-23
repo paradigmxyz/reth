@@ -48,7 +48,7 @@ where
                 .pool()
                 .add_transaction(TransactionOrigin::Local, pool_transaction)
                 .await.inspect_err(|err| {
-                tracing::warn!(target: "rpc::eth", %err, %hash, "successfully sent tx to sequencer, but failed to persist in local tx pool");
+                    tracing::warn!(target: "rpc::eth", %err, %hash, "successfully sent tx to sequencer, but failed to persist in local tx pool");
             });
 
             return Ok(hash)
