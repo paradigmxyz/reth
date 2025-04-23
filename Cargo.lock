@@ -8619,6 +8619,7 @@ dependencies = [
  "reth-engine-tree",
  "reth-engine-util",
  "reth-evm",
+ "reth-evm-ethereum",
  "reth-exex",
  "reth-fs-util",
  "reth-invalid-block-hooks",

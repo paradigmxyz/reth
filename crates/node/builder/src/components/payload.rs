@@ -3,11 +3,11 @@
 use crate::{BuilderContext, FullNodeTypes};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_chain_state::CanonStateSubscriptions;
+use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::{NodeTypes, PayloadBuilderFor};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_transaction_pool::TransactionPool;
 use std::future::Future;
-
 /// A type that knows how to spawn the payload service.
 pub trait PayloadServiceBuilder<Node: FullNodeTypes, Pool: TransactionPool>: Send + Sized {
     /// Spawns the [`PayloadBuilderService`] and returns the handle to it for use by the engine.
@@ -16,6 +16,7 @@ pub trait PayloadServiceBuilder<Node: FullNodeTypes, Pool: TransactionPool>: Sen
     /// for custom job orchestration logic,
     fn spawn_payload_builder_service(
         self,
+        evm_config: EthEvmConfig,
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> impl Future<Output = eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>>>
@@ -26,17 +27,18 @@ impl<Node, F, Fut, Pool> PayloadServiceBuilder<Node, Pool> for F
 where
     Node: FullNodeTypes,
     Pool: TransactionPool,
-    F: Fn(&BuilderContext<Node>, Pool) -> Fut + Send,
+    F: Fn(EthEvmConfig, &BuilderContext<Node>, Pool) -> Fut + Send,
     Fut: Future<Output = eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>>>
         + Send,
 {
     fn spawn_payload_builder_service(
         self,
+        evm_config: EthEvmConfig,
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> impl Future<Output = eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>>>
     {
-        self(ctx, pool)
+        self(evm_config, ctx, pool)
     }
 }
 
@@ -50,6 +52,7 @@ pub trait PayloadBuilderBuilder<Node: FullNodeTypes, Pool: TransactionPool>: Sen
     /// The [`BuilderContext`] is provided to allow access to the node's configuration.
     fn build_payload_builder(
         self,
+        evm_config: EthEvmConfig,
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> impl Future<Output = eyre::Result<Self::PayloadBuilder>> + Send;
@@ -74,10 +77,11 @@ where
 {
     async fn spawn_payload_builder_service(
         self,
+        evm_config: EthEvmConfig,
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>> {
-        let payload_builder = self.0.build_payload_builder(ctx, pool).await?;
+        let payload_builder = self.0.build_payload_builder(evm_config, ctx, pool).await?;
 
         let conf = ctx.config().builder.clone();
 

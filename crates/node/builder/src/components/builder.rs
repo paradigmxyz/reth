@@ -9,6 +9,7 @@ use crate::{
 };
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_evm::execute::BlockExecutorProvider;
+use reth_evm_ethereum::EthEvmConfig;
 use reth_network::NetworkPrimitives;
 use reth_node_api::{BlockTy, BodyTy, HeaderTy, PrimitivesTy, TxTy};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
@@ -294,7 +295,7 @@ where
 impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB> NodeComponentsBuilder<Node>
     for ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB>
 where
-    Node: FullNodeTypes,
+    Node: FullNodeTypes<Types: reth_node_api::NodeTypes<ChainSpec = reth_chainspec::ChainSpec>>,
     PoolB: PoolBuilder<
         Node,
         Pool: TransactionPool<
@@ -341,8 +342,13 @@ where
         let (evm_config, executor) = evm_builder.build_evm(context).await?;
         let pool = pool_builder.build_pool(context).await?;
         let network = network_builder.build_network(context, pool.clone()).await?;
-        let payload_builder_handle =
-            payload_builder.spawn_payload_builder_service(context, pool.clone()).await?;
+        let payload_builder_handle = payload_builder
+            .spawn_payload_builder_service(
+                EthEvmConfig::new(context.chain_spec()),
+                context,
+                pool.clone(),
+            )
+            .await?;
         let consensus = consensus_builder.build_consensus(context).await?;
 
         Ok(Components {

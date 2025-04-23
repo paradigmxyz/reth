@@ -356,6 +356,7 @@ where
 
     async fn build_payload_builder(
         self,
+        evm_config: EthEvmConfig,
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> eyre::Result<Self::PayloadBuilder> {
@@ -363,7 +364,7 @@ where
             inner: reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
                 ctx.provider().clone(),
                 pool,
-                EthEvmConfig::new(ctx.provider().chain_spec().clone()),
+                evm_config,
                 EthereumBuilderConfig::new(),
             ),
         };

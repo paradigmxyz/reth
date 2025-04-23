@@ -28,6 +28,7 @@ reth-engine-service.workspace = true
 reth-engine-tree.workspace = true
 reth-engine-util.workspace = true
 reth-evm.workspace = true
+reth-evm-ethereum.workspace = true
 reth-exex.workspace = true
 reth-fs-util.workspace = true
 reth-invalid-block-hooks.workspace = true

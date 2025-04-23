@@ -122,19 +122,15 @@ where
         PayloadBuilderAttributes = EthPayloadBuilderAttributes,
     >,
 {
-    type PayloadBuilder = reth_ethereum_payload_builder::EthereumPayloadBuilder<
-        Pool,
-        Node::Provider,
-        EthEvmConfig<MyEvmFactory>,
-    >;
+    type PayloadBuilder =
+        reth_ethereum_payload_builder::EthereumPayloadBuilder<Pool, Node::Provider, EthEvmConfig>;
 
     async fn build_payload_builder(
         self,
+        evm_config: EthEvmConfig,
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> eyre::Result<Self::PayloadBuilder> {
-        let evm_config =
-            EthEvmConfig::new_with_evm_factory(ctx.chain_spec(), MyEvmFactory::default());
         self.inner.build(evm_config, ctx, pool)
     }
 }

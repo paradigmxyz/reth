@@ -71,11 +71,10 @@ where
 
     async fn build_payload_builder(
         self,
+        evm_config: EthEvmConfig,
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> eyre::Result<Self::PayloadBuilder> {
-        let evm_config = EthEvmConfig::new(ctx.chain_spec())
-            .with_extra_data(ctx.payload_builder_config().extra_data_bytes());
         self.build(evm_config, ctx, pool)
     }
 }
