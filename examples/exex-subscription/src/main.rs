@@ -95,13 +95,13 @@ async fn my_exex<Node: FullNodeComponents>(
                             for (key, slot) in &change.1.storage {
                                 let diff = StorageDiff {
                                     address: *change.0,
-                                    key: key.clone(),
+                                    key: *key,
                                     old_value: slot.original_value(),
                                     new_value: slot.present_value(),
                                 };
 
                                 for sender in senders {
-                                    let _ = sender.send(diff.clone());
+                                    let _ = sender.send(diff).await;
                                 }
                             }
                         }
