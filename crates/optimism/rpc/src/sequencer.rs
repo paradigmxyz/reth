@@ -6,7 +6,13 @@ use alloy_primitives::{hex, B256};
 use alloy_rpc_client::{BuiltInConnectionString, ClientBuilder, RpcClient as Client};
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
 use alloy_transport_http::Http;
-use std::{str::FromStr, sync::Arc};
+use metrics::Histogram;
+use reth_metrics::Metrics;
+use std::{
+    str::FromStr,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use thiserror::Error;
 use tracing::warn;
 
@@ -48,6 +54,7 @@ impl SequencerClient {
     pub async fn new(sequencer_endpoint: impl Into<String>) -> Result<Self, Error> {
         let sequencer_endpoint = sequencer_endpoint.into();
         let endpoint = BuiltInConnectionString::from_str(&sequencer_endpoint)?;
+        let metrics = SequencerClientMetrics::default();
         if let BuiltInConnectionString::Http(url) = endpoint {
             let client = reqwest::Client::builder()
                 // we force use tls to prevent native issues
@@ -56,7 +63,7 @@ impl SequencerClient {
             Self::with_http_client(url, client)
         } else {
             let client = ClientBuilder::default().connect_with(endpoint).await?;
-            let inner = SequencerClientInner { sequencer_endpoint, client };
+            let inner = SequencerClientInner { sequencer_endpoint, client, metrics };
             Ok(Self { inner: Arc::new(inner) })
         }
     }
@@ -74,8 +81,9 @@ impl SequencerClient {
         let http_client = Http::with_client(client, url);
         let is_local = http_client.guess_local();
         let client = ClientBuilder::default().transport(http_client, is_local);
+        let metrics = SequencerClientMetrics::default();
 
-        let inner = SequencerClientInner { sequencer_endpoint, client };
+        let inner = SequencerClientInner { sequencer_endpoint, client, metrics };
         Ok(Self { inner: Arc::new(inner) })
     }
 
@@ -110,6 +118,7 @@ impl SequencerClient {
 
     /// Forwards a transaction to the sequencer endpoint.
     pub async fn forward_raw_transaction(&self, tx: &[u8]) -> Result<B256, SequencerClientError> {
+        let start = Instant::now();
         let rlp_hex = hex::encode_prefixed(tx);
         let tx_hash =
             self.request("eth_sendRawTransaction", (rlp_hex,)).await.inspect_err(|err| {
@@ -120,6 +129,8 @@ impl SequencerClient {
                 );
             })?;
 
+        self.inner.metrics.record_supervisor_query(start.elapsed());
+
         Ok(tx_hash)
     }
 
@@ -129,6 +140,7 @@ impl SequencerClient {
         tx: &[u8],
         condition: TransactionConditional,
     ) -> Result<B256, SequencerClientError> {
+        let start = Instant::now();
         let rlp_hex = hex::encode_prefixed(tx);
         let tx_hash = self
             .request("eth_sendRawTransactionConditional", (rlp_hex, condition))
@@ -140,6 +152,9 @@ impl SequencerClient {
                     "Failed to forward transaction conditional for sequencer",
                 );
             })?;
+
+        self.inner.metrics.record_supervisor_query(start.elapsed());
+
         Ok(tx_hash)
     }
 }
@@ -150,6 +165,24 @@ struct SequencerClientInner {
     sequencer_endpoint: String,
     /// The client
     client: Client,
+    /// The sequencer client metrics
+    metrics: SequencerClientMetrics,
+}
+
+/// Optimism Sequencer Client metrics
+#[derive(Metrics, Clone)]
+#[metrics(scope = "optimism_rpc.sequencer_client")]
+pub struct SequencerClientMetrics {
+    /// How long it takes to forward a transaction to the sequencer
+    pub(crate) supervisor_query_latency: Histogram,
+}
+
+impl SequencerClientMetrics {
+    /// Records the duration of supervisor queries
+    #[inline]
+    pub fn record_supervisor_query(&self, duration: Duration) {
+        self.supervisor_query_latency.record(duration.as_secs_f64());
+    }
 }
 
 #[cfg(test)]
