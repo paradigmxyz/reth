@@ -16,9 +16,11 @@ jobs:
         with:
           target: x86_64-unknown-linux-gnu
       - name: Install cross main
-        id: cross_main
         run: |
           cargo install cross --git https://github.com/cross-rs/cross
+      - name: Install cargo-cache
+        run: |
+          cargo install cargo-cache
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
