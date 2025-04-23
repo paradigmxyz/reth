@@ -488,10 +488,7 @@ mod tests {
     use alloy_consensus::TxEip1559;
     use alloy_eips::eip2930::AccessList;
     use alloy_primitives::{hex, Signature};
-    use reth_primitives_traits::{
-        crypto::secp256k1::{public_key_to_address, sign_message},
-        SignedTransaction,
-    };
+    use reth_primitives_traits::crypto::secp256k1::{public_key_to_address, sign_message};
     use std::str::FromStr;
 
     #[test]
@@ -518,7 +515,7 @@ mod tests {
                 sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), signature_hash)
                     .unwrap();
 
-            let signed : TransactionSigned = tx.clone().into_signed(signature).into();
+            let signed: TransactionSigned = tx.clone().into_signed(signature).into();
             let recovered = signed.recover_signer().unwrap();
 
             let expected = public_key_to_address(key_pair.public_key());
