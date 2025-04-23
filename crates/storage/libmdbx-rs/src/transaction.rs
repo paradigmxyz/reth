@@ -653,7 +653,7 @@ impl CommitLatency {
     }
 
     /// Returns a mut pointer to `ffi::MDBX_commit_latency`.
-    pub(crate) fn mdb_commit_latency(&mut self) -> *mut ffi::MDBX_commit_latency {
+    pub(crate) const fn mdb_commit_latency(&mut self) -> *mut ffi::MDBX_commit_latency {
         &mut self.0
     }
 }

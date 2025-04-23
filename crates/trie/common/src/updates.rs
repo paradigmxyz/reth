@@ -174,7 +174,7 @@ impl StorageTrieUpdates {
     }
 
     /// Sets `deleted` flag on the storage trie.
-    pub fn set_deleted(&mut self, deleted: bool) {
+    pub const fn set_deleted(&mut self, deleted: bool) {
         self.is_deleted = deleted;
     }
 

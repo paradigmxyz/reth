@@ -298,7 +298,7 @@ pub enum StageUnitCheckpoint {
 impl StageUnitCheckpoint {
     /// Sets the block range. Returns old block range, or `None` if checkpoint doesn't use block
     /// range.
-    pub fn set_block_range(&mut self, from: u64, to: u64) -> Option<CheckpointBlockRange> {
+    pub const fn set_block_range(&mut self, from: u64, to: u64) -> Option<CheckpointBlockRange> {
         match self {
             Self::Account(AccountHashingCheckpoint { ref mut block_range, .. }) |
             Self::Storage(StorageHashingCheckpoint { ref mut block_range, .. }) |

@@ -348,7 +348,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         Some(tx.transaction)
     }
 
-    fn next_id(&mut self) -> u64 {
+    const fn next_id(&mut self) -> u64 {
         let id = self.submission_id;
         self.submission_id = self.submission_id.wrapping_add(1);
         id
