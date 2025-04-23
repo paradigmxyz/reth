@@ -11,7 +11,7 @@
 
 extern crate alloc;
 
-use alloc::{fmt::Debug, string::String, sync::Arc, vec::Vec};
+use alloc::{fmt::Debug, string::String, vec::Vec};
 use alloy_consensus::Header;
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256, U256};
 use reth_execution_types::BlockExecutionResult;
