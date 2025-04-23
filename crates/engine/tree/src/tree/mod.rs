@@ -66,6 +66,7 @@ use tracing::*;
 mod block_buffer;
 mod cached_state;
 pub mod error;
+mod instrumented_state;
 mod invalid_block_hook;
 mod invalid_headers;
 mod metrics;
