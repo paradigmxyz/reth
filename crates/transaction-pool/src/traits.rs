@@ -8,7 +8,9 @@ use crate::{
     validate::ValidPoolTransaction,
     AllTransactionsEvents,
 };
-use alloy_consensus::{transaction::PooledTransaction, BlockHeader, Signed, Typed2718};
+use alloy_consensus::{
+    error::ValueError, transaction::PooledTransaction, BlockHeader, Signed, Typed2718,
+};
 use alloy_eips::{
     eip2718::Encodable2718,
     eip2930::AccessList,
@@ -24,7 +26,7 @@ use reth_eth_wire_types::HandleMempoolData;
 use reth_ethereum_primitives::{Transaction, TransactionSigned};
 use reth_execution_types::ChangedAccount;
 use reth_primitives_traits::{
-    transaction::error::TransactionConversionError, Block, InMemorySize, Recovered, SealedBlock,
+    Block, InMemorySize, Recovered, SealedBlock,
     SignedTransaction,
 };
 #[cfg(feature = "serde")]
@@ -1121,7 +1123,7 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
 }
 
 impl PoolTransaction for EthPooledTransaction {
-    type TryFromConsensusError = TransactionConversionError;
+    type TryFromConsensusError = ValueError<TransactionSigned>;
 
     type Consensus = TransactionSigned;
 

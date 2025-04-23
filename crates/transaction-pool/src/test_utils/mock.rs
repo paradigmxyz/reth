@@ -27,10 +27,11 @@ use paste::paste;
 use rand::{distr::Uniform, prelude::Distribution};
 use reth_ethereum_primitives::{Transaction, TransactionSigned};
 use reth_primitives_traits::{
-    transaction::error::{TransactionConversionError, TryFromRecoveredTransactionError},
+    transaction::error::{TryFromRecoveredTransactionError},
     InMemorySize, Recovered, SignedTransaction,
 };
 
+use alloy_consensus::error::ValueError;
 use alloy_eips::eip4844::env_settings::KzgSettings;
 use rand::distr::weighted::WeightedIndex;
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
@@ -667,7 +668,7 @@ impl MockTransaction {
 }
 
 impl PoolTransaction for MockTransaction {
-    type TryFromConsensusError = TransactionConversionError;
+    type TryFromConsensusError = ValueError<EthereumTxEnvelope<TxEip4844>>;
 
     type Consensus = TransactionSigned;
 

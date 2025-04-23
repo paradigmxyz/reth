@@ -373,7 +373,7 @@ mod tests {
     fn test_block_receipts_reorg() {
         // Define block1 for the old chain segment, which will be reverted.
         let mut body = BlockBody::<TransactionSigned>::default();
-        body.transactions.push(TransactionSigned::default());
+        body.transactions.push(TxLegacy::default().into_signed(Signature::test_signature()).into());
         let mut old_block1 =
             SealedBlock::<alloy_consensus::Block<TransactionSigned>>::from_sealed_parts(
                 SealedHeader::seal_slow(alloy_consensus::Header::default()),
@@ -402,7 +402,7 @@ mod tests {
 
         // Define block2 for the new chain segment, which will be committed.
         let mut body = BlockBody::<TransactionSigned>::default();
-        body.transactions.push(TransactionSigned::default());
+        body.transactions.push(TxLegacy::default().into_signed(Signature::test_signature()).into());
         let mut new_block1 =
             SealedBlock::<alloy_consensus::Block<TransactionSigned>>::from_sealed_parts(
                 SealedHeader::seal_slow(alloy_consensus::Header::default()),
