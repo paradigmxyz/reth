@@ -42,7 +42,7 @@ members = [
     "crates/ethereum/primitives/",
     "crates/ethereum/reth/",
     "crates/etl/",
-    "crates/evm/",
+    "crates/evm/evm",
     "crates/evm/execution-errors",
     "crates/evm/execution-types",
     "crates/exex/exex/",
@@ -358,7 +358,7 @@ reth-ethereum-payload-builder = { path = "crates/ethereum/payload" }
 reth-ethereum-primitives = { path = "crates/ethereum/primitives", default-features = false }
 reth-ethereum = { path = "crates/ethereum/reth" }
 reth-etl = { path = "crates/etl" }
-reth-evm = { path = "crates/evm", default-features = false }
+reth-evm = { path = "crates/evm/evm", default-features = false }
 reth-evm-ethereum = { path = "crates/ethereum/evm", default-features = false }
 reth-optimism-evm = { path = "crates/optimism/evm", default-features = false }
 reth-execution-errors = { path = "crates/evm/execution-errors", default-features = false }
@@ -460,8 +460,12 @@ alloy-chains = { version = "0.2.0", default-features = false }
 alloy-dyn-abi = "1.0.0"
 alloy-eip2124 = { version = "0.2.0", default-features = false }
 alloy-evm = { version = "0.5.0", default-features = false }
-alloy-primitives = { version = "1.0.0", default-features = false, features = ["map-foldhash"] }
-alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
+alloy-primitives = { version = "1.0.0", default-features = false, features = [
+    "map-foldhash",
+] }
+alloy-rlp = { version = "0.3.10", default-features = false, features = [
+    "core-net",
+] }
 alloy-sol-macro = "1.0.0"
 alloy-sol-types = { version = "1.0.0", default-features = false }
 alloy-trie = { version = "0.8.1", default-features = false }
@@ -476,10 +480,14 @@ alloy-json-rpc = { version = "0.14.0", default-features = false }
 alloy-network = { version = "0.14.0", default-features = false }
 alloy-network-primitives = { version = "0.14.0", default-features = false }
 alloy-node-bindings = { version = "0.14.0", default-features = false }
-alloy-provider = { version = "0.14.0", features = ["reqwest"], default-features = false }
+alloy-provider = { version = "0.14.0", features = [
+    "reqwest",
+], default-features = false }
 alloy-pubsub = { version = "0.14.0", default-features = false }
 alloy-rpc-client = { version = "0.14.0", default-features = false }
-alloy-rpc-types = { version = "0.14.0", features = ["eth"], default-features = false }
+alloy-rpc-types = { version = "0.14.0", features = [
+    "eth",
+], default-features = false }
 alloy-rpc-types-admin = { version = "0.14.0", default-features = false }
 alloy-rpc-types-anvil = { version = "0.14.0", default-features = false }
 alloy-rpc-types-beacon = { version = "0.14.0", default-features = false }
@@ -493,7 +501,9 @@ alloy-serde = { version = "0.14.0", default-features = false }
 alloy-signer = { version = "0.14.0", default-features = false }
 alloy-signer-local = { version = "0.14.0", default-features = false }
 alloy-transport = { version = "0.14.0" }
-alloy-transport-http = { version = "0.14.0", features = ["reqwest-rustls-tls"], default-features = false }
+alloy-transport-http = { version = "0.14.0", features = [
+    "reqwest-rustls-tls",
+], default-features = false }
 alloy-transport-ipc = { version = "0.14.0", default-features = false }
 alloy-transport-ws = { version = "0.14.0", default-features = false }
 
@@ -510,7 +520,10 @@ op-alloy-flz = { version = "0.13.0", default-features = false }
 # misc
 aquamarine = "0.6"
 auto_impl = "1"
-backon = { version = "1.2", default-features = false, features = ["std-blocking-sleep", "tokio-sleep"] }
+backon = { version = "1.2", default-features = false, features = [
+    "std-blocking-sleep",
+    "tokio-sleep",
+] }
 bincode = "1.3"
 bitflags = "2.4"
 blake3 = "1.5.5"
@@ -530,9 +543,13 @@ humantime-serde = "1.1"
 itertools = { version = "0.14", default-features = false }
 linked_hash_set = "0.1"
 modular-bitfield = "0.11.2"
-notify = { version = "8.0.0", default-features = false, features = ["macos_fsevent"] }
+notify = { version = "8.0.0", default-features = false, features = [
+    "macos_fsevent",
+] }
 nybbles = { version = "0.3.0", default-features = false }
-once_cell = { version = "1.19", default-features = false, features = ["critical-section"] }
+once_cell = { version = "1.19", default-features = false, features = [
+    "critical-section",
+] }
 parking_lot = "0.12"
 paste = "1.0"
 rand = "0.9"
@@ -609,7 +626,10 @@ proptest-arbitrary-interop = "0.1.0"
 # crypto
 enr = { version = "0.13", default-features = false }
 k256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
-secp256k1 = { version = "0.30", default-features = false, features = ["global-context", "recovery"] }
+secp256k1 = { version = "0.30", default-features = false, features = [
+    "global-context",
+    "recovery",
+] }
 # rand 8 for secp256k1
 rand_08 = { package = "rand", version = "0.8" }
 
