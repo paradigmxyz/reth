@@ -70,7 +70,7 @@ jobs:
           cargo nextest run \
             ${{ matrix.args }} --workspace \
             --exclude ef-tests --no-tests=warn \
-            --partition hash:${{ matrix.partition }}/2 \
+            --partition hash:${{ matrix.partition }}/${{ matrix.total_partitions }} \
             -E "!kind(test)"
 
   state:

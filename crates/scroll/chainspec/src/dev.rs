@@ -3,7 +3,6 @@
 use alloc::sync::Arc;
 
 use alloy_chains::Chain;
-use alloy_consensus::constants::DEV_GENESIS_HASH;
 use alloy_primitives::U256;
 use reth_chainspec::{BaseFeeParams, BaseFeeParamsKind, ChainSpec};
 use reth_primitives_traits::SealedHeader;
@@ -21,7 +20,7 @@ pub static SCROLL_DEV: LazyLock<Arc<ScrollChainSpec>> = LazyLock::new(|| {
     ScrollChainSpec {
         inner: ChainSpec {
             chain: Chain::dev(),
-            genesis_header: SealedHeader::new(make_genesis_header(&genesis), DEV_GENESIS_HASH),
+            genesis_header: SealedHeader::new_unhashed(make_genesis_header(&genesis)),
             genesis,
             paris_block_and_final_difficulty: Some((0, U256::from(0))),
             hardforks: DEV_HARDFORKS.clone(),
