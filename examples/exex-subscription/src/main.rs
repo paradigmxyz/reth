@@ -1,14 +1,12 @@
 #![warn(unused_crate_dependencies)]
-#![allow(unused_imports)] //will be removed in the future
-#![allow(dead_code)] //will be removed in the future
-use alloy_primitives::{Address, B256};
+#![allow(dead_code)]
+use alloy_primitives::{Address, U256};
 use clap::Parser;
 use futures::TryStreamExt;
 use jsonrpsee::{
     core::SubscriptionResult, proc_macros::rpc, tracing, PendingSubscriptionSink,
     SubscriptionMessage,
 };
-use reth::cli::Cli;
 use reth_ethereum::{
     exex::{ExExContext, ExExEvent, ExExNotification},
     node::{api::FullNodeComponents, EthereumNode},
@@ -21,9 +19,9 @@ use tracing::info;
 #[derive(Debug, Clone, Copy, Default, serde::Serialize)]
 struct StorageDiff {
     address: Address,
-    key: B256,
-    old_value: B256,
-    new_value: B256,
+    key: U256,
+    old_value: U256,
+    new_value: U256,
 }
 
 type SubscriptionMap = Arc<RwLock<HashMap<Address, Vec<mpsc::Sender<StorageDiff>>>>>;
@@ -81,12 +79,47 @@ impl StorageWatcherApiServer for StorageWatcherRpc {
     }
 }
 
-use jsonrpsee::server::{ServerBuilder, ServerHandle};
-
 async fn my_exex<Node: FullNodeComponents>(
-    mut _ctx: ExExContext<Node>,
-    _subscriptions: SubscriptionMap,
+    mut ctx: ExExContext<Node>,
+    subscriptions: SubscriptionMap,
 ) -> eyre::Result<()> {
+    while let Some(notification) = ctx.notifications.try_next().await? {
+        match &notification {
+            ExExNotification::ChainCommitted { new } => {
+                info!(committed_chain = ?new.range(), "Received commit");
+                let execution_outcome = new.execution_outcome();
+                let subscriptions = subscriptions.read().await;
+                for (address, senders) in subscriptions.iter() {
+                    for change in &execution_outcome.bundle.state {
+                        if change.0 == address {
+                            for (key, slot) in &change.1.storage {
+                                let diff = StorageDiff {
+                                    address: *change.0,
+                                    key: key.clone(),
+                                    old_value: slot.original_value(),
+                                    new_value: slot.present_value(),
+                                };
+
+                                for sender in senders {
+                                    let _ = sender.send(diff.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            ExExNotification::ChainReorged { old, new } => {
+                info!(from_chain = ?old.range(), to_chain = ?new.range(), "Received reorg");
+            }
+            ExExNotification::ChainReverted { old } => {
+                info!(reverted_chain = ?old.range(), "Received revert");
+            }
+        }
+
+        if let Some(committed_chain) = notification.committed_chain() {
+            ctx.events.send(ExExEvent::FinishedHeight(committed_chain.tip().num_hash()))?;
+        }
+    }
     Ok(())
 }
 

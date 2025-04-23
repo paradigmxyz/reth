@@ -12,7 +12,6 @@ exclude.workspace = true
 # reth
 reth.workspace = true
 reth-ethereum = { workspace = true, features = ["full"] }
-# reth-tracing.workspace = true
 
 eyre.workspace = true
 futures.workspace = true
