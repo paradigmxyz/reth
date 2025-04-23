@@ -16,7 +16,7 @@ workspace = true
 reth-primitives-traits.workspace = true
 reth-execution-errors.workspace = true
 reth-trie-common.workspace = true
-tracing = { workspace = true }
+tracing.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
@@ -59,7 +59,6 @@ std = [
     "reth-trie-common/std",
     "alloy-primitives/std",
     "alloy-rlp/std",
-    "metrics",
     "tracing/std",
 ]
 metrics = ["dep:reth-metrics", "dep:metrics", "std"]
