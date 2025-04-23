@@ -315,8 +315,7 @@ mod tests {
             next_tx_num: &mut u64,
         ) {
             let mut receipt = Receipt::default();
-            let mut tx: TransactionSigned =
-                TxLegacy::default().into_signed(Signature::test_signature()).into();
+            let mut tx = TxLegacy::default();
 
             for block in block_range.clone() {
                 writer.increment_block(block).unwrap();
@@ -329,7 +328,9 @@ mod tests {
                         writer.append_receipt(*next_tx_num, &receipt).unwrap();
                     } else {
                         // Used as ID for validation
-                        tx.transaction_mut().set_nonce(*next_tx_num);
+                        tx.nonce = *next_tx_num;
+                        let tx: TransactionSigned =
+                            tx.clone().into_signed(Signature::test_signature()).into();
                         writer.append_transaction(*next_tx_num, &tx).unwrap();
                     }
                     *next_tx_num += 1;
