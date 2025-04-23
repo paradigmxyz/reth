@@ -215,7 +215,7 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     /// This syncs RLP encoded blocks from a file.
     #[command(name = "import")]
     Import(import::ImportCommand<C>),
-    /// This syncs RLP encoded blocks from a file.
+    /// This syncs ERA encoded blocks from a directory.
     #[command(name = "import-era")]
     ImportEra(import_era::ImportEraCommand<C>),
     /// Dumps genesis block JSON configuration to stdout.
