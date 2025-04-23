@@ -25,10 +25,7 @@ use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_ethereum_primitives::{Transaction, TransactionSigned};
 use reth_execution_types::ChangedAccount;
-use reth_primitives_traits::{
-    Block, InMemorySize, Recovered, SealedBlock,
-    SignedTransaction,
-};
+use reth_primitives_traits::{Block, InMemorySize, Recovered, SealedBlock, SignedTransaction};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{

@@ -57,8 +57,8 @@ mod tests {
     use crate::{
         test_utils::create_test_provider_factory, HeaderProvider, StaticFileProviderFactory,
     };
-    use alloy_consensus::{Header, Transaction};
-    use alloy_primitives::{BlockHash, TxNumber, B256, U256};
+    use alloy_consensus::{Header, SignableTransaction, Transaction, TxLegacy};
+    use alloy_primitives::{BlockHash, Signature, TxNumber, B256, U256};
     use rand::seq::SliceRandom;
     use reth_db::test_utils::create_test_static_files_dir;
     use reth_db_api::{
@@ -315,7 +315,8 @@ mod tests {
             next_tx_num: &mut u64,
         ) {
             let mut receipt = Receipt::default();
-            let mut tx = TransactionSigned::default();
+            let mut tx: TransactionSigned =
+                TxLegacy::default().into_signed(Signature::test_signature()).into();
 
             for block in block_range.clone() {
                 writer.increment_block(block).unwrap();

@@ -27,8 +27,8 @@ use paste::paste;
 use rand::{distr::Uniform, prelude::Distribution};
 use reth_ethereum_primitives::{Transaction, TransactionSigned};
 use reth_primitives_traits::{
-    transaction::error::{TryFromRecoveredTransactionError},
-    InMemorySize, Recovered, SignedTransaction,
+    transaction::error::TryFromRecoveredTransactionError, InMemorySize, Recovered,
+    SignedTransaction,
 };
 
 use alloy_consensus::error::ValueError;
