@@ -24,6 +24,9 @@ reth-db-common.workspace = true
 reth-downloaders.workspace = true
 reth-ecies.workspace = true
 reth-eth-wire.workspace = true
+reth-era-downloader.workspace = true
+reth-era-import.workspace = true
+reth-etl.workspace = true
 reth-evm.workspace = true
 reth-exex.workspace = true
 reth-fs-util.workspace = true
@@ -72,6 +75,7 @@ tracing.workspace = true
 backon.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
 tokio-stream.workspace = true
+reqwest.workspace = true
 
 # io
 fdlimit.workspace = true
