@@ -10257,6 +10257,7 @@ dependencies = [
  "reth-trie-common",
  "reth-trie-db",
  "smallvec",
+ "tracing",
 ]
 
 [[package]]
