@@ -147,3 +147,27 @@ impl<'a, TX: DbTx> DatabaseStorageProof
             .storage_multiproof(targets)
     }
 }
+
+/// Extends [`StorageProof`] with operations specific for constructing from a database transaction.
+pub trait StorageProofFromTx<'a, TX> {
+    /// Create a new [`StorageProof`] instance from database transaction.
+    fn from_tx(tx: &'a TX, address: Address) -> StorageProof<Self::T, Self::H>
+    where
+        Self: Sized;
+
+    /// The type of trie cursor factory used by [`StorageProof`].
+    type T;
+    /// The type of hashed cursor factory used by the [`StorageProof`].
+    type H;
+}
+
+impl<'a, TX: DbTx> StorageProofFromTx<'a, TX>
+    for StorageProof<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>
+{
+    type T = DatabaseTrieCursorFactory<'a, TX>;
+    type H = DatabaseHashedCursorFactory<'a, TX>;
+
+    fn from_tx(tx: &'a TX, address: Address) -> StorageProof<Self::T, Self::H> {
+        Self::new(DatabaseTrieCursorFactory::new(tx), DatabaseHashedCursorFactory::new(tx), address)
+    }
+}

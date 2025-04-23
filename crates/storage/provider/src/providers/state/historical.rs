@@ -25,9 +25,9 @@ use reth_trie::{
     StorageMultiProof, StorageRoot, TrieInput,
 };
 use reth_trie_db::{
-    DatabaseHashedCursorFactory, DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof,
-    DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieCursorFactory,
-    DatabaseTrieWitness, StateCommitment,
+    DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,
+    DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness, StateCommitment,
+    StorageProofFromTx,
 };
 use std::fmt::Debug;
 
@@ -344,17 +344,9 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StorageRoo
     ) -> ProviderResult<reth_trie::StorageProof> {
         let mut revert_storage = self.revert_storage(address)?;
         revert_storage.extend(&hashed_storage);
-        StorageProof::overlay_storage_proof(
-            &StorageProof::new(
-                DatabaseTrieCursorFactory::new(self.tx()),
-                DatabaseHashedCursorFactory::new(self.tx()),
-                address,
-            ),
-            address,
-            slot,
-            revert_storage,
-        )
-        .map_err(ProviderError::from)
+        StorageProof::from_tx(self.tx(), address)
+            .overlay_storage_proof(address, slot, revert_storage)
+            .map_err(ProviderError::from)
     }
 
     fn storage_multiproof(
@@ -365,17 +357,9 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StorageRoo
     ) -> ProviderResult<StorageMultiProof> {
         let mut revert_storage = self.revert_storage(address)?;
         revert_storage.extend(&hashed_storage);
-        StorageProof::overlay_storage_multiproof(
-            &StorageProof::new(
-                DatabaseTrieCursorFactory::new(self.tx()),
-                DatabaseHashedCursorFactory::new(self.tx()),
-                address,
-            ),
-            address,
-            slots,
-            revert_storage,
-        )
-        .map_err(ProviderError::from)
+        StorageProof::from_tx(self.tx(), address)
+            .overlay_storage_multiproof(address, slots, revert_storage)
+            .map_err(ProviderError::from)
     }
 }
 

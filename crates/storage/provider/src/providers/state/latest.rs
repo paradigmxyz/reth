@@ -17,8 +17,8 @@ use reth_trie::{
     StorageMultiProof, StorageRoot, TrieInput,
 };
 use reth_trie_db::{
-    DatabaseHashedCursorFactory, DatabaseProof, DatabaseStateRoot, DatabaseStorageProof,
-    DatabaseStorageRoot, DatabaseTrieCursorFactory, DatabaseTrieWitness, StateCommitment,
+    DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
+    DatabaseTrieWitness, StateCommitment, StorageProofFromTx,
 };
 
 /// State provider over latest state that takes tx reference.
@@ -108,17 +108,9 @@ impl<Provider: DBProvider + StateCommitmentProvider> StorageRootProvider
         slot: B256,
         hashed_storage: HashedStorage,
     ) -> ProviderResult<reth_trie::StorageProof> {
-        StorageProof::overlay_storage_proof(
-            &StorageProof::new(
-                DatabaseTrieCursorFactory::new(self.tx()),
-                DatabaseHashedCursorFactory::new(self.tx()),
-                address,
-            ),
-            address,
-            slot,
-            hashed_storage,
-        )
-        .map_err(ProviderError::from)
+        StorageProof::from_tx(self.tx(), address)
+            .overlay_storage_proof(address, slot, hashed_storage)
+            .map_err(ProviderError::from)
     }
 
     fn storage_multiproof(
@@ -127,17 +119,9 @@ impl<Provider: DBProvider + StateCommitmentProvider> StorageRootProvider
         slots: &[B256],
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
-        StorageProof::overlay_storage_multiproof(
-            &StorageProof::new(
-                DatabaseTrieCursorFactory::new(self.tx()),
-                DatabaseHashedCursorFactory::new(self.tx()),
-                address,
-            ),
-            address,
-            slots,
-            hashed_storage,
-        )
-        .map_err(ProviderError::from)
+        StorageProof::from_tx(self.tx(), address)
+            .overlay_storage_multiproof(address, slots, hashed_storage)
+            .map_err(ProviderError::from)
     }
 }
 
