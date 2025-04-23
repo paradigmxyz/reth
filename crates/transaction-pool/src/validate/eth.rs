@@ -84,7 +84,7 @@ where
     /// which can improve performance when validating many transactions.
     ///
     /// If `state` is `None`, a new state provider will be created.
-    pub fn validate_one_with_state(
+    pub fn validate_one_against_state(
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
@@ -212,7 +212,7 @@ where
         transaction: Tx,
         maybe_state: &mut Option<Box<dyn StateProvider>>,
     ) -> TransactionValidationOutcome<Tx> {
-        match self.validate_one_stateless(origin, transaction) {
+        match self.validate_one_no_state(origin, transaction) {
             Ok(transaction) => {
                 // stateless checks passed, pass transaction down stateful validation pipeline
                 // If we don't have a state provider yet, fetch the latest state
@@ -232,7 +232,7 @@ where
 
                 let state = maybe_state.as_deref().expect("provider is set");
 
-                self.validate_one_stateful(origin, transaction, state)
+                self.validate_one_against_state(origin, transaction, state)
             }
             Err(invalid_outcome) => invalid_outcome,
         }
@@ -240,8 +240,8 @@ where
 
     /// Performs stateless validation on single transaction. Returns unaltered input transaction
     /// if all checks pass, so transaction can continue through to stateful validation as argument
-    /// to [`validate_one_with_provider_stateful`](Self::validate_one_with_provider_stateful).
-    fn validate_one_stateless(
+    /// to [`validate_one_against_state`](Self::validate_one_against_state).
+    fn validate_one_no_state(
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
@@ -442,7 +442,7 @@ where
     }
 
     /// Validates a single transaction using given state provider.
-    fn validate_one_stateful<P>(
+    fn validate_one_against_state<P>(
         &self,
         origin: TransactionOrigin,
         mut transaction: Tx,
