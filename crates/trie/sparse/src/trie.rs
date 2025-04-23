@@ -1,7 +1,4 @@
-use crate::{
-    blinded::{BlindedProvider, DefaultBlindedProvider, RevealedNode},
-    trace,
-};
+use crate::blinded::{BlindedProvider, DefaultBlindedProvider, RevealedNode};
 use alloc::{
     borrow::Cow,
     boxed::Box,

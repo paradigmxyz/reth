@@ -23,7 +23,6 @@ use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord
 use reth_stateless::{validation::stateless_validation, ExecutionWitness};
 use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
 use reth_trie_db::DatabaseStateRoot;
-
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 
 /// A handler for the blockchain test suite.
