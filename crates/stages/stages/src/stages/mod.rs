@@ -360,9 +360,20 @@ mod tests {
     ) where
         <T as Table>::Value: Default,
     {
+        update_db_with_and_check::<T>(db, key, expected, &Default::default());
+    }
+
+    /// Inserts the given value at key and compare the check consistency result against the expected
+    /// one.
+    fn update_db_with_and_check<T: Table<Key = u64>>(
+        db: &TestStageDB,
+        key: u64,
+        expected: Option<PipelineTarget>,
+        value: &T::Value,
+    ) {
         let provider_rw = db.factory.provider_rw().unwrap();
         let mut cursor = provider_rw.tx_ref().cursor_write::<T>().unwrap();
-        cursor.insert(key, &Default::default()).unwrap();
+        cursor.insert(key, value).unwrap();
         provider_rw.commit().unwrap();
 
         assert!(matches!(
@@ -487,14 +498,20 @@ mod tests {
             .unwrap();
 
         // Creates a gap of one transaction: static_file <missing> db
-        update_db_and_check::<tables::Transactions>(
+        update_db_with_and_check::<tables::Transactions>(
             &db,
             current + 2,
             Some(PipelineTarget::Unwind(89)),
+            &Default::default(),
         );
 
         // Fill the gap, and ensure no unwind is necessary.
-        update_db_and_check::<tables::Transactions>(&db, current + 1, None);
+        update_db_with_and_check::<tables::Transactions>(
+            &db,
+            current + 1,
+            None,
+            &Default::default(),
+        );
     }
 
     #[test]
