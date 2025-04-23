@@ -120,7 +120,7 @@ where
             online: OnlineStages::new(
                 provider,
                 tip,
-                consensus.clone().as_consensus(),
+                consensus.clone(),
                 header_downloader,
                 body_downloader,
                 stages_config.clone(),
@@ -255,7 +255,7 @@ where
                 provider,
                 header_downloader,
                 tip,
-                consensus.clone().as_header_validator(),
+                consensus.clone(),
                 stages_config.etl,
             ))
             .add_stage(bodies)
@@ -276,7 +276,7 @@ where
                 self.provider,
                 self.header_downloader,
                 self.tip,
-                self.consensus.clone().as_header_validator(),
+                self.consensus.clone(),
                 self.stages_config.etl.clone(),
             ))
             .add_stage(BodyStage::new(self.body_downloader))

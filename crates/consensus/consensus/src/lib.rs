@@ -11,7 +11,7 @@
 
 extern crate alloc;
 
-use alloc::{fmt::Debug, string::String, sync::Arc, vec::Vec};
+use alloc::{fmt::Debug, string::String, vec::Vec};
 use alloy_consensus::Header;
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256, U256};
 use reth_execution_types::BlockExecutionResult;
@@ -32,7 +32,7 @@ pub mod test_utils;
 /// [`Consensus`] implementation which knows full node primitives and is able to validation block's
 /// execution outcome.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait FullConsensus<N: NodePrimitives>: AsConsensus<N::Block> {
+pub trait FullConsensus<N: NodePrimitives>: Consensus<N::Block> {
     /// Validate a block considering world state, i.e. things that can not be checked before
     /// execution.
     ///
@@ -48,7 +48,7 @@ pub trait FullConsensus<N: NodePrimitives>: AsConsensus<N::Block> {
 
 /// Consensus is a protocol that chooses canonical chain.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait Consensus<B: Block>: AsHeaderValidator<B::Header> {
+pub trait Consensus<B: Block>: HeaderValidator<B::Header> {
     /// The error type related to consensus.
     type Error;
 
@@ -133,40 +133,6 @@ pub trait HeaderValidator<H = Header>: Debug + Send + Sync {
         header: &H,
         total_difficulty: U256,
     ) -> Result<(), ConsensusError>;
-}
-
-/// Helper trait to cast `Arc<dyn Consensus>` to `Arc<dyn HeaderValidator>`
-pub trait AsHeaderValidator<H>: HeaderValidator<H> {
-    /// Converts the [`Arc`] of self to [`Arc`] of [`HeaderValidator`]
-    fn as_header_validator<'a>(self: Arc<Self>) -> Arc<dyn HeaderValidator<H> + 'a>
-    where
-        Self: 'a;
-}
-
-impl<T: HeaderValidator<H>, H> AsHeaderValidator<H> for T {
-    fn as_header_validator<'a>(self: Arc<Self>) -> Arc<dyn HeaderValidator<H> + 'a>
-    where
-        Self: 'a,
-    {
-        self
-    }
-}
-
-/// Helper trait to cast `Arc<dyn FullConsensus>` to `Arc<dyn Consensus>`
-pub trait AsConsensus<B: Block>: Consensus<B> {
-    /// Converts the [`Arc`] of self to [`Arc`] of [`HeaderValidator`]
-    fn as_consensus<'a>(self: Arc<Self>) -> Arc<dyn Consensus<B, Error = Self::Error> + 'a>
-    where
-        Self: 'a;
-}
-
-impl<T: Consensus<B>, B: Block> AsConsensus<B> for T {
-    fn as_consensus<'a>(self: Arc<Self>) -> Arc<dyn Consensus<B, Error = Self::Error> + 'a>
-    where
-        Self: 'a,
-    {
-        self
-    }
 }
 
 /// Consensus Errors
