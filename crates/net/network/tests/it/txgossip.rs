@@ -9,7 +9,6 @@ use reth_network::{
     NetworkEvent, NetworkEventListenerProvider, Peers,
 };
 use reth_network_api::{events::PeerEvent, PeerKind, PeersInfo};
-use reth_primitives_traits::SignedTransaction;
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 use reth_transaction_pool::{test_utils::TransactionGenerator, PoolTransaction, TransactionPool};
 use std::sync::Arc;

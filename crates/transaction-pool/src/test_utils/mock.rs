@@ -1167,8 +1167,11 @@ impl From<Recovered<PooledTransaction>> for MockTransaction {
 impl From<MockTransaction> for Recovered<TransactionSigned> {
     fn from(tx: MockTransaction) -> Self {
         let hash = *tx.hash();
+        let sender = tx.sender();
         let tx = Transaction::from(tx);
-        Signed::new_unchecked(tx, Signature::test_signature(), hash).into()
+        let tx: TransactionSigned =
+            Signed::new_unchecked(tx, Signature::test_signature(), hash).into();
+        Self::new_unchecked(tx, sender)
     }
 }
 

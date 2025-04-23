@@ -662,7 +662,6 @@ mod tests {
     };
     use reth_db_api::tables;
     use reth_network_p2p::headers::downloader::SyncTarget;
-    use reth_primitives_traits::SignedTransaction;
     use reth_prune_types::{PruneMode, PruneModes};
     use reth_storage_errors::provider::ProviderError;
     use reth_testing_utils::generators::{self, random_block, random_header, BlockParams};
