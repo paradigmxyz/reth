@@ -38,12 +38,12 @@
 //! # let consensus: Arc<dyn FullConsensus<reth_ethereum_primitives::EthPrimitives, Error = ConsensusError>> = Arc::new(TestConsensus::default());
 //! # let headers_downloader = ReverseHeadersDownloaderBuilder::default().build(
 //! #    Arc::new(TestHeadersClient::default()),
-//! #    consensus.clone().as_header_validator()
+//! #    consensus.clone()
 //! # );
 //! # let provider_factory = create_test_provider_factory();
 //! # let bodies_downloader = BodiesDownloaderBuilder::default().build(
 //! #    Arc::new(TestBodiesClient { responder: |_| Ok((PeerId::ZERO, vec![]).into()) }),
-//! #    consensus.clone().as_consensus(),
+//! #    consensus.clone(),
 //! #    provider_factory.clone()
 //! # );
 //! # let (tip_tx, tip_rx) = watch::channel(B256::default());
