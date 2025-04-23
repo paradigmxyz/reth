@@ -10,13 +10,15 @@
 
 /// Chain specification parser.
 pub mod chainspec;
+pub mod debug_cmd;
+pub mod interface;
 
 #[cfg(test)]
 mod test {
+    use crate::chainspec::EthereumChainSpecParser;
     use clap::Parser;
     use reth_chainspec::DEV;
     use reth_cli_commands::NodeCommand;
-    use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 
     #[test]
     #[ignore = "reth cmd will print op-reth output if optimism feature enabled"]
