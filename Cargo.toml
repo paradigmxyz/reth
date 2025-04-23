@@ -30,6 +30,7 @@ members = [
     "crates/engine/util/",
     "crates/era",
     "crates/era-downloader",
+    "crates/era-export",
     "crates/era-import",
     "crates/errors/",
     "crates/ethereum-forks/",

@@ -1,5 +1,6 @@
 [package]
 name = "reth-era"
+description = "e2store and era1 files core logic"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
