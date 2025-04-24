@@ -71,7 +71,8 @@ where
         let Ok(tx) = request.build_typed_tx() else {
             return Err(EthApiError::TransactionConversionError)
         };
-        Ok(tx.into_signed(Signature::test_signature()).into())
+        let signature = Signature::new(Default::default(), Default::default(), false);
+        Ok(tx.into_signed(signature).into())
     }
 
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
