@@ -28,6 +28,6 @@ tracing.workspace = true
 
 # error
 eyre.workspace = true
- 
+
 [lints]
 workspace = true

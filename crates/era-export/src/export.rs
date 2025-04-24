@@ -53,7 +53,7 @@ pub(crate) struct EraExportData {
 /// and prepares it for export to era1 files.
 /// for a given number of blocks
 /// TODO: add the write logic to create the era1 files
-/// directly from this function 
+/// directly from this function
 /// to avoid holding the data in memory
 #[allow(dead_code)]
 pub(crate) fn fetch_block_history_data<P, BH, BB>(
