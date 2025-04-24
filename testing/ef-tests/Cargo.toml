@@ -19,11 +19,7 @@ asm-keccak = ["alloy-primitives/asm-keccak", "revm/asm-keccak"]
 
 reth-ethereum-primitives.workspace = true
 
-reth-db = { workspace = true, features = [
-    "mdbx",
-    "test-utils",
-    "disable-lock",
-] }
+reth-db = { workspace = true, features = ["mdbx", "test-utils", "disable-lock"] }
 reth-chainspec.workspace = true
 reth-primitives-traits.workspace = true
 reth-consensus.workspace = true
