@@ -19,7 +19,7 @@ pub struct RollupArgs {
 
     /// Enable transaction pool admission
     #[arg(long = "rollup.enable-tx-pool-admission", default_value = "true")]
-    pub enable_txpool_admisson: bool,
+    pub enable_txpool_admission: bool,
 
     /// Enable walkback to genesis on startup. This is useful for re-validating the existing DB
     /// prior to beginning normal syncing.
@@ -66,7 +66,7 @@ impl Default for RollupArgs {
         Self {
             sequencer: None,
             disable_txpool_gossip: false,
-            enable_txpool_admisson: true,
+            enable_txpool_admission: true,
             enable_genesis_walkback: false,
             compute_pending_block: false,
             discovery_v4: false,

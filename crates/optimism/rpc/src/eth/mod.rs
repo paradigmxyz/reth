@@ -283,12 +283,12 @@ struct OpEthApiInner<N: OpNodeCore> {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
     sequencer_client: Option<SequencerClient>,
-    ///flag for enabling txpool asmission
+    ///flag for enabling txpool admission
     enable_txpool_admission: bool,
 }
 
 impl<N: OpNodeCore> OpEthApiInner<N> {
-    /// Returns a new[`OpEthApiInner`].
+    /// Returns a new [`OpEthApiInner`].
     const fn new(
         enable_txpool_admission: bool,
         eth_api: EthApiNodeBackend<N>,
@@ -336,7 +336,7 @@ impl OpEthApiBuilder {
     }
 
     ///with a flag to disable txpool admission
-    pub fn with_disable_txpool_asmission(mut self, enable_txpool_admission: bool) -> Self {
+    pub fn with_enable_txpool_admission(mut self, enable_txpool_admission: bool) -> Self {
         self.enable_txpool_admission = enable_txpool_admission;
         self
     }
