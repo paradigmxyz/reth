@@ -21,7 +21,6 @@ reth-fs-util.workspace = true
 reth-errors.workspace = true
 reth-storage-errors.workspace = true
 reth-storage-api = { workspace = true, features = ["std", "db-api"] }
-reth-network-p2p.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-db-api.workspace = true
 reth-prune-types.workspace = true
@@ -95,7 +94,6 @@ test-utils = [
     "reth-ethereum-primitives/test-utils",
     "reth-chainspec/test-utils",
     "reth-evm/test-utils",
-    "reth-network-p2p/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-codecs/test-utils",
     "reth-db-api/test-utils",
