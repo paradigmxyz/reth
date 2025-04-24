@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 use alloy_consensus::{
     transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx},
     EthereumTxEnvelope, SignableTransaction, Signed, TxEip1559, TxEip2930, TxEip4844, TxEip7702,
-    TxLegacy, TxType, Typed2718, TypedTransaction,
+    TxLegacy, TxType, Typed2718,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
@@ -33,19 +33,6 @@ macro_rules! delegate {
             Transaction::Eip4844($tx) => $tx.$method($($arg),*),
             Transaction::Eip7702($tx) => $tx.$method($($arg),*),
         }
-    };
-}
-
-macro_rules! impl_from_signed {
-    ($($tx:ident),*) => {
-        $(
-            impl From<Signed<$tx>> for TransactionSigned {
-                fn from(value: Signed<$tx>) -> Self {
-                    let(tx,sig,hash) = value.into_parts();
-                    Self::new(tx.into(), sig, hash)
-                }
-            }
-        )*
     };
 }
 
@@ -113,17 +100,6 @@ impl Transaction {
             Self::Eip1559(_) => TxType::Eip1559,
             Self::Eip4844(_) => TxType::Eip4844,
             Self::Eip7702(_) => TxType::Eip7702,
-        }
-    }
-
-    /// This sets the transaction's nonce.
-    pub const fn set_nonce(&mut self, nonce: u64) {
-        match self {
-            Self::Legacy(tx) => tx.nonce = nonce,
-            Self::Eip2930(tx) => tx.nonce = nonce,
-            Self::Eip1559(tx) => tx.nonce = nonce,
-            Self::Eip4844(tx) => tx.nonce = nonce,
-            Self::Eip7702(tx) => tx.nonce = nonce,
         }
     }
 
@@ -289,18 +265,6 @@ impl reth_codecs::Compact for Transaction {
     }
 }
 
-impl From<TypedTransaction> for Transaction {
-    fn from(value: TypedTransaction) -> Self {
-        match value {
-            TypedTransaction::Legacy(tx) => Self::Legacy(tx),
-            TypedTransaction::Eip2930(tx) => Self::Eip2930(tx),
-            TypedTransaction::Eip1559(tx) => Self::Eip1559(tx),
-            TypedTransaction::Eip4844(tx) => Self::Eip4844(tx.into()),
-            TypedTransaction::Eip7702(tx) => Self::Eip7702(tx),
-        }
-    }
-}
-
 impl RlpEcdsaEncodableTx for Transaction {
     fn rlp_encoded_fields_length(&self) -> usize {
         delegate!(self => tx.rlp_encoded_fields_length())
@@ -354,20 +318,9 @@ pub struct TransactionSigned {
     transaction: Transaction,
 }
 
-impl Default for TransactionSigned {
-    fn default() -> Self {
-        Self::new_unhashed(Transaction::Legacy(Default::default()), Signature::test_signature())
-    }
-}
-
 impl TransactionSigned {
     fn recalculate_hash(&self) -> B256 {
         keccak256(self.encoded_2718())
-    }
-
-    /// Returns the signature of the transaction
-    pub const fn signature(&self) -> &Signature {
-        &self.signature
     }
 }
 
@@ -392,35 +345,10 @@ impl TransactionSigned {
         Self { hash: hash.into(), signature, transaction }
     }
 
-    /// Consumes the type and returns the transaction.
-    #[inline]
-    pub fn into_transaction(self) -> Transaction {
-        self.transaction
-    }
-
-    /// Returns the transaction.
-    #[inline]
-    pub const fn transaction(&self) -> &Transaction {
-        &self.transaction
-    }
-
     /// Returns the transaction hash.
     #[inline]
     pub fn hash(&self) -> &B256 {
         self.hash.get_or_init(|| self.recalculate_hash())
-    }
-
-    /// Creates a new signed transaction from the given transaction and signature without the hash.
-    ///
-    /// Note: this only calculates the hash on the first [`TransactionSigned::hash`] call.
-    pub fn new_unhashed(transaction: Transaction, signature: Signature) -> Self {
-        Self { hash: Default::default(), signature, transaction }
-    }
-
-    /// Provides mutable access to the transaction.
-    #[cfg(feature = "test-utils")]
-    pub const fn transaction_mut(&mut self) -> &mut Transaction {
-        &mut self.transaction
     }
 
     /// Splits the transaction into parts.
@@ -505,8 +433,6 @@ impl alloy_consensus::Transaction for TransactionSigned {
         self.transaction.authorization_list()
     }
 }
-
-impl_from_signed!(TxLegacy, TxEip2930, TxEip1559, TxEip7702, TxEip4844, TypedTransaction);
 
 impl From<Signed<Transaction>> for TransactionSigned {
     fn from(value: Signed<Transaction>) -> Self {

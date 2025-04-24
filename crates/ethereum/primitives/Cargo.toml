@@ -38,7 +38,6 @@ proptest-arbitrary-interop.workspace = true
 rand_08.workspace = true
 rand.workspace = true
 reth-codecs = { workspace = true, features = ["test-utils"] }
-reth-testing-utils.workspace = true
 reth-zstd-compressors.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }
 test-fuzz.workspace = true

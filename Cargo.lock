@@ -8097,7 +8097,6 @@ dependencies = [
  "rand 0.9.1",
  "reth-codecs",
  "reth-primitives-traits",
- "reth-testing-utils",
  "reth-zstd-compressors",
  "secp256k1",
  "serde",
