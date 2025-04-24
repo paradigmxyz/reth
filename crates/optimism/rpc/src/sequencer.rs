@@ -43,6 +43,7 @@ pub struct SequencerClient {
 }
 
 impl SequencerClientInner {
+    /// Creates a new instance with the given endpoint and client.
     pub fn new(sequencer_endpoint: String, client: Client) -> Self {
         let metrics = SequencerMetrics::default();
         Self { sequencer_endpoint, client, metrics }
@@ -50,11 +51,6 @@ impl SequencerClientInner {
 }
 
 impl SequencerClient {
-    /// Returns a reference to the [`SequencerMetrics`] for tracking client metrics.
-    pub fn metrics(&self) -> &SequencerMetrics {
-        &self.inner.metrics
-    }
-
     /// Creates a new [`SequencerClient`] for the given URL.
     ///
     /// If the URL is a websocket endpoint we connect a websocket instance.
@@ -100,6 +96,11 @@ impl SequencerClient {
     /// Returns the client
     pub fn client(&self) -> &Client {
         &self.inner.client
+    }
+
+    /// Returns a reference to the [`SequencerMetrics`] for tracking client metrics.
+    fn metrics(&self) -> &SequencerMetrics {
+        &self.inner.metrics
     }
 
     /// Sends a [`alloy_rpc_client::RpcCall`] request to the sequencer endpoint.
