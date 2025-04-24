@@ -236,7 +236,16 @@ impl CompressedBody {
 
     /// Decode this [`CompressedBody`] into an `alloy_consensus::BlockBody`
     pub fn decode_body<T: Decodable, H: Decodable>(&self) -> Result<BlockBody<T, H>, E2sError> {
-        self.decode()
+        let decompressed = self.decompress()?;
+        Self::decode_body_from_decompressed(&decompressed)
+    }
+
+    /// Decode decompressed body data into an `alloy_consensus::BlockBody`
+    pub fn decode_body_from_decompressed<T: Decodable, H: Decodable>(
+        data: &[u8],
+    ) -> Result<BlockBody<T, H>, E2sError> {
+        alloy_rlp::decode_exact::<BlockBody<T, H>>(data)
+            .map_err(|e| E2sError::Rlp(format!("Failed to decode RLP data: {e}")))
     }
 
     /// Create a [`CompressedBody`] from an `alloy_consensus::BlockBody`
