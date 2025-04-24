@@ -13,6 +13,7 @@ exclude.workspace = true
 # alloy
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
+alloy-rlp.workspace = true
 
 # reth
 reth-db-api.workspace = true

@@ -4,7 +4,9 @@
 use alloy_consensus::{BlockBody, BlockHeader, Header};
 use alloy_primitives::{BlockNumber, U256};
 use eyre::{eyre, Result};
-use reth_era::execution_types::{BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts};
+use reth_era::execution_types::{
+    BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts, TotalDifficulty,
+};
 use reth_primitives_traits::{FullBlockBody, FullBlockHeader, NodePrimitives};
 use reth_storage_api::{
     BlockReader, DBProvider, HeaderProvider, NodePrimitivesProvider, ReceiptProvider,
@@ -17,7 +19,8 @@ use tracing::{info, warn};
 
 /// Configuration to export block history
 /// to era1 files
-pub struct ExportConfig {
+#[allow(dead_code)]
+pub(crate) struct ExportConfig {
     /// Directory to export era1 files to
     pub dir: PathBuf,
     /// First block to export
@@ -34,6 +37,7 @@ pub struct ExportConfig {
 
 /// Era export data
 /// prepared to create (multiple?) era1 file
+#[allow(dead_code)]
 pub(crate) struct EraExportData {
     /// Block tuples containing header, body, receipts, and total difficulty
     pub block_tuples: Vec<BlockTuple>,
@@ -48,7 +52,11 @@ pub(crate) struct EraExportData {
 /// Fetches block history data from the provider
 /// and prepares it for export to era1 files.
 /// for a given number of blocks
-pub(crate) fn fetch_block_history_data<B, P, BH, BB>(
+/// TODO: add the write logic to create the era1 files
+/// directly from this function 
+/// to avoid holding the data in memory
+#[allow(dead_code)]
+pub(crate) fn fetch_block_history_data<P, BH, BB>(
     provider: &P,
     config: &ExportConfig,
 ) -> Result<Vec<EraExportData>>
@@ -63,6 +71,7 @@ where
                 Header,
             >,
         >,
+    <P as ReceiptProvider>::Receipt: alloy_rlp::Encodable,
 {
     info!(
         "Exporting blockchain history from block {} to {} in steps of {}",
@@ -135,8 +144,53 @@ where
 
             let compressed_header = CompressedHeader::from_header(&header.into())?;
             let compressed_body = CompressedBody::from_body(&body.into())?;
-            // let compressed_receipts = CompressedReceipts::from_rlp(&receipts())?;
+            let compressed_receipts = CompressedReceipts::from_encodable_list(&receipts)
+                .map_err(|e| eyre!("Failed to compress receipts: {}", e))?;
+
+            let difficulty = TotalDifficulty::new(total_difficulty);
+
+            let block_tuple = BlockTuple::new(
+                compressed_header,
+                compressed_body,
+                compressed_receipts,
+                difficulty,
+            );
+
+            block_tuples.push(block_tuple);
+            offsets.push(position);
+
+            // TODO: calculate accurate file offsets when writing era files
+            position += 100;
+            total_blocks_processed += 1;
+
+            if last_report_time.elapsed() >= report_interval {
+                info!(
+                    "Export progress: block {}/{} ({:.2}%) - elapsed: {:?}",
+                    block_number,
+                    last_block_number,
+                    (total_blocks_processed as f64) /
+                        ((last_block_number - config.first_block_number + 1) as f64) *
+                        100.0,
+                    start_time.elapsed()
+                );
+                last_report_time = Instant::now();
+            }
+        }
+        if !block_tuples.is_empty() {
+            export_data.push(EraExportData {
+                block_tuples,
+                start_block,
+                network: config.network.clone(),
+                offsets,
+            });
         }
     }
-    Ok(Vec::new())
+
+    info!(
+        "Export data preparation complete. Processed {} blocks in {:?}",
+        total_blocks_processed,
+        start_time.elapsed()
+    );
+
+    Ok(export_data)
 }
