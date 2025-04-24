@@ -140,7 +140,7 @@ async fn test_file_roundtrip(
         assert_eq!(
             original_decoded_body.transactions.len(),
             roundtrip_decoded_body.transactions.len(),
-            "Transaction count should match after roundtrip between original and roundtrop"
+            "Transaction count should match after roundtrip between original and roundtrip"
         );
 
         assert_eq!(
