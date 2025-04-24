@@ -323,7 +323,6 @@ fn pre_execution_checks(
         sealed_header,
     )?;
     consensus.validate_header_against_parent(sealed_header, parent.sealed_header())?;
-    consensus.validate_header_with_total_difficulty(header, block.difficulty)?;
     consensus.validate_header(sealed_header)?;
     consensus.validate_block_pre_execution(block)?;
 
