@@ -55,7 +55,7 @@ async fn e2e_test_send_transactions() -> eyre::Result<()> {
 
     let seed: [u8; 32] = rand::rng().random();
     let mut rng = StdRng::from_seed(seed);
-    println!("Seed: {:?}", seed);
+    println!("Seed: {seed:?}");
 
     let chain_spec = Arc::new(
         ChainSpecBuilder::default()
@@ -91,7 +91,7 @@ async fn test_long_reorg() -> eyre::Result<()> {
 
     let seed: [u8; 32] = rand::rng().random();
     let mut rng = StdRng::from_seed(seed);
-    println!("Seed: {:?}", seed);
+    println!("Seed: {seed:?}");
 
     let chain_spec = Arc::new(
         ChainSpecBuilder::default()
@@ -141,7 +141,7 @@ async fn test_reorg_through_backfill() -> eyre::Result<()> {
 
     let seed: [u8; 32] = rand::rng().random();
     let mut rng = StdRng::from_seed(seed);
-    println!("Seed: {:?}", seed);
+    println!("Seed: {seed:?}");
 
     let chain_spec = Arc::new(
         ChainSpecBuilder::default()

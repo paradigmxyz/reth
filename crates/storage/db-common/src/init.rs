@@ -314,7 +314,7 @@ where
 
     let storage_transitions = alloc
         .filter_map(|(addr, account)| account.storage.as_ref().map(|storage| (addr, storage)))
-        .flat_map(|(addr, storage)| storage.iter().map(|(key, _)| ((*addr, *key), [block])));
+        .flat_map(|(addr, storage)| storage.keys().map(|key| ((*addr, *key), [block])));
     provider.insert_storage_history_index(storage_transitions)?;
 
     trace!(target: "reth::cli", "Inserted storage history");
