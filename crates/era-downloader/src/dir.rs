@@ -57,8 +57,7 @@ impl EraLocalDirectoryStream {
                     }
                 }
 
-                entries.sort_by(|(left, _), (right, _)| left.cmp(right));
-                entries.reverse();
+                entries.sort_by(|(left, _), (right, _)| right.cmp(left));
 
                 Ok(entries)
             }),
