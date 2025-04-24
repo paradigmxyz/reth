@@ -7,7 +7,7 @@ mod block;
 pub use block::*;
 
 mod header_sync_gap;
-pub use header_sync_gap::{HeaderSyncGap, HeaderSyncGapProvider};
+pub use header_sync_gap::HeaderSyncGapProvider;
 
 pub use reth_chainspec::ChainSpecProvider;
 
