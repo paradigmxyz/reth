@@ -246,7 +246,7 @@ impl CompressedBody {
         data: &[u8],
     ) -> Result<BlockBody<T, H>, E2sError> {
         alloy_rlp::decode_exact::<BlockBody<T, H>>(data)
-            .map_err(|e| E2sError::Rlp(format!("Failed to decode RLP data: {}", e)))
+            .map_err(|e| E2sError::Rlp(format!("Failed to decode RLP data: {e}")))
     }
 
     /// Create a [`CompressedBody`] from an `alloy_consensus::BlockBody`
