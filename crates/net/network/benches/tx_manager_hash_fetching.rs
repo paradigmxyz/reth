@@ -43,7 +43,7 @@ pub fn benchmark_fetch_pending_hashes(group: &mut BenchmarkGroup<'_, WallTime>, 
         buffer_hash_to_tx_fetcher(&mut tx_fetcher, hash, peer, 0, None);
     }
 
-    let group_id = format!("fetch pending hashes, peers num: {}", peers_num);
+    let group_id = format!("fetch pending hashes, peers num: {peers_num}");
 
     group.bench_function(group_id, |b| {
         b.iter(|| {

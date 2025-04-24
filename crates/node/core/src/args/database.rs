@@ -136,7 +136,7 @@ impl FromStr for ByteSize {
             "MB" => 1024 * 1024,
             "GB" => 1024 * 1024 * 1024,
             "TB" => 1024 * 1024 * 1024 * 1024,
-            _ => return Err(format!("Invalid unit: {}. Use B, KB, MB, GB, or TB.", unit)),
+            _ => return Err(format!("Invalid unit: {unit}. Use B, KB, MB, GB, or TB.")),
         };
 
         Ok(Self(num * multiplier))
@@ -162,7 +162,7 @@ impl fmt::Display for ByteSize {
             (self.0 as f64, "B")
         };
 
-        write!(f, "{:.2}{}", size, unit)
+        write!(f, "{size:.2}{unit}")
     }
 }
 
