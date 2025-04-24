@@ -83,7 +83,10 @@ impl BeaconEventsConfig {
             match client.subscribe(&payloads_url).await {
                 Ok(subscription) => return subscription,
                 Err(err) => {
-                    warn!("Failed to subscribe to payload attributes events: {:?}\nRetrying in 5 seconds...", err);
+                    warn!(
+                        "Failed to subscribe to payload attributes events: {:?}\nRetrying in 5 seconds...",
+                        err
+                    );
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 }
             }
