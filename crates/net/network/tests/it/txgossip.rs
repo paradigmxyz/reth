@@ -4,13 +4,13 @@ use alloy_primitives::{Signature, U256};
 use futures::StreamExt;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_network::{
+    NetworkEvent, NetworkEventListenerProvider, Peers,
     test_utils::{NetworkEventStream, Testnet},
     transactions::config::TransactionPropagationKind,
-    NetworkEvent, NetworkEventListenerProvider, Peers,
 };
-use reth_network_api::{events::PeerEvent, PeerKind, PeersInfo};
+use reth_network_api::{PeerKind, PeersInfo, events::PeerEvent};
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
-use reth_transaction_pool::{test_utils::TransactionGenerator, PoolTransaction, TransactionPool};
+use reth_transaction_pool::{PoolTransaction, TransactionPool, test_utils::TransactionGenerator};
 use std::sync::Arc;
 use tokio::join;
 
@@ -34,8 +34,8 @@ async fn test_tx_gossip() {
     let mut peer0_tx_listener = peer0.pool().unwrap().pending_transactions_listener();
     let mut peer1_tx_listener = peer1.pool().unwrap().pending_transactions_listener();
 
-    let mut gen = TransactionGenerator::new(rand::rng());
-    let tx = gen.gen_eip1559_pooled();
+    let mut tx_gen = TransactionGenerator::new(rand::rng());
+    let tx = tx_gen.gen_eip1559_pooled();
 
     // ensure the sender has balance
     let sender = tx.sender();
@@ -73,8 +73,8 @@ async fn test_tx_propagation_policy_trusted_only() {
     let mut peer0_tx_listener = peer_0_handle.pool().unwrap().pending_transactions_listener();
     let mut peer1_tx_listener = peer_1_handle.pool().unwrap().pending_transactions_listener();
 
-    let mut gen = TransactionGenerator::new(rand::rng());
-    let tx = gen.gen_eip1559_pooled();
+    let mut tx_gen = TransactionGenerator::new(rand::rng());
+    let tx = tx_gen.gen_eip1559_pooled();
 
     // ensure the sender has balance
     let sender = tx.sender();
@@ -100,8 +100,8 @@ async fn test_tx_propagation_policy_trusted_only() {
     peer_0_handle.network().add_trusted_peer(*peer_1_handle.peer_id(), peer_1_handle.local_addr());
     join!(event_stream_0.next_session_established(), event_stream_1.next_session_established());
 
-    let mut gen = TransactionGenerator::new(rand::rng());
-    let tx = gen.gen_eip1559_pooled();
+    let mut tx_gen = TransactionGenerator::new(rand::rng());
+    let tx = tx_gen.gen_eip1559_pooled();
 
     // ensure the sender has balance
     let sender = tx.sender();

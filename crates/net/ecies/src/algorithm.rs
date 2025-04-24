@@ -1,25 +1,25 @@
 #![allow(missing_docs)]
 
 use crate::{
+    ECIESError,
     error::ECIESErrorImpl,
     mac::{HeaderBytes, MAC},
     util::{hmac_sha256, sha256},
-    ECIESError,
 };
-use aes::{cipher::StreamCipher, Aes128, Aes256};
+use aes::{Aes128, Aes256, cipher::StreamCipher};
 use alloy_primitives::{
-    bytes::{BufMut, Bytes, BytesMut},
     B128, B256, B512 as PeerId,
+    bytes::{BufMut, Bytes, BytesMut},
 };
 use alloy_rlp::{Encodable, Rlp, RlpEncodable, RlpMaxEncodedLen};
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
 use ctr::Ctr64BE;
-use digest::{crypto_common::KeyIvInit, Digest};
-use rand_08::{thread_rng as rng, Rng};
+use digest::{Digest, crypto_common::KeyIvInit};
+use rand_08::{Rng, thread_rng as rng};
 use reth_network_peers::{id2pk, pk2id};
 use secp256k1::{
+    PublicKey, SECP256K1, SecretKey,
     ecdsa::{RecoverableSignature, RecoveryId},
-    PublicKey, SecretKey, SECP256K1,
 };
 use sha2::Sha256;
 use sha3::Keccak256;

@@ -277,7 +277,7 @@ pub fn rng_ipv6_record(rng: &mut impl RngCore) -> NodeRecord {
     rng.fill_bytes(&mut ip);
     let address = IpAddr::V6(ip.into());
     // TODO(rand)
-    NodeRecord { address, tcp_port: rng.gen(), udp_port: rng.gen(), id: B512::random() }
+    NodeRecord { address, tcp_port: rng.r#gen(), udp_port: rng.r#gen(), id: B512::random() }
 }
 
 /// Generates a random IPv4 [`NodeRecord`] using the provided random number generator.
@@ -286,7 +286,7 @@ pub fn rng_ipv4_record(rng: &mut impl RngCore) -> NodeRecord {
     rng.fill_bytes(&mut ip);
     let address = IpAddr::V4(ip.into());
     // TODO(rand)
-    NodeRecord { address, tcp_port: rng.gen(), udp_port: rng.gen(), id: B512::random() }
+    NodeRecord { address, tcp_port: rng.r#gen(), udp_port: rng.r#gen(), id: B512::random() }
 }
 
 /// Generates a random [`Message`] using the provided random number generator.
@@ -301,10 +301,10 @@ pub fn rng_message(rng: &mut impl RngCore) -> Message {
         2 => Message::Pong(Pong {
             to: rng_endpoint(rng),
             echo: B256::random(),
-            expire: rng.gen(),
+            expire: rng.r#gen(),
             enr_sq: None,
         }),
-        3 => Message::FindNode(FindNode { id: B512::random(), expire: rng.gen() }),
+        3 => Message::FindNode(FindNode { id: B512::random(), expire: rng.r#gen() }),
         4 => {
             let num: usize = rng.gen_range(1..=SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS);
             Message::Neighbours(Neighbours {

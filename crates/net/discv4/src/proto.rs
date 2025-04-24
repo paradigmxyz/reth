@@ -676,7 +676,7 @@ mod tests {
             let msg = Pong {
                 to: rng_endpoint(&mut rng),
                 echo: B256::random(),
-                expire: rng.gen(),
+                expire: rng.r#gen(),
                 enr_sq: None,
             };
 
@@ -694,8 +694,8 @@ mod tests {
             let msg = Pong {
                 to: rng_endpoint(&mut rng),
                 echo: B256::random(),
-                expire: rng.gen(),
-                enr_sq: Some(rng.gen()),
+                expire: rng.r#gen(),
+                enr_sq: Some(rng.r#gen()),
             };
 
             let decoded = Pong::decode(&mut alloy_rlp::encode(&msg).as_slice()).unwrap();
