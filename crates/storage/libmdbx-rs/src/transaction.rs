@@ -426,6 +426,7 @@ impl Transaction<RW> {
     /// Returns a buffer which can be used to write a value into the item at the
     /// given key and with the given length. The buffer must be completely
     /// filled by the caller.
+    #[allow(clippy::mut_from_ref)]
     pub fn reserve(
         &self,
         db: &Database,
