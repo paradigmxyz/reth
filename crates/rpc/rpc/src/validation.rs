@@ -36,6 +36,18 @@ use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{oneshot, RwLock};
 use tracing::warn;
 
+/// A trait to convert an error to an RPC error.
+pub trait ToRpcError: core::error::Error + Send + Sync + 'static {
+    /// Converts the error to a JSON-RPC error object.
+    fn to_rpc_error(&self) -> jsonrpsee_types::ErrorObject<'static>;
+}
+
+impl ToRpcError for jsonrpsee_types::ErrorObject<'static> {
+    fn to_rpc_error(&self) -> jsonrpsee_types::ErrorObject<'static> {
+        self.clone()
+    }
+}
+
 /// The type that implements the `validation` rpc namespace trait
 #[derive(Clone, Debug, derive_more::Deref)]
 pub struct ValidationApi<Provider, E: BlockExecutorProvider> {
@@ -566,4 +578,40 @@ pub enum ValidationApiError {
 pub(crate) struct ValidationMetrics {
     /// The number of entries configured in the builder validation disallow list.
     pub(crate) disallow_size: Gauge,
+}
+
+impl From<ValidationApiError> for jsonrpsee_types::error::ErrorObject<'static> {
+    fn from(error: ValidationApiError) -> Self {
+        match error {
+            ValidationApiError::GasLimitMismatch(_)
+            | ValidationApiError::GasUsedMismatch(_)
+            | ValidationApiError::ParentHashMismatch(_)
+            | ValidationApiError::BlockHashMismatch(_)
+            | ValidationApiError::InvalidTransactionSignature
+            | ValidationApiError::Blacklist(_)
+            | ValidationApiError::InvalidBlobsBundle => {
+                jsonrpsee_types::error::ErrorObject::owned(
+                    jsonrpsee_types::error::INVALID_PARAMS_CODE,
+                    error.to_string(),
+                    None::<()>,
+                )
+            }
+
+            ValidationApiError::MissingLatestBlock
+            | ValidationApiError::MissingParentBlock
+            | ValidationApiError::BlockTooOld
+            | ValidationApiError::ProposerPayment
+            | ValidationApiError::Consensus(_)
+            | ValidationApiError::Provider(_)
+            | ValidationApiError::Execution(_)
+            | ValidationApiError::Payload(_)
+            | ValidationApiError::Blob(_) => {
+                jsonrpsee_types::error::ErrorObject::owned(
+                    jsonrpsee_types::error::INTERNAL_ERROR_CODE,
+                    error.to_string(),
+                    None::<()>,
+                )
+            }
+        }
+    }
 }
