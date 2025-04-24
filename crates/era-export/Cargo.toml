@@ -10,6 +10,23 @@ repository.workspace = true
 exclude.workspace = true
 
 [dependencies]
+# alloy
+alloy-consensus.workspace = true
+alloy-primitives.workspace = true
 
+# reth
+reth-db-api.workspace = true
+reth-era.workspace = true
+reth-fs-util.workspace = true
+reth-primitives-traits.workspace = true
+reth-provider.workspace = true
+reth-storage-api.workspace = true
+
+# obs
+tracing.workspace = true
+
+# error
+eyre.workspace = true
+ 
 [lints]
 workspace = true
