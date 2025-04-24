@@ -121,18 +121,6 @@ pub trait HeaderValidator<H = Header>: Debug + Send + Sync {
         }
         Ok(())
     }
-
-    /// Validate if the header is correct and follows the consensus specification, including
-    /// computed properties (like total difficulty).
-    ///
-    /// Some consensus engines may want to do additional checks here.
-    ///
-    /// Note: validating headers with TD does not include other HeaderValidator validation.
-    fn validate_header_with_total_difficulty(
-        &self,
-        header: &H,
-        total_difficulty: U256,
-    ) -> Result<(), ConsensusError>;
 }
 
 /// Consensus Errors
