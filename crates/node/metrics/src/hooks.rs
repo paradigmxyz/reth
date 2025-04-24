@@ -80,7 +80,7 @@ impl fmt::Debug for Hooks {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let hooks_len = self.inner.len();
         f.debug_struct("Hooks")
-            .field("inner", &format_args!("Arc<Vec<Box<dyn Hook>>>, len: {}", hooks_len))
+            .field("inner", &format_args!("Arc<Vec<Box<dyn Hook>>>, len: {hooks_len}"))
             .finish()
     }
 }
