@@ -34,7 +34,7 @@ pub(crate) const MAINNET: &str = "mainnet";
 /// for downloading mainnet `.era1` files
 pub(crate) const MAINNET_URL: &str = "https://mainnet.era1.nimbus.team/";
 
-/// Succint list of mainnet files we want to download
+/// Succinct list of mainnet files we want to download
 /// from <https://mainnet.era1.nimbus.team/>
 /// for testing purposes
 pub(crate) const ERA1_MAINNET_FILES_NAMES: [&str; 6] = [
