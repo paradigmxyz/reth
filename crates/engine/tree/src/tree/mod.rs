@@ -3328,7 +3328,7 @@ mod tests {
                     assert_eq!(state, fcu_state);
                     assert_eq!(status, fcu_status.into());
                 }
-                _ => panic!("Unexpected event: {:#?}", event),
+                _ => panic!("Unexpected event: {event:#?}"),
             }
         }
 
@@ -3377,7 +3377,7 @@ mod tests {
                 ) => {
                     assert_eq!(header.hash(), hash);
                 }
-                _ => panic!("Unexpected event: {:#?}", event),
+                _ => panic!("Unexpected event: {event:#?}"),
             }
         }
 
@@ -3407,7 +3407,7 @@ mod tests {
                 ) => {
                     assert_eq!(executed.recovered_block.hash(), expected_hash);
                 }
-                _ => panic!("Unexpected event: {:#?}", event),
+                _ => panic!("Unexpected event: {event:#?}"),
             }
         }
 
@@ -3420,7 +3420,7 @@ mod tests {
                 )) => {
                     assert_eq!(executed.recovered_block.hash(), expected_hash);
                 }
-                _ => panic!("Unexpected event: {:#?}", event),
+                _ => panic!("Unexpected event: {event:#?}"),
             }
         }
 
@@ -3432,7 +3432,7 @@ mod tests {
                 )) => {
                     assert_eq!(block.hash(), expected_hash);
                 }
-                _ => panic!("Unexpected event: {:#?}", event),
+                _ => panic!("Unexpected event: {event:#?}"),
             }
         }
 
@@ -3523,7 +3523,7 @@ mod tests {
             FromEngine::DownloadedBlocks(blocks) => {
                 assert_eq!(blocks.len(), tree_config.max_execute_block_batch_size());
             }
-            _ => panic!("unexpected message: {:#?}", msg),
+            _ => panic!("unexpected message: {msg:#?}"),
         }
     }
 
@@ -4213,7 +4213,7 @@ mod tests {
                 let expected_block_set = HashSet::from_iter([missing_block.hash()]);
                 assert_eq!(actual_block_set, expected_block_set);
             }
-            _ => panic!("Unexpected event: {:#?}", event),
+            _ => panic!("Unexpected event: {event:#?}"),
         }
     }
 
@@ -4305,7 +4305,7 @@ mod tests {
             EngineApiEvent::Download(DownloadRequest::BlockSet(hash_set)) => {
                 assert_eq!(hash_set, HashSet::from_iter([main_chain_last_hash]));
             }
-            _ => panic!("Unexpected event: {:#?}", event),
+            _ => panic!("Unexpected event: {event:#?}"),
         }
 
         test_harness
@@ -4325,7 +4325,7 @@ mod tests {
                 );
                 assert_eq!(initial_hash, main_chain.last().unwrap().parent_hash);
             }
-            _ => panic!("Unexpected event: {:#?}", event),
+            _ => panic!("Unexpected event: {event:#?}"),
         }
     }
 
@@ -4368,7 +4368,7 @@ mod tests {
             EngineApiEvent::Download(DownloadRequest::BlockSet(hash_set)) => {
                 assert_eq!(hash_set, HashSet::from_iter([main_chain_backfill_target_hash]));
             }
-            _ => panic!("Unexpected event: {:#?}", event),
+            _ => panic!("Unexpected event: {event:#?}"),
         }
 
         // send message to tell the engine the requested block was downloaded
@@ -4387,7 +4387,7 @@ mod tests {
             )) => {
                 assert_eq!(target_hash, main_chain_backfill_target_hash);
             }
-            _ => panic!("Unexpected event: {:#?}", event),
+            _ => panic!("Unexpected event: {event:#?}"),
         }
 
         // persist blocks of main chain, same as the backfill operation would do
@@ -4413,7 +4413,7 @@ mod tests {
             EngineApiEvent::Download(DownloadRequest::BlockSet(target_hash)) => {
                 assert_eq!(target_hash, HashSet::from_iter([main_chain_last_hash]));
             }
-            _ => panic!("Unexpected event: {:#?}", event),
+            _ => panic!("Unexpected event: {event:#?}"),
         }
 
         // tell engine main chain tip downloaded
@@ -4432,7 +4432,7 @@ mod tests {
                 );
                 assert_eq!(initial_hash, main_chain_last.parent_hash);
             }
-            _ => panic!("Unexpected event: {:#?}", event),
+            _ => panic!("Unexpected event: {event:#?}"),
         }
 
         let remaining: Vec<_> = main_chain
