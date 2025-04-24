@@ -45,7 +45,7 @@ use utils::*;
 mod tests {
     use super::*;
     use crate::test_utils::{StorageKind, TestStageDB};
-    use alloy_primitives::{address, hex_literal::hex, keccak256, BlockNumber, B256, U256};
+    use alloy_primitives::{address, hex_literal::hex, keccak256, BlockNumber, Signature, B256, U256};
     use alloy_rlp::Decodable;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db::mdbx::{cursor::Cursor, RW};
@@ -77,6 +77,7 @@ mod tests {
         self, random_block, random_block_range, random_receipt, BlockRangeParams,
     };
     use std::{io::Write, sync::Arc};
+    use alloy_consensus::{SignableTransaction, TxLegacy};
 
     #[tokio::test]
     #[ignore]
@@ -502,7 +503,7 @@ mod tests {
             &db,
             current + 2,
             Some(PipelineTarget::Unwind(89)),
-            &Default::default(),
+            &TxLegacy::default().into_signed(Signature::test_signature()).into(),
         );
 
         // Fill the gap, and ensure no unwind is necessary.
@@ -510,7 +511,7 @@ mod tests {
             &db,
             current + 1,
             None,
-            &Default::default(),
+            &TxLegacy::default().into_signed(Signature::test_signature()).into(),
         );
     }
 
