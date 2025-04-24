@@ -96,3 +96,6 @@ pub use block_indices::*;
 
 mod block_writer;
 pub use block_writer::*;
+
+mod state_writer;
+pub use state_writer::*;
