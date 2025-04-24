@@ -2464,6 +2464,7 @@ where
         ));
         let execution_finish = Instant::now();
         let execution_time = execution_finish.duration_since(execution_start);
+        state_provider.record_total_latency();
         debug!(target: "engine::tree", elapsed = ?execution_time, number=?block_num_hash.number, "Executed block");
 
         // after executing the block we can stop executing transactions
