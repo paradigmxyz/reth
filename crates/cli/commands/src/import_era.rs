@@ -3,7 +3,7 @@ use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use clap::Parser;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
-use reth_era_downloader::EraLocalDirectoryStream;
+use reth_era_downloader::read_dir;
 use reth_etl::Collector;
 use reth_node_core::version::SHORT_VERSION;
 use std::{path::PathBuf, sync::Arc};
@@ -33,7 +33,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
         let Environment { provider_factory, config, .. } = self.env.init::<N>(AccessRights::RW)?;
 
         let hash_collector = Collector::new(config.stages.etl.file_size, config.stages.etl.dir);
-        let stream = EraLocalDirectoryStream::new(self.path);
+        let stream = read_dir(self.path)?;
 
         reth_era_import::import(
             stream,
