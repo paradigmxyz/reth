@@ -43,8 +43,7 @@ impl core::fmt::Display for DisplayFork {
                 // All networks that have merged are finalized.
                 write!(
                     f,
-                    "{:32} @{} (network is known to be merged)",
-                    name_with_eip, total_difficulty,
+                    "{name_with_eip:32} @{total_difficulty} (network is known to be merged)",
                 )?;
             }
             ForkCondition::Never => unreachable!(),
@@ -123,7 +122,12 @@ impl core::fmt::Display for DisplayHardforks {
             f,
         )?;
 
-        if !self.with_merge.is_empty() {
+        if self.with_merge.is_empty() {
+            if !self.post_merge.is_empty() {
+                // need an extra line here in case we don't have a merge block (optimism)
+                writeln!(f)?;
+            }
+        } else {
             format("Merge hard forks", &self.with_merge, self.post_merge.is_empty(), f)?;
         }
 

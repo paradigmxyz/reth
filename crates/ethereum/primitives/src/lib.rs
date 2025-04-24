@@ -14,16 +14,24 @@ extern crate alloc;
 mod receipt;
 pub use receipt::*;
 
+/// Kept for concistency tests
+#[cfg(test)]
 mod transaction;
-pub use transaction::*;
 
-#[cfg(feature = "alloy-compat")]
-mod alloy_compat;
+use alloy_consensus::TxEip4844;
+pub use alloy_consensus::{transaction::PooledTransaction, TxType};
+
+/// Typed Transaction type without a signature
+pub type Transaction = alloy_consensus::EthereumTypedTransaction<TxEip4844>;
+
+/// Signed transaction.
+pub type TransactionSigned = alloy_consensus::EthereumTxEnvelope<TxEip4844>;
 
 /// Bincode-compatible serde implementations.
 #[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
 pub mod serde_bincode_compat {
-    pub use super::{receipt::serde_bincode_compat::*, transaction::serde_bincode_compat::*};
+    pub use super::receipt::serde_bincode_compat::*;
+    pub use alloy_consensus::serde_bincode_compat::transaction::*;
 }
 
 /// Type alias for the ethereum block

@@ -14,25 +14,15 @@ workspace = true
 
 [dependencies]
 # reth
-reth-cli.workspace = true
 reth-ethereum-cli.workspace = true
 reth-chainspec.workspace = true
-reth-config.workspace = true
 reth-primitives.workspace = true
-reth-primitives-traits.workspace = true
-reth-fs-util.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
-reth-db-api.workspace = true
-reth-exex.workspace = true
 reth-provider.workspace = true
 reth-evm.workspace = true
 reth-revm.workspace = true
-reth-stages.workspace = true
-reth-execution-types.workspace = true
-reth-errors.workspace = true
 reth-transaction-pool.workspace = true
 reth-cli-runner.workspace = true
-reth-cli-commands.workspace = true
 reth-cli-util.workspace = true
 reth-consensus-common.workspace = true
 reth-rpc-builder.workspace = true
@@ -42,91 +32,95 @@ reth-rpc-api = { workspace = true, features = ["client"] }
 reth-rpc-eth-types.workspace = true
 reth-rpc-server-types.workspace = true
 reth-network = { workspace = true, features = ["serde"] }
-reth-network-p2p.workspace = true
 reth-network-api.workspace = true
-reth-downloaders.workspace = true
-reth-tracing.workspace = true
 reth-tasks.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-primitives.workspace = true
-reth-basic-payload-builder.workspace = true
-reth-static-file.workspace = true
-reth-trie = { workspace = true, features = ["metrics"] }
-reth-trie-db = { workspace = true, features = ["metrics"] }
 reth-node-api.workspace = true
 reth-node-core.workspace = true
 reth-ethereum-payload-builder.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-node-ethereum = { workspace = true, features = ["js-tracer"] }
 reth-node-builder.workspace = true
-reth-node-events.workspace = true
 reth-node-metrics.workspace = true
 reth-consensus.workspace = true
-reth-prune.workspace = true
 reth-tokio-util.workspace = true
 reth-ress-protocol.workspace = true
 reth-ress-provider.workspace = true
 
 # alloy
-alloy-eips = { workspace = true, features = ["kzg"] }
-alloy-rlp.workspace = true
 alloy-rpc-types = { workspace = true, features = ["engine"] }
-alloy-consensus.workspace = true
-alloy-primitives.workspace = true
 
 # tracing
 tracing.workspace = true
 
-# io
-serde_json.workspace = true
-
 # async
 tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thread"] }
-futures.workspace = true
 
 # misc
 aquamarine.workspace = true
 eyre.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
-backon.workspace = true
-similar-asserts.workspace = true
-
-[dev-dependencies]
-tempfile.workspace = true
 
 [features]
 default = ["jemalloc", "reth-revm/portable"]
 
-dev = ["reth-cli-commands/arbitrary"]
+dev = ["reth-ethereum-cli/dev"]
 
 asm-keccak = [
     "reth-node-core/asm-keccak",
     "reth-primitives/asm-keccak",
-    "alloy-primitives/asm-keccak",
+    "reth-ethereum-cli/asm-keccak",
 ]
 
 jemalloc = [
     "reth-cli-util/jemalloc",
     "reth-node-core/jemalloc",
     "reth-node-metrics/jemalloc",
+    "reth-ethereum-cli/jemalloc",
 ]
 jemalloc-prof = [
     "reth-cli-util/jemalloc",
     "reth-cli-util/jemalloc-prof",
+    "reth-ethereum-cli/jemalloc-prof",
 ]
-tracy-allocator = ["reth-cli-util/tracy-allocator"]
+tracy-allocator = [
+    "reth-cli-util/tracy-allocator",
+    "reth-ethereum-cli/tracy-allocator",
+]
 
 # Because jemalloc is default and preferred over snmalloc when both features are
 # enabled, `--no-default-features` should be used when enabling snmalloc or
 # snmalloc-native.
-snmalloc = ["reth-cli-util/snmalloc"]
-snmalloc-native = ["reth-cli-util/snmalloc-native"]
+snmalloc = [
+    "reth-cli-util/snmalloc",
+    "reth-ethereum-cli/snmalloc",
+]
+snmalloc-native = [
+    "reth-cli-util/snmalloc-native",
+    "reth-ethereum-cli/snmalloc-native",
+]
 
-min-error-logs = ["tracing/release_max_level_error"]
-min-warn-logs = ["tracing/release_max_level_warn"]
-min-info-logs = ["tracing/release_max_level_info"]
-min-debug-logs = ["tracing/release_max_level_debug"]
-min-trace-logs = ["tracing/release_max_level_trace"]
+min-error-logs = [
+    "tracing/release_max_level_error",
+    "reth-ethereum-cli/min-error-logs",
+]
+min-warn-logs = [
+    "tracing/release_max_level_warn",
+    "reth-ethereum-cli/min-warn-logs",
+]
+min-info-logs = [
+    "tracing/release_max_level_info",
+    "reth-ethereum-cli/min-info-logs",
+]
+min-debug-logs = [
+    "tracing/release_max_level_debug",
+    "reth-ethereum-cli/min-debug-logs",
+]
+min-trace-logs = [
+    "tracing/release_max_level_trace",
+    "reth-ethereum-cli/min-trace-logs",
+]
 
 [[bin]]
 name = "reth"

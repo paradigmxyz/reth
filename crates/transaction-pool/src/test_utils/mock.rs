@@ -13,8 +13,8 @@ use alloy_consensus::{
         LEGACY_TX_TYPE_ID,
     },
     transaction::PooledTransaction,
-    EthereumTxEnvelope, TxEip1559, TxEip2930, TxEip4844, TxEip4844Variant, TxEip7702, TxEnvelope,
-    TxLegacy, TxType, Typed2718,
+    EthereumTxEnvelope, Signed, TxEip1559, TxEip2930, TxEip4844, TxEip4844Variant, TxEip7702,
+    TxEnvelope, TxLegacy, TxType, Typed2718,
 };
 use alloy_eips::{
     eip1559::MIN_PROTOCOL_BASE_FEE,
@@ -27,10 +27,11 @@ use paste::paste;
 use rand::{distr::Uniform, prelude::Distribution};
 use reth_ethereum_primitives::{Transaction, TransactionSigned};
 use reth_primitives_traits::{
-    transaction::error::{TransactionConversionError, TryFromRecoveredTransactionError},
-    InMemorySize, Recovered, SignedTransaction,
+    transaction::error::TryFromRecoveredTransactionError, InMemorySize, Recovered,
+    SignedTransaction,
 };
 
+use alloy_consensus::error::ValueError;
 use alloy_eips::eip4844::env_settings::KzgSettings;
 use rand::distr::weighted::WeightedIndex;
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
@@ -667,7 +668,7 @@ impl MockTransaction {
 }
 
 impl PoolTransaction for MockTransaction {
-    type TryFromConsensusError = TransactionConversionError;
+    type TryFromConsensusError = ValueError<EthereumTxEnvelope<TxEip4844>>;
 
     type Consensus = TransactionSigned;
 
@@ -918,8 +919,7 @@ impl TryFrom<Recovered<TransactionSigned>> for MockTransaction {
         let hash = *transaction.tx_hash();
         let size = transaction.size();
 
-        #[expect(unreachable_patterns)]
-        match transaction.into_transaction() {
+        match transaction.into_typed_transaction() {
             Transaction::Legacy(TxLegacy {
                 chain_id,
                 nonce,
@@ -1046,7 +1046,6 @@ impl TryFrom<Recovered<TransactionSigned>> for MockTransaction {
                 size,
                 cost: U256::from(gas_limit) * U256::from(max_fee_per_gas) + value,
             }),
-            tx => Err(TryFromRecoveredTransactionError::UnsupportedTransactionType(tx.ty())),
         }
     }
 }
@@ -1167,10 +1166,12 @@ impl From<Recovered<PooledTransaction>> for MockTransaction {
 
 impl From<MockTransaction> for Recovered<TransactionSigned> {
     fn from(tx: MockTransaction) -> Self {
-        let signed_tx =
-            TransactionSigned::new(tx.clone().into(), Signature::test_signature(), *tx.hash());
-
-        Self::new_unchecked(signed_tx, tx.sender())
+        let hash = *tx.hash();
+        let sender = tx.sender();
+        let tx = Transaction::from(tx);
+        let tx: TransactionSigned =
+            Signed::new_unchecked(tx, Signature::test_signature(), hash).into();
+        Self::new_unchecked(tx, sender)
     }
 }
 
