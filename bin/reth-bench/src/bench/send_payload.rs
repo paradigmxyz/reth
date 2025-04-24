@@ -144,10 +144,10 @@ impl Command {
                 );
 
                 if let Some(rpc_url) = self.rpc_url {
-                    cmd += &format!(" --rpc-url {}", rpc_url);
+                    cmd += &format!(" --rpc-url {rpc_url}");
                 }
                 if let Some(secret) = &jwt_secret {
-                    cmd += &format!(" --jwt-secret {}", secret);
+                    cmd += &format!(" --jwt-secret {secret}");
                 }
 
                 println!("{cmd}");
