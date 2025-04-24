@@ -9558,6 +9558,7 @@ dependencies = [
  "http-body",
  "hyper",
  "jsonrpsee",
+ "jsonrpsee-core",
  "jsonrpsee-types",
  "jsonwebtoken",
  "parking_lot",
