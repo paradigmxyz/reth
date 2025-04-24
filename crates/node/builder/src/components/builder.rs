@@ -295,7 +295,8 @@ where
 impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB> NodeComponentsBuilder<Node>
     for ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB>
 where
-    Node: FullNodeTypes<Types: reth_node_api::NodeTypes<ChainSpec = reth_chainspec::ChainSpec>>,
+    Node: FullNodeTypes,
+    Node::Types: reth_node_api::NodeTypes,
     PoolB: PoolBuilder<
         Node,
         Pool: TransactionPool<
