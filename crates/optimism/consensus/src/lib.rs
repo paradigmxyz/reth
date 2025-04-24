@@ -205,6 +205,4 @@ impl<ChainSpec: EthChainSpec + OpHardforks, H: BlockHeader> HeaderValidator<H>
 
         Ok(())
     }
-
-    
 }

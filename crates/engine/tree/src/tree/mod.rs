@@ -1906,18 +1906,6 @@ where
     /// Validate if block is correct and satisfies all the consensus rules that concern the header
     /// and block body itself.
     fn validate_block(&self, block: &RecoveredBlock<N::Block>) -> Result<(), ConsensusError> {
-        if let Err(e) =
-            self.consensus.validate_header_with_total_difficulty(block.header(), U256::MAX)
-        {
-            error!(
-                target: "engine::tree",
-                ?block,
-                "Failed to validate total difficulty for block {}: {e}",
-                block.hash()
-            );
-            return Err(e)
-        }
-
         if let Err(e) = self.consensus.validate_header(block.sealed_header()) {
             error!(target: "engine::tree", ?block, "Failed to validate header {}: {e}", block.hash());
             return Err(e)

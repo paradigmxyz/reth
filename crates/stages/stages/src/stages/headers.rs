@@ -145,17 +145,6 @@ where
             // Increase total difficulty
             td += header.difficulty();
 
-            // Header validation
-            self.consensus.validate_header_with_total_difficulty(&header, td).map_err(|error| {
-                StageError::Block {
-                    block: Box::new(BlockWithParent::new(
-                        header.parent_hash(),
-                        NumHash::new(header.number(), header_hash),
-                    )),
-                    error: BlockErrorKind::Validation(error),
-                }
-            })?;
-
             // Append to Headers segment
             writer.append_header(&header, td, &header_hash)?;
         }

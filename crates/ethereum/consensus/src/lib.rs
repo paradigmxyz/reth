@@ -14,7 +14,6 @@ extern crate alloc;
 use alloc::{fmt::Debug, sync::Arc};
 use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
 use alloy_eips::eip7840::BlobParams;
-use alloy_primitives::U256;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
 use reth_consensus_common::validation::{
