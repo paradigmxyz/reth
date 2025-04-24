@@ -107,7 +107,7 @@ fn bench_put_rand_raw(c: &mut Criterion) {
                     data_val.iov_len = data.len();
                     data_val.iov_base = data.as_bytes().as_ptr().cast_mut().cast();
 
-                    i += mdbx_put(txn, dbi, &key_val, &raw mut data_val, 0);
+                    i += mdbx_put(txn, dbi, &raw const key_val, &raw mut data_val, 0);
                 }
                 assert_eq!(0, i);
                 mdbx_txn_abort(txn);

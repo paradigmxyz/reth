@@ -2237,8 +2237,7 @@ mod tests {
             };
             assert!(
                 equals,
-                "path: {:?}\nproof node: {:?}\nsparse node: {:?}",
-                proof_node_path, proof_node, sparse_node
+                "path: {proof_node_path:?}\nproof node: {proof_node:?}\nsparse node: {sparse_node:?}"
             );
         }
     }

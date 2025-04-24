@@ -58,12 +58,12 @@ impl<T: Decodable> SnappyRlpCodec<T> {
         let mut decoder = FrameDecoder::new(compressed_data);
         let mut decompressed = Vec::new();
         Read::read_to_end(&mut decoder, &mut decompressed).map_err(|e| {
-            E2sError::SnappyDecompression(format!("Failed to decompress data: {}", e))
+            E2sError::SnappyDecompression(format!("Failed to decompress data: {e}"))
         })?;
 
         let mut slice = decompressed.as_slice();
         T::decode(&mut slice)
-            .map_err(|e| E2sError::Rlp(format!("Failed to decode RLP data: {}", e)))
+            .map_err(|e| E2sError::Rlp(format!("Failed to decode RLP data: {e}")))
     }
 }
 
@@ -78,11 +78,11 @@ impl<T: Encodable> SnappyRlpCodec<T> {
             let mut encoder = FrameEncoder::new(&mut compressed);
 
             Write::write_all(&mut encoder, &rlp_data).map_err(|e| {
-                E2sError::SnappyCompression(format!("Failed to compress data: {}", e))
+                E2sError::SnappyCompression(format!("Failed to compress data: {e}"))
             })?;
 
             encoder.flush().map_err(|e| {
-                E2sError::SnappyCompression(format!("Failed to flush encoder: {}", e))
+                E2sError::SnappyCompression(format!("Failed to flush encoder: {e}"))
             })?;
         }
 
@@ -212,7 +212,7 @@ impl CompressedBody {
         let mut decoder = FrameDecoder::new(self.data.as_slice());
         let mut decompressed = Vec::new();
         Read::read_to_end(&mut decoder, &mut decompressed).map_err(|e| {
-            E2sError::SnappyDecompression(format!("Failed to decompress body: {}", e))
+            E2sError::SnappyDecompression(format!("Failed to decompress body: {e}"))
         })?;
 
         Ok(decompressed)
@@ -279,7 +279,7 @@ impl CompressedReceipts {
             })?;
 
             encoder.flush().map_err(|e| {
-                E2sError::SnappyCompression(format!("Failed to flush encoder: {}", e))
+                E2sError::SnappyCompression(format!("Failed to flush encoder: {e}"))
             })?;
         }
         Ok(Self { data: compressed })
