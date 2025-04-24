@@ -8,7 +8,6 @@ use alloy_rpc_types_eth::erc4337::TransactionConditional;
 use alloy_transport_http::Http;
 use reth_optimism_txpool::supervisor::metrics::SequencerMetrics;
 use std::{str::FromStr, sync::Arc, time::Instant};
-use std::{str::FromStr, sync::Arc};
 use thiserror::Error;
 use tracing::warn;
 
