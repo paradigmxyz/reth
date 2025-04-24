@@ -18,7 +18,7 @@ pub struct RollupArgs {
     pub disable_txpool_gossip: bool,
 
     /// Enable transaction pool admission
-    #[arg(long = "rollup.enable-tx-pool-admission")]
+    #[arg(long = "rollup.enable-tx-pool-admission", default_value = "true")]
     pub enable_txpool_admisson: bool,
 
     /// Enable walkback to genesis on startup. This is useful for re-validating the existing DB
