@@ -7818,6 +7818,7 @@ dependencies = [
  "futures",
  "futures-util",
  "reqwest",
+ "reth-fs-util",
  "tempfile",
  "test-case",
  "tokio",

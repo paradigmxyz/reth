@@ -10,6 +10,9 @@ repository.workspace = true
 exclude.workspace = true
 
 [dependencies]
+# reth
+reth-fs-util.workspace = true
+
 # http
 bytes.workspace = true
 reqwest.workspace = true

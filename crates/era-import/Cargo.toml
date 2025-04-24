@@ -40,7 +40,7 @@ reth-db-common.workspace = true
 
 # async
 tokio.workspace = true
-tokio.features = ["fs", "io-util", "macros"]
+tokio.features = ["fs", "io-util", "macros", "rt-multi-thread"]
 
 # http
 reqwest.workspace = true
