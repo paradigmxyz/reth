@@ -62,8 +62,7 @@ impl<T: Decodable> SnappyRlpCodec<T> {
         })?;
 
         let mut slice = decompressed.as_slice();
-        T::decode(&mut slice)
-            .map_err(|e| E2sError::Rlp(format!("Failed to decode RLP data: {e}")))
+        T::decode(&mut slice).map_err(|e| E2sError::Rlp(format!("Failed to decode RLP data: {e}")))
     }
 }
 
