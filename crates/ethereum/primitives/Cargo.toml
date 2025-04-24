@@ -51,16 +51,16 @@ test-utils = [
     "reth-primitives-traits/test-utils",
 ]
 std = [
-	"alloy-consensus/std",
-	"alloy-primitives/std",
-	"alloy-rlp/std",
-	"reth-primitives-traits/std",
-	"reth-zstd-compressors?/std",
-	"serde?/std",
-	"alloy-eips/std",
-	"derive_more/std",
-	"serde_with?/std",
-	"secp256k1/std"
+    "alloy-consensus/std",
+    "alloy-primitives/std",
+    "alloy-rlp/std",
+    "reth-primitives-traits/std",
+    "reth-zstd-compressors?/std",
+    "serde?/std",
+    "alloy-eips/std",
+    "derive_more/std",
+    "serde_with?/std",
+    "secp256k1/std",
 ]
 reth-codec = [
     "std",
@@ -84,13 +84,13 @@ serde-bincode-compat = [
     "reth-primitives-traits/serde-bincode-compat",
 ]
 serde = [
-	"dep:serde",
-	"alloy-consensus/serde",
-	"alloy-eips/serde",
-	"alloy-primitives/serde",
-	"reth-codecs?/serde",
-	"reth-primitives-traits/serde",
-	"rand/serde",
-	"rand_08/serde",
-	"secp256k1/serde"
+    "dep:serde",
+    "alloy-consensus/serde",
+    "alloy-eips/serde",
+    "alloy-primitives/serde",
+    "reth-codecs?/serde",
+    "reth-primitives-traits/serde",
+    "rand/serde",
+    "rand_08/serde",
+    "secp256k1/serde",
 ]
