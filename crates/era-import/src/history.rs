@@ -21,7 +21,7 @@ use tracing::info;
 /// Imports blocks from `downloader` using `provider`.
 ///
 /// Returns current block height.
-pub fn import<Downloader, P, B, BB, BH>(
+pub fn import<Downloader, Era, P, B, BB, BH>(
     mut downloader: Downloader,
     provider: &P,
     mut hash_collector: Collector<BlockHash, BlockNumber>,
@@ -33,7 +33,8 @@ where
         Transaction = <<P as NodePrimitivesProvider>::Primitives as NodePrimitives>::SignedTx,
         OmmerHeader = BH,
     >,
-    Downloader: Stream<Item = eyre::Result<Box<Path>>> + Send + 'static + Unpin,
+    Downloader: Stream<Item = eyre::Result<Era>> + Send + 'static + Unpin,
+    Era: AsRef<Path> + Send + 'static,
     P: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory + BlockWriter<Block = B>,
     <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
 {
@@ -66,7 +67,7 @@ where
 
     while let Some(path) = rx.recv()? {
         let path = path?;
-        let file = fs::open(path.clone())?;
+        let file = fs::open(path.as_ref())?;
         let mut reader = Era1Reader::new(file);
 
         for block in reader.iter() {
@@ -98,9 +99,7 @@ where
             hash_collector.insert(hash, number)?;
         }
 
-        info!(target: "era::history::import", "Processed {}", path.to_string_lossy());
-
-        fs::remove_file(path)?;
+        info!(target: "era::history::import", "Processed {}", path.as_ref().to_string_lossy());
     }
 
     let total_headers = hash_collector.len();

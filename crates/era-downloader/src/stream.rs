@@ -90,8 +90,31 @@ impl<Http> EraStream<Http> {
     }
 }
 
+#[derive(Debug)]
+pub struct EraMeta {
+    path: Box<Path>,
+}
+
+impl EraMeta {
+    const fn new(path: Box<Path>) -> Self {
+        Self { path }
+    }
+}
+
+impl AsRef<Path> for EraMeta {
+    fn as_ref(&self) -> &Path {
+        self.path.as_ref()
+    }
+}
+
+impl Drop for EraMeta {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
 impl<Http: HttpClient + Clone + Send + Sync + 'static + Unpin> Stream for EraStream<Http> {
-    type Item = eyre::Result<Box<Path>>;
+    type Item = eyre::Result<EraMeta>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if let Poll::Ready(fut) = self.starting_stream.poll_next_unpin(cx) {
@@ -112,8 +135,7 @@ impl<Http: HttpClient + Clone + Send + Sync + 'static + Unpin> Stream for EraStr
     }
 }
 
-type DownloadFuture =
-    Pin<Box<dyn Future<Output = eyre::Result<Box<Path>>> + Send + Sync + 'static>>;
+type DownloadFuture = Pin<Box<dyn Future<Output = eyre::Result<EraMeta>> + Send + Sync + 'static>>;
 
 struct DownloadStream {
     downloads: FuturesOrdered<DownloadFuture>,
@@ -129,7 +151,7 @@ impl Debug for DownloadStream {
 }
 
 impl Stream for DownloadStream {
-    type Item = eyre::Result<Box<Path>>;
+    type Item = eyre::Result<EraMeta>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         for _ in 0..self.max_concurrent_downloads - self.downloads.len() {
@@ -221,7 +243,7 @@ impl<Http: HttpClient + Clone + Send + Sync + 'static + Unpin> Stream for Starti
                 return Poll::Ready(url.transpose().map(|url| -> DownloadFuture {
                     let mut client = self.client.clone();
 
-                    Box::pin(async move { client.download_to_file(url?).await })
+                    Box::pin(async move { client.download_to_file(url?).await.map(EraMeta::new) })
                 }));
             }
         }
