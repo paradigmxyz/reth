@@ -17,6 +17,7 @@ use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
 use error::{InsertBlockError, InsertBlockErrorKind, InsertBlockFatalError};
+use instrumented_state::InstrumentedStateProvider;
 use payload_processor::sparse_trie::StateRootComputeOutcome;
 use persistence_state::CurrentPersistenceAction;
 use reth_chain_state::{
@@ -66,6 +67,7 @@ use tracing::*;
 mod block_buffer;
 mod cached_state;
 pub mod error;
+mod instrumented_state;
 mod invalid_block_hook;
 mod invalid_headers;
 mod metrics;
@@ -2431,11 +2433,12 @@ where
 
         // Use cached state provider before executing, used in execution after prewarming threads
         // complete
-        let state_provider = CachedStateProvider::new_with_caches(
-            state_provider,
-            handle.caches(),
-            handle.cache_metrics(),
-        );
+        let state_provider =
+            InstrumentedStateProvider::from_state_provider(CachedStateProvider::new_with_caches(
+                state_provider,
+                handle.caches(),
+                handle.cache_metrics(),
+            ));
 
         debug!(target: "engine::tree", block=?block_num_hash, "Executing block");
 
