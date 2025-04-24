@@ -187,7 +187,7 @@ async fn test_file_roundtrip(
         let recompressed_block = BlockTuple::new(
             recompressed_header,
             recompressed_body,
-            original_block.receipts.clone(), /* reuse original receipts direclty as it not
+            original_block.receipts.clone(), /* reuse original receipts directly as it not
                                               * possible to decode them */
             TotalDifficulty::new(original_block.total_difficulty.value),
         );
