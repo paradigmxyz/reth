@@ -1,7 +1,7 @@
 use crate::{EthPooledTransaction, PoolTransaction};
 use alloy_consensus::{SignableTransaction, TxEip1559, TxEip4844, TxLegacy};
 use alloy_eips::{eip1559::MIN_PROTOCOL_BASE_FEE, eip2718::Encodable2718, eip2930::AccessList};
-use alloy_primitives::{Address, B256, Bytes, TxKind, U256};
+use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
 use rand::{Rng, RngCore};
 use reth_chainspec::MAINNET;
 use reth_ethereum_primitives::{Transaction, TransactionSigned};
