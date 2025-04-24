@@ -53,7 +53,7 @@ where
 
             return Ok(hash)
         }
-        if self.inner.disable_txpool_asmission() {
+        if !self.inner.enable_txpool_admission() {
             tracing::debug!(
                 target: "rpc::eth",
                 hash = % *pool_transaction.hash(),
