@@ -649,25 +649,22 @@ mod tests {
     use crate::{
         providers::{StaticFileProvider, StaticFileWriter},
         test_utils::{blocks::TEST_BLOCK, create_test_provider_factory, MockNodeTypesWithDB},
-        BlockHashReader, BlockNumReader, BlockWriter, DBProvider, HeaderSyncGap,
-        HeaderSyncGapProvider, StorageLocation, TransactionsProvider,
+        BlockHashReader, BlockNumReader, BlockWriter, DBProvider, HeaderSyncGapProvider,
+        StorageLocation, TransactionsProvider,
     };
     use alloy_primitives::{TxNumber, B256, U256};
     use assert_matches::assert_matches;
-    use rand::Rng;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db::{
         mdbx::DatabaseArguments,
         test_utils::{create_test_static_files_dir, ERROR_TEMPDIR},
     };
     use reth_db_api::tables;
-    use reth_network_p2p::headers::downloader::SyncTarget;
     use reth_primitives_traits::SignedTransaction;
     use reth_prune_types::{PruneMode, PruneModes};
     use reth_storage_errors::provider::ProviderError;
     use reth_testing_utils::generators::{self, random_block, random_header, BlockParams};
     use std::{ops::RangeInclusive, sync::Arc};
-    use tokio::sync::watch;
 
     #[test]
     fn common_history_provider() {
@@ -797,8 +794,6 @@ mod tests {
         let provider = factory.provider_rw().unwrap();
 
         let mut rng = generators::rng();
-        let consensus_tip = rng.random();
-        let (_tip_tx, tip_rx) = watch::channel(consensus_tip);
 
         // Genesis
         let checkpoint = 0;
@@ -820,9 +815,7 @@ mod tests {
         drop(static_file_writer);
 
         let local_head = provider.local_tip_header(checkpoint).unwrap();
-        let gap = HeaderSyncGap { local_head, target: SyncTarget::Tip(*tip_rx.borrow()) };
 
-        assert_eq!(gap.local_head, head);
-        assert_eq!(gap.target.tip(), consensus_tip.into());
+        assert_eq!(local_head, head);
     }
 }
