@@ -135,7 +135,7 @@ where
                     .map_err(|err| StageError::Fatal(Box::new(err)))?
                     .into();
 
-            let (header, header_hash) = sealed_header.split();
+            let (header, header_hash) = sealed_header.clone().split();
             if header.number() == 0 {
                 continue
             }
