@@ -9,7 +9,6 @@ use reth_network::{
     NetworkEvent, NetworkEventListenerProvider, Peers,
 };
 use reth_network_api::{events::PeerEvent, PeerKind, PeersInfo};
-use reth_primitives_traits::SignedTransaction;
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 use reth_transaction_pool::{test_utils::TransactionGenerator, PoolTransaction, TransactionPool};
 use std::sync::Arc;
@@ -115,7 +114,8 @@ async fn test_tx_propagation_policy_trusted_only() {
 
     // ensure peer1 now receives the pending txs from peer0
     let mut buff = Vec::with_capacity(2);
-    peer1_tx_listener.recv_many(&mut buff, 2).await;
+    buff.push(peer1_tx_listener.recv().await.unwrap());
+    buff.push(peer1_tx_listener.recv().await.unwrap());
 
     assert!(buff.contains(&hash_1));
 }

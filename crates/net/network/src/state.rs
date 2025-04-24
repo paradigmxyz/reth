@@ -114,12 +114,12 @@ impl<N: NetworkPrimitives> NetworkState<N> {
     }
 
     /// Returns mutable access to the [`PeersManager`]
-    pub(crate) fn peers_mut(&mut self) -> &mut PeersManager {
+    pub(crate) const fn peers_mut(&mut self) -> &mut PeersManager {
         &mut self.peers_manager
     }
 
     /// Returns mutable access to the [`Discovery`]
-    pub(crate) fn discovery_mut(&mut self) -> &mut Discovery {
+    pub(crate) const fn discovery_mut(&mut self) -> &mut Discovery {
         &mut self.discovery
     }
 

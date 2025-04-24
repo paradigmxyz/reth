@@ -15,7 +15,7 @@ use reth::{
 use reth_ethereum::{
     chainspec::ChainSpec,
     node::{
-        core::{args::RpcServerArgs, node_config::NodeConfig, primitives::SignedTransaction},
+        core::{args::RpcServerArgs, node_config::NodeConfig},
         EthereumNode,
     },
     provider::CanonStateSubscriptions,

@@ -109,7 +109,7 @@ impl<N: NodePrimitives> Chain<N> {
     }
 
     /// Get mutable execution outcome of this chain
-    pub fn execution_outcome_mut(&mut self) -> &mut ExecutionOutcome<N::Receipt> {
+    pub const fn execution_outcome_mut(&mut self) -> &mut ExecutionOutcome<N::Receipt> {
         &mut self.execution_outcome
     }
 

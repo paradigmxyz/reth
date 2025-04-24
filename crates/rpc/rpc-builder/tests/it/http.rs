@@ -284,6 +284,7 @@ where
         client,
         call_request.clone(),
         Some(block_number.into()),
+        None,
     )
     .await
     .unwrap_err();

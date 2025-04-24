@@ -19,9 +19,8 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
 use reth_consensus_common::validation::{
     validate_against_parent_4844, validate_against_parent_eip1559_base_fee,
-    validate_against_parent_hash_number, validate_against_parent_timestamp,
-    validate_body_against_header, validate_cancun_gas, validate_header_base_fee,
-    validate_header_extra_data, validate_header_gas,
+    validate_against_parent_hash_number, validate_against_parent_timestamp, validate_cancun_gas,
+    validate_header_base_fee, validate_header_extra_data, validate_header_gas,
 };
 use reth_execution_types::BlockExecutionResult;
 use reth_optimism_forks::OpHardforks;
@@ -36,8 +35,7 @@ pub use proof::calculate_receipt_root_no_memo_optimism;
 
 pub mod validation;
 pub use validation::{
-    canyon, decode_holocene_base_fee, isthmus, next_block_base_fee, shanghai,
-    validate_block_post_execution,
+    canyon, decode_holocene_base_fee, isthmus, next_block_base_fee, validate_block_post_execution,
 };
 
 pub mod error;
@@ -81,7 +79,7 @@ impl<ChainSpec: EthChainSpec + OpHardforks, B: Block> Consensus<B>
         body: &B::Body,
         header: &SealedHeader<B::Header>,
     ) -> Result<(), ConsensusError> {
-        validate_body_against_header(body, header.header())
+        validation::validate_body_against_header_op(&self.chain_spec, body, header.header())
     }
 
     fn validate_block_pre_execution(&self, block: &SealedBlock<B>) -> Result<(), ConsensusError> {
@@ -104,7 +102,7 @@ impl<ChainSpec: EthChainSpec + OpHardforks, B: Block> Consensus<B>
 
         // Check empty shanghai-withdrawals
         if self.chain_spec.is_shanghai_active_at_timestamp(block.timestamp()) {
-            shanghai::ensure_empty_shanghai_withdrawals(block.body()).map_err(|err| {
+            canyon::ensure_empty_shanghai_withdrawals(block.body()).map_err(|err| {
                 ConsensusError::Other(format!("failed to verify block {}: {err}", block.number()))
             })?
         } else {

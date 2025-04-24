@@ -237,7 +237,7 @@ impl SegmentHeader {
     }
 
     /// Increments block end range depending on segment
-    pub fn increment_block(&mut self) -> BlockNumber {
+    pub const fn increment_block(&mut self) -> BlockNumber {
         if let Some(block_range) = &mut self.block_range {
             block_range.end += 1;
             block_range.end
@@ -251,7 +251,7 @@ impl SegmentHeader {
     }
 
     /// Increments tx end range depending on segment
-    pub fn increment_tx(&mut self) {
+    pub const fn increment_tx(&mut self) {
         if self.segment.is_tx_based() {
             if let Some(tx_range) = &mut self.tx_range {
                 tx_range.end += 1;
@@ -262,7 +262,7 @@ impl SegmentHeader {
     }
 
     /// Removes `num` elements from end of tx or block range.
-    pub fn prune(&mut self, num: u64) {
+    pub const fn prune(&mut self, num: u64) {
         if self.segment.is_block_based() {
             if let Some(range) = &mut self.block_range {
                 if num > range.end - range.start {
@@ -281,7 +281,7 @@ impl SegmentHeader {
     }
 
     /// Sets a new `block_range`.
-    pub fn set_block_range(&mut self, block_start: BlockNumber, block_end: BlockNumber) {
+    pub const fn set_block_range(&mut self, block_start: BlockNumber, block_end: BlockNumber) {
         if let Some(block_range) = &mut self.block_range {
             block_range.start = block_start;
             block_range.end = block_end;
@@ -291,7 +291,7 @@ impl SegmentHeader {
     }
 
     /// Sets a new `tx_range`.
-    pub fn set_tx_range(&mut self, tx_start: TxNumber, tx_end: TxNumber) {
+    pub const fn set_tx_range(&mut self, tx_start: TxNumber, tx_end: TxNumber) {
         if let Some(tx_range) = &mut self.tx_range {
             tx_range.start = tx_start;
             tx_range.end = tx_end;

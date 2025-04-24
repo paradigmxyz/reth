@@ -5,9 +5,7 @@ use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
 use rand::{Rng, RngCore};
 use reth_chainspec::MAINNET;
 use reth_ethereum_primitives::{Transaction, TransactionSigned};
-use reth_primitives_traits::{
-    crypto::secp256k1::sign_message, transaction::signed::SignedTransaction,
-};
+use reth_primitives_traits::crypto::secp256k1::sign_message;
 
 /// A generator for transactions for testing purposes.
 #[derive(Debug)]
@@ -28,7 +26,7 @@ impl<R: RngCore> TransactionGenerator<R> {
         Self::with_num_signers(rng, 10)
     }
 
-    /// Generates random random signers
+    /// Generates random signers
     pub fn with_num_signers(rng: R, num_signers: usize) -> Self {
         Self {
             rng,
@@ -45,7 +43,7 @@ impl<R: RngCore> TransactionGenerator<R> {
     }
 
     /// Sets the default gas limit for all generated transactions
-    pub fn set_gas_limit(&mut self, gas_limit: u64) -> &mut Self {
+    pub const fn set_gas_limit(&mut self, gas_limit: u64) -> &mut Self {
         self.gas_limit = gas_limit;
         self
     }
@@ -57,7 +55,7 @@ impl<R: RngCore> TransactionGenerator<R> {
     }
 
     /// Sets the base fee for the generated transactions
-    pub fn set_base_fee(&mut self, base_fee: u64) -> &mut Self {
+    pub const fn set_base_fee(&mut self, base_fee: u64) -> &mut Self {
         self.base_fee = base_fee as u128;
         self
     }
@@ -279,31 +277,34 @@ impl TransactionBuilder {
     }
 
     /// Sets the chain ID for the transaction, mutable reference version.
-    pub fn set_chain_id(&mut self, chain_id: u64) -> &mut Self {
+    pub const fn set_chain_id(&mut self, chain_id: u64) -> &mut Self {
         self.chain_id = chain_id;
         self
     }
 
     /// Sets the nonce for the transaction, mutable reference version.
-    pub fn set_nonce(&mut self, nonce: u64) -> &mut Self {
+    pub const fn set_nonce(&mut self, nonce: u64) -> &mut Self {
         self.nonce = nonce;
         self
     }
 
     /// Sets the gas limit for the transaction, mutable reference version.
-    pub fn set_gas_limit(&mut self, gas_limit: u64) -> &mut Self {
+    pub const fn set_gas_limit(&mut self, gas_limit: u64) -> &mut Self {
         self.gas_limit = gas_limit;
         self
     }
 
     /// Sets the maximum fee per gas for the transaction, mutable reference version.
-    pub fn set_max_fee_per_gas(&mut self, max_fee_per_gas: u128) -> &mut Self {
+    pub const fn set_max_fee_per_gas(&mut self, max_fee_per_gas: u128) -> &mut Self {
         self.max_fee_per_gas = max_fee_per_gas;
         self
     }
 
     /// Sets the maximum priority fee per gas for the transaction, mutable reference version.
-    pub fn set_max_priority_fee_per_gas(&mut self, max_priority_fee_per_gas: u128) -> &mut Self {
+    pub const fn set_max_priority_fee_per_gas(
+        &mut self,
+        max_priority_fee_per_gas: u128,
+    ) -> &mut Self {
         self.max_priority_fee_per_gas = max_priority_fee_per_gas;
         self
     }
@@ -327,7 +328,7 @@ impl TransactionBuilder {
     }
 
     /// Sets the signer for the transaction, mutable reference version.
-    pub fn set_signer(&mut self, signer: B256) -> &mut Self {
+    pub const fn set_signer(&mut self, signer: B256) -> &mut Self {
         self.signer = signer;
         self
     }
