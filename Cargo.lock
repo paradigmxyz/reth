@@ -9390,7 +9390,6 @@ dependencies = [
  "reth-execution-types",
  "reth-fs-util",
  "reth-metrics",
- "reth-network-p2p",
  "reth-nippy-jar",
  "reth-node-types",
  "reth-primitives-traits",

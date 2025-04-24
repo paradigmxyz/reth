@@ -1,5 +1,5 @@
-use reth_primitives_traits::{BlockHeader, SealedHeader};
 use alloy_primitives::BlockNumber;
+use reth_primitives_traits::{BlockHeader, SealedHeader};
 use reth_storage_errors::provider::ProviderResult;
 
 /// Provider for getting the local tip header for sync gap calculation.
@@ -12,4 +12,4 @@ pub trait HeaderSyncGapProvider: Send + Sync {
         &self,
         highest_uninterrupted_block: BlockNumber,
     ) -> ProviderResult<SealedHeader<Self::Header>>;
-} 
+}
