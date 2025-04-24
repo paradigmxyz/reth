@@ -6,7 +6,7 @@ This syncs ERA encoded blocks from a directory
 $ reth import-era --help
 ```
 ```txt
-Usage: reth import-era [OPTIONS] <IMPORT_PATH> <ERA_URL>
+Usage: reth import-era [OPTIONS] <IMPORT_PATH>
 
 Options:
   -h, --help
@@ -67,20 +67,10 @@ Database:
       --db.read-transaction-timeout <READ_TRANSACTION_TIMEOUT>
           Read transaction timeout in seconds, 0 means no timeout
 
-      --no-state
-          Disables stages that require state.
-
-      --chunk-len <CHUNK_LEN>
-          Chunk byte length to read from file.
-
   <IMPORT_PATH>
-          The path to a block file for import.
+          The path to a directory for import.
 
-          The online stages (headers and bodies) are replaced by a file import, after which the
-          remaining stages are executed.
-
-  <ERA_URL>
-          The base URL for the ERA hosting service.
+          The ERA1 files are read from the directory parsing headers and bodies.
 
 Logging:
       --log.stdout.format <FORMAT>
