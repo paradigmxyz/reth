@@ -218,7 +218,6 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 let block = payload.block();
                 debug!(target: "reth::cli", ?block, "Built new payload");
 
-                consensus.validate_header_with_total_difficulty(block, U256::MAX)?;
                 consensus.validate_header(block.sealed_header())?;
                 consensus.validate_block_pre_execution(block)?;
 
