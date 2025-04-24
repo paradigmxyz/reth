@@ -45,7 +45,10 @@ use utils::*;
 mod tests {
     use super::*;
     use crate::test_utils::{StorageKind, TestStageDB};
-    use alloy_primitives::{address, hex_literal::hex, keccak256, BlockNumber, Signature, B256, U256};
+    use alloy_consensus::{SignableTransaction, TxLegacy};
+    use alloy_primitives::{
+        address, hex_literal::hex, keccak256, BlockNumber, Signature, B256, U256,
+    };
     use alloy_rlp::Decodable;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db::mdbx::{cursor::Cursor, RW};
@@ -77,7 +80,6 @@ mod tests {
         self, random_block, random_block_range, random_receipt, BlockRangeParams,
     };
     use std::{io::Write, sync::Arc};
-    use alloy_consensus::{SignableTransaction, TxLegacy};
 
     #[tokio::test]
     #[ignore]
