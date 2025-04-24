@@ -256,7 +256,7 @@ where
     T: reth_codecs::Compact,
 {
     let type_name = type_name::<T>();
-    print!("{}", &type_name);
+    print!("{}: {}", std::any::type_name::<T>(), &type_name);
 
     // Read the file where the vectors are stored
     let file_path = format!("{VECTORS_FOLDER}/{}.json", &type_name);
