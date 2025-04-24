@@ -32,15 +32,9 @@ pub(crate) struct AtomicDuration {
 }
 
 impl AtomicDuration {
-    /// The zero duration.
-    const ZERO: Self = Self { seconds: AtomicU64::new(0), nanos: AtomicU32::new(0) };
-
-    /// Creates a new [`AtomicDuration`] from a [`Duration`]
-    pub(crate) fn new(duration: Duration) -> Self {
-        Self {
-            seconds: AtomicU64::new(duration.as_secs()),
-            nanos: AtomicU32::new(duration.subsec_nanos()),
-        }
+    /// Returns a zero duration.
+    pub(crate) const fn zero() -> Self {
+        Self { seconds: AtomicU64::new(0), nanos: AtomicU32::new(0) }
     }
 
     /// Returns the duration as a [`Duration`]
@@ -95,9 +89,9 @@ where
         Self {
             state_provider,
             metrics: StateProviderMetrics::default(),
-            total_storage_fetch_latency: AtomicDuration::ZERO,
-            total_code_fetch_latency: AtomicDuration::ZERO,
-            total_account_fetch_latency: AtomicDuration::ZERO,
+            total_storage_fetch_latency: AtomicDuration::zero(),
+            total_code_fetch_latency: AtomicDuration::zero(),
+            total_account_fetch_latency: AtomicDuration::zero(),
         }
     }
 }
