@@ -62,8 +62,16 @@ macro_rules! compact_types {
 
         pub static IDENTIFIER_TYPE: std::sync::LazyLock<std::collections::HashSet<String>> = std::sync::LazyLock::new(|| {
             let mut map = std::collections::HashSet::new();
+            // With alloy type transition <https://github.com/paradigmxyz/reth/pull/15768> the types are renamed, we map them here to the original name so that test vector files remain consistent
             $(
-                map.insert(type_name::<$id_ty>());
+                match stringify!($id_ty) {
+                    "Transaction" | "TransactionSigned" => {
+                        map.insert(stringify!($id_ty).to_string());
+                    }
+                    _ =>  {
+                       map.insert(type_name::<$id_ty>());
+                    }
+                }
             )*
             map
         });
@@ -279,6 +287,7 @@ where
     Ok(())
 }
 
+/// Returns the type name for the given type.
 pub fn type_name<T>() -> String {
     std::any::type_name::<T>().split("::").last().unwrap_or(std::any::type_name::<T>()).to_string()
 }
