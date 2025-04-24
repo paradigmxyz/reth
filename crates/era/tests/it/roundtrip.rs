@@ -10,7 +10,6 @@
 use alloy_consensus::{BlockBody, BlockHeader, Header};
 use rand::{prelude::IndexedRandom, rng};
 use reth_era::{
-    e2s_types::E2sError,
     era1_file::{Era1File, Era1Reader, Era1Writer},
     era1_types::{Era1Group, Era1Id},
     execution_types::{BlockTuple, CompressedBody, CompressedHeader, TotalDifficulty},
@@ -27,7 +26,7 @@ async fn test_file_roundtrip(
     downloader: &Era1TestDownloader,
     filename: &str,
     network: &str,
-) -> Result<(), E2sError> {
+) -> eyre::Result<()> {
     println!("\nTesting roundtrip for file: {}", filename);
 
     let original_file = downloader.open_era1_file(filename, network).await?;
@@ -230,7 +229,7 @@ async fn test_file_roundtrip(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_roundtrip_compression_encoding_mainnet() -> Result<(), E2sError> {
+async fn test_roundtrip_compression_encoding_mainnet() -> eyre::Result<()> {
     let downloader = Era1TestDownloader::new().await?;
 
     let mut rng = rng();
@@ -249,7 +248,7 @@ async fn test_roundtrip_compression_encoding_mainnet() -> Result<(), E2sError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_roundtrip_compression_encoding_sepolia() -> Result<(), E2sError> {
+async fn test_roundtrip_compression_encoding_sepolia() -> eyre::Result<()> {
     let downloader = Era1TestDownloader::new().await?;
 
     // Test all Sepolia files

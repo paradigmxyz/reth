@@ -7793,6 +7793,7 @@ dependencies = [
  "alloy-rlp",
  "ethereum_ssz",
  "ethereum_ssz_derive",
+ "eyre",
  "rand 0.9.1",
  "reqwest",
  "reth-era-downloader",

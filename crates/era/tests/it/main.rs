@@ -22,6 +22,8 @@ use std::{
     str::FromStr,
     sync::{Arc, Mutex},
 };
+
+use eyre::{eyre, Result};
 use tempfile::TempDir;
 
 mod dd;
@@ -74,20 +76,15 @@ struct Era1TestDownloader {
 
 impl Era1TestDownloader {
     /// Create a new downloader instance with a temporary directory
-    async fn new() -> Result<Self, E2sError> {
-        let temp_dir = TempDir::new().map_err(|e| {
-            E2sError::Io(std::io::Error::other(format!("Failed to create temp directory: {}", e)))
-        })?;
+    async fn new() -> Result<Self> {
+        let temp_dir =
+            TempDir::new().map_err(|e| eyre!("Failed to create temp directory: {}", e))?;
 
         Ok(Self { temp_dir, file_cache: Arc::new(Mutex::new(HashMap::new())) })
     }
 
     /// Download a specific .era1 file by name
-    pub(crate) async fn download_file(
-        &self,
-        filename: &str,
-        network: &str,
-    ) -> Result<PathBuf, E2sError> {
+    pub(crate) async fn download_file(&self, filename: &str, network: &str) -> Result<PathBuf> {
         // check cache first
         {
             let cache = self.file_cache.lock().unwrap();
@@ -100,10 +97,12 @@ impl Era1TestDownloader {
         if !ERA1_MAINNET_FILES_NAMES.contains(&filename) &&
             !ERA1_SEPOLIA_FILES_NAMES.contains(&filename)
         {
-            return Err(E2sError::Io(std::io::Error::other(format!(
+            return Err(eyre!(
                 "Unknown file: {}. Only the following files are supported: {:?} or {:?}",
-                filename, ERA1_MAINNET_FILES_NAMES, ERA1_SEPOLIA_FILES_NAMES
-            ))));
+                filename,
+                ERA1_MAINNET_FILES_NAMES,
+                ERA1_SEPOLIA_FILES_NAMES
+            ));
         }
 
         // initialize the client and build url config
@@ -111,16 +110,14 @@ impl Era1TestDownloader {
             MAINNET => MAINNET_URL,
             SEPOLIA => SEPOLIA_URL,
             _ => {
-                return Err(E2sError::Io(std::io::Error::other(format!(
+                return Err(eyre!(
                     "Unknown network: {}. Only mainnet and sepolia are supported.",
                     network
-                ))));
+                ));
             }
         };
 
-        let final_url = Url::from_str(url).map_err(|e| {
-            E2sError::Io(std::io::Error::other(format!("Failed to parse URL: {}", e)))
-        })?;
+        let final_url = Url::from_str(url).map_err(|e| eyre!("Failed to parse URL: {}", e))?;
 
         let folder = self.temp_dir.path().to_owned().into_boxed_path();
 
@@ -133,16 +130,15 @@ impl Era1TestDownloader {
         })?;
 
         // create an url for the file
-        let file_url = Url::parse(&format!("{}{}", url, filename)).map_err(|e| {
-            E2sError::Io(std::io::Error::other(format!("Failed to create URL: {}", e)))
-        })?;
+        let file_url = Url::parse(&format!("{}{}", url, filename))
+            .map_err(|e| eyre!("Failed to fetch file list: {}", e))?;
 
         // download the file
         let mut client = client;
-        let downloaded_path = client.download_to_file(file_url).await.map_err(|e| {
-            E2sError::Io(std::io::Error::other(format!("Failed to download file: {}", e)))
-        })?;
-
+        let downloaded_path = client
+            .download_to_file(file_url)
+            .await
+            .map_err(|e| eyre!("Failed to download file: {}", e))?;
         // update the cache
         {
             let mut cache = self.file_cache.lock().unwrap();
@@ -153,9 +149,9 @@ impl Era1TestDownloader {
     }
 
     /// open .era1 file, downloading it if necessary
-    async fn open_era1_file(&self, filename: &str, network: &str) -> Result<Era1File, E2sError> {
+    async fn open_era1_file(&self, filename: &str, network: &str) -> Result<Era1File> {
         let path = self.download_file(filename, network).await?;
-        Era1Reader::open(&path, network)
+        Era1Reader::open(&path, network).map_err(|e| eyre!("Failed to open Era1 file: {}", e))
     }
 }
 
@@ -165,14 +161,11 @@ async fn open_test_file(
     file_path: &str,
     downloader: &Era1TestDownloader,
     network: &str,
-) -> Result<Era1File, E2sError> {
-    let filename =
-        Path::new(file_path).file_name().and_then(|os_str| os_str.to_str()).ok_or_else(|| {
-            E2sError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                format!("Invalid file path: {}", file_path),
-            ))
-        })?;
+) -> Result<Era1File> {
+    let filename = Path::new(file_path)
+        .file_name()
+        .and_then(|os_str| os_str.to_str())
+        .ok_or_else(|| eyre!("Invalid file path: {}", file_path))?;
 
     downloader.open_era1_file(filename, network).await
 }

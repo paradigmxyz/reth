@@ -4,7 +4,6 @@
 use alloy_consensus::{BlockBody, Header};
 use alloy_primitives::U256;
 use reth_era::{
-    e2s_types::E2sError,
     era1_file::{Era1Reader, Era1Writer},
     execution_types::CompressedBody,
 };
@@ -14,7 +13,7 @@ use std::io::Cursor;
 use crate::{open_test_file, Era1TestDownloader, ERA1_MAINNET_FILES_NAMES, MAINNET};
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_mainnet_era1_only_file_decompression_and_decoding() -> Result<(), E2sError> {
+async fn test_mainnet_era1_only_file_decompression_and_decoding() -> eyre::Result<()> {
     let downloader = Era1TestDownloader::new().await.expect("Failed to create downloader");
 
     for &filename in &ERA1_MAINNET_FILES_NAMES {
