@@ -131,7 +131,7 @@ impl Era1TestDownloader {
 
         // create an url for the file
         let file_url = Url::parse(&format!("{url}{filename}"))
-            .map_err(|e| eyre!("Failed to fetch file list: {}", e))?;
+            .map_err(|e| eyre!("Failed to parse file URL: {}", e))?;
 
         // download the file
         let mut client = client;
