@@ -76,7 +76,7 @@ impl BlockchainTestCase {
         name.contains("UncleFromSideChain")
     }
 
-    /// If the test expects an exception, return the the block number
+    /// If the test expects an exception, return the block number
     /// at which it must occur together with the original message.
     ///
     /// Note: There is a +1 here because the genesis block is not included
