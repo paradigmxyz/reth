@@ -128,7 +128,7 @@ async fn test_file_roundtrip(
             CompressedBody::decode_body_from_decompressed::<TransactionSigned, Header>(
                 &original_body_data,
             )
-            .expect("Failed to original decode body");
+            .expect("Failed to decode original body");
 
         let roundtrip_decoded_body: BlockBody<TransactionSigned> =
             CompressedBody::decode_body_from_decompressed::<TransactionSigned, Header>(
