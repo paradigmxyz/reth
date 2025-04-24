@@ -97,7 +97,6 @@ full = [
     "network",
 ]
 
-alloy-compat = ["reth-ethereum-primitives/alloy-compat"]
 cli = ["dep:reth-ethereum-cli"]
 consensus = [
     "dep:reth-consensus",

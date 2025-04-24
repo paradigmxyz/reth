@@ -1,6 +1,6 @@
 //! L1 `eth` API types.
 
-use alloy_consensus::{Transaction as _, TxEnvelope};
+use alloy_consensus::{EthereumTxEnvelope, Transaction as _, TxEnvelope};
 use alloy_network::{Ethereum, Network};
 use alloy_primitives::Signature;
 use alloy_rpc_types::TransactionRequest;
@@ -74,7 +74,8 @@ where
 
         // Create an empty signature for the transaction.
         let signature = Signature::new(Default::default(), Default::default(), false);
-        Ok(TransactionSigned::new_unhashed(tx.into(), signature))
+        // TODO(mattsse): simplify
+        Ok(EthereumTxEnvelope::new_unhashed(tx, signature).into())
     }
 
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
