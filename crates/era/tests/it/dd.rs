@@ -13,6 +13,7 @@ use std::io::Cursor;
 use crate::{open_test_file, Era1TestDownloader, ERA1_MAINNET_FILES_NAMES, MAINNET};
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "download intensive"]
 async fn test_mainnet_era1_only_file_decompression_and_decoding() -> eyre::Result<()> {
     let downloader = Era1TestDownloader::new().await.expect("Failed to create downloader");
 

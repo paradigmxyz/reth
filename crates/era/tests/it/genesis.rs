@@ -12,6 +12,7 @@ use crate::{
 };
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "download intensive"]
 async fn test_mainnet_genesis_block_decompression() -> eyre::Result<()> {
     let downloader = Era1TestDownloader::new().await?;
 
@@ -63,6 +64,7 @@ async fn test_mainnet_genesis_block_decompression() -> eyre::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "download intensive"]
 async fn test_sepolia_genesis_block_decompression() -> eyre::Result<()> {
     let downloader = Era1TestDownloader::new().await?;
 
