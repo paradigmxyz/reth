@@ -743,7 +743,7 @@ impl<Txs> OpPayloadBuilder<Txs> {
     }
 }
 
-impl<Node, Pool, Txs> PayloadBuilderBuilder<Node, Pool, OpEvmConfig> for OpPayloadBuilder<Txs>
+impl<Node, Pool, Txs, Evm> PayloadBuilderBuilder<Node, Pool, Evm> for OpPayloadBuilder<Txs>
 where
     Node: FullNodeTypes<
         Types: NodeTypes<
@@ -752,6 +752,10 @@ where
             Primitives = OpPrimitives,
         >,
     >,
+    Evm: ConfigureEvm<
+            Primitives = PrimitivesTy<Node::Types>,
+            NextBlockEnvCtx = OpNextBlockEnvAttributes,
+        > + 'static,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
         + 'static,
@@ -759,13 +763,13 @@ where
     <Pool as TransactionPool>::Transaction: OpPooledTx,
 {
     type PayloadBuilder =
-        reth_optimism_payload_builder::OpPayloadBuilder<Pool, Node::Provider, OpEvmConfig, Txs>;
+        reth_optimism_payload_builder::OpPayloadBuilder<Pool, Node::Provider, Evm, Txs>;
 
     async fn build_payload_builder(
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-        evm_config: OpEvmConfig,
+        evm_config: Evm,
     ) -> eyre::Result<Self::PayloadBuilder> {
         self.build(evm_config, ctx, pool)
     }

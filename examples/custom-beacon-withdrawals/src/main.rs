@@ -53,7 +53,9 @@ fn main() {
                 .with_types::<EthereumNode>()
                 // Configure the components of the node
                 // use default ethereum components but use our custom pool
-                .with_components(EthereumNode::components())
+                .with_components(
+                    EthereumNode::components().executor(CustomExecutorBuilder::default()),
+                )
                 .with_add_ons(EthereumAddOns::default())
                 .launch()
                 .await?;
