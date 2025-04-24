@@ -144,6 +144,10 @@ where
             // Increase total difficulty
             td += header.difficulty();
 
+            self.consensus
+                .validate_header(&sealed_header)
+                .map_err(|err| StageError::Fatal(Box::new(err)))?;
+
             // Append to Headers segment
             writer.append_header(&header, td, &header_hash)?;
         }
