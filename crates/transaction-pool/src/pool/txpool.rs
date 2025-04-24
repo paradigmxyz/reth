@@ -3007,6 +3007,50 @@ mod tests {
     }
 
     #[test]
+    fn account_updates_sender_balance() {
+        let mut on_chain_balance = U256::from(100);
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let tx_0 = MockTransaction::eip1559().set_gas_price(100).inc_limit();
+        let tx_1 = tx_0.next();
+        let tx_2 = tx_1.next();
+
+        // Create 3 transactions
+        let v0 = f.validated(tx_0);
+        let v1 = f.validated(tx_1);
+        let v2 = f.validated(tx_2);
+
+        let _res = pool.add_transaction(v0.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v1, on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v2, on_chain_balance, on_chain_nonce).unwrap();
+
+        // The sender does not have enough balance to put all txs into pending.
+        assert_eq!(1, pool.pending_transactions().len());
+        assert_eq!(2, pool.queued_transactions().len());
+
+        // Simulate new block arrival - and chain balance increase.
+        let mut updated_accounts = HashMap::default();
+        on_chain_balance = U256::from(300);
+        updated_accounts.insert(
+            v0.sender_id(),
+            SenderInfo { state_nonce: on_chain_nonce, balance: on_chain_balance },
+        );
+        pool.update_accounts(updated_accounts.clone());
+
+        assert_eq!(3, pool.pending_transactions().len());
+        assert!(pool.queued_transactions().is_empty());
+
+        // Simulate new block arrival - and chain balance decrease.
+        updated_accounts.entry(v0.sender_id()).and_modify(|v| v.balance = U256::from(1));
+        pool.update_accounts(updated_accounts);
+
+        assert!(pool.pending_transactions().is_empty());
+        assert_eq!(3, pool.queued_transactions().len());
+    }
+
+    #[test]
     fn account_updates_nonce_gap() {
         let on_chain_balance = U256::from(10_000);
         let mut on_chain_nonce = 0;
@@ -3017,7 +3061,7 @@ mod tests {
         let tx_1 = tx_0.next();
         let tx_2 = tx_1.next();
 
-        // Create 4 transactions
+        // Create 3 transactions
         let v0 = f.validated(tx_0);
         let v1 = f.validated(tx_1);
         let v2 = f.validated(tx_2);
