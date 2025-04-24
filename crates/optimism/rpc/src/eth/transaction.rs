@@ -53,6 +53,14 @@ where
 
             return Ok(hash)
         }
+        if self.inner.disable_txpool_asmission() {
+            tracing::debug!(
+                target: "rpc::eth",
+                hash = % *pool_transaction.hash(),
+                "txpool admission disabled; skipping local pool"
+            );
+            return Ok(*pool_transaction.hash());
+        }
 
         // submit the transaction to the pool with a `Local` origin
         let hash = self
