@@ -35,9 +35,9 @@
 //! ```
 
 mod client;
-mod dir;
+mod fs;
 mod stream;
 
 pub use client::{EraClient, HttpClient};
-pub use dir::EraLocalDirectoryStream;
+pub use fs::read_dir;
 pub use stream::{EraMeta, EraStream, EraStreamConfig};

@@ -1,5 +1,5 @@
 use futures_util::StreamExt;
-use reth_era_downloader::EraLocalDirectoryStream;
+use reth_era_downloader::read_dir;
 use tokio::fs;
 
 #[tokio::test]
@@ -11,7 +11,7 @@ async fn test_streaming_from_local_directory() {
     fs::write(folder.join("mainnet-00001-a5364e9a.era1"), b"").await.unwrap();
 
     let folder = folder.into_boxed_path();
-    let mut stream = EraLocalDirectoryStream::new(folder.clone());
+    let mut stream = read_dir(folder.clone()).unwrap();
 
     let expected_file = folder.join("mainnet-00000-5ec1ffb8.era1").into_boxed_path();
     let actual_file = stream.next().await.unwrap().unwrap();
