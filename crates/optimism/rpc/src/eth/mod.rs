@@ -335,7 +335,7 @@ impl OpEthApiBuilder {
         self
     }
 
-    ///with a flag to disable txpool admission
+    /// With a flag to enable txpool admission
     pub fn with_enable_txpool_admission(mut self, enable_txpool_admission: bool) -> Self {
         self.enable_txpool_admission = enable_txpool_admission;
         self
