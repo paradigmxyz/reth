@@ -1143,7 +1143,7 @@ mod tests {
                 assert_eq!(received_notification, notification);
             }
             Poll::Pending => panic!("Notification send is pending"),
-            Poll::Ready(Err(e)) => panic!("Failed to send notification: {:?}", e),
+            Poll::Ready(Err(e)) => panic!("Failed to send notification: {e:?}"),
         }
 
         // Ensure the notification ID was incremented
