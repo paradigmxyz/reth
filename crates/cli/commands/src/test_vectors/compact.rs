@@ -145,7 +145,7 @@ pub fn read_vectors() -> Result<()> {
 }
 
 /// Generates a vector of type `T` to a file.
-pub fn generate_vectors_with(gen: &[fn(&mut TestRunner) -> eyre::Result<()>]) -> Result<()> {
+pub fn generate_vectors_with(generator: &[fn(&mut TestRunner) -> eyre::Result<()>]) -> Result<()> {
     // Prepare random seed for test (same method as used by proptest)
     let seed = B256::random();
     println!("Seed for compact test vectors: {:?}", hex::encode_prefixed(seed));
@@ -157,7 +157,7 @@ pub fn generate_vectors_with(gen: &[fn(&mut TestRunner) -> eyre::Result<()>]) ->
 
     fs::create_dir_all(VECTORS_FOLDER)?;
 
-    for generate_fn in gen {
+    for generate_fn in generator {
         generate_fn(&mut runner)?;
     }
 
