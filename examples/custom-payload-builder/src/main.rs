@@ -12,14 +12,17 @@
 #![warn(unused_crate_dependencies)]
 
 use crate::generator::EmptyBlockPayloadJobGenerator;
-use reth::{
-    builder::{components::PayloadServiceBuilder, node::FullNodeTypes, BuilderContext},
-    cli::{config::PayloadBuilderConfig, Cli},
-};
+use reth::builder::{components::PayloadServiceBuilder, BuilderContext};
 use reth_basic_payload_builder::BasicPayloadJobGeneratorConfig;
 use reth_ethereum::{
     chainspec::ChainSpec,
-    node::{api::NodeTypes, node::EthereumAddOns, EthEngineTypes, EthEvmConfig, EthereumNode},
+    cli::interface::Cli,
+    node::{
+        api::{node::FullNodeTypes, NodeTypes},
+        core::cli::config::PayloadBuilderConfig,
+        node::EthereumAddOns,
+        EthEngineTypes, EthEvmConfig, EthereumNode,
+    },
     pool::{PoolTransaction, TransactionPool},
     provider::CanonStateSubscriptions,
     EthPrimitives, TransactionSigned,
