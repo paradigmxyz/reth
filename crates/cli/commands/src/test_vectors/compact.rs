@@ -178,7 +178,7 @@ pub fn read_vectors_with(read: &[fn() -> eyre::Result<()>]) -> Result<()> {
 
     if let Some(err_list) = errors {
         for error in err_list {
-            eprintln!("{:?}", error);
+            eprintln!("{error:?}");
         }
         return Err(eyre::eyre!(
             "If there are missing types, make sure to run `reth test-vectors compact --write` first.\n
@@ -271,7 +271,7 @@ where
 
         let (reconstructed, _) = T::from_compact(&compact_bytes, len_or_identifier);
         reconstructed.to_compact(&mut buffer);
-        assert_eq!(buffer, compact_bytes, "mismatch {}", type_name);
+        assert_eq!(buffer, compact_bytes, "mismatch {type_name}");
     }
 
     println!(" ✅");
