@@ -18,9 +18,7 @@ alloy-rlp.workspace = true
 # reth
 reth-db-api.workspace = true
 reth-era.workspace = true
-reth-fs-util.workspace = true
 reth-primitives-traits.workspace = true
-reth-provider.workspace = true
 reth-storage-api.workspace = true
 
 # obs
