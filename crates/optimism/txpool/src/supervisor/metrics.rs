@@ -19,7 +19,6 @@ impl SupervisorMetrics {
     }
 }
 
-
 /// Optimism sequencer metrics
 #[derive(Metrics, Clone)]
 #[metrics(scope = "optimism_transaction_pool.sequencer")]
