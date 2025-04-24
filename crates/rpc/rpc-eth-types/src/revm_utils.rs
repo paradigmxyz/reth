@@ -46,7 +46,7 @@ where
         .ok_or_else(|| RpcInvalidTransactionError::InsufficientFunds { cost: value, balance })?;
 
     Ok(balance
-        // Calculate the amount of gas the caller can afford with the specfified gas price.
+        // Calculate the amount of gas the caller can afford with the specified gas price.
         .checked_div(U256::from(env.gas_price()))
         // This will be 0 if gas price is 0. It is fine, because we check it before.
         .unwrap_or_default()
@@ -99,7 +99,7 @@ impl CallFees {
         max_fee_per_blob_gas: Option<U256>,
         block_blob_fee: Option<U256>,
     ) -> EthResult<Self> {
-        /// Get the effective gas price of a transaction as specified in EIP-1559 with relevant
+        /// Get the effective gas price of a transaction as specfified in EIP-1559 with relevant
         /// checks.
         fn get_effective_gas_price(
             max_fee_per_gas: Option<U256>,
