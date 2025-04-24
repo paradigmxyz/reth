@@ -53,11 +53,11 @@ fn main() {
                     match result {
                         Ok(blob_transaction) => {
                             // Handle successful transaction
-                            println!("Processed BlobTransaction: {:?}", blob_transaction);
+                            println!("Processed BlobTransaction: {blob_transaction:?}");
                         }
                         Err(e) => {
                             // Handle errors specifically
-                            eprintln!("Failed to process transaction: {:?}", e);
+                            eprintln!("Failed to process transaction: {e:?}");
                         }
                     }
                 }
