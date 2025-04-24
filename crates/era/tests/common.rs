@@ -53,8 +53,8 @@ pub(crate) const SEPOLIA: &str = "sepolia";
 /// for downloading sepolia `.era1` files
 pub(crate) const SEPOLIA_URL: &str = "https://sepolia.era1.nimbus.team/";
 
-/// Succint list of mainnet files we want to download
-/// from <https://mainnet.era1.nimbus.team/>
+/// Succinct list of sepolia files we want to download
+/// from <https://sepolia.era1.nimbus.team/>
 /// for testing purposes
 pub(crate) const ERA1_SEPOLIA_FILES_NAMES: [&str; 3] =
     ["sepolia-00000-643a00f7.era1", "sepolia-00074-0e81003c.era1", "sepolia-00173-b6924da5.era1"];
