@@ -8,6 +8,7 @@ use reth_db_api::{
     RawKey, RawTable, RawValue,
 };
 use reth_era::{era1_file::Era1Reader, execution_types::DecodeCompressed};
+use reth_era_downloader::EraMeta;
 use reth_etl::Collector;
 use reth_fs_util as fs;
 use reth_primitives_traits::{Block, FullBlockBody, FullBlockHeader, NodePrimitives};
@@ -15,7 +16,7 @@ use reth_provider::{
     BlockWriter, ProviderError, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
 };
 use reth_storage_api::{DBProvider, HeaderProvider, NodePrimitivesProvider, StorageLocation};
-use std::{path::Path, sync::mpsc};
+use std::sync::mpsc;
 use tracing::info;
 
 /// Imports blocks from `downloader` using `provider`.
@@ -34,7 +35,7 @@ where
         OmmerHeader = BH,
     >,
     Downloader: Stream<Item = eyre::Result<Era>> + Send + 'static + Unpin,
-    Era: AsRef<Path> + Send + 'static,
+    Era: EraMeta + Send + 'static,
     P: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory + BlockWriter<Block = B>,
     <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
 {
@@ -65,9 +66,9 @@ where
     // order
     let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
 
-    while let Some(path) = rx.recv()? {
-        let path = path?;
-        let file = fs::open(path.as_ref())?;
+    while let Some(meta) = rx.recv()? {
+        let meta = meta?;
+        let file = fs::open(meta.as_ref())?;
         let mut reader = Era1Reader::new(file);
 
         for block in reader.iter() {
@@ -99,7 +100,9 @@ where
             hash_collector.insert(hash, number)?;
         }
 
-        info!(target: "era::history::import", "Processed {}", path.as_ref().to_string_lossy());
+        info!(target: "era::history::import", "Processed {}", meta.as_ref().to_string_lossy());
+
+        meta.mark_as_processed()?;
     }
 
     let total_headers = hash_collector.len();

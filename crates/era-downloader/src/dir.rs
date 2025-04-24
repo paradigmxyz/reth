@@ -1,3 +1,4 @@
+use crate::EraMeta;
 use futures_util::{FutureExt, Stream};
 use std::{
     fmt::{Debug, Formatter},
@@ -5,7 +6,7 @@ use std::{
     path::Path,
     pin::Pin,
     str::FromStr,
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
 };
 
 type ListFuture =
@@ -30,12 +31,12 @@ impl Debug for EraLocalDirectoryStream {
 
 impl EraLocalDirectoryStream {
     /// Creates a new [`EraLocalDirectoryStream`] reading files from `dir`.
-    pub fn new(dir: Box<Path>) -> Self {
+    pub fn new(dir: impl AsRef<Path> + Send + Sync + 'static) -> Self {
         Self {
             entries: Vec::new(),
             loaded: false,
             list: Box::pin(async move {
-                let mut dir = tokio::fs::read_dir(&dir).await?;
+                let mut dir = tokio::fs::read_dir(dir).await?;
                 let mut entries = vec![];
 
                 while let Some(entry) = dir.next_entry().await? {
@@ -66,19 +67,45 @@ impl EraLocalDirectoryStream {
 }
 
 impl Stream for EraLocalDirectoryStream {
-    type Item = eyre::Result<Box<Path>>;
+    type Item = eyre::Result<EraLocalMeta>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if !self.loaded {
-            match self.list.poll_unpin(cx) {
-                Poll::Ready(entries) => {
-                    self.entries = entries?;
-                    self.loaded = true;
-                }
-                Poll::Pending => return Poll::Pending,
-            }
+            self.entries = ready!(self.list.poll_unpin(cx))?;
+            self.loaded = true;
         }
 
-        Poll::Ready(Ok(self.entries.pop().map(|(_, v)| v)).transpose())
+        Poll::Ready(Ok(self.entries.pop().map(|(_, v)| EraLocalMeta::new(v))).transpose())
+    }
+}
+
+/// Contains information about an ERA file that is on the local file-system and is read-only.
+#[derive(Debug)]
+pub struct EraLocalMeta {
+    path: Box<Path>,
+}
+
+impl EraLocalMeta {
+    const fn new(path: Box<Path>) -> Self {
+        Self { path }
+    }
+}
+
+impl<T: AsRef<Path>> PartialEq<T> for EraLocalMeta {
+    fn eq(&self, other: &T) -> bool {
+        self.as_ref().eq(other.as_ref())
+    }
+}
+
+impl AsRef<Path> for EraLocalMeta {
+    fn as_ref(&self) -> &Path {
+        self.path.as_ref()
+    }
+}
+
+impl EraMeta for EraLocalMeta {
+    /// A no-op.
+    fn mark_as_processed(self) -> eyre::Result<()> {
+        Ok(())
     }
 }
