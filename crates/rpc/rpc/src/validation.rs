@@ -36,18 +36,6 @@ use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{oneshot, RwLock};
 use tracing::warn;
 
-/// A trait to convert an error to an RPC error.
-pub trait ToRpcError: core::error::Error + Send + Sync + 'static {
-    /// Converts the error to a JSON-RPC error object.
-    fn to_rpc_error(&self) -> jsonrpsee_types::ErrorObject<'static>;
-}
-
-impl ToRpcError for jsonrpsee_types::ErrorObject<'static> {
-    fn to_rpc_error(&self) -> jsonrpsee_types::ErrorObject<'static> {
-        self.clone()
-    }
-}
-
 /// The type that implements the `validation` rpc namespace trait
 #[derive(Clone, Debug, derive_more::Deref)]
 pub struct ValidationApi<Provider, E: BlockExecutorProvider> {
@@ -453,7 +441,7 @@ where
         self.task_spawner.spawn_blocking(Box::pin(async move {
             let result = Self::validate_builder_submission_v3(&this, request)
                 .await
-                .map_err(|err| internal_rpc_err(err.to_string()));
+                .map_err(ErrorObject::from);
             let _ = tx.send(result);
         }));
 
@@ -471,7 +459,7 @@ where
         self.task_spawner.spawn_blocking(Box::pin(async move {
             let result = Self::validate_builder_submission_v4(&this, request)
                 .await
-                .map_err(|err| internal_rpc_err(err.to_string()));
+                .map_err(ErrorObject::from);
             let _ = tx.send(result);
         }));
 
