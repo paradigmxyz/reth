@@ -9,9 +9,6 @@ pub use block::*;
 mod header_sync_gap;
 pub use header_sync_gap::{HeaderSyncGap, HeaderSyncGapProvider};
 
-mod state;
-pub use state::StateWriter;
-
 pub use reth_chainspec::ChainSpecProvider;
 
 mod static_file_provider;
