@@ -760,21 +760,34 @@ where
         for chunk in not_fetched_state_update.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
             let targets_to_fetch = get_proof_targets(&chunk, &self.fetched_proof_targets);
 
-            let targets_to_fetch = MultiProofTargets::from_targets_difference(
+            let proof_targets = MultiProofTargets::from_targets_difference(
                 &self.fetched_proof_targets,
                 targets_to_fetch,
             );
 
-            self.fetched_proof_targets.extend_multi_proof_targets(&targets_to_fetch);
-            spawned_proof_targets.extend_multi_proof_targets(&targets_to_fetch);
+            self.fetched_proof_targets.extend_multi_proof_targets(&proof_targets);
+            spawned_proof_targets.extend_multi_proof_targets(&proof_targets);
 
-            let targets_to_fetch = targets_to_fetch.to_targets_map();
+            let (multiproof_targets, storage_only_targets) = proof_targets.into_inner();
+            for (hashed_addr, storage_targets) in storage_only_targets {
+                // If there are storage only targets, spawn a dedicated storage multiproof task.
+                let storage_input = StorageMultiproofInput {
+                    config: self.config.clone(),
+                    source: Some(source),
+                    hashed_state_update: chunk.clone(),
+                    hashed_address: hashed_addr,
+                    proof_targets: storage_targets,
+                    proof_sequence_number: self.proof_sequencer.next_sequence(),
+                    state_root_message_sender: self.tx.clone(),
+                };
+                self.multiproof_manager.spawn_or_queue(storage_input.into());
+            }
             self.multiproof_manager.spawn_or_queue(
                 MultiproofInput {
                     config: self.config.clone(),
                     source: Some(source),
                     hashed_state_update: chunk,
-                    proof_targets: targets_to_fetch,
+                    proof_targets: multiproof_targets,
                     proof_sequence_number: self.proof_sequencer.next_sequence(),
                     state_root_message_sender: self.tx.clone(),
                 }
