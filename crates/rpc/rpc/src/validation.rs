@@ -13,6 +13,7 @@ use alloy_rpc_types_engine::{
 use async_trait::async_trait;
 use core::fmt;
 use jsonrpsee::core::RpcResult;
+use jsonrpsee_types::error::ErrorObject;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::PayloadValidator;
@@ -27,7 +28,7 @@ use reth_primitives_traits::{
 };
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
 use reth_rpc_api::BlockSubmissionValidationApiServer;
-use reth_rpc_server_types::result::internal_rpc_err;
+use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use revm_primitives::{Address, B256, U256};
@@ -568,7 +569,7 @@ pub(crate) struct ValidationMetrics {
     pub(crate) disallow_size: Gauge,
 }
 
-impl From<ValidationApiError> for jsonrpsee_types::error::ErrorObject<'static> {
+impl From<ValidationApiError> for ErrorObject<'static> {
     fn from(error: ValidationApiError) -> Self {
         match error {
             ValidationApiError::GasLimitMismatch(_)
@@ -578,11 +579,7 @@ impl From<ValidationApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             | ValidationApiError::InvalidTransactionSignature
             | ValidationApiError::Blacklist(_)
             | ValidationApiError::InvalidBlobsBundle => {
-                jsonrpsee_types::error::ErrorObject::owned(
-                    jsonrpsee_types::error::INVALID_PARAMS_CODE,
-                    error.to_string(),
-                    None::<()>,
-                )
+                invalid_params_rpc_err(error.to_string())
             }
 
             ValidationApiError::MissingLatestBlock
@@ -594,11 +591,7 @@ impl From<ValidationApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             | ValidationApiError::Execution(_)
             | ValidationApiError::Payload(_)
             | ValidationApiError::Blob(_) => {
-                jsonrpsee_types::error::ErrorObject::owned(
-                    jsonrpsee_types::error::INTERNAL_ERROR_CODE,
-                    error.to_string(),
-                    None::<()>,
-                )
+                internal_rpc_err(error.to_string())
             }
         }
     }
