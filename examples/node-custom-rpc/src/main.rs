@@ -20,8 +20,11 @@ use jsonrpsee::{
     proc_macros::rpc,
     PendingSubscriptionSink, SubscriptionMessage,
 };
-use reth::{chainspec::EthereumChainSpecParser, cli::Cli};
-use reth_ethereum::{node::EthereumNode, pool::TransactionPool};
+use reth_ethereum::{
+    cli::{chainspec::EthereumChainSpecParser, interface::Cli},
+    node::EthereumNode,
+    pool::TransactionPool,
+};
 use std::time::Duration;
 use tokio::time::sleep;
 

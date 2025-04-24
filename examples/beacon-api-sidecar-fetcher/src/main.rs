@@ -22,8 +22,12 @@ use alloy_primitives::B256;
 use clap::Parser;
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use mined_sidecar::MinedSidecarStream;
-use reth::{builder::NodeHandle, chainspec::EthereumChainSpecParser, cli::Cli};
-use reth_ethereum::{node::EthereumNode, provider::CanonStateSubscriptions};
+use reth::builder::NodeHandle;
+use reth_ethereum::{
+    cli::{chainspec::EthereumChainSpecParser, interface::Cli},
+    node::EthereumNode,
+    provider::CanonStateSubscriptions,
+};
 
 pub mod mined_sidecar;
 
