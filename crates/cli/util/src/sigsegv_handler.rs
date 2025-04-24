@@ -7,7 +7,7 @@ use std::{
     fmt, mem, ptr,
 };
 
-unsafe extern "C" {
+extern "C" {
     fn backtrace_symbols_fd(buffer: *const *mut libc::c_void, size: libc::c_int, fd: libc::c_int);
 }
 
