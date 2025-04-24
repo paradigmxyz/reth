@@ -109,7 +109,7 @@ pub struct MyPayloadBuilder {
     inner: EthereumPayloadBuilder,
 }
 
-impl<Types, Node, Pool> PayloadBuilderBuilder<Node, Pool> for MyPayloadBuilder
+impl<Types, Node, Pool> PayloadBuilderBuilder<Node, Pool, EthEvmConfig> for MyPayloadBuilder
 where
     Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
@@ -127,9 +127,9 @@ where
 
     async fn build_payload_builder(
         self,
-        evm_config: EthEvmConfig,
         ctx: &BuilderContext<Node>,
         pool: Pool,
+        evm_config: EthEvmConfig,
     ) -> eyre::Result<Self::PayloadBuilder> {
         self.inner.build(evm_config, ctx, pool)
     }

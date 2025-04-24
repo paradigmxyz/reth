@@ -53,7 +53,7 @@ impl EthereumPayloadBuilder {
     }
 }
 
-impl<Types, Node, Pool> PayloadBuilderBuilder<Node, Pool> for EthereumPayloadBuilder
+impl<Types, Node, Pool> PayloadBuilderBuilder<Node, Pool, EthEvmConfig> for EthereumPayloadBuilder
 where
     Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
@@ -71,9 +71,9 @@ where
 
     async fn build_payload_builder(
         self,
-        evm_config: EthEvmConfig,
         ctx: &BuilderContext<Node>,
         pool: Pool,
+        evm_config: EthEvmConfig,
     ) -> eyre::Result<Self::PayloadBuilder> {
         self.build(evm_config, ctx, pool)
     }

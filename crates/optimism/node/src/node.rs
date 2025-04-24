@@ -122,6 +122,7 @@ impl OpNode {
                         self.args.supervisor_safety_level,
                     ),
             )
+            .executor(OpExecutorBuilder::default())
             .payload(BasicPayloadServiceBuilder::new(
                 OpPayloadBuilder::new(compute_pending_block).with_da_config(self.da_config.clone()),
             ))
@@ -129,7 +130,6 @@ impl OpNode {
                 disable_txpool_gossip,
                 disable_discovery_v4: !discovery_v4,
             })
-            .executor(OpExecutorBuilder::default())
             .consensus(OpConsensusBuilder::default())
     }
 
@@ -743,7 +743,7 @@ impl<Txs> OpPayloadBuilder<Txs> {
     }
 }
 
-impl<Node, Pool, Txs> PayloadBuilderBuilder<Node, Pool> for OpPayloadBuilder<Txs>
+impl<Node, Pool, Txs> PayloadBuilderBuilder<Node, Pool, OpEvmConfig> for OpPayloadBuilder<Txs>
 where
     Node: FullNodeTypes<
         Types: NodeTypes<
@@ -765,8 +765,9 @@ where
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
+        evm_config: OpEvmConfig,
     ) -> eyre::Result<Self::PayloadBuilder> {
-        self.build(OpEvmConfig::optimism(ctx.chain_spec()), ctx, pool)
+        self.build(evm_config, ctx, pool)
     }
 }
 

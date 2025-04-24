@@ -34,7 +34,7 @@ pub mod job;
 #[non_exhaustive]
 pub struct CustomPayloadBuilder;
 
-impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for CustomPayloadBuilder
+impl<Node, Pool> PayloadServiceBuilder<Node, Pool, EthEvmConfig> for CustomPayloadBuilder
 where
     Node: FullNodeTypes<
         Types: NodeTypes<
