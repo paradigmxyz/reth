@@ -125,7 +125,7 @@ impl<S> InstrumentedStateProvider<S> {
     }
 
     /// Records the total latencies into their respective gauges and histograms.
-    fn record_total_latency(&self) {
+    pub(crate) fn record_total_latency(&self) {
         let total_storage_fetch_latency = self.total_storage_fetch_latency.duration();
         self.metrics.total_storage_fetch_latency.record(total_storage_fetch_latency);
         self.metrics
