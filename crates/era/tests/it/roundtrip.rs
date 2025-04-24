@@ -18,8 +18,7 @@ use reth_era::{
 use reth_ethereum_primitives::TransactionSigned;
 use std::io::Cursor;
 
-mod common;
-use common::{
+use crate::{
     Era1TestDownloader, ERA1_MAINNET_FILES_NAMES, ERA1_SEPOLIA_FILES_NAMES, MAINNET, SEPOLIA,
 };
 

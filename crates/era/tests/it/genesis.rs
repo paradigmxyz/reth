@@ -7,8 +7,7 @@ use alloy_consensus::{BlockBody, Header};
 use reth_era::{e2s_types::E2sError, execution_types::CompressedBody};
 use reth_ethereum_primitives::TransactionSigned;
 
-mod common;
-use common::{
+use crate::{
     Era1TestDownloader, ERA1_MAINNET_FILES_NAMES, ERA1_SEPOLIA_FILES_NAMES, MAINNET, SEPOLIA,
 };
 
