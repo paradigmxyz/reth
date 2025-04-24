@@ -17,7 +17,7 @@ pub struct RollupArgs {
     #[arg(long = "rollup.disable-tx-pool-gossip")]
     pub disable_txpool_gossip: bool,
 
-    /// Disable transaction pool admission
+    /// Enable transaction pool admission
     #[arg(long = "rollup.enable-tx-pool-admission")]
     pub enable_txpool_admisson: bool,
 
