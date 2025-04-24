@@ -3344,7 +3344,6 @@ dependencies = [
  "clap",
  "futures-util",
  "mev-share-sse",
- "reth",
  "reth-ethereum",
  "tokio",
  "tracing",
@@ -3609,7 +3608,6 @@ version = "0.0.0"
 dependencies = [
  "clap",
  "jsonrpsee",
- "reth",
  "reth-ethereum",
  "tokio",
 ]
@@ -3618,7 +3616,6 @@ dependencies = [
 name = "example-node-event-hooks"
 version = "0.0.0"
 dependencies = [
- "reth",
  "reth-ethereum",
 ]
 
