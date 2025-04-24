@@ -20,6 +20,7 @@ use reth_trie_common::{
     TrieNode, CHILD_INDEX_RANGE, EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
+use tracing::trace;
 
 /// Struct for passing around `hash_mask` and `tree_mask`
 #[derive(Debug)]
