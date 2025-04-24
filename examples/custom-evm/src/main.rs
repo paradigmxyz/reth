@@ -226,7 +226,6 @@ async fn main() -> eyre::Result<()> {
         // use default ethereum components but with our executor
         .with_components(
             EthereumNode::components()
-                .executor(MyExecutorBuilder::default())
                 .payload(BasicPayloadServiceBuilder::new(MyPayloadBuilder::default())),
         )
         .with_add_ons(EthereumAddOns::default())
