@@ -307,7 +307,7 @@ impl<N: OpNodeCore> OpEthApiInner<N> {
         self.sequencer_client.as_ref()
     }
 
-    /// Returns the disabled txpool admission flag.
+    /// Returns whether transaction pool admission is enabled.
     const fn enable_txpool_admission(&self) -> bool {
         self.enable_txpool_admission
     }
