@@ -52,11 +52,11 @@ async fn test_mainnet_genesis_block_decompression() -> eyre::Result<()> {
 
         let header = block.header.decode_header()?;
         assert_eq!(header.number, block_number, "Header should have correct block number");
-        println!("Successfully decoded header for block {}", block_number);
+        println!("Successfully decoded header for block {block_number}");
 
         // Test total difficulty value
         let td = block.total_difficulty.value;
-        println!("Block {} total difficulty: {}", block_number, td);
+        println!("Block {block_number} total difficulty: {td}");
     }
 
     Ok(())
@@ -103,11 +103,11 @@ async fn test_sepolia_genesis_block_decompression() -> eyre::Result<()> {
 
         let header = block.header.decode_header()?;
         assert_eq!(header.number, block_number, "Header should have correct block number");
-        println!("Successfully decoded header for block {}", block_number);
+        println!("Successfully decoded header for block {block_number}");
 
         // Test total difficulty value
         let td = block.total_difficulty.value;
-        println!("Block {} total difficulty: {}", block_number, td);
+        println!("Block {block_number} total difficulty: {td}");
     }
 
     Ok(())

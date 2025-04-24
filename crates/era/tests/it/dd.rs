@@ -17,7 +17,7 @@ async fn test_mainnet_era1_only_file_decompression_and_decoding() -> eyre::Resul
     let downloader = Era1TestDownloader::new().await.expect("Failed to create downloader");
 
     for &filename in &ERA1_MAINNET_FILES_NAMES {
-        println!("\nTesting file: {}", filename);
+        println!("\nTesting file: {filename}");
         let file = open_test_file(filename, &downloader, MAINNET).await?;
 
         // Test block decompression across different positions in the file
@@ -41,8 +41,7 @@ async fn test_mainnet_era1_only_file_decompression_and_decoding() -> eyre::Resul
             let header_data = block.header.decompress()?;
             assert!(
                 !header_data.is_empty(),
-                "Block {} header decompression should produce non-empty data",
-                block_number
+                "Block {block_number} header decompression should produce non-empty data"
             );
 
             let header = block.header.decode_header()?;
@@ -56,8 +55,7 @@ async fn test_mainnet_era1_only_file_decompression_and_decoding() -> eyre::Resul
             let body_data = block.body.decompress()?;
             assert!(
                 !body_data.is_empty(),
-                "Block {} body decompression should produce non-empty data",
-                block_number
+                "Block {block_number} body decompression should produce non-empty data"
             );
             println!("Body decompression successful ({} bytes)", body_data.len());
 
@@ -78,15 +76,13 @@ async fn test_mainnet_era1_only_file_decompression_and_decoding() -> eyre::Resul
             let receipts_data = block.receipts.decompress()?;
             assert!(
                 !receipts_data.is_empty(),
-                "Block {} receipts decompression should produce non-empty data",
-                block_number
+                "Block {block_number} receipts decompression should produce non-empty data"
             );
             println!("Receipts decompression successful ({} bytes)", receipts_data.len());
 
             assert!(
                 block.total_difficulty.value > U256::ZERO,
-                "Block {} should have non-zero difficulty",
-                block_number
+                "Block {block_number} should have non-zero difficulty"
             );
             println!("Total difficulty verified: {}", block.total_difficulty.value);
         }
@@ -115,7 +111,7 @@ async fn test_mainnet_era1_only_file_decompression_and_decoding() -> eyre::Resul
             let read_back_block = &read_back_file.group.blocks[idx];
             let block_number = file.group.block_index.starting_number + idx as u64;
 
-            println!("Block {} details:", block_number);
+            println!("Block {block_number} details:");
             println!("  Header size: {} bytes", original_block.header.data.len());
             println!("  Body size: {} bytes", original_block.body.data.len());
             println!("  Receipts size: {} bytes", original_block.receipts.data.len());
@@ -124,28 +120,24 @@ async fn test_mainnet_era1_only_file_decompression_and_decoding() -> eyre::Resul
             assert_eq!(
                 original_block.header.decompress()?,
                 read_back_block.header.decompress()?,
-                "Header data should be identical for block {}",
-                block_number
+                "Header data should be identical for block {block_number}"
             );
 
             assert_eq!(
                 original_block.body.decompress()?,
                 read_back_block.body.decompress()?,
-                "Body data should be identical for block {}",
-                block_number
+                "Body data should be identical for block {block_number}"
             );
 
             assert_eq!(
                 original_block.receipts.decompress()?,
                 read_back_block.receipts.decompress()?,
-                "Receipts data should be identical for block {}",
-                block_number
+                "Receipts data should be identical for block {block_number}"
             );
 
             assert_eq!(
                 original_block.total_difficulty.value, read_back_block.total_difficulty.value,
-                "Total difficulty should be identical for block {}",
-                block_number
+                "Total difficulty should be identical for block {block_number}"
             );
         }
     }

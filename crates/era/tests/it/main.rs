@@ -126,11 +126,11 @@ impl Era1TestDownloader {
 
         // set up the file list, required before we can download files
         client.fetch_file_list().await.map_err(|e| {
-            E2sError::Io(std::io::Error::other(format!("Failed to fetch file list: {}", e)))
+            E2sError::Io(std::io::Error::other(format!("Failed to fetch file list: {e}")))
         })?;
 
         // create an url for the file
-        let file_url = Url::parse(&format!("{}{}", url, filename))
+        let file_url = Url::parse(&format!("{url}{filename}"))
             .map_err(|e| eyre!("Failed to fetch file list: {}", e))?;
 
         // download the file
@@ -151,7 +151,7 @@ impl Era1TestDownloader {
     /// open .era1 file, downloading it if necessary
     async fn open_era1_file(&self, filename: &str, network: &str) -> Result<Era1File> {
         let path = self.download_file(filename, network).await?;
-        Era1Reader::open(&path, network).map_err(|e| eyre!("Failed to open Era1 file: {}", e))
+        Era1Reader::open(&path, network).map_err(|e| eyre!("Failed to open Era1 file: {e}"))
     }
 }
 

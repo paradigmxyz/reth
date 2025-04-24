@@ -27,7 +27,7 @@ async fn test_file_roundtrip(
     filename: &str,
     network: &str,
 ) -> eyre::Result<()> {
-    println!("\nTesting roundtrip for file: {}", filename);
+    println!("\nTesting roundtrip for file: {filename}");
 
     let original_file = downloader.open_era1_file(filename, network).await?;
 
@@ -73,15 +73,14 @@ async fn test_file_roundtrip(
         let roundtrip_block = &roundtrip_file.group.blocks[block_id];
         let block_number = original_file.group.block_index.starting_number + block_id as u64;
 
-        println!("Testing roundtrip for block {}", block_number);
+        println!("Testing roundtrip for block {block_number}");
 
         // Test header decompression
         let original_header_data = original_block.header.decompress()?;
         let roundtrip_header_data = roundtrip_block.header.decompress()?;
         assert_eq!(
             original_header_data, roundtrip_header_data,
-            "Block {} header data should be identical after roundtrip",
-            block_number
+            "Block {block_number} header data should be identical after roundtrip"
         );
 
         // Test body decompression
@@ -89,8 +88,7 @@ async fn test_file_roundtrip(
         let roundtrip_body_data = roundtrip_block.body.decompress()?;
         assert_eq!(
             original_body_data, roundtrip_body_data,
-            "Block {} body data should be identical after roundtrip",
-            block_number
+            "Block {block_number} body data should be identical after roundtrip"
         );
 
         // Test receipts decompression
@@ -99,15 +97,13 @@ async fn test_file_roundtrip(
         let roundtrip_receipts_data = roundtrip_block.receipts.decompress()?;
         assert_eq!(
             original_receipts_data, roundtrip_receipts_data,
-            "Block {} receipts data should be identical after roundtrip",
-            block_number
+            "Block {block_number} receipts data should be identical after roundtrip"
         );
 
         // Test total difficulty preservation
         assert_eq!(
             original_block.total_difficulty.value, roundtrip_block.total_difficulty.value,
-            "Block {} total difficulty should be identical after roundtrip",
-            block_number
+            "Block {block_number} total difficulty should be identical after roundtrip",
         );
         // Test decoding of header and body to ensure structural integrity
         let original_header = original_block.header.decode_header()?;
@@ -154,9 +150,9 @@ async fn test_file_roundtrip(
             "Withdrawals presence should match after roundtrip"
         );
 
-        println!("Block {} roundtrip verified successfully", block_number);
+        println!("Block {block_number} roundtrip verified successfully");
 
-        println!("Testing full re-encoding/re-compression cycle for block {}", block_number);
+        println!("Testing full re-encoding/re-compression cycle for block {block_number}");
 
         // Re-encode and re-compress the header
         let recompressed_header = CompressedHeader::from_header(&original_header)?;
@@ -219,12 +215,11 @@ async fn test_file_roundtrip(
         );
 
         println!(
-            "Block {} full re-encoding/re-compression cycle verified successfully 🫡",
-            block_number
+            "Block {block_number} full re-encoding/re-compression cycle verified successfully 🫡"
         );
     }
 
-    println!("File {} roundtrip successful", filename);
+    println!("File {filename} roundtrip successful");
     Ok(())
 }
 
