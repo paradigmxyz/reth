@@ -4,9 +4,9 @@ use alloy_consensus::{constants::ETH_TO_WEI, BlockHeader, Header, TxEip2930};
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_primitives::{b256, Address, TxKind, U256};
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET, MIN_TRANSACTION_GAS};
+use reth_ethereum_evm::execute::EthExecutorProvider;
 use reth_ethereum_primitives::{Block, BlockBody, Receipt, Transaction};
 use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
-use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_node_api::FullNodePrimitives;
 use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_provider::{

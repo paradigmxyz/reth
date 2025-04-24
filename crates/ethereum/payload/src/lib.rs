@@ -20,12 +20,12 @@ use reth_basic_payload_builder::{
 };
 use reth_chainspec::{ChainSpec, ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{BlockExecutionError, BlockValidationError};
+use reth_ethereum_evm::EthEvmConfig;
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm, Evm, NextBlockEnvAttributes,
 };
-use reth_evm_ethereum::EthEvmConfig;
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;

@@ -91,7 +91,7 @@ where
     /// # Create a new instance with [`EthApi`](crate::EthApi)
     ///
     /// ```no_run
-    /// use reth_evm_ethereum::EthEvmConfig;
+    /// use reth_ethereum_evm::EthEvmConfig;
     /// use reth_network_api::noop::NoopNetwork;
     /// use reth_provider::noop::NoopProvider;
     /// use reth_rpc::{EthApi, EthFilter};

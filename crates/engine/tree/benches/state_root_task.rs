@@ -15,8 +15,8 @@ use reth_db_common::init::init_genesis;
 use reth_engine_tree::tree::{
     executor::WorkloadExecutor, PayloadProcessor, StateProviderBuilder, TreeConfig,
 };
+use reth_ethereum_evm::EthEvmConfig;
 use reth_evm::OnStateHook;
-use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{Account as RethAccount, StorageEntry};
 use reth_provider::{
     providers::{BlockchainProvider, ConsistentDbView},

@@ -46,7 +46,7 @@ pub mod chainspec {
 #[cfg(feature = "evm")]
 pub mod evm {
     #[doc(inline)]
-    pub use reth_evm_ethereum::*;
+    pub use reth_ethereum_evm::*;
 
     #[doc(inline)]
     pub use reth_evm as primitives;

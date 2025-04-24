@@ -59,7 +59,7 @@ mod tests {
     use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M;
     use alloy_primitives::{hex_literal::hex, Bytes};
     use reth_chainspec::ChainSpecProvider;
-    use reth_evm_ethereum::EthEvmConfig;
+    use reth_ethereum_evm::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::test_utils::NoopProvider;
     use reth_rpc_eth_api::helpers::EthTransactions;

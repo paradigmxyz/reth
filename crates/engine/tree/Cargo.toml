@@ -76,7 +76,7 @@ reth-db-common.workspace = true
 reth-ethereum-consensus.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-evm = { workspace = true, features = ["test-utils"] }
-reth-evm-ethereum.workspace = true
+reth-ethereum-evm.workspace = true
 reth-exex-types.workspace = true
 reth-network-p2p = { workspace = true, features = ["test-utils"] }
 reth-prune-types.workspace = true

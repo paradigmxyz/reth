@@ -93,7 +93,7 @@ where
     /// # Create an instance with noop ethereum implementations
     ///
     /// ```no_run
-    /// use reth_evm_ethereum::EthEvmConfig;
+    /// use reth_ethereum_evm::EthEvmConfig;
     /// use reth_network_api::noop::NoopNetwork;
     /// use reth_provider::noop::NoopProvider;
     /// use reth_rpc::EthApi;
@@ -471,8 +471,8 @@ mod tests {
     use rand::Rng;
     use reth_chain_state::CanonStateSubscriptions;
     use reth_chainspec::{BaseFeeParams, ChainSpec, ChainSpecProvider};
+    use reth_ethereum_evm::EthEvmConfig;
     use reth_ethereum_primitives::TransactionSigned;
-    use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::test_utils::{MockEthProvider, NoopProvider};
     use reth_rpc_eth_api::EthApiServer;

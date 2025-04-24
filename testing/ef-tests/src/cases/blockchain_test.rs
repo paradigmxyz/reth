@@ -10,9 +10,9 @@ use reth_chainspec::ChainSpec;
 use reth_consensus::{Consensus, HeaderValidator};
 use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert_genesis_state};
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
+use reth_ethereum_evm::execute::EthExecutorProvider;
 use reth_ethereum_primitives::Block;
 use reth_evm::execute::{BlockExecutorProvider, Executor};
-use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_primitives_traits::{RecoveredBlock, SealedBlock};
 use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, DatabaseProviderFactory,

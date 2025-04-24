@@ -3064,9 +3064,9 @@ mod tests {
     use reth_engine_primitives::ForkchoiceStatus;
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_engine_primitives::EthEngineTypes;
+    use reth_ethereum_evm::EthEvmConfig;
     use reth_ethereum_primitives::{Block, EthPrimitives};
     use reth_evm::test_utils::MockExecutorProvider;
-    use reth_evm_ethereum::EthEvmConfig;
     use reth_node_ethereum::EthereumEngineValidator;
     use reth_primitives_traits::Block as _;
     use reth_provider::test_utils::MockEthProvider;

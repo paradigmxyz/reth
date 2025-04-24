@@ -56,7 +56,7 @@ reth-ethereum-primitives.workspace = true
 reth-chainspec.workspace = true
 reth-network-api.workspace = true
 reth-network-peers.workspace = true
-reth-evm-ethereum.workspace = true
+reth-ethereum-evm.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }

@@ -57,8 +57,8 @@ mod tests {
         AccountsHistory,
     };
     use reth_ethereum_consensus::EthBeaconConsensus;
+    use reth_ethereum_evm::execute::EthExecutorProvider;
     use reth_ethereum_primitives::Block;
-    use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_exex::ExExManagerHandle;
     use reth_primitives_traits::{Account, Bytecode, SealedBlock};
     use reth_provider::{

@@ -24,7 +24,7 @@ crates_to_check=(
     reth-storage-api
 
     ## ethereum
-    reth-evm-ethereum
+    reth-ethereum-evm
     reth-ethereum-forks
     reth-ethereum-primitives
     reth-ethereum-consensus

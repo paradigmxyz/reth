@@ -38,7 +38,7 @@ reth-trie = { workspace = true, optional = true }
 reth-ethereum-primitives.workspace = true
 reth-ethereum-cli = { workspace = true, optional = true }
 reth-ethereum-consensus = { workspace = true, optional = true }
-reth-evm-ethereum = { workspace = true, optional = true }
+reth-ethereum-evm = { workspace = true, optional = true }
 reth-node-ethereum = { workspace = true, optional = true }
 
 # alloy
@@ -56,7 +56,7 @@ std = [
     "alloy-rpc-types-eth?/std",
     "reth-storage-api?/std",
     "reth-evm?/std",
-    "reth-evm-ethereum?/std",
+    "reth-ethereum-evm?/std",
     "reth-revm?/std",
 ]
 arbitrary = [
@@ -104,7 +104,7 @@ consensus = [
     "dep:reth-consensus-common",
     "dep:reth-ethereum-consensus",
 ]
-evm = ["dep:reth-evm", "dep:reth-evm-ethereum", "dep:reth-revm"]
+evm = ["dep:reth-evm", "dep:reth-ethereum-evm", "dep:reth-revm"]
 exex = ["provider", "dep:reth-exex"]
 node-api = ["dep:reth-node-api", "dep:reth-node-core"]
 node = [

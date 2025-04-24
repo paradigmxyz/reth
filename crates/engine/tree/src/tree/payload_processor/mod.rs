@@ -430,9 +430,9 @@ mod tests {
     use rand::Rng;
     use reth_chainspec::ChainSpec;
     use reth_db_common::init::init_genesis;
+    use reth_ethereum_evm::EthEvmConfig;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_evm::OnStateHook;
-    use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{
         providers::{BlockchainProvider, ConsistentDbView},

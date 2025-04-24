@@ -669,9 +669,9 @@ mod tests {
         transaction::{DbTx, DbTxMut},
     };
     use reth_ethereum_consensus::EthBeaconConsensus;
+    use reth_ethereum_evm::EthEvmConfig;
     use reth_ethereum_primitives::Block;
     use reth_evm::execute::BasicBlockExecutorProvider;
-    use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{Account, Bytecode, SealedBlock, StorageEntry};
     use reth_provider::{
         test_utils::create_test_provider_factory, AccountReader, DatabaseProviderFactory,

@@ -164,7 +164,7 @@ mod tests {
     use reth_engine_tree::{test_utils::TestPipelineBuilder, tree::NoopInvalidBlockHook};
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_engine_primitives::EthEngineTypes;
-    use reth_evm_ethereum::{execute::EthExecutorProvider, EthEvmConfig};
+    use reth_ethereum_evm::{execute::EthExecutorProvider, EthEvmConfig};
     use reth_exex_types::FinishedExExHeight;
     use reth_network_p2p::test_utils::TestFullBlockClient;
     use reth_node_ethereum::EthereumEngineValidator;
