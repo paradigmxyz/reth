@@ -592,10 +592,7 @@ impl<P> RevealedSparseTrie<P> {
                         current.extend_from_slice_unchecked(key);
                         assert!(
                             path.starts_with(&current),
-                            "path: {:?}, current: {:?}, key: {:?}",
-                            path,
-                            current,
-                            key
+                            "path: {path:?}, current: {current:?}, key: {key:?}",
                         );
                     }
 
@@ -607,11 +604,7 @@ impl<P> RevealedSparseTrie<P> {
                     let nibble = path[current.len()];
                     debug_assert!(
                         state_mask.is_bit_set(nibble),
-                        "current: {:?}, path: {:?}, nibble: {:?}, state_mask: {:?}",
-                        current,
-                        path,
-                        nibble,
-                        state_mask
+                        "current: {current:?}, path: {path:?}, nibble: {nibble:?}, state_mask: {state_mask:?}",
                     );
 
                     // If the branch node has a child that is a leaf node that we're removing,
