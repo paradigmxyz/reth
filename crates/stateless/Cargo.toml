@@ -13,10 +13,10 @@ workspace = true
 
 [dependencies]
 # alloy
-alloy-primitives.workspace = true
+alloy-primitives = {workspace = true, features = ["serde"]}
 alloy-rlp.workspace = true
 alloy-trie.workspace = true
-alloy-consensus.workspace = true
+alloy-consensus = {workspace = true, features = ["serde"]}
 alloy-eips = { workspace = true }
 
 # reth
@@ -30,8 +30,18 @@ reth-trie-common.workspace = true
 reth-trie-sparse.workspace = true
 reth-chainspec.workspace = true
 reth-consensus.workspace = true
+reth-ethereum-primitives = { workspace = true, features = [
+    "serde",
+] }
+reth-primitives-traits = { workspace = true, features = [
+    "serde",
+    "serde-bincode-compat",
+] }
+
 
 # misc
 thiserror.workspace = true
 itertools.workspace = true
 serde.workspace = true # Needed because we copied `ExecutionWitness` into this crate
+serde_with.workspace = true
+tracing = {workspace = true, default-features = false }
