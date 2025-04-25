@@ -544,9 +544,6 @@ pub enum ValidationApiError {
     ProposerPayment,
     #[error("invalid blobs bundle")]
     InvalidBlobsBundle,
-    /// When the transaction signature is invalid
-    #[error("invalid transaction signature")]
-    InvalidTransactionSignature,
     #[error("block accesses blacklisted address: {_0}")]
     Blacklist(Address),
     #[error(transparent)]
@@ -561,14 +558,6 @@ pub enum ValidationApiError {
     Payload(#[from] NewPayloadError),
 }
 
-/// Metrics for the validation endpoint.
-#[derive(Metrics)]
-#[metrics(scope = "builder.validation")]
-pub(crate) struct ValidationMetrics {
-    /// The number of entries configured in the builder validation disallow list.
-    pub(crate) disallow_size: Gauge,
-}
-
 impl From<ValidationApiError> for ErrorObject<'static> {
     fn from(error: ValidationApiError) -> Self {
         match error {
@@ -576,19 +565,34 @@ impl From<ValidationApiError> for ErrorObject<'static> {
             ValidationApiError::GasUsedMismatch(_) |
             ValidationApiError::ParentHashMismatch(_) |
             ValidationApiError::BlockHashMismatch(_) |
-            ValidationApiError::InvalidTransactionSignature |
             ValidationApiError::Blacklist(_) |
-            ValidationApiError::InvalidBlobsBundle => invalid_params_rpc_err(error.to_string()),
+            ValidationApiError::ProposerPayment |
+            ValidationApiError::InvalidBlobsBundle |
+            ValidationApiError::Blob(_) => invalid_params_rpc_err(error.to_string()),
 
             ValidationApiError::MissingLatestBlock |
             ValidationApiError::MissingParentBlock |
             ValidationApiError::BlockTooOld |
-            ValidationApiError::ProposerPayment |
             ValidationApiError::Consensus(_) |
-            ValidationApiError::Provider(_) |
-            ValidationApiError::Execution(_) |
-            ValidationApiError::Payload(_) |
-            ValidationApiError::Blob(_) => internal_rpc_err(error.to_string()),
+            ValidationApiError::Provider(_) => internal_rpc_err(error.to_string()),
+            ValidationApiError::Execution(err) => match err {
+                error @ BlockExecutionError::Validation(_) => {
+                    invalid_params_rpc_err(error.to_string())
+                }
+                error @ BlockExecutionError::Internal(_) => internal_rpc_err(error.to_string()),
+            },
+            ValidationApiError::Payload(err) => match err {
+                error @ NewPayloadError::Eth(_) => invalid_params_rpc_err(error.to_string()),
+                error @ NewPayloadError::Other(_) => internal_rpc_err(error.to_string()),
+            },
         }
     }
+}
+
+/// Metrics for the validation endpoint.
+#[derive(Metrics)]
+#[metrics(scope = "builder.validation")]
+pub(crate) struct ValidationMetrics {
+    /// The number of entries configured in the builder validation disallow list.
+    pub(crate) disallow_size: Gauge,
 }
