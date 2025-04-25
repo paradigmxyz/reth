@@ -18,8 +18,9 @@ use reth_network_p2p::headers::{
 };
 use reth_primitives_traits::{serde_bincode_compat, FullBlockHeader, NodePrimitives, SealedHeader};
 use reth_provider::{
-    providers::StaticFileWriter, BlockHashReader, DBProvider, HeaderProvider,HeaderSyncGapProvider, StaticFileProviderFactory,
-};
+    providers::StaticFileWriter, BlockHashReader, DBProvider, HeaderProvider,
+    HeaderSyncGapProvider, StaticFileProviderFactory,
+ };
 use reth_stages_api::{
     BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput,
     HeadersCheckpoint, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
