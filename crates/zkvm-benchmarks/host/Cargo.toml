@@ -1,0 +1,35 @@
+[package]
+name = "stateless-host"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[dependencies]
+
+sp1-sdk = "4.2.0"
+hex = "0.4.3"
+dotenv = "0.15.0"
+ef-tests.workspace = true
+walkdir.workspace = true
+rayon.workspace = true
+reth-stateless.workspace = true
+reth-ethereum-primitives = { workspace = true, features = [
+    "serde",
+    "serde-bincode-compat",
+] }
+reth-primitives-traits = { workspace = true, features = [
+    "serde",
+    "serde-bincode-compat",
+] }
+serde.workspace = true
+reth-chainspec.workspace = true
+bincode = { workspace = true }
+alloy-primitives = { workspace = true, features = ["serde"] }
+
+# rkyv = { version = "*", default-features = false, features = ["alloc"] }
+[lints]
+workspace = true
