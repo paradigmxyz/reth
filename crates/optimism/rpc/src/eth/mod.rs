@@ -321,9 +321,12 @@ impl OpEthApiBuilder {
         self
     }
 
-    /// Creates a new minimal [`OpEthApi`] with only database provider component and
+    /// Creates a new light-weight [`OpEthApi`] that has only the database provider component and
     /// [`OpEvmConfig`] component.
-    pub fn build_minimal_with_evm<P>(
+    ///
+    /// This is useful for building [`TraceApi`](reth_rpc::TraceApi) as standalone program without
+    /// mempool.
+    pub fn build_for_evm_api_no_pool<P>(
         self,
         provider: P,
         evm_config: OpEvmConfig,
