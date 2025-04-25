@@ -378,7 +378,11 @@ impl FeeHistoryEntry {
                 .excess_blob_gas()
                 .and_then(|excess_blob_gas| Some(blob_params?.calc_blob_fee(excess_blob_gas))),
             blob_gas_used_ratio: block.body().blob_gas_used() as f64 /
-                alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
+                blob_params
+                    .as_ref()
+                    .map(|params| params.max_blob_gas_per_block())
+                    .unwrap_or(alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK_DENCUN)
+                    as f64,
             excess_blob_gas: block.header().excess_blob_gas(),
             blob_gas_used: block.header().blob_gas_used(),
             gas_used: block.header().gas_used(),

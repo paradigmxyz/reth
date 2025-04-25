@@ -316,7 +316,7 @@ mod tests {
                 reth.command.chain_spec().map(|c| c.chain.to_string()).unwrap_or(String::new());
             reth.logs.log_file_directory = reth.logs.log_file_directory.join(chain.clone());
             let log_dir = reth.logs.log_file_directory;
-            let end = format!("reth/logs/{}", chain);
+            let end = format!("reth/logs/{chain}");
             assert!(log_dir.as_ref().ends_with(end), "{log_dir:?}");
         }
     }
@@ -332,7 +332,7 @@ mod tests {
         }
         let log_dir = reth.logs.log_file_directory;
         let end = format!("reth/logs/{}", SUPPORTED_CHAINS[0]);
-        println!("{:?}", log_dir);
+        println!("{log_dir:?}");
         assert!(log_dir.as_ref().ends_with(end), "{log_dir:?}");
     }
 
@@ -346,7 +346,7 @@ mod tests {
         }
         let log_dir = reth.logs.log_file_directory;
         let end = "reth/logs".to_string();
-        println!("{:?}", log_dir);
+        println!("{log_dir:?}");
         assert!(log_dir.as_ref().ends_with(end), "{log_dir:?}");
     }
 

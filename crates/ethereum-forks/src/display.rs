@@ -43,8 +43,7 @@ impl core::fmt::Display for DisplayFork {
                 // All networks that have merged are finalized.
                 write!(
                     f,
-                    "{:32} @{} (network is known to be merged)",
-                    name_with_eip, total_difficulty,
+                    "{name_with_eip:32} @{total_difficulty} (network is known to be merged)",
                 )?;
             }
             ForkCondition::Never => unreachable!(),
