@@ -172,6 +172,11 @@ impl<T: PoolTransaction> PoolEventBroadcast<T> {
         self.broadcast_event(tx, TransactionEvent::Discarded, FullTransactionEvent::Discarded(*tx));
     }
 
+    /// Notify listeners about a transaction that was invalid.
+    pub(crate) fn invalid(&mut self, tx: &TxHash) {
+        self.broadcast_event(tx, TransactionEvent::Invalid, FullTransactionEvent::Invalid(*tx));
+    }
+
     /// Notify listeners that the transaction was mined
     pub(crate) fn mined(&mut self, tx: &TxHash, block_hash: B256) {
         self.broadcast_event(

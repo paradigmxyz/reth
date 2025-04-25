@@ -9,6 +9,7 @@ mod call;
 mod pending_block;
 
 use alloy_primitives::U256;
+use eyre::WrapErr;
 use op_alloy_network::Optimism;
 pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
 use reth_chain_state::CanonStateSubscriptions;
@@ -276,7 +277,6 @@ impl<N: OpNodeCore> fmt::Debug for OpEthApi<N> {
 }
 
 /// Container type `OpEthApi`
-#[allow(missing_debug_implementations)]
 struct OpEthApiInner<N: OpNodeCore> {
     /// Gateway to node's core components.
     eth_api: EthApiNodeBackend<N>,
@@ -302,18 +302,18 @@ impl<N: OpNodeCore> OpEthApiInner<N> {
 pub struct OpEthApiBuilder {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
-    sequencer_client: Option<SequencerClient>,
+    sequencer_url: Option<String>,
 }
 
 impl OpEthApiBuilder {
     /// Creates a [`OpEthApiBuilder`] instance from core components.
     pub const fn new() -> Self {
-        Self { sequencer_client: None }
+        Self { sequencer_url: None }
     }
 
     /// With a [`SequencerClient`].
-    pub fn with_sequencer(mut self, sequencer_client: Option<SequencerClient>) -> Self {
-        self.sequencer_client = sequencer_client;
+    pub fn with_sequencer(mut self, sequencer_url: Option<String>) -> Self {
+        self.sequencer_url = sequencer_url;
         self
     }
 }
@@ -325,8 +325,8 @@ where
 {
     type EthApi = OpEthApi<N>;
 
-    fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> Self::EthApi {
-        let Self { sequencer_client } = self;
+    async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
+        let Self { sequencer_url } = self;
         let eth_api = reth_rpc::EthApiBuilder::new(
             ctx.components.provider().clone(),
             ctx.components.pool().clone(),
@@ -340,8 +340,19 @@ where
         .eth_proof_window(ctx.config.eth_proof_window)
         .fee_history_cache_config(ctx.config.fee_history_cache)
         .proof_permits(ctx.config.proof_permits)
+        .gas_oracle_config(ctx.config.gas_oracle)
         .build_inner();
 
-        OpEthApi { inner: Arc::new(OpEthApiInner { eth_api, sequencer_client }) }
+        let sequencer_client = if let Some(url) = sequencer_url {
+            Some(
+                SequencerClient::new(&url)
+                    .await
+                    .wrap_err_with(|| "Failed to init sequencer client with: {url}")?,
+            )
+        } else {
+            None
+        };
+
+        Ok(OpEthApi { inner: Arc::new(OpEthApiInner { eth_api, sequencer_client }) })
     }
 }

@@ -24,8 +24,11 @@ use reth_evm::{
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_primitives::transaction::signed::OpTransaction;
-use reth_optimism_txpool::{interop::MaybeInteropTransaction, OpPooledTx};
+use reth_optimism_primitives::transaction::OpTransaction;
+use reth_optimism_txpool::{
+    interop::{is_valid_interop, MaybeInteropTransaction},
+    OpPooledTx,
+};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_payload_util::{BestPayloadTransactions, NoopPayloadTransactions, PayloadTransactions};
@@ -68,7 +71,7 @@ impl<Pool, Client, Evm> OpPayloadBuilder<Pool, Client, Evm> {
     }
 
     /// Configures the builder with the given [`OpBuilderConfig`].
-    pub fn with_builder_config(
+    pub const fn with_builder_config(
         pool: Pool,
         client: Client,
         evm_config: Evm,
@@ -378,10 +381,15 @@ impl<Txs> OpBuilder<'_, Txs> {
         ctx.execute_sequencer_transactions(&mut builder)?;
         builder.into_executor().apply_post_execution_changes()?;
 
-        let ExecutionWitnessRecord { hashed_state, codes, keys } =
+        let ExecutionWitnessRecord { hashed_state, codes, keys, lowest_block_number: _ } =
             ExecutionWitnessRecord::from_executed_state(&db);
         let state = state_provider.witness(Default::default(), hashed_state)?;
-        Ok(ExecutionWitness { state: state.into_iter().collect(), codes, keys })
+        Ok(ExecutionWitness {
+            state: state.into_iter().collect(),
+            codes,
+            keys,
+            ..Default::default()
+        })
     }
 }
 
@@ -432,7 +440,7 @@ pub struct ExecutionInfo {
 
 impl ExecutionInfo {
     /// Create a new instance with allocated slots.
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self { cumulative_gas_used: 0, cumulative_da_bytes_used: 0, total_fees: U256::ZERO }
     }
 
@@ -625,7 +633,7 @@ where
         let base_fee = builder.evm_mut().block().basefee;
 
         while let Some(tx) = best_txs.next(()) {
-            let interop = tx.interop();
+            let interop = tx.interop_deadline();
             let tx = tx.into_consensus();
             if info.is_tx_over_limits(tx.inner(), block_gas_limit, tx_da_limit, block_da_limit) {
                 // we can't fit this transaction into the block, so we need to mark it as
@@ -644,7 +652,7 @@ where
             // We skip invalid cross chain txs, they would be removed on the next block update in
             // the maintenance job
             if let Some(interop) = interop {
-                if !interop.is_valid(self.config.attributes.timestamp()) {
+                if !is_valid_interop(interop, self.config.attributes.timestamp()) {
                     best_txs.mark_invalid(tx.signer(), tx.nonce());
                     continue
                 }

@@ -1,5 +1,7 @@
+use std::str::FromStr;
+
 use super::{
-    DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
+    PeerMetadata, DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
     DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
@@ -7,7 +9,8 @@ use crate::transactions::constants::tx_fetcher::{
     DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH, DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
     DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
 };
-use derive_more::Constructor;
+use derive_more::{Constructor, Display};
+use reth_eth_wire::NetworkPrimitives;
 
 /// Configuration for managing transactions within the network.
 #[derive(Debug, Clone)]
@@ -91,6 +94,58 @@ impl Default for TransactionFetcherConfig {
             soft_limit_byte_size_pooled_transactions_response_on_pack_request:
                 DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
                 max_capacity_cache_txns_pending_fetch: DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
+        }
+    }
+}
+
+/// A policy defining which peers pending transactions are gossiped to.
+pub trait TransactionPropagationPolicy: Send + Sync + Unpin + 'static {
+    /// Filter a given peer based on the policy.
+    ///
+    /// This determines whether transactions can be propagated to this peer.
+    fn can_propagate<N: NetworkPrimitives>(&self, peer: &mut PeerMetadata<N>) -> bool;
+
+    /// A callback on the policy when a new peer session is established.
+    fn on_session_established<N: NetworkPrimitives>(&mut self, peer: &mut PeerMetadata<N>);
+
+    /// A callback on the policy when a peer session is closed.
+    fn on_session_closed<N: NetworkPrimitives>(&mut self, peer: &mut PeerMetadata<N>);
+}
+
+/// Determines which peers pending transactions are propagated to.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Display)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum TransactionPropagationKind {
+    /// Propagate transactions to all peers.
+    ///
+    /// No restructions
+    #[default]
+    All,
+    /// Propagate transactions to only trusted peers.
+    Trusted,
+}
+
+impl TransactionPropagationPolicy for TransactionPropagationKind {
+    fn can_propagate<N: NetworkPrimitives>(&self, peer: &mut PeerMetadata<N>) -> bool {
+        match self {
+            Self::All => true,
+            Self::Trusted => peer.peer_kind.is_trusted(),
+        }
+    }
+
+    fn on_session_established<N: NetworkPrimitives>(&mut self, _peer: &mut PeerMetadata<N>) {}
+
+    fn on_session_closed<N: NetworkPrimitives>(&mut self, _peer: &mut PeerMetadata<N>) {}
+}
+
+impl FromStr for TransactionPropagationKind {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "All" | "all" => Ok(Self::All),
+            "Trusted" | "trusted" => Ok(Self::Trusted),
+            _ => Err(format!("Invalid transaction propagation policy: {s}")),
         }
     }
 }

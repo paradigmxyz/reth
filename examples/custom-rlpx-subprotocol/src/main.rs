@@ -15,12 +15,15 @@ mod subprotocol;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 use reth::builder::NodeHandle;
-use reth_network::{
-    config::SecretKey, protocol::IntoRlpxSubProtocol, NetworkConfig, NetworkManager,
-    NetworkProtocols,
+use reth_ethereum::{
+    network::{
+        api::{test_utils::PeersHandleProvider, NetworkInfo},
+        config::rng_secret_key,
+        protocol::IntoRlpxSubProtocol,
+        NetworkConfig, NetworkManager, NetworkProtocols,
+    },
+    node::EthereumNode,
 };
-use reth_network_api::{test_utils::PeersHandleProvider, NetworkInfo};
-use reth_node_ethereum::EthereumNode;
 use subprotocol::{
     connection::CustomCommand,
     protocol::{
@@ -45,7 +48,7 @@ fn main() -> eyre::Result<()> {
         node.network.add_rlpx_sub_protocol(custom_rlpx_handler.into_rlpx_sub_protocol());
 
         // creates a separate network instance and adds the custom network subprotocol
-        let secret_key = SecretKey::new(&mut rand::thread_rng());
+        let secret_key = rng_secret_key();
         let (tx, mut from_peer1) = mpsc::unbounded_channel();
         let custom_rlpx_handler_2 = CustomRlpxProtoHandler { state: ProtocolState { events: tx } };
         let net_cfg = NetworkConfig::builder(secret_key)

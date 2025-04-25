@@ -43,11 +43,9 @@ arbitrary = { workspace = true, features = ["derive"] }
 
 proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
-serde_json.workspace = true
 reth-codecs.workspace = true
 
 criterion.workspace = true
-pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
 
 [features]
 default = ["c-kzg", "alloy-compat", "std", "reth-codec", "secp256k1"]
@@ -58,7 +56,6 @@ std = [
     "alloy-genesis/std",
     "once_cell/std",
     "reth-ethereum-forks/std",
-    "serde_json/std",
     "reth-ethereum-primitives/std",
     "alloy-rlp/std",
     "alloy-primitives/std",
@@ -91,9 +88,7 @@ c-kzg = [
     "alloy-consensus/kzg",
     "alloy-eips/kzg",
 ]
-alloy-compat = [
-    "reth-ethereum-primitives/alloy-compat",
-]
+alloy-compat = []
 test-utils = [
     "reth-primitives-traits/test-utils",
     "arbitrary",

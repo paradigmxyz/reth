@@ -298,12 +298,12 @@ pub enum StageUnitCheckpoint {
 impl StageUnitCheckpoint {
     /// Sets the block range. Returns old block range, or `None` if checkpoint doesn't use block
     /// range.
-    pub fn set_block_range(&mut self, from: u64, to: u64) -> Option<CheckpointBlockRange> {
+    pub const fn set_block_range(&mut self, from: u64, to: u64) -> Option<CheckpointBlockRange> {
         match self {
-            Self::Account(AccountHashingCheckpoint { ref mut block_range, .. }) |
-            Self::Storage(StorageHashingCheckpoint { ref mut block_range, .. }) |
-            Self::Execution(ExecutionCheckpoint { ref mut block_range, .. }) |
-            Self::IndexHistory(IndexHistoryCheckpoint { ref mut block_range, .. }) => {
+            Self::Account(AccountHashingCheckpoint { block_range, .. }) |
+            Self::Storage(StorageHashingCheckpoint { block_range, .. }) |
+            Self::Execution(ExecutionCheckpoint { block_range, .. }) |
+            Self::IndexHistory(IndexHistoryCheckpoint { block_range, .. }) => {
                 let old_range = *block_range;
                 *block_range = CheckpointBlockRange { from, to };
 
@@ -412,13 +412,13 @@ mod tests {
 
     #[test]
     fn merkle_checkpoint_roundtrip() {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let checkpoint = MerkleCheckpoint {
-            target_block: rng.gen(),
-            last_account_key: rng.gen(),
+            target_block: rng.random(),
+            last_account_key: rng.random(),
             walker_stack: vec![StoredSubNode {
                 key: B256::random_with(&mut rng).to_vec(),
-                nibble: Some(rng.gen()),
+                nibble: Some(rng.random()),
                 node: None,
             }],
             state: HashBuilderState::default(),

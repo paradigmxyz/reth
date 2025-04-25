@@ -88,7 +88,7 @@ Different consensus mechanisms.
 Crates related to transaction execution.
 
 - [`revm`](../../crates/revm): Revm utils and implementations specific to reth.
-- [`evm`](../../crates/evm): Traits for configuring an EVM specifics.
+- [`evm`](../../crates/evm/evm): Traits for configuring an EVM specifics.
 - [`execution-types`](../../crates/evm/execution-types): Commonly used types for (EVM) block execution.
 - [`execution-errors`](../../crates/evm/execution-errors): Commonly used error types used when doing block execution.
 
@@ -165,7 +165,9 @@ Small utility crates.
 
 - [`tasks`](../../crates/tasks): An executor-agnostic task abstraction, used to spawn tasks on different async executors. Supports blocking tasks and handles panics gracefully. A tokio implementation is provided by default.
 - [`metrics/common`](../../crates/metrics/src/common): Common metrics types (e.g. metered channels)
+- [`metrics`](https://github.com/metrics-rs/metrics): Reth use [metrics][metrics] for metrics collection, which is a lightweight metrics facade
 - [`metrics/metrics-derive`](https://github.com/rkrasiuk/metrics-derive): A derive-style API for creating metrics
+- [`metrics/reth-node-metrics`](../../crates/node/metrics/): The implementation of metrics server, recorder, hooks.
 - [`tracing`](../../crates/tracing): A small utility crate to install a uniform [`tracing`][tracing] subscriber
 
 [libmdbx-rs]: https://crates.io/crates/libmdbx
@@ -174,3 +176,4 @@ Small utility crates.
 [tracing]: https://crates.io/crates/tracing
 [eip-1459]: https://eips.ethereum.org/EIPS/eip-1459
 [engine-spec]: https://github.com/ethereum/execution-apis/tree/main/src/engine
+[metrics]: https://github.com/metrics-rs/metrics

@@ -14,10 +14,10 @@
 
 use chain_cfg::{boot_nodes, head, polygon_chain_spec};
 use reth_discv4::Discv4ConfigBuilder;
-use reth_network::{
-    config::NetworkMode, NetworkConfig, NetworkEvent, NetworkEventListenerProvider, NetworkManager,
+use reth_ethereum::network::{
+    api::events::SessionInfo, config::NetworkMode, NetworkConfig, NetworkEvent,
+    NetworkEventListenerProvider, NetworkManager,
 };
-use reth_network_api::events::SessionInfo;
 use reth_tracing::{
     tracing::info, tracing_subscriber::filter::LevelFilter, LayerInfo, LogFormat, RethTracer,
     Tracer,

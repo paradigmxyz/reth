@@ -272,22 +272,11 @@ pub struct HardforkBlobParams {
 
 impl HardforkBlobParams {
     /// Constructs params for chainspec from a provided blob schedule.
-    /// Falls back to defaults if the schedule is empty.
+    /// Falls back to defaults if the schedule is missing.
     pub fn from_schedule(blob_schedule: &BTreeMap<String, BlobParams>) -> Self {
-        let extract = |key: &str, default: fn() -> BlobParams| {
-            blob_schedule
-                .get(key)
-                .map(|item| BlobParams {
-                    target_blob_count: item.target_blob_count,
-                    max_blob_count: item.max_blob_count,
-                    ..default()
-                })
-                .unwrap_or_else(default) // Use default if key is missing
-        };
-
         Self {
-            cancun: extract("cancun", BlobParams::cancun),
-            prague: extract("prague", BlobParams::prague),
+            cancun: blob_schedule.get("cancun").copied().unwrap_or_else(BlobParams::cancun),
+            prague: blob_schedule.get("prague").copied().unwrap_or_else(BlobParams::prague),
         }
     }
 }
@@ -1075,6 +1064,7 @@ mod tests {
     use super::*;
     use alloy_chains::Chain;
     use alloy_consensus::constants::ETH_TO_WEI;
+    use alloy_eips::eip4844::BLOB_TX_MIN_BLOB_GASPRICE;
     use alloy_evm::block::calc::{base_block_reward, block_reward};
     use alloy_genesis::{ChainConfig, GenesisAccount};
     use alloy_primitives::{b256, hex};
@@ -1127,7 +1117,8 @@ Merge hard forks:
 - Paris                            @58750000000000000000000 (network is known to be merged)
 Post-merge hard forks (timestamp based):
 - Shanghai                         @1681338455
-- Cancun                           @1710338135"
+- Cancun                           @1710338135
+- Prague                           @1746612311"
         );
     }
 
@@ -1367,7 +1358,11 @@ Post-merge hard forks (timestamp based):
                 ),
                 (
                     EthereumHardfork::Cancun,
-                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
+                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 1746612311 },
+                ),
+                (
+                    EthereumHardfork::Prague,
+                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
                 ),
             ],
         );
@@ -1503,12 +1498,17 @@ Post-merge hard forks (timestamp based):
                 // First Cancun block
                 (
                     Head { number: 20000001, timestamp: 1710338135, ..Default::default() },
-                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
+                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 1746612311 },
                 ),
-                // Future Cancun block
+                // First Prague block
+                (
+                    Head { number: 20000002, timestamp: 1746612311, ..Default::default() },
+                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
+                ),
+                // Future Prague block
                 (
                     Head { number: 20000002, timestamp: 2000000000, ..Default::default() },
-                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
+                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
                 ),
             ],
         );
@@ -1764,11 +1764,19 @@ Post-merge hard forks (timestamp based):
                 ), // First Cancun block
                 (
                     Head { number: 20000002, timestamp: 1710338135, ..Default::default() },
-                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
-                ), // Future Cancun block
+                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 1746612311 },
+                ), // Last Cancun block
                 (
-                    Head { number: 20000003, timestamp: 2000000000, ..Default::default() },
-                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
+                    Head { number: 20000003, timestamp: 1746612310, ..Default::default() },
+                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 1746612311 },
+                ), // First Prague block
+                (
+                    Head { number: 20000004, timestamp: 1746612311, ..Default::default() },
+                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
+                ), // Future Prague block
+                (
+                    Head { number: 20000004, timestamp: 2000000000, ..Default::default() },
+                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
                 ),
             ],
         );
@@ -1983,9 +1991,24 @@ Post-merge hard forks (timestamp based):
 
         // alloc key -> expected rlp mapping
         let key_rlp = vec![
-            (hex!("0x658bdf435d810c91414ec09147daa6db62406379"), &hex!("0xf84d8089487a9a304539440000a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a0c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470")[..]),
-            (hex!("0xaa00000000000000000000000000000000000000"), &hex!("0xf8440101a08afc95b7d18a226944b9c2070b6bda1c3a36afcc3730429d47579c94b9fe5850a0ce92c756baff35fa740c3557c1a971fd24d2d35b7c8e067880d50cd86bb0bc99")[..]),
-            (hex!("0xbb00000000000000000000000000000000000000"), &hex!("0xf8440102a08afc95b7d18a226944b9c2070b6bda1c3a36afcc3730429d47579c94b9fe5850a0e25a53cbb501cec2976b393719c63d832423dd70a458731a0b64e4847bbca7d2")[..]),
+            (
+                hex!("0x658bdf435d810c91414ec09147daa6db62406379"),
+                &hex!(
+                    "0xf84d8089487a9a304539440000a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a0c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+                )[..],
+            ),
+            (
+                hex!("0xaa00000000000000000000000000000000000000"),
+                &hex!(
+                    "0xf8440101a08afc95b7d18a226944b9c2070b6bda1c3a36afcc3730429d47579c94b9fe5850a0ce92c756baff35fa740c3557c1a971fd24d2d35b7c8e067880d50cd86bb0bc99"
+                )[..],
+            ),
+            (
+                hex!("0xbb00000000000000000000000000000000000000"),
+                &hex!(
+                    "0xf8440102a08afc95b7d18a226944b9c2070b6bda1c3a36afcc3730429d47579c94b9fe5850a0e25a53cbb501cec2976b393719c63d832423dd70a458731a0b64e4847bbca7d2"
+                )[..],
+            ),
         ];
 
         for (key, expected_rlp) in key_rlp {
@@ -2411,7 +2434,7 @@ Post-merge hard forks (timestamp based):
     #[test]
     fn latest_eth_mainnet_fork_id() {
         assert_eq!(
-            ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
+            ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
             MAINNET.latest_fork_id()
         )
     }
@@ -2509,5 +2532,38 @@ Post-merge hard forks (timestamp based):
         for (num_ommers, expected_reward) in cases {
             assert_eq!(block_reward(base_reward, num_ommers), expected_reward);
         }
+    }
+
+    #[test]
+    fn blob_params_from_genesis() {
+        let s = r#"{
+         "cancun":{
+            "baseFeeUpdateFraction":3338477,
+            "max":6,
+            "target":3
+         },
+         "prague":{
+            "baseFeeUpdateFraction":3338477,
+            "max":6,
+            "target":3
+         }
+      }"#;
+        let schedule: BTreeMap<String, BlobParams> = serde_json::from_str(s).unwrap();
+        let hardfork_params = HardforkBlobParams::from_schedule(&schedule);
+        let expected = HardforkBlobParams {
+            cancun: BlobParams {
+                target_blob_count: 3,
+                max_blob_count: 6,
+                update_fraction: 3338477,
+                min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
+            },
+            prague: BlobParams {
+                target_blob_count: 3,
+                max_blob_count: 6,
+                update_fraction: 3338477,
+                min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
+            },
+        };
+        assert_eq!(hardfork_params, expected);
     }
 }

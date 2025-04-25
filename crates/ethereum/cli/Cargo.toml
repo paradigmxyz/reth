@@ -13,11 +13,106 @@ workspace = true
 [dependencies]
 # reth
 reth-cli.workspace = true
+reth-cli-commands.workspace = true
+reth-cli-runner.workspace = true
 reth-chainspec.workspace = true
+reth-db.workspace = true
+reth-ethereum-primitives.workspace = true
+reth-network.workspace = true
+reth-node-builder.workspace = true
+reth-node-core.workspace = true
+reth-node-ethereum.workspace = true
+reth-node-metrics.workspace = true
+reth-tracing.workspace = true
+reth-db-api.workspace = true
+reth-consensus.workspace = true
+reth-errors.workspace = true
+reth-ethereum-payload-builder.workspace = true
+reth-evm.workspace = true
+reth-execution-types.workspace = true
+reth-fs-util.workspace = true
+reth-node-api.workspace = true
+reth-basic-payload-builder.workspace = true
+reth-primitives-traits.workspace = true
+reth-provider.workspace = true
+reth-revm.workspace = true
+reth-stages.workspace = true
+reth-transaction-pool.workspace = true
+reth-trie.workspace = true
+reth-trie-db.workspace = true
+reth-cli-util.workspace = true
+reth-config.workspace = true
+reth-downloaders.workspace = true
+reth-exex.workspace = true
+reth-network-api.workspace = true
+reth-network-p2p.workspace = true
+reth-node-events.workspace = true
+reth-prune.workspace = true
+reth-static-file.workspace = true
+reth-tasks.workspace = true
+reth-payload-builder.workspace = true
+
+# serde
+serde_json.workspace = true
+
+# backoff
+backon.workspace = true
+
+# test
+similar-asserts.workspace = true
+
+# async
+tokio.workspace = true
+futures.workspace = true
+
+# alloy
+alloy-eips = { workspace = true, features = ["kzg"] }
+alloy-rlp.workspace = true
+alloy-rpc-types = { workspace = true, features = ["engine"] }
+alloy-consensus.workspace = true
+alloy-primitives.workspace = true
 
 # misc
+clap.workspace = true
 eyre.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
-clap.workspace = true
+# reth
 reth-cli-commands.workspace = true
+
+# fs
+tempfile.workspace = true
+
+[features]
+default = ["jemalloc", "reth-revm/portable"]
+
+dev = ["reth-cli-commands/arbitrary"]
+
+asm-keccak = [
+    "reth-node-core/asm-keccak",
+    "alloy-primitives/asm-keccak",
+]
+
+jemalloc = [
+    "reth-cli-util/jemalloc",
+    "reth-node-core/jemalloc",
+    "reth-node-metrics/jemalloc",
+]
+jemalloc-prof = [
+    "reth-cli-util/jemalloc",
+    "reth-cli-util/jemalloc-prof",
+]
+tracy-allocator = ["reth-cli-util/tracy-allocator"]
+
+# Because jemalloc is default and preferred over snmalloc when both features are
+# enabled, `--no-default-features` should be used when enabling snmalloc or
+# snmalloc-native.
+snmalloc = ["reth-cli-util/snmalloc"]
+snmalloc-native = ["reth-cli-util/snmalloc-native"]
+
+min-error-logs = ["tracing/release_max_level_error"]
+min-warn-logs = ["tracing/release_max_level_warn"]
+min-info-logs = ["tracing/release_max_level_info"]
+min-debug-logs = ["tracing/release_max_level_debug"]
+min-trace-logs = ["tracing/release_max_level_trace"]

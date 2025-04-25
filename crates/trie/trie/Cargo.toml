@@ -30,7 +30,7 @@ alloy-consensus.workspace = true
 alloy-trie.workspace = true
 
 # tracing
-tracing.workspace = true
+tracing = { workspace = true, features = ["attributes"] }
 
 # misc
 auto_impl.workspace = true
@@ -62,7 +62,6 @@ parking_lot.workspace = true
 pretty_assertions.workspace = true
 proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
-serde_json.workspace = true
 
 [features]
 metrics = ["reth-metrics", "dep:metrics"]

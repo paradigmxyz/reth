@@ -1,5 +1,5 @@
-# Use the Rust 1.85 image based on Debian Bullseye
-FROM rust:1.85-bullseye AS builder
+# Use the Rust 1.86 image based on Debian Bullseye
+FROM rust:1.86-bullseye AS builder
 
 # Install specific version of libclang-dev
 RUN apt-get update && apt-get install -y libclang-dev=1:11.0-51+nmu5

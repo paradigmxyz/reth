@@ -72,6 +72,8 @@ exclude_crates=(
   reth-trie-parallel # tokio
   reth-testing-utils
   reth-optimism-txpool # reth-transaction-pool
+  reth-era-downloader # tokio
+  reth-era-import # tokio
 )
 
 # Array to hold the results

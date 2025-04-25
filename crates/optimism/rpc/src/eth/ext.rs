@@ -23,7 +23,6 @@ const MAX_CONCURRENT_CONDITIONAL_VALIDATIONS: usize = 3;
 ///
 /// Separate from [`super::OpEthApi`] to allow to enable it conditionally,
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub struct OpEthExtApi<Pool, Provider> {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
@@ -42,7 +41,7 @@ where
     }
 
     /// Returns the configured sequencer client, if any.
-    fn sequencer_client(&self) -> Option<&SequencerClient> {
+    const fn sequencer_client(&self) -> Option<&SequencerClient> {
         self.sequencer_client.as_ref()
     }
 
@@ -188,12 +187,12 @@ impl<Pool, Provider> OpEthExtApiInner<Pool, Provider> {
     }
 
     #[inline]
-    fn pool(&self) -> &Pool {
+    const fn pool(&self) -> &Pool {
         &self.pool
     }
 
     #[inline]
-    fn provider(&self) -> &Provider {
+    const fn provider(&self) -> &Provider {
         &self.provider
     }
 }
