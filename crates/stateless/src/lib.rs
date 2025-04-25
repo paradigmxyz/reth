@@ -35,6 +35,24 @@
 
 extern crate alloc;
 
+/// Tracks the amount of cycles a region of code takes up
+/// in a zkvm environment and is no-op otherwise.
+#[macro_export]
+macro_rules! track_cycles {
+    ($name:expr, $body:expr) => {{
+        #[cfg(target_os = "zkvm")]
+        {
+            tracing::info!("cycle-tracker-report-start: {}", $name);
+            let result = $body;
+            tracing::info!("cycle-tracker-report-end: {}", $name);
+            result
+        }
+
+        #[cfg(not(target_os = "zkvm"))]
+        $body
+    }};
+}
+
 pub(crate) mod root;
 /// Implementation of stateless validation
 pub mod validation;
@@ -42,3 +60,20 @@ pub(crate) mod witness_db;
 
 mod execution_witness;
 pub use execution_witness::ExecutionWitness;
+/// Enum that specifies the fork
+pub mod fork_spec;
+
+use reth_ethereum_primitives::Block;
+use reth_primitives::RecoveredBlock;
+use serde::{Deserialize, Serialize};
+
+#[serde_with::serde_as]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ClientInput {
+    #[serde_as(
+        as = "reth_primitives_traits::serde_bincode_compat::RecoveredBlock<reth_ethereum_primitives::Block>"
+    )]
+    pub block: RecoveredBlock<Block>,
+
+    pub witness: ExecutionWitness,
+}
