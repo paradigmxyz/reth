@@ -2577,7 +2577,7 @@ where
 
         let executed: ExecutedBlockWithTrieUpdates<N> = ExecutedBlockWithTrieUpdates {
             block: ExecutedBlock {
-                recovered_block: Arc::new(block.clone()),
+                recovered_block: Arc::new(block),
                 execution_output: Arc::new(ExecutionOutcome::from((output, block_num_hash.number))),
                 hashed_state: Arc::new(hashed_state),
             },
