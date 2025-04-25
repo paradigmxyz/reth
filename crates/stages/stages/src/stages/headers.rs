@@ -135,7 +135,7 @@ where
                     .map_err(|err| StageError::Fatal(Box::new(err)))?
                     .into();
 
-            let (header, header_hash) = sealed_header.clone().split();
+            let (header, header_hash) = sealed_header.sealed_ref().split();
             if header.number() == 0 {
                 continue
             }
@@ -144,9 +144,13 @@ where
             // Increase total difficulty
             td += header.difficulty();
 
-            self.consensus
-                .validate_header(&sealed_header)
-                .map_err(|err| StageError::Fatal(Box::new(err)))?;
+            self.consensus.validate_header(&sealed_header).map_err(|error| StageError::Block {
+                block: Box::new(BlockWithParent::new(
+                    sealed_header.parent_hash(),
+                    NumHash::new(sealed_header.number(), sealed_header.hash()),
+                )),
+                error: BlockErrorKind::Validation(error),
+            })?;
 
             // Append to Headers segment
             writer.append_header(&header, td, &header_hash)?;

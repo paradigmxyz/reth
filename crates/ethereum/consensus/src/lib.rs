@@ -151,8 +151,6 @@ where
             if header.ommers_hash() != EMPTY_OMMER_ROOT_HASH {
                 return Err(ConsensusError::TheMergeOmmerRootIsNotEmpty);
             }
-
-            validate_header_extra_data(header)?;
         } else {
             #[cfg(feature = "std")]
             {
@@ -170,9 +168,8 @@ where
                     });
                 }
             }
-
-            validate_header_extra_data(header)?;
         }
+        validate_header_extra_data(header)?;
         validate_header_gas(header)?;
         validate_header_base_fee(header, &self.chain_spec)?;
 
