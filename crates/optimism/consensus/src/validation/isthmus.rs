@@ -2,11 +2,13 @@
 
 use crate::OpConsensusError;
 use alloy_consensus::BlockHeader;
+use alloy_trie::EMPTY_ROOT_HASH;
 use alloy_primitives::{address, Address, B256};
 use core::fmt::Debug;
 use reth_storage_api::{errors::ProviderResult, StorageRootProvider};
 use reth_trie_common::HashedStorage;
 use revm::database::BundleState;
+use tracing::warn;
 
 /// The L2 contract `L2ToL1MessagePasser`, stores commitments to withdrawal transactions.
 pub const ADDRESS_L2_TO_L1_MESSAGE_PASSER: Address =
@@ -77,6 +79,14 @@ where
 
     let storage_root = withdrawals_root(state_updates, state)
         .map_err(OpConsensusError::L2WithdrawalsRootCalculationFail)?;
+    
+    if storage_root == EMPTY_ROOT_HASH {
+        warn!(
+            target: "consensus::withdrawals",
+            "isthmus: no storage root for L2ToL1MessagePasser contract"
+        );
+    }
+
 
     if header_storage_root != storage_root {
         return Err(OpConsensusError::L2WithdrawalsRootMismatch {
