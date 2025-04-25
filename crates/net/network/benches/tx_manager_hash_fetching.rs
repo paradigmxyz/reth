@@ -104,10 +104,10 @@ pub fn tx_fetch_bench(c: &mut Criterion) {
                             let peer_pool = peer.pool().unwrap();
 
                             for _ in 0..num_tx_per_peer {
-                                let mut gen =
+                                let mut tx_gen =
                                     TransactionGenerator::new(rand::rngs::StdRng::seed_from_u64(0));
 
-                                let tx = gen.gen_eip1559_pooled();
+                                let tx = tx_gen.gen_eip1559_pooled();
                                 let sender = tx.sender();
                                 provider.add_account(
                                     sender,
