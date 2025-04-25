@@ -42,7 +42,6 @@ use std::{
     str::FromStr,
     sync::{atomic::AtomicBool, Arc},
 };
-use std::{path::PathBuf, str::FromStr, sync::Arc};
 use tracing::*;
 
 /// `reth debug build-block` command
