@@ -26,6 +26,11 @@ impl<'a, TX> DatabaseTrieCursorFactory<'a, TX> {
     pub const fn new(tx: &'a TX) -> Self {
         Self(tx)
     }
+
+    /// Returns the tx used to create the factory
+    pub fn get_tx(&self) -> &'a TX {
+        self.0
+    }
 }
 
 /// Implementation of the trie cursor factory for a database transaction.

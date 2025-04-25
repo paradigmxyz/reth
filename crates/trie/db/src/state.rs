@@ -130,21 +130,23 @@ pub trait DatabaseHashedPostState<TX>: Sized {
 }
 
 impl<'a, TX: DbTx> StateRootFromTx<'a, TX>
-    for StateRoot<'a, DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>, TX>
+    for StateRoot<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>
 {
     fn from_tx(tx: &'a TX) -> Self {
-        Self::new(DatabaseTrieCursorFactory::new(tx), DatabaseHashedCursorFactory::new(tx), tx)
+        Self::new(DatabaseTrieCursorFactory::new(tx), DatabaseHashedCursorFactory::new(tx))
     }
 }
 
 impl<'a, TX: DbTx> DatabaseStateRoot
-    for StateRoot<'a, DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>, TX>
+    for StateRoot<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>
 {
     fn incremental_root_calculator(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<Self, StateRootError> {
-        let loaded_prefix_sets = PrefixSetLoader::<_, KeccakKeyHasher>::new(self.tx).load(range)?;
+        let loaded_prefix_sets =
+            PrefixSetLoader::<_, KeccakKeyHasher>::new(self.trie_cursor_factory.get_tx())
+                .load(range)?;
         Ok(self.clone().with_prefix_sets(loaded_prefix_sets))
     }
 
@@ -172,13 +174,10 @@ impl<'a, TX: DbTx> DatabaseStateRoot
     fn overlay_root(&self, post_state: HashedPostState) -> Result<B256, StateRootError> {
         let prefix_sets = post_state.construct_prefix_sets().freeze();
         let state_sorted = post_state.into_sorted();
+        let tx = self.trie_cursor_factory.get_tx();
         StateRoot::new(
-            DatabaseTrieCursorFactory::new(self.tx),
-            HashedPostStateCursorFactory::new(
-                DatabaseHashedCursorFactory::new(self.tx),
-                &state_sorted,
-            ),
-            self.tx,
+            DatabaseTrieCursorFactory::new(tx),
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
         )
         .with_prefix_sets(prefix_sets)
         .root()
@@ -190,13 +189,10 @@ impl<'a, TX: DbTx> DatabaseStateRoot
     ) -> Result<(B256, TrieUpdates), StateRootError> {
         let prefix_sets = post_state.construct_prefix_sets().freeze();
         let state_sorted = post_state.into_sorted();
+        let tx = self.trie_cursor_factory.get_tx();
         StateRoot::new(
-            DatabaseTrieCursorFactory::new(self.tx),
-            HashedPostStateCursorFactory::new(
-                DatabaseHashedCursorFactory::new(self.tx),
-                &state_sorted,
-            ),
-            self.tx,
+            DatabaseTrieCursorFactory::new(tx),
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
         )
         .with_prefix_sets(prefix_sets)
         .root_with_updates()
@@ -205,13 +201,10 @@ impl<'a, TX: DbTx> DatabaseStateRoot
     fn overlay_root_from_nodes(&self, input: TrieInput) -> Result<B256, StateRootError> {
         let state_sorted = input.state.into_sorted();
         let nodes_sorted = input.nodes.into_sorted();
+        let tx = self.trie_cursor_factory.get_tx();
         StateRoot::new(
-            InMemoryTrieCursorFactory::new(DatabaseTrieCursorFactory::new(self.tx), &nodes_sorted),
-            HashedPostStateCursorFactory::new(
-                DatabaseHashedCursorFactory::new(self.tx),
-                &state_sorted,
-            ),
-            self.tx,
+            InMemoryTrieCursorFactory::new(DatabaseTrieCursorFactory::new(tx), &nodes_sorted),
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
         )
         .with_prefix_sets(input.prefix_sets.freeze())
         .root()
@@ -223,13 +216,10 @@ impl<'a, TX: DbTx> DatabaseStateRoot
     ) -> Result<(B256, TrieUpdates), StateRootError> {
         let state_sorted = input.state.into_sorted();
         let nodes_sorted = input.nodes.into_sorted();
+        let tx = self.trie_cursor_factory.get_tx();
         StateRoot::new(
-            InMemoryTrieCursorFactory::new(DatabaseTrieCursorFactory::new(self.tx), &nodes_sorted),
-            HashedPostStateCursorFactory::new(
-                DatabaseHashedCursorFactory::new(self.tx),
-                &state_sorted,
-            ),
-            self.tx,
+            InMemoryTrieCursorFactory::new(DatabaseTrieCursorFactory::new(tx), &nodes_sorted),
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
         )
         .with_prefix_sets(input.prefix_sets.freeze())
         .root_with_updates()

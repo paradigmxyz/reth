@@ -28,7 +28,7 @@ pub struct MerklePatriciaTrie;
 
 impl StateCommitment for MerklePatriciaTrie {
     type StateRoot<'a, TX: DbTx + 'a> =
-        StateRoot<'a, DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>, TX>;
+        StateRoot<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>;
     type StorageRoot<'a, TX: DbTx + 'a> =
         StorageRoot<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>;
     type StateProof<'a, TX: DbTx + 'a> =
