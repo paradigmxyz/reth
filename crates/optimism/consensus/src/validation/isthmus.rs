@@ -79,14 +79,13 @@ where
 
     let storage_root = withdrawals_root(state_updates, state)
         .map_err(OpConsensusError::L2WithdrawalsRootCalculationFail)?;
-    
+
     if storage_root == EMPTY_ROOT_HASH {
         warn!(
             target: "consensus::withdrawals",
             "isthmus: no storage root for L2ToL1MessagePasser contract"
         );
     }
-
 
     if header_storage_root != storage_root {
         return Err(OpConsensusError::L2WithdrawalsRootMismatch {
