@@ -1476,7 +1476,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
             tx.state.remove(TxState::NO_NONCE_GAPS);
 
-            // udpate the pool based on the state.
+            // update the pool based on the state.
             tx.subpool = tx.state.into();
 
             // check if anything changed.
@@ -3209,10 +3209,10 @@ mod tests {
         let v3 = f.validated(tx_3);
 
         // Add them to the pool
-        let _res = pool.add_transaction(v0.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v0, on_chain_balance, on_chain_nonce).unwrap();
         let _res = pool.add_transaction(v1.clone(), on_chain_balance, on_chain_nonce).unwrap();
-        let _res = pool.add_transaction(v2.clone(), on_chain_balance, on_chain_nonce).unwrap();
-        let _res = pool.add_transaction(v3.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v2, on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v3, on_chain_balance, on_chain_nonce).unwrap();
 
         assert_eq!(0, pool.queued_transactions().len());
         assert_eq!(4, pool.pending_transactions().len());
