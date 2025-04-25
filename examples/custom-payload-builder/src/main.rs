@@ -37,7 +37,7 @@ pub mod job;
 #[non_exhaustive]
 pub struct CustomPayloadBuilder;
 
-impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for CustomPayloadBuilder
+impl<Node, Pool> PayloadServiceBuilder<Node, Pool, EthEvmConfig> for CustomPayloadBuilder
 where
     Node: FullNodeTypes<
         Types: NodeTypes<
@@ -54,13 +54,14 @@ where
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
+        evm_config: EthEvmConfig,
     ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>> {
         tracing::info!("Spawning a custom payload builder");
 
         let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
             ctx.provider().clone(),
             pool,
-            EthEvmConfig::new(ctx.chain_spec()),
+            evm_config,
             EthereumBuilderConfig::new(),
         );
 

@@ -7,7 +7,6 @@ use reth_ethereum_engine_primitives::{
 use reth_ethereum_payload_builder::EthereumBuilderConfig;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::ConfigureEvm;
-use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::{FullNodeTypes, NodeTypes, PrimitivesTy, TxTy};
 use reth_node_builder::{
     components::PayloadBuilderBuilder, BuilderContext, PayloadBuilderConfig, PayloadTypes,
@@ -19,47 +18,17 @@ use reth_transaction_pool::{PoolTransaction, TransactionPool};
 #[non_exhaustive]
 pub struct EthereumPayloadBuilder;
 
-impl EthereumPayloadBuilder {
-    /// A helper method initializing [`reth_ethereum_payload_builder::EthereumPayloadBuilder`] with
-    /// the given EVM config.
-    pub fn build<Types, Node, Evm, Pool>(
-        self,
-        evm_config: Evm,
-        ctx: &BuilderContext<Node>,
-        pool: Pool,
-    ) -> eyre::Result<
-        reth_ethereum_payload_builder::EthereumPayloadBuilder<Pool, Node::Provider, Evm>,
-    >
-    where
-        Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
-        Node: FullNodeTypes<Types = Types>,
-        Evm: ConfigureEvm<Primitives = PrimitivesTy<Types>>,
-        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
-            + Unpin
-            + 'static,
-        Types::Payload: PayloadTypes<
-            BuiltPayload = EthBuiltPayload,
-            PayloadAttributes = EthPayloadAttributes,
-            PayloadBuilderAttributes = EthPayloadBuilderAttributes,
-        >,
-    {
-        let conf = ctx.payload_builder_config();
-        Ok(reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
-            ctx.provider().clone(),
-            pool,
-            evm_config,
-            EthereumBuilderConfig::new().with_gas_limit(conf.gas_limit()),
-        ))
-    }
-}
-
-impl<Types, Node, Pool> PayloadBuilderBuilder<Node, Pool> for EthereumPayloadBuilder
+impl<Types, Node, Pool, Evm> PayloadBuilderBuilder<Node, Pool, Evm> for EthereumPayloadBuilder
 where
     Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
         + 'static,
+    Evm: ConfigureEvm<
+            Primitives = PrimitivesTy<Types>,
+            NextBlockEnvCtx = reth_evm::NextBlockEnvAttributes,
+        > + 'static,
     Types::Payload: PayloadTypes<
         BuiltPayload = EthBuiltPayload,
         PayloadAttributes = EthPayloadAttributes,
@@ -67,15 +36,20 @@ where
     >,
 {
     type PayloadBuilder =
-        reth_ethereum_payload_builder::EthereumPayloadBuilder<Pool, Node::Provider, EthEvmConfig>;
+        reth_ethereum_payload_builder::EthereumPayloadBuilder<Pool, Node::Provider, Evm>;
 
     async fn build_payload_builder(
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
+        evm_config: Evm,
     ) -> eyre::Result<Self::PayloadBuilder> {
-        let evm_config = EthEvmConfig::new(ctx.chain_spec())
-            .with_extra_data(ctx.payload_builder_config().extra_data_bytes());
-        self.build(evm_config, ctx, pool)
+        let conf = ctx.payload_builder_config();
+        Ok(reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
+            ctx.provider().clone(),
+            pool,
+            evm_config,
+            EthereumBuilderConfig::new().with_gas_limit(conf.gas_limit()),
+        ))
     }
 }

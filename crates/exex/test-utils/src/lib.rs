@@ -151,9 +151,9 @@ where
         ComponentsBuilder::default()
             .node_types::<N>()
             .pool(TestPoolBuilder::default())
+            .executor(TestExecutorBuilder::default())
             .payload(BasicPayloadServiceBuilder::default())
             .network(EthereumNetworkBuilder::default())
-            .executor(TestExecutorBuilder::default())
             .consensus(TestConsensusBuilder::default())
     }
 
