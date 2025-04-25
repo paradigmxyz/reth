@@ -2596,7 +2596,11 @@ where
 
         // emit insert event
         let elapsed = start.elapsed();
-        let engine_event = if ensure_ok!(self.is_fork(block_num_hash.hash)) {
+        let is_fork = match self.is_fork(block_num_hash.hash) {
+            Ok(val) => val,
+            Err(e) => return Err((e.into(), executed.block.recovered_block().clone())),
+        };
+        let engine_event = if is_fork {
             BeaconConsensusEngineEvent::ForkBlockAdded(executed, elapsed)
         } else {
             BeaconConsensusEngineEvent::CanonicalBlockAdded(executed, elapsed)
