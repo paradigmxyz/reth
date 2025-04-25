@@ -18,40 +18,6 @@ use reth_transaction_pool::{PoolTransaction, TransactionPool};
 #[non_exhaustive]
 pub struct EthereumPayloadBuilder;
 
-impl EthereumPayloadBuilder {
-    /// A helper method initializing [`reth_ethereum_payload_builder::EthereumPayloadBuilder`] with
-    /// the given EVM config.
-    pub fn build<Types, Node, Evm, Pool>(
-        self,
-        evm_config: Evm,
-        ctx: &BuilderContext<Node>,
-        pool: Pool,
-    ) -> eyre::Result<
-        reth_ethereum_payload_builder::EthereumPayloadBuilder<Pool, Node::Provider, Evm>,
-    >
-    where
-        Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
-        Node: FullNodeTypes<Types = Types>,
-        Evm: ConfigureEvm<Primitives = PrimitivesTy<Types>>,
-        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
-            + Unpin
-            + 'static,
-        Types::Payload: PayloadTypes<
-            BuiltPayload = EthBuiltPayload,
-            PayloadAttributes = EthPayloadAttributes,
-            PayloadBuilderAttributes = EthPayloadBuilderAttributes,
-        >,
-    {
-        let conf = ctx.payload_builder_config();
-        Ok(reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
-            ctx.provider().clone(),
-            pool,
-            evm_config,
-            EthereumBuilderConfig::new().with_gas_limit(conf.gas_limit()),
-        ))
-    }
-}
-
 impl<Types, Node, Pool, Evm> PayloadBuilderBuilder<Node, Pool, Evm> for EthereumPayloadBuilder
 where
     Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
@@ -78,6 +44,12 @@ where
         pool: Pool,
         evm_config: Evm,
     ) -> eyre::Result<Self::PayloadBuilder> {
-        self.build(evm_config, ctx, pool)
+        let conf = ctx.payload_builder_config();
+        Ok(reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
+            ctx.provider().clone(),
+            pool,
+            evm_config,
+            EthereumBuilderConfig::new().with_gas_limit(conf.gas_limit()),
+        ))
     }
 }

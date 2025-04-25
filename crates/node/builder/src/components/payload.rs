@@ -7,6 +7,7 @@ use reth_node_api::{NodeTypes, PayloadBuilderFor};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_transaction_pool::TransactionPool;
 use std::future::Future;
+
 /// A type that knows how to spawn the payload service.
 pub trait PayloadServiceBuilder<Node: FullNodeTypes, Pool: TransactionPool, EvmConfig>:
     Send + Sized

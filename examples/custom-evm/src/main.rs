@@ -6,12 +6,7 @@ use alloy_evm::{eth::EthEvmContext, EvmFactory};
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, Address, Bytes};
 use reth::{
-    builder::{
-        components::{BasicPayloadServiceBuilder, ExecutorBuilder, PayloadBuilderBuilder},
-        BuilderContext, NodeBuilder,
-    },
-    payload::{EthBuiltPayload, EthPayloadBuilderAttributes},
-    rpc::types::engine::PayloadAttributes,
+    builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
     tasks::TaskManager,
 };
 use reth_ethereum::{
@@ -34,13 +29,12 @@ use reth_ethereum::{
         EthEvm, EthEvmConfig,
     },
     node::{
-        api::{FullNodeTypes, NodeTypes, PayloadTypes},
+        api::{FullNodeTypes, NodeTypes},
         core::{args::RpcServerArgs, node_config::NodeConfig},
-        node::{EthereumAddOns, EthereumPayloadBuilder},
+        node::EthereumAddOns,
         BasicBlockExecutorProvider, EthereumNode,
     },
-    pool::{PoolTransaction, TransactionPool},
-    EthPrimitives, TransactionSigned,
+    EthPrimitives,
 };
 use reth_tracing::{RethTracer, Tracer};
 use std::sync::OnceLock;
@@ -99,39 +93,6 @@ where
         let evm_config =
             EthEvmConfig::new_with_evm_factory(ctx.chain_spec(), MyEvmFactory::default());
         Ok((evm_config.clone(), BasicBlockExecutorProvider::new(evm_config)))
-    }
-}
-
-/// Builds a regular ethereum block executor that uses the custom EVM.
-#[derive(Debug, Default, Clone)]
-#[non_exhaustive]
-pub struct MyPayloadBuilder {
-    inner: EthereumPayloadBuilder,
-}
-
-impl<Types, Node, Pool> PayloadBuilderBuilder<Node, Pool, EthEvmConfig> for MyPayloadBuilder
-where
-    Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
-    Node: FullNodeTypes<Types = Types>,
-    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>
-        + Unpin
-        + 'static,
-    Types::Payload: PayloadTypes<
-        BuiltPayload = EthBuiltPayload,
-        PayloadAttributes = PayloadAttributes,
-        PayloadBuilderAttributes = EthPayloadBuilderAttributes,
-    >,
-{
-    type PayloadBuilder =
-        reth_ethereum_payload_builder::EthereumPayloadBuilder<Pool, Node::Provider, EthEvmConfig>;
-
-    async fn build_payload_builder(
-        self,
-        ctx: &BuilderContext<Node>,
-        pool: Pool,
-        evm_config: EthEvmConfig,
-    ) -> eyre::Result<Self::PayloadBuilder> {
-        self.inner.build(evm_config, ctx, pool)
     }
 }
 
@@ -224,10 +185,7 @@ async fn main() -> eyre::Result<()> {
         // configure the node with regular ethereum types
         .with_types::<EthereumNode>()
         // use default ethereum components but with our executor
-        .with_components(
-            EthereumNode::components()
-                .payload(BasicPayloadServiceBuilder::new(MyPayloadBuilder::default())),
-        )
+        .with_components(EthereumNode::components().executor(MyExecutorBuilder::default()))
         .with_add_ons(EthereumAddOns::default())
         .launch()
         .await

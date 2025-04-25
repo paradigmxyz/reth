@@ -708,39 +708,6 @@ impl<Txs> OpPayloadBuilder<Txs> {
         let Self { compute_pending_block, da_config, .. } = self;
         OpPayloadBuilder { compute_pending_block, best_transactions, da_config }
     }
-
-    /// A helper method to initialize [`reth_optimism_payload_builder::OpPayloadBuilder`] with the
-    /// given EVM config.
-    pub fn build<Node, Evm, Pool>(
-        self,
-        evm_config: Evm,
-        ctx: &BuilderContext<Node>,
-        pool: Pool,
-    ) -> eyre::Result<reth_optimism_payload_builder::OpPayloadBuilder<Pool, Node::Provider, Evm, Txs>>
-    where
-        Node: FullNodeTypes<
-            Types: NodeTypes<
-                Payload = OpEngineTypes,
-                ChainSpec = OpChainSpec,
-                Primitives = OpPrimitives,
-            >,
-        >,
-        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
-            + Unpin
-            + 'static,
-        Evm: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>>,
-        Txs: OpPayloadTransactions<Pool::Transaction>,
-    {
-        let payload_builder = reth_optimism_payload_builder::OpPayloadBuilder::with_builder_config(
-            pool,
-            ctx.provider().clone(),
-            evm_config,
-            OpBuilderConfig { da_config: self.da_config.clone() },
-        )
-        .with_transactions(self.best_transactions.clone())
-        .set_compute_pending_block(self.compute_pending_block);
-        Ok(payload_builder)
-    }
 }
 
 impl<Node, Pool, Txs, Evm> PayloadBuilderBuilder<Node, Pool, Evm> for OpPayloadBuilder<Txs>
@@ -771,7 +738,15 @@ where
         pool: Pool,
         evm_config: Evm,
     ) -> eyre::Result<Self::PayloadBuilder> {
-        self.build(evm_config, ctx, pool)
+        let payload_builder = reth_optimism_payload_builder::OpPayloadBuilder::with_builder_config(
+            pool,
+            ctx.provider().clone(),
+            evm_config,
+            OpBuilderConfig { da_config: self.da_config.clone() },
+        )
+        .with_transactions(self.best_transactions.clone())
+        .set_compute_pending_block(self.compute_pending_block);
+        Ok(payload_builder)
     }
 }
 
