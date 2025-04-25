@@ -826,7 +826,9 @@ impl<T: TransactionOrdering> TxPool<T> {
         &mut self,
         tx_hash: &B256,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let (tx, pool) = self.all_transactions.remove_transaction_by_hash(tx_hash)?;
+        let (tx, pool, updates) =
+            self.all_transactions.remove_transaction_by_hash(tx_hash, true)?;
+        self.process_updates(updates);
         self.remove_from_subpool(pool, tx.id())
     }
 
@@ -839,7 +841,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         &mut self,
         tx_hash: &B256,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let (tx, pool) = self.all_transactions.remove_transaction_by_hash(tx_hash)?;
+        let (tx, pool, _) = self.all_transactions.remove_transaction_by_hash(tx_hash, false)?;
         self.prune_from_subpool(pool, tx.id())
     }
 
@@ -1455,13 +1457,39 @@ impl<T: PoolTransaction> AllTransactions<T> {
     pub(crate) fn remove_transaction_by_hash(
         &mut self,
         tx_hash: &B256,
-    ) -> Option<(Arc<ValidPoolTransaction<T>>, SubPool)> {
+        update_descendant: bool,
+    ) -> Option<(Arc<ValidPoolTransaction<T>>, SubPool, Vec<PoolUpdate>)> {
         let tx = self.by_hash.remove(tx_hash)?;
         let internal = self.txs.remove(&tx.transaction_id)?;
         // decrement the counter for the sender.
         self.tx_decr(tx.sender_id());
         self.update_size_metrics();
-        Some((tx, internal.subpool))
+
+        if !update_descendant {
+            return Some((tx, internal.subpool, vec![]));
+        }
+
+        let mut updates = Vec::new();
+
+        for (id, tx) in self.descendant_txs_mut(tx.id()) {
+            let current_pool = tx.subpool;
+
+            tx.state.remove(TxState::NO_NONCE_GAPS);
+
+            // udpate the pool based on the state.
+            tx.subpool = tx.state.into();
+
+            // check if anything changed.
+            if current_pool != tx.subpool {
+                updates.push(PoolUpdate {
+                    id: *id,
+                    hash: *tx.transaction.hash(),
+                    current: current_pool,
+                    destination: tx.subpool.into(),
+                })
+            }
+        }
+        Some((tx, internal.subpool, updates))
     }
 
     /// Removes a transaction from the set.
@@ -3077,15 +3105,15 @@ mod tests {
         assert!(pool.queued_transactions().is_empty());
         assert_eq!(2, pool.pending_transactions().len());
 
-        // Remove first (nonce 0) - simulating that it was taken to be a part of the block.
-        pool.prune_transaction_by_hash(v0.hash());
+        // Remove first (nonce 0)
+        pool.remove_transaction_by_hash(v0.hash());
 
         // Now add transaction with nonce 2
         let _res = pool.add_transaction(v2, on_chain_balance, on_chain_nonce).unwrap();
 
-        // v2 is in the queue now. v1 is still in 'pending'.
-        assert_eq!(1, pool.queued_transactions().len());
-        assert_eq!(1, pool.pending_transactions().len());
+        // v1 and v2 should both be in the queue now.
+        assert_eq!(2, pool.queued_transactions().len());
+        assert!(pool.pending_transactions().is_empty());
 
         // Simulate new block arrival - and chain nonce increasing.
         let mut updated_accounts = HashMap::default();
@@ -3156,10 +3184,43 @@ mod tests {
 
         pool.remove_transactions(vec![*v0.hash(), *v2.hash()]);
 
-        assert_eq!(0, pool.queued_transactions().len());
-        assert_eq!(2, pool.pending_transactions().len());
+        assert_eq!(2, pool.queued_transactions().len());
+        assert!(pool.pending_transactions().is_empty());
         assert!(pool.contains(v1.hash()));
         assert!(pool.contains(v3.hash()));
+    }
+
+    #[test]
+    fn test_remove_transactions_middle_pending_hash() {
+        let on_chain_balance = U256::from(10_000);
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let tx_0 = MockTransaction::eip1559().set_gas_price(100).inc_limit();
+        let tx_1 = tx_0.next();
+        let tx_2 = tx_1.next();
+        let tx_3 = tx_2.next();
+
+        // Create 4 transactions
+        let v0 = f.validated(tx_0);
+        let v1 = f.validated(tx_1);
+        let v2 = f.validated(tx_2);
+        let v3 = f.validated(tx_3);
+
+        // Add them to the pool
+        let _res = pool.add_transaction(v0.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v1.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v2.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v3.clone(), on_chain_balance, on_chain_nonce).unwrap();
+
+        assert_eq!(0, pool.queued_transactions().len());
+        assert_eq!(4, pool.pending_transactions().len());
+
+        pool.remove_transactions(vec![*v1.hash()]);
+
+        assert_eq!(2, pool.queued_transactions().len());
+        assert_eq!(1, pool.pending_transactions().len());
     }
 
     #[test]
