@@ -296,7 +296,7 @@ impl TreeConfig {
         self
     }
 
-    /// Setter for whether to use the precompile_cache.
+    /// Setter for whether to use the precompile cache.
     pub const fn with_precompile_cache_enabled(mut self, precompile_cache_enabled: bool) -> Self {
         self.precompile_cache_enabled = precompile_cache_enabled;
         self
