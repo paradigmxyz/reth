@@ -50,7 +50,6 @@ use reth_consensus::{Consensus, ConsensusError, FullConsensus};
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network_p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader};
 use reth_primitives_traits::{Block, NodePrimitives};
-use reth_provider::HeaderSyncGapProvider;
 use reth_prune_types::PruneModes;
 use reth_stages_api::Stage;
 use std::{ops::Not, sync::Arc};
