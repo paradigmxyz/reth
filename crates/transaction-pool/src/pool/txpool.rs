@@ -828,7 +828,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         let (tx, pool) = self.all_transactions.remove_transaction_by_hash(tx_hash)?;
 
-        // After tx is removed, its descendants must become parked due to the nonce gap
+        // After a tx is removed, its descendants must become parked due to the nonce gap
         let updates = self.all_transactions.park_descendant_pending_txs(tx.id());
         self.process_updates(updates);
         self.remove_from_subpool(pool, tx.id())
