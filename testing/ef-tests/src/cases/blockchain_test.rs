@@ -20,7 +20,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
-use reth_trie_db::DatabaseStateRoot;
+use reth_trie_db::{DatabaseStateRoot, StateRootFromTx};
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 
 /// A handler for the blockchain test suite.
@@ -240,9 +240,9 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
         // Compute and check the post state root
         let hashed_state =
             HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
-        let (computed_state_root, _) =
-            StateRoot::overlay_root_with_updates(provider.tx_ref(), hashed_state.clone())
-                .map_err(|_| Error::BlockProcessingFailed { block_number })?;
+        let (computed_state_root, _) = StateRoot::from_tx(provider.tx_ref())
+            .overlay_root_with_updates(hashed_state.clone())
+            .map_err(|_| Error::BlockProcessingFailed { block_number })?;
         if computed_state_root != block.state_root {
             return Err(Error::BlockProcessingFailed { block_number })
         }
