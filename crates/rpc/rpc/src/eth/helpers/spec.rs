@@ -1,9 +1,8 @@
+use crate::EthApi;
 use alloy_primitives::U256;
 use reth_node_api::FullNodeComponents;
 use reth_provider::TransactionsProvider;
-use reth_rpc_eth_api::{helpers::EthApiSpec, RpcNodeCore};
-
-use crate::EthApi;
+use reth_rpc_eth_api::helpers::EthApiSpec;
 
 impl<Components> EthApiSpec for EthApi<Components>
 where

@@ -13,7 +13,6 @@ use reth_rpc_eth_types::{
 use reth_rpc_server_types::constants::{
     DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
 };
-use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner, TokioTaskExecutor};
 use std::sync::Arc;
 
@@ -37,9 +36,9 @@ where
         EthStateCache<
             <D::Provider as BlockReader>::Block,
             <D::Provider as ReceiptProvider>::Receipt,
-            gas_oracle_config: GasPriceOracleConfig,
         >,
     >,
+    gas_oracle_config: GasPriceOracleConfig,
     gas_oracle: Option<GasPriceOracle<D::Provider>>,
     blocking_task_pool: Option<BlockingTaskPool>,
     task_spawner: Box<dyn TaskSpawner + 'static>,

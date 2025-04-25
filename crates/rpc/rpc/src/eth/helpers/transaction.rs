@@ -13,11 +13,13 @@ use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool}
 
 impl<Components: FullNodeComponents> EthTransactions for EthApi<Components>
 where
-    Self: LoadTransaction<Provider: BlockReaderIdExt>,
-    Components::Provider: BlockReader<Transaction = ProviderTx<Self::Provider>>,
+    Self: LoadTransaction<Provider = Components::Provider>,
+    Components::Provider: BlockReader + BlockReaderIdExt,
 {
     #[inline]
-    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>> {
+    fn signers(
+        &self,
+    ) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Components::Provider>>>>> {
         self.inner.signers()
     }
 

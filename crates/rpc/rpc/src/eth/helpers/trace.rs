@@ -12,16 +12,9 @@ use crate::EthApi;
 
 impl<Components: FullNodeComponents> Trace for EthApi<Components>
 where
-    Self: LoadState<
-        Provider: BlockReader,
-        Evm: ConfigureEvm<
-            Primitives: NodePrimitives<
-                BlockHeader = ProviderHeader<Self::Provider>,
-                SignedTx = ProviderTx<Self::Provider>,
-            >,
-        >,
-        Error: FromEvmError<Self::Evm>,
-    >,
+    Self: LoadState<Provider: BlockReader, Evm: ConfigureEvm, Error: FromEvmError<Self::Evm>>,
     Components::Provider: BlockReader,
+    // <<<Self as FullNodeTypes>::Types as NodeTypes>::Primitives as NodePrimitives>::BlockHeader
+    // == _
 {
 }

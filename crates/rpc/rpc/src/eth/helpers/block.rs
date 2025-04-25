@@ -1,10 +1,10 @@
 //! Contains RPC handler implementations specific to blocks.
 
-use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
+use alloy_consensus::{transaction::TransactionMeta, BlockHeader, EthereumTxEnvelope, TxEip4844};
 use alloy_rpc_types_eth::{BlockId, TransactionReceipt};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
-use reth_node_api::FullNodeComponents;
-use reth_primitives_traits::BlockBody;
+use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeTypes};
+use reth_primitives_traits::{BlockBody, NodePrimitives, SignedTransaction};
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
     types::RpcTypes,
@@ -27,6 +27,8 @@ where
         >,
     >,
     Components::Provider: BlockReader + ChainSpecProvider,
+    <<Self as FullNodeTypes>::Types as NodeTypes>::Primitives:
+        NodePrimitives<SignedTx = EthereumTxEnvelope<TxEip4844>>,
 {
     async fn block_receipts(
         &self,

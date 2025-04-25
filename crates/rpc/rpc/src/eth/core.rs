@@ -9,7 +9,8 @@ use alloy_eips::BlockNumberOrTag;
 use alloy_network::Ethereum;
 use alloy_primitives::{Bytes, U256};
 use derive_more::Deref;
-use reth_node_api::{FullNodeComponents, FullNodeTypes, TxTy};
+use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeTypes, TxTy};
+use reth_payload_builder::PayloadBuilderHandle;
 use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
     node::RpcNodeCoreExt,
@@ -25,7 +26,7 @@ use reth_storage_api::{
 };
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
-    TaskSpawner, TokioTaskExecutor,
+    TaskExecutor, TaskSpawner, TokioTaskExecutor,
 };
 use tokio::sync::{broadcast, Mutex};
 
@@ -58,6 +59,52 @@ pub struct EthApi<Components: FullNodeComponents> {
     pub(super) inner: Arc<EthApiInner<Components>>,
     /// Transaction RPC response builder.
     pub tx_resp_builder: EthTxBuilder,
+}
+
+impl<Components: FullNodeComponents> FullNodeTypes for EthApi<Components> {
+    type Types = Components::Types;
+    type DB = Components::DB;
+    type Provider = Components::Provider;
+}
+
+impl<Components: FullNodeComponents> FullNodeComponents for EthApi<Components> {
+    type Pool = Components::Pool;
+    type Evm = Components::Evm;
+    type Executor = Components::Executor;
+    type Consensus = Components::Consensus;
+    type Network = Components::Network;
+
+    fn pool(&self) -> &Self::Pool {
+        self.components.pool()
+    }
+
+    fn evm_config(&self) -> &Self::Evm {
+        self.components.evm_config()
+    }
+
+    fn block_executor(&self) -> &Self::Executor {
+        self.components.block_executor()
+    }
+
+    fn consensus(&self) -> &Self::Consensus {
+        self.components.consensus()
+    }
+
+    fn network(&self) -> &Self::Network {
+        self.components.network()
+    }
+
+    fn payload_builder_handle(&self) -> &PayloadBuilderHandle<<Self::Types as NodeTypes>::Payload> {
+        self.components.payload_builder_handle()
+    }
+
+    fn provider(&self) -> &Self::Provider {
+        self.components.provider()
+    }
+
+    fn task_executor(&self) -> &TaskExecutor {
+        self.components.task_executor()
+    }
 }
 
 impl<Components: FullNodeComponents> Clone for EthApi<Components> {
@@ -287,8 +334,8 @@ where
 {
     /// Returns a handle to data on disk.
     #[inline]
-    pub const fn provider(&self) -> &Components::Provider {
-        self.provider()
+    pub fn provider(&self) -> &Components::Provider {
+        self.components.provider()
     }
 
     /// Returns a handle to data in memory.
@@ -331,13 +378,13 @@ where
 
     /// Returns a handle to the EVM config.
     #[inline]
-    pub const fn evm_config(&self) -> &Components::Evm {
+    pub fn evm_config(&self) -> &Components::Evm {
         self.components.evm_config()
     }
 
     /// Returns a handle to the transaction pool.
     #[inline]
-    pub const fn pool(&self) -> &Components::Pool {
+    pub fn pool(&self) -> &Components::Pool {
         self.components.pool()
     }
 
