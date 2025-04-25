@@ -13,6 +13,7 @@ use alloy_rpc_types_engine::{
 use async_trait::async_trait;
 use core::fmt;
 use jsonrpsee::core::RpcResult;
+use jsonrpsee_types::error::ErrorObject;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::PayloadValidator;
@@ -27,7 +28,7 @@ use reth_primitives_traits::{
 };
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
 use reth_rpc_api::BlockSubmissionValidationApiServer;
-use reth_rpc_server_types::result::internal_rpc_err;
+use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use revm_primitives::{Address, B256, U256};
@@ -443,7 +444,7 @@ where
         self.task_spawner.spawn_blocking(Box::pin(async move {
             let result = Self::validate_builder_submission_v3(&this, request)
                 .await
-                .map_err(|err| internal_rpc_err(err.to_string()));
+                .map_err(ErrorObject::from);
             let _ = tx.send(result);
         }));
 
@@ -461,7 +462,7 @@ where
         self.task_spawner.spawn_blocking(Box::pin(async move {
             let result = Self::validate_builder_submission_v4(&this, request)
                 .await
-                .map_err(|err| internal_rpc_err(err.to_string()));
+                .map_err(ErrorObject::from);
             let _ = tx.send(result);
         }));
 
@@ -545,9 +546,6 @@ pub enum ValidationApiError {
     ProposerPayment,
     #[error("invalid blobs bundle")]
     InvalidBlobsBundle,
-    /// When the transaction signature is invalid
-    #[error("invalid transaction signature")]
-    InvalidTransactionSignature,
     #[error("block accesses blacklisted address: {_0}")]
     Blacklist(Address),
     #[error(transparent)]
@@ -560,6 +558,37 @@ pub enum ValidationApiError {
     Execution(#[from] BlockExecutionError),
     #[error(transparent)]
     Payload(#[from] NewPayloadError),
+}
+
+impl From<ValidationApiError> for ErrorObject<'static> {
+    fn from(error: ValidationApiError) -> Self {
+        match error {
+            ValidationApiError::GasLimitMismatch(_) |
+            ValidationApiError::GasUsedMismatch(_) |
+            ValidationApiError::ParentHashMismatch(_) |
+            ValidationApiError::BlockHashMismatch(_) |
+            ValidationApiError::Blacklist(_) |
+            ValidationApiError::ProposerPayment |
+            ValidationApiError::InvalidBlobsBundle |
+            ValidationApiError::Blob(_) => invalid_params_rpc_err(error.to_string()),
+
+            ValidationApiError::MissingLatestBlock |
+            ValidationApiError::MissingParentBlock |
+            ValidationApiError::BlockTooOld |
+            ValidationApiError::Consensus(_) |
+            ValidationApiError::Provider(_) => internal_rpc_err(error.to_string()),
+            ValidationApiError::Execution(err) => match err {
+                error @ BlockExecutionError::Validation(_) => {
+                    invalid_params_rpc_err(error.to_string())
+                }
+                error @ BlockExecutionError::Internal(_) => internal_rpc_err(error.to_string()),
+            },
+            ValidationApiError::Payload(err) => match err {
+                error @ NewPayloadError::Eth(_) => invalid_params_rpc_err(error.to_string()),
+                error @ NewPayloadError::Other(_) => internal_rpc_err(error.to_string()),
+            },
+        }
+    }
 }
 
 /// Metrics for the validation endpoint.
