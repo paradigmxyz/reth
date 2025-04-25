@@ -99,7 +99,7 @@ pub mod providers {
 
 /// Re-exported from `reth_primitives`.
 pub mod primitives {
-    pub use reth_primitives::*;
+    pub use reth_ethereum_primitives::*;
 }
 
 /// Re-exported from `reth_ethereum_consensus`.
