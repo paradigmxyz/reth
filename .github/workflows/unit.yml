@@ -81,7 +81,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ethereum/tests
-          ref: 59781f1c6cce3d6c161751ab3512d79fa75d5597
+          ref: 81862e4848585a438d64f911a19b3825f0f4cd95
           path: testing/ef-tests/ethereum-tests
           submodules: recursive
           fetch-depth: 1

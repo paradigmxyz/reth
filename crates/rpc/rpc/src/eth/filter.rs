@@ -539,7 +539,7 @@ where
                     // these are consecutive headers, so we can use the parent hash of the next
                     // block to get the current header's hash
                     let block_hash = match headers.get(idx + 1) {
-                        Some(parent) => parent.parent_hash(),
+                        Some(child) => child.parent_hash(),
                         None => self
                             .provider()
                             .block_hash(header.number())?

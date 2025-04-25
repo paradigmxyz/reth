@@ -343,8 +343,8 @@ impl Command {
             // add rows containing checksums to the table
             let mut row = Row::new();
             row.add_cell(Cell::new(db_table));
-            row.add_cell(Cell::new(format!("{:x}", checksum)));
-            row.add_cell(Cell::new(format!("{:?}", elapsed)));
+            row.add_cell(Cell::new(format!("{checksum:x}")));
+            row.add_cell(Cell::new(format!("{elapsed:?}")));
             table.add_row(row);
         }
 
@@ -360,7 +360,7 @@ impl Command {
         let mut row = Row::new();
         row.add_cell(Cell::new("Total elapsed"));
         row.add_cell(Cell::new(""));
-        row.add_cell(Cell::new(format!("{:?}", total_elapsed)));
+        row.add_cell(Cell::new(format!("{total_elapsed:?}")));
         table.add_row(row);
 
         Ok(table)

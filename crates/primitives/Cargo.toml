@@ -88,9 +88,7 @@ c-kzg = [
     "alloy-consensus/kzg",
     "alloy-eips/kzg",
 ]
-alloy-compat = [
-    "reth-ethereum-primitives/alloy-compat",
-]
+alloy-compat = []
 test-utils = [
     "reth-primitives-traits/test-utils",
     "arbitrary",

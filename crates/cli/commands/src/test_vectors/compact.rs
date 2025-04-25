@@ -63,7 +63,7 @@ macro_rules! compact_types {
         pub static IDENTIFIER_TYPE: std::sync::LazyLock<std::collections::HashSet<String>> = std::sync::LazyLock::new(|| {
             let mut map = std::collections::HashSet::new();
             $(
-                map.insert(type_name::<$id_ty>());
+                 map.insert(type_name::<$id_ty>());
             )*
             map
         });
@@ -145,7 +145,7 @@ pub fn read_vectors() -> Result<()> {
 }
 
 /// Generates a vector of type `T` to a file.
-pub fn generate_vectors_with(gen: &[fn(&mut TestRunner) -> eyre::Result<()>]) -> Result<()> {
+pub fn generate_vectors_with(generator: &[fn(&mut TestRunner) -> eyre::Result<()>]) -> Result<()> {
     // Prepare random seed for test (same method as used by proptest)
     let seed = B256::random();
     println!("Seed for compact test vectors: {:?}", hex::encode_prefixed(seed));
@@ -157,7 +157,7 @@ pub fn generate_vectors_with(gen: &[fn(&mut TestRunner) -> eyre::Result<()>]) ->
 
     fs::create_dir_all(VECTORS_FOLDER)?;
 
-    for generate_fn in gen {
+    for generate_fn in generator {
         generate_fn(&mut runner)?;
     }
 
@@ -178,7 +178,7 @@ pub fn read_vectors_with(read: &[fn() -> eyre::Result<()>]) -> Result<()> {
 
     if let Some(err_list) = errors {
         for error in err_list {
-            eprintln!("{:?}", error);
+            eprintln!("{error:?}");
         }
         return Err(eyre::eyre!(
             "If there are missing types, make sure to run `reth test-vectors compact --write` first.\n
@@ -271,7 +271,7 @@ where
 
         let (reconstructed, _) = T::from_compact(&compact_bytes, len_or_identifier);
         reconstructed.to_compact(&mut buffer);
-        assert_eq!(buffer, compact_bytes, "mismatch {}", type_name);
+        assert_eq!(buffer, compact_bytes, "mismatch {type_name}");
     }
 
     println!(" ✅");
@@ -279,6 +279,15 @@ where
     Ok(())
 }
 
+/// Returns the type name for the given type.
 pub fn type_name<T>() -> String {
-    std::any::type_name::<T>().split("::").last().unwrap_or(std::any::type_name::<T>()).to_string()
+    // With alloy type transition <https://github.com/paradigmxyz/reth/pull/15768> the types are renamed, we map them here to the original name so that test vector files remain consistent
+    let name = std::any::type_name::<T>();
+    match name {
+        "alloy_consensus::transaction::typed::EthereumTypedTransaction<alloy_consensus::transaction::eip4844::TxEip4844>" => "Transaction".to_string(),
+        "alloy_consensus::transaction::envelope::EthereumTxEnvelope<alloy_consensus::transaction::eip4844::TxEip4844>" => "TransactionSigned".to_string(),
+        name => {
+            name.split("::").last().unwrap_or(std::any::type_name::<T>()).to_string()
+        }
+    }
 }

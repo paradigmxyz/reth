@@ -1,5 +1,6 @@
 [package]
 name = "reth-era-downloader"
+description = "An asynchronous stream interface for downloading ERA1 files"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,6 +10,9 @@ repository.workspace = true
 exclude.workspace = true
 
 [dependencies]
+# reth
+reth-fs-util.workspace = true
+
 # http
 bytes.workspace = true
 reqwest.workspace = true

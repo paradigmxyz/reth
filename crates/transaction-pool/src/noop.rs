@@ -30,11 +30,21 @@ use tokio::sync::{mpsc, mpsc::Receiver};
 /// This type will never hold any transactions and is only useful for wiring components together.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
-pub struct NoopTransactionPool<T = EthPooledTransaction>(PhantomData<T>);
+pub struct NoopTransactionPool<T: EthPoolTransaction = EthPooledTransaction> {
+    /// Type marker
+    _marker: PhantomData<T>,
+}
 
-impl<T> Default for NoopTransactionPool<T> {
+impl<T: EthPoolTransaction> NoopTransactionPool<T> {
+    /// Creates a new [`NoopTransactionPool`].
+    pub fn new() -> Self {
+        Self { _marker: Default::default() }
+    }
+}
+
+impl Default for NoopTransactionPool<EthPooledTransaction> {
     fn default() -> Self {
-        Self(Default::default())
+        Self { _marker: Default::default() }
     }
 }
 
@@ -381,11 +391,11 @@ impl<T> Default for MockTransactionValidator<T> {
 /// An error that contains the transaction that failed to be inserted into the noop pool.
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("can't insert transaction into the noop pool that does nothing")]
-pub struct NoopInsertError<T> {
+pub struct NoopInsertError<T: EthPoolTransaction = EthPooledTransaction> {
     tx: T,
 }
 
-impl<T> NoopInsertError<T> {
+impl<T: EthPoolTransaction> NoopInsertError<T> {
     const fn new(tx: T) -> Self {
         Self { tx }
     }

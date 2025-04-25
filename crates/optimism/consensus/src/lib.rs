@@ -13,15 +13,14 @@ extern crate alloc;
 
 use alloc::{format, sync::Arc};
 use alloy_consensus::{BlockHeader as _, EMPTY_OMMER_ROOT_HASH};
-use alloy_primitives::{B64, U256};
+use alloy_primitives::B64;
 use core::fmt::Debug;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
 use reth_consensus_common::validation::{
     validate_against_parent_4844, validate_against_parent_eip1559_base_fee,
-    validate_against_parent_hash_number, validate_against_parent_timestamp,
-    validate_body_against_header, validate_cancun_gas, validate_header_base_fee,
-    validate_header_extra_data, validate_header_gas,
+    validate_against_parent_hash_number, validate_against_parent_timestamp, validate_cancun_gas,
+    validate_header_base_fee, validate_header_extra_data, validate_header_gas,
 };
 use reth_execution_types::BlockExecutionResult;
 use reth_optimism_forks::OpHardforks;
@@ -80,7 +79,7 @@ impl<ChainSpec: EthChainSpec + OpHardforks, B: Block> Consensus<B>
         body: &B::Body,
         header: &SealedHeader<B::Header>,
     ) -> Result<(), ConsensusError> {
-        validate_body_against_header(body, header.header())
+        validation::validate_body_against_header_op(&self.chain_spec, body, header.header())
     }
 
     fn validate_block_pre_execution(&self, block: &SealedBlock<B>) -> Result<(), ConsensusError> {
@@ -135,8 +134,33 @@ impl<ChainSpec: EthChainSpec + OpHardforks, H: BlockHeader> HeaderValidator<H>
     for OpBeaconConsensus<ChainSpec>
 {
     fn validate_header(&self, header: &SealedHeader<H>) -> Result<(), ConsensusError> {
-        validate_header_gas(header.header())?;
-        validate_header_base_fee(header.header(), &self.chain_spec)
+        let header = header.header();
+        // with OP-stack Bedrock activation number determines when TTD (eth Merge) has been reached.
+        debug_assert!(
+            self.chain_spec.is_bedrock_active_at_block(header.number()),
+            "manually import OVM blocks"
+        );
+
+        if header.nonce() != Some(B64::ZERO) {
+            return Err(ConsensusError::TheMergeNonceIsNotZero)
+        }
+
+        if header.ommers_hash() != EMPTY_OMMER_ROOT_HASH {
+            return Err(ConsensusError::TheMergeOmmerRootIsNotEmpty)
+        }
+
+        // Post-merge, the consensus layer is expected to perform checks such that the block
+        // timestamp is a function of the slot. This is different from pre-merge, where blocks
+        // are only allowed to be in the future (compared to the system's clock) by a certain
+        // threshold.
+        //
+        // Block validation with respect to the parent should ensure that the block timestamp
+        // is greater than its parent timestamp.
+
+        // validate header extra data for all networks post merge
+        validate_header_extra_data(header)?;
+        validate_header_gas(header)?;
+        validate_header_base_fee(header, &self.chain_spec)
     }
 
     fn validate_header_against_parent(
@@ -178,42 +202,6 @@ impl<ChainSpec: EthChainSpec + OpHardforks, H: BlockHeader> HeaderValidator<H>
         if let Some(blob_params) = self.chain_spec.blob_params_at_timestamp(header.timestamp()) {
             validate_against_parent_4844(header.header(), parent.header(), blob_params)?;
         }
-
-        Ok(())
-    }
-
-    fn validate_header_with_total_difficulty(
-        &self,
-        header: &H,
-        _total_difficulty: U256,
-    ) -> Result<(), ConsensusError> {
-        // with OP-stack Bedrock activation number determines when TTD (eth Merge) has been reached.
-        debug_assert!(
-            self.chain_spec.is_bedrock_active_at_block(header.number()),
-            "manually import OVM blocks"
-        );
-
-        if header.nonce() != Some(B64::ZERO) {
-            return Err(ConsensusError::TheMergeNonceIsNotZero)
-        }
-
-        if header.ommers_hash() != EMPTY_OMMER_ROOT_HASH {
-            return Err(ConsensusError::TheMergeOmmerRootIsNotEmpty)
-        }
-
-        // Post-merge, the consensus layer is expected to perform checks such that the block
-        // timestamp is a function of the slot. This is different from pre-merge, where blocks
-        // are only allowed to be in the future (compared to the system's clock) by a certain
-        // threshold.
-        //
-        // Block validation with respect to the parent should ensure that the block timestamp
-        // is greater than its parent timestamp.
-
-        // validate header extra data for all networks post merge
-        validate_header_extra_data(header)?;
-
-        // mixHash is used instead of difficulty inside EVM
-        // https://eips.ethereum.org/EIPS/eip-4399#using-mixhash-field-instead-of-difficulty
 
         Ok(())
     }
