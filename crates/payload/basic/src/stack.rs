@@ -210,6 +210,7 @@ where
                             None
                         }
                     }),
+                    is_resolving:args.is_resolving.clone(),
                 };
 
                 self.left.try_build(left_args).map(|out| out.map_payload(Either::Left))
@@ -229,6 +230,7 @@ where
                             None
                         }
                     }),
+                    is_resolving: args.is_resolving.clone(),
                 };
 
                 self.right.try_build(right_args).map(|out| out.map_payload(Either::Right))
