@@ -45,9 +45,7 @@ fn check_bytecodes(provider: impl DBProvider) {
     for entry in cursor.walk(None).unwrap() {
         let (hash, bytecode) = entry.unwrap();
 
-        if check_bytecode(bytecode) {
-            println!("Found bytecode: {hash:?}");
-        }
+        check_bytecode(bytecode);
 
         if processed % 1000 == 0 {
             println!("Processed {processed}/{total_entries}");
@@ -57,24 +55,26 @@ fn check_bytecodes(provider: impl DBProvider) {
     }
 }
 
-fn check_bytecode(bytecode: Bytecode) -> bool {
+fn check_bytecode(bytecode: Bytecode) {
     let bytes = bytecode.0.bytecode();
-    let mut idx: u8 = 0;
+    let mut idx = 0;
     let mut prev = None;
 
-    while idx < bytes.len() as u8 {
+    while idx < bytes.len() {
         let opcode = bytes[idx as usize];
 
         if opcode >= opcode::PUSH1 && opcode <= opcode::PUSH32 {
             prev = None;
-            idx += opcode - opcode::PUSH1 + 2;
+            idx += (opcode - opcode::PUSH1 + 2) as usize;
             continue;
         }
 
         if opcode == opcode::JUMPDEST {
             if let Some(prev) = prev {
                 if prev == 0xe6 || prev == 0xe7 || prev == 0xe8 {
-                    return true;
+                    println!("Found JUMPDEST at {idx}");
+                    println!("{bytes:?}");
+                    break;
                 }
             }
         }
@@ -82,6 +82,4 @@ fn check_bytecode(bytecode: Bytecode) -> bool {
         prev = Some(opcode);
         idx += 1;
     }
-
-    false
 }
