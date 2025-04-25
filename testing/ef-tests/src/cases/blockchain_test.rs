@@ -50,13 +50,13 @@ impl Suite for BlockchainTests {
 /// An Ethereum blockchain test.
 #[derive(Debug, PartialEq, Eq)]
 pub struct BlockchainTestCase {
-    tests: BTreeMap<String, BlockchainTest>,
-    skip: bool,
+    pub tests: BTreeMap<String, BlockchainTest>,
+    pub skip: bool,
 }
 
 impl BlockchainTestCase {
     /// Returns `true` if the fork is not supported.
-    const fn excluded_fork(network: ForkSpec) -> bool {
+    pub const fn excluded_fork(network: ForkSpec) -> bool {
         matches!(
             network,
             ForkSpec::ByzantiumToConstantinopleAt5 |
@@ -98,7 +98,7 @@ impl BlockchainTestCase {
         let expectation = Self::expected_failure(case);
         match run_case(case) {
             // All blocks executed successfully.
-            Ok(()) => {
+            Ok(_) => {
                 // Check if the test case specifies that it should have failed
                 if let Some((block, msg)) = expectation {
                     Err(Error::Assertion(format!(
@@ -185,7 +185,9 @@ impl Case for BlockchainTestCase {
 /// Returns:
 /// - `Ok(())` if all blocks execute successfully and the final state is correct.
 /// - `Err(Error)` if any block fails to execute correctly, or if the post-state validation fails.
-fn run_case(case: &BlockchainTest) -> Result<(), Error> {
+pub fn run_case(
+    case: &BlockchainTest,
+) -> Result<Vec<(RecoveredBlock<Block>, ExecutionWitness)>, Error> {
     // Create a new test database and initialize a provider for the test case.
     let chain_spec: Arc<ChainSpec> = Arc::new(case.network.into());
     let factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
@@ -323,12 +325,12 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     }
 
     // Now validate using the stateless client if everything else passes
-    for (block, execution_witness) in program_inputs {
-        stateless_validation(block, execution_witness, chain_spec.clone())
+    for (block, execution_witness) in &program_inputs {
+        stateless_validation(block.clone(), execution_witness.clone(), chain_spec.clone())
             .expect("stateless validation failed");
     }
 
-    Ok(())
+    Ok(program_inputs)
 }
 
 fn decode_blocks(
