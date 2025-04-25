@@ -20,7 +20,7 @@ use reth_primitives_traits::{serde_bincode_compat, FullBlockHeader, NodePrimitiv
 use reth_provider::{
     providers::StaticFileWriter, BlockHashReader, DBProvider, HeaderProvider,
     HeaderSyncGapProvider, StaticFileProviderFactory,
- };
+};
 use reth_stages_api::{
     BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput,
     HeadersCheckpoint, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
