@@ -13,7 +13,7 @@ use reth_db_api::{
 };
 use reth_etl::Collector;
 use reth_network_p2p::headers::{
-    downloader::{HeaderDownloader, HeaderSyncGap, SyncTarget},
+    downloader::{HeaderDownloader, HeaderSyncGap, HeaderSyncGapProvider, SyncTarget},
     error::HeadersDownloaderError,
 };
 use reth_primitives_traits::{serde_bincode_compat, FullBlockHeader, NodePrimitives, SealedHeader};
