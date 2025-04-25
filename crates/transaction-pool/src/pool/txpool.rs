@@ -826,8 +826,10 @@ impl<T: TransactionOrdering> TxPool<T> {
         &mut self,
         tx_hash: &B256,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let (tx, pool, updates) =
-            self.all_transactions.remove_transaction_by_hash(tx_hash, true)?;
+        let (tx, pool) = self.all_transactions.remove_transaction_by_hash(tx_hash)?;
+
+        // After tx is removed, its descendants must become parked due to the nonce gap
+        let updates = self.all_transactions.park_descendant_pending_txs(tx.id());
         self.process_updates(updates);
         self.remove_from_subpool(pool, tx.id())
     }
@@ -836,12 +838,13 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// subpool.
     ///
     /// This is intended to be used when a transaction is included in a block,
-    /// [`Self::on_canonical_state_change`]
+    /// [`Self::on_canonical_state_change`]. So its descendants will not change from pending to
+    /// parked, just like what we do in `remove_transaction_by_hash`.
     fn prune_transaction_by_hash(
         &mut self,
         tx_hash: &B256,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let (tx, pool, _) = self.all_transactions.remove_transaction_by_hash(tx_hash, false)?;
+        let (tx, pool) = self.all_transactions.remove_transaction_by_hash(tx_hash)?;
         self.prune_from_subpool(pool, tx.id())
     }
 
@@ -1457,21 +1460,19 @@ impl<T: PoolTransaction> AllTransactions<T> {
     pub(crate) fn remove_transaction_by_hash(
         &mut self,
         tx_hash: &B256,
-        update_descendant: bool,
-    ) -> Option<(Arc<ValidPoolTransaction<T>>, SubPool, Vec<PoolUpdate>)> {
+    ) -> Option<(Arc<ValidPoolTransaction<T>>, SubPool)> {
         let tx = self.by_hash.remove(tx_hash)?;
         let internal = self.txs.remove(&tx.transaction_id)?;
         // decrement the counter for the sender.
         self.tx_decr(tx.sender_id());
         self.update_size_metrics();
+        Some((tx, internal.subpool))
+    }
 
-        if !update_descendant {
-            return Some((tx, internal.subpool, vec![]));
-        }
-
+    pub(crate) fn park_descendant_pending_txs(&mut self, tx_id: &TransactionId) -> Vec<PoolUpdate> {
         let mut updates = Vec::new();
 
-        for (id, tx) in self.descendant_txs_mut(tx.id()) {
+        for (id, tx) in self.descendant_txs_mut(tx_id) {
             let current_pool = tx.subpool;
 
             tx.state.remove(TxState::NO_NONCE_GAPS);
@@ -1489,7 +1490,8 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 })
             }
         }
-        Some((tx, internal.subpool, updates))
+
+        updates
     }
 
     /// Removes a transaction from the set.
