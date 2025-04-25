@@ -31,10 +31,10 @@ pub fn benchmark_fetch_pending_hashes(group: &mut BenchmarkGroup<'_, WallTime>, 
     let mut tx_fetcher = TransactionFetcher::<EthNetworkPrimitives>::default();
     let mut peers = HashMap::default();
 
-        for _i in 0..peers_num {
-            // NOTE: the worst case, each tx in the cache belongs to a different peer.
-            let peer = PeerId::random();
-            let hash = B256::random();
+    for _i in 0..peers_num {
+        // NOTE: the worst case, each tx in the cache belongs to a different peer.
+        let peer = PeerId::random();
+        let hash = B256::random();
 
         let (mut peer_data, _) = new_mock_session(peer, EthVersion::Eth66);
         peer_data.seen_transactions_mut().insert(hash);
