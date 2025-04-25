@@ -99,7 +99,7 @@ impl SequencerClient {
     }
 
     /// Returns a reference to the [`SequencerMetrics`] for tracking client metrics.
-    fn metrics(&self) -> &SequencerMetrics {
+    pub fn metrics(&self) -> &SequencerMetrics {
         &self.inner.metrics
     }
 
