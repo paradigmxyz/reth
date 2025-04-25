@@ -2,7 +2,7 @@
 
 use alloy_consensus::TxEip4844;
 use alloy_eips::eip4844::{
-    env_settings::EnvKzgSettings, BlobTransactionSidecar, MAX_BLOBS_PER_BLOCK,
+    env_settings::EnvKzgSettings, BlobTransactionSidecar, MAX_BLOBS_PER_BLOCK_DENCUN,
 };
 use criterion::{
     criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
@@ -14,7 +14,7 @@ use proptest_arbitrary_interop::arb;
 fn blob_validation(c: &mut Criterion) {
     let mut group = c.benchmark_group("Blob Transaction KZG validation");
 
-    for num_blobs in 1..=MAX_BLOBS_PER_BLOCK {
+    for num_blobs in 1..=MAX_BLOBS_PER_BLOCK_DENCUN {
         println!("Benchmarking validation for tx with {num_blobs} blobs");
         validate_blob_tx(&mut group, "ValidateBlob", num_blobs as u64, EnvKzgSettings::Default);
     }

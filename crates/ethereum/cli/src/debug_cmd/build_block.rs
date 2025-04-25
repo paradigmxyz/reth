@@ -1,5 +1,5 @@
 //! Command for debugging block building.
-use alloy_consensus::{BlockHeader, TxEip4844};
+use alloy_consensus::BlockHeader;
 use alloy_eips::{
     eip2718::Encodable2718,
     eip4844::{env_settings::EnvKzgSettings, BlobTransactionSidecar},
@@ -17,7 +17,7 @@ use reth_cli_runner::CliContext;
 use reth_consensus::{Consensus, FullConsensus};
 use reth_errors::{ConsensusError, RethResult};
 use reth_ethereum_payload_builder::EthereumBuilderConfig;
-use reth_ethereum_primitives::{EthPrimitives, Transaction, TransactionSigned};
+use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
@@ -146,14 +146,14 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 .try_clone_into_recovered()
                 .map_err(|e| eyre::eyre!("failed to recover tx: {e}"))?;
 
-            let encoded_length = match transaction.transaction() {
-                Transaction::Eip4844(TxEip4844 { blob_versioned_hashes, .. }) => {
+            let encoded_length = match transaction.inner() {
+                TransactionSigned::Eip4844(tx) => {
                     let blobs_bundle = blobs_bundle.as_mut().ok_or_else(|| {
                         eyre::eyre!("encountered a blob tx. `--blobs-bundle-path` must be provided")
                     })?;
 
                     let sidecar: BlobTransactionSidecar =
-                        blobs_bundle.pop_sidecar(blob_versioned_hashes.len());
+                        blobs_bundle.pop_sidecar(tx.tx().blob_versioned_hashes.len());
 
                     let pooled = transaction
                         .clone()
