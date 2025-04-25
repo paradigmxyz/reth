@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{
-    config_cmd, db, dump_genesis, import, init_cmd, init_state,
+    config_cmd, db, dump_genesis, import, import_era, init_cmd, init_state,
     node::{self, NoArgs},
     p2p, prune, recover, stage,
 };
@@ -163,6 +163,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
             Commands::Import(command) => {
                 runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode, _, _>(components))
             }
+            Commands::ImportEra(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
+            }
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => {
                 runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
@@ -212,6 +215,9 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     /// This syncs RLP encoded blocks from a file.
     #[command(name = "import")]
     Import(import::ImportCommand<C>),
+    /// This syncs ERA encoded blocks from a directory.
+    #[command(name = "import-era")]
+    ImportEra(import_era::ImportEraCommand<C>),
     /// Dumps genesis block JSON configuration to stdout.
     DumpGenesis(dump_genesis::DumpGenesisCommand<C>),
     /// Database debugging utilities
@@ -249,6 +255,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Co
             Self::Init(cmd) => cmd.chain_spec(),
             Self::InitState(cmd) => cmd.chain_spec(),
             Self::Import(cmd) => cmd.chain_spec(),
+            Self::ImportEra(cmd) => cmd.chain_spec(),
             Self::DumpGenesis(cmd) => cmd.chain_spec(),
             Self::Db(cmd) => cmd.chain_spec(),
             Self::Stage(cmd) => cmd.chain_spec(),
