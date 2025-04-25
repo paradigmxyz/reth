@@ -3442,7 +3442,6 @@ dependencies = [
  "eyre",
  "reth",
  "reth-ethereum",
- "reth-ethereum-payload-builder",
  "reth-tracing",
  "tokio",
 ]

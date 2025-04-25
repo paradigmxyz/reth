@@ -86,7 +86,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         config.peers.trusted_nodes.extend(self.network.trusted_peers.clone());
 
         if config.peers.trusted_nodes.is_empty() && self.network.trusted_only {
-            eyre::bail!("No trusted nodes. Set trusted peer with `--trusted-peer <enode record>` or set `--trusted-only` to `false`")
+            eyre::bail!(
+                "No trusted nodes. Set trusted peer with `--trusted-peer <enode record>` or set `--trusted-only` to `false`"
+            )
         }
 
         config.peers.trusted_nodes_only = self.network.trusted_only;

@@ -1,7 +1,7 @@
 //! Contains [Chain], a chain of blocks and their final state.
 
 use crate::ExecutionOutcome;
-use alloc::{borrow::Cow, collections::BTreeMap, vec::Vec};
+use alloc::{borrow::Cow, boxed::Box, collections::BTreeMap, vec::Vec};
 use alloy_consensus::{transaction::Recovered, BlockHeader};
 use alloy_eips::{eip1898::ForkBlock, eip2718::Encodable2718, BlockNumHash};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash};
@@ -347,11 +347,11 @@ impl<N: NodePrimitives> Chain<N> {
         // TODO: Currently, trie updates are reset on chain split.
         // Add tests ensuring that it is valid to leave updates in the pending chain.
         ChainSplit::Split {
-            canonical: Self {
+            canonical: Box::new(Self {
                 execution_outcome: canonical_block_exec_outcome.expect("split in range"),
                 blocks: self.blocks,
                 trie_updates: None,
-            },
+            }),
             pending: Self {
                 execution_outcome: pending_block_exec_outcome,
                 blocks: higher_number_blocks,
@@ -497,7 +497,6 @@ impl From<BlockHash> for ChainSplitTarget {
 
 /// Result of a split chain.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[expect(clippy::large_enum_variant)]
 pub enum ChainSplit<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
     /// Chain is not split. Pending chain is returned.
     /// Given block split is higher than last block.
@@ -512,7 +511,7 @@ pub enum ChainSplit<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives>
         /// Contains lower block numbers that are considered canonicalized. It ends with
         /// the [`ChainSplitTarget`] block. The state of this chain is now empty and no longer
         /// usable.
-        canonical: Chain<N>,
+        canonical: Box<Chain<N>>,
         /// Right contains all subsequent blocks __after__ the [`ChainSplitTarget`] that are still
         /// pending.
         ///
@@ -819,7 +818,7 @@ mod tests {
         // split in two
         assert_eq!(
             chain.clone().split(block1_hash.into()),
-            ChainSplit::Split { canonical: chain_split1, pending: chain_split2 }
+            ChainSplit::Split { canonical: Box::new(chain_split1), pending: chain_split2 }
         );
 
         // split at unknown block hash

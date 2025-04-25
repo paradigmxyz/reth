@@ -371,6 +371,8 @@ impl PartialEq for ZstdDictionary<'_> {
         if let (Self::Raw(a), Self::Raw(b)) = (self, &other) {
             return a == b
         }
-        unimplemented!("`DecoderDictionary` can't be compared. So comparison should be done after decompressing a value.");
+        unimplemented!(
+            "`DecoderDictionary` can't be compared. So comparison should be done after decompressing a value."
+        );
     }
 }
