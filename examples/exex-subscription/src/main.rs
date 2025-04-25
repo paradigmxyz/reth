@@ -1,5 +1,6 @@
 #![warn(unused_crate_dependencies)]
 #![allow(dead_code)]
+#![allow(unused_variables)]
 use alloy_primitives::{Address, U256};
 use clap::Parser;
 use futures::TryStreamExt;
@@ -11,11 +12,12 @@ use reth_ethereum::{
     exex::{ExExContext, ExExEvent, ExExNotification},
     node::{api::FullNodeComponents, EthereumNode},
 };
-use std::{collections::HashMap, sync::Arc};
-use tokio::sync::{mpsc, RwLock};
+use std::collections::HashMap;
+use tokio::sync::{mpsc, oneshot};
 use tracing::info;
 
-/// Subscription update format
+/// Subscription update format for storage changes.
+/// This is the format that will be sent to the client when a storage change occurs.
 #[derive(Debug, Clone, Copy, Default, serde::Serialize)]
 struct StorageDiff {
     address: Address,
@@ -24,21 +26,36 @@ struct StorageDiff {
     new_value: U256,
 }
 
-type SubscriptionMap = Arc<RwLock<HashMap<Address, Vec<mpsc::Sender<StorageDiff>>>>>;
+/// Subscription request format for storage changes.
+struct SubscriptionRequest {
+    /// The address to subscribe to.
+    address: Address,
+    /// The response channel to send the subscription updates to.
+    response: oneshot::Sender<mpsc::UnboundedReceiver<StorageDiff>>,
+}
 
+/// Subscription request format for storage changes.
+type SubscriptionSender = mpsc::UnboundedSender<SubscriptionRequest>;
+
+/// API to subscribe to storage changes for a specific Ethereum address.
 #[rpc(server, namespace = "watcher")]
 pub trait StorageWatcherApi {
+    /// Subscribes to storage changes for a given Ethereum address and streams `StorageDiff`
+    /// updates.
     #[subscription(name = "subscribeStorageChanges", item = StorageDiff)]
     fn subscribe_storage_changes(&self, address: Address) -> SubscriptionResult;
 }
 
+/// API implementation for the storage watcher.
 #[derive(Clone)]
 struct StorageWatcherRpc {
-    subscriptions: SubscriptionMap,
+    /// The subscription sender to send subscription requests to.
+    subscriptions: SubscriptionSender,
 }
 
 impl StorageWatcherRpc {
-    fn new(subscriptions: SubscriptionMap) -> Self {
+    /// Creates a new [`StorageWatcherRpc`] instance with the given subscription sender.
+    fn new(subscriptions: SubscriptionSender) -> Self {
         Self { subscriptions }
     }
 }
@@ -49,7 +66,7 @@ impl StorageWatcherApiServer for StorageWatcherRpc {
         pending: PendingSubscriptionSink,
         address: Address,
     ) -> SubscriptionResult {
-        let subscriptions = self.subscriptions.clone();
+        let subscription = self.subscriptions.clone();
 
         tokio::spawn(async move {
             let sink = match pending.accept().await {
@@ -60,12 +77,13 @@ impl StorageWatcherApiServer for StorageWatcherRpc {
                 }
             };
 
-            let (tx, mut rx) = tokio::sync::mpsc::channel::<StorageDiff>(16);
+            let (resp_tx, resp_rx) = oneshot::channel();
+            subscription.send(SubscriptionRequest { address, response: resp_tx }).unwrap();
 
-            {
-                let mut map = subscriptions.write().await;
-                map.entry(address).or_default().push(tx);
-            }
+            let mut rx = match resp_rx.await {
+                Ok(rx) => rx,
+                Err(_) => return,
+            };
 
             while let Some(diff) = rx.recv().await {
                 let msg = SubscriptionMessage::from_json(&diff).expect("serialize");
@@ -81,15 +99,17 @@ impl StorageWatcherApiServer for StorageWatcherRpc {
 
 async fn my_exex<Node: FullNodeComponents>(
     mut ctx: ExExContext<Node>,
-    subscriptions: SubscriptionMap,
+    _subscriptions_senderr: SubscriptionSender,
 ) -> eyre::Result<()> {
+    let subscriptions: HashMap<Address, Vec<mpsc::UnboundedSender<StorageDiff>>> = HashMap::new();
+
     while let Some(notification) = ctx.notifications.try_next().await? {
         match &notification {
             ExExNotification::ChainCommitted { new } => {
                 info!(committed_chain = ?new.range(), "Received commit");
                 let execution_outcome = new.execution_outcome();
-                let subscriptions = subscriptions.read().await;
-                for (address, senders) in subscriptions.iter() {
+
+                for (address, senders) in &subscriptions {
                     for change in &execution_outcome.bundle.state {
                         if change.0 == address {
                             for (key, slot) in &change.1.storage {
@@ -101,7 +121,7 @@ async fn my_exex<Node: FullNodeComponents>(
                                 };
 
                                 for sender in senders {
-                                    let _ = sender.send(diff).await;
+                                    let _ = sender.send(diff);
                                 }
                             }
                         }
@@ -131,10 +151,12 @@ struct Args {
 
 fn main() -> eyre::Result<()> {
     reth::cli::Cli::parse_args().run(async move |builder, _| {
-        let subscriptions: SubscriptionMap = Arc::new(RwLock::new(HashMap::new()));
+        let (subscriptions_tx, subscriptions_rx) = mpsc::unbounded_channel::<SubscriptionRequest>();
+        let subscriptions_sender: SubscriptionSender = subscriptions_tx.clone();
+
         let handle = builder
             .node(EthereumNode::default())
-            .install_exex("my-exex", async move |ctx| Ok(my_exex(ctx, subscriptions)))
+            .install_exex("my-exex", async move |ctx| Ok(my_exex(ctx, subscriptions_sender)))
             .launch()
             .await?;
 
