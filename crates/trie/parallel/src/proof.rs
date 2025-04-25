@@ -220,7 +220,8 @@ where
         let retainer: ProofRetainer = targets.keys().map(Nibbles::unpack).collect();
         let mut hash_builder = HashBuilder::default()
             .with_proof_retainer(retainer)
-            .with_updates(self.collect_branch_node_masks);
+            .with_updates(self.collect_branch_node_masks)
+            .with_all_branch_nodes_in_database(true);
 
         // Initialize all storage multiproofs as empty.
         // Storage multiproofs for non empty tries will be overwritten if necessary.

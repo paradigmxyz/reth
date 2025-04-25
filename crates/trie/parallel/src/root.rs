@@ -155,7 +155,9 @@ where
             hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?,
         );
 
-        let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
+        let mut hash_builder = HashBuilder::default()
+            .with_updates(retain_updates)
+            .with_all_branch_nodes_in_database(true);
         let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
         while let Some(node) = account_node_iter.try_next().map_err(ProviderError::Database)? {
             match node {

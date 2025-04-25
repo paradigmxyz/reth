@@ -158,7 +158,10 @@ where
         let hashed_account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
         let (mut hash_builder, mut account_node_iter) = match self.previous_state {
             Some(state) => {
-                let hash_builder = state.hash_builder.with_updates(retain_updates);
+                let hash_builder = state
+                    .hash_builder
+                    .with_updates(retain_updates)
+                    .with_all_branch_nodes_in_database(true);
                 let walker = TrieWalker::from_stack(
                     trie_cursor,
                     state.walker_stack,
@@ -170,7 +173,9 @@ where
                 (hash_builder, node_iter)
             }
             None => {
-                let hash_builder = HashBuilder::default().with_updates(retain_updates);
+                let hash_builder = HashBuilder::default()
+                    .with_updates(retain_updates)
+                    .with_all_branch_nodes_in_database(true);
                 let walker = TrieWalker::new(trie_cursor, self.prefix_sets.account_prefix_set)
                     .with_deletions_retained(retain_updates);
                 let node_iter = TrieNodeIter::state_trie(walker, hashed_account_cursor);
