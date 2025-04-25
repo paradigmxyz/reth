@@ -82,7 +82,7 @@ impl<'a> RpcServiceT<'a> for RpcService {
                         bounded_subscriptions,
                         sink,
                         id_provider,
-                    } = self.cfg.clone()
+                    } = &self.cfg
                     else {
                         tracing::warn!("Subscriptions not supported");
                         let rp =
@@ -93,11 +93,12 @@ impl<'a> RpcServiceT<'a> for RpcService {
                     if let Some(p) = bounded_subscriptions.acquire() {
                         let conn_state = SubscriptionState {
                             conn_id,
-                            id_provider: &*id_provider.clone(),
+                            id_provider: &**id_provider,
                             subscription_permit: p,
                         };
 
-                        let fut = callback(id.clone(), params, sink, conn_state, extensions);
+                        let fut =
+                            callback(id.clone(), params, sink.clone(), conn_state, extensions);
                         ResponseFuture::future(fut)
                     } else {
                         let max = bounded_subscriptions.max();

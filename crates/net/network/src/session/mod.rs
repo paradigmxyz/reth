@@ -168,7 +168,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
     }
 
     /// Returns the next unique [`SessionId`].
-    fn next_id(&mut self) -> SessionId {
+    const fn next_id(&mut self) -> SessionId {
         let id = self.next_id;
         self.next_id += 1;
         SessionId(id)

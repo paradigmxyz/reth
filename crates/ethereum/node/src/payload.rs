@@ -74,6 +74,8 @@ where
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> eyre::Result<Self::PayloadBuilder> {
-        self.build(EthEvmConfig::new(ctx.chain_spec()), ctx, pool)
+        let evm_config = EthEvmConfig::new(ctx.chain_spec())
+            .with_extra_data(ctx.payload_builder_config().extra_data_bytes());
+        self.build(evm_config, ctx, pool)
     }
 }

@@ -1037,7 +1037,7 @@ pub struct TxFetchMetadata {
 
 impl TxFetchMetadata {
     /// Returns a mutable reference to the fallback peers cache for this transaction hash.
-    pub fn fallback_peers_mut(&mut self) -> &mut LruCache<PeerId> {
+    pub const fn fallback_peers_mut(&mut self) -> &mut LruCache<PeerId> {
         &mut self.fallback_peers
     }
 

@@ -54,29 +54,29 @@ impl SupervisorClient {
     }
 
     /// Configures a custom timeout
-    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+    pub const fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self
     }
 
     /// Returns safely level
-    pub fn safety(&self) -> SafetyLevel {
+    pub const fn safety(&self) -> SafetyLevel {
         self.safety
     }
 
     /// Executes a `supervisor_checkAccessList` with the configured safety level.
-    pub fn check_access_list<'a, 'b>(
-        &'b self,
+    pub fn check_access_list<'a>(
+        &self,
         inbox_entries: &'a [B256],
         executing_descriptor: ExecutingDescriptor,
-    ) -> CheckAccessListRequest<'a, 'b> {
+    ) -> CheckAccessListRequest<'a> {
         CheckAccessListRequest {
             client: self.client.clone(),
             inbox_entries: Cow::Borrowed(inbox_entries),
             executing_descriptor,
             timeout: self.timeout,
             safety: self.safety,
-            metrics: &self.metrics,
+            metrics: self.metrics.clone(),
         }
     }
 
@@ -129,30 +129,30 @@ impl SupervisorClient {
 
 /// A Request future that issues a `supervisor_checkAccessList` request.
 #[derive(Debug, Clone)]
-pub struct CheckAccessListRequest<'a, 'b> {
+pub struct CheckAccessListRequest<'a> {
     client: ReqwestClient,
     inbox_entries: Cow<'a, [B256]>,
     executing_descriptor: ExecutingDescriptor,
     timeout: Duration,
     safety: SafetyLevel,
-    metrics: &'b SupervisorMetrics,
+    metrics: SupervisorMetrics,
 }
 
-impl<'a, 'b> CheckAccessListRequest<'a, 'b> {
+impl<'a> CheckAccessListRequest<'a> {
     /// Configures the timeout to use for the request if any.
-    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+    pub const fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self
     }
 
     /// Configures the [`SafetyLevel`] for this request
-    pub fn with_safety(mut self, safety: SafetyLevel) -> Self {
+    pub const fn with_safety(mut self, safety: SafetyLevel) -> Self {
         self.safety = safety;
         self
     }
 }
 
-impl<'a, 'b: 'a> IntoFuture for CheckAccessListRequest<'a, 'b> {
+impl<'a> IntoFuture for CheckAccessListRequest<'a> {
     type Output = Result<(), InteropTxValidatorError>;
     type IntoFuture = BoxFuture<'a, Self::Output>;
 
