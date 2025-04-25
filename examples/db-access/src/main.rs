@@ -51,8 +51,8 @@ fn check_bytecodes(provider: impl DBProvider) {
             let (_, bytecode) =
                 provider.get::<tables::Bytecodes>(hash..=hash).unwrap().pop().unwrap();
 
-            if check_bytecode(bytecode) {
-                println!("{address}");
+            if let Some(distance) = check_bytecode(bytecode) {
+                println!("{address} {distance}");
             }
 
             if processed % 10000000 == 0 {
@@ -64,7 +64,7 @@ fn check_bytecodes(provider: impl DBProvider) {
     }
 }
 
-fn check_bytecode(bytecode: Bytecode) -> bool {
+fn check_bytecode(bytecode: Bytecode) -> Option<usize> {
     let bytes = bytecode.0.bytecode();
     let mut idx = 0;
     let mut prev = None;
@@ -81,7 +81,8 @@ fn check_bytecode(bytecode: Bytecode) -> bool {
         if opcode == opcode::JUMPDEST {
             if let Some(prev) = prev {
                 if prev == 0xe6 || prev == 0xe7 || prev == 0xe8 {
-                    return true;
+                    let distance_from_end = bytes.len() - idx - 1;
+                    return Some(distance_from_end);
                 }
             }
         }
@@ -90,5 +91,5 @@ fn check_bytecode(bytecode: Bytecode) -> bool {
         idx += 1;
     }
 
-    false
+    None
 }
