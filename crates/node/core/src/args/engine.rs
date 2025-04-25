@@ -97,6 +97,7 @@ impl EngineArgs {
             .with_cross_block_cache_size(self.cross_block_cache_size * 1024 * 1024)
             .with_max_proof_task_concurrency(self.max_proof_task_concurrency)
             .with_reserved_cpu_cores(self.reserved_cpu_cores)
+            .with_precompile_cache_enabled(self.precompile_cache_enabled)
     }
 }
 
