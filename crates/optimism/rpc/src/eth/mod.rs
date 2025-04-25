@@ -326,7 +326,7 @@ impl OpEthApiBuilder {
     ///
     /// This is useful for building [`TraceApi`](reth_rpc::TraceApi) as standalone program without
     /// mempool.
-    pub fn build_for_evm_api_no_pool<P>(
+    pub fn build_evm_eth_api<P>(
         self,
         provider: P,
         evm_config: OpEvmConfig,
@@ -468,8 +468,7 @@ mod test {
         let _ = init_genesis(&factory).expect("should init genesis");
         let provider = BlockchainProvider::new(factory).expect("should build provider");
 
-        let eth_api =
-            OpEthApiBuilder::default().build_minimal_with_evm(provider, OpEvmConfig::op_dev());
+        let eth_api = OpEthApiBuilder::default().build_evm_eth_api(provider, OpEvmConfig::op_dev());
 
         let trace = TraceApi::new(eth_api, BlockingTaskGuard::new(10), EthConfig::default());
 
