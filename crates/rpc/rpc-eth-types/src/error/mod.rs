@@ -581,6 +581,7 @@ impl From<InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::Eip1559NotSupported |
             InvalidTransaction::Eip4844NotSupported |
             InvalidTransaction::Eip7702NotSupported => Self::TxTypeNotSupported,
+            _ => todo!(),
         }
     }
 }
