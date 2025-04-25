@@ -65,7 +65,7 @@ pub struct BasicPayloadJobGenerator<Client, Tasks, Builder> {
     /// Stored `cached_reads` for new payload jobs.
     pre_cached: Option<PrecachedState>,
     /// Flag indicating if a payload job is currently being resolved.
-    is_resolving: Arc<AtomicBool>,
+    pub is_resolving: Arc<AtomicBool>,
 }
 
 // === impl BasicPayloadJobGenerator ===
