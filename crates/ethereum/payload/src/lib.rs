@@ -36,7 +36,7 @@ use reth_transaction_pool::{
     PoolTransaction, TransactionPool, ValidPoolTransaction,
 };
 use revm::context_interface::Block as _;
-use std::sync::Arc;
+use std::sync::{atomic::AtomicBool, Arc};
 use tracing::{debug, trace, warn};
 
 mod config;
@@ -112,7 +112,7 @@ where
         &self,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<EthBuiltPayload, PayloadBuilderError> {
-        let args = BuildArguments::new(Default::default(), config, Default::default(), None);
+        let args = BuildArguments::new(Default::default(), config, Default::default(), None, Arc::new(AtomicBool::new(false)));
 
         default_ethereum_payload(
             self.evm_config.clone(),
@@ -147,7 +147,7 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
 {
-    let BuildArguments { mut cached_reads, config, cancel, best_payload } = args;
+    let BuildArguments { mut cached_reads, config, cancel, best_payload, is_resolving: _ } = args;
     let PayloadConfig { parent_header, attributes } = config;
 
     let state_provider = client.state_by_block_hash(parent_header.hash())?;
