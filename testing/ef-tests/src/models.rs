@@ -8,7 +8,7 @@ use alloy_primitives::{keccak256, Address, Bloom, Bytes, B256, B64, U256};
 use reth_chainspec::{ChainSpec, ChainSpecBuilder};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_primitives_traits::SealedHeader;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, ops::Deref};
 
 /// The definition of a blockchain test.
@@ -257,7 +257,7 @@ impl Account {
 }
 
 /// Fork specification.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Hash, Ord, Clone, Copy, Deserialize)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Hash, Ord, Clone, Copy, Serialize, Deserialize)]
 pub enum ForkSpec {
     /// Frontier
     Frontier,
@@ -347,6 +347,47 @@ impl From<ForkSpec> for ChainSpec {
             }
         }
         .build()
+    }
+}
+
+impl From<ForkSpec> for reth_stateless::fork_spec::ForkSpec {
+    fn from(value: ForkSpec) -> Self {
+        match value {
+            ForkSpec::Frontier => reth_stateless::fork_spec::ForkSpec::Frontier,
+            ForkSpec::FrontierToHomesteadAt5 => {
+                reth_stateless::fork_spec::ForkSpec::FrontierToHomesteadAt5
+            }
+            ForkSpec::Homestead => reth_stateless::fork_spec::ForkSpec::Homestead,
+            ForkSpec::HomesteadToDaoAt5 => reth_stateless::fork_spec::ForkSpec::HomesteadToDaoAt5,
+            ForkSpec::HomesteadToEIP150At5 => {
+                reth_stateless::fork_spec::ForkSpec::HomesteadToEIP150At5
+            }
+            ForkSpec::EIP150 => reth_stateless::fork_spec::ForkSpec::EIP150,
+            ForkSpec::EIP158 => reth_stateless::fork_spec::ForkSpec::EIP158,
+            ForkSpec::EIP158ToByzantiumAt5 => {
+                reth_stateless::fork_spec::ForkSpec::EIP158ToByzantiumAt5
+            }
+            ForkSpec::Byzantium => reth_stateless::fork_spec::ForkSpec::Byzantium,
+            ForkSpec::ByzantiumToConstantinopleAt5 => {
+                reth_stateless::fork_spec::ForkSpec::ByzantiumToConstantinopleAt5
+            }
+            ForkSpec::ByzantiumToConstantinopleFixAt5 => {
+                reth_stateless::fork_spec::ForkSpec::ByzantiumToConstantinopleFixAt5
+            }
+            ForkSpec::Constantinople => reth_stateless::fork_spec::ForkSpec::Constantinople,
+            ForkSpec::ConstantinopleFix => reth_stateless::fork_spec::ForkSpec::ConstantinopleFix,
+            ForkSpec::Istanbul => reth_stateless::fork_spec::ForkSpec::Istanbul,
+            ForkSpec::Berlin => reth_stateless::fork_spec::ForkSpec::Berlin,
+            ForkSpec::BerlinToLondonAt5 => reth_stateless::fork_spec::ForkSpec::BerlinToLondonAt5,
+            ForkSpec::London => reth_stateless::fork_spec::ForkSpec::London,
+            ForkSpec::Merge => reth_stateless::fork_spec::ForkSpec::Merge,
+            ForkSpec::Shanghai => reth_stateless::fork_spec::ForkSpec::Shanghai,
+            ForkSpec::MergeEOF => reth_stateless::fork_spec::ForkSpec::MergeEOF,
+            ForkSpec::MergeMeterInitCode => reth_stateless::fork_spec::ForkSpec::MergeMeterInitCode,
+            ForkSpec::MergePush0 => reth_stateless::fork_spec::ForkSpec::MergePush0,
+            ForkSpec::Cancun => reth_stateless::fork_spec::ForkSpec::Cancun,
+            ForkSpec::Unknown => reth_stateless::fork_spec::ForkSpec::Unknown,
+        }
     }
 }
 
