@@ -72,7 +72,7 @@ impl StorageWatcherApiServer for StorageWatcherRpc {
             let sink = match pending.accept().await {
                 Ok(sink) => sink,
                 Err(e) => {
-                    println!("failed to accept subscription: {}", e);
+                    println!("failed to accept subscription: {e}");
                     return;
                 }
             };
