@@ -2,7 +2,10 @@
 
 use reth_ethereum::{
     chainspec::ChainSpecBuilder,
-    evm::revm::bytecode::opcode,
+    evm::revm::{
+        bytecode::opcode,
+        primitives::{B256, KECCAK_EMPTY},
+    },
     node::EthereumNode,
     primitives::Bytecode,
     provider::{
@@ -38,24 +41,30 @@ fn main() -> eyre::Result<()> {
 }
 
 fn check_bytecodes(provider: impl DBProvider) {
-    let total_entries = provider.tx_ref().entries::<tables::Bytecodes>().unwrap();
-    let mut cursor = provider.tx_ref().cursor_read::<tables::Bytecodes>().unwrap();
-
+    let total_entries = provider.tx_ref().entries::<tables::PlainAccountState>().unwrap();
+    let mut accounts = provider.tx_ref().cursor_read::<tables::PlainAccountState>().unwrap();
     let mut processed = 0;
-    for entry in cursor.walk(None).unwrap() {
-        let (hash, bytecode) = entry.unwrap();
+    for entry in accounts.walk(None).unwrap() {
+        let (address, account) = entry.unwrap();
+        if account.bytecode_hash.is_some_and(|hash| hash != KECCAK_EMPTY && hash != B256::ZERO) {
+            let hash = account.bytecode_hash.unwrap();
+            let (_, bytecode) =
+                provider.get::<tables::Bytecodes>(hash..=hash).unwrap().pop().unwrap();
 
-        check_bytecode(bytecode);
+            if check_bytecode(bytecode) {
+                println!("{address}");
+            }
 
-        if processed % 1000 == 0 {
-            println!("Processed {processed}/{total_entries}");
+            if processed % 1000 == 0 {
+                println!("Processed {processed}/{total_entries}");
+            }
         }
 
         processed += 1;
     }
 }
 
-fn check_bytecode(bytecode: Bytecode) {
+fn check_bytecode(bytecode: Bytecode) -> bool {
     let bytes = bytecode.0.bytecode();
     let mut idx = 0;
     let mut prev = None;
@@ -72,9 +81,7 @@ fn check_bytecode(bytecode: Bytecode) {
         if opcode == opcode::JUMPDEST {
             if let Some(prev) = prev {
                 if prev == 0xe6 || prev == 0xe7 || prev == 0xe8 {
-                    println!("Found JUMPDEST at {idx}");
-                    println!("{bytes:?}");
-                    break;
+                    return true;
                 }
             }
         }
@@ -82,4 +89,6 @@ fn check_bytecode(bytecode: Bytecode) {
         prev = Some(opcode);
         idx += 1;
     }
+
+    false
 }
