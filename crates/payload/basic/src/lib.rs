@@ -86,7 +86,7 @@ impl<Client, Tasks, Builder> BasicPayloadJobGenerator<Client, Tasks, Builder> {
             config,
             builder,
             pre_cached: None,
-            is_resolving:Arc::new(Atomic::new(false)),
+            is_resolving:Arc::new(AtomicBool::new(false)),
         }
     }
 
