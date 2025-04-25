@@ -44,7 +44,7 @@ pub struct SequencerClient {
 
 impl SequencerClientInner {
     /// Creates a new instance with the given endpoint and client.
-    pub fn new(sequencer_endpoint: String, client: Client) -> Self {
+    pub(crate) fn new(sequencer_endpoint: String, client: Client) -> Self {
         let metrics = SequencerMetrics::default();
         Self { sequencer_endpoint, client, metrics }
     }
@@ -99,7 +99,7 @@ impl SequencerClient {
     }
 
     /// Returns a reference to the [`SequencerMetrics`] for tracking client metrics.
-    pub fn metrics(&self) -> &SequencerMetrics {
+    fn metrics(&self) -> &SequencerMetrics {
         &self.inner.metrics
     }
 
