@@ -4,7 +4,7 @@ use alloy_eips::{
     eip2718::Encodable2718,
     eip4844::{env_settings::EnvKzgSettings, BlobTransactionSidecar},
 };
-use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_primitives::{Address, Bytes, B256};
 use alloy_rlp::Decodable;
 use alloy_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
 use clap::Parser;
@@ -218,7 +218,6 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 let block = payload.block();
                 debug!(target: "reth::cli", ?block, "Built new payload");
 
-                consensus.validate_header_with_total_difficulty(block, U256::MAX)?;
                 consensus.validate_header(block.sealed_header())?;
                 consensus.validate_block_pre_execution(block)?;
 
