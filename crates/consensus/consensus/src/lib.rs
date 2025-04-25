@@ -13,7 +13,7 @@ extern crate alloc;
 
 use alloc::{fmt::Debug, string::String, vec::Vec};
 use alloy_consensus::Header;
-use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256, U256};
+use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256};
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{
     constants::{MAXIMUM_GAS_LIMIT_BLOCK, MINIMUM_GAS_LIMIT},
@@ -121,18 +121,6 @@ pub trait HeaderValidator<H = Header>: Debug + Send + Sync {
         }
         Ok(())
     }
-
-    /// Validate if the header is correct and follows the consensus specification, including
-    /// computed properties (like total difficulty).
-    ///
-    /// Some consensus engines may want to do additional checks here.
-    ///
-    /// Note: validating headers with TD does not include other HeaderValidator validation.
-    fn validate_header_with_total_difficulty(
-        &self,
-        header: &H,
-        total_difficulty: U256,
-    ) -> Result<(), ConsensusError>;
 }
 
 /// Consensus Errors

@@ -315,7 +315,6 @@ fn pre_execution_checks(
     let consensus: EthBeaconConsensus<ChainSpec> = EthBeaconConsensus::new(chain_spec);
 
     let sealed_header = block.sealed_header();
-    let header = block.header();
 
     <EthBeaconConsensus<ChainSpec> as Consensus<Block>>::validate_body_against_header(
         &consensus,
@@ -323,7 +322,6 @@ fn pre_execution_checks(
         sealed_header,
     )?;
     consensus.validate_header_against_parent(sealed_header, parent.sealed_header())?;
-    consensus.validate_header_with_total_difficulty(header, block.difficulty)?;
     consensus.validate_header(sealed_header)?;
     consensus.validate_block_pre_execution(block)?;
 
