@@ -327,7 +327,7 @@ impl OpEthApiBuilder {
         self,
         provider: P,
         evm_config: OpEvmConfig,
-    ) -> OpEthApi<OpMinimalNodeWithEvm<P>>
+    ) -> OpEthApi<OpNodeOnlyEvm<P>>
     where
         P: FullRpcProvider<
                 Block = OpBlock,
@@ -346,10 +346,7 @@ impl OpEthApiBuilder {
         .build_inner();
 
         OpEthApi {
-            inner: Arc::new(OpEthApiInner::<OpMinimalNodeWithEvm<P>> {
-                eth_api,
-                sequencer_client: None,
-            }),
+            inner: Arc::new(OpEthApiInner::<OpNodeOnlyEvm<P>> { eth_api, sequencer_client: None }),
         }
     }
 }
@@ -396,14 +393,14 @@ where
 /// Minimal OP node, with only EVM and database, useful for building
 /// [`TraceApi`](reth_rpc::TraceApi) by itself.
 #[derive(Debug, Clone)]
-pub struct OpMinimalNodeWithEvm<P> {
+pub struct OpNodeOnlyEvm<P> {
     provider: P,
     evm_config: OpEvmConfig,
     noop_pool: NoopTransactionPool<OpPooledTransaction>,
     noop_network: NoopNetwork,
 }
 
-impl<P> OpMinimalNodeWithEvm<P> {
+impl<P> OpNodeOnlyEvm<P> {
     /// Returns new instance from given provider and [`OpEvmConfig`].
     pub fn new(provider: P, evm_config: OpEvmConfig) -> Self {
         Self {
@@ -415,7 +412,7 @@ impl<P> OpMinimalNodeWithEvm<P> {
     }
 }
 
-impl<P> RpcNodeCore for OpMinimalNodeWithEvm<P>
+impl<P> RpcNodeCore for OpNodeOnlyEvm<P>
 where
     P: Send + Sync + Clone + Unpin,
 {
