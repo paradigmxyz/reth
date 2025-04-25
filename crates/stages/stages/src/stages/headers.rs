@@ -1,4 +1,5 @@
 use alloy_consensus::BlockHeader;
+use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
 use futures_util::StreamExt;
 use reth_config::config::EtlConfig;
@@ -21,8 +22,8 @@ use reth_provider::{
     HeaderSyncGapProvider, StaticFileProviderFactory,
 };
 use reth_stages_api::{
-    CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput, HeadersCheckpoint, Stage,
-    StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
+    BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput,
+    HeadersCheckpoint, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderError;
@@ -135,7 +136,7 @@ where
                     .map_err(|err| StageError::Fatal(Box::new(err)))?
                     .into();
 
-            let (header, header_hash) = sealed_header.sealed_ref().split();
+            let (header, header_hash) = sealed_header.split_ref();
             if header.number() == 0 {
                 continue
             }
