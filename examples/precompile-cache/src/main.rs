@@ -72,6 +72,7 @@ impl EvmFactory for MyEvmFactory {
     type HaltReason = HaltReason;
     type Context<DB: Database> = EthEvmContext<DB>;
     type Spec = SpecId;
+    type Precompiles = WrappedPrecompile<EthPrecompiles>;
 
     fn create_evm<DB: Database>(&self, db: DB, input: EvmEnv) -> Self::Evm<DB, NoOpInspector> {
         let new_cache = self.precompile_cache.clone();
