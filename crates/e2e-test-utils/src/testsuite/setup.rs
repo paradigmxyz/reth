@@ -9,7 +9,7 @@ use eyre::{eyre, Result};
 use reth_chainspec::ChainSpec;
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_ethereum_primitives::Block;
-use reth_node_api::{NodeTypesWithEngine, PayloadTypes};
+use reth_node_api::{NodeTypes, PayloadTypes};
 use reth_node_core::primitives::RecoveredBlock;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_rpc_api::clients::EthApiClient;
@@ -79,7 +79,7 @@ impl<I> Setup<I> {
     }
 
     /// Set the genesis block
-    pub fn with_genesis(mut self, genesis: Genesis) -> Self {
+    pub const fn with_genesis(mut self, genesis: Genesis) -> Self {
         self.genesis = Some(genesis);
         self
     }
@@ -103,13 +103,13 @@ impl<I> Setup<I> {
     }
 
     /// Set the network configuration
-    pub fn with_network(mut self, network: NetworkSetup) -> Self {
+    pub const fn with_network(mut self, network: NetworkSetup) -> Self {
         self.network = network;
         self
     }
 
     /// Set dev mode
-    pub fn with_dev_mode(mut self, is_dev: bool) -> Self {
+    pub const fn with_dev_mode(mut self, is_dev: bool) -> Self {
         self.is_dev = is_dev;
         self
     }
@@ -119,7 +119,7 @@ impl<I> Setup<I> {
     where
         N: NodeBuilderHelper,
         LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
-            <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
+            <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
         >,
     {
         let chain_spec =
@@ -140,7 +140,7 @@ impl<I> Setup<I> {
                 withdrawals: Some(vec![]),
                 parent_beacon_block_root: Some(B256::ZERO),
             };
-            <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes::from(
+            <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes::from(
                 EthPayloadBuilderAttributes::new(B256::ZERO, attributes),
             )
         };
@@ -240,12 +240,12 @@ pub struct NetworkSetup {
 
 impl NetworkSetup {
     /// Create a new network setup with a single node
-    pub fn single_node() -> Self {
+    pub const fn single_node() -> Self {
         Self { node_count: 1 }
     }
 
     /// Create a new network setup with multiple nodes
-    pub fn multi_node(count: usize) -> Self {
+    pub const fn multi_node(count: usize) -> Self {
         Self { node_count: count }
     }
 }

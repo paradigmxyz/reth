@@ -5,33 +5,40 @@
 
 use alloy_eips::eip4895::Withdrawal;
 use alloy_evm::{
-    block::{BlockExecutorFactory, BlockExecutorFor},
+    block::{BlockExecutorFactory, BlockExecutorFor, ExecutableTx},
     eth::{EthBlockExecutionCtx, EthBlockExecutor},
     EthEvm, EthEvmFactory,
 };
 use alloy_sol_macro::sol;
 use alloy_sol_types::SolCall;
 use reth::{
-    api::{ConfigureEvm, NodeTypesWithEngine},
-    builder::{components::ExecutorBuilder, BuilderContext, FullNodeTypes},
-    cli::Cli,
-    providers::BlockExecutionResult,
-    revm::{
-        context::{result::ExecutionResult, TxEnv},
-        db::State,
-        primitives::{address, hardfork::SpecId, Address},
-        DatabaseCommit,
+    builder::{components::ExecutorBuilder, BuilderContext},
+    primitives::SealedBlock,
+};
+use reth_ethereum::{
+    chainspec::ChainSpec,
+    cli::interface::Cli,
+    evm::{
+        primitives::{
+            execute::{BlockExecutionError, BlockExecutor, InternalBlockExecutionError},
+            Database, Evm, EvmEnv, InspectorFor, NextBlockEnvAttributes, OnStateHook,
+        },
+        revm::{
+            context::{result::ExecutionResult, TxEnv},
+            db::State,
+            primitives::{address, hardfork::SpecId, Address},
+            DatabaseCommit,
+        },
+        EthBlockAssembler, EthEvmConfig, RethReceiptBuilder,
     },
-};
-use reth_chainspec::ChainSpec;
-use reth_evm::{
-    execute::{BlockExecutionError, BlockExecutor, InternalBlockExecutionError},
-    Database, Evm, EvmEnv, InspectorFor, NextBlockEnvAttributes, OnStateHook,
-};
-use reth_evm_ethereum::{EthBlockAssembler, EthEvmConfig, RethReceiptBuilder};
-use reth_node_ethereum::{node::EthereumAddOns, BasicBlockExecutorProvider, EthereumNode};
-use reth_primitives::{
-    EthPrimitives, Header, Receipt, Recovered, SealedBlock, SealedHeader, TransactionSigned,
+    node::{
+        api::{ConfigureEvm, FullNodeTypes, NodeTypes},
+        node::EthereumAddOns,
+        BasicBlockExecutorProvider, EthereumNode,
+    },
+    primitives::{Header, SealedHeader},
+    provider::BlockExecutionResult,
+    EthPrimitives, Receipt, TransactionSigned,
 };
 use std::{fmt::Display, sync::Arc};
 
@@ -65,7 +72,7 @@ pub struct CustomExecutorBuilder;
 
 impl<Types, Node> ExecutorBuilder<Node> for CustomExecutorBuilder
 where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
+    Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
 {
     type EVM = CustomEvmConfig;
@@ -177,7 +184,7 @@ where
 
     fn execute_transaction_with_result_closure(
         &mut self,
-        tx: Recovered<&TransactionSigned>,
+        tx: impl ExecutableTx<Self>,
         f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>),
     ) -> Result<u64, BlockExecutionError> {
         self.inner.execute_transaction_with_result_closure(tx, f)
@@ -198,6 +205,10 @@ where
 
     fn evm_mut(&mut self) -> &mut Self::Evm {
         self.inner.evm_mut()
+    }
+
+    fn evm(&self) -> &Self::Evm {
+        self.inner.evm()
     }
 }
 
@@ -227,7 +238,7 @@ pub fn apply_withdrawals_contract_call(
         Ok(res) => res.state,
         Err(e) => {
             return Err(BlockExecutionError::Internal(InternalBlockExecutionError::Other(
-                format!("withdrawal contract system call revert: {}", e).into(),
+                format!("withdrawal contract system call revert: {e}").into(),
             )))
         }
     };

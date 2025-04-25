@@ -55,8 +55,8 @@ pub struct PayloadProcessor<N, Evm> {
     trie_metrics: MultiProofTaskMetrics,
     /// Cross-block cache size in bytes.
     cross_block_cache_size: u64,
-    /// Whether transactions should be executed on prewarming task.
-    use_transaction_prewarming: bool,
+    /// Whether transactions should not be executed on prewarming task.
+    disable_transaction_prewarming: bool,
     /// Determines how to configure the evm for execution.
     evm_config: Evm,
     /// Cache for hashed cursors.
@@ -72,7 +72,7 @@ impl<N, Evm> PayloadProcessor<N, Evm> {
             execution_cache: Default::default(),
             trie_metrics: Default::default(),
             cross_block_cache_size: config.cross_block_cache_size(),
-            use_transaction_prewarming: config.use_caching_and_prewarming(),
+            disable_transaction_prewarming: config.disable_caching_and_prewarming(),
             evm_config,
             hashed_cursor_cache: Default::default(),
             _marker: Default::default(),
@@ -105,7 +105,7 @@ where
     /// output back to this task.
     ///
     /// Receives updates from sequential execution.
-    /// This task runs until it receives a shutdown signal, which should be after after the block
+    /// This task runs until it receives a shutdown signal, which should be after the block
     /// was fully executed.
     ///
     /// ## Sparse trie task
@@ -124,6 +124,7 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         consistent_view: ConsistentDbView<P>,
         trie_input: TrieInput,
+        config: &TreeConfig,
     ) -> PayloadHandle
     where
         P: DatabaseProviderFactory<Provider: BlockReader>
@@ -144,21 +145,26 @@ where
             state_root_config.state_sorted.clone(),
             state_root_config.prefix_sets.clone(),
         );
-        let max_concurrency = 256;
+        let max_proof_task_concurrency = config.max_proof_task_concurrency() as usize;
         let proof_task = ProofTaskManager::new(
             self.executor.handle().clone(),
             state_root_config.consistent_view.clone(),
             task_ctx,
-            max_concurrency,
+            max_proof_task_concurrency,
         );
 
         self.hashed_cursor_cache.reset_metrics();
+
+        // We set it to half of the proof task concurrency, because often for each multiproof we
+        // spawn one Tokio task for the account proof, and one Tokio task for the storage proof.
+        let max_multi_proof_task_concurrency = max_proof_task_concurrency / 2;
         let multi_proof_task = MultiProofTask::new(
             state_root_config,
             self.executor.clone(),
             proof_task.handle(),
             to_sparse_trie,
             self.hashed_cursor_cache.clone(),
+            max_multi_proof_task_concurrency,
         );
 
         // wire the multiproof task to the prewarm task
@@ -238,7 +244,7 @@ where
             + Clone
             + 'static,
     {
-        if !self.use_transaction_prewarming {
+        if self.disable_transaction_prewarming {
             // if no transactions should be executed we clear them but still spawn the task for
             // caching updates
             transactions.clear();
@@ -433,6 +439,7 @@ mod tests {
         StateProviderBuilder, TreeConfig,
     };
     use alloy_evm::block::StateChangeSource;
+    use rand::Rng;
     use reth_chainspec::ChainSpec;
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::EthPrimitives;
@@ -444,38 +451,41 @@ mod tests {
         test_utils::create_test_provider_factory_with_chain_spec,
         ChainSpecProvider, HashingWriter,
     };
-    use reth_testing_utils::generators::{self, Rng};
+    use reth_testing_utils::generators;
     use reth_trie::{test_utils::state_root, HashedPostState, TrieInput};
     use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
     use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
 
     fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {
         let mut rng = generators::rng();
-        let all_addresses: Vec<Address> = (0..num_accounts).map(|_| rng.gen()).collect();
+        let all_addresses: Vec<Address> = (0..num_accounts).map(|_| rng.random()).collect();
         let mut updates = Vec::new();
 
         for _ in 0..updates_per_account {
-            let num_accounts_in_update = rng.gen_range(1..=num_accounts);
+            let num_accounts_in_update = rng.random_range(1..=num_accounts);
             let mut state_update = EvmState::default();
 
             let selected_addresses = &all_addresses[0..num_accounts_in_update];
 
             for &address in selected_addresses {
                 let mut storage = HashMap::default();
-                if rng.gen_bool(0.7) {
-                    for _ in 0..rng.gen_range(1..10) {
-                        let slot = U256::from(rng.gen::<u64>());
+                if rng.random_bool(0.7) {
+                    for _ in 0..rng.random_range(1..10) {
+                        let slot = U256::from(rng.random::<u64>());
                         storage.insert(
                             slot,
-                            EvmStorageSlot::new_changed(U256::ZERO, U256::from(rng.gen::<u64>())),
+                            EvmStorageSlot::new_changed(
+                                U256::ZERO,
+                                U256::from(rng.random::<u64>()),
+                            ),
                         );
                     }
                 }
 
                 let account = revm_state::Account {
                     info: AccountInfo {
-                        balance: U256::from(rng.gen::<u64>()),
-                        nonce: rng.gen::<u64>(),
+                        balance: U256::from(rng.random::<u64>()),
+                        nonce: rng.random::<u64>(),
                         code_hash: KECCAK_EMPTY,
                         code: Some(Default::default()),
                     },
@@ -556,6 +566,7 @@ mod tests {
             StateProviderBuilder::new(provider.clone(), genesis_hash, None),
             ConsistentDbView::new_with_latest_tip(provider).unwrap(),
             TrieInput::from_state(hashed_state),
+            &TreeConfig::default(),
         );
 
         let mut state_hook = handle.state_hook();

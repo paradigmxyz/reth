@@ -10,7 +10,7 @@ use alloy_eips::eip4844::BlobTransactionSidecar;
 use alloy_primitives::{Address, TxHash, B256, U256};
 use futures_util::future::Either;
 use reth_primitives_traits::{Recovered, SealedBlock};
-use std::{fmt, future::Future, time::Instant};
+use std::{fmt, fmt::Debug, future::Future, time::Instant};
 
 mod constants;
 mod eth;
@@ -150,7 +150,7 @@ impl<T: PoolTransaction> ValidTransaction<T> {
 }
 
 /// Provides support for validating transaction at any given state of the chain
-pub trait TransactionValidator: Send + Sync {
+pub trait TransactionValidator: Debug + Send + Sync {
     /// The transaction type to validate.
     type Transaction: PoolTransaction;
 

@@ -471,9 +471,9 @@ pub trait Trace:
 
         // apply relevant system calls
         let mut evm = self.evm_config().evm_with_env(db, evm_env.clone());
-        system_caller
-            .apply_pre_execution_changes(block.header(), &mut evm)
-            .map_err(|_| EthApiError::EvmCustom("failed to apply 4788 system call".to_string()))?;
+        system_caller.apply_pre_execution_changes(block.header(), &mut evm).map_err(|err| {
+            EthApiError::EvmCustom(format!("failed to apply 4788 system call {err}"))
+        })?;
 
         Ok(())
     }

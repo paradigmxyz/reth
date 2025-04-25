@@ -8,7 +8,9 @@ use crate::{
     validate::ValidPoolTransaction,
     AllTransactionsEvents,
 };
-use alloy_consensus::{transaction::PooledTransaction, BlockHeader, Signed, Typed2718};
+use alloy_consensus::{
+    error::ValueError, transaction::PooledTransaction, BlockHeader, Signed, Typed2718,
+};
 use alloy_eips::{
     eip2718::Encodable2718,
     eip2930::AccessList,
@@ -21,17 +23,15 @@ use alloy_eips::{
 use alloy_primitives::{Address, Bytes, TxHash, TxKind, B256, U256};
 use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
-use reth_ethereum_primitives::{Transaction, TransactionSigned};
+use reth_ethereum_primitives::TransactionSigned;
 use reth_execution_types::ChangedAccount;
-use reth_primitives_traits::{
-    transaction::error::TransactionConversionError, Block, InMemorySize, Recovered, SealedBlock,
-    SignedTransaction,
-};
+use reth_primitives_traits::{Block, InMemorySize, Recovered, SealedBlock, SignedTransaction};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     fmt,
+    fmt::Debug,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -59,7 +59,7 @@ pub type PoolPooledTx<P> = <<P as TransactionPool>::Transaction as PoolTransacti
 /// Note: This requires `Clone` for convenience, since it is assumed that this will be implemented
 /// for a wrapped `Arc` type, see also [`Pool`](crate::Pool).
 #[auto_impl::auto_impl(&, Arc)]
-pub trait TransactionPool: Send + Sync + Clone {
+pub trait TransactionPool: Clone + Debug + Send + Sync {
     /// The transaction type of the pool
     type Transaction: EthPoolTransaction;
 
@@ -938,7 +938,7 @@ impl BestTransactionsAttributes {
 /// handling of all valid `Consensus` transactions that can't be pooled (e.g Deposit transactions or
 /// blob-less EIP-4844 transactions).
 pub trait PoolTransaction:
-    alloy_consensus::Transaction + InMemorySize + fmt::Debug + Send + Sync + Clone
+    alloy_consensus::Transaction + InMemorySize + Debug + Send + Sync + Clone
 {
     /// Associated error type for the `try_from_consensus` method.
     type TryFromConsensusError: fmt::Display;
@@ -1120,7 +1120,7 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
 }
 
 impl PoolTransaction for EthPooledTransaction {
-    type TryFromConsensusError = TransactionConversionError;
+    type TryFromConsensusError = ValueError<TransactionSigned>;
 
     type Consensus = TransactionSigned;
 
@@ -1306,8 +1306,8 @@ impl EthPoolTransaction for EthPooledTransaction {
         sidecar: &BlobTransactionSidecar,
         settings: &KzgSettings,
     ) -> Result<(), BlobTransactionValidationError> {
-        match self.transaction.transaction() {
-            Transaction::Eip4844(tx) => tx.validate_blob(sidecar, settings),
+        match self.transaction.inner().as_eip4844() {
+            Some(tx) => tx.tx().validate_blob(sidecar, settings),
             _ => Err(BlobTransactionValidationError::NotBlobTransaction(self.ty())),
         }
     }
@@ -1466,10 +1466,12 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
+    use alloy_consensus::{
+        EthereumTxEnvelope, SignableTransaction, TxEip1559, TxEip2930, TxEip4844, TxEip7702,
+        TxEnvelope, TxLegacy,
+    };
     use alloy_eips::eip4844::DATA_GAS_PER_BLOB;
-    use alloy_primitives::PrimitiveSignature as Signature;
-    use reth_ethereum_primitives::{Transaction, TransactionSigned};
+    use alloy_primitives::Signature;
 
     #[test]
     fn test_pool_size_invariants() {
@@ -1511,15 +1513,16 @@ mod tests {
     #[test]
     fn test_eth_pooled_transaction_new_legacy() {
         // Create a legacy transaction with specific parameters
-        let tx = Transaction::Legacy(TxLegacy {
-            gas_price: 10,
-            gas_limit: 1000,
-            value: U256::from(100),
-            ..Default::default()
-        });
-        let signature = Signature::test_signature();
-        let signed_tx = TransactionSigned::new_unhashed(tx, signature);
-        let transaction = Recovered::new_unchecked(signed_tx, Default::default());
+        let tx = TxEnvelope::Legacy(
+            TxLegacy {
+                gas_price: 10,
+                gas_limit: 1000,
+                value: U256::from(100),
+                ..Default::default()
+            }
+            .into_signed(Signature::test_signature()),
+        );
+        let transaction = Recovered::new_unchecked(tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
 
         // Check that the pooled transaction is created correctly
@@ -1532,36 +1535,38 @@ mod tests {
     #[test]
     fn test_eth_pooled_transaction_new_eip2930() {
         // Create an EIP-2930 transaction with specific parameters
-        let tx = Transaction::Eip2930(TxEip2930 {
-            gas_price: 10,
-            gas_limit: 1000,
-            value: U256::from(100),
-            ..Default::default()
-        });
-        let signature = Signature::test_signature();
-        let signed_tx = TransactionSigned::new_unhashed(tx, signature);
-        let transaction = Recovered::new_unchecked(signed_tx, Default::default());
+        let tx = TxEnvelope::Eip2930(
+            TxEip2930 {
+                gas_price: 10,
+                gas_limit: 1000,
+                value: U256::from(100),
+                ..Default::default()
+            }
+            .into_signed(Signature::test_signature()),
+        );
+        let transaction = Recovered::new_unchecked(tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
+        let expected_cost = U256::from(100) + (U256::from(10 * 1000));
 
-        // Check that the pooled transaction is created correctly
         assert_eq!(pooled_tx.transaction, transaction);
         assert_eq!(pooled_tx.encoded_length, 200);
         assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::None);
-        assert_eq!(pooled_tx.cost, U256::from(100) + U256::from(10 * 1000));
+        assert_eq!(pooled_tx.cost, expected_cost);
     }
 
     #[test]
     fn test_eth_pooled_transaction_new_eip1559() {
         // Create an EIP-1559 transaction with specific parameters
-        let tx = Transaction::Eip1559(TxEip1559 {
-            max_fee_per_gas: 10,
-            gas_limit: 1000,
-            value: U256::from(100),
-            ..Default::default()
-        });
-        let signature = Signature::test_signature();
-        let signed_tx = TransactionSigned::new_unhashed(tx, signature);
-        let transaction = Recovered::new_unchecked(signed_tx, Default::default());
+        let tx = TxEnvelope::Eip1559(
+            TxEip1559 {
+                max_fee_per_gas: 10,
+                gas_limit: 1000,
+                value: U256::from(100),
+                ..Default::default()
+            }
+            .into_signed(Signature::test_signature()),
+        );
+        let transaction = Recovered::new_unchecked(tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
 
         // Check that the pooled transaction is created correctly
@@ -1574,17 +1579,18 @@ mod tests {
     #[test]
     fn test_eth_pooled_transaction_new_eip4844() {
         // Create an EIP-4844 transaction with specific parameters
-        let tx = Transaction::Eip4844(TxEip4844 {
-            max_fee_per_gas: 10,
-            gas_limit: 1000,
-            value: U256::from(100),
-            max_fee_per_blob_gas: 5,
-            blob_versioned_hashes: vec![B256::default()],
-            ..Default::default()
-        });
-        let signature = Signature::test_signature();
-        let signed_tx = TransactionSigned::new_unhashed(tx, signature);
-        let transaction = Recovered::new_unchecked(signed_tx, Default::default());
+        let tx = EthereumTxEnvelope::Eip4844(
+            TxEip4844 {
+                max_fee_per_gas: 10,
+                gas_limit: 1000,
+                value: U256::from(100),
+                max_fee_per_blob_gas: 5,
+                blob_versioned_hashes: vec![B256::default()],
+                ..Default::default()
+            }
+            .into_signed(Signature::test_signature()),
+        );
+        let transaction = Recovered::new_unchecked(tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 300);
 
         // Check that the pooled transaction is created correctly
@@ -1599,15 +1605,16 @@ mod tests {
     #[test]
     fn test_eth_pooled_transaction_new_eip7702() {
         // Init an EIP-7702 transaction with specific parameters
-        let tx = Transaction::Eip7702(TxEip7702 {
-            max_fee_per_gas: 10,
-            gas_limit: 1000,
-            value: U256::from(100),
-            ..Default::default()
-        });
-        let signature = Signature::test_signature();
-        let signed_tx = TransactionSigned::new_unhashed(tx, signature);
-        let transaction = Recovered::new_unchecked(signed_tx, Default::default());
+        let tx = EthereumTxEnvelope::<TxEip4844>::Eip7702(
+            TxEip7702 {
+                max_fee_per_gas: 10,
+                gas_limit: 1000,
+                value: U256::from(100),
+                ..Default::default()
+            }
+            .into_signed(Signature::test_signature()),
+        );
+        let transaction = Recovered::new_unchecked(tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
 
         // Check that the pooled transaction is created correctly

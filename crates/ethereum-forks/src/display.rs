@@ -1,9 +1,10 @@
-use crate::{hardforks::Hardforks, ForkCondition};
+use crate::ForkCondition;
 use alloc::{
     format,
     string::{String, ToString},
     vec::Vec,
 };
+use alloy_hardforks::Hardfork;
 
 /// A container to pretty-print a hardfork.
 ///
@@ -42,8 +43,7 @@ impl core::fmt::Display for DisplayFork {
                 // All networks that have merged are finalized.
                 write!(
                     f,
-                    "{:32} @{} (network is known to be merged)",
-                    name_with_eip, total_difficulty,
+                    "{name_with_eip:32} @{total_difficulty} (network is known to be merged)",
                 )?;
             }
             ForkCondition::Never => unreachable!(),
@@ -122,7 +122,12 @@ impl core::fmt::Display for DisplayHardforks {
             f,
         )?;
 
-        if !self.with_merge.is_empty() {
+        if self.with_merge.is_empty() {
+            if !self.post_merge.is_empty() {
+                // need an extra line here in case we don't have a merge block (optimism)
+                writeln!(f)?;
+            }
+        } else {
             format("Merge hard forks", &self.with_merge, self.post_merge.is_empty(), f)?;
         }
 
@@ -136,12 +141,15 @@ impl core::fmt::Display for DisplayHardforks {
 
 impl DisplayHardforks {
     /// Creates a new [`DisplayHardforks`] from an iterator of hardforks.
-    pub fn new<H: Hardforks>(hardforks: &H) -> Self {
+    pub fn new<'a, I>(hardforks: I) -> Self
+    where
+        I: IntoIterator<Item = (&'a dyn Hardfork, ForkCondition)>,
+    {
         let mut pre_merge = Vec::new();
         let mut with_merge = Vec::new();
         let mut post_merge = Vec::new();
 
-        for (fork, condition) in hardforks.forks_iter() {
+        for (fork, condition) in hardforks {
             let mut display_fork =
                 DisplayFork { name: fork.name().to_string(), activated_at: condition, eip: None };
 

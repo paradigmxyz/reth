@@ -37,7 +37,7 @@ pub mod witness;
 
 /// The implementation of the Merkle Patricia Trie.
 mod trie;
-pub use trie::{StateRoot, StorageRoot};
+pub use trie::{StateRoot, StorageRoot, TrieType};
 
 /// Utilities for state root checkpoint progress.
 mod progress;

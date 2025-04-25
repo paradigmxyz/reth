@@ -9,7 +9,7 @@ use reth_trie::{
 };
 
 #[cfg(feature = "metrics")]
-use reth_trie::metrics::{TrieRootMetrics, TrieType};
+use reth_trie::metrics::TrieRootMetrics;
 
 /// Extends [`StorageRoot`] with operations specific for working with a database transaction.
 pub trait DatabaseStorageRoot<'a, TX> {
@@ -44,7 +44,7 @@ impl<'a, TX: DbTx> DatabaseStorageRoot<'a, TX>
             address,
             Default::default(),
             #[cfg(feature = "metrics")]
-            TrieRootMetrics::new(TrieType::Storage),
+            TrieRootMetrics::new(reth_trie::TrieType::Storage),
         )
     }
 
@@ -55,7 +55,7 @@ impl<'a, TX: DbTx> DatabaseStorageRoot<'a, TX>
             hashed_address,
             Default::default(),
             #[cfg(feature = "metrics")]
-            TrieRootMetrics::new(TrieType::Storage),
+            TrieRootMetrics::new(reth_trie::TrieType::Storage),
         )
     }
 
@@ -73,7 +73,7 @@ impl<'a, TX: DbTx> DatabaseStorageRoot<'a, TX>
             address,
             prefix_set,
             #[cfg(feature = "metrics")]
-            TrieRootMetrics::new(TrieType::Storage),
+            TrieRootMetrics::new(reth_trie::TrieType::Storage),
         )
         .root()
     }

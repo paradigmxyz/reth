@@ -13,8 +13,8 @@ use alloy_consensus::{
         LEGACY_TX_TYPE_ID,
     },
     transaction::PooledTransaction,
-    EthereumTxEnvelope, TxEip1559, TxEip2930, TxEip4844, TxEip4844Variant, TxEip7702, TxEnvelope,
-    TxLegacy, TxType, Typed2718,
+    EthereumTxEnvelope, Signed, TxEip1559, TxEip2930, TxEip4844, TxEip4844Variant, TxEip7702,
+    TxEnvelope, TxLegacy, TxType, Typed2718,
 };
 use alloy_eips::{
     eip1559::MIN_PROTOCOL_BASE_FEE,
@@ -22,21 +22,18 @@ use alloy_eips::{
     eip4844::{BlobTransactionSidecar, BlobTransactionValidationError, DATA_GAS_PER_BLOB},
     eip7702::SignedAuthorization,
 };
-use alloy_primitives::{
-    Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
-};
+use alloy_primitives::{Address, Bytes, ChainId, Signature, TxHash, TxKind, B256, U256};
 use paste::paste;
-use rand::{
-    distributions::{Uniform, WeightedIndex},
-    prelude::Distribution,
-};
+use rand::{distr::Uniform, prelude::Distribution};
 use reth_ethereum_primitives::{Transaction, TransactionSigned};
 use reth_primitives_traits::{
-    transaction::error::{TransactionConversionError, TryFromRecoveredTransactionError},
-    InMemorySize, Recovered, SignedTransaction,
+    transaction::error::TryFromRecoveredTransactionError, InMemorySize, Recovered,
+    SignedTransaction,
 };
 
+use alloy_consensus::error::ValueError;
 use alloy_eips::eip4844::env_settings::KzgSettings;
+use rand::distr::weighted::WeightedIndex;
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
 
 /// A transaction pool implementation using [`MockOrdering`] for transaction ordering.
@@ -405,13 +402,13 @@ impl MockTransaction {
     }
 
     /// Sets the max fee per blob gas for EIP-4844 transactions,
-    pub fn with_blob_fee(mut self, val: u128) -> Self {
+    pub const fn with_blob_fee(mut self, val: u128) -> Self {
         self.set_blob_fee(val);
         self
     }
 
     /// Sets the max fee per blob gas for EIP-4844 transactions,
-    pub fn set_blob_fee(&mut self, val: u128) -> &mut Self {
+    pub const fn set_blob_fee(&mut self, val: u128) -> &mut Self {
         if let Self::Eip4844 { max_fee_per_blob_gas, .. } = self {
             *max_fee_per_blob_gas = val;
         }
@@ -419,7 +416,7 @@ impl MockTransaction {
     }
 
     /// Sets the priority fee for dynamic fee transactions (EIP-1559 and EIP-4844)
-    pub fn set_priority_fee(&mut self, val: u128) -> &mut Self {
+    pub const fn set_priority_fee(&mut self, val: u128) -> &mut Self {
         if let Self::Eip1559 { max_priority_fee_per_gas, .. } |
         Self::Eip4844 { max_priority_fee_per_gas, .. } = self
         {
@@ -429,7 +426,7 @@ impl MockTransaction {
     }
 
     /// Sets the priority fee for dynamic fee transactions (EIP-1559 and EIP-4844)
-    pub fn with_priority_fee(mut self, val: u128) -> Self {
+    pub const fn with_priority_fee(mut self, val: u128) -> Self {
         self.set_priority_fee(val);
         self
     }
@@ -445,7 +442,7 @@ impl MockTransaction {
     }
 
     /// Sets the max fee for dynamic fee transactions (EIP-1559 and EIP-4844)
-    pub fn set_max_fee(&mut self, val: u128) -> &mut Self {
+    pub const fn set_max_fee(&mut self, val: u128) -> &mut Self {
         if let Self::Eip1559 { max_fee_per_gas, .. } |
         Self::Eip4844 { max_fee_per_gas, .. } |
         Self::Eip7702 { max_fee_per_gas, .. } = self
@@ -456,7 +453,7 @@ impl MockTransaction {
     }
 
     /// Sets the max fee for dynamic fee transactions (EIP-1559 and EIP-4844)
-    pub fn with_max_fee(mut self, val: u128) -> Self {
+    pub const fn with_max_fee(mut self, val: u128) -> Self {
         self.set_max_fee(val);
         self
     }
@@ -486,7 +483,7 @@ impl MockTransaction {
     }
 
     /// Sets the gas price for the transaction.
-    pub fn set_gas_price(&mut self, val: u128) -> &mut Self {
+    pub const fn set_gas_price(&mut self, val: u128) -> &mut Self {
         match self {
             Self::Legacy { gas_price, .. } | Self::Eip2930 { gas_price, .. } => {
                 *gas_price = val;
@@ -502,7 +499,7 @@ impl MockTransaction {
     }
 
     /// Sets the gas price for the transaction.
-    pub fn with_gas_price(mut self, val: u128) -> Self {
+    pub const fn with_gas_price(mut self, val: u128) -> Self {
         match self {
             Self::Legacy { ref mut gas_price, .. } | Self::Eip2930 { ref mut gas_price, .. } => {
                 *gas_price = val;
@@ -671,7 +668,7 @@ impl MockTransaction {
 }
 
 impl PoolTransaction for MockTransaction {
-    type TryFromConsensusError = TransactionConversionError;
+    type TryFromConsensusError = ValueError<EthereumTxEnvelope<TxEip4844>>;
 
     type Consensus = TransactionSigned;
 
@@ -922,8 +919,7 @@ impl TryFrom<Recovered<TransactionSigned>> for MockTransaction {
         let hash = *transaction.tx_hash();
         let size = transaction.size();
 
-        #[expect(unreachable_patterns)]
-        match transaction.into_transaction() {
+        match transaction.into_typed_transaction() {
             Transaction::Legacy(TxLegacy {
                 chain_id,
                 nonce,
@@ -1050,7 +1046,6 @@ impl TryFrom<Recovered<TransactionSigned>> for MockTransaction {
                 size,
                 cost: U256::from(gas_limit) * U256::from(max_fee_per_gas) + value,
             }),
-            tx => Err(TryFromRecoveredTransactionError::UnsupportedTransactionType(tx.ty())),
         }
     }
 }
@@ -1171,10 +1166,12 @@ impl From<Recovered<PooledTransaction>> for MockTransaction {
 
 impl From<MockTransaction> for Recovered<TransactionSigned> {
     fn from(tx: MockTransaction) -> Self {
-        let signed_tx =
-            TransactionSigned::new(tx.clone().into(), Signature::test_signature(), *tx.hash());
-
-        Self::new_unchecked(signed_tx, tx.sender())
+        let hash = *tx.hash();
+        let sender = tx.sender();
+        let tx = Transaction::from(tx);
+        let tx: TransactionSigned =
+            Signed::new_unchecked(tx, Signature::test_signature(), hash).into();
+        Self::new_unchecked(tx, sender)
     }
 }
 
@@ -1443,10 +1440,10 @@ impl MockFeeRange {
             "max_fee_range should be strictly below the priority fee range"
         );
         Self {
-            gas_price: gas_price.into(),
-            priority_fee: priority_fee.into(),
-            max_fee: max_fee.into(),
-            max_fee_blob: max_fee_blob.into(),
+            gas_price: gas_price.try_into().unwrap(),
+            priority_fee: priority_fee.try_into().unwrap(),
+            max_fee: max_fee.try_into().unwrap(),
+            max_fee_blob: max_fee_blob.try_into().unwrap(),
         }
     }
 
@@ -1498,9 +1495,9 @@ impl MockTransactionDistribution {
     ) -> Self {
         Self {
             transaction_ratio,
-            gas_limit_range: gas_limit_range.into(),
+            gas_limit_range: gas_limit_range.try_into().unwrap(),
             fee_ranges,
-            size_range: size_range.into(),
+            size_range: size_range.try_into().unwrap(),
         }
     }
 
@@ -1710,7 +1707,7 @@ impl MockTransactionSet {
 
         let mut prev_nonce = 0;
         for tx in &mut self.transactions {
-            if rng.gen_bool(gap_pct as f64 / 100.0) {
+            if rng.random_bool(gap_pct as f64 / 100.0) {
                 prev_nonce += gap_range.start;
             } else {
                 prev_nonce += 1;
@@ -1757,4 +1754,86 @@ fn test_mock_priority() {
     let lo = MockTransaction::eip1559().with_gas_limit(100_000);
     let hi = lo.next().inc_price();
     assert!(o.priority(&hi, 0) > o.priority(&lo, 0));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::Transaction;
+    use alloy_primitives::U256;
+
+    #[test]
+    fn test_mock_transaction_factory() {
+        let mut factory = MockTransactionFactory::default();
+
+        // Test legacy transaction creation
+        let legacy = factory.create_legacy();
+        assert_eq!(legacy.transaction.tx_type(), TxType::Legacy);
+
+        // Test EIP1559 transaction creation
+        let eip1559 = factory.create_eip1559();
+        assert_eq!(eip1559.transaction.tx_type(), TxType::Eip1559);
+
+        // Test EIP4844 transaction creation
+        let eip4844 = factory.create_eip4844();
+        assert_eq!(eip4844.transaction.tx_type(), TxType::Eip4844);
+    }
+
+    #[test]
+    fn test_mock_transaction_set() {
+        let sender = Address::random();
+        let nonce_start = 0u64;
+        let count = 3;
+
+        // Test legacy transaction set
+        let legacy_set = MockTransactionSet::dependent(sender, nonce_start, count, TxType::Legacy);
+        assert_eq!(legacy_set.transactions.len(), count);
+        for (idx, tx) in legacy_set.transactions.iter().enumerate() {
+            assert_eq!(tx.tx_type(), TxType::Legacy);
+            assert_eq!(tx.nonce(), nonce_start + idx as u64);
+            assert_eq!(tx.sender(), sender);
+        }
+
+        // Test EIP1559 transaction set
+        let eip1559_set =
+            MockTransactionSet::dependent(sender, nonce_start, count, TxType::Eip1559);
+        assert_eq!(eip1559_set.transactions.len(), count);
+        for (idx, tx) in eip1559_set.transactions.iter().enumerate() {
+            assert_eq!(tx.tx_type(), TxType::Eip1559);
+            assert_eq!(tx.nonce(), nonce_start + idx as u64);
+            assert_eq!(tx.sender(), sender);
+        }
+    }
+
+    #[test]
+    fn test_mock_transaction_modifications() {
+        let tx = MockTransaction::eip1559();
+
+        // Test price increment
+        let original_price = tx.get_gas_price();
+        let tx_inc = tx.inc_price();
+        assert!(tx_inc.get_gas_price() > original_price);
+
+        // Test gas limit increment
+        let original_limit = tx.gas_limit();
+        let tx_inc = tx.inc_limit();
+        assert!(tx_inc.gas_limit() > original_limit);
+
+        // Test nonce increment
+        let original_nonce = tx.nonce();
+        let tx_inc = tx.inc_nonce();
+        assert_eq!(tx_inc.nonce(), original_nonce + 1);
+    }
+
+    #[test]
+    fn test_mock_transaction_cost() {
+        let tx = MockTransaction::eip1559()
+            .with_gas_limit(7_000)
+            .with_max_fee(100)
+            .with_value(U256::ZERO);
+
+        // Cost is calculated as (gas_limit * max_fee_per_gas) + value
+        let expected_cost = U256::from(7_000u64) * U256::from(100u128) + U256::ZERO;
+        assert_eq!(*tx.cost(), expected_cost);
+    }
 }

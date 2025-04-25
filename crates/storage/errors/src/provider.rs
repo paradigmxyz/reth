@@ -39,7 +39,9 @@ pub enum ProviderError {
     BlockBodyIndicesNotFound(BlockNumber),
     /// The transition ID was found for the given address and storage key, but the changeset was
     /// not found.
-    #[error("storage change set for address {address} and key {storage_key} at block #{block_number} does not exist")]
+    #[error(
+        "storage change set for address {address} and key {storage_key} at block #{block_number} does not exist"
+    )]
     StorageChangesetNotFound {
         /// The block number found for the address and storage key.
         block_number: BlockNumber,
@@ -214,7 +216,6 @@ pub struct StaticFileWriterError {
 
 impl StaticFileWriterError {
     /// Creates a new [`StaticFileWriterError`] with the given message.
-    #[allow(dead_code)]
     pub fn new(message: impl Into<String>) -> Self {
         Self { message: message.into() }
     }

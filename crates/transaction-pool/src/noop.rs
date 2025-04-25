@@ -5,7 +5,7 @@
 
 use crate::{
     blobstore::BlobStoreError,
-    error::PoolError,
+    error::{InvalidPoolTransactionError, PoolError},
     pool::TransactionListenerKind,
     traits::{BestTransactionsAttributes, GetPooledTransactionLimit, NewBlobSidecar},
     validate::ValidTransaction,
@@ -28,12 +28,28 @@ use tokio::sync::{mpsc, mpsc::Receiver};
 ///
 /// All transactions are rejected and no events are emitted.
 /// This type will never hold any transactions and is only useful for wiring components together.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
-pub struct NoopTransactionPool;
+pub struct NoopTransactionPool<T: EthPoolTransaction = EthPooledTransaction> {
+    /// Type marker
+    _marker: PhantomData<T>,
+}
 
-impl TransactionPool for NoopTransactionPool {
-    type Transaction = EthPooledTransaction;
+impl<T: EthPoolTransaction> NoopTransactionPool<T> {
+    /// Creates a new [`NoopTransactionPool`].
+    pub fn new() -> Self {
+        Self { _marker: Default::default() }
+    }
+}
+
+impl Default for NoopTransactionPool<EthPooledTransaction> {
+    fn default() -> Self {
+        Self { _marker: Default::default() }
+    }
+}
+
+impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
+    type Transaction = T;
 
     fn pool_size(&self) -> PoolSize {
         Default::default()
@@ -320,6 +336,7 @@ impl TransactionPool for NoopTransactionPool {
 #[non_exhaustive]
 pub struct MockTransactionValidator<T> {
     propagate_local: bool,
+    return_invalid: bool,
     _marker: PhantomData<T>,
 }
 
@@ -331,6 +348,12 @@ impl<T: EthPoolTransaction> TransactionValidator for MockTransactionValidator<T>
         origin: TransactionOrigin,
         mut transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
+        if self.return_invalid {
+            return TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidPoolTransactionError::Underpriced,
+            );
+        }
         let maybe_sidecar = transaction.take_blob().maybe_sidecar().cloned();
         // we return `balance: U256::MAX` to simulate a valid transaction which will never go into
         // overdraft
@@ -351,30 +374,34 @@ impl<T> MockTransactionValidator<T> {
     /// Creates a new [`MockTransactionValidator`] that does not allow local transactions to be
     /// propagated.
     pub fn no_propagate_local() -> Self {
-        Self { propagate_local: false, _marker: Default::default() }
+        Self { propagate_local: false, return_invalid: false, _marker: Default::default() }
+    }
+    /// Creates a new [`MockTransactionValidator`] that always return a invalid outcome.
+    pub fn return_invalid() -> Self {
+        Self { propagate_local: false, return_invalid: true, _marker: Default::default() }
     }
 }
 
 impl<T> Default for MockTransactionValidator<T> {
     fn default() -> Self {
-        Self { propagate_local: true, _marker: Default::default() }
+        Self { propagate_local: true, return_invalid: false, _marker: Default::default() }
     }
 }
 
 /// An error that contains the transaction that failed to be inserted into the noop pool.
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("can't insert transaction into the noop pool that does nothing")]
-pub struct NoopInsertError {
-    tx: EthPooledTransaction,
+pub struct NoopInsertError<T: EthPoolTransaction = EthPooledTransaction> {
+    tx: T,
 }
 
-impl NoopInsertError {
-    const fn new(tx: EthPooledTransaction) -> Self {
+impl<T: EthPoolTransaction> NoopInsertError<T> {
+    const fn new(tx: T) -> Self {
         Self { tx }
     }
 
     /// Returns the transaction that failed to be inserted.
-    pub fn into_inner(self) -> EthPooledTransaction {
+    pub fn into_inner(self) -> T {
         self.tx
     }
 }

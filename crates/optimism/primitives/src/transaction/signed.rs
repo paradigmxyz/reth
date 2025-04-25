@@ -1,5 +1,7 @@
-//! A signed Optimism transaction.
+//! This file contains the legacy reth `OpTransactionSigned` type that has been replaced with
+//! op-alloy's OpTransactionSigned To test for consistency this is kept
 
+use crate::transaction::OpTransaction;
 use alloc::vec::Vec;
 use alloy_consensus::{
     transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx},
@@ -11,33 +13,26 @@ use alloy_eips::{
     eip2930::AccessList,
     eip7702::SignedAuthorization,
 };
-use alloy_evm::FromRecoveredTx;
-use alloy_primitives::{
-    keccak256, Address, Bytes, PrimitiveSignature as Signature, TxHash, TxKind, Uint, B256,
-};
+use alloy_primitives::{keccak256, Address, Bytes, Signature, TxHash, TxKind, Uint, B256};
 use alloy_rlp::Header;
 use core::{
     hash::{Hash, Hasher},
     mem,
     ops::Deref,
 };
-use derive_more::{AsRef, Deref};
 use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope, OpTypedTransaction, TxDeposit};
-use op_revm::transaction::deposit::DepositTransactionParts;
 #[cfg(any(test, feature = "reth-codec"))]
-use proptest as _;
 use reth_primitives_traits::{
     crypto::secp256k1::{recover_signer, recover_signer_unchecked},
     sync::OnceLock,
     transaction::{error::TransactionConversionError, signed::RecoveryError},
     InMemorySize, SignedTransaction,
 };
-use revm_context::TxEnv;
 
 /// Signed transaction.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, Eq, AsRef, Deref)]
+#[derive(Debug, Clone, Eq)]
 pub struct OpTransactionSigned {
     /// Transaction hash
     #[cfg_attr(feature = "serde", serde(skip))]
@@ -45,15 +40,31 @@ pub struct OpTransactionSigned {
     /// The transaction signature values
     signature: Signature,
     /// Raw transaction info
-    #[deref]
-    #[as_ref]
     transaction: OpTypedTransaction,
+}
+
+impl Deref for OpTransactionSigned {
+    type Target = OpTypedTransaction;
+    fn deref(&self) -> &Self::Target {
+        &self.transaction
+    }
 }
 
 impl OpTransactionSigned {
     /// Creates a new signed transaction from the given transaction, signature and hash.
     pub fn new(transaction: OpTypedTransaction, signature: Signature, hash: B256) -> Self {
         Self { hash: hash.into(), signature, transaction }
+    }
+
+    #[cfg(test)]
+    fn input_mut(&mut self) -> &mut Bytes {
+        match &mut self.transaction {
+            OpTypedTransaction::Legacy(tx) => &mut tx.input,
+            OpTypedTransaction::Eip2930(tx) => &mut tx.input,
+            OpTypedTransaction::Eip1559(tx) => &mut tx.input,
+            OpTypedTransaction::Eip7702(tx) => &mut tx.input,
+            OpTypedTransaction::Deposit(tx) => &mut tx.input,
+        }
     }
 
     /// Consumes the type and returns the transaction.
@@ -95,10 +106,6 @@ impl OpTransactionSigned {
 impl SignedTransaction for OpTransactionSigned {
     fn tx_hash(&self) -> &TxHash {
         self.hash.get_or_init(|| self.recalculate_hash())
-    }
-
-    fn signature(&self) -> &Signature {
-        &self.signature
     }
 
     fn recover_signer(&self) -> Result<Address, RecoveryError> {
@@ -173,6 +180,13 @@ impl From<OpTxEnvelope> for OpTransactionSigned {
     }
 }
 
+impl From<Sealed<TxDeposit>> for OpTransactionSigned {
+    fn from(value: Sealed<TxDeposit>) -> Self {
+        let (tx, hash) = value.into_parts();
+        Self::new(OpTypedTransaction::Deposit(tx), TxDeposit::signature(), hash)
+    }
+}
+
 impl From<OpTransactionSigned> for OpTxEnvelope {
     fn from(value: OpTransactionSigned) -> Self {
         let (tx, signature, hash) = value.into_parts();
@@ -182,140 +196,6 @@ impl From<OpTransactionSigned> for OpTxEnvelope {
             OpTypedTransaction::Eip1559(tx) => Signed::new_unchecked(tx, signature, hash).into(),
             OpTypedTransaction::Deposit(tx) => Sealed::new_unchecked(tx, hash).into(),
             OpTypedTransaction::Eip7702(tx) => Signed::new_unchecked(tx, signature, hash).into(),
-        }
-    }
-}
-
-impl From<OpTransactionSigned> for Signed<OpTypedTransaction> {
-    fn from(value: OpTransactionSigned) -> Self {
-        let (tx, sig, hash) = value.into_parts();
-        Self::new_unchecked(tx, sig, hash)
-    }
-}
-
-impl From<Sealed<TxDeposit>> for OpTransactionSigned {
-    fn from(value: Sealed<TxDeposit>) -> Self {
-        let (tx, hash) = value.into_parts();
-        Self::new(OpTypedTransaction::Deposit(tx), TxDeposit::signature(), hash)
-    }
-}
-
-/// A trait that represents an optimism transaction, mainly used to indicate whether or not the
-/// transaction is a deposit transaction.
-pub trait OpTransaction {
-    /// Whether or not the transaction is a dpeosit transaction.
-    fn is_deposit(&self) -> bool;
-}
-
-impl OpTransaction for OpTransactionSigned {
-    fn is_deposit(&self) -> bool {
-        self.is_deposit()
-    }
-}
-
-impl FromRecoveredTx<OpTransactionSigned> for op_revm::OpTransaction<TxEnv> {
-    fn from_recovered_tx(tx: &OpTransactionSigned, sender: Address) -> Self {
-        let envelope = tx.encoded_2718();
-
-        let base = match &tx.transaction {
-            OpTypedTransaction::Legacy(tx) => TxEnv {
-                gas_limit: tx.gas_limit,
-                gas_price: tx.gas_price,
-                gas_priority_fee: None,
-                kind: tx.to,
-                value: tx.value,
-                data: tx.input.clone(),
-                chain_id: tx.chain_id,
-                nonce: tx.nonce,
-                access_list: Default::default(),
-                blob_hashes: Default::default(),
-                max_fee_per_blob_gas: Default::default(),
-                authorization_list: Default::default(),
-                tx_type: 0,
-                caller: sender,
-            },
-            OpTypedTransaction::Eip2930(tx) => TxEnv {
-                gas_limit: tx.gas_limit,
-                gas_price: tx.gas_price,
-                gas_priority_fee: None,
-                kind: tx.to,
-                value: tx.value,
-                data: tx.input.clone(),
-                chain_id: Some(tx.chain_id),
-                nonce: tx.nonce,
-                access_list: tx.access_list.clone(),
-                blob_hashes: Default::default(),
-                max_fee_per_blob_gas: Default::default(),
-                authorization_list: Default::default(),
-                tx_type: 1,
-                caller: sender,
-            },
-            OpTypedTransaction::Eip1559(tx) => TxEnv {
-                gas_limit: tx.gas_limit,
-                gas_price: tx.max_fee_per_gas,
-                gas_priority_fee: Some(tx.max_priority_fee_per_gas),
-                kind: tx.to,
-                value: tx.value,
-                data: tx.input.clone(),
-                chain_id: Some(tx.chain_id),
-                nonce: tx.nonce,
-                access_list: tx.access_list.clone(),
-                blob_hashes: Default::default(),
-                max_fee_per_blob_gas: Default::default(),
-                authorization_list: Default::default(),
-                tx_type: 2,
-                caller: sender,
-            },
-            OpTypedTransaction::Eip7702(tx) => TxEnv {
-                gas_limit: tx.gas_limit,
-                gas_price: tx.max_fee_per_gas,
-                gas_priority_fee: Some(tx.max_priority_fee_per_gas),
-                kind: TxKind::Call(tx.to),
-                value: tx.value,
-                data: tx.input.clone(),
-                chain_id: Some(tx.chain_id),
-                nonce: tx.nonce,
-                access_list: tx.access_list.clone(),
-                blob_hashes: Default::default(),
-                max_fee_per_blob_gas: Default::default(),
-                authorization_list: tx.authorization_list.clone(),
-                tx_type: 4,
-                caller: sender,
-            },
-            OpTypedTransaction::Deposit(tx) => TxEnv {
-                gas_limit: tx.gas_limit,
-                gas_price: 0,
-                kind: tx.to,
-                value: tx.value,
-                data: tx.input.clone(),
-                chain_id: None,
-                nonce: 0,
-                access_list: Default::default(),
-                blob_hashes: Default::default(),
-                max_fee_per_blob_gas: Default::default(),
-                authorization_list: Default::default(),
-                gas_priority_fee: Default::default(),
-                tx_type: 126,
-                caller: sender,
-            },
-        };
-
-        Self {
-            base,
-            enveloped_tx: Some(envelope.into()),
-            deposit: if let OpTypedTransaction::Deposit(tx) = &tx.transaction {
-                DepositTransactionParts {
-                    is_system_transaction: tx.is_system_transaction,
-                    source_hash: tx.source_hash,
-                    // For consistency with op-geth, we always return `0x0` for mint if it is
-                    // missing This is because op-geth does not distinguish
-                    // between null and 0, because this value is decoded from RLP where null is
-                    // represented as 0
-                    mint: Some(tx.mint.unwrap_or_default()),
-                }
-            } else {
-                Default::default()
-            },
         }
     }
 }
@@ -613,11 +493,10 @@ impl reth_codecs::Compact for OpTransactionSigned {
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for OpTransactionSigned {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        #[allow(unused_mut)]
         let mut transaction = OpTypedTransaction::arbitrary(u)?;
 
         let secp = secp256k1::Secp256k1::new();
-        let key_pair = secp256k1::Keypair::new(&secp, &mut rand::thread_rng());
+        let key_pair = secp256k1::Keypair::new(&secp, &mut rand_08::thread_rng());
         let signature = reth_primitives_traits::crypto::secp256k1::sign_message(
             B256::from_slice(&key_pair.secret_bytes()[..]),
             signature_hash(&transaction),
@@ -633,7 +512,7 @@ impl<'a> arbitrary::Arbitrary<'a> for OpTransactionSigned {
             }
         }
 
-        let signature = if is_deposit(&transaction) { TxDeposit::signature() } else { signature };
+        let signature = if transaction.is_deposit() { TxDeposit::signature() } else { signature };
 
         Ok(Self::new_unhashed(transaction, signature))
     }
@@ -650,135 +529,6 @@ fn signature_hash(tx: &OpTypedTransaction) -> B256 {
     }
 }
 
-/// Returns `true` if transaction is deposit transaction.
-pub const fn is_deposit(tx: &OpTypedTransaction) -> bool {
-    matches!(tx, OpTypedTransaction::Deposit(_))
-}
-
-impl From<OpPooledTransaction> for OpTransactionSigned {
-    fn from(value: OpPooledTransaction) -> Self {
-        match value {
-            OpPooledTransaction::Legacy(tx) => tx.into(),
-            OpPooledTransaction::Eip2930(tx) => tx.into(),
-            OpPooledTransaction::Eip1559(tx) => tx.into(),
-            OpPooledTransaction::Eip7702(tx) => tx.into(),
-        }
-    }
-}
-
-impl TryFrom<OpTransactionSigned> for OpPooledTransaction {
-    type Error = TransactionConversionError;
-
-    fn try_from(value: OpTransactionSigned) -> Result<Self, Self::Error> {
-        let hash = *value.tx_hash();
-        let OpTransactionSigned { hash: _, signature, transaction } = value;
-
-        match transaction {
-            OpTypedTransaction::Legacy(tx) => {
-                Ok(Self::Legacy(Signed::new_unchecked(tx, signature, hash)))
-            }
-            OpTypedTransaction::Eip2930(tx) => {
-                Ok(Self::Eip2930(Signed::new_unchecked(tx, signature, hash)))
-            }
-            OpTypedTransaction::Eip1559(tx) => {
-                Ok(Self::Eip1559(Signed::new_unchecked(tx, signature, hash)))
-            }
-            OpTypedTransaction::Eip7702(tx) => {
-                Ok(Self::Eip7702(Signed::new_unchecked(tx, signature, hash)))
-            }
-            OpTypedTransaction::Deposit(_) => Err(TransactionConversionError::UnsupportedForP2P),
-        }
-    }
-}
-
-/// Bincode-compatible transaction type serde implementations.
-#[cfg(feature = "serde-bincode-compat")]
-pub mod serde_bincode_compat {
-    use alloy_consensus::transaction::serde_bincode_compat::{
-        TxEip1559, TxEip2930, TxEip7702, TxLegacy,
-    };
-    use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
-    use reth_primitives_traits::{serde_bincode_compat::SerdeBincodeCompat, SignedTransaction};
-    use serde::{Deserialize, Serialize};
-
-    /// Bincode-compatible [`super::OpTypedTransaction`] serde implementation.
-    #[derive(Debug, Serialize, Deserialize)]
-    #[allow(missing_docs)]
-    enum OpTypedTransaction<'a> {
-        Legacy(TxLegacy<'a>),
-        Eip2930(TxEip2930<'a>),
-        Eip1559(TxEip1559<'a>),
-        Eip7702(TxEip7702<'a>),
-        Deposit(op_alloy_consensus::serde_bincode_compat::TxDeposit<'a>),
-    }
-
-    impl<'a> From<&'a super::OpTypedTransaction> for OpTypedTransaction<'a> {
-        fn from(value: &'a super::OpTypedTransaction) -> Self {
-            match value {
-                super::OpTypedTransaction::Legacy(tx) => Self::Legacy(TxLegacy::from(tx)),
-                super::OpTypedTransaction::Eip2930(tx) => Self::Eip2930(TxEip2930::from(tx)),
-                super::OpTypedTransaction::Eip1559(tx) => Self::Eip1559(TxEip1559::from(tx)),
-                super::OpTypedTransaction::Eip7702(tx) => Self::Eip7702(TxEip7702::from(tx)),
-                super::OpTypedTransaction::Deposit(tx) => {
-                    Self::Deposit(op_alloy_consensus::serde_bincode_compat::TxDeposit::from(tx))
-                }
-            }
-        }
-    }
-
-    impl<'a> From<OpTypedTransaction<'a>> for super::OpTypedTransaction {
-        fn from(value: OpTypedTransaction<'a>) -> Self {
-            match value {
-                OpTypedTransaction::Legacy(tx) => Self::Legacy(tx.into()),
-                OpTypedTransaction::Eip2930(tx) => Self::Eip2930(tx.into()),
-                OpTypedTransaction::Eip1559(tx) => Self::Eip1559(tx.into()),
-                OpTypedTransaction::Eip7702(tx) => Self::Eip7702(tx.into()),
-                OpTypedTransaction::Deposit(tx) => Self::Deposit(tx.into()),
-            }
-        }
-    }
-
-    /// Bincode-compatible [`super::OpTransactionSigned`] serde implementation.
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct OpTransactionSigned<'a> {
-        hash: TxHash,
-        signature: Signature,
-        transaction: OpTypedTransaction<'a>,
-    }
-
-    impl<'a> From<&'a super::OpTransactionSigned> for OpTransactionSigned<'a> {
-        fn from(value: &'a super::OpTransactionSigned) -> Self {
-            Self {
-                hash: *value.tx_hash(),
-                signature: value.signature,
-                transaction: OpTypedTransaction::from(&value.transaction),
-            }
-        }
-    }
-
-    impl<'a> From<OpTransactionSigned<'a>> for super::OpTransactionSigned {
-        fn from(value: OpTransactionSigned<'a>) -> Self {
-            Self {
-                hash: value.hash.into(),
-                signature: value.signature,
-                transaction: value.transaction.into(),
-            }
-        }
-    }
-
-    impl SerdeBincodeCompat for super::OpTransactionSigned {
-        type BincodeRepr<'a> = OpTransactionSigned<'a>;
-
-        fn as_repr(&self) -> Self::BincodeRepr<'_> {
-            self.into()
-        }
-
-        fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
-            repr.into()
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -789,6 +539,34 @@ mod tests {
     proptest! {
         #[test]
         fn test_roundtrip_compact_encode_envelope(reth_tx in arb::<OpTransactionSigned>()) {
+            let mut expected_buf = Vec::<u8>::new();
+            let expected_len = reth_tx.to_compact(&mut expected_buf);
+
+            let mut actual_but  = Vec::<u8>::new();
+            let alloy_tx = OpTxEnvelope::from(reth_tx);
+            let actual_len = alloy_tx.to_compact(&mut actual_but);
+
+            assert_eq!(actual_but, expected_buf);
+            assert_eq!(actual_len, expected_len);
+        }
+
+        #[test]
+        fn test_roundtrip_compact_decode_envelope_zstd(mut reth_tx in arb::<OpTransactionSigned>()) {
+                 // zstd only kicks in if the input is large enough
+            *reth_tx.input_mut() = vec![0;33].into();
+            let mut buf = Vec::<u8>::new();
+            let len = reth_tx.to_compact(&mut buf);
+
+            let (actual_tx, _) = OpTxEnvelope::from_compact(&buf, len);
+            let expected_tx = OpTxEnvelope::from(reth_tx);
+
+            assert_eq!(actual_tx, expected_tx);
+        }
+
+        #[test]
+        fn test_roundtrip_compact_encode_envelope_zstd(mut reth_tx in arb::<OpTransactionSigned>()) {
+                 // zstd only kicks in if the input is large enough
+            *reth_tx.input_mut() = vec![0;33].into();
             let mut expected_buf = Vec::<u8>::new();
             let expected_len = reth_tx.to_compact(&mut expected_buf);
 

@@ -176,7 +176,6 @@ where
     N: NodePrimitives,
 {
     /// Create a new instance of the builder
-    #[allow(clippy::too_many_arguments)]
     pub const fn new(
         provider: Provider,
         pool: Pool,
@@ -694,7 +693,7 @@ impl RpcModuleConfig {
     }
 
     /// Get a mutable reference to the eth namespace config
-    pub fn eth_mut(&mut self) -> &mut EthConfig {
+    pub const fn eth_mut(&mut self) -> &mut EthConfig {
         &mut self.eth
     }
 }
@@ -733,7 +732,7 @@ impl RpcModuleConfigBuilder {
     }
 
     /// Get a mutable reference to the eth namespace config, if any
-    pub fn eth_mut(&mut self) -> &mut Option<EthConfig> {
+    pub const fn eth_mut(&mut self) -> &mut Option<EthConfig> {
         &mut self.eth
     }
 
@@ -1632,7 +1631,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                 .http_only()
                 .set_http_middleware(
                     tower::ServiceBuilder::new()
-                        .option_layer(Self::maybe_cors_layer(self.ws_cors_domains.clone())?)
+                        .option_layer(Self::maybe_cors_layer(self.http_cors_domains.clone())?)
                         .option_layer(Self::maybe_jwt_layer(self.jwt_secret))
                         .option_layer(Self::maybe_compression_layer()),
                 )
@@ -1733,22 +1732,22 @@ impl TransportRpcModuleConfig {
     }
 
     /// Get a mutable reference to the
-    pub fn http_mut(&mut self) -> &mut Option<RpcModuleSelection> {
+    pub const fn http_mut(&mut self) -> &mut Option<RpcModuleSelection> {
         &mut self.http
     }
 
     /// Get a mutable reference to the
-    pub fn ws_mut(&mut self) -> &mut Option<RpcModuleSelection> {
+    pub const fn ws_mut(&mut self) -> &mut Option<RpcModuleSelection> {
         &mut self.ws
     }
 
     /// Get a mutable reference to the
-    pub fn ipc_mut(&mut self) -> &mut Option<RpcModuleSelection> {
+    pub const fn ipc_mut(&mut self) -> &mut Option<RpcModuleSelection> {
         &mut self.ipc
     }
 
     /// Get a mutable reference to the
-    pub fn config_mut(&mut self) -> &mut Option<RpcModuleConfig> {
+    pub const fn config_mut(&mut self) -> &mut Option<RpcModuleConfig> {
         &mut self.config
     }
 
@@ -1943,6 +1942,68 @@ impl TransportRpcModules {
         Ok(())
     }
 
+    /// Returns all unique endpoints installed for the given module.
+    ///
+    /// Note: In case of duplicate method names this only record the first occurrence.
+    pub fn methods_by_module<F>(&self, module: RethRpcModule) -> Methods {
+        self.methods_by(|name| name.starts_with(module.as_str()))
+    }
+
+    /// Returns all unique endpoints installed in any of the configured modules.
+    ///
+    /// Note: In case of duplicate method names this only record the first occurrence.
+    pub fn methods_by<F>(&self, mut filter: F) -> Methods
+    where
+        F: FnMut(&str) -> bool,
+    {
+        let mut methods = Methods::new();
+
+        // filter that matches the given filter and also removes duplicates we already have
+        let mut f =
+            |name: &str, mm: &Methods| filter(name) && !mm.method_names().any(|m| m == name);
+
+        if let Some(m) = self.http_methods(|name| f(name, &methods)) {
+            let _ = methods.merge(m);
+        }
+        if let Some(m) = self.ws_methods(|name| f(name, &methods)) {
+            let _ = methods.merge(m);
+        }
+        if let Some(m) = self.ipc_methods(|name| f(name, &methods)) {
+            let _ = methods.merge(m);
+        }
+        methods
+    }
+
+    /// Returns all [`Methods`] installed for the http server based in the given closure.
+    ///
+    /// Returns `None` if no http support is configured.
+    pub fn http_methods<F>(&self, filter: F) -> Option<Methods>
+    where
+        F: FnMut(&str) -> bool,
+    {
+        self.http.as_ref().map(|module| methods_by(module, filter))
+    }
+
+    /// Returns all [`Methods`] installed for the ws server based in the given closure.
+    ///
+    /// Returns `None` if no ws support is configured.
+    pub fn ws_methods<F>(&self, filter: F) -> Option<Methods>
+    where
+        F: FnMut(&str) -> bool,
+    {
+        self.ws.as_ref().map(|module| methods_by(module, filter))
+    }
+
+    /// Returns all [`Methods`] installed for the ipc server based in the given closure.
+    ///
+    /// Returns `None` if no ipc support is configured.
+    pub fn ipc_methods<F>(&self, filter: F) -> Option<Methods>
+    where
+        F: FnMut(&str) -> bool,
+    {
+        self.ipc.as_ref().map(|module| methods_by(module, filter))
+    }
+
     /// Removes the method with the given name from the configured http methods.
     ///
     /// Returns `true` if the method was found and removed, `false` otherwise.
@@ -2086,6 +2147,23 @@ impl TransportRpcModules {
     }
 }
 
+/// Returns the methods installed in the given module that match the given filter.
+fn methods_by<T, F>(module: &RpcModule<T>, mut filter: F) -> Methods
+where
+    F: FnMut(&str) -> bool,
+{
+    let mut methods = Methods::new();
+    let method_names = module.method_names().filter(|name| filter(name));
+
+    for name in method_names {
+        if let Some(matched_method) = module.method(name).cloned() {
+            let _ = methods.verify_and_insert(name, matched_method);
+        }
+    }
+
+    methods
+}
+
 /// A handle to the spawned servers.
 ///
 /// When this type is dropped or [`RpcServerHandle::stop`] has been called the server will be
@@ -2211,7 +2289,7 @@ impl RpcServerHandle {
         let rpc_url = self.http_url()?;
         let provider = ProviderBuilder::default()
             .with_recommended_fillers()
-            .on_http(rpc_url.parse().expect("valid url"));
+            .connect_http(rpc_url.parse().expect("valid url"));
         Some(provider)
     }
 
