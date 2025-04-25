@@ -149,33 +149,6 @@ impl MultiProofTargets {
         )
     }
 
-    /// Creates a [`PrefixSetMut`] from this [`MultiProofTargets`], for the accounts that have
-    /// changed.
-    pub fn account_prefix_set(&self) -> PrefixSetMut {
-        PrefixSetMut::from(self.account_targets.keys().copied().map(Nibbles::unpack))
-    }
-
-    /// Creates a map from hashed address to [`PrefixSetMut`] for storage prefix sets in accounts
-    /// that have changed.
-    pub fn storage_prefix_set_map(&self) -> B256Map<PrefixSetMut> {
-        self.storage_only_targets
-            .iter()
-            .filter(|&(_hashed_address, slots)| !slots.is_empty())
-            .map(|(hashed_address, slots)| {
-                (*hashed_address, PrefixSetMut::from(slots.iter().map(Nibbles::unpack)))
-            })
-            .collect()
-    }
-
-    /// Creates a [`TriePrefixSetsMut`] from this [`MultiProofTargets`].
-    pub fn trie_prefix_sets(&self) -> TriePrefixSetsMut {
-        TriePrefixSetsMut {
-            account_prefix_set: self.account_prefix_set(),
-            storage_prefix_sets: self.storage_prefix_set_map(),
-            destroyed_accounts: Default::default(),
-        }
-    }
-
     /// Returns true if the hashed account address is present in the account multiproof set.
     ///
     /// This does not check whether the hashed address is present in the storage-only target set.
@@ -356,6 +329,28 @@ impl MultiProofTargets {
     /// See [`ChunkedMultiProofTargets`] for more information.
     pub fn chunks(self, size: usize) -> ChunkedMultiProofTargets {
         ChunkedMultiProofTargets::new(self, size)
+    }
+
+    /// Creates a [`PrefixSetMut`] from this [`MultiProofTargets`], for the accounts that have
+    /// changed.
+    pub fn account_prefix_set(&self) -> PrefixSetMut {
+        PrefixSetMut::from(self.account_targets.keys().copied().map(Nibbles::unpack))
+    }
+
+    /// Creates a [`TriePrefixSetsMut`] from the account multiproof targets.
+    pub fn account_trie_prefix_sets(&self) -> TriePrefixSetsMut {
+        TriePrefixSetsMut {
+            account_prefix_set: self.account_prefix_set(),
+            storage_prefix_sets: self
+                .account_targets
+                .iter()
+                .filter(|&(_hashed_address, slots)| !slots.is_empty())
+                .map(|(hashed_address, slots)| {
+                    (*hashed_address, PrefixSetMut::from(slots.iter().map(Nibbles::unpack)))
+                })
+                .collect(),
+            destroyed_accounts: Default::default(),
+        }
     }
 }
 

@@ -405,6 +405,8 @@ impl<P> RevealedSparseTrie<P> {
             self.branch_node_hash_masks.insert(path.clone(), hash_mask);
         }
 
+        // TODO: add traces here! to see what we're not revealing / what is turning into blind
+
         match node {
             TrieNode::EmptyRoot => {
                 debug_assert!(path.is_empty());

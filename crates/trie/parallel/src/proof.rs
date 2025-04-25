@@ -25,10 +25,10 @@ use reth_trie::{
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdatesSorted,
     walker::TrieWalker,
-    HashBuilder, HashedPostStateSorted, MultiProof, Nibbles, StorageMultiProof,
+    HashBuilder, HashedPostStateSorted, MultiProof, MultiProofTargets, Nibbles, StorageMultiProof,
     TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use reth_trie_common::proof::ProofRetainer;
+use reth_trie_common::proof::{ProofNodes, ProofRetainer};
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::sync::{mpsc::Receiver, Arc};
 use tracing::debug;
@@ -118,17 +118,7 @@ where
         target_slots: B256Set,
     ) -> Result<StorageMultiProof, ParallelStateRootError> {
         let total_targets = target_slots.len();
-        let prefix_set = PrefixSetMut::from(target_slots.iter().map(Nibbles::unpack));
-        let prefix_set = prefix_set.freeze();
-
-        debug!(
-            target: "trie::parallel_proof",
-            total_targets,
-            ?hashed_address,
-            "Starting storage proof generation"
-        );
-
-        let receiver = self.spawn_storage_proof(hashed_address, prefix_set, target_slots);
+        let receiver = self.spawn_storage_multiproof(hashed_address, target_slots);
         let proof_result = receiver.recv().map_err(|_| {
             ParallelStateRootError::StorageRoot(StorageRootError::Database(DatabaseError::Other(
                 format!("channel closed for {hashed_address}"),
@@ -145,28 +135,61 @@ where
         proof_result
     }
 
+    /// Spawn a storage multiproof task, and return the receiver that will return the multiproof
+    /// result.
+    ///
+    /// TODO: make better names for `spawn_storage_multiproof` and `storage_proof` and
+    /// `spawn_storage_proof`.
+    pub fn spawn_storage_multiproof(
+        &self,
+        hashed_address: B256,
+        target_slots: B256Set,
+    ) -> Receiver<Result<StorageMultiProof, ParallelStateRootError>> {
+        let total_targets = target_slots.len();
+        let prefix_set = PrefixSetMut::from(target_slots.iter().map(Nibbles::unpack));
+        let prefix_set = prefix_set.freeze();
+
+        debug!(
+            target: "trie::parallel_proof",
+            total_targets,
+            ?hashed_address,
+            "Starting storage proof generation"
+        );
+
+        self.spawn_storage_proof(hashed_address, prefix_set, target_slots)
+    }
+
     /// Generate a state multiproof according to specified targets.
+    ///
+    /// This takes in a [`MultiProofTargets`] which contains two collections:
+    /// * Account multiproof targets, that will fetch proofs for the listed accounts and their
+    /// associated storage. In other words, this will fetch a proof for each account and a storage
+    /// multiproof for the listed storage slots.
+    /// * Storage-only targets, that will fetch storage proofs only for the listed storage slots. In
+    /// other words, this will fetch only the storage multiproofs for each account and its listed
+    /// storage slots.
+    ///
+    /// This function will first spawn tasks for each hashed address in the account multiproof
+    /// targets, then spawn tasks for each hashed address in the storage-only targets.
+    ///
+    /// The account multiproof results will be awaited first, then the storage multiproof results
+    /// will be collected.
     pub fn multiproof(
         self,
-        targets: B256Map<B256Set>,
+        targets: MultiProofTargets,
     ) -> Result<MultiProof, ParallelStateRootError> {
         let mut tracker = ParallelTrieTracker::default();
 
-        // Extend prefix sets with targets
+        // Extend prefix sets with account multiproof targets
         let mut prefix_sets = (*self.prefix_sets).clone();
-        prefix_sets.extend(TriePrefixSetsMut {
-            account_prefix_set: PrefixSetMut::from(targets.keys().copied().map(Nibbles::unpack)),
-            storage_prefix_sets: targets
-                .iter()
-                .filter(|&(_hashed_address, slots)| !slots.is_empty())
-                .map(|(hashed_address, slots)| {
-                    (*hashed_address, PrefixSetMut::from(slots.iter().map(Nibbles::unpack)))
-                })
-                .collect(),
-            destroyed_accounts: Default::default(),
-        });
+        prefix_sets.extend(targets.account_trie_prefix_sets());
         let prefix_sets = prefix_sets.freeze();
 
+        // split the targets into account and storage-only targets, as we will be using them
+        // separately from now on
+        let (targets, storage_only_targets) = targets.into_inner();
+
+        // These storage root targets correspond to only the account multiproof targets.
         let storage_root_targets = StorageRootTargets::new(
             prefix_sets.account_prefix_set.iter().map(|nibbles| B256::from_slice(&nibbles.pack())),
             prefix_sets.storage_prefix_sets.clone(),
@@ -187,6 +210,8 @@ where
         let mut storage_proofs =
             B256Map::with_capacity_and_hasher(storage_root_targets.len(), Default::default());
 
+        // These storage proof targets are for only the account multiproof targets. We spawn the
+        // storage-only targets later.
         for (hashed_address, prefix_set) in
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
         {
@@ -196,6 +221,25 @@ where
             // store the receiver for that result with the hashed address so we can await this in
             // place when we iterate over the trie
             storage_proofs.insert(hashed_address, receiver);
+        }
+
+        // Now we spawn storage multiproof tasks for the storage-only targets.
+        let mut storage_only_proofs =
+            B256Map::with_capacity_and_hasher(storage_only_targets.len(), Default::default());
+
+        for (hashed_address, targets) in storage_only_targets.into_iter() {
+            let mut storage_prefix_sets = self
+                .prefix_sets
+                .storage_prefix_sets
+                .get(&hashed_address)
+                .cloned()
+                .unwrap_or_default();
+            storage_prefix_sets.extend(PrefixSetMut::from(targets.iter().map(Nibbles::unpack)));
+            let prefix_sets = storage_prefix_sets.freeze();
+
+            // Spawn the storage multiproof task and store the receiver.
+            let receiver = self.spawn_storage_proof(hashed_address, prefix_sets, targets);
+            storage_only_proofs.insert(hashed_address, receiver);
         }
 
         let provider_ro = self.view.provider_ro()?;
@@ -286,6 +330,17 @@ where
         let stats = tracker.finish();
         #[cfg(feature = "metrics")]
         self.metrics.record(stats);
+
+        // Now let's await the storage only multiproof results.
+        for (hashed_address, receiver) in storage_only_proofs {
+            let storage_multiproof = receiver.recv().map_err(|_| {
+                ParallelStateRootError::StorageRoot(StorageRootError::Database(
+                    DatabaseError::Other(format!("channel closed for {hashed_address}")),
+                ))
+            })??;
+
+            storages.insert(hashed_address, storage_multiproof);
+        }
 
         let account_subtree = hash_builder.take_proof_nodes();
         let (branch_node_hash_masks, branch_node_tree_masks) = if self.collect_branch_node_masks {
@@ -392,6 +447,8 @@ mod tests {
                 targets.insert(hashed_address, target_slots);
             }
         }
+
+        let targets = MultiProofTargets::from_account_targets(targets);
 
         let provider_rw = factory.provider_rw().unwrap();
         let trie_cursor_factory = DatabaseTrieCursorFactory::new(provider_rw.tx_ref());

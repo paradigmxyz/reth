@@ -318,7 +318,7 @@ struct MultiproofInput<Factory> {
     config: MultiProofConfig<Factory>,
     source: Option<StateChangeSource>,
     hashed_state_update: HashedPostState,
-    proof_targets: B256Map<B256Set>,
+    proof_targets: MultiProofTargets,
     proof_sequence_number: u64,
     state_root_message_sender: Sender<MultiProofMessage>,
 }
@@ -756,6 +756,7 @@ where
 
         // Process state updates in chunks.
         let mut chunks = 0;
+        let mut proofs_requested = 0;
         let mut spawned_proof_targets = FetchedProofTargets::default();
         for chunk in not_fetched_state_update.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
             let targets_to_fetch = get_proof_targets(&chunk, &self.fetched_proof_targets);
@@ -781,6 +782,8 @@ where
                     state_root_message_sender: self.tx.clone(),
                 };
                 self.multiproof_manager.spawn_or_queue(storage_input.into());
+
+                proofs_requested += 1;
             }
             self.multiproof_manager.spawn_or_queue(
                 MultiproofInput {
@@ -793,6 +796,7 @@ where
                 }
                 .into(),
             );
+            proofs_requested += 1;
             chunks += 1;
         }
 
@@ -806,7 +810,7 @@ where
 
         self.fetched_proof_targets.extend(spawned_proof_targets);
 
-        state_updates + chunks
+        state_updates + proofs_requested
     }
 
     /// Handler for new proof calculated, aggregates all the existing sequential proofs.
