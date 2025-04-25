@@ -736,19 +736,20 @@ vergen-git2 = "1.0.5"
 # revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "1207e33" }
 
 [patch.crates-io]
-revm = { git = "https://github.com/bluealloy/revm", rev = "f7693cc67df716498c8e2555349ef8b91d864cbd" }
-op-revm = { git = "https://github.com/bluealloy/revm", rev = "f7693cc67df716498c8e2555349ef8b91d864cbd" }
-revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "f7693cc67df716498c8e2555349ef8b91d864cbd" }
-revm-database = { git = "https://github.com/bluealloy/revm", rev = "f7693cc67df716498c8e2555349ef8b91d864cbd" }
-revm-state = { git = "https://github.com/bluealloy/revm", rev = "f7693cc67df716498c8e2555349ef8b91d864cbd" }
-revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "f7693cc67df716498c8e2555349ef8b91d864cbd" }
-revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "f7693cc67df716498c8e2555349ef8b91d864cbd" }
-revm-inspector = { git = "https://github.com/bluealloy/revm", rev = "f7693cc67df716498c8e2555349ef8b91d864cbd" }
-revm-context = { git = "https://github.com/bluealloy/revm", rev = "f7693cc67df716498c8e2555349ef8b91d864cbd" }
-revm-context-interface = { git = "https://github.com/bluealloy/revm", rev = "f7693cc67df716498c8e2555349ef8b91d864cbd" }
-revm-database-interface = { git = "https://github.com/bluealloy/revm", rev = "f7693cc67df716498c8e2555349ef8b91d864cbd" }
-revm-precompile = { git = "https://github.com/bluealloy/revm", rev = "f7693cc67df716498c8e2555349ef8b91d864cbd" }
-revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "cfc8ff4e4d742bb1419f3acaee9ff2028a136ab7" }
+revm = { git = "https://github.com/bluealloy/revm", rev = "e13b609fbbc80f9e5858255e4412db95c0cc6d12" }
+op-revm = { git = "https://github.com/bluealloy/revm", rev = "e13b609fbbc80f9e5858255e4412db95c0cc6d12" }
+revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "e13b609fbbc80f9e5858255e4412db95c0cc6d12" }
+revm-database = { git = "https://github.com/bluealloy/revm", rev = "e13b609fbbc80f9e5858255e4412db95c0cc6d12" }
+revm-state = { git = "https://github.com/bluealloy/revm", rev = "e13b609fbbc80f9e5858255e4412db95c0cc6d12" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "e13b609fbbc80f9e5858255e4412db95c0cc6d12" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "e13b609fbbc80f9e5858255e4412db95c0cc6d12" }
+revm-inspector = { git = "https://github.com/bluealloy/revm", rev = "e13b609fbbc80f9e5858255e4412db95c0cc6d12" }
+revm-context = { git = "https://github.com/bluealloy/revm", rev = "e13b609fbbc80f9e5858255e4412db95c0cc6d12" }
+revm-context-interface = { git = "https://github.com/bluealloy/revm", rev = "e13b609fbbc80f9e5858255e4412db95c0cc6d12" }
+revm-database-interface = { git = "https://github.com/bluealloy/revm", rev = "e13b609fbbc80f9e5858255e4412db95c0cc6d12" }
+revm-precompile = { git = "https://github.com/bluealloy/revm", rev = "e13b609fbbc80f9e5858255e4412db95c0cc6d12" }
 
-alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "d8a866e4aeebe8499f2f232a74c12fa346ff58f0" }
-alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "d8a866e4aeebe8499f2f232a74c12fa346ff58f0" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "a15c9c149e8debcbdbbbac41d79c808e71c51170" }
+
+alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "ec09d626ac2240a1c8fbf3482b2ac91945bf9d73" }
+alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "ec09d626ac2240a1c8fbf3482b2ac91945bf9d73" }
