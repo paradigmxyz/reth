@@ -264,9 +264,8 @@ where
                                 )),
                             ))
                         })??,
-                        // Since we do not store all intermediate nodes in the database, there
-                        // might be a possibility of re-adding a
-                        // non-modified leaf to the hash builder.
+                        // Since we do not store all intermediate nodes in the database, there might
+                        // be a possibility of re-adding a non-modified leaf to the hash builder.
                         None => {
                             tracker.inc_missed_leaves();
                             StorageProof::new_hashed(
