@@ -6,9 +6,6 @@ pub use reth_storage_api::*;
 mod block;
 pub use block::*;
 
-mod header_sync_gap;
-pub use header_sync_gap::HeaderSyncGapProvider;
-
 pub use reth_chainspec::ChainSpecProvider;
 
 mod static_file_provider;
