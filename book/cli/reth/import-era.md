@@ -1,35 +1,76 @@
-# reth
+# reth import-era
 
-Reth
+This syncs ERA encoded blocks from a directory
 
 ```bash
-$ reth --help
+$ reth import-era --help
 ```
 ```txt
-Usage: reth [OPTIONS] <COMMAND>
-
-Commands:
-  node          Start the node
-  init          Initialize the database from a genesis file
-  init-state    Initialize the database from a state dump file
-  import        This syncs RLP encoded blocks from a file
-  import-era    This syncs ERA encoded blocks from a directory
-  dump-genesis  Dumps genesis block JSON configuration to stdout
-  db            Database debugging utilities
-  stage         Manipulate individual stages
-  p2p           P2P Debugging utilities
-  config        Write config to stdout
-  debug         Various debug routines
-  recover       Scripts for node recovery
-  prune         Prune according to the configuration without any limits
-  help          Print this message or the help of the given subcommand(s)
+Usage: reth import-era [OPTIONS] <IMPORT_PATH>
 
 Options:
   -h, --help
           Print help (see a summary with '-h')
 
-  -V, --version
-          Print version
+Datadir:
+      --datadir <DATA_DIR>
+          The path to the data dir for all reth files and subdirectories.
+
+          Defaults to the OS-specific data directory:
+
+          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
+          - Windows: `{FOLDERID_RoamingAppData}/reth/`
+          - macOS: `$HOME/Library/Application Support/reth/`
+
+          [default: default]
+
+      --datadir.static-files <PATH>
+          The absolute path to store static files in.
+
+      --config <FILE>
+          The path to the configuration file to use
+
+      --chain <CHAIN_OR_PATH>
+          The chain this node is running.
+          Possible values are either a built-in chain or the path to a chain specification file.
+
+          Built-in chains:
+              mainnet, sepolia, holesky, hoodi, dev
+
+          [default: mainnet]
+
+Database:
+      --db.log-level <LOG_LEVEL>
+          Database logging level. Levels higher than "notice" require a debug build
+
+          Possible values:
+          - fatal:   Enables logging for critical conditions, i.e. assertion failures
+          - error:   Enables logging for error conditions
+          - warn:    Enables logging for warning conditions
+          - notice:  Enables logging for normal but significant condition
+          - verbose: Enables logging for verbose informational
+          - debug:   Enables logging for debug-level messages
+          - trace:   Enables logging for trace debug-level messages
+          - extra:   Enables logging for extra debug-level messages
+
+      --db.exclusive <EXCLUSIVE>
+          Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an NFS volume
+
+          [possible values: true, false]
+
+      --db.max-size <MAX_SIZE>
+          Maximum database size (e.g., 4TB, 8MB)
+
+      --db.growth-step <GROWTH_STEP>
+          Database growth step (e.g., 4GB, 4KB)
+
+      --db.read-transaction-timeout <READ_TRANSACTION_TIMEOUT>
+          Read transaction timeout in seconds, 0 means no timeout
+
+  <IMPORT_PATH>
+          The path to a directory for import.
+
+          The ERA1 files are read from the directory parsing headers and bodies.
 
 Logging:
       --log.stdout.format <FORMAT>
