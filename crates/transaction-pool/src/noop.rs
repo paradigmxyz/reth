@@ -30,7 +30,7 @@ use tokio::sync::{mpsc, mpsc::Receiver};
 /// This type will never hold any transactions and is only useful for wiring components together.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
-pub struct NoopTransactionPool<T: EthPoolTransaction = EthPooledTransaction> {
+pub struct NoopTransactionPool<T = EthPooledTransaction> {
     /// Type marker
     _marker: PhantomData<T>,
 }
@@ -42,7 +42,7 @@ impl<T: EthPoolTransaction> NoopTransactionPool<T> {
     }
 }
 
-impl Default for NoopTransactionPool<EthPooledTransaction> {
+impl<T> Default for NoopTransactionPool<T> {
     fn default() -> Self {
         Self { _marker: Default::default() }
     }
