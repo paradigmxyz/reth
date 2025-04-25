@@ -391,7 +391,7 @@ where
 }
 
 /// Minimal OP node, with only EVM and database, useful for building
-/// [`TraceApi`](reth_rpc::TraceApi) by itself.
+/// [`TraceApi`](reth_rpc::TraceApi) as alone-standing program.
 #[derive(Debug, Clone)]
 pub struct OpNodeOnlyEvm<P> {
     provider: P,
