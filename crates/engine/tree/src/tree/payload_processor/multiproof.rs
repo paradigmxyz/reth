@@ -1084,7 +1084,13 @@ fn get_proof_targets(
 
         // If the storage has changed slots, we need to fetch them.
         if changed_slots.peek().is_some() {
-            targets.storage_targets_entry(*hashed_address).or_default().extend(changed_slots);
+            // only insert into storage only targets if we have fetched the account proof before.
+            let entry = match fetched {
+                Some(_) => targets.storage_targets_entry(*hashed_address),
+                None => targets.account_targets_entry(*hashed_address),
+            };
+
+            entry.or_default().extend(changed_slots);
         }
     }
 

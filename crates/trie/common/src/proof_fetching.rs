@@ -188,6 +188,11 @@ impl MultiProofTargets {
         self.storage_only_targets.entry(hashed_address)
     }
 
+    /// Returns the account multiproof targets entry for the given hashed address.
+    pub fn account_targets_entry(&mut self, hashed_address: B256) -> Entry<'_, B256, B256Set> {
+        self.account_targets.entry(hashed_address)
+    }
+
     /// Creates a new `MultiProofTargets` instance from the difference between the already-fetched
     /// [`MultiProofTargets`] instance, and new [`TargetsToFetch`].
     pub fn from_targets_difference(fetched: &B256Map<B256Set>, new: Self) -> Self {
