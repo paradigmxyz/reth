@@ -112,8 +112,13 @@ where
         &self,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<EthBuiltPayload, PayloadBuilderError> {
-        let args = BuildArguments::new(Default::default(), config, Default::default(), None, Arc::new(AtomicBool::new(false)));
-
+        let args = BuildArguments::new(
+            Default::default(),
+            config,
+            Default::default(),
+            None,
+            Arc::new(AtomicBool::new(false)),
+        );
         default_ethereum_payload(
             self.evm_config.clone(),
             self.client.clone(),
