@@ -8,7 +8,8 @@ use reth_network_api::{
 use reth_provider::test_utils::MockEthProvider;
 use reth_ress_protocol::{
     test_utils::{MockRessProtocolProvider, NoopRessProtocolProvider},
-    GetHeaders, NodeType, ProtocolEvent, ProtocolState, RessPeerRequest, RessProtocolHandler,
+    GetHeaders, NodeType, ProtocolEvent, ProtocolState, RLPExecutionWitness, RessPeerRequest,
+    RessProtocolHandler,
 };
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot};
@@ -66,7 +67,7 @@ async fn disconnect_on_stateful_pair() {
             peer0_event_listener.next().await.unwrap()
         {
             assert_eq!(peer_id, *handle.peers()[1].peer_id());
-            break
+            break;
         }
     }
 
@@ -76,7 +77,7 @@ async fn disconnect_on_stateful_pair() {
             peer1_event_listener.next().await.unwrap()
         {
             assert_eq!(peer_id, *handle.peers()[0].peer_id());
-            break
+            break;
         }
     }
 }
@@ -150,7 +151,7 @@ async fn message_exchange() {
     // send get witness message from peer0 to peer1
     let (tx, rx) = oneshot::channel();
     peer0_conn.send(RessPeerRequest::GetWitness { block_hash: B256::ZERO, tx }).unwrap();
-    assert_eq!(rx.await.unwrap(), Vec::<Bytes>::new());
+    assert_eq!(rx.await.unwrap(), RLPExecutionWitness::default());
 
     // send get bytecode message from peer0 to peer1
     let (tx, rx) = oneshot::channel();
@@ -226,7 +227,7 @@ async fn witness_fetching_does_not_block() {
     assert!(bytecode_requested_at.elapsed() < witness_delay);
 
     // await for witness response
-    assert_eq!(witness_rx.await.unwrap(), Vec::<Bytes>::new());
+    assert_eq!(witness_rx.await.unwrap(), RLPExecutionWitness::default());
     assert!(witness_requested_at.elapsed() >= witness_delay);
 }
 

@@ -1,4 +1,7 @@
-use crate::{GetHeaders, NodeType, RessMessage, RessProtocolMessage, RessProtocolProvider};
+use crate::{
+    GetHeaders, NodeType, RLPExecutionWitness, RessMessage, RessProtocolMessage,
+    RessProtocolProvider,
+};
 use alloy_consensus::Header;
 use alloy_primitives::{bytes::BytesMut, BlockHash, Bytes, B256};
 use futures::{stream::FuturesUnordered, Stream, StreamExt};
@@ -150,13 +153,13 @@ where
     fn on_witness_response(
         &self,
         request: RequestPair<B256>,
-        witness_result: ProviderResult<Vec<Bytes>>,
+        witness_result: ProviderResult<RLPExecutionWitness>,
     ) -> RessProtocolMessage {
         let peer_id = self.peer_id;
         let block_hash = request.message;
         let witness = match witness_result {
             Ok(witness) => {
-                trace!(target: "ress::net::connection", %peer_id, %block_hash, len = witness.len(), "witness found");
+                trace!(target: "ress::net::connection", %peer_id, %block_hash, state_len = witness.state.len(), codes_len = witness.codes.len(), headers_len = witness.headers.len(), "witness found");
                 witness
             }
             Err(error) => {
@@ -264,12 +267,12 @@ where
         let this = self.get_mut();
 
         if this.terminated {
-            return Poll::Ready(None)
+            return Poll::Ready(None);
         }
 
         if !this.node_type_sent {
             this.node_type_sent = true;
-            return Poll::Ready(Some(RessProtocolMessage::node_type(this.node_type).encoded()))
+            return Poll::Ready(Some(RessProtocolMessage::node_type(this.node_type).encoded()));
         }
 
         'conn: loop {
@@ -320,7 +323,7 @@ where
 }
 
 type WitnessFut =
-    Pin<Box<dyn Future<Output = (RequestPair<B256>, ProviderResult<Vec<Bytes>>)> + Send>>;
+    Pin<Box<dyn Future<Output = (RequestPair<B256>, ProviderResult<RLPExecutionWitness>)> + Send>>;
 
 /// Ress peer request.
 #[derive(Debug)]
@@ -351,7 +354,7 @@ pub enum RessPeerRequest {
         /// Target block hash that we want to get witness for.
         block_hash: BlockHash,
         /// The sender for the response.
-        tx: oneshot::Sender<Vec<Bytes>>,
+        tx: oneshot::Sender<RLPExecutionWitness>,
     },
 }
 

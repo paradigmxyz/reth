@@ -2,6 +2,7 @@
 
 use alloy_consensus::BlockHeader;
 use reth_consensus::ConsensusError;
+use reth_db::DatabaseError;
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError};
 use reth_evm::execute::InternalBlockExecutionError;
 use reth_primitives_traits::{Block, BlockBody, SealedBlock};
@@ -162,6 +163,9 @@ pub enum InsertBlockFatalError {
     /// An internal / fatal block execution error
     #[error(transparent)]
     BlockExecutionError(#[from] InternalBlockExecutionError),
+    /// A Database error
+    #[error(transparent)]
+    Database(#[from] DatabaseError),
 }
 
 /// Error variants that are caused by invalid blocks
