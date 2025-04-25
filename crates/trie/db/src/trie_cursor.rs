@@ -28,7 +28,7 @@ impl<'a, TX> DatabaseTrieCursorFactory<'a, TX> {
     }
 
     /// Returns the tx used to create the factory
-    pub fn get_tx(&self) -> &'a TX {
+    pub const fn get_tx(&self) -> &'a TX {
         self.0
     }
 }
