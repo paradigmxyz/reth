@@ -4,9 +4,10 @@
 use super::SpawnBlocking;
 use crate::{FromEthApiError, FullEthApiTypes};
 use alloy_consensus::{BlockHeader, Transaction};
-use alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK;
+use alloy_eips::eip7840::BlobParams;
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use futures::Future;
+use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
@@ -192,6 +193,11 @@ pub trait LoadPendingBlock: FullEthApiTypes {
 
         let block_env = builder.evm_mut().block().clone();
 
+        let blob_params = self
+            .provider()
+            .chain_spec()
+            .blob_params_at_timestamp(parent.timestamp())
+            .unwrap_or_else(BlobParams::cancun);
         let mut cumulative_gas_used = 0;
         let mut sum_blob_gas_used = 0;
         let block_gas_limit: u64 = block_env.gas_limit;
@@ -237,7 +243,7 @@ pub trait LoadPendingBlock: FullEthApiTypes {
             // There's only limited amount of blob space available per block, so we need to check if
             // the EIP-4844 can still fit in the block
             if let Some(tx_blob_gas) = tx.blob_gas_used() {
-                if sum_blob_gas_used + tx_blob_gas > MAX_DATA_GAS_PER_BLOCK {
+                if sum_blob_gas_used + tx_blob_gas > blob_params.max_blob_gas_per_block() {
                     // we can't fit this _blob_ transaction into the block, so we mark it as
                     // invalid, which removes its dependent transactions from
                     // the iterator. This is similar to the gas limit condition
@@ -246,7 +252,7 @@ pub trait LoadPendingBlock: FullEthApiTypes {
                         &pool_tx,
                         InvalidPoolTransactionError::ExceedsGasLimit(
                             tx_blob_gas,
-                            MAX_DATA_GAS_PER_BLOCK,
+                            blob_params.max_blob_gas_per_block(),
                         ),
                     );
                     continue
@@ -282,7 +288,7 @@ pub trait LoadPendingBlock: FullEthApiTypes {
                 sum_blob_gas_used += tx_blob_gas;
 
                 // if we've reached the max data gas per block, we can skip blob txs entirely
-                if sum_blob_gas_used == MAX_DATA_GAS_PER_BLOCK {
+                if sum_blob_gas_used == blob_params.max_blob_gas_per_block() {
                     best_txs.skip_blobs();
                 }
             }

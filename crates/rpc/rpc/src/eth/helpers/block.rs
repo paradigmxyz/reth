@@ -5,7 +5,7 @@ use alloy_rpc_types::Header;
 use alloy_rpc_types_eth::{BlockId, TransactionReceipt};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_ethereum_primitives::EthPrimitives;
-use reth_primitives_traits::{HeaderTy, SignedTransaction};
+use reth_primitives_traits::HeaderTy;
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
     types::RpcTypes,

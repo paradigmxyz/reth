@@ -21,7 +21,7 @@ use crate::{eth::OpNodeCore, OpEthApi, OpEthApiError, SequencerClient};
 impl<N> EthTransactions for OpEthApi<N>
 where
     N: OpNodeCore,
-    Self: LoadTransaction<Primitives = N::Primitives>,
+    Self: LoadTransaction<Primitives = N::Primitives, Error = OpEthApiError>,
 {
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<TxTy<Self::Primitives>>>>> {
         self.inner.eth_api.signers()
@@ -38,9 +38,19 @@ where
         // blocks that it builds.
         if let Some(client) = self.raw_tx_forwarder().as_ref() {
             tracing::debug!(target: "rpc::eth", hash = %pool_transaction.hash(), "forwarding raw transaction to sequencer");
-            let _ = client.forward_raw_transaction(&tx).await.inspect_err(|err| {
+            let hash = client.forward_raw_transaction(&tx).await.inspect_err(|err| {
                     tracing::debug!(target: "rpc::eth", %err, hash=% *pool_transaction.hash(), "failed to forward raw transaction");
-                });
+                })?;
+
+            // Retain tx in local tx pool after forwarding, for local RPC usage.
+            let _ = self
+                .pool()
+                .add_transaction(TransactionOrigin::Local, pool_transaction)
+                .await.inspect_err(|err| {
+                    tracing::warn!(target: "rpc::eth", %err, %hash, "successfully sent tx to sequencer, but failed to persist in local tx pool");
+            });
+
+            return Ok(hash)
         }
 
         // submit the transaction to the pool with a `Local` origin

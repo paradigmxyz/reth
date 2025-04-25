@@ -98,7 +98,7 @@ where
         let engine_kind =
             if chain_spec.is_optimism() { EngineApiKind::OpStack } else { EngineApiKind::Ethereum };
 
-        let downloader = BasicBlockDownloader::new(client, consensus.clone().as_consensus());
+        let downloader = BasicBlockDownloader::new(client, consensus.clone());
 
         let persistence_handle =
             PersistenceHandle::<EthPrimitives>::spawn_service(provider, pruner, sync_metrics_tx);

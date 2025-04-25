@@ -1,5 +1,4 @@
 use crate::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
-use alloy_primitives::U256;
 use core::sync::atomic::{AtomicBool, Ordering};
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
@@ -98,18 +97,6 @@ impl<H> HeaderValidator<H> for TestConsensus {
         &self,
         _header: &SealedHeader<H>,
         _parent: &SealedHeader<H>,
-    ) -> Result<(), ConsensusError> {
-        if self.fail_validation() {
-            Err(ConsensusError::BaseFeeMissing)
-        } else {
-            Ok(())
-        }
-    }
-
-    fn validate_header_with_total_difficulty(
-        &self,
-        _header: &H,
-        _total_difficulty: U256,
     ) -> Result<(), ConsensusError> {
         if self.fail_validation() {
             Err(ConsensusError::BaseFeeMissing)
