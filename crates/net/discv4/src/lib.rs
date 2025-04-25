@@ -652,7 +652,7 @@ impl Discv4Service {
 
     /// Returns mutable reference to ENR for testing.
     #[cfg(test)]
-    pub fn local_enr_mut(&mut self) -> &mut NodeRecord {
+    pub const fn local_enr_mut(&mut self) -> &mut NodeRecord {
         &mut self.local_node_record
     }
 
@@ -2319,7 +2319,7 @@ impl NodeEntry {
     }
 
     /// Marks the entry with an established proof and resets the consecutive failure counter.
-    fn establish_proof(&mut self) {
+    const fn establish_proof(&mut self) {
         self.has_endpoint_proof = true;
         self.find_node_failures = 0;
     }
@@ -2335,7 +2335,7 @@ impl NodeEntry {
     }
 
     /// Increases the failed request counter
-    fn inc_failed_request(&mut self) {
+    const fn inc_failed_request(&mut self) {
         self.find_node_failures += 1;
     }
 
@@ -2544,7 +2544,7 @@ mod tests {
             from: rng_endpoint(&mut rng),
             to: rng_endpoint(&mut rng),
             expire: service.ping_expiration(),
-            enr_sq: Some(rng.gen()),
+            enr_sq: Some(rng.r#gen()),
         };
 
         let id = PeerId::random();
@@ -2576,7 +2576,7 @@ mod tests {
             from: rng_endpoint(&mut rng),
             to: rng_endpoint(&mut rng),
             expire: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() - 1,
-            enr_sq: Some(rng.gen()),
+            enr_sq: Some(rng.r#gen()),
         };
 
         let id = PeerId::random();

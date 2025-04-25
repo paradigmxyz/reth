@@ -80,7 +80,10 @@ where
 
     /// Sets `eth_cache` config for the cache that will be used if no [`EthStateCache`] is
     /// configured.
-    pub fn eth_state_cache_config(mut self, eth_state_cache_config: EthStateCacheConfig) -> Self {
+    pub const fn eth_state_cache_config(
+        mut self,
+        eth_state_cache_config: EthStateCacheConfig,
+    ) -> Self {
         self.eth_state_cache_config = eth_state_cache_config;
         self
     }
@@ -96,7 +99,7 @@ where
 
     /// Sets `gas_oracle` config for the gas oracle that will be used if no [`GasPriceOracle`] is
     /// configured.
-    pub fn gas_oracle_config(mut self, gas_oracle_config: GasPriceOracleConfig) -> Self {
+    pub const fn gas_oracle_config(mut self, gas_oracle_config: GasPriceOracleConfig) -> Self {
         self.gas_oracle_config = gas_oracle_config;
         self
     }
@@ -132,7 +135,7 @@ where
     }
 
     /// Sets the fee history cache.
-    pub fn fee_history_cache_config(
+    pub const fn fee_history_cache_config(
         mut self,
         fee_history_cache_config: FeeHistoryCacheConfig,
     ) -> Self {

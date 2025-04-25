@@ -24,7 +24,7 @@ use tracing::trace;
 pub const DEFAULT_SUPERVISOR_URL: &str = "http://localhost:1337/";
 
 /// The default request timeout to use
-const DEFAULT_REQUEST_TIMOUT: Duration = Duration::from_millis(100);
+const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(100);
 
 /// Implementation of the supervisor trait for the interop.
 #[derive(Debug, Clone)]
@@ -48,19 +48,19 @@ impl SupervisorClient {
         Self {
             client,
             safety,
-            timeout: DEFAULT_REQUEST_TIMOUT,
+            timeout: DEFAULT_REQUEST_TIMEOUT,
             metrics: SupervisorMetrics::default(),
         }
     }
 
     /// Configures a custom timeout
-    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+    pub const fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self
     }
 
     /// Returns safely level
-    pub fn safety(&self) -> SafetyLevel {
+    pub const fn safety(&self) -> SafetyLevel {
         self.safety
     }
 
@@ -140,13 +140,13 @@ pub struct CheckAccessListRequest<'a> {
 
 impl<'a> CheckAccessListRequest<'a> {
     /// Configures the timeout to use for the request if any.
-    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+    pub const fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self
     }
 
     /// Configures the [`SafetyLevel`] for this request
-    pub fn with_safety(mut self, safety: SafetyLevel) -> Self {
+    pub const fn with_safety(mut self, safety: SafetyLevel) -> Self {
         self.safety = safety;
         self
     }

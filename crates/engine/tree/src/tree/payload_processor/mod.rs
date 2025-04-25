@@ -53,8 +53,8 @@ pub struct PayloadProcessor<N, Evm> {
     trie_metrics: MultiProofTaskMetrics,
     /// Cross-block cache size in bytes.
     cross_block_cache_size: u64,
-    /// Whether transactions should be executed on prewarming task.
-    use_transaction_prewarming: bool,
+    /// Whether transactions should not be executed on prewarming task.
+    disable_transaction_prewarming: bool,
     /// Determines how to configure the evm for execution.
     evm_config: Evm,
     _marker: std::marker::PhantomData<N>,
@@ -68,7 +68,7 @@ impl<N, Evm> PayloadProcessor<N, Evm> {
             execution_cache: Default::default(),
             trie_metrics: Default::default(),
             cross_block_cache_size: config.cross_block_cache_size(),
-            use_transaction_prewarming: config.use_caching_and_prewarming(),
+            disable_transaction_prewarming: config.disable_caching_and_prewarming(),
             evm_config,
             _marker: Default::default(),
         }
@@ -100,7 +100,7 @@ where
     /// output back to this task.
     ///
     /// Receives updates from sequential execution.
-    /// This task runs until it receives a shutdown signal, which should be after after the block
+    /// This task runs until it receives a shutdown signal, which should be after the block
     /// was fully executed.
     ///
     /// ## Sparse trie task
@@ -236,7 +236,7 @@ where
             + Clone
             + 'static,
     {
-        if !self.use_transaction_prewarming {
+        if self.disable_transaction_prewarming {
             // if no transactions should be executed we clear them but still spawn the task for
             // caching updates
             transactions.clear();

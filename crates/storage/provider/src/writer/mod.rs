@@ -62,7 +62,7 @@ impl<'a, ProviderDB, ProviderSF> UnifiedStorageWriter<'a, ProviderDB, ProviderSF
     ///
     /// # Panics
     /// If the static file instance is not set.
-    fn static_file(&self) -> &ProviderSF {
+    const fn static_file(&self) -> &ProviderSF {
         self.static_file.as_ref().expect("should exist")
     }
 

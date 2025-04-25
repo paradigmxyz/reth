@@ -362,6 +362,11 @@ RPC:
 
           [default: 50000000]
 
+      --rpc.txfeecap <TX_FEE_CAP>
+          Maximum eth transaction fee that can be sent via the RPC APIs (0 = no cap)
+
+          [default: 1.0]
+
       --rpc.max-simulate-blocks <BLOCKS_COUNT>
           Maximum number of blocks for `eth_simulateV1` call
 
@@ -730,7 +735,10 @@ Engine:
           Enable legacy state root
 
       --engine.caching-and-prewarming
-          Enable cross-block caching and parallel prewarming
+          CAUTION: This CLI flag has no effect anymore, use --engine.disable-caching-and-prewarming if you want to disable caching and prewarming
+
+      --engine.disable-caching-and-prewarming
+          Disable cross-block caching and parallel prewarming
 
       --engine.cross-block-cache-size <CROSS_BLOCK_CACHE_SIZE>
           Configure the size of cross-block cache in megabytes
