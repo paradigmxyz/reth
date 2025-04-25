@@ -81,10 +81,9 @@ where
         .map_err(OpConsensusError::L2WithdrawalsRootCalculationFail)?;
 
     if storage_root == EMPTY_ROOT_HASH {
-        warn!(
-            target: "consensus::withdrawals",
-            "isthmus: no storage root for L2ToL1MessagePasser contract"
-        );
+        // if there was no MessagePasser contract storage, something is wrong
+        // (it should at least store an implementation address and owner address)
+        warn!("isthmus: no storage root for L2ToL1MessagePasser contract");
     }
 
     if header_storage_root != storage_root {
