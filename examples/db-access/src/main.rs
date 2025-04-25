@@ -55,7 +55,7 @@ fn check_bytecodes(provider: impl DBProvider) {
                 println!("{address}");
             }
 
-            if processed % 1000 == 0 {
+            if processed % 10000000 == 0 {
                 println!("Processed {processed}/{total_entries}");
             }
         }
