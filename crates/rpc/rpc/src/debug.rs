@@ -880,6 +880,7 @@ where
     Eth: EthApiTypes + EthTransactions + TraceExt + 'static,
     BlockExecutor:
         BlockExecutorProvider<Primitives: NodePrimitives<Block = ProviderBlock<Eth::Provider>>>,
+    <<Eth as FullNodeTypes>::Types as NodeTypes>::ChainSpec: EthereumHardforks,
 {
     /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {

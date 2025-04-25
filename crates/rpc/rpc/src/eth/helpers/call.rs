@@ -32,6 +32,9 @@ where
             //         SignedTx = ProviderTx<Self::Provider>,
             //     >,
             // >,
+            Evm: ConfigureEvm<
+                BlockExecutorFactory: BlockExecutorFactory<EvmFactory: EvmFactory<Tx = TxEnv>>,
+            >,
             Error: FromEvmError<Self::Evm>,
         > + SpawnBlocking,
     Components::Provider: BlockReader,
