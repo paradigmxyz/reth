@@ -8,11 +8,14 @@
 
 use clap::Parser;
 use futures::TryStreamExt;
+use reth::rpc::eth::core::EthApiFor;
 use reth_ethereum::{
     exex::{ExExContext, ExExEvent, ExExNotification},
     node::{api::FullNodeComponents, EthereumNode},
 };
 use reth_tracing::tracing::info;
+use std::sync::Arc;
+use tokio::sync::oneshot;
 
 #[derive(Parser)]
 struct ExExArgs {
@@ -42,6 +45,18 @@ async fn my_exex<Node: FullNodeComponents>(mut ctx: ExExContext<Node>) -> eyre::
     Ok(())
 }
 
+async fn ethapi_exex<Node>(
+    mut _ctx: ExExContext<Node>,
+    ethapi_rx: oneshot::Receiver<Arc<EthApiFor<Node>>>,
+) -> eyre::Result<()>
+where
+    Node: FullNodeComponents,
+{
+    let ethapi = ethapi_rx.await?;
+    info!("Received ethapi inside exex: {:?}", ethapi);
+    Ok(())
+}
+
 fn main() -> eyre::Result<()> {
     let args = ExExArgs::parse();
 
@@ -60,11 +75,15 @@ fn main() -> eyre::Result<()> {
     } else {
         reth::cli::Cli::parse_args().run(|builder, _| {
             Box::pin(async move {
+                let (ethapi_tx, ethapi_rx) = oneshot::channel();
                 let handle = builder
                     .node(EthereumNode::default())
                     .install_exex("my-exex", async move |ctx| Ok(my_exex(ctx)))
+                    .install_exex("ethapi-exex", async move |ctx| Ok(ethapi_exex(ctx, ethapi_rx)))
                     .launch()
                     .await?;
+                let ethapi = handle.node.add_ons_handle.eth_api();
+                ethapi_tx.send(Arc::new(ethapi.clone())).expect("Failed to send ethapi to ExEx");
 
                 handle.wait_for_node_exit().await
             })
