@@ -205,10 +205,9 @@ where
     B: BodyDownloader,
 {
     /// Create a new set of online stages with default values.
-    pub fn new(
+    pub const fn new(
         provider: Provider,
         tip: watch::Receiver<B256>,
-
         header_downloader: H,
         body_downloader: B,
         stages_config: StageConfig,
