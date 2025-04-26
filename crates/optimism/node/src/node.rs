@@ -8,11 +8,12 @@ use crate::{
 };
 use op_alloy_consensus::{interop::SafetyLevel, OpPooledTransaction};
 use reth_chainspec::{EthChainSpec, Hardforks};
+use reth_db_api::FullDatabase;
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm, EvmFactory, EvmFactoryFor};
-use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives, PeersInfo};
+use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, PeersInfo};
 use reth_node_api::{
-    AddOnsContext, FullNodeComponents, FullNodeTypesAdapter, KeyHasherTy, NodeAddOns,
-    NodePrimitives, PrimitivesTy, TxTy,
+    AddOnsContext, FullNodeComponents, KeyHasherTy, NodeAddOns, NodePrimitives,
+    NodeTypesWithDBAdapter, PrimitivesTy, TxTy,
 };
 use reth_node_builder::{
     components::{
@@ -35,7 +36,7 @@ use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
     config::{OpBuilderConfig, OpDAConfig},
 };
-use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
+use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpTransactionSigned};
 use reth_optimism_rpc::{
     eth::{ext::OpEthExtApi, OpEthApiBuilder},
     miner::{MinerApiExtServer, OpMinerExtApi},
@@ -48,12 +49,13 @@ use reth_optimism_txpool::{
     supervisor::{SupervisorClient, DEFAULT_SUPERVISOR_URL},
     OpPooledTx,
 };
-use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage};
+use reth_provider::{
+    providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage, FullProvider,
+};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::ext::L2EthApiExtServer;
 use reth_rpc_eth_types::error::FromEvmError;
 use reth_rpc_server_types::RethRpcModule;
-use reth_storage_api::FullDatabase;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, CoinbaseTipOrdering, EthPoolTransaction, PoolTransaction,
@@ -171,12 +173,22 @@ impl OpNode {
     }
 }
 
-impl<DB, Provider> Node<FullNodeTypesAdapter<OpNodeTypes, DB, Provider>> for OpNode
+impl NodeTypes for OpNode {
+    type Primitives = <OpNodeTypes as NodeTypes>::Primitives;
+    type ChainSpec = <OpNodeTypes as NodeTypes>::ChainSpec;
+    type StateCommitment = <OpNodeTypes as NodeTypes>::StateCommitment;
+    type Storage = <OpNodeTypes as NodeTypes>::Storage;
+    type Payload = <OpNodeTypes as NodeTypes>::Payload;
+}
+
+impl<DB, Provider, N> Node<N> for OpNode
 where
+    N: FullNodeTypes<Types = OpNodeTypes, DB = DB, Provider = Provider>,
     DB: FullDatabase + 'static,
+    Provider: FullProvider<NodeTypesWithDBAdapter<OpNodeTypes, DB>>,
 {
     type ComponentsBuilder = ComponentsBuilder<
-        FullNodeTypesAdapter<OpNodeTypes, DB, Provider>,
+        N,
         OpPoolBuilder,
         BasicPayloadServiceBuilder<OpPayloadBuilder>,
         OpNetworkBuilder,
@@ -202,7 +214,8 @@ where
 
 impl<N> DebugNode<N> for OpNode
 where
-    N: FullNodeComponents<Types = Self>,
+    Self: Node<N>,
+    N: FullNodeComponents<Types = OpNodeTypes>,
 {
     type RpcBlock = alloy_rpc_types_eth::Block<op_alloy_consensus::OpTxEnvelope>;
 
@@ -278,12 +291,7 @@ where
 impl<N> NodeAddOns<N> for OpAddOns<N>
 where
     N: FullNodeComponents<
-        Types: NodeTypes<
-            ChainSpec = OpChainSpec,
-            Primitives = OpPrimitives,
-            Storage = OpStorage,
-            Payload = OpEngineTypes,
-        >,
+        Types = OpNodeTypes,
         Evm: ConfigureEvm<NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     >,
     OpEthApiError: FromEvmError<N::Evm>,
@@ -363,12 +371,7 @@ where
 impl<N> RethRpcAddOns<N> for OpAddOns<N>
 where
     N: FullNodeComponents<
-        Types: NodeTypes<
-            ChainSpec = OpChainSpec,
-            Primitives = OpPrimitives,
-            Storage = OpStorage,
-            Payload = OpEngineTypes,
-        >,
+        Types = OpNodeTypes,
         Evm: ConfigureEvm<NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     >,
     OpEthApiError: FromEvmError<N::Evm>,
@@ -384,13 +387,7 @@ where
 
 impl<N> EngineValidatorAddOn<N> for OpAddOns<N>
 where
-    N: FullNodeComponents<
-        Types: NodeTypes<
-            ChainSpec = OpChainSpec,
-            Primitives = OpPrimitives,
-            Payload = OpEngineTypes,
-        >,
-    >,
+    N: FullNodeComponents<Types = OpNodeTypes>,
     OpEthApiBuilder: EthApiBuilder<N>,
 {
     type Validator = OpEngineValidator<N::Provider>;
@@ -818,13 +815,13 @@ where
         > + Unpin
         + 'static,
 {
-    type Primitives = OpNetworkPrimitives;
+    type Network = NetworkHandle<OpNetworkPrimitives>;
 
     async fn build_network(
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<NetworkHandle<Self::Primitives>> {
+    ) -> eyre::Result<Self::Network> {
         let network_config = self.network_config(ctx)?;
         let network = NetworkManager::builder(network_config).await?;
         let handle = ctx.start_network(network, pool);

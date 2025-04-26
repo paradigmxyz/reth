@@ -334,6 +334,7 @@ impl OpEthApiBuilder {
     ///
     /// This is useful for building [`TraceApi`](reth_rpc::TraceApi) as standalone program without
     /// mempool.
+    #[expect(clippy::complexity)]
     pub fn build_evm_eth_api<N, DB, P>(
         self,
         provider: P,

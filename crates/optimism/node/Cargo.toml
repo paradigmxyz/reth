@@ -32,7 +32,7 @@ reth-trie-common.workspace = true
 reth-node-core.workspace = true
 reth-rpc-engine-api.workspace = true
 reth-rpc-api.workspace = true
-reth-storage-api.workspace = true
+reth-db-api.workspace = true
 
 # op-reth
 reth-optimism-payload-builder.workspace = true
