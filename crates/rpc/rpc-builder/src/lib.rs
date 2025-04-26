@@ -2289,7 +2289,7 @@ impl RpcServerHandle {
         let rpc_url = self.http_url()?;
         let provider = ProviderBuilder::default()
             .with_recommended_fillers()
-            .on_http(rpc_url.parse().expect("valid url"));
+            .connect_http(rpc_url.parse().expect("valid url"));
         Some(provider)
     }
 

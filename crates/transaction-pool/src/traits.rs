@@ -8,7 +8,9 @@ use crate::{
     validate::ValidPoolTransaction,
     AllTransactionsEvents,
 };
-use alloy_consensus::{transaction::PooledTransaction, BlockHeader, Signed, Typed2718};
+use alloy_consensus::{
+    error::ValueError, transaction::PooledTransaction, BlockHeader, Signed, Typed2718,
+};
 use alloy_eips::{
     eip2718::Encodable2718,
     eip2930::AccessList,
@@ -21,12 +23,9 @@ use alloy_eips::{
 use alloy_primitives::{Address, Bytes, TxHash, TxKind, B256, U256};
 use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
-use reth_ethereum_primitives::{Transaction, TransactionSigned};
+use reth_ethereum_primitives::TransactionSigned;
 use reth_execution_types::ChangedAccount;
-use reth_primitives_traits::{
-    transaction::error::TransactionConversionError, Block, InMemorySize, Recovered, SealedBlock,
-    SignedTransaction,
-};
+use reth_primitives_traits::{Block, InMemorySize, Recovered, SealedBlock, SignedTransaction};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{
@@ -1121,7 +1120,7 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
 }
 
 impl PoolTransaction for EthPooledTransaction {
-    type TryFromConsensusError = TransactionConversionError;
+    type TryFromConsensusError = ValueError<TransactionSigned>;
 
     type Consensus = TransactionSigned;
 
@@ -1307,8 +1306,8 @@ impl EthPoolTransaction for EthPooledTransaction {
         sidecar: &BlobTransactionSidecar,
         settings: &KzgSettings,
     ) -> Result<(), BlobTransactionValidationError> {
-        match self.transaction.transaction() {
-            Transaction::Eip4844(tx) => tx.validate_blob(sidecar, settings),
+        match self.transaction.inner().as_eip4844() {
+            Some(tx) => tx.tx().validate_blob(sidecar, settings),
             _ => Err(BlobTransactionValidationError::NotBlobTransaction(self.ty())),
         }
     }

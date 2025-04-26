@@ -1019,5 +1019,13 @@ mod tests {
 
         let pool_limit = SubPoolLimit { max_txs: 10, max_size: usize::MAX };
         pool.truncate_pool(pool_limit);
+
+        let sender_a = f.ids.sender_id(&a).unwrap();
+        let sender_b = f.ids.sender_id(&b).unwrap();
+        let sender_c = f.ids.sender_id(&c).unwrap();
+
+        assert_eq!(pool.get_txs_by_sender(sender_a).len(), 10);
+        assert!(pool.get_txs_by_sender(sender_b).is_empty());
+        assert!(pool.get_txs_by_sender(sender_c).is_empty());
     }
 }
