@@ -32,7 +32,7 @@ pub fn benchmark_fetch_pending_hashes(group: &mut BenchmarkGroup<'_, WallTime>, 
     let mut peers = HashMap::default();
 
     for _i in 0..peers_num {
-        // NOTE: the worst case, each tx in the cache belongs to a differenct peer.
+        // NOTE: the worst case, each tx in the cache belongs to a different peer.
         let peer = PeerId::random();
         let hash = B256::random();
 
