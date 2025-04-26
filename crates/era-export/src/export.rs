@@ -2,11 +2,17 @@
 //! and injecting them into era1 files with `Era1Writer`.
 
 use alloy_consensus::{BlockBody, BlockHeader, Header};
-use alloy_primitives::{BlockNumber, U256};
+use alloy_primitives::{BlockNumber, B256, U256};
 use eyre::{eyre, Result};
-use reth_era::execution_types::{
-    BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts, TotalDifficulty,
+use reth_era::{
+    era1_file::{Era1File, Era1Writer},
+    era1_types::{BlockIndex, Era1Group, Era1Id},
+    execution_types::{
+        Accumulator, BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts,
+        TotalDifficulty,
+    },
 };
+use reth_fs_util as fs;
 use reth_primitives_traits::{FullBlockBody, FullBlockHeader, NodePrimitives};
 use reth_storage_api::{
     BlockReader, DBProvider, HeaderProvider, NodePrimitivesProvider, ReceiptProvider,
@@ -17,10 +23,13 @@ use std::{
 };
 use tracing::{info, warn};
 
+const REPORT_INTERVAL_SECS: u64 = 10;
+
 /// Configuration to export block history
 /// to era1 files
+#[derive(Clone, Debug)]
 #[allow(dead_code)]
-pub(crate) struct ExportConfig {
+pub struct ExportConfig {
     /// Directory to export era1 files to
     pub dir: PathBuf,
     /// First block to export
@@ -35,31 +44,34 @@ pub(crate) struct ExportConfig {
     pub network: String,
 }
 
-/// Era export data
-/// prepared to create (multiple?) era1 file
-#[allow(dead_code)]
-pub(crate) struct EraExportData {
-    /// Block tuples containing header, body, receipts, and total difficulty
-    pub block_tuples: Vec<BlockTuple>,
-    /// Starting block number
-    pub start_block: BlockNumber,
-    /// Network name
-    pub network: String,
-    /// Block position offsets within the file
-    pub offsets: Vec<i64>,
+/// Exports block history data from the database
+/// to recreate Era1 files, with option for direct writing.
+pub fn export<P, BH, BB>(provider: &P, config: &ExportConfig) -> Result<Vec<PathBuf>>
+where
+    P: DBProvider + HeaderProvider + BlockReader + ReceiptProvider + NodePrimitivesProvider,
+    <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
+    <P as HeaderProvider>::Header: Into<Header> + FullBlockHeader,
+    <P as BlockReader>::Block: FullBlockBody
+        + Into<
+            BlockBody<
+                <<P as NodePrimitivesProvider>::Primitives as NodePrimitives>::SignedTx,
+                Header,
+            >,
+        >,
+    <P as ReceiptProvider>::Receipt: alloy_rlp::Encodable,
+{
+    fetch_and_write_history_data(provider, config)
 }
 
 /// Fetches block history data from the provider
 /// and prepares it for export to era1 files.
 /// for a given number of blocks
-/// TODO: add the write logic to create the era1 files
-/// directly from this function
-/// to avoid holding the data in memory
+/// then writes then to disk
 #[allow(dead_code)]
-pub(crate) fn fetch_block_history_data<P, BH, BB>(
+pub(crate) fn fetch_and_write_history_data<P, BH, BB>(
     provider: &P,
     config: &ExportConfig,
-) -> Result<Vec<EraExportData>>
+) -> Result<Vec<PathBuf>>
 where
     P: DBProvider + HeaderProvider + BlockReader + ReceiptProvider + NodePrimitivesProvider,
     <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
@@ -95,15 +107,19 @@ where
         first = config.first_block_number,
         last = config.last_block_number,
         step = config.step,
-        "Preparing ERA export data"
+        "Preparing era1 export data"
     );
+
+    if !config.dir.exists() {
+        fs::create_dir_all(&config.dir)
+            .map_err(|e| eyre!("Failed to create output directory: {}", e))?;
+    }
 
     let start_time = Instant::now();
     let mut last_report_time = Instant::now();
-    let report_interval = Duration::from_secs(8);
+    let report_interval = Duration::from_secs(REPORT_INTERVAL_SECS);
 
-    // Prepare export data in chunks based on step size
-    let mut export_data: Vec<EraExportData> = Vec::new();
+    let mut created_files = Vec::new();
     let mut total_blocks_processed = 0;
 
     let mut total_difficulty = if config.first_block_number > 0 {
@@ -121,11 +137,18 @@ where
         let end_block = (start_block + config.step - 1).min(last_block_number);
         let block_count = (end_block - start_block + 1) as usize;
 
-        info!("Processing blocks {} to {} ({} blocks)", start_block, end_block, block_count);
+        info!(
+            target: "era::history::export",
+            "Processing blocks {} to {} ({} blocks)",
+            start_block, end_block, block_count
+        );
 
-        let mut block_tuples: Vec<BlockTuple> = Vec::new();
-        let mut offsets: Vec<i64> = Vec::new();
+        let mut block_tuples = Vec::with_capacity(block_count);
+        let mut offsets = Vec::with_capacity(block_count);
+
+        // Start after version header to count
         let mut position: i64 = 0;
+        let final_header_data = Vec::new();
 
         for block_number in start_block..=end_block {
             let header = provider
@@ -156,11 +179,11 @@ where
                 difficulty,
             );
 
-            block_tuples.push(block_tuple);
             offsets.push(position);
 
             // TODO: calculate accurate file offsets when writing era files
             position += 100;
+            block_tuples.push(block_tuple);
             total_blocks_processed += 1;
 
             if last_report_time.elapsed() >= report_interval {
@@ -178,21 +201,33 @@ where
             }
         }
         if !block_tuples.is_empty() {
-            export_data.push(EraExportData {
-                block_tuples,
-                start_block,
-                network: config.network.clone(),
-                offsets,
-            });
+            let accumulator_hash =
+                B256::from_slice(&final_header_data[0..32.min(final_header_data.len())]);
+            let accumulator = Accumulator::new(accumulator_hash);
+            let block_index = BlockIndex::new(start_block, offsets);
+
+            let era1_group = Era1Group::new(block_tuples, accumulator, block_index);
+
+            let era1_id = Era1Id::new(&config.network, start_block, block_count as u32);
+            let era1_file = Era1File::new(era1_group, era1_id.clone());
+            let file_path = config.dir.join(era1_id.to_file_name());
+            Era1Writer::create(&file_path, &era1_file)
+                .map_err(|e| eyre!("Failed to write ERA1 file: {}", e))?;
+            created_files.push(file_path.clone());
+            info!(
+                target: "era::history::export",
+                "Wrote ERA1 file: {:?}",
+                file_path
+            );
         }
     }
 
     info!(
         target: "era::history::export",
-        "Export data preparation complete. Processed {} blocks in {:?}",
-        total_blocks_processed,
+        "Successfully wrote {} ERA1 files in {:?}",
+        created_files.len(),
         start_time.elapsed()
     );
 
-    Ok(export_data)
+    Ok(created_files)
 }

@@ -3225,6 +3225,7 @@ dependencies = [
  "eyre",
  "reth-db-api",
  "reth-era",
+ "reth-fs-util",
  "reth-primitives-traits",
  "reth-storage-api",
  "tracing",
