@@ -182,7 +182,7 @@ pub trait Block:
     /// consists of:
     ///
     /// - Header
-    /// And the ethereum block body [`alloy_consensus::BlockBody`], seel also
+    /// And the ethereum block body [`alloy_consensus::BlockBody`], see also
     /// [`BlockBody::into_ethereum_body`].
     /// - Transactions
     /// - Withdrawals
