@@ -9,7 +9,7 @@ license.workspace = true
 reth.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-payload-builder.workspace = true
-reth-ethereum = { workspace = true, features = ["node", "pool"] }
+reth-ethereum = { workspace = true, features = ["node", "pool", "cli"] }
 reth-ethereum-payload-builder.workspace = true
 
 alloy-eips.workspace = true

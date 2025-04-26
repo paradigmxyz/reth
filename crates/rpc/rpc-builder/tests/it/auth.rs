@@ -4,7 +4,6 @@ use crate::utils::launch_auth;
 use alloy_primitives::U64;
 use alloy_rpc_types_engine::{
     ExecutionPayloadInputV2, ExecutionPayloadV1, ForkchoiceState, PayloadId,
-    TransitionConfiguration,
 };
 use jsonrpsee::core::client::{ClientT, SubscriptionClientT};
 use reth_ethereum_engine_primitives::EthEngineTypes;
@@ -39,8 +38,6 @@ where
     EngineApiClient::get_payload_v2(client, PayloadId::new([0, 0, 0, 0, 0, 0, 0, 0])).await;
     EngineApiClient::get_payload_bodies_by_hash_v1(client, vec![]).await;
     EngineApiClient::get_payload_bodies_by_range_v1(client, U64::ZERO, U64::from(1u64)).await;
-    EngineApiClient::exchange_transition_configuration(client, TransitionConfiguration::default())
-        .await;
     EngineApiClient::exchange_capabilities(client, vec![]).await;
 }
 

@@ -83,6 +83,7 @@ impl Discv5 {
     ////////////////////////////////////////////////////////////////////////////////////////////////
 
     /// Adds the node to the table, if it is not already present.
+    #[expect(clippy::result_large_err)]
     pub fn add_node(&self, node_record: Enr<SecretKey>) -> Result<(), Error> {
         let EnrCombinedKeyWrapper(enr) = node_record.into();
         self.discv5.add_enr(enr).map_err(Error::AddNodeFailed)
@@ -378,6 +379,7 @@ impl Discv5 {
 
     /// Returns the [`ForkId`] of the given [`Enr`](discv5::Enr) w.r.t. the local node's network
     /// stack, if field is set.
+    #[expect(clippy::result_large_err)]
     pub fn get_fork_id<K: discv5::enr::EnrKey>(
         &self,
         enr: &discv5::enr::Enr<K>,

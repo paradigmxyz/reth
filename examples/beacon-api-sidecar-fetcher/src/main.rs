@@ -22,8 +22,12 @@ use alloy_primitives::B256;
 use clap::Parser;
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use mined_sidecar::MinedSidecarStream;
-use reth::{builder::NodeHandle, chainspec::EthereumChainSpecParser, cli::Cli};
-use reth_ethereum::{node::EthereumNode, provider::CanonStateSubscriptions};
+use reth::builder::NodeHandle;
+use reth_ethereum::{
+    cli::{chainspec::EthereumChainSpecParser, interface::Cli},
+    node::EthereumNode,
+    provider::CanonStateSubscriptions,
+};
 
 pub mod mined_sidecar;
 
@@ -53,11 +57,11 @@ fn main() {
                     match result {
                         Ok(blob_transaction) => {
                             // Handle successful transaction
-                            println!("Processed BlobTransaction: {:?}", blob_transaction);
+                            println!("Processed BlobTransaction: {blob_transaction:?}");
                         }
                         Err(e) => {
                             // Handle errors specifically
-                            eprintln!("Failed to process transaction: {:?}", e);
+                            eprintln!("Failed to process transaction: {e:?}");
                         }
                     }
                 }

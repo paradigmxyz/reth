@@ -26,10 +26,10 @@ async fn test_streaming_files_after_fetching_file_list(url: &str) {
     let expected_file = folder.join("mainnet-00000-5ec1ffb8.era1").into_boxed_path();
     let actual_file = stream.next().await.unwrap().unwrap();
 
-    assert_eq!(actual_file, expected_file);
+    assert_eq!(actual_file.as_ref(), expected_file.as_ref());
 
     let expected_file = folder.join("mainnet-00001-a5364e9a.era1").into_boxed_path();
     let actual_file = stream.next().await.unwrap().unwrap();
 
-    assert_eq!(actual_file, expected_file);
+    assert_eq!(actual_file.as_ref(), expected_file.as_ref());
 }

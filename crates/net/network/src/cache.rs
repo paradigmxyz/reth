@@ -265,7 +265,10 @@ mod test {
         let value_2 = Value(22);
         cache.insert(key_2, value_2);
 
-        assert_eq!("LruMap { limiter: ByLength { max_length: 2 }, ret %iter: Iter: { 2: Value(22), 1: Value(11) } }", format!("{cache:?}"))
+        assert_eq!(
+            "LruMap { limiter: ByLength { max_length: 2 }, ret %iter: Iter: { 2: Value(22), 1: Value(11) } }",
+            format!("{cache:?}")
+        )
     }
 
     #[test]
