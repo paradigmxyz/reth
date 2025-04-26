@@ -1,4 +1,5 @@
-//! An ExEx example that installs a new RPC subscription endpoint that emit storage changes for a requested address.
+//! An ExEx example that installs a new RPC subscription endpoint that emit storage changes for a
+//! requested address.
 
 use alloy_primitives::{Address, U256};
 use clap::Parser;
@@ -79,9 +80,7 @@ impl StorageWatcherApiServer for StorageWatcherRpc {
             let (resp_tx, resp_rx) = oneshot::channel();
             subscription.send(SubscriptionRequest { address, response: resp_tx }).unwrap();
 
-            let Ok(mut rx) = resp_rx.await else {
-                return
-            };
+            let Ok(mut rx) = resp_rx.await else { return };
 
             while let Some(diff) = rx.recv().await {
                 let msg = SubscriptionMessage::from_json(&diff).expect("serialize");
