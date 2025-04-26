@@ -847,7 +847,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         tx_hash: &B256,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         let (tx, pool) = self.all_transactions.remove_transaction_by_hash(tx_hash)?;
-        self.prune_from_subpool(pool, tx.id())
+        self.remove_from_subpool(pool, tx.id())
     }
 
     /// Removes the transaction from the given pool.
@@ -870,30 +870,6 @@ impl<T: TransactionOrdering> TxPool<T> {
             // is generic and it would not be possible to distinguish whether a transaction is
             // being removed from the `BaseFee` pool, or the `Queued` pool.
             trace!(target: "txpool", hash=%tx.transaction.hash(), ?pool, "Removed transaction from a subpool");
-        }
-
-        tx
-    }
-
-    /// Removes the transaction from the given pool and advance sub-pool internal state, with the
-    /// expectation that the given transaction is included in a block.
-    fn prune_from_subpool(
-        &mut self,
-        pool: SubPool,
-        tx: &TransactionId,
-    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let tx = match pool {
-            SubPool::Pending => self.pending_pool.remove_transaction(tx),
-            SubPool::Queued => self.queued_pool.remove_transaction(tx),
-            SubPool::BaseFee => self.basefee_pool.remove_transaction(tx),
-            SubPool::Blob => self.blob_pool.remove_transaction(tx),
-        };
-
-        if let Some(ref tx) = tx {
-            // We trace here instead of in subpool structs directly, because the `ParkedPool` type
-            // is generic and it would not be possible to distinguish whether a transaction is
-            // being pruned from the `BaseFee` pool, or the `Queued` pool.
-            trace!(target: "txpool", hash=%tx.transaction.hash(), ?pool, "Pruned transaction from a subpool");
         }
 
         tx
