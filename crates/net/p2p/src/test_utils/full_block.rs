@@ -11,7 +11,7 @@ use alloy_eips::{BlockHashOrNumber, BlockNumHash};
 use alloy_primitives::B256;
 use core::{fmt, marker::PhantomData};
 use parking_lot::Mutex;
-use reth_eth_wire_types::{EthNetworkPrimitives, HeadersDirection};
+use reth_eth_wire_types::{EthNetworkPrimitives, HeadersDirection, NetworkPrimitives};
 use reth_ethereum_primitives::{Block, BlockBody};
 use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives_traits::{SealedBlock, SealedHeader};
@@ -48,11 +48,11 @@ where
 /// Implements the `BodiesClient` trait for the `NoopFullBlockClient` struct.
 impl<NetPrimitives> BodiesClient for NoopFullBlockClient<NetPrimitives>
 where
-    NetPrimitives: fmt::Debug + Send + Sync,
+    NetPrimitives: NetworkPrimitives,
 {
-    type Body = BlockBody;
+    type Body = NetPrimitives::BlockBody;
     /// Defines the output type of the function.
-    type Output = futures::future::Ready<PeerRequestResult<Vec<BlockBody>>>;
+    type Output = futures::future::Ready<PeerRequestResult<Vec<Self::Body>>>;
 
     /// Retrieves block bodies based on provided hashes and priority.
     ///
@@ -77,12 +77,12 @@ where
 
 impl<NetPrimitives> HeadersClient for NoopFullBlockClient<NetPrimitives>
 where
-    NetPrimitives: fmt::Debug + Send + Sync,
+    NetPrimitives: NetworkPrimitives,
 {
-    type Header = Header;
+    type Header = NetPrimitives::BlockHeader;
     /// The output type representing a future containing a peer request result with a vector of
     /// headers.
-    type Output = futures::future::Ready<PeerRequestResult<Vec<Header>>>;
+    type Output = futures::future::Ready<PeerRequestResult<Vec<Self::Header>>>;
 
     /// Retrieves headers with a specified priority level.
     ///
@@ -104,6 +104,13 @@ where
     ) -> Self::Output {
         futures::future::ready(Ok(WithPeerId::new(PeerId::random(), vec![])))
     }
+}
+
+impl<NetPrimitives> BlockClient for NoopFullBlockClient<NetPrimitives>
+where
+    NetPrimitives: NetworkPrimitives,
+{
+    type Block = NetPrimitives::Block;
 }
 
 /// A headers+bodies client that stores the headers and bodies in memory, with an artificial soft
