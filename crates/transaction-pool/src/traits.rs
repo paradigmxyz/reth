@@ -315,7 +315,7 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
 
     /// Removes all transactions corresponding to the given hashes.
     ///
-    /// Note: This removes the transactions as if the got discarded (_not_ mined).
+    /// Note: This removes the transactions as if they got discarded (_not_ mined).
     ///
     /// Consumer: Utility
     fn remove_transactions(
