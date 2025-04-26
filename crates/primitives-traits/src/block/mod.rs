@@ -178,18 +178,25 @@ pub trait Block:
         Ok(RecoveredBlock::new_unhashed(self, signers))
     }
 
-    /// A convenience function to convert this type into the regular ethereum block that
+    /// A Convenience function to convert this type into the regular ethereum block that
     /// consists of:
     ///
     /// - Header
-    /// - Body (Transactions, Withdrawals, Ommers)
+    /// And the ethereum block body [`alloy_consensus::BlockBody`], seel also
+    /// [`BlockBody::into_ethereum_body`].
+    /// - Transactions
+    /// - Withdrawals
+    /// - Ommers
     ///
     /// Note: This conversion can be incomplete. It is not expected that this `Block` is the same as
     /// [`alloy_consensus::Block`] only that it can be converted into it which is useful for
     /// the `eth_` RPC namespace (e.g. RPC block).
     fn into_ethereum_block(
         self,
-    ) -> alloy_consensus::Block<<Self::Body as BlockBody>::Transaction, Self::Header>;
+    ) -> alloy_consensus::Block<<Self::Body as BlockBody>::Transaction, Self::Header> {
+        let (header, body) = self.split();
+        alloy_consensus::Block::new(header, body.into_ethereum_body())
+    }
 }
 
 impl<T, H> Block for alloy_consensus::Block<T, H>
