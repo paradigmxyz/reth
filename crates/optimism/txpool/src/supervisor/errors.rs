@@ -128,7 +128,7 @@ fn extract_chain_id(message: &str) -> Option<u64> {
 /// Extracts a safety level value from error message patterns
 fn extract_safety_level(message: &str, key_param: &str) -> Option<SafetyLevel> {
     // Look for patterns like "got: 0" or "expected: 1" in the message
-    for pattern in &[format!("{}: ", key_param), format!("{} ", key_param)] {
+    for pattern in &[format!("{key_param}: "), format!("{key_param} ")] {
         if let Some(pos) = message.find(pattern) {
             let value_part = &message[pos + pattern.len()..];
             let value = value_part.chars().next().and_then(|c| c.to_digit(10));
