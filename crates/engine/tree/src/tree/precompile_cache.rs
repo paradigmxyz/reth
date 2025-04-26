@@ -74,9 +74,7 @@ impl Precompile for CachedPrecompile {
     fn call(&self, data: &Bytes, gas_limit: u64) -> PrecompileResult {
         let key = PrecompileKey(data.clone());
 
-        let cache_result = self.cache.get(&key);
-
-        if let Some(ref entry) = cache_result {
+        if let Some(ref entry) = self.cache.get(&key) {
             // for each precompile and input we store in lower_gas_limit the maximum gas for
             // which we have received an out of gas error, any gas limit below that will fail
             // with OOG too.
@@ -103,63 +101,15 @@ impl Precompile for CachedPrecompile {
         self.increment_by_one_precompile_cache_misses();
         let result = self.precompile.call(data, gas_limit);
 
-        match &result {
-            Ok(_) => {
-                let previous_entry_count = self.cache_entry_count();
+        let previous_entry_count = self.cache_entry_count();
+        let (upper_gas_limit, lower_gas_limit) = match &result {
+            Err(PrecompileError::OutOfGas) => (u64::MAX, gas_limit),
+            _ => (gas_limit, 0),
+        };
+        self.cache
+            .insert(key, CacheEntry { result: result.clone(), upper_gas_limit, lower_gas_limit });
 
-                self.cache.insert(
-                    key,
-                    CacheEntry {
-                        result: result.clone(),
-                        upper_gas_limit: gas_limit,
-                        lower_gas_limit: 0,
-                    },
-                );
-                self.update_precompile_cache_size(previous_entry_count);
-            }
-            Err(PrecompileError::OutOfGas) => {
-                let previous_entry_count = self.cache_entry_count();
-
-                self.cache.insert(
-                    key,
-                    CacheEntry {
-                        result: result.clone(),
-                        upper_gas_limit: u64::MAX,
-                        lower_gas_limit: gas_limit,
-                    },
-                );
-
-                self.update_precompile_cache_size(previous_entry_count);
-            }
-            Err(PrecompileError::Fatal(_)) => {
-                // fatal error
-                let previous_entry_count = self.cache_entry_count();
-                self.cache.insert(
-                    key,
-                    CacheEntry {
-                        result: result.clone(),
-                        upper_gas_limit: gas_limit,
-                        lower_gas_limit: 0,
-                    },
-                );
-                self.update_precompile_cache_size(previous_entry_count);
-            }
-            Err(_) => {
-                // for other errors cache the result
-                let previous_entry_count = self.cache_entry_count();
-
-                self.cache.insert(
-                    key,
-                    CacheEntry {
-                        result: result.clone(),
-                        upper_gas_limit: gas_limit,
-                        lower_gas_limit: 0,
-                    },
-                );
-
-                self.update_precompile_cache_size(previous_entry_count);
-            }
-        }
+        self.update_precompile_cache_size(previous_entry_count);
         result
     }
 }
