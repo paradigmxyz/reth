@@ -130,7 +130,7 @@ async fn my_exex<Node: FullNodeComponents>(
                                             new_value: slot.present_value(),
                                         };
                                         // Send diff to all the active subscribers
-                                        senders.retain(|sender| sender.send(diff.clone()).is_ok());
+                                        senders.retain(|sender| sender.send(diff).is_ok());
                                     }
                                 }
                             }
