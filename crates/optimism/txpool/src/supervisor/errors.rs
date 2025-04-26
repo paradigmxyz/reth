@@ -110,10 +110,17 @@ impl InteropTxValidatorError {
 fn extract_chain_id(message: &str) -> Option<u64> {
     // Common pattern for chain ID errors
     if let Some(idx) = message.find("chain id") {
-        let remainder = &message[idx + 8..];
-        if let Some(colon_idx) = remainder.find(':') {
-            let num_part = &remainder[colon_idx + 1..].trim();
-            return num_part.parse::<u64>().ok();
+        if idx + 8 < message.len() {
+            // Ensure there are characters after "chain id"
+            let remainder = &message[idx + 8..];
+            if let Some(colon_idx) = remainder.find(':') {
+                #[allow(clippy::int_plus_one)]
+                if colon_idx + 1 <= remainder.len() {
+                    // Ensure there are characters after the colon
+                    let num_part = &remainder[colon_idx + 1..].trim();
+                    return num_part.parse::<u64>().ok();
+                }
+            }
         }
     }
 
@@ -128,17 +135,21 @@ fn extract_chain_id(message: &str) -> Option<u64> {
 /// Extracts a safety level value from error message patterns
 fn extract_safety_level(message: &str, key_param: &str) -> Option<SafetyLevel> {
     // Look for patterns like "got: 0" or "expected: 1" in the message
-    for pattern in &[format!("{key_param}: "), format!("{key_param} ")] {
-        if let Some(pos) = message.find(pattern) {
-            let value_part = &message[pos + pattern.len()..];
-            let value = value_part.chars().next().and_then(|c| c.to_digit(10));
+    let patterns = [format!("{key_param}: "), format!("{key_param} ")];
+    for pattern in &patterns {
+        if let Some(pos) = message.find(pattern.as_str()) {
+            if pos + pattern.len() < message.len() {
+                // Ensure there are characters after the pattern
+                let value_part = &message[pos + pattern.len()..];
+                let value = value_part.chars().next().and_then(|c| c.to_digit(10));
 
-            return match value {
-                Some(0) => Some(SafetyLevel::Unsafe),
-                Some(1) => Some(SafetyLevel::Safe),
-                Some(2) => Some(SafetyLevel::Finalized),
-                _ => None,
-            };
+                return match value {
+                    Some(0) => Some(SafetyLevel::Unsafe),
+                    Some(1) => Some(SafetyLevel::Safe),
+                    Some(2) => Some(SafetyLevel::Finalized),
+                    _ => None,
+                };
+            }
         }
     }
     None
