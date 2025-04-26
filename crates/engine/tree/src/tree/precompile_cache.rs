@@ -92,13 +92,8 @@ impl Precompile for CachedPrecompile {
             if gas_limit >= entry.upper_gas_limit {
                 self.increment_by_one_precompile_cache_hits();
 
-                // for successful results, we need to ensure gas costs are correct when
-                // gas_limit differs. we only do this for successful results because it is the
-                // only case in which the inner precompile provider records gas costs.
-                if let Ok(mut result) = entry.result.clone() {
-                    result.gas_used = gas_limit.saturating_sub(result.gas_used);
-                    return Ok(result);
-                }
+                // no need to change gas on successful results, on success the gas spent is the same
+                // no matter gas the limit
 
                 return entry.result.clone();
             }
