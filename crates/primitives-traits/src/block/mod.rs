@@ -177,6 +177,19 @@ pub trait Block:
         };
         Ok(RecoveredBlock::new_unhashed(self, signers))
     }
+
+    /// A convenience function to convert this type into the regular ethereum block that
+    /// consists of:
+    ///
+    /// - Header
+    /// - Body (Transactions, Withdrawals, Ommers)
+    ///
+    /// Note: This conversion can be incomplete. It is not expected that this `Block` is the same as
+    /// [`alloy_consensus::Block`] only that it can be converted into it which is useful for
+    /// the `eth_` RPC namespace (e.g. RPC block).
+    fn into_ethereum_block(
+        self,
+    ) -> alloy_consensus::Block<<Self::Body as BlockBody>::Transaction, Self::Header>;
 }
 
 impl<T, H> Block for alloy_consensus::Block<T, H>
@@ -205,6 +218,10 @@ where
 
     fn rlp_length(header: &Self::Header, body: &Self::Body) -> usize {
         Self::rlp_length_for(header, body)
+    }
+
+    fn into_ethereum_block(self) -> Self {
+        self
     }
 }
 
