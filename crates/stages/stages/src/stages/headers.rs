@@ -422,7 +422,6 @@ mod tests {
             channel: (watch::Sender<B256>, watch::Receiver<B256>),
             downloader_factory: Box<dyn Fn() -> D + Send + Sync + 'static>,
             db: TestStageDB,
-            consensus: Arc<TestConsensus>,
         }
 
         impl Default for HeadersTestRunner<TestHeaderDownloader> {
@@ -431,14 +430,9 @@ mod tests {
                 Self {
                     client: client.clone(),
                     channel: watch::channel(B256::ZERO),
-                    consensus: Arc::new(TestConsensus::default()),
+
                     downloader_factory: Box::new(move || {
-                        TestHeaderDownloader::new(
-                            client.clone(),
-                            Arc::new(TestConsensus::default()),
-                            1000,
-                            1000,
-                        )
+                        TestHeaderDownloader::new(client.clone(), 1000, 1000)
                     }),
                     db: TestStageDB::default(),
                 }
@@ -559,7 +553,6 @@ mod tests {
                             .build(client.clone(), Arc::new(TestConsensus::default()))
                     }),
                     db: TestStageDB::default(),
-                    consensus: Arc::new(TestConsensus::default()),
                 }
             }
         }
