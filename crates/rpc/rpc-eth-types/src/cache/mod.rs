@@ -156,7 +156,7 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
     ) -> ProviderResult<Option<Arc<RecoveredBlock<B>>>> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetBlockWithSenders { block_hash, response_tx });
-        rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
+        rx.await.map_err(|_| CacheServiceUnavailable)?
     }
 
     /// Requests the receipts for the block hash
@@ -165,7 +165,7 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
     pub async fn get_receipts(&self, block_hash: B256) -> ProviderResult<Option<Arc<Vec<R>>>> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetReceipts { block_hash, response_tx });
-        rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
+        rx.await.map_err(|_| CacheServiceUnavailable)?
     }
 
     /// Fetches both receipts and block for the given block hash.
@@ -193,7 +193,7 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
 
         let (receipts, block) = futures::join!(receipts, rx);
 
-        let block = block.map_err(|_| ProviderError::CacheServiceUnavailable)?;
+        let block = block.map_err(|_| CacheServiceUnavailable)?;
         Ok(receipts?.map(|r| (r, block)))
     }
 
@@ -203,7 +203,7 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
     pub async fn get_header(&self, block_hash: B256) -> ProviderResult<B::Header> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetHeader { block_hash, response_tx });
-        rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
+        rx.await.map_err(|_| CacheServiceUnavailable)?
     }
 
     /// Retrieves a chain of connected blocks from the cache, starting from the given block hash
@@ -231,6 +231,16 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
         } else {
             Some(blocks)
         }
+    }
+}
+/// Thrown when the cache service task dropped.
+#[derive(Debug, thiserror::Error)]
+#[error("cache service task stopped")]
+pub struct CacheServiceUnavailable;
+
+impl From<CacheServiceUnavailable> for ProviderError {
+    fn from(err: CacheServiceUnavailable) -> Self {
+        Self::other(err)
     }
 }
 
@@ -710,15 +720,15 @@ impl<R: Send + Sync, B: Block> Drop for ActionSender<B, R> {
             let msg = match self.kind {
                 CacheKind::Block => CacheAction::BlockWithSendersResult {
                     block_hash: self.blockhash,
-                    res: Err(ProviderError::CacheServiceUnavailable),
+                    res: Err(CacheServiceUnavailable.into()),
                 },
                 CacheKind::Receipt => CacheAction::ReceiptsResult {
                     block_hash: self.blockhash,
-                    res: Err(ProviderError::CacheServiceUnavailable),
+                    res: Err(CacheServiceUnavailable.into()),
                 },
                 CacheKind::Header => CacheAction::HeaderResult {
                     block_hash: self.blockhash,
-                    res: Box::new(Err(ProviderError::CacheServiceUnavailable)),
+                    res: Box::new(Err(CacheServiceUnavailable.into())),
                 },
             };
             let _ = tx.send(msg);
