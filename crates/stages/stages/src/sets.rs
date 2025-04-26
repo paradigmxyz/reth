@@ -251,13 +251,7 @@ where
         HeaderStage<P, H>: Stage<Provider>,
     {
         StageSetBuilder::default()
-            .add_stage(HeaderStage::new(
-                provider,
-                header_downloader,
-                tip,
-                consensus.clone(),
-                stages_config.etl,
-            ))
+            .add_stage(HeaderStage::new(provider, header_downloader, tip, stages_config.etl))
             .add_stage(bodies)
     }
 }
@@ -276,7 +270,6 @@ where
                 self.provider,
                 self.header_downloader,
                 self.tip,
-                self.consensus.clone(),
                 self.stages_config.etl.clone(),
             ))
             .add_stage(BodyStage::new(self.body_downloader))

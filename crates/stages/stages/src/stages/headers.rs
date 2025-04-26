@@ -1,9 +1,7 @@
 use alloy_consensus::BlockHeader;
-use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
 use futures_util::StreamExt;
 use reth_config::config::EtlConfig;
-use reth_consensus::HeaderValidator;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     table::Value,
@@ -22,8 +20,8 @@ use reth_provider::{
     HeaderSyncGapProvider, StaticFileProviderFactory,
 };
 use reth_stages_api::{
-    BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput,
-    HeadersCheckpoint, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
+    CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput, HeadersCheckpoint, Stage,
+    StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderError;
@@ -55,8 +53,6 @@ pub struct HeaderStage<Provider, Downloader: HeaderDownloader> {
     ///
     /// This determines the sync target of the stage (set by the pipeline).
     tip: watch::Receiver<B256>,
-    /// Consensus client implementation
-    consensus: Arc<dyn HeaderValidator<Downloader::Header>>,
     /// Current sync gap.
     sync_gap: Option<HeaderSyncGap<Downloader::Header>>,
     /// ETL collector with `HeaderHash` -> `BlockNumber`
@@ -78,14 +74,12 @@ where
         database: Provider,
         downloader: Downloader,
         tip: watch::Receiver<B256>,
-        consensus: Arc<dyn HeaderValidator<Downloader::Header>>,
         etl_config: EtlConfig,
     ) -> Self {
         Self {
             provider: database,
             downloader,
             tip,
-            consensus,
             sync_gap: None,
             hash_collector: Collector::new(etl_config.file_size / 2, etl_config.dir.clone()),
             header_collector: Collector::new(etl_config.file_size / 2, etl_config.dir),
@@ -144,14 +138,6 @@ where
 
             // Increase total difficulty
             td += header.difficulty();
-
-            self.consensus.validate_header(&sealed_header).map_err(|error| StageError::Block {
-                block: Box::new(BlockWithParent::new(
-                    sealed_header.parent_hash(),
-                    NumHash::new(sealed_header.number(), sealed_header.hash()),
-                )),
-                error: BlockErrorKind::Validation(error),
-            })?;
 
             // Append to Headers segment
             writer.append_header(header, td, header_hash)?;
@@ -473,7 +459,6 @@ mod tests {
                     self.db.factory.clone(),
                     (*self.downloader_factory)(),
                     self.channel.1.clone(),
-                    self.consensus.clone(),
                     EtlConfig::default(),
                 )
             }
