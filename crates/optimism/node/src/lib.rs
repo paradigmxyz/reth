@@ -20,7 +20,7 @@ pub mod engine;
 pub use engine::OpEngineTypes;
 
 pub mod node;
-pub use node::{OpNetworkPrimitives, OpNode};
+pub use node::{OpNetworkPrimitives, OpNode, OpNodeTypes};
 
 pub mod rpc;
 pub use rpc::OpEngineApiBuilder;

@@ -24,6 +24,7 @@ use reth_primitives_traits::{
 
 /// A consensus implementation that does nothing.
 pub mod noop;
+pub use noop::NoopConsensus;
 
 #[cfg(any(test, feature = "test-utils"))]
 /// test helpers for mocking consensus

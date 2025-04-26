@@ -8966,6 +8966,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-optimism-network"
+version = "1.3.12"
+dependencies = [
+ "alloy-consensus",
+ "op-alloy-consensus",
+ "reth-eth-wire-types",
+ "reth-optimism-primitives",
+]
+
+[[package]]
 name = "reth-optimism-node"
 version = "1.3.12"
 dependencies = [
@@ -8996,6 +9006,7 @@ dependencies = [
  "reth-optimism-consensus",
  "reth-optimism-evm",
  "reth-optimism-forks",
+ "reth-optimism-network",
  "reth-optimism-node",
  "reth-optimism-payload-builder",
  "reth-optimism-primitives",
@@ -9012,6 +9023,7 @@ dependencies = [
  "reth-rpc-eth-api",
  "reth-rpc-eth-types",
  "reth-rpc-server-types",
+ "reth-storage-api",
  "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
@@ -9117,7 +9129,9 @@ dependencies = [
  "reqwest",
  "reth-chain-state",
  "reth-chainspec",
+ "reth-consensus",
  "reth-db",
+ "reth-db-api",
  "reth-db-common",
  "reth-evm",
  "reth-network-api",
@@ -9126,6 +9140,7 @@ dependencies = [
  "reth-optimism-chainspec",
  "reth-optimism-evm",
  "reth-optimism-forks",
+ "reth-optimism-network",
  "reth-optimism-node",
  "reth-optimism-payload-builder",
  "reth-optimism-primitives",

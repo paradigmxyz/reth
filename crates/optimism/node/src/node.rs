@@ -11,7 +11,8 @@ use reth_chainspec::{EthChainSpec, Hardforks};
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm, EvmFactory, EvmFactoryFor};
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives, PeersInfo};
 use reth_node_api::{
-    AddOnsContext, FullNodeComponents, KeyHasherTy, NodeAddOns, NodePrimitives, PrimitivesTy, TxTy,
+    AddOnsContext, FullNodeComponents, FullNodeTypesAdapter, KeyHasherTy, NodeAddOns,
+    NodePrimitives, PrimitivesTy, TxTy,
 };
 use reth_node_builder::{
     components::{
@@ -29,6 +30,7 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_evm::{OpEvmConfig, OpNextBlockEnvAttributes};
 use reth_optimism_forks::OpHardforks;
+use reth_optimism_network::OpNetworkPrimitives;
 use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
     config::{OpBuilderConfig, OpDAConfig},
@@ -51,6 +53,7 @@ use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::ext::L2EthApiExtServer;
 use reth_rpc_eth_types::error::FromEvmError;
 use reth_rpc_server_types::RethRpcModule;
+use reth_storage_api::FullDatabase;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, CoinbaseTipOrdering, EthPoolTransaction, PoolTransaction,
@@ -168,19 +171,12 @@ impl OpNode {
     }
 }
 
-impl<N> Node<N> for OpNode
+impl<DB, Provider> Node<FullNodeTypesAdapter<OpNodeTypes, DB, Provider>> for OpNode
 where
-    N: FullNodeTypes<
-        Types: NodeTypes<
-            Payload = OpEngineTypes,
-            ChainSpec = OpChainSpec,
-            Primitives = OpPrimitives,
-            Storage = OpStorage,
-        >,
-    >,
+    DB: FullDatabase + 'static,
 {
     type ComponentsBuilder = ComponentsBuilder<
-        N,
+        FullNodeTypesAdapter<OpNodeTypes, DB, Provider>,
         OpPoolBuilder,
         BasicPayloadServiceBuilder<OpPayloadBuilder>,
         OpNetworkBuilder,
@@ -222,7 +218,11 @@ where
     }
 }
 
-impl NodeTypes for OpNode {
+/// Basic blockchain types for OP stack.
+#[derive(Debug, Default, Clone)]
+pub struct OpNodeTypes;
+
+impl NodeTypes for OpNodeTypes {
     type Primitives = OpPrimitives;
     type ChainSpec = OpChainSpec;
     type StateCommitment = MerklePatriciaTrie;
@@ -873,18 +873,4 @@ where
             ctx.node.provider().clone(),
         ))
     }
-}
-
-/// Network primitive types used by Optimism networks.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub struct OpNetworkPrimitives;
-
-impl NetworkPrimitives for OpNetworkPrimitives {
-    type BlockHeader = alloy_consensus::Header;
-    type BlockBody = alloy_consensus::BlockBody<OpTransactionSigned>;
-    type Block = alloy_consensus::Block<OpTransactionSigned>;
-    type BroadcastedTransaction = OpTransactionSigned;
-    type PooledTransaction = OpPooledTransaction;
-    type Receipt = OpReceipt;
 }
