@@ -1,7 +1,7 @@
 //! Contains [Chain], a chain of blocks and their final state.
 
 use crate::ExecutionOutcome;
-use alloc::{borrow::Cow, boxed::Box, collections::BTreeMap, vec::Vec};
+use alloc::{borrow::Cow, collections::BTreeMap, vec::Vec};
 use alloy_consensus::{transaction::Recovered, BlockHeader};
 use alloy_eips::{eip1898::ForkBlock, eip2718::Encodable2718, BlockNumHash};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash};
@@ -186,7 +186,6 @@ impl<N: NodePrimitives> Chain<N> {
     }
 
     /// Get the block at which this chain forked.
-    #[track_caller]
     pub fn fork_block(&self) -> ForkBlock {
         let first = self.first();
         ForkBlock {
@@ -287,77 +286,6 @@ impl<N: NodePrimitives> Chain<N> {
         self.trie_updates.take(); // reset
 
         Ok(())
-    }
-
-    /// Split this chain at the given block.
-    ///
-    /// The given block will be the last block in the first returned chain.
-    ///
-    /// If the given block is not found, [`ChainSplit::NoSplitPending`] is returned.
-    /// Split chain at the number or hash, block with given number will be included at first chain.
-    /// If any chain is empty (Does not have blocks) None will be returned.
-    ///
-    /// # Note
-    ///
-    /// The plain state is only found in the second chain, making it
-    /// impossible to perform any state reverts on the first chain.
-    ///
-    /// The second chain only contains the changes that were reverted on the first chain; however,
-    /// it retains the up to date state as if the chains were one, i.e. the second chain is an
-    /// extension of the first.
-    ///
-    /// # Panics
-    ///
-    /// If chain doesn't have any blocks.
-    #[track_caller]
-    pub fn split(mut self, split_at: ChainSplitTarget) -> ChainSplit<N> {
-        let chain_tip = *self.blocks.last_entry().expect("chain is never empty").key();
-        let block_number = match split_at {
-            ChainSplitTarget::Hash(block_hash) => {
-                let Some(block_number) = self.block_number(block_hash) else {
-                    return ChainSplit::NoSplitPending(self)
-                };
-                // If block number is same as tip whole chain is becoming canonical.
-                if block_number == chain_tip {
-                    return ChainSplit::NoSplitCanonical(self)
-                }
-                block_number
-            }
-            ChainSplitTarget::Number(block_number) => {
-                if block_number > chain_tip {
-                    return ChainSplit::NoSplitPending(self)
-                }
-                if block_number == chain_tip {
-                    return ChainSplit::NoSplitCanonical(self)
-                }
-                if block_number < *self.blocks.first_entry().expect("chain is never empty").key() {
-                    return ChainSplit::NoSplitPending(self)
-                }
-                block_number
-            }
-        };
-
-        let split_at = block_number + 1;
-        let higher_number_blocks = self.blocks.split_off(&split_at);
-
-        let execution_outcome = core::mem::take(&mut self.execution_outcome);
-        let (canonical_block_exec_outcome, pending_block_exec_outcome) =
-            execution_outcome.split_at(split_at);
-
-        // TODO: Currently, trie updates are reset on chain split.
-        // Add tests ensuring that it is valid to leave updates in the pending chain.
-        ChainSplit::Split {
-            canonical: Box::new(Self {
-                execution_outcome: canonical_block_exec_outcome.expect("split in range"),
-                blocks: self.blocks,
-                trie_updates: None,
-            }),
-            pending: Self {
-                execution_outcome: pending_block_exec_outcome,
-                blocks: higher_number_blocks,
-                trie_updates: None,
-            },
-        }
     }
 }
 
@@ -472,52 +400,6 @@ pub struct BlockReceipts<T = reth_ethereum_primitives::Receipt> {
     pub block: BlockNumHash,
     /// Transaction identifier and receipt.
     pub tx_receipts: Vec<(TxHash, T)>,
-}
-
-/// The target block where the chain should be split.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ChainSplitTarget {
-    /// Split at block number.
-    Number(BlockNumber),
-    /// Split at block hash.
-    Hash(BlockHash),
-}
-
-impl From<BlockNumber> for ChainSplitTarget {
-    fn from(number: BlockNumber) -> Self {
-        Self::Number(number)
-    }
-}
-
-impl From<BlockHash> for ChainSplitTarget {
-    fn from(hash: BlockHash) -> Self {
-        Self::Hash(hash)
-    }
-}
-
-/// Result of a split chain.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ChainSplit<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
-    /// Chain is not split. Pending chain is returned.
-    /// Given block split is higher than last block.
-    /// Or in case of split by hash when hash is unknown.
-    NoSplitPending(Chain<N>),
-    /// Chain is not split. Canonical chain is returned.
-    /// Given block split is lower than first block.
-    NoSplitCanonical(Chain<N>),
-    /// Chain is split into two: `[canonical]` and `[pending]`
-    /// The target of this chain split [`ChainSplitTarget`] belongs to the `canonical` chain.
-    Split {
-        /// Contains lower block numbers that are considered canonicalized. It ends with
-        /// the [`ChainSplitTarget`] block. The state of this chain is now empty and no longer
-        /// usable.
-        canonical: Box<Chain<N>>,
-        /// Right contains all subsequent blocks __after__ the [`ChainSplitTarget`] that are still
-        /// pending.
-        ///
-        /// The state of the original chain is moved here.
-        pending: Chain<N>,
-    },
 }
 
 /// Bincode-compatible [`Chain`] serde implementation.
@@ -788,50 +670,13 @@ mod tests {
         let chain: Chain =
             Chain::new(vec![block1.clone(), block2.clone()], block_state_extended, None);
 
-        let (split1_execution_outcome, split2_execution_outcome) =
-            chain.execution_outcome.clone().split_at(2);
-
-        let chain_split1 = Chain {
-            execution_outcome: split1_execution_outcome.unwrap(),
-            blocks: BTreeMap::from([(1, block1.clone())]),
-            trie_updates: None,
-        };
-
-        let chain_split2 = Chain {
-            execution_outcome: split2_execution_outcome,
-            blocks: BTreeMap::from([(2, block2.clone())]),
-            trie_updates: None,
-        };
-
         // return tip state
         assert_eq!(
             chain.execution_outcome_at_block(block2.number),
             Some(chain.execution_outcome.clone())
         );
-        assert_eq!(
-            chain.execution_outcome_at_block(block1.number),
-            Some(chain_split1.execution_outcome.clone())
-        );
         // state at unknown block
         assert_eq!(chain.execution_outcome_at_block(100), None);
-
-        // split in two
-        assert_eq!(
-            chain.clone().split(block1_hash.into()),
-            ChainSplit::Split { canonical: Box::new(chain_split1), pending: chain_split2 }
-        );
-
-        // split at unknown block hash
-        assert_eq!(
-            chain.clone().split(B256::new([100; 32]).into()),
-            ChainSplit::NoSplitPending(chain.clone())
-        );
-
-        // split at higher number
-        assert_eq!(chain.clone().split(10u64.into()), ChainSplit::NoSplitPending(chain.clone()));
-
-        // split at lower number
-        assert_eq!(chain.clone().split(0u64.into()), ChainSplit::NoSplitPending(chain));
     }
 
     #[test]
