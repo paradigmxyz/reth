@@ -74,7 +74,9 @@ impl Precompile for CachedPrecompile {
     fn call(&self, data: &Bytes, gas_limit: u64) -> PrecompileResult {
         let key = PrecompileKey(data.clone());
 
-        if let Some(ref entry) = self.cache.get(&key) {
+        let cache_result = self.cache.get(&key);
+
+        if let Some(ref entry) = cache_result {
             // for each precompile and input we store in lower_gas_limit the maximum gas for
             // which we have received an out of gas error, any gas limit below that will fail
             // with OOG too.
@@ -97,17 +99,62 @@ impl Precompile for CachedPrecompile {
             }
         }
 
-        // cache miss, call the precompile
-        self.increment_by_one_precompile_cache_misses();
+        // cache miss or unknown gas limit, call the precompile
         let result = self.precompile.call(data, gas_limit);
 
         let previous_entry_count = self.cache_entry_count();
-        let (upper_gas_limit, lower_gas_limit) = match &result {
-            Err(PrecompileError::OutOfGas) => (u64::MAX, gas_limit),
-            _ => (gas_limit, 0),
-        };
-        self.cache
-            .insert(key, CacheEntry { result: result.clone(), upper_gas_limit, lower_gas_limit });
+        match &result {
+            Ok(_) => {
+                if let Some(mut entry) = cache_result {
+                    // update cached result and upper gas limit
+                    entry.result = result.clone();
+                    entry.upper_gas_limit = entry.upper_gas_limit.min(gas_limit);
+                } else {
+                    self.increment_by_one_precompile_cache_misses();
+                    self.cache.insert(
+                        key,
+                        CacheEntry {
+                            result: result.clone(),
+                            upper_gas_limit: gas_limit,
+                            lower_gas_limit: 0,
+                        },
+                    );
+                }
+            }
+            Err(PrecompileError::OutOfGas) => {
+                if let Some(mut entry) = cache_result {
+                    // update cached result and lower gas limit
+                    entry.result = result.clone();
+                    entry.lower_gas_limit = entry.lower_gas_limit.max(gas_limit);
+                } else {
+                    self.increment_by_one_precompile_cache_misses();
+                    self.cache.insert(
+                        key,
+                        CacheEntry {
+                            result: result.clone(),
+                            upper_gas_limit: u64::MAX,
+                            lower_gas_limit: gas_limit,
+                        },
+                    );
+                }
+            }
+            _ => {
+                // for other errors, update the cached result or insert cache entry
+                if let Some(mut entry) = cache_result {
+                    entry.result = result.clone();
+                } else {
+                    self.increment_by_one_precompile_cache_misses();
+                    self.cache.insert(
+                        key,
+                        CacheEntry {
+                            result: result.clone(),
+                            upper_gas_limit: gas_limit,
+                            lower_gas_limit: 0,
+                        },
+                    );
+                }
+            }
+        }
 
         self.update_precompile_cache_size(previous_entry_count);
         result
