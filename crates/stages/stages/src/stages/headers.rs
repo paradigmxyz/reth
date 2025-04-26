@@ -25,10 +25,8 @@ use reth_stages_api::{
 };
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderError;
-use std::{
-    sync::Arc,
-    task::{ready, Context, Poll},
-};
+use std::task::{ready, Context, Poll};
+
 use tokio::sync::watch;
 use tracing::*;
 
@@ -404,6 +402,7 @@ mod tests {
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators::{self, random_header, random_header_range};
     use reth_trie::{updates::TrieUpdates, HashedPostStateSorted};
+    use std::sync::Arc;
     use test_runner::HeadersTestRunner;
 
     mod test_runner {
