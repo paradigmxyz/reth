@@ -30,13 +30,13 @@
 
         # Common arguments for crane builds
         commonArgs = {
-          src = craneLib.cleanCargoSource (craneLib.path ./.);
+          #src = craneLib.cleanCargoSource (craneLib.path ./.);
+          src = (craneLib.path ./.);
           # Add a pname here to silence the warning for the cargoArtifacts build
           pname = "reth-workspace-deps";
           # Features based on Makefile (excluding jemalloc for non-linux potentially,
           # but Nix builds usually target Linux where jemalloc is fine)
-          cargoExtraArgs =
-            "--features jemalloc,asm-keccak,min-debug-logs";
+          cargoExtraArgs = "--features jemalloc,asm-keccak,min-debug-logs";
 
           buildInputs = with pkgs;
             [
