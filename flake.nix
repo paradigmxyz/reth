@@ -31,6 +31,8 @@
         # Common arguments for crane builds
         commonArgs = {
           src = craneLib.cleanCargoSource (craneLib.path ./.);
+          # Add a pname here to silence the warning for the cargoArtifacts build
+          pname = "reth-workspace-deps";
           # Features based on Makefile (excluding jemalloc for non-linux potentially,
           # but Nix builds usually target Linux where jemalloc is fine)
           cargoExtraArgs =
@@ -51,6 +53,7 @@
             cmake # Often needed for C dependencies like libmdbx
             clang # Sometimes preferred/needed by cc crate
             llvmPackages.libclang # For bindgen if used
+            perl # <---- Added perl here for sha3-asm build script
           ];
 
           # Environment variables from Makefile's reproducible build (optional, Nix handles reproducibility)
@@ -68,13 +71,13 @@
         # Build reth package
         reth = craneLib.buildPackage (commonArgs // {
           inherit cargoArtifacts;
-          pname = "reth";
+          pname = "reth"; # This overrides the pname from commonArgs
         });
 
         # Build op-reth package
         op-reth = craneLib.buildPackage (commonArgs // {
           inherit cargoArtifacts;
-          pname = "op-reth";
+          pname = "op-reth"; # This overrides the pname from commonArgs
           # Specify the binary and manifest path for op-reth
           cargoExtraArgs = commonArgs.cargoExtraArgs
             + " --bin op-reth --manifest-path crates/optimism/bin/Cargo.toml";
@@ -128,6 +131,7 @@
             self.packages.${system}.mdbx-tools
           ];
 
+          # Use the same nativeBuildInputs as the build itself
           nativeBuildInputs = commonArgs.nativeBuildInputs;
 
           buildInputs = commonArgs.buildInputs ++ (with pkgs; [
