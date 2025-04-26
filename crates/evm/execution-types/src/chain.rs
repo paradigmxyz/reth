@@ -677,14 +677,6 @@ mod tests {
         );
         // state at unknown block
         assert_eq!(chain.execution_outcome_at_block(100), None);
-
-        // split in two
-
-        // split at unknown block hash
-
-        // split at higher number
-
-        // split at lower number
     }
 
     #[test]
