@@ -4,9 +4,7 @@ use alloy_primitives::{Address, B256};
 use reth_ethereum::{
     chainspec::ChainSpecBuilder,
     node::EthereumNode,
-    primitives::{
-        transaction::signed::SignedTransaction, AlloyBlockHeader, SealedBlock, SealedHeader,
-    },
+    primitives::{AlloyBlockHeader, SealedBlock, SealedHeader},
     provider::{
         providers::ReadOnlyConfig, AccountReader, BlockReader, BlockSource, HeaderProvider,
         ReceiptProvider, StateProvider, TransactionsProvider,

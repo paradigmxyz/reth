@@ -1,6 +1,5 @@
 //! Command for debugging execution.
 
-use crate::{args::NetworkArgs, utils::get_single_header};
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{BlockNumber, B256};
 use clap::Parser;
@@ -24,6 +23,7 @@ use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_network_p2p::{headers::client::HeadersClient, EthBlockClient};
 use reth_node_api::NodeTypesWithDBAdapter;
+use reth_node_core::{args::NetworkArgs, utils::get_single_header};
 use reth_node_ethereum::{consensus::EthBeaconConsensus, EthExecutorProvider};
 use reth_node_events::node::NodeEvent;
 use reth_provider::{
@@ -75,11 +75,11 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     {
         // building network downloaders using the fetch client
         let header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
-            .build(client.clone(), consensus.clone().as_header_validator())
+            .build(client.clone(), consensus.clone())
             .into_task_with(task_executor);
 
         let body_downloader = BodiesDownloaderBuilder::new(config.stages.bodies)
-            .build(client, consensus.clone().as_consensus(), provider_factory.clone())
+            .build(client, consensus.clone(), provider_factory.clone())
             .into_task_with(task_executor);
 
         let stage_conf = &config.stages;

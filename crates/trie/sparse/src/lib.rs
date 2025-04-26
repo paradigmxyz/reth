@@ -1,6 +1,9 @@
 //! The implementation of sparse MPT.
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
 
 mod state;
 pub use state::*;

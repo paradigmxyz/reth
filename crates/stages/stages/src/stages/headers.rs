@@ -13,12 +13,12 @@ use reth_db_api::{
 };
 use reth_etl::Collector;
 use reth_network_p2p::headers::{
-    downloader::{HeaderDownloader, SyncTarget},
+    downloader::{HeaderDownloader, HeaderSyncGap, SyncTarget},
     error::HeadersDownloaderError,
 };
 use reth_primitives_traits::{serde_bincode_compat, FullBlockHeader, NodePrimitives, SealedHeader};
 use reth_provider::{
-    providers::StaticFileWriter, BlockHashReader, DBProvider, HeaderProvider, HeaderSyncGap,
+    providers::StaticFileWriter, BlockHashReader, DBProvider, HeaderProvider,
     HeaderSyncGapProvider, StaticFileProviderFactory,
 };
 use reth_stages_api::{
@@ -136,7 +136,7 @@ where
                     .map_err(|err| StageError::Fatal(Box::new(err)))?
                     .into();
 
-            let (header, header_hash) = sealed_header.split();
+            let (header, header_hash) = sealed_header.split_ref();
             if header.number() == 0 {
                 continue
             }
@@ -145,19 +145,16 @@ where
             // Increase total difficulty
             td += header.difficulty();
 
-            // Header validation
-            self.consensus.validate_header_with_total_difficulty(&header, td).map_err(|error| {
-                StageError::Block {
-                    block: Box::new(BlockWithParent::new(
-                        header.parent_hash(),
-                        NumHash::new(header.number(), header_hash),
-                    )),
-                    error: BlockErrorKind::Validation(error),
-                }
+            self.consensus.validate_header(&sealed_header).map_err(|error| StageError::Block {
+                block: Box::new(BlockWithParent::new(
+                    sealed_header.parent_hash(),
+                    NumHash::new(sealed_header.number(), sealed_header.hash()),
+                )),
+                error: BlockErrorKind::Validation(error),
             })?;
 
             // Append to Headers segment
-            writer.append_header(&header, td, &header_hash)?;
+            writer.append_header(header, td, header_hash)?;
         }
 
         info!(target: "sync::stages::headers", total = total_headers, "Writing headers hash index");
