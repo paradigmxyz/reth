@@ -3,24 +3,31 @@
 //! This is useful for wiring components together that don't require network but still need to be
 //! generic over it.
 
+use core::marker::PhantomData;
 use std::net::{IpAddr, SocketAddr};
 
 use alloy_rpc_types_admin::EthProtocolInfo;
 use enr::{secp256k1::SecretKey, Enr};
-use reth_eth_wire_types::{DisconnectReason, ProtocolVersion};
+use reth_eth_wire_types::{DisconnectReason, EthNetworkPrimitives, ProtocolVersion};
 use reth_network_peers::NodeRecord;
 use reth_network_types::{PeerKind, Reputation, ReputationChangeKind};
 
-use crate::{NetworkError, NetworkInfo, NetworkStatus, PeerId, PeerInfo, Peers, PeersInfo};
+use crate::{
+    BlockDownloaderProvider, NetworkError, NetworkInfo, NetworkStatus, PeerId, PeerInfo, Peers,
+    PeersInfo,
+};
 
 /// A type that implements all network trait that does nothing.
 ///
 /// Intended for testing purposes where network is not used.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
-pub struct NoopNetwork;
+pub struct NoopNetwork<NetPrimitives = EthNetworkPrimitives>(PhantomData<NetPrimitives>);
 
-impl NetworkInfo for NoopNetwork {
+impl<NetPrimitives> NetworkInfo for NoopNetwork<NetPrimitives>
+where
+    NetPrimitives: Send + Sync,
+{
     fn local_addr(&self) -> SocketAddr {
         (IpAddr::from(std::net::Ipv4Addr::UNSPECIFIED), 30303).into()
     }
@@ -54,7 +61,10 @@ impl NetworkInfo for NoopNetwork {
     }
 }
 
-impl PeersInfo for NoopNetwork {
+impl<NetPrimitives> PeersInfo for NoopNetwork<NetPrimitives>
+where
+    NetPrimitives: Send + Sync,
+{
     fn num_connected_peers(&self) -> usize {
         0
     }
@@ -69,7 +79,10 @@ impl PeersInfo for NoopNetwork {
     }
 }
 
-impl Peers for NoopNetwork {
+impl<NetPrimitives> Peers for NoopNetwork<NetPrimitives>
+where
+    NetPrimitives: Send + Sync,
+{
     fn add_trusted_peer_id(&self, _peer: PeerId) {}
 
     fn add_peer_kind(
@@ -117,4 +130,9 @@ impl Peers for NoopNetwork {
     async fn reputation_by_id(&self, _peer_id: PeerId) -> Result<Option<Reputation>, NetworkError> {
         Ok(None)
     }
+}
+
+impl<NetPrimitives> BlockDownloaderProvider for NoopNetwork<NetPrimitives> where
+    NetPrimitives: Send + Sync
+{
 }

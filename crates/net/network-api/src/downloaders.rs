@@ -1,9 +1,11 @@
 //! API related to syncing blocks.
 
+use core::marker::PhantomData;
 use std::fmt::Debug;
 
 use futures::Future;
-use reth_network_p2p::BlockClient;
+use reth_eth_wire_types::EthNetworkPrimitives;
+use reth_network_p2p::{test_utils::NoopFullBlockClient, BlockClient};
 use tokio::sync::oneshot;
 
 /// Provides client for downloading blocks.
@@ -18,4 +20,18 @@ pub trait BlockDownloaderProvider {
     fn fetch_client(
         &self,
     ) -> impl Future<Output = Result<Self::Client, oneshot::error::RecvError>> + Send;
+}
+
+pub struct NoopBlockchainDownloaderProvider<NetPrimitives = EthNetworkPrimitives>(
+    PhantomData<NetPrimitives>,
+);
+
+impl<NetPrimitives> BlockDownloaderProvider for NoopBlockchainDownloaderProvider<NetPrimitives> {
+    type Client = NoopFullBlockClient<NetPrimitives>;
+
+    fn fetch_client(
+        &self,
+    ) -> impl Future<Output = Result<Self::Client, oneshot::error::RecvError>> + Send {
+        async { Ok(NoopFullBlockClient::<_>(PhantomData)) }
+    }
 }

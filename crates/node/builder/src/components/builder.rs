@@ -10,6 +10,8 @@ use crate::{
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network::NetworkPrimitives;
+use reth_network_api::FullNetwork;
+use reth_network_p2p::BlockClient;
 use reth_node_api::{BlockTy, BodyTy, HeaderTy, PrimitivesTy, TxTy};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::{future::Future, marker::PhantomData};
@@ -300,14 +302,14 @@ where
         Node,
         Pool: TransactionPool<
             Transaction: PoolTransaction<
-                Pooled = <NetworkB::Primitives as NetworkPrimitives>::PooledTransaction,
+                Pooled = <NetworkB::Network as NetworkPrimitives>::PooledTransaction,
             >,
         >,
     >,
     NetworkB: NetworkBuilder<
         Node,
         PoolB::Pool,
-        Primitives: NetworkPrimitives<
+        Network: NetworkPrimitives<
             BlockHeader = HeaderTy<Node::Types>,
             BlockBody = BodyTy<Node::Types>,
             Block = BlockTy<Node::Types>,
@@ -319,7 +321,7 @@ where
 {
     type Components = Components<
         Node,
-        NetworkB::Primitives,
+        NetworkB::Network,
         PoolB::Pool,
         ExecB::EVM,
         ExecB::Executor,
@@ -391,16 +393,17 @@ pub trait NodeComponentsBuilder<Node: FullNodeTypes>: Send {
     ) -> impl Future<Output = eyre::Result<Self::Components>> + Send;
 }
 
-impl<Node, N, F, Fut, Pool, EVM, Executor, Cons> NodeComponentsBuilder<Node> for F
+impl<Node, Net, F, Fut, Pool, EVM, Executor, Cons> NodeComponentsBuilder<Node> for F
 where
-    N: NetworkPrimitives<
+    Net: FullNetwork<
         BlockHeader = HeaderTy<Node::Types>,
         BlockBody = BodyTy<Node::Types>,
         Block = BlockTy<Node::Types>,
+        Client: BlockClient<Block = BlockTy<Node::Types>>,
     >,
     Node: FullNodeTypes,
     F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
-    Fut: Future<Output = eyre::Result<Components<Node, N, Pool, EVM, Executor, Cons>>> + Send,
+    Fut: Future<Output = eyre::Result<Components<Node, Net, Pool, EVM, Executor, Cons>>> + Send,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
         + 'static,
@@ -409,7 +412,7 @@ where
     Cons:
         FullConsensus<PrimitivesTy<Node::Types>, Error = ConsensusError> + Clone + Unpin + 'static,
 {
-    type Components = Components<Node, N, Pool, EVM, Executor, Cons>;
+    type Components = Components<Node, Net, Pool, EVM, Executor, Cons>;
 
     fn build_components(
         self,

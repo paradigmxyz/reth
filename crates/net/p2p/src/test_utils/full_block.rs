@@ -9,8 +9,9 @@ use crate::{
 use alloy_consensus::Header;
 use alloy_eips::{BlockHashOrNumber, BlockNumHash};
 use alloy_primitives::B256;
+use core::{fmt, marker::PhantomData};
 use parking_lot::Mutex;
-use reth_eth_wire_types::HeadersDirection;
+use reth_eth_wire_types::{EthNetworkPrimitives, HeadersDirection};
 use reth_ethereum_primitives::{Block, BlockBody};
 use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives_traits::{SealedBlock, SealedHeader};
@@ -19,10 +20,13 @@ use std::{collections::HashMap, sync::Arc};
 /// A headers+bodies client implementation that does nothing.
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
-pub struct NoopFullBlockClient;
+pub struct NoopFullBlockClient<NetPrimitives = EthNetworkPrimitives>(PhantomData<NetPrimitives>);
 
 /// Implements the `DownloadClient` trait for the `NoopFullBlockClient` struct.
-impl DownloadClient for NoopFullBlockClient {
+impl<NetPrimitives> DownloadClient for NoopFullBlockClient<NetPrimitives>
+where
+    NetPrimitives: fmt::Debug + Send + Sync,
+{
     /// Reports a bad message received from a peer.
     ///
     /// # Arguments
@@ -42,7 +46,10 @@ impl DownloadClient for NoopFullBlockClient {
 }
 
 /// Implements the `BodiesClient` trait for the `NoopFullBlockClient` struct.
-impl BodiesClient for NoopFullBlockClient {
+impl<NetPrimitives> BodiesClient for NoopFullBlockClient<NetPrimitives>
+where
+    NetPrimitives: fmt::Debug + Send + Sync,
+{
     type Body = BlockBody;
     /// Defines the output type of the function.
     type Output = futures::future::Ready<PeerRequestResult<Vec<BlockBody>>>;
@@ -68,7 +75,10 @@ impl BodiesClient for NoopFullBlockClient {
     }
 }
 
-impl HeadersClient for NoopFullBlockClient {
+impl<NetPrimitives> HeadersClient for NoopFullBlockClient<NetPrimitives>
+where
+    NetPrimitives: fmt::Debug + Send + Sync,
+{
     type Header = Header;
     /// The output type representing a future containing a peer request result with a vector of
     /// headers.
