@@ -76,7 +76,6 @@ members = [
     "crates/optimism/evm/",
     "crates/optimism/hardforks/",
     "crates/optimism/node/",
-    "crates/optimism/chain-registry/",
     "crates/optimism/payload/",
     "crates/optimism/primitives/",
     "crates/optimism/reth/",
@@ -390,7 +389,6 @@ reth-optimism-node = { path = "crates/optimism/node" }
 reth-node-types = { path = "crates/node/types" }
 reth-op = { path = "crates/optimism/reth", default-features = false }
 reth-optimism-chainspec = { path = "crates/optimism/chainspec", default-features = false }
-reth-optimism-chain-resitry = { path = "crates/optimism/chain-registry" }
 reth-optimism-cli = { path = "crates/optimism/cli" }
 reth-optimism-consensus = { path = "crates/optimism/consensus", default-features = false }
 reth-optimism-forks = { path = "crates/optimism/hardforks", default-features = false }
