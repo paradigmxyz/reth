@@ -24,6 +24,8 @@ use std::{
 use tracing::{info, warn};
 
 const REPORT_INTERVAL_SECS: u64 = 10;
+const ENTRY_HEADER_SIZE: usize = 8;
+const VERSION_ENTRY_SIZE: usize = ENTRY_HEADER_SIZE;
 
 /// Configuration to export block history
 /// to era1 files
@@ -144,11 +146,8 @@ where
         );
 
         let mut block_tuples = Vec::with_capacity(block_count);
-        let mut offsets = Vec::with_capacity(block_count);
-
-        // Start after version header to count
-        let mut position: i64 = 0;
-        let final_header_data = Vec::new();
+        let mut block_sizes = Vec::with_capacity(block_count);
+        let mut final_header_data = Vec::new();
 
         for block_number in start_block..=end_block {
             let header = provider
@@ -170,20 +169,27 @@ where
             let compressed_receipts = CompressedReceipts::from_encodable_list(&receipts)
                 .map_err(|e| eyre!("Failed to compress receipts: {}", e))?;
 
+            // Save last block's header data for accumulator
+            if block_number == end_block {
+                final_header_data = compressed_header.data.clone();
+            }
+
             let difficulty = TotalDifficulty::new(total_difficulty);
 
             let block_tuple = BlockTuple::new(
-                compressed_header,
-                compressed_body,
-                compressed_receipts,
+                compressed_header.clone(),
+                compressed_body.clone(),
+                compressed_receipts.clone(),
                 difficulty,
             );
 
-            offsets.push(position);
-
-            // TODO: calculate accurate file offsets when writing era files
-            position += 100;
+            let header_size = compressed_header.data.len() + ENTRY_HEADER_SIZE;
+            let body_size = compressed_body.data.len() + ENTRY_HEADER_SIZE;
+            let receipts_size = compressed_receipts.data.len() + ENTRY_HEADER_SIZE;
+            let difficulty_size = 32 + ENTRY_HEADER_SIZE; // U256 is 32 + 8 bytes header overhead
+            let total_size = header_size + body_size + receipts_size + difficulty_size;
             block_tuples.push(block_tuple);
+            block_sizes.push(total_size);
             total_blocks_processed += 1;
 
             if last_report_time.elapsed() >= report_interval {
@@ -201,6 +207,15 @@ where
             }
         }
         if !block_tuples.is_empty() {
+            let mut offsets = Vec::with_capacity(block_count);
+
+            let mut position = VERSION_ENTRY_SIZE as i64;
+
+            for size in &block_sizes {
+                offsets.push(position);
+                position += *size as i64;
+            }
+
             let accumulator_hash =
                 B256::from_slice(&final_header_data[0..32.min(final_header_data.len())]);
             let accumulator = Accumulator::new(accumulator_hash);
