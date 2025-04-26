@@ -727,7 +727,7 @@ where
 
     /// Removes and returns all matching transactions from the pool.
     ///
-    /// This behaves as if the transactions got discarded (_not_ mined), effecitvely introducing a
+    /// This behaves as if the transactions got discarded (_not_ mined), effectively introducing a
     /// nonce gap for the given transactions.
     pub fn remove_transactions(
         &self,
