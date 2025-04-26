@@ -165,6 +165,7 @@ where
 
             if last_report_time.elapsed() >= report_interval {
                 info!(
+                    target: "era::history::export",
                     "Export progress: block {}/{} ({:.2}%) - elapsed: {:?}",
                     block_number,
                     last_block_number,
@@ -187,6 +188,7 @@ where
     }
 
     info!(
+        target: "era::history::export",
         "Export data preparation complete. Processed {} blocks in {:?}",
         total_blocks_processed,
         start_time.elapsed()
