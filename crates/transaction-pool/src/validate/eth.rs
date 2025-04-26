@@ -84,7 +84,7 @@ where
     /// which can improve performance when validating many transactions.
     ///
     /// If `state` is `None`, a new state provider will be created.
-    pub fn validate_one_against_state(
+    pub fn validate_one_with_state(
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
