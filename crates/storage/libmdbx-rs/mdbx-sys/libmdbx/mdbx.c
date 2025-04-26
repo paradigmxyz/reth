@@ -14810,7 +14810,7 @@ retry:
           left > (MDBX_PNL_GETSIZE(txn->tw.lifo_reclaimed) - ctx->reused_slot) *
                      env->me_maxgc_ov1page &&
           !ctx->dense) {
-        /* Hужен свободный для сохранения списка страниц. */
+        /* Hужен свободный для для сохранения списка страниц. */
         bool need_cleanup = false;
         txnid_t snap_oldest = 0;
       retry_rid:
