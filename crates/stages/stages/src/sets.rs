@@ -120,7 +120,6 @@ where
             online: OnlineStages::new(
                 provider,
                 tip,
-                consensus.clone(),
                 header_downloader,
                 body_downloader,
                 stages_config.clone(),
@@ -191,8 +190,7 @@ where
     provider: Provider,
     /// The tip for the headers stage.
     tip: watch::Receiver<B256>,
-    /// The consensus engine used to validate incoming data.
-    consensus: Arc<dyn Consensus<B::Block, Error = ConsensusError>>,
+
     /// The block header downloader
     header_downloader: H,
     /// The block body downloader
@@ -210,12 +208,12 @@ where
     pub fn new(
         provider: Provider,
         tip: watch::Receiver<B256>,
-        consensus: Arc<dyn Consensus<B::Block, Error = ConsensusError>>,
+
         header_downloader: H,
         body_downloader: B,
         stages_config: StageConfig,
     ) -> Self {
-        Self { provider, tip, consensus, header_downloader, body_downloader, stages_config }
+        Self { provider, tip, header_downloader, body_downloader, stages_config }
     }
 }
 
