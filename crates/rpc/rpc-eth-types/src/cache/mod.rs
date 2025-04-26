@@ -234,7 +234,7 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
     }
 }
 
-/// A task than manages caches for data required by the `eth` rpc implementation.
+/// A task that manages caches for data required by the `eth` rpc implementation.
 ///
 /// It provides a caching layer on top of the given
 /// [`StateProvider`](reth_storage_api::StateProvider) and keeps data fetched via the provider in
