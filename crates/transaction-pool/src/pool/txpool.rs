@@ -819,9 +819,11 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.remove_from_subpool(pool, tx.id())
     }
 
-    /// Remove the transaction from the entire pool via its hash.
+    /// Remove the transaction from the entire pool via its hash. This includes the total set of
+    /// transactions and the subpool it currently resides in.
     ///
-    /// This includes the total set of transactions and the subpool it currently resides in.
+    /// This treats the descendants as if this transaction is discarded and removing the transaction
+    /// reduces a nonce gap.
     fn remove_transaction_by_hash(
         &mut self,
         tx_hash: &B256,
@@ -3220,10 +3222,18 @@ mod tests {
         assert_eq!(0, pool.queued_transactions().len());
         assert_eq!(4, pool.pending_transactions().len());
 
-        pool.remove_transactions(vec![*v1.hash()]);
+        let mut removed_txs = pool.remove_transactions(vec![*v1.hash()]);
+        assert_eq!(1, removed_txs.len());
 
         assert_eq!(2, pool.queued_transactions().len());
         assert_eq!(1, pool.pending_transactions().len());
+
+        // reinsert
+        let removed_tx = removed_txs.pop().unwrap();
+        let v1 = f.validated(removed_tx.transaction.clone());
+        let _res = pool.add_transaction(v1, on_chain_balance, on_chain_nonce).unwrap();
+        assert_eq!(0, pool.queued_transactions().len());
+        assert_eq!(4, pool.pending_transactions().len());
     }
 
     #[test]
