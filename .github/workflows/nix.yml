@@ -1,0 +1,41 @@
+name: nix
+permissions:
+  contents: read
+  pull-requests: write
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  NIX_BUILD_CMD: "nix build -L -v --log-format bar-with-logs"
+  NIX_RUN_CMD: "nix run .#reth -L -v --log-format bar-with-logs -- --help"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: checkout repository
+        uses: actions/checkout@v4
+
+      - name: install nix
+        uses: cachix/install-nix-action@v31
+        with:
+          nix_path: nixpkgs=channel:nixpkgs-unstable
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: nix flake check
+        run: |
+          nix flake check
+
+      - name: nix build
+        run: |
+          echo $NIX_BUILD_CMD
+          eval $NIX_BUILD_CMD
+
+      - name: nix run
+        run: |
+          echo $NIX_RUN_CMD
+          eval $NIX_RUN_CMD
