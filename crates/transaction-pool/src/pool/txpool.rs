@@ -1469,6 +1469,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         Some((tx, internal.subpool))
     }
 
+    /// If a tx is removed (_not_ mined), all descendants are set to parked due to the nonce gap
     pub(crate) fn park_descendant_pending_txs(&mut self, tx_id: &TransactionId) -> Vec<PoolUpdate> {
         let mut updates = Vec::new();
 
