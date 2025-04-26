@@ -831,7 +831,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         let (tx, pool) = self.all_transactions.remove_transaction_by_hash(tx_hash)?;
 
         // After a tx is removed, its descendants must become parked due to the nonce gap
-        let updates = self.all_transactions.park_descendant_pending_txs(tx.id());
+        let updates = self.all_transactions.park_descendant_transactions(tx.id());
         self.process_updates(updates);
         self.remove_from_subpool(pool, tx.id())
     }
@@ -1472,7 +1472,10 @@ impl<T: PoolTransaction> AllTransactions<T> {
     }
 
     /// If a tx is removed (_not_ mined), all descendants are set to parked due to the nonce gap
-    pub(crate) fn park_descendant_pending_txs(&mut self, tx_id: &TransactionId) -> Vec<PoolUpdate> {
+    pub(crate) fn park_descendant_transactions(
+        &mut self,
+        tx_id: &TransactionId,
+    ) -> Vec<PoolUpdate> {
         let mut updates = Vec::new();
 
         for (id, tx) in self.descendant_txs_mut(tx_id) {
