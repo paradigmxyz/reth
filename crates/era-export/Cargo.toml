@@ -19,7 +19,7 @@ alloy-rlp.workspace = true
 reth-db-api.workspace = true
 reth-era.workspace = true
 reth-primitives-traits.workspace = true
-reth-storage-api.workspace = true
+reth-storage-api = { workspace = true, features = ["db-api"] }
 
 # obs
 tracing.workspace = true
