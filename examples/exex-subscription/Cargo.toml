@@ -10,8 +10,9 @@ exclude.workspace = true
 
 [dependencies]
 # reth
-reth.workspace = true
-reth-ethereum = { workspace = true, features = ["full"] }
+reth-ethereum = { workspace = true, features = ["full", "cli"] }
+
+alloy-primitives.workspace = true
 
 eyre.workspace = true
 futures.workspace = true
@@ -19,6 +20,4 @@ clap = { workspace = true, features = ["derive"] }
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
 tokio.workspace = true
 serde.workspace = true
-alloy-primitives.workspace = true
-[dev-dependencies]
-tokio.workspace = true
+tracing.workspace = true

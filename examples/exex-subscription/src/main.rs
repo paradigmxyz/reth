@@ -1,6 +1,5 @@
-#![warn(unused_crate_dependencies)]
-#![allow(dead_code)]
-#![allow(unused_variables)]
+//! An ExEx example that installs a new RPC subscription endpoint that emit storage changes for a requested address.
+
 use alloy_primitives::{Address, U256};
 use clap::Parser;
 use futures::TryStreamExt;
@@ -14,7 +13,7 @@ use reth_ethereum::{
 };
 use std::collections::HashMap;
 use tokio::sync::{mpsc, oneshot};
-use tracing::info;
+use tracing::{error, info};
 
 /// Subscription update format for storage changes.
 /// This is the format that will be sent to the client when a storage change occurs.
@@ -72,7 +71,7 @@ impl StorageWatcherApiServer for StorageWatcherRpc {
             let sink = match pending.accept().await {
                 Ok(sink) => sink,
                 Err(e) => {
-                    println!("failed to accept subscription: {e}");
+                    error!("failed to accept subscription: {e}");
                     return;
                 }
             };
@@ -80,9 +79,8 @@ impl StorageWatcherApiServer for StorageWatcherRpc {
             let (resp_tx, resp_rx) = oneshot::channel();
             subscription.send(SubscriptionRequest { address, response: resp_tx }).unwrap();
 
-            let mut rx = match resp_rx.await {
-                Ok(rx) => rx,
-                Err(_) => return,
+            let Ok(mut rx) = resp_rx.await else {
+                return
             };
 
             while let Some(diff) = rx.recv().await {
@@ -150,7 +148,7 @@ struct Args {
 }
 
 fn main() -> eyre::Result<()> {
-    reth::cli::Cli::parse_args().run(async move |builder, _| {
+    reth_ethereum::cli::Cli::parse_args().run(async move |builder, _| {
         let (subscriptions_tx, subscriptions_rx) = mpsc::unbounded_channel::<SubscriptionRequest>();
         let subscriptions_sender: SubscriptionSender = subscriptions_tx.clone();
 
