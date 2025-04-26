@@ -1,6 +1,8 @@
+#![allow(dead_code)]
+
 //! An ExEx example that installs a new RPC subscription endpoint that emit storage changes for a
 //! requested address.
-
+#[allow(dead_code)]
 use alloy_primitives::{Address, U256};
 use clap::Parser;
 use futures::TryStreamExt;
@@ -96,47 +98,70 @@ impl StorageWatcherApiServer for StorageWatcherRpc {
 
 async fn my_exex<Node: FullNodeComponents>(
     mut ctx: ExExContext<Node>,
-    _subscriptions_senderr: SubscriptionSender,
+    mut subscription_requests: mpsc::UnboundedReceiver<(
+        Address,
+        mpsc::UnboundedSender<StorageDiff>,
+    )>,
 ) -> eyre::Result<()> {
-    let subscriptions: HashMap<Address, Vec<mpsc::UnboundedSender<StorageDiff>>> = HashMap::new();
+    let mut subscriptions: HashMap<Address, Vec<mpsc::UnboundedSender<StorageDiff>>> =
+        HashMap::new();
 
-    while let Some(notification) = ctx.notifications.try_next().await? {
-        match &notification {
-            ExExNotification::ChainCommitted { new } => {
-                info!(committed_chain = ?new.range(), "Received commit");
-                let execution_outcome = new.execution_outcome();
+    loop {
+        tokio::select! {
+            maybe_notification = ctx.notifications.try_next() => {
+                let notification = match maybe_notification? {
+                    Some(notification) => notification,
+                    None => break,
+                };
 
-                for (address, senders) in &subscriptions {
-                    for change in &execution_outcome.bundle.state {
-                        if change.0 == address {
-                            for (key, slot) in &change.1.storage {
-                                let diff = StorageDiff {
-                                    address: *change.0,
-                                    key: *key,
-                                    old_value: slot.original_value(),
-                                    new_value: slot.present_value(),
-                                };
+                match &notification {
+                    ExExNotification::ChainCommitted { new } => {
+                        info!(committed_chain = ?new.range(), "Received commit");
+                        let execution_outcome = new.execution_outcome();
 
-                                for sender in senders {
-                                    let _ = sender.send(diff);
+                        for (address, senders) in subscriptions.iter_mut() {
+                            for change in &execution_outcome.bundle.state {
+                                if change.0 == address {
+                                    for (key, slot) in &change.1.storage {
+                                        let diff = StorageDiff {
+                                            address: *change.0,
+                                            key: *key,
+                                            old_value: slot.original_value(),
+                                            new_value: slot.present_value(),
+                                        };
+                                        // Send diff to all the active subscribers
+                                        senders.retain(|sender| sender.send(diff.clone()).is_ok());
+                                    }
                                 }
                             }
                         }
                     }
+                    ExExNotification::ChainReorged { old, new } => {
+                        info!(from_chain = ?old.range(), to_chain = ?new.range(), "Received reorg");
+                    }
+                    ExExNotification::ChainReverted { old } => {
+                        info!(reverted_chain = ?old.range(), "Received revert");
+                    }
+                }
+
+                if let Some(committed_chain) = notification.committed_chain() {
+                    ctx.events.send(ExExEvent::FinishedHeight(committed_chain.tip().num_hash()))?;
                 }
             }
-            ExExNotification::ChainReorged { old, new } => {
-                info!(from_chain = ?old.range(), to_chain = ?new.range(), "Received reorg");
-            }
-            ExExNotification::ChainReverted { old } => {
-                info!(reverted_chain = ?old.range(), "Received revert");
-            }
-        }
 
-        if let Some(committed_chain) = notification.committed_chain() {
-            ctx.events.send(ExExEvent::FinishedHeight(committed_chain.tip().num_hash()))?;
+            maybe_subscription = subscription_requests.recv() => {
+                match maybe_subscription {
+                    Some((address, sender)) => {
+                        subscriptions.entry(address).or_default().push(sender);
+                    }
+                    None => {
+                        // Channel closed
+                    }
+                }
+            }
         }
     }
+
     Ok(())
 }
 
@@ -148,12 +173,11 @@ struct Args {
 
 fn main() -> eyre::Result<()> {
     reth_ethereum::cli::Cli::parse_args().run(async move |builder, _| {
-        let (subscriptions_tx, subscriptions_rx) = mpsc::unbounded_channel::<SubscriptionRequest>();
-        let subscriptions_sender: SubscriptionSender = subscriptions_tx.clone();
-
+        let (_, subscriptions_rx) =
+            mpsc::unbounded_channel::<(Address, mpsc::UnboundedSender<StorageDiff>)>();
         let handle = builder
             .node(EthereumNode::default())
-            .install_exex("my-exex", async move |ctx| Ok(my_exex(ctx, subscriptions_sender)))
+            .install_exex("my-exex", async move |ctx| Ok(my_exex(ctx, subscriptions_rx)))
             .launch()
             .await?;
 
