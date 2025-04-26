@@ -311,6 +311,74 @@ where
         })
     }
 }
+
+///Action that broadcasts the latest fork choice state to all clients
+#[derive(Debug, Default)]
+pub struct BroadcastLatestForkchoice {}
+
+impl<Engine> Action<Engine> for BroadcastLatestForkchoice
+where
+    Engine: EngineTypes + PayloadTypes<PayloadAttributes = PayloadAttributes>,
+    reth_node_ethereum::engine::EthPayloadAttributes:
+        From<<Engine as EngineTypes>::ExecutionPayloadEnvelopeV3>,
+{
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            let payload = env.latest_payload_executed.clone();
+
+            if env.node_clients.is_empty() {
+                return Err(eyre::eyre!("No node clients available"));
+            }
+            let latest_block = env
+                .latest_block_info
+                .as_ref()
+                .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
+
+            let parent_hash = latest_block.hash;
+            debug!("Latest block hash: {parent_hash}");
+
+            let fork_choice_state = ForkchoiceState {
+                head_block_hash: parent_hash,
+                safe_block_hash: parent_hash,
+                finalized_block_hash: parent_hash,
+            };
+            debug!(
+                "Broadcasting forkchoice update to {} clients. Head: {:?}",
+                env.node_clients.len(),
+                fork_choice_state.head_block_hash
+            );
+
+            for (idx, client) in env.node_clients.iter().enumerate() {
+                let engine_client = &client.engine;
+
+                match EngineApiClient::<Engine>::fork_choice_updated_v3(
+                    engine_client,
+                    fork_choice_state,
+                    payload.clone(),
+                )
+                .await
+                {
+                    Ok(resp) => {
+                        debug!(
+                            "Client {}: Forkchoice update status: {:?}",
+                            idx, resp.payload_status.status
+                        );
+                    }
+                    Err(err) => {
+                        return Err(eyre::eyre!(
+                            "Client {}: Failed to broadcast forkchoice: {:?}",
+                            idx,
+                            err
+                        ));
+                    }
+                }
+            }
+            debug!("Forkchoice update broadcasted successfully");
+            Ok(())
+        })
+    }
+}
+
 /// Action that produces a sequence of blocks using the available clients
 #[derive(Debug)]
 pub struct ProduceBlocks<Engine> {
