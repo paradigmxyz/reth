@@ -98,10 +98,7 @@ impl StorageWatcherApiServer for StorageWatcherRpc {
 
 async fn my_exex<Node: FullNodeComponents>(
     mut ctx: ExExContext<Node>,
-    mut subscription_requests: mpsc::UnboundedReceiver<(
-        Address,
-        mpsc::UnboundedSender<StorageDiff>,
-    )>,
+    mut subscription_requests: mpsc::UnboundedReceiver<SubscriptionRequest>,
 ) -> eyre::Result<()> {
     let mut subscriptions: HashMap<Address, Vec<mpsc::UnboundedSender<StorageDiff>>> =
         HashMap::new();
@@ -151,12 +148,14 @@ async fn my_exex<Node: FullNodeComponents>(
 
             maybe_subscription = subscription_requests.recv() => {
                 match maybe_subscription {
-                    Some((address, sender)) => {
-                        subscriptions.entry(address).or_default().push(sender);
+                    Some(SubscriptionRequest { address, response }) => {
+                        let (tx, rx) = mpsc::unbounded_channel();
+                        subscriptions.entry(address).or_default().push(tx);
+                        let _ = response.send(rx);
                     }
                     None => {
-                        // Channel closed
-                    }
+                        // channel closed
+                         }
                 }
             }
         }
@@ -172,11 +171,17 @@ struct Args {
 }
 
 fn main() -> eyre::Result<()> {
-    reth_ethereum::cli::Cli::parse_args().run(async move |builder, _| {
-        let (_, subscriptions_rx) =
-            mpsc::unbounded_channel::<(Address, mpsc::UnboundedSender<StorageDiff>)>();
+    reth_ethereum::cli::Cli::parse_args().run(|builder, _args| async move {
+        let (subscriptions_tx, subscriptions_rx) = mpsc::unbounded_channel::<SubscriptionRequest>();
+
+        let rpc = StorageWatcherRpc::new(subscriptions_tx.clone());
+
         let handle = builder
             .node(EthereumNode::default())
+            .extend_rpc_modules(move |ctx| {
+                ctx.modules.merge_configured(StorageWatcherApiServer::into_rpc(rpc))?;
+                Ok(())
+            })
             .install_exex("my-exex", async move |ctx| Ok(my_exex(ctx, subscriptions_rx)))
             .launch()
             .await?;
