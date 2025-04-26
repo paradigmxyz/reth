@@ -8821,19 +8821,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-optimism-chain-registry"
-version = "1.3.12"
-dependencies = [
- "eyre",
- "reqwest",
- "reth-fs-util",
- "serde_json",
- "tempfile",
- "tracing",
- "zstd",
-]
-
-[[package]]
 name = "reth-optimism-chainspec"
 version = "1.3.12"
 dependencies = [
