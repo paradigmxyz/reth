@@ -107,9 +107,6 @@ Next, run the tests:
 # Without Geth
 cargo test --workspace
 
-# With Geth
-cargo test --workspace --features geth-tests
-
 # With Ethereum Foundation tests
 #
 # Note: Requires cloning https://github.com/ethereum/tests
