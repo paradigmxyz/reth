@@ -105,7 +105,7 @@ Next, run the tests:
 
 ```sh
 # Without Geth
-cargo nextest --workspace
+cargo nextest run --workspace
 
 # With Geth
 cargo nextest --workspace --features geth-tests
