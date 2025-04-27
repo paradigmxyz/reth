@@ -12,11 +12,10 @@ use reth_era::{
         TotalDifficulty,
     },
 };
+use reth_ethereum_primitives::TransactionSigned;
 use reth_fs_util as fs;
-use reth_primitives_traits::{FullBlockBody, FullBlockHeader, NodePrimitives};
-use reth_storage_api::{
-    BlockReader, DBProvider, HeaderProvider, NodePrimitivesProvider, ReceiptProvider,
-};
+use reth_primitives_traits::{Block, FullBlockHeader, SignedTransaction};
+use reth_storage_api::{BlockReader, BlockWriter, DBProvider, HeaderProvider, ReceiptProvider};
 use std::{
     path::PathBuf,
     time::{Duration, Instant},
@@ -46,46 +45,21 @@ pub struct ExportConfig {
     pub network: String,
 }
 
-/// Exports block history data from the database
-/// to recreate Era1 files, with option for direct writing.
-pub fn export<P, BH, BB>(provider: &P, config: &ExportConfig) -> Result<Vec<PathBuf>>
-where
-    P: DBProvider + HeaderProvider + BlockReader + ReceiptProvider + NodePrimitivesProvider,
-    <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
-    <P as HeaderProvider>::Header: Into<Header> + FullBlockHeader,
-    <P as BlockReader>::Block: FullBlockBody
-        + Into<
-            BlockBody<
-                <<P as NodePrimitivesProvider>::Primitives as NodePrimitives>::SignedTx,
-                Header,
-            >,
-        >,
-    <P as ReceiptProvider>::Receipt: alloy_rlp::Encodable,
-{
-    fetch_and_write_history_data(provider, config)
-}
-
 /// Fetches block history data from the provider
-/// and prepares it for export to era1 files.
+/// and prepares it for export to era1 files
 /// for a given number of blocks
-/// then writes then to disk
-#[allow(dead_code)]
-pub(crate) fn fetch_and_write_history_data<P, BH, BB>(
-    provider: &P,
-    config: &ExportConfig,
-) -> Result<Vec<PathBuf>>
+/// then writes then to disk.
+pub fn export<P, B>(provider: &P, config: &ExportConfig) -> Result<Vec<PathBuf>>
 where
-    P: DBProvider + HeaderProvider + BlockReader + ReceiptProvider + NodePrimitivesProvider,
-    <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
-    <P as HeaderProvider>::Header: Into<Header> + FullBlockHeader,
-    <P as BlockReader>::Block: FullBlockBody
-        + Into<
-            BlockBody<
-                <<P as NodePrimitivesProvider>::Primitives as NodePrimitives>::SignedTx,
-                Header,
-            >,
-        >,
+    P: DBProvider
+        + BlockReader<Block = B>
+        + ReceiptProvider
+        + HeaderProvider
+        + BlockWriter<Block = B>,
+    B: Block + Into<BlockBody<P::Transaction, Header>>,
+    P::Header: Into<Header> + FullBlockHeader,
     <P as ReceiptProvider>::Receipt: alloy_rlp::Encodable,
+    P::Transaction: SignedTransaction + From<TransactionSigned>,
 {
     info!(
         "Exporting blockchain history from block {} to {} in steps of {}",
