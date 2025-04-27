@@ -8,7 +8,7 @@ use reth_primitives_traits::SealedHeader;
 use reth_rpc_eth_api::{
     helpers::{LoadPendingBlock, SpawnBlocking},
     types::RpcTypes,
-    EthApiTypes, FromEvmError,
+    FromEvmError,
 };
 use reth_rpc_eth_types::PendingBlock;
 use reth_storage_api::{

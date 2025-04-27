@@ -14,7 +14,6 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
     node::RpcNodeCoreExt,
-    types::RpcTypes,
     EthApiTypes,
 };
 use reth_rpc_eth_types::{
