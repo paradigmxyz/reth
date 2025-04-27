@@ -20,6 +20,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
+use alloy_primitives::private::rand;
 use alloy_provider::{fillers::RecommendedFillers, Provider, ProviderBuilder};
 use core::marker::PhantomData;
 use error::{ConflictingModules, RpcError, ServerKind};
@@ -39,7 +40,7 @@ use reth_network_api::{noop::NoopNetwork, FullNetwork, NetworkInfo, Peers};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     AccountReader, BlockReader, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-    EthStorage, FullRpcProvider, ProviderBlock, StateProviderFactory,
+    EthStorage, FullRpcProvider, ProviderBlock, ProviderFactory, StateProviderFactory,
 };
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthApi, EthApiBuilder, EthBundle, MinerApi, NetApi,
@@ -52,7 +53,9 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{EthConfig, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, CompressionLayer, JwtAuthValidator, JwtSecret};
-use reth_tasks::{pool::BlockingTaskGuard, TaskExecutor, TaskSpawner, TokioTaskExecutor};
+use reth_tasks::{
+    pool::BlockingTaskGuard, TaskExecutor, TaskManager, TaskSpawner, TokioTaskExecutor,
+};
 use reth_transaction_pool::{noop::NoopTransactionPool, PoolTransaction, TransactionPool};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -95,11 +98,18 @@ pub use eth::EthHandlers;
 // Rpc server metrics
 mod metrics;
 pub use metrics::{MeteredRequestFuture, RpcRequestMetricsService};
+use reth_consensus::test_utils::TestConsensus;
+use reth_ethereum_engine_primitives::EthEngineTypes;
+use reth_evm::test_utils::MockExecutorProvider;
+use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::{
-    AnyNodeTypes, FullNodeComponents, FullNodeTypes, NodeTypes, PayloadTypes, TxTy,
+    AnyNodeTypes, FullNodeComponents, FullNodeTypes, FullNodeTypesAdapter, NodeTypes,
+    NodeTypesWithDBAdapter, PayloadTypes, TxTy,
 };
-use reth_payload_builder::PayloadBuilderHandle;
+use reth_payload_builder::{noop::NoopPayloadBuilderService, PayloadBuilderHandle};
+use reth_provider::providers::{BlockchainProvider, StaticFileProvider};
 use reth_rpc::eth::sim_bundle::EthSimBundle;
+use reth_transaction_pool::test_utils::testing_pool;
 
 // Rpc rate limiter
 pub mod rate_limiter;
@@ -153,17 +163,8 @@ where
 ///
 /// This is the main entrypoint and the easiest way to configure an RPC server.
 #[derive(Debug, Clone)]
-pub struct RpcModuleBuilder<
-    N,
-    Provider,
-    Pool,
-    Network,
-    Tasks,
-    EvmConfig,
-    BlockExecutor,
-    Consensus,
-    Payload: PayloadTypes,
-> {
+pub struct RpcModuleBuilder<N, Provider, Pool, Network, Tasks, EvmConfig, BlockExecutor, Consensus>
+{
     /// The Provider type to when creating all rpc handlers
     provider: Provider,
     /// The Pool type to when creating all rpc handlers
@@ -180,120 +181,12 @@ pub struct RpcModuleBuilder<
     consensus: Consensus,
     /// Node data primitives.
     _primitives: PhantomData<N>,
-    payload_builder: PayloadBuilderHandle<Payload>,
 }
 
 // === impl RpcBuilder ===
 
-impl<N, Provider, Pool, Network, Tasks, EvmConfig, BlockExecutor, Consensus, Payload> FullNodeTypes
-    for RpcModuleBuilder<
-        N,
-        Provider,
-        Pool,
-        Network,
-        Tasks,
-        EvmConfig,
-        BlockExecutor,
-        Consensus,
-        Payload,
-    >
-where
-    N: NodePrimitives,
-    Provider: Debug + Clone + Unpin + Sync + Send + 'static,
-    Pool: Debug + Clone + Unpin + Sync + Send + 'static,
-    Network: Debug + Clone + Unpin + Sync + Send + 'static,
-    Tasks: Debug + Clone + Unpin + Sync + Send + 'static,
-    EvmConfig: Debug + Clone + Unpin + Sync + Send + 'static,
-    BlockExecutor: Debug + Clone + Unpin + Sync + Send + 'static,
-    Consensus: Debug + Clone + Unpin + Sync + Send + 'static,
-    Payload: PayloadTypes,
-{
-    type Types = AnyNodeTypes<N, ChainSpec<Header = N::BlockHeader>, (), EthStorage, Payload>;
-    type DB = ();
-    type Provider = Provider;
-}
-
-impl<N, Provider, Pool, Network, Tasks, EvmConfig, BlockExecutor, Consensus, Payload>
-    FullNodeComponents
-    for RpcModuleBuilder<
-        N,
-        Provider,
-        Pool,
-        Network,
-        Tasks,
-        EvmConfig,
-        BlockExecutor,
-        Consensus,
-        Payload,
-    >
-where
-    N: NodePrimitives,
-    Provider: Debug + Clone + Unpin + Sync + Send + 'static,
-    Pool: Unpin
-        + 'static
-        + TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Types>>>,
-    Network: Unpin + FullNetwork,
-    Tasks: Debug + Clone + Unpin + Sync + Send + 'static,
-    EvmConfig: 'static + ConfigureEvm<Primitives = <Self::Types as NodeTypes>::Primitives>,
-    BlockExecutor: BlockExecutorProvider<Primitives = <Self::Types as NodeTypes>::Primitives>,
-    Consensus: Clone
-        + Unpin
-        + 'static
-        + FullConsensus<<Self::Types as NodeTypes>::Primitives, Error = ConsensusError>,
-    Payload: PayloadTypes,
-    Self::Types: NodeTypes<Payload = Payload>,
-{
-    type Pool = Pool;
-    type Evm = EvmConfig;
-    type Executor = BlockExecutor;
-    type Consensus = Consensus;
-    type Network = Network;
-
-    fn pool(&self) -> &Self::Pool {
-        &self.pool
-    }
-
-    fn evm_config(&self) -> &Self::Evm {
-        &self.evm_config
-    }
-
-    fn block_executor(&self) -> &Self::Executor {
-        &self.block_executor
-    }
-
-    fn consensus(&self) -> &Self::Consensus {
-        &self.consensus
-    }
-
-    fn network(&self) -> &Self::Network {
-        &self.network
-    }
-
-    fn payload_builder_handle(&self) -> &PayloadBuilderHandle<<Self::Types as NodeTypes>::Payload> {
-        &self.payload_builder
-    }
-
-    fn provider(&self) -> &Self::Provider {
-        &self.provider
-    }
-
-    fn task_executor(&self) -> &TaskExecutor {
-        &self.executor
-    }
-}
-
-impl<N, Provider, Pool, Network, Tasks, EvmConfig, BlockExecutor, Consensus, Payload>
-    RpcModuleBuilder<
-        N,
-        Provider,
-        Pool,
-        Network,
-        Tasks,
-        EvmConfig,
-        BlockExecutor,
-        Consensus,
-        Payload,
-    >
+impl<N, Provider, Pool, Network, Tasks, EvmConfig, BlockExecutor, Consensus>
+    RpcModuleBuilder<N, Provider, Pool, Network, Tasks, EvmConfig, BlockExecutor, Consensus>
 where
     N: NodePrimitives,
 {
@@ -307,8 +200,6 @@ where
         block_executor: BlockExecutor,
         consensus: Consensus,
     ) -> Self {
-        let (sender, _) = unbounded_channel();
-
         Self {
             provider,
             pool,
@@ -317,7 +208,6 @@ where
             evm_config,
             block_executor,
             consensus,
-            payload_builder: PayloadBuilderHandle::new(sender),
             _primitives: PhantomData,
         }
     }
@@ -326,7 +216,7 @@ where
     pub fn with_provider<P>(
         self,
         provider: P,
-    ) -> RpcModuleBuilder<N, P, Pool, Network, Tasks, EvmConfig, BlockExecutor, Consensus, Payload>
+    ) -> RpcModuleBuilder<N, P, Pool, Network, Tasks, EvmConfig, BlockExecutor, Consensus>
     where
         P: BlockReader<Block = N::Block, Header = N::BlockHeader, Receipt = N::Receipt>
             + StateProviderFactory
@@ -339,7 +229,6 @@ where
             evm_config,
             block_executor,
             consensus,
-            payload_builder,
             _primitives,
             ..
         } = self;
@@ -351,7 +240,6 @@ where
             evm_config,
             block_executor,
             consensus,
-            payload_builder,
             _primitives,
         }
     }
@@ -360,17 +248,7 @@ where
     pub fn with_pool<P>(
         self,
         pool: P,
-    ) -> RpcModuleBuilder<
-        N,
-        Provider,
-        P,
-        Network,
-        Tasks,
-        EvmConfig,
-        BlockExecutor,
-        Consensus,
-        Payload,
-    >
+    ) -> RpcModuleBuilder<N, Provider, P, Network, Tasks, EvmConfig, BlockExecutor, Consensus>
     where
         P: TransactionPool<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
     {
@@ -381,7 +259,6 @@ where
             evm_config,
             block_executor,
             consensus,
-            payload_builder,
             _primitives,
             ..
         } = self;
@@ -393,7 +270,6 @@ where
             evm_config,
             block_executor,
             consensus,
-            payload_builder,
             _primitives,
         }
     }
@@ -414,7 +290,6 @@ where
         EvmConfig,
         BlockExecutor,
         Consensus,
-        Payload,
     > {
         let Self {
             provider,
@@ -423,7 +298,6 @@ where
             evm_config,
             block_executor,
             consensus,
-            payload_builder,
             _primitives,
             ..
         } = self;
@@ -435,7 +309,6 @@ where
             block_executor,
             pool: NoopTransactionPool::default(),
             consensus,
-            payload_builder,
             _primitives,
         }
     }
@@ -444,7 +317,7 @@ where
     pub fn with_network<Net>(
         self,
         network: Net,
-    ) -> RpcModuleBuilder<N, Provider, Pool, Net, Tasks, EvmConfig, BlockExecutor, Consensus, Payload>
+    ) -> RpcModuleBuilder<N, Provider, Pool, Net, Tasks, EvmConfig, BlockExecutor, Consensus>
     where
         Net: NetworkInfo + Peers + 'static,
     {
@@ -455,7 +328,6 @@ where
             evm_config,
             block_executor,
             consensus,
-            payload_builder,
             _primitives,
             ..
         } = self;
@@ -467,7 +339,6 @@ where
             evm_config,
             block_executor,
             consensus,
-            payload_builder,
             _primitives,
         }
     }
@@ -479,17 +350,8 @@ where
     /// [`EthApi`] which requires a [`NetworkInfo`] implementation.
     pub fn with_noop_network(
         self,
-    ) -> RpcModuleBuilder<
-        N,
-        Provider,
-        Pool,
-        NoopNetwork,
-        Tasks,
-        EvmConfig,
-        BlockExecutor,
-        Consensus,
-        Payload,
-    > {
+    ) -> RpcModuleBuilder<N, Provider, Pool, NoopNetwork, Tasks, EvmConfig, BlockExecutor, Consensus>
+    {
         let Self {
             provider,
             pool,
@@ -498,7 +360,6 @@ where
             block_executor,
             consensus,
             _primitives,
-            payload_builder,
             ..
         } = self;
         RpcModuleBuilder {
@@ -509,7 +370,6 @@ where
             evm_config,
             block_executor,
             consensus,
-            payload_builder,
             _primitives,
         }
     }
@@ -518,7 +378,7 @@ where
     pub fn with_executor<T>(
         self,
         executor: T,
-    ) -> RpcModuleBuilder<N, Provider, Pool, Network, T, EvmConfig, BlockExecutor, Consensus, Payload>
+    ) -> RpcModuleBuilder<N, Provider, Pool, Network, T, EvmConfig, BlockExecutor, Consensus>
     where
         T: TaskSpawner + 'static,
     {
@@ -530,7 +390,6 @@ where
             block_executor,
             consensus,
             _primitives,
-            payload_builder,
             ..
         } = self;
         RpcModuleBuilder {
@@ -541,7 +400,6 @@ where
             evm_config,
             block_executor,
             consensus,
-            payload_builder,
             _primitives,
         }
     }
@@ -561,7 +419,6 @@ where
         EvmConfig,
         BlockExecutor,
         Consensus,
-        Payload,
     > {
         let Self {
             pool,
@@ -570,7 +427,6 @@ where
             evm_config,
             block_executor,
             consensus,
-            payload_builder,
             _primitives,
             ..
         } = self;
@@ -582,7 +438,6 @@ where
             evm_config,
             block_executor,
             consensus,
-            payload_builder,
             _primitives,
         }
     }
@@ -591,20 +446,12 @@ where
     pub fn with_evm_config<E>(
         self,
         evm_config: E,
-    ) -> RpcModuleBuilder<N, Provider, Pool, Network, Tasks, E, BlockExecutor, Consensus, Payload>
+    ) -> RpcModuleBuilder<N, Provider, Pool, Network, Tasks, E, BlockExecutor, Consensus>
     where
         EvmConfig: 'static,
     {
         let Self {
-            provider,
-            pool,
-            executor,
-            network,
-            block_executor,
-            consensus,
-            _primitives,
-            payload_builder,
-            ..
+            provider, pool, executor, network, block_executor, consensus, _primitives, ..
         } = self;
         RpcModuleBuilder {
             provider,
@@ -614,7 +461,6 @@ where
             evm_config,
             block_executor,
             consensus,
-            payload_builder,
             _primitives,
         }
     }
@@ -623,21 +469,12 @@ where
     pub fn with_block_executor<BE>(
         self,
         block_executor: BE,
-    ) -> RpcModuleBuilder<N, Provider, Pool, Network, Tasks, EvmConfig, BE, Consensus, Payload>
+    ) -> RpcModuleBuilder<N, Provider, Pool, Network, Tasks, EvmConfig, BE, Consensus>
     where
         BE: BlockExecutorProvider<Primitives = N> + 'static,
     {
-        let Self {
-            provider,
-            network,
-            pool,
-            executor,
-            evm_config,
-            consensus,
-            _primitives,
-            payload_builder,
-            ..
-        } = self;
+        let Self { provider, network, pool, executor, evm_config, consensus, _primitives, .. } =
+            self;
         RpcModuleBuilder {
             provider,
             network,
@@ -646,7 +483,6 @@ where
             evm_config,
             block_executor,
             consensus,
-            payload_builder,
             _primitives,
         }
     }
@@ -655,18 +491,9 @@ where
     pub fn with_consensus<C>(
         self,
         consensus: C,
-    ) -> RpcModuleBuilder<N, Provider, Pool, Network, Tasks, EvmConfig, BlockExecutor, C, Payload>
-    {
+    ) -> RpcModuleBuilder<N, Provider, Pool, Network, Tasks, EvmConfig, BlockExecutor, C> {
         let Self {
-            provider,
-            network,
-            pool,
-            executor,
-            evm_config,
-            block_executor,
-            _primitives,
-            payload_builder,
-            ..
+            provider, network, pool, executor, evm_config, block_executor, _primitives, ..
         } = self;
         RpcModuleBuilder {
             provider,
@@ -676,14 +503,66 @@ where
             evm_config,
             block_executor,
             consensus,
-            payload_builder,
             _primitives,
         }
     }
 
     /// Instantiates a new [`EthApiBuilder`] from the configured components.
     pub fn eth_api_builder(&self) -> EthApiBuilder<Self> {
-        let components = (*self).clone();
+        let Self {
+            provider,
+            pool: transaction_pool,
+            network,
+            executor,
+            evm_config,
+            block_executor,
+            consensus,
+            _primitives,
+        } = (*self).clone();
+
+
+        let chain_spec = MAINNET.clone();
+        let evm_config = EthEvmConfig::new(chain_spec.clone());
+        let executor = MockExecutorProvider::default();
+        let consensus = Arc::new(TestConsensus::default());
+
+        let (static_dir, _) = create_test_static_files_dir();
+        let db = create_test_rw_db();
+        let provider_factory = ProviderFactory::<NodeTypesWithDBAdapter<TestNode, _>>::new(
+            db,
+            chain_spec.clone(),
+            StaticFileProvider::read_write(static_dir.into_path()).expect("static file provider"),
+        );
+
+        let _genesis_hash = init_genesis(&provider_factory)?;
+        let provider = BlockchainProvider::new(provider_factory.clone())?;
+
+        let network_manager = NetworkManager::new(
+            NetworkConfigBuilder::new(SecretKey::new(&mut rand::thread_rng()))
+                .with_unused_discovery_port()
+                .with_unused_listener_port()
+                .build(provider_factory.clone()),
+        )
+            .await?;
+        let network = network_manager.handle().clone();
+        let tasks = TaskManager::current();
+        let task_executor = tasks.executor();
+        tasks.executor().spawn(network_manager);
+
+        let (_, payload_builder_handle) = NoopPayloadBuilderService::<EthEngineTypes>::new();
+
+        let components = NodeAdapter::<FullNodeTypesAdapter<_, _, _>, _> {
+            components: Components {
+                transaction_pool,
+                evm_config,
+                executor,
+                consensus,
+                network,
+                payload_builder_handle,
+            },
+            task_executor,
+            provider,
+        };
 
         EthApiBuilder::new(components)
     }
@@ -698,18 +577,8 @@ where
     }
 }
 
-impl<N, Provider, Pool, Network, Tasks, EvmConfig, BlockExecutor, Consensus, Payload>
-    RpcModuleBuilder<
-        N,
-        Provider,
-        Pool,
-        Network,
-        Tasks,
-        EvmConfig,
-        BlockExecutor,
-        Consensus,
-        Payload,
-    >
+impl<N, Provider, Pool, Network, Tasks, EvmConfig, BlockExecutor, Consensus>
+    RpcModuleBuilder<N, Provider, Pool, Network, Tasks, EvmConfig, BlockExecutor, Consensus>
 where
     N: NodePrimitives,
     Provider: FullRpcProvider<Block = N::Block, Receipt = N::Receipt, Header = N::BlockHeader>
@@ -837,7 +706,7 @@ where
     }
 }
 
-impl<N: NodePrimitives> Default for RpcModuleBuilder<N, (), (), (), (), (), (), (), ()> {
+impl<N: NodePrimitives> Default for RpcModuleBuilder<N, (), (), (), (), (), (), ()> {
     fn default() -> Self {
         Self::new((), (), (), (), (), (), ())
     }
