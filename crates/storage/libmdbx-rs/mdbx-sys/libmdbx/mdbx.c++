@@ -3932,7 +3932,7 @@ typedef struct MDBX_node {
 #error "Oops, some flags overlapped or wrong"
 #endif
 
-/* Max length of iov-vector passed to writev() call, used for auxilary writes */
+/* Max length of iov-vector passed to writev() call, used for auxiliary writes */
 #define MDBX_AUXILARY_IOV_MAX 64
 #if defined(IOV_MAX) && IOV_MAX < MDBX_AUXILARY_IOV_MAX
 #undef MDBX_AUXILARY_IOV_MAX
