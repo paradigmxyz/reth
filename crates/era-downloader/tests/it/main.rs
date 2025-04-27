@@ -15,6 +15,7 @@ use std::future::Future;
 
 const NIMBUS: &[u8] = include_bytes!("../res/nimbus.html");
 const ETH_PORTAL: &[u8] = include_bytes!("../res/ethportal.html");
+const CHECKSUMS: &[u8] = include_bytes!("../res/checksums.txt");
 const MAINNET_0: &[u8] = include_bytes!("../res/mainnet-00000-5ec1ffb8.era1");
 const MAINNET_1: &[u8] = include_bytes!("../res/mainnet-00001-a5364e9a.era1");
 
@@ -44,6 +45,18 @@ impl HttpClient for StubClient {
                 "https://era1.ethportal.net/" => {
                     Ok(Box::new(futures::stream::once(Box::pin(async move {
                         Ok(bytes::Bytes::from(ETH_PORTAL))
+                    })))
+                        as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
+                }
+                "https://mainnet.era1.nimbus.team/checksums.txt" => {
+                    Ok(Box::new(futures::stream::once(Box::pin(async move {
+                        Ok(bytes::Bytes::from(CHECKSUMS))
+                    })))
+                        as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
+                }
+                "https://era1.ethportal.net/checksums.txt" => {
+                    Ok(Box::new(futures::stream::once(Box::pin(async move {
+                        Ok(bytes::Bytes::from(CHECKSUMS))
                     })))
                         as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
                 }
