@@ -108,7 +108,7 @@ Next, run the tests:
 cargo nextest run --workspace
 
 # With Geth
-cargo nextest --workspace --features geth-tests
+cargo nextest run --workspace --features geth-tests
 
 # Run the Ethereum Foundation tests
 make ef-tests
