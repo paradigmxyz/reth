@@ -1,15 +1,12 @@
 //! Connection tests
 
-use alloy_node_bindings::Geth;
 use alloy_primitives::map::HashSet;
-use alloy_provider::{ext::AdminApi, ProviderBuilder};
 use futures::StreamExt;
 use reth_chainspec::{MAINNET, SEPOLIA};
 use reth_discv4::Discv4Config;
 use reth_eth_wire::{DisconnectReason, EthNetworkPrimitives, HeadersDirection};
-use reth_net_banlist::BanList;
 use reth_network::{
-    test_utils::{enr_to_peer_id, NetworkEventStream, PeerConfig, Testnet, GETH_TIMEOUT},
+    test_utils::{NetworkEventStream, PeerConfig, Testnet},
     BlockDownloaderProvider, NetworkConfigBuilder, NetworkEvent, NetworkEventListenerProvider,
     NetworkManager, PeersConfig,
 };
@@ -25,7 +22,7 @@ use reth_network_peers::{mainnet_nodes, NodeRecord, TrustedPeer};
 use reth_storage_api::noop::NoopProvider;
 use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;
-use std::{net::SocketAddr, time::Duration};
+use std::time::Duration;
 use tokio::task;
 use url::Host;
 
