@@ -64,6 +64,10 @@ pub struct Environment<I> {
     pub latest_payload_built: Option<PayloadAttributes>,
     /// Stores the most recent executed payload
     pub latest_payload_executed: Option<PayloadAttributes>,
+    /// Number of slots until a block is considered safe
+    pub slots_to_safe: u64,
+    /// Number of slots until a block is considered finalized
+    pub slots_to_finalized: u64,
 }
 
 impl<I> Default for Environment<I> {
@@ -81,6 +85,8 @@ impl<I> Default for Environment<I> {
             latest_fork_choice_state: ForkchoiceState::default(),
             latest_payload_built: None,
             latest_payload_executed: None,
+            slots_to_safe: 0,
+            slots_to_finalized: 0,
         }
     }
 }
