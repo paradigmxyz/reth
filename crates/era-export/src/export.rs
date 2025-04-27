@@ -5,8 +5,8 @@ use alloy_consensus::{BlockBody, BlockHeader, Header};
 use alloy_primitives::{BlockNumber, B256, U256};
 use eyre::{eyre, Result};
 use reth_era::{
-    era1_file::{Era1File, Era1Writer},
-    era1_types::{BlockIndex, Era1Group, Era1Id},
+    era1_file::Era1Writer,
+    era1_types::{BlockIndex, Era1Id},
     execution_types::{
         Accumulator, BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts,
         TotalDifficulty,
@@ -119,22 +119,39 @@ where
             start_block, end_block, block_count
         );
 
-        let mut block_tuples = Vec::with_capacity(block_count);
-        let mut block_sizes = Vec::with_capacity(block_count);
+        let headers = provider.headers_range(start_block..=end_block)?;
+
+        let era1_id = Era1Id::new(&config.network, start_block, block_count as u32);
+        let file_path = config.dir.join(era1_id.to_file_name());
+        let file = std::fs::File::create(&file_path)?;
+        let mut writer = Era1Writer::new(file);
+        writer.write_version()?;
+
+        let mut offsets = Vec::with_capacity(block_count);
+        let mut position = VERSION_ENTRY_SIZE as i64;
+        let mut blocks_written = 0;
         let mut final_header_data = Vec::new();
 
-        for block_number in start_block..=end_block {
-            let header = provider
-                .header_by_number(block_number)?
-                .ok_or_else(|| eyre!("Header not found for block {}", block_number))?;
+        for (i, header) in headers.into_iter().enumerate() {
+            let expected_block_number = start_block + i as u64;
+            let actual_block_number = header.number();
+
+            // Validate block number
+            if expected_block_number != actual_block_number {
+                return Err(eyre!(
+                    "Expected header for block {}, got {}",
+                    expected_block_number,
+                    actual_block_number
+                ));
+            }
 
             let body = provider
-                .block_by_number(block_number)?
-                .ok_or_else(|| eyre!("Block body not found for block {}", block_number))?;
+                .block_by_number(actual_block_number)?
+                .ok_or_else(|| eyre!("Block body not found for block {}", actual_block_number))?;
 
             let receipts = provider
-                .receipts_by_block(block_number.into())?
-                .ok_or_else(|| eyre!("Receipts not found for block {}", block_number))?;
+                .receipts_by_block(actual_block_number.into())?
+                .ok_or_else(|| eyre!("Receipts not found for block {}", actual_block_number))?;
 
             total_difficulty += header.difficulty();
 
@@ -144,7 +161,7 @@ where
                 .map_err(|e| eyre!("Failed to compress receipts: {}", e))?;
 
             // Save last block's header data for accumulator
-            if block_number == end_block {
+            if actual_block_number == end_block {
                 final_header_data = compressed_header.data.clone();
             }
 
@@ -162,15 +179,18 @@ where
             let receipts_size = compressed_receipts.data.len() + ENTRY_HEADER_SIZE;
             let difficulty_size = 32 + ENTRY_HEADER_SIZE; // U256 is 32 + 8 bytes header overhead
             let total_size = header_size + body_size + receipts_size + difficulty_size;
-            block_tuples.push(block_tuple);
-            block_sizes.push(total_size);
+            offsets.push(position);
+            position += total_size as i64;
+
+            writer.write_block(&block_tuple)?;
+            blocks_written += 1;
             total_blocks_processed += 1;
 
             if last_report_time.elapsed() >= report_interval {
                 info!(
                     target: "era::history::export",
                     "Export progress: block {}/{} ({:.2}%) - elapsed: {:?}",
-                    block_number,
+                    actual_block_number,
                     last_block_number,
                     (total_blocks_processed as f64) /
                         ((last_block_number - config.first_block_number + 1) as f64) *
@@ -180,33 +200,22 @@ where
                 last_report_time = Instant::now();
             }
         }
-        if !block_tuples.is_empty() {
-            let mut offsets = Vec::with_capacity(block_count);
-
-            let mut position = VERSION_ENTRY_SIZE as i64;
-
-            for size in &block_sizes {
-                offsets.push(position);
-                position += *size as i64;
-            }
-
+        if blocks_written > 0 {
             let accumulator_hash =
                 B256::from_slice(&final_header_data[0..32.min(final_header_data.len())]);
             let accumulator = Accumulator::new(accumulator_hash);
             let block_index = BlockIndex::new(start_block, offsets);
 
-            let era1_group = Era1Group::new(block_tuples, accumulator, block_index);
-
-            let era1_id = Era1Id::new(&config.network, start_block, block_count as u32);
-            let era1_file = Era1File::new(era1_group, era1_id.clone());
-            let file_path = config.dir.join(era1_id.to_file_name());
-            Era1Writer::create(&file_path, &era1_file)
-                .map_err(|e| eyre!("Failed to write ERA1 file: {}", e))?;
+            writer.write_accumulator(&accumulator)?;
+            writer.write_block_index(&block_index)?;
+            writer.flush()?;
             created_files.push(file_path.clone());
+
             info!(
                 target: "era::history::export",
-                "Wrote ERA1 file: {:?}",
-                file_path
+                "Wrote ERA1 file: {:?} with {} blocks",
+                file_path,
+                blocks_written
             );
         }
     }
