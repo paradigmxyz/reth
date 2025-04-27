@@ -30,6 +30,7 @@ reth-node-api.workspace = true
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-transaction-pool.workspace = true
 reth-evm.workspace = true
+reth-payload-builder.workspace = true
 
 # rpc/net
 jsonrpsee = { workspace = true, features = ["server"] }

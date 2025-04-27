@@ -32,14 +32,14 @@ use jsonrpsee::{
     },
     Methods, RpcModule,
 };
-use reth_chainspec::EthereumHardforks;
+use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
-use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
+use reth_network_api::{noop::NoopNetwork, FullNetwork, NetworkInfo, Peers};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    AccountReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
-    ChangeSetReader, FullRpcProvider, ProviderBlock, StateProviderFactory,
+    AccountReader, BlockReader, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
+    EthStorage, FullRpcProvider, ProviderBlock, StateProviderFactory,
 };
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthApi, EthApiBuilder, EthBundle, MinerApi, NetApi,
@@ -48,8 +48,7 @@ use reth_rpc::{
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_api::{
     helpers::{Call, EthApiSpec, EthTransactions, LoadPendingBlock, TraceExt},
-    EthApiServer, EthApiTypes, FullEthApiServer, RpcBlock, RpcHeader, RpcNodeCore, RpcReceipt,
-    RpcTransaction,
+    EthApiServer, EthApiTypes, FullEthApiServer, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
 };
 use reth_rpc_eth_types::{EthConfig, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, CompressionLayer, JwtAuthValidator, JwtSecret};
@@ -96,7 +95,9 @@ pub use eth::EthHandlers;
 // Rpc server metrics
 mod metrics;
 pub use metrics::{MeteredRequestFuture, RpcRequestMetricsService};
-use reth_node_api::{FullNodeComponents, NodeTypes};
+use reth_node_api::{
+    AnyNodeTypes, FullNodeComponents, FullNodeTypes, NodeTypes, PayloadTypes, TxTy,
+};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_rpc::eth::sim_bundle::EthSimBundle;
 
@@ -161,7 +162,7 @@ pub struct RpcModuleBuilder<
     EvmConfig,
     BlockExecutor,
     Consensus,
-    Payload,
+    Payload: PayloadTypes,
 > {
     /// The Provider type to when creating all rpc handlers
     provider: Provider,
@@ -184,7 +185,7 @@ pub struct RpcModuleBuilder<
 
 // === impl RpcBuilder ===
 
-impl<N, Provider, Pool, Network, Tasks, EvmConfig, BlockExecutor, Consensus> FullNodeComponents
+impl<N, Provider, Pool, Network, Tasks, EvmConfig, BlockExecutor, Consensus, Payload> FullNodeTypes
     for RpcModuleBuilder<
         N,
         Provider,
@@ -194,10 +195,53 @@ impl<N, Provider, Pool, Network, Tasks, EvmConfig, BlockExecutor, Consensus> Ful
         EvmConfig,
         BlockExecutor,
         Consensus,
-        <Self::Types as NodeTypes>::Payload,
+        Payload,
     >
 where
     N: NodePrimitives,
+    Provider: Debug + Clone + Unpin + Sync + Send + 'static,
+    Pool: Debug + Clone + Unpin + Sync + Send + 'static,
+    Network: Debug + Clone + Unpin + Sync + Send + 'static,
+    Tasks: Debug + Clone + Unpin + Sync + Send + 'static,
+    EvmConfig: Debug + Clone + Unpin + Sync + Send + 'static,
+    BlockExecutor: Debug + Clone + Unpin + Sync + Send + 'static,
+    Consensus: Debug + Clone + Unpin + Sync + Send + 'static,
+    Payload: PayloadTypes,
+{
+    type Types = AnyNodeTypes<N, ChainSpec<Header = N::BlockHeader>, (), EthStorage, Payload>;
+    type DB = ();
+    type Provider = Provider;
+}
+
+impl<N, Provider, Pool, Network, Tasks, EvmConfig, BlockExecutor, Consensus, Payload>
+    FullNodeComponents
+    for RpcModuleBuilder<
+        N,
+        Provider,
+        Pool,
+        Network,
+        Tasks,
+        EvmConfig,
+        BlockExecutor,
+        Consensus,
+        Payload,
+    >
+where
+    N: NodePrimitives,
+    Provider: Debug + Clone + Unpin + Sync + Send + 'static,
+    Pool: Unpin
+        + 'static
+        + TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Types>>>,
+    Network: Unpin + FullNetwork,
+    Tasks: Debug + Clone + Unpin + Sync + Send + 'static,
+    EvmConfig: 'static + ConfigureEvm<Primitives = <Self::Types as NodeTypes>::Primitives>,
+    BlockExecutor: BlockExecutorProvider<Primitives = <Self::Types as NodeTypes>::Primitives>,
+    Consensus: Clone
+        + Unpin
+        + 'static
+        + FullConsensus<<Self::Types as NodeTypes>::Primitives, Error = ConsensusError>,
+    Payload: PayloadTypes,
+    Self::Types: NodeTypes<Payload = Payload>,
 {
     type Pool = Pool;
     type Evm = EvmConfig;
