@@ -1,4 +1,5 @@
 use alloy_primitives::{B256, U256};
+use alloy_rpc_types_engine::ForkchoiceUpdateError;
 use jsonrpsee_types::error::{
     INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE, INVALID_PARAMS_MSG, SERVER_ERROR_MSG,
 };
@@ -171,7 +172,23 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             ),
             // Error responses from the consensus engine
             EngineApiError::ForkChoiceUpdate(ref err) => match err {
-                BeaconForkChoiceUpdateError::ForkchoiceUpdateError(err) => (*err).into(),
+                BeaconForkChoiceUpdateError::ForkchoiceUpdateError(err) => match err {
+                    ForkchoiceUpdateError::UpdatedInvalidPayloadAttributes => {
+                        jsonrpsee_types::error::ErrorObject::owned(
+                            -38003,
+                            "Invalid payload attributes",
+                            None::<()>,
+                        )
+                    }
+                    ForkchoiceUpdateError::InvalidState |
+                    ForkchoiceUpdateError::UnknownFinalBlock => {
+                        jsonrpsee_types::error::ErrorObject::owned(
+                            -38002,
+                            "Invalid forkchoice state",
+                            None::<()>,
+                        )
+                    }
+                },
                 BeaconForkChoiceUpdateError::EngineUnavailable |
                 BeaconForkChoiceUpdateError::Internal(_) => {
                     jsonrpsee_types::error::ErrorObject::owned(

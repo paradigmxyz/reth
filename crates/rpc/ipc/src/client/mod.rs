@@ -10,7 +10,7 @@ use jsonrpsee::{
     async_client::{Client, ClientBuilder},
     core::client::{ReceivedMessage, TransportReceiverT, TransportSenderT},
 };
-use std::{io, time::Duration};
+use std::{future::Future, io, time::Duration};
 use tokio::io::AsyncWriteExt;
 use tokio_util::codec::FramedRead;
 
@@ -20,24 +20,26 @@ pub(crate) struct Sender {
     inner: SendHalf,
 }
 
-#[async_trait::async_trait]
+#[allow(clippy::manual_async_fn)]
 impl TransportSenderT for Sender {
     type Error = IpcError;
 
     /// Sends out a request. Returns a Future that finishes when the request has been successfully
     /// sent.
-    async fn send(&mut self, msg: String) -> Result<(), Self::Error> {
-        Ok(self.inner.write_all(msg.as_bytes()).await?)
+    fn send(&mut self, msg: String) -> impl Future<Output = Result<(), Self::Error>> {
+        async move { Ok(self.inner.write_all(msg.as_bytes()).await?) }
     }
 
-    async fn send_ping(&mut self) -> Result<(), Self::Error> {
-        tracing::trace!("send ping - not implemented");
-        Err(IpcError::NotSupported)
+    fn send_ping(&mut self) -> impl Future<Output = Result<(), Self::Error>> {
+        async {
+            tracing::trace!("send ping - not implemented");
+            Err(IpcError::NotSupported)
+        }
     }
 
     /// Close the connection.
-    async fn close(&mut self) -> Result<(), Self::Error> {
-        Ok(())
+    fn close(&mut self) -> impl Future<Output = Result<(), Self::Error>> {
+        async { Ok(()) }
     }
 }
 
@@ -47,13 +49,18 @@ pub(crate) struct Receiver {
     pub(crate) inner: FramedRead<RecvHalf, StreamCodec>,
 }
 
-#[async_trait::async_trait]
+#[allow(clippy::manual_async_fn)]
 impl TransportReceiverT for Receiver {
     type Error = IpcError;
 
     /// Returns a Future resolving when the server sent us something back.
-    async fn receive(&mut self) -> Result<ReceivedMessage, Self::Error> {
-        self.inner.next().await.map_or(Err(IpcError::Closed), |val| Ok(ReceivedMessage::Text(val?)))
+    fn receive(&mut self) -> impl Future<Output = Result<ReceivedMessage, Self::Error>> {
+        async {
+            self.inner
+                .next()
+                .await
+                .map_or(Err(IpcError::Closed), |val| Ok(ReceivedMessage::Text(val?)))
+        }
     }
 }
 

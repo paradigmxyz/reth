@@ -17,7 +17,6 @@ futures.workspace = true
 tokio = { workspace = true, features = ["net", "time", "rt-multi-thread"] }
 tokio-util = { workspace = true, features = ["codec"] }
 tokio-stream.workspace = true
-async-trait.workspace = true
 pin-project.workspace = true
 tower.workspace = true
 
