@@ -3,24 +3,52 @@
 //! This is useful for wiring components together that don't require network but still need to be
 //! generic over it.
 
+use core::{fmt, marker::PhantomData};
 use std::net::{IpAddr, SocketAddr};
 
 use alloy_rpc_types_admin::EthProtocolInfo;
 use enr::{secp256k1::SecretKey, Enr};
-use reth_eth_wire_types::{DisconnectReason, ProtocolVersion};
+use reth_eth_wire_types::{
+    DisconnectReason, EthNetworkPrimitives, NetworkPrimitives, ProtocolVersion,
+};
+use reth_network_p2p::{sync::NetworkSyncUpdater, NoopFullBlockClient};
 use reth_network_peers::NodeRecord;
 use reth_network_types::{PeerKind, Reputation, ReputationChangeKind};
+use reth_tokio_util::{EventSender, EventStream};
+use tokio::sync::{mpsc, oneshot};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
-use crate::{NetworkError, NetworkInfo, NetworkStatus, PeerId, PeerInfo, Peers, PeersInfo};
+use crate::{
+    events::{NetworkPeersEvents, PeerEventStream},
+    test_utils::{PeersHandle, PeersHandleProvider},
+    BlockDownloaderProvider, DiscoveryEvent, NetworkError, NetworkEvent,
+    NetworkEventListenerProvider, NetworkInfo, NetworkStatus, PeerId, PeerInfo, PeerRequest, Peers,
+    PeersInfo,
+};
 
 /// A type that implements all network trait that does nothing.
 ///
 /// Intended for testing purposes where network is not used.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
-pub struct NoopNetwork;
+pub struct NoopNetwork<NetPrimitives = EthNetworkPrimitives> {
+    peers_handle: PeersHandle,
+    _marker: PhantomData<NetPrimitives>,
+}
 
-impl NetworkInfo for NoopNetwork {
+impl<NetPrimitives: NetworkPrimitives> NetworkPrimitives for NoopNetwork<NetPrimitives> {
+    type Block = NetPrimitives::Block;
+    type BlockHeader = NetPrimitives::BlockHeader;
+    type BlockBody = NetPrimitives::BlockBody;
+    type BroadcastedTransaction = NetPrimitives::BroadcastedTransaction;
+    type PooledTransaction = NetPrimitives::PooledTransaction;
+    type Receipt = NetPrimitives::Receipt;
+}
+
+impl<NetPrimitives> NetworkInfo for NoopNetwork<NetPrimitives>
+where
+    NetPrimitives: Send + Sync,
+{
     fn local_addr(&self) -> SocketAddr {
         (IpAddr::from(std::net::Ipv4Addr::UNSPECIFIED), 30303).into()
     }
@@ -54,7 +82,10 @@ impl NetworkInfo for NoopNetwork {
     }
 }
 
-impl PeersInfo for NoopNetwork {
+impl<NetPrimitives> PeersInfo for NoopNetwork<NetPrimitives>
+where
+    NetPrimitives: Send + Sync,
+{
     fn num_connected_peers(&self) -> usize {
         0
     }
@@ -69,7 +100,10 @@ impl PeersInfo for NoopNetwork {
     }
 }
 
-impl Peers for NoopNetwork {
+impl<NetPrimitives> Peers for NoopNetwork<NetPrimitives>
+where
+    NetPrimitives: Send + Sync,
+{
     fn add_trusted_peer_id(&self, _peer: PeerId) {}
 
     fn add_peer_kind(
@@ -116,5 +150,71 @@ impl Peers for NoopNetwork {
 
     async fn reputation_by_id(&self, _peer_id: PeerId) -> Result<Option<Reputation>, NetworkError> {
         Ok(None)
+    }
+}
+
+impl<NetPrimitives> BlockDownloaderProvider for NoopNetwork<NetPrimitives>
+where
+    NetPrimitives: NetworkPrimitives + Default,
+{
+    type Client = NoopFullBlockClient<NetPrimitives>;
+
+    async fn fetch_client(&self) -> Result<Self::Client, oneshot::error::RecvError> {
+        Ok(NoopFullBlockClient::<NetPrimitives>::default())
+    }
+}
+
+impl<NetPrimitives> NetworkSyncUpdater for NoopNetwork<NetPrimitives>
+where
+    NetPrimitives: fmt::Debug + Send + Sync + 'static,
+{
+    fn update_status(&self, _head: reth_ethereum_forks::Head) {}
+
+    fn update_sync_state(&self, _state: reth_network_p2p::sync::SyncState) {}
+}
+
+impl<NetPrimitives> NetworkEventListenerProvider for NoopNetwork<NetPrimitives>
+where
+    NetPrimitives: NetworkPrimitives,
+{
+    type Primitives = NetPrimitives;
+
+    fn event_listener(&self) -> EventStream<NetworkEvent<PeerRequest<Self::Primitives>>> {
+        let event_sender: EventSender<NetworkEvent<PeerRequest<NetPrimitives>>> =
+            Default::default();
+        event_sender.new_listener()
+    }
+
+    fn discovery_listener(&self) -> UnboundedReceiverStream<DiscoveryEvent> {
+        let (_, rx) = mpsc::unbounded_channel();
+        UnboundedReceiverStream::new(rx)
+    }
+}
+
+impl<NetPrimitives> NetworkPeersEvents for NoopNetwork<NetPrimitives>
+where
+    NetPrimitives: NetworkPrimitives,
+{
+    fn peer_events(&self) -> PeerEventStream {
+        let event_sender: EventSender<NetworkEvent<PeerRequest<NetPrimitives>>> =
+            Default::default();
+        PeerEventStream::new(event_sender.new_listener())
+    }
+}
+
+impl<NetPrimitives> PeersHandleProvider for NoopNetwork<NetPrimitives>
+where
+    NetPrimitives: NetworkPrimitives,
+{
+    fn peers_handle(&self) -> &PeersHandle {
+        &self.peers_handle
+    }
+}
+
+impl<NetPrimitives> Default for NoopNetwork<NetPrimitives> {
+    fn default() -> Self {
+        let (tx, _) = mpsc::unbounded_channel();
+
+        Self { peers_handle: PeersHandle::new(tx), _marker: PhantomData }
     }
 }
