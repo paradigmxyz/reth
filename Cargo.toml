@@ -473,7 +473,6 @@ alloy-genesis = { version = "0.15.5", default-features = false }
 alloy-json-rpc = { version = "0.15.5", default-features = false }
 alloy-network = { version = "0.15.5", default-features = false }
 alloy-network-primitives = { version = "0.15.5", default-features = false }
-alloy-node-bindings = { version = "0.15.5", default-features = false }
 alloy-provider = { version = "0.15.5", features = ["reqwest"], default-features = false }
 alloy-pubsub = { version = "0.15.5", default-features = false }
 alloy-rpc-client = { version = "0.15.5", default-features = false }
@@ -702,7 +701,6 @@ vergen-git2 = "1.0.5"
 # alloy-json-rpc = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
 # alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
 # alloy-network-primitives = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
 # alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
 # alloy-pubsub = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
 # alloy-rpc-client = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
