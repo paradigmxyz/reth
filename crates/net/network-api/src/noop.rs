@@ -36,15 +36,6 @@ pub struct NoopNetwork<NetPrimitives = EthNetworkPrimitives> {
     _marker: PhantomData<NetPrimitives>,
 }
 
-impl<NetPrimitives: NetworkPrimitives> NetworkPrimitives for NoopNetwork<NetPrimitives> {
-    type Block = NetPrimitives::Block;
-    type BlockHeader = NetPrimitives::BlockHeader;
-    type BlockBody = NetPrimitives::BlockBody;
-    type BroadcastedTransaction = NetPrimitives::BroadcastedTransaction;
-    type PooledTransaction = NetPrimitives::PooledTransaction;
-    type Receipt = NetPrimitives::Receipt;
-}
-
 impl<NetPrimitives> NetworkInfo for NoopNetwork<NetPrimitives>
 where
     NetPrimitives: Send + Sync,
