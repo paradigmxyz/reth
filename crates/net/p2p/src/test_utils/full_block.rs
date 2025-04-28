@@ -9,9 +9,8 @@ use crate::{
 use alloy_consensus::Header;
 use alloy_eips::{BlockHashOrNumber, BlockNumHash};
 use alloy_primitives::B256;
-use core::{fmt, marker::PhantomData};
 use parking_lot::Mutex;
-use reth_eth_wire_types::{EthNetworkPrimitives, HeadersDirection, NetworkPrimitives};
+use reth_eth_wire_types::HeadersDirection;
 use reth_ethereum_primitives::{Block, BlockBody};
 use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives_traits::{SealedBlock, SealedHeader};

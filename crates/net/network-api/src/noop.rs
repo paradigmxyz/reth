@@ -36,6 +36,23 @@ pub struct NoopNetwork<NetPrimitives = EthNetworkPrimitives> {
     _marker: PhantomData<NetPrimitives>,
 }
 
+impl<NetPrimitives> NoopNetwork<NetPrimitives> {
+    /// Creates a new [`NoopNetwork`].
+    pub fn new() -> Self {
+        let (tx, _) = mpsc::unbounded_channel();
+
+        Self { peers_handle: PeersHandle::new(tx), _marker: PhantomData }
+    }
+}
+
+impl Default for NoopNetwork<EthNetworkPrimitives> {
+    fn default() -> Self {
+        let (tx, _) = mpsc::unbounded_channel();
+
+        Self { peers_handle: PeersHandle::new(tx), _marker: PhantomData }
+    }
+}
+
 impl<NetPrimitives> NetworkInfo for NoopNetwork<NetPrimitives>
 where
     NetPrimitives: Send + Sync,
@@ -199,13 +216,5 @@ where
 {
     fn peers_handle(&self) -> &PeersHandle {
         &self.peers_handle
-    }
-}
-
-impl<NetPrimitives> Default for NoopNetwork<NetPrimitives> {
-    fn default() -> Self {
-        let (tx, _) = mpsc::unbounded_channel();
-
-        Self { peers_handle: PeersHandle::new(tx), _marker: PhantomData }
     }
 }
