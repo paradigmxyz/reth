@@ -8,7 +8,8 @@ use derive_more;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, derive_more::TryFrom)]
 #[repr(i64)]
 #[try_from(repr)]
-#[allow(unreachable_pub)]
+#[allow(unfulfilled_lint_expectations)]
+#[expect(unreachable_pub)]
 pub enum SupervisorErrorCode {
     // -3204XX DEADLINE_EXCEEDED errors
     /// Happens when a chain database is not initialized yet.
