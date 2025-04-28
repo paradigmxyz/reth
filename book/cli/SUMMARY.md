@@ -4,6 +4,8 @@
   - [`reth init-state`](./reth/init-state.md)
   - [`reth import`](./reth/import.md)
   - [`reth import-era`](./reth/import-era.md)
+    - [`reth import-era local`](./reth/import-era/local.md)
+    - [`reth import-era remote`](./reth/import-era/remote.md)
   - [`reth dump-genesis`](./reth/dump-genesis.md)
   - [`reth db`](./reth/db.md)
     - [`reth db stats`](./reth/db/stats.md)
