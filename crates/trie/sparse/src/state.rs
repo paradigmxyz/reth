@@ -38,6 +38,7 @@ pub struct SparseStateTrie<F: BlindedProviderFactory = DefaultBlindedProviderFac
     /// Reusable buffer for RLP encoding of trie accounts.
     account_rlp_buf: Vec<u8>,
     /// Metrics for the sparse state trie.
+    #[cfg(feature = "metrics")]
     metrics: SparseStateTrieMetrics,
 }
 
@@ -334,8 +335,11 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
 
         let DecodedProofNodes { nodes, total_nodes, skipped_nodes, new_nodes } =
             decode_proof_nodes(storage_subtree.subtree, revealed_nodes)?;
-        self.metrics.increment_total_storage_nodes(total_nodes as u64);
-        self.metrics.increment_skipped_storage_nodes(skipped_nodes as u64);
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.increment_total_storage_nodes(total_nodes as u64);
+            self.metrics.increment_skipped_storage_nodes(skipped_nodes as u64);
+        }
         let mut nodes = nodes.into_iter().peekable();
 
         if let Some(root_node) = Self::validate_root_node_decoded(&mut nodes)? {
