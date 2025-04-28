@@ -111,7 +111,8 @@ where
         // Create the walker.
         let mut prefix_set = self.prefix_sets.account_prefix_set.clone();
         prefix_set.extend_keys(targets.keys().map(Nibbles::unpack));
-        let walker = TrieWalker::new(trie_cursor, prefix_set.freeze());
+        let walker = TrieWalker::new(trie_cursor, prefix_set.freeze())
+            .with_all_branch_nodes_in_database(true);
 
         // Create a hash builder to rebuild the root node since it is not available in the database.
         let retainer = targets.keys().map(Nibbles::unpack).collect();

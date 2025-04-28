@@ -13,7 +13,7 @@ use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{keccak256, Address, B256};
 use alloy_rlp::{BufMut, Encodable};
 use reth_execution_errors::{StateRootError, StorageRootError};
-use tracing::trace;
+use tracing::{info, trace};
 
 #[cfg(feature = "metrics")]
 use crate::metrics::{StateRootMetrics, TrieRootMetrics};
@@ -177,7 +177,8 @@ where
                     .with_updates(retain_updates)
                     .with_all_branch_nodes_in_database(true);
                 let walker = TrieWalker::new(trie_cursor, self.prefix_sets.account_prefix_set)
-                    .with_deletions_retained(retain_updates);
+                    .with_deletions_retained(retain_updates)
+                    .with_all_branch_nodes_in_database(true);
                 let node_iter = TrieNodeIter::state_trie(walker, hashed_account_cursor);
                 (hash_builder, node_iter)
             }
