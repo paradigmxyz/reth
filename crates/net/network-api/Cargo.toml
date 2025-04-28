@@ -13,7 +13,6 @@ workspace = true
 
 [dependencies]
 # reth
-alloy-rpc-types-admin.workspace = true
 reth-network-peers.workspace = true
 reth-network-types.workspace = true
 reth-network-p2p.workspace = true
@@ -22,9 +21,8 @@ reth-tokio-util.workspace = true
 reth-ethereum-forks.workspace = true
 
 # ethereum
-alloy-primitives = { workspace = true, features = ["getrandom"] }
-
-# eth
+alloy-primitives = { workspace = true, features = ["getrandom", "rand"] }
+alloy-rpc-types-admin.workspace = true
 enr = { workspace = true, default-features = false, features = ["rust-secp256k1"] }
 
 # async
