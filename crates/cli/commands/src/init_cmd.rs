@@ -37,4 +37,3 @@ impl<C: ChainSpecParser> InitCommand<C> {
         Some(&self.env.chain)
     }
 }
-
