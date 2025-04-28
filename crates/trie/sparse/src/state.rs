@@ -91,6 +91,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
             revealed_storage_paths: Default::default(),
             retain_updates: false,
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
+            #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
     }
@@ -602,6 +603,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     /// If the trie has not been revealed, this function reveals the root node and returns its hash.
     pub fn root(&mut self) -> SparseStateTrieResult<B256> {
         // record revealed node metrics
+        #[cfg(feature = "metrics")]
         self.metrics.record();
 
         Ok(self.revealed_trie_mut()?.root())
@@ -610,6 +612,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     /// Returns sparse trie root and trie updates if the trie has been revealed.
     pub fn root_with_updates(&mut self) -> SparseStateTrieResult<(B256, TrieUpdates)> {
         // record revealed node metrics
+        #[cfg(feature = "metrics")]
         self.metrics.record();
 
         let storage_tries = self.storage_trie_updates();
