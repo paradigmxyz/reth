@@ -1,6 +1,5 @@
 use crate::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
 use alloc::sync::Arc;
-use alloy_primitives::U256;
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 
@@ -25,14 +24,6 @@ impl<H> HeaderValidator<H> for NoopConsensus {
         &self,
         _header: &SealedHeader<H>,
         _parent: &SealedHeader<H>,
-    ) -> Result<(), ConsensusError> {
-        Ok(())
-    }
-
-    fn validate_header_with_total_difficulty(
-        &self,
-        _header: &H,
-        _total_difficulty: U256,
     ) -> Result<(), ConsensusError> {
         Ok(())
     }

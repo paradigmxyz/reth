@@ -2544,7 +2544,7 @@ mod tests {
             from: rng_endpoint(&mut rng),
             to: rng_endpoint(&mut rng),
             expire: service.ping_expiration(),
-            enr_sq: Some(rng.gen()),
+            enr_sq: Some(rng.r#gen()),
         };
 
         let id = PeerId::random();
@@ -2576,7 +2576,7 @@ mod tests {
             from: rng_endpoint(&mut rng),
             to: rng_endpoint(&mut rng),
             expire: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() - 1,
-            enr_sq: Some(rng.gen()),
+            enr_sq: Some(rng.r#gen()),
         };
 
         let id = PeerId::random();

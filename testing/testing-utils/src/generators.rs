@@ -172,7 +172,7 @@ pub fn sign_tx_with_key_pair(key_pair: Keypair, tx: Transaction) -> TransactionS
     let signature =
         sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
 
-    TransactionSigned::new_unhashed(tx, signature)
+    tx.into_signed(signature).into()
 }
 
 /// Generates a new random [Keypair].
@@ -211,7 +211,7 @@ pub fn random_block<R: Rng>(
     let tx_count = block_params.tx_count.unwrap_or_else(|| rng.random::<u8>());
     let transactions: Vec<TransactionSigned> =
         (0..tx_count).map(|_| random_signed_tx(rng)).collect();
-    let total_gas = transactions.iter().fold(0, |sum, tx| sum + tx.transaction().gas_limit());
+    let total_gas = transactions.iter().fold(0, |sum, tx| sum + tx.gas_limit());
 
     // Generate ommers
     let ommers_count = block_params.ommers_count.unwrap_or_else(|| rng.random_range(0..2));
@@ -488,10 +488,7 @@ mod tests {
     use alloy_consensus::TxEip1559;
     use alloy_eips::eip2930::AccessList;
     use alloy_primitives::{hex, Signature};
-    use reth_primitives_traits::{
-        crypto::secp256k1::{public_key_to_address, sign_message},
-        SignedTransaction,
-    };
+    use reth_primitives_traits::crypto::secp256k1::{public_key_to_address, sign_message};
     use std::str::FromStr;
 
     #[test]
@@ -518,7 +515,7 @@ mod tests {
                 sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), signature_hash)
                     .unwrap();
 
-            let signed = TransactionSigned::new_unhashed(tx.clone(), signature);
+            let signed: TransactionSigned = tx.clone().into_signed(signature).into();
             let recovered = signed.recover_signer().unwrap();
 
             let expected = public_key_to_address(key_pair.public_key());

@@ -20,8 +20,11 @@ use jsonrpsee::{
     proc_macros::rpc,
     PendingSubscriptionSink, SubscriptionMessage,
 };
-use reth::{chainspec::EthereumChainSpecParser, cli::Cli};
-use reth_ethereum::{node::EthereumNode, pool::TransactionPool};
+use reth_ethereum::{
+    cli::{chainspec::EthereumChainSpecParser, interface::Cli},
+    node::EthereumNode,
+    pool::TransactionPool,
+};
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -153,7 +156,7 @@ mod tests {
                 let sink = match pending.accept().await {
                     Ok(sink) => sink,
                     Err(err) => {
-                        eprintln!("failed to accept subscription: {}", err);
+                        eprintln!("failed to accept subscription: {err}");
                         return;
                     }
                 };
@@ -175,7 +178,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_call_transaction_count_http() {
         let server_addr = start_server().await;
-        let uri = format!("http://{}", server_addr);
+        let uri = format!("http://{server_addr}");
         let client = HttpClientBuilder::default().build(&uri).unwrap();
         let count = TxpoolExtApiClient::transaction_count(&client).await.unwrap();
         assert_eq!(count, 0);
@@ -184,7 +187,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_subscribe_transaction_count_ws() {
         let server_addr = start_server().await;
-        let ws_url = format!("ws://{}", server_addr);
+        let ws_url = format!("ws://{server_addr}");
         let client = WsClientBuilder::default().build(&ws_url).await.unwrap();
 
         let mut sub = TxpoolExtApiClient::subscribe_transaction_count(&client, None)

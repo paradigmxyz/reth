@@ -376,7 +376,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db_api::cursor::DbCursorRO;
     use reth_ethereum_primitives::{Block, TransactionSigned};
-    use reth_primitives_traits::{SealedBlock, SignedTransaction};
+    use reth_primitives_traits::SealedBlock;
     use reth_provider::{
         providers::StaticFileWriter, BlockBodyIndicesProvider, DatabaseProviderFactory,
         PruneCheckpointWriter, StaticFileProviderFactory, TransactionsProvider,
