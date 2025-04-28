@@ -14,7 +14,6 @@ use reth_ethereum::{
     node::{api::FullNodeComponents, EthereumNode},
 };
 use reth_tracing::tracing::info;
-use std::sync::Arc;
 use tokio::sync::oneshot;
 
 #[derive(Parser)]
@@ -45,18 +44,25 @@ async fn my_exex<Node: FullNodeComponents>(mut ctx: ExExContext<Node>) -> eyre::
     Ok(())
 }
 
-/// This is an example of how to access the `EthApi` inside an ExEx. It receives the `EthApi` from
-/// the node and prints it.
+/// This is an example of how to access the `EthApi` inside an ExEx. It receives the `EthApi` once
+/// the node is launched fully.
 async fn ethapi_exex<Node>(
-    mut _ctx: ExExContext<Node>,
-    ethapi_rx: oneshot::Receiver<Arc<EthApiFor<Node>>>,
+    mut ctx: ExExContext<Node>,
+    ethapi_rx: oneshot::Receiver<EthApiFor<Node>>,
 ) -> eyre::Result<()>
 where
     Node: FullNodeComponents,
 {
     // Wait for the ethapi to be sent from the main function
-    let ethapi = ethapi_rx.await?;
-    info!("Received ethapi inside exex: {:?}", ethapi);
+    let _ethapi = ethapi_rx.await?;
+    info!("Received ethapi inside exex");
+
+    while let Some(notification) = ctx.notifications.try_next().await? {
+        if let Some(committed_chain) = notification.committed_chain() {
+            ctx.events.send(ExExEvent::FinishedHeight(committed_chain.tip().num_hash()))?;
+        }
+    }
+
     Ok(())
 }
 
@@ -86,9 +92,9 @@ fn main() -> eyre::Result<()> {
                     .launch()
                     .await?;
 
-                //Retrieve the ethapi from the node and send it to the exex
+                // Retrieve the ethapi from the node and send it to the exex
                 let ethapi = handle.node.add_ons_handle.eth_api();
-                ethapi_tx.send(Arc::new(ethapi.clone())).expect("Failed to send ethapi to ExEx");
+                ethapi_tx.send(ethapi.clone()).expect("Failed to send ethapi to ExEx");
 
                 handle.wait_for_node_exit().await
             })
