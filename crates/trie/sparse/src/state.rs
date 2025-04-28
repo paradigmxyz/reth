@@ -285,8 +285,11 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     ) -> SparseStateTrieResult<()> {
         let DecodedProofNodes { nodes, total_nodes, skipped_nodes, new_nodes } =
             decode_proof_nodes(account_subtree, &self.revealed_account_paths)?;
-        self.metrics.increment_total_account_nodes(total_nodes as u64);
-        self.metrics.increment_skipped_account_nodes(skipped_nodes as u64);
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.increment_total_account_nodes(total_nodes as u64);
+            self.metrics.increment_skipped_account_nodes(skipped_nodes as u64);
+        }
         let mut account_nodes = nodes.into_iter().peekable();
 
         if let Some(root_node) = Self::validate_root_node_decoded(&mut account_nodes)? {
