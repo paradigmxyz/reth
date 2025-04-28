@@ -26,10 +26,12 @@ macro_rules! delegate {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Hash, Eq, PartialEq)]
-pub enum ExtendedOpTxEnvelope<T> {
-    BuiltIn(Box<OpTxEnvelope>),
-    Other(T),
+pub enum ExtendedTxEnvelope<BuiltIn, Other> {
+    BuiltIn(Box<BuiltIn>),
+    Other(Other),
 }
+
+pub type ExtendedOpTxEnvelope<T> = ExtendedTxEnvelope<OpTxEnvelope, T>;
 
 impl<T> Transaction for ExtendedOpTxEnvelope<T>
 where
