@@ -31,7 +31,7 @@ use crate::{
 /// Intended for testing purposes where network is not used.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
-pub struct NoopNetwork<NetPrimitives = EthNetworkPrimitives> {
+pub struct NoopNetwork<Net = EthNetworkPrimitives> {
     peers_handle: PeersHandle,
     _marker: PhantomData<Net>,
 }
@@ -55,7 +55,7 @@ impl Default for NoopNetwork<EthNetworkPrimitives> {
 
 impl<Net> NetworkInfo for NoopNetwork<Net>
 where
-    NetPrimitives: Send + Sync,
+    Net: Send + Sync,
 {
     fn local_addr(&self) -> SocketAddr {
         (IpAddr::from(std::net::Ipv4Addr::UNSPECIFIED), 30303).into()
@@ -92,7 +92,7 @@ where
 
 impl<Net> PeersInfo for NoopNetwork<Net>
 where
-    NetPrimitives: Send + Sync,
+    Net: Send + Sync,
 {
     fn num_connected_peers(&self) -> usize {
         0
@@ -110,7 +110,7 @@ where
 
 impl<Net> Peers for NoopNetwork<Net>
 where
-    NetPrimitives: Send + Sync,
+    Net: Send + Sync,
 {
     fn add_trusted_peer_id(&self, _peer: PeerId) {}
 
@@ -163,7 +163,7 @@ where
 
 impl<Net> BlockDownloaderProvider for NoopNetwork<Net>
 where
-    NetPrimitives: NetworkPrimitives + Default,
+    Net: NetworkPrimitives + Default,
 {
     type Client = NoopFullBlockClient<Net>;
 
@@ -174,7 +174,7 @@ where
 
 impl<Net> NetworkSyncUpdater for NoopNetwork<Net>
 where
-    NetPrimitives: fmt::Debug + Send + Sync + 'static,
+    Net: fmt::Debug + Send + Sync + 'static,
 {
     fn update_status(&self, _head: reth_ethereum_forks::Head) {}
 
@@ -183,9 +183,9 @@ where
 
 impl<Net> NetworkEventListenerProvider for NoopNetwork<Net>
 where
-    NetPrimitives: NetworkPrimitives,
+    Net: NetworkPrimitives,
 {
-    type Primitives = NetPrimitives;
+    type Primitives = Net;
 
     fn event_listener(&self) -> EventStream<NetworkEvent<PeerRequest<Self::Primitives>>> {
         let event_sender: EventSender<NetworkEvent<PeerRequest<Net>>> = Default::default();
@@ -200,7 +200,7 @@ where
 
 impl<Net> NetworkPeersEvents for NoopNetwork<Net>
 where
-    NetPrimitives: NetworkPrimitives,
+    Net: NetworkPrimitives,
 {
     fn peer_events(&self) -> PeerEventStream {
         let event_sender: EventSender<NetworkEvent<PeerRequest<Net>>> = Default::default();
@@ -210,7 +210,7 @@ where
 
 impl<Net> PeersHandleProvider for NoopNetwork<Net>
 where
-    NetPrimitives: NetworkPrimitives,
+    Net: NetworkPrimitives,
 {
     fn peers_handle(&self) -> &PeersHandle {
         &self.peers_handle

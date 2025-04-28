@@ -648,12 +648,12 @@ enum RangeResponseResult<H, B> {
 /// A headers+bodies client implementation that does nothing.
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
-pub struct NoopFullBlockClient<NetPrimitives = EthNetworkPrimitives>(PhantomData<Net>);
+pub struct NoopFullBlockClient<Net = EthNetworkPrimitives>(PhantomData<Net>);
 
 /// Implements the `DownloadClient` trait for the `NoopFullBlockClient` struct.
 impl<Net> DownloadClient for NoopFullBlockClient<Net>
 where
-    NetPrimitives: Debug + Send + Sync,
+    Net: Debug + Send + Sync,
 {
     /// Reports a bad message received from a peer.
     ///
@@ -676,9 +676,9 @@ where
 /// Implements the `BodiesClient` trait for the `NoopFullBlockClient` struct.
 impl<Net> BodiesClient for NoopFullBlockClient<Net>
 where
-    NetPrimitives: NetworkPrimitives,
+    Net: NetworkPrimitives,
 {
-    type Body = NetPrimitives::BlockBody;
+    type Body = Net::BlockBody;
     /// Defines the output type of the function.
     type Output = futures::future::Ready<PeerRequestResult<Vec<Self::Body>>>;
 
@@ -705,9 +705,9 @@ where
 
 impl<Net> HeadersClient for NoopFullBlockClient<Net>
 where
-    NetPrimitives: NetworkPrimitives,
+    Net: NetworkPrimitives,
 {
-    type Header = NetPrimitives::BlockHeader;
+    type Header = Net::BlockHeader;
     /// The output type representing a future containing a peer request result with a vector of
     /// headers.
     type Output = futures::future::Ready<PeerRequestResult<Vec<Self::Header>>>;
@@ -736,9 +736,9 @@ where
 
 impl<Net> BlockClient for NoopFullBlockClient<Net>
 where
-    NetPrimitives: NetworkPrimitives,
+    Net: NetworkPrimitives,
 {
-    type Block = NetPrimitives::Block;
+    type Block = Net::Block;
 }
 
 #[cfg(test)]
