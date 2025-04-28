@@ -247,7 +247,7 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     Prune(prune::PruneCommand<C>),
 }
 
-impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Commands<C, Ext> {
+impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Commands<C, Ext> {
     /// Returns the underlying chain being used for commands
     pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         match self {
