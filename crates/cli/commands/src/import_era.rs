@@ -35,11 +35,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
         let hash_collector = Collector::new(config.stages.etl.file_size, config.stages.etl.dir);
         let stream = read_dir(self.path)?;
 
-        reth_era_import::import(
-            stream,
-            &provider_factory.provider_rw().unwrap().0,
-            hash_collector,
-        )?;
+        reth_era_utils::import(stream, &provider_factory.provider_rw().unwrap().0, hash_collector)?;
 
         Ok(())
     }
