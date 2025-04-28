@@ -345,7 +345,8 @@ where
         let blob_cache_size = if let Some(blob_cache_size) = pool_config.blob_cache_size {
             blob_cache_size
         } else {
-            // get the current blob params for the current timestamp
+            // get the current blob params for the current timestamp, fallback to default Cancun
+            // params
             let current_timestamp =
                 SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs();
             let blob_params = ctx
