@@ -53,6 +53,7 @@ impl Default for SparseStateTrie {
             revealed_storage_paths: Default::default(),
             retain_updates: false,
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
+            #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
     }
