@@ -350,7 +350,7 @@ where
     type EthApi = OpEthApi<N>;
 
     async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
-        let Self { sequencer_url, enable_txpool_admission } = self;
+        let Self { sequencer_url, .. } = self;
         let eth_api = reth_rpc::EthApiBuilder::new(
             ctx.components.provider().clone(),
             ctx.components.pool().clone(),
@@ -367,15 +367,17 @@ where
         .gas_oracle_config(ctx.config.gas_oracle)
         .build_inner();
 
-        let sequencer_client = if let Some(url) = sequencer_url {
+        let sequencer_client = if let Some(ref url) = sequencer_url {
             Some(
-                SequencerClient::new(&url)
+                SequencerClient::new(url)
                     .await
-                    .wrap_err_with(|| "Failed to init sequencer client with: {url}")?,
+                    .wrap_err_with(|| format!("Failed to init sequencer client with: {url}"))?,
             )
         } else {
             None
         };
+
+        let enable_txpool_admission = sequencer_url.is_none();
 
         Ok(OpEthApi {
             inner: Arc::new(OpEthApiInner::new(enable_txpool_admission, eth_api, sequencer_client)),
