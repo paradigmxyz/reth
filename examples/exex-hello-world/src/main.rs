@@ -45,6 +45,8 @@ async fn my_exex<Node: FullNodeComponents>(mut ctx: ExExContext<Node>) -> eyre::
     Ok(())
 }
 
+/// This is an example of how to access the `EthApi` inside an ExEx. It receives the `EthApi` from
+/// the node and prints it.
 async fn ethapi_exex<Node>(
     mut _ctx: ExExContext<Node>,
     ethapi_rx: oneshot::Receiver<Arc<EthApiFor<Node>>>,
@@ -52,6 +54,7 @@ async fn ethapi_exex<Node>(
 where
     Node: FullNodeComponents,
 {
+    // Wait for the ethapi to be sent from the main function
     let ethapi = ethapi_rx.await?;
     info!("Received ethapi inside exex: {:?}", ethapi);
     Ok(())
@@ -82,6 +85,8 @@ fn main() -> eyre::Result<()> {
                     .install_exex("ethapi-exex", async move |ctx| Ok(ethapi_exex(ctx, ethapi_rx)))
                     .launch()
                     .await?;
+
+                //Retrieve the ethapi from the node and send it to the exex
                 let ethapi = handle.node.add_ons_handle.eth_api();
                 ethapi_tx.send(Arc::new(ethapi.clone())).expect("Failed to send ethapi to ExEx");
 
