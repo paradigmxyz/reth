@@ -251,8 +251,8 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Commands<C, Ext> {
     /// Returns the underlying chain being used for commands
     pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         match self {
-            Self::Node(cmd) => cmd.chain_spec(),
-            Self::Init(cmd) => cmd.chain_spec(),
+            Self::Node(cmd) => cmd.as_ref().chain_spec(),
+            Self::Init(cmd) => cmd.as_ref().chain_spec(),
             Self::InitState(cmd) => cmd.chain_spec(),
             Self::Import(cmd) => cmd.chain_spec(),
             Self::ImportEra(cmd) => cmd.chain_spec(),
