@@ -918,7 +918,7 @@ mod test {
     fn foo<T: ProviderNodeTypes>(_bar: T) {}
 
     #[test]
-    fn op_node_sdk() {
+    fn provider_factory_impl_provider_node_types() {
         let (static_dir, _) = create_test_static_files_dir();
         let db = create_test_rw_db();
         let provider: ProviderFactory<NodeTypesWithDBAdapter<OpNode, _>> = ProviderFactory::new(
