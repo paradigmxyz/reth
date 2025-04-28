@@ -7113,7 +7113,7 @@ dependencies = [
  "reth-downloaders",
  "reth-ecies",
  "reth-era-downloader",
- "reth-era-import",
+ "reth-era-utils",
  "reth-eth-wire",
  "reth-ethereum-cli",
  "reth-ethereum-primitives",
@@ -7796,7 +7796,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-era-import"
+name = "reth-era-utils"
 version = "1.3.12"
 dependencies = [
  "alloy-primitives",

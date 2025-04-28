@@ -1,6 +1,6 @@
 [package]
-name = "reth-era-import"
-description = "Imports history from ERA files"
+name = "reth-era-utils"
+description = "Utilities to store and fetch history data with storage-api"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

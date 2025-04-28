@@ -35,7 +35,7 @@ async fn test_history_imports_from_fresh_state_successfully() {
 
     let expected_block_number = 8191;
     let actual_block_number =
-        reth_era_import::import(stream, &pf.provider_rw().unwrap().0, hash_collector).unwrap();
+        reth_era_utils::import(stream, &pf.provider_rw().unwrap().0, hash_collector).unwrap();
 
     assert_eq!(actual_block_number, expected_block_number);
 }
