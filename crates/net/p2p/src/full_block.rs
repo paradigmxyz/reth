@@ -648,10 +648,10 @@ enum RangeResponseResult<H, B> {
 /// A headers+bodies client implementation that does nothing.
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
-pub struct NoopFullBlockClient<NetPrimitives = EthNetworkPrimitives>(PhantomData<NetPrimitives>);
+pub struct NoopFullBlockClient<NetPrimitives = EthNetworkPrimitives>(PhantomData<Net>);
 
 /// Implements the `DownloadClient` trait for the `NoopFullBlockClient` struct.
-impl<NetPrimitives> DownloadClient for NoopFullBlockClient<NetPrimitives>
+impl<Net> DownloadClient for NoopFullBlockClient<Net>
 where
     NetPrimitives: Debug + Send + Sync,
 {
@@ -674,7 +674,7 @@ where
 }
 
 /// Implements the `BodiesClient` trait for the `NoopFullBlockClient` struct.
-impl<NetPrimitives> BodiesClient for NoopFullBlockClient<NetPrimitives>
+impl<Net> BodiesClient for NoopFullBlockClient<Net>
 where
     NetPrimitives: NetworkPrimitives,
 {
@@ -703,7 +703,7 @@ where
     }
 }
 
-impl<NetPrimitives> HeadersClient for NoopFullBlockClient<NetPrimitives>
+impl<Net> HeadersClient for NoopFullBlockClient<Net>
 where
     NetPrimitives: NetworkPrimitives,
 {
@@ -734,7 +734,7 @@ where
     }
 }
 
-impl<NetPrimitives> BlockClient for NoopFullBlockClient<NetPrimitives>
+impl<Net> BlockClient for NoopFullBlockClient<Net>
 where
     NetPrimitives: NetworkPrimitives,
 {
