@@ -874,7 +874,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2e60987afbc49b8719578355726059579a1a197741a2adae52f860d5d7464cc"
 dependencies = [
  "alloy-json-rpc",
+ "alloy-rpc-types-engine",
  "alloy-transport",
+ "http-body-util",
+ "hyper",
+ "hyper-tls",
+ "hyper-util",
+ "jsonwebtoken",
  "reqwest",
  "serde_json",
  "tower 0.5.2",
@@ -2436,6 +2442,16 @@ dependencies = [
 
 [[package]]
 name = "core-foundation"
+version = "0.9.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91e195e091a93c46f7102ec7818a2aa394e1e1771c3ab4825963fa03e45afb8f"
+dependencies = [
+ "core-foundation-sys",
+ "libc",
+]
+
+[[package]]
+name = "core-foundation"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b55271e5c8c478ad3f38ad24ef34923091e0548492a266d19b3c0b4d82574c63"
@@ -3764,6 +3780,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
+name = "foreign-types"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f6f339eb8adc052cd2ca78910fda869aefa38d22d5cb648e6485e4d3fc06f3b1"
+dependencies = [
+ "foreign-types-shared",
+]
+
+[[package]]
+name = "foreign-types-shared"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
+
+[[package]]
 name = "form_urlencoded"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4418,6 +4449,22 @@ dependencies = [
  "tokio-rustls",
  "tower-service",
  "webpki-roots",
+]
+
+[[package]]
+name = "hyper-tls"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70206fc6890eaca9fde8a0bf71caa2ddfc9fe045ac9e5c70df101a7dbde866e0"
+dependencies = [
+ "bytes",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "native-tls",
+ "tokio",
+ "tokio-native-tls",
+ "tower-service",
 ]
 
 [[package]]
@@ -5653,6 +5700,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "native-tls"
+version = "0.2.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "87de3442987e9dbec73158d5c715e7ad9072fda936bb03d19d7fa10e00520f0e"
+dependencies = [
+ "libc",
+ "log",
+ "openssl",
+ "openssl-probe",
+ "openssl-sys",
+ "schannel",
+ "security-framework 2.11.1",
+ "security-framework-sys",
+ "tempfile",
+]
+
+[[package]]
 name = "nom"
 version = "7.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5993,10 +6057,48 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
+name = "openssl"
+version = "0.10.72"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fedfea7d58a1f73118430a55da6a286e7b044961736ce96a16a17068ea25e5da"
+dependencies = [
+ "bitflags 2.9.0",
+ "cfg-if",
+ "foreign-types",
+ "libc",
+ "once_cell",
+ "openssl-macros",
+ "openssl-sys",
+]
+
+[[package]]
+name = "openssl-macros"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a948666b637a0f465e8564c73e89d4dde00d72d4d473cc972f390fc3dcee7d9c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.101",
+]
+
+[[package]]
 name = "openssl-probe"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d05e27ee213611ffe7d6348b942e8f942b37114c00cc03cec254295a4a17852e"
+
+[[package]]
+name = "openssl-sys"
+version = "0.9.107"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8288979acd84749c744a9014b4382d42b8f7b2592847b5afb2ed29e5d16ede07"
+dependencies = [
+ "cc",
+ "libc",
+ "pkg-config",
+ "vcpkg",
+]
 
 [[package]]
 name = "option-ext"
@@ -7333,6 +7435,7 @@ dependencies = [
  "reth-optimism-primitives",
  "reth-primitives-traits",
  "reth-prune-types",
+ "reth-scroll-primitives",
  "reth-stages-types",
  "reth-storage-errors",
  "reth-trie-common",
@@ -7607,6 +7710,7 @@ dependencies = [
  "reth-prune",
  "reth-stages-api",
  "reth-transaction-pool",
+ "scroll-alloy-rpc-types-engine",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -8111,6 +8215,7 @@ dependencies = [
  "reth-storage-errors",
  "reth-trie-common",
  "revm",
+ "scroll-alloy-evm",
 ]
 
 [[package]]
@@ -9228,6 +9333,7 @@ dependencies = [
  "reth-chainspec",
  "reth-errors",
  "reth-primitives-traits",
+ "scroll-alloy-rpc-types-engine",
  "serde",
  "thiserror 2.0.12",
  "tokio",
@@ -9303,6 +9409,7 @@ dependencies = [
  "revm-bytecode",
  "revm-primitives",
  "revm-state",
+ "scroll-alloy-consensus",
  "secp256k1",
  "serde",
  "serde_json",
@@ -9813,6 +9920,320 @@ dependencies = [
  "jsonrpsee-types",
  "reth-primitives-traits",
  "serde",
+]
+
+[[package]]
+name = "reth-scroll-chainspec"
+version = "1.3.12"
+dependencies = [
+ "alloy-chains",
+ "alloy-consensus",
+ "alloy-eips 0.15.6",
+ "alloy-genesis",
+ "alloy-primitives",
+ "alloy-serde 0.15.6",
+ "derive_more",
+ "once_cell",
+ "reth-chainspec",
+ "reth-ethereum-forks",
+ "reth-network-peers",
+ "reth-primitives-traits",
+ "reth-scroll-forks",
+ "reth-trie-common",
+ "scroll-alloy-hardforks",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "reth-scroll-cli"
+version = "1.3.12"
+dependencies = [
+ "clap",
+ "eyre",
+ "proptest",
+ "reth-cli",
+ "reth-cli-commands",
+ "reth-cli-runner",
+ "reth-consensus",
+ "reth-db",
+ "reth-node-builder",
+ "reth-node-core",
+ "reth-node-metrics",
+ "reth-scroll-chainspec",
+ "reth-scroll-evm",
+ "reth-scroll-node",
+ "reth-scroll-primitives",
+ "reth-tracing",
+ "scroll-alloy-consensus",
+ "tracing",
+]
+
+[[package]]
+name = "reth-scroll-consensus"
+version = "1.3.12"
+dependencies = [
+ "alloy-consensus",
+ "alloy-primitives",
+ "reth-chainspec",
+ "reth-consensus",
+ "reth-consensus-common",
+ "reth-ethereum-consensus",
+ "reth-execution-types",
+ "reth-primitives",
+ "reth-primitives-traits",
+ "reth-scroll-primitives",
+ "scroll-alloy-hardforks",
+ "thiserror 2.0.12",
+ "tracing",
+]
+
+[[package]]
+name = "reth-scroll-engine-primitives"
+version = "1.3.12"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips 0.15.6",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-rpc-types-engine",
+ "arbitrary",
+ "eyre",
+ "rand 0.9.1",
+ "reth-chain-state",
+ "reth-chainspec",
+ "reth-engine-primitives",
+ "reth-payload-builder",
+ "reth-payload-primitives",
+ "reth-primitives",
+ "reth-primitives-traits",
+ "reth-scroll-chainspec",
+ "reth-scroll-primitives",
+ "scroll-alloy-hardforks",
+ "scroll-alloy-rpc-types-engine",
+ "serde",
+ "sha2 0.10.8",
+]
+
+[[package]]
+name = "reth-scroll-evm"
+version = "1.3.12"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips 0.15.6",
+ "alloy-evm",
+ "alloy-primitives",
+ "derive_more",
+ "eyre",
+ "reth-chainspec",
+ "reth-evm",
+ "reth-execution-types",
+ "reth-primitives",
+ "reth-primitives-traits",
+ "reth-scroll-chainspec",
+ "reth-scroll-forks",
+ "reth-scroll-primitives",
+ "revm",
+ "revm-primitives",
+ "revm-scroll",
+ "scroll-alloy-consensus",
+ "scroll-alloy-evm",
+ "scroll-alloy-hardforks",
+ "thiserror 2.0.12",
+ "tracing",
+]
+
+[[package]]
+name = "reth-scroll-forks"
+version = "1.3.12"
+dependencies = [
+ "alloy-chains",
+ "alloy-primitives",
+ "auto_impl",
+ "once_cell",
+ "reth-ethereum-forks",
+ "scroll-alloy-hardforks",
+ "serde",
+]
+
+[[package]]
+name = "reth-scroll-node"
+version = "1.3.12"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips 0.15.6",
+ "alloy-genesis",
+ "alloy-network",
+ "alloy-primitives",
+ "alloy-rpc-types-engine",
+ "eyre",
+ "futures",
+ "reth-basic-payload-builder",
+ "reth-chainspec",
+ "reth-db",
+ "reth-e2e-test-utils",
+ "reth-engine-local",
+ "reth-eth-wire-types",
+ "reth-evm",
+ "reth-network",
+ "reth-node-api",
+ "reth-node-builder",
+ "reth-node-core",
+ "reth-node-types",
+ "reth-payload-builder",
+ "reth-primitives",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-revm",
+ "reth-rpc-eth-types",
+ "reth-rpc-server-types",
+ "reth-scroll-chainspec",
+ "reth-scroll-consensus",
+ "reth-scroll-engine-primitives",
+ "reth-scroll-evm",
+ "reth-scroll-node",
+ "reth-scroll-payload",
+ "reth-scroll-primitives",
+ "reth-scroll-rpc",
+ "reth-scroll-txpool",
+ "reth-tasks",
+ "reth-tracing",
+ "reth-transaction-pool",
+ "reth-trie-db",
+ "revm",
+ "scroll-alloy-consensus",
+ "scroll-alloy-evm",
+ "scroll-alloy-hardforks",
+ "scroll-alloy-rpc-types-engine",
+ "serde_json",
+ "thiserror 2.0.12",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "reth-scroll-payload"
+version = "1.3.12"
+dependencies = [
+ "alloy-consensus",
+ "alloy-primitives",
+ "alloy-rlp",
+ "futures-util",
+ "reth-basic-payload-builder",
+ "reth-chain-state",
+ "reth-chainspec",
+ "reth-evm",
+ "reth-execution-types",
+ "reth-payload-builder",
+ "reth-payload-primitives",
+ "reth-payload-util",
+ "reth-primitives-traits",
+ "reth-revm",
+ "reth-scroll-chainspec",
+ "reth-scroll-engine-primitives",
+ "reth-scroll-forks",
+ "reth-scroll-primitives",
+ "reth-storage-api",
+ "reth-transaction-pool",
+ "revm",
+ "scroll-alloy-consensus",
+ "scroll-alloy-hardforks",
+ "thiserror 2.0.12",
+ "tracing",
+]
+
+[[package]]
+name = "reth-scroll-primitives"
+version = "1.3.12"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips 0.15.6",
+ "alloy-evm",
+ "alloy-primitives",
+ "alloy-rlp",
+ "arbitrary",
+ "bytes",
+ "derive_more",
+ "modular-bitfield",
+ "once_cell",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "rand 0.8.5",
+ "rand 0.9.1",
+ "reth-codecs",
+ "reth-primitives-traits",
+ "reth-zstd-compressors",
+ "revm-context",
+ "revm-scroll",
+ "rstest",
+ "scroll-alloy-consensus",
+ "scroll-alloy-evm",
+ "secp256k1",
+ "serde",
+]
+
+[[package]]
+name = "reth-scroll-rpc"
+version = "1.3.12"
+dependencies = [
+ "alloy-consensus",
+ "alloy-primitives",
+ "alloy-rpc-types-eth",
+ "eyre",
+ "jsonrpsee-types",
+ "parking_lot",
+ "reth-chainspec",
+ "reth-evm",
+ "reth-network-api",
+ "reth-node-api",
+ "reth-node-builder",
+ "reth-primitives",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-rpc",
+ "reth-rpc-eth-api",
+ "reth-rpc-eth-types",
+ "reth-scroll-chainspec",
+ "reth-scroll-primitives",
+ "reth-tasks",
+ "reth-transaction-pool",
+ "revm",
+ "scroll-alloy-consensus",
+ "scroll-alloy-evm",
+ "scroll-alloy-hardforks",
+ "scroll-alloy-network",
+ "scroll-alloy-rpc-types",
+ "thiserror 2.0.12",
+ "tokio",
+]
+
+[[package]]
+name = "reth-scroll-txpool"
+version = "1.3.12"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips 0.15.6",
+ "alloy-primitives",
+ "alloy-rpc-types-eth",
+ "c-kzg",
+ "derive_more",
+ "futures-util",
+ "metrics",
+ "parking_lot",
+ "reth-chain-state",
+ "reth-chainspec",
+ "reth-metrics",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-revm",
+ "reth-scroll-chainspec",
+ "reth-scroll-evm",
+ "reth-scroll-forks",
+ "reth-scroll-primitives",
+ "reth-storage-api",
+ "reth-transaction-pool",
+ "revm-scroll",
+ "scroll-alloy-consensus",
 ]
 
 [[package]]
@@ -10442,6 +10863,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "revm-scroll"
+version = "0.1.0"
+source = "git+https://github.com/scroll-tech/scroll-revm#ccf29efd0762f6e45f7dc1c290668c643658080e"
+dependencies = [
+ "auto_impl",
+ "enumn",
+ "once_cell",
+ "revm",
+ "revm-inspector",
+ "revm-primitives",
+ "serde",
+]
+
+[[package]]
 name = "revm-state"
 version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10717,7 +11152,7 @@ dependencies = [
  "openssl-probe",
  "rustls-pki-types",
  "schannel",
- "security-framework",
+ "security-framework 3.2.0",
 ]
 
 [[package]]
@@ -10744,7 +11179,7 @@ version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4937d110d34408e9e5ad30ba0b0ca3b6a8a390f8db3636db60144ac4fa792750"
 dependencies = [
- "core-foundation",
+ "core-foundation 0.10.0",
  "core-foundation-sys",
  "jni",
  "log",
@@ -10753,7 +11188,7 @@ dependencies = [
  "rustls-native-certs",
  "rustls-platform-verifier-android",
  "rustls-webpki",
- "security-framework",
+ "security-framework 3.2.0",
  "security-framework-sys",
  "webpki-root-certs",
  "windows-sys 0.59.0",
@@ -10848,6 +11283,152 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
+name = "scroll-alloy-consensus"
+version = "1.3.12"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips 0.15.6",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-serde 0.15.6",
+ "arbitrary",
+ "bincode 1.3.3",
+ "derive_more",
+ "modular-bitfield",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "rand 0.9.1",
+ "reth-codecs",
+ "reth-codecs-derive",
+ "serde",
+ "serde_json",
+ "test-fuzz",
+]
+
+[[package]]
+name = "scroll-alloy-evm"
+version = "1.3.12"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips 0.15.6",
+ "alloy-evm",
+ "alloy-primitives",
+ "auto_impl",
+ "eyre",
+ "revm",
+ "revm-scroll",
+ "scroll-alloy-consensus",
+ "scroll-alloy-hardforks",
+ "serde",
+]
+
+[[package]]
+name = "scroll-alloy-hardforks"
+version = "1.3.12"
+dependencies = [
+ "alloy-hardforks",
+ "auto_impl",
+ "serde",
+]
+
+[[package]]
+name = "scroll-alloy-network"
+version = "1.3.12"
+dependencies = [
+ "alloy-consensus",
+ "alloy-network",
+ "alloy-primitives",
+ "alloy-rpc-types-eth",
+ "alloy-signer",
+ "scroll-alloy-consensus",
+ "scroll-alloy-rpc-types",
+]
+
+[[package]]
+name = "scroll-alloy-provider"
+version = "1.3.12"
+dependencies = [
+ "alloy-json-rpc",
+ "alloy-primitives",
+ "alloy-provider",
+ "alloy-rpc-client",
+ "alloy-rpc-types-engine",
+ "alloy-transport",
+ "alloy-transport-http",
+ "async-trait",
+ "derive_more",
+ "eyre",
+ "futures-util",
+ "http-body-util",
+ "jsonrpsee",
+ "jsonrpsee-types",
+ "reqwest",
+ "reth-engine-primitives",
+ "reth-payload-builder",
+ "reth-payload-primitives",
+ "reth-primitives",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-rpc-api",
+ "reth-rpc-builder",
+ "reth-rpc-engine-api",
+ "reth-scroll-chainspec",
+ "reth-scroll-engine-primitives",
+ "reth-scroll-node",
+ "reth-scroll-payload",
+ "reth-tasks",
+ "reth-tracing",
+ "reth-transaction-pool",
+ "scroll-alloy-network",
+ "scroll-alloy-rpc-types-engine",
+ "thiserror 2.0.12",
+ "tokio",
+ "tower 0.4.13",
+]
+
+[[package]]
+name = "scroll-alloy-rpc-types"
+version = "1.3.12"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips 0.15.6",
+ "alloy-network-primitives",
+ "alloy-primitives",
+ "alloy-rpc-types-eth",
+ "alloy-serde 0.15.6",
+ "arbitrary",
+ "derive_more",
+ "scroll-alloy-consensus",
+ "serde",
+ "serde_json",
+ "similar-asserts",
+]
+
+[[package]]
+name = "scroll-alloy-rpc-types-engine"
+version = "1.3.12"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rpc-types-engine",
+ "arbitrary",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "scroll-reth"
+version = "1.3.12"
+dependencies = [
+ "clap",
+ "reth-cli-util",
+ "reth-engine-local",
+ "reth-provider",
+ "reth-scroll-cli",
+ "reth-scroll-node",
+ "tracing",
+]
+
+[[package]]
 name = "sec1"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10885,12 +11466,25 @@ dependencies = [
 
 [[package]]
 name = "security-framework"
+version = "2.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "897b2245f0b511c87893af39b033e5ca9cce68824c4d7e7630b5a1d339658d02"
+dependencies = [
+ "bitflags 2.9.0",
+ "core-foundation 0.9.4",
+ "core-foundation-sys",
+ "libc",
+ "security-framework-sys",
+]
+
+[[package]]
+name = "security-framework"
 version = "3.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "271720403f46ca04f7ba6f55d438f8bd878d6b8ca0a1046e8228c4145bcbb316"
 dependencies = [
  "bitflags 2.9.0",
- "core-foundation",
+ "core-foundation 0.10.0",
  "core-foundation-sys",
  "libc",
  "security-framework-sys",
@@ -11782,6 +12376,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.101",
+]
+
+[[package]]
+name = "tokio-native-tls"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbae76ab933c85776efabc971569dd6119c580d8f5d448769dec1764bf796ef2"
+dependencies = [
+ "native-tls",
+ "tokio",
 ]
 
 [[package]]
