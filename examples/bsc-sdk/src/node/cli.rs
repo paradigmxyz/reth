@@ -1,8 +1,8 @@
 use crate::{
     chainspec::{parser::BscChainSpecParser, BscChainSpec},
-    node::{consensus::BscConsensus, BscNode},
+    node::{consensus::BscConsensus, execute::BscExecutorProvider, BscNode},
 };
-use clap::{value_parser, Parser};
+use clap::Parser;
 use reth::{
     args::LogArgs,
     builder::{NodeBuilder, WithLaunchContext},
@@ -15,9 +15,7 @@ use reth_chainspec::EthChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::node::NoArgs;
 use reth_db::DatabaseEnv;
-
 use reth_network::EthNetworkPrimitives;
-use reth_node_ethereum::BasicBlockExecutorProvider;
 use reth_tracing::FileWorkerGuard;
 use std::{
     fmt::{self},
@@ -35,35 +33,6 @@ pub struct Cli<Spec: ChainSpecParser = BscChainSpecParser, Ext: clap::Args + fmt
     /// The command to run
     #[command(subcommand)]
     pub command: Commands<Spec, Ext>,
-
-    /// The chain this node is running.
-    ///
-    /// Possible values are either a built-in chain or the path to a chain specification file.
-    #[arg(
-        long,
-        value_name = "CHAIN_OR_PATH",
-        long_help = Spec::help_message(),
-        default_value = Spec::SUPPORTED_CHAINS[0],
-        value_parser = Spec::parser(),
-        global = true,
-    )]
-    chain: Arc<Spec::ChainSpec>,
-
-    /// Add a new instance of a node.
-    ///
-    /// Configures the ports of the node to avoid conflicts with the defaults.
-    /// This is useful for running multiple nodes on the same machine.
-    ///
-    /// Max number of instances is 200. It is chosen in a way so that it's not possible to have
-    /// port numbers that conflict with each other.
-    ///
-    /// Changes to the following port numbers:
-    /// - `DISCOVERY_PORT`: default + `instance` - 1
-    /// - `AUTH_PORT`: default + `instance` * 100 - 100
-    /// - `HTTP_RPC_PORT`: default - `instance` + 1
-    /// - `WS_RPC_PORT`: default + `instance` * 2 - 2
-    #[arg(long, value_name = "INSTANCE", global = true, default_value_t = 1, value_parser = value_parser!(u16).range(..=200))]
-    instance: u16,
 
     #[command(flatten)]
     logs: LogArgs,
@@ -92,9 +61,11 @@ where
         L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
     {
-        // add network name to logs dir
-        self.logs.log_file_directory =
-            self.logs.log_file_directory.join(self.chain.chain().to_string());
+        // Add network name if available to the logs dir
+        if let Some(chain_spec) = self.command.chain_spec() {
+            self.logs.log_file_directory =
+                self.logs.log_file_directory.join(chain_spec.chain().to_string());
+        }
 
         let _guard = self.init_tracing()?;
         info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
@@ -102,8 +73,8 @@ where
         // Install the prometheus recorder to be sure to record all metrics
         let _ = install_prometheus_recorder();
 
-        let _components = |spec: Arc<C::ChainSpec>| {
-            (BasicBlockExecutorProvider::new(spec.clone()), BscConsensus::new(spec))
+        let components = |spec: Arc<C::ChainSpec>| {
+            (BscExecutorProvider::new(spec.clone()), BscConsensus::new(spec))
         };
 
         match self.command {
@@ -118,7 +89,9 @@ where
             }
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute::<BscNode>()),
-            Commands::Stage(_command) => todo!(),
+            Commands::Stage(command) => runner.run_command_until_exit(|ctx| {
+                command.execute::<BscNode, _, _, EthNetworkPrimitives>(ctx, components)
+            }),
             Commands::P2P(command) => {
                 runner.run_until_ctrl_c(command.execute::<EthNetworkPrimitives>())
             }
@@ -127,13 +100,15 @@ where
                 runner.run_command_until_exit(|ctx| command.execute::<BscNode>(ctx))
             }
             Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<BscNode>()),
-            Commands::Import(_command) => {
-                // runner.run_blocking_until_ctrl_c(command.execute::<BscNode, _, _>(components))
-                todo!()
+            Commands::Import(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute::<BscNode, _, _>(components))
             }
             Commands::Debug(_command) => todo!(),
             #[cfg(feature = "dev")]
             Commands::TestVectors(_command) => todo!(),
+            Commands::ImportEra(_command) => {
+                todo!()
+            }
         }
     }
 
