@@ -66,4 +66,3 @@ impl<C: ChainSpecParser> Command<C> {
         }
     }
 }
-
