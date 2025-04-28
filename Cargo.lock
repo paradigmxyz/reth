@@ -3624,6 +3624,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "exex-subscription"
+version = "1.3.12"
+dependencies = [
+ "alloy-primitives",
+ "clap",
+ "eyre",
+ "futures",
+ "jsonrpsee",
+ "reth-ethereum",
+ "serde",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "eyre"
 version = "0.6.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
