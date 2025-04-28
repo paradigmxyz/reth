@@ -311,4 +311,3 @@ impl<C: ChainSpecParser> Command<C> {
         Some(&self.env.chain)
     }
 }
-
