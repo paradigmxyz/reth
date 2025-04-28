@@ -109,7 +109,7 @@ mod tests {
         let excepted_output = Bytes::from(vec![1]);
         let result = match bls_signature_validation_run(&Bytes::from(input.clone()), 100_000_000) {
             Ok(o) => o.bytes,
-            Err(e) => panic!("BLS signature validation failed, {:?}", e),
+            Err(e) => panic!("BLS signature validation failed, {e:?}"),
         };
         assert_eq!(result, excepted_output);
 
@@ -125,7 +125,7 @@ mod tests {
         let excepted_output = Bytes::from(vec![]);
         let result = match bls_signature_validation_run(&Bytes::from(input.clone()), 100_000_000) {
             Ok(o) => o.bytes,
-            Err(e) => panic!("BLS signature validation failed, {:?}", e),
+            Err(e) => panic!("BLS signature validation failed, {e:?}"),
         };
         assert_eq!(result, excepted_output);
 
@@ -175,7 +175,7 @@ mod tests {
         let excepted_output = Bytes::from(vec![1]);
         let result = match bls_signature_validation_run(&Bytes::from(input.clone()), 100_000_000) {
             Ok(o) => o.bytes,
-            Err(e) => panic!("BLS signature validation failed, {:?}", e),
+            Err(e) => panic!("BLS signature validation failed, {e:?}"),
         };
         assert_eq!(result, excepted_output);
 
@@ -194,7 +194,7 @@ mod tests {
         let excepted_output = Bytes::from(vec![]);
         let result = match bls_signature_validation_run(&Bytes::from(input.clone()), 100_000_000) {
             Ok(o) => o.bytes,
-            Err(e) => panic!("BLS signature validation failed, {:?}", e),
+            Err(e) => panic!("BLS signature validation failed, {e:?}"),
         };
         assert_eq!(result, excepted_output);
 
@@ -249,7 +249,7 @@ mod tests {
         let excepted_output = Bytes::from(vec![]);
         let result = match bls_signature_validation_run(&Bytes::from(input.clone()), 100_000_000) {
             Ok(o) => o.bytes,
-            Err(e) => panic!("BLS signature validation failed, {:?}", e),
+            Err(e) => panic!("BLS signature validation failed, {e:?}"),
         };
         assert_eq!(result, excepted_output);
     }

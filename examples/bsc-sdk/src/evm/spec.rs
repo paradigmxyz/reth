@@ -164,7 +164,7 @@ impl FromStr for BscSpecId {
             name::HABER => Self::HABER,
             name::HABER_FIX => Self::HABER_FIX,
             name::BOHR => Self::BOHR,
-            _ => return Err(format!("Unknown BSC spec: {}", s)),
+            _ => return Err(format!("Unknown BSC spec: {s}")),
         })
     }
 }

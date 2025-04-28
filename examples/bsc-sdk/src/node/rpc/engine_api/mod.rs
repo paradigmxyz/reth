@@ -346,9 +346,9 @@ where
 
     async fn get_blobs_v1(
         &self,
-        versioned_hashes: Vec<B256>,
+        _versioned_hashes: Vec<B256>,
     ) -> RpcResult<Vec<Option<BlobAndProofV1>>> {
-        Ok(self.inner.get_blobs_v1(versioned_hashes)?)
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn get_blobs_v2(

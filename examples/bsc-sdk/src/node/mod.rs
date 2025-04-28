@@ -6,8 +6,6 @@ use crate::node::rpc::engine_api::{
 use consensus::BscConsensusBuilder;
 use evm::BscExecutorBuilder;
 use network::BscNetworkBuilder;
-use payload::builder::BscPayloadBuilder;
-use pool::BscPoolBuilder;
 use reth::{
     api::{FullNodeComponents, FullNodeTypes, NodeTypes},
     builder::{
@@ -16,6 +14,7 @@ use reth::{
         DebugNode, Node, NodeAdapter, NodeComponentsBuilder,
     },
 };
+use reth_node_ethereum::node::{EthereumPayloadBuilder, EthereumPoolBuilder};
 use reth_primitives::{Block, BlockBody, EthPrimitives};
 use reth_provider::EthStorage;
 use reth_trie_db::MerklePatriciaTrie;
@@ -23,9 +22,8 @@ use reth_trie_db::MerklePatriciaTrie;
 pub mod cli;
 pub mod consensus;
 pub mod evm;
+pub mod execute;
 pub mod network;
-pub mod payload;
-pub mod pool;
 pub mod rpc;
 
 /// Bsc addons configuring RPC types
@@ -46,8 +44,8 @@ impl BscNode {
         &self,
     ) -> ComponentsBuilder<
         Node,
-        BscPoolBuilder,
-        BasicPayloadServiceBuilder<BscPayloadBuilder>,
+        EthereumPoolBuilder,
+        BasicPayloadServiceBuilder<EthereumPayloadBuilder>,
         BscNetworkBuilder,
         BscExecutorBuilder,
         BscConsensusBuilder,
@@ -63,10 +61,10 @@ impl BscNode {
     {
         ComponentsBuilder::default()
             .node_types::<Node>()
-            .pool(BscPoolBuilder::default())
+            .pool(EthereumPoolBuilder::default())
+            .executor(BscExecutorBuilder::default())
             .payload(BasicPayloadServiceBuilder::default())
             .network(BscNetworkBuilder::default())
-            .executor(BscExecutorBuilder::default())
             .consensus(BscConsensusBuilder::default())
     }
 }
@@ -84,8 +82,8 @@ where
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
-        BscPoolBuilder,
-        BasicPayloadServiceBuilder<BscPayloadBuilder>,
+        EthereumPoolBuilder,
+        BasicPayloadServiceBuilder<EthereumPayloadBuilder>,
         BscNetworkBuilder,
         BscExecutorBuilder,
         BscConsensusBuilder,
