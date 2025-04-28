@@ -104,11 +104,7 @@ cd reth
 Next, run the tests:
 
 ```sh
-# Without Geth
 cargo nextest run --workspace
-
-# With Geth
-cargo nextest run --workspace --features geth-tests
 
 # Run the Ethereum Foundation tests
 make ef-tests
