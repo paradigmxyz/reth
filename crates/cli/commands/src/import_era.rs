@@ -1,12 +1,14 @@
-//! Command that initializes the node by importing a chain from a file.
+//! Command that initializes the node by importing a chain from ERA files.
 use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, ValueEnum};
+use eyre::OptionExt;
 use reqwest::{Client, Url};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_era_downloader::{read_dir, EraClient, EraStream, EraStreamConfig};
+use reth_era_utils as era;
 use reth_etl::Collector;
-use reth_node_core::version::SHORT_VERSION;
+use reth_node_core::{dirs::data_dir, version::SHORT_VERSION};
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
@@ -16,42 +18,54 @@ pub struct ImportEraCommand<C: ChainSpecParser> {
     #[command(flatten)]
     env: EnvironmentArgs<C>,
 
-    #[command(subcommand)]
-    import: ImportArgs<C>,
+    #[clap(flatten)]
+    import: ImportArgs,
 }
 
-#[derive(Debug, Subcommand)]
-pub enum ImportArgs<C: ChainSpecParser> {
-    /// Read ERA1 files from a local directory.
-    Local {
-        /// The path to a directory for import.
-        ///
-        /// The ERA1 files are read from the local directory parsing headers and bodies.
-        #[arg(value_name = "IMPORT_PATH", verbatim_doc_comment)]
-        path: PathBuf,
-    },
-    /// Read ERA1 files from a remote URL.
-    Remote {
-        /// The URL to a remote host where the ERA1 files are hosted.
-        ///
-        /// The ERA1 files are read from the remote host using HTTP GET requests parsing headers
-        /// and bodies.
-        #[arg(value_name = "IMPORT_URL", verbatim_doc_comment)]
-        url: Url,
+#[derive(Debug, Args)]
+#[group(required = true, multiple = false)]
+pub struct ImportArgs {
+    /// The path to a directory for import.
+    ///
+    /// The ERA1 files are read from the local directory parsing headers and bodies.
+    #[arg(value_name = "IMPORT_ERA_PATH", verbatim_doc_comment)]
+    path: Option<PathBuf>,
 
-        /// The chain this node is running.
-        ///
-        /// Possible values are either a built-in chain or the path to a chain specification file.
-        #[arg(
-            long,
-            value_name = "CHAIN_OR_PATH",
-            long_help = C::help_message(),
-            default_value = C::SUPPORTED_CHAINS[0],
-            value_parser = C::parser(),
-            global = true
-        )]
-        chain: Arc<C::ChainSpec>,
-    },
+    /// The URL to a remote host where the ERA1 files are hosted.
+    ///
+    /// The ERA1 files are read from the remote host using HTTP GET requests parsing headers
+    /// and bodies.
+    #[arg(value_name = "IMPORT_ERA_URL", verbatim_doc_comment)]
+    url: Option<Url>,
+
+    /// The chain for which a known URL exists.
+    ///
+    /// When specified, the URL is derived from the chain name and read from the remote host using
+    /// HTTP GET requests parsing headers and bodies.
+    #[arg(value_enum, value_name = "IMPORT_ERA_CHAIN", verbatim_doc_comment)]
+    chain_id: Option<Chain>,
+}
+
+/// An identifier of a chain for which a known URL that hosts ERA1 files exists.
+///
+/// The conversion into [`Url`] is done through [`Url::from`].
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+pub enum Chain {
+    Mainnet,
+    Sepolia,
+}
+
+impl From<Chain> for Url {
+    fn from(value: Chain) -> Self {
+        match value {
+            Chain::Mainnet => {
+                Url::parse("https://mainnet.era1.nimbus.team/").expect("URL should be valid")
+            }
+            Chain::Sepolia => {
+                Url::parse("https://sepolia.era1.nimbus.team/").expect("URL should be valid")
+            }
+        }
+    }
 }
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraCommand<C> {
@@ -65,29 +79,19 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
         let Environment { provider_factory, config, .. } = self.env.init::<N>(AccessRights::RW)?;
 
         let hash_collector = Collector::new(config.stages.etl.file_size, config.stages.etl.dir);
+        let provider_factory = &provider_factory.provider_rw()?.0;
 
-        match self.import {
-            ImportArgs::Local { path } => {
-                let stream = read_dir(path)?;
+        if let Some(path) = self.import.path {
+            let stream = read_dir(path)?;
 
-                reth_era_import::import(
-                    stream,
-                    &provider_factory.provider_rw().unwrap().0,
-                    hash_collector,
-                )?;
-            }
-            ImportArgs::Remote { url, .. } => {
-                let folder = tempfile::tempdir()?;
-                let folder = folder.path().to_owned().into_boxed_path();
-                let client = EraClient::new(Client::new(), url, folder);
-                let stream = EraStream::new(client, EraStreamConfig::default());
+            era::import(stream, provider_factory, hash_collector)?;
+        } else if let Some(url) = self.import.url.or(self.import.chain_id.map(Url::from)) {
+            let folder = data_dir().ok_or_eyre("Missing data directory")?.join("era");
+            let folder = folder.into_boxed_path();
+            let client = EraClient::new(Client::new(), url, folder);
+            let stream = EraStream::new(client, EraStreamConfig::default());
 
-                reth_era_utils::import(
-                    stream,
-                    &provider_factory.provider_rw().unwrap().0,
-                    hash_collector
-                )?;
-            }
+            era::import(stream, provider_factory, hash_collector)?;
         }
 
         Ok(())

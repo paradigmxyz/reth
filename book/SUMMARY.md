@@ -34,8 +34,6 @@
     - [`reth init-state`](./cli/reth/init-state.md)
     - [`reth import`](./cli/reth/import.md)
     - [`reth import-era`](./cli/reth/import-era.md)
-      - [`reth import-era local`](./cli/reth/import-era/local.md)
-      - [`reth import-era remote`](./cli/reth/import-era/remote.md)
     - [`reth dump-genesis`](./cli/reth/dump-genesis.md)
     - [`reth db`](./cli/reth/db.md)
       - [`reth db stats`](./cli/reth/db/stats.md)
