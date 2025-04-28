@@ -303,8 +303,12 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
         Ok(())
     }
+}
+
+impl<C: ChainSpecParser> Command<C> {
     /// Returns the underlying chain being used to run this command
-    pub const fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+    pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         Some(&self.env.chain)
     }
 }
+
