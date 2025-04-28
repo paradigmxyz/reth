@@ -262,7 +262,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Commands<C, Ext> {
             Self::P2P(cmd) => cmd.chain_spec(),
             #[cfg(feature = "dev")]
             Self::TestVectors(cmd) => {
-                cmd.chain_spec(),map(|c| c as &Arc::ChainSoec>)
+                cmd.chain_spec().map(|c| c as &Arc<C::ChainSpec>)
             },
             Self::Config(_) => None,
             Self::Debug(cmd) => cmd.chain_spec(),
