@@ -53,8 +53,11 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             Subcommands::BuildBlock(command) => command.execute::<N>(ctx).await,
         }
     }
+}
+
+impl<C: ChainSpecParser> Command<C> {
     /// Returns the underlying chain being used to run this command
-    pub const fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+    pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         match &self.command {
             Subcommands::Execution(command) => command.chain_spec(),
             Subcommands::Merkle(command) => command.chain_spec(),
@@ -63,3 +66,4 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         }
     }
 }
+
