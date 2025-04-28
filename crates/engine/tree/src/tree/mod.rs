@@ -2552,14 +2552,17 @@ where
         if state_root != block.header().state_root() {
             // call post-block hook
             self.on_invalid_block(&parent_block, &block, &output, Some((&trie_output, state_root)));
-            return Err(ConsensusError::BodyStateRootDiff(
-                reth_primitives_traits::GotExpected {
-                    got: state_root,
-                    expected: block.header().state_root(),
-                }
+            return Err((
+                ConsensusError::BodyStateRootDiff(
+                    reth_primitives_traits::GotExpected {
+                        got: state_root,
+                        expected: block.header().state_root(),
+                    }
+                    .into(),
+                )
                 .into(),
-            )
-            .into())
+                block,
+            ))
         }
 
         // terminate prewarming task with good state output
