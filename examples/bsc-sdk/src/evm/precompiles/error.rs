@@ -27,9 +27,7 @@ impl From<BscPrecompileError> for PrecompileError {
             BscPrecompileError::CometBftEncodeConsensusStateFailed => {
                 PrecompileError::Other("encode consensus state failed".to_string())
             }
-            BscPrecompileError::Reverted(gas) => {
-                PrecompileError::Other(format!("Reverted({})", gas))
-            }
+            BscPrecompileError::Reverted(gas) => PrecompileError::Other(format!("Reverted({gas})")),
         }
     }
 }

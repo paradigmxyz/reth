@@ -774,8 +774,7 @@ where
         &self.inner.capabilities
     }
 
-    /// Returns the blobs for the given versioned hashes.
-    pub fn get_blobs_v1(
+    fn get_blobs_v1(
         &self,
         versioned_hashes: Vec<B256>,
     ) -> EngineApiResult<Vec<Option<BlobAndProofV1>>> {

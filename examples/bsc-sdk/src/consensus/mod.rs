@@ -3,7 +3,7 @@ use alloy_primitives::{address, Address, BlockNumber, B256};
 use reth_provider::{BlockNumReader, ProviderError};
 use std::cmp::Ordering;
 
-pub const SYSTEM_ADDRESS: Address = address!("fffffffffffffffffffffffffffffffffffffffe");
+pub const SYSTEM_ADDRESS: Address = address!("0xfffffffffffffffffffffffffffffffffffffffe");
 /// The reward percent to system
 pub const SYSTEM_REWARD_PERCENT: usize = 4;
 /// The max reward in system reward contract

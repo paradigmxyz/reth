@@ -19,12 +19,11 @@ const SYSTEM_ADDRESS: Address = address!("ffffffffffffffffffffffffffffffffffffff
 
 pub struct BscHandler<EVM, ERROR, FRAME> {
     pub mainnet: MainnetHandler<EVM, ERROR, FRAME>,
-    pub _phantom: core::marker::PhantomData<(EVM, ERROR, FRAME)>,
 }
 
 impl<EVM, ERROR, FRAME> BscHandler<EVM, ERROR, FRAME> {
     pub fn new() -> Self {
-        Self { mainnet: MainnetHandler::default(), _phantom: core::marker::PhantomData }
+        Self { mainnet: MainnetHandler::default() }
     }
 }
 
@@ -139,8 +138,7 @@ where
             // Only two internal return flags.
             flag @ (SuccessOrHalt::FatalExternalError | SuccessOrHalt::Internal(_)) => {
                 panic!(
-                "Encountered unexpected internal return flag: {:?} with instruction result: {:?}",
-                flag, instruction_result
+                "Encountered unexpected internal return flag: {flag:?} with instruction result: {instruction_result:?}"
             )
             }
         };

@@ -5919,7 +5919,7 @@ mod tests {
         println!("consensus address: {:?}", consensus_address[0]);
         println!("voting power: {:?}", voting_powers[0]);
         println!("vote address: {:?}", hex::encode(&vote_addresses[0]));
-        println!("total length: {:?}", total_length);
+        println!("total length: {total_length:?}");
 
         assert_eq!(consensus_address[0], expected_consensus_addr);
         assert_eq!(voting_powers[0], expected_voting_power);

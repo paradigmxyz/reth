@@ -19,7 +19,7 @@ use reth::{
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::{ConfigureEvm, NextBlockEnvAttributes};
 use reth_primitives::NodePrimitives;
-use reth_primitives_traits::{BlockBody as _, SignedTransaction};
+use reth_primitives_traits::BlockBody as _;
 use reth_provider::{
     BlockReader, ChainSpecProvider, HeaderProvider, ProviderBlock, ProviderReceipt, ProviderTx,
     StateProviderFactory,

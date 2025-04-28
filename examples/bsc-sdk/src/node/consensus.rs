@@ -1,5 +1,4 @@
 use crate::{chainspec::BscChainSpec, hardforks::BscHardforks};
-use alloy_primitives::U256;
 use reth::{
     api::{FullNodeTypes, NodeTypes},
     builder::{components::ConsensusBuilder, BuilderContext},
@@ -119,22 +118,6 @@ impl<ChainSpec: EthChainSpec + BscHardforks, H: BlockHeader> HeaderValidator<H>
         // // ensure that the blob gas fields for this block
         // if let Some(blob_params) = self.chain_spec.blob_params_at_timestamp(header.timestamp()) {
         //     validate_against_parent_4844(header.header(), parent.header(), blob_params)?;
-        // }
-
-        Ok(())
-    }
-
-    fn validate_header_with_total_difficulty(
-        &self,
-        _header: &H,
-        _total_difficulty: U256,
-    ) -> Result<(), ConsensusError> {
-        // if header.nonce() != Some(B64::ZERO) {
-        //     return Err(ConsensusError::TheMergeNonceIsNotZero)
-        // }
-
-        // if header.ommers_hash() != EMPTY_OMMER_ROOT_HASH {
-        //     return Err(ConsensusError::TheMergeOmmerRootIsNotEmpty)
         // }
 
         Ok(())

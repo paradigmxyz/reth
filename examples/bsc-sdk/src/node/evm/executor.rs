@@ -19,7 +19,6 @@ use reth_evm::{
     Database, Evm, FromRecoveredTx, FromTxWithEncoded, IntoTxEnv, OnStateHook, RecoveredTx,
 };
 use reth_primitives::TransactionSigned;
-use reth_primitives_traits::SignedTransaction;
 use reth_provider::BlockExecutionResult;
 use reth_revm::State;
 use revm::{
@@ -176,7 +175,7 @@ where
                 tx_type: 0,
                 authorization_list: Default::default(),
             },
-            is_system_transaction: Some(true),
+            is_system_transaction: true,
         };
 
         let result_and_state = self.evm.transact(tx_env).map_err(BlockExecutionError::other)?;

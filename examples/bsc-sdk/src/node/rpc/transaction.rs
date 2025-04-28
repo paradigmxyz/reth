@@ -1,6 +1,5 @@
 use super::BscNodeCore;
 use crate::node::rpc::BscEthApi;
-use alloy_consensus::{Transaction, TxEnvelope};
 use alloy_network::{Ethereum, Network};
 use alloy_primitives::{Bytes, Signature, B256};
 use reth::{
@@ -8,6 +7,7 @@ use reth::{
     primitives::{Receipt, Recovered, TransactionSigned},
     providers::ReceiptProvider,
     rpc::{
+        eth::EthTxBuilder,
         server_types::eth::{utils::recover_raw_transaction, EthApiError},
         types::{TransactionInfo, TransactionRequest},
     },
@@ -39,25 +39,8 @@ where
         tx: Recovered<TransactionSigned>,
         tx_info: TransactionInfo,
     ) -> Result<Self::Transaction, Self::Error> {
-        let tx = tx.convert::<TxEnvelope>();
-
-        let TransactionInfo {
-            block_hash, block_number, index: transaction_index, base_fee, ..
-        } = tx_info;
-
-        let effective_gas_price = base_fee
-            .map(|base_fee| {
-                tx.effective_tip_per_gas(base_fee).unwrap_or_default() + base_fee as u128
-            })
-            .unwrap_or_else(|| tx.max_fee_per_gas());
-
-        Ok(alloy_rpc_types::Transaction {
-            inner: tx,
-            block_hash,
-            block_number,
-            transaction_index,
-            effective_gas_price: Some(effective_gas_price),
-        })
+        let builder = EthTxBuilder::default();
+        builder.fill(tx, tx_info)
     }
 
     fn build_simulate_v1_transaction(

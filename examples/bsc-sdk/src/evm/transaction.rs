@@ -18,18 +18,18 @@ pub trait BscTxTr: Transaction {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BscTxEnv<T: Transaction> {
     pub base: T,
-    pub is_system_transaction: Option<bool>,
+    pub is_system_transaction: bool,
 }
 
 impl<T: Transaction> BscTxEnv<T> {
     pub fn new(base: T) -> Self {
-        Self { base, is_system_transaction: None }
+        Self { base, is_system_transaction: false }
     }
 }
 
 impl Default for BscTxEnv<TxEnv> {
     fn default() -> Self {
-        Self { base: TxEnv::default(), is_system_transaction: None }
+        Self { base: TxEnv::default(), is_system_transaction: false }
     }
 }
 
@@ -108,7 +108,7 @@ impl<T: Transaction> Transaction for BscTxEnv<T> {
 
 impl<T: Transaction> BscTxTr for BscTxEnv<T> {
     fn is_system_transaction(&self) -> bool {
-        self.is_system_transaction.unwrap_or(false)
+        self.is_system_transaction
     }
 }
 
@@ -126,15 +126,15 @@ impl FromRecoveredTx<TransactionSigned> for BscTxEnv<TxEnv> {
 
 impl FromTxWithEncoded<TransactionSigned> for BscTxEnv<TxEnv> {
     fn from_encoded_tx(tx: &TransactionSigned, sender: Address, _encoded: Bytes) -> Self {
-        let base = match &tx.transaction() {
-            reth_primitives::Transaction::Legacy(tx) => TxEnv::from_recovered_tx(tx, sender),
-            reth_primitives::Transaction::Eip2930(tx) => TxEnv::from_recovered_tx(tx, sender),
-            reth_primitives::Transaction::Eip1559(tx) => TxEnv::from_recovered_tx(tx, sender),
-            reth_primitives::Transaction::Eip4844(tx) => TxEnv::from_recovered_tx(tx, sender),
-            reth_primitives::Transaction::Eip7702(tx) => TxEnv::from_recovered_tx(tx, sender),
+        let base = match tx.clone().into_typed_transaction() {
+            reth_primitives::Transaction::Legacy(tx) => TxEnv::from_recovered_tx(&tx, sender),
+            reth_primitives::Transaction::Eip2930(tx) => TxEnv::from_recovered_tx(&tx, sender),
+            reth_primitives::Transaction::Eip1559(tx) => TxEnv::from_recovered_tx(&tx, sender),
+            reth_primitives::Transaction::Eip4844(tx) => TxEnv::from_recovered_tx(&tx, sender),
+            reth_primitives::Transaction::Eip7702(tx) => TxEnv::from_recovered_tx(&tx, sender),
         };
 
-        Self { base, is_system_transaction: None }
+        Self { base, is_system_transaction: false }
     }
 }
 
@@ -172,7 +172,7 @@ mod tests {
                 gas_priority_fee: Some(5),
                 ..Default::default()
             },
-            is_system_transaction: None,
+            is_system_transaction: false,
         };
 
         assert_eq!(bsc_tx.tx_type(), 0);
