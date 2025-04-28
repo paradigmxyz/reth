@@ -21,7 +21,7 @@ reth-tokio-util.workspace = true
 reth-ethereum-forks.workspace = true
 
 # ethereum
-alloy-primitives = { workspace = true, features = ["getrandom", "rand"] }
+alloy-primitives = { workspace = true, features = ["getrandom"] }
 alloy-rpc-types-admin.workspace = true
 enr = { workspace = true, default-features = false, features = ["rust-secp256k1"] }
 
