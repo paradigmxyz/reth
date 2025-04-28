@@ -1,14 +1,15 @@
-//! Example for how to hook into the bsc p2p network
+//! Example for how to use reth sdk to build a bsc node.
 //!
 //! Run with
 //!
 //! ```sh
-//! cargo run -p bsc-sdk
+//! RUST_LOG=info cargo run --package example-bsc-sdk \
+//! --bin example-bsc-sdk \
+//! --all-features \
+//! node \
+//! --chain bsc \
+//! --debug.tip "0xe468563fd42441b615ef6132474b2b6692fea05c7523356b79b8e5a414909360"
 //! ```
-//!
-//! This launches a regular reth node overriding the engine api payload builder with our custom.
-//!
-//! Credits to: <https://merkle.io/blog/modifying-reth-to-build-the-fastest-transaction-network-on-bsc-and-polygon>
 
 use crate::{
     consensus::ParliaConsensus,

@@ -11,6 +11,9 @@ struct StoragePatch {
     storage: HashMap<U256, U256>,
 }
 
+/// Applies storage patches to the state before a transaction is executed.
+/// This is necessary as it was a geth bug more infos here:
+/// <https://>forum.bnbchain.org/t/about-the-hertzfix/2400>
 static MAINNET_PATCHES_BEFORE_TX: LazyLock<HashMap<B256, StoragePatch>> = LazyLock::new(|| {
     HashMap::from([
         // patch 1: BlockNum 33851236, txIndex 89
@@ -364,6 +367,9 @@ static MAINNET_PATCHES_BEFORE_TX: LazyLock<HashMap<B256, StoragePatch>> = LazyLo
     ])
 });
 
+/// Applies storage patches to the state after a transaction is executed.
+/// This is necessary as it was a bsc geth bug more infos here:
+/// <https://>forum.bnbchain.org/t/about-the-hertzfix/2400>
 static MAINNET_PATCHES_AFTER_TX: LazyLock<HashMap<B256, StoragePatch>> = LazyLock::new(|| {
     HashMap::from([
         // patch 1: BlockNum 33851236, txIndex 89

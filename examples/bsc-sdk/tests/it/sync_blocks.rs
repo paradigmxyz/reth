@@ -179,7 +179,7 @@ async fn can_sync_from_p2p() -> eyre::Result<()> {
     };
 
     info!("Successfully retrieved {} bodies", bodies.len());
-    let filename = format!("{}_{}_blocks.json", start_block, end_block);
+    let filename = format!("{start_block}_{end_block}_blocks.json");
     let file = File::create(filename).unwrap();
     serde_json::to_writer(file, &bodies).unwrap();
 
