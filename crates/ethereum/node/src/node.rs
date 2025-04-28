@@ -351,7 +351,7 @@ where
             let blob_params = ctx
                 .chain_spec()
                 .blob_params_at_timestamp(current_timestamp)
-                .unwrap_or(BlobParams::cancun());
+                .unwrap_or_else(BlobParams::cancun);
 
             // Derive the blob cache size from the target blob count, to auto scale it by
             // multiplying it with the slot count for 2 epochs: 384 for pectra
