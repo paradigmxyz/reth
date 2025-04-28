@@ -206,7 +206,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             ReverseHeadersDownloaderBuilder::new(config.stages.headers)
                                 .build(fetch_client, consensus.clone()),
                             rx,
-                            consensus,
                             etl_config,
                         )),
                         None,

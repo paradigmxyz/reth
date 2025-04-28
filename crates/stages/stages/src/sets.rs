@@ -46,7 +46,7 @@ use crate::{
 };
 use alloy_primitives::B256;
 use reth_config::config::StageConfig;
-use reth_consensus::{Consensus, ConsensusError, FullConsensus};
+use reth_consensus::{ConsensusError, FullConsensus};
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network_p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader};
 use reth_primitives_traits::{Block, NodePrimitives};
@@ -120,7 +120,6 @@ where
             online: OnlineStages::new(
                 provider,
                 tip,
-                consensus.clone(),
                 header_downloader,
                 body_downloader,
                 stages_config.clone(),
@@ -191,8 +190,7 @@ where
     provider: Provider,
     /// The tip for the headers stage.
     tip: watch::Receiver<B256>,
-    /// The consensus engine used to validate incoming data.
-    consensus: Arc<dyn Consensus<B::Block, Error = ConsensusError>>,
+
     /// The block header downloader
     header_downloader: H,
     /// The block body downloader
@@ -207,15 +205,14 @@ where
     B: BodyDownloader,
 {
     /// Create a new set of online stages with default values.
-    pub fn new(
+    pub const fn new(
         provider: Provider,
         tip: watch::Receiver<B256>,
-        consensus: Arc<dyn Consensus<B::Block, Error = ConsensusError>>,
         header_downloader: H,
         body_downloader: B,
         stages_config: StageConfig,
     ) -> Self {
-        Self { provider, tip, consensus, header_downloader, body_downloader, stages_config }
+        Self { provider, tip, header_downloader, body_downloader, stages_config }
     }
 }
 
@@ -243,7 +240,6 @@ where
         provider: P,
         tip: watch::Receiver<B256>,
         header_downloader: H,
-        consensus: Arc<dyn Consensus<B::Block, Error = ConsensusError>>,
         stages_config: StageConfig,
     ) -> StageSetBuilder<Provider>
     where
@@ -251,13 +247,7 @@ where
         HeaderStage<P, H>: Stage<Provider>,
     {
         StageSetBuilder::default()
-            .add_stage(HeaderStage::new(
-                provider,
-                header_downloader,
-                tip,
-                consensus.clone(),
-                stages_config.etl,
-            ))
+            .add_stage(HeaderStage::new(provider, header_downloader, tip, stages_config.etl))
             .add_stage(bodies)
     }
 }
@@ -276,7 +266,6 @@ where
                 self.provider,
                 self.header_downloader,
                 self.tip,
-                self.consensus.clone(),
                 self.stages_config.etl.clone(),
             ))
             .add_stage(BodyStage::new(self.body_downloader))
