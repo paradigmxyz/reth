@@ -4,6 +4,7 @@
 use reth_metrics::{metrics::Histogram, Metrics};
 
 /// Metrics for the sparse state trie
+#[cfg(feature = "metrics")]
 #[derive(Default, Debug)]
 pub(crate) struct SparseStateTrieMetrics {
     /// Number of account nodes that were skipped during a multiproof reveal due to being redundant
@@ -21,6 +22,7 @@ pub(crate) struct SparseStateTrieMetrics {
     pub(crate) histograms: SparseStateTrieHistograms,
 }
 
+#[cfg(feature = "metrics")]
 impl SparseStateTrieMetrics {
     /// Record the metrics into the histograms
     pub(crate) fn record(&self) {
@@ -61,6 +63,10 @@ impl SparseStateTrieMetrics {
         self.multiproof_total_storage_nodes += count;
     }
 }
+
+#[cfg(not(feature = "metrics"))]
+#[derive(Default, Debug)]
+pub(crate) struct SparseStateTrieMetrics;
 
 /// Metrics for the sparse state trie
 #[cfg(feature = "metrics")]
