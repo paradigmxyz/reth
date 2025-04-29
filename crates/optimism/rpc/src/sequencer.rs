@@ -10,7 +10,6 @@ use reth_optimism_txpool::supervisor::metrics::SequencerMetrics;
 use std::{str::FromStr, sync::Arc, time::Instant};
 use thiserror::Error;
 use tracing::warn;
-use reqwest::header::{HeaderName,HeaderValue};
 
 /// Sequencer client error
 #[derive(Error, Debug)]
@@ -71,6 +70,7 @@ impl SequencerClient {
         }
     }
 
+    /// Creates a new `SequencerClient` for the given URL with additional custom headers.
     pub async fn new_with_headers(
         sequencer_endpoint: impl Into<String>,
         headers: Vec<String>,
@@ -79,7 +79,7 @@ impl SequencerClient {
         let endpoint = BuiltInConnectionString::from_str(&sequencer_endpoint)?;
         if let BuiltInConnectionString::Http(url) = endpoint {
             let mut builder = reqwest::Client::builder().use_rustls_tls();
-    
+
             if !headers.is_empty() {
                 let mut header_map = reqwest::header::HeaderMap::new();
                 for header in headers {
@@ -87,11 +87,11 @@ impl SequencerClient {
                     header_map.insert(
                         key.trim().parse::<reqwest::header::HeaderName>().unwrap(),
                         value.trim().parse::<reqwest::header::HeaderValue>().unwrap(),
-                    ); 
+                    );
                 }
                 builder = builder.default_headers(header_map);
             }
-    
+
             let client = builder.build()?;
             Self::with_http_client(url, client)
         } else {
@@ -100,7 +100,7 @@ impl SequencerClient {
             Ok(Self { inner: Arc::new(inner) })
         }
     }
-    
+
     /// Creates a new [`SequencerClient`] with http transport with the given http client.
     pub fn with_http_client(
         sequencer_endpoint: impl Into<String>,
