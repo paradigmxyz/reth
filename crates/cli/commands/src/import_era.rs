@@ -1,7 +1,8 @@
 //! Command that initializes the node by importing a chain from ERA files.
 use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
-use clap::{Args, Parser, ValueEnum};
-use eyre::OptionExt;
+use alloy_chains::{ChainKind, NamedChain};
+use clap::{Args, Parser};
+use eyre::{eyre, OptionExt};
 use reqwest::{Client, Url};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
@@ -23,48 +24,37 @@ pub struct ImportEraCommand<C: ChainSpecParser> {
 }
 
 #[derive(Debug, Args)]
-#[group(required = true, multiple = false)]
+#[group(required = false, multiple = false)]
 pub struct ImportArgs {
     /// The path to a directory for import.
     ///
     /// The ERA1 files are read from the local directory parsing headers and bodies.
-    #[arg(value_name = "IMPORT_ERA_PATH", verbatim_doc_comment)]
+    #[arg(long, value_name = "IMPORT_ERA_PATH", verbatim_doc_comment)]
     path: Option<PathBuf>,
 
     /// The URL to a remote host where the ERA1 files are hosted.
     ///
     /// The ERA1 files are read from the remote host using HTTP GET requests parsing headers
     /// and bodies.
-    #[arg(value_name = "IMPORT_ERA_URL", verbatim_doc_comment)]
+    #[arg(long, value_name = "IMPORT_ERA_URL", verbatim_doc_comment)]
     url: Option<Url>,
-
-    /// The chain for which a known URL exists.
-    ///
-    /// When specified, the URL is derived from the chain name and read from the remote host using
-    /// HTTP GET requests parsing headers and bodies.
-    #[arg(value_enum, value_name = "IMPORT_ERA_CHAIN", verbatim_doc_comment)]
-    chain_id: Option<Chain>,
 }
 
-/// An identifier of a chain for which a known URL that hosts ERA1 files exists.
-///
-/// The conversion into [`Url`] is done through [`Url::from`].
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
-pub enum Chain {
-    Mainnet,
-    Sepolia,
+trait TryFromChain {
+    fn try_to_url(&self) -> eyre::Result<Url>;
 }
 
-impl From<Chain> for Url {
-    fn from(value: Chain) -> Self {
-        match value {
-            Chain::Mainnet => {
+impl TryFromChain for ChainKind {
+    fn try_to_url(&self) -> eyre::Result<Url> {
+        Ok(match self {
+            ChainKind::Named(NamedChain::Mainnet) => {
                 Url::parse("https://mainnet.era1.nimbus.team/").expect("URL should be valid")
             }
-            Chain::Sepolia => {
+            ChainKind::Named(NamedChain::Sepolia) => {
                 Url::parse("https://sepolia.era1.nimbus.team/").expect("URL should be valid")
             }
-        }
+            chain => return Err(eyre!("No known host for ERA files on chain {chain:?}")),
+        })
     }
 }
 
@@ -85,7 +75,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
             let stream = read_dir(path)?;
 
             era::import(stream, provider_factory, hash_collector)?;
-        } else if let Some(url) = self.import.url.or(self.import.chain_id.map(Url::from)) {
+        } else {
+            let url = match self.import.url {
+                Some(url) => url,
+                None => self.env.chain.chain().kind().try_to_url()?,
+            };
             let folder = data_dir().ok_or_eyre("Missing data directory")?.join("era");
             let folder = folder.into_boxed_path();
             let client = EraClient::new(Client::new(), url, folder);

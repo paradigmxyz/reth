@@ -6,7 +6,7 @@ This syncs ERA encoded blocks from a directory
 $ reth import-era --help
 ```
 ```txt
-Usage: reth import-era [OPTIONS] <IMPORT_ERA_PATH|IMPORT_ERA_URL|IMPORT_ERA_CHAIN>
+Usage: reth import-era [OPTIONS]
 
 Options:
   -h, --help
@@ -67,20 +67,12 @@ Database:
       --db.read-transaction-timeout <READ_TRANSACTION_TIMEOUT>
           Read transaction timeout in seconds, 0 means no timeout
 
-  [IMPORT_ERA_CHAIN]
-          The chain for which a known URL exists.
-
-          When specified, the URL is derived from the chain name and read from the remote host using
-          HTTP GET requests parsing headers and bodies.
-
-          [possible values: mainnet, sepolia]
-
-  [IMPORT_ERA_PATH]
+      --path <IMPORT_ERA_PATH>
           The path to a directory for import.
 
           The ERA1 files are read from the local directory parsing headers and bodies.
 
-  [IMPORT_ERA_URL]
+      --url <IMPORT_ERA_URL>
           The URL to a remote host where the ERA1 files are hosted.
 
           The ERA1 files are read from the remote host using HTTP GET requests parsing headers
