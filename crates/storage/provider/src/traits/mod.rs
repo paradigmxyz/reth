@@ -3,9 +3,6 @@
 // Re-export all the traits
 pub use reth_storage_api::*;
 
-mod block;
-pub use block::*;
-
 pub use reth_chainspec::ChainSpecProvider;
 
 mod static_file_provider;
