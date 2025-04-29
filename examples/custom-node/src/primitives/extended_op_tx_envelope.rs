@@ -37,8 +37,9 @@ pub enum ExtendedTxEnvelope<BuiltIn, Other> {
 
 pub type ExtendedOpTxEnvelope<T> = ExtendedTxEnvelope<OpTxEnvelope, T>;
 
-impl<T> Transaction for ExtendedOpTxEnvelope<T>
+impl<B, T> Transaction for ExtendedTxEnvelope<B, T>
 where
+    B: Transaction,
     T: Transaction,
 {
     fn chain_id(&self) -> Option<ChainId> {
@@ -119,8 +120,9 @@ where
     }
 }
 
-impl<T> InMemorySize for ExtendedOpTxEnvelope<T>
+impl<B, T> InMemorySize for ExtendedTxEnvelope<B, T>
 where
+    B: InMemorySize,
     T: InMemorySize,
 {
     fn size(&self) -> usize {
@@ -128,19 +130,14 @@ where
     }
 }
 
-impl<T> SignedTransaction for ExtendedOpTxEnvelope<T>
+impl<B, T> SignedTransaction for ExtendedTxEnvelope<B, T>
 where
-    T: SignedTransaction,
+    B: SignedTransaction + SerdeBincodeCompat,
+    T: SignedTransaction + SerdeBincodeCompat,
 {
     fn tx_hash(&self) -> &TxHash {
         match self {
-            Self::BuiltIn(tx) => match tx {
-                OpTxEnvelope::Legacy(tx) => tx.hash(),
-                OpTxEnvelope::Eip1559(tx) => tx.hash(),
-                OpTxEnvelope::Eip2930(tx) => tx.hash(),
-                OpTxEnvelope::Eip7702(tx) => tx.hash(),
-                OpTxEnvelope::Deposit(tx) => tx.hash_ref(),
-            },
+            Self::BuiltIn(tx) => tx.tx_hash(),
             Self::Other(tx) => tx.tx_hash(),
         }
     }
@@ -161,8 +158,9 @@ where
     }
 }
 
-impl<T> Typed2718 for ExtendedOpTxEnvelope<T>
+impl<B, T> Typed2718 for ExtendedTxEnvelope<B, T>
 where
+    B: Typed2718,
     T: Typed2718,
 {
     fn ty(&self) -> u8 {
@@ -173,20 +171,21 @@ where
     }
 }
 
-impl<T> Decodable2718 for ExtendedOpTxEnvelope<T>
+impl<B, T> Decodable2718 for ExtendedTxEnvelope<B, T>
 where
-    T: Decodable2718,
+    B: Decodable2718 + SerdeBincodeCompat,
+    T: Decodable2718 + SerdeBincodeCompat,
 {
     fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
         match ty.try_into() {
             Ok(tx_type) => match tx_type {
                 OpTxType::Eip2930 | OpTxType::Eip1559 | OpTxType::Eip7702 | OpTxType::Deposit => {
-                    let envelope = OpTxEnvelope::typed_decode(ty, buf)?;
-                    Ok(Self::BuiltIn(envelope))
+                    let envelope = B::typed_decode(ty, buf)?;
+                    Ok(Self::BuiltIn(B::from_repr(envelope.as_repr())))
                 }
                 OpTxType::Legacy => {
-                    let envelope = OpTxEnvelope::typed_decode(ty, buf)?;
-                    Ok(Self::BuiltIn(envelope))
+                    let envelope = B::typed_decode(ty, buf)?;
+                    Ok(Self::BuiltIn(B::from_repr(envelope.as_repr())))
                 }
             },
             Err(_) => {
@@ -205,12 +204,12 @@ where
         match type_byte.try_into() {
             Ok(tx_type) => match tx_type {
                 OpTxType::Eip2930 | OpTxType::Eip1559 | OpTxType::Eip7702 | OpTxType::Deposit => {
-                    let envelope = OpTxEnvelope::fallback_decode(buf)?;
-                    Ok(Self::BuiltIn(envelope))
+                    let envelope = B::fallback_decode(buf)?;
+                    Ok(Self::BuiltIn(B::from_repr(envelope.as_repr())))
                 }
                 OpTxType::Legacy => {
-                    let envelope = OpTxEnvelope::fallback_decode(buf)?;
-                    Ok(Self::BuiltIn(envelope))
+                    let envelope = B::fallback_decode(buf)?;
+                    Ok(Self::BuiltIn(B::from_repr(envelope.as_repr())))
                 }
             },
             Err(_) => {
@@ -221,8 +220,9 @@ where
     }
 }
 
-impl<T> Encodable2718 for ExtendedOpTxEnvelope<T>
+impl<B, T> Encodable2718 for ExtendedTxEnvelope<B, T>
 where
+    B: Encodable2718,
     T: Encodable2718,
 {
     fn encode_2718_len(&self) -> usize {
@@ -240,8 +240,9 @@ where
     }
 }
 
-impl<T> Encodable for ExtendedOpTxEnvelope<T>
+impl<B, T> Encodable for ExtendedTxEnvelope<B, T>
 where
+    B: Encodable,
     T: Encodable,
 {
     fn encode(&self, out: &mut dyn BufMut) {
@@ -259,12 +260,21 @@ where
     }
 }
 
-impl<T> Decodable for ExtendedOpTxEnvelope<T>
+impl<B, T> Decodable for ExtendedTxEnvelope<B, T>
 where
+    B: Decodable,
     T: Decodable,
 {
     fn decode(buf: &mut &[u8]) -> RlpResult<Self> {
-        OpTxEnvelope::decode(buf).map(Self::BuiltIn).or_else(|_| T::decode(buf).map(Self::Other))
+        let original = *buf;
+
+        match B::decode(buf) {
+            Ok(tx) => Ok(Self::BuiltIn(tx)),
+            Err(_) => {
+                *buf = original;
+                T::decode(buf).map(Self::Other)
+            }
+        }
     }
 }
 
@@ -296,13 +306,14 @@ where
     }
 }
 
-impl<T> Compact for ExtendedOpTxEnvelope<T>
+impl<B, T> Compact for ExtendedTxEnvelope<B, T>
 where
+    B: Compact,
     T: Compact,
 {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
+    fn to_compact<Buf>(&self, buf: &mut Buf) -> usize
     where
-        B: alloy_rlp::bytes::BufMut + AsMut<[u8]>,
+        Buf: alloy_rlp::bytes::BufMut + AsMut<[u8]>,
     {
         match self {
             Self::BuiltIn(tx) => tx.to_compact(buf),
@@ -314,7 +325,7 @@ where
         if !buf.is_empty() {
             let type_byte = buf[0];
             if let Ok(_tx_type) = <u8 as TryInto<OpTxType>>::try_into(type_byte) {
-                let (tx, remaining) = OpTxEnvelope::from_compact(buf, len);
+                let (tx, remaining) = B::from_compact(buf, len);
                 return (Self::BuiltIn(tx), remaining);
             }
         }
