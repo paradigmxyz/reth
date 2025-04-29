@@ -697,11 +697,19 @@ where
 }
 
 /// Builder for engine API RPC module.
+///
+/// This builder type is responsible for providing an instance of [`IntoEngineApiRpcModule`], which
+/// is effectively a helper trait that provides the type erased [`jsonrpsee::RpcModule`] instance
+/// that contains the method handlers for the engine API. See [`EngineApi`] for an implementation of
+/// [`IntoEngineApiRpcModule`].
 pub trait EngineApiBuilder<Node: FullNodeComponents>: Send + Sync {
-    /// The engine API RPC module. Only required to be convertible to an [`jsonrpsee`] module.
+    /// The engine API RPC module. Only required to be convertible to an [`jsonrpsee::RpcModule`].
     type EngineApi: IntoEngineApiRpcModule + Send + Sync;
 
-    /// Builds the engine API.
+    /// Builds the engine API instance given the provided [`AddOnsContext`].
+    ///
+    /// [`Self::EngineApi`] will be converted into the method handlers of the authenticated RPC
+    /// server (engine API).
     fn build_engine_api(
         self,
         ctx: &AddOnsContext<'_, Node>,
@@ -709,6 +717,10 @@ pub trait EngineApiBuilder<Node: FullNodeComponents>: Send + Sync {
 }
 
 /// Builder for basic [`EngineApi`] implementation.
+///
+/// This provides a basic default implementation for opstack and ethereum engine API via
+/// [`EngineTypes`] and uses the general purpose [`EngineApi`] implementation as the builder's
+/// output.
 #[derive(Debug, Default)]
 pub struct BasicEngineApiBuilder<EV> {
     engine_validator_builder: EV,
