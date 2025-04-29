@@ -90,8 +90,13 @@ impl SequencerClient {
                         .split_once('=')
                         .ok_or_else(|| Error::InvalidHeaderFormat(header.clone()))?;
                         header_map.insert(
-                        key.trim().parse()?,
-                        value.trim().parse()?,
+                            key.trim()
+                               .parse()
+                               .map_err(|_| Error::InvalidHeaderFormat(header.clone()))?,
+                            value.trim()
+                                 .parse()
+                                 .map_err(|_| Error::InvalidHeaderFormat(header.clone()))?,
+                        );
                     );
                 }
                 builder = builder.default_headers(header_map);
