@@ -57,7 +57,7 @@ pub struct RollupArgs {
     pub supervisor_safety_level: SafetyLevel,
 
     /// Optional headers to use when connecting to the sequencer.
-    #[arg(long = "rollup.sequencer-headers", requires = "rollup.sequencer")]
+    #[arg(long = "rollup.sequencer-headers", requires = "sequencer")]
     pub sequencer_headers: Vec<String>,
 }
 
