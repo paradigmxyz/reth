@@ -28,7 +28,7 @@ macro_rules! delegate {
 /// A [`SignedTransaction`] implementation that combines two different transaction types.
 ///
 /// This is intended to be used to extend existing presets, for example the ethereum or optstack
-/// transadtion types.
+/// transaction types.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Hash, Eq, PartialEq)]
 pub enum ExtendedTxEnvelope<BuiltIn, Other> {
     BuiltIn(BuiltIn),
