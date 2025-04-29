@@ -308,7 +308,7 @@ where
 
 impl<B, T> Compact for ExtendedTxEnvelope<B, T>
 where
-    B: Compact + SerdeBincodeCompat,
+    B: Compact,
     T: Compact,
 {
     fn to_compact<Buf>(&self, buf: &mut Buf) -> usize
