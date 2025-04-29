@@ -130,7 +130,7 @@ where
     }
 }
 
-impl<T, B> SignedTransaction for ExtendedTxEnvelope<B, T>
+impl<B, T> SignedTransaction for ExtendedTxEnvelope<B, T>
 where
     B: SignedTransaction + SerdeBincodeCompat,
     T: SignedTransaction + SerdeBincodeCompat,
