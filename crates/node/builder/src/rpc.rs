@@ -352,7 +352,7 @@ where
 /// modified as part of the [`NodeAddOns`] see for example `OpRpcAddons`, `EthereumAddOns`.
 ///
 /// It can be modified to register RPC API handlers, see [`RpcAddOns::launch_add_ons_with`] which
-/// takes a closure that provides acces to all the configured modules (namespaces), and is invoked
+/// takes a closure that provides access to all the configured modules (namespaces), and is invoked
 /// just before the servers are launched. This can be used to extend the node with custom RPC
 /// methods or even replace existing method handlers, see also [`TransportRpcModules`].
 pub struct RpcAddOns<
