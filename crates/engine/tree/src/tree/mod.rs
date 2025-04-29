@@ -3152,7 +3152,6 @@ mod tests {
         tree: EngineApiTreeHandler<
             EthPrimitives,
             MockEthProvider,
-            MockExecutorProvider,
             EthEngineTypes,
             EthereumEngineValidator,
             EthEvmConfig,
