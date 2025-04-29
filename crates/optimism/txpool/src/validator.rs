@@ -11,8 +11,8 @@ use reth_primitives_traits::{
 };
 use reth_storage_api::{BlockReaderIdExt, StateProvider, StateProviderBox, StateProviderFactory};
 use reth_transaction_pool::{
-    error::InvalidPoolTransactionError, EthPoolTransaction, EthTransactionValidator,
-    TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
+    error::InvalidPoolTransactionError, validate::ValidTransaction, EthPoolTransaction,
+    EthTransactionValidator, TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
 };
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
@@ -187,36 +187,17 @@ where
     where
         P: StateProvider,
     {
-        if transaction.is_eip4844() {
-            return TransactionValidationOutcome::Invalid(
-                transaction,
-                InvalidTransactionError::TxTypeNotSupported.into(),
-            )
-        }
+        // OP checks without state
+        let transaction = match self.apply_op_checks_no_state(transaction) {
+            Ok(tx) => tx,
+            Err(invalid_outcome) => return invalid_outcome,
+        };
 
-        // Interop cross tx validation
-        match self.is_valid_cross_tx(&transaction).await {
-            Some(Err(err)) => {
-                let err = match err {
-                    InvalidCrossTx::CrossChainTxPreInterop => {
-                        InvalidTransactionError::TxTypeNotSupported.into()
-                    }
-                    err => InvalidPoolTransactionError::Other(Box::new(err)),
-                };
-                return TransactionValidationOutcome::Invalid(transaction, err)
-            }
-            Some(Ok(_)) => {
-                // valid interop tx
-                transaction.set_interop_deadline(
-                    self.block_timestamp() + TRANSACTION_VALIDITY_WINDOW_SECS,
-                );
-            }
-            _ => {}
-        }
+        // l1 checks, will load state from DB (costly) unless state has been passed as param
+        let l1_validation_outcome = self.inner.validate_one_with_state(origin, transaction, state);
 
-        let outcome = self.inner.validate_one_with_state(origin, transaction, state);
-
-        self.apply_op_checks(outcome)
+        // OP checks against state bundled in L1 validation outcome and superchain state
+        self.apply_op_checks_against_state(l1_validation_outcome).await
     }
 
     /// Validates all given transactions.
@@ -228,18 +209,81 @@ where
         &self,
         transactions: Vec<(TransactionOrigin, Tx)>,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
-        let state: Option<Arc<dyn StateProvider>> =
-            self.inner.client().latest().ok().map(|state| state.into());
-        futures_util::future::join_all(
-            transactions
-                .into_iter()
-                .map(|(origin, tx)| self.validate_one_with_state(origin, tx, state.clone())),
-        )
-        .await
+        let transactions = transactions
+            .into_iter()
+            .map(|(origin, tx)| {
+                self.apply_op_checks_no_state(tx)
+                    .map(|tx| self.inner.validate_one_no_state(origin, tx))
+            })
+            .collect::<Vec<_>>();
+
+        // bail early if all transactions failed validation without state
+        let some_pass = transactions.iter().any(|res| res.is_ok());
+        if some_pass {
+            // otherwise load state from DB for checks against state
+            let state = match self.client().latest() {
+                Ok(s) => s,
+                Err(err) => {
+                    return transactions
+                        .into_iter()
+                        .map(|res| match res {
+                            Ok(tx) => TransactionValidationOutcome::Error(tx.hash(), Box::new(err)),
+                            Err(already_invalid) => already_invalid,
+                        })
+                        .collect()
+                }
+            };
+
+            futures_util::future::join_all(transactions.into_iter().map(|(origin, tx)| {
+                self.inner
+                    .validate_one_against_state(origin, tx, state.clone())
+                    .map(|outcome| self.apply_op_checks_against_state(outcome))
+            }))
+            .await
+        }
+
+        transactions
+            .into_iter()
+            .map(|res| match res {
+                Ok(valid) => valid,
+                Err(invalid) => invalid,
+            })
+            .collect()
     }
 
-    /// Performs the necessary opstack specific checks based on top of the regular eth outcome.
-    fn apply_op_checks(
+    /// Applies OP validity checks, that do _not_ require reading latest state from DB (or from
+    /// Superchain oracle), to single transaction.
+    ///
+    /// Returns the unmodified transaction if all checks pass.
+    ///
+    /// Applies OP-protocol specific checks:
+    /// - ensures tx is not eip4844
+    pub fn apply_op_checks_no_state(
+        &self,
+        transaction: Tx,
+    ) -> Result<Tx, TransactionValidationOutcome<Tx>> {
+        // no support for eip4844 transactions in OP tx pool
+        if transaction.is_eip4844() {
+            return Err(TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidTransactionError::TxTypeNotSupported.into(),
+            ))
+        }
+
+        Ok(transaction)
+    }
+
+    /// Performs the necessary opstack specific checks on single transaction and its corresponding
+    /// relevant state.
+    ///
+    /// Takes as parameter a transaction that has successfully passed pipeline for L1
+    /// [`validate_one_against_state`](EthTransactionValidator::validate_one_against_state).
+    ///
+    /// Applies OP-protocol specific checks:
+    /// - ensures that the account has enough balance to cover the L1 gas cost
+    /// - ensures cross chain transactions are valid w.r.t. locally configured minimum
+    ///   [`SafetyLevel`] (involves RPC call to a superchain supervisor (cross-chain oracle)).
+    pub async fn apply_op_checks_against_state(
         &self,
         outcome: TransactionValidationOutcome<Tx>,
     ) -> TransactionValidationOutcome<Tx> {
@@ -285,17 +329,56 @@ where
                 )
             }
 
+            // Interop cross tx validation
+            let super_valid_tx = match self.apply_checks_against_superchain_state(valid_tx).await {
+                Ok(tx) => tx,
+                Err(err) => return err,
+            };
+
             return TransactionValidationOutcome::Valid {
                 balance,
                 state_nonce,
-                transaction: valid_tx,
+                transaction: super_valid_tx,
                 propagate,
             }
         }
         outcome
     }
 
-    /// Wrapper for is valid cross tx
+    /// Applies Superchain validity check to single transaction.
+    ///
+    /// RPC queries OP supervisor (cross-chain oracle), which stores superchain state, about
+    ///transaction's validity, given transaction is a cross-chain transaction.
+    pub async fn apply_checks_against_superchain_state(
+        &self,
+        transaction: ValidTransaction<Tx>,
+    ) -> Result<ValidTransaction<Tx>, TransactionValidationOutcome<Tx>> {
+        // Interop cross tx validation
+        match self.is_valid_cross_tx(transaction.transaction()).await {
+            Some(Err(err)) => {
+                let err = match err {
+                    InvalidCrossTx::CrossChainTxPreInterop => {
+                        InvalidTransactionError::TxTypeNotSupported.into()
+                    }
+                    err => InvalidPoolTransactionError::Other(Box::new(err)),
+                };
+                return Err(TransactionValidationOutcome::Invalid(
+                    transaction.into_transaction(),
+                    err,
+                ))
+            }
+            Some(Ok(_)) => {
+                // valid interop tx
+                transaction
+                    .set_interop_deadline(self.block_timestamp() + TRANSACTION_VALIDITY_WINDOW_SECS)
+            }
+            None => {} // not an interop (cross-chain) tx
+        }
+
+        Ok(transaction)
+    }
+
+    /// Wrapper for [`is_valid_cross_tx`](SupervisorClient::is_valid_cross_tx).
     pub async fn is_valid_cross_tx(&self, tx: &Tx) -> Option<Result<(), InvalidCrossTx>> {
         // We don't need to check for deposit transaction in here, because they won't come from
         // txpool
