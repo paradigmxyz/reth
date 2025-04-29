@@ -541,9 +541,7 @@ where
     where
         EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
     {
-        let Self {
-            provider, pool, network, executor, evm_config, block_executor, consensus, ..
-        } = self;
+        let Self { provider, pool, network, executor, block_executor, consensus, .. } = self;
 
         let config = module_config.config.clone().unwrap_or_default();
 
@@ -554,7 +552,6 @@ where
             executor,
             consensus,
             config,
-            evm_config,
             eth,
             block_executor,
         );
@@ -578,9 +575,7 @@ where
     where
         EthApi: EthApiTypes + 'static,
     {
-        let Self {
-            provider, pool, network, executor, evm_config, block_executor, consensus, ..
-        } = self;
+        let Self { provider, pool, network, executor, block_executor, consensus, .. } = self;
         RpcRegistryInner::new(
             provider,
             pool,
@@ -588,7 +583,6 @@ where
             executor,
             consensus,
             config,
-            evm_config,
             eth,
             block_executor,
         )
@@ -606,9 +600,7 @@ where
     {
         let mut modules = TransportRpcModules::default();
 
-        let Self {
-            provider, pool, network, executor, evm_config, block_executor, consensus, ..
-        } = self;
+        let Self { provider, pool, network, executor, block_executor, consensus, .. } = self;
 
         if !module_config.is_empty() {
             let TransportRpcModuleConfig { http, ws, ipc, config } = module_config.clone();
@@ -620,7 +612,6 @@ where
                 executor,
                 consensus,
                 config.unwrap_or_default(),
-                evm_config,
                 eth,
                 block_executor,
             );
@@ -773,7 +764,6 @@ where
         executor: Tasks,
         consensus: Consensus,
         config: RpcModuleConfig,
-        _evm_config: EvmConfig,
         eth_api: EthApi,
         block_executor: BasicBlockExecutorProvider<EvmConfig>,
     ) -> Self
