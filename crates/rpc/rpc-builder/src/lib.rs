@@ -208,6 +208,7 @@ where
     Tasks: TaskSpawner + Clone + 'static,
     EvmConfig: ConfigureEvm<Primitives = N>,
     BlockExecutor: BlockExecutorProvider<Primitives = N>,
+    Network: FullNetwork<Client: BlockClient<Block = <N as NodePrimitives>::Block>>,
 {
     /// Create a new instance of the builder
     pub const fn new(
@@ -572,7 +573,7 @@ where
     /// Note: This spawns all necessary tasks.
     ///
     /// See also [`EthApiBuilder`].
-    pub fn bootstrap_eth_api(&self) -> EthApi<Self> {
+    pub fn bootstrap_eth_api(&self) -> EthApi<impl FullNodeComponents> {
         self.eth_api_builder().build()
     }
 }
@@ -637,7 +638,7 @@ pub trait NodeComponents<T: FullNodeTypes>: Clone + Debug + Unpin + Send + Sync 
 ///
 /// This provides access to all the components of the node.
 #[derive(Debug)]
-pub struct Components<Node: FullNodeTypes, N: NetworkPrimitives, Pool, EVM, Executor, Consensus> {
+pub struct Components<Node: FullNodeTypes, Pool, EVM, Executor, Consensus, Network> {
     /// The transaction pool of the node.
     pub transaction_pool: Pool,
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
@@ -647,20 +648,15 @@ pub struct Components<Node: FullNodeTypes, N: NetworkPrimitives, Pool, EVM, Exec
     /// The consensus implementation of the node.
     pub consensus: Consensus,
     /// The network implementation of the node.
-    pub network: NetworkHandle<N>,
+    pub network: Network,
     /// The handle to the payload builder service.
     pub payload_builder_handle: PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>,
 }
 
-impl<Node, Pool, EVM, Executor, Cons, N> NodeComponents<Node>
-    for Components<Node, N, Pool, EVM, Executor, Cons>
+impl<Node, Pool, EVM, Executor, Cons, N, Network> NodeComponents<Node>
+    for Components<Node, Pool, EVM, Executor, Cons, Network>
 where
     Node: FullNodeTypes,
-    N: NetworkPrimitives<
-        BlockHeader = HeaderTy<Node::Types>,
-        BlockBody = BodyTy<Node::Types>,
-        Block = BlockTy<Node::Types>,
-    >,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
         + 'static,
@@ -668,12 +664,13 @@ where
     Executor: BlockExecutorProvider<Primitives = PrimitivesTy<Node::Types>>,
     Cons:
         FullConsensus<PrimitivesTy<Node::Types>, Error = ConsensusError> + Clone + Unpin + 'static,
+    Network: FullNetwork<Client: BlockClient<Block = BlockTy<Node::Types>>>,
 {
     type Pool = Pool;
     type Evm = EVM;
     type Executor = Executor;
     type Consensus = Cons;
-    type Network = NetworkHandle<N>;
+    type Network = Network;
 
     fn pool(&self) -> &Self::Pool {
         &self.transaction_pool
@@ -700,14 +697,15 @@ where
     }
 }
 
-impl<Node, N, Pool, EVM, Executor, Cons> Clone for Components<Node, N, Pool, EVM, Executor, Cons>
+impl<Node, Pool, EVM, Executor, Cons, Network> Clone
+    for Components<Node, Pool, EVM, Executor, Cons, Network>
 where
-    N: NetworkPrimitives,
     Node: FullNodeTypes,
     Pool: TransactionPool,
     EVM: ConfigureEvm,
     Executor: BlockExecutorProvider,
     Cons: Clone,
+    Network: Clone,
 {
     fn clone(&self) -> Self {
         Self {
