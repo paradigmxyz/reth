@@ -195,7 +195,7 @@ pub struct RpcRegistry<Node: FullNodeComponents, EthApi: EthApiTypes> {
         Node::Network,
         TaskExecutor,
         EthApi,
-        Node::Executor,
+        Node::Evm,
         Node::Consensus,
     >,
 }
@@ -211,7 +211,7 @@ where
         Node::Network,
         TaskExecutor,
         EthApi,
-        Node::Executor,
+        Node::Evm,
         Node::Consensus,
     >;
 
