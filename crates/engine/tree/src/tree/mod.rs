@@ -31,7 +31,7 @@ use reth_engine_primitives::{
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_ethereum_primitives::EthPrimitives;
-use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
+use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes, PayloadTypes};
 use reth_primitives_traits::{
@@ -563,13 +563,13 @@ pub enum TreeAction {
 ///
 /// This type is responsible for processing engine API requests, maintaining the canonical state and
 /// emitting events.
-pub struct EngineApiTreeHandler<N, P, E, T, V, C>
+pub struct EngineApiTreeHandler<N, P, T, V, C>
 where
     N: NodePrimitives,
     T: PayloadTypes,
 {
     provider: P,
-    executor_provider: E,
+    executor_provider: BasicBlockExecutorProvider<C>,
     consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
     payload_validator: V,
     /// Keeps track of internals such as executed and buffered blocks.
@@ -611,8 +611,8 @@ where
     payload_processor: PayloadProcessor<N, C>,
 }
 
-impl<N, P: Debug, E: Debug, T: PayloadTypes + Debug, V: Debug, C: Debug> std::fmt::Debug
-    for EngineApiTreeHandler<N, P, E, T, V, C>
+impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C: Debug> std::fmt::Debug
+    for EngineApiTreeHandler<N, P, T, V, C>
 where
     N: NodePrimitives,
 {
@@ -637,7 +637,7 @@ where
     }
 }
 
-impl<N, P, E, T, V, C> EngineApiTreeHandler<N, P, E, T, V, C>
+impl<N, P, T, V, C> EngineApiTreeHandler<N, P, T, V, C>
 where
     N: NodePrimitives,
     P: DatabaseProviderFactory
@@ -650,7 +650,6 @@ where
         + 'static,
     <P as DatabaseProviderFactory>::Provider:
         BlockReader<Block = N::Block, Header = N::BlockHeader>,
-    E: BlockExecutorProvider<Primitives = N>,
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes,
     V: EngineValidator<T, Block = N::Block>,
@@ -659,7 +658,7 @@ where
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         provider: P,
-        executor_provider: E,
+        executor_provider: BasicBlockExecutorProvider<C>,
         consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
         payload_validator: V,
         outgoing: UnboundedSender<EngineApiEvent<N>>,
@@ -712,7 +711,7 @@ where
     #[expect(clippy::complexity)]
     pub fn spawn_new(
         provider: P,
-        executor_provider: E,
+        executor_provider: BasicBlockExecutorProvider<C>,
         consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
         payload_validator: V,
         persistence: PersistenceHandle<N>,
