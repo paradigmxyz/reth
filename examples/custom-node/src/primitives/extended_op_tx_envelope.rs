@@ -315,7 +315,7 @@ where
             let type_byte = buf[0];
             if let Ok(_tx_type) = <u8 as TryInto<OpTxType>>::try_into(type_byte) {
                 let (tx, remaining) = OpTxEnvelope::from_compact(buf, len);
-                return (Self::BuiltIn(*Box::new(tx)), remaining);
+                return (Self::BuiltIn(tx), remaining);
             }
         }
 
