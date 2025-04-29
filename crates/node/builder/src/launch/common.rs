@@ -17,7 +17,7 @@ use reth_db_common::init::{init_genesis, InitStorageError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_local::MiningMode;
 use reth_engine_tree::tree::{InvalidBlockHook, InvalidBlockHooks, NoopInvalidBlockHook};
-use reth_evm::noop::NoopBlockExecutorProvider;
+use reth_evm::{execute::BasicBlockExecutorProvider, noop::NoopBlockExecutorProvider};
 use reth_fs_util as fs;
 use reth_invalid_block_hooks::InvalidBlockWitnessHook;
 use reth_network_p2p::headers::client::HeadersClient;
@@ -422,7 +422,7 @@ where
                     Arc::new(NoopConsensus::default()),
                     NoopHeaderDownloader::default(),
                     NoopBodiesDownloader::default(),
-                    NoopBlockExecutorProvider::<N::Primitives>::default(),
+                    BasicBlockExecutorProvider::new(EthEvmConfig::mainnet()),
                     self.toml_config().stages.clone(),
                     self.prune_modes(),
                 ))

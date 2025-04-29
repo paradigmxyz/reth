@@ -8,7 +8,6 @@ use crate::{
     BuilderContext, ConfigureEvm, FullNodeTypes,
 };
 use reth_consensus::{ConsensusError, FullConsensus};
-use reth_evm::execute::BlockExecutorProvider;
 use reth_network::NetworkPrimitives;
 use reth_node_api::{BlockTy, BodyTy, HeaderTy, PrimitivesTy, TxTy};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
@@ -317,14 +316,8 @@ where
     ExecB: ExecutorBuilder<Node>,
     ConsB: ConsensusBuilder<Node>,
 {
-    type Components = Components<
-        Node,
-        NetworkB::Primitives,
-        PoolB::Pool,
-        ExecB::EVM,
-        ExecB::Executor,
-        ConsB::Consensus,
-    >;
+    type Components =
+        Components<Node, NetworkB::Primitives, PoolB::Pool, ExecB::EVM, ConsB::Consensus>;
 
     async fn build_components(
         self,
@@ -391,7 +384,7 @@ pub trait NodeComponentsBuilder<Node: FullNodeTypes>: Send {
     ) -> impl Future<Output = eyre::Result<Self::Components>> + Send;
 }
 
-impl<Node, N, F, Fut, Pool, EVM, Executor, Cons> NodeComponentsBuilder<Node> for F
+impl<Node, N, F, Fut, Pool, EVM, Cons> NodeComponentsBuilder<Node> for F
 where
     N: NetworkPrimitives<
         BlockHeader = HeaderTy<Node::Types>,
@@ -400,16 +393,15 @@ where
     >,
     Node: FullNodeTypes,
     F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
-    Fut: Future<Output = eyre::Result<Components<Node, N, Pool, EVM, Executor, Cons>>> + Send,
+    Fut: Future<Output = eyre::Result<Components<Node, N, Pool, EVM, Cons>>> + Send,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
         + 'static,
     EVM: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>> + 'static,
-    Executor: BlockExecutorProvider<Primitives = PrimitivesTy<Node::Types>>,
     Cons:
         FullConsensus<PrimitivesTy<Node::Types>, Error = ConsensusError> + Clone + Unpin + 'static,
 {
-    type Components = Components<Node, N, Pool, EVM, Executor, Cons>;
+    type Components = Components<Node, N, Pool, EVM, Cons>;
 
     fn build_components(
         self,

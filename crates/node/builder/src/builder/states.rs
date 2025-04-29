@@ -12,6 +12,7 @@ use crate::{
     rpc::{RethRpcAddOns, RethRpcServerHandles, RpcContext},
     AddOns, FullNode,
 };
+use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_exex::ExExContext;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes};
 use reth_node_core::node_config::NodeConfig;
@@ -82,12 +83,6 @@ pub struct NodeAdapter<T: FullNodeTypes, C: NodeComponents<T>> {
     pub provider: T::Provider,
 }
 
-impl NodeTypesAdapter<T: FullNodeTypes, C: NodeComponents<T>> {
-    fn block_executor(&self) -> &Self::Executor {
-        self.components.block_executor()
-    }
-}
-
 impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeTypes for NodeAdapter<T, C> {
     type Types = T::Types;
     type DB = T::DB;
@@ -130,6 +125,10 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<
 
     fn task_executor(&self) -> &TaskExecutor {
         &self.task_executor
+    }
+
+    fn block_executor(&self) -> &BasicBlockExecutorProvider<C::Evm> {
+        self.components.block_executor()
     }
 }
 
