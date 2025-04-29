@@ -21,7 +21,7 @@ use op_alloy_consensus::EIP1559ParamError;
 use op_revm::{OpSpecId, OpTransaction};
 use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, EvmEnv};
-use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
 use reth_optimism_consensus::next_block_base_fee;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives};
@@ -76,6 +76,12 @@ impl<ChainSpec> OpEvmConfig<ChainSpec> {
     /// Creates a new [`OpEvmConfig`] with the given chain spec for OP chains.
     pub fn optimism(chain_spec: Arc<ChainSpec>) -> Self {
         Self::new(chain_spec, OpRethReceiptBuilder::default())
+    }
+}
+
+impl Default for OpEvmConfig {
+    fn default() -> Self {
+        Self::optimism(Arc::new(OpChainSpecBuilder::optimism_mainnet().build()))
     }
 }
 

@@ -9,7 +9,7 @@ use reth_consensus::{noop::NoopConsensus, ConsensusError, FullConsensus};
 use reth_db::{init_db, open_db_read_only, DatabaseEnv};
 use reth_db_common::init::init_genesis;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
-use reth_evm::{execute::BlockExecutorProvider, noop::NoopBlockExecutorProvider};
+use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
 use reth_node_builder::{NodeTypes, NodeTypesWithDBAdapter};
 use reth_node_core::{
     args::{DatabaseArgs, DatadirArgs},
@@ -158,7 +158,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
                     Arc::new(NoopConsensus::default()),
                     NoopHeaderDownloader::default(),
                     NoopBodiesDownloader::default(),
-                    NoopBlockExecutorProvider::<N::Primitives>::default(),
+                    BasicBlockExecutorProvider::default(),
                     config.stages.clone(),
                     prune_modes.clone(),
                 ))
@@ -207,27 +207,27 @@ impl<N> CliNodeTypes for N where N: NodeTypes + NodeTypesForProvider {}
 
 /// Helper trait aggregating components required for the CLI.
 pub trait CliNodeComponents<N: CliNodeTypes> {
-    /// Block executor.
-    type Executor: BlockExecutorProvider<Primitives = N::Primitives>;
+    /// Evm to use..
+    type Evm: ConfigureEvm<Primitives = N::Primitives>;
     /// Consensus implementation.
     type Consensus: FullConsensus<N::Primitives, Error = ConsensusError> + Clone + 'static;
 
     /// Returns the block executor.
-    fn executor(&self) -> &Self::Executor;
+    fn executor(&self) -> &BasicBlockExecutorProvider<Self::Evm>;
     /// Returns the consensus implementation.
     fn consensus(&self) -> &Self::Consensus;
 }
 
 impl<N: CliNodeTypes, E, C> CliNodeComponents<N> for (E, C)
 where
-    E: BlockExecutorProvider<Primitives = N::Primitives>,
+    E: ConfigureEvm<Primitives = N::Primitives>,
     C: FullConsensus<N::Primitives, Error = ConsensusError> + Clone + 'static,
 {
-    type Executor = E;
+    type Evm = E;
     type Consensus = C;
 
-    fn executor(&self) -> &Self::Executor {
-        &self.0
+    fn executor(&self) -> &BasicBlockExecutorProvider<Self::Evm> {
+        &BasicBlockExecutorProvider::new(self.0)
     }
 
     fn consensus(&self) -> &Self::Consensus {

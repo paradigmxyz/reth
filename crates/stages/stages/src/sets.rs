@@ -19,12 +19,11 @@
 //! # use reth_provider::test_utils::{create_test_provider_factory, MockNodeTypesWithDB};
 //! # use reth_static_file::StaticFileProducer;
 //! # use reth_config::config::StageConfig;
-//! # use reth_evm::execute::BlockExecutorProvider;
 //! # use reth_ethereum_primitives::EthPrimitives;
 //! # use std::sync::Arc;
 //! # use reth_consensus::{FullConsensus, ConsensusError};
 //!
-//! # fn create(exec: impl BlockExecutorProvider<Primitives = EthPrimitives>, consensus: impl FullConsensus<EthPrimitives, Error = ConsensusError> + 'static) {
+//! # fn create(exec: BasicBlockExecutorProvider<EthEvmConfig>, consensus: impl FullConsensus<EthPrimitives, Error = ConsensusError> + 'static) {
 //!
 //! let provider_factory = create_test_provider_factory();
 //! let static_file_producer =

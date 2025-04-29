@@ -1,9 +1,10 @@
 use reth_ethereum_primitives::EthPrimitives;
-use reth_evm::execute::BlockExecutorProvider;
+use reth_evm::ConfigureEvm;
 use reth_network::{protocol::IntoRlpxSubProtocol, NetworkProtocols};
 use reth_network_api::FullNetwork;
 use reth_node_api::BeaconConsensusEngineEvent;
 use reth_node_core::args::RessArgs;
+use reth_node_ethereum::BasicBlockExecutorProvider;
 use reth_provider::providers::{BlockchainProvider, ProviderNodeTypes};
 use reth_ress_protocol::{NodeType, ProtocolState, RessProtocolHandler};
 use reth_ress_provider::{maintain_pending_state, PendingState, RethRessProtocolProvider};
@@ -16,14 +17,14 @@ use tracing::*;
 pub fn install_ress_subprotocol<P, E, N>(
     args: RessArgs,
     provider: BlockchainProvider<P>,
-    block_executor: E,
+    block_executor: BasicBlockExecutorProvider<E>,
     network: N,
     task_executor: TaskExecutor,
     engine_events: EventStream<BeaconConsensusEngineEvent<EthPrimitives>>,
 ) -> eyre::Result<()>
 where
     P: ProviderNodeTypes<Primitives = EthPrimitives>,
-    E: BlockExecutorProvider<Primitives = EthPrimitives> + Clone,
+    E: ConfigureEvm<Primitives = EthPrimitives> + Clone,
     N: FullNetwork + NetworkProtocols,
 {
     info!(target: "reth::cli", "Installing ress subprotocol");

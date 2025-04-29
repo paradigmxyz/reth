@@ -410,6 +410,15 @@ where
     }
 }
 
+impl<F> Default for BasicBlockExecutorProvider<F>
+where
+    F: Default,
+{
+    fn default() -> Self {
+        Self { strategy_factory: F::default() }
+    }
+}
+
 /// A generic block executor that uses a [`BlockExecutor`] to
 /// execute blocks.
 #[expect(missing_debug_implementations)]

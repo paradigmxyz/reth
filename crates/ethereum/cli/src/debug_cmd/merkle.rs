@@ -11,7 +11,7 @@ use reth_config::Config;
 use reth_consensus::{Consensus, ConsensusError};
 use reth_db_api::{cursor::DbCursorRO, tables, transaction::DbTx};
 use reth_ethereum_primitives::EthPrimitives;
-use reth_evm::execute::{BlockExecutorProvider, Executor};
+use reth_evm::execute::Executor;
 use reth_execution_types::ExecutionOutcome;
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
