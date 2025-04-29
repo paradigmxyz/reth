@@ -34,6 +34,10 @@ pub enum Error {
         #[source]
         reqwest::Error,
     ),
+
+    /// Invalid header format
+    #[error("Invalid header format: {0}")]
+    InvalidHeaderFormat(String),
 }
 
 /// A client to interact with a Sequencer
@@ -84,8 +88,8 @@ impl SequencerClient {
                 for header in headers {
                     let (key, value) = header
                         .split_once('=')
-                        .ok_or_else(|| eyre::eyre!("Invalid header format: {header}"))?;
-                    header_map.insert(
+                        .ok_or_else(|| Error::InvalidHeaderFormat(header.clone()))?;
+                        header_map.insert(
                         key.trim().parse()?,
                         value.trim().parse()?,
                     );
