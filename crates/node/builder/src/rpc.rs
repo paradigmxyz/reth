@@ -346,6 +346,15 @@ where
 }
 
 /// Node add-ons containing RPC server configuration, with customizable eth API handler.
+///
+/// This struct can be used to provide the RPC server functionality. It is responsible for launching
+/// the regular RPC and the authenticated RPC server (engine API). It is intended to be used and
+/// modified as part of the [`NodeAddOns`] see for example `OpRpcAddons`, `EthereumAddOns`.
+///
+/// It can be modified to register RPC API handlers, see [`RpcAddOns::launch_add_ons_with`] which
+/// takes a closure that provides access to all the configured modules (namespaces), and is invoked
+/// just before the servers are launched. This can be used to extend the node with custom RPC
+/// methods or even replace existing method handlers, see also [`TransportRpcModules`].
 pub struct RpcAddOns<
     Node: FullNodeComponents,
     EthB: EthApiBuilder<Node>,
