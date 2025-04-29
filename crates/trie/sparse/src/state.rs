@@ -1,6 +1,8 @@
+#[cfg(feature = "metrics")]
+use crate::metrics::SparseStateTrieMetrics;
 use crate::{
     blinded::{BlindedProvider, BlindedProviderFactory, DefaultBlindedProviderFactory},
-    metrics::RevealedSparseTrie, SparseTrie, TrieMasks,
+    RevealedSparseTrie, SparseTrie, TrieMasks,
 };
 use alloc::{collections::VecDeque, vec::Vec};
 use alloy_primitives::{
@@ -19,8 +21,6 @@ use reth_trie_common::{
     EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use tracing::trace;
-#[cfg(feature = "metrics")]
-use crate::metrics::SparseStateTrieMetrics;
 
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
 pub struct SparseStateTrie<F: BlindedProviderFactory = DefaultBlindedProviderFactory> {
