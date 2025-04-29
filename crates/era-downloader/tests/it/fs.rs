@@ -31,7 +31,7 @@ const CONTENTS_1: &[u8; 1] = b"b";
             got: 3e23e8160039594a33894f6564e1b1348bbd7a0088d42c4acb73eeaed59c009d, \
             expected: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
     ];
-    "Invalid checksums fails"
+    "With invalid checksums fails"
 )]
 #[test_case(
     format!(
@@ -44,7 +44,7 @@ const CONTENTS_1: &[u8; 1] = b"b";
             expected: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
         Ok("mainnet-00001-a5364e9a.era1"),
     ];
-    "One invalid checksum partially fails"
+    "With one invalid checksum partially fails"
 )]
 #[tokio::test]
 async fn test_streaming_from_local_directory(
@@ -76,6 +76,28 @@ async fn test_streaming_from_local_directory(
 
                 assert_eq!(actual_err, expected_err)
             }
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_streaming_from_local_directory_with_missing_checksums_file_fails() {
+    let folder = tempfile::tempdir().unwrap();
+    let folder = folder.path().to_owned();
+
+    fs::write(folder.join("mainnet-00000-5ec1ffb8.era1"), CONTENTS_0).await.unwrap();
+    fs::write(folder.join("mainnet-00001-a5364e9a.era1"), CONTENTS_1).await.unwrap();
+
+    let folder = folder.into_boxed_path();
+    let actual = read_dir(folder.clone());
+
+    match actual {
+        Ok(_) => panic!("should be err"),
+        Err(e) => {
+            let actual_err = e.to_string();
+            let expected_err = "Missing file `checksums.txt` in the `dir`";
+
+            assert_eq!(actual_err, expected_err);
         }
     }
 }
