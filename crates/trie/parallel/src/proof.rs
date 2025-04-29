@@ -28,7 +28,7 @@ use reth_trie::{
     HashBuilder, HashedPostStateSorted, MultiProof, MultiProofTargets, Nibbles, StorageMultiProof,
     TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use reth_trie_common::proof::{ProofNodes, ProofRetainer};
+use reth_trie_common::proof::ProofRetainer;
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::sync::{mpsc::Receiver, Arc};
 use tracing::debug;
@@ -163,11 +163,11 @@ where
     ///
     /// This takes in a [`MultiProofTargets`] which contains two collections:
     /// * Account multiproof targets, that will fetch proofs for the listed accounts and their
-    /// associated storage. In other words, this will fetch a proof for each account and a storage
-    /// multiproof for the listed storage slots.
+    ///   associated storage. In other words, this will fetch a proof for each account and a storage
+    ///   multiproof for the listed storage slots.
     /// * Storage-only targets, that will fetch storage proofs only for the listed storage slots. In
-    /// other words, this will fetch only the storage multiproofs for each account and its listed
-    /// storage slots.
+    ///   other words, this will fetch only the storage multiproofs for each account and its listed
+    ///   storage slots.
     ///
     /// This function will first spawn tasks for each hashed address in the account multiproof
     /// targets, then spawn tasks for each hashed address in the storage-only targets.
@@ -227,7 +227,7 @@ where
         let mut storage_only_proofs =
             B256Map::with_capacity_and_hasher(storage_only_targets.len(), Default::default());
 
-        for (hashed_address, targets) in storage_only_targets.into_iter() {
+        for (hashed_address, targets) in storage_only_targets {
             let mut storage_prefix_sets = self
                 .prefix_sets
                 .storage_prefix_sets

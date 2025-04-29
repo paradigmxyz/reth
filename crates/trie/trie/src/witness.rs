@@ -18,7 +18,7 @@ use reth_execution_errors::{
     SparseStateTrieErrorKind, SparseTrieError, SparseTrieErrorKind, StateProofError,
     TrieWitnessError,
 };
-use reth_trie_common::Nibbles;
+use reth_trie_common::{MultiProofTargets, Nibbles};
 use reth_trie_sparse::{
     blinded::{BlindedProvider, BlindedProviderFactory, RevealedNode},
     SparseStateTrie,
@@ -118,7 +118,7 @@ where
         let multiproof =
             Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
                 .with_prefix_sets_mut(self.prefix_sets.clone())
-                .multiproof(proof_targets.clone())?;
+                .multiproof(MultiProofTargets::from_iter(proof_targets.clone()))?;
 
         // No need to reconstruct the rest of the trie, we just need to include
         // the root node and return.

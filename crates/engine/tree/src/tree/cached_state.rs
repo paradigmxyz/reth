@@ -1,8 +1,5 @@
 //! Implements a state provider that has a shared cache in front of it.
-use alloy_primitives::{
-    map::{B256Map, B256Set},
-    Address, StorageKey, StorageValue, B256,
-};
+use alloy_primitives::{Address, StorageKey, StorageValue, B256};
 use metrics::Gauge;
 use mini_moka::sync::CacheBuilder;
 use reth_errors::ProviderResult;
@@ -15,7 +12,7 @@ use reth_provider::{
 use reth_revm::db::BundleState;
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    StorageMultiProof, StorageProof, TrieInput,
+    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 use revm_primitives::map::DefaultHashBuilder;
 use std::time::Duration;
@@ -217,7 +214,7 @@ impl<S: StateProofProvider> StateProofProvider for CachedStateProvider<S> {
     fn multiproof(
         &self,
         input: TrieInput,
-        targets: B256Map<B256Set>,
+        targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
         self.state_provider.multiproof(input, targets)
     }

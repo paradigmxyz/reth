@@ -503,8 +503,8 @@ where
         let storage_proof_task_handle = self.storage_proof_task_handle.clone();
 
         self.executor.spawn_blocking(move || {
-            let account_targets = proof_targets.len();
-            let storage_targets = proof_targets.values().map(|slots| slots.len()).sum::<usize>();
+            let account_targets = proof_targets.total_accounts();
+            let storage_targets = proof_targets.total_slots();
 
             trace!(
                 target: "engine::root",
@@ -689,9 +689,6 @@ where
         // Process proof targets in chunks.
         let mut chunks = 0;
         for proof_targets_chunk in proof_targets.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
-            // NOTE: This will be removed once the proof fetching logic is updated to work with
-            // `TargetsToFetch` directly.
-            let proof_targets_chunk = proof_targets_chunk.to_targets_map();
             self.multiproof_manager.spawn_or_queue(
                 MultiproofInput {
                     config: self.config.clone(),
@@ -769,28 +766,12 @@ where
             self.fetched_proof_targets.extend_multi_proof_targets(&proof_targets);
             spawned_proof_targets.extend_multi_proof_targets(&proof_targets);
 
-            let (multiproof_targets, storage_only_targets) = proof_targets.into_inner();
-            for (hashed_addr, storage_targets) in storage_only_targets {
-                // If there are storage only targets, spawn a dedicated storage multiproof task.
-                let storage_input = StorageMultiproofInput {
-                    config: self.config.clone(),
-                    source: Some(source),
-                    hashed_state_update: chunk.clone(),
-                    hashed_address: hashed_addr,
-                    proof_targets: storage_targets,
-                    proof_sequence_number: self.proof_sequencer.next_sequence(),
-                    state_root_message_sender: self.tx.clone(),
-                };
-                self.multiproof_manager.spawn_or_queue(storage_input.into());
-
-                proofs_requested += 1;
-            }
             self.multiproof_manager.spawn_or_queue(
                 MultiproofInput {
                     config: self.config.clone(),
                     source: Some(source),
                     hashed_state_update: chunk,
-                    proof_targets: multiproof_targets,
+                    proof_targets,
                     proof_sequence_number: self.proof_sequencer.next_sequence(),
                     state_root_message_sender: self.tx.clone(),
                 }
@@ -1058,8 +1039,8 @@ where
     }
 }
 
-/// Returns a [`TargetsToFetch`] containing all accounts and storage slots that
-/// were not previously fetched.
+/// Returns a [`MultiProofTargets`] containing all accounts and storage slots that were not
+/// previously fetched.
 fn get_proof_targets(
     state_update: &HashedPostState,
     fetched_proof_targets: &B256Map<B256Set>,
@@ -1088,13 +1069,7 @@ fn get_proof_targets(
 
         // If the storage has changed slots, we need to fetch them.
         if changed_slots.peek().is_some() {
-            // only insert into storage only targets if we have fetched the account proof before.
-            let entry = match fetched {
-                Some(_) => targets.storage_targets_entry(*hashed_address),
-                None => targets.account_targets_entry(*hashed_address),
-            };
-
-            entry.or_default().extend(changed_slots);
+            targets.insert_target_slots(changed_slots, *hashed_address, fetched)
         }
     }
 
@@ -1213,10 +1188,11 @@ mod tests {
 
         let targets = get_proof_targets(&state, &fetched);
 
-        // should return all accounts as targets since nothing was fetched before
-        assert_eq!(targets.len(), state.accounts.len());
+        // should return all accounts as targets, specifically account multiproof targets, since
+        // nothing was fetched before
+        assert_eq!(targets.total_accounts(), state.accounts.len());
         for addr in state.accounts.keys() {
-            assert!(targets.contains_key(addr));
+            assert!(targets.contains_account_target(addr));
         }
     }
 
@@ -1228,9 +1204,10 @@ mod tests {
         let targets = get_proof_targets(&state, &fetched);
 
         // verify storage slots are included for accounts with storage
+        // check that these are in the account multiproof part of the targets
         for (addr, storage) in &state.storages {
-            assert!(targets.contains_key(addr));
-            let target_slots = &targets[addr];
+            assert!(targets.contains_account_target(addr));
+            let target_slots = &targets.account_targets()[addr];
             assert_eq!(target_slots.len(), storage.storage.len());
             for slot in storage.storage.keys() {
                 assert!(target_slots.contains(slot));
@@ -1256,9 +1233,9 @@ mod tests {
         let targets = get_proof_targets(&state, &fetched);
 
         // should not include the already fetched account since it has no storage updates
-        assert!(!targets.contains_key(fetched_addr));
+        assert!(!targets.contains_account(fetched_addr));
         // other accounts should still be included
-        assert_eq!(targets.len(), state.accounts.len() - 1);
+        assert_eq!(targets.total_accounts(), state.accounts.len() - 1);
     }
 
     #[test]
@@ -1276,7 +1253,7 @@ mod tests {
         let targets = get_proof_targets(&state, &fetched);
 
         // should not include the already fetched storage slot
-        let target_slots = &targets[addr];
+        let target_slots = &targets.account_targets()[addr];
         assert!(!target_slots.contains(&fetched_slot));
         assert_eq!(target_slots.len(), storage.storage.len() - 1);
     }
@@ -1315,9 +1292,9 @@ mod tests {
 
         let targets = get_proof_targets(&state, &fetched);
 
-        assert!(targets.contains_key(&addr2));
-        assert!(!targets[&addr1].contains(&slot1));
-        assert!(targets[&addr1].contains(&slot2));
+        assert!(targets.contains_account(&addr2));
+        assert!(!targets.account_targets()[&addr1].contains(&slot1));
+        assert!(targets.account_targets()[&addr1].contains(&slot2));
     }
 
     #[test]
@@ -1342,9 +1319,9 @@ mod tests {
         let targets = get_proof_targets(&state, &fetched);
 
         // verify that we still get the storage slots for the unmodified account
-        assert!(targets.contains_key(&addr));
+        assert!(targets.contains_account(&addr));
 
-        let target_slots = &targets[&addr];
+        let target_slots = &targets.account_targets()[&addr];
         assert_eq!(target_slots.len(), 2);
         assert!(target_slots.contains(&slot1));
         assert!(target_slots.contains(&slot2));

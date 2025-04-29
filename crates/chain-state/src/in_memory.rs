@@ -1087,7 +1087,7 @@ mod tests {
         fn multiproof(
             &self,
             _input: TrieInput,
-            _targets: B256Map<B256Set>,
+            _targets: MultiProofTargets,
         ) -> ProviderResult<MultiProof> {
             Ok(MultiProof::default())
         }

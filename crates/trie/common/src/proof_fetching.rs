@@ -5,7 +5,7 @@ use crate::{
     ChunkedMultiProofTargets, Nibbles,
 };
 use alloy_primitives::{
-    map::{B256Map, B256Set, Entry},
+    map::{B256Map, B256Set},
     B256,
 };
 use core::cmp::Ordering;
@@ -25,7 +25,7 @@ pub enum SingleProofTarget {
 
 impl SingleProofTarget {
     /// Returns an [`Option`] containing the storage slot if a storage slot exists for the target.
-    pub fn storage_slot(&self) -> Option<B256> {
+    pub const fn storage_slot(&self) -> Option<B256> {
         match self {
             Self::StorageOnly(slot) | Self::AccountWithStorage(slot) => Some(*slot),
             Self::Account => None,
@@ -84,6 +84,10 @@ pub struct MultiProofTargets {
 }
 
 impl FromIterator<(B256, B256Set)> for MultiProofTargets {
+    /// Creates a new [`MultiProofTargets`] instance from an iterator over multiproof targets.
+    ///
+    /// NOTE: This will create an empty storage-only target map, and only populates the account
+    /// multiproof part of the [`MultiProofTargets`].
     fn from_iter<T: IntoIterator<Item = (B256, B256Set)>>(iter: T) -> Self {
         Self { account_targets: B256Map::from_iter(iter), storage_only_targets: B256Map::default() }
     }
@@ -104,7 +108,7 @@ impl MultiProofTargets {
 
     /// Creates a new [`MultiProofTargets`] instance from an account target map and storage-only
     /// target map directly.
-    pub fn from_target_maps(
+    pub const fn from_target_maps(
         account_targets: B256Map<B256Set>,
         storage_only_targets: B256Map<B256Set>,
     ) -> Self {
@@ -137,12 +141,12 @@ impl MultiProofTargets {
         }
     }
 
-    /// Create `MultiProofTargets` with a single account as a target.
+    /// Create [`MultiProofTargets`] with a single account as a target.
     pub fn account(hashed_address: B256) -> Self {
         Self::accounts([hashed_address])
     }
 
-    /// Create a `MultiProofTargets` with multiple accounts as targets.
+    /// Create a [`MultiProofTargets`] with multiple accounts as targets.
     pub fn accounts(hashed_addresses: impl IntoIterator<Item = B256>) -> Self {
         Self::from_account_targets(
             hashed_addresses.into_iter().map(|addr| (addr, B256Set::default())),
@@ -156,18 +160,8 @@ impl MultiProofTargets {
         self.account_targets.contains_key(hashed_address)
     }
 
-    /// Returns the storage proof targets entry for the given hashed address.
-    pub fn storage_targets_entry(&mut self, hashed_address: B256) -> Entry<'_, B256, B256Set> {
-        self.storage_only_targets.entry(hashed_address)
-    }
-
-    /// Returns the account multiproof targets entry for the given hashed address.
-    pub fn account_targets_entry(&mut self, hashed_address: B256) -> Entry<'_, B256, B256Set> {
-        self.account_targets.entry(hashed_address)
-    }
-
-    /// Creates a new `MultiProofTargets` instance from the difference between the already-fetched
-    /// [`MultiProofTargets`] instance, and new [`TargetsToFetch`].
+    /// Creates a new [`MultiProofTargets`] instance from the difference between the
+    /// already-fetched accounts and storage slots, and new [`MultiProofTargets`].
     pub fn from_targets_difference(fetched: &B256Map<B256Set>, new: Self) -> Self {
         let mut account_targets = B256Map::default();
         let mut storage_only_targets = B256Map::default();
@@ -262,6 +256,24 @@ impl MultiProofTargets {
         multiproof_targets
     }
 
+    /// Inserts the changed slots into the map for the account, using the `fetched` value to
+    /// determine whether or not to put the targets into the account or storage-only multiproof
+    /// targets.
+    pub fn insert_target_slots<'a>(
+        &mut self,
+        changed_slots: impl IntoIterator<Item = &'a B256>,
+        hashed_address: B256,
+        fetched: Option<&B256Set>,
+    ) {
+        // only insert into storage only targets if we have fetched the account proof before.
+        let entry = match fetched {
+            Some(_) => self.storage_only_targets.entry(hashed_address),
+            None => self.account_targets.entry(hashed_address),
+        };
+
+        entry.or_default().extend(changed_slots);
+    }
+
     /// Inserts the hashed address and target slots into the account multiproof targets.
     pub fn insert_account_targets(&mut self, hashed_address: B256, slots: B256Set) {
         self.account_targets.entry(hashed_address).or_default().extend(slots);
@@ -302,13 +314,13 @@ impl MultiProofTargets {
 
     /// Returns a reference to the account multiproof targets.
     #[inline]
-    pub fn account_targets(&self) -> &B256Map<B256Set> {
+    pub const fn account_targets(&self) -> &B256Map<B256Set> {
         &self.account_targets
     }
 
     /// Returns a reference to the storage-only multiproof targets.
     #[inline]
-    pub fn storage_only_targets(&self) -> &B256Map<B256Set> {
+    pub const fn storage_only_targets(&self) -> &B256Map<B256Set> {
         &self.storage_only_targets
     }
 
@@ -357,6 +369,7 @@ impl MultiProofTargets {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::FetchedProofTargets;
 
     #[test]
     fn targets_to_fetch_difference_accounts_only() {

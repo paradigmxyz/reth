@@ -13,7 +13,9 @@ use alloy_primitives::{
 };
 use alloy_rlp::{BufMut, Encodable};
 use reth_execution_errors::trie::StateProofError;
-use reth_trie_common::{proof::ProofRetainer, AccountProof, MultiProof, StorageMultiProof};
+use reth_trie_common::{
+    proof::ProofRetainer, AccountProof, MultiProof, MultiProofTargets, StorageMultiProof,
+};
 
 mod blinded;
 pub use blinded::*;
@@ -91,7 +93,7 @@ where
         slots: &[B256],
     ) -> Result<AccountProof, StateProofError> {
         Ok(self
-            .multiproof(B256Map::from_iter([(
+            .multiproof(MultiProofTargets::from_iter([(
                 keccak256(address),
                 slots.iter().map(keccak256).collect(),
             )]))?
@@ -99,12 +101,12 @@ where
     }
 
     /// Generate a state multiproof according to specified targets.
-    pub fn multiproof(
-        mut self,
-        mut targets: B256Map<B256Set>,
-    ) -> Result<MultiProof, StateProofError> {
+    pub fn multiproof(mut self, targets: MultiProofTargets) -> Result<MultiProof, StateProofError> {
         let hashed_account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
         let trie_cursor = self.trie_cursor_factory.account_trie_cursor()?;
+
+        // split the targets into account and storage only targets
+        let (mut targets, storage_only_targets) = targets.into_inner();
 
         // Create the walker.
         let mut prefix_set = self.prefix_sets.account_prefix_set.clone();
@@ -162,6 +164,23 @@ where
         }
         let _ = hash_builder.root();
         let account_subtree = hash_builder.take_proof_nodes();
+
+        // Now get the storage only proofs
+        for (hashed_address, targets) in storage_only_targets {
+            let storage_prefix_set =
+                self.prefix_sets.storage_prefix_sets.remove(&hashed_address).unwrap_or_default();
+            let storage_multiproof = StorageProof::new_hashed(
+                self.trie_cursor_factory.clone(),
+                self.hashed_cursor_factory.clone(),
+                hashed_address,
+            )
+            .with_prefix_set_mut(storage_prefix_set)
+            .with_branch_node_masks(self.collect_branch_node_masks)
+            .storage_multiproof(targets)?;
+
+            storages.insert(hashed_address, storage_multiproof);
+        }
+
         let (branch_node_hash_masks, branch_node_tree_masks) = if self.collect_branch_node_masks {
             let updated_branch_nodes = hash_builder.updated_branch_nodes.unwrap_or_default();
             (
