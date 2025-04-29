@@ -10,6 +10,7 @@ use reth_optimism_txpool::supervisor::metrics::SequencerMetrics;
 use std::{str::FromStr, sync::Arc, time::Instant};
 use thiserror::Error;
 use tracing::warn;
+use reqwest::header::{HeaderName,HeaderValue};
 
 /// Sequencer client error
 #[derive(Error, Debug)]
@@ -84,9 +85,9 @@ impl SequencerClient {
                 for header in headers {
                     let (key, value) = header.split_once('=').unwrap();
                     header_map.insert(
-                        key.trim().parse().unwrap(),
-                        value.trim().parse().unwrap(),
-                    );
+                        key.trim().parse::<reqwest::header::HeaderName>().unwrap(),
+                        value.trim().parse::<reqwest::header::HeaderValue>().unwrap(),
+                    ); 
                 }
                 builder = builder.default_headers(header_map);
             }
