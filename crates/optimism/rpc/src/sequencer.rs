@@ -54,16 +54,14 @@ impl SequencerClient {
     /// Creates a new [`SequencerClient`] for the given URL.
     ///
     /// If the URL is a websocket endpoint we connect a websocket instance.
-    pub async fn new(sequencer_endpoint: impl Into<String>, headers: Option<reqwest::header::HeaderMap>) -> Result<Self, Error> {
+    pub async fn new(sequencer_endpoint: impl Into<String>) -> Result<Self, Error> {
         let sequencer_endpoint = sequencer_endpoint.into();
         let endpoint = BuiltInConnectionString::from_str(&sequencer_endpoint)?;
         if let BuiltInConnectionString::Http(url) = endpoint {
-            let mut builder = reqwest::Client::builder().use_rustls_tls();
-            if let Some(headers) = headers {
-                builder = builder.default_headers(headers);
-            }
-
-            let client = builder.build()?;
+            let client = reqwest::Client::builder()
+                // we force use tls to prevent native issues
+                .use_rustls_tls()
+                .build()?;
             Self::with_http_client(url, client)
         } else {
             let client = ClientBuilder::default().connect_with(endpoint).await?;
@@ -72,6 +70,38 @@ impl SequencerClient {
         }
     }
 
+    pub async fn new_with_headers(
+        sequencer_endpoint: impl Into<String>,
+        headers: Vec<String>,
+    ) -> Result<Self, Error> {
+        let sequencer_endpoint = sequencer_endpoint.into();
+        let endpoint = BuiltInConnectionString::from_str(&sequencer_endpoint)?;
+        if let BuiltInConnectionString::Http(url) = endpoint {
+            let mut builder = reqwest::Client::builder().use_rustls_tls();
+    
+            if !headers.is_empty() {
+                let mut header_map = reqwest::header::HeaderMap::new();
+                for header in headers {
+                    let (key, value) = header
+                        .split_once('=')
+                        .ok_or_else(|| eyre::eyre!("Invalid header format: {header}"))?;
+                    header_map.insert(
+                        key.trim().parse()?,
+                        value.trim().parse()?,
+                    );
+                }
+                builder = builder.default_headers(header_map);
+            }
+    
+            let client = builder.build()?;
+            Self::with_http_client(url, client)
+        } else {
+            let client = ClientBuilder::default().connect_with(endpoint).await?;
+            let inner = SequencerClientInner::new(sequencer_endpoint, client);
+            Ok(Self { inner: Arc::new(inner) })
+        }
+    }
+    
     /// Creates a new [`SequencerClient`] with http transport with the given http client.
     pub fn with_http_client(
         sequencer_endpoint: impl Into<String>,
@@ -180,7 +210,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_http_body_str() {
-        let client = SequencerClient::new("http://localhost:8545", None).await.unwrap();
+        let client = SequencerClient::new("http://localhost:8545").await.unwrap();
 
         let request = client
             .client()
@@ -217,7 +247,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "Start if WS is reachable at ws://localhost:8546"]
     async fn test_ws_body_str() {
-        let client = SequencerClient::new("ws://localhost:8546", None).await.unwrap();
+        let client = SequencerClient::new("ws://localhost:8546").await.unwrap();
 
         let request = client
             .client()
