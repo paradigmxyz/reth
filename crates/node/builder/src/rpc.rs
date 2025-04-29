@@ -347,7 +347,7 @@ where
 
 /// Node add-ons containing RPC server configuration, with customizable eth API handler.
 ///
-/// This struct can be sued to provide the RPC server functionality. It is responsible for launching
+/// This struct can be used to provide the RPC server functionality. It is responsible for launching
 /// the regular RPC and the authenticated RPC server (engine API). It is intended to be used and
 /// modified as part of the [`NodeAddOns`] see for example `OpRpcAddons`, `EthereumAddOns`.
 ///
