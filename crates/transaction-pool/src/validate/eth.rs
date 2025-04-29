@@ -209,9 +209,43 @@ where
     fn validate_one_with_provider(
         &self,
         origin: TransactionOrigin,
-        mut transaction: Tx,
+        transaction: Tx,
         maybe_state: &mut Option<Box<dyn StateProvider>>,
     ) -> TransactionValidationOutcome<Tx> {
+        match self.validate_one_no_state(origin, transaction) {
+            Ok(transaction) => {
+                // stateless checks passed, pass transaction down stateful validation pipeline
+                // If we don't have a state provider yet, fetch the latest state
+                if maybe_state.is_none() {
+                    match self.client.latest() {
+                        Ok(new_state) => {
+                            *maybe_state = Some(new_state);
+                        }
+                        Err(err) => {
+                            return TransactionValidationOutcome::Error(
+                                *transaction.hash(),
+                                Box::new(err),
+                            )
+                        }
+                    }
+                }
+
+                let state = maybe_state.as_deref().expect("provider is set");
+
+                self.validate_one_against_state(origin, transaction, state)
+            }
+            Err(invalid_outcome) => invalid_outcome,
+        }
+    }
+
+    /// Performs stateless validation on single transaction. Returns unaltered input transaction
+    /// if all checks pass, so transaction can continue through to stateful validation as argument
+    /// to [`validate_one_against_state`](Self::validate_one_against_state).
+    fn validate_one_no_state(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Tx,
+    ) -> Result<Tx, TransactionValidationOutcome<Tx>> {
         // Checks for tx_type
         match transaction.ty() {
             LEGACY_TX_TYPE_ID => {
@@ -220,61 +254,61 @@ where
             EIP2930_TX_TYPE_ID => {
                 // Accept only legacy transactions until EIP-2718/2930 activates
                 if !self.eip2718 {
-                    return TransactionValidationOutcome::Invalid(
+                    return Err(TransactionValidationOutcome::Invalid(
                         transaction,
                         InvalidTransactionError::Eip2930Disabled.into(),
-                    )
+                    ))
                 }
             }
             EIP1559_TX_TYPE_ID => {
                 // Reject dynamic fee transactions until EIP-1559 activates.
                 if !self.eip1559 {
-                    return TransactionValidationOutcome::Invalid(
+                    return Err(TransactionValidationOutcome::Invalid(
                         transaction,
                         InvalidTransactionError::Eip1559Disabled.into(),
-                    )
+                    ))
                 }
             }
             EIP4844_TX_TYPE_ID => {
                 // Reject blob transactions.
                 if !self.eip4844 {
-                    return TransactionValidationOutcome::Invalid(
+                    return Err(TransactionValidationOutcome::Invalid(
                         transaction,
                         InvalidTransactionError::Eip4844Disabled.into(),
-                    )
+                    ))
                 }
             }
             EIP7702_TX_TYPE_ID => {
                 // Reject EIP-7702 transactions.
                 if !self.eip7702 {
-                    return TransactionValidationOutcome::Invalid(
+                    return Err(TransactionValidationOutcome::Invalid(
                         transaction,
                         InvalidTransactionError::Eip7702Disabled.into(),
-                    )
+                    ))
                 }
             }
 
             _ => {
-                return TransactionValidationOutcome::Invalid(
+                return Err(TransactionValidationOutcome::Invalid(
                     transaction,
                     InvalidTransactionError::TxTypeNotSupported.into(),
-                )
+                ))
             }
         };
 
         // Reject transactions over defined size to prevent DOS attacks
         let tx_input_len = transaction.input().len();
         if tx_input_len > self.max_tx_input_bytes {
-            return TransactionValidationOutcome::Invalid(
+            return Err(TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidPoolTransactionError::OversizedData(tx_input_len, self.max_tx_input_bytes),
-            )
+            ))
         }
 
         // Check whether the init code size has been exceeded.
         if self.fork_tracker.is_shanghai_activated() {
             if let Err(err) = transaction.ensure_max_init_code_size(MAX_INIT_CODE_BYTE_SIZE) {
-                return TransactionValidationOutcome::Invalid(transaction, err)
+                return Err(TransactionValidationOutcome::Invalid(transaction, err))
             }
         }
 
@@ -282,21 +316,21 @@ where
         let transaction_gas_limit = transaction.gas_limit();
         let block_gas_limit = self.max_gas_limit();
         if transaction_gas_limit > block_gas_limit {
-            return TransactionValidationOutcome::Invalid(
+            return Err(TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidPoolTransactionError::ExceedsGasLimit(
                     transaction_gas_limit,
                     block_gas_limit,
                 ),
-            )
+            ))
         }
 
         // Ensure max_priority_fee_per_gas (if EIP1559) is less than max_fee_per_gas if any.
         if transaction.max_priority_fee_per_gas() > Some(transaction.max_fee_per_gas()) {
-            return TransactionValidationOutcome::Invalid(
+            return Err(TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::TipAboveFeeCap.into(),
-            )
+            ))
         }
 
         // determine whether the transaction should be treated as local
@@ -313,13 +347,13 @@ where
                     let gas_price = transaction.max_fee_per_gas();
                     let max_tx_fee_wei = gas_price.saturating_mul(transaction.gas_limit() as u128);
                     if max_tx_fee_wei > tx_fee_cap_wei {
-                        return TransactionValidationOutcome::Invalid(
+                        return Err(TransactionValidationOutcome::Invalid(
                             transaction,
                             InvalidPoolTransactionError::ExceedsFeeCap {
                                 max_tx_fee_wei,
                                 tx_fee_cap_wei,
                             },
-                        );
+                        ))
                     }
                 }
             }
@@ -331,68 +365,68 @@ where
             transaction.is_dynamic_fee() &&
             transaction.max_priority_fee_per_gas() < self.minimum_priority_fee
         {
-            return TransactionValidationOutcome::Invalid(
+            return Err(TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidPoolTransactionError::Underpriced,
-            )
+            ))
         }
 
         // Checks for chainid
         if let Some(chain_id) = transaction.chain_id() {
             if chain_id != self.chain_id() {
-                return TransactionValidationOutcome::Invalid(
+                return Err(TransactionValidationOutcome::Invalid(
                     transaction,
                     InvalidTransactionError::ChainIdMismatch.into(),
-                )
+                ))
             }
         }
 
         if transaction.is_eip7702() {
             // Prague fork is required for 7702 txs
             if !self.fork_tracker.is_prague_activated() {
-                return TransactionValidationOutcome::Invalid(
+                return Err(TransactionValidationOutcome::Invalid(
                     transaction,
                     InvalidTransactionError::TxTypeNotSupported.into(),
-                )
+                ))
             }
 
             if transaction.authorization_list().is_none_or(|l| l.is_empty()) {
-                return TransactionValidationOutcome::Invalid(
+                return Err(TransactionValidationOutcome::Invalid(
                     transaction,
                     Eip7702PoolTransactionError::MissingEip7702AuthorizationList.into(),
-                )
+                ))
             }
         }
 
         if let Err(err) = ensure_intrinsic_gas(&transaction, &self.fork_tracker) {
-            return TransactionValidationOutcome::Invalid(transaction, err)
+            return Err(TransactionValidationOutcome::Invalid(transaction, err))
         }
 
         // light blob tx pre-checks
         if transaction.is_eip4844() {
             // Cancun fork is required for blob txs
             if !self.fork_tracker.is_cancun_activated() {
-                return TransactionValidationOutcome::Invalid(
+                return Err(TransactionValidationOutcome::Invalid(
                     transaction,
                     InvalidTransactionError::TxTypeNotSupported.into(),
-                )
+                ))
             }
 
             let blob_count =
                 transaction.blob_versioned_hashes().map(|b| b.len() as u64).unwrap_or(0);
             if blob_count == 0 {
                 // no blobs
-                return TransactionValidationOutcome::Invalid(
+                return Err(TransactionValidationOutcome::Invalid(
                     transaction,
                     InvalidPoolTransactionError::Eip4844(
                         Eip4844PoolTransactionError::NoEip4844Blobs,
                     ),
-                )
+                ))
             }
 
             let max_blob_count = self.fork_tracker.max_blob_count();
             if blob_count > max_blob_count {
-                return TransactionValidationOutcome::Invalid(
+                return Err(TransactionValidationOutcome::Invalid(
                     transaction,
                     InvalidPoolTransactionError::Eip4844(
                         Eip4844PoolTransactionError::TooManyEip4844Blobs {
@@ -400,24 +434,23 @@ where
                             permitted: max_blob_count,
                         },
                     ),
-                )
+                ))
             }
         }
 
-        // If we don't have a state provider yet, fetch the latest state
-        if maybe_state.is_none() {
-            match self.client.latest() {
-                Ok(new_state) => {
-                    *maybe_state = Some(new_state);
-                }
-                Err(err) => {
-                    return TransactionValidationOutcome::Error(*transaction.hash(), Box::new(err))
-                }
-            }
-        }
+        Ok(transaction)
+    }
 
-        let state = maybe_state.as_deref().expect("provider is set");
-
+    /// Validates a single transaction using given state provider.
+    fn validate_one_against_state<P>(
+        &self,
+        origin: TransactionOrigin,
+        mut transaction: Tx,
+        state: P,
+    ) -> TransactionValidationOutcome<Tx>
+    where
+        P: StateProvider,
+    {
         // Use provider to get account info
         let account = match state.basic_account(transaction.sender_ref()) {
             Ok(account) => account.unwrap_or_default(),
