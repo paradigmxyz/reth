@@ -2,6 +2,7 @@ use crate::BackfillJob;
 use std::{ops::RangeInclusive, time::Duration};
 
 use alloy_primitives::BlockNumber;
+use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_node_api::FullNodeComponents;
 use reth_prune_types::PruneModes;
 use reth_stages_api::ExecutionStageThresholds;
@@ -11,7 +12,7 @@ use super::stream::DEFAULT_PARALLELISM;
 /// Factory for creating new backfill jobs.
 #[derive(Debug, Clone)]
 pub struct BackfillJobFactory<E, P> {
-    executor: E,
+    executor: BasicBlockExecutorProvider<E>,
     provider: P,
     prune_modes: PruneModes,
     thresholds: ExecutionStageThresholds,
@@ -20,7 +21,7 @@ pub struct BackfillJobFactory<E, P> {
 
 impl<E, P> BackfillJobFactory<E, P> {
     /// Creates a new [`BackfillJobFactory`].
-    pub fn new(executor: E, provider: P) -> Self {
+    pub fn new(executor: BasicBlockExecutorProvider<E>, provider: P) -> Self {
         Self {
             executor,
             provider,
@@ -78,7 +79,7 @@ impl BackfillJobFactory<(), ()> {
     /// Creates a new [`BackfillJobFactory`] from [`FullNodeComponents`].
     pub fn new_from_components<Node: FullNodeComponents>(
         components: Node,
-    ) -> BackfillJobFactory<Node::Executor, Node::Provider> {
+    ) -> BackfillJobFactory<Node::Evm, Node::Provider> {
         BackfillJobFactory::<_, _>::new(
             components.block_executor().clone(),
             components.provider().clone(),

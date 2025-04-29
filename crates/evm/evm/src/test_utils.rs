@@ -1,7 +1,7 @@
 //! Helpers for testing.
 
 use crate::{
-    execute::{BasicBlockExecutor, BlockExecutionOutput, BlockExecutorProvider, Executor},
+    execute::{BasicBlockExecutor, BlockExecutionOutput, Executor},
     Database, OnStateHook,
 };
 use alloc::{sync::Arc, vec::Vec};
@@ -23,19 +23,6 @@ impl MockExecutorProvider {
     /// Extend the mocked execution results
     pub fn extend(&self, results: impl IntoIterator<Item = impl Into<ExecutionOutcome>>) {
         self.exec_results.lock().extend(results.into_iter().map(Into::into));
-    }
-}
-
-impl BlockExecutorProvider for MockExecutorProvider {
-    type Primitives = EthPrimitives;
-
-    type Executor<DB: Database> = Self;
-
-    fn executor<DB>(&self, _: DB) -> Self::Executor<DB>
-    where
-        DB: Database,
-    {
-        self.clone()
     }
 }
 

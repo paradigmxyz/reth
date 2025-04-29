@@ -1,9 +1,6 @@
 //! A no operation block executor implementation.
 
-use crate::{
-    execute::{BlockExecutorProvider, Executor},
-    Database, OnStateHook,
-};
+use crate::{execute::Executor, Database, OnStateHook};
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
@@ -14,19 +11,6 @@ const UNAVAILABLE_FOR_NOOP: &str = "execution unavailable for noop";
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
 pub struct NoopBlockExecutorProvider<P>(core::marker::PhantomData<P>);
-
-impl<P: NodePrimitives> BlockExecutorProvider for NoopBlockExecutorProvider<P> {
-    type Primitives = P;
-
-    type Executor<DB: Database> = Self;
-
-    fn executor<DB>(&self, _: DB) -> Self::Executor<DB>
-    where
-        DB: Database,
-    {
-        Self::default()
-    }
-}
 
 impl<DB: Database, P: NodePrimitives> Executor<DB> for NoopBlockExecutorProvider<P> {
     type Primitives = P;

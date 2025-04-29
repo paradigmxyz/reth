@@ -1,5 +1,6 @@
 use crate::{ExExContextDyn, ExExEvent, ExExNotifications, ExExNotificationsStream};
 use alloy_eips::BlockNumHash;
+use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_exex_types::ExExHead;
 use reth_node_api::{FullNodeComponents, NodePrimitives, NodeTypes, PrimitivesTy};
 use reth_node_core::node_config::NodeConfig;
@@ -33,7 +34,7 @@ pub struct ExExContext<Node: FullNodeComponents> {
     ///
     /// Once an [`ExExNotification`](crate::ExExNotification) is sent over the channel, it is
     /// considered delivered by the node.
-    pub notifications: ExExNotifications<Node::Provider, Node::Executor>,
+    pub notifications: ExExNotifications<Node::Provider, Node::Evm>,
 
     /// Node components
     pub components: Node,
@@ -43,7 +44,6 @@ impl<Node> Debug for ExExContext<Node>
 where
     Node: FullNodeComponents,
     Node::Provider: Debug,
-    Node::Executor: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ExExContext")
@@ -61,7 +61,6 @@ impl<Node> ExExContext<Node>
 where
     Node: FullNodeComponents,
     Node::Provider: Debug + BlockReader,
-    Node::Executor: Debug,
     Node::Types: NodeTypes<Primitives: NodePrimitives>,
 {
     /// Returns dynamic version of the context
@@ -86,7 +85,7 @@ where
     }
 
     /// Returns the node's executor type.
-    pub fn block_executor(&self) -> &Node::Executor {
+    pub fn block_executor(&self) -> &BasicBlockExecutorProvider<Node::Evm> {
         self.components.block_executor()
     }
 

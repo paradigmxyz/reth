@@ -8,7 +8,7 @@ use itertools::Itertools;
 use metrics::Gauge;
 use reth_chain_state::ForkChoiceStream;
 use reth_ethereum_primitives::EthPrimitives;
-use reth_evm::execute::BlockExecutorProvider;
+use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
 use reth_metrics::{metrics::Counter, Metrics};
 use reth_node_api::NodePrimitives;
 use reth_primitives_traits::SealedHeader;
@@ -94,11 +94,11 @@ impl<N: NodePrimitives> ExExHandle<N> {
     ///
     /// Returns the handle, as well as a [`UnboundedSender`] for [`ExExEvent`]s and a
     /// [`mpsc::Receiver`] for [`ExExNotification`]s that should be given to the `ExEx`.
-    pub fn new<P, E: BlockExecutorProvider<Primitives = N>>(
+    pub fn new<P, E: ConfigureEvm<Primitives = N>>(
         id: String,
         node_head: BlockNumHash,
         provider: P,
-        executor: E,
+        executor: BasicBlockExecutorProvider<E>,
         wal_handle: WalHandle<N>,
     ) -> (Self, UnboundedSender<ExExEvent>, ExExNotifications<P, E>) {
         let (notification_tx, notification_rx) = mpsc::channel(1);

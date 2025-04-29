@@ -6,8 +6,9 @@ use reth_config::config::ExecutionConfig;
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_db::{static_file::HeaderMask, tables};
 use reth_evm::{
-    execute::{BlockExecutorProvider, Executor},
+    execute::{BasicBlockExecutorProvider, Executor},
     metrics::ExecutorMetrics,
+    ConfigureEvm,
 };
 use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
@@ -68,10 +69,10 @@ use super::missing_static_data_error;
 #[derive(Debug)]
 pub struct ExecutionStage<E>
 where
-    E: BlockExecutorProvider,
+    E: ConfigureEvm,
 {
     /// The stage's internal block executor
-    executor_provider: E,
+    executor_provider: BasicBlockExecutorProvider<E>,
     /// The consensus instance for validating blocks.
     consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
     /// The consensu
@@ -98,11 +99,11 @@ where
 
 impl<E> ExecutionStage<E>
 where
-    E: BlockExecutorProvider,
+    E: ConfigureEvm,
 {
     /// Create new execution stage with specified config.
     pub fn new(
-        executor_provider: E,
+        executor_provider: BasicBlockExecutorProvider<E>,
         consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
         thresholds: ExecutionStageThresholds,
         external_clean_threshold: u64,
@@ -124,7 +125,7 @@ where
     ///
     /// The commit threshold will be set to [`MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD`].
     pub fn new_with_executor(
-        executor_provider: E,
+        executor_provider: BasicBlockExecutorProvider<E>,
         consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
     ) -> Self {
         Self::new(
@@ -138,7 +139,7 @@ where
 
     /// Create new instance of [`ExecutionStage`] from configuration.
     pub fn from_config(
-        executor_provider: E,
+        executor_provider: BasicBlockExecutorProvider<E>,
         consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
         config: ExecutionConfig,
         external_clean_threshold: u64,
@@ -255,7 +256,7 @@ where
 
 impl<E, Provider> Stage<Provider> for ExecutionStage<E>
 where
-    E: BlockExecutorProvider,
+    E: ConfigureEvm + 'static,
     Provider: DBProvider
         + BlockReader<
             Block = <E::Primitives as NodePrimitives>::Block,
@@ -682,7 +683,7 @@ mod tests {
     use reth_stages_api::StageUnitCheckpoint;
     use std::collections::BTreeMap;
 
-    fn stage() -> ExecutionStage<BasicBlockExecutorProvider<EthEvmConfig>> {
+    fn stage() -> ExecutionStage<EthEvmConfig> {
         let strategy_factory =
             EthEvmConfig::new(Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build()));
         let executor_provider = BasicBlockExecutorProvider::new(strategy_factory);

@@ -7,7 +7,10 @@ use alloy_primitives::{Bytes, B256};
 use parking_lot::Mutex;
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, MemoryOverlayStateProvider};
 use reth_ethereum_primitives::{Block, BlockBody, EthPrimitives};
-use reth_evm::execute::{BlockExecutorProvider, Executor};
+use reth_evm::{
+    execute::{BasicBlockExecutorProvider, Executor},
+    ConfigureEvm,
+};
 use reth_primitives_traits::{Block as _, Header, RecoveredBlock};
 use reth_provider::{
     BlockReader, BlockSource, ProviderError, ProviderResult, StateProvider, StateProviderFactory,
@@ -31,7 +34,7 @@ pub use pending_state::*;
 #[expect(missing_debug_implementations)]
 pub struct RethRessProtocolProvider<P, E> {
     provider: P,
-    block_executor: E,
+    block_executor: BasicBlockExecutorProvider<E>,
     task_spawner: Box<dyn TaskSpawner>,
     max_witness_window: u64,
     witness_semaphore: Arc<Semaphore>,
@@ -56,12 +59,12 @@ impl<P: Clone, E: Clone> Clone for RethRessProtocolProvider<P, E> {
 impl<P, E> RethRessProtocolProvider<P, E>
 where
     P: BlockReader<Block = Block> + StateProviderFactory,
-    E: BlockExecutorProvider<Primitives = EthPrimitives> + Clone,
+    E: ConfigureEvm<Primitives = EthPrimitives> + 'static,
 {
     /// Create new ress protocol provider.
     pub fn new(
         provider: P,
-        block_executor: E,
+        block_executor: BasicBlockExecutorProvider<E>,
         task_spawner: Box<dyn TaskSpawner>,
         max_witness_window: u64,
         witness_max_parallel: usize,
@@ -205,7 +208,7 @@ where
 impl<P, E> RessProtocolProvider for RethRessProtocolProvider<P, E>
 where
     P: BlockReader<Block = Block> + StateProviderFactory + Clone + 'static,
-    E: BlockExecutorProvider<Primitives = EthPrimitives> + Clone,
+    E: ConfigureEvm<Primitives = EthPrimitives> + 'static,
 {
     fn header(&self, block_hash: B256) -> ProviderResult<Option<Header>> {
         trace!(target: "reth::ress_provider", %block_hash, "Serving header");

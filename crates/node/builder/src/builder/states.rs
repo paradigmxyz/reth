@@ -82,6 +82,12 @@ pub struct NodeAdapter<T: FullNodeTypes, C: NodeComponents<T>> {
     pub provider: T::Provider,
 }
 
+impl NodeTypesAdapter<T: FullNodeTypes, C: NodeComponents<T>> {
+    fn block_executor(&self) -> &Self::Executor {
+        self.components.block_executor()
+    }
+}
+
 impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeTypes for NodeAdapter<T, C> {
     type Types = T::Types;
     type DB = T::DB;
@@ -91,7 +97,6 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeTypes for NodeAdapter<T, C>
 impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<T, C> {
     type Pool = C::Pool;
     type Evm = C::Evm;
-    type Executor = C::Executor;
     type Consensus = C::Consensus;
     type Network = C::Network;
 
@@ -101,10 +106,6 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<
 
     fn evm_config(&self) -> &Self::Evm {
         self.components.evm_config()
-    }
-
-    fn block_executor(&self) -> &Self::Executor {
-        self.components.block_executor()
     }
 
     fn consensus(&self) -> &Self::Consensus {

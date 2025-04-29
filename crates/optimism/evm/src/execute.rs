@@ -28,7 +28,7 @@ mod tests {
     use op_alloy_consensus::TxDeposit;
     use op_revm::constants::L1_BLOCK_CONTRACT;
     use reth_chainspec::MIN_TRANSACTION_GAS;
-    use reth_evm::execute::{BasicBlockExecutorProvider, BlockExecutorProvider, Executor};
+    use reth_evm::execute::{BasicBlockExecutorProvider, Executor};
     use reth_optimism_chainspec::OpChainSpecBuilder;
     use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
     use reth_primitives_traits::{Account, RecoveredBlock};

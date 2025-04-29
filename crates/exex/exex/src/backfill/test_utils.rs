@@ -5,7 +5,7 @@ use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_primitives::{b256, Address, TxKind, U256};
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET, MIN_TRANSACTION_GAS};
 use reth_ethereum_primitives::{Block, BlockBody, Receipt, Transaction};
-use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
+use reth_evm::execute::{BlockExecutionOutput, Executor};
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_node_api::FullNodePrimitives;
 use reth_primitives_traits::{Block as _, RecoveredBlock};
