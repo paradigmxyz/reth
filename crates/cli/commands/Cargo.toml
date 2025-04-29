@@ -59,6 +59,7 @@ alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-consensus.workspace = true
+alloy-chains.workspace = true
 
 itertools.workspace = true
 futures.workspace = true
@@ -75,6 +76,7 @@ tracing.workspace = true
 backon.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
 tokio-stream.workspace = true
+reqwest.workspace = true
 
 # io
 fdlimit.workspace = true
@@ -103,6 +105,7 @@ arbitrary = [
     "reth-eth-wire/arbitrary",
     "reth-db/arbitrary",
     "reth-chainspec/arbitrary",
+    "alloy-chains/arbitrary",
     "alloy-eips/arbitrary",
     "alloy-primitives/arbitrary",
     "reth-codecs/test-utils",
