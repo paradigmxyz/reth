@@ -347,6 +347,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         &self,
         request: TransactionRequest,
         block_number: Option<BlockId>,
+        state_override: Option<StateOverride>,
     ) -> impl Future<Output = Result<AccessListResult, Self::Error>> + Send
     where
         Self: Trace,
@@ -355,8 +356,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             let block_id = block_number.unwrap_or_default();
             let (evm_env, at) = self.evm_env_at(block_id).await?;
 
-            self.spawn_blocking_io(move |this| this.create_access_list_with(evm_env, at, request))
-                .await
+            self.spawn_blocking_io(move |this| {
+                this.create_access_list_with(evm_env, at, request, state_override)
+            })
+            .await
         }
     }
 
@@ -367,12 +370,17 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         mut evm_env: EvmEnvFor<Self::Evm>,
         at: BlockId,
         mut request: TransactionRequest,
+        state_override: Option<StateOverride>,
     ) -> Result<AccessListResult, Self::Error>
     where
         Self: Trace,
     {
         let state = self.state_at_block_id(at)?;
         let mut db = CacheDB::new(StateProviderDatabase::new(state));
+
+        if let Some(state_overrides) = state_override {
+            apply_state_overrides(state_overrides, &mut db)?;
+        }
 
         let mut tx_env = self.create_txn_env(&evm_env, request.clone(), &mut db)?;
 

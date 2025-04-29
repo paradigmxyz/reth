@@ -16,7 +16,7 @@ workspace = true
 reth-primitives-traits.workspace = true
 reth-execution-errors.workspace = true
 reth-trie-common.workspace = true
-reth-tracing.workspace = true
+tracing.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
@@ -27,8 +27,8 @@ auto_impl.workspace = true
 smallvec = { workspace = true, features = ["const_new"] }
 
 # metrics
-reth-metrics.workspace = true
-metrics.workspace = true
+reth-metrics = { workspace = true, optional = true }
+metrics = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
@@ -38,6 +38,7 @@ reth-testing-utils.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-trie-db = { workspace = true, features = ["test-utils"] }
+reth-tracing.workspace = true
 
 arbitrary.workspace = true
 assert_matches.workspace = true
@@ -50,7 +51,19 @@ rand.workspace = true
 rand_08.workspace = true
 
 [features]
+default = ["std", "metrics"]
+std = [
+    "reth-storage-api/std",
+    "reth-primitives-traits/std",
+    "reth-execution-errors/std",
+    "reth-trie-common/std",
+    "alloy-primitives/std",
+    "alloy-rlp/std",
+    "tracing/std",
+]
+metrics = ["dep:reth-metrics", "dep:metrics", "std"]
 test-utils = [
+    "std",
     "reth-primitives-traits/test-utils",
     "reth-provider/test-utils",
     "reth-trie-common/test-utils",
@@ -58,6 +71,7 @@ test-utils = [
     "reth-trie/test-utils",
 ]
 arbitrary = [
+    "std",
     "reth-primitives-traits/arbitrary",
     "reth-trie-common/arbitrary",
     "alloy-primitives/arbitrary",

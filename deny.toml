@@ -20,7 +20,7 @@ multiple-versions = "warn"
 wildcards = "allow"
 highlight = "all"
 # List of crates to deny
-deny = [{ name = "openssl" }]
+# TODO issue #201 deny = [{ name = "openssl" }]
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = []
 # Similarly to `skip` allows you to skip certain crates during duplicate
@@ -43,6 +43,7 @@ allow = [
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
+    "BSL-1.0",
     "0BSD",
     "CC0-1.0",
     "ISC",

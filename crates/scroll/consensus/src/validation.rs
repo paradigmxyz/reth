@@ -3,7 +3,6 @@ use core::fmt::Debug;
 
 use crate::error::ScrollConsensusError;
 use alloy_consensus::{BlockHeader as _, TxReceipt, EMPTY_OMMER_ROOT_HASH};
-use alloy_primitives::U256;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
 use reth_consensus_common::validation::{
@@ -117,6 +116,10 @@ impl<ChainSpec: EthChainSpec + ScrollHardforks, H: BlockHeader> HeaderValidator<
     for ScrollBeaconConsensus<ChainSpec>
 {
     fn validate_header(&self, header: &SealedHeader<H>) -> Result<(), ConsensusError> {
+        if header.ommers_hash() != EMPTY_OMMER_ROOT_HASH {
+            return Err(ConsensusError::TheMergeOmmerRootIsNotEmpty)
+        }
+
         validate_header_gas(header.header())?;
         validate_header_base_fee(header.header(), &self.chain_spec)
     }
@@ -138,18 +141,6 @@ impl<ChainSpec: EthChainSpec + ScrollHardforks, H: BlockHeader> HeaderValidator<
             return Err(ConsensusError::Other(
                 ScrollConsensusError::UnexpectedBlobParams.to_string(),
             ))
-        }
-
-        Ok(())
-    }
-
-    fn validate_header_with_total_difficulty(
-        &self,
-        header: &H,
-        _total_difficulty: U256,
-    ) -> Result<(), ConsensusError> {
-        if header.ommers_hash() != EMPTY_OMMER_ROOT_HASH {
-            return Err(ConsensusError::TheMergeOmmerRootIsNotEmpty)
         }
 
         Ok(())

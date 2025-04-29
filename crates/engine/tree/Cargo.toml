@@ -31,7 +31,7 @@ reth-stages-api.workspace = true
 reth-tasks.workspace = true
 reth-trie-db.workspace = true
 reth-trie-parallel.workspace = true
-reth-trie-sparse.workspace = true
+reth-trie-sparse = { workspace = true, features = ["std", "metrics"] }
 reth-trie.workspace = true
 
 # alloy

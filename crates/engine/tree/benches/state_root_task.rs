@@ -70,8 +70,8 @@ fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
                 RevmAccount {
                     #[allow(clippy::needless_update)]
                     info: AccountInfo {
-                        balance: U256::from(rng.gen::<u64>()),
-                        nonce: rng.gen::<u64>(),
+                        balance: U256::from(rng.r#gen::<u64>()),
+                        nonce: rng.r#gen::<u64>(),
                         code_hash: KECCAK_EMPTY,
                         code: Some(Default::default()),
                         ..Default::default()
@@ -79,10 +79,10 @@ fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
                     storage: (0..rng.gen_range(0..=params.storage_slots_per_account))
                         .map(|_| {
                             (
-                                U256::from(rng.gen::<u64>()),
+                                U256::from(rng.r#gen::<u64>()),
                                 EvmStorageSlot::new_changed(
                                     U256::ZERO,
-                                    U256::from(rng.gen::<u64>()),
+                                    U256::from(rng.r#gen::<u64>()),
                                 ),
                             )
                         })
