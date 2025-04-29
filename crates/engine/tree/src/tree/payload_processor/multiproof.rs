@@ -1253,7 +1253,8 @@ mod tests {
         let targets = get_proof_targets(&state, &fetched);
 
         // should not include the already fetched storage slot
-        let target_slots = &targets.account_targets()[addr];
+        assert!(!targets.account_targets().contains_key(addr));
+        let target_slots = &targets.storage_only_targets()[addr];
         assert!(!target_slots.contains(&fetched_slot));
         assert_eq!(target_slots.len(), storage.storage.len() - 1);
     }
@@ -1293,8 +1294,9 @@ mod tests {
         let targets = get_proof_targets(&state, &fetched);
 
         assert!(targets.contains_account(&addr2));
-        assert!(!targets.account_targets()[&addr1].contains(&slot1));
-        assert!(targets.account_targets()[&addr1].contains(&slot2));
+        assert!(!targets.account_targets().contains_key(&addr1));
+        assert!(!targets.storage_only_targets()[&addr1].contains(&slot1));
+        assert!(targets.storage_only_targets()[&addr1].contains(&slot2));
     }
 
     #[test]
