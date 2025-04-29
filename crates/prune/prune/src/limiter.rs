@@ -53,7 +53,7 @@ impl PruneTimeLimit {
 impl PruneLimiter {
     /// Sets the limit on the number of deleted entries (rows in the database).
     /// If the limit was already set, it will be overwritten.
-    pub fn set_deleted_entries_limit(mut self, limit: usize) -> Self {
+    pub const fn set_deleted_entries_limit(mut self, limit: usize) -> Self {
         if let Some(deleted_entries_limit) = self.deleted_entries_limit.as_mut() {
             deleted_entries_limit.limit = limit;
         } else {
@@ -83,14 +83,14 @@ impl PruneLimiter {
     }
 
     /// Increments the number of deleted entries by the given number.
-    pub fn increment_deleted_entries_count_by(&mut self, entries: usize) {
+    pub const fn increment_deleted_entries_count_by(&mut self, entries: usize) {
         if let Some(limit) = self.deleted_entries_limit.as_mut() {
             limit.deleted += entries;
         }
     }
 
     /// Increments the number of deleted entries by one.
-    pub fn increment_deleted_entries_count(&mut self) {
+    pub const fn increment_deleted_entries_count(&mut self) {
         self.increment_deleted_entries_count_by(1)
     }
 

@@ -61,7 +61,7 @@ async fn main() -> eyre::Result<()> {
     let mut txs = pool.pending_transactions_listener_for(TransactionListenerKind::All);
 
     while let Some(tx) = txs.recv().await {
-        println!("Received new transaction: {:?}", tx);
+        println!("Received new transaction: {tx:?}");
     }
 
     Ok(())

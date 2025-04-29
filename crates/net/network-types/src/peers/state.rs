@@ -23,7 +23,7 @@ pub enum PeerConnectionState {
 impl PeerConnectionState {
     /// Sets the disconnect state
     #[inline]
-    pub fn disconnect(&mut self) {
+    pub const fn disconnect(&mut self) {
         match self {
             Self::In => *self = Self::DisconnectingIn,
             Self::Out => *self = Self::DisconnectingOut,
