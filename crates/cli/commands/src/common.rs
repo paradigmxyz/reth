@@ -220,7 +220,7 @@ pub trait CliNodeComponents<N: CliNodeTypes> {
     fn consensus(&self) -> &Self::Consensus;
 }
 
-impl<N: CliNodeTypes, E, C> CliNodeComponents<N> for (E, C)
+impl<N: CliNodeTypes, E, C> CliNodeComponents<N> for (BasicBlockExecutorProvider<E>, C)
 where
     E: ConfigureEvm<Primitives = N::Primitives>,
     C: FullConsensus<N::Primitives, Error = ConsensusError> + Clone + 'static,
@@ -229,7 +229,7 @@ where
     type Consensus = C;
 
     fn executor(&self) -> &BasicBlockExecutorProvider<Self::Evm> {
-        &BasicBlockExecutorProvider::new(self.0.clone())
+        &self.0
     }
 
     fn consensus(&self) -> &Self::Consensus {

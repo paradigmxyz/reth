@@ -24,7 +24,7 @@ pub fn install_ress_subprotocol<P, E, N>(
 ) -> eyre::Result<()>
 where
     P: ProviderNodeTypes<Primitives = EthPrimitives>,
-    E: ConfigureEvm<Primitives = EthPrimitives> + Clone,
+    E: ConfigureEvm<Primitives = EthPrimitives> + Clone + 'static,
     N: FullNetwork + NetworkProtocols,
 {
     info!(target: "reth::cli", "Installing ress subprotocol");

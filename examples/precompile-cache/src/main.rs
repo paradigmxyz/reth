@@ -181,12 +181,11 @@ where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
 {
     type EVM = EthEvmConfig<MyEvmFactory>;
-    type Executor = BasicBlockExecutorProvider<Self::EVM>;
 
     async fn build_evm(
         self,
         ctx: &BuilderContext<Node>,
-    ) -> eyre::Result<(Self::EVM, Self::Executor)> {
+    ) -> eyre::Result<(Self::EVM, BasicBlockExecutorProvider<Self::EVM>)> {
         let evm_config = EthEvmConfig::new_with_evm_factory(
             ctx.chain_spec(),
             MyEvmFactory { precompile_cache: self.precompile_cache.clone() },

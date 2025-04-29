@@ -76,12 +76,11 @@ where
     Node: FullNodeTypes<Types = Types>,
 {
     type EVM = CustomEvmConfig;
-    type Executor = BasicBlockExecutorProvider<Self::EVM>;
 
     async fn build_evm(
         self,
         ctx: &BuilderContext<Node>,
-    ) -> eyre::Result<(Self::EVM, Self::Executor)> {
+    ) -> eyre::Result<(Self::EVM, BasicBlockExecutorProvider<Self::EVM>)> {
         let evm_config = CustomEvmConfig { inner: EthEvmConfig::new(ctx.chain_spec()) };
         let executor = BasicBlockExecutorProvider::new(evm_config.clone());
 
