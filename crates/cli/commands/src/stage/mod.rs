@@ -47,6 +47,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         Comp: CliNodeComponents<N>,
         F: FnOnce(Arc<C::ChainSpec>) -> Comp,
         P: NetPrimitivesFor<N::Primitives>,
+        <Comp as CliNodeComponents<N>>::Evm: 'static,
     {
         match self.command {
             Subcommands::Run(command) => command.execute::<N, _, _, P>(ctx, components).await,

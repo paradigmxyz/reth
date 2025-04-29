@@ -109,6 +109,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         Comp: CliNodeComponents<N>,
         F: FnOnce(Arc<C::ChainSpec>) -> Comp,
         P: NetPrimitivesFor<N::Primitives>,
+        <Comp as CliNodeComponents<N>>::Evm: 'static,
     {
         // Raise the fd limit of the process.
         // Does not do anything on windows.

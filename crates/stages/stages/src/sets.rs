@@ -365,7 +365,7 @@ impl<E: BlockExecutorProvider> ExecutionStages<E> {
 
 impl<E, Provider> StageSet<Provider> for ExecutionStages<E>
 where
-    E: BlockExecutorProvider + 'static,
+    E: BlockExecutorProvider,
     SenderRecoveryStage: Stage<Provider>,
     ExecutionStage<E>: Stage<Provider>,
 {

@@ -5,7 +5,9 @@ use reth_db_api::{
     cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
 };
 use reth_db_common::DbTool;
-use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
+use reth_evm::{
+    execute::BasicBlockExecutorProvider, noop::NoopBlockExecutorProvider, ConfigureEvm,
+};
 use reth_node_builder::NodeTypesWithDB;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::{
@@ -27,7 +29,7 @@ pub(crate) async fn dump_execution_stage<N, E, C>(
 ) -> eyre::Result<()>
 where
     N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>,
-    E: ConfigureEvm<Primitives = N::Primitives>,
+    E: ConfigureEvm<Primitives = N::Primitives> + 'static,
     C: FullConsensus<E::Primitives, Error = ConsensusError> + 'static,
 {
     let (output_db, tip_block_number) = setup(from, to, &output_datadir.db(), db_tool)?;
@@ -143,7 +145,7 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
     let provider = db_tool.provider_factory.database_provider_rw()?;
 
     let mut exec_stage = ExecutionStage::new_with_executor(
-        BasicBlockExecutorProvider::default(),
+        NoopBlockExecutorProvider::<N::Primitives>::default(),
         NoopConsensus::arc(),
     );
 
@@ -176,7 +178,7 @@ fn dry_run<N, E, C>(
 ) -> eyre::Result<()>
 where
     N: ProviderNodeTypes,
-    E: ConfigureEvm<Primitives = N::Primitives>,
+    E: ConfigureEvm<Primitives = N::Primitives> + 'static,
     C: FullConsensus<E::Primitives, Error = ConsensusError> + 'static,
 {
     info!(target: "reth::cli", "Executing stage. [dry-run]");
