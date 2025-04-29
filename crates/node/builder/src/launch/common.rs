@@ -17,7 +17,7 @@ use reth_db_common::init::{init_genesis, InitStorageError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_local::MiningMode;
 use reth_engine_tree::tree::{InvalidBlockHook, InvalidBlockHooks, NoopInvalidBlockHook};
-use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
+use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_fs_util as fs;
 use reth_invalid_block_hooks::InvalidBlockWitnessHook;
 use reth_network_p2p::headers::client::HeadersClient;
@@ -381,10 +381,9 @@ where
     /// Returns the [`ProviderFactory`] for the attached storage after executing a consistent check
     /// between the database and static files. **It may execute a pipeline unwind if it fails this
     /// check.**
-    pub async fn create_provider_factory<N, E>(&self) -> eyre::Result<ProviderFactory<N>>
+    pub async fn create_provider_factory<N>(&self) -> eyre::Result<ProviderFactory<N>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
-        E: ConfigureEvm<Primitives = N::Primitives> + Default + 'static,
     {
         let factory = ProviderFactory::new(
             self.right().clone(),
@@ -417,13 +416,13 @@ where
 
             // Builds an unwind-only pipeline
             let pipeline = PipelineBuilder::default()
-                .add_stages(DefaultStages::<reth_provider::ProviderFactory<N>, reth_downloaders::headers::noop::NoopHeaderDownloader<<<N as reth_node_api::NodeTypes>::Primitives as reth_node_api::NodePrimitives>::BlockHeader>, reth_downloaders::bodies::noop::NoopBodiesDownloader<<<N as reth_node_api::NodeTypes>::Primitives as reth_node_api::NodePrimitives>::Block>, E>::new(
+                .add_stages(DefaultStages::new(
                     factory.clone(),
                     tip_rx,
                     Arc::new(NoopConsensus::default()),
                     NoopHeaderDownloader::default(),
                     NoopBodiesDownloader::default(),
-                    BasicBlockExecutorProvider::default(),
+                    NoopBlockExecutorProvider::<N::Primitives>::default(),
                     self.toml_config().stages.clone(),
                     self.prune_modes(),
                 ))

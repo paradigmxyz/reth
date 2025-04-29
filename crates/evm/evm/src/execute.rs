@@ -387,7 +387,8 @@ where
 /// A generic block executor provider that can create executors using a strategy factory.
 #[derive(Debug)]
 pub struct BasicBlockExecutorProvider<F> {
-    strategy_factory: F,
+    /// Strategy to create block executors.
+    pub strategy_factory: F,
 }
 
 impl<F> BasicBlockExecutorProvider<F> {

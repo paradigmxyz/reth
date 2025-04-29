@@ -75,12 +75,6 @@ impl EthEvmConfig {
     }
 }
 
-impl Default for EthEvmConfig {
-    fn default() -> Self {
-        Self::mainnet()
-    }
-}
-
 impl<EvmFactory> EthEvmConfig<EvmFactory> {
     /// Creates a new Ethereum EVM configuration with the given chain spec and EVM factory.
     pub fn new_with_evm_factory(chain_spec: Arc<ChainSpec>, evm_factory: EvmFactory) -> Self {

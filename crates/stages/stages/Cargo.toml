@@ -21,6 +21,7 @@ reth-db.workspace = true
 reth-db-api.workspace = true
 reth-etl.workspace = true
 reth-evm = { workspace = true, features = ["metrics"] }
+reth-execution-errors.workspace = true
 reth-exex.workspace = true
 reth-fs-util.workspace = true
 reth-network-p2p.workspace = true
