@@ -109,14 +109,19 @@ where
     info!("");
     info!("Diff results for {table}:");
 
+    // analyze the result and print some stats
+    let discrepancies = result.discrepancies.len();
+    let extra_elements = result.extra_elements.len();
+
+    if discrepancies == 0 && extra_elements == 0 {
+        info!("No discrepancies or extra elements found in table {table}");
+        return Ok(());
+    }
+
     // create directory and open file
     fs::create_dir_all(output_dir.as_ref())?;
     let file_name = format!("{table}.txt");
     let mut file = File::create(output_dir.as_ref().join(file_name.clone()))?;
-
-    // analyze the result and print some stats
-    let discrepancies = result.discrepancies.len();
-    let extra_elements = result.extra_elements.len();
 
     // Make a pretty summary header for the table
     writeln!(file, "Diff results for {table}")?;
@@ -155,7 +160,7 @@ where
     }
 
     for discrepancy in result.discrepancies.values() {
-        writeln!(file, "{discrepancy:?}")?;
+        writeln!(file, "{discrepancy:#?}")?;
     }
 
     if extra_elements > 0 {
@@ -163,7 +168,7 @@ where
     }
 
     for extra_element in result.extra_elements.values() {
-        writeln!(file, "{extra_element:?}")?;
+        writeln!(file, "{extra_element:#?}")?;
     }
 
     let full_file_name = output_dir.as_ref().join(file_name);
