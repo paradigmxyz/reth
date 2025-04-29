@@ -213,42 +213,41 @@ where
             .into_iter()
             .map(|(origin, tx)| {
                 self.apply_op_checks_no_state(tx)
-                    .map(|tx| self.inner.validate_one_no_state(origin, tx))
+                    .and_then(|tx| self.inner.validate_one_no_state(origin, tx))
+                    .map(|tx| (origin, tx))
             })
             .collect::<Vec<_>>();
 
         // bail early if all transactions failed validation without state
         let some_pass = transactions.iter().any(|res| res.is_ok());
-        if some_pass {
-            // otherwise load state from DB for checks against state
-            let state = match self.client().latest() {
-                Ok(s) => s,
-                Err(err) => {
-                    return transactions
-                        .into_iter()
-                        .map(|res| match res {
-                            Ok(tx) => TransactionValidationOutcome::Error(tx.hash(), Box::new(err)),
-                            Err(already_invalid) => already_invalid,
-                        })
-                        .collect()
-                }
-            };
-
-            futures_util::future::join_all(transactions.into_iter().map(|(origin, tx)| {
-                self.inner
-                    .validate_one_against_state(origin, tx, state.clone())
-                    .map(|outcome| self.apply_op_checks_against_state(outcome))
-            }))
-            .await
+        if !some_pass {
+            return transactions.into_iter().filter_map(|res| res.err()).collect()
         }
 
-        transactions
-            .into_iter()
-            .map(|res| match res {
-                Ok(valid) => valid,
-                Err(invalid) => invalid,
-            })
-            .collect()
+        // otherwise load state from DB for checks against state
+        let state: Arc<dyn StateProvider> = match self.client().latest() {
+            Ok(s) => s.into(),
+            Err(err) => {
+                return transactions
+                    .into_iter()
+                    .map(|res| match res {
+                        Ok((_, tx)) => {
+                            TransactionValidationOutcome::Error(*tx.hash(), Box::new(err.clone()))
+                        }
+                        Err(already_invalid) => already_invalid,
+                    })
+                    .collect()
+            }
+        };
+
+        futures_util::future::join_all(transactions.into_iter().map(async |res| match res {
+            Ok((origin, tx)) => {
+                let outcome = self.inner.validate_one_against_state(origin, tx, state.clone());
+                self.apply_op_checks_against_state(outcome).await
+            }
+            Err(invalid_outcome) => invalid_outcome,
+        }))
+        .await
     }
 
     /// Applies OP validity checks, that do _not_ require reading latest state from DB (or from
@@ -370,6 +369,7 @@ where
             Some(Ok(_)) => {
                 // valid interop tx
                 transaction
+                    .transaction()
                     .set_interop_deadline(self.block_timestamp() + TRANSACTION_VALIDITY_WINDOW_SECS)
             }
             None => {} // not an interop (cross-chain) tx
