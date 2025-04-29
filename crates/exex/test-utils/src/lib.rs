@@ -25,7 +25,6 @@ use reth_db::{
 };
 use reth_db_common::init::init_genesis;
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
-use reth_evm::test_utils::MockExecutorProvider;
 use reth_execution_types::Chain;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification, ExExNotifications, Wal};
 use reth_network::{config::rng_secret_key, NetworkConfigBuilder, NetworkManager};
@@ -42,7 +41,7 @@ use reth_node_builder::{
 use reth_node_core::node_config::NodeConfig;
 use reth_node_ethereum::{
     node::{EthereumAddOns, EthereumNetworkBuilder, EthereumPayloadBuilder},
-    EthEngineTypes, EthEvmConfig,
+    BasicBlockExecutorProvider, EthEngineTypes, EthEvmConfig,
 };
 use reth_payload_builder::noop::NoopPayloadBuilderService;
 use reth_primitives_traits::{Block as _, RecoveredBlock};
@@ -82,14 +81,13 @@ where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
 {
     type EVM = EthEvmConfig;
-    type Executor = MockExecutorProvider;
 
     async fn build_evm(
         self,
         ctx: &BuilderContext<Node>,
-    ) -> eyre::Result<(Self::EVM, Self::Executor)> {
+    ) -> eyre::Result<(Self::EVM, BasicBlockExecutorProvider<Self::EVM>)> {
         let evm_config = EthEvmConfig::new(ctx.chain_spec());
-        let executor = MockExecutorProvider::default();
+        let executor = BasicBlockExecutorProvider::new(evm_config.clone());
 
         Ok((evm_config, executor))
     }
@@ -257,7 +255,7 @@ pub async fn test_exex_context_with_chain_spec(
 ) -> eyre::Result<(ExExContext<Adapter>, TestExExHandle)> {
     let transaction_pool = testing_pool();
     let evm_config = EthEvmConfig::new(chain_spec.clone());
-    let executor = MockExecutorProvider::default();
+    let executor = BasicBlockExecutorProvider::new(evm_config.clone());
     let consensus = Arc::new(TestConsensus::default());
 
     let (static_dir, _) = create_test_static_files_dir();

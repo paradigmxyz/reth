@@ -125,7 +125,6 @@ pub fn test_rpc_builder() -> RpcModuleBuilder<
     NoopNetwork,
     TokioTaskExecutor,
     EthEvmConfig,
-    BasicBlockExecutorProvider<EthEvmConfig>,
     NoopConsensus,
 > {
     RpcModuleBuilder::default()
