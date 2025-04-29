@@ -7,7 +7,7 @@ use reth::{
 };
 use reth_engine_primitives::EngineTypes;
 
-/// Builder for basic [`EngineApi`] implementation.
+/// Builder for mocked [`BscEngineApi`] implementation.
 #[derive(Debug, Default)]
 pub struct BscEngineApiBuilder;
 
