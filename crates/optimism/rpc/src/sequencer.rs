@@ -34,10 +34,6 @@ pub enum Error {
         #[source]
         reqwest::Error,
     ),
-
-    /// Invalid header format
-    #[error("Invalid header format: {0}")]
-    InvalidHeaderFormat(String),
 }
 
 /// A client to interact with a Sequencer
@@ -86,17 +82,10 @@ impl SequencerClient {
             if !headers.is_empty() {
                 let mut header_map = reqwest::header::HeaderMap::new();
                 for header in headers {
-                    let (key, value) = header
-                        .split_once('=')
-                        .ok_or_else(|| Error::InvalidHeaderFormat(header.clone()))?;
-                        header_map.insert(
-                            key.trim()
-                               .parse()
-                               .map_err(|_| Error::InvalidHeaderFormat(header.clone()))?,
-                            value.trim()
-                                 .parse()
-                                 .map_err(|_| Error::InvalidHeaderFormat(header.clone()))?,
-                        );
+                    let (key, value) = header.split_once('=').unwrap();
+                    header_map.insert(
+                        key.trim().parse().unwrap(),
+                        value.trim().parse().unwrap(),
                     );
                 }
                 builder = builder.default_headers(header_map);
