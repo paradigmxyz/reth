@@ -1708,7 +1708,7 @@ where
     ///
     /// Assumes that `finish` has been called on the `persistence_state` at least once
     fn on_new_persisted_block(&mut self) -> ProviderResult<()> {
-        // If we have an on-disk reorg, we need to handle it firsrt before touching the in-memory
+        // If we have an on-disk reorg, we need to handle it first before touching the in-memory
         // state.
         if let Some(remove_above) = self.find_disk_reorg()? {
             self.remove_blocks(remove_above);
