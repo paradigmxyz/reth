@@ -2,13 +2,12 @@ use alloy_primitives::hex::ToHexExt;
 use futures_util::StreamExt;
 use reth_era_downloader::read_dir;
 use sha2::Digest;
-use test_case::test_case;
 use tokio::fs;
 
 const CONTENTS_0: &[u8; 1] = b"a";
 const CONTENTS_1: &[u8; 1] = b"b";
 
-#[test_case(
+#[test_case::test_case(
     Ok(format!(
         "{}\n{}",
         sha2::Sha256::digest(CONTENTS_0).encode_hex(),
@@ -20,7 +19,7 @@ const CONTENTS_1: &[u8; 1] = b"b";
     ];
     "Reads all files successfully"
 )]
-#[test_case(
+#[test_case::test_case(
     Ok("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n\
     bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
     [
@@ -33,7 +32,7 @@ const CONTENTS_1: &[u8; 1] = b"b";
     ];
     "With invalid checksums fails"
 )]
-#[test_case(
+#[test_case::test_case(
     Ok(format!(
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n{}",
         sha2::Sha256::digest(CONTENTS_1).encode_hex()
@@ -46,7 +45,7 @@ const CONTENTS_1: &[u8; 1] = b"b";
     ];
     "With one invalid checksum partially fails"
 )]
-#[test_case(
+#[test_case::test_case(
     Err::<&str, _>("Missing file `checksums.txt` in the `dir`"),
     [
         Err("Checksum mismatch, \
