@@ -697,7 +697,7 @@ pub trait EngineApiBuilder<Node: FullNodeComponents>: Send + Sync {
     /// The engine API RPC module. Only required to be convertible to an [`jsonrpsee::RpcModule`].
     type EngineApi: IntoEngineApiRpcModule + Send + Sync;
 
-    /// Builds the engine API instance given the provided context.
+    /// Builds the engine API instance given the provided [`AddOnsContext`].
     ///
     /// [`Self::EngineApi`] will be converted into the method handlers of the authenticated RPC
     /// server (engine API).
