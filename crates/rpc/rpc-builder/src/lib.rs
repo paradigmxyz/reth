@@ -434,10 +434,10 @@ where
     pub fn with_block_executor(
         self,
         block_executor: BasicBlockExecutorProvider<EvmConfig>,
-    ) -> RpcModuleBuilder<N, Provider, Pool, Network, Tasks, EvmConfig, Consensus> {
+    ) -> Self {
         let Self { provider, network, pool, executor, evm_config, consensus, _primitives, .. } =
             self;
-        RpcModuleBuilder {
+        Self {
             provider,
             network,
             pool,
@@ -637,7 +637,7 @@ where
 
 impl<N: NodePrimitives> Default for RpcModuleBuilder<N, (), (), (), (), (), ()> {
     fn default() -> Self {
-        Self::new((), (), (), (), (), (), ())
+        Self::new((), (), (), (), (), BasicBlockExecutorProvider::new(()), ())
     }
 }
 
