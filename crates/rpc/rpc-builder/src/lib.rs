@@ -599,7 +599,7 @@ where
         registry: &mut RpcRegistryInner<Provider, Pool, Network, Tasks, EthApi, BlockExecutor, Consensus>,
     ) -> AuthRpcModule
         where
-            EthApi: EthApiTypes + FullNodeTypes<Provider = Provider, Pool = Pool>,
+            EthApi: EthApiTypes + FullEthApiServer<Provider = Provider, Pool = Pool>,
         {
             registry.create_auth_module(engine)
         }
