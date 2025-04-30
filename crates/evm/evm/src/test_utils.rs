@@ -13,7 +13,7 @@ use reth_execution_types::{BlockExecutionResult, ExecutionOutcome};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
 use revm::database::State;
 
-/// A [`BlockExecutorProvider`] that returns mocked execution results.
+/// A block executor provider that returns mocked execution results.
 #[derive(Clone, Debug, Default)]
 pub struct MockExecutorProvider {
     exec_results: Arc<Mutex<Vec<ExecutionOutcome>>>,
