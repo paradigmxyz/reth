@@ -491,15 +491,20 @@ where
         let module_config = config.rpc.transport_rpc_module_config();
         debug!(target: "reth::cli", http=?module_config.http(), ws=?module_config.ws(), "Using RPC module config");
 
-        let (mut modules, mut auth_module, registry) = RpcModuleBuilder::default()
+        let builder = RpcModuleBuilder::default()
             .with_provider(node.provider().clone())
             .with_pool(node.pool().clone())
             .with_network(node.network().clone())
             .with_executor(node.task_executor().clone())
             .with_evm_config(node.evm_config().clone())
             .with_block_executor(node.block_executor().clone())
-            .with_consensus(node.consensus().clone())
-            .build_with_auth_server(module_config, engine_api, eth_api);
+            .with_consensus(node.consensus().clone());
+        
+        let (mut modules, mut registry) =
+        builder.launch_rpc_server(ctx.clone(), eth_api_builder).await?;
+        
+        let mut auth_module =
+        builder.launch_auth_server(ctx.clone(), engine_api_builder, &mut registry).await?;
 
         // in dev mode we generate 20 random dev-signer accounts
         if config.dev.dev {
@@ -697,19 +702,11 @@ where
 }
 
 /// Builder for engine API RPC module.
-///
-/// This builder type is responsible for providing an instance of [`IntoEngineApiRpcModule`], which
-/// is effectively a helper trait that provides the type erased [`jsonrpsee::RpcModule`] instance
-/// that contains the method handlers for the engine API. See [`EngineApi`] for an implementation of
-/// [`IntoEngineApiRpcModule`].
 pub trait EngineApiBuilder<Node: FullNodeComponents>: Send + Sync {
-    /// The engine API RPC module. Only required to be convertible to an [`jsonrpsee::RpcModule`].
+    /// The engine API RPC module. Only required to be convertible to an [`jsonrpsee`] module.
     type EngineApi: IntoEngineApiRpcModule + Send + Sync;
 
-    /// Builds the engine API instance given the provided [`AddOnsContext`].
-    ///
-    /// [`Self::EngineApi`] will be converted into the method handlers of the authenticated RPC
-    /// server (engine API).
+    /// Builds the engine API.
     fn build_engine_api(
         self,
         ctx: &AddOnsContext<'_, Node>,
@@ -717,10 +714,6 @@ pub trait EngineApiBuilder<Node: FullNodeComponents>: Send + Sync {
 }
 
 /// Builder for basic [`EngineApi`] implementation.
-///
-/// This provides a basic default implementation for opstack and ethereum engine API via
-/// [`EngineTypes`] and uses the general purpose [`EngineApi`] implementation as the builder's
-/// output.
 #[derive(Debug, Default)]
 pub struct BasicEngineApiBuilder<EV> {
     engine_validator_builder: EV,
