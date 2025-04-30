@@ -185,6 +185,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
             root_node,
             TrieMasks::none(),
             self.retain_updates,
+            true,
         )?;
 
         // Reveal the remaining proof nodes.
@@ -229,6 +230,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
             root_node,
             TrieMasks::none(),
             self.retain_updates,
+            false,
         )?;
 
         let revealed_nodes = self.revealed_storage_paths.entry(account).or_default();
@@ -297,6 +299,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                     tree_mask: branch_node_tree_masks.get(&Nibbles::default()).copied(),
                 },
                 self.retain_updates,
+                true,
             )?;
 
             // Reserve the capacity for new nodes ahead of time.
@@ -354,6 +357,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                         .copied(),
                 },
                 self.retain_updates,
+                false,
             )?;
 
             // Reserve the capacity for new nodes ahead of time.
@@ -450,6 +454,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                             trie_node,
                             TrieMasks::none(),
                             self.retain_updates,
+                            false,
                         )?;
                     } else {
                         // Reveal non-root storage trie node.
@@ -472,6 +477,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                         trie_node,
                         TrieMasks::none(),
                         self.retain_updates,
+                        true,
                     )?;
                 } else {
                     // Reveal non-root state trie node.
@@ -582,6 +588,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                         root_node,
                         TrieMasks { hash_mask, tree_mask },
                         self.retain_updates,
+                        true,
                     )
                     .map_err(Into::into)
             }

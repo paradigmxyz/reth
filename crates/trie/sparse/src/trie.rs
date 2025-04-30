@@ -84,8 +84,15 @@ impl SparseTrie {
         root: TrieNode,
         masks: TrieMasks,
         retain_updates: bool,
+        all_branch_nodes_in_database: bool,
     ) -> SparseTrieResult<&mut RevealedSparseTrie> {
-        self.reveal_root_with_provider(Default::default(), root, masks, retain_updates)
+        self.reveal_root_with_provider(
+            Default::default(),
+            root,
+            masks,
+            retain_updates,
+            all_branch_nodes_in_database,
+        )
     }
 }
 
@@ -124,6 +131,7 @@ impl<P> SparseTrie<P> {
         root: TrieNode,
         masks: TrieMasks,
         retain_updates: bool,
+        all_branch_nodes_in_database: bool,
     ) -> SparseTrieResult<&mut RevealedSparseTrie<P>> {
         if self.is_blind() {
             *self = Self::Revealed(Box::new(RevealedSparseTrie::from_provider_and_root(
@@ -131,6 +139,7 @@ impl<P> SparseTrie<P> {
                 root,
                 masks,
                 retain_updates,
+                all_branch_nodes_in_database,
             )?))
         }
         Ok(self.as_revealed_mut().unwrap())
@@ -195,6 +204,7 @@ pub struct RevealedSparseTrie<P = DefaultBlindedProvider> {
     prefix_set: PrefixSetMut,
     /// Retained trie updates.
     updates: Option<SparseTrieUpdates>,
+    all_branch_nodes_in_database: bool,
     /// Reusable buffer for RLP encoding of nodes.
     rlp_buf: Vec<u8>,
 }
@@ -208,6 +218,7 @@ impl<P> fmt::Debug for RevealedSparseTrie<P> {
             .field("values", &self.values)
             .field("prefix_set", &self.prefix_set)
             .field("updates", &self.updates)
+            .field("all_branch_nodes_in_database", &self.all_branch_nodes_in_database)
             .field("rlp_buf", &hex::encode(&self.rlp_buf))
             .finish_non_exhaustive()
     }
@@ -295,6 +306,7 @@ impl Default for RevealedSparseTrie {
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
             updates: None,
+            all_branch_nodes_in_database: false,
             rlp_buf: Vec::new(),
         }
     }
@@ -314,8 +326,9 @@ impl RevealedSparseTrie {
             branch_node_hash_masks: HashMap::default(),
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
-            rlp_buf: Vec::new(),
             updates: None,
+            all_branch_nodes_in_database: false,
+            rlp_buf: Vec::new(),
         }
         .with_updates(retain_updates);
         this.reveal_node(Nibbles::default(), node, masks)?;
@@ -330,6 +343,7 @@ impl<P> RevealedSparseTrie<P> {
         node: TrieNode,
         masks: TrieMasks,
         retain_updates: bool,
+        all_branch_nodes_in_database: bool,
     ) -> SparseTrieResult<Self> {
         let mut this = Self {
             provider,
@@ -338,8 +352,9 @@ impl<P> RevealedSparseTrie<P> {
             branch_node_hash_masks: HashMap::default(),
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
-            rlp_buf: Vec::new(),
             updates: None,
+            all_branch_nodes_in_database,
+            rlp_buf: Vec::new(),
         }
         .with_updates(retain_updates);
         this.reveal_node(Nibbles::default(), node, masks)?;
@@ -356,6 +371,7 @@ impl<P> RevealedSparseTrie<P> {
             values: self.values,
             prefix_set: self.prefix_set,
             updates: self.updates,
+            all_branch_nodes_in_database: self.all_branch_nodes_in_database,
             rlp_buf: self.rlp_buf,
         }
     }
@@ -365,6 +381,14 @@ impl<P> RevealedSparseTrie<P> {
         if retain_updates {
             self.updates = Some(SparseTrieUpdates::default());
         }
+        self
+    }
+
+    pub const fn with_all_branch_nodes_in_database(
+        mut self,
+        all_branch_nodes_in_database: bool,
+    ) -> Self {
+        self.all_branch_nodes_in_database = all_branch_nodes_in_database;
         self
     }
 
@@ -1948,6 +1972,7 @@ mod find_leaf_tests {
             values: Default::default(),
             prefix_set: Default::default(),
             updates: None,
+            all_branch_nodes_in_database: false,
             rlp_buf: Vec::new(),
         };
 
@@ -1991,6 +2016,7 @@ mod find_leaf_tests {
             values,
             prefix_set: Default::default(),
             updates: None,
+            all_branch_nodes_in_database: false,
             rlp_buf: Vec::new(),
         };
 
