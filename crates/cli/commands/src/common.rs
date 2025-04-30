@@ -210,7 +210,7 @@ impl<N> CliNodeTypes for N where N: NodeTypes + NodeTypesForProvider {}
 /// Helper trait aggregating components required for the CLI.
 pub trait CliNodeComponents<N: CliNodeTypes> {
     /// Evm to use.
-    type Evm: ConfigureEvm<Primitives = N::Primitives>;
+    type Evm: ConfigureEvm<Primitives = N::Primitives> + 'static;
     /// Consensus implementation.
     type Consensus: FullConsensus<N::Primitives, Error = ConsensusError> + Clone + 'static;
 
@@ -222,7 +222,7 @@ pub trait CliNodeComponents<N: CliNodeTypes> {
 
 impl<N: CliNodeTypes, E, C> CliNodeComponents<N> for (BasicBlockExecutorProvider<E>, C)
 where
-    E: ConfigureEvm<Primitives = N::Primitives>,
+    E: ConfigureEvm<Primitives = N::Primitives> + 'static,
     C: FullConsensus<N::Primitives, Error = ConsensusError> + Clone + 'static,
 {
     type Evm = E;

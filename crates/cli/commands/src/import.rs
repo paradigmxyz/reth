@@ -60,7 +60,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportComm
     where
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
         Comp: CliNodeComponents<N>,
-        <Comp as CliNodeComponents<N>>::Evm: 'static,
         F: FnOnce(Arc<N::ChainSpec>) -> Comp,
     {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
