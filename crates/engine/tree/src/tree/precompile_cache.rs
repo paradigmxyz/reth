@@ -5,11 +5,17 @@ use reth_evm::precompiles::{DynPrecompile, Precompile};
 use revm::precompile::{PrecompileError, PrecompileResult};
 use std::sync::Arc;
 
-type Cache<K, V> = mini_moka::sync::Cache<K, V, alloy_primitives::map::DefaultHashBuilder>;
+pub(crate) type PrecompileCache =
+    mini_moka::sync::Cache<CacheKey, CacheEntry, alloy_primitives::map::DefaultHashBuilder>;
+
+pub(crate) fn create_precompile_cache() -> PrecompileCache {
+    mini_moka::sync::CacheBuilder::new(100_000)
+        .build_with_hasher(alloy_primitives::map::DefaultHashBuilder::default())
+}
 
 /// Cache key, just input for each precompile.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct PrecompileKey(alloy_primitives::Bytes);
+pub(crate) struct CacheKey(alloy_primitives::Bytes);
 
 /// Combined entry containing both the result and gas bounds.
 #[derive(Debug, Clone, PartialEq)]
@@ -32,7 +38,7 @@ pub(crate) struct CacheEntry {
 #[derive(Debug)]
 pub(crate) struct CachedPrecompile {
     /// Cache for precompile results and gas bounds.
-    cache: Arc<Cache<PrecompileKey, CacheEntry>>,
+    cache: Arc<PrecompileCache>,
     /// The precompile.
     precompile: DynPrecompile,
     /// Cache metrics.
@@ -41,10 +47,7 @@ pub(crate) struct CachedPrecompile {
 
 impl CachedPrecompile {
     /// `CachedPrecompile` constructor.
-    pub(crate) fn new(
-        precompile: DynPrecompile,
-        cache: Arc<Cache<PrecompileKey, CacheEntry>>,
-    ) -> Self {
+    pub(crate) fn new(precompile: DynPrecompile, cache: Arc<PrecompileCache>) -> Self {
         Self { precompile, cache, metrics: Default::default() }
     }
 
@@ -72,7 +75,7 @@ impl CachedPrecompile {
 
 impl Precompile for CachedPrecompile {
     fn call(&self, data: &Bytes, gas_limit: u64) -> PrecompileResult {
-        let key = PrecompileKey(data.clone());
+        let key = CacheKey(data.clone());
 
         let cache_result = self.cache.get(&key);
 
@@ -190,15 +193,9 @@ mod tests {
         }
         .into();
 
-        let cache = CachedPrecompile::new(
-            dyn_precompile,
-            Arc::new(
-                mini_moka::sync::CacheBuilder::new(100_000)
-                    .build_with_hasher(alloy_primitives::map::DefaultHashBuilder::default()),
-            ),
-        );
+        let cache = CachedPrecompile::new(dyn_precompile, Arc::new(create_precompile_cache()));
 
-        let key = PrecompileKey(b"test_input".into());
+        let key = CacheKey(b"test_input".into());
 
         let result = Ok(PrecompileOutput {
             gas_used: 50,
