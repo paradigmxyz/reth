@@ -484,12 +484,14 @@ where
             }),
         );
 
-        let ctx = EthApiCtx { components: &node, config: config.rpc.eth_config(), cache };
-        let eth_api = eth_api_builder.build_eth_api(ctx).await?;
 
-        let auth_config = config.rpc.auth_server_config(jwt_secret)?;
+        let eth_ctx = EthApiCtx { components: &node, config: config.rpc.eth_config(), cache };
+        let eth_api = eth_api_builder.build_eth_api(eth_ctx).await?;
+    
+        let engine_api = engine_api_builder.build_engine_api(&ctx).await?;
+    
         let module_config = config.rpc.transport_rpc_module_config();
-        debug!(target: "reth::cli", http=?module_config.http(), ws=?module_config.ws(), "Using RPC module config");
+        let auth_config = config.rpc.auth_server_config(jwt_secret)?;
 
         let builder = RpcModuleBuilder::default()
             .with_provider(node.provider().clone())
@@ -500,11 +502,9 @@ where
             .with_block_executor(node.block_executor().clone())
             .with_consensus(node.consensus().clone());
         
-        let (mut modules, mut registry) =
-        builder.launch_rpc_server(ctx.clone(), eth_api_builder).await?;
-        
-        let mut auth_module =
-        builder.launch_auth_server(ctx.clone(), engine_api_builder, &mut registry).await?;
+        let (mut modules, mut registry) = builder.launch_rpc_server(module_config.clone(), eth_api);
+
+        let mut auth_module = RpcModuleBuilder::launch_auth_server(engine_api, &mut registry);
 
         // in dev mode we generate 20 random dev-signer accounts
         if config.dev.dev {
