@@ -1,5 +1,3 @@
-#[cfg(feature = "metrics")]
-use crate::metrics::SparseStateTrieMetrics;
 use crate::{
     blinded::{BlindedProvider, BlindedProviderFactory, DefaultBlindedProviderFactory},
     RevealedSparseTrie, SparseTrie, TrieMasks,
@@ -40,7 +38,7 @@ pub struct SparseStateTrie<F: BlindedProviderFactory = DefaultBlindedProviderFac
     account_rlp_buf: Vec<u8>,
     /// Metrics for the sparse state trie.
     #[cfg(feature = "metrics")]
-    metrics: SparseStateTrieMetrics,
+    metrics: crate::metrics::SparseStateTrieMetrics,
 }
 
 #[cfg(test)]
