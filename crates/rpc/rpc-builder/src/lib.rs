@@ -569,13 +569,12 @@ where
     }
     
     #[expect(clippy::type_complexity)]
-    pub async fn launch_auth_server<EV, EB, EthB>(
-        ctx: AddOnsContext<'_, N>,
+    pub async fn launch_auth_server<EB, EthB>(
+        ctx: AddOnsContext<'_, N>
         engine_api_builder: EB,
         registry: &mut RpcRegistry<N, EthB::EthApi>,
     ) -> eyre::Result<AuthRpcModule>
     where
-        EV: EngineValidatorBuilder<N>,
         EB: EngineApiBuilder<N>,
         EthB: EthApiBuilder<N>,
     {
