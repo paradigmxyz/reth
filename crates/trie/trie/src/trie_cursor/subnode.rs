@@ -1,5 +1,5 @@
 use crate::{BranchNodeCompact, Nibbles, StoredSubNode, CHILD_INDEX_RANGE};
-use reth_trie_common::RlpNode;
+use alloy_primitives::B256;
 
 /// Cursor for iterating over a subtrie.
 #[derive(Clone)]
@@ -146,10 +146,10 @@ impl CursorSubNode {
     /// - Root hash of the parent branch node.
     /// - Hash of the child node at the current nibble, if it has a hash mask bit set in the parent
     ///   branch node.
-    pub fn hash(&self) -> Option<RlpNode> {
+    pub fn hash(&self) -> Option<B256> {
         self.node.as_ref().and_then(|node| match self.position {
             // Get the root hash for the parent branch node
-            SubNodePosition::ParentBranch => node.root_hash.as_ref().map(RlpNode::word_rlp),
+            SubNodePosition::ParentBranch => node.root_hash,
             // Or get it from the children
             SubNodePosition::Child(nibble) => Some(node.hash_for_nibble(nibble)),
         })
@@ -159,10 +159,10 @@ impl CursorSubNode {
     ///
     /// Differs from [`Self::hash`] in that it returns `None` if the subnode is positioned at the
     /// child without a hash mask bit set. [`Self::hash`] panics in that case.
-    pub fn maybe_hash(&self) -> Option<RlpNode> {
+    pub fn maybe_hash(&self) -> Option<B256> {
         self.node.as_ref().and_then(|node| match self.position {
             // Get the root hash for the parent branch node
-            SubNodePosition::ParentBranch => node.root_hash.as_ref().map(RlpNode::word_rlp),
+            SubNodePosition::ParentBranch => node.root_hash,
             // Or get it from the children
             SubNodePosition::Child(nibble) => {
                 node.hash_mask.is_bit_set(nibble).then(|| node.hash_for_nibble(nibble))

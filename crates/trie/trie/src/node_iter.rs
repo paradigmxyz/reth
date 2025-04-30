@@ -1,7 +1,6 @@
 use crate::{hashed_cursor::HashedCursor, trie_cursor::TrieCursor, walker::TrieWalker, Nibbles};
 use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
-use reth_trie_common::RlpNode;
 use tracing::trace;
 
 /// Represents a branch node in the trie.
@@ -10,14 +9,14 @@ pub struct TrieBranchNode {
     /// The key associated with the node.
     pub key: Nibbles,
     /// The value associated with the node.
-    pub value: RlpNode,
+    pub value: B256,
     /// Indicates whether children are in the trie.
     pub children_are_in_trie: bool,
 }
 
 impl TrieBranchNode {
     /// Creates a new `TrieBranchNode`.
-    pub const fn new(key: Nibbles, value: RlpNode, children_are_in_trie: bool) -> Self {
+    pub const fn new(key: Nibbles, value: B256, children_are_in_trie: bool) -> Self {
         Self { key, value, children_are_in_trie }
     }
 }
@@ -310,8 +309,7 @@ mod tests {
             mock::MockHashedCursorFactory, noop::NoopHashedAccountCursor, HashedCursorFactory,
             HashedPostStateAccountCursor,
         },
-        mock::{CursorType, KeyVisit, KeyVisitType},
-        trie::TrieType,
+        mock::{CursorType, KeyVisit},
         trie_cursor::{
             mock::MockTrieCursorFactory, noop::NoopAccountTrieCursor, TrieCursorFactory,
         },

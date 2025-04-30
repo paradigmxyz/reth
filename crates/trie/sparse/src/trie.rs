@@ -935,12 +935,16 @@ impl<P> RevealedSparseTrie<P> {
                                 // Set the hash mask. If a child node is a revealed branch node OR
                                 // is a blinded node that has its hash mask bit set according to the
                                 // database, set the hash mask bit and save the hash.
-                                let hash = (!child_node_type.is_hash() ||
-                                    (child_node_type.is_hash() &&
-                                        self.branch_node_hash_masks.get(&path).is_some_and(
-                                            |mask| mask.is_bit_set(last_child_nibble),
-                                        )))
-                                .then(|| child.clone());
+                                let hash = child.as_hash().filter(|_| {
+                                    child_node_type.is_leaf() ||
+                                        child_node_type.is_branch() ||
+                                        (child_node_type.is_hash() &&
+                                            self.branch_node_hash_masks
+                                                .get(&path)
+                                                .is_some_and(|mask| {
+                                                    mask.is_bit_set(last_child_nibble)
+                                                }))
+                                });
                                 if let Some(hash) = hash {
                                     hash_mask.set_bit(last_child_nibble);
                                     hashes.push(hash);
@@ -1558,6 +1562,14 @@ enum SparseNodeType {
 impl SparseNodeType {
     const fn is_hash(&self) -> bool {
         matches!(self, Self::Hash)
+    }
+
+    const fn is_leaf(&self) -> bool {
+        matches!(self, Self::Leaf { .. })
+    }
+
+    const fn is_branch(&self) -> bool {
+        matches!(self, Self::Branch { .. })
     }
 
     const fn store_in_db_trie(&self) -> Option<bool> {

@@ -5,7 +5,6 @@ use crate::{
 };
 use alloy_primitives::{map::HashSet, B256};
 use reth_storage_errors::db::DatabaseError;
-use reth_trie_common::RlpNode;
 use tracing::{instrument, trace};
 
 #[cfg(feature = "metrics")]
@@ -90,7 +89,7 @@ impl<C> TrieWalker<C> {
     }
 
     /// Returns the current hash in the trie if any.
-    pub fn hash(&self) -> Option<RlpNode> {
+    pub fn hash(&self) -> Option<B256> {
         self.stack.last().and_then(|n| n.hash())
     }
 
@@ -98,7 +97,7 @@ impl<C> TrieWalker<C> {
     ///
     /// Differs from [`Self::hash`] in that it returns `None` if the subnode is positioned at the
     /// child without a hash mask bit set. [`Self::hash`] panics in that case.
-    pub fn maybe_hash(&self) -> Option<RlpNode> {
+    pub fn maybe_hash(&self) -> Option<B256> {
         self.stack.last().and_then(|n| n.maybe_hash())
     }
 
@@ -166,7 +165,10 @@ impl<C: TrieCursor> TrieWalker<C> {
         this
     }
 
-    pub fn with_all_branch_nodes_in_database(mut self, all_branch_nodes_in_database: bool) -> Self {
+    pub const fn with_all_branch_nodes_in_database(
+        mut self,
+        all_branch_nodes_in_database: bool,
+    ) -> Self {
         self.all_branch_nodes_in_database = all_branch_nodes_in_database;
         self
     }

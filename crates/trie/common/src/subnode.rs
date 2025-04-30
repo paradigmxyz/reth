@@ -68,12 +68,10 @@ impl reth_codecs::Compact for StoredSubNode {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use super::*;
     use crate::TrieMask;
     use alloy_primitives::B256;
-    use alloy_trie::nodes::RlpNode;
     use reth_codecs::Compact;
 
     #[test]
@@ -85,7 +83,7 @@ mod tests {
                 state_mask: TrieMask::new(1),
                 tree_mask: TrieMask::new(0),
                 hash_mask: TrieMask::new(1),
-                hashes: vec![RlpNode::word_rlp(&B256::ZERO)].into(),
+                hashes: vec![B256::ZERO].into(),
                 root_hash: None,
             }),
         };
