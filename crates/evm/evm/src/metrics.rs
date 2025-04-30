@@ -47,6 +47,8 @@ pub struct ExecutorMetrics {
     pub gas_processed_total: Counter,
     /// The instantaneous amount of gas processed per second.
     pub gas_per_second: Gauge,
+    /// The Histogram for amount of gas used.
+    pub gas_used_histogram: Histogram,
 
     /// The Histogram for amount of time taken to execute blocks.
     pub execution_histogram: Histogram,
@@ -82,6 +84,7 @@ impl ExecutorMetrics {
         // Update gas metrics.
         self.gas_processed_total.increment(block.header().gas_used());
         self.gas_per_second.set(block.header().gas_used() as f64 / execution_duration);
+        self.gas_used_histogram.record(block.header().gas_used() as f64);
         self.execution_histogram.record(execution_duration);
         self.execution_duration.set(execution_duration);
 
@@ -106,7 +109,7 @@ impl ExecutorMetrics {
         E: Executor<DB>,
     {
         // clone here is cheap, all the metrics are Option<Arc<_>>. additionally
-        // they are gloally registered so that the data recorded in the hook will
+        // they are globally registered so that the data recorded in the hook will
         // be accessible.
         let wrapper = MeteredStateHook { metrics: self.clone(), inner_hook: state_hook };
 
