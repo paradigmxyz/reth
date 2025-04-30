@@ -34,9 +34,10 @@ use reth_engine_primitives::{
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
+    block::BlockExecutorFactory,
     execute::{BasicBlockExecutor, BasicBlockExecutorProvider, Executor},
     precompiles::PrecompilesMap,
-    ConfigureEvm, Database, Evm,
+    ConfigureEvm, Database, Evm, EvmFactory,
 };
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes, PayloadTypes};
@@ -666,6 +667,8 @@ where
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes,
     V: EngineValidator<T, Block = N::Block>,
+    <<C as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::EvmFactory:
+        EvmFactory<Precompiles = PrecompilesMap>,
 {
     /// Creates a new [`EngineApiTreeHandler`].
     #[expect(clippy::too_many_arguments)]
