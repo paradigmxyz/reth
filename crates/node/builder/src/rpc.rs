@@ -484,12 +484,11 @@ where
             }),
         );
 
-
         let eth_ctx = EthApiCtx { components: &node, config: config.rpc.eth_config(), cache };
         let eth_api = eth_api_builder.build_eth_api(eth_ctx).await?;
-    
+
         let engine_api = engine_api_builder.build_engine_api(&ctx).await?;
-    
+
         let module_config = config.rpc.transport_rpc_module_config();
         let auth_config = config.rpc.auth_server_config(jwt_secret)?;
 
@@ -501,10 +500,10 @@ where
             .with_evm_config(node.evm_config().clone())
             .with_block_executor(node.block_executor().clone())
             .with_consensus(node.consensus().clone());
-        
+
         let (mut modules, mut registry) = builder.launch_rpc_server(module_config.clone(), eth_api);
 
-        let mut auth_module = RpcModuleBuilder::launch_auth_server(engine_api, &mut registry);
+        let mut auth_module = builder.launch_auth_server(engine_api, &mut registry);
 
         // in dev mode we generate 20 random dev-signer accounts
         if config.dev.dev {
