@@ -1,0 +1,22 @@
+//! Trait for checking type of transaction envelope.
+
+use alloy_consensus::transaction::EthereumTxEnvelope;
+use op_alloy_consensus::OpTxEnvelope;
+
+/// Trait for checking if a transaction envelope supports a given EIP-2718 type ID.
+pub trait IsTyped2718 {
+    /// Returns true if the given type ID corresponds to a supported typed transaction.
+    fn is_type(type_id: u8) -> bool;
+}
+
+impl<T: IsTyped2718> IsTyped2718 for EthereumTxEnvelope<T> {
+    fn is_type(type_id: u8) -> bool {
+        matches!(type_id, 0x01 | 0x02 | 0x03 | 0x04)
+    }
+}
+
+impl IsTyped2718 for OpTxEnvelope {
+    fn is_type(type_id: u8) -> bool {
+        matches!(type_id, 0x01 | 0x02 | 0x04 | 0x7E)
+    }
+}
