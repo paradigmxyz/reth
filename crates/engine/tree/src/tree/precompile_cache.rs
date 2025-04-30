@@ -5,21 +5,23 @@ use reth_evm::precompiles::{DynPrecompile, Precompile};
 use revm::precompile::{PrecompileError, PrecompileResult};
 use std::sync::Arc;
 
-pub(crate) type PrecompileCache =
+/// Cache for precompiles, for each input stores the result.
+pub type PrecompileCache =
     mini_moka::sync::Cache<CacheKey, CacheEntry, alloy_primitives::map::DefaultHashBuilder>;
 
-pub(crate) fn create_precompile_cache() -> PrecompileCache {
+/// Create a new [`PrecompileCache`].
+pub fn create_precompile_cache() -> PrecompileCache {
     mini_moka::sync::CacheBuilder::new(100_000)
         .build_with_hasher(alloy_primitives::map::DefaultHashBuilder::default())
 }
 
 /// Cache key, just input for each precompile.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct CacheKey(alloy_primitives::Bytes);
+pub struct CacheKey(alloy_primitives::Bytes);
 
 /// Combined entry containing both the result and gas bounds.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct CacheEntry {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CacheEntry {
     /// The actual result of executing the precompile.
     result: PrecompileResult,
     /// Observed gas limit above which the precompile does not fail with out of gas.

@@ -20,6 +20,7 @@ use error::{InsertBlockError, InsertBlockErrorKind, InsertBlockFatalError};
 use instrumented_state::InstrumentedStateProvider;
 use payload_processor::sparse_trie::StateRootComputeOutcome;
 use persistence_state::CurrentPersistenceAction;
+use precompile_cache::{create_precompile_cache, PrecompileCache};
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates,
     MemoryOverlayStateProvider, NewCanonicalChain,
@@ -614,6 +615,8 @@ where
     payload_processor: PayloadProcessor<N, C>,
     /// The EVM configuration.
     evm_config: C,
+    /// Precompile cache.
+    precompile_cache: Arc<PrecompileCache>,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C: Debug> std::fmt::Debug
@@ -676,8 +679,14 @@ where
     ) -> Self {
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
 
-        let payload_processor =
-            PayloadProcessor::new(WorkloadExecutor::default(), evm_config.clone(), &config);
+        let precompile_cache = Arc::new(create_precompile_cache());
+
+        let payload_processor = PayloadProcessor::new(
+            WorkloadExecutor::default(),
+            evm_config,
+            &config,
+            precompile_cache.clone(),
+        );
 
         Self {
             provider,
@@ -698,6 +707,7 @@ where
             engine_kind,
             payload_processor,
             evm_config,
+            precompile_cache,
         }
     }
 

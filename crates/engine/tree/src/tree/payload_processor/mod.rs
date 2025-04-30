@@ -6,6 +6,7 @@ use crate::tree::{
         prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmTaskEvent},
         sparse_trie::StateRootComputeOutcome,
     },
+    precompile_cache::PrecompileCache,
     sparse_trie::SparseTrieTask,
     StateProviderBuilder, TreeConfig,
 };
@@ -58,12 +59,19 @@ pub struct PayloadProcessor<N, Evm> {
     disable_transaction_prewarming: bool,
     /// Determines how to configure the evm for execution.
     evm_config: Evm,
+    /// Precompile cache.
+    precompile_cache: Arc<PrecompileCache>,
     _marker: std::marker::PhantomData<N>,
 }
 
 impl<N, Evm> PayloadProcessor<N, Evm> {
     /// Creates a new payload processor.
-    pub fn new(executor: WorkloadExecutor, evm_config: Evm, config: &TreeConfig) -> Self {
+    pub fn new(
+        executor: WorkloadExecutor,
+        evm_config: Evm,
+        config: &TreeConfig,
+        precompile_cache: Arc<PrecompileCache>,
+    ) -> Self {
         Self {
             executor,
             execution_cache: Default::default(),
@@ -71,6 +79,7 @@ impl<N, Evm> PayloadProcessor<N, Evm> {
             cross_block_cache_size: config.cross_block_cache_size(),
             disable_transaction_prewarming: config.disable_caching_and_prewarming(),
             evm_config,
+            precompile_cache,
             _marker: Default::default(),
         }
     }
@@ -426,6 +435,7 @@ mod tests {
         payload_processor::{
             evm_state_to_hashed_post_state, executor::WorkloadExecutor, PayloadProcessor,
         },
+        precompile_cache::create_precompile_cache,
         StateProviderBuilder, TreeConfig,
     };
     use alloy_evm::block::StateChangeSource;
@@ -548,6 +558,7 @@ mod tests {
             WorkloadExecutor::default(),
             EthEvmConfig::new(factory.chain_spec()),
             &TreeConfig::default(),
+            Arc::new(create_precompile_cache()),
         );
         let provider = BlockchainProvider::new(factory).unwrap();
         let mut handle = payload_processor.spawn(
