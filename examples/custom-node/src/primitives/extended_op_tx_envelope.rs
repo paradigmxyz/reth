@@ -11,7 +11,7 @@ use op_alloy_consensus::{OpTxEnvelope, OpTxType};
 use reth_codecs::Compact;
 use reth_ethereum::primitives::{
     serde_bincode_compat::SerdeBincodeCompat, transaction::signed::RecoveryError, InMemorySize,
-    SignedTransaction,
+    IsTyped2718, SignedTransaction,
 };
 use revm_primitives::{Address, Bytes, TxKind, B256, U256};
 use std::convert::TryInto;
@@ -117,6 +117,16 @@ where
 
     fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
         delegate!(self => tx.authorization_list())
+    }
+}
+
+impl<B, T> IsTyped2718 for ExtendedTxEnvelope<B, T>
+where
+    B: IsTyped2718,
+    T: IsTyped2718,
+{
+    fn is_type(type_id: u8) -> bool {
+        B::is_type(type_id) || T::is_type(type_id)
     }
 }
 
