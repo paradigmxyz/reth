@@ -230,6 +230,8 @@ where
                         storage_root_calculator.root()?
                     };
 
+                    trace!(target: "trie::state_root", ?hashed_address, ?storage_root, "Calculated storage root");
+
                     account_rlp.clear();
                     let account = account.into_trie_account(storage_root);
                     account.encode(&mut account_rlp as &mut dyn BufMut);
