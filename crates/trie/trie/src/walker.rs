@@ -94,6 +94,14 @@ impl<C> TrieWalker<C> {
         self.stack.last().and_then(|n| n.hash())
     }
 
+    /// Returns the current hash in the trie if any.
+    ///
+    /// Differs from [`Self::hash`] in that it returns `None` if the subnode is positioned at the
+    /// child without a hash mask bit set. [`Self::hash`] panics in that case.
+    pub fn maybe_hash(&self) -> Option<RlpNode> {
+        self.stack.last().and_then(|n| n.maybe_hash())
+    }
+
     /// Indicates whether the children of the current node are present in the trie.
     pub fn children_are_in_trie(&self) -> bool {
         self.stack.last().is_some_and(|n| n.tree_flag())

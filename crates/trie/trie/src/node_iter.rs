@@ -286,7 +286,7 @@ where
                         trace!(
                             target: "trie::node_iter",
                             ?seek_key,
-                            walker_hash = ?self.walker.hash(),
+                            walker_hash = ?self.walker.maybe_hash(),
                             "skipping hashed seek"
                         );
 
