@@ -814,12 +814,14 @@ fn decode_proof_nodes(
         result.total_nodes += 1;
         // If the node is already revealed, skip it.
         if revealed_nodes.contains(&path) {
+            trace!(target: "trie::sparse::path", ?path, "Skipping already revealed node");
             result.skipped_nodes += 1;
             continue
         }
 
         let node = TrieNode::decode(&mut &bytes[..])?;
         result.new_nodes += 1;
+        trace!(target: "trie::sparse::path", ?path, "Counting new nodes");
         // If it's a branch node, increase the number of new nodes by the number of children
         // according to the state mask.
         if let TrieNode::Branch(branch) = &node {
