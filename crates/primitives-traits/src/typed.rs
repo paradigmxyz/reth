@@ -12,7 +12,7 @@ pub trait IsTyped2718 {
 
 impl IsTyped2718 for TxType {
     fn is_type(type_id: u8) -> bool {
-        matches!(type_id, 0x01 | 0x02 | 0x03 | 0x04)
+        matches!(type_id, 0x01..=0x04)
     }
 }
 
