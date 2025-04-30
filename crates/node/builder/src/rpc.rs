@@ -500,7 +500,7 @@ where
             .with_block_executor(node.block_executor().clone())
             .with_consensus(node.consensus().clone());
 
-        let (mut modules, mut registry) = builder.cloen().launch_rpc_server(module_config.clone(), eth_api);
+        let (mut modules, mut registry) = builder.clone().launch_rpc_server(module_config.clone(), eth_api);
 
         let mut auth_module = builder.launch_auth_server(engine_api, &mut registry);
 
