@@ -40,6 +40,8 @@ pub struct ParallelTrieMetrics {
     pub precomputed_storage_roots: Histogram,
     /// The number of leaves for which we did not pre-compute the storage roots.
     pub missed_leaves: Histogram,
+    /// The number of storage-only multiproofs.
+    pub storage_only_multiproofs: Histogram,
 }
 
 impl ParallelTrieMetrics {

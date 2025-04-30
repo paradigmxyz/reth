@@ -227,6 +227,9 @@ where
         let mut storage_only_proofs =
             B256Map::with_capacity_and_hasher(storage_only_targets.len(), Default::default());
 
+        // Record total number of storage-only proofs
+        self.metrics.storage_only_multiproofs.record(storage_only_targets.len() as f64);
+
         for (hashed_address, targets) in storage_only_targets {
             let mut storage_prefix_sets = self
                 .prefix_sets

@@ -153,6 +153,14 @@ impl MultiProofTargets {
         )
     }
 
+    /// Create [`MultiProofTargets`] with a single account and slots as targets.
+    pub fn account_with_slots<I: IntoIterator<Item = B256>>(
+        hashed_address: B256,
+        slots_iter: I,
+    ) -> Self {
+        Self::from_iter([(hashed_address, slots_iter.into_iter().collect())])
+    }
+
     /// Returns true if the hashed account address is present in the account multiproof set.
     ///
     /// This does not check whether the hashed address is present in the storage-only target set.
@@ -209,42 +217,6 @@ impl MultiProofTargets {
         Self { account_targets, storage_only_targets }
     }
 
-    /// Creates a new `MultiProofTargets` instance from the difference between the already-fetched
-    /// [`MultiProofTargets`] instance, and new targets from the iterator.
-    // TODO: remove this
-    pub fn from_difference(
-        fetched: &B256Map<B256Set>,
-        new: impl IntoIterator<Item = (B256, B256Set)>,
-    ) -> Self {
-        let mut account_targets = B256Map::default();
-        let mut storage_only_targets = B256Map::default();
-        for (hashed_address, mut new_slots) in new {
-            // check if we have already fetched the account
-            match fetched.get(&hashed_address) {
-                Some(fetched_slots) => {
-                    // let's filter out all the slots that we already have
-                    new_slots.retain(|slot| !fetched_slots.contains(slot));
-
-                    // if we have the account already and the fetched storage slots are a superset
-                    // of the new storage slots, we don't need to fetch anything.
-                    //
-                    // if the new slots are empty, we also don't need to fetch anything
-                    if !new_slots.is_empty() {
-                        // we do need to fetch some new slots, but not the account proof
-                        storage_only_targets.insert(hashed_address, new_slots);
-                    }
-                }
-                None => {
-                    // if we don't have the account then we need to fetch both the account and
-                    // storage slots
-                    account_targets.insert(hashed_address, new_slots);
-                }
-            };
-        }
-
-        Self { account_targets, storage_only_targets }
-    }
-
     /// This turns the [`MultiProofTargets`] into a single map, erasing any information about
     /// storage-only proof targets.
     ///
@@ -291,8 +263,17 @@ impl MultiProofTargets {
 
     /// Returns the total number of slots to fetch.
     pub fn total_slots(&self) -> usize {
-        self.account_targets.values().map(|slots| slots.len()).sum::<usize>() +
-            self.storage_only_targets.values().map(|slots| slots.len()).sum::<usize>()
+        self.total_account_slots() + self.total_storage_only_slots()
+    }
+
+    /// Returns the total slots in the account multiproof targets.
+    pub fn total_account_slots(&self) -> usize {
+        self.account_targets.values().map(|slots| slots.len()).sum()
+    }
+
+    /// Returns the total slots in the storage-only multiproof targets.
+    pub fn total_storage_only_slots(&self) -> usize {
+        self.storage_only_targets.values().map(|slots| slots.len()).sum()
     }
 
     /// Returns the number of accounts in _both_ the account and storage-only multiproof target
@@ -378,13 +359,13 @@ mod tests {
             B256::from([2; 32]),
             B256::from([3; 32]),
         ]);
-        let new = FetchedProofTargets::accounts([
+        let new = MultiProofTargets::accounts([
             B256::from([1; 32]),
             B256::from([2; 32]),
             B256::from([4; 32]),
         ]);
 
-        let targets_to_fetch = MultiProofTargets::from_difference(&fetched, new);
+        let targets_to_fetch = MultiProofTargets::from_targets_difference(&fetched, new);
         let expected =
             MultiProofTargets::from_account_targets([(B256::from([4; 32]), Default::default())]);
 
@@ -400,12 +381,12 @@ mod tests {
             [B256::from([1; 32]), B256::from([2; 32])],
         );
 
-        let new = FetchedProofTargets::account_with_slots(
+        let new = MultiProofTargets::account_with_slots(
             B256::from([1; 32]),
             [B256::from([1; 32]), B256::from([2; 32]), B256::from([3; 32])],
         );
 
-        let targets_to_fetch = MultiProofTargets::from_difference(&fetched, new);
+        let targets_to_fetch = MultiProofTargets::from_targets_difference(&fetched, new);
         let expected = MultiProofTargets::from_storage_only_targets([(
             B256::from([1; 32]),
             B256Set::from_iter([B256::from([3; 32])]),
@@ -419,10 +400,9 @@ mod tests {
         // We have slots 1 and 2 already, but get a proof target for slot 3. In this
         // case we want to fetch the storage proof for slot 3
         let fetched = FetchedProofTargets::accounts([B256::from([1; 32]), B256::from([2; 32])]);
-        let new =
-            FetchedProofTargets::account_with_slots(B256::from([1; 32]), [B256::from([3; 32])]);
+        let new = MultiProofTargets::account_with_slots(B256::from([1; 32]), [B256::from([3; 32])]);
 
-        let targets_to_fetch = MultiProofTargets::from_difference(&fetched, new);
+        let targets_to_fetch = MultiProofTargets::from_targets_difference(&fetched, new);
         let expected = MultiProofTargets::from_storage_only_targets([(
             B256::from([1; 32]),
             B256Set::from_iter([B256::from([3; 32])]),
@@ -436,12 +416,12 @@ mod tests {
         // here the fetched targets does not have the account we are looking for, and we want to
         // fetch the account and storage proofs for the new account
         let fetched = FetchedProofTargets::accounts([B256::from([1; 32]), B256::from([2; 32])]);
-        let new = FetchedProofTargets::account_with_slots(
+        let new = MultiProofTargets::account_with_slots(
             B256::from([3; 32]),
             [B256::from([1; 32]), B256::from([2; 32])],
         );
 
-        let targets_to_fetch = MultiProofTargets::from_difference(&fetched, new);
+        let targets_to_fetch = MultiProofTargets::from_targets_difference(&fetched, new);
         let expected = MultiProofTargets::from_account_targets([(
             B256::from([3; 32]),
             B256Set::from_iter([B256::from([1; 32]), B256::from([2; 32])]),
@@ -456,9 +436,9 @@ mod tests {
         // proof targets do not have any storage slots to fetch, so we want to return the account
         // proof only.
         let fetched = FetchedProofTargets::accounts([B256::from([1; 32]), B256::from([2; 32])]);
-        let new = FetchedProofTargets::account_with_slots(B256::from([3; 32]), []);
+        let new = MultiProofTargets::account_with_slots(B256::from([3; 32]), []);
 
-        let targets_to_fetch = MultiProofTargets::from_difference(&fetched, new);
+        let targets_to_fetch = MultiProofTargets::from_targets_difference(&fetched, new);
         let expected =
             MultiProofTargets::from_account_targets([(B256::from([3; 32]), Default::default())]);
 
@@ -470,9 +450,9 @@ mod tests {
         // here the fetched targets already have all the proof targets
         // so we don't need to fetch anything
         let fetched = FetchedProofTargets::accounts([B256::from([1; 32]), B256::from([2; 32])]);
-        let new = FetchedProofTargets::accounts([B256::from([1; 32])]);
+        let new = MultiProofTargets::accounts([B256::from([1; 32])]);
 
-        let targets_to_fetch = MultiProofTargets::from_difference(&fetched, new);
+        let targets_to_fetch = MultiProofTargets::from_targets_difference(&fetched, new);
         let expected = MultiProofTargets::default();
 
         assert_eq!(targets_to_fetch, expected);
@@ -487,12 +467,12 @@ mod tests {
             [B256::from([1; 32]), B256::from([2; 32]), B256::from([3; 32])],
         );
 
-        let new = FetchedProofTargets::account_with_slots(
+        let new = MultiProofTargets::account_with_slots(
             B256::from([1; 32]),
             [B256::from([1; 32]), B256::from([2; 32])],
         );
 
-        let targets_to_fetch = MultiProofTargets::from_difference(&fetched, new);
+        let targets_to_fetch = MultiProofTargets::from_targets_difference(&fetched, new);
         let expected = MultiProofTargets::default();
 
         assert_eq!(targets_to_fetch, expected);
