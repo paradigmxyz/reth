@@ -593,7 +593,8 @@ where
         (modules, registry)
     }
     
-    #[expect(clippy::type_complexity)]
+    /// Creates and returns the auth (engine API) module for the given registry and engine.
+    /// RPC server setup, such as running only the transport server when the auth server is not required.    
     pub fn launch_auth_server<EthApi>(
         engine: impl IntoEngineApiRpcModule,
         registry: &mut RpcRegistryInner<Provider, Pool, Network, Tasks, EthApi, BlockExecutor, Consensus>,
