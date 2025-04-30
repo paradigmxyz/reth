@@ -37,11 +37,13 @@ struct MyMiddlewareService<S> {
     count: Arc<AtomicUsize>,
 }
 
-impl<'a, S> RpcServiceT<'a> for MyMiddlewareService<S>
+impl<S> RpcServiceT for MyMiddlewareService<S>
 where
-    S: RpcServiceT<'a> + Send + Sync + Clone + 'static,
+    S: RpcServiceT + Send + Sync + Clone + 'static,
 {
-    type Future = Pin<Box<dyn Future<Output = MethodResponse> + Send + 'a>>;
+    type MethodResponse = MethodResponse;
+    type NotificationResponse = S::NotificationResponse;
+    type BatchResponse = S::BatchResponse;
 
     fn call(&self, req: Request<'a>) -> Self::Future {
         tracing::info!("MyMiddleware processed call {}", req.method);
@@ -53,6 +55,14 @@ where
             count.fetch_add(1, Ordering::Relaxed);
             rp
         })
+    }
+
+    fn batch(&self, req: Batch<'a>) -> Self::BatchResponse {
+        self.service.batch(req)
+    }
+
+    fn notification(&self, n: Notification<'a>) -> Self::NotificationResponse {
+        self.service.notification(n)
     }
 }
 
