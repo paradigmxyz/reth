@@ -31,6 +31,7 @@ use reth_trie_parallel::{
 use std::{
     collections::VecDeque,
     sync::{
+        atomic::AtomicBool,
         mpsc,
         mpsc::{channel, Sender},
         Arc,
@@ -251,6 +252,7 @@ where
             cache_metrics: cache_metrics.clone(),
             provider: provider_builder,
             metrics: PrewarmMetrics::default(),
+            terminate_execution: Arc::new(AtomicBool::new(false)),
         };
 
         let prewarm_task = PrewarmCacheTask::new(
