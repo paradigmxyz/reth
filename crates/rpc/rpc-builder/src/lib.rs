@@ -597,9 +597,12 @@ where
     pub fn launch_auth_server<EthApi>(
         engine: impl IntoEngineApiRpcModule,
         registry: &mut RpcRegistryInner<Provider, Pool, Network, Tasks, EthApi, BlockExecutor, Consensus>,
-    ) -> AuthRpcModule {
-        registry.create_auth_module(engine)
-    }
+    ) -> AuthRpcModule
+        where
+            EthApi: EthApiTypes + FullNodeTypes<Provider = Provider, Pool = Pool>,
+        {
+            registry.create_auth_module(engine)
+        }
     
     /// Converts the builder into a [`RpcRegistryInner`] which can be used to create all
     /// components.
