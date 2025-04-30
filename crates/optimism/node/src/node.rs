@@ -8,7 +8,7 @@ use crate::{
 };
 use op_alloy_consensus::{interop::SafetyLevel, OpPooledTransaction};
 use reth_chainspec::{EthChainSpec, Hardforks};
-use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm, EvmFactory, EvmFactoryFor};
+use reth_evm::{ConfigureEvm, EvmFactory, EvmFactoryFor};
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives, PeersInfo};
 use reth_node_api::{
     AddOnsContext, FullNodeComponents, KeyHasherTy, NodeAddOns, NodePrimitives, PrimitivesTy, TxTy,
@@ -466,14 +466,10 @@ where
 {
     type EVM = OpEvmConfig;
 
-    async fn build_evm(
-        self,
-        ctx: &BuilderContext<Node>,
-    ) -> eyre::Result<(Self::EVM, BasicBlockExecutorProvider<Self::EVM>)> {
+    async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
         let evm_config = OpEvmConfig::optimism(ctx.chain_spec());
-        let executor = BasicBlockExecutorProvider::new(evm_config.clone());
 
-        Ok((evm_config, executor))
+        Ok(evm_config)
     }
 }
 

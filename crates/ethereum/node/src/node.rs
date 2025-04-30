@@ -10,10 +10,7 @@ use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
 use reth_ethereum_primitives::{EthPrimitives, PooledTransaction, TransactionSigned};
-use reth_evm::{
-    execute::BasicBlockExecutorProvider, ConfigureEvm, EvmFactory, EvmFactoryFor,
-    NextBlockEnvAttributes,
-};
+use reth_evm::{ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes};
 use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, NodePrimitives, TxTy};
 use reth_node_builder::{
@@ -305,15 +302,10 @@ where
 {
     type EVM = EthEvmConfig;
 
-    async fn build_evm(
-        self,
-        ctx: &BuilderContext<Node>,
-    ) -> eyre::Result<(Self::EVM, BasicBlockExecutorProvider<Self::EVM>)> {
+    async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
         let evm_config = EthEvmConfig::new(ctx.chain_spec())
             .with_extra_data(ctx.payload_builder_config().extra_data_bytes());
-        let executor = BasicBlockExecutorProvider::new(evm_config.clone());
-
-        Ok((evm_config, executor))
+        Ok(evm_config)
     }
 }
 

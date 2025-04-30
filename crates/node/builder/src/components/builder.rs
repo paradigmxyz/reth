@@ -8,6 +8,7 @@ use crate::{
     BuilderContext, ConfigureEvm, FullNodeTypes,
 };
 use reth_consensus::{ConsensusError, FullConsensus};
+use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_network::NetworkPrimitives;
 use reth_node_api::{BlockTy, BodyTy, HeaderTy, PrimitivesTy, TxTy};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
@@ -332,7 +333,8 @@ where
             _marker,
         } = self;
 
-        let (evm_config, executor) = evm_builder.build_evm(context).await?;
+        let evm_config = evm_builder.build_evm(context).await?;
+        let executor = BasicBlockExecutorProvider::new(evm_config.clone());
         let pool = pool_builder.build_pool(context).await?;
         let network = network_builder.build_network(context, pool.clone()).await?;
         let payload_builder_handle = payload_builder
