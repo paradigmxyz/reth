@@ -22,6 +22,7 @@ use std::{
     collections::VecDeque,
     sync::mpsc::{channel, Receiver, Sender},
     time::Instant,
+    sync::{atomic::{AtomicBool, Ordering}, Arc},
 };
 use tracing::{debug, trace};
 
@@ -46,6 +47,8 @@ pub(super) struct PrewarmCacheTask<N: NodePrimitives, P, Evm> {
     actions_rx: Receiver<PrewarmTaskEvent>,
     /// Sender the transactions use to send their result back
     actions_tx: Sender<PrewarmTaskEvent>,
+    /// An atomic bool that tells prewarm tasks to not start any more execution.
+    terminate_execution: Arc<AtomicBool>,
 }
 
 impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
@@ -72,6 +75,7 @@ where
             to_multi_proof,
             actions_rx,
             actions_tx,
+            terminate_execution: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -88,8 +92,14 @@ where
             let sender = self.actions_tx.clone();
             let ctx = self.ctx.clone();
             let pending_chunk = chunk.collect::<Vec<_>>();
+            let terminate_execution = self.terminate_execution.clone();
 
             self.executor.spawn_blocking(move || {
+                // if the task was cancelled, stop execution
+                if terminate_execution.load(Ordering::Relaxed) {
+                    return
+                }
+
                 ctx.transact_batch(&pending_chunk, sender);
             });
         }
@@ -138,7 +148,7 @@ where
             match event {
                 PrewarmTaskEvent::TerminateTransactionExecution => {
                     // stop tx processing
-                    self.pending.clear();
+                    self.terminate_execution.store(true, Ordering::Relaxed);
                 }
                 PrewarmTaskEvent::Outcome { proof_targets } => {
                     // completed a transaction, frees up one slot
