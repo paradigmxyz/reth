@@ -209,7 +209,7 @@ impl<N> CliNodeTypes for N where N: NodeTypes + NodeTypesForProvider {}
 
 /// Helper trait aggregating components required for the CLI.
 pub trait CliNodeComponents<N: CliNodeTypes> {
-    /// Evm to use..
+    /// Evm to use.
     type Evm: ConfigureEvm<Primitives = N::Primitives>;
     /// Consensus implementation.
     type Consensus: FullConsensus<N::Primitives, Error = ConsensusError> + Clone + 'static;
