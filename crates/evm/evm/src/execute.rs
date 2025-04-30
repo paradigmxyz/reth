@@ -388,13 +388,18 @@ where
 #[derive(Debug)]
 pub struct BasicBlockExecutorProvider<F> {
     /// Strategy to create block executors.
-    pub strategy_factory: F,
+    strategy_factory: F,
 }
 
 impl<F> BasicBlockExecutorProvider<F> {
     /// Creates a new `BasicBlockExecutorProvider` with the given strategy factory.
     pub const fn new(strategy_factory: F) -> Self {
         Self { strategy_factory }
+    }
+
+    /// Getter for `strategy_factory`.
+    pub const fn strategy_factory(&self) -> &F {
+        &self.strategy_factory
     }
 }
 
@@ -408,15 +413,6 @@ where
         DB: Database,
     {
         BasicBlockExecutor::new(self.strategy_factory.clone(), db)
-    }
-}
-
-impl<F> Default for BasicBlockExecutorProvider<F>
-where
-    F: Default,
-{
-    fn default() -> Self {
-        Self { strategy_factory: F::default() }
     }
 }
 

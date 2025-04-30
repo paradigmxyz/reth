@@ -478,7 +478,7 @@ where
     where
         DB: Database,
     {
-        BasicBlockExecutor::new(self.strategy_factory.clone(), db)
+        BasicBlockExecutor::new(self.strategy_factory().clone(), db)
     }
 }
 
