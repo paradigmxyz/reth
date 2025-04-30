@@ -11,6 +11,7 @@ use reth_engine_tree::{
     tree::TreeConfig,
 };
 use reth_engine_util::EngineMessageStreamExt;
+use reth_evm::TxEnvFor;
 use reth_exex::ExExManagerHandle;
 use reth_network::{NetworkSyncUpdater, SyncState};
 use reth_network_api::BlockDownloaderProvider;
@@ -106,7 +107,7 @@ where
             // ensure certain settings take effect
             .with_adjusted_configs()
             // Create the provider factory
-            .with_provider_factory().await?
+            .with_provider_factory::<_, TxEnvFor<<CB::Components as NodeComponents<T>>::Evm>>().await?
             .inspect(|_| {
                 info!(target: "reth::cli", "Database opened");
             })

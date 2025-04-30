@@ -20,14 +20,24 @@ extern crate alloc;
 use crate::execute::BasicBlockBuilder;
 use alloc::vec::Vec;
 use alloy_eips::{eip2930::AccessList, eip4895::Withdrawals};
-use alloy_evm::block::{BlockExecutorFactory, BlockExecutorFor};
-use alloy_primitives::{Address, B256};
-use core::{error::Error, fmt::Debug};
-use execute::{BlockAssembler, BlockBuilder};
+use alloy_evm::{
+    block::{BlockExecutor, BlockExecutorFactory, BlockExecutorFor},
+    eth::EthEvmContext,
+};
+use alloy_primitives::{Address, Bytes, B256};
+use core::{convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
+use execute::{BlockAssembler, BlockAssemblerInput, BlockBuilder};
 use reth_primitives_traits::{
     BlockTy, HeaderTy, NodePrimitives, ReceiptTy, SealedBlock, SealedHeader, TxTy,
 };
-use revm::{context::TxEnv, database::State};
+use revm::{
+    context::{
+        result::{EVMError, HaltReason, ResultAndState},
+        BlockEnv, TxEnv,
+    },
+    database::State,
+    primitives::hardfork::SpecId,
+};
 
 pub mod either;
 /// EVM environment configuration.
@@ -272,6 +282,227 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     }
 }
 
+/// Noop [`ConfigureEvm`] implementation.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoopEvmConfig<N: NodePrimitives, TxEnv>(PhantomData<(N, TxEnv)>);
+
+/// Noop [`Evm`] implementation.
+#[derive(Debug, Clone, Copy)]
+pub struct NoopEvm<DB: Database, N: NodePrimitives, TxEnv>(PhantomData<(DB, N, TxEnv)>);
+
+impl<N: NodePrimitives, DB: Database, TxEnv> Default for NoopEvm<DB, N, TxEnv> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<N: NodePrimitives, DB: Database, TxEnv> Evm for NoopEvm<DB, N, TxEnv>
+where
+    TxEnv: IntoTxEnv<TxEnv>,
+{
+    type DB = DB;
+    type Error = EVMError<DB::Error>;
+    type HaltReason = HaltReason;
+    type Spec = SpecId;
+    type Tx = TxEnv;
+
+    fn block(&self) -> &BlockEnv {
+        unimplemented!()
+    }
+
+    fn chain_id(&self) -> u64 {
+        unimplemented!()
+    }
+
+    fn transact_raw(
+        &mut self,
+        _tx: Self::Tx,
+    ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
+        unimplemented!()
+    }
+
+    fn finish(self) -> (Self::DB, EvmEnv<Self::Spec>)
+    where
+        Self: Sized,
+    {
+        unimplemented!()
+    }
+
+    fn transact_system_call(
+        &mut self,
+        _caller: Address,
+        _contract: Address,
+        _data: Bytes,
+    ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
+        unimplemented!()
+    }
+
+    fn db_mut(&mut self) -> &mut Self::DB {
+        unimplemented!()
+    }
+
+    fn set_inspector_enabled(&mut self, _enabled: bool) {
+        unimplemented!()
+    }
+}
+
+impl<N: NodePrimitives, TxEnv> EvmFactory for NoopEvmConfig<N, TxEnv>
+where
+    TxEnv: IntoTxEnv<TxEnv>,
+{
+    type Context<DB: Database> = EthEvmContext<DB>;
+    type Error<DBError: Error + Send + Sync + 'static> = EVMError<DBError>;
+    type Evm<DB: Database, I: revm::Inspector<Self::Context<DB>>> = NoopEvm<DB, N, TxEnv>;
+    type HaltReason = HaltReason;
+    type Spec = SpecId;
+    type Tx = TxEnv;
+
+    fn create_evm<DB: Database>(
+        &self,
+        _db: DB,
+        _evm_env: EvmEnv<Self::Spec>,
+    ) -> Self::Evm<DB, revm::inspector::NoOpInspector> {
+        unimplemented!()
+    }
+
+    fn create_evm_with_inspector<DB: Database, I: revm::Inspector<Self::Context<DB>>>(
+        &self,
+        _db: DB,
+        _input: EvmEnv<Self::Spec>,
+        _inspector: I,
+    ) -> Self::Evm<DB, I> {
+        unimplemented!()
+    }
+}
+
+impl<DB: Database, N: NodePrimitives, TxEnv> BlockExecutor for NoopEvm<DB, N, TxEnv>
+where
+    TxEnv: IntoTxEnv<TxEnv> + FromRecoveredTx<N::SignedTx> + FromTxWithEncoded<N::SignedTx>,
+{
+    type Evm = Self;
+    type Receipt = N::Receipt;
+    type Transaction = N::SignedTx;
+
+    fn apply_pre_execution_changes(&mut self) -> Result<(), block::BlockExecutionError> {
+        unimplemented!()
+    }
+
+    fn execute_transaction_with_result_closure(
+        &mut self,
+        _tx: impl block::ExecutableTx<Self>,
+        _f: impl FnOnce(&revm::context::result::ExecutionResult<<Self::Evm as Evm>::HaltReason>),
+    ) -> Result<u64, block::BlockExecutionError> {
+        unimplemented!()
+    }
+
+    fn finish(
+        self,
+    ) -> Result<(Self::Evm, block::BlockExecutionResult<Self::Receipt>), block::BlockExecutionError>
+    {
+        unimplemented!()
+    }
+
+    fn set_state_hook(&mut self, _hook: Option<Box<dyn OnStateHook>>) {
+        unimplemented!()
+    }
+
+    fn evm_mut(&mut self) -> &mut Self::Evm {
+        unimplemented!()
+    }
+
+    fn evm(&self) -> &Self::Evm {
+        unimplemented!()
+    }
+}
+
+impl<N: NodePrimitives, TxEnv> BlockExecutorFactory for NoopEvmConfig<N, TxEnv>
+where
+    TxEnv:
+        IntoTxEnv<TxEnv> + FromRecoveredTx<N::SignedTx> + FromTxWithEncoded<N::SignedTx> + 'static,
+{
+    type EvmFactory = Self;
+    type ExecutionCtx<'a> = ();
+    type Receipt = N::Receipt;
+    type Transaction = N::SignedTx;
+
+    fn evm_factory(&self) -> &Self::EvmFactory {
+        self
+    }
+
+    fn create_executor<'a, DB, I>(
+        &'a self,
+        _evm: <Self::EvmFactory as EvmFactory>::Evm<&'a mut State<DB>, I>,
+        _ctx: Self::ExecutionCtx<'a>,
+    ) -> impl BlockExecutorFor<'a, Self, DB, I>
+    where
+        DB: Database + 'a,
+        I: revm::Inspector<<Self::EvmFactory as EvmFactory>::Context<&'a mut State<DB>>> + 'a,
+    {
+        NoopEvm::default()
+    }
+}
+
+impl<N: NodePrimitives, TxEnv> BlockAssembler<Self> for NoopEvmConfig<N, TxEnv>
+where
+    TxEnv:
+        IntoTxEnv<TxEnv> + FromRecoveredTx<N::SignedTx> + FromTxWithEncoded<N::SignedTx> + 'static,
+{
+    type Block = N::Block;
+
+    fn assemble_block(
+        &self,
+        _input: BlockAssemblerInput<'_, '_, Self, N::BlockHeader>,
+    ) -> Result<Self::Block, block::BlockExecutionError> {
+        unimplemented!()
+    }
+}
+
+impl<N: NodePrimitives, TxEnv> ConfigureEvm for NoopEvmConfig<N, TxEnv>
+where
+    TxEnv: TransactionEnv + FromRecoveredTx<N::SignedTx> + FromTxWithEncoded<N::SignedTx>,
+{
+    type Primitives = N;
+    type Error = Infallible;
+    type NextBlockEnvCtx = NextBlockEnvAttributes;
+    type BlockExecutorFactory = Self;
+    type BlockAssembler = Self;
+
+    fn block_assembler(&self) -> &Self::BlockAssembler {
+        self
+    }
+
+    fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
+        self
+    }
+
+    fn evm_env(&self, _header: &HeaderTy<Self::Primitives>) -> EvmEnvFor<Self> {
+        unimplemented!()
+    }
+
+    fn next_evm_env(
+        &self,
+        _parent: &HeaderTy<Self::Primitives>,
+        _attributes: &Self::NextBlockEnvCtx,
+    ) -> Result<EvmEnvFor<Self>, Self::Error> {
+        unimplemented!()
+    }
+
+    fn context_for_block<'a>(
+        &self,
+        _block: &'a SealedBlock<BlockTy<Self::Primitives>>,
+    ) -> ExecutionCtxFor<'a, Self> {
+        unimplemented!()
+    }
+
+    fn context_for_next_block(
+        &self,
+        _parent: &SealedHeader<HeaderTy<Self::Primitives>>,
+        _attributes: Self::NextBlockEnvCtx,
+    ) -> ExecutionCtxFor<'_, Self> {
+        unimplemented!()
+    }
+}
+
 /// Represents additional attributes required to configure the next block.
 /// This is used to configure the next block's environment
 /// [`ConfigureEvm::next_evm_env`] and contains fields that can't be derived from the
@@ -294,7 +525,14 @@ pub struct NextBlockEnvAttributes {
 
 /// Abstraction over transaction environment.
 pub trait TransactionEnv:
-    revm::context_interface::Transaction + Debug + Clone + Send + Sync + 'static
+    revm::context_interface::Transaction
+    + IntoTxEnv<Self>
+    + Debug
+    + Clone
+    + Send
+    + Sync
+    + Unpin
+    + 'static
 {
     /// Set the gas limit.
     fn set_gas_limit(&mut self, gas_limit: u64);

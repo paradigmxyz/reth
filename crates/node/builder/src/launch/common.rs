@@ -17,11 +17,13 @@ use reth_db_common::init::{init_genesis, InitStorageError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_local::MiningMode;
 use reth_engine_tree::tree::{InvalidBlockHook, InvalidBlockHooks, NoopInvalidBlockHook};
-use reth_evm::noop::NoopBlockExecutorProvider;
+use reth_evm::{
+    noop::NoopBlockExecutorProvider, FromRecoveredTx, FromTxWithEncoded, TransactionEnv,
+};
 use reth_fs_util as fs;
 use reth_invalid_block_hooks::InvalidBlockWitnessHook;
 use reth_network_p2p::headers::client::HeadersClient;
-use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithDB, NodeTypesWithDBAdapter};
+use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithDB, NodeTypesWithDBAdapter, TxTy};
 use reth_node_core::{
     args::InvalidBlockHookType,
     dirs::{ChainPath, DataDirPath},
@@ -381,9 +383,10 @@ where
     /// Returns the [`ProviderFactory`] for the attached storage after executing a consistent check
     /// between the database and static files. **It may execute a pipeline unwind if it fails this
     /// check.**
-    pub async fn create_provider_factory<N>(&self) -> eyre::Result<ProviderFactory<N>>
+    pub async fn create_provider_factory<N, TxEnv>(&self) -> eyre::Result<ProviderFactory<N>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
+        TxEnv: TransactionEnv + FromRecoveredTx<TxTy<N>> + FromTxWithEncoded<TxTy<N>>,
     {
         let factory = ProviderFactory::new(
             self.right().clone(),
@@ -449,13 +452,14 @@ where
     }
 
     /// Creates a new [`ProviderFactory`] and attaches it to the launch context.
-    pub async fn with_provider_factory<N>(
+    pub async fn with_provider_factory<N, TxEnv>(
         self,
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<ChainSpec>, ProviderFactory<N>>>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
+        TxEnv: TransactionEnv + FromRecoveredTx<TxTy<N>> + FromTxWithEncoded<TxTy<N>>,
     {
-        let factory = self.create_provider_factory().await?;
+        let factory = self.create_provider_factory::<N, TxEnv>().await?;
         let ctx = LaunchContextWith {
             inner: self.inner,
             attachment: self.attachment.map_right(|_| factory),
