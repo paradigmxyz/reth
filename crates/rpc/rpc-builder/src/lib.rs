@@ -552,43 +552,37 @@ where
     /// also configures the auth (engine api) server, which exposes a subset of the `eth_`
     /// namespace.
     #[expect(clippy::type_complexity)]
-    pub fn build_with_auth_server<EthApi>(
-        self,
-        module_config: TransportRpcModuleConfig,
-        engine: impl IntoEngineApiRpcModule,
-        eth: EthApi,
-    ) -> (
-        TransportRpcModules,
-        AuthRpcModule,
-        RpcRegistryInner<Provider, Pool, Network, Tasks, EthApi, BlockExecutor, Consensus>,
-    )
+    pub async fn launch_rpc_server<EthB>(
+        ctx: AddOnsContext<'_, N>,
+        eth_api_builder: EthB,
+    ) -> eyre::Result<(TransportRpcModules, RpcRegistry<N, EthB::EthApi>)>
     where
-        EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
+        EthB: EthApiBuilder<N>,
     {
-        let Self {
-            provider, pool, network, executor, evm_config, block_executor, consensus, ..
-        } = self;
-
-        let config = module_config.config.clone().unwrap_or_default();
-
-        let mut registry = RpcRegistryInner::new(
-            provider,
-            pool,
-            network,
-            executor,
-            consensus,
-            config,
-            evm_config,
-            eth,
-            block_executor,
-        );
-
-        let modules = registry.create_transport_rpc_modules(module_config);
-
-        let auth_module = registry.create_auth_module(engine);
-
-        (modules, auth_module, registry)
+        let eth_api = eth_api_builder.build_eth_api(&ctx).await?;
+        let config = ctx.module_config.config.clone().unwrap_or_default();
+    
+        let mut registry = RpcRegistry::new_with_eth_api(ctx.provider.clone(), eth_api, config);
+        let modules = registry.create_transport_rpc_modules(ctx.module_config.clone());
+    
+        Ok((modules, registry))
     }
+    
+    #[expect(clippy::type_complexity)]
+    pub async fn launch_auth_server<EV, EB, EthB>(
+        ctx: AddOnsContext<'_, N>,
+        engine_api_builder: EB,
+        registry: &mut RpcRegistry<N, EthB::EthApi>,
+    ) -> eyre::Result<AuthRpcModule>
+    where
+        EV: EngineValidatorBuilder<N>,
+        EB: EngineApiBuilder<N>,
+        EthB: EthApiBuilder<N>,
+    {
+        let engine_api = engine_api_builder.build_engine_api(&ctx).await?;
+        let auth_module = registry.create_auth_module(engine_api);
+        Ok(auth_module)
+    } 
 
     /// Converts the builder into a [`RpcRegistryInner`] which can be used to create all
     /// components.
