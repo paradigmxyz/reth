@@ -159,7 +159,7 @@ impl CursorSubNode {
     ///
     /// Differs from [`Self::hash`] in that it returns `None` if the subnode is positioned at the
     /// child without a hash mask bit set. [`Self::hash`] panics in that case.
-    fn maybe_hash(&self) -> Option<RlpNode> {
+    pub fn maybe_hash(&self) -> Option<RlpNode> {
         self.node.as_ref().and_then(|node| match self.position {
             // Get the root hash for the parent branch node
             SubNodePosition::ParentBranch => node.root_hash.as_ref().map(RlpNode::word_rlp),
