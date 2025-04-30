@@ -23,7 +23,7 @@ impl<T: IsTyped2718> IsTyped2718 for EthereumTxEnvelope<T> {
 #[cfg(feature = "op")]
 impl IsTyped2718 for op_alloy_consensus::OpTxType {
     fn is_type(type_id: u8) -> bool {
-        matches!(type_id, 0x01 | 0x02 | 0x03 | 0x04 | 0x7E)
+        matches!(type_id, 0x0 | 0x01 | 0x02 | 0x04 | 0x7E)
     }
 }
 
