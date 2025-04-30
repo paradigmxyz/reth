@@ -38,7 +38,7 @@
 //! ```
 use crate::{
     stages::{
-        AccountHashingStage, BodyStage, ExecutionStage, FinishStage, HeaderStage,
+        AccountHashingStage, BodyStage, EraStage, ExecutionStage, FinishStage, HeaderStage,
         IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, PruneSenderRecoveryStage,
         PruneStage, SenderRecoveryStage, StorageHashingStage, TransactionLookupStage,
     },
@@ -259,9 +259,11 @@ where
     B: BodyDownloader + 'static,
     HeaderStage<P, H>: Stage<Provider>,
     BodyStage<B>: Stage<Provider>,
+    EraStage: Stage<Provider>,
 {
     fn builder(self) -> StageSetBuilder<Provider> {
         StageSetBuilder::default()
+            .add_stage(EraStage::new(None, self.stages_config.etl.clone()))
             .add_stage(HeaderStage::new(
                 self.provider,
                 self.header_downloader,
