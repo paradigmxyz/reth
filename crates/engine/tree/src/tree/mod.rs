@@ -20,7 +20,7 @@ use error::{InsertBlockError, InsertBlockErrorKind, InsertBlockFatalError};
 use instrumented_state::InstrumentedStateProvider;
 use payload_processor::sparse_trie::StateRootComputeOutcome;
 use persistence_state::CurrentPersistenceAction;
-use precompile_cache::{create_precompile_cache, PrecompileCache};
+use precompile_cache::{create_precompile_cache, CachedPrecompile, PrecompileCache};
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates,
     MemoryOverlayStateProvider, NewCanonicalChain,
@@ -33,7 +33,11 @@ use reth_engine_primitives::{
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_ethereum_primitives::EthPrimitives;
-use reth_evm::ConfigureEvm;
+use reth_evm::{
+    execute::{BasicBlockExecutor, BasicBlockExecutorProvider, Executor},
+    precompiles::PrecompilesMap,
+    ConfigureEvm, Database, Evm,
+};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes, PayloadTypes};
 use reth_primitives_traits::{
@@ -640,6 +644,8 @@ where
             .field("metrics", &self.metrics)
             .field("invalid_block_hook", &format!("{:p}", self.invalid_block_hook))
             .field("engine_kind", &self.engine_kind)
+            .field("payload_processor", &self.payload_processor)
+            .field("evm_config", &self.evm_config)
             .finish()
     }
 }
@@ -683,7 +689,7 @@ where
 
         let payload_processor = PayloadProcessor::new(
             WorkloadExecutor::default(),
-            evm_config,
+            evm_config.clone(),
             &config,
             precompile_cache.clone(),
         );
@@ -708,6 +714,7 @@ where
             payload_processor,
             evm_config,
             precompile_cache,
+            evm_config,
         }
     }
 
@@ -2625,7 +2632,14 @@ where
             .with_bundle_update()
             .without_state_clear()
             .build();
-        let executor = self.evm_config.executor_for_block(&mut db, block);
+        let mut executor = self.evm_config.executor_for_block(&mut db, block);
+
+        if self.config.precompile_cache_enabled() {
+            executor.evm_mut().precompiles_mut().map_precompiles(|_, precompile| {
+                CachedPrecompile::wrap(precompile, self.precompile_cache.clone())
+            });
+        }
+
         let execution_start = Instant::now();
         let output = self.metrics.executor.execute_metered(
             executor,

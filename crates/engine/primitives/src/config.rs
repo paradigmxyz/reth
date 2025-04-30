@@ -194,9 +194,14 @@ impl TreeConfig {
         self.always_compare_trie_updates
     }
 
-    /// Return the cross-block cache size.
+    /// Returns the cross-block cache size.
     pub const fn cross_block_cache_size(&self) -> u64 {
         self.cross_block_cache_size
+    }
+
+    /// Returns whether precompile cache is enabled.
+    pub const fn precompile_cache_enabled(&self) -> bool {
+        self.precompile_cache_enabled
     }
 
     /// Setter for persistence threshold.
