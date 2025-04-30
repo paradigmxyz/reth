@@ -51,7 +51,7 @@ pub(super) struct PrewarmCacheTask<N: NodePrimitives, P, Evm> {
     /// Sender the transactions use to send their result back
     actions_tx: Sender<PrewarmTaskEvent>,
     /// Total prewarming tasks spawned
-    prewarm_tasks_left: usize,
+    prewarm_outcomes_left: usize,
 }
 
 impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
@@ -78,7 +78,7 @@ where
             to_multi_proof,
             actions_rx,
             actions_tx,
-            prewarm_tasks_left: 0,
+            prewarm_outcomes_left: 0,
         }
     }
 
@@ -96,11 +96,10 @@ where
             let ctx = self.ctx.clone();
             let pending_chunk = chunk.collect::<Vec<_>>();
 
+            self.prewarm_outcomes_left += pending_chunk.len();
             self.executor.spawn_blocking(move || {
                 ctx.transact_batch(&pending_chunk, sender);
             });
-
-            self.prewarm_tasks_left += 1;
         }
     }
 
@@ -169,9 +168,9 @@ where
                     self.send_multi_proof_targets(proof_targets);
 
                     // decrement the number of tasks left
-                    self.prewarm_tasks_left -= 1;
+                    self.prewarm_outcomes_left -= 1;
 
-                    if self.prewarm_tasks_left == 0 && final_block_output.is_some() {
+                    if self.prewarm_outcomes_left == 0 && final_block_output.is_some() {
                         // all tasks are done, and we have the block output, we can exit
                         break
                     }
@@ -179,7 +178,7 @@ where
                 PrewarmTaskEvent::Terminate { block_output } => {
                     final_block_output = Some(block_output);
 
-                    if self.prewarm_tasks_left == 0 {
+                    if self.prewarm_outcomes_left == 0 {
                         // all tasks are done, we can exit, which will save caches and exit
                         break
                     }
