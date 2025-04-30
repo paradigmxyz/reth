@@ -86,9 +86,8 @@ where
     /// If `state` is `None`, a new state provider will be created.
     ///
     /// Convenience method for applying stateless and stateful checks on transaction. Under the
-    /// hood this calls
-    /// [`validate_one_no_state`](EthTransactionValidatorInner::validate_one_no_state) followed by
-    /// [`validate_one_against_state`](EthTransactionValidatorInner::validate_one_against_state).
+    /// hood this calls same validations as [`validate_one_no_state`](Self::validate_one_no_state)
+    /// followed by [`validate_one_against_state`](Self::validate_one_against_state).
     pub fn validate_one_with_state<P>(
         &self,
         origin: TransactionOrigin,
@@ -101,7 +100,11 @@ where
         self.inner.validate_one_with_provider(origin, transaction, state)
     }
 
-    /// See [`EthTransactionValidatorInner::validate_one_no_state`].
+    /// Performs stateless validation on single transaction.
+    ///
+    /// Returns unaltered input transaction if all checks pass, so transaction can continue
+    /// through to stateful validation as argument to
+    /// [`validate_one_against_state`](Self::validate_one_against_state).
     pub fn validate_one_no_state(
         &self,
         origin: TransactionOrigin,
@@ -110,7 +113,7 @@ where
         self.inner.validate_one_no_state(origin, transaction)
     }
 
-    /// See [`EthTransactionValidatorInner::validate_one_against_state`].
+    /// Validates single transaction using given state.
     pub fn validate_one_against_state<P>(
         &self,
         origin: TransactionOrigin,

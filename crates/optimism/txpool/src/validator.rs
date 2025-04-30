@@ -281,7 +281,8 @@ where
     /// Applies OP-protocol specific checks:
     /// - ensures that the account has enough balance to cover the L1 gas cost
     /// - ensures cross chain transactions are valid w.r.t. locally configured minimum
-    ///   [`SafetyLevel`] (involves RPC call to a superchain supervisor (cross-chain oracle)).
+    ///   [`SafetyLevel`](op_alloy_consensus::interop::SafetyLevel) (involves RPC call to a
+    ///   superchain supervisor (cross-chain oracle)).
     pub async fn apply_op_checks_against_state(
         &self,
         outcome: TransactionValidationOutcome<Tx>,
