@@ -464,7 +464,7 @@ where
     {
         let Self { eth_api_builder, engine_api_builder, hooks, .. } = self;
 
-        let AddOnsContext { node, config, beacon_engine_handle, jwt_secret, ref engine_events } = ctx;
+        let AddOnsContext { node, config, ref beacon_engine_handle, jwt_secret, ref engine_events } = ctx;
 
         info!(target: "reth::cli", "Engine API handler initialized");
 
@@ -500,7 +500,7 @@ where
             .with_block_executor(node.block_executor().clone())
             .with_consensus(node.consensus().clone());
 
-        let (mut modules, mut registry) = builder.launch_rpc_server(module_config.clone(), eth_api);
+        let (mut modules, mut registry) = builder.cloen().launch_rpc_server(module_config.clone(), eth_api);
 
         let mut auth_module = builder.launch_auth_server(engine_api, &mut registry);
 
@@ -567,7 +567,7 @@ where
             rpc_server_handles: handles,
             rpc_registry: registry,
             engine_events: engine_events.clone(),
-            beacon_engine_handle,
+            beacon_engine_handle: beacon_engine_handle.clone(),
         })
     }
 }
