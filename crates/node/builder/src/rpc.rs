@@ -26,7 +26,7 @@ use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_eth_types::{cache::cache_new_blocks_task, EthConfig, EthStateCache};
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
-use reth_tracing::tracing::{debug, info};
+use reth_tracing::tracing::info;
 use std::{
     fmt::{self, Debug},
     future::Future,
@@ -566,7 +566,7 @@ where
         Ok(RpcHandle {
             rpc_server_handles: handles,
             rpc_registry: registry,
-            engine_events,
+            engine_events: engine_events.clone(),
             beacon_engine_handle,
         })
     }
