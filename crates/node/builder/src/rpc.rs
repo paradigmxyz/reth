@@ -464,7 +464,7 @@ where
     {
         let Self { eth_api_builder, engine_api_builder, hooks, .. } = self;
 
-        let AddOnsContext { node, config, ref beacon_engine_handle, jwt_secret, ref engine_events } = ctx;
+        let AddOnsContext { ref node, ref config, ref beacon_engine_handle, jwt_secret, ref engine_events } = ctx;
 
         info!(target: "reth::cli", "Engine API handler initialized");
 
@@ -555,7 +555,7 @@ where
 
         let ctx = RpcContext {
             node: node.clone(),
-            config,
+            config: config.clone(),
             registry: &mut registry,
             modules: &mut modules,
             auth_module: &mut auth_module,
