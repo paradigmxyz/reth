@@ -95,19 +95,20 @@ where
             PersistenceHandle::<N::Primitives>::spawn_service(provider, pruner, sync_metrics_tx);
         let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
 
-        let (to_tree_tx, from_tree) = EngineApiTreeHandler::<N::Primitives, _, _, _, _>::spawn_new(
-            blockchain_db.clone(),
-            executor_factory,
-            consensus,
-            payload_validator,
-            persistence_handle,
-            payload_builder.clone(),
-            canonical_in_memory_state,
-            tree_config,
-            invalid_block_hook,
-            engine_kind,
-            evm_config,
-        );
+        let (to_tree_tx, from_tree) =
+            EngineApiTreeHandler::<N::Primitives, _, _, _, _, _>::spawn_new(
+                blockchain_db.clone(),
+                executor_factory,
+                consensus,
+                payload_validator,
+                persistence_handle,
+                payload_builder.clone(),
+                canonical_in_memory_state,
+                tree_config,
+                invalid_block_hook,
+                engine_kind,
+                evm_config,
+            );
 
         let handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
 

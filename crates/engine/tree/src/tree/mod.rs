@@ -29,9 +29,12 @@ use reth_engine_primitives::{
     BeaconConsensusEngineEvent, BeaconEngineMessage, BeaconOnNewPayloadError, EngineValidator,
     ExecutionPayload, ForkchoiceStateTracker, OnForkChoiceUpdated,
 };
-use reth_errors::{ConsensusError, ProviderResult};
+use reth_errors::{BlockExecutionError, ConsensusError, ProviderResult};
 use reth_ethereum_primitives::EthPrimitives;
-use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
+use reth_evm::{
+    execute::{BasicBlockExecutor, BasicBlockExecutorProvider, Executor},
+    ConfigureEvm, Database,
+};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes, PayloadTypes};
 use reth_primitives_traits::{
@@ -563,13 +566,13 @@ pub enum TreeAction {
 ///
 /// This type is responsible for processing engine API requests, maintaining the canonical state and
 /// emitting events.
-pub struct EngineApiTreeHandler<N, P, T, V, C>
+pub struct EngineApiTreeHandler<N, P, E, T, V, C>
 where
     N: NodePrimitives,
     T: PayloadTypes,
 {
     provider: P,
-    executor_provider: BasicBlockExecutorProvider<C>,
+    executor_provider: E,
     consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
     payload_validator: V,
     /// Keeps track of internals such as executed and buffered blocks.
@@ -611,8 +614,8 @@ where
     payload_processor: PayloadProcessor<N, C>,
 }
 
-impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C: Debug> std::fmt::Debug
-    for EngineApiTreeHandler<N, P, T, V, C>
+impl<N, P: Debug, E: Debug, T: PayloadTypes + Debug, V: Debug, C: Debug> std::fmt::Debug
+    for EngineApiTreeHandler<N, P, E, T, V, C>
 where
     N: NodePrimitives,
 {
@@ -637,7 +640,7 @@ where
     }
 }
 
-impl<N, P, T, V, C> EngineApiTreeHandler<N, P, T, V, C>
+impl<N, P, E, T, V, C> EngineApiTreeHandler<N, P, E, T, V, C>
 where
     N: NodePrimitives,
     P: DatabaseProviderFactory
@@ -650,6 +653,7 @@ where
         + 'static,
     <P as DatabaseProviderFactory>::Provider:
         BlockReader<Block = N::Block, Header = N::BlockHeader>,
+    E: BlockExecutorProvider<Primitives = N>,
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes,
     V: EngineValidator<T, Block = N::Block>,
@@ -658,7 +662,7 @@ where
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         provider: P,
-        executor_provider: BasicBlockExecutorProvider<C>,
+        executor_provider: E,
         consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
         payload_validator: V,
         outgoing: UnboundedSender<EngineApiEvent<N>>,
@@ -711,7 +715,7 @@ where
     #[expect(clippy::complexity)]
     pub fn spawn_new(
         provider: P,
-        executor_provider: BasicBlockExecutorProvider<C>,
+        executor_provider: E,
         consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
         payload_validator: V,
         persistence: PersistenceHandle<N>,
@@ -3066,6 +3070,42 @@ impl PersistingKind {
     }
 }
 
+/// A type that can create a new executor for block execution in stages.
+pub trait BlockExecutorProvider: Clone + std::fmt::Debug + Send + Sync + Unpin + 'static {
+    /// Receipt type.
+    type Primitives: NodePrimitives;
+
+    /// An executor that can execute a single block given a database.
+    type Executor<DB: Database>: Executor<
+        DB,
+        Primitives = Self::Primitives,
+        Error = BlockExecutionError,
+    >;
+
+    /// Creates a new executor for single block execution.
+    ///
+    /// This is used to execute a single block and get the changed state.
+    fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
+    where
+        DB: Database;
+}
+
+impl<F> BlockExecutorProvider for BasicBlockExecutorProvider<F>
+where
+    F: ConfigureEvm + 'static,
+{
+    type Primitives = F::Primitives;
+
+    type Executor<DB: Database> = BasicBlockExecutor<F, DB>;
+
+    fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
+    where
+        DB: Database,
+    {
+        BasicBlockExecutor::new(self.strategy_factory().clone(), db)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3094,6 +3134,19 @@ mod tests {
         str::FromStr,
         sync::mpsc::{channel, Sender},
     };
+
+    impl BlockExecutorProvider for MockExecutorProvider {
+        type Primitives = EthPrimitives;
+
+        type Executor<DB: Database> = Self;
+
+        fn executor<DB>(&self, _: DB) -> Self::Executor<DB>
+        where
+            DB: Database,
+        {
+            self.clone()
+        }
+    }
 
     /// This is a test channel that allows you to `release` any value that is in the channel.
     ///
@@ -3152,6 +3205,7 @@ mod tests {
         tree: EngineApiTreeHandler<
             EthPrimitives,
             MockEthProvider,
+            MockExecutorProvider,
             EthEngineTypes,
             EthereumEngineValidator,
             EthEvmConfig,

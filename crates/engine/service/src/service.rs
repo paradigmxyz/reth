@@ -101,19 +101,20 @@ where
 
         let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
 
-        let (to_tree_tx, from_tree) = EngineApiTreeHandler::<N::Primitives, _, _, _, _>::spawn_new(
-            blockchain_db,
-            executor_factory,
-            consensus,
-            payload_validator,
-            persistence_handle,
-            payload_builder,
-            canonical_in_memory_state,
-            tree_config,
-            invalid_block_hook,
-            engine_kind,
-            evm_config,
-        );
+        let (to_tree_tx, from_tree) =
+            EngineApiTreeHandler::<N::Primitives, _, _, _, _, _>::spawn_new(
+                blockchain_db,
+                executor_factory,
+                consensus,
+                payload_validator,
+                persistence_handle,
+                payload_builder,
+                canonical_in_memory_state,
+                tree_config,
+                invalid_block_hook,
+                engine_kind,
+                evm_config,
+            );
 
         let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
         let handler = EngineHandler::new(engine_handler, downloader, incoming_requests);
