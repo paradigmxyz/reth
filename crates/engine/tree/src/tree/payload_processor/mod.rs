@@ -171,7 +171,7 @@ where
             multi_proof_task.run();
         });
 
-        let sparse_trie_task = SparseTrieTask::new(
+        let mut sparse_trie_task = SparseTrieTask::new(
             self.executor.clone(),
             sparse_trie_rx,
             proof_task.handle(),
