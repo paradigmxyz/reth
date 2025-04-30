@@ -84,11 +84,15 @@ pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
 use reth_evm::execute::BlockExecutionOutput;
 
-/// The largest gap for which the tree will be used for sync. See docs for `pipeline_run_threshold`
-/// for more information.
+/// The largest gap for which the tree will be used to sync individual blocks by downloading them.
 ///
-/// This is the default threshold, the distance to the head that the tree will be used for sync.
-/// If the distance exceeds this threshold, the pipeline will be used for sync.
+/// This is the default threshold, and represents the distance (gap) from the local head to a
+/// new (canonical) block, e.g. the forkchoice head block. If the block distance from the local head
+/// exceeds this threshold, the pipeline will be used to backfill the gap more efficiently.
+///
+/// E.g.: Local head `block.number` is 100 and the forkchoice head `block.number` is 133 (more than
+/// an epoch has slots), then this exceeds the threshold at which the pipeline should be used to
+/// backfill this gap.
 pub(crate) const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 
 /// Keeps track of the state of the tree.
