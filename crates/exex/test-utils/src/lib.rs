@@ -71,7 +71,7 @@ where
     }
 }
 
-/// A test [`ExecutorBuilder`] that builds a [`MockExecutorProvider`].
+/// A test [`ExecutorBuilder`] that builds a [`BasicBlockExecutorProvider`] for testing.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
 pub struct TestExecutorBuilder;
