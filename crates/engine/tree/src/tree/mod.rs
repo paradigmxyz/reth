@@ -86,7 +86,7 @@ use reth_evm::execute::BlockExecutionOutput;
 
 /// The largest gap for which the tree will be used to sync individual blocks by downloading them.
 ///
-/// This is the default threshold, and represents the the distance (gap) from the local head to a
+/// This is the default threshold, and represents the distance (gap) from the local head to a
 /// new (canonical) block, e.g. the forkchoice head block. If the block distance from the local head
 /// exceeds this threshold, the pipeline will be used to backfill the gap more efficiently.
 ///
