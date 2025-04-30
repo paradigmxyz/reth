@@ -110,7 +110,6 @@ pub async fn launch<N, Provider, Pool, Network, Tasks, EvmConfig, EthApi>(
     executor: Tasks,
     evm_config: EvmConfig,
     eth: EthApi,
-    block_executor: BasicBlockExecutorProvider<EvmConfig>,
     consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
 ) -> Result<RpcServerHandle, RpcError>
 where
@@ -129,16 +128,8 @@ where
     server_config
         .into()
         .start(
-            &RpcModuleBuilder::new(
-                provider,
-                pool,
-                network,
-                executor,
-                evm_config,
-                block_executor,
-                consensus,
-            )
-            .build(module_config, eth),
+            &RpcModuleBuilder::new(provider, pool, network, executor, evm_config, consensus)
+                .build(module_config, eth),
         )
         .await
 }
@@ -172,17 +163,19 @@ impl<N, Provider, Pool, Network, Tasks, EvmConfig, Consensus>
     RpcModuleBuilder<N, Provider, Pool, Network, Tasks, EvmConfig, Consensus>
 where
     N: NodePrimitives,
+    EvmConfig: Clone,
 {
     /// Create a new instance of the builder
-    pub const fn new(
+    pub fn new(
         provider: Provider,
         pool: Pool,
         network: Network,
         executor: Tasks,
         evm_config: EvmConfig,
-        block_executor: BasicBlockExecutorProvider<EvmConfig>,
         consensus: Consensus,
     ) -> Self {
+        let block_executor = BasicBlockExecutorProvider::new(evm_config.clone());
+
         Self {
             provider,
             pool,
@@ -628,7 +621,7 @@ where
 
 impl<N: NodePrimitives> Default for RpcModuleBuilder<N, (), (), (), (), (), ()> {
     fn default() -> Self {
-        Self::new((), (), (), (), (), BasicBlockExecutorProvider::new(()), ())
+        Self::new((), (), (), (), (), ())
     }
 }
 
