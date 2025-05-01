@@ -3423,7 +3423,7 @@ mod tests {
         }
 
         let cases = vec![
-            // 1. Base fee increate, blob fee increase
+            // 1. Base fee increase, blob fee increase
             (BestTransactionsAttributes::new(base_fee + 5, Some(blob_fee + 5)), vec![tx1.clone()]),
             // 2. Base fee increase, blob fee not change
             (
@@ -3467,11 +3467,9 @@ mod tests {
             ),
         ];
 
-        let mut i = 1;
         for (attribute, expected) in cases {
             let mut best = pool.best_transactions_with_attributes(attribute);
 
-            let mut j = 1;
             for expected_tx in expected {
                 let tx = best.next().expect("Transaction should be returned");
                 assert_eq!(tx.transaction, expected_tx);
