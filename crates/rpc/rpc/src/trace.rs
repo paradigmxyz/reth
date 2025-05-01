@@ -1,7 +1,10 @@
 use alloy_consensus::BlockHeader as _;
 use alloy_eips::BlockId;
 use alloy_evm::block::calc::{base_block_reward_pre_merge, block_reward, ommer_reward};
-use alloy_primitives::{map::HashSet, Bytes, B256, U256};
+use alloy_primitives::{
+    map::{HashMap, HashSet},
+    Address, Bytes, B256, U256,
+};
 use alloy_rpc_types_eth::{
     state::{EvmOverrides, StateOverride},
     transaction::TransactionRequest,
@@ -31,10 +34,26 @@ use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
 use revm::DatabaseCommit;
 use revm_inspectors::{
     opcode::OpcodeGasInspector,
+    storage::StorageInspector,
     tracing::{parity::populate_state_diff, TracingInspector, TracingInspectorConfig},
 };
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
+
+/// Response type for storage tracing that contains all accessed storage slots
+/// for a transaction.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TransactionStorageAccess {
+    /// Hash of the transaction
+    pub transaction_hash: B256,
+    /// Tracks storage slots and access counter.
+    pub storage_access: HashMap<Address, HashMap<B256, u64>>,
+    /// Number of unique storage loads
+    pub unique_loads: u64,
+    /// Number of warm storage loads
+    pub warm_loads: u64,
+}
 
 /// `trace` API implementation.
 ///
@@ -560,6 +579,96 @@ where
             block_number: block.number(),
             transactions,
         }))
+    }
+
+    /// Calculates the base block reward for the given block:
+    ///
+    /// - if Paris hardfork is activated, no block rewards are given
+    /// - if Paris hardfork is not activated, calculate block rewards with block number only
+    /// - if Paris hardfork is unknown, calculate block rewards with block number and ttd
+    fn calculate_base_block_reward<H: BlockHeader>(
+        &self,
+        header: &H,
+    ) -> Result<Option<u128>, Eth::Error> {
+        let chain_spec = self.provider().chain_spec();
+        let is_paris_activated = if chain_spec.chain() == MAINNET.chain() {
+            Some(header.number()) >= EthereumHardfork::Paris.mainnet_activation_block()
+        } else if chain_spec.chain() == SEPOLIA.chain() {
+            Some(header.number()) >= EthereumHardfork::Paris.sepolia_activation_block()
+        } else {
+            true
+        };
+
+        if is_paris_activated {
+            return Ok(None)
+        }
+
+        Ok(Some(base_block_reward_pre_merge(&chain_spec, header.number())))
+    }
+
+    /// Extracts the reward traces for the given block:
+    ///  - block reward
+    ///  - uncle rewards
+    fn extract_reward_traces<H: BlockHeader>(
+        &self,
+        header: &H,
+        ommers: Option<&[H]>,
+        base_block_reward: u128,
+    ) -> Vec<LocalizedTransactionTrace> {
+        let ommers_cnt = ommers.map(|o| o.len()).unwrap_or_default();
+        let mut traces = Vec::with_capacity(ommers_cnt + 1);
+
+        let block_reward = block_reward(base_block_reward, ommers_cnt);
+        traces.push(reward_trace(
+            header,
+            RewardAction {
+                author: header.beneficiary(),
+                reward_type: RewardType::Block,
+                value: U256::from(block_reward),
+            },
+        ));
+
+        let Some(ommers) = ommers else { return traces };
+
+        for uncle in ommers {
+            let uncle_reward = ommer_reward(base_block_reward, header.number(), uncle.number());
+            traces.push(reward_trace(
+                header,
+                RewardAction {
+                    author: uncle.beneficiary(),
+                    reward_type: RewardType::Uncle,
+                    value: U256::from(uncle_reward),
+                },
+            ));
+        }
+        traces
+    }
+
+    /// Returns all storage slots accessed during transaction execution along with their access
+    /// counts.
+    pub async fn trace_transaction_storage_access(
+        &self,
+        tx_hash: B256,
+    ) -> Result<Option<TransactionStorageAccess>, Eth::Error> {
+        self.eth_api()
+            .spawn_trace_transaction_in_block_with_inspector(
+                tx_hash,
+                StorageInspector::default(),
+                move |_tx_info, inspector, _res, _| {
+                    let unique_loads = inspector.unique_loads();
+                    let warm_loads = inspector.warm_loads();
+                    let accessed_slots = inspector.into_accessed_slots();
+
+                    let trace = TransactionStorageAccess {
+                        transaction_hash: tx_hash,
+                        storage_access: accessed_slots,
+                        unique_loads,
+                        warm_loads,
+                    };
+                    Ok(trace)
+                },
+            )
+            .await
     }
 }
 
