@@ -283,8 +283,14 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
 }
 
 /// Noop [`ConfigureEvm`] implementation.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub struct NoopEvmConfig<N: NodePrimitives, TxEnv>(PhantomData<(N, TxEnv)>);
+
+impl<N: NodePrimitives, TxEnv> Default for NoopEvmConfig<N, TxEnv> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
 
 /// Noop [`Evm`] implementation.
 #[derive(Debug, Clone, Copy)]

@@ -18,7 +18,8 @@ use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHe
 use reth_engine_local::MiningMode;
 use reth_engine_tree::tree::{InvalidBlockHook, InvalidBlockHooks, NoopInvalidBlockHook};
 use reth_evm::{
-    noop::NoopBlockExecutorProvider, FromRecoveredTx, FromTxWithEncoded, TransactionEnv,
+    execute::BasicBlockExecutorProvider, FromRecoveredTx, FromTxWithEncoded, NoopEvmConfig,
+    TransactionEnv,
 };
 use reth_fs_util as fs;
 use reth_invalid_block_hooks::InvalidBlockWitnessHook;
@@ -425,7 +426,9 @@ where
                     Arc::new(NoopConsensus::default()),
                     NoopHeaderDownloader::default(),
                     NoopBodiesDownloader::default(),
-                    NoopBlockExecutorProvider::<N::Primitives>::default(),
+                    BasicBlockExecutorProvider::new(
+                        NoopEvmConfig::<N::Primitives, TxEnv>::default(),
+                    ),
                     self.toml_config().stages.clone(),
                     self.prune_modes(),
                 ))
