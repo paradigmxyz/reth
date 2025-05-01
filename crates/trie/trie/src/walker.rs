@@ -123,13 +123,10 @@ impl<C> TrieWalker<C> {
     /// Updates the skip node flag based on the walker's current state.
     fn update_skip_node(&mut self) {
         let old = self.can_skip_current_node;
-        self.can_skip_current_node = self.stack.last().is_some_and(|node| {
-            !self.changes.contains(node.full_key()) &&
-                node.hash_flag() &&
-                // If we have all branch nodes in the database, we will have a hash flag set even for leaf nodes.
-                // It means that we need to explicitly check that the node is a branch node by checking the tree flag.
-                (!self.all_branch_nodes_in_database || node.tree_flag())
-        });
+        self.can_skip_current_node = self
+            .stack
+            .last()
+            .is_some_and(|node| !self.changes.contains(node.full_key()) && node.hash_flag());
         trace!(
             target: "trie::walker",
             old,
