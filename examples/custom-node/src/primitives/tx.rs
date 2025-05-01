@@ -8,20 +8,15 @@ use reth_ethereum::primitives::{
     serde_bincode_compat::SerdeBincodeCompat, transaction::signed::RecoveryError, InMemorySize,
     SignedTransaction,
 };
-use reth_op::{
-    serde_bincode_compat::transaction::OpTxEnvelope as BincodeCompatOpTransactionSigned,
-    OpTransactionSigned,
-};
+
 use revm_primitives::{Address, Bytes};
 use serde::{Deserialize, Serialize};
 
 pub const TRANSFER_TX_TYPE_ID: u8 = 127;
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, Eq, PartialEq)]
-pub struct CustomTxEnvelope<T> {
-    pub inner: T,
+pub struct CustomTransaction {
+    pub inner: Signed<TxCustom>,
 }
-
-pub type CustomTransaction = CustomTxEnvelope<Signed<TxCustom>>;
 
 impl Transaction for CustomTransaction {
     fn chain_id(&self) -> Option<alloy_primitives::ChainId> {
@@ -97,11 +92,11 @@ impl Transaction for CustomTransaction {
 
 impl SignedTransaction for CustomTransaction {
     fn tx_hash(&self) -> &TxHash {
-        self.inner.tx().hash()
+        self.inner.tx().tx_hash()
     }
 
     fn recover_signer(&self) -> Result<Address, RecoveryError> {
-        self.inner.tx().recover_signer().map_err(|e| RecoveryError::from(e))
+        self.inner.tx().recover_signer()
     }
 
     fn recover_signer_unchecked(&self) -> Result<Address, RecoveryError> {
@@ -144,7 +139,8 @@ impl Encodable2718 for CustomTransaction {
 
 impl Decodable for CustomTransaction {
     fn decode(buf: &mut &[u8]) -> RlpResult<Self> {
-        Ok(Self { inner: Signed::new(TxCustom::decode(buf)?) })
+        let inner = Signed::<TxCustom>::decode_2718(buf)?;
+        Ok(CustomTransaction { inner })
     }
 }
 
@@ -160,15 +156,18 @@ impl InMemorySize for CustomTransaction {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BincodeCompatSignedTxCustom(pub Signed<TxCustom>);
+
 impl SerdeBincodeCompat for CustomTransaction {
-    type BincodeRepr<'a> = BincodeCompatOpTransactionSigned<'a>;
+    type BincodeRepr<'a> = BincodeCompatSignedTxCustom;
 
     fn as_repr(&self) -> Self::BincodeRepr<'_> {
-        self.inner.as_repr()
+        BincodeCompatSignedTxCustom(self.inner.clone())
     }
 
     fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
-        Self { inner: repr.into() }
+        Self { inner: repr.0.clone() }
     }
 }
 
@@ -177,12 +176,14 @@ impl Compact for CustomTransaction {
     where
         B: alloy_rlp::bytes::BufMut + AsMut<[u8]>,
     {
-        self.inner.tx().encode(buf)
+        let start_len = buf.remaining_mut();
+        self.inner.tx().encode(buf);
+        start_len - buf.remaining_mut()
     }
 
-    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        let (inner, buf) = OpTransactionSigned::from_compact(buf, len);
-
-        (Self { inner }, buf)
+    fn from_compact(_buf: &[u8], _len: usize) -> (Self, &[u8]) {
+        // let (inner, buf) = Signed::<TxCustom>::from_compact(buf, len);
+        // (Self { inner }, buf)
+        todo!()
     }
 }
