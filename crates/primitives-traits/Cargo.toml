@@ -16,7 +16,7 @@ workspace = true
 reth-codecs = { workspace = true, optional = true }
 
 # ethereum
-alloy-consensus.workspace = true
+alloy-consensus = { workspace = true, features = ["k256"] }
 alloy-eips.workspace = true
 alloy-genesis.workspace = true
 alloy-primitives = { workspace = true, features = ["k256"] }
