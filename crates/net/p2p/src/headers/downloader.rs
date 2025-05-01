@@ -4,7 +4,7 @@ use alloy_eips::{eip1898::BlockWithParent, BlockHashOrNumber};
 use alloy_primitives::{Sealable, B256};
 use futures::Stream;
 use reth_consensus::HeaderValidator;
-use reth_primitives_traits::{BlockHeader, SealedHeader};
+use reth_primitives_traits::{BlockHeader, Header, SealedHeader};
 use std::fmt::Debug;
 
 /// A downloader capable of fetching and yielding block headers.
@@ -75,6 +75,27 @@ impl SyncTarget {
             Self::Tip(tip) => (*tip).into(),
             Self::Gap(gap) => gap.parent.into(),
             Self::TipNum(num) => (*num).into(),
+        }
+    }
+}
+
+/// Represents a gap to sync: from `local_head` to `target`
+#[derive(Clone, Debug)]
+pub struct HeaderSyncGap<H = Header> {
+    /// The local head block. Represents lower bound of sync range.
+    pub local_head: SealedHeader<H>,
+
+    /// The sync target. Represents upper bound of sync range.
+    pub target: SyncTarget,
+}
+
+impl<H: BlockHeader + Sealable> HeaderSyncGap<H> {
+    /// Returns `true` if the gap from the head to the target was closed
+    #[inline]
+    pub fn is_closed(&self) -> bool {
+        match self.target.tip() {
+            BlockHashOrNumber::Hash(hash) => self.local_head.hash() == hash,
+            BlockHashOrNumber::Number(num) => self.local_head.number() == num,
         }
     }
 }

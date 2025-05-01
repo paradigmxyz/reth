@@ -1,6 +1,6 @@
 //! utilities for working with revm
 
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{keccak256, Address, B256, U256};
 use alloy_rpc_types_eth::{
     state::{AccountOverride, StateOverride},
     BlockOverrides,
@@ -288,6 +288,8 @@ where
         info.nonce = nonce;
     }
     if let Some(code) = account_override.code {
+        // we need to set both the bytecode and the codehash
+        info.code_hash = keccak256(&code);
         info.code = Some(
             Bytecode::new_raw_checked(code)
                 .map_err(|err| EthApiError::InvalidBytecode(err.to_string()))?,
@@ -346,6 +348,8 @@ where
 mod tests {
     use super::*;
     use alloy_consensus::constants::GWEI_TO_WEI;
+    use alloy_primitives::{address, bytes};
+    use reth_revm::db::EmptyDB;
 
     #[test]
     fn test_ensure_0_fallback() {
@@ -455,5 +459,39 @@ mod tests {
             Some(U256::ZERO),
         );
         assert!(call_fees.is_err());
+    }
+
+    #[test]
+    fn state_override_state() {
+        let code = bytes!(
+        "0x63d0e30db05f525f5f6004601c3473c02aaa39b223fe8d0a0e5c4f27ead9083c756cc25af15f5260205ff3"
+    );
+        let to = address!("0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599");
+
+        let mut db = State::builder().with_database(CacheDB::new(EmptyDB::new())).build();
+
+        let acc_override = AccountOverride::default().with_code(code.clone());
+        apply_account_override(to, acc_override, &mut db).unwrap();
+
+        let account = db.basic(to).unwrap().unwrap();
+        assert!(account.code.is_some());
+        assert_eq!(account.code_hash, keccak256(&code));
+    }
+
+    #[test]
+    fn state_override_cache_db() {
+        let code = bytes!(
+        "0x63d0e30db05f525f5f6004601c3473c02aaa39b223fe8d0a0e5c4f27ead9083c756cc25af15f5260205ff3"
+    );
+        let to = address!("0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599");
+
+        let mut db = CacheDB::new(EmptyDB::new());
+
+        let acc_override = AccountOverride::default().with_code(code.clone());
+        apply_account_override(to, acc_override, &mut db).unwrap();
+
+        let account = db.basic(to).unwrap().unwrap();
+        assert!(account.code.is_some());
+        assert_eq!(account.code_hash, keccak256(&code));
     }
 }

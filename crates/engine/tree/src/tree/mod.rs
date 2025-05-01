@@ -11,7 +11,7 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::{merge::EPOCH_SLOTS, BlockNumHash, NumHash};
 use alloy_primitives::{
     map::{HashMap, HashSet},
-    BlockNumber, B256, U256,
+    BlockNumber, B256,
 };
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
@@ -84,11 +84,15 @@ pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
 use reth_evm::execute::BlockExecutionOutput;
 
-/// The largest gap for which the tree will be used for sync. See docs for `pipeline_run_threshold`
-/// for more information.
+/// The largest gap for which the tree will be used to sync individual blocks by downloading them.
 ///
-/// This is the default threshold, the distance to the head that the tree will be used for sync.
-/// If the distance exceeds this threshold, the pipeline will be used for sync.
+/// This is the default threshold, and represents the distance (gap) from the local head to a
+/// new (canonical) block, e.g. the forkchoice head block. If the block distance from the local head
+/// exceeds this threshold, the pipeline will be used to backfill the gap more efficiently.
+///
+/// E.g.: Local head `block.number` is 100 and the forkchoice head `block.number` is 133 (more than
+/// an epoch has slots), then this exceeds the threshold at which the pipeline should be used to
+/// backfill this gap.
 pub(crate) const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 
 /// Keeps track of the state of the tree.
@@ -313,7 +317,7 @@ impl<N: NodePrimitives> TreeState<N> {
         // block, if it exists.
         //
         // For all other blocks, we  first put their children into this vec.
-        // Then, we will iterate over them, removing them, adding their children, etc etc,
+        // Then, we will iterate over them, removing them, adding their children, etc,
         // until the vec is empty.
         let mut blocks_to_remove = self.blocks_by_number.remove(&finalized_num).unwrap_or_default();
 
@@ -417,7 +421,7 @@ impl<N: NodePrimitives> TreeState<N> {
     }
 
     /// Updates the canonical head to the given block.
-    fn set_canonical_head(&mut self, new_head: BlockNumHash) {
+    const fn set_canonical_head(&mut self, new_head: BlockNumHash) {
         self.current_canonical_head = new_head;
     }
 
@@ -451,7 +455,7 @@ pub struct StateProviderBuilder<N: NodePrimitives, P> {
 impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
     /// Creates a new state provider from the provider factory, historical block hash and optional
     /// overlaid blocks.
-    pub fn new(
+    pub const fn new(
         provider_factory: P,
         historical: B256,
         overlay: Option<Vec<ExecutedBlockWithTrieUpdates<N>>>,
@@ -566,7 +570,6 @@ where
 {
     provider: P,
     executor_provider: E,
-    evm_config: C,
     consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
     payload_validator: V,
     /// Keeps track of internals such as executed and buffered blocks.
@@ -616,7 +619,6 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineApiTreeHandler")
             .field("provider", &self.provider)
-            .field("evm_config", &self.evm_config)
             .field("executor_provider", &self.executor_provider)
             .field("consensus", &self.consensus)
             .field("payload_validator", &self.payload_validator)
@@ -673,12 +675,11 @@ where
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
 
         let payload_processor =
-            PayloadProcessor::new(WorkloadExecutor::default(), evm_config.clone(), &config);
+            PayloadProcessor::new(WorkloadExecutor::default(), evm_config, &config);
 
         Self {
             provider,
             executor_provider,
-            evm_config,
             consensus,
             payload_validator,
             incoming,
@@ -1454,12 +1455,6 @@ where
                                 // handle the event if any
                                 self.on_maybe_tree_event(maybe_event)?;
                             }
-                            BeaconEngineMessage::TransitionConfigurationExchanged => {
-                                // triggering this hook will record that we received a request from
-                                // the CL
-                                self.canonical_in_memory_state
-                                    .on_transition_configuration_exchanged();
-                            }
                         }
                     }
                 }
@@ -1717,7 +1712,7 @@ where
     ///
     /// Assumes that `finish` has been called on the `persistence_state` at least once
     fn on_new_persisted_block(&mut self) -> ProviderResult<()> {
-        // If we have an on-disk reorg, we need to handle it firsrt before touching the in-memory
+        // If we have an on-disk reorg, we need to handle it first before touching the in-memory
         // state.
         if let Some(remove_above) = self.find_disk_reorg()? {
             self.remove_blocks(remove_above);
@@ -1915,18 +1910,6 @@ where
     /// Validate if block is correct and satisfies all the consensus rules that concern the header
     /// and block body itself.
     fn validate_block(&self, block: &RecoveredBlock<N::Block>) -> Result<(), ConsensusError> {
-        if let Err(e) =
-            self.consensus.validate_header_with_total_difficulty(block.header(), U256::MAX)
-        {
-            error!(
-                target: "engine::tree",
-                ?block,
-                "Failed to validate total difficulty for block {}: {e}",
-                block.hash()
-            );
-            return Err(e)
-        }
-
         if let Err(e) = self.consensus.validate_header(block.sealed_header()) {
             error!(target: "engine::tree", ?block, "Failed to validate header {}: {e}", block.hash());
             return Err(e)
@@ -2336,18 +2319,30 @@ where
         &mut self,
         block: RecoveredBlock<N::Block>,
     ) -> Result<InsertPayloadOk, InsertBlockError<N::Block>> {
-        self.insert_block_inner(block.clone())
-            .map_err(|kind| InsertBlockError::new(block.into_sealed_block(), kind))
+        match self.insert_block_inner(block) {
+            Ok(result) => Ok(result),
+            Err((kind, block)) => Err(InsertBlockError::new(block.into_sealed_block(), kind)),
+        }
     }
 
     fn insert_block_inner(
         &mut self,
         block: RecoveredBlock<N::Block>,
-    ) -> Result<InsertPayloadOk, InsertBlockErrorKind> {
+    ) -> Result<InsertPayloadOk, (InsertBlockErrorKind, RecoveredBlock<N::Block>)> {
+        /// A helper macro that returns the block in case there was an error
+        macro_rules! ensure_ok {
+            ($expr:expr) => {
+                match $expr {
+                    Ok(val) => val,
+                    Err(e) => return Err((e.into(), block)),
+                }
+            };
+        }
+
         let block_num_hash = block.num_hash();
         debug!(target: "engine::tree", block=?block_num_hash, parent = ?block.parent_hash(), state_root = ?block.state_root(), "Inserting new block into tree");
 
-        if self.block_by_hash(block.hash())?.is_some() {
+        if ensure_ok!(self.block_by_hash(block.hash())).is_some() {
             return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid))
         }
 
@@ -2356,10 +2351,11 @@ where
         trace!(target: "engine::tree", block=?block_num_hash, "Validating block consensus");
 
         // validate block consensus rules
-        self.validate_block(&block)?;
+        ensure_ok!(self.validate_block(&block));
 
         trace!(target: "engine::tree", block=?block_num_hash, parent=?block.parent_hash(), "Fetching block state provider");
-        let Some(provider_builder) = self.state_provider_builder(block.parent_hash())? else {
+        let Some(provider_builder) = ensure_ok!(self.state_provider_builder(block.parent_hash()))
+        else {
             // we don't have the state required to execute this block, buffering it and find the
             // missing parent block
             let missing_ancestor = self
@@ -2378,19 +2374,23 @@ where
         };
 
         // now validate against the parent
-        let parent_block = self.sealed_header_by_hash(block.parent_hash())?.ok_or_else(|| {
-            InsertBlockErrorKind::Provider(ProviderError::HeaderNotFound(
-                block.parent_hash().into(),
+        let Some(parent_block) = ensure_ok!(self.sealed_header_by_hash(block.parent_hash())) else {
+            return Err((
+                InsertBlockErrorKind::Provider(ProviderError::HeaderNotFound(
+                    block.parent_hash().into(),
+                )),
+                block,
             ))
-        })?;
+        };
+
         if let Err(e) =
             self.consensus.validate_header_against_parent(block.sealed_header(), &parent_block)
         {
             warn!(target: "engine::tree", ?block, "Failed to validate header {} against parent: {e}", block.hash());
-            return Err(e.into())
+            return Err((e.into(), block))
         }
 
-        let state_provider = provider_builder.build()?;
+        let state_provider = ensure_ok!(provider_builder.build());
 
         // We only run the parallel state root if we are not currently persisting any blocks or
         // persisting blocks that are all ancestors of the one we are executing.
@@ -2409,24 +2409,34 @@ where
         let txs = block.clone_transactions_recovered().collect();
         let mut handle = if run_parallel_state_root && self.config.use_state_root_task() {
             // use background tasks for state root calc
-            let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
+            let consistent_view =
+                ensure_ok!(ConsistentDbView::new_with_latest_tip(self.provider.clone()));
 
             // Compute trie input
             let trie_input_start = Instant::now();
-            let trie_input = self
-                .compute_trie_input(
-                    persisting_kind,
-                    consistent_view.clone(),
-                    block.header().parent_hash(),
-                )
-                .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
+            let res = self.compute_trie_input(
+                persisting_kind,
+                consistent_view.clone(),
+                block.header().parent_hash(),
+            );
+            let trie_input = match res {
+                Ok(val) => val,
+                Err(e) => return Err((InsertBlockErrorKind::Other(Box::new(e)), block)),
+            };
 
             self.metrics
                 .block_validation
                 .trie_input_duration
                 .record(trie_input_start.elapsed().as_secs_f64());
 
-            self.payload_processor.spawn(header, txs, provider_builder, consistent_view, trie_input)
+            self.payload_processor.spawn(
+                header,
+                txs,
+                provider_builder,
+                consistent_view,
+                trie_input,
+                &self.config,
+            )
         } else {
             self.payload_processor.spawn_cache_exclusive(header, txs, provider_builder)
         };
@@ -2443,11 +2453,11 @@ where
 
         let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
         let execution_start = Instant::now();
-        let output = self.metrics.executor.execute_metered(
+        let output = ensure_ok!(self.metrics.executor.execute_metered(
             executor,
             &block,
             Box::new(handle.state_hook()),
-        )?;
+        ));
         let execution_finish = Instant::now();
         let execution_time = execution_finish.duration_since(execution_start);
         debug!(target: "engine::tree", elapsed = ?execution_time, number=?block_num_hash.number, "Executed block");
@@ -2458,7 +2468,7 @@ where
         if let Err(err) = self.consensus.validate_block_post_execution(&block, &output) {
             // call post-block hook
             self.on_invalid_block(&parent_block, &block, &output, None);
-            return Err(err.into())
+            return Err((err.into(), block))
         }
 
         let hashed_state = self.provider.hashed_post_state(&output.state);
@@ -2469,7 +2479,7 @@ where
         {
             // call post-block hook
             self.on_invalid_block(&parent_block, &block, &output, None);
-            return Err(err.into())
+            return Err((err.into(), block))
         }
 
         debug!(target: "engine::tree", block=?block_num_hash, "Calculating block state root");
@@ -2520,7 +2530,7 @@ where
                     Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(error))) => {
                         debug!(target: "engine::tree", %error, "Parallel state root computation failed consistency check, falling back");
                     }
-                    Err(error) => return Err(InsertBlockErrorKind::Other(Box::new(error))),
+                    Err(error) => return Err((InsertBlockErrorKind::Other(Box::new(error)), block)),
                 }
             }
         }
@@ -2532,7 +2542,9 @@ where
         } else {
             // fallback is to compute the state root regularly in sync
             warn!(target: "engine::tree", block=?block_num_hash, ?persisting_kind, "Failed to compute state root in parallel");
-            let (root, updates) = state_provider.state_root_with_updates(hashed_state.clone())?;
+            self.metrics.block_validation.state_root_parallel_fallback_total.increment(1);
+            let (root, updates) =
+                ensure_ok!(state_provider.state_root_with_updates(hashed_state.clone()));
             (root, updates, root_time.elapsed())
         };
 
@@ -2543,10 +2555,13 @@ where
         if state_root != block.header().state_root() {
             // call post-block hook
             self.on_invalid_block(&parent_block, &block, &output, Some((&trie_output, state_root)));
-            return Err(ConsensusError::BodyStateRootDiff(
-                GotExpected { got: state_root, expected: block.header().state_root() }.into(),
-            )
-            .into())
+            return Err((
+                ConsensusError::BodyStateRootDiff(
+                    GotExpected { got: state_root, expected: block.header().state_root() }.into(),
+                )
+                .into(),
+                block,
+            ))
         }
 
         // terminate prewarming task with good state output
@@ -2573,7 +2588,11 @@ where
 
         // emit insert event
         let elapsed = start.elapsed();
-        let engine_event = if self.is_fork(block_num_hash.hash)? {
+        let is_fork = match self.is_fork(block_num_hash.hash) {
+            Ok(val) => val,
+            Err(e) => return Err((e.into(), executed.block.recovered_block().clone())),
+        };
+        let engine_event = if is_fork {
             BeaconConsensusEngineEvent::ForkBlockAdded(executed, elapsed)
         } else {
             BeaconConsensusEngineEvent::CanonicalBlockAdded(executed, elapsed)
@@ -3037,13 +3056,13 @@ impl PersistingKind {
     ///
     /// We only run the parallel state root if we are not currently persisting any blocks or
     /// persisting blocks that are all ancestors of the one we are calculating the state root for.
-    pub fn can_run_parallel_state_root(&self) -> bool {
+    pub const fn can_run_parallel_state_root(&self) -> bool {
         matches!(self, Self::NotPersisting | Self::PersistingDescendant)
     }
 
     /// Returns true if the blocks are currently being persisted and the input block is a
     /// descendant.
-    pub fn is_descendant(&self) -> bool {
+    pub const fn is_descendant(&self) -> bool {
         matches!(self, Self::PersistingDescendant)
     }
 }
@@ -3080,7 +3099,6 @@ mod tests {
     /// This is a test channel that allows you to `release` any value that is in the channel.
     ///
     /// If nothing has been sent, then the next value will be immediately sent.
-    #[allow(dead_code)]
     struct TestChannel<T> {
         /// If an item is sent to this channel, an item will be released in the wrapped channel
         release: Receiver<()>,
@@ -3092,7 +3110,6 @@ mod tests {
 
     impl<T: Send + 'static> TestChannel<T> {
         /// Creates a new test channel
-        #[allow(dead_code)]
         fn spawn_channel() -> (Sender<T>, Receiver<T>, TestChannelHandle) {
             let (original_tx, original_rx) = channel();
             let (wrapped_tx, wrapped_rx) = channel();
@@ -3156,7 +3173,7 @@ mod tests {
             Self::with_persistence_channel(chain_spec, action_tx, action_rx)
         }
 
-        #[allow(dead_code)]
+        #[expect(dead_code)]
         fn with_test_channel(chain_spec: Arc<ChainSpec>) -> (Self, TestChannelHandle) {
             let (action_tx, action_rx, handle) = TestChannel::spawn_channel();
             (Self::with_persistence_channel(chain_spec, action_tx, action_rx), handle)
@@ -3331,7 +3348,7 @@ mod tests {
                     assert_eq!(state, fcu_state);
                     assert_eq!(status, fcu_status.into());
                 }
-                _ => panic!("Unexpected event: {:#?}", event),
+                _ => panic!("Unexpected event: {event:#?}"),
             }
         }
 
@@ -3380,7 +3397,7 @@ mod tests {
                 ) => {
                     assert_eq!(header.hash(), hash);
                 }
-                _ => panic!("Unexpected event: {:#?}", event),
+                _ => panic!("Unexpected event: {event:#?}"),
             }
         }
 
@@ -3410,7 +3427,7 @@ mod tests {
                 ) => {
                     assert_eq!(executed.recovered_block.hash(), expected_hash);
                 }
-                _ => panic!("Unexpected event: {:#?}", event),
+                _ => panic!("Unexpected event: {event:#?}"),
             }
         }
 
@@ -3423,7 +3440,7 @@ mod tests {
                 )) => {
                     assert_eq!(executed.recovered_block.hash(), expected_hash);
                 }
-                _ => panic!("Unexpected event: {:#?}", event),
+                _ => panic!("Unexpected event: {event:#?}"),
             }
         }
 
@@ -3435,7 +3452,7 @@ mod tests {
                 )) => {
                     assert_eq!(block.hash(), expected_hash);
                 }
-                _ => panic!("Unexpected event: {:#?}", event),
+                _ => panic!("Unexpected event: {event:#?}"),
             }
         }
 
@@ -3526,7 +3543,7 @@ mod tests {
             FromEngine::DownloadedBlocks(blocks) => {
                 assert_eq!(blocks.len(), tree_config.max_execute_block_batch_size());
             }
-            _ => panic!("unexpected message: {:#?}", msg),
+            _ => panic!("unexpected message: {msg:#?}"),
         }
     }
 
@@ -4216,7 +4233,7 @@ mod tests {
                 let expected_block_set = HashSet::from_iter([missing_block.hash()]);
                 assert_eq!(actual_block_set, expected_block_set);
             }
-            _ => panic!("Unexpected event: {:#?}", event),
+            _ => panic!("Unexpected event: {event:#?}"),
         }
     }
 
@@ -4308,7 +4325,7 @@ mod tests {
             EngineApiEvent::Download(DownloadRequest::BlockSet(hash_set)) => {
                 assert_eq!(hash_set, HashSet::from_iter([main_chain_last_hash]));
             }
-            _ => panic!("Unexpected event: {:#?}", event),
+            _ => panic!("Unexpected event: {event:#?}"),
         }
 
         test_harness
@@ -4328,7 +4345,7 @@ mod tests {
                 );
                 assert_eq!(initial_hash, main_chain.last().unwrap().parent_hash);
             }
-            _ => panic!("Unexpected event: {:#?}", event),
+            _ => panic!("Unexpected event: {event:#?}"),
         }
     }
 
@@ -4371,7 +4388,7 @@ mod tests {
             EngineApiEvent::Download(DownloadRequest::BlockSet(hash_set)) => {
                 assert_eq!(hash_set, HashSet::from_iter([main_chain_backfill_target_hash]));
             }
-            _ => panic!("Unexpected event: {:#?}", event),
+            _ => panic!("Unexpected event: {event:#?}"),
         }
 
         // send message to tell the engine the requested block was downloaded
@@ -4390,7 +4407,7 @@ mod tests {
             )) => {
                 assert_eq!(target_hash, main_chain_backfill_target_hash);
             }
-            _ => panic!("Unexpected event: {:#?}", event),
+            _ => panic!("Unexpected event: {event:#?}"),
         }
 
         // persist blocks of main chain, same as the backfill operation would do
@@ -4416,7 +4433,7 @@ mod tests {
             EngineApiEvent::Download(DownloadRequest::BlockSet(target_hash)) => {
                 assert_eq!(target_hash, HashSet::from_iter([main_chain_last_hash]));
             }
-            _ => panic!("Unexpected event: {:#?}", event),
+            _ => panic!("Unexpected event: {event:#?}"),
         }
 
         // tell engine main chain tip downloaded
@@ -4435,7 +4452,7 @@ mod tests {
                 );
                 assert_eq!(initial_hash, main_chain_last.parent_hash);
             }
-            _ => panic!("Unexpected event: {:#?}", event),
+            _ => panic!("Unexpected event: {event:#?}"),
         }
 
         let remaining: Vec<_> = main_chain

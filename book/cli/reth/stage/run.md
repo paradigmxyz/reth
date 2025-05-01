@@ -9,17 +9,6 @@ $ reth stage run --help
 Usage: reth stage run [OPTIONS] --from <FROM> --to <TO> <STAGE>
 
 Options:
-      --instance <INSTANCE>
-          Add a new instance of a node.
-
-          Configures the ports of the node to avoid conflicts with the defaults. This is useful for running multiple nodes on the same machine.
-
-          Max number of instances is 200. It is chosen in a way so that it's not possible to have port numbers that conflict with each other.
-
-          Changes to the following port numbers: - `DISCOVERY_PORT`: default + `instance` - 1 - `AUTH_PORT`: default + `instance` * 100 - 100 - `HTTP_RPC_PORT`: default - `instance` + 1 - `WS_RPC_PORT`: default + `instance` * 2 - 2
-
-          [default: 1]
-
   -h, --help
           Print help (see a summary with '-h')
 
@@ -287,6 +276,13 @@ Networking:
           Name of network interface used to communicate with peers.
 
           If flag is set, but no value is passed, the default interface for docker `eth0` is tried.
+
+      --tx-propagation-policy <TX_PROPAGATION_POLICY>
+          Transaction Propagation Policy
+
+          The policy determines which peers transactions are gossiped to.
+
+          [default: All]
 
 Logging:
       --log.stdout.format <FORMAT>

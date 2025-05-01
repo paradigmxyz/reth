@@ -70,8 +70,8 @@ op-node \
     --l2.jwt-secret=/path/to/jwt.hex \
     --rpc.addr=0.0.0.0 \
     --rpc.port=7000 \
-    --l1.beacon=<your-beacon-node-http-endpoint>
-    --syncmode=execution-layer
+    --l1.beacon=<your-beacon-node-http-endpoint> \
+    --syncmode=execution-layer \
     --l2.enginekind=reth
 ```
 

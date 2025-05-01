@@ -16,86 +16,6 @@ use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives_traits::{SealedBlock, SealedHeader};
 use std::{collections::HashMap, sync::Arc};
 
-/// A headers+bodies client implementation that does nothing.
-#[derive(Debug, Default, Clone)]
-#[non_exhaustive]
-pub struct NoopFullBlockClient;
-
-/// Implements the `DownloadClient` trait for the `NoopFullBlockClient` struct.
-impl DownloadClient for NoopFullBlockClient {
-    /// Reports a bad message received from a peer.
-    ///
-    /// # Arguments
-    ///
-    /// * `_peer_id` - Identifier for the peer sending the bad message (unused in this
-    ///   implementation).
-    fn report_bad_message(&self, _peer_id: PeerId) {}
-
-    /// Retrieves the number of connected peers.
-    ///
-    /// # Returns
-    ///
-    /// The number of connected peers, which is always zero in this implementation.
-    fn num_connected_peers(&self) -> usize {
-        0
-    }
-}
-
-/// Implements the `BodiesClient` trait for the `NoopFullBlockClient` struct.
-impl BodiesClient for NoopFullBlockClient {
-    type Body = BlockBody;
-    /// Defines the output type of the function.
-    type Output = futures::future::Ready<PeerRequestResult<Vec<BlockBody>>>;
-
-    /// Retrieves block bodies based on provided hashes and priority.
-    ///
-    /// # Arguments
-    ///
-    /// * `_hashes` - A vector of block hashes (unused in this implementation).
-    /// * `_priority` - Priority level for block body retrieval (unused in this implementation).
-    ///
-    /// # Returns
-    ///
-    /// A future containing an empty vector of block bodies and a randomly generated `PeerId`.
-    fn get_block_bodies_with_priority(
-        &self,
-        _hashes: Vec<B256>,
-        _priority: Priority,
-    ) -> Self::Output {
-        // Create a future that immediately returns an empty vector of block bodies and a random
-        // PeerId.
-        futures::future::ready(Ok(WithPeerId::new(PeerId::random(), vec![])))
-    }
-}
-
-impl HeadersClient for NoopFullBlockClient {
-    type Header = Header;
-    /// The output type representing a future containing a peer request result with a vector of
-    /// headers.
-    type Output = futures::future::Ready<PeerRequestResult<Vec<Header>>>;
-
-    /// Retrieves headers with a specified priority level.
-    ///
-    /// This implementation does nothing and returns an empty vector of headers.
-    ///
-    /// # Arguments
-    ///
-    /// * `_request` - A request for headers (unused in this implementation).
-    /// * `_priority` - The priority level for the headers request (unused in this implementation).
-    ///
-    /// # Returns
-    ///
-    /// Always returns a ready future with an empty vector of headers wrapped in a
-    /// `PeerRequestResult`.
-    fn get_headers_with_priority(
-        &self,
-        _request: HeadersRequest,
-        _priority: Priority,
-    ) -> Self::Output {
-        futures::future::ready(Ok(WithPeerId::new(PeerId::random(), vec![])))
-    }
-}
-
 /// A headers+bodies client that stores the headers and bodies in memory, with an artificial soft
 /// bodies response limit that is set to 20 by default.
 ///
@@ -127,7 +47,7 @@ impl TestFullBlockClient {
     }
 
     /// Set the soft response limit.
-    pub fn set_soft_limit(&mut self, limit: usize) {
+    pub const fn set_soft_limit(&mut self, limit: usize) {
         self.soft_limit = limit;
     }
 

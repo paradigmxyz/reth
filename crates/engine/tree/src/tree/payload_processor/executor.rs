@@ -25,7 +25,7 @@ impl Default for WorkloadExecutor {
 
 impl WorkloadExecutor {
     /// Creates a new executor with the given number of threads for cpu bound work (rayon).
-    #[allow(unused)]
+    #[expect(unused)]
     pub(super) fn with_num_cpu_threads(cpu_threads: usize) -> Self {
         Self {
             inner: WorkloadExecutorInner::new(
@@ -35,7 +35,7 @@ impl WorkloadExecutor {
     }
 
     /// Returns the handle to the tokio runtime
-    pub(super) fn handle(&self) -> &Handle {
+    pub(super) const fn handle(&self) -> &Handle {
         &self.inner.handle
     }
 
@@ -50,8 +50,8 @@ impl WorkloadExecutor {
     }
 
     /// Returns access to the rayon pool
-    #[allow(unused)]
-    pub(super) fn rayon_pool(&self) -> &Arc<rayon::ThreadPool> {
+    #[expect(unused)]
+    pub(super) const fn rayon_pool(&self) -> &Arc<rayon::ThreadPool> {
         &self.inner.rayon_pool
     }
 }

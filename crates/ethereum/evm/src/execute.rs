@@ -49,7 +49,6 @@ mod tests {
         state::{AccountInfo, Bytecode, EvmState},
         Database,
     };
-    use secp256k1::{Keypair, Secp256k1};
     use std::sync::mpsc;
 
     fn create_database_with_beacon_root_contract() -> CacheDB<EmptyDB> {
@@ -415,10 +414,9 @@ mod tests {
         // we load the account first, because revm expects it to be
         // loaded
         executor.with_state_mut(|state| state.basic(HISTORY_STORAGE_ADDRESS).unwrap());
-        assert!(executor.with_state_mut(|state| state
-            .storage(HISTORY_STORAGE_ADDRESS, U256::ZERO)
-            .unwrap()
-            .is_zero()));
+        assert!(executor.with_state_mut(|state| {
+            state.storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap().is_zero()
+        }));
     }
 
     #[test]
@@ -453,10 +451,9 @@ mod tests {
         // we load the account first, because revm expects it to be
         // loaded
         executor.with_state_mut(|state| state.basic(HISTORY_STORAGE_ADDRESS).unwrap());
-        assert!(executor.with_state_mut(|state| state
-            .storage(HISTORY_STORAGE_ADDRESS, U256::ZERO)
-            .unwrap()
-            .is_zero()));
+        assert!(executor.with_state_mut(|state| {
+            state.storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap().is_zero()
+        }));
     }
 
     #[test]
@@ -505,10 +502,12 @@ mod tests {
         );
 
         // the hash of the block itself should not be in storage
-        assert!(executor.with_state_mut(|state| state
-            .storage(HISTORY_STORAGE_ADDRESS, U256::from(fork_activation_block))
-            .unwrap()
-            .is_zero()));
+        assert!(executor.with_state_mut(|state| {
+            state
+                .storage(HISTORY_STORAGE_ADDRESS, U256::from(fork_activation_block))
+                .unwrap()
+                .is_zero()
+        }));
     }
 
     // <https://github.com/ethereum/EIPs/pull/9144>
@@ -586,10 +585,9 @@ mod tests {
         // we load the account first, because revm expects it to be
         // loaded
         executor.with_state_mut(|state| state.basic(HISTORY_STORAGE_ADDRESS).unwrap());
-        assert!(executor.with_state_mut(|state| state
-            .storage(HISTORY_STORAGE_ADDRESS, U256::ZERO)
-            .unwrap()
-            .is_zero()));
+        assert!(executor.with_state_mut(|state| {
+            state.storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap().is_zero()
+        }));
 
         // attempt to execute block 1, this should not fail
         let header = Header {
@@ -621,10 +619,9 @@ mod tests {
                 .unwrap()),
             U256::ZERO
         );
-        assert!(executor.with_state_mut(|state| state
-            .storage(HISTORY_STORAGE_ADDRESS, U256::from(1))
-            .unwrap()
-            .is_zero()));
+        assert!(executor.with_state_mut(|state| {
+            state.storage(HISTORY_STORAGE_ADDRESS, U256::from(1)).unwrap().is_zero()
+        }));
 
         // attempt to execute block 2, this should not fail
         let header = Header {
@@ -661,10 +658,9 @@ mod tests {
                 .unwrap()),
             U256::ZERO
         );
-        assert!(executor.with_state_mut(|state| state
-            .storage(HISTORY_STORAGE_ADDRESS, U256::from(2))
-            .unwrap()
-            .is_zero()));
+        assert!(executor.with_state_mut(|state| {
+            state.storage(HISTORY_STORAGE_ADDRESS, U256::from(2)).unwrap().is_zero()
+        }));
     }
 
     #[test]
@@ -679,8 +675,7 @@ mod tests {
 
         let mut db = create_database_with_withdrawal_requests_contract();
 
-        let secp = Secp256k1::new();
-        let sender_key_pair = Keypair::new(&secp, &mut generators::rng());
+        let sender_key_pair = generators::generate_key(&mut generators::rng());
         let sender_address = public_key_to_address(sender_key_pair.public_key());
 
         db.insert_account_info(
@@ -689,7 +684,9 @@ mod tests {
         );
 
         // https://github.com/lightclient/sys-asm/blob/9282bdb9fd64e024e27f60f507486ffb2183cba2/test/Withdrawal.t.sol.in#L36
-        let validator_public_key = fixed_bytes!("111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111");
+        let validator_public_key = fixed_bytes!(
+            "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
+        );
         let withdrawal_amount = fixed_bytes!("0203040506070809");
         let input: Bytes = [&validator_public_key[..], &withdrawal_amount[..]].concat().into();
         assert_eq!(input.len(), 56);
@@ -748,10 +745,8 @@ mod tests {
         // Create a state provider with the withdrawal requests contract pre-deployed
         let mut db = create_database_with_withdrawal_requests_contract();
 
-        // Initialize Secp256k1 for key pair generation
-        let secp = Secp256k1::new();
         // Generate a new key pair for the sender
-        let sender_key_pair = Keypair::new(&secp, &mut generators::rng());
+        let sender_key_pair = generators::generate_key(&mut generators::rng());
         // Get the sender's address from the public key
         let sender_address = public_key_to_address(sender_key_pair.public_key());
 
@@ -762,7 +757,9 @@ mod tests {
         );
 
         // Define the validator public key and withdrawal amount as fixed bytes
-        let validator_public_key = fixed_bytes!("111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111");
+        let validator_public_key = fixed_bytes!(
+            "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
+        );
         let withdrawal_amount = fixed_bytes!("2222222222222222");
         // Concatenate the validator public key and withdrawal amount into a single byte array
         let input: Bytes = [&validator_public_key[..], &withdrawal_amount[..]].concat().into();

@@ -707,7 +707,7 @@ mod tests {
 
         // calculate min for chunk byte length range, pick a lower bound that guarantees at least
         // one block will be read
-        let chunk_byte_len = rand::thread_rng().gen_range(2000..=10_000);
+        let chunk_byte_len = rand::rng().random_range(2000..=10_000);
         trace!(target: "downloaders::file::test", chunk_byte_len);
 
         // init reader

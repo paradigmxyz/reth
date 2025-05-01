@@ -50,8 +50,6 @@ pub(crate) struct EngineApiLatencyMetrics {
     pub(crate) get_payload_bodies_by_range_v1: Histogram,
     /// Latency for `engine_getPayloadBodiesByHashV1`
     pub(crate) get_payload_bodies_by_hash_v1: Histogram,
-    /// Latency for `engine_exchangeTransitionConfigurationV1`
-    pub(crate) exchange_transition_configuration: Histogram,
     /// Latency for `engine_getBlobsV1`
     pub(crate) get_blobs_v1: Histogram,
 }
