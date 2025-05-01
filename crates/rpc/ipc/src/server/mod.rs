@@ -257,7 +257,7 @@ pub struct IpcServerStartError {
 
 /// Data required by the server to handle requests received via an IPC connection
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
+#[expect(dead_code)]
 pub(crate) struct ServiceData {
     /// Registered server methods.
     pub(crate) methods: Methods,
@@ -790,13 +790,14 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
 }
 
 #[cfg(test)]
-#[allow(missing_docs)]
+#[expect(missing_docs)]
 pub fn dummy_name() -> String {
-    let num: u64 = rand::Rng::gen(&mut rand::thread_rng());
+    use rand::Rng;
+    let num: u64 = rand::rng().random();
     if cfg!(windows) {
-        format!(r"\\.\pipe\my-pipe-{}", num)
+        format!(r"\\.\pipe\my-pipe-{num}")
     } else {
-        format!(r"/tmp/my-uds-{}", num)
+        format!(r"/tmp/my-uds-{num}")
     }
 }
 
@@ -849,7 +850,7 @@ mod tests {
                     closed = c;
                 }
 
-                // Send back back the error.
+                // Send back the error.
                 Either::Right((Some(Err(e)), _)) => break Err(e.into()),
             }
         }

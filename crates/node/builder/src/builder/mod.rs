@@ -14,15 +14,15 @@ use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli_util::get_secret_key;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
-use reth_engine_tree::tree::TreeConfig;
 use reth_exex::ExExContext;
 use reth_network::{
-    transactions::TransactionsManagerConfig, NetworkBuilder, NetworkConfig, NetworkConfigBuilder,
-    NetworkHandle, NetworkManager, NetworkPrimitives,
+    transactions::{TransactionPropagationPolicy, TransactionsManagerConfig},
+    NetworkBuilder, NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
+    NetworkPrimitives,
 };
 use reth_node_api::{
     FullNodePrimitives, FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes,
-    NodeTypesWithDBAdapter, NodeTypesWithEngine,
+    NodeTypesWithDBAdapter,
 };
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethTransactionPoolConfig},
@@ -50,7 +50,7 @@ pub use states::*;
 pub type RethFullAdapter<DB, Types> =
     FullNodeTypesAdapter<Types, DB, BlockchainProvider<NodeTypesWithDBAdapter<Types, DB>>>;
 
-#[allow(clippy::doc_markdown)]
+#[expect(clippy::doc_markdown)]
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Declaratively construct a node.
 ///
@@ -61,7 +61,8 @@ pub type RethFullAdapter<DB, Types> =
 ///
 /// Configuring a node starts out with a [`NodeConfig`] (this can be obtained from cli arguments for
 /// example) and then proceeds to configure the core static types of the node:
-/// [`NodeTypesWithEngine`], these include the node's primitive types and the node's engine types.
+/// [`NodeTypes`], these include the node's primitive types and the node's engine
+/// types.
 ///
 /// Next all stateful components of the node are configured, these include all the
 /// components of the node that are downstream of those types, these include:
@@ -127,10 +128,10 @@ pub type RethFullAdapter<DB, Types> =
 ///
 /// ## Internals
 ///
-/// The node builder is fully type safe, it uses the [`NodeTypesWithEngine`] trait to enforce that
+/// The node builder is fully type safe, it uses the [`NodeTypes`] trait to enforce that
 /// all components are configured with the correct types. However the database types and with that
 /// the provider trait implementations are currently created by the builder itself during the launch
-/// process, hence the database type is not part of the [`NodeTypesWithEngine`] trait and the node's
+/// process, hence the database type is not part of the [`NodeTypes`] trait and the node's
 /// components, that depend on the database, are configured separately. In order to have a nice
 /// trait that encapsulates the entire node the
 /// [`FullNodeComponents`](reth_node_api::FullNodeComponents) trait was introduced. This
@@ -188,7 +189,7 @@ impl<DB, ChainSpec> NodeBuilder<DB, ChainSpec> {
     }
 
     /// Returns a mutable reference to the node builder's config.
-    pub fn config_mut(&mut self) -> &mut NodeConfig<ChainSpec> {
+    pub const fn config_mut(&mut self) -> &mut NodeConfig<ChainSpec> {
         &mut self.config
     }
 }
@@ -239,7 +240,7 @@ where
     /// Configures the types of the node.
     pub fn with_types<T>(self) -> NodeBuilderWithTypes<RethFullAdapter<DB, T>>
     where
-        T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesForProvider,
+        T: NodeTypes<ChainSpec = ChainSpec> + NodeTypesForProvider,
     {
         self.with_types_and_provider()
     }
@@ -249,7 +250,7 @@ where
         self,
     ) -> NodeBuilderWithTypes<FullNodeTypesAdapter<T, DB, P>>
     where
-        T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesForProvider,
+        T: NodeTypes<ChainSpec = ChainSpec> + NodeTypesForProvider,
         P: FullProvider<NodeTypesWithDBAdapter<T, DB>>,
     {
         NodeBuilderWithTypes::new(self.config, self.database)
@@ -300,7 +301,7 @@ where
     /// Configures the types of the node.
     pub fn with_types<T>(self) -> WithLaunchContext<NodeBuilderWithTypes<RethFullAdapter<DB, T>>>
     where
-        T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesForProvider,
+        T: NodeTypes<ChainSpec = ChainSpec> + NodeTypesForProvider,
     {
         WithLaunchContext { builder: self.builder.with_types(), task_executor: self.task_executor }
     }
@@ -310,7 +311,7 @@ where
         self,
     ) -> WithLaunchContext<NodeBuilderWithTypes<FullNodeTypesAdapter<T, DB, P>>>
     where
-        T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesForProvider,
+        T: NodeTypes<ChainSpec = ChainSpec> + NodeTypesForProvider,
         P: FullProvider<NodeTypesWithDBAdapter<T, DB>>,
     {
         WithLaunchContext {
@@ -551,15 +552,7 @@ where
     {
         let Self { builder, task_executor } = self;
 
-        let engine_tree_config = TreeConfig::default()
-            .with_persistence_threshold(builder.config.engine.persistence_threshold)
-            .with_memory_block_buffer_target(builder.config.engine.memory_block_buffer_target)
-            .with_legacy_state_root(builder.config.engine.legacy_state_root_task_enabled)
-            .with_caching_and_prewarming(builder.config.engine.caching_and_prewarming_enabled)
-            .with_always_compare_trie_updates(builder.config.engine.state_root_task_compare_updates)
-            .with_cross_block_cache_size(
-                builder.config.engine.cross_block_cache_size * 1024 * 1024,
-            );
+        let engine_tree_config = builder.config.engine.tree_config();
 
         let launcher =
             EngineNodeLauncher::new(task_executor, builder.config.datadir(), engine_tree_config);
@@ -579,15 +572,7 @@ where
     {
         let Self { builder, task_executor } = self;
 
-        let engine_tree_config = TreeConfig::default()
-            .with_persistence_threshold(builder.config.engine.persistence_threshold)
-            .with_memory_block_buffer_target(builder.config.engine.memory_block_buffer_target)
-            .with_legacy_state_root(builder.config.engine.legacy_state_root_task_enabled)
-            .with_caching_and_prewarming(builder.config.engine.caching_and_prewarming_enabled)
-            .with_always_compare_trie_updates(builder.config.engine.state_root_task_compare_updates)
-            .with_cross_block_cache_size(
-                builder.config.engine.cross_block_cache_size * 1024 * 1024,
-            );
+        let engine_tree_config = builder.config.engine.tree_config();
 
         let launcher = DebugNodeLauncher::new(EngineNodeLauncher::new(
             task_executor,
@@ -693,20 +678,26 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
             + 'static,
         Node::Provider: BlockReaderFor<N>,
     {
-        self.start_network_with(builder, pool, Default::default())
+        self.start_network_with(
+            builder,
+            pool,
+            self.config().network.transactions_manager_config(),
+            self.config().network.tx_propagation_policy,
+        )
     }
 
     /// Convenience function to start the network tasks.
     ///
-    /// Accepts the config for the transaction task.
+    /// Accepts the config for the transaction task and the policy for propagation.
     ///
     /// Spawns the configured network and associated tasks and returns the [`NetworkHandle`]
     /// connected to that network.
-    pub fn start_network_with<Pool, N>(
+    pub fn start_network_with<Pool, N, Policy>(
         &self,
         builder: NetworkBuilder<(), (), N>,
         pool: Pool,
         tx_config: TransactionsManagerConfig,
+        propagation_policy: Policy,
     ) -> NetworkHandle<N>
     where
         N: NetworkPrimitives,
@@ -718,9 +709,10 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
             > + Unpin
             + 'static,
         Node::Provider: BlockReaderFor<N>,
+        Policy: TransactionPropagationPolicy,
     {
         let (handle, network, txpool, eth) = builder
-            .transactions(pool, tx_config)
+            .transactions_with_policy(pool, tx_config, propagation_policy)
             .request_handler(self.provider().clone())
             .split_with_handle();
 

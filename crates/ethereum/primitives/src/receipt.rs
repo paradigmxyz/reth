@@ -3,18 +3,21 @@ use alloy_consensus::{
     Eip2718EncodableReceipt, Eip658Value, ReceiptWithBloom, RlpDecodableReceipt,
     RlpEncodableReceipt, TxReceipt, TxType, Typed2718,
 };
-use alloy_eips::eip2718::Encodable2718;
+use alloy_eips::{
+    eip2718::{Eip2718Result, Encodable2718},
+    Decodable2718,
+};
 use alloy_primitives::{Bloom, Log, B256};
 use alloy_rlp::{BufMut, Decodable, Encodable, Header};
 use reth_primitives_traits::{proofs::ordered_trie_root_with_encoder, InMemorySize};
-use serde::{Deserialize, Serialize};
 
 /// Typed ethereum transaction receipt.
 /// Receipt containing result of transaction execution.
-#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[cfg_attr(feature = "reth-codec", derive(reth_codecs::CompactZstd))]
-#[cfg_attr(feature = "reth-codec", reth_codecs::add_arbitrary_tests)]
+#[cfg_attr(feature = "reth-codec", reth_codecs::add_arbitrary_tests(compact, rlp))]
 #[cfg_attr(feature = "reth-codec", reth_zstd(
     compressor = reth_zstd_compressors::RECEIPT_COMPRESSOR,
     decompressor = reth_zstd_compressors::RECEIPT_DECOMPRESSOR
@@ -88,6 +91,47 @@ impl Receipt {
     pub fn calculate_receipt_root_no_memo(receipts: &[Self]) -> B256 {
         ordered_trie_root_with_encoder(receipts, |r, buf| r.with_bloom_ref().encode_2718(buf))
     }
+
+    /// Returns length of RLP-encoded receipt fields without the given [`Bloom`] without an RLP
+    /// header
+    pub fn rlp_encoded_fields_length_without_bloom(&self) -> usize {
+        self.success.length() + self.cumulative_gas_used.length() + self.logs.length()
+    }
+
+    /// RLP-encodes receipt fields without the given [`Bloom`] without an RLP header.
+    pub fn rlp_encode_fields_without_bloom(&self, out: &mut dyn BufMut) {
+        self.success.encode(out);
+        self.cumulative_gas_used.encode(out);
+        self.logs.encode(out);
+    }
+
+    /// Returns RLP header for inner encoding.
+    pub fn rlp_header_inner_without_bloom(&self) -> Header {
+        Header { list: true, payload_length: self.rlp_encoded_fields_length_without_bloom() }
+    }
+
+    /// RLP-decodes the receipt from the provided buffer. This does not expect a type byte or
+    /// network header.
+    pub fn rlp_decode_inner_without_bloom(
+        buf: &mut &[u8],
+        tx_type: TxType,
+    ) -> alloy_rlp::Result<Self> {
+        let header = Header::decode(buf)?;
+        if !header.list {
+            return Err(alloy_rlp::Error::UnexpectedString);
+        }
+
+        let remaining = buf.len();
+        let success = Decodable::decode(buf)?;
+        let cumulative_gas_used = Decodable::decode(buf)?;
+        let logs = Decodable::decode(buf)?;
+
+        if buf.len() + header.payload_length != remaining {
+            return Err(alloy_rlp::Error::UnexpectedLength);
+        }
+
+        Ok(Self { tx_type, success, cumulative_gas_used, logs })
+    }
 }
 
 impl Eip2718EncodableReceipt for Receipt {
@@ -152,6 +196,48 @@ impl RlpDecodableReceipt for Receipt {
     }
 }
 
+impl Encodable2718 for Receipt {
+    fn encode_2718_len(&self) -> usize {
+        (!self.tx_type.is_legacy() as usize) +
+            self.rlp_header_inner_without_bloom().length_with_payload()
+    }
+
+    // encode the header
+    fn encode_2718(&self, out: &mut dyn BufMut) {
+        if !self.tx_type.is_legacy() {
+            out.put_u8(self.tx_type as u8);
+        }
+        self.rlp_header_inner_without_bloom().encode(out);
+        self.rlp_encode_fields_without_bloom(out);
+    }
+}
+
+impl Decodable2718 for Receipt {
+    fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
+        Ok(Self::rlp_decode_inner_without_bloom(buf, TxType::try_from(ty)?)?)
+    }
+
+    fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
+        Ok(Self::rlp_decode_inner_without_bloom(buf, TxType::Legacy)?)
+    }
+}
+
+impl Encodable for Receipt {
+    fn encode(&self, out: &mut dyn BufMut) {
+        self.network_encode(out);
+    }
+
+    fn length(&self) -> usize {
+        self.network_len()
+    }
+}
+
+impl Decodable for Receipt {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        Ok(Self::network_decode(buf)?)
+    }
+}
+
 impl TxReceipt for Receipt {
     type Log = Log;
 
@@ -193,16 +279,131 @@ impl InMemorySize for Receipt {
 
 impl reth_primitives_traits::Receipt for Receipt {}
 
-#[cfg(feature = "serde-bincode-compat")]
-impl reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat for Receipt {
-    type BincodeRepr<'a> = alloc::borrow::Cow<'a, Self>;
+#[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
+pub(super) mod serde_bincode_compat {
+    use alloc::{borrow::Cow, vec::Vec};
+    use alloy_consensus::TxType;
+    use alloy_primitives::{Log, U8};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde_with::{DeserializeAs, SerializeAs};
 
-    fn as_repr(&self) -> Self::BincodeRepr<'_> {
-        alloc::borrow::Cow::Borrowed(self)
+    /// Bincode-compatible [`super::Receipt`] serde implementation.
+    ///
+    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
+    /// ```rust
+    /// use reth_ethereum_primitives::{serde_bincode_compat, Receipt};
+    /// use serde::{de::DeserializeOwned, Deserialize, Serialize};
+    /// use serde_with::serde_as;
+    ///
+    /// #[serde_as]
+    /// #[derive(Serialize, Deserialize)]
+    /// struct Data {
+    ///     #[serde_as(as = "serde_bincode_compat::Receipt<'_>")]
+    ///     receipt: Receipt,
+    /// }
+    /// ```
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct Receipt<'a> {
+        /// Receipt type.
+        #[serde(deserialize_with = "deserde_txtype")]
+        pub tx_type: TxType,
+        /// If transaction is executed successfully.
+        ///
+        /// This is the `statusCode`
+        pub success: bool,
+        /// Gas used
+        pub cumulative_gas_used: u64,
+        /// Log send from contracts.
+        pub logs: Cow<'a, Vec<Log>>,
     }
 
-    fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
-        repr.into_owned()
+    /// Ensures that txtype is deserialized symmetrically as U8
+    fn deserde_txtype<'de, D>(deserializer: D) -> Result<TxType, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = U8::deserialize(deserializer)?;
+        value.to::<u8>().try_into().map_err(serde::de::Error::custom)
+    }
+
+    impl<'a> From<&'a super::Receipt> for Receipt<'a> {
+        fn from(value: &'a super::Receipt) -> Self {
+            Self {
+                tx_type: value.tx_type,
+                success: value.success,
+                cumulative_gas_used: value.cumulative_gas_used,
+                logs: Cow::Borrowed(&value.logs),
+            }
+        }
+    }
+
+    impl<'a> From<Receipt<'a>> for super::Receipt {
+        fn from(value: Receipt<'a>) -> Self {
+            Self {
+                tx_type: value.tx_type,
+                success: value.success,
+                cumulative_gas_used: value.cumulative_gas_used,
+                logs: value.logs.into_owned(),
+            }
+        }
+    }
+
+    impl SerializeAs<super::Receipt> for Receipt<'_> {
+        fn serialize_as<S>(source: &super::Receipt, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            Receipt::<'_>::from(source).serialize(serializer)
+        }
+    }
+
+    impl<'de> DeserializeAs<'de, super::Receipt> for Receipt<'de> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::Receipt, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            Receipt::<'_>::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    impl reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat for super::Receipt {
+        type BincodeRepr<'a> = Receipt<'a>;
+
+        fn as_repr(&self) -> Self::BincodeRepr<'_> {
+            self.into()
+        }
+
+        fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
+            repr.into()
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use crate::{receipt::serde_bincode_compat, Receipt};
+        use arbitrary::Arbitrary;
+        use rand::Rng;
+        use serde_with::serde_as;
+
+        #[test]
+        fn test_receipt_bincode_roundtrip() {
+            #[serde_as]
+            #[derive(Debug, PartialEq, Eq)]
+            #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+            struct Data {
+                #[serde_as(as = "serde_bincode_compat::Receipt<'_>")]
+                reseipt: Receipt,
+            }
+
+            let mut bytes = [0u8; 1024];
+            rand::rng().fill(bytes.as_mut_slice());
+            let data = Data {
+                reseipt: Receipt::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap(),
+            };
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+        }
     }
 }
 
@@ -235,7 +436,9 @@ mod tests {
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
     #[test]
     fn encode_legacy_receipt() {
-        let expected = hex!("f901668001b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85ff85d940000000000000000000000000000000000000011f842a0000000000000000000000000000000000000000000000000000000000000deada0000000000000000000000000000000000000000000000000000000000000beef830100ff");
+        let expected = hex!(
+            "f901668001b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85ff85d940000000000000000000000000000000000000011f842a0000000000000000000000000000000000000000000000000000000000000deada0000000000000000000000000000000000000000000000000000000000000beef830100ff"
+        );
 
         let mut data = Vec::with_capacity(expected.length());
         let receipt = ReceiptWithBloom {
@@ -265,7 +468,9 @@ mod tests {
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
     #[test]
     fn decode_legacy_receipt() {
-        let data = hex!("f901668001b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85ff85d940000000000000000000000000000000000000011f842a0000000000000000000000000000000000000000000000000000000000000deada0000000000000000000000000000000000000000000000000000000000000beef830100ff");
+        let data = hex!(
+            "f901668001b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85ff85d940000000000000000000000000000000000000011f842a0000000000000000000000000000000000000000000000000000000000000deada0000000000000000000000000000000000000000000000000000000000000beef830100ff"
+        );
 
         // EIP658Receipt
         let expected = ReceiptWithBloom {
@@ -359,7 +564,9 @@ mod tests {
 
     #[test]
     fn check_transaction_root() {
-        let data = &hex!("f90262f901f9a092230ce5476ae868e98c7979cfc165a93f8b6ad1922acf2df62e340916efd49da01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa02307107a867056ca33b5087e77c4174f47625e48fb49f1c70ced34890ddd88f3a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba0c598f69a5674cae9337261b669970e24abc0b46e6d284372a239ec8ccbf20b0ab901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8618203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0");
+        let data = &hex!(
+            "f90262f901f9a092230ce5476ae868e98c7979cfc165a93f8b6ad1922acf2df62e340916efd49da01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa02307107a867056ca33b5087e77c4174f47625e48fb49f1c70ced34890ddd88f3a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba0c598f69a5674cae9337261b669970e24abc0b46e6d284372a239ec8ccbf20b0ab901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8618203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0"
+        );
         let block_rlp = &mut data.as_slice();
         let block: Block = Block::decode(block_rlp).unwrap();
 
@@ -371,7 +578,9 @@ mod tests {
     fn check_withdrawals_root() {
         // Single withdrawal, amount 0
         // https://github.com/ethereum/tests/blob/9760400e667eba241265016b02644ef62ab55de2/BlockchainTests/EIPTests/bc4895-withdrawals/amountIs0.json
-        let data = &hex!("f90238f90219a0151934ad9b654c50197f37018ee5ee9bb922dec0a1b5e24a6d679cb111cdb107a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa0046119afb1ab36aaa8f66088677ed96cd62762f6d3e65642898e189fbe702d51a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008001887fffffffffffffff8082079e42a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b42188000000000000000009a048a703da164234812273ea083e4ec3d09d028300cd325b46a6a75402e5a7ab95c0c0d9d8808094c94f5374fce5edbc8e2a8697c15331677e6ebf0b80");
+        let data = &hex!(
+            "f90238f90219a0151934ad9b654c50197f37018ee5ee9bb922dec0a1b5e24a6d679cb111cdb107a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa0046119afb1ab36aaa8f66088677ed96cd62762f6d3e65642898e189fbe702d51a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008001887fffffffffffffff8082079e42a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b42188000000000000000009a048a703da164234812273ea083e4ec3d09d028300cd325b46a6a75402e5a7ab95c0c0d9d8808094c94f5374fce5edbc8e2a8697c15331677e6ebf0b80"
+        );
         let block: Block = Block::decode(&mut data.as_slice()).unwrap();
         assert!(block.body.withdrawals.is_some());
         let withdrawals = block.body.withdrawals.as_ref().unwrap();
@@ -381,7 +590,9 @@ mod tests {
 
         // 4 withdrawals, identical indices
         // https://github.com/ethereum/tests/blob/9760400e667eba241265016b02644ef62ab55de2/BlockchainTests/EIPTests/bc4895-withdrawals/twoIdenticalIndex.json
-        let data = &hex!("f9028cf90219a0151934ad9b654c50197f37018ee5ee9bb922dec0a1b5e24a6d679cb111cdb107a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa0ccf7b62d616c2ad7af862d67b9dcd2119a90cebbff8c3cd1e5d7fc99f8755774a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008001887fffffffffffffff8082079e42a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b42188000000000000000009a0a95b9a7b58a6b3cb4001eb0be67951c5517141cb0183a255b5cae027a7b10b36c0c0f86cda808094c94f5374fce5edbc8e2a8697c15331677e6ebf0b822710da028094c94f5374fce5edbc8e2a8697c15331677e6ebf0b822710da018094c94f5374fce5edbc8e2a8697c15331677e6ebf0b822710da028094c94f5374fce5edbc8e2a8697c15331677e6ebf0b822710");
+        let data = &hex!(
+            "f9028cf90219a0151934ad9b654c50197f37018ee5ee9bb922dec0a1b5e24a6d679cb111cdb107a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa0ccf7b62d616c2ad7af862d67b9dcd2119a90cebbff8c3cd1e5d7fc99f8755774a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008001887fffffffffffffff8082079e42a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b42188000000000000000009a0a95b9a7b58a6b3cb4001eb0be67951c5517141cb0183a255b5cae027a7b10b36c0c0f86cda808094c94f5374fce5edbc8e2a8697c15331677e6ebf0b822710da028094c94f5374fce5edbc8e2a8697c15331677e6ebf0b822710da018094c94f5374fce5edbc8e2a8697c15331677e6ebf0b822710da028094c94f5374fce5edbc8e2a8697c15331677e6ebf0b822710"
+        );
         let block: Block = Block::decode(&mut data.as_slice()).unwrap();
         assert!(block.body.withdrawals.is_some());
         let withdrawals = block.body.withdrawals.as_ref().unwrap();
@@ -397,7 +608,9 @@ mod tests {
             address: Address::ZERO,
             data: LogData::new_unchecked(vec![], Default::default()),
         }];
-        let bloom = bloom!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001");
+        let bloom = bloom!(
+            "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001"
+        );
         let receipt = ReceiptWithBloom {
             receipt: Receipt {
                 tx_type: TxType::Eip2930,

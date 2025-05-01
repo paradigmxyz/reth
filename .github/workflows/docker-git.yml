@@ -20,10 +20,18 @@ env:
 jobs:
   build:
     name: build and push
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     permissions:
       packages: write
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        build:
+          - name: 'Build and push the git-sha-tagged reth image'
+            command: 'make PROFILE=maxperf GIT_SHA=$GIT_SHA docker-build-push-git-sha'
+          - name: 'Build and push the git-sha-tagged op-reth image'
+            command: 'make IMAGE_NAME=$OP_IMAGE_NAME DOCKER_IMAGE_NAME=$OP_DOCKER_IMAGE_NAME GIT_SHA=$GIT_SHA PROFILE=maxperf op-docker-build-push-git-sha'
     steps:
       - uses: actions/checkout@v4
       - uses: rui314/setup-mold@v1
@@ -31,7 +39,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - uses: taiki-e/install-action@cross
+      - name: Install cross main
+        id: cross_main
+        run: |
+          cargo install cross --git https://github.com/cross-rs/cross
       - name: Log in to Docker
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io --username ${DOCKER_USERNAME} --password-stdin
@@ -39,7 +50,5 @@ jobs:
         run: |
           docker run --privileged --rm tonistiigi/binfmt --install arm64,amd64
           docker buildx create --use --name cross-builder
-      - name: Build and push the git-sha-tagged reth image
-        run: make PROFILE=maxperf GIT_SHA=$GIT_SHA docker-build-push-git-sha
-      - name: Build and push the git-sha-tagged op-reth image
-        run: make IMAGE_NAME=$OP_IMAGE_NAME DOCKER_IMAGE_NAME=$OP_DOCKER_IMAGE_NAME GIT_SHA=$GIT_SHA PROFILE=maxperf op-docker-build-push-git-sha
+      - name: Build and push ${{ matrix.build.name }}
+        run: ${{ matrix.build.command }}

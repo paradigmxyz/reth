@@ -15,20 +15,20 @@ pub use validator::EthereumExecutionPayloadValidator;
 use alloy_consensus::{Transaction, Typed2718};
 use alloy_primitives::U256;
 use reth_basic_payload_builder::{
-    is_better_payload, BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig,
+    is_better_payload, BuildArguments, BuildOutcome, MissingPayloadBehaviour, PayloadBuilder,
+    PayloadConfig,
 };
-use reth_chainspec::{ChainSpec, ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{BlockExecutionError, BlockValidationError};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutionStrategyFactory},
-    Evm, NextBlockEnvAttributes,
+    execute::{BlockBuilder, BlockBuilderOutcome},
+    ConfigureEvm, Evm, NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
-use reth_primitives_traits::SignedTransaction;
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_storage_api::StateProviderFactory;
 use reth_transaction_pool::{
@@ -76,11 +76,8 @@ impl<Pool, Client, EvmConfig> EthereumPayloadBuilder<Pool, Client, EvmConfig> {
 // Default implementation of [PayloadBuilder] for unit type
 impl<Pool, Client, EvmConfig> PayloadBuilder for EthereumPayloadBuilder<Pool, Client, EvmConfig>
 where
-    EvmConfig: BlockExecutionStrategyFactory<
-        Primitives = EthPrimitives,
-        NextBlockEnvCtx = NextBlockEnvAttributes,
-    >,
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + Clone,
+    EvmConfig: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks> + Clone,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
 {
     type Attributes = EthPayloadBuilderAttributes;
@@ -98,6 +95,17 @@ where
             args,
             |attributes| self.pool.best_transactions_with_attributes(attributes),
         )
+    }
+
+    fn on_missing_payload(
+        &self,
+        _args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
+    ) -> MissingPayloadBehaviour<Self::BuiltPayload> {
+        if self.builder_config.await_payload_on_missing {
+            MissingPayloadBehaviour::AwaitInProgress
+        } else {
+            MissingPayloadBehaviour::RaceEmptyPayload
+        }
     }
 
     fn build_empty_payload(
@@ -134,11 +142,8 @@ pub fn default_ethereum_payload<EvmConfig, Client, Pool, F>(
     best_txs: F,
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
 where
-    EvmConfig: BlockExecutionStrategyFactory<
-        Primitives = EthPrimitives,
-        NextBlockEnvCtx = NextBlockEnvAttributes,
-    >,
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
+    EvmConfig: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks>,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
 {
@@ -212,7 +217,7 @@ where
         // There's only limited amount of blob space available per block, so we need to check if
         // the EIP-4844 can still fit in the block
         if let Some(blob_tx) = tx.as_eip4844() {
-            let tx_blob_count = blob_tx.blob_versioned_hashes.len() as u64;
+            let tx_blob_count = blob_tx.tx().blob_versioned_hashes.len() as u64;
 
             if block_blob_count + tx_blob_count > max_blob_count {
                 // we can't fit this _blob_ transaction into the block, so we mark it as
@@ -260,7 +265,7 @@ where
 
         // add to the total blob gas used if the transaction successfully executed
         if let Some(blob_tx) = tx.as_eip4844() {
-            block_blob_count += blob_tx.blob_versioned_hashes.len() as u64;
+            block_blob_count += blob_tx.tx().blob_versioned_hashes.len() as u64;
 
             // if we've reached the max blob count, we can skip blob txs entirely
             if block_blob_count == max_blob_count {
@@ -283,8 +288,7 @@ where
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
-    let BlockBuilderOutcome { execution_result, block, .. } =
-        builder.finish(&state_provider).map_err(|err| PayloadBuilderError::Internal(err.into()))?;
+    let BlockBuilderOutcome { execution_result, block, .. } = builder.finish(&state_provider)?;
 
     let requests = chain_spec
         .is_prague_active_at_timestamp(attributes.timestamp)

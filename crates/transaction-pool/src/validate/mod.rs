@@ -9,17 +9,15 @@ use crate::{
 use alloy_eips::eip4844::BlobTransactionSidecar;
 use alloy_primitives::{Address, TxHash, B256, U256};
 use futures_util::future::Either;
-use reth_primitives::{Recovered, SealedBlock};
-use std::{fmt, future::Future, time::Instant};
+use reth_primitives_traits::{Recovered, SealedBlock};
+use std::{fmt, fmt::Debug, future::Future, time::Instant};
 
 mod constants;
 mod eth;
 mod task;
 
-/// A `TransactionValidator` implementation that validates ethereum transaction.
 pub use eth::*;
 
-/// A spawnable task that performs transaction validation.
 pub use task::{TransactionValidationTaskExecutor, ValidationTask};
 
 /// Validation constants.
@@ -152,7 +150,7 @@ impl<T: PoolTransaction> ValidTransaction<T> {
 }
 
 /// Provides support for validating transaction at any given state of the chain
-pub trait TransactionValidator: Send + Sync {
+pub trait TransactionValidator: Debug + Send + Sync {
     /// The transaction type to validate.
     type Transaction: PoolTransaction;
 
@@ -171,8 +169,8 @@ pub trait TransactionValidator: Send + Sync {
     ///    * nonce >= next nonce of the sender
     ///    * ...
     ///
-    /// See [`InvalidTransactionError`](reth_primitives::InvalidTransactionError) for common errors
-    /// variants.
+    /// See [`InvalidTransactionError`](reth_primitives_traits::transaction::error::InvalidTransactionError) for common
+    /// errors variants.
     ///
     /// The transaction pool makes no additional assumptions about the validity of the transaction
     /// at the time of this call before it inserts it into the pool. However, the validity of

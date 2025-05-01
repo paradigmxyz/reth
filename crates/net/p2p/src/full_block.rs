@@ -1,15 +1,18 @@
 use super::headers::client::HeadersRequest;
 use crate::{
     bodies::client::{BodiesClient, SingleBodyRequest},
+    download::DownloadClient,
     error::PeerRequestResult,
     headers::client::{HeadersClient, SingleHeaderRequest},
+    priority::Priority,
     BlockClient,
 };
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{Sealable, B256};
+use core::marker::PhantomData;
 use reth_consensus::{Consensus, ConsensusError};
-use reth_eth_wire_types::HeadersDirection;
-use reth_network_peers::WithPeerId;
+use reth_eth_wire_types::{EthNetworkPrimitives, HeadersDirection, NetworkPrimitives};
+use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives_traits::{SealedBlock, SealedHeader};
 use std::{
     cmp::Reverse,
@@ -322,7 +325,7 @@ enum BodyResponse<B> {
 /// NOTE: this assumes that bodies responses are returned by the client in the same order as the
 /// hash array used to request them.
 #[must_use = "futures do nothing unless polled"]
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 pub struct FetchFullBlockRangeFuture<Client>
 where
     Client: BlockClient,
@@ -640,6 +643,102 @@ where
 enum RangeResponseResult<H, B> {
     Header(PeerRequestResult<Vec<H>>),
     Body(PeerRequestResult<Vec<B>>),
+}
+
+/// A headers+bodies client implementation that does nothing.
+#[derive(Debug, Default, Clone)]
+#[non_exhaustive]
+pub struct NoopFullBlockClient<Net = EthNetworkPrimitives>(PhantomData<Net>);
+
+/// Implements the `DownloadClient` trait for the `NoopFullBlockClient` struct.
+impl<Net> DownloadClient for NoopFullBlockClient<Net>
+where
+    Net: Debug + Send + Sync,
+{
+    /// Reports a bad message received from a peer.
+    ///
+    /// # Arguments
+    ///
+    /// * `_peer_id` - Identifier for the peer sending the bad message (unused in this
+    ///   implementation).
+    fn report_bad_message(&self, _peer_id: PeerId) {}
+
+    /// Retrieves the number of connected peers.
+    ///
+    /// # Returns
+    ///
+    /// The number of connected peers, which is always zero in this implementation.
+    fn num_connected_peers(&self) -> usize {
+        0
+    }
+}
+
+/// Implements the `BodiesClient` trait for the `NoopFullBlockClient` struct.
+impl<Net> BodiesClient for NoopFullBlockClient<Net>
+where
+    Net: NetworkPrimitives,
+{
+    type Body = Net::BlockBody;
+    /// Defines the output type of the function.
+    type Output = futures::future::Ready<PeerRequestResult<Vec<Self::Body>>>;
+
+    /// Retrieves block bodies based on provided hashes and priority.
+    ///
+    /// # Arguments
+    ///
+    /// * `_hashes` - A vector of block hashes (unused in this implementation).
+    /// * `_priority` - Priority level for block body retrieval (unused in this implementation).
+    ///
+    /// # Returns
+    ///
+    /// A future containing an empty vector of block bodies and a randomly generated `PeerId`.
+    fn get_block_bodies_with_priority(
+        &self,
+        _hashes: Vec<B256>,
+        _priority: Priority,
+    ) -> Self::Output {
+        // Create a future that immediately returns an empty vector of block bodies and a random
+        // PeerId.
+        futures::future::ready(Ok(WithPeerId::new(PeerId::random(), vec![])))
+    }
+}
+
+impl<Net> HeadersClient for NoopFullBlockClient<Net>
+where
+    Net: NetworkPrimitives,
+{
+    type Header = Net::BlockHeader;
+    /// The output type representing a future containing a peer request result with a vector of
+    /// headers.
+    type Output = futures::future::Ready<PeerRequestResult<Vec<Self::Header>>>;
+
+    /// Retrieves headers with a specified priority level.
+    ///
+    /// This implementation does nothing and returns an empty vector of headers.
+    ///
+    /// # Arguments
+    ///
+    /// * `_request` - A request for headers (unused in this implementation).
+    /// * `_priority` - The priority level for the headers request (unused in this implementation).
+    ///
+    /// # Returns
+    ///
+    /// Always returns a ready future with an empty vector of headers wrapped in a
+    /// `PeerRequestResult`.
+    fn get_headers_with_priority(
+        &self,
+        _request: HeadersRequest,
+        _priority: Priority,
+    ) -> Self::Output {
+        futures::future::ready(Ok(WithPeerId::new(PeerId::random(), vec![])))
+    }
+}
+
+impl<Net> BlockClient for NoopFullBlockClient<Net>
+where
+    Net: NetworkPrimitives,
+{
+    type Block = Net::Block;
 }
 
 #[cfg(test)]

@@ -11,7 +11,7 @@ use tokio::net::TcpStream;
 /// RLPx commands
 #[derive(Parser, Debug)]
 pub struct Command {
-    #[clap(subcommand)]
+    #[command(subcommand)]
     subcommand: Subcommands,
 }
 
@@ -34,7 +34,7 @@ impl Command {
                 let (_, their_hello) =
                     UnauthedP2PStream::new(ecies_stream).handshake(hello).await?;
 
-                println!("{:#?}", their_hello);
+                println!("{their_hello:#?}");
             }
         }
         Ok(())

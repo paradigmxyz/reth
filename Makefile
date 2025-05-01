@@ -26,7 +26,7 @@ PROFILE ?= release
 CARGO_INSTALL_EXTRA_FLAGS ?=
 
 # The release tag of https://github.com/ethereum/tests to use for EF tests
-EF_TESTS_TAG := v12.2
+EF_TESTS_TAG := v17.0
 EF_TESTS_URL := https://github.com/ethereum/tests/archive/refs/tags/$(EF_TESTS_TAG).tar.gz
 EF_TESTS_DIR := ./testing/ef-tests/ethereum-tests
 
@@ -238,7 +238,7 @@ docker-build-push-latest: ## Build and push a cross-arch Docker image tagged wit
 # `docker buildx create --use --name cross-builder`
 .PHONY: docker-build-push-nightly
 docker-build-push-nightly: ## Build and push cross-arch Docker image tagged with the latest git tag with a `-nightly` suffix, and `latest-nightly`.
-	$(call docker_build_push,$(GIT_TAG)-nightly,latest-nightly)
+	$(call docker_build_push,nightly,nightly)
 
 # Create a cross-arch Docker image with the given tags and push it
 define docker_build_push
@@ -290,7 +290,24 @@ op-docker-build-push-latest: ## Build and push a cross-arch Docker image tagged 
 # `docker buildx create --use --name cross-builder`
 .PHONY: op-docker-build-push-nightly
 op-docker-build-push-nightly: ## Build and push cross-arch Docker image tagged with the latest git tag with a `-nightly` suffix, and `latest-nightly`.
-	$(call op_docker_build_push,$(GIT_TAG)-nightly,latest-nightly)
+	$(call op_docker_build_push,nightly,nightly)
+
+# Note: This requires a buildx builder with emulation support. For example:
+#
+# `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
+# `docker buildx create --use --name cross-builder`
+.PHONY: docker-build-push-nightly-profiling
+docker-build-push-nightly-profiling: ## Build and push cross-arch Docker image with profiling profile tagged with nightly-profiling.
+	$(call docker_build_push,nightly-profiling,nightly-profiling)
+
+	# Note: This requires a buildx builder with emulation support. For example:
+#
+# `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
+# `docker buildx create --use --name cross-builder`
+.PHONY: op-docker-build-push-nightly-profiling
+op-docker-build-push-nightly-profiling: ## Build and push cross-arch Docker image tagged with the latest git tag with a `-nightly` suffix, and `latest-nightly`.
+	$(call op_docker_build_push,nightly-profiling,nightly-profiling)
+
 
 # Create a cross-arch Docker image with the given tags and push it
 define op_docker_build_push
@@ -344,6 +361,10 @@ update-book-cli: build-debug ## Update book cli documentation.
 .PHONY: profiling
 profiling: ## Builds `reth` with optimisations, but also symbols.
 	RUSTFLAGS="-C target-cpu=native" cargo build --profile profiling --features jemalloc,asm-keccak
+
+.PHONY: profiling-op
+profiling-op: ## Builds `op-reth` with optimisations, but also symbols.
+	RUSTFLAGS="-C target-cpu=native" cargo build --profile profiling --features jemalloc,asm-keccak --bin op-reth --manifest-path crates/optimism/bin/Cargo.toml
 
 .PHONY: maxperf
 maxperf: ## Builds `reth` with the most aggressive optimisations.

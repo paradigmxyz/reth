@@ -2,15 +2,15 @@
 
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_rpc_types_eth::{BlockId, TransactionReceipt};
-use reth_chainspec::EthChainSpec;
-use reth_primitives_traits::{BlockBody, SignedTransaction};
-use reth_provider::{BlockReader, ChainSpecProvider};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec};
+use reth_primitives_traits::BlockBody;
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
     types::RpcTypes,
     RpcNodeCoreExt, RpcReceipt,
 };
 use reth_rpc_eth_types::{EthApiError, EthReceiptBuilder};
+use reth_storage_api::BlockReader;
 
 use crate::EthApi;
 
@@ -20,8 +20,8 @@ where
         Error = EthApiError,
         NetworkTypes: RpcTypes<Receipt = TransactionReceipt>,
         Provider: BlockReader<
-            Transaction = reth_primitives::TransactionSigned,
-            Receipt = reth_primitives::Receipt,
+            Transaction = reth_ethereum_primitives::TransactionSigned,
+            Receipt = reth_ethereum_primitives::Receipt,
         >,
     >,
     Provider: BlockReader + ChainSpecProvider,

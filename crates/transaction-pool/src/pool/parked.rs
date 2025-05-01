@@ -216,7 +216,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
         removed
     }
 
-    fn next_id(&mut self) -> u64 {
+    const fn next_id(&mut self) -> u64 {
         let id = self.submission_id;
         self.submission_id = self.submission_id.wrapping_add(1);
         id
@@ -240,7 +240,6 @@ impl<T: ParkedOrd> ParkedPool<T> {
 
     /// Returns whether the pool is empty
     #[cfg(test)]
-    #[allow(dead_code)]
     pub(crate) fn is_empty(&self) -> bool {
         self.by_id.is_empty()
     }
@@ -272,7 +271,6 @@ impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
     /// Returns all transactions that satisfy the given basefee.
     ///
     /// Note: this does _not_ remove the transactions
-    #[allow(dead_code)]
     pub(crate) fn satisfy_base_fee_transactions(
         &self,
         basefee: u64,
@@ -520,9 +518,8 @@ impl<T: PoolTransaction> Ord for QueuedOrd<T> {
 mod tests {
     use super::*;
     use crate::test_utils::{MockTransaction, MockTransactionFactory, MockTransactionSet};
-    use alloy_consensus::Transaction;
+    use alloy_consensus::{Transaction, TxType};
     use alloy_primitives::address;
-    use reth_primitives::TxType;
     use std::collections::HashSet;
 
     #[test]
@@ -696,21 +693,17 @@ mod tests {
         let d_sender = address!("0x000000000000000000000000000000000000000d");
 
         // create a chain of transactions by sender A, B, C
-        let mut tx_set =
-            MockTransactionSet::dependent(a_sender, 0, 4, reth_primitives::TxType::Eip1559);
+        let mut tx_set = MockTransactionSet::dependent(a_sender, 0, 4, TxType::Eip1559);
         let a = tx_set.clone().into_vec();
 
-        let b = MockTransactionSet::dependent(b_sender, 0, 3, reth_primitives::TxType::Eip1559)
-            .into_vec();
+        let b = MockTransactionSet::dependent(b_sender, 0, 3, TxType::Eip1559).into_vec();
         tx_set.extend(b.clone());
 
         // C has the same number of txs as B
-        let c = MockTransactionSet::dependent(c_sender, 0, 3, reth_primitives::TxType::Eip1559)
-            .into_vec();
+        let c = MockTransactionSet::dependent(c_sender, 0, 3, TxType::Eip1559).into_vec();
         tx_set.extend(c.clone());
 
-        let d = MockTransactionSet::dependent(d_sender, 0, 1, reth_primitives::TxType::Eip1559)
-            .into_vec();
+        let d = MockTransactionSet::dependent(d_sender, 0, 1, TxType::Eip1559).into_vec();
         tx_set.extend(d.clone());
 
         let all_txs = tx_set.into_vec();

@@ -31,11 +31,13 @@ use std::{
 };
 use tracing::*;
 
+pub use reth_engine_primitives::{
+    DEFAULT_MAX_PROOF_TASK_CONCURRENCY, DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
+    DEFAULT_RESERVED_CPU_CORES,
+};
+
 /// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
 pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
-
-/// How close to the canonical head we persist blocks.
-pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 2;
 
 /// Default size of cross-block cache in megabytes.
 pub const DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB: u64 = 4 * 1024;
@@ -117,7 +119,8 @@ pub struct NodeConfig<ChainSpec> {
     /// - `AUTH_PORT`: default + `instance` * 100 - 100
     /// - `HTTP_RPC_PORT`: default - `instance` + 1
     /// - `WS_RPC_PORT`: default + `instance` * 2 - 2
-    pub instance: u16,
+    /// - `IPC_PATH`: default + `instance`
+    pub instance: Option<u16>,
 
     /// All networking related arguments
     pub network: NetworkArgs,
@@ -163,7 +166,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             config: None,
             chain,
             metrics: None,
-            instance: 1,
+            instance: None,
             network: NetworkArgs::default(),
             rpc: RpcServerArgs::default(),
             txpool: TxPoolArgs::default(),
@@ -222,8 +225,13 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
 
     /// Set the instance for the node
     pub const fn with_instance(mut self, instance: u16) -> Self {
-        self.instance = instance;
+        self.instance = Some(instance);
         self
+    }
+
+    /// Returns the instance value, defaulting to 1 if not set.
+    pub fn get_instance(&self) -> u16 {
+        self.instance.unwrap_or(1)
     }
 
     /// Set the network args for the node
@@ -397,8 +405,8 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     /// Change rpc port numbers based on the instance number, using the inner
     /// [`RpcServerArgs::adjust_instance_ports`] method.
     pub fn adjust_instance_ports(&mut self) {
-        self.rpc.adjust_instance_ports(self.instance);
         self.network.adjust_instance_ports(self.instance);
+        self.rpc.adjust_instance_ports(self.instance);
     }
 
     /// Sets networking and RPC ports to zero, causing the OS to choose random unused ports when

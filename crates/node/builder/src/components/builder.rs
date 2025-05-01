@@ -5,10 +5,10 @@ use crate::{
         Components, ConsensusBuilder, ExecutorBuilder, NetworkBuilder, NodeComponents,
         PayloadServiceBuilder, PoolBuilder,
     },
-    BuilderContext, FullNodeTypes,
+    BuilderContext, ConfigureEvm, FullNodeTypes,
 };
 use reth_consensus::{ConsensusError, FullConsensus};
-use reth_evm::execute::{BlockExecutionStrategyFactory, BlockExecutorProvider};
+use reth_evm::execute::BlockExecutorProvider;
 use reth_network::NetworkPrimitives;
 use reth_node_api::{BlockTy, BodyTy, HeaderTy, PrimitivesTy, TxTy};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
@@ -211,7 +211,8 @@ where
         payload_builder: PB,
     ) -> ComponentsBuilder<Node, PoolB, PB, NetworkB, ExecB, ConsB>
     where
-        PB: PayloadServiceBuilder<Node, PoolB::Pool>,
+        ExecB: ExecutorBuilder<Node>,
+        PB: PayloadServiceBuilder<Node, PoolB::Pool, ExecB::EVM>,
     {
         let Self {
             pool_builder,
@@ -312,7 +313,7 @@ where
             Block = BlockTy<Node::Types>,
         >,
     >,
-    PayloadB: PayloadServiceBuilder<Node, PoolB::Pool>,
+    PayloadB: PayloadServiceBuilder<Node, PoolB::Pool, ExecB::EVM>,
     ExecB: ExecutorBuilder<Node>,
     ConsB: ConsensusBuilder<Node>,
 {
@@ -341,8 +342,9 @@ where
         let (evm_config, executor) = evm_builder.build_evm(context).await?;
         let pool = pool_builder.build_pool(context).await?;
         let network = network_builder.build_network(context, pool.clone()).await?;
-        let payload_builder_handle =
-            payload_builder.spawn_payload_builder_service(context, pool.clone()).await?;
+        let payload_builder_handle = payload_builder
+            .spawn_payload_builder_service(context, pool.clone(), evm_config.clone())
+            .await?;
         let consensus = consensus_builder.build_consensus(context).await?;
 
         Ok(Components {
@@ -402,7 +404,7 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
         + 'static,
-    EVM: BlockExecutionStrategyFactory<Primitives = PrimitivesTy<Node::Types>> + 'static,
+    EVM: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>> + 'static,
     Executor: BlockExecutorProvider<Primitives = PrimitivesTy<Node::Types>>,
     Cons:
         FullConsensus<PrimitivesTy<Node::Types>, Error = ConsensusError> + Clone + Unpin + 'static,

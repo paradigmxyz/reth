@@ -24,7 +24,7 @@ use reth_tracing::tracing::debug;
 use tokio::sync::watch;
 
 /// Constructs a [Pipeline] that's wired to the network
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn build_networked_pipeline<N, Client, Executor>(
     config: &StageConfig,
     client: Client,
@@ -45,11 +45,11 @@ where
 {
     // building network downloaders using the fetch client
     let header_downloader = ReverseHeadersDownloaderBuilder::new(config.headers)
-        .build(client.clone(), consensus.clone().as_header_validator())
+        .build(client.clone(), consensus.clone())
         .into_task_with(task_executor);
 
     let body_downloader = BodiesDownloaderBuilder::new(config.bodies)
-        .build(client, consensus.clone().as_consensus(), provider_factory.clone())
+        .build(client, consensus.clone(), provider_factory.clone())
         .into_task_with(task_executor);
 
     let pipeline = build_pipeline(
@@ -70,7 +70,7 @@ where
 }
 
 /// Builds the [Pipeline] with the given [`ProviderFactory`] and downloaders.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn build_pipeline<N, H, B, Executor>(
     provider_factory: ProviderFactory<N>,
     stage_config: &StageConfig,

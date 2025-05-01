@@ -1,80 +1,113 @@
 //! Utilities for running e2e tests against a node or a network of nodes.
 
-use actions::{Action, ActionBox};
+use crate::{
+    testsuite::actions::{Action, ActionBox},
+    NodeBuilderHelper, PayloadAttributesBuilder,
+};
+use alloy_primitives::B256;
 use eyre::Result;
+use jsonrpsee::http_client::{transport::HttpBackend, HttpClient};
+use reth_engine_local::LocalPayloadAttributesBuilder;
+use reth_node_api::{NodeTypes, PayloadTypes};
+use reth_payload_builder::PayloadId;
+use reth_rpc_layer::AuthClientService;
 use setup::Setup;
-
+use std::{collections::HashMap, marker::PhantomData};
 pub mod actions;
 pub mod setup;
+use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
 
 #[cfg(test)]
 mod examples;
 
-/// A runner performs operations on an environment.
+/// Client handles for both regular RPC and Engine API endpoints
 #[derive(Debug)]
-pub struct Runner<I> {
-    /// The environment containing the node(s) to test
-    env: Environment<I>,
+pub struct NodeClient {
+    /// Regular JSON-RPC client
+    pub rpc: HttpClient,
+    /// Engine API client
+    pub engine: HttpClient<AuthClientService<HttpBackend>>,
 }
 
-impl<I: 'static> Runner<I> {
-    /// Create a new test runner with the given environment
-    pub fn new(instance: I) -> Self {
-        Self { env: Environment { instance, ctx: () } }
-    }
-
-    /// Execute an action
-    pub async fn execute(&mut self, action: ActionBox<I>) -> Result<()> {
-        action.execute(&self.env).await
-    }
-
-    /// Execute a sequence of actions
-    pub async fn run_actions(&mut self, actions: Vec<ActionBox<I>>) -> Result<()> {
-        for action in actions {
-            self.execute(action).await?;
-        }
-        Ok(())
-    }
-
-    /// Run a complete test scenario with setup and actions
-    pub async fn run_scenario(
-        &mut self,
-        setup: Option<Setup>,
-        actions: Vec<ActionBox<I>>,
-    ) -> Result<()> {
-        if let Some(setup) = setup {
-            setup.apply(&mut self.env).await?;
-        }
-
-        self.run_actions(actions).await
-    }
+/// Represents the latest block information.
+#[derive(Debug, Clone)]
+pub struct LatestBlockInfo {
+    /// Hash of the latest block
+    pub hash: B256,
+    /// Number of the latest block
+    pub number: u64,
 }
-
 /// Represents a test environment.
 #[derive(Debug)]
 pub struct Environment<I> {
-    /// The instance against which we can run tests.
-    pub instance: I,
-    /// Context.
-    pub ctx: (),
+    /// Combined clients with both RPC and Engine API endpoints
+    pub node_clients: Vec<NodeClient>,
+    /// Tracks instance generic.
+    _phantom: PhantomData<I>,
+    /// Latest block information
+    pub latest_block_info: Option<LatestBlockInfo>,
+    /// Last producer index
+    pub last_producer_idx: Option<usize>,
+    /// Stores payload attributes indexed by block number
+    pub payload_attributes: HashMap<u64, PayloadAttributes>,
+    /// Tracks the latest block header timestamp
+    pub latest_header_time: u64,
+    /// Defines the increment for block timestamps (default: 2 seconds)
+    pub block_timestamp_increment: u64,
+    /// Stores payload IDs returned by block producers, indexed by block number
+    pub payload_id_history: HashMap<u64, PayloadId>,
+    /// Stores the next expected payload ID
+    pub next_payload_id: Option<PayloadId>,
+    /// Stores the latest fork choice state
+    pub latest_fork_choice_state: ForkchoiceState,
+    /// Stores the most recent built execution payload
+    pub latest_payload_built: Option<PayloadAttributes>,
+    /// Stores the most recent executed payload
+    pub latest_payload_executed: Option<PayloadAttributes>,
+    /// Number of slots until a block is considered safe
+    pub slots_to_safe: u64,
+    /// Number of slots until a block is considered finalized
+    pub slots_to_finalized: u64,
+}
+
+impl<I> Default for Environment<I> {
+    fn default() -> Self {
+        Self {
+            node_clients: vec![],
+            _phantom: Default::default(),
+            latest_block_info: None,
+            last_producer_idx: None,
+            payload_attributes: Default::default(),
+            latest_header_time: 0,
+            block_timestamp_increment: 2,
+            payload_id_history: HashMap::new(),
+            next_payload_id: None,
+            latest_fork_choice_state: ForkchoiceState::default(),
+            latest_payload_built: None,
+            latest_payload_executed: None,
+            slots_to_safe: 0,
+            slots_to_finalized: 0,
+        }
+    }
 }
 
 /// Builder for creating test scenarios
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
+#[derive(Default)]
 pub struct TestBuilder<I> {
-    instance: I,
-    setup: Option<Setup>,
+    setup: Option<Setup<I>>,
     actions: Vec<ActionBox<I>>,
+    env: Environment<I>,
 }
 
 impl<I: 'static> TestBuilder<I> {
     /// Create a new test builder
-    pub fn new(instance: I) -> Self {
-        Self { instance, setup: None, actions: Vec::new() }
+    pub fn new() -> Self {
+        Self { setup: None, actions: Vec::new(), env: Default::default() }
     }
 
     /// Set the test setup
-    pub fn with_setup(mut self, setup: Setup) -> Self {
+    pub fn with_setup(mut self, setup: Setup<I>) -> Self {
         self.setup = Some(setup);
         self
     }
@@ -84,13 +117,44 @@ impl<I: 'static> TestBuilder<I> {
     where
         A: Action<I>,
     {
-        self.actions.push(ActionBox::new(action));
+        self.actions.push(ActionBox::<I>::new(action));
+        self
+    }
+
+    /// Add multiple actions to the test
+    pub fn with_actions<II, A>(mut self, actions: II) -> Self
+    where
+        II: IntoIterator<Item = A>,
+        A: Action<I>,
+    {
+        self.actions.extend(actions.into_iter().map(ActionBox::new));
         self
     }
 
     /// Run the test scenario
-    pub async fn run(self) -> Result<()> {
-        let mut runner = Runner::new(self.instance);
-        runner.run_scenario(self.setup, self.actions).await
+    pub async fn run<N>(mut self) -> Result<()>
+    where
+        N: NodeBuilderHelper,
+        LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
+            <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
+        >,
+    {
+        let mut setup = self.setup.take();
+
+        if let Some(ref mut s) = setup {
+            s.apply::<N>(&mut self.env).await?;
+        }
+
+        let actions = std::mem::take(&mut self.actions);
+
+        for action in actions {
+            action.execute(&mut self.env).await?;
+        }
+
+        // explicitly drop the setup to shutdown the nodes
+        // after all actions have completed
+        drop(setup);
+
+        Ok(())
     }
 }

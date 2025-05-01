@@ -9,10 +9,12 @@
 #![warn(unused_crate_dependencies)]
 
 use futures::StreamExt;
-use reth_network::{
-    config::rng_secret_key, NetworkConfig, NetworkEventListenerProvider, NetworkManager,
+use reth_ethereum::{
+    network::{
+        config::rng_secret_key, NetworkConfig, NetworkEventListenerProvider, NetworkManager,
+    },
+    provider::test_utils::NoopProvider,
 };
-use reth_provider::test_utils::NoopProvider;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
@@ -37,7 +39,7 @@ async fn main() -> eyre::Result<()> {
     // interact with the network
     let mut events = handle.event_listener();
     while let Some(event) = events.next().await {
-        println!("Received event: {:?}", event);
+        println!("Received event: {event:?}");
     }
 
     Ok(())

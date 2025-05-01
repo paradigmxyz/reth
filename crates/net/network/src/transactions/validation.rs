@@ -3,53 +3,17 @@
 //! announcements. Validation and filtering of announcements is network dependent.
 
 use crate::metrics::{AnnouncedTxTypesMetrics, TxTypesCounter};
-use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
+use alloy_primitives::Signature;
 use derive_more::{Deref, DerefMut};
 use reth_eth_wire::{
     DedupPayload, Eth68TxMetadata, HandleMempoolData, PartiallyValidData, ValidAnnouncementData,
-    MAX_MESSAGE_SIZE,
 };
-use reth_primitives::TxType;
+use reth_ethereum_primitives::TxType;
 use std::{fmt, fmt::Display, mem};
 use tracing::trace;
 
 /// The size of a decoded signature in bytes.
 pub const SIGNATURE_DECODED_SIZE_BYTES: usize = mem::size_of::<Signature>();
-
-/// Interface for validating a `(ty, size, hash)` tuple from a
-/// [`NewPooledTransactionHashes68`](reth_eth_wire::NewPooledTransactionHashes68)..
-pub trait ValidateTx68 {
-    /// Validates a [`NewPooledTransactionHashes68`](reth_eth_wire::NewPooledTransactionHashes68)
-    /// entry. Returns [`ValidationOutcome`] which signals to the caller whether to fetch the
-    /// transaction or to drop it, and whether the sender of the announcement should be
-    /// penalized.
-    fn should_fetch(
-        &self,
-        ty: u8,
-        hash: &TxHash,
-        size: usize,
-        tx_types_counter: &mut TxTypesCounter,
-    ) -> ValidationOutcome;
-
-    /// Returns the reasonable maximum encoded transaction length configured for this network, if
-    /// any. This property is not spec'ed out but can be inferred by looking how much data can be
-    /// packed into a transaction for any given transaction type.
-    fn max_encoded_tx_length(&self, ty: TxType) -> Option<usize>;
-
-    /// Returns the strict maximum encoded transaction length for the given transaction type, if
-    /// any.
-    fn strict_max_encoded_tx_length(&self, ty: TxType) -> Option<usize>;
-
-    /// Returns the reasonable minimum encoded transaction length, if any. This property is not
-    /// spec'ed out but can be inferred by looking at which
-    /// [`reth_primitives::PooledTransaction`] will successfully pass decoding
-    /// for any given transaction type.
-    fn min_encoded_tx_length(&self, ty: TxType) -> Option<usize>;
-
-    /// Returns the strict minimum encoded transaction length for the given transaction type, if
-    /// any.
-    fn strict_min_encoded_tx_length(&self, ty: TxType) -> Option<usize>;
-}
 
 /// Outcomes from validating a `(ty, hash, size)` entry from a
 /// [`NewPooledTransactionHashes68`](reth_eth_wire::NewPooledTransactionHashes68). Signals to the
@@ -110,9 +74,7 @@ pub trait FilterAnnouncement {
     fn filter_valid_entries_68(
         &self,
         msg: PartiallyValidData<Eth68TxMetadata>,
-    ) -> (FilterOutcome, ValidAnnouncementData)
-    where
-        Self: ValidateTx68;
+    ) -> (FilterOutcome, ValidAnnouncementData);
 
     /// Removes invalid entries from a
     /// [`NewPooledTransactionHashes66`](reth_eth_wire::NewPooledTransactionHashes66) announcement.
@@ -157,125 +119,11 @@ impl Display for EthMessageFilter {
 
 impl PartiallyFilterMessage for EthMessageFilter {}
 
-impl ValidateTx68 for EthMessageFilter {
-    fn should_fetch(
-        &self,
-        ty: u8,
-        hash: &TxHash,
-        size: usize,
-        tx_types_counter: &mut TxTypesCounter,
-    ) -> ValidationOutcome {
-        //
-        // 1. checks if tx type is valid value for this network
-        //
-        let tx_type = match TxType::try_from(ty) {
-            Ok(ty) => ty,
-            Err(_) => {
-                trace!(target: "net::eth-wire",
-                    ty=ty,
-                    size=size,
-                    hash=%hash,
-                    network=%self,
-                    "invalid tx type in eth68 announcement"
-                );
-
-                return ValidationOutcome::ReportPeer
-            }
-        };
-        tx_types_counter.increase_by_tx_type(tx_type);
-
-        //
-        // 2. checks if tx's encoded length is within limits for this network
-        //
-        // transactions that are filtered out here, may not be spam, rather from benevolent peers
-        // that are unknowingly sending announcements with invalid data.
-        //
-        if let Some(strict_min_encoded_tx_length) = self.strict_min_encoded_tx_length(tx_type) {
-            if size < strict_min_encoded_tx_length {
-                trace!(target: "net::eth-wire",
-                    ty=ty,
-                    size=size,
-                    hash=%hash,
-                    strict_min_encoded_tx_length=strict_min_encoded_tx_length,
-                    network=%self,
-                    "invalid tx size in eth68 announcement"
-                );
-
-                return ValidationOutcome::Ignore
-            }
-        }
-        if let Some(reasonable_min_encoded_tx_length) = self.min_encoded_tx_length(tx_type) {
-            if size < reasonable_min_encoded_tx_length {
-                trace!(target: "net::eth-wire",
-                    ty=ty,
-                    size=size,
-                    hash=%hash,
-                    reasonable_min_encoded_tx_length=reasonable_min_encoded_tx_length,
-                    strict_min_encoded_tx_length=self.strict_min_encoded_tx_length(tx_type),
-                    network=%self,
-                    "tx size in eth68 announcement, is unreasonably small"
-                );
-
-                // just log a tx which is smaller than the reasonable min encoded tx length, don't
-                // filter it out
-            }
-        }
-        // this network has no strict max encoded tx length for any tx type
-        if let Some(reasonable_max_encoded_tx_length) = self.max_encoded_tx_length(tx_type) {
-            if size > reasonable_max_encoded_tx_length {
-                trace!(target: "net::eth-wire",
-                    ty=ty,
-                    size=size,
-                    hash=%hash,
-                    reasonable_max_encoded_tx_length=reasonable_max_encoded_tx_length,
-                    strict_max_encoded_tx_length=self.strict_max_encoded_tx_length(tx_type),
-                    network=%self,
-                    "tx size in eth68 announcement, is unreasonably large"
-                );
-
-                // just log a tx which is bigger than the reasonable max encoded tx length, don't
-                // filter it out
-            }
-        }
-
-        ValidationOutcome::Fetch
-    }
-
-    fn max_encoded_tx_length(&self, ty: TxType) -> Option<usize> {
-        // the biggest transaction so far is a blob transaction, which is currently max 2^17,
-        // encoded length, nonetheless, the blob tx may become bigger in the future.
-        #[allow(unreachable_patterns, clippy::match_same_arms)]
-        match ty {
-            TxType::Legacy | TxType::Eip2930 | TxType::Eip1559 => Some(MAX_MESSAGE_SIZE),
-            TxType::Eip4844 => None,
-            _ => None,
-        }
-    }
-
-    fn strict_max_encoded_tx_length(&self, _ty: TxType) -> Option<usize> {
-        None
-    }
-
-    fn min_encoded_tx_length(&self, _ty: TxType) -> Option<usize> {
-        // a transaction will have at least a signature. the encoded signature encoded on the tx
-        // is at least as big as the decoded type.
-        Some(SIGNATURE_DECODED_SIZE_BYTES)
-    }
-
-    fn strict_min_encoded_tx_length(&self, _ty: TxType) -> Option<usize> {
-        // decoding a tx will exit right away if it's not at least a byte
-        Some(1)
-    }
-}
-
 impl FilterAnnouncement for EthMessageFilter {
     fn filter_valid_entries_68(
         &self,
         mut msg: PartiallyValidData<Eth68TxMetadata>,
-    ) -> (FilterOutcome, ValidAnnouncementData)
-    where
-        Self: ValidateTx68,
-    {
+    ) -> (FilterOutcome, ValidAnnouncementData) {
         trace!(target: "net::tx::validation",
             msg=?*msg,
             network=%self,
@@ -301,14 +149,28 @@ impl FilterAnnouncement for EthMessageFilter {
                 return false
             };
 
-            match self.should_fetch(*ty, hash, *size, &mut tx_types_counter) {
-                ValidationOutcome::Fetch => true,
-                ValidationOutcome::Ignore => false,
-                ValidationOutcome::ReportPeer => {
+            //
+            //  checks if tx type is valid value for this network
+            //
+            let tx_type = match TxType::try_from(*ty) {
+                Ok(ty) => ty,
+                Err(_) => {
+                    trace!(target: "net::eth-wire",
+                        ty=ty,
+                        size=size,
+                        hash=%hash,
+                        network=%self,
+                        "invalid tx type in eth68 announcement"
+                    );
+
                     should_report_peer = true;
-                    false
-                }
+                    return false;
             }
+
+            };
+            tx_types_counter.increase_by_tx_type(tx_type);
+
+            true
         });
         self.announced_tx_types_metrics.update_eth68_announcement_metrics(tx_types_counter);
         (
@@ -335,7 +197,9 @@ impl FilterAnnouncement for EthMessageFilter {
 mod test {
     use super::*;
     use alloy_primitives::B256;
-    use reth_eth_wire::{NewPooledTransactionHashes66, NewPooledTransactionHashes68};
+    use reth_eth_wire::{
+        NewPooledTransactionHashes66, NewPooledTransactionHashes68, MAX_MESSAGE_SIZE,
+    };
     use std::{collections::HashMap, str::FromStr};
 
     #[test]
@@ -385,45 +249,6 @@ mod test {
 
         let mut expected_data = HashMap::default();
         expected_data.insert(hashes[1], Some((types[1], sizes[1])));
-
-        assert_eq!(expected_data, valid_data.into_data())
-    }
-
-    #[test]
-    fn eth68_announcement_too_small_tx() {
-        let types = vec![TxType::Eip7702 as u8, TxType::Legacy as u8, TxType::Eip2930 as u8];
-        let sizes = vec![
-            0, // the first length isn't valid
-            0, // neither is the second
-            1,
-        ];
-        let hashes = vec![
-            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafa")
-                .unwrap(),
-            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefbbbb")
-                .unwrap(),
-            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeef00bb")
-                .unwrap(),
-        ];
-
-        let announcement = NewPooledTransactionHashes68 {
-            types: types.clone(),
-            sizes: sizes.clone(),
-            hashes: hashes.clone(),
-        };
-
-        let filter = EthMessageFilter::default();
-
-        let (outcome, partially_valid_data) = filter.partially_filter_valid_entries(announcement);
-
-        assert_eq!(outcome, FilterOutcome::Ok);
-
-        let (outcome, valid_data) = filter.filter_valid_entries_68(partially_valid_data);
-
-        assert_eq!(outcome, FilterOutcome::Ok);
-
-        let mut expected_data = HashMap::default();
-        expected_data.insert(hashes[2], Some((types[2], sizes[2])));
 
         assert_eq!(expected_data, valid_data.into_data())
     }

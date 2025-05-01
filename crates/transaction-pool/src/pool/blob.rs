@@ -16,7 +16,8 @@ use std::{
 ///
 /// This expects that certain constraints are met:
 ///   - blob transactions are always gap less
-pub(crate) struct BlobTransactions<T: PoolTransaction> {
+#[derive(Debug, Clone)]
+pub struct BlobTransactions<T: PoolTransaction> {
     /// Keeps track of transactions inserted in the pool.
     ///
     /// This way we can determine when transactions were submitted to the pool.
@@ -42,7 +43,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
     ///
     ///   - If the transaction is not a blob tx.
     ///   - If the transaction is already included.
-    pub(crate) fn add_transaction(&mut self, tx: Arc<ValidPoolTransaction<T>>) {
+    pub fn add_transaction(&mut self, tx: Arc<ValidPoolTransaction<T>>) {
         assert!(tx.is_eip4844(), "transaction is not a blob tx");
         let id = *tx.id();
         assert!(!self.contains(&id), "transaction already included {:?}", self.get(&id).unwrap());
@@ -58,7 +59,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         self.all.insert(transaction);
     }
 
-    fn next_id(&mut self) -> u64 {
+    const fn next_id(&mut self) -> u64 {
         let id = self.submission_id;
         self.submission_id = self.submission_id.wrapping_add(1);
         id
@@ -136,7 +137,6 @@ impl<T: PoolTransaction> BlobTransactions<T> {
 
     /// Returns whether the pool is empty
     #[cfg(test)]
-    #[allow(dead_code)]
     pub(crate) fn is_empty(&self) -> bool {
         self.by_id.is_empty()
     }
@@ -217,10 +217,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
     /// the [`BlobOrd`] struct.
     ///
     /// Removed transactions are returned in the order they were removed.
-    pub(crate) fn truncate_pool(
-        &mut self,
-        limit: SubPoolLimit,
-    ) -> Vec<Arc<ValidPoolTransaction<T>>> {
+    pub fn truncate_pool(&mut self, limit: SubPoolLimit) -> Vec<Arc<ValidPoolTransaction<T>>> {
         let mut removed = Vec::new();
 
         while self.exceeds(&limit) {
@@ -409,7 +406,7 @@ pub fn blob_tx_priority(
 /// The `priority` value is calculated using the [`blob_tx_priority`] function, and should be
 /// re-calculated on each block.
 #[derive(Debug, Clone)]
-struct BlobOrd {
+pub struct BlobOrd {
     /// Identifier that tags when transaction was submitted in the pool.
     pub(crate) submission_id: u64,
     /// The priority for this transaction, calculated using the [`blob_tx_priority`] function,

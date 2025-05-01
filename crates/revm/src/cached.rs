@@ -11,6 +11,9 @@ use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
 /// This is intended to be used in conjunction with `revm::db::State`
 /// during payload building which repeatedly accesses the same data.
 ///
+/// [`CachedReads::as_db_mut`] transforms this type into a [`Database`] implementation that uses
+/// [`CachedReads`] as a caching layer for operations, and records any cache misses.
+///
 /// # Example
 ///
 /// ```
@@ -26,21 +29,24 @@ use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
 /// ```
 #[derive(Debug, Clone, Default)]
 pub struct CachedReads {
-    accounts: HashMap<Address, CachedAccount>,
-    contracts: HashMap<B256, Bytecode>,
-    block_hashes: HashMap<u64, B256>,
+    /// Block state account with storage.
+    pub accounts: HashMap<Address, CachedAccount>,
+    /// Created contracts.
+    pub contracts: HashMap<B256, Bytecode>,
+    /// Block hash mapped to the block number.
+    pub block_hashes: HashMap<u64, B256>,
 }
 
 // === impl CachedReads ===
 
 impl CachedReads {
     /// Gets a [`DatabaseRef`] that will cache reads from the given database.
-    pub fn as_db<DB>(&mut self, db: DB) -> CachedReadsDBRef<'_, DB> {
+    pub const fn as_db<DB>(&mut self, db: DB) -> CachedReadsDBRef<'_, DB> {
         self.as_db_mut(db).into_db()
     }
 
     /// Gets a mutable [`Database`] that will cache reads from the underlying database.
-    pub fn as_db_mut<DB>(&mut self, db: DB) -> CachedReadsDbMut<'_, DB> {
+    pub const fn as_db_mut<DB>(&mut self, db: DB) -> CachedReadsDbMut<'_, DB> {
         CachedReadsDbMut { cached: self, db }
     }
 
@@ -178,10 +184,14 @@ impl<DB: DatabaseRef> DatabaseRef for CachedReadsDBRef<'_, DB> {
     }
 }
 
+/// Cached account contains the account state with storage
+/// but lacks the account status.
 #[derive(Debug, Clone)]
-struct CachedAccount {
-    info: Option<AccountInfo>,
-    storage: HashMap<U256, U256>,
+pub struct CachedAccount {
+    /// Account state.
+    pub info: Option<AccountInfo>,
+    /// Account's storage.
+    pub storage: HashMap<U256, U256>,
 }
 
 impl CachedAccount {

@@ -23,14 +23,14 @@ pub(crate) const RANDOM_INDEXES: [usize; 10] = [23, 2, 42, 5, 3, 99, 54, 0, 33, 
 #[allow(dead_code)]
 pub(crate) fn load_vectors<T: Table>() -> Vec<(T::Key, Bytes, T::Value, Bytes)>
 where
-    T::Key: Default + Clone + for<'de> serde::Deserialize<'de>,
-    T::Value: Default + Clone + for<'de> serde::Deserialize<'de>,
+    T::Key: Clone + for<'de> serde::Deserialize<'de>,
+    T::Value: Clone + for<'de> serde::Deserialize<'de>,
 {
     let path =
         format!("{}/../../../testdata/micro/db/{}.json", env!("CARGO_MANIFEST_DIR"), T::NAME);
     let list: Vec<TableRow<T>> = serde_json::from_reader(std::io::BufReader::new(
         std::fs::File::open(&path)
-        .unwrap_or_else(|_| panic!("Test vectors not found. They can be generated from the workspace by calling `cargo run --bin reth --features dev -- test-vectors tables`: {:?}", path))
+            .unwrap_or_else(|_| panic!("Test vectors not found. They can be generated from the workspace by calling `cargo run --bin reth --features dev -- test-vectors tables`: {path:?}"))
     ))
     .unwrap();
 
@@ -47,7 +47,7 @@ where
 }
 
 /// Sets up a clear database at `bench_db_path`.
-#[allow(clippy::ptr_arg)]
+#[expect(clippy::ptr_arg)]
 #[allow(dead_code)]
 pub(crate) fn set_up_db<T>(
     bench_db_path: &Path,
@@ -55,8 +55,8 @@ pub(crate) fn set_up_db<T>(
 ) -> DatabaseEnv
 where
     T: Table,
-    T::Key: Default + Clone,
-    T::Value: Default + Clone,
+    T::Key: Clone,
+    T::Value: Clone,
 {
     // Reset DB
     let _ = fs::remove_dir_all(bench_db_path);

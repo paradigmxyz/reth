@@ -2,25 +2,29 @@
 
 pub use crate::{payload::EthereumPayloadBuilder, EthereumEngineValidator};
 use crate::{EthEngineTypes, EthEvmConfig};
-use reth_chainspec::ChainSpec;
+use alloy_eips::{eip7840::BlobParams, merge::EPOCH_SLOTS};
+use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
-use reth_ethereum_primitives::{EthPrimitives, PooledTransaction};
-use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm, NextBlockEnvAttributes};
+use reth_ethereum_primitives::{EthPrimitives, PooledTransaction, TransactionSigned};
+use reth_evm::{
+    execute::BasicBlockExecutorProvider, ConfigureEvm, EvmFactory, EvmFactoryFor,
+    NextBlockEnvAttributes,
+};
 use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
-use reth_node_api::{AddOnsContext, BlockTy, FullNodeComponents, NodeAddOns, ReceiptTy, TxTy};
+use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, NodePrimitives, TxTy};
 use reth_node_builder::{
     components::{
         BasicPayloadServiceBuilder, ComponentsBuilder, ConsensusBuilder, ExecutorBuilder,
         NetworkBuilder, PoolBuilder,
     },
-    node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
+    node::{FullNodeTypes, NodeTypes},
     rpc::{
-        EngineValidatorAddOn, EngineValidatorBuilder, EthApiBuilder, RethRpcAddOns, RpcAddOns,
-        RpcHandle,
+        EngineValidatorAddOn, EngineValidatorBuilder, EthApiBuilder, EthApiCtx, RethRpcAddOns,
+        RpcAddOns, RpcHandle,
     },
     BuilderContext, DebugNode, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig,
     PayloadTypes,
@@ -29,16 +33,16 @@ use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, 
 use reth_rpc::{eth::core::EthApiFor, ValidationApi};
 use reth_rpc_api::{eth::FullEthApiServer, servers::BlockSubmissionValidationApiServer};
 use reth_rpc_builder::config::RethRpcServerConfig;
-use reth_rpc_eth_types::{error::FromEvmError, EthApiError, EthConfig, EthStateCache};
+use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, EthTransactionPool, PoolTransaction, TransactionPool,
-    TransactionValidationTaskExecutor,
+    blobstore::{DiskFileBlobStore, DiskFileBlobStoreConfig},
+    EthTransactionPool, PoolTransaction, TransactionPool, TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
 use revm::context::TxEnv;
-use std::sync::Arc;
+use std::{default::Default, sync::Arc, time::SystemTime};
 
 /// Type configuration for a regular Ethereum node.
 #[derive(Debug, Default, Clone, Copy)]
@@ -57,7 +61,7 @@ impl EthereumNode {
     >
     where
         Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
-        <Node::Types as NodeTypesWithEngine>::Engine: PayloadTypes<
+        <Node::Types as NodeTypes>::Payload: PayloadTypes<
             BuiltPayload = EthBuiltPayload,
             PayloadAttributes = EthPayloadAttributes,
             PayloadBuilderAttributes = EthPayloadBuilderAttributes,
@@ -66,9 +70,9 @@ impl EthereumNode {
         ComponentsBuilder::default()
             .node_types::<Node>()
             .pool(EthereumPoolBuilder::default())
+            .executor(EthereumExecutorBuilder::default())
             .payload(BasicPayloadServiceBuilder::default())
             .network(EthereumNetworkBuilder::default())
-            .executor(EthereumExecutorBuilder::default())
             .consensus(EthereumConsensusBuilder::default())
     }
 
@@ -88,7 +92,7 @@ impl EthereumNode {
     ///     .unwrap();
     /// ```
     ///
-    /// # Open a Providerfactory manually with with all required components
+    /// # Open a Providerfactory manually with all required components
     ///
     /// ```no_run
     /// use reth_chainspec::ChainSpecBuilder;
@@ -113,10 +117,7 @@ impl NodeTypes for EthereumNode {
     type ChainSpec = ChainSpec;
     type StateCommitment = MerklePatriciaTrie;
     type Storage = EthStorage;
-}
-
-impl NodeTypesWithEngine for EthereumNode {
-    type Engine = EthEngineTypes;
+    type Payload = EthEngineTypes;
 }
 
 /// Builds [`EthApi`](reth_rpc::EthApi) for Ethereum.
@@ -130,26 +131,23 @@ where
 {
     type EthApi = EthApiFor<N>;
 
-    fn build_eth_api(
-        self,
-        core_components: &N,
-        config: EthConfig,
-        cache: EthStateCache<BlockTy<N::Types>, ReceiptTy<N::Types>>,
-    ) -> Self::EthApi {
-        reth_rpc::EthApiBuilder::new(
-            core_components.provider().clone(),
-            core_components.pool().clone(),
-            core_components.network().clone(),
-            core_components.evm_config().clone(),
+    async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
+        let api = reth_rpc::EthApiBuilder::new(
+            ctx.components.provider().clone(),
+            ctx.components.pool().clone(),
+            ctx.components.network().clone(),
+            ctx.components.evm_config().clone(),
         )
-        .eth_cache(cache)
-        .task_spawner(core_components.task_executor().clone())
-        .gas_cap(config.rpc_gas_cap.into())
-        .max_simulate_blocks(config.rpc_max_simulate_blocks)
-        .eth_proof_window(config.eth_proof_window)
-        .fee_history_cache_config(config.fee_history_cache)
-        .proof_permits(config.proof_permits)
-        .build()
+        .eth_cache(ctx.cache)
+        .task_spawner(ctx.components.task_executor().clone())
+        .gas_cap(ctx.config.rpc_gas_cap.into())
+        .max_simulate_blocks(ctx.config.rpc_max_simulate_blocks)
+        .eth_proof_window(ctx.config.eth_proof_window)
+        .fee_history_cache_config(ctx.config.fee_history_cache)
+        .proof_permits(ctx.config.proof_permits)
+        .gas_oracle_config(ctx.config.gas_oracle)
+        .build();
+        Ok(api)
     }
 }
 
@@ -174,14 +172,15 @@ where
 impl<N> NodeAddOns<N> for EthereumAddOns<N>
 where
     N: FullNodeComponents<
-        Types: NodeTypesWithEngine<
+        Types: NodeTypes<
             ChainSpec = ChainSpec,
             Primitives = EthPrimitives,
-            Engine = EthEngineTypes,
+            Payload = EthEngineTypes,
         >,
-        Evm: ConfigureEvm<TxEnv = TxEnv, NextBlockEnvCtx = NextBlockEnvAttributes>,
+        Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthApiError: FromEvmError<N::Evm>,
+    EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
 {
     type Handle = RpcHandle<N, EthApiFor<N>>;
 
@@ -199,7 +198,7 @@ where
         );
 
         self.inner
-            .launch_add_ons_with(ctx, move |modules, _| {
+            .launch_add_ons_with(ctx, move |modules, _, _| {
                 modules.merge_if_module_configured(
                     RethRpcModule::Flashbots,
                     validation_api.into_rpc(),
@@ -214,14 +213,15 @@ where
 impl<N> RethRpcAddOns<N> for EthereumAddOns<N>
 where
     N: FullNodeComponents<
-        Types: NodeTypesWithEngine<
+        Types: NodeTypes<
             ChainSpec = ChainSpec,
             Primitives = EthPrimitives,
-            Engine = EthEngineTypes,
+            Payload = EthEngineTypes,
         >,
-        Evm: ConfigureEvm<TxEnv = TxEnv, NextBlockEnvCtx = NextBlockEnvAttributes>,
+        Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthApiError: FromEvmError<N::Evm>,
+    EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
 {
     type EthApi = EthApiFor<N>;
 
@@ -233,10 +233,10 @@ where
 impl<N> EngineValidatorAddOn<N> for EthereumAddOns<N>
 where
     N: FullNodeComponents<
-        Types: NodeTypesWithEngine<
+        Types: NodeTypes<
             ChainSpec = ChainSpec,
             Primitives = EthPrimitives,
-            Engine = EthEngineTypes,
+            Payload = EthEngineTypes,
         >,
     >,
     EthApiFor<N>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
@@ -282,7 +282,10 @@ impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for EthereumNode {
         reth_ethereum_primitives::Block {
             header: header.inner,
             body: reth_ethereum_primitives::BlockBody {
-                transactions: transactions.into_transactions().map(|tx| tx.inner.into()).collect(),
+                transactions: transactions
+                    .into_transactions()
+                    .map(|tx| tx.inner.into_inner().into())
+                    .collect(),
                 ommers: Default::default(),
                 withdrawals,
             },
@@ -297,7 +300,7 @@ pub struct EthereumExecutorBuilder;
 
 impl<Types, Node> ExecutorBuilder<Node> for EthereumExecutorBuilder
 where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
+    Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
 {
     type EVM = EthEvmConfig;
@@ -327,7 +330,10 @@ pub struct EthereumPoolBuilder {
 
 impl<Types, Node> PoolBuilder<Node> for EthereumPoolBuilder
 where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
+    Types: NodeTypes<
+        ChainSpec: EthereumHardforks,
+        Primitives: NodePrimitives<SignedTx = TransactionSigned>,
+    >,
     Node: FullNodeTypes<Types = Types>,
 {
     type Pool = EthTransactionPool<Node::Provider, DiskFileBlobStore>;
@@ -335,37 +341,69 @@ where
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
         let data_dir = ctx.config().datadir();
         let pool_config = ctx.pool_config();
-        let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
+
+        let blob_cache_size = if let Some(blob_cache_size) = pool_config.blob_cache_size {
+            blob_cache_size
+        } else {
+            // get the current blob params for the current timestamp, fallback to default Cancun
+            // params
+            let current_timestamp =
+                SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs();
+            let blob_params = ctx
+                .chain_spec()
+                .blob_params_at_timestamp(current_timestamp)
+                .unwrap_or_else(BlobParams::cancun);
+
+            // Derive the blob cache size from the target blob count, to auto scale it by
+            // multiplying it with the slot count for 2 epochs: 384 for pectra
+            (blob_params.target_blob_count * EPOCH_SLOTS * 2) as u32
+        };
+
+        let custom_config =
+            DiskFileBlobStoreConfig::default().with_max_cached_entries(blob_cache_size);
+
+        let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), custom_config)?;
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
             .with_head_timestamp(ctx.head().timestamp)
             .kzg_settings(ctx.kzg_settings()?)
             .with_local_transactions_config(pool_config.local_transactions_config.clone())
+            .set_tx_fee_cap(ctx.config().rpc.rpc_tx_fee_cap)
             .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
             .build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
 
         let transaction_pool =
             reth_transaction_pool::Pool::eth_pool(validator, blob_store, pool_config);
         info!(target: "reth::cli", "Transaction pool initialized");
-        let transactions_path = data_dir.txpool_transactions();
 
         // spawn txpool maintenance task
         {
             let pool = transaction_pool.clone();
             let chain_events = ctx.provider().canonical_state_stream();
             let client = ctx.provider().clone();
-            let transactions_backup_config =
-                reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
+            // Only spawn backup task if not disabled
+            if !ctx.config().txpool.disable_transactions_backup {
+                // Use configured backup path or default to data dir
+                let transactions_path = ctx
+                    .config()
+                    .txpool
+                    .transactions_backup_path
+                    .clone()
+                    .unwrap_or_else(|| data_dir.txpool_transactions());
 
-            ctx.task_executor().spawn_critical_with_graceful_shutdown_signal(
-                "local transactions backup task",
-                |shutdown| {
-                    reth_transaction_pool::maintain::backup_local_transactions_task(
-                        shutdown,
-                        pool.clone(),
-                        transactions_backup_config,
-                    )
-                },
-            );
+                let transactions_backup_config =
+                    reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
+
+                ctx.task_executor().spawn_critical_with_graceful_shutdown_signal(
+                    "local transactions backup task",
+                    |shutdown| {
+                        reth_transaction_pool::maintain::backup_local_transactions_task(
+                            shutdown,
+                            pool.clone(),
+                            transactions_backup_config,
+                        )
+                    },
+                );
+            }
 
             // spawn the maintenance task
             ctx.task_executor().spawn_critical(
@@ -377,6 +415,10 @@ where
                     ctx.task_executor().clone(),
                     reth_transaction_pool::maintain::MaintainPoolConfig {
                         max_tx_lifetime: transaction_pool.config().max_queued_lifetime,
+                        no_local_exemptions: transaction_pool
+                            .config()
+                            .local_transactions_config
+                            .no_exemptions,
                         ..Default::default()
                     },
                 ),
@@ -440,11 +482,7 @@ pub struct EthereumEngineValidatorBuilder;
 
 impl<Node, Types> EngineValidatorBuilder<Node> for EthereumEngineValidatorBuilder
 where
-    Types: NodeTypesWithEngine<
-        ChainSpec = ChainSpec,
-        Engine = EthEngineTypes,
-        Primitives = EthPrimitives,
-    >,
+    Types: NodeTypes<ChainSpec = ChainSpec, Payload = EthEngineTypes, Primitives = EthPrimitives>,
     Node: FullNodeComponents<Types = Types>,
 {
     type Validator = EthereumEngineValidator;

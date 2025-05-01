@@ -3,7 +3,6 @@
 use crate::{
     bench::{
         context::BenchContext,
-        new_payload_fcu::from_any_rpc_block,
         output::{
             NewPayloadResult, TotalGasOutput, TotalGasRow, GAS_OUTPUT_SUFFIX,
             NEW_PAYLOAD_OUTPUT_SUFFIX,
@@ -12,6 +11,7 @@ use crate::{
     valid_payload::call_new_payload,
 };
 use alloy_provider::Provider;
+use alloy_rpc_types_engine::ExecutionPayload;
 use clap::Parser;
 use csv::Writer;
 use reth_cli_runner::CliContext;
@@ -33,21 +33,29 @@ pub struct Command {
 impl Command {
     /// Execute `benchmark new-payload-only` command
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
-        // TODO: this could be just a function I guess, but destructuring makes the code slightly
-        // more readable than a 4 element tuple.
         let BenchContext { benchmark_mode, block_provider, auth_provider, mut next_block } =
             BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
         let (sender, mut receiver) = tokio::sync::mpsc::channel(1000);
         tokio::task::spawn(async move {
             while benchmark_mode.contains(next_block) {
-                let block_res =
-                    block_provider.get_block_by_number(next_block.into(), true.into()).await;
+                let block_res = block_provider.get_block_by_number(next_block.into()).full().await;
                 let block = block_res.unwrap().unwrap();
-                let response = from_any_rpc_block(block).unwrap();
+                let block = block
+                    .into_inner()
+                    .map_header(|header| header.map(|h| h.into_header_with_defaults()))
+                    .try_map_transactions(|tx| {
+                        tx.try_into_either::<op_alloy_consensus::OpTxEnvelope>()
+                    })
+                    .unwrap()
+                    .into_consensus();
+
+                let blob_versioned_hashes =
+                    block.body.blob_versioned_hashes_iter().copied().collect::<Vec<_>>();
+                let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
 
                 next_block += 1;
-                sender.send(response).await.unwrap();
+                sender.send((block.header, blob_versioned_hashes, payload, sidecar)).await.unwrap();
             }
         });
 
@@ -56,7 +64,7 @@ impl Command {
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
 
-        while let Some((header, versioned_hashes, payload)) = {
+        while let Some((header, versioned_hashes, payload, sidecar)) = {
             let wait_start = Instant::now();
             let result = receiver.recv().await;
             total_wait_time += wait_start.elapsed();
@@ -77,6 +85,7 @@ impl Command {
             call_new_payload(
                 &auth_provider,
                 payload,
+                sidecar,
                 header.parent_beacon_block_root,
                 versioned_hashes,
             )

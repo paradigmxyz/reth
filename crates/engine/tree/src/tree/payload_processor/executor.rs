@@ -25,7 +25,7 @@ impl Default for WorkloadExecutor {
 
 impl WorkloadExecutor {
     /// Creates a new executor with the given number of threads for cpu bound work (rayon).
-    #[allow(unused)]
+    #[expect(unused)]
     pub(super) fn with_num_cpu_threads(cpu_threads: usize) -> Self {
         Self {
             inner: WorkloadExecutorInner::new(
@@ -35,7 +35,7 @@ impl WorkloadExecutor {
     }
 
     /// Returns the handle to the tokio runtime
-    pub(super) fn handle(&self) -> &Handle {
+    pub(super) const fn handle(&self) -> &Handle {
         &self.inner.handle
     }
 
@@ -50,7 +50,8 @@ impl WorkloadExecutor {
     }
 
     /// Returns access to the rayon pool
-    pub(super) fn rayon_pool(&self) -> &Arc<rayon::ThreadPool> {
+    #[expect(unused)]
+    pub(super) const fn rayon_pool(&self) -> &Arc<rayon::ThreadPool> {
         &self.inner.rayon_pool
     }
 }
@@ -76,16 +77,4 @@ impl WorkloadExecutorInner {
 
         Self { handle: get_runtime_handle(), rayon_pool: Arc::new(rayon_pool) }
     }
-}
-
-/// Determines if the host has enough parallelism to run the payload processor.
-///
-/// It requires at least 5 parallel threads:
-/// - Engine in main thread that spawns the state root task.
-/// - Multiproof task in [`super::multiproof::MultiProofTask::run`]
-/// - Sparse Trie task in [`super::sparse_trie::SparseTrieTask::run`]
-/// - Multiproof computation spawned in [`super::multiproof::MultiproofManager::spawn_multiproof`]
-/// - Storage root computation spawned in [`reth_trie_parallel::proof::ParallelProof::multiproof`]
-pub(crate) fn has_enough_parallelism() -> bool {
-    std::thread::available_parallelism().is_ok_and(|num| num.get() >= 5)
 }

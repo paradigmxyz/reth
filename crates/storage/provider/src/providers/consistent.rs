@@ -20,8 +20,9 @@ use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::{BundleStateInit, ExecutionOutcome, RevertsInit};
 use reth_node_types::{BlockTy, HeaderTy, ReceiptTy, TxTy};
-use reth_primitives::{Account, RecoveredBlock, SealedBlock, SealedHeader, StorageEntry};
-use reth_primitives_traits::BlockBody;
+use reth_primitives_traits::{
+    Account, BlockBody, RecoveredBlock, SealedBlock, SealedHeader, StorageEntry,
+};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
@@ -844,14 +845,14 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
     /// hashes, since they would need to be calculated on the spot, and we want fast querying.**
     ///
     /// Returns `None` if block is not found.
-    fn block_with_senders(
+    fn recovered_block(
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         self.get_in_memory_or_storage_by_block(
             id,
-            |db_provider| db_provider.block_with_senders(id, transaction_kind),
+            |db_provider| db_provider.recovered_block(id, transaction_kind),
             |block_state| Ok(Some(block_state.block().recovered_block().clone())),
         )
     }
@@ -1485,8 +1486,9 @@ mod tests {
     use rand::Rng;
     use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, NewCanonicalChain};
     use reth_db_api::models::AccountBeforeTx;
+    use reth_ethereum_primitives::Block;
     use reth_execution_types::ExecutionOutcome;
-    use reth_primitives::{RecoveredBlock, SealedBlock};
+    use reth_primitives_traits::{RecoveredBlock, SealedBlock};
     use reth_storage_api::{BlockReader, BlockSource, ChangeSetReader};
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_eoa_accounts, BlockRangeParams,
@@ -1506,7 +1508,7 @@ mod tests {
         requests_count: Option<Range<u8>>,
         withdrawals_count: Option<Range<u8>>,
         tx_count: impl RangeBounds<u8>,
-    ) -> (Vec<SealedBlock>, Vec<SealedBlock>) {
+    ) -> (Vec<SealedBlock<Block>>, Vec<SealedBlock<Block>>) {
         let block_range = (database_blocks + in_memory_blocks - 1) as u64;
 
         let tx_start = match tx_count.start_bound() {

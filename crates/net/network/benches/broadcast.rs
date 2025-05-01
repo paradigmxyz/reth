@@ -1,11 +1,8 @@
 #![allow(missing_docs)]
-use alloy_primitives::{
-    private::proptest::test_runner::{RngAlgorithm, TestRng},
-    U256,
-};
+use alloy_primitives::U256;
 use criterion::*;
 use futures::StreamExt;
-use pprof::criterion::{Output, PProfProfiler};
+use rand::SeedableRng;
 use reth_network::{test_utils::Testnet, NetworkEventListenerProvider};
 use reth_network_api::Peers;
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
@@ -15,7 +12,7 @@ use tokio::{runtime::Runtime as TokioRuntime, sync::mpsc::unbounded_channel};
 
 criterion_group!(
     name = broadcast_benches;
-    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    config = Criterion::default();
     targets = broadcast_ingress_bench
 );
 
@@ -51,20 +48,19 @@ pub fn broadcast_ingress_bench(c: &mut Criterion) {
                         }
 
                         // prepare some transactions
-                        let mut gen = TransactionGenerator::new(TestRng::deterministic_rng(
-                            RngAlgorithm::ChaCha,
-                        ));
+                        let mut tx_gen =
+                            TransactionGenerator::new(rand::rngs::StdRng::seed_from_u64(0));
                         let num_broadcasts = 10;
                         for _ in 0..num_broadcasts {
                             for _ in 0..2 {
                                 let mut txs = Vec::new();
-                                let tx = gen.gen_eip1559_pooled();
+                                let tx = tx_gen.gen_eip1559_pooled();
                                 // ensure the sender has balance
                                 provider.add_account(
                                     tx.sender(),
                                     ExtendedAccount::new(0, U256::from(100_000_000)),
                                 );
-                                txs.push(Arc::new(tx.transaction().clone().into_tx()));
+                                txs.push(Arc::new(tx.transaction().clone().into_inner()));
                                 peer1.send_transactions(peer0_id, txs);
                             }
                         }

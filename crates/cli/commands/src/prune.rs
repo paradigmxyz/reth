@@ -5,6 +5,7 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
+use std::sync::Arc;
 use tracing::info;
 
 /// Prunes according to the configuration without any limits
@@ -41,5 +42,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
         }
 
         Ok(())
+    }
+}
+
+impl<C: ChainSpecParser> PruneCommand<C> {
+    /// Returns the underlying chain being used to run this command
+    pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+        Some(&self.env.chain)
     }
 }

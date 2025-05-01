@@ -1,4 +1,5 @@
 pub use alloy_eips::eip1559::BaseFeeParams;
+use alloy_evm::eth::spec::EthExecutorSpec;
 
 use crate::{
     constants::{MAINNET_DEPOSIT_CONTRACT, MAINNET_PRUNE_DELETE_LIMIT},
@@ -8,8 +9,8 @@ use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc, vec::V
 use alloy_chains::{Chain, NamedChain};
 use alloy_consensus::{
     constants::{
-        DEV_GENESIS_HASH, EMPTY_WITHDRAWALS, HOLESKY_GENESIS_HASH, MAINNET_GENESIS_HASH,
-        SEPOLIA_GENESIS_HASH,
+        DEV_GENESIS_HASH, EMPTY_WITHDRAWALS, HOLESKY_GENESIS_HASH, HOODI_GENESIS_HASH,
+        MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
     },
     Header,
 };
@@ -20,13 +21,15 @@ use alloy_eips::{
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
 use alloy_trie::root::state_root_ref_unhashed;
+use core::fmt::Debug;
 use derive_more::From;
 use reth_ethereum_forks::{
     ChainHardforks, DisplayHardforks, EthereumHardfork, EthereumHardforks, ForkCondition,
     ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Hardforks, Head, DEV_HARDFORKS,
 };
 use reth_network_peers::{
-    holesky_nodes, mainnet_nodes, op_nodes, op_testnet_nodes, sepolia_nodes, NodeRecord,
+    holesky_nodes, hoodi_nodes, mainnet_nodes, op_nodes, op_testnet_nodes, sepolia_nodes,
+    NodeRecord,
 };
 use reth_primitives_traits::{sync::LazyLock, SealedHeader};
 
@@ -171,6 +174,35 @@ pub static HOLESKY: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
     spec.into()
 });
 
+/// The Hoodi spec
+///
+/// Genesis files from: <https://github.com/eth-clients/hoodi>
+pub static HOODI: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
+    let genesis = serde_json::from_str(include_str!("../res/genesis/hoodi.json"))
+        .expect("Can't deserialize Hoodi genesis json");
+    let hardforks = EthereumHardfork::hoodi().into();
+    let mut spec = ChainSpec {
+        chain: Chain::hoodi(),
+        genesis_header: SealedHeader::new(
+            make_genesis_header(&genesis, &hardforks),
+            HOODI_GENESIS_HASH,
+        ),
+        genesis,
+        paris_block_and_final_difficulty: Some((0, U256::from(0))),
+        hardforks,
+        deposit_contract: Some(DepositContract::new(
+            address!("0x00000000219ab540356cBB839Cbe05303d7705Fa"),
+            0,
+            b256!("0x649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
+        )),
+        base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
+        prune_delete_limit: 10000,
+        blob_params: HardforkBlobParams::default(),
+    };
+    spec.genesis.config.dao_fork_support = true;
+    spec.into()
+});
+
 /// Dev testnet specification
 ///
 /// Includes 20 prefunded accounts with `10_000` ETH each derived from mnemonic "test test test test
@@ -240,22 +272,11 @@ pub struct HardforkBlobParams {
 
 impl HardforkBlobParams {
     /// Constructs params for chainspec from a provided blob schedule.
-    /// Falls back to defaults if the schedule is empty.
+    /// Falls back to defaults if the schedule is missing.
     pub fn from_schedule(blob_schedule: &BTreeMap<String, BlobParams>) -> Self {
-        let extract = |key: &str, default: fn() -> BlobParams| {
-            blob_schedule
-                .get(key)
-                .map(|item| BlobParams {
-                    target_blob_count: item.target_blob_count,
-                    max_blob_count: item.max_blob_count,
-                    ..default()
-                })
-                .unwrap_or_else(default) // Use default if key is missing
-        };
-
         Self {
-            cancun: extract("cancun", BlobParams::cancun),
-            prague: extract("prague", BlobParams::prague),
+            cancun: blob_schedule.get("cancun").copied().unwrap_or_else(BlobParams::cancun),
+            prague: blob_schedule.get("prague").copied().unwrap_or_else(BlobParams::prague),
         }
     }
 }
@@ -447,7 +468,7 @@ impl ChainSpec {
 
     /// Returns the hardfork display helper.
     pub fn display_hardforks(&self) -> DisplayHardforks {
-        DisplayHardforks::new(&self)
+        DisplayHardforks::new(self.hardforks.forks_iter())
     }
 
     /// Get the fork id for the given hardfork.
@@ -630,6 +651,7 @@ impl ChainSpec {
             C::Mainnet => Some(mainnet_nodes()),
             C::Sepolia => Some(sepolia_nodes()),
             C::Holesky => Some(holesky_nodes()),
+            C::Hoodi => Some(hoodi_nodes()),
             // opstack uses the same bootnodes for all chains: <https://github.com/paradigmxyz/reth/issues/14603>
             C::Base | C::Optimism | C::Unichain | C::World => Some(op_nodes()),
             C::OptimismSepolia | C::BaseSepolia | C::UnichainSepolia | C::WorldSepolia => {
@@ -779,7 +801,7 @@ impl EthereumHardforks for ChainSpec {
 
 /// A trait for reading the current chainspec.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait ChainSpecProvider: Send + Sync {
+pub trait ChainSpecProvider: Debug + Send + Sync {
     /// The chain spec type.
     type ChainSpec: EthChainSpec + 'static;
 
@@ -1000,6 +1022,12 @@ impl From<&Arc<ChainSpec>> for ChainSpecBuilder {
     }
 }
 
+impl EthExecutorSpec for ChainSpec {
+    fn deposit_contract_address(&self) -> Option<Address> {
+        self.deposit_contract.map(|deposit_contract| deposit_contract.address)
+    }
+}
+
 /// `PoS` deposit contract details.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DepositContract {
@@ -1035,6 +1063,9 @@ pub fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
 mod tests {
     use super::*;
     use alloy_chains::Chain;
+    use alloy_consensus::constants::ETH_TO_WEI;
+    use alloy_eips::eip4844::BLOB_TX_MIN_BLOB_GASPRICE;
+    use alloy_evm::block::calc::{base_block_reward, block_reward};
     use alloy_genesis::{ChainConfig, GenesisAccount};
     use alloy_primitives::{b256, hex};
     use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
@@ -1086,7 +1117,8 @@ Merge hard forks:
 - Paris                            @58750000000000000000000 (network is known to be merged)
 Post-merge hard forks (timestamp based):
 - Shanghai                         @1681338455
-- Cancun                           @1710338135"
+- Cancun                           @1710338135
+- Prague                           @1746612311"
         );
     }
 
@@ -1326,7 +1358,11 @@ Post-merge hard forks (timestamp based):
                 ),
                 (
                     EthereumHardfork::Cancun,
-                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
+                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 1746612311 },
+                ),
+                (
+                    EthereumHardfork::Prague,
+                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
                 ),
             ],
         );
@@ -1462,15 +1498,38 @@ Post-merge hard forks (timestamp based):
                 // First Cancun block
                 (
                     Head { number: 20000001, timestamp: 1710338135, ..Default::default() },
-                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
+                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 1746612311 },
                 ),
-                // Future Cancun block
+                // First Prague block
+                (
+                    Head { number: 20000002, timestamp: 1746612311, ..Default::default() },
+                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
+                ),
+                // Future Prague block
                 (
                     Head { number: 20000002, timestamp: 2000000000, ..Default::default() },
-                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
+                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
                 ),
             ],
         );
+    }
+
+    #[test]
+    fn hoodi_fork_ids() {
+        test_fork_ids(
+            &HOODI,
+            &[
+                (
+                    Head { number: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0xbe, 0xf7, 0x1d, 0x30]), next: 1742999832 },
+                ),
+                // First Prague block
+                (
+                    Head { number: 0, timestamp: 1742999833, ..Default::default() },
+                    ForkId { hash: ForkHash([0x09, 0x29, 0xe2, 0x4e]), next: 0 },
+                ),
+            ],
+        )
     }
 
     #[test]
@@ -1705,11 +1764,19 @@ Post-merge hard forks (timestamp based):
                 ), // First Cancun block
                 (
                     Head { number: 20000002, timestamp: 1710338135, ..Default::default() },
-                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
-                ), // Future Cancun block
+                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 1746612311 },
+                ), // Last Cancun block
                 (
-                    Head { number: 20000003, timestamp: 2000000000, ..Default::default() },
-                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
+                    Head { number: 20000003, timestamp: 1746612310, ..Default::default() },
+                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 1746612311 },
+                ), // First Prague block
+                (
+                    Head { number: 20000004, timestamp: 1746612311, ..Default::default() },
+                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
+                ), // Future Prague block
+                (
+                    Head { number: 20000004, timestamp: 2000000000, ..Default::default() },
+                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
                 ),
             ],
         );
@@ -1924,9 +1991,24 @@ Post-merge hard forks (timestamp based):
 
         // alloc key -> expected rlp mapping
         let key_rlp = vec![
-            (hex!("0x658bdf435d810c91414ec09147daa6db62406379"), &hex!("0xf84d8089487a9a304539440000a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a0c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470")[..]),
-            (hex!("0xaa00000000000000000000000000000000000000"), &hex!("0xf8440101a08afc95b7d18a226944b9c2070b6bda1c3a36afcc3730429d47579c94b9fe5850a0ce92c756baff35fa740c3557c1a971fd24d2d35b7c8e067880d50cd86bb0bc99")[..]),
-            (hex!("0xbb00000000000000000000000000000000000000"), &hex!("0xf8440102a08afc95b7d18a226944b9c2070b6bda1c3a36afcc3730429d47579c94b9fe5850a0e25a53cbb501cec2976b393719c63d832423dd70a458731a0b64e4847bbca7d2")[..]),
+            (
+                hex!("0x658bdf435d810c91414ec09147daa6db62406379"),
+                &hex!(
+                    "0xf84d8089487a9a304539440000a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a0c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+                )[..],
+            ),
+            (
+                hex!("0xaa00000000000000000000000000000000000000"),
+                &hex!(
+                    "0xf8440101a08afc95b7d18a226944b9c2070b6bda1c3a36afcc3730429d47579c94b9fe5850a0ce92c756baff35fa740c3557c1a971fd24d2d35b7c8e067880d50cd86bb0bc99"
+                )[..],
+            ),
+            (
+                hex!("0xbb00000000000000000000000000000000000000"),
+                &hex!(
+                    "0xf8440102a08afc95b7d18a226944b9c2070b6bda1c3a36afcc3730429d47579c94b9fe5850a0e25a53cbb501cec2976b393719c63d832423dd70a458731a0b64e4847bbca7d2"
+                )[..],
+            ),
         ];
 
         for (key, expected_rlp) in key_rlp {
@@ -2352,7 +2434,7 @@ Post-merge hard forks (timestamp based):
     #[test]
     fn latest_eth_mainnet_fork_id() {
         assert_eq!(
-            ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
+            ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
             MAINNET.latest_fork_id()
         )
     }
@@ -2414,5 +2496,74 @@ Post-merge hard forks (timestamp based):
             .zip(hardforks.iter())
             .all(|(expected, actual)| &**expected == *actual));
         assert_eq!(expected_hardforks.len(), hardforks.len());
+    }
+
+    #[test]
+    fn test_calc_base_block_reward() {
+        // ((block number, td), reward)
+        let cases = [
+            // Pre-byzantium
+            ((0, U256::ZERO), Some(ETH_TO_WEI * 5)),
+            // Byzantium
+            ((4370000, U256::ZERO), Some(ETH_TO_WEI * 3)),
+            // Petersburg
+            ((7280000, U256::ZERO), Some(ETH_TO_WEI * 2)),
+            // Merge
+            ((15537394, U256::from(58_750_000_000_000_000_000_000_u128)), None),
+        ];
+
+        for ((block_number, _td), expected_reward) in cases {
+            assert_eq!(base_block_reward(&*MAINNET, block_number), expected_reward);
+        }
+    }
+
+    #[test]
+    fn test_calc_full_block_reward() {
+        let base_reward = ETH_TO_WEI;
+        let one_thirty_twoth_reward = base_reward >> 5;
+
+        // (num_ommers, reward)
+        let cases = [
+            (0, base_reward),
+            (1, base_reward + one_thirty_twoth_reward),
+            (2, base_reward + one_thirty_twoth_reward * 2),
+        ];
+
+        for (num_ommers, expected_reward) in cases {
+            assert_eq!(block_reward(base_reward, num_ommers), expected_reward);
+        }
+    }
+
+    #[test]
+    fn blob_params_from_genesis() {
+        let s = r#"{
+         "cancun":{
+            "baseFeeUpdateFraction":3338477,
+            "max":6,
+            "target":3
+         },
+         "prague":{
+            "baseFeeUpdateFraction":3338477,
+            "max":6,
+            "target":3
+         }
+      }"#;
+        let schedule: BTreeMap<String, BlobParams> = serde_json::from_str(s).unwrap();
+        let hardfork_params = HardforkBlobParams::from_schedule(&schedule);
+        let expected = HardforkBlobParams {
+            cancun: BlobParams {
+                target_blob_count: 3,
+                max_blob_count: 6,
+                update_fraction: 3338477,
+                min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
+            },
+            prague: BlobParams {
+                target_blob_count: 3,
+                max_blob_count: 6,
+                update_fraction: 3338477,
+                min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
+            },
+        };
+        assert_eq!(hardfork_params, expected);
     }
 }

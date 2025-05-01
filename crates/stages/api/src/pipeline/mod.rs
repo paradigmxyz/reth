@@ -75,7 +75,9 @@ pub struct Pipeline<N: ProviderNodeTypes> {
     event_sender: EventSender<PipelineEvent>,
     /// Keeps track of the progress of the pipeline.
     progress: PipelineProgress,
-    /// A receiver for the current chain tip to sync to.
+    /// A Sender for the current chain tip to sync to.
+    ///
+    /// This is used to notify the headers stage about a new sync target.
     tip_tx: Option<watch::Sender<B256>>,
     metrics_tx: Option<MetricEventsSender>,
     /// Whether an unwind should fail the syncing process. Should only be set when downloading
@@ -270,7 +272,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         Ok(())
     }
 
-    /// Unwind the stages to the target block.
+    /// Unwind the stages to the target block (exclusive).
     ///
     /// If the unwind is due to a bad block the number of that block should be specified.
     pub fn unwind(

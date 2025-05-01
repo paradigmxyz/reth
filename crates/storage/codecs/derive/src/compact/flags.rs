@@ -54,8 +54,9 @@ pub(crate) fn generate_flag_struct(
         total_bytes.into()
     ];
 
-    let docs =
-        format!("Fieldset that facilitates compacting the parent type. Used bytes: {total_bytes} | Unused bits: {unused_bits}");
+    let docs = format!(
+        "Fieldset that facilitates compacting the parent type. Used bytes: {total_bytes} | Unused bits: {unused_bits}"
+    );
     let bitflag_encoded_bytes = format!("Used bytes by [`{flags_ident}`]");
     let bitflag_unused_bits = format!("Unused bits for new fields by [`{flags_ident}`]");
     let impl_bitflag_encoded_bytes = if has_lifetime {
@@ -90,7 +91,7 @@ pub(crate) fn generate_flag_struct(
     quote! {
         #impl_bitflag_encoded_bytes
         pub use #mod_flags_ident::#flags_ident;
-        #[allow(non_snake_case)]
+        #[expect(non_snake_case)]
         mod #mod_flags_ident {
             use #reth_codecs::__private::Buf;
             use #reth_codecs::__private::modular_bitfield;

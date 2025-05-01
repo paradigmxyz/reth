@@ -6,7 +6,7 @@ use reth_network_p2p::headers::{
     downloader::{HeaderDownloader, SyncTarget},
     error::HeadersDownloaderResult,
 };
-use reth_primitives::SealedHeader;
+use reth_primitives_traits::SealedHeader;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
     fmt::Debug,

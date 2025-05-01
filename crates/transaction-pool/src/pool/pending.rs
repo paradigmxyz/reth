@@ -53,9 +53,14 @@ pub struct PendingPool<T: TransactionOrdering> {
 // === impl PendingPool ===
 
 impl<T: TransactionOrdering> PendingPool<T> {
-    /// Create a new pool instance.
+    /// Create a new pending pool instance.
     pub fn new(ordering: T) -> Self {
-        let (new_transaction_notifier, _) = broadcast::channel(200);
+        Self::with_buffer(ordering, 200)
+    }
+
+    /// Create a new pool instance with the given buffer capacity.
+    pub fn with_buffer(ordering: T, buffer_capacity: usize) -> Self {
+        let (new_transaction_notifier, _) = broadcast::channel(buffer_capacity);
         Self {
             ordering,
             submission_id: 0,
@@ -343,7 +348,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         Some(tx.transaction)
     }
 
-    fn next_id(&mut self) -> u64 {
+    const fn next_id(&mut self) -> u64 {
         let id = self.submission_id;
         self.submission_id = self.submission_id.wrapping_add(1);
         id
@@ -613,9 +618,8 @@ mod tests {
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory, MockTransactionSet},
         PoolTransaction,
     };
-    use alloy_consensus::Transaction;
+    use alloy_consensus::{Transaction, TxType};
     use alloy_primitives::address;
-    use reth_primitives::TxType;
     use std::collections::HashSet;
 
     #[test]
@@ -711,21 +715,17 @@ mod tests {
         let d_sender = address!("0x000000000000000000000000000000000000000d");
 
         // create a chain of transactions by sender A, B, C
-        let mut tx_set =
-            MockTransactionSet::dependent(a_sender, 0, 4, reth_primitives::TxType::Eip1559);
+        let mut tx_set = MockTransactionSet::dependent(a_sender, 0, 4, TxType::Eip1559);
         let a = tx_set.clone().into_vec();
 
-        let b = MockTransactionSet::dependent(b_sender, 0, 3, reth_primitives::TxType::Eip1559)
-            .into_vec();
+        let b = MockTransactionSet::dependent(b_sender, 0, 3, TxType::Eip1559).into_vec();
         tx_set.extend(b.clone());
 
         // C has the same number of txs as B
-        let c = MockTransactionSet::dependent(c_sender, 0, 3, reth_primitives::TxType::Eip1559)
-            .into_vec();
+        let c = MockTransactionSet::dependent(c_sender, 0, 3, TxType::Eip1559).into_vec();
         tx_set.extend(c.clone());
 
-        let d = MockTransactionSet::dependent(d_sender, 0, 1, reth_primitives::TxType::Eip1559)
-            .into_vec();
+        let d = MockTransactionSet::dependent(d_sender, 0, 1, TxType::Eip1559).into_vec();
         tx_set.extend(d.clone());
 
         // add all the transactions to the pool
@@ -1019,5 +1019,13 @@ mod tests {
 
         let pool_limit = SubPoolLimit { max_txs: 10, max_size: usize::MAX };
         pool.truncate_pool(pool_limit);
+
+        let sender_a = f.ids.sender_id(&a).unwrap();
+        let sender_b = f.ids.sender_id(&b).unwrap();
+        let sender_c = f.ids.sender_id(&c).unwrap();
+
+        assert_eq!(pool.get_txs_by_sender(sender_a).len(), 10);
+        assert!(pool.get_txs_by_sender(sender_b).is_empty());
+        assert!(pool.get_txs_by_sender(sender_c).is_empty());
     }
 }

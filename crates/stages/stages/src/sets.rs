@@ -20,7 +20,7 @@
 //! # use reth_static_file::StaticFileProducer;
 //! # use reth_config::config::StageConfig;
 //! # use reth_evm::execute::BlockExecutorProvider;
-//! # use reth_primitives::EthPrimitives;
+//! # use reth_ethereum_primitives::EthPrimitives;
 //! # use std::sync::Arc;
 //! # use reth_consensus::{FullConsensus, ConsensusError};
 //!
@@ -46,11 +46,10 @@ use crate::{
 };
 use alloy_primitives::B256;
 use reth_config::config::StageConfig;
-use reth_consensus::{Consensus, ConsensusError, FullConsensus};
+use reth_consensus::{ConsensusError, FullConsensus};
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network_p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader};
-use reth_primitives::NodePrimitives;
-use reth_primitives_traits::Block;
+use reth_primitives_traits::{Block, NodePrimitives};
 use reth_provider::HeaderSyncGapProvider;
 use reth_prune_types::PruneModes;
 use reth_stages_api::Stage;
@@ -106,7 +105,7 @@ where
     E: BlockExecutorProvider<Primitives: NodePrimitives<BlockHeader = H::Header, Block = B::Block>>,
 {
     /// Create a new set of default stages with default values.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         provider: Provider,
         tip: watch::Receiver<B256>,
@@ -121,7 +120,6 @@ where
             online: OnlineStages::new(
                 provider,
                 tip,
-                consensus.clone().as_consensus(),
                 header_downloader,
                 body_downloader,
                 stages_config.clone(),
@@ -192,8 +190,7 @@ where
     provider: Provider,
     /// The tip for the headers stage.
     tip: watch::Receiver<B256>,
-    /// The consensus engine used to validate incoming data.
-    consensus: Arc<dyn Consensus<B::Block, Error = ConsensusError>>,
+
     /// The block header downloader
     header_downloader: H,
     /// The block body downloader
@@ -208,15 +205,14 @@ where
     B: BodyDownloader,
 {
     /// Create a new set of online stages with default values.
-    pub fn new(
+    pub const fn new(
         provider: Provider,
         tip: watch::Receiver<B256>,
-        consensus: Arc<dyn Consensus<B::Block, Error = ConsensusError>>,
         header_downloader: H,
         body_downloader: B,
         stages_config: StageConfig,
     ) -> Self {
-        Self { provider, tip, consensus, header_downloader, body_downloader, stages_config }
+        Self { provider, tip, header_downloader, body_downloader, stages_config }
     }
 }
 
@@ -244,7 +240,6 @@ where
         provider: P,
         tip: watch::Receiver<B256>,
         header_downloader: H,
-        consensus: Arc<dyn Consensus<B::Block, Error = ConsensusError>>,
         stages_config: StageConfig,
     ) -> StageSetBuilder<Provider>
     where
@@ -252,13 +247,7 @@ where
         HeaderStage<P, H>: Stage<Provider>,
     {
         StageSetBuilder::default()
-            .add_stage(HeaderStage::new(
-                provider,
-                header_downloader,
-                tip,
-                consensus.clone().as_header_validator(),
-                stages_config.etl,
-            ))
+            .add_stage(HeaderStage::new(provider, header_downloader, tip, stages_config.etl))
             .add_stage(bodies)
     }
 }
@@ -277,7 +266,6 @@ where
                 self.provider,
                 self.header_downloader,
                 self.tip,
-                self.consensus.clone().as_header_validator(),
                 self.stages_config.etl.clone(),
             ))
             .add_stage(BodyStage::new(self.body_downloader))

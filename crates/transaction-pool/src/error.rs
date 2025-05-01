@@ -4,7 +4,7 @@ use std::any::Any;
 
 use alloy_eips::eip4844::BlobTransactionValidationError;
 use alloy_primitives::{Address, TxHash, U256};
-use reth_primitives::InvalidTransactionError;
+use reth_primitives_traits::transaction::error::InvalidTransactionError;
 
 /// Transaction pool result type.
 pub type PoolResult<T> = Result<T, PoolError>;
@@ -102,7 +102,7 @@ impl PoolError {
     /// erroneous transaction.
     #[inline]
     pub fn is_bad_transaction(&self) -> bool {
-        #[allow(clippy::match_same_arms)]
+        #[expect(clippy::match_same_arms)]
         match &self.kind {
             PoolErrorKind::AlreadyImported => {
                 // already imported but not bad
@@ -200,6 +200,15 @@ pub enum InvalidPoolTransactionError {
     #[error("transaction's gas limit {0} exceeds block's gas limit {1}")]
     ExceedsGasLimit(u64, u64),
     /// Thrown when a new transaction is added to the pool, but then immediately discarded to
+    /// respect the tx fee exceeds the configured cap
+    #[error("tx fee ({max_tx_fee_wei} wei) exceeds the configured cap ({tx_fee_cap_wei} wei)")]
+    ExceedsFeeCap {
+        /// max fee in wei of new tx submitted to the pull (e.g. 0.11534 ETH)
+        max_tx_fee_wei: u128,
+        /// configured tx fee cap in wei (e.g. 1.0 ETH)
+        tx_fee_cap_wei: u128,
+    },
+    /// Thrown when a new transaction is added to the pool, but then immediately discarded to
     /// respect the `max_init_code_size`.
     #[error("transaction's input size {0} exceeds max_init_code_size {1}")]
     ExceedsMaxInitCodeSize(usize, usize),
@@ -237,11 +246,17 @@ pub enum InvalidPoolTransactionError {
 // === impl InvalidPoolTransactionError ===
 
 impl InvalidPoolTransactionError {
+    /// Returns a new [`InvalidPoolTransactionError::Other`] instance with the given
+    /// [`PoolTransactionError`].
+    pub fn other<E: PoolTransactionError + 'static>(err: E) -> Self {
+        Self::Other(Box::new(err))
+    }
+
     /// Returns `true` if the error was caused by a transaction that is considered bad in the
     /// context of the transaction pool and warrants peer penalization.
     ///
     /// See [`PoolError::is_bad_transaction`].
-    #[allow(clippy::match_same_arms)]
+    #[expect(clippy::match_same_arms)]
     #[inline]
     fn is_bad_transaction(&self) -> bool {
         match self {
@@ -281,6 +296,7 @@ impl InvalidPoolTransactionError {
                 }
             }
             Self::ExceedsGasLimit(_, _) => true,
+            Self::ExceedsFeeCap { max_tx_fee_wei: _, tx_fee_cap_wei: _ } => true,
             Self::ExceedsMaxInitCodeSize(_, _) => true,
             Self::OversizedData(_, _) => true,
             Self::Underpriced => {

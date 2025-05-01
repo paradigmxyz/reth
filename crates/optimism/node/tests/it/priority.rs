@@ -1,16 +1,15 @@
 //! Node builder test that customizes priority of transactions in the block.
 
-use alloy_consensus::{SignableTransaction, TxEip1559};
+use alloy_consensus::{transaction::Recovered, SignableTransaction, Transaction, TxEip1559};
 use alloy_genesis::Genesis;
 use alloy_network::TxSignerSync;
 use alloy_primitives::{Address, ChainId, TxKind};
-use op_alloy_consensus::OpTypedTransaction;
 use reth_chainspec::EthChainSpec;
 use reth_db::test_utils::create_test_rw_db_with_path;
 use reth_e2e_test_utils::{
     node::NodeTestContext, transaction::TransactionTestContext, wallet::Wallet,
 };
-use reth_node_api::{FullNodeTypes, NodeTypesWithEngine};
+use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{
     components::{BasicPayloadServiceBuilder, ComponentsBuilder},
     EngineNodeLauncher, NodeBuilder, NodeConfig,
@@ -33,7 +32,6 @@ use reth_payload_util::{
     BestPayloadTransactions, PayloadTransactions, PayloadTransactionsChain,
     PayloadTransactionsFixed,
 };
-use reth_primitives::Recovered;
 use reth_provider::providers::BlockchainProvider;
 use reth_tasks::TaskManager;
 use reth_transaction_pool::PoolTransaction;
@@ -101,8 +99,8 @@ fn build_components<Node>(
 >
 where
     Node: FullNodeTypes<
-        Types: NodeTypesWithEngine<
-            Engine = OpEngineTypes,
+        Types: NodeTypes<
+            Payload = OpEngineTypes,
             ChainSpec = OpChainSpec,
             Primitives = OpPrimitives,
         >,
@@ -113,12 +111,12 @@ where
     ComponentsBuilder::default()
         .node_types::<Node>()
         .pool(OpPoolBuilder::default())
+        .executor(OpExecutorBuilder::default())
         .payload(BasicPayloadServiceBuilder::new(
             OpPayloadBuilder::new(compute_pending_block)
                 .with_transactions(CustomTxPriority { chain_id }),
         ))
         .network(OpNetworkBuilder { disable_txpool_gossip, disable_discovery_v4: !discovery_v4 })
-        .executor(OpExecutorBuilder::default())
         .consensus(OpConsensusBuilder::default())
 }
 
@@ -193,10 +191,10 @@ async fn test_custom_block_priority_config() {
 
     // Check that last transaction in the block looks like a transfer to a random address.
     let end_of_block_tx = block_payload.body().transactions.last().unwrap();
-    let OpTypedTransaction::Eip1559(end_of_block_tx) = end_of_block_tx.transaction() else {
+    let Some(tx) = end_of_block_tx.as_eip1559() else {
         panic!("expected EIP-1559 transaction");
     };
-    assert_eq!(end_of_block_tx.nonce, 1);
-    assert_eq!(end_of_block_tx.gas_limit, 21_000);
-    assert!(end_of_block_tx.input.is_empty());
+    assert_eq!(tx.tx().nonce(), 1);
+    assert_eq!(tx.tx().gas_limit(), 21_000);
+    assert!(tx.tx().input().is_empty());
 }

@@ -4,8 +4,10 @@ use alloy_eips::eip7685::Requests;
 use alloy_primitives::{logs_bloom, map::HashMap, Address, BlockNumber, Bloom, Log, B256, U256};
 use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
 use reth_trie_common::{HashedPostState, KeyHasher};
-use revm::state::AccountInfo;
-use revm_database::{states::BundleState, BundleAccount};
+use revm::{
+    database::{states::BundleState, BundleAccount},
+    state::AccountInfo,
+};
 
 /// Type used to initialize revms bundle state.
 pub type BundleStateInit =
@@ -156,12 +158,12 @@ impl<T> ExecutionOutcome<T> {
     }
 
     /// Returns mutable revm bundle state.
-    pub fn state_mut(&mut self) -> &mut BundleState {
+    pub const fn state_mut(&mut self) -> &mut BundleState {
         &mut self.bundle
     }
 
     /// Set first block.
-    pub fn set_first_block(&mut self, first_block: BlockNumber) {
+    pub const fn set_first_block(&mut self, first_block: BlockNumber) {
         self.first_block = first_block;
     }
 
@@ -227,7 +229,7 @@ impl<T> ExecutionOutcome<T> {
     }
 
     /// Returns mutable reference to receipts.
-    pub fn receipts_mut(&mut self) -> &mut Vec<Vec<T>> {
+    pub const fn receipts_mut(&mut self) -> &mut Vec<Vec<T>> {
         &mut self.receipts
     }
 
@@ -401,11 +403,11 @@ impl<T> From<(BlockExecutionOutput<T>, BlockNumber)> for ExecutionOutcome<T> {
 
 #[cfg(feature = "serde-bincode-compat")]
 pub(super) mod serde_bincode_compat {
-    use alloc::borrow::Cow;
+    use alloc::{borrow::Cow, vec::Vec};
     use alloy_eips::eip7685::Requests;
     use alloy_primitives::BlockNumber;
     use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;
-    use revm_database::BundleState;
+    use revm::database::BundleState;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -434,7 +436,7 @@ pub(super) mod serde_bincode_compat {
         bundle: Cow<'a, BundleState>,
         receipts: Vec<Vec<T::BincodeRepr<'a>>>,
         first_block: BlockNumber,
-        #[allow(clippy::owned_cow)]
+        #[expect(clippy::owned_cow)]
         requests: Cow<'a, Vec<Requests>>,
     }
 
@@ -532,7 +534,7 @@ pub(super) mod serde_bincode_compat {
             }
 
             let mut bytes = [0u8; 1024];
-            rand::thread_rng().fill(bytes.as_mut_slice());
+            rand::rng().fill(bytes.as_mut_slice());
             let data = Data {
                 data: ExecutionOutcome {
                     bundle: Default::default(),
@@ -646,7 +648,7 @@ mod tests {
         // Test before the first block
         assert_eq!(exec_res.block_number_to_index(12), None);
 
-        // Test after after the first block but index larger than receipts length
+        // Test after the first block but index larger than receipts length
         assert_eq!(exec_res.block_number_to_index(133), None);
 
         // Test after the first block

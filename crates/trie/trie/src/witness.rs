@@ -4,6 +4,8 @@ use crate::{
     proof::{Proof, ProofBlindedProviderFactory},
     trie_cursor::TrieCursorFactory,
 };
+use alloy_rlp::EMPTY_STRING_CODE;
+use alloy_trie::EMPTY_ROOT_HASH;
 use reth_trie_common::HashedPostState;
 
 use alloy_primitives::{
@@ -32,6 +34,11 @@ pub struct TrieWitness<T, H> {
     hashed_cursor_factory: H,
     /// A set of prefix sets that have changes.
     prefix_sets: TriePrefixSetsMut,
+    /// Flag indicating whether the root node should always be included (even if the target state
+    /// is empty). This setting is useful if the caller wants to verify the witness against the
+    /// parent state root.
+    /// Set to `false` by default.
+    always_include_root_node: bool,
     /// Recorded witness.
     witness: B256Map<Bytes>,
 }
@@ -43,6 +50,7 @@ impl<T, H> TrieWitness<T, H> {
             trie_cursor_factory,
             hashed_cursor_factory,
             prefix_sets: TriePrefixSetsMut::default(),
+            always_include_root_node: false,
             witness: HashMap::default(),
         }
     }
@@ -53,6 +61,7 @@ impl<T, H> TrieWitness<T, H> {
             trie_cursor_factory,
             hashed_cursor_factory: self.hashed_cursor_factory,
             prefix_sets: self.prefix_sets,
+            always_include_root_node: self.always_include_root_node,
             witness: self.witness,
         }
     }
@@ -63,6 +72,7 @@ impl<T, H> TrieWitness<T, H> {
             trie_cursor_factory: self.trie_cursor_factory,
             hashed_cursor_factory,
             prefix_sets: self.prefix_sets,
+            always_include_root_node: self.always_include_root_node,
             witness: self.witness,
         }
     }
@@ -70,6 +80,14 @@ impl<T, H> TrieWitness<T, H> {
     /// Set the prefix sets. They have to be mutable in order to allow extension with proof target.
     pub fn with_prefix_sets_mut(mut self, prefix_sets: TriePrefixSetsMut) -> Self {
         self.prefix_sets = prefix_sets;
+        self
+    }
+
+    /// Set `always_include_root_node` to true. Root node will be included even on empty state.
+    /// This setting is useful if the caller wants to verify the witness against the
+    /// parent state root.
+    pub const fn always_include_root_node(mut self) -> Self {
+        self.always_include_root_node = true;
         self
     }
 }
@@ -86,15 +104,33 @@ where
     ///
     /// `state` - state transition containing both modified and touched accounts and storage slots.
     pub fn compute(mut self, state: HashedPostState) -> Result<B256Map<Bytes>, TrieWitnessError> {
-        if state.is_empty() {
-            return Ok(self.witness)
+        let is_state_empty = state.is_empty();
+        if is_state_empty && !self.always_include_root_node {
+            return Ok(Default::default())
         }
 
-        let proof_targets = self.get_proof_targets(&state)?;
+        let proof_targets = if is_state_empty {
+            MultiProofTargets::account(B256::ZERO)
+        } else {
+            self.get_proof_targets(&state)?
+        };
         let multiproof =
             Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
                 .with_prefix_sets_mut(self.prefix_sets.clone())
                 .multiproof(proof_targets.clone())?;
+
+        // No need to reconstruct the rest of the trie, we just need to include
+        // the root node and return.
+        if is_state_empty {
+            let (root_hash, root_node) = if let Some(root_node) =
+                multiproof.account_subtree.into_inner().remove(&Nibbles::default())
+            {
+                (keccak256(&root_node), root_node)
+            } else {
+                (EMPTY_ROOT_HASH, Bytes::from([EMPTY_STRING_CODE]))
+            };
+            return Ok(B256Map::from_iter([(root_hash, root_node)]))
+        }
 
         // Record all nodes from multiproof in the witness
         for account_node in multiproof.account_subtree.values() {
@@ -109,13 +145,15 @@ where
         }
 
         let (tx, rx) = mpsc::channel();
-        let proof_provider_factory = ProofBlindedProviderFactory::new(
-            self.trie_cursor_factory,
-            self.hashed_cursor_factory,
-            Arc::new(self.prefix_sets),
+        let blinded_provider_factory = WitnessBlindedProviderFactory::new(
+            ProofBlindedProviderFactory::new(
+                self.trie_cursor_factory,
+                self.hashed_cursor_factory,
+                Arc::new(self.prefix_sets),
+            ),
+            tx,
         );
-        let mut sparse_trie =
-            SparseStateTrie::new(WitnessBlindedProviderFactory::new(proof_provider_factory, tx));
+        let mut sparse_trie = SparseStateTrie::new(blinded_provider_factory);
         sparse_trie.reveal_multiproof(multiproof)?;
 
         // Attempt to update state trie to gather additional information for the witness.
@@ -196,7 +234,7 @@ where
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct WitnessBlindedProviderFactory<F> {
     /// Blinded node provider factory.
     provider_factory: F,
@@ -245,7 +283,7 @@ impl<P> WitnessBlindedProvider<P> {
 }
 
 impl<P: BlindedProvider> BlindedProvider for WitnessBlindedProvider<P> {
-    fn blinded_node(&mut self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
+    fn blinded_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
         let maybe_node = self.provider.blinded_node(path)?;
         if let Some(node) = &maybe_node {
             self.tx

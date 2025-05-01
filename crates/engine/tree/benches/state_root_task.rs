@@ -4,17 +4,18 @@
 #![allow(missing_docs)]
 
 use alloy_consensus::constants::KECCAK_EMPTY;
+use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{Address, B256};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use proptest::test_runner::TestRunner;
-use rand::Rng;
+use rand_08::Rng;
 use reth_chain_state::EthPrimitives;
 use reth_chainspec::ChainSpec;
 use reth_db_common::init::init_genesis;
 use reth_engine_tree::tree::{
     executor::WorkloadExecutor, PayloadProcessor, StateProviderBuilder, TreeConfig,
 };
-use reth_evm::system_calls::{OnStateHook, StateChangeSource};
+use reth_evm::OnStateHook;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{Account as RethAccount, StorageEntry};
 use reth_provider::{
@@ -40,7 +41,12 @@ struct BenchParams {
 fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
     let mut runner = TestRunner::deterministic();
     let mut rng = runner.rng().clone();
-    let all_addresses: Vec<Address> = (0..params.num_accounts).map(|_| rng.gen()).collect();
+    let all_addresses: Vec<Address> = (0..params.num_accounts)
+        .map(|_| {
+            // TODO: rand08
+            Address::random()
+        })
+        .collect();
     let mut updates = Vec::new();
 
     for _ in 0..params.updates_per_account {
@@ -63,18 +69,18 @@ fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
             } else {
                 RevmAccount {
                     info: AccountInfo {
-                        balance: U256::from(rng.gen::<u64>()),
-                        nonce: rng.gen::<u64>(),
+                        balance: U256::from(rng.r#gen::<u64>()),
+                        nonce: rng.r#gen::<u64>(),
                         code_hash: KECCAK_EMPTY,
                         code: Some(Default::default()),
                     },
                     storage: (0..rng.gen_range(0..=params.storage_slots_per_account))
                         .map(|_| {
                             (
-                                U256::from(rng.gen::<u64>()),
+                                U256::from(rng.r#gen::<u64>()),
                                 EvmStorageSlot::new_changed(
                                     U256::ZERO,
-                                    U256::from(rng.gen::<u64>()),
+                                    U256::from(rng.r#gen::<u64>()),
                                 ),
                             )
                         })
@@ -227,6 +233,7 @@ fn bench_state_root(c: &mut Criterion) {
                                 StateProviderBuilder::new(provider.clone(), genesis_hash, None),
                                 ConsistentDbView::new_with_latest_tip(provider).unwrap(),
                                 TrieInput::default(),
+                                &TreeConfig::default(),
                             );
 
                             let mut state_hook = handle.state_hook();

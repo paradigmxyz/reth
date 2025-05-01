@@ -426,6 +426,7 @@ impl Transaction<RW> {
     /// Returns a buffer which can be used to write a value into the item at the
     /// given key and with the given length. The buffer must be completely
     /// filled by the caller.
+    #[allow(clippy::mut_from_ref)]
     pub fn reserve(
         &self,
         db: &Database,
@@ -653,7 +654,7 @@ impl CommitLatency {
     }
 
     /// Returns a mut pointer to `ffi::MDBX_commit_latency`.
-    pub(crate) fn mdb_commit_latency(&mut self) -> *mut ffi::MDBX_commit_latency {
+    pub(crate) const fn mdb_commit_latency(&mut self) -> *mut ffi::MDBX_commit_latency {
         &mut self.0
     }
 }
@@ -728,7 +729,7 @@ mod tests {
 
     const fn assert_send_sync<T: Send + Sync>() {}
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     const fn test_txn_send_sync() {
         assert_send_sync::<Transaction<RO>>();
         assert_send_sync::<Transaction<RW>>();

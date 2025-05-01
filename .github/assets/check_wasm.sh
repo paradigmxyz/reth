@@ -32,7 +32,6 @@ exclude_crates=(
   reth-exex-test-utils
   reth-ipc
   reth-net-nat
-  reth-network-ress
   reth-network
   reth-node-api
   reth-node-builder
@@ -45,7 +44,6 @@ exclude_crates=(
   reth-optimism-payload-builder
   reth-optimism-rpc
   reth-optimism-storage
-  reth-optimism-chain-registry
   reth-rpc
   reth-rpc-api
   reth-rpc-api-testing-util
@@ -56,6 +54,8 @@ exclude_crates=(
   reth-rpc-layer
   reth-stages
   reth-engine-local
+  reth-ress-protocol
+  reth-ress-provider
   # The following are not supposed to be working
   reth # all of the crates below
   reth-invalid-block-hooks # reth-provider
@@ -71,6 +71,8 @@ exclude_crates=(
   reth-trie-parallel # tokio
   reth-testing-utils
   reth-optimism-txpool # reth-transaction-pool
+  reth-era-downloader # tokio
+  reth-era-utils # tokio
 )
 
 # Array to hold the results

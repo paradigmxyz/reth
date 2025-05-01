@@ -7,10 +7,24 @@ use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, StorageValue, B256, U256};
 use auto_impl::auto_impl;
+use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::Bytecode;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::HashedPostState;
 use revm_database::BundleState;
+
+/// This just receives state, or [`ExecutionOutcome`], from the provider
+#[auto_impl::auto_impl(&, Arc, Box)]
+pub trait StateReader: Send + Sync {
+    /// Receipt type in [`ExecutionOutcome`].
+    type Receipt: Send + Sync;
+
+    /// Get the [`ExecutionOutcome`] for the given block
+    fn get_state(
+        &self,
+        block: BlockNumber,
+    ) -> ProviderResult<Option<ExecutionOutcome<Self::Receipt>>>;
+}
 
 /// Type alias of boxed [`StateProvider`].
 pub type StateProviderBox = Box<dyn StateProvider>;
@@ -66,10 +80,8 @@ pub trait StateProvider:
     fn account_balance(&self, addr: &Address) -> ProviderResult<Option<U256>> {
         // Get basic account information
         // Returns None if acc doesn't exist
-        match self.basic_account(addr)? {
-            Some(acc) => Ok(Some(acc.balance)),
-            None => Ok(None),
-        }
+
+        self.basic_account(addr)?.map_or_else(|| Ok(None), |acc| Ok(Some(acc.balance)))
     }
 
     /// Get account nonce by its address.
@@ -78,10 +90,7 @@ pub trait StateProvider:
     fn account_nonce(&self, addr: &Address) -> ProviderResult<Option<u64>> {
         // Get basic account information
         // Returns None if acc doesn't exist
-        match self.basic_account(addr)? {
-            Some(acc) => Ok(Some(acc.nonce)),
-            None => Ok(None),
-        }
+        self.basic_account(addr)?.map_or_else(|| Ok(None), |acc| Ok(Some(acc.nonce)))
     }
 }
 

@@ -45,7 +45,10 @@ use utils::*;
 mod tests {
     use super::*;
     use crate::test_utils::{StorageKind, TestStageDB};
-    use alloy_primitives::{address, hex_literal::hex, keccak256, BlockNumber, B256, U256};
+    use alloy_consensus::{SignableTransaction, TxLegacy};
+    use alloy_primitives::{
+        address, hex_literal::hex, keccak256, BlockNumber, Signature, B256, U256,
+    };
     use alloy_rlp::Decodable;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db::mdbx::{cursor::Cursor, RW};
@@ -57,9 +60,10 @@ mod tests {
         AccountsHistory,
     };
     use reth_ethereum_consensus::EthBeaconConsensus;
+    use reth_ethereum_primitives::Block;
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_exex::ExExManagerHandle;
-    use reth_primitives::{Account, Bytecode, SealedBlock, StaticFileSegment};
+    use reth_primitives_traits::{Account, Bytecode, SealedBlock};
     use reth_provider::{
         providers::{StaticFileProvider, StaticFileWriter},
         test_utils::MockNodeTypesWithDB,
@@ -71,6 +75,7 @@ mod tests {
     use reth_stages_api::{
         ExecInput, ExecutionStageThresholds, PipelineTarget, Stage, StageCheckpoint, StageId,
     };
+    use reth_static_file_types::StaticFileSegment;
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_receipt, BlockRangeParams,
     };
@@ -85,9 +90,9 @@ mod tests {
         let tip = 66;
         let input = ExecInput { target: Some(tip), checkpoint: None };
         let mut genesis_rlp = hex!("f901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
-        let genesis = SealedBlock::<reth_primitives::Block>::decode(&mut genesis_rlp).unwrap();
+        let genesis = SealedBlock::<Block>::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
-        let block = SealedBlock::<reth_primitives::Block>::decode(&mut block_rlp).unwrap();
+        let block = SealedBlock::<Block>::decode(&mut block_rlp).unwrap();
         provider_rw.insert_historical_block(genesis.try_recover().unwrap()).unwrap();
         provider_rw.insert_historical_block(block.clone().try_recover().unwrap()).unwrap();
 
@@ -358,9 +363,20 @@ mod tests {
     ) where
         <T as Table>::Value: Default,
     {
+        update_db_with_and_check::<T>(db, key, expected, &Default::default());
+    }
+
+    /// Inserts the given value at key and compare the check consistency result against the expected
+    /// one.
+    fn update_db_with_and_check<T: Table<Key = u64>>(
+        db: &TestStageDB,
+        key: u64,
+        expected: Option<PipelineTarget>,
+        value: &T::Value,
+    ) {
         let provider_rw = db.factory.provider_rw().unwrap();
         let mut cursor = provider_rw.tx_ref().cursor_write::<T>().unwrap();
-        cursor.insert(key, &Default::default()).unwrap();
+        cursor.insert(key, value).unwrap();
         provider_rw.commit().unwrap();
 
         assert!(matches!(
@@ -485,14 +501,20 @@ mod tests {
             .unwrap();
 
         // Creates a gap of one transaction: static_file <missing> db
-        update_db_and_check::<tables::Transactions>(
+        update_db_with_and_check::<tables::Transactions>(
             &db,
             current + 2,
             Some(PipelineTarget::Unwind(89)),
+            &TxLegacy::default().into_signed(Signature::test_signature()).into(),
         );
 
         // Fill the gap, and ensure no unwind is necessary.
-        update_db_and_check::<tables::Transactions>(&db, current + 1, None);
+        update_db_with_and_check::<tables::Transactions>(
+            &db,
+            current + 1,
+            None,
+            &TxLegacy::default().into_signed(Signature::test_signature()).into(),
+        );
     }
 
     #[test]

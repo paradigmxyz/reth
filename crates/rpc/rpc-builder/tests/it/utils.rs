@@ -5,12 +5,12 @@ use reth_chainspec::MAINNET;
 use reth_consensus::noop::NoopConsensus;
 use reth_engine_primitives::BeaconConsensusEngineHandle;
 use reth_ethereum_engine_primitives::EthEngineTypes;
+use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_network_api::noop::NoopNetwork;
 use reth_node_ethereum::EthereumEngineValidator;
 use reth_payload_builder::test_utils::spawn_test_payload_service;
-use reth_primitives::EthPrimitives;
 use reth_provider::test_utils::NoopProvider;
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerConfig, AuthServerHandle},
@@ -53,6 +53,7 @@ pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
         client,
         EngineCapabilities::default(),
         EthereumEngineValidator::new(MAINNET.clone()),
+        false,
     );
     let module = AuthRpcModule::new(engine_api);
     module.start_server(config).await.unwrap()

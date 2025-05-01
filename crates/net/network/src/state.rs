@@ -114,12 +114,12 @@ impl<N: NetworkPrimitives> NetworkState<N> {
     }
 
     /// Returns mutable access to the [`PeersManager`]
-    pub(crate) fn peers_mut(&mut self) -> &mut PeersManager {
+    pub(crate) const fn peers_mut(&mut self) -> &mut PeersManager {
         &mut self.peers_manager
     }
 
     /// Returns mutable access to the [`Discovery`]
-    pub(crate) fn discovery_mut(&mut self) -> &mut Discovery {
+    pub(crate) const fn discovery_mut(&mut self) -> &mut Discovery {
         &mut self.discovery
     }
 
@@ -195,7 +195,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
 
         // Shuffle to propagate to a random sample of peers on every block announcement
         let mut peers: Vec<_> = self.active_peers.iter_mut().collect();
-        peers.shuffle(&mut rand::thread_rng());
+        peers.shuffle(&mut rand::rng());
 
         for (peer_id, peer) in peers {
             if peer.blocks.contains(&msg.hash) {
@@ -506,7 +506,7 @@ pub(crate) struct ActivePeer<N: NetworkPrimitives> {
     /// Best block of the peer.
     pub(crate) best_hash: B256,
     /// The capabilities of the remote peer.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub(crate) capabilities: Arc<Capabilities>,
     /// A communication channel directly to the session task.
     pub(crate) request_tx: PeerRequestSender<PeerRequest<N>>,
@@ -566,10 +566,10 @@ mod tests {
     use alloy_consensus::Header;
     use alloy_primitives::B256;
     use reth_eth_wire::{BlockBodies, Capabilities, Capability, EthNetworkPrimitives, EthVersion};
+    use reth_ethereum_primitives::BlockBody;
     use reth_network_api::PeerRequestSender;
     use reth_network_p2p::{bodies::client::BodiesClient, error::RequestError};
     use reth_network_peers::PeerId;
-    use reth_primitives::BlockBody;
     use reth_storage_api::noop::NoopProvider;
     use std::{
         future::poll_fn,

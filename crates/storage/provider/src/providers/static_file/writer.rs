@@ -11,10 +11,7 @@ use reth_db_api::models::{
 };
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
 use reth_node_types::NodePrimitives;
-use reth_primitives::{
-    static_file::{SegmentHeader, SegmentRangeInclusive},
-    StaticFileSegment,
-};
+use reth_static_file_types::{SegmentHeader, SegmentRangeInclusive, StaticFileSegment};
 use reth_storage_errors::provider::{ProviderError, ProviderResult, StaticFileWriterError};
 use std::{
     borrow::Borrow,
@@ -850,19 +847,19 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     }
 
     /// Helper function to access a mutable reference to [`SegmentHeader`].
-    pub fn user_header_mut(&mut self) -> &mut SegmentHeader {
+    pub const fn user_header_mut(&mut self) -> &mut SegmentHeader {
         self.writer.user_header_mut()
     }
 
     /// Helper function to override block range for testing.
     #[cfg(any(test, feature = "test-utils"))]
-    pub fn set_block_range(&mut self, block_range: std::ops::RangeInclusive<BlockNumber>) {
+    pub const fn set_block_range(&mut self, block_range: std::ops::RangeInclusive<BlockNumber>) {
         self.writer.user_header_mut().set_block_range(*block_range.start(), *block_range.end())
     }
 
     /// Helper function to override block range for testing.
     #[cfg(any(test, feature = "test-utils"))]
-    pub fn inner(&mut self) -> &mut NippyJarWriter<SegmentHeader> {
+    pub const fn inner(&mut self) -> &mut NippyJarWriter<SegmentHeader> {
         &mut self.writer
     }
 }

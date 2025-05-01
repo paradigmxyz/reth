@@ -14,7 +14,7 @@ use alloy_primitives::{Address, Bytes, TxHash, B256};
 use alloy_rpc_types_eth::{transaction::TransactionRequest, BlockNumberOrTag, TransactionInfo};
 use futures::Future;
 use reth_node_api::BlockBody;
-use reth_primitives::{transaction::SignedTransaction, RecoveredBlock};
+use reth_primitives_traits::{RecoveredBlock, SignedTransaction};
 use reth_provider::{
     BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
     TransactionsProvider,
@@ -49,7 +49,7 @@ use std::sync::Arc;
 pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     /// Returns a handle for signing data.
     ///
-    /// Singer access in default (L1) trait method implementations.
+    /// Signer access in default (L1) trait method implementations.
     #[expect(clippy::type_complexity)]
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>>;
 
@@ -206,7 +206,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         Self: LoadBlock,
     {
         async move {
-            if let Some(block) = self.block_with_senders(block_id).await? {
+            if let Some(block) = self.recovered_block(block_id).await? {
                 let block_hash = block.hash();
                 let block_number = block.number();
                 let base_fee_per_gas = block.base_fee_per_gas();
@@ -278,7 +278,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             .await?;
 
             let block_id = num.into();
-            self.block_with_senders(block_id)
+            self.recovered_block(block_id)
                 .await?
                 .and_then(|block| {
                     let block_hash = block.hash();
@@ -317,7 +317,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         Self: LoadBlock,
     {
         async move {
-            if let Some(block) = self.block_with_senders(block_id).await? {
+            if let Some(block) = self.recovered_block(block_id).await? {
                 if let Some(tx) = block.body().transactions().get(index) {
                     return Ok(Some(tx.encoded_2718().into()))
                 }

@@ -3,13 +3,16 @@
 //! This contains the `engine_` namespace and the subset of the `eth_` namespace that is exposed to
 //! the consensus client.
 
-use alloy_eips::{eip4844::BlobAndProofV1, eip7685::Requests, BlockId, BlockNumberOrTag};
+use alloy_eips::{
+    eip4844::{BlobAndProofV1, BlobAndProofV2},
+    eip7685::RequestsOrHash,
+    BlockId, BlockNumberOrTag,
+};
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, BlockHash, Bytes, B256, U256, U64};
 use alloy_rpc_types_engine::{
     ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV1,
     ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
-    TransitionConfiguration,
 };
 use alloy_rpc_types_eth::{
     state::StateOverride, transaction::TransactionRequest, BlockOverrides,
@@ -68,7 +71,7 @@ pub trait EngineApi<Engine: EngineTypes> {
         payload: ExecutionPayloadV3,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
-        execution_requests: Requests,
+        execution_requests: RequestsOrHash,
     ) -> RpcResult<PayloadStatus>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_forkchoiceupdatedv1>
@@ -189,19 +192,6 @@ pub trait EngineApi<Engine: EngineTypes> {
         count: U64,
     ) -> RpcResult<ExecutionPayloadBodiesV1>;
 
-    /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_exchangetransitionconfigurationv1>
-    ///
-    /// Note: This method will be deprecated after the cancun hardfork:
-    ///
-    /// > Consensus and execution layer clients MAY remove support of this method after Cancun. If
-    /// > no longer supported, this method MUST be removed from the engine_exchangeCapabilities
-    /// > request or response list depending on whether it is consensus or execution layer client.
-    #[method(name = "exchangeTransitionConfigurationV1")]
-    async fn exchange_transition_configuration(
-        &self,
-        transition_configuration: TransitionConfiguration,
-    ) -> RpcResult<TransitionConfiguration>;
-
     /// This function will return the ClientVersionV1 object.
     /// See also:
     /// <https://github.com/ethereum/execution-apis/blob/03911ffc053b8b806123f1fc237184b0092a485a/src/engine/identification.md#engine_getclientversionv1>make fmt
@@ -228,6 +218,13 @@ pub trait EngineApi<Engine: EngineTypes> {
         &self,
         versioned_hashes: Vec<B256>,
     ) -> RpcResult<Vec<Option<BlobAndProofV1>>>;
+
+    /// Fetch blobs for the consensus layer from the blob store.
+    #[method(name = "getBlobsV2")]
+    async fn get_blobs_v2(
+        &self,
+        versioned_hashes: Vec<B256>,
+    ) -> RpcResult<Vec<Option<BlobAndProofV2>>>;
 }
 
 /// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>

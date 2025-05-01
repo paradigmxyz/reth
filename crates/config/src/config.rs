@@ -1,31 +1,28 @@
 //! Configuration files.
-
-use eyre::eyre;
 use reth_network_types::{PeersConfig, SessionsConfig};
 use reth_prune_types::PruneModes;
 use reth_stages_types::ExecutionStageThresholds;
-use serde::{Deserialize, Deserializer, Serialize};
 use std::{
-    ffi::OsStr,
-    fs,
     path::{Path, PathBuf},
     time::Duration,
 };
 
+#[cfg(feature = "serde")]
 const EXTENSION: &str = "toml";
 
 /// The default prune block interval
 pub const DEFAULT_BLOCK_INTERVAL: usize = 5;
 
 /// Configuration for the reth node.
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct Config {
     /// Configuration for each stage in the pipeline.
     // TODO(onbjerg): Can we make this easier to maintain when we add/remove stages?
     pub stages: StageConfig,
     /// Configuration for pruning.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
     pub prune: Option<PruneConfig>,
     /// Configuration for the discovery service.
     pub peers: PeersConfig,
@@ -34,28 +31,37 @@ pub struct Config {
 }
 
 impl Config {
+    /// Sets the pruning configuration.
+    pub fn update_prune_config(&mut self, prune_config: PruneConfig) {
+        self.prune = Some(prune_config);
+    }
+}
+
+#[cfg(feature = "serde")]
+impl Config {
     /// Load a [`Config`] from a specified path.
     ///
     /// A new configuration file is created with default values if none
     /// exists.
     pub fn from_path(path: impl AsRef<Path>) -> eyre::Result<Self> {
         let path = path.as_ref();
-        match fs::read_to_string(path) {
+        match std::fs::read_to_string(path) {
             Ok(cfg_string) => {
-                toml::from_str(&cfg_string).map_err(|e| eyre!("Failed to parse TOML: {e}"))
+                toml::from_str(&cfg_string).map_err(|e| eyre::eyre!("Failed to parse TOML: {e}"))
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 if let Some(parent) = path.parent() {
-                    fs::create_dir_all(parent)
-                        .map_err(|e| eyre!("Failed to create directory: {e}"))?;
+                    std::fs::create_dir_all(parent)
+                        .map_err(|e| eyre::eyre!("Failed to create directory: {e}"))?;
                 }
                 let cfg = Self::default();
                 let s = toml::to_string_pretty(&cfg)
-                    .map_err(|e| eyre!("Failed to serialize to TOML: {e}"))?;
-                fs::write(path, s).map_err(|e| eyre!("Failed to write configuration file: {e}"))?;
+                    .map_err(|e| eyre::eyre!("Failed to serialize to TOML: {e}"))?;
+                std::fs::write(path, s)
+                    .map_err(|e| eyre::eyre!("Failed to write configuration file: {e}"))?;
                 Ok(cfg)
             }
-            Err(e) => Err(eyre!("Failed to load configuration: {e}")),
+            Err(e) => Err(eyre::eyre!("Failed to load configuration: {e}")),
         }
     }
 
@@ -74,7 +80,7 @@ impl Config {
 
     /// Save the configuration to toml file.
     pub fn save(&self, path: &Path) -> Result<(), std::io::Error> {
-        if path.extension() != Some(OsStr::new(EXTENSION)) {
+        if path.extension() != Some(std::ffi::OsStr::new(EXTENSION)) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!("reth config file extension must be '{EXTENSION}'"),
@@ -87,16 +93,12 @@ impl Config {
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?,
         )
     }
-
-    /// Sets the pruning configuration.
-    pub fn update_prune_config(&mut self, prune_config: PruneConfig) {
-        self.prune = Some(prune_config);
-    }
 }
 
 /// Configuration for each stage in the pipeline.
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct StageConfig {
     /// Header stage configuration.
     pub headers: HeadersConfig,
@@ -138,8 +140,9 @@ impl StageConfig {
 }
 
 /// Header stage configuration.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct HeadersConfig {
     /// The maximum number of requests to send concurrently.
     ///
@@ -171,8 +174,9 @@ impl Default for HeadersConfig {
 }
 
 /// Body stage configuration.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct BodiesConfig {
     /// The batch size of non-empty blocks per one request
     ///
@@ -210,8 +214,9 @@ impl Default for BodiesConfig {
 }
 
 /// Sender recovery stage configuration.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct SenderRecoveryConfig {
     /// The maximum number of transactions to process before committing progress to the database.
     pub commit_threshold: u64,
@@ -224,8 +229,9 @@ impl Default for SenderRecoveryConfig {
 }
 
 /// Execution stage configuration.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct ExecutionConfig {
     /// The maximum number of blocks to process before the execution stage commits.
     pub max_blocks: Option<u64>,
@@ -234,9 +240,12 @@ pub struct ExecutionConfig {
     /// The maximum cumulative amount of gas to process before the execution stage commits.
     pub max_cumulative_gas: Option<u64>,
     /// The maximum time spent on blocks processing before the execution stage commits.
-    #[serde(
-        serialize_with = "humantime_serde::serialize",
-        deserialize_with = "deserialize_duration"
+    #[cfg_attr(
+        feature = "serde",
+        serde(
+            serialize_with = "humantime_serde::serialize",
+            deserialize_with = "deserialize_duration"
+        )
     )]
     pub max_duration: Option<Duration>,
 }
@@ -266,8 +275,9 @@ impl From<ExecutionConfig> for ExecutionStageThresholds {
 }
 
 /// Prune stage configuration.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct PruneStageConfig {
     /// The maximum number of entries to prune before committing progress to the database.
     pub commit_threshold: usize,
@@ -280,8 +290,9 @@ impl Default for PruneStageConfig {
 }
 
 /// Hashing stage configuration.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct HashingConfig {
     /// The threshold (in number of blocks) for switching between
     /// incremental hashing and full hashing.
@@ -297,8 +308,9 @@ impl Default for HashingConfig {
 }
 
 /// Merkle stage configuration.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct MerkleConfig {
     /// The threshold (in number of blocks) for switching from incremental trie building of changes
     /// to whole rebuild.
@@ -312,8 +324,9 @@ impl Default for MerkleConfig {
 }
 
 /// Transaction Lookup stage configuration.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct TransactionLookupConfig {
     /// The maximum number of transactions to process before writing to disk.
     pub chunk_size: u64,
@@ -326,8 +339,9 @@ impl Default for TransactionLookupConfig {
 }
 
 /// Common ETL related configuration.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct EtlConfig {
     /// Data directory where temporary files are created.
     pub dir: Option<PathBuf>,
@@ -360,8 +374,9 @@ impl EtlConfig {
 }
 
 /// History stage configuration.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct IndexHistoryConfig {
     /// The maximum number of blocks to process before committing progress to the database.
     pub commit_threshold: u64,
@@ -374,13 +389,14 @@ impl Default for IndexHistoryConfig {
 }
 
 /// Pruning configuration.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct PruneConfig {
     /// Minimum pruning interval measured in blocks.
     pub block_interval: usize,
     /// Pruning configuration for every part of the data that can be pruned.
-    #[serde(alias = "parts")]
+    #[cfg_attr(feature = "serde", serde(alias = "parts"))]
     pub segments: PruneModes,
 }
 
@@ -432,11 +448,12 @@ impl PruneConfig {
 }
 
 /// Helper type to support older versions of Duration deserialization.
+#[cfg(feature = "serde")]
 fn deserialize_duration<'de, D>(deserializer: D) -> Result<Option<Duration>, D::Error>
 where
-    D: Deserializer<'de>,
+    D: serde::de::Deserializer<'de>,
 {
-    #[derive(Deserialize)]
+    #[derive(serde::Deserialize)]
     #[serde(untagged)]
     enum AnyDuration {
         #[serde(deserialize_with = "humantime_serde::deserialize")]
@@ -444,12 +461,12 @@ where
         Duration(Option<Duration>),
     }
 
-    AnyDuration::deserialize(deserializer).map(|d| match d {
+    <AnyDuration as serde::Deserialize>::deserialize(deserializer).map(|d| match d {
         AnyDuration::Human(duration) | AnyDuration::Duration(duration) => duration,
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "serde"))]
 mod tests {
     use super::{Config, EXTENSION};
     use crate::PruneConfig;
@@ -1010,9 +1027,9 @@ connect_trusted_nodes_only = true
         assert_eq!(conf.peers.trusted_nodes.len(), 2);
 
         let expected_enodes = vec![
-        "enode://0401e494dbd0c84c5c0f72adac5985d2f2525e08b68d448958aae218f5ac8198a80d1498e0ebec2ce38b1b18d6750f6e61a56b4614c5a6c6cf0981c39aed47dc@34.159.32.127:30303",
-        "enode://e9675164b5e17b9d9edf0cc2bd79e6b6f487200c74d1331c220abb5b8ee80c2eefbf18213989585e9d0960683e819542e11d4eefb5f2b4019e1e49f9fd8fff18@berav2-bootnode.staketab.org:30303",
-    ];
+            "enode://0401e494dbd0c84c5c0f72adac5985d2f2525e08b68d448958aae218f5ac8198a80d1498e0ebec2ce38b1b18d6750f6e61a56b4614c5a6c6cf0981c39aed47dc@34.159.32.127:30303",
+            "enode://e9675164b5e17b9d9edf0cc2bd79e6b6f487200c74d1331c220abb5b8ee80c2eefbf18213989585e9d0960683e819542e11d4eefb5f2b4019e1e49f9fd8fff18@berav2-bootnode.staketab.org:30303",
+        ];
 
         for enode in expected_enodes {
             let node = TrustedPeer::from_str(enode).unwrap();

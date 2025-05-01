@@ -86,6 +86,11 @@ pub mod receipt;
 pub use receipt::{FullReceipt, Receipt};
 
 pub mod transaction;
+pub use alloy_consensus::{
+    transaction::{Recovered, TransactionMeta},
+    ReceiptWithBloom,
+};
+
 pub use transaction::{
     execute::FillTxEnv,
     signed::{FullSignedTx, SignedTransaction},
@@ -99,9 +104,8 @@ pub use block::{
     Block, FullBlock, RecoveredBlock, SealedBlock,
 };
 
-mod encoded;
 mod withdrawal;
-pub use encoded::WithEncoded;
+pub use alloy_eips::eip2718::WithEncoded;
 
 pub mod crypto;
 
@@ -117,6 +121,9 @@ mod storage;
 pub use storage::StorageEntry;
 
 pub mod sync;
+
+pub mod typed;
+pub use typed::IsTyped2718;
 
 /// Common header types
 pub mod header;

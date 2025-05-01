@@ -1,16 +1,15 @@
-use crate::execute::EthBlockExecutionCtx;
 use alloc::sync::Arc;
 use alloy_consensus::{
     proofs, Block, BlockBody, BlockHeader, Header, Transaction, TxReceipt, EMPTY_OMMER_ROOT_HASH,
 };
 use alloy_eips::merge::BEACON_NONCE;
+use alloy_evm::{block::BlockExecutorFactory, eth::EthBlockExecutionCtx};
 use alloy_primitives::Bytes;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_evm::execute::{
-    BlockAssembler, BlockAssemblerInput, BlockExecutionError, BlockExecutionStrategyFactory,
-};
+use reth_ethereum_primitives::{Receipt, TransactionSigned};
+use reth_evm::execute::{BlockAssembler, BlockAssemblerInput, BlockExecutionError};
 use reth_execution_types::BlockExecutionResult;
-use reth_primitives::{logs_bloom, EthPrimitives, Receipt, TransactionSigned};
+use reth_primitives_traits::logs_bloom;
 
 /// Block builder for Ethereum.
 #[derive(Debug, Clone)]
@@ -28,17 +27,20 @@ impl<ChainSpec> EthBlockAssembler<ChainSpec> {
     }
 }
 
-impl<Evm, ChainSpec> BlockAssembler<Evm> for EthBlockAssembler<ChainSpec>
+impl<F, ChainSpec> BlockAssembler<F> for EthBlockAssembler<ChainSpec>
 where
-    Evm: for<'a> BlockExecutionStrategyFactory<
-        Primitives = EthPrimitives,
+    F: for<'a> BlockExecutorFactory<
         ExecutionCtx<'a> = EthBlockExecutionCtx<'a>,
+        Transaction = TransactionSigned,
+        Receipt = Receipt,
     >,
     ChainSpec: EthChainSpec + EthereumHardforks,
 {
+    type Block = Block<TransactionSigned>;
+
     fn assemble_block(
         &self,
-        input: BlockAssemblerInput<'_, '_, Evm>,
+        input: BlockAssemblerInput<'_, '_, F>,
     ) -> Result<Block<TransactionSigned>, BlockExecutionError> {
         let BlockAssemblerInput {
             evm_env,

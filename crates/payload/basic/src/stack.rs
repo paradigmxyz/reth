@@ -7,7 +7,7 @@ use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::{Address, B256, U256};
 use reth_payload_builder::PayloadId;
 use reth_payload_primitives::BuiltPayload;
-use reth_primitives::{NodePrimitives, SealedBlock};
+use reth_primitives_traits::{NodePrimitives, SealedBlock};
 
 use alloy_eips::eip7685::Requests;
 use std::{error::Error, fmt};
@@ -28,8 +28,8 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Left(l) => write!(f, "Left: {}", l),
-            Self::Right(r) => write!(f, "Right: {}", r),
+            Self::Left(l) => write!(f, "Left: {l}"),
+            Self::Right(r) => write!(f, "Right: {r}"),
         }
     }
 }

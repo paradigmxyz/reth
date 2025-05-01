@@ -3,12 +3,13 @@
 use alloy_json_rpc::RpcObject;
 use alloy_rpc_types_eth::{Filter, FilterChanges, FilterId, Log, PendingTransactionFilterKind};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use std::future::Future;
 
 /// Rpc Interface for poll-based ethereum filter API.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
 pub trait EthFilterApi<T: RpcObject> {
-    /// Creates anew filter and returns its id.
+    /// Creates a new filter and returns its id.
     #[method(name = "newFilter")]
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId>;
 
@@ -38,4 +39,31 @@ pub trait EthFilterApi<T: RpcObject> {
     /// Returns logs matching given filter object.
     #[method(name = "getLogs")]
     async fn logs(&self, filter: Filter) -> RpcResult<Vec<Log>>;
+}
+
+/// Limits for logs queries
+#[derive(Default, Debug, Clone, Copy)]
+pub struct QueryLimits {
+    /// Maximum number of blocks that could be scanned per filter
+    pub max_blocks_per_filter: Option<u64>,
+    /// Maximum number of logs that can be returned in a response
+    pub max_logs_per_response: Option<usize>,
+}
+
+impl QueryLimits {
+    /// Construct an object with no limits (more explicit than using default constructor)
+    pub fn no_limits() -> Self {
+        Default::default()
+    }
+}
+
+/// Rpc Interface for poll-based ethereum filter API, implementing only the `eth_getLogs` method.
+/// Used for the engine API, with possibility to specify [`QueryLimits`].
+pub trait EngineEthFilter: Send + Sync + 'static {
+    /// Returns logs matching given filter object.
+    fn logs(
+        &self,
+        filter: Filter,
+        limits: QueryLimits,
+    ) -> impl Future<Output = RpcResult<Vec<Log>>> + Send;
 }

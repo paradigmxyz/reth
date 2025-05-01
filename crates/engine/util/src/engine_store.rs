@@ -2,8 +2,9 @@
 
 use alloy_rpc_types_engine::ForkchoiceState;
 use futures::{Stream, StreamExt};
-use reth_engine_primitives::{BeaconEngineMessage, EngineTypes, ExecutionPayload};
+use reth_engine_primitives::{BeaconEngineMessage, ExecutionPayload};
 use reth_fs_util as fs;
+use reth_payload_primitives::PayloadTypes;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -17,19 +18,19 @@ use tracing::*;
 /// A message from the engine API that has been stored to disk.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum StoredEngineApiMessage<EngineT: EngineTypes> {
+pub enum StoredEngineApiMessage<T: PayloadTypes> {
     /// The on-disk representation of an `engine_forkchoiceUpdated` method call.
     ForkchoiceUpdated {
         /// The [`ForkchoiceState`] sent in the persisted call.
         state: ForkchoiceState,
         /// The payload attributes sent in the persisted call, if any.
-        payload_attrs: Option<EngineT::PayloadAttributes>,
+        payload_attrs: Option<T::PayloadAttributes>,
     },
     /// The on-disk representation of an `engine_newPayload` method call.
     NewPayload {
-        /// The [`EngineTypes::ExecutionData`] sent in the persisted call.
+        /// The [`PayloadTypes::ExecutionData`] sent in the persisted call.
         #[serde(flatten)]
-        payload: EngineT::ExecutionData,
+        payload: T::ExecutionData,
     },
 }
 
@@ -50,13 +51,13 @@ impl EngineMessageStore {
 
     /// Stores the received [`BeaconEngineMessage`] to disk, appending the `received_at` time to the
     /// path.
-    pub fn on_message<Engine>(
+    pub fn on_message<T>(
         &self,
-        msg: &BeaconEngineMessage<Engine>,
+        msg: &BeaconEngineMessage<T>,
         received_at: SystemTime,
     ) -> eyre::Result<()>
     where
-        Engine: EngineTypes,
+        T: PayloadTypes,
     {
         fs::create_dir_all(&self.path)?; // ensure that store path had been created
         let timestamp = received_at.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis();
@@ -70,7 +71,7 @@ impl EngineMessageStore {
                 let filename = format!("{}-fcu-{}.json", timestamp, state.head_block_hash);
                 fs::write(
                     self.path.join(filename),
-                    serde_json::to_vec(&StoredEngineApiMessage::<Engine>::ForkchoiceUpdated {
+                    serde_json::to_vec(&StoredEngineApiMessage::<T>::ForkchoiceUpdated {
                         state: *state,
                         payload_attrs: payload_attrs.clone(),
                     })?,
@@ -80,13 +81,11 @@ impl EngineMessageStore {
                 let filename = format!("{}-new_payload-{}.json", timestamp, payload.block_hash());
                 fs::write(
                     self.path.join(filename),
-                    serde_json::to_vec(&StoredEngineApiMessage::<Engine>::NewPayload {
+                    serde_json::to_vec(&StoredEngineApiMessage::<T>::NewPayload {
                         payload: payload.clone(),
                     })?,
                 )?;
             }
-            // noop
-            BeaconEngineMessage::TransitionConfigurationExchanged => (),
         };
         Ok(())
     }
@@ -131,10 +130,10 @@ impl<S> EngineStoreStream<S> {
     }
 }
 
-impl<S, Engine> Stream for EngineStoreStream<S>
+impl<S, T> Stream for EngineStoreStream<S>
 where
-    S: Stream<Item = BeaconEngineMessage<Engine>>,
-    Engine: EngineTypes,
+    S: Stream<Item = BeaconEngineMessage<T>>,
+    T: PayloadTypes,
 {
     type Item = S::Item;
 

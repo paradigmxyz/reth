@@ -60,7 +60,7 @@ impl DnsResolver {
     ///
     /// This will use `/etc/resolv.conf` on Unix OSes and the registry on Windows.
     pub fn from_system_conf() -> Result<Self, ResolveError> {
-        TokioResolver::tokio_from_system_conf().map(Self::new)
+        TokioResolver::builder_tokio().map(|builder| Self::new(builder.build()))
     }
 }
 

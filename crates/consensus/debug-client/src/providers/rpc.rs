@@ -29,7 +29,7 @@ impl<N: Network, PrimitiveBlock> RpcBlockProvider<N, PrimitiveBlock> {
                 ProviderBuilder::new()
                     .disable_recommended_fillers()
                     .network::<N>()
-                    .on_builtin(rpc_url)
+                    .connect(rpc_url)
                     .await?,
             ),
             url: rpc_url.to_string(),
@@ -80,7 +80,8 @@ where
     async fn get_block(&self, block_number: u64) -> eyre::Result<Self::Block> {
         let block = self
             .provider
-            .get_block_by_number(block_number.into(), true.into())
+            .get_block_by_number(block_number.into())
+            .full()
             .await?
             .ok_or_else(|| eyre::eyre!("block not found by number {}", block_number))?;
         Ok((self.convert)(block))

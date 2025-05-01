@@ -4,18 +4,19 @@
 use super::SpawnBlocking;
 use crate::{types::RpcTypes, EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
 use alloy_consensus::{BlockHeader, Transaction};
-use alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK;
+use alloy_eips::eip7840::BlobParams;
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError};
 use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutionStrategyFactory},
-    ConfigureEvmEnv, Evm,
+    execute::{BlockBuilder, BlockBuilderOutcome},
+    ConfigureEvm, Evm, SpecFor,
 };
 use reth_node_api::NodePrimitives;
-use reth_primitives::{InvalidTransactionError, RecoveredBlock, SealedHeader};
-use reth_primitives_traits::Receipt;
+use reth_primitives_traits::{
+    transaction::error::InvalidTransactionError, Receipt, RecoveredBlock, SealedHeader,
+};
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderError, ProviderHeader,
     ProviderReceipt, ProviderTx, ReceiptProvider, StateProviderFactory,
@@ -45,7 +46,7 @@ pub trait LoadPendingBlock:
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                       + StateProviderFactory,
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
-        Evm: BlockExecutionStrategyFactory<
+        Evm: ConfigureEvm<
             Primitives: NodePrimitives<
                 BlockHeader = ProviderHeader<Self::Provider>,
                 SignedTx = ProviderTx<Self::Provider>,
@@ -73,7 +74,7 @@ pub trait LoadPendingBlock:
         PendingBlockEnv<
             ProviderBlock<Self::Provider>,
             ProviderReceipt<Self::Provider>,
-            <Self::Evm as ConfigureEvmEnv>::Spec,
+            SpecFor<Self::Evm>,
         >,
         Self::Error,
     > {
@@ -114,11 +115,11 @@ pub trait LoadPendingBlock:
         Ok(PendingBlockEnv::new(evm_env, PendingBlockEnvOrigin::DerivedFromLatest(latest)))
     }
 
-    /// Returns [`ConfigureEvmEnv::NextBlockEnvCtx`] for building a local pending block.
+    /// Returns [`ConfigureEvm::NextBlockEnvCtx`] for building a local pending block.
     fn next_env_attributes(
         &self,
         parent: &SealedHeader<ProviderHeader<Self::Provider>>,
-    ) -> Result<<Self::Evm as ConfigureEvmEnv>::NextBlockEnvCtx, Self::Error>;
+    ) -> Result<<Self::Evm as ConfigureEvm>::NextBlockEnvCtx, Self::Error>;
 
     /// Returns the locally built pending block
     #[expect(clippy::type_complexity)]
@@ -221,6 +222,11 @@ pub trait LoadPendingBlock:
 
         let block_env = builder.evm_mut().block().clone();
 
+        let blob_params = self
+            .provider()
+            .chain_spec()
+            .blob_params_at_timestamp(parent.timestamp())
+            .unwrap_or_else(BlobParams::cancun);
         let mut cumulative_gas_used = 0;
         let mut sum_blob_gas_used = 0;
         let block_gas_limit: u64 = block_env.gas_limit;
@@ -266,7 +272,7 @@ pub trait LoadPendingBlock:
             // There's only limited amount of blob space available per block, so we need to check if
             // the EIP-4844 can still fit in the block
             if let Some(tx_blob_gas) = tx.blob_gas_used() {
-                if sum_blob_gas_used + tx_blob_gas > MAX_DATA_GAS_PER_BLOCK {
+                if sum_blob_gas_used + tx_blob_gas > blob_params.max_blob_gas_per_block() {
                     // we can't fit this _blob_ transaction into the block, so we mark it as
                     // invalid, which removes its dependent transactions from
                     // the iterator. This is similar to the gas limit condition
@@ -275,7 +281,7 @@ pub trait LoadPendingBlock:
                         &pool_tx,
                         InvalidPoolTransactionError::ExceedsGasLimit(
                             tx_blob_gas,
-                            MAX_DATA_GAS_PER_BLOCK,
+                            blob_params.max_blob_gas_per_block(),
                         ),
                     );
                     continue
@@ -311,7 +317,7 @@ pub trait LoadPendingBlock:
                 sum_blob_gas_used += tx_blob_gas;
 
                 // if we've reached the max data gas per block, we can skip blob txs entirely
-                if sum_blob_gas_used == MAX_DATA_GAS_PER_BLOCK {
+                if sum_blob_gas_used == blob_params.max_blob_gas_per_block() {
                     best_txs.skip_blobs();
                 }
             }

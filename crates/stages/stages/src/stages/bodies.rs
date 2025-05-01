@@ -6,7 +6,6 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_network_p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
-use reth_primitives::StaticFileSegment;
 use reth_provider::{
     providers::StaticFileWriter, BlockReader, BlockWriter, DBProvider, ProviderError,
     StaticFileProviderFactory, StatsReader, StorageLocation,
@@ -15,6 +14,7 @@ use reth_stages_api::{
     EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId,
     UnwindInput, UnwindOutput,
 };
+use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderResult;
 use std::{
     cmp::Ordering,
@@ -491,6 +491,7 @@ mod tests {
             models::{StoredBlockBodyIndices, StoredBlockOmmers},
             transaction::{DbTx, DbTxMut},
         };
+        use reth_ethereum_primitives::{Block, BlockBody};
         use reth_network_p2p::{
             bodies::{
                 downloader::{BodyDownloader, BodyDownloaderResult},
@@ -498,12 +499,13 @@ mod tests {
             },
             error::DownloadResult,
         };
-        use reth_primitives::{BlockBody, SealedBlock, SealedHeader, StaticFileSegment};
+        use reth_primitives_traits::{SealedBlock, SealedHeader};
         use reth_provider::{
             providers::StaticFileWriter, test_utils::MockNodeTypesWithDB, HeaderProvider,
             ProviderFactory, StaticFileProviderFactory, TransactionsProvider,
         };
         use reth_stages_api::{ExecInput, ExecOutput, UnwindInput};
+        use reth_static_file_types::StaticFileSegment;
         use reth_testing_utils::generators::{
             self, random_block_range, random_signed_tx, BlockRangeParams,
         };
@@ -518,7 +520,7 @@ mod tests {
         pub(crate) const GENESIS_HASH: B256 = B256::ZERO;
 
         /// A helper to create a collection of block bodies keyed by their hash.
-        pub(crate) fn body_by_hash(block: &SealedBlock) -> (B256, BlockBody) {
+        pub(crate) fn body_by_hash(block: &SealedBlock<Block>) -> (B256, BlockBody) {
             (block.hash(), block.body().clone())
         }
 
@@ -562,7 +564,7 @@ mod tests {
         }
 
         impl ExecuteStageTestRunner for BodyTestRunner {
-            type Seed = Vec<SealedBlock>;
+            type Seed = Vec<SealedBlock<Block>>;
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
                 let start = input.checkpoint().block_number;
@@ -762,7 +764,7 @@ mod tests {
         }
 
         impl BodyDownloader for TestBodyDownloader {
-            type Block = reth_primitives::Block;
+            type Block = Block;
 
             fn set_download_range(
                 &mut self,
@@ -784,7 +786,7 @@ mod tests {
         }
 
         impl Stream for TestBodyDownloader {
-            type Item = BodyDownloaderResult<reth_primitives::Block>;
+            type Item = BodyDownloaderResult<Block>;
             fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
                 let this = self.get_mut();
 

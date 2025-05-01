@@ -7,10 +7,13 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
 
+extern crate alloc;
+
+use alloc::{fmt::Debug, sync::Arc};
 use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
-use alloy_eips::merge::ALLOWED_FUTURE_BLOCK_TIME_SECONDS;
-use alloy_primitives::U256;
+use alloy_eips::eip7840::BlobParams;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
 use reth_consensus_common::validation::{
@@ -20,12 +23,10 @@ use reth_consensus_common::validation::{
     validate_header_base_fee, validate_header_extra_data, validate_header_gas,
 };
 use reth_execution_types::BlockExecutionResult;
-use reth_primitives::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_primitives_traits::{
     constants::{GAS_LIMIT_BOUND_DIVISOR, MINIMUM_GAS_LIMIT},
-    Block, BlockHeader,
+    Block, BlockHeader, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
-use std::{fmt::Debug, sync::Arc, time::SystemTime};
 
 mod validation;
 pub use validation::validate_block_post_execution;
@@ -135,8 +136,42 @@ where
     H: BlockHeader,
 {
     fn validate_header(&self, header: &SealedHeader<H>) -> Result<(), ConsensusError> {
-        validate_header_gas(header.header())?;
-        validate_header_base_fee(header.header(), &self.chain_spec)?;
+        let header = header.header();
+        let is_post_merge = self.chain_spec.is_paris_active_at_block(header.number());
+
+        if is_post_merge {
+            if !header.difficulty().is_zero() {
+                return Err(ConsensusError::TheMergeDifficultyIsNotZero);
+            }
+
+            if !header.nonce().is_some_and(|nonce| nonce.is_zero()) {
+                return Err(ConsensusError::TheMergeNonceIsNotZero);
+            }
+
+            if header.ommers_hash() != EMPTY_OMMER_ROOT_HASH {
+                return Err(ConsensusError::TheMergeOmmerRootIsNotEmpty);
+            }
+        } else {
+            #[cfg(feature = "std")]
+            {
+                let present_timestamp = std::time::SystemTime::now()
+                    .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+
+                if header.timestamp() >
+                    present_timestamp + alloy_eips::merge::ALLOWED_FUTURE_BLOCK_TIME_SECONDS
+                {
+                    return Err(ConsensusError::TimestampIsInFuture {
+                        timestamp: header.timestamp(),
+                        present_timestamp,
+                    });
+                }
+            }
+        }
+        validate_header_extra_data(header)?;
+        validate_header_gas(header)?;
+        validate_header_base_fee(header, &self.chain_spec)?;
 
         // EIP-4895: Beacon chain push withdrawals as operations
         if self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp()) &&
@@ -151,7 +186,12 @@ where
 
         // Ensures that EIP-4844 fields are valid once cancun is active.
         if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp()) {
-            validate_4844_header_standalone(header.header())?;
+            validate_4844_header_standalone(
+                header,
+                self.chain_spec
+                    .blob_params_at_timestamp(header.timestamp())
+                    .unwrap_or_else(BlobParams::cancun),
+            )?;
         } else if header.blob_gas_used().is_some() {
             return Err(ConsensusError::BlobGasUsedUnexpected)
         } else if header.excess_blob_gas().is_some() {
@@ -197,61 +237,6 @@ where
 
         Ok(())
     }
-
-    fn validate_header_with_total_difficulty(
-        &self,
-        header: &H,
-        _total_difficulty: U256,
-    ) -> Result<(), ConsensusError> {
-        let is_post_merge = self.chain_spec.is_paris_active_at_block(header.number());
-
-        if is_post_merge {
-            if !header.difficulty().is_zero() {
-                return Err(ConsensusError::TheMergeDifficultyIsNotZero)
-            }
-
-            if !header.nonce().is_some_and(|nonce| nonce.is_zero()) {
-                return Err(ConsensusError::TheMergeNonceIsNotZero)
-            }
-
-            if header.ommers_hash() != EMPTY_OMMER_ROOT_HASH {
-                return Err(ConsensusError::TheMergeOmmerRootIsNotEmpty)
-            }
-
-            // Post-merge, the consensus layer is expected to perform checks such that the block
-            // timestamp is a function of the slot. This is different from pre-merge, where blocks
-            // are only allowed to be in the future (compared to the system's clock) by a certain
-            // threshold.
-            //
-            // Block validation with respect to the parent should ensure that the block timestamp
-            // is greater than its parent timestamp.
-
-            // validate header extra data for all networks post merge
-            validate_header_extra_data(header)?;
-
-            // mixHash is used instead of difficulty inside EVM
-            // https://eips.ethereum.org/EIPS/eip-4399#using-mixhash-field-instead-of-difficulty
-        } else {
-            // Note: This does not perform any pre merge checks for difficulty, mix_hash & nonce
-            // because those are deprecated and the expectation is that a reth node syncs in reverse
-            // order, making those checks obsolete.
-
-            // Check if timestamp is in the future. Clock can drift but this can be consensus issue.
-            let present_timestamp =
-                SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
-
-            if header.timestamp() > present_timestamp + ALLOWED_FUTURE_BLOCK_TIME_SECONDS {
-                return Err(ConsensusError::TimestampIsInFuture {
-                    timestamp: header.timestamp(),
-                    present_timestamp,
-                })
-            }
-
-            validate_header_extra_data(header)?;
-        }
-
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -262,7 +247,7 @@ mod tests {
     use reth_primitives_traits::proofs;
 
     fn header_with_gas_limit(gas_limit: u64) -> SealedHeader {
-        let header = reth_primitives::Header { gas_limit, ..Default::default() };
+        let header = reth_primitives_traits::Header { gas_limit, ..Default::default() };
         SealedHeader::new(header, B256::ZERO)
     }
 
@@ -342,7 +327,7 @@ mod tests {
         // that the header is valid
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().shanghai_activated().build());
 
-        let header = reth_primitives::Header {
+        let header = reth_primitives_traits::Header {
             base_fee_per_gas: Some(1337),
             withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
             ..Default::default()

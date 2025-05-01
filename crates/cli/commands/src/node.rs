@@ -6,7 +6,6 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::parse_socket_address;
 use reth_db::{init_db, DatabaseEnv};
-use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
     args::{
@@ -20,10 +19,7 @@ use std::{ffi::OsString, fmt, future::Future, net::SocketAddr, path::PathBuf, sy
 
 /// Start the node
 #[derive(Debug, Parser)]
-pub struct NodeCommand<
-    C: ChainSpecParser = EthereumChainSpecParser,
-    Ext: clap::Args + fmt::Debug = NoArgs,
-> {
+pub struct NodeCommand<C: ChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs> {
     /// The path to the configuration file to use.
     #[arg(long, value_name = "FILE", verbatim_doc_comment)]
     pub config: Option<PathBuf>,
@@ -61,8 +57,9 @@ pub struct NodeCommand<
     /// - `AUTH_PORT`: default + `instance` * 100 - 100
     /// - `HTTP_RPC_PORT`: default - `instance` + 1
     /// - `WS_RPC_PORT`: default + `instance` * 2 - 2
-    #[arg(long, value_name = "INSTANCE", global = true, default_value_t = 1, value_parser = value_parser!(u16).range(..=200))]
-    pub instance: u16,
+    /// - `IPC_PATH`: default + `-instance`
+    #[arg(long, value_name = "INSTANCE", global = true, value_parser = value_parser!(u16).range(..=200))]
+    pub instance: Option<u16>,
 
     /// Sets all ports to unused, allowing the OS to choose random unused ports when sockets are
     /// bound.
@@ -132,10 +129,11 @@ impl<C: ChainSpecParser> NodeCommand<C> {
     }
 }
 
-impl<
-        C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>,
-        Ext: clap::Args + fmt::Debug,
-    > NodeCommand<C, Ext>
+impl<C, Ext> NodeCommand<C, Ext>
+where
+    C: ChainSpecParser,
+    C::ChainSpec: EthChainSpec + EthereumHardforks,
+    Ext: clap::Args + fmt::Debug,
 {
     /// Launches the node
     ///
@@ -203,6 +201,12 @@ impl<
     }
 }
 
+impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> NodeCommand<C, Ext> {
+    /// Returns the underlying chain being used to run this command
+    pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+        Some(&self.chain)
+    }
+}
 /// No Additional arguments
 #[derive(Debug, Clone, Copy, Default, Args)]
 #[non_exhaustive]
@@ -212,7 +216,7 @@ pub struct NoArgs;
 mod tests {
     use super::*;
     use reth_discv4::DEFAULT_DISCOVERY_PORT;
-    use reth_ethereum_cli::chainspec::SUPPORTED_CHAINS;
+    use reth_ethereum_cli::chainspec::{EthereumChainSpecParser, SUPPORTED_CHAINS};
     use std::{
         net::{IpAddr, Ipv4Addr},
         path::Path,
@@ -228,21 +232,22 @@ mod tests {
     #[test]
     fn parse_common_node_command_chain_args() {
         for chain in SUPPORTED_CHAINS {
-            let args: NodeCommand = NodeCommand::parse_from(["reth", "--chain", chain]);
+            let args: NodeCommand<EthereumChainSpecParser> =
+                NodeCommand::parse_from(["reth", "--chain", chain]);
             assert_eq!(args.chain.chain, chain.parse::<reth_chainspec::Chain>().unwrap());
         }
     }
 
     #[test]
     fn parse_discovery_addr() {
-        let cmd: NodeCommand =
+        let cmd: NodeCommand<EthereumChainSpecParser> =
             NodeCommand::try_parse_args_from(["reth", "--discovery.addr", "127.0.0.1"]).unwrap();
         assert_eq!(cmd.network.discovery.addr, IpAddr::V4(Ipv4Addr::LOCALHOST));
     }
 
     #[test]
     fn parse_addr() {
-        let cmd: NodeCommand = NodeCommand::try_parse_args_from([
+        let cmd: NodeCommand<EthereumChainSpecParser> = NodeCommand::try_parse_args_from([
             "reth",
             "--discovery.addr",
             "127.0.0.1",
@@ -256,14 +261,14 @@ mod tests {
 
     #[test]
     fn parse_discovery_port() {
-        let cmd: NodeCommand =
+        let cmd: NodeCommand<EthereumChainSpecParser> =
             NodeCommand::try_parse_args_from(["reth", "--discovery.port", "300"]).unwrap();
         assert_eq!(cmd.network.discovery.port, 300);
     }
 
     #[test]
     fn parse_port() {
-        let cmd: NodeCommand =
+        let cmd: NodeCommand<EthereumChainSpecParser> =
             NodeCommand::try_parse_args_from(["reth", "--discovery.port", "300", "--port", "99"])
                 .unwrap();
         assert_eq!(cmd.network.discovery.port, 300);
@@ -272,29 +277,30 @@ mod tests {
 
     #[test]
     fn parse_metrics_port() {
-        let cmd: NodeCommand =
+        let cmd: NodeCommand<EthereumChainSpecParser> =
             NodeCommand::try_parse_args_from(["reth", "--metrics", "9001"]).unwrap();
         assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
 
-        let cmd: NodeCommand =
+        let cmd: NodeCommand<EthereumChainSpecParser> =
             NodeCommand::try_parse_args_from(["reth", "--metrics", ":9001"]).unwrap();
         assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
 
-        let cmd: NodeCommand =
+        let cmd: NodeCommand<EthereumChainSpecParser> =
             NodeCommand::try_parse_args_from(["reth", "--metrics", "localhost:9001"]).unwrap();
         assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
     }
 
     #[test]
     fn parse_config_path() {
-        let cmd: NodeCommand =
+        let cmd: NodeCommand<EthereumChainSpecParser> =
             NodeCommand::try_parse_args_from(["reth", "--config", "my/path/to/reth.toml"]).unwrap();
         // always store reth.toml in the data dir, not the chain specific data dir
         let data_dir = cmd.datadir.resolve_datadir(cmd.chain.chain);
         let config_path = cmd.config.unwrap_or_else(|| data_dir.config());
         assert_eq!(config_path, Path::new("my/path/to/reth.toml"));
 
-        let cmd: NodeCommand = NodeCommand::try_parse_args_from(["reth"]).unwrap();
+        let cmd: NodeCommand<EthereumChainSpecParser> =
+            NodeCommand::try_parse_args_from(["reth"]).unwrap();
 
         // always store reth.toml in the data dir, not the chain specific data dir
         let data_dir = cmd.datadir.resolve_datadir(cmd.chain.chain);
@@ -305,14 +311,15 @@ mod tests {
 
     #[test]
     fn parse_db_path() {
-        let cmd: NodeCommand = NodeCommand::try_parse_args_from(["reth"]).unwrap();
+        let cmd: NodeCommand<EthereumChainSpecParser> =
+            NodeCommand::try_parse_args_from(["reth"]).unwrap();
         let data_dir = cmd.datadir.resolve_datadir(cmd.chain.chain);
 
         let db_path = data_dir.db();
         let end = format!("reth/{}/db", SUPPORTED_CHAINS[0]);
         assert!(db_path.ends_with(end), "{:?}", cmd.config);
 
-        let cmd: NodeCommand =
+        let cmd: NodeCommand<EthereumChainSpecParser> =
             NodeCommand::try_parse_args_from(["reth", "--datadir", "my/custom/path"]).unwrap();
         let data_dir = cmd.datadir.resolve_datadir(cmd.chain.chain);
 
@@ -322,9 +329,9 @@ mod tests {
 
     #[test]
     fn parse_instance() {
-        let mut cmd: NodeCommand = NodeCommand::parse_from(["reth"]);
+        let mut cmd: NodeCommand<EthereumChainSpecParser> = NodeCommand::parse_from(["reth"]);
         cmd.rpc.adjust_instance_ports(cmd.instance);
-        cmd.network.port = DEFAULT_DISCOVERY_PORT + cmd.instance - 1;
+        cmd.network.port = DEFAULT_DISCOVERY_PORT;
         // check rpc port numbers
         assert_eq!(cmd.rpc.auth_port, 8551);
         assert_eq!(cmd.rpc.http_port, 8545);
@@ -332,9 +339,10 @@ mod tests {
         // check network listening port number
         assert_eq!(cmd.network.port, 30303);
 
-        let mut cmd: NodeCommand = NodeCommand::parse_from(["reth", "--instance", "2"]);
+        let mut cmd: NodeCommand<EthereumChainSpecParser> =
+            NodeCommand::parse_from(["reth", "--instance", "2"]);
         cmd.rpc.adjust_instance_ports(cmd.instance);
-        cmd.network.port = DEFAULT_DISCOVERY_PORT + cmd.instance - 1;
+        cmd.network.port = DEFAULT_DISCOVERY_PORT + 2 - 1;
         // check rpc port numbers
         assert_eq!(cmd.rpc.auth_port, 8651);
         assert_eq!(cmd.rpc.http_port, 8544);
@@ -342,9 +350,10 @@ mod tests {
         // check network listening port number
         assert_eq!(cmd.network.port, 30304);
 
-        let mut cmd: NodeCommand = NodeCommand::parse_from(["reth", "--instance", "3"]);
+        let mut cmd: NodeCommand<EthereumChainSpecParser> =
+            NodeCommand::parse_from(["reth", "--instance", "3"]);
         cmd.rpc.adjust_instance_ports(cmd.instance);
-        cmd.network.port = DEFAULT_DISCOVERY_PORT + cmd.instance - 1;
+        cmd.network.port = DEFAULT_DISCOVERY_PORT + 3 - 1;
         // check rpc port numbers
         assert_eq!(cmd.rpc.auth_port, 8751);
         assert_eq!(cmd.rpc.http_port, 8543);
@@ -355,7 +364,8 @@ mod tests {
 
     #[test]
     fn parse_with_unused_ports() {
-        let cmd: NodeCommand = NodeCommand::parse_from(["reth", "--with-unused-ports"]);
+        let cmd: NodeCommand<EthereumChainSpecParser> =
+            NodeCommand::parse_from(["reth", "--with-unused-ports"]);
         assert!(cmd.with_unused_ports);
     }
 
@@ -373,7 +383,7 @@ mod tests {
 
     #[test]
     fn with_unused_ports_check_zero() {
-        let mut cmd: NodeCommand = NodeCommand::parse_from(["reth"]);
+        let mut cmd: NodeCommand<EthereumChainSpecParser> = NodeCommand::parse_from(["reth"]);
         cmd.rpc = cmd.rpc.with_unused_ports();
         cmd.network = cmd.network.with_unused_ports();
 

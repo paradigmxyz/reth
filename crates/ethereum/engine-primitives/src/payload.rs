@@ -9,8 +9,9 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadFieldV2, ExecutionPayloadV1, ExecutionPayloadV3, PayloadAttributes, PayloadId,
 };
 use core::convert::Infallible;
+use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
-use reth_primitives::{EthPrimitives, SealedBlock};
+use reth_primitives_traits::SealedBlock;
 
 /// Contains the built payload.
 ///
@@ -22,7 +23,7 @@ pub struct EthBuiltPayload {
     /// Identifier of the payload
     pub(crate) id: PayloadId,
     /// The built block
-    pub(crate) block: Arc<SealedBlock>,
+    pub(crate) block: Arc<SealedBlock<Block>>,
     /// The fees of the block
     pub(crate) fees: U256,
     /// The blobs, proofs, and commitments in the block. If the block is pre-cancun, this will be
@@ -40,7 +41,7 @@ impl EthBuiltPayload {
     /// Caution: This does not set any [`BlobTransactionSidecar`].
     pub const fn new(
         id: PayloadId,
-        block: Arc<SealedBlock>,
+        block: Arc<SealedBlock<Block>>,
         fees: U256,
         requests: Option<Requests>,
     ) -> Self {
@@ -53,7 +54,7 @@ impl EthBuiltPayload {
     }
 
     /// Returns the built block(sealed)
-    pub fn block(&self) -> &SealedBlock {
+    pub fn block(&self) -> &SealedBlock<Block> {
         &self.block
     }
 
@@ -85,7 +86,7 @@ impl EthBuiltPayload {
 impl BuiltPayload for EthBuiltPayload {
     type Primitives = EthPrimitives;
 
-    fn block(&self) -> &SealedBlock {
+    fn block(&self) -> &SealedBlock<Block> {
         &self.block
     }
 

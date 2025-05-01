@@ -42,6 +42,8 @@ pub struct PoolConfig {
     pub queued_limit: SubPoolLimit,
     /// Max number of transactions in the blob sub-pool
     pub blob_limit: SubPoolLimit,
+    /// Blob cache size
+    pub blob_cache_size: Option<u32>,
     /// Max number of executable transaction slots guaranteed per account
     pub max_account_slots: usize,
     /// Price bump (in %) for the transaction pool underpriced check.
@@ -81,6 +83,7 @@ impl Default for PoolConfig {
             basefee_limit: Default::default(),
             queued_limit: Default::default(),
             blob_limit: Default::default(),
+            blob_cache_size: None,
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             price_bumps: Default::default(),
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
@@ -147,7 +150,7 @@ pub struct PriceBumpConfig {
 impl PriceBumpConfig {
     /// Returns the price bump required to replace the given transaction type.
     #[inline]
-    pub(crate) const fn price_bump(&self, tx_type: u8) -> u128 {
+    pub const fn price_bump(&self, tx_type: u8) -> u128 {
         if tx_type == EIP4844_TX_TYPE_ID {
             return self.replace_blob_tx_price_bump
         }

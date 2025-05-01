@@ -30,17 +30,15 @@ use reth_db_api::{
     tables,
     transaction::DbTx,
 };
+use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_nippy_jar::{NippyJar, NippyJarChecker, CONFIG_FILE_EXTENSION};
 use reth_node_types::{FullNodePrimitives, NodePrimitives};
-use reth_primitives::{
-    static_file::{
-        find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive,
-        DEFAULT_BLOCKS_PER_STATIC_FILE,
-    },
-    Receipt, RecoveredBlock, SealedBlock, SealedHeader, StaticFileSegment, TransactionSigned,
-};
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader, SignedTransaction};
 use reth_stages_types::{PipelineTarget, StageId};
+use reth_static_file_types::{
+    find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive, StaticFileSegment,
+    DEFAULT_BLOCKS_PER_STATIC_FILE,
+};
 use reth_storage_api::{BlockBodyIndicesProvider, DBProvider, OmmersProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
@@ -170,10 +168,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                         // appending/truncating rows
                         for segment in event.paths {
                             // Ensure it's a file with the .conf extension
-                            #[allow(clippy::nonminimal_bool)]
-                            if !segment
+                            if segment
                                 .extension()
-                                .is_some_and(|s| s.to_str() == Some(CONFIG_FILE_EXTENSION))
+                                .is_none_or(|s| s.to_str() != Some(CONFIG_FILE_EXTENSION))
                             {
                                 continue
                             }
@@ -253,7 +250,7 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
     /// Creates a new [`StaticFileProviderInner`].
     fn new(path: impl AsRef<Path>, access: StaticFileAccess) -> ProviderResult<Self> {
         let _lock_file = if access.is_read_write() {
-            StorageLock::try_acquire(path.as_ref())?.into()
+            StorageLock::try_acquire(path.as_ref()).map_err(ProviderError::other)?.into()
         } else {
             None
         };
@@ -655,7 +652,6 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ///
     /// WARNING: No static file writer should be held before calling this function, otherwise it
     /// will deadlock.
-    #[allow(clippy::while_let_loop)]
     pub fn check_consistency<Provider>(
         &self,
         provider: &Provider,
@@ -1655,7 +1651,7 @@ impl<N: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>>
         Err(ProviderError::UnsupportedProvider)
     }
 
-    fn block_with_senders(
+    fn recovered_block(
         &self,
         _id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,

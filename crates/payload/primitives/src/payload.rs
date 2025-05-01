@@ -1,6 +1,6 @@
 use crate::{MessageValidationKind, PayloadAttributes};
 use alloc::vec::Vec;
-use alloy_eips::eip4895::Withdrawal;
+use alloy_eips::{eip4895::Withdrawal, eip7685::Requests};
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::ExecutionData;
 use core::fmt::Debug;
@@ -162,5 +162,27 @@ impl ExecutionPayload for op_alloy_rpc_types_engine::OpExecutionData {
 
     fn gas_used(&self) -> u64 {
         self.payload.as_v1().gas_used
+    }
+}
+
+/// Special implementation for Ethereum types that provides additional helper methods
+impl<Attributes> PayloadOrAttributes<'_, ExecutionData, Attributes>
+where
+    Attributes: PayloadAttributes,
+{
+    /// Return the execution requests from the payload, if available.
+    ///
+    /// This will return `Some(requests)` only if:
+    /// - The payload is an `ExecutionData` (not `PayloadAttributes`)
+    /// - The payload has Prague payload fields
+    /// - The Prague fields contain requests (not a hash)
+    ///
+    /// Returns `None` in all other cases.
+    pub fn execution_requests(&self) -> Option<&Requests> {
+        if let Self::ExecutionPayload(payload) = self {
+            payload.sidecar.requests()
+        } else {
+            None
+        }
     }
 }

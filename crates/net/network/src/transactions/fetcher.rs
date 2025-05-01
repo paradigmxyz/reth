@@ -37,6 +37,7 @@ use crate::{
     metrics::TransactionFetcherMetrics,
     transactions::{validation, PartiallyFilterMessage},
 };
+use alloy_consensus::transaction::PooledTransaction;
 use alloy_primitives::TxHash;
 use derive_more::{Constructor, Deref};
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
@@ -49,11 +50,8 @@ use reth_eth_wire_types::{EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::{RequestError, RequestResult};
 use reth_network_peers::PeerId;
-use reth_primitives::PooledTransaction;
 use reth_primitives_traits::SignedTransaction;
 use schnellru::ByLength;
-#[cfg(debug_assertions)]
-use smallvec::{smallvec, SmallVec};
 use std::{
     collections::HashMap,
     pin::Pin,
@@ -86,7 +84,7 @@ pub struct TransactionFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// which a [`GetPooledTransactions`] request is inflight.
     pub hashes_pending_fetch: LruCache<TxHash>,
     /// Tracks all hashes in the transaction fetcher.
-    pub(super) hashes_fetch_inflight_and_pending_fetch: LruMap<TxHash, TxFetchMetadata, ByLength>,
+    pub hashes_fetch_inflight_and_pending_fetch: LruMap<TxHash, TxFetchMetadata, ByLength>,
     /// Filter for valid announcement and response data.
     pub(super) filter_valid_message: MessageFilter,
     /// Info on capacity of the transaction fetcher.
@@ -372,6 +370,16 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         self.buffer_hashes(hashes, None)
     }
 
+    /// Number of hashes pending fetch.
+    pub fn num_pending_hashes(&self) -> usize {
+        self.hashes_pending_fetch.len()
+    }
+
+    /// Number of all transaction hashes in the fetcher.
+    pub fn num_all_hashes(&self) -> usize {
+        self.hashes_fetch_inflight_and_pending_fetch.len()
+    }
+
     /// Buffers hashes. Note: Only peers that haven't yet tried to request the hashes should be
     /// passed as `fallback_peer` parameter! For re-buffering hashes on failed request, use
     /// [`TransactionFetcher::try_buffer_hashes_for_retry`]. Hashes that have been re-requested
@@ -513,7 +521,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         new_announced_hashes.retain(|hash, metadata| {
 
             // occupied entry
-            if let Some(TxFetchMetadata{ tx_encoded_length: ref mut previously_seen_size, ..}) = self.hashes_fetch_inflight_and_pending_fetch.peek_mut(hash) {
+            if let Some(TxFetchMetadata{ tx_encoded_length: previously_seen_size, ..}) = self.hashes_fetch_inflight_and_pending_fetch.peek_mut(hash) {
                 // update size metadata if available
                 if let Some((_ty, size)) = metadata {
                     if let Some(prev_size) = previously_seen_size {
@@ -1029,7 +1037,7 @@ pub struct TxFetchMetadata {
 
 impl TxFetchMetadata {
     /// Returns a mutable reference to the fallback peers cache for this transaction hash.
-    pub fn fallback_peers_mut(&mut self) -> &mut LruCache<PeerId> {
+    pub const fn fallback_peers_mut(&mut self) -> &mut LruCache<PeerId> {
         &mut self.fallback_peers
     }
 
@@ -1180,7 +1188,7 @@ impl<T: SignedTransaction> VerifyPooledTransactionsResponse for UnverifiedPooled
         let Self { mut txns } = self;
 
         #[cfg(debug_assertions)]
-        let mut tx_hashes_not_requested: SmallVec<[TxHash; 16]> = smallvec!();
+        let mut tx_hashes_not_requested: smallvec::SmallVec<[TxHash; 16]> = smallvec::smallvec!();
         #[cfg(not(debug_assertions))]
         let mut tx_hashes_not_requested_count = 0;
 
@@ -1293,11 +1301,11 @@ struct TxFetcherSearchDurations {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::transactions::tests::{default_cache, new_mock_session};
+    use crate::test_utils::transactions::{buffer_hash_to_tx_fetcher, new_mock_session};
     use alloy_primitives::{hex, B256};
     use alloy_rlp::Decodable;
     use derive_more::IntoIterator;
-    use reth_primitives::TransactionSigned;
+    use reth_ethereum_primitives::TransactionSigned;
     use std::{collections::HashSet, str::FromStr};
 
     #[derive(IntoIterator)]
@@ -1416,45 +1424,30 @@ mod test {
         peers.insert(peer_1, peer_1_data);
         peers.insert(peer_2, peer_2_data);
 
-        let mut backups = default_cache();
-        backups.insert(peer_2);
         // insert seen_hashes into tx fetcher
         for i in 0..3 {
             // insert peer_2 as fallback peer for seen_hashes
-            let mut backups = default_cache();
-            backups.insert(peer_2);
-            let meta = TxFetchMetadata::new(0, backups, Some(seen_eth68_hashes_sizes[i]));
-            tx_fetcher.hashes_fetch_inflight_and_pending_fetch.insert(seen_hashes[i], meta);
+            buffer_hash_to_tx_fetcher(
+                tx_fetcher,
+                seen_hashes[i],
+                peer_2,
+                0,
+                Some(seen_eth68_hashes_sizes[i]),
+            );
         }
-        let meta = TxFetchMetadata::new(0, backups, None);
-        tx_fetcher.hashes_fetch_inflight_and_pending_fetch.insert(seen_hashes[3], meta);
+        buffer_hash_to_tx_fetcher(tx_fetcher, seen_hashes[3], peer_2, 0, None);
 
-        let mut backups = default_cache();
-        backups.insert(peer_2);
         // insert pending hash without peer_1 as fallback peer, only with peer_2 as fallback peer
         let hash_other = B256::from_slice(&[5; 32]);
-        tx_fetcher
-            .hashes_fetch_inflight_and_pending_fetch
-            .insert(hash_other, TxFetchMetadata::new(0, backups, None));
-        tx_fetcher.hashes_pending_fetch.insert(hash_other);
+        buffer_hash_to_tx_fetcher(tx_fetcher, hash_other, peer_2, 0, None);
 
         // add peer_1 as lru fallback peer for seen hashes
         for hash in &seen_hashes {
-            tx_fetcher
-                .hashes_fetch_inflight_and_pending_fetch
-                .get(hash)
-                .unwrap()
-                .fallback_peers_mut()
-                .insert(peer_1);
-        }
-
-        // mark seen hashes as pending fetch
-        for hash in &seen_hashes {
-            tx_fetcher.hashes_pending_fetch.insert(*hash);
+            buffer_hash_to_tx_fetcher(tx_fetcher, *hash, peer_1, 0, None);
         }
 
         // seen hashes and the random hash from peer_2 are pending fetch
-        assert_eq!(tx_fetcher.hashes_pending_fetch.len(), 5);
+        assert_eq!(tx_fetcher.num_pending_hashes(), 5);
 
         // TEST
 
@@ -1476,10 +1469,14 @@ mod test {
 
     #[test]
     fn verify_response_hashes() {
-        let input = hex!("02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598daa");
+        let input = hex!(
+            "02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598daa"
+        );
         let signed_tx_1: PooledTransaction =
             TransactionSigned::decode(&mut &input[..]).unwrap().try_into().unwrap();
-        let input = hex!("02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598d76");
+        let input = hex!(
+            "02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598d76"
+        );
         let signed_tx_2: PooledTransaction =
             TransactionSigned::decode(&mut &input[..]).unwrap().try_into().unwrap();
 

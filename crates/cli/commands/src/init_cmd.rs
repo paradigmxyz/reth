@@ -5,6 +5,7 @@ use clap::Parser;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_provider::BlockHashReader;
+use std::sync::Arc;
 use tracing::info;
 
 /// Initializes the database with the genesis block.
@@ -27,5 +28,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitComman
 
         info!(target: "reth::cli", hash = ?hash, "Genesis block written");
         Ok(())
+    }
+}
+
+impl<C: ChainSpecParser> InitCommand<C> {
+    /// Returns the underlying chain being used to run this command
+    pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+        Some(&self.env.chain)
     }
 }

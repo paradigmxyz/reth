@@ -1,20 +1,20 @@
 //! Support for building a pending block with transactions from local view of mempool.
 
 use alloy_consensus::BlockHeader;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_evm::{execute::BlockExecutionStrategyFactory, NextBlockEnvAttributes};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_evm::{ConfigureEvm, NextBlockEnvAttributes};
 use reth_node_api::NodePrimitives;
-use reth_primitives::SealedHeader;
-use reth_provider::{
-    BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderHeader,
-    ProviderReceipt, ProviderTx, StateProviderFactory,
-};
+use reth_primitives_traits::SealedHeader;
 use reth_rpc_eth_api::{
     helpers::{LoadPendingBlock, SpawnBlocking},
     types::RpcTypes,
     FromEvmError, RpcNodeCore,
 };
 use reth_rpc_eth_types::PendingBlock;
+use reth_storage_api::{
+    BlockReader, BlockReaderIdExt, ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx,
+    StateProviderFactory,
+};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use revm_primitives::B256;
 
@@ -28,16 +28,16 @@ where
             Error: FromEvmError<Self::Evm>,
         > + RpcNodeCore<
             Provider: BlockReaderIdExt<
-                Transaction = reth_primitives::TransactionSigned,
-                Block = reth_primitives::Block,
-                Receipt = reth_primitives::Receipt,
-                Header = reth_primitives::Header,
+                Transaction = reth_ethereum_primitives::TransactionSigned,
+                Block = reth_ethereum_primitives::Block,
+                Receipt = reth_ethereum_primitives::Receipt,
+                Header = alloy_consensus::Header,
             > + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                           + StateProviderFactory,
             Pool: TransactionPool<
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,
-            Evm: BlockExecutionStrategyFactory<
+            Evm: ConfigureEvm<
                 Primitives: NodePrimitives<
                     BlockHeader = ProviderHeader<Self::Provider>,
                     SignedTx = ProviderTx<Self::Provider>,
@@ -47,7 +47,10 @@ where
                 NextBlockEnvCtx = NextBlockEnvAttributes,
             >,
         >,
-    Provider: BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>,
+    Provider: BlockReader<
+        Block = reth_ethereum_primitives::Block,
+        Receipt = reth_ethereum_primitives::Receipt,
+    >,
 {
     #[inline]
     fn pending_block(
@@ -61,7 +64,7 @@ where
     fn next_env_attributes(
         &self,
         parent: &SealedHeader<ProviderHeader<Self::Provider>>,
-    ) -> Result<<Self::Evm as reth_evm::ConfigureEvmEnv>::NextBlockEnvCtx, Self::Error> {
+    ) -> Result<<Self::Evm as reth_evm::ConfigureEvm>::NextBlockEnvCtx, Self::Error> {
         Ok(NextBlockEnvAttributes {
             timestamp: parent.timestamp().saturating_add(12),
             suggested_fee_recipient: parent.beneficiary(),

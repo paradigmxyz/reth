@@ -58,7 +58,7 @@ where
 
         let AllPoolTransactions { pending, queued } = self.pool.all_transactions();
 
-        let mut content = TxpoolContent { pending: BTreeMap::new(), queued: BTreeMap::new() };
+        let mut content = TxpoolContent::default();
         for pending in pending {
             insert::<_, Eth>(&pending.transaction, &mut content.pending, &self.tx_resp_builder)?;
         }
@@ -103,7 +103,7 @@ where
         ) {
             let entry = inspect.entry(tx.sender()).or_default();
             let tx = tx.clone_into_consensus();
-            entry.insert(tx.nonce().to_string(), tx.into_tx().into());
+            entry.insert(tx.nonce().to_string(), tx.into_inner().into());
         }
 
         let AllPoolTransactions { pending, queued } = self.pool.all_transactions();

@@ -9,10 +9,12 @@ use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber, BlockNumHash};
 use alloy_primitives::{map::HashMap, TxHash, B256};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
+use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_metrics::{metrics::Gauge, Metrics};
-use reth_primitives::{EthPrimitives, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
-use reth_primitives_traits::{BlockBody as _, SignedTransaction};
+use reth_primitives_traits::{
+    BlockBody as _, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader, SignedTransaction,
+};
 use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
@@ -419,16 +421,6 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         self.inner.chain_info_tracker.last_forkchoice_update_received_at()
     }
 
-    /// Hook for transition configuration exchanged.
-    pub fn on_transition_configuration_exchanged(&self) {
-        self.inner.chain_info_tracker.on_transition_configuration_exchanged();
-    }
-
-    /// Returns the timestamp of the last transition configuration exchanged,
-    pub fn last_exchanged_transition_configuration_timestamp(&self) -> Option<Instant> {
-        self.inner.chain_info_tracker.last_transition_configuration_exchanged_at()
-    }
-
     /// Canonical head setter.
     pub fn set_canonical_head(&self, header: SealedHeader<N::BlockHeader>) {
         self.inner.chain_info_tracker.set_canonical_head(header);
@@ -595,7 +587,6 @@ pub struct BlockState<N: NodePrimitives = EthPrimitives> {
     parent: Option<Arc<BlockState<N>>>,
 }
 
-#[allow(dead_code)]
 impl<N: NodePrimitives> BlockState<N> {
     /// [`BlockState`] constructor.
     pub const fn new(block: ExecutedBlockWithTrieUpdates<N>) -> Self {
@@ -944,10 +935,11 @@ mod tests {
     use super::*;
     use crate::test_utils::TestBlockBuilder;
     use alloy_eips::eip7685::Requests;
-    use alloy_primitives::{map::B256Map, Address, BlockNumber, Bytes, StorageKey, StorageValue};
+    use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue};
     use rand::Rng;
     use reth_errors::ProviderResult;
-    use reth_primitives::{Account, Bytecode, EthPrimitives, Receipt};
+    use reth_ethereum_primitives::{EthPrimitives, Receipt};
+    use reth_primitives_traits::{Account, Bytecode};
     use reth_storage_api::{
         AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
         StateRootProvider, StorageRootProvider,
@@ -1104,15 +1096,15 @@ mod tests {
             &self,
             _input: TrieInput,
             _target: HashedPostState,
-        ) -> ProviderResult<B256Map<Bytes>> {
-            Ok(HashMap::default())
+        ) -> ProviderResult<Vec<Bytes>> {
+            Ok(Vec::default())
         }
     }
 
     #[test]
     fn test_in_memory_state_impl_state_by_hash() {
         let mut state_by_hash = HashMap::default();
-        let number = rand::thread_rng().gen::<u64>();
+        let number = rand::rng().random::<u64>();
         let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
         let state = Arc::new(create_mock_state(&mut test_block_builder, number, B256::random()));
         state_by_hash.insert(state.hash(), state.clone());
@@ -1128,7 +1120,7 @@ mod tests {
         let mut state_by_hash = HashMap::default();
         let mut hash_by_number = BTreeMap::new();
 
-        let number = rand::thread_rng().gen::<u64>();
+        let number = rand::rng().random::<u64>();
         let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
         let state = Arc::new(create_mock_state(&mut test_block_builder, number, B256::random()));
         let hash = state.hash();
@@ -1165,7 +1157,7 @@ mod tests {
 
     #[test]
     fn test_in_memory_state_impl_pending_state() {
-        let pending_number = rand::thread_rng().gen::<u64>();
+        let pending_number = rand::rng().random::<u64>();
         let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
         let pending_state =
             create_mock_state(&mut test_block_builder, pending_number, B256::random());
@@ -1190,57 +1182,16 @@ mod tests {
     }
 
     #[test]
-    fn test_state_new() {
-        let number = rand::thread_rng().gen::<u64>();
+    fn test_state() {
+        let number = rand::rng().random::<u64>();
         let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
         let block = test_block_builder.get_executed_block_with_number(number, B256::random());
 
         let state = BlockState::new(block.clone());
 
         assert_eq!(state.block(), block);
-    }
-
-    #[test]
-    fn test_state_block() {
-        let number = rand::thread_rng().gen::<u64>();
-        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
-        let block = test_block_builder.get_executed_block_with_number(number, B256::random());
-
-        let state = BlockState::new(block.clone());
-
-        assert_eq!(state.block(), block);
-    }
-
-    #[test]
-    fn test_state_hash() {
-        let number = rand::thread_rng().gen::<u64>();
-        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
-        let block = test_block_builder.get_executed_block_with_number(number, B256::random());
-
-        let state = BlockState::new(block.clone());
-
         assert_eq!(state.hash(), block.recovered_block().hash());
-    }
-
-    #[test]
-    fn test_state_number() {
-        let number = rand::thread_rng().gen::<u64>();
-        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
-        let block = test_block_builder.get_executed_block_with_number(number, B256::random());
-
-        let state = BlockState::new(block);
-
         assert_eq!(state.number(), number);
-    }
-
-    #[test]
-    fn test_state_state_root() {
-        let number = rand::thread_rng().gen::<u64>();
-        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
-        let block = test_block_builder.get_executed_block_with_number(number, B256::random());
-
-        let state = BlockState::new(block.clone());
-
         assert_eq!(state.state_root(), block.recovered_block().state_root);
     }
 

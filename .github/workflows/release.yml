@@ -35,10 +35,10 @@ jobs:
       matrix:
         configs:
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-20.04
+            os: ubuntu-24.04
             profile: maxperf
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-20.04
+            os: ubuntu-24.04
             profile: maxperf
           - target: x86_64-apple-darwin
             os: macos-13
@@ -47,7 +47,7 @@ jobs:
             os: macos-14
             profile: maxperf
           - target: x86_64-pc-windows-gnu
-            os: ubuntu-20.04
+            os: ubuntu-24.04
             profile: maxperf
         build:
           - command: build
@@ -60,7 +60,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           target: ${{ matrix.configs.target }}
-      - uses: taiki-e/install-action@cross
+      - name: Install cross main
+        id: cross_main
+        run: |
+          cargo install cross --git https://github.com/cross-rs/cross
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true

@@ -24,7 +24,7 @@ pub mod types;
 pub use bundle::{EthBundleApiServer, EthCallBundleApiServer};
 pub use core::{EthApiServer, FullEthApiServer};
 pub use ext::L2EthApiExtServer;
-pub use filter::EthFilterApiServer;
+pub use filter::{EngineEthFilter, EthFilterApiServer, QueryLimits};
 pub use node::{RpcNodeCore, RpcNodeCoreExt};
 pub use pubsub::EthPubSubApiServer;
 pub use reth_rpc_eth_types::error::{

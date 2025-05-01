@@ -329,7 +329,7 @@ mod tests {
     #[test]
     #[cfg(feature = "secp256k1")]
     fn pk2id2pk() {
-        let prikey = secp256k1::SecretKey::new(&mut rand::thread_rng());
+        let prikey = secp256k1::SecretKey::new(&mut rand_08::thread_rng());
         let pubkey = secp256k1::PublicKey::from_secret_key(secp256k1::SECP256K1, &prikey);
         assert_eq!(pubkey, id2pk(pk2id(&pubkey)).unwrap());
     }

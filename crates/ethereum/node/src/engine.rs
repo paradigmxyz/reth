@@ -6,13 +6,15 @@ pub use alloy_rpc_types_engine::{
     ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes,
 };
 use reth_chainspec::ChainSpec;
-use reth_engine_primitives::{EngineTypes, EngineValidator, PayloadValidator};
+use reth_engine_primitives::{EngineValidator, PayloadValidator};
 use reth_ethereum_payload_builder::EthereumExecutionPayloadValidator;
+use reth_ethereum_primitives::Block;
+use reth_node_api::PayloadTypes;
 use reth_payload_primitives::{
-    validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
-    NewPayloadError, PayloadOrAttributes,
+    validate_execution_requests, validate_version_specific_fields, EngineApiMessageVersion,
+    EngineObjectValidationError, NewPayloadError, PayloadOrAttributes,
 };
-use reth_primitives::{Block, RecoveredBlock};
+use reth_primitives_traits::RecoveredBlock;
 use std::sync::Arc;
 
 /// Validator for the ethereum engine API.
@@ -49,13 +51,18 @@ impl PayloadValidator for EthereumEngineValidator {
 
 impl<Types> EngineValidator<Types> for EthereumEngineValidator
 where
-    Types: EngineTypes<PayloadAttributes = EthPayloadAttributes, ExecutionData = ExecutionData>,
+    Types: PayloadTypes<PayloadAttributes = EthPayloadAttributes, ExecutionData = ExecutionData>,
 {
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,
         payload_or_attrs: PayloadOrAttributes<'_, Self::ExecutionData, EthPayloadAttributes>,
     ) -> Result<(), EngineObjectValidationError> {
+        payload_or_attrs
+            .execution_requests()
+            .map(|requests| validate_execution_requests(requests))
+            .transpose()?;
+
         validate_version_specific_fields(self.chain_spec(), version, payload_or_attrs)
     }
 

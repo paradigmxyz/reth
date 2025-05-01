@@ -8,9 +8,7 @@ use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
 use reth_db_api::{tables, transaction::DbTxMut, DatabaseError};
 use reth_etl::Collector;
-use reth_primitives::{
-    Account, Bytecode, GotExpected, NodePrimitives, StaticFileSegment, StorageEntry,
-};
+use reth_primitives_traits::{Account, Bytecode, GotExpected, NodePrimitives, StorageEntry};
 use reth_provider::{
     errors::provider::ProviderResult, providers::StaticFileWriter, writer::UnifiedStorageWriter,
     BlockHashReader, BlockNumReader, BundleStateInit, ChainSpecProvider, DBProvider,
@@ -19,6 +17,7 @@ use reth_provider::{
     StateWriter, StaticFileProviderFactory, StorageLocation, TrieWriter,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
+use reth_static_file_types::StaticFileSegment;
 use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
 use reth_trie_db::DatabaseStateRoot;
 use serde::{Deserialize, Serialize};
@@ -46,11 +45,15 @@ const SOFT_LIMIT_COUNT_FLUSHED_UPDATES: usize = 1_000_000;
 #[derive(Debug, thiserror::Error, Clone)]
 pub enum InitStorageError {
     /// Genesis header found on static files but the database is empty.
-    #[error("static files found, but the database is uninitialized. If attempting to re-syncing, delete both.")]
+    #[error(
+        "static files found, but the database is uninitialized. If attempting to re-syncing, delete both."
+    )]
     UninitializedDatabase,
     /// An existing genesis block was found in the database, and its hash did not match the hash of
     /// the chainspec.
-    #[error("genesis hash in the storage does not match the specified chainspec: chainspec is {chainspec_hash}, database is {storage_hash}")]
+    #[error(
+        "genesis hash in the storage does not match the specified chainspec: chainspec is {chainspec_hash}, database is {storage_hash}"
+    )]
     GenesisHashMismatch {
         /// Expected genesis hash.
         chainspec_hash: B256,
@@ -315,7 +318,7 @@ where
 
     let storage_transitions = alloc
         .filter_map(|(addr, account)| account.storage.as_ref().map(|storage| (addr, storage)))
-        .flat_map(|(addr, storage)| storage.iter().map(|(key, _)| ((*addr, *key), [block])));
+        .flat_map(|(addr, storage)| storage.keys().map(|key| ((*addr, *key), [block])));
     provider.insert_storage_history_index(storage_transitions)?;
 
     trace!(target: "reth::cli", "Inserted storage history");

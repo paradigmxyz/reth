@@ -12,10 +12,11 @@ workspace = true
 
 [dependencies]
 # reth
+revm-bytecode.workspace = true
 reth-chainspec.workspace = true
+revm-database.workspace = true
 reth-engine-primitives.workspace = true
 reth-evm.workspace = true
-reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider.workspace = true
 reth-revm = { workspace = true, features = ["serde"] }

@@ -33,9 +33,9 @@ alloy_sol_types::sol! {
 async fn test_fee_history() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let seed: [u8; 32] = rand::thread_rng().gen();
+    let seed: [u8; 32] = rand::rng().random();
     let mut rng = StdRng::from_seed(seed);
-    println!("Seed: {:?}", seed);
+    println!("Seed: {seed:?}");
 
     let chain_spec = Arc::new(
         ChainSpecBuilder::default()
@@ -49,8 +49,8 @@ async fn test_fee_history() -> eyre::Result<()> {
         setup_engine::<EthereumNode>(1, chain_spec.clone(), false, eth_payload_attributes).await?;
     let mut node = nodes.pop().unwrap();
     let provider = ProviderBuilder::new()
-        .wallet(EthereumWallet::new(wallet.gen().swap_remove(0)))
-        .on_http(node.rpc_url());
+        .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
+        .connect_http(node.rpc_url());
 
     let fee_history = provider.get_fee_history(10, 0_u64.into(), &[]).await?;
 
@@ -66,13 +66,14 @@ async fn test_fee_history() -> eyre::Result<()> {
     let receipt = builder.get_receipt().await?;
     assert!(receipt.status());
 
-    let block = provider.get_block_by_number(1.into(), false.into()).await?.unwrap();
+    let block = provider.get_block_by_number(1.into()).await?.unwrap();
     assert_eq!(block.header.gas_used, receipt.gas_used,);
     assert_eq!(block.header.base_fee_per_gas.unwrap(), expected_first_base_fee as u64);
 
     for _ in 0..100 {
-        let _ =
-            GasWaster::deploy_builder(&provider, U256::from(rng.gen_range(0..1000))).send().await?;
+        let _ = GasWaster::deploy_builder(&provider, U256::from(rng.random_range(0..1000)))
+            .send()
+            .await?;
 
         node.advance_block().await?;
     }
@@ -80,13 +81,13 @@ async fn test_fee_history() -> eyre::Result<()> {
     let latest_block = provider.get_block_number().await?;
 
     for _ in 0..100 {
-        let latest_block = rng.gen_range(0..=latest_block);
-        let block_count = rng.gen_range(1..=(latest_block + 1));
+        let latest_block = rng.random_range(0..=latest_block);
+        let block_count = rng.random_range(1..=(latest_block + 1));
 
         let fee_history = provider.get_fee_history(block_count, latest_block.into(), &[]).await?;
 
         let mut prev_header = provider
-            .get_block_by_number((latest_block + 1 - block_count).into(), false.into())
+            .get_block_by_number((latest_block + 1 - block_count).into())
             .await?
             .unwrap()
             .header;
@@ -98,10 +99,9 @@ async fn test_fee_history() -> eyre::Result<()> {
                 chain_spec.base_fee_params_at_block(block),
             );
 
-            let header =
-                provider.get_block_by_number(block.into(), false.into()).await?.unwrap().header;
+            let header = provider.get_block_by_number(block.into()).await?.unwrap().header;
 
-            assert_eq!(header.base_fee_per_gas.unwrap(), expected_base_fee as u64);
+            assert_eq!(header.base_fee_per_gas.unwrap(), expected_base_fee);
             assert_eq!(
                 header.base_fee_per_gas.unwrap(),
                 fee_history.base_fee_per_gas[(block + block_count - 1 - latest_block) as usize]
@@ -131,8 +131,8 @@ async fn test_flashbots_validate_v3() -> eyre::Result<()> {
         setup_engine::<EthereumNode>(1, chain_spec.clone(), false, eth_payload_attributes).await?;
     let mut node = nodes.pop().unwrap();
     let provider = ProviderBuilder::new()
-        .wallet(EthereumWallet::new(wallet.gen().swap_remove(0)))
-        .on_http(node.rpc_url());
+        .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
+        .connect_http(node.rpc_url());
 
     node.advance(100, |_| {
         let provider = provider.clone();
@@ -207,8 +207,8 @@ async fn test_flashbots_validate_v4() -> eyre::Result<()> {
         setup_engine::<EthereumNode>(1, chain_spec.clone(), false, eth_payload_attributes).await?;
     let mut node = nodes.pop().unwrap();
     let provider = ProviderBuilder::new()
-        .wallet(EthereumWallet::new(wallet.gen().swap_remove(0)))
-        .on_http(node.rpc_url());
+        .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
+        .connect_http(node.rpc_url());
 
     node.advance(100, |_| {
         let provider = provider.clone();

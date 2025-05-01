@@ -4,13 +4,14 @@ use alloy_consensus::TxType;
 use alloy_primitives::{Bytes, TxKind, U256};
 use alloy_rpc_types_eth::transaction::TransactionRequest;
 use op_revm::OpTransaction;
-use reth_evm::{ConfigureEvm, EvmEnv, SpecFor};
-use reth_provider::ProviderHeader;
+use reth_evm::{execute::BlockExecutorFactory, ConfigureEvm, EvmEnv, EvmFactory, SpecFor};
+use reth_node_api::NodePrimitives;
 use reth_rpc_eth_api::{
     helpers::{estimate::EstimateCall, Call, EthCall, LoadBlock, LoadState, SpawnBlocking},
     FromEthApiError, FromEvmError, FullEthApiTypes, IntoEthApiError,
 };
 use reth_rpc_eth_types::{revm_utils::CallFees, EthApiError, RpcInvalidTransactionError};
+use reth_storage_api::{ProviderHeader, ProviderTx};
 use revm::{context::TxEnv, context_interface::Block, Database};
 
 impl<N> EthCall for OpEthApi<N>
@@ -32,8 +33,13 @@ impl<N> Call for OpEthApi<N>
 where
     Self: LoadState<
             Evm: ConfigureEvm<
-                Header = ProviderHeader<Self::Provider>,
-                TxEnv = OpTransaction<TxEnv>,
+                Primitives: NodePrimitives<
+                    BlockHeader = ProviderHeader<Self::Provider>,
+                    SignedTx = ProviderTx<Self::Provider>,
+                >,
+                BlockExecutorFactory: BlockExecutorFactory<
+                    EvmFactory: EvmFactory<Tx = OpTransaction<TxEnv>>,
+                >,
             >,
             Error: FromEvmError<Self::Evm>,
         > + SpawnBlocking,

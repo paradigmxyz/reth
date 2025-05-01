@@ -6,12 +6,12 @@ use std::{
 
 use alloy_consensus::BlockHeader;
 use alloy_primitives::BlockNumber;
+use reth_ethereum_primitives::Receipt;
 use reth_evm::execute::{
     BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider, Executor,
 };
 use reth_node_api::{Block as _, BlockBody as _, NodePrimitives};
-use reth_primitives::{Receipt, RecoveredBlock};
-use reth_primitives_traits::{format_gas_throughput, SignedTransaction};
+use reth_primitives_traits::{format_gas_throughput, RecoveredBlock, SignedTransaction};
 use reth_provider::{
     BlockReader, Chain, ExecutionOutcome, HeaderProvider, ProviderError, StateProviderFactory,
     TransactionVariant,
@@ -77,7 +77,9 @@ where
         );
 
         let mut executor = self.executor.executor(StateProviderDatabase::new(
-            self.provider.history_by_block_number(self.range.start().saturating_sub(1))?,
+            self.provider
+                .history_by_block_number(self.range.start().saturating_sub(1))
+                .map_err(BlockExecutionError::other)?,
         ));
 
         let mut fetch_block_duration = Duration::default();
@@ -94,8 +96,10 @@ where
             // we need the block's transactions along with their hashes
             let block = self
                 .provider
-                .sealed_block_with_senders(block_number.into(), TransactionVariant::WithHash)?
-                .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+                .sealed_block_with_senders(block_number.into(), TransactionVariant::WithHash)
+                .map_err(BlockExecutionError::other)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))
+                .map_err(BlockExecutionError::other)?;
 
             fetch_block_duration += fetch_block_start.elapsed();
 
@@ -190,7 +194,7 @@ where
     ) -> StreamBackfillJob<
         E,
         P,
-        (RecoveredBlock<reth_primitives::Block>, BlockExecutionOutput<Receipt>),
+        (RecoveredBlock<reth_ethereum_primitives::Block>, BlockExecutionOutput<Receipt>),
     > {
         self.into()
     }
@@ -206,12 +210,16 @@ where
         // Fetch the block with senders for execution.
         let block_with_senders = self
             .provider
-            .block_with_senders(block_number.into(), TransactionVariant::WithHash)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+            .recovered_block(block_number.into(), TransactionVariant::WithHash)
+            .map_err(BlockExecutionError::other)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))
+            .map_err(BlockExecutionError::other)?;
 
         // Configure the executor to use the previous block's state.
         let executor = self.executor.executor(StateProviderDatabase::new(
-            self.provider.history_by_block_number(block_number.saturating_sub(1))?,
+            self.provider
+                .history_by_block_number(block_number.saturating_sub(1))
+                .map_err(BlockExecutionError::other)?,
         ));
 
         trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.body().transaction_count(), "Executing block");
@@ -246,14 +254,13 @@ mod tests {
         providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
     };
     use reth_testing_utils::generators;
-    use secp256k1::Keypair;
 
     #[test]
     fn test_backfill() -> eyre::Result<()> {
         reth_tracing::init_test_tracing();
 
         // Create a key pair for the sender
-        let key_pair = Keypair::new_global(&mut generators::rng());
+        let key_pair = generators::generate_key(&mut generators::rng());
         let address = public_key_to_address(key_pair.public_key());
 
         let chain_spec = chain_spec(address);
@@ -289,7 +296,7 @@ mod tests {
         reth_tracing::init_test_tracing();
 
         // Create a key pair for the sender
-        let key_pair = Keypair::new_global(&mut generators::rng());
+        let key_pair = generators::generate_key(&mut generators::rng());
         let address = public_key_to_address(key_pair.public_key());
 
         let chain_spec = chain_spec(address);

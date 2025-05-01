@@ -14,8 +14,7 @@ use reth_network_p2p::{
     },
     error::{DownloadError, DownloadResult},
 };
-use reth_primitives::SealedHeader;
-use reth_primitives_traits::{size::InMemorySize, Block};
+use reth_primitives_traits::{size::InMemorySize, Block, SealedHeader};
 use reth_storage_api::HeaderProvider;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
@@ -644,7 +643,7 @@ mod tests {
         let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
         let mut downloader = BodiesDownloaderBuilder::default()
-            .build::<reth_primitives::Block, _, _>(
+            .build::<reth_ethereum_primitives::Block, _, _>(
                 client.clone(),
                 Arc::new(TestConsensus::default()),
                 ProviderFactory::<MockNodeTypesWithDB>::new(
@@ -689,7 +688,7 @@ mod tests {
 
         let mut downloader = BodiesDownloaderBuilder::default()
             .with_request_limit(request_limit)
-            .build::<reth_primitives::Block, _, _>(
+            .build::<reth_ethereum_primitives::Block, _, _>(
             client.clone(),
             Arc::new(TestConsensus::default()),
             ProviderFactory::<MockNodeTypesWithDB>::new(
@@ -723,7 +722,7 @@ mod tests {
         let mut downloader = BodiesDownloaderBuilder::default()
             .with_stream_batch_size(stream_batch_size)
             .with_request_limit(request_limit)
-            .build::<reth_primitives::Block, _, _>(
+            .build::<reth_ethereum_primitives::Block, _, _>(
                 client.clone(),
                 Arc::new(TestConsensus::default()),
                 ProviderFactory::<MockNodeTypesWithDB>::new(
@@ -761,7 +760,7 @@ mod tests {
 
         let mut downloader = BodiesDownloaderBuilder::default()
             .with_stream_batch_size(100)
-            .build::<reth_primitives::Block, _, _>(
+            .build::<reth_ethereum_primitives::Block, _, _>(
             client.clone(),
             Arc::new(TestConsensus::default()),
             ProviderFactory::<MockNodeTypesWithDB>::new(
@@ -807,7 +806,7 @@ mod tests {
             .with_stream_batch_size(10)
             .with_request_limit(1)
             .with_max_buffered_blocks_size_bytes(1)
-            .build::<reth_primitives::Block, _, _>(
+            .build::<reth_ethereum_primitives::Block, _, _>(
                 client.clone(),
                 Arc::new(TestConsensus::default()),
                 ProviderFactory::<MockNodeTypesWithDB>::new(
@@ -844,7 +843,7 @@ mod tests {
         let mut downloader = BodiesDownloaderBuilder::default()
             .with_request_limit(3)
             .with_stream_batch_size(100)
-            .build::<reth_primitives::Block, _, _>(
+            .build::<reth_ethereum_primitives::Block, _, _>(
                 client.clone(),
                 Arc::new(TestConsensus::default()),
                 ProviderFactory::<MockNodeTypesWithDB>::new(

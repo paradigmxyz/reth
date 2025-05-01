@@ -1,87 +1,72 @@
 //! Example tests using the test suite framework.
 
 use crate::testsuite::{
-    actions::{
-        AssertMineBlock, Call, ForkchoiceUpdated, GetTransactionCount, MineBlock, SubmitTransaction,
-    },
+    actions::{AssertMineBlock, ProduceBlocks},
     setup::{NetworkSetup, Setup},
     TestBuilder,
 };
-use alloy_eips::{BlockId, BlockNumberOrTag};
-use alloy_primitives::B256;
+use alloy_primitives::{Address, B256};
+use alloy_rpc_types_engine::PayloadAttributes;
 use eyre::Result;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
+use reth_node_ethereum::{EthEngineTypes, EthereumNode};
 use std::sync::Arc;
 
 #[tokio::test]
-#[ignore = "empty testsuite impls"]
-async fn test_testsuite_submit_transaction_and_advance_block() -> Result<()> {
+async fn test_testsuite_assert_mine_block() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
     let setup = Setup::default()
         .with_chain_spec(Arc::new(
-            ChainSpecBuilder::default().chain(MAINNET.chain).cancun_activated().build(),
+            ChainSpecBuilder::default()
+                .chain(MAINNET.chain)
+                .genesis(serde_json::from_str(include_str!("assets/genesis.json")).unwrap())
+                .paris_activated()
+                .build(),
         ))
         .with_network(NetworkSetup::single_node());
 
-    let test = TestBuilder::new(())
-        .with_setup(setup)
-        .with_action(SubmitTransaction { node_idx: 0, raw_tx: vec![] })
-        .with_action(AssertMineBlock {
-            node_idx: 0,
-            transactions: vec![],
-            expected_hash: Some(B256::ZERO),
-        });
+    let test =
+        TestBuilder::new().with_setup(setup).with_action(AssertMineBlock::<EthEngineTypes>::new(
+            0,
+            vec![],
+            Some(B256::ZERO),
+            // TODO: refactor once we have actions to generate payload attributes.
+            PayloadAttributes {
+                timestamp: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+                prev_randao: B256::random(),
+                suggested_fee_recipient: Address::random(),
+                withdrawals: None,
+                parent_beacon_block_root: None,
+            },
+        ));
 
-    test.run().await
+    test.run::<EthereumNode>().await?;
+
+    Ok(())
 }
 
 #[tokio::test]
-#[ignore = "empty testsuite impls"]
-async fn test_testsuite_chain_reorg() -> Result<()> {
+async fn test_testsuite_produce_blocks() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
     let setup = Setup::default()
         .with_chain_spec(Arc::new(
-            ChainSpecBuilder::default().chain(MAINNET.chain).cancun_activated().build(),
+            ChainSpecBuilder::default()
+                .chain(MAINNET.chain)
+                .genesis(serde_json::from_str(include_str!("assets/genesis.json")).unwrap())
+                .cancun_activated()
+                .build(),
         ))
-        .with_network(NetworkSetup::multi_node(2));
+        .with_network(NetworkSetup::single_node());
 
-    let test = TestBuilder::new(())
-        .with_setup(setup)
-        .with_action(MineBlock { node_idx: 0, transactions: vec![] })
-        .with_action(ForkchoiceUpdated {
-            node_idx: 1,
-            state: (
-                B256::ZERO, // head block hash
-                B256::ZERO, // safe block hash
-                B256::ZERO, // finalized block hash
-            ),
-            attributes: None,
-        })
-        .with_action(GetTransactionCount {
-            node_idx: 1,
-            address: B256::ZERO,
-            block_id: BlockId::Number(BlockNumberOrTag::Latest),
-        });
+    let test =
+        TestBuilder::new().with_setup(setup).with_action(ProduceBlocks::<EthEngineTypes>::new(0));
 
-    test.run().await
-}
+    test.run::<EthereumNode>().await?;
 
-#[tokio::test]
-#[ignore = "empty testsuite impls"]
-async fn test_testsuite_complex_scenario() -> Result<()> {
-    let setup = Setup::default()
-        .with_chain_spec(Arc::new(
-            ChainSpecBuilder::default().chain(MAINNET.chain).cancun_activated().build(),
-        ))
-        .with_network(NetworkSetup::multi_node(3));
-
-    let test = TestBuilder::new(())
-        .with_setup(setup)
-        .with_action(SubmitTransaction { node_idx: 0, raw_tx: vec![] })
-        .with_action(MineBlock { node_idx: 0, transactions: vec![] })
-        .with_action(Call {
-            node_idx: 1,
-            request: Default::default(),
-            block_id: BlockId::Number(BlockNumberOrTag::Latest),
-        });
-
-    test.run().await
+    Ok(())
 }

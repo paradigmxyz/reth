@@ -5,7 +5,7 @@ use alloy_primitives::{TxHash, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use eyre::OptionExt;
 use futures_util::{stream::Fuse, StreamExt};
-use reth_engine_primitives::{BeaconEngineMessage, EngineTypes};
+use reth_engine_primitives::BeaconEngineMessage;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{
     BuiltPayload, EngineApiMessageVersion, PayloadAttributesBuilder, PayloadKind, PayloadTypes,
@@ -74,33 +74,33 @@ impl Future for MiningMode {
 
 /// Local miner advancing the chain/
 #[derive(Debug)]
-pub struct LocalMiner<EngineT: EngineTypes, B> {
+pub struct LocalMiner<T: PayloadTypes, B> {
     /// The payload attribute builder for the engine
     payload_attributes_builder: B,
     /// Sender for events to engine.
-    to_engine: UnboundedSender<BeaconEngineMessage<EngineT>>,
+    to_engine: UnboundedSender<BeaconEngineMessage<T>>,
     /// The mining mode for the engine
     mode: MiningMode,
     /// The payload builder for the engine
-    payload_builder: PayloadBuilderHandle<EngineT>,
+    payload_builder: PayloadBuilderHandle<T>,
     /// Timestamp for the next block.
     last_timestamp: u64,
     /// Stores latest mined blocks.
     last_block_hashes: Vec<B256>,
 }
 
-impl<EngineT, B> LocalMiner<EngineT, B>
+impl<T, B> LocalMiner<T, B>
 where
-    EngineT: EngineTypes,
-    B: PayloadAttributesBuilder<<EngineT as PayloadTypes>::PayloadAttributes>,
+    T: PayloadTypes,
+    B: PayloadAttributesBuilder<<T as PayloadTypes>::PayloadAttributes>,
 {
     /// Spawns a new [`LocalMiner`] with the given parameters.
     pub fn spawn_new(
         provider: impl BlockReader,
         payload_attributes_builder: B,
-        to_engine: UnboundedSender<BeaconEngineMessage<EngineT>>,
+        to_engine: UnboundedSender<BeaconEngineMessage<T>>,
         mode: MiningMode,
-        payload_builder: PayloadBuilderHandle<EngineT>,
+        payload_builder: PayloadBuilderHandle<T>,
     ) {
         let latest_header =
             provider.sealed_header(provider.best_block_number().unwrap()).unwrap().unwrap();
@@ -207,7 +207,7 @@ where
         let block = payload.block();
 
         let (tx, rx) = oneshot::channel();
-        let payload = EngineT::block_to_payload(payload.block().clone());
+        let payload = T::block_to_payload(payload.block().clone());
         self.to_engine.send(BeaconEngineMessage::NewPayload { payload, tx })?;
 
         let res = rx.await??;

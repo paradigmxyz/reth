@@ -29,6 +29,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec>> DumpGenesisCommand<C> {
     }
 }
 
+impl<C: ChainSpecParser> DumpGenesisCommand<C> {
+    /// Returns the underlying chain being used to run this command
+    pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+        Some(&self.chain)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

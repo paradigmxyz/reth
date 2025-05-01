@@ -24,13 +24,13 @@ use reth_db::{
     DatabaseEnv,
 };
 use reth_db_common::init::init_genesis;
+use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::test_utils::MockExecutorProvider;
 use reth_execution_types::Chain;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification, ExExNotifications, Wal};
-use reth_network::{config::SecretKey, NetworkConfigBuilder, NetworkManager};
+use reth_network::{config::rng_secret_key, NetworkConfigBuilder, NetworkManager};
 use reth_node_api::{
     FullNodeTypes, FullNodeTypesAdapter, NodePrimitives, NodeTypes, NodeTypesWithDBAdapter,
-    NodeTypesWithEngine,
 };
 use reth_node_builder::{
     components::{
@@ -45,8 +45,7 @@ use reth_node_ethereum::{
     EthEngineTypes, EthEvmConfig,
 };
 use reth_payload_builder::noop::NoopPayloadBuilderService;
-use reth_primitives::{EthPrimitives, RecoveredBlock, TransactionSigned};
-use reth_primitives_traits::Block as _;
+use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_provider::{
     providers::{BlockchainProvider, StaticFileProvider},
     BlockReader, EthStorage, ProviderFactory,
@@ -122,17 +121,14 @@ impl NodeTypes for TestNode {
     type ChainSpec = ChainSpec;
     type StateCommitment = reth_trie_db::MerklePatriciaTrie;
     type Storage = EthStorage;
-}
-
-impl NodeTypesWithEngine for TestNode {
-    type Engine = EthEngineTypes;
+    type Payload = EthEngineTypes;
 }
 
 impl<N> Node<N> for TestNode
 where
     N: FullNodeTypes<
-        Types: NodeTypesWithEngine<
-            Engine = EthEngineTypes,
+        Types: NodeTypes<
+            Payload = EthEngineTypes,
             ChainSpec = ChainSpec,
             Primitives = EthPrimitives,
             Storage = EthStorage,
@@ -155,9 +151,9 @@ where
         ComponentsBuilder::default()
             .node_types::<N>()
             .pool(TestPoolBuilder::default())
+            .executor(TestExecutorBuilder::default())
             .payload(BasicPayloadServiceBuilder::default())
             .network(EthereumNetworkBuilder::default())
-            .executor(TestExecutorBuilder::default())
             .consensus(TestConsensusBuilder::default())
     }
 
@@ -187,7 +183,7 @@ pub type TestExExContext = ExExContext<Adapter>;
 #[derive(Debug)]
 pub struct TestExExHandle {
     /// Genesis block that was inserted into the storage
-    pub genesis: RecoveredBlock<reth_primitives::Block>,
+    pub genesis: RecoveredBlock<reth_ethereum_primitives::Block>,
     /// Provider Factory for accessing the emphemeral storage of the host node
     pub provider_factory: ProviderFactory<NodeTypesWithDBAdapter<TestNode, TmpDB>>,
     /// Channel for receiving events from the Execution Extension
@@ -276,7 +272,7 @@ pub async fn test_exex_context_with_chain_spec(
     let provider = BlockchainProvider::new(provider_factory.clone())?;
 
     let network_manager = NetworkManager::new(
-        NetworkConfigBuilder::new(SecretKey::new(&mut rand::thread_rng()))
+        NetworkConfigBuilder::new(rng_secret_key())
             .with_unused_discovery_port()
             .with_unused_listener_port()
             .build(provider_factory.clone()),

@@ -11,6 +11,7 @@ crates/engine               @rkrasiuk @mattsse @Rjected
 crates/e2e-test-utils/      @mattsse @Rjected
 crates/engine/              @rkrasiuk @mattsse @Rjected @fgimenez
 crates/errors/              @mattsse
+crates/era/                 @mattsse
 crates/ethereum/            @mattsse @Rjected
 crates/ethereum-forks/      @mattsse @Rjected
 crates/etl/                 @joshieDo @shekhirin
@@ -44,5 +45,6 @@ crates/tokio-util/          @fgimenez
 crates/tracing/             @onbjerg
 crates/transaction-pool/    @mattsse
 crates/trie/                @rkrasiuk @Rjected @shekhirin
+crates/ress                 @rkrasiuk
 etc/                        @Rjected @onbjerg @shekhirin
 .github/                    @onbjerg @gakonst @DaniPopes
