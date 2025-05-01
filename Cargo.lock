@@ -9297,7 +9297,6 @@ dependencies = [
  "byteorder",
  "bytes",
  "derive_more",
- "k256",
  "modular-bitfield",
  "once_cell",
  "op-alloy-consensus",
