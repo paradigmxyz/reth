@@ -8108,7 +8108,6 @@ dependencies = [
  "metrics",
  "metrics-util",
  "op-revm",
- "parking_lot",
  "reth-ethereum-forks",
  "reth-ethereum-primitives",
  "reth-execution-errors",

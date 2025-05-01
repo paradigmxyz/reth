@@ -3071,7 +3071,7 @@ impl PersistingKind {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::persistence::PersistenceAction;
+    use crate::{persistence::PersistenceAction, test_utils::MockEvmConfig};
     use alloy_consensus::Header;
     use alloy_primitives::Bytes;
     use alloy_rlp::Decodable;
@@ -3086,8 +3086,6 @@ mod tests {
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_ethereum_primitives::{Block, EthPrimitives};
-    use reth_evm::test_utils::MockExecutorProvider;
-    use reth_evm_ethereum::EthEvmConfig;
     use reth_node_ethereum::EthereumEngineValidator;
     use reth_primitives_traits::Block as _;
     use reth_provider::test_utils::MockEthProvider;
@@ -3156,13 +3154,13 @@ mod tests {
             MockEthProvider,
             EthEngineTypes,
             EthereumEngineValidator,
-            EthEvmConfig,
+            MockEvmConfig,
         >,
         to_tree_tx: Sender<FromEngine<EngineApiRequest<EthEngineTypes, EthPrimitives>, Block>>,
         from_tree_rx: UnboundedReceiver<EngineApiEvent>,
         blocks: Vec<ExecutedBlockWithTrieUpdates>,
         action_rx: Receiver<PersistenceAction>,
-        executor_provider: MockExecutorProvider,
+        evm_config: MockEvmConfig,
         block_builder: TestBlockBuilder,
         provider: MockEthProvider,
     }
@@ -3189,7 +3187,6 @@ mod tests {
             let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
 
             let provider = MockEthProvider::default();
-            let executor_provider = MockExecutorProvider::default();
 
             let payload_validator = EthereumEngineValidator::new(chain_spec.clone());
 
@@ -3203,7 +3200,7 @@ mod tests {
             let (to_payload_service, _payload_command_rx) = unbounded_channel();
             let payload_builder = PayloadBuilderHandle::new(to_payload_service);
 
-            let evm_config = EthEvmConfig::new(chain_spec.clone());
+            let evm_config = MockEvmConfig::new(chain_spec.clone());
 
             let tree = EngineApiTreeHandler::new(
                 provider.clone(),
@@ -3221,7 +3218,7 @@ mod tests {
                     .with_legacy_state_root(true)
                     .with_has_enough_parallelism(true),
                 EngineApiKind::Ethereum,
-                evm_config,
+                evm_config.clone(),
             );
 
             let block_builder = TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());
@@ -3231,7 +3228,7 @@ mod tests {
                 from_tree_rx,
                 blocks: vec![],
                 action_rx,
-                executor_provider,
+                evm_config,
                 block_builder,
                 provider,
             }
@@ -3289,7 +3286,7 @@ mod tests {
             &self,
             execution_outcomes: impl IntoIterator<Item = impl Into<ExecutionOutcome>>,
         ) {
-            self.executor_provider.extend(execution_outcomes);
+            self.evm_config.extend(execution_outcomes);
         }
 
         fn insert_block(
