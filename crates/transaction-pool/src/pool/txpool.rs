@@ -3473,12 +3473,10 @@ mod tests {
             for expected_tx in expected {
                 let tx = best.next().expect("Transaction should be returned");
                 assert_eq!(tx.transaction, expected_tx);
-                j += 1;
             }
 
             // No more transactions should be returned
             assert!(best.next().is_none());
-            i += 1;
         }
     }
 
