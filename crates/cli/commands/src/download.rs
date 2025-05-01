@@ -22,15 +22,6 @@ const EXTENSION_TAR_FILE: &str = ".tar.lz4";
 
 #[derive(Debug, Parser)]
 pub struct DownloadCommand<C: ChainSpecParser> {
-    #[arg(
-        long,
-        value_name = "CHAIN_OR_PATH",
-        long_help = C::help_message(),
-        default_value = C::SUPPORTED_CHAINS[0],
-        value_parser = C::parser()
-    )]
-    chain: Arc<C::ChainSpec>,
-
     #[command(flatten)]
     env: EnvironmentArgs<C>,
 
@@ -52,7 +43,7 @@ pub struct DownloadCommand<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCommand<C> {
     pub async fn execute<N>(self) -> Result<()> {
-        let data_dir = self.env.datadir.resolve_datadir(self.chain.chain());
+        let data_dir = self.env.datadir.resolve_datadir(self.env.chain.chain());
         fs::create_dir_all(&data_dir)?;
 
         let url = match self.url {
@@ -65,7 +56,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         };
 
         info!(target: "reth::cli",
-            chain = %self.chain.chain(),
+            chain = %self.env.chain.chain(),
             dir = ?data_dir.data_dir(),
             url = %url,
             "Starting snapshot download and extraction"
@@ -81,7 +72,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 impl<C: ChainSpecParser> DownloadCommand<C> {
     /// Returns the underlying chain being used to run this command
     pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
-        Some(&self.chain)
+        Some(&self.env.chain)
     }
 }
 
