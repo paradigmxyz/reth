@@ -3463,26 +3463,16 @@ mod tests {
             // 9. Base fee decrease, blob fee decrease
             (
                 BestTransactionsAttributes::new(base_fee - 10, Some(blob_fee - 10)),
-                vec![
-                    tx1.clone(),
-                    tx2.clone(),
-                    tx3.clone(),
-                    tx4.clone(),
-                    tx5.clone(),
-                    tx6.clone(),
-                    tx7.clone(),
-                ],
+                vec![tx1, tx2, tx3, tx4, tx5, tx6, tx7],
             ),
         ];
 
         let mut i = 1;
         for (attribute, expected) in cases {
-            println!("Case {}", i);
             let mut best = pool.best_transactions_with_attributes(attribute);
 
             let mut j = 1;
             for expected_tx in expected {
-                println!("j is {}", j);
                 let tx = best.next().expect("Transaction should be returned");
                 assert_eq!(tx.transaction, expected_tx);
                 j += 1;
