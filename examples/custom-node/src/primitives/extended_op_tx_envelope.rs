@@ -142,7 +142,7 @@ where
 
 impl<B, T> SignedTransaction for ExtendedTxEnvelope<B, T>
 where
-    B: SignedTransaction + SerdeBincodeCompat,
+    B: SignedTransaction + SerdeBincodeCompat + IsTyped2718,
     T: SignedTransaction + SerdeBincodeCompat,
 {
     fn tx_hash(&self) -> &TxHash {
@@ -183,49 +183,30 @@ where
 
 impl<B, T> Decodable2718 for ExtendedTxEnvelope<B, T>
 where
-    B: Decodable2718 + SerdeBincodeCompat,
+    B: Decodable2718 + SerdeBincodeCompat + IsTyped2718,
     T: Decodable2718 + SerdeBincodeCompat,
 {
     fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
-        match ty.try_into() {
-            Ok(tx_type) => match tx_type {
-                OpTxType::Eip2930 | OpTxType::Eip1559 | OpTxType::Eip7702 | OpTxType::Deposit => {
-                    let envelope = B::typed_decode(ty, buf)?;
-                    Ok(Self::BuiltIn(B::from_repr(envelope.as_repr())))
-                }
-                OpTxType::Legacy => {
-                    let envelope = B::typed_decode(ty, buf)?;
-                    Ok(Self::BuiltIn(B::from_repr(envelope.as_repr())))
-                }
-            },
-            Err(_) => {
-                let other = T::typed_decode(ty, buf)?;
-                Ok(Self::Other(other))
-            }
+        if B::is_type(ty) {
+            let envelope = B::typed_decode(ty, buf)?;
+            Ok(Self::BuiltIn(B::from_repr(envelope.as_repr())))
+        } else {
+            let other = T::typed_decode(ty, buf)?;
+            Ok(Self::Other(other))
         }
     }
-
     fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
         if buf.is_empty() {
             return Err(Eip2718Error::RlpError(alloy_rlp::Error::InputTooShort));
         }
 
         let type_byte = buf[0];
-        match type_byte.try_into() {
-            Ok(tx_type) => match tx_type {
-                OpTxType::Eip2930 | OpTxType::Eip1559 | OpTxType::Eip7702 | OpTxType::Deposit => {
-                    let envelope = B::fallback_decode(buf)?;
-                    Ok(Self::BuiltIn(B::from_repr(envelope.as_repr())))
-                }
-                OpTxType::Legacy => {
-                    let envelope = B::fallback_decode(buf)?;
-                    Ok(Self::BuiltIn(B::from_repr(envelope.as_repr())))
-                }
-            },
-            Err(_) => {
-                let other = T::fallback_decode(buf)?;
-                Ok(Self::Other(other))
-            }
+        if B::is_type(type_byte) {
+            let envelope = B::fallback_decode(buf)?;
+            Ok(Self::BuiltIn(B::from_repr(envelope.as_repr())))
+        } else {
+            let other = T::fallback_decode(buf)?;
+            Ok(Self::Other(other))
         }
     }
 }
