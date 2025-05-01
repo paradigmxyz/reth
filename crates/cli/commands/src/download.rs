@@ -116,8 +116,7 @@ impl DownloadProgress {
             let progress = (self.downloaded as f64 / self.total_size as f64) * 100.0;
 
             print!(
-                "\rDownloading and extracting... {:.2}% ({} / {})",
-                progress, formatted_downloaded, formatted_total
+                "\rDownloading and extracting... {progress:.2}% ({formatted_downloaded} / {formatted_total})",
             );
             io::stdout().flush()?;
             self.last_displayed = Instant::now();
@@ -183,7 +182,7 @@ async fn stream_and_extract(url: &str, target_dir: &Path) -> Result<()> {
 
 // Builds default URL for latest mainnet archive  snapshot
 async fn get_latest_snapshot_url() -> Result<String> {
-    let latest_url = format!("{}/latest.txt", MERKLE_BASE_URL);
+    let latest_url = format!("{MERKLE_BASE_URL}/latest.txt");
     let filename = Client::new()
         .get(latest_url)
         .send()
@@ -198,5 +197,5 @@ async fn get_latest_snapshot_url() -> Result<String> {
         return Err(eyre::eyre!("Unexpected snapshot filename format: {}", filename));
     }
 
-    Ok(format!("{}/{}", MERKLE_BASE_URL, filename))
+    Ok(format!("{MERKLE_BASE_URL}/{filename}"))
 }

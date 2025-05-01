@@ -59,12 +59,12 @@ tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thre
 
 # misc
 aquamarine.workspace = true
-backon.workspace = true
-similar-asserts.workspace = true
-
-[dev-dependencies]
 clap = { workspace = true, features = ["derive", "env"] }
 eyre.workspace = true
+
+[dev-dependencies]
+backon.workspace = true
+similar-asserts.workspace = true
 tempfile.workspace = true
 
 [features]
