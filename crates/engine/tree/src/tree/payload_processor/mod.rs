@@ -31,6 +31,7 @@ use reth_trie_parallel::{
 use std::{
     collections::VecDeque,
     sync::{
+        atomic::AtomicBool,
         mpsc,
         mpsc::{channel, Sender},
         Arc,
@@ -170,7 +171,7 @@ where
             multi_proof_task.run();
         });
 
-        let sparse_trie_task = SparseTrieTask::new(
+        let mut sparse_trie_task = SparseTrieTask::new(
             self.executor.clone(),
             sparse_trie_rx,
             proof_task.handle(),
@@ -251,6 +252,7 @@ where
             cache_metrics: cache_metrics.clone(),
             provider: provider_builder,
             metrics: PrewarmMetrics::default(),
+            terminate_execution: Arc::new(AtomicBool::new(false)),
         };
 
         let prewarm_task = PrewarmCacheTask::new(

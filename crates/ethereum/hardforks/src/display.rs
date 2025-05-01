@@ -84,7 +84,8 @@ impl core::fmt::Display for DisplayFork {
 // - Paris                            @58750000000000000000000 (network is known to be merged)
 // Post-merge hard forks (timestamp based):
 // - Shanghai                         @1681338455
-// - Cancun                           @1710338135"
+// - Cancun                           @1710338135
+// - Prague                           @1746612311
 /// ```
 #[derive(Debug)]
 pub struct DisplayHardforks {

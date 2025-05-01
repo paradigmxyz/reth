@@ -475,13 +475,10 @@ where
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        let mut strategy = self.strategy_factory.executor_for_block(&mut self.db, block);
-
-        strategy.apply_pre_execution_changes()?;
-        for tx in block.transactions_recovered() {
-            strategy.execute_transaction(tx)?;
-        }
-        let result = strategy.apply_post_execution_changes()?;
+        let result = self
+            .strategy_factory
+            .executor_for_block(&mut self.db, block)
+            .execute_block(block.transactions_recovered())?;
 
         self.db.merge_transitions(BundleRetention::Reverts);
 
@@ -496,16 +493,11 @@ where
     where
         H: OnStateHook + 'static,
     {
-        let mut strategy = self
+        let result = self
             .strategy_factory
             .executor_for_block(&mut self.db, block)
-            .with_state_hook(Some(Box::new(state_hook)));
-
-        strategy.apply_pre_execution_changes()?;
-        for tx in block.transactions_recovered() {
-            strategy.execute_transaction(tx)?;
-        }
-        let result = strategy.apply_post_execution_changes()?;
+            .with_state_hook(Some(Box::new(state_hook)))
+            .execute_block(block.transactions_recovered())?;
 
         self.db.merge_transitions(BundleRetention::Reverts);
 
