@@ -415,7 +415,7 @@ where
 }
 
 /// A generic block executor provider that can create executors using a strategy factory.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct BasicBlockExecutorProvider<F> {
     strategy_factory: F,
 }
