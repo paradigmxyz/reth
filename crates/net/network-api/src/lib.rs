@@ -25,7 +25,7 @@ use test_utils::PeersHandleProvider;
 
 pub use alloy_rpc_types_admin::EthProtocolInfo;
 use reth_network_p2p::sync::NetworkSyncUpdater;
-pub use reth_network_p2p::BlockClient;
+pub use reth_network_p2p::{BlockClient, HeadersClient};
 pub use reth_network_types::{PeerKind, Reputation, ReputationChangeKind};
 
 pub use downloaders::BlockDownloaderProvider;
