@@ -100,8 +100,6 @@ where
             hash_collector.insert(hash, number)?;
         }
 
-        writer.commit()?;
-
         info!(target: "era::history::import", "Processed {}", meta.as_ref().to_string_lossy());
 
         meta.mark_as_processed()?;
