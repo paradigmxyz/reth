@@ -49,6 +49,11 @@ pub use build::EthBlockAssembler;
 mod receipt;
 pub use receipt::RethReceiptBuilder;
 
+#[cfg(feature = "test-utils")]
+mod test_utils;
+#[cfg(feature = "test-utils")]
+pub use test_utils::*;
+
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone)]
 pub struct EthEvmConfig<EvmFactory = EthEvmFactory> {
