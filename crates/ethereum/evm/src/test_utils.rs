@@ -1,5 +1,5 @@
 use crate::EthEvmConfig;
-use alloc::{boxed::Box, sync::Arc};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::Header;
 use alloy_eips::eip7685::Requests;
 use parking_lot::Mutex;
