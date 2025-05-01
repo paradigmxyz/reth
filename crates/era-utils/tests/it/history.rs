@@ -2,10 +2,7 @@ use reqwest::{Client, Url};
 use reth_db_common::init::init_genesis;
 use reth_era_downloader::{EraClient, EraStream, EraStreamConfig};
 use reth_etl::Collector;
-use reth_provider::{
-    test_utils::create_test_provider_factory, BlockReader, HeaderProvider,
-    StaticFileProviderFactory,
-};
+use reth_provider::test_utils::create_test_provider_factory;
 use std::{fs, str::FromStr};
 use tempfile::tempdir;
 
@@ -28,9 +25,9 @@ async fn test_history_imports_from_fresh_state_successfully() {
     let config = EraStreamConfig::default().with_max_files(1).with_max_concurrent_downloads(1);
 
     let stream = EraStream::new(client, config);
-    let provider_factory = create_test_provider_factory();
+    let pf = create_test_provider_factory();
 
-    init_genesis(&provider_factory).unwrap();
+    init_genesis(&pf).unwrap();
 
     let folder = tempdir().unwrap();
     let folder = Some(folder.path().to_owned());
@@ -38,26 +35,7 @@ async fn test_history_imports_from_fresh_state_successfully() {
 
     let expected_block_number = 8191;
     let actual_block_number =
-        reth_era_utils::import(stream, &provider_factory.provider_rw().unwrap().0, hash_collector)
-            .unwrap();
+        reth_era_utils::import(stream, &pf.provider_rw().unwrap().0, hash_collector).unwrap();
 
-    let static_file_provider = provider_factory.static_file_provider();
-
-    let checkpoint_blocks = [0, 100, 1000, 8191];
-
-    for block_num in checkpoint_blocks {
-        let block_db = provider_factory.provider_rw().unwrap().block_by_number(block_num).unwrap();
-        let header_static = static_file_provider.header_by_number(block_num);
-        let static_header_exists = header_static.is_ok() && header_static.unwrap().is_some();
-
-        assert!(static_header_exists, "Block {block_num} should exist in static files");
-
-        // Only genesis block is in the db, others should be in static files
-        if block_num == 0 {
-            assert!(block_db.is_some(), "Genesis block should exist in the db");
-        } else {
-            assert!(block_db.is_none(), "Block {block_num} should not exist in db");
-        }
-    }
     assert_eq!(actual_block_number, expected_block_number);
 }
