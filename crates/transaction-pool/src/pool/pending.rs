@@ -114,12 +114,13 @@ impl<T: TransactionOrdering> PendingPool<T> {
     }
 
     /// Same as `best` but only returns transactions that satisfy the given basefee and blobfee.
-    pub(crate) fn best_with_basefee_and_blobfee(
+    pub(crate) const fn best_with_basefee_and_blobfee(
         &self,
+        best: BestTransactions<T>,
         base_fee: u64,
         base_fee_per_blob_gas: u64,
     ) -> BestTransactionsWithFees<T> {
-        BestTransactionsWithFees { best: self.best(), base_fee, base_fee_per_blob_gas }
+        BestTransactionsWithFees { best, base_fee, base_fee_per_blob_gas }
     }
 
     /// Same as `best` but also includes the given unlocked transactions, also satisfy given basefee
@@ -146,7 +147,6 @@ impl<T: TransactionOrdering> PendingPool<T> {
             submission_id += 1;
             debug_assert!(!best.all.contains_key(tx.id()), "transaction already included");
             let priority = self.ordering.priority(&tx.transaction, origin_base_fee);
-            println!("priority is {:?}", priority);
             let tx_id = *tx.id();
             let transaction = PendingTransaction { submission_id, transaction: tx, priority };
             if best.ancestor(&tx_id).is_none() {
@@ -155,7 +155,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             best.all.insert(tx_id, transaction);
         }
 
-        BestTransactionsWithFees { best, base_fee, base_fee_per_blob_gas }
+        self.best_with_basefee_and_blobfee(best, base_fee, base_fee_per_blob_gas)
     }
 
     /// Returns an iterator over all transactions in the pool

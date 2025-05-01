@@ -479,7 +479,8 @@ mod tests {
             pool.add_transaction(Arc::new(valid_tx), 0);
         }
 
-        let mut best = pool.best_with_basefee_and_blobfee(base_fee, base_fee_per_blob_gas);
+        let mut best =
+            pool.best_with_basefee_and_blobfee(pool.best(), base_fee, base_fee_per_blob_gas);
 
         for nonce in 0..num_tx {
             let tx = best.next().expect("Transaction should be returned");
@@ -507,7 +508,8 @@ mod tests {
             pool.add_transaction(Arc::new(valid_tx), 0);
         }
 
-        let mut best = pool.best_with_basefee_and_blobfee(base_fee, base_fee_per_blob_gas);
+        let mut best =
+            pool.best_with_basefee_and_blobfee(pool.best(), base_fee, base_fee_per_blob_gas);
 
         // No transaction should be returned since all violate the base fee
         assert!(best.next().is_none());
@@ -534,7 +536,8 @@ mod tests {
             pool.add_transaction(Arc::new(valid_tx), 0);
         }
 
-        let mut best = pool.best_with_basefee_and_blobfee(base_fee, base_fee_per_blob_gas);
+        let mut best =
+            pool.best_with_basefee_and_blobfee(pool.best(), base_fee, base_fee_per_blob_gas);
 
         // All transactions should be returned in order since they satisfy both base fee and blob
         // fee
@@ -571,7 +574,8 @@ mod tests {
             pool.add_transaction(Arc::new(valid_tx), 0);
         }
 
-        let mut best = pool.best_with_basefee_and_blobfee(base_fee, base_fee_per_blob_gas);
+        let mut best =
+            pool.best_with_basefee_and_blobfee(pool.best(), base_fee, base_fee_per_blob_gas);
 
         // No transaction should be returned since all violate the blob fee
         assert!(best.next().is_none());
@@ -606,7 +610,8 @@ mod tests {
         pool.add_transaction(Arc::new(f.validated(tx3)), 0);
         pool.add_transaction(Arc::new(f.validated(tx4)), 0);
 
-        let mut best = pool.best_with_basefee_and_blobfee(base_fee, base_fee_per_blob_gas);
+        let mut best =
+            pool.best_with_basefee_and_blobfee(pool.best(), base_fee, base_fee_per_blob_gas);
 
         let expected_order = vec![tx1, tx2];
         for expected_tx in expected_order {
@@ -828,7 +833,8 @@ mod tests {
             pool.add_transaction(Arc::new(valid_tx), 0);
         }
 
-        let mut best = pool.best_with_basefee_and_blobfee(base_fee, base_fee_per_blob_gas);
+        let mut best =
+            pool.best_with_basefee_and_blobfee(pool.best(), base_fee, base_fee_per_blob_gas);
 
         // All transactions should be returned as no blob fee requirement is imposed
         for nonce in 0..5 {
@@ -862,7 +868,8 @@ mod tests {
             .with_blob_fee(base_fee_per_blob_gas as u128 + 5);
         pool.add_transaction(Arc::new(f.validated(tx_blob.clone())), 0);
 
-        let mut best = pool.best_with_basefee_and_blobfee(base_fee, base_fee_per_blob_gas);
+        let mut best =
+            pool.best_with_basefee_and_blobfee(pool.best(), base_fee, base_fee_per_blob_gas);
 
         // Verify both transactions are returned
         let tx = best.next().expect("Transaction should be returned");

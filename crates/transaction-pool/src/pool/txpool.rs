@@ -370,9 +370,6 @@ impl<T: TransactionOrdering> TxPool<T> {
             unlocked.extend(self.blob_pool.satisfy_attributes(best_transactions_attributes));
         }
 
-        println!("pending pool len is {}", self.pending_pool.len());
-        println!("unlocked len is {}", unlocked.len());
-
         Box::new(self.pending_pool.best_with_unlocked(
             unlocked,
             self.all_transactions.pending_fees.base_fee,
@@ -902,11 +899,9 @@ impl<T: TransactionOrdering> TxPool<T> {
             }
             SubPool::BaseFee => {
                 self.basefee_pool.add_transaction(tx);
-                println!("Add to base fee pool")
             }
             SubPool::Blob => {
                 self.blob_pool.add_transaction(tx);
-                println!("Add to blob pool")
             }
         }
     }
@@ -1669,8 +1664,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
             let blob_fee_cap = transaction.transaction.max_fee_per_blob_gas().unwrap_or_default();
             if blob_fee_cap >= self.pending_fees.blob_fee {
                 state.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
-            } else {
-                println!("NOT ENOUGH BLOB FEE");
             }
         } else {
             // Non-EIP4844 transaction always satisfy the blob fee cap condition
@@ -3428,10 +3421,6 @@ mod tests {
             pool.add_transaction(f.validated(tx.clone()), on_chain_balance, on_chain_nonce)
                 .unwrap();
         }
-
-        println!("pool pending len is {}\n", pool.pending_pool.len());
-        println!("pool base len is {}\n", pool.basefee_pool.len());
-        println!("pool blob len is {}\n", pool.blob_pool.len());
 
         let cases = vec![
             // 1. Base fee increate, blob fee increase
