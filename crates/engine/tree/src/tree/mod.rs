@@ -31,7 +31,7 @@ use reth_engine_primitives::{
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_ethereum_primitives::EthPrimitives;
-use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
+use reth_evm::ConfigureEvm;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes, PayloadTypes};
 use reth_primitives_traits::{
@@ -42,7 +42,7 @@ use reth_provider::{
     ExecutionOutcome, HashedPostStateProvider, ProviderError, StateCommitmentProvider,
     StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
 };
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{database::StateProviderDatabase, State};
 use reth_stages_api::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_db::{DatabaseHashedPostState, StateCommitment};
@@ -563,13 +563,12 @@ pub enum TreeAction {
 ///
 /// This type is responsible for processing engine API requests, maintaining the canonical state and
 /// emitting events.
-pub struct EngineApiTreeHandler<N, P, E, T, V, C>
+pub struct EngineApiTreeHandler<N, P, T, V, C>
 where
     N: NodePrimitives,
     T: PayloadTypes,
 {
     provider: P,
-    executor_provider: E,
     consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
     payload_validator: V,
     /// Keeps track of internals such as executed and buffered blocks.
@@ -609,17 +608,18 @@ where
     engine_kind: EngineApiKind,
     /// The type responsible for processing new payloads
     payload_processor: PayloadProcessor<N, C>,
+    /// The EVM configuration.
+    evm_config: C,
 }
 
-impl<N, P: Debug, E: Debug, T: PayloadTypes + Debug, V: Debug, C: Debug> std::fmt::Debug
-    for EngineApiTreeHandler<N, P, E, T, V, C>
+impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C: Debug> std::fmt::Debug
+    for EngineApiTreeHandler<N, P, T, V, C>
 where
     N: NodePrimitives,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineApiTreeHandler")
             .field("provider", &self.provider)
-            .field("executor_provider", &self.executor_provider)
             .field("consensus", &self.consensus)
             .field("payload_validator", &self.payload_validator)
             .field("state", &self.state)
@@ -637,7 +637,7 @@ where
     }
 }
 
-impl<N, P, E, T, V, C> EngineApiTreeHandler<N, P, E, T, V, C>
+impl<N, P, T, V, C> EngineApiTreeHandler<N, P, T, V, C>
 where
     N: NodePrimitives,
     P: DatabaseProviderFactory
@@ -650,7 +650,6 @@ where
         + 'static,
     <P as DatabaseProviderFactory>::Provider:
         BlockReader<Block = N::Block, Header = N::BlockHeader>,
-    E: BlockExecutorProvider<Primitives = N>,
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes,
     V: EngineValidator<T, Block = N::Block>,
@@ -659,7 +658,6 @@ where
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         provider: P,
-        executor_provider: E,
         consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
         payload_validator: V,
         outgoing: UnboundedSender<EngineApiEvent<N>>,
@@ -675,11 +673,10 @@ where
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
 
         let payload_processor =
-            PayloadProcessor::new(WorkloadExecutor::default(), evm_config, &config);
+            PayloadProcessor::new(WorkloadExecutor::default(), evm_config.clone(), &config);
 
         Self {
             provider,
-            executor_provider,
             consensus,
             payload_validator,
             incoming,
@@ -696,6 +693,7 @@ where
             invalid_block_hook: Box::new(NoopInvalidBlockHook),
             engine_kind,
             payload_processor,
+            evm_config,
         }
     }
 
@@ -712,7 +710,6 @@ where
     #[expect(clippy::complexity)]
     pub fn spawn_new(
         provider: P,
-        executor_provider: E,
         consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
         payload_validator: V,
         persistence: PersistenceHandle<N>,
@@ -741,7 +738,6 @@ where
 
         let mut task = Self::new(
             provider,
-            executor_provider,
             consensus,
             payload_validator,
             tx,
@@ -2451,7 +2447,12 @@ where
 
         debug!(target: "engine::tree", block=?block_num_hash, "Executing block");
 
-        let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
+        let mut db = State::builder()
+            .with_database(StateProviderDatabase::new(&state_provider))
+            .with_bundle_update()
+            .without_state_clear()
+            .build();
+        let executor = self.evm_config.executor_for_block(&mut db, &block);
         let execution_start = Instant::now();
         let output = ensure_ok!(self.metrics.executor.execute_metered(
             executor,
@@ -3153,7 +3154,6 @@ mod tests {
         tree: EngineApiTreeHandler<
             EthPrimitives,
             MockEthProvider,
-            MockExecutorProvider,
             EthEngineTypes,
             EthereumEngineValidator,
             EthEvmConfig,
@@ -3207,7 +3207,6 @@ mod tests {
 
             let tree = EngineApiTreeHandler::new(
                 provider.clone(),
-                executor_provider.clone(),
                 consensus,
                 payload_validator,
                 from_tree_tx,
