@@ -7637,6 +7637,7 @@ dependencies = [
  "reth-trie",
  "reth-trie-common",
  "serde",
+ "sysinfo",
  "thiserror 2.0.12",
  "tokio",
 ]
