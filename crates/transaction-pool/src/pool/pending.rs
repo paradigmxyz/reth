@@ -122,7 +122,8 @@ impl<T: TransactionOrdering> PendingPool<T> {
         BestTransactionsWithFees { best: self.best(), base_fee, base_fee_per_blob_gas }
     }
 
-    /// Same as `best` but also includes the given unlocked transactions.
+    /// Same as `best` but also includes the given unlocked transactions, also satisfy given basefee
+    /// and blobfee.
     ///
     /// This mimics the [`Self::add_transaction`] method, but does not insert the transactions into
     /// pool but only into the returned iterator.
@@ -135,14 +136,17 @@ impl<T: TransactionOrdering> PendingPool<T> {
     pub(crate) fn best_with_unlocked(
         &self,
         unlocked: Vec<Arc<ValidPoolTransaction<T::Transaction>>>,
+        origin_base_fee: u64,
         base_fee: u64,
-    ) -> BestTransactions<T> {
+        base_fee_per_blob_gas: u64,
+    ) -> BestTransactionsWithFees<T> {
         let mut best = self.best();
         let mut submission_id = self.submission_id;
         for tx in unlocked {
             submission_id += 1;
             debug_assert!(!best.all.contains_key(tx.id()), "transaction already included");
-            let priority = self.ordering.priority(&tx.transaction, base_fee);
+            let priority = self.ordering.priority(&tx.transaction, origin_base_fee);
+            println!("priority is {:?}", priority);
             let tx_id = *tx.id();
             let transaction = PendingTransaction { submission_id, transaction: tx, priority };
             if best.ancestor(&tx_id).is_none() {
@@ -151,7 +155,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             best.all.insert(tx_id, transaction);
         }
 
-        best
+        BestTransactionsWithFees { best, base_fee, base_fee_per_blob_gas }
     }
 
     /// Returns an iterator over all transactions in the pool

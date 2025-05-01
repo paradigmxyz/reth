@@ -348,52 +348,37 @@ impl<T: TransactionOrdering> TxPool<T> {
         best_transactions_attributes: BestTransactionsAttributes,
     ) -> Box<dyn crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T::Transaction>>>>
     {
-        // First we need to check if the given base fee is different than what's currently being
-        // tracked
-        match best_transactions_attributes.basefee.cmp(&self.all_transactions.pending_fees.base_fee)
-        {
-            Ordering::Equal => {
-                // for EIP-4844 transactions we also need to check if the blob fee is now lower than
-                // what's currently being tracked, if so we need to include transactions from the
-                // blob pool that are valid with the lower blob fee
-                if best_transactions_attributes
-                    .blob_fee
-                    .is_some_and(|fee| fee < self.all_transactions.pending_fees.blob_fee as u64)
-                {
-                    let unlocked_by_blob_fee =
-                        self.blob_pool.satisfy_attributes(best_transactions_attributes);
+        let basefee_decrease =
+            best_transactions_attributes.basefee < self.all_transactions.pending_fees.base_fee;
+        let blobfee_decrease = best_transactions_attributes
+            .blob_fee
+            .is_some_and(|fee| fee < self.all_transactions.pending_fees.blob_fee as u64);
 
-                    Box::new(self.pending_pool.best_with_unlocked(
-                        unlocked_by_blob_fee,
-                        self.all_transactions.pending_fees.base_fee,
-                    ))
-                } else {
-                    Box::new(self.pending_pool.best())
-                }
-            }
-            Ordering::Greater => {
-                // base fee increased, we only need to enforce this on the pending pool
-                Box::new(self.pending_pool.best_with_basefee_and_blobfee(
-                    best_transactions_attributes.basefee,
-                    best_transactions_attributes.blob_fee.unwrap_or_default(),
-                ))
-            }
-            Ordering::Less => {
-                // base fee decreased, we need to move transactions from the basefee + blob pool to
-                // the pending pool that might be unlocked by the lower base fee
-                let mut unlocked = self
-                    .basefee_pool
-                    .satisfy_base_fee_transactions(best_transactions_attributes.basefee);
+        let mut unlocked = vec![];
 
-                // also include blob pool transactions that are now unlocked
-                unlocked.extend(self.blob_pool.satisfy_attributes(best_transactions_attributes));
-
-                Box::new(
-                    self.pending_pool
-                        .best_with_unlocked(unlocked, self.all_transactions.pending_fees.base_fee),
-                )
-            }
+        if basefee_decrease {
+            // base fee decreased, we need to move transactions from the basefee to
+            // the pending pool that might be unlocked by the lower base fee
+            unlocked.extend(
+                self.basefee_pool
+                    .satisfy_base_fee_transactions(best_transactions_attributes.basefee),
+            );
         }
+
+        if basefee_decrease || blobfee_decrease {
+            // also include blob pool transactions that are now unlocked.
+            unlocked.extend(self.blob_pool.satisfy_attributes(best_transactions_attributes));
+        }
+
+        println!("pending pool len is {}", self.pending_pool.len());
+        println!("unlocked len is {}", unlocked.len());
+
+        Box::new(self.pending_pool.best_with_unlocked(
+            unlocked,
+            self.all_transactions.pending_fees.base_fee,
+            best_transactions_attributes.basefee,
+            best_transactions_attributes.blob_fee.unwrap_or_default(),
+        ))
     }
 
     /// Returns all transactions from the pending sub-pool
@@ -915,8 +900,14 @@ impl<T: TransactionOrdering> TxPool<T> {
             SubPool::Pending => {
                 self.pending_pool.add_transaction(tx, self.all_transactions.pending_fees.base_fee);
             }
-            SubPool::BaseFee => self.basefee_pool.add_transaction(tx),
-            SubPool::Blob => self.blob_pool.add_transaction(tx),
+            SubPool::BaseFee => {
+                self.basefee_pool.add_transaction(tx);
+                println!("Add to base fee pool")
+            }
+            SubPool::Blob => {
+                self.blob_pool.add_transaction(tx);
+                println!("Add to blob pool")
+            }
         }
     }
 
@@ -1678,6 +1669,8 @@ impl<T: PoolTransaction> AllTransactions<T> {
             let blob_fee_cap = transaction.transaction.max_fee_per_blob_gas().unwrap_or_default();
             if blob_fee_cap >= self.pending_fees.blob_fee {
                 state.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
+            } else {
+                println!("NOT ENOUGH BLOB FEE");
             }
         } else {
             // Non-EIP4844 transaction always satisfy the blob fee cap condition
@@ -3382,6 +3375,134 @@ mod tests {
             pool.best_transactions().map(|x| x.id().nonce).collect::<Vec<_>>(),
             vec![1, 2, 3]
         );
+    }
+
+    #[test]
+    fn test_best_with_attributes() {
+        let on_chain_balance = U256::MAX;
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let base_fee: u64 = 100;
+        let blob_fee: u64 = 100;
+
+        // set base fee and blob fee.
+        let mut block_info = pool.block_info();
+        block_info.pending_basefee = base_fee;
+        block_info.pending_blob_fee = Some(blob_fee as u128);
+        pool.set_block_info(block_info);
+
+        // Insert transactions with varying max_fee_per_gas and max_fee_per_blob_gas.
+        let tx1 = MockTransaction::eip4844()
+            .with_max_fee(base_fee as u128 + 10)
+            .with_blob_fee(blob_fee as u128 + 10);
+        let tx2 = MockTransaction::eip4844()
+            .with_max_fee(base_fee as u128 + 10)
+            .with_blob_fee(blob_fee as u128);
+        let tx3 = MockTransaction::eip4844()
+            .with_max_fee(base_fee as u128)
+            .with_blob_fee(blob_fee as u128 + 10);
+        let tx4 = MockTransaction::eip4844()
+            .with_max_fee(base_fee as u128)
+            .with_blob_fee(blob_fee as u128);
+        let tx5 = MockTransaction::eip4844()
+            .with_max_fee(base_fee as u128)
+            .with_blob_fee(blob_fee as u128 - 10);
+        let tx6 = MockTransaction::eip4844()
+            .with_max_fee(base_fee as u128 - 10)
+            .with_blob_fee(blob_fee as u128);
+        let tx7 = MockTransaction::eip4844()
+            .with_max_fee(base_fee as u128 - 10)
+            .with_blob_fee(blob_fee as u128 - 10);
+
+        for tx in vec![
+            tx1.clone(),
+            tx2.clone(),
+            tx3.clone(),
+            tx4.clone(),
+            tx5.clone(),
+            tx6.clone(),
+            tx7.clone(),
+        ] {
+            pool.add_transaction(f.validated(tx.clone()), on_chain_balance, on_chain_nonce)
+                .unwrap();
+        }
+
+        println!("pool pending len is {}\n", pool.pending_pool.len());
+        println!("pool base len is {}\n", pool.basefee_pool.len());
+        println!("pool blob len is {}\n", pool.blob_pool.len());
+
+        let cases = vec![
+            // 1. Base fee increate, blob fee increase
+            (BestTransactionsAttributes::new(base_fee + 5, Some(blob_fee + 5)), vec![tx1.clone()]),
+            // 2. Base fee increase, blob fee not change
+            (
+                BestTransactionsAttributes::new(base_fee + 5, Some(blob_fee)),
+                vec![tx1.clone(), tx2.clone()],
+            ),
+            // 3. Base fee increase, blob fee decrease
+            (
+                BestTransactionsAttributes::new(base_fee + 5, Some(blob_fee - 5)),
+                vec![tx1.clone(), tx2.clone()],
+            ),
+            // 4. Base fee not change, blob fee increase
+            (
+                BestTransactionsAttributes::new(base_fee, Some(blob_fee + 5)),
+                vec![tx1.clone(), tx3.clone()],
+            ),
+            // 5. Base fee not change, blob fee not change
+            (
+                BestTransactionsAttributes::new(base_fee, Some(blob_fee)),
+                vec![tx1.clone(), tx2.clone(), tx3.clone(), tx4.clone()],
+            ),
+            // 6. Base fee not change, blob fee decrease
+            (
+                BestTransactionsAttributes::new(base_fee, Some(blob_fee - 10)),
+                vec![tx1.clone(), tx2.clone(), tx3.clone(), tx4.clone(), tx5.clone()],
+            ),
+            // 7. Base fee decrease, blob fee increase
+            (
+                BestTransactionsAttributes::new(base_fee - 5, Some(blob_fee + 5)),
+                vec![tx1.clone(), tx3.clone()],
+            ),
+            // 8. Base fee decrease, blob fee not change
+            (
+                BestTransactionsAttributes::new(base_fee - 10, Some(blob_fee)),
+                vec![tx1.clone(), tx2.clone(), tx3.clone(), tx4.clone(), tx6.clone()],
+            ),
+            // 9. Base fee decrease, blob fee decrease
+            (
+                BestTransactionsAttributes::new(base_fee - 10, Some(blob_fee - 10)),
+                vec![
+                    tx1.clone(),
+                    tx2.clone(),
+                    tx3.clone(),
+                    tx4.clone(),
+                    tx5.clone(),
+                    tx6.clone(),
+                    tx7.clone(),
+                ],
+            ),
+        ];
+
+        let mut i = 1;
+        for (attribute, expected) in cases {
+            println!("Case {}", i);
+            let mut best = pool.best_transactions_with_attributes(attribute);
+
+            let mut j = 1;
+            for expected_tx in expected {
+                println!("j is {}", j);
+                let tx = best.next().expect("Transaction should be returned");
+                assert_eq!(tx.transaction, expected_tx);
+                j += 1;
+            }
+
+            // No more transactions should be returned
+            assert!(best.next().is_none());
+            i += 1;
+        }
     }
 
     #[test]

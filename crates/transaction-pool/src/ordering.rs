@@ -1,16 +1,33 @@
 use crate::traits::PoolTransaction;
 use alloy_primitives::U256;
-use std::{fmt::Debug, marker::PhantomData};
+use std::{cmp::Ordering, fmt::Debug, marker::PhantomData};
 
 /// Priority of the transaction that can be missing.
 ///
 /// Transactions with missing priorities are ranked lower.
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub enum Priority<T: Ord + Clone> {
     /// The value of the priority of the transaction.
     Value(T),
     /// Missing priority due to ordering internals.
     None,
+}
+
+impl<T: Ord + Clone> PartialOrd for Priority<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<T: Ord + Clone> Ord for Priority<T> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (Self::Value(a), Self::Value(b)) => a.cmp(b),
+            (Self::Value(_), Self::None) => Ordering::Greater,
+            (Self::None, Self::Value(_)) => Ordering::Less,
+            (Self::None, Self::None) => Ordering::Equal,
+        }
+    }
 }
 
 impl<T: Ord + Clone> From<Option<T>> for Priority<T> {
@@ -77,5 +94,22 @@ impl<T> Default for CoinbaseTipOrdering<T> {
 impl<T> Clone for CoinbaseTipOrdering<T> {
     fn clone(&self) -> Self {
         Self::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_priority_ordering() {
+        let p1 = Priority::Value(3);
+        let p2 = Priority::Value(1);
+        let p3 = Priority::None;
+
+        assert!(p1 > p2); // 3 > 1
+        assert!(p1 > p3); // Value(3) > None
+        assert!(p2 > p3); // Value(1) > None
+        assert_eq!(p3, Priority::None);
     }
 }
