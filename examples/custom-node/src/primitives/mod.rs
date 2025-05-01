@@ -8,6 +8,8 @@ pub mod tx;
 pub use tx::*;
 pub mod extended_op_tx_envelope;
 pub use extended_op_tx_envelope::*;
+pub mod tx_custom;
+pub use tx_custom::*;
 
 use reth_ethereum::primitives::NodePrimitives;
 use reth_op::{OpReceipt, OpTransactionSigned};

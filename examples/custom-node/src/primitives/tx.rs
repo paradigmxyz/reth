@@ -1,4 +1,5 @@
-use alloy_consensus::Transaction;
+use super::TxCustom;
+use alloy_consensus::{Signed, Transaction};
 use alloy_eips::{eip2718::Eip2718Result, Decodable2718, Encodable2718, Typed2718};
 use alloy_primitives::TxHash;
 use alloy_rlp::{BufMut, Decodable, Encodable, Result as RlpResult};
@@ -12,57 +13,59 @@ use reth_op::{
     OpTransactionSigned,
 };
 use revm_primitives::{Address, Bytes};
+use serde::{Deserialize, Serialize};
 
 pub const TRANSFER_TX_TYPE_ID: u8 = 127;
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Hash, Eq, PartialEq)]
-pub struct CustomTransaction {
-    inner: OpTransactionSigned,
+#[derive(Debug, Clone, Serialize, Deserialize, Hash, Eq, PartialEq)]
+pub struct CustomTxEnvelope<T> {
+    pub inner: T,
 }
+
+pub type CustomTransaction = CustomTxEnvelope<Signed<TxCustom>>;
 
 impl Transaction for CustomTransaction {
     fn chain_id(&self) -> Option<alloy_primitives::ChainId> {
-        self.inner.chain_id()
+        self.inner.tx().chain_id()
     }
 
     fn nonce(&self) -> u64 {
-        self.inner.nonce()
+        self.inner.tx().nonce()
     }
 
     fn gas_limit(&self) -> u64 {
-        self.inner.gas_limit()
+        self.inner.tx().gas_limit()
     }
 
     fn gas_price(&self) -> Option<u128> {
-        self.inner.gas_price()
+        self.inner.tx().gas_price()
     }
 
     fn max_fee_per_gas(&self) -> u128 {
-        self.inner.max_fee_per_gas()
+        self.inner.tx().max_fee_per_gas()
     }
 
     fn max_priority_fee_per_gas(&self) -> Option<u128> {
-        self.inner.max_priority_fee_per_gas()
+        self.inner.tx().max_priority_fee_per_gas()
     }
 
     fn max_fee_per_blob_gas(&self) -> Option<u128> {
-        self.inner.max_fee_per_blob_gas()
+        self.inner.tx().max_fee_per_blob_gas()
     }
 
     fn priority_fee_or_price(&self) -> u128 {
-        self.inner.priority_fee_or_price()
+        self.inner.tx().priority_fee_or_price()
     }
 
     fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
-        self.inner.effective_gas_price(base_fee)
+        self.inner.tx().effective_gas_price(base_fee)
     }
 
     fn is_dynamic_fee(&self) -> bool {
-        self.inner.is_dynamic_fee()
+        self.inner.tx().is_dynamic_fee()
     }
 
     fn kind(&self) -> revm_primitives::TxKind {
-        self.inner.kind()
+        self.inner.tx().kind()
     }
 
     fn is_create(&self) -> bool {
@@ -70,7 +73,7 @@ impl Transaction for CustomTransaction {
     }
 
     fn value(&self) -> revm_primitives::U256 {
-        self.inner.value()
+        self.inner.tx().value()
     }
 
     fn input(&self) -> &revm_primitives::Bytes {
@@ -80,36 +83,36 @@ impl Transaction for CustomTransaction {
     }
 
     fn access_list(&self) -> Option<&alloy_eips::eip2930::AccessList> {
-        self.inner.access_list()
+        self.inner.tx().access_list()
     }
 
     fn blob_versioned_hashes(&self) -> Option<&[revm_primitives::B256]> {
-        self.inner.blob_versioned_hashes()
+        self.inner.tx().blob_versioned_hashes()
     }
 
     fn authorization_list(&self) -> Option<&[alloy_eips::eip7702::SignedAuthorization]> {
-        self.inner.authorization_list()
+        self.inner.tx().authorization_list()
     }
 }
 
 impl SignedTransaction for CustomTransaction {
     fn tx_hash(&self) -> &TxHash {
-        self.inner.hash()
+        self.inner.tx().hash()
     }
 
     fn recover_signer(&self) -> Result<Address, RecoveryError> {
-        self.inner.recover_signer()
+        self.inner.tx().recover_signer().map_err(|e| RecoveryError::from(e))
     }
 
     fn recover_signer_unchecked(&self) -> Result<Address, RecoveryError> {
-        self.inner.recover_signer_unchecked()
+        self.inner.tx().recover_signer_unchecked()
     }
 
     fn recover_signer_unchecked_with_buf(
         &self,
         buf: &mut Vec<u8>,
     ) -> Result<Address, RecoveryError> {
-        self.inner.recover_signer_unchecked_with_buf(buf)
+        self.inner.tx().recover_signer_unchecked_with_buf(buf)
     }
 }
 
@@ -121,11 +124,11 @@ impl Typed2718 for CustomTransaction {
 
 impl Decodable2718 for CustomTransaction {
     fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
-        Ok(Self { inner: OpTransactionSigned::typed_decode(ty, buf)? })
+        Ok(Self { inner: Signed::<TxCustom>::typed_decode(ty, buf)? })
     }
 
     fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
-        Ok(Self { inner: OpTransactionSigned::fallback_decode(buf)? })
+        Ok(Self { inner: Signed::<TxCustom>::fallback_decode(buf)? })
     }
 }
 
@@ -141,19 +144,19 @@ impl Encodable2718 for CustomTransaction {
 
 impl Decodable for CustomTransaction {
     fn decode(buf: &mut &[u8]) -> RlpResult<Self> {
-        Ok(Self { inner: OpTransactionSigned::decode(buf)? })
+        Ok(Self { inner: Signed::new(TxCustom::decode(buf)?) })
     }
 }
 
 impl Encodable for CustomTransaction {
     fn encode(&self, out: &mut dyn BufMut) {
-        self.inner.encode(out)
+        self.inner.tx().encode(out)
     }
 }
 
 impl InMemorySize for CustomTransaction {
     fn size(&self) -> usize {
-        self.inner.size()
+        self.inner.tx().size()
     }
 }
 
@@ -174,7 +177,7 @@ impl Compact for CustomTransaction {
     where
         B: alloy_rlp::bytes::BufMut + AsMut<[u8]>,
     {
-        self.inner.to_compact(buf)
+        self.inner.tx().encode(buf)
     }
 
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {

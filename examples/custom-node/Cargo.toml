@@ -21,7 +21,12 @@ reth-payload-builder.workspace = true
 
 reth-rpc-api.workspace = true
 reth-rpc-engine-api.workspace = true
-reth-ethereum = { workspace = true, features = ["node-api", "network", "evm", "pool"] }
+reth-ethereum = { workspace = true, features = [
+    "node-api",
+    "network",
+    "evm",
+    "pool",
+] }
 
 # revm
 revm.workspace = true
@@ -35,6 +40,7 @@ alloy-genesis.workspace = true
 alloy-op-evm.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
+alloy-serde.workspace = true
 alloy-rpc-types-engine.workspace = true
 op-alloy-consensus.workspace = true
 op-alloy-rpc-types-engine.workspace = true
