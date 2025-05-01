@@ -1,4 +1,5 @@
 use crate::EthEvmConfig;
+use alloc::{boxed::Box, sync::Arc};
 use alloy_consensus::Header;
 use alloy_eips::eip7685::Requests;
 use parking_lot::Mutex;
@@ -18,7 +19,6 @@ use revm::{
     database::State,
     Inspector,
 };
-use std::sync::Arc;
 
 /// A helper type alias for mocked block executor provider.
 pub type MockExecutorProvider = BasicBlockExecutorProvider<MockEvmConfig>;
