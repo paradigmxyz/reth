@@ -116,7 +116,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     let SimBlock { block_overrides, state_overrides, calls } = block;
 
                     if let Some(block_overrides) = block_overrides {
-                        // ensure we dont allow uncapped gas limit per block
+                        // ensure we don't allow uncapped gas limit per block
                         if let Some(gas_limit_override) = block_overrides.gas_limit {
                             if gas_limit_override > evm_env.block_env.gas_limit &&
                                 gas_limit_override > this.call_gas_limit()
