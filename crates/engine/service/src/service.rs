@@ -27,7 +27,6 @@ use reth_prune::PrunerWithFactory;
 use reth_stages_api::{MetricEventsSender, Pipeline};
 use reth_tasks::TaskSpawner;
 use std::{
-    marker::PhantomData,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -55,21 +54,18 @@ type EngineServiceType<N, Client> = ChainOrchestrator<
 // TODO(mattsse): remove hidde once fixed : <https://github.com/rust-lang/rust/issues/135363>
 //  otherwise rustdoc fails to resolve the alias
 #[doc(hidden)]
-pub struct EngineService<N, Client, E>
+pub struct EngineService<N, Client>
 where
     N: ProviderNodeTypes,
     Client: BlockClient<Block = BlockTy<N>> + 'static,
-    E: BlockExecutorProvider + 'static,
 {
     orchestrator: EngineServiceType<N, Client>,
-    _marker: PhantomData<E>,
 }
 
-impl<N, Client, E> EngineService<N, Client, E>
+impl<N, Client> EngineService<N, Client>
 where
     N: ProviderNodeTypes,
     Client: BlockClient<Block = BlockTy<N>> + 'static,
-    E: BlockExecutorProvider<Primitives = N::Primitives> + 'static,
 {
     /// Constructor for `EngineService`.
     #[expect(clippy::too_many_arguments)]
@@ -122,10 +118,7 @@ where
 
         let backfill_sync = PipelineSync::new(pipeline, pipeline_task_spawner);
 
-        Self {
-            orchestrator: ChainOrchestrator::new(handler, backfill_sync),
-            _marker: Default::default(),
-        }
+        Self { orchestrator: ChainOrchestrator::new(handler, backfill_sync) }
     }
 
     /// Returns a mutable reference to the orchestrator.
@@ -134,11 +127,10 @@ where
     }
 }
 
-impl<N, Client, E> Stream for EngineService<N, Client, E>
+impl<N, Client> Stream for EngineService<N, Client>
 where
     N: ProviderNodeTypes,
     Client: BlockClient<Block = BlockTy<N>> + 'static,
-    E: BlockExecutorProvider + 'static,
 {
     type Item = ChainEvent<BeaconConsensusEngineEvent<N::Primitives>>;
 

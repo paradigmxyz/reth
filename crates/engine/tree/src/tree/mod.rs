@@ -3071,7 +3071,7 @@ impl PersistingKind {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{persistence::PersistenceAction, test_utils::MockEvmConfig};
+    use crate::persistence::PersistenceAction;
     use alloy_consensus::Header;
     use alloy_primitives::Bytes;
     use alloy_rlp::Decodable;
@@ -3086,6 +3086,7 @@ mod tests {
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_ethereum_primitives::{Block, EthPrimitives};
+    use reth_evm_ethereum::MockEvmConfig;
     use reth_node_ethereum::EthereumEngineValidator;
     use reth_primitives_traits::Block as _;
     use reth_provider::test_utils::MockEthProvider;
@@ -3200,7 +3201,7 @@ mod tests {
             let (to_payload_service, _payload_command_rx) = unbounded_channel();
             let payload_builder = PayloadBuilderHandle::new(to_payload_service);
 
-            let evm_config = MockEvmConfig::new(chain_spec.clone());
+            let evm_config = MockEvmConfig::default();
 
             let tree = EngineApiTreeHandler::new(
                 provider.clone(),
