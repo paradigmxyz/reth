@@ -1,10 +1,10 @@
+use crate::common::EnvironmentArgs;
 use clap::Parser;
 use eyre::Result;
 use lz4::Decoder;
 use reqwest::Client;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
-use reth_node_core::args::DatadirArgs;
 use std::{
     fs,
     io::{self, Read, Write},
@@ -20,8 +20,8 @@ const BYTE_UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
 const MERKLE_BASE_URL: &str = "https://downloads.merkle.io";
 const EXTENSION_TAR_FILE: &str = ".tar.lz4";
 
-#[derive(Debug, Parser, Clone)]
-pub struct Command<C: ChainSpecParser> {
+#[derive(Debug, Parser)]
+pub struct DownloadCommand<C: ChainSpecParser> {
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
@@ -32,7 +32,7 @@ pub struct Command<C: ChainSpecParser> {
     chain: Arc<C::ChainSpec>,
 
     #[command(flatten)]
-    datadir: DatadirArgs,
+    env: EnvironmentArgs<C>,
 
     #[arg(
         long,
@@ -50,9 +50,9 @@ pub struct Command<C: ChainSpecParser> {
     url: Option<String>,
 }
 
-impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
+impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCommand<C> {
     pub async fn execute<N>(self) -> Result<()> {
-        let data_dir = self.datadir.resolve_datadir(self.chain.chain());
+        let data_dir = self.env.datadir.resolve_datadir(self.chain.chain());
         fs::create_dir_all(&data_dir)?;
 
         let url = match self.url {
@@ -75,6 +75,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         info!(target: "reth::cli", "Snapshot downloaded and extracted successfully");
 
         Ok(())
+    }
+}
+
+impl<C: ChainSpecParser> DownloadCommand<C> {
+    /// Returns the underlying chain being used to run this command
+    pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+        Some(&self.chain)
     }
 }
 
