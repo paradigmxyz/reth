@@ -41,7 +41,8 @@ use reth_primitives_traits::{
 use reth_provider::{
     providers::ConsistentDbView, BlockNumReader, BlockReader, DBProvider, DatabaseProviderFactory,
     ExecutionOutcome, HashedPostStateProvider, ProviderError, StateCommitmentProvider,
-    StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
+    StateProvider, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
+    TransactionVariant,
 };
 use reth_revm::{database::StateProviderDatabase, State};
 use reth_stages_api::ControlFlow;
@@ -2441,31 +2442,23 @@ where
 
         // Use cached state provider before executing, used in execution after prewarming threads
         // complete
-        let state_provider =
-            InstrumentedStateProvider::from_state_provider(CachedStateProvider::new_with_caches(
-                state_provider,
-                handle.caches(),
-                handle.cache_metrics(),
-            ));
+        let state_provider = CachedStateProvider::new_with_caches(
+            state_provider,
+            handle.caches(),
+            handle.cache_metrics(),
+        );
 
-        debug!(target: "engine::tree", block=?block_num_hash, "Executing block");
-
-        let mut db = State::builder()
-            .with_database(StateProviderDatabase::new(&state_provider))
-            .with_bundle_update()
-            .without_state_clear()
-            .build();
-        let executor = self.evm_config.executor_for_block(&mut db, &block);
-        let execution_start = Instant::now();
-        let output = ensure_ok!(self.metrics.executor.execute_metered(
-            executor,
-            &block,
-            Box::new(handle.state_hook()),
-        ));
-        let execution_finish = Instant::now();
-        let execution_time = execution_finish.duration_since(execution_start);
-        state_provider.record_total_latency();
-        debug!(target: "engine::tree", elapsed = ?execution_time, number=?block_num_hash.number, "Executed block");
+        let (output, execution_finish) = if self.config.state_provider_metrics() {
+            let state_provider = InstrumentedStateProvider::from_state_provider(&state_provider);
+            let (output, execution_finish) =
+                ensure_ok!(self.execute_block(&state_provider, &block, &handle));
+            state_provider.record_total_latency();
+            (output, execution_finish)
+        } else {
+            let (output, execution_finish) =
+                ensure_ok!(self.execute_block(&state_provider, &block, &handle));
+            (output, execution_finish)
+        };
 
         // after executing the block we can stop executing transactions
         handle.stop_prewarming_execution();
@@ -2606,6 +2599,32 @@ where
 
         debug!(target: "engine::tree", block=?block_num_hash, "Finished inserting block");
         Ok(InsertPayloadOk::Inserted(BlockStatus::Valid))
+    }
+
+    /// Executes a block with the given state provider
+    fn execute_block<S: StateProvider>(
+        &self,
+        state_provider: S,
+        block: &RecoveredBlock<N::Block>,
+        handle: &PayloadHandle,
+    ) -> Result<(BlockExecutionOutput<N::Receipt>, Instant), InsertBlockErrorKind> {
+        debug!(target: "engine::tree", block=?block.num_hash(), "Executing block");
+        let mut db = State::builder()
+            .with_database(StateProviderDatabase::new(&state_provider))
+            .with_bundle_update()
+            .without_state_clear()
+            .build();
+        let executor = self.evm_config.executor_for_block(&mut db, block);
+        let execution_start = Instant::now();
+        let output = self.metrics.executor.execute_metered(
+            executor,
+            block,
+            Box::new(handle.state_hook()),
+        )?;
+        let execution_finish = Instant::now();
+        let execution_time = execution_finish.duration_since(execution_start);
+        debug!(target: "engine::tree", elapsed = ?execution_time, number=?block.number(), "Executed block");
+        Ok((output, execution_finish))
     }
 
     /// Compute state root for the given hashed post state in parallel.
