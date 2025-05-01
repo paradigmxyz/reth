@@ -17,7 +17,7 @@ pub enum Error {
     /// Invalid scheme
     #[error("Invalid scheme of sequencer url: {0}")]
     InvalidScheme(String),
-    /// Invalid scheme
+    /// Invalid header or value provided.
     #[error("Invalid header: {0}")]
     InvalidHeader(String),
     /// Invalid url
