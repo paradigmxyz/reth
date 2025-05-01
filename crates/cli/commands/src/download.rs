@@ -5,8 +5,8 @@ use lz4::Decoder;
 use reqwest::Client;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
+use reth_fs_util as fs;
 use std::{
-    fs,
     io::{self, Read, Write},
     path::Path,
     sync::Arc,
