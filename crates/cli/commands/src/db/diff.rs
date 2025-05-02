@@ -10,7 +10,7 @@ use reth_node_core::{
     dirs::{DataDirPath, PlatformPath},
 };
 use std::{
-    collections::HashMap,
+    collections::BTreeMap,
     fmt::Debug,
     fs::{self, File},
     hash::Hash,
@@ -262,10 +262,10 @@ where
     T::Key: Hash,
 {
     /// All elements of the database that are different
-    discrepancies: HashMap<T::Key, TableDiffElement<T>>,
+    discrepancies: BTreeMap<T::Key, TableDiffElement<T>>,
 
     /// Any extra elements, and the table they are in
-    extra_elements: HashMap<T::Key, ExtraTableElement<T>>,
+    extra_elements: BTreeMap<T::Key, ExtraTableElement<T>>,
 }
 
 impl<T> Default for TableDiffResult<T>
@@ -274,7 +274,7 @@ where
     T::Key: Hash,
 {
     fn default() -> Self {
-        Self { discrepancies: HashMap::default(), extra_elements: HashMap::default() }
+        Self { discrepancies: BTreeMap::default(), extra_elements: BTreeMap::default() }
     }
 }
 
