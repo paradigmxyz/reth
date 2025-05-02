@@ -3,7 +3,7 @@ use alloy_eips::BlockId;
 use alloy_evm::block::calc::{base_block_reward_pre_merge, block_reward, ommer_reward};
 use alloy_primitives::{
     map::{HashMap, HashSet},
-    Address, Bytes, B256, U256,
+    Address, BlockHash, Bytes, B256, U256,
 };
 use alloy_rpc_types_eth::{
     state::{EvmOverrides, StateOverride},
@@ -53,6 +53,17 @@ pub struct TransactionStorageAccess {
     pub unique_loads: u64,
     /// Number of warm storage loads
     pub warm_loads: u64,
+}
+
+/// Response type for storage tracing that contains all accessed storage slots
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlockStorageAccess {
+    /// The block hash
+    pub block_hash: BlockHash,
+    /// The block number
+    pub block_number: u64,
+    /// All executed transactions in the block in the order they were executed
+    pub transactions: Vec<TransactionStorageAccess>,
 }
 
 /// `trace` API implementation.
@@ -646,29 +657,37 @@ where
 
     /// Returns all storage slots accessed during transaction execution along with their access
     /// counts.
-    pub async fn trace_transaction_storage_access(
+    pub async fn trace_block_storage_access(
         &self,
-        tx_hash: B256,
-    ) -> Result<Option<TransactionStorageAccess>, Eth::Error> {
-        self.eth_api()
-            .spawn_trace_transaction_in_block_with_inspector(
-                tx_hash,
-                StorageInspector::default(),
-                move |_tx_info, inspector, _res, _| {
-                    let unique_loads = inspector.unique_loads();
-                    let warm_loads = inspector.warm_loads();
-                    let accessed_slots = inspector.into_accessed_slots();
-
+        block_id: BlockId,
+    ) -> Result<Option<BlockStorageAccess>, Eth::Error> {
+        let res = self
+            .eth_api()
+            .trace_block_inspector(
+                block_id,
+                None,
+                StorageInspector::default,
+                move |tx_info, inspector, _res, _, _| {
                     let trace = TransactionStorageAccess {
-                        transaction_hash: tx_hash,
-                        storage_access: accessed_slots,
-                        unique_loads,
-                        warm_loads,
+                        transaction_hash: tx_info.hash.expect("tx hash is set"),
+                        storage_access: inspector.accessed_slots().clone(),
+                        unique_loads: inspector.unique_loads(),
+                        warm_loads: inspector.warm_loads(),
                     };
                     Ok(trace)
                 },
             )
-            .await
+            .await?;
+
+        let Some(transactions) = res else { return Ok(None) };
+
+        let Some(block) = self.eth_api().recovered_block(block_id).await? else { return Ok(None) };
+
+        Ok(Some(BlockStorageAccess {
+            block_hash: block.hash(),
+            block_number: block.number(),
+            transactions,
+        }))
     }
 }
 
