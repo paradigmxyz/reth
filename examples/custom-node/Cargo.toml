@@ -44,11 +44,11 @@ jsonrpsee.workspace = true
 serde.workspace = true
 
 [features]
-default = []
 arbitrary = [
     "alloy-consensus/arbitrary",
     "alloy-eips/arbitrary",
     "alloy-primitives/arbitrary",
+    "alloy-serde/arbitrary",
     "op-alloy-consensus/arbitrary",
     "op-alloy-rpc-types-engine/arbitrary",
     "reth-codecs/arbitrary",
@@ -57,3 +57,4 @@ arbitrary = [
     "revm/arbitrary",
     "reth-ethereum/arbitrary",
 ]
+default = []
