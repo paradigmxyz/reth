@@ -68,7 +68,6 @@ impl reth_codecs::Compact for StoredSubNode {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
     use crate::TrieMask;
     use alloy_primitives::B256;
