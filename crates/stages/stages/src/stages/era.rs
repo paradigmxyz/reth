@@ -72,7 +72,7 @@ where
             }
                 .map(|height| ExecOutput::done(StageCheckpoint::new(height)))
                 .map_err(|e| StageError::Recoverable(e.into())),
-            None => Ok(ExecOutput { checkpoint: input.checkpoint.unwrap_or(StageCheckpoint::new(0)), done: true })
+            None => Ok(ExecOutput { checkpoint: input.checkpoint.unwrap_or_else(|| StageCheckpoint::new(0)), done: true })
         }
     }
 

@@ -44,9 +44,9 @@ where
     // Handle IO-bound async download in a background tokio task
     tokio::spawn(async move {
         while let Some(file) = downloader.next().await {
-            tx.send(Some(file)).unwrap();
+            tx.send(Some(file))?;
         }
-        tx.send(None).unwrap();
+        tx.send(None)
     });
 
     let static_file_provider = provider.static_file_provider();
