@@ -74,13 +74,7 @@ where
 
 impl<Components: FullNodeComponents> LoadBlock for EthApi<Components>
 where
-    Self: LoadPendingBlock
-        + SpawnBlocking
-        + RpcNodeCoreExt<
-            Pool: TransactionPool<
-                Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
-            >,
-        >,
+    Self: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt,
     Components::Provider: BlockReader,
 {
 }
