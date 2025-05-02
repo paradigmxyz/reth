@@ -106,7 +106,7 @@ mod tests {
         assert_eq!(
             pool.len(),
             1,
-            "expect 1 transactions in the pool, but pool size is {}",
+            "expect 1 transaction in the pool, but pool size is {}",
             pool.len()
         );
 

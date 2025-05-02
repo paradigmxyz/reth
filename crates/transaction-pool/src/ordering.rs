@@ -36,6 +36,24 @@ impl<T: Ord + Clone> From<Option<T>> for Priority<T> {
     }
 }
 
+impl<T: Ord + Clone> PartialOrd for Priority<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<T: Ord + Clone> Ord for Priority<T> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (Self::Value(a), Self::Value(b)) => a.cmp(b),
+            // Note: None should be smaller than Value.
+            (Self::Value(_), Self::None) => Ordering::Greater,
+            (Self::None, Self::Value(_)) => Ordering::Less,
+            (Self::None, Self::None) => Ordering::Equal,
+        }
+    }
+}
+
 /// Transaction ordering trait to determine the order of transactions.
 ///
 /// Decides how transactions should be ordered within the pool, depending on a `Priority` value.
