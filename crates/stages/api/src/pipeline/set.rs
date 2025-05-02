@@ -100,6 +100,31 @@ impl<Provider> StageSetBuilder<Provider> {
         self
     }
 
+    /// Returns iterator over the stages in this set,
+    /// In the same order they would be executed in the pipeline.
+    pub fn stages(&self) -> impl Iterator<Item = StageId> + '_ {
+        self.order.iter().copied()
+    }
+
+    /// Replaces a stage with the given ID with a new stage.
+    ///
+    /// If the new stage has a different ID,
+    /// it will maintain the original stage's position in the execution order.
+    pub fn replace<S: Stage<Provider> + 'static>(mut self, stage_id: StageId, stage: S) -> Self {
+        self.stages
+            .get(&stage_id)
+            .unwrap_or_else(|| panic!("Stage does not exist in set: {stage_id}"));
+
+        if stage.id() == stage_id {
+            return self.set(stage);
+        }
+        let index = self.index_of(stage_id);
+        self.stages.remove(&stage_id);
+        self.order[index] = stage.id();
+        self.upsert_stage_state(Box::new(stage), index);
+        self
+    }
+
     /// Adds the given [`Stage`] at the end of this set.
     ///
     /// If the stage was already in the group, it is removed from its previous place.
