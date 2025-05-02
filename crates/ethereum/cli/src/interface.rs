@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{
-    config_cmd, db, dump_genesis, import, init_cmd, init_state,
+    config_cmd, db, dump_genesis, import, import_era, init_cmd, init_state,
     node::{self, NoArgs},
     p2p, prune, recover, stage,
 };
@@ -163,6 +163,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
             Commands::Import(command) => {
                 runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode, _, _>(components))
             }
+            Commands::ImportEra(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
+            }
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => {
                 runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
@@ -212,6 +215,9 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     /// This syncs RLP encoded blocks from a file.
     #[command(name = "import")]
     Import(import::ImportCommand<C>),
+    /// This syncs ERA encoded blocks from a directory.
+    #[command(name = "import-era")]
+    ImportEra(import_era::ImportEraCommand<C>),
     /// Dumps genesis block JSON configuration to stdout.
     DumpGenesis(dump_genesis::DumpGenesisCommand<C>),
     /// Database debugging utilities
@@ -241,7 +247,7 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     Prune(prune::PruneCommand<C>),
 }
 
-impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Commands<C, Ext> {
+impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Commands<C, Ext> {
     /// Returns the underlying chain being used for commands
     pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         match self {
@@ -249,12 +255,13 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Co
             Self::Init(cmd) => cmd.chain_spec(),
             Self::InitState(cmd) => cmd.chain_spec(),
             Self::Import(cmd) => cmd.chain_spec(),
+            Self::ImportEra(cmd) => cmd.chain_spec(),
             Self::DumpGenesis(cmd) => cmd.chain_spec(),
             Self::Db(cmd) => cmd.chain_spec(),
             Self::Stage(cmd) => cmd.chain_spec(),
             Self::P2P(cmd) => cmd.chain_spec(),
             #[cfg(feature = "dev")]
-            Self::TestVectors(cmd) => cmd.chain_spec(),
+            Self::TestVectors(_) => None,
             Self::Config(_) => None,
             Self::Debug(cmd) => cmd.chain_spec(),
             Self::Recover(cmd) => cmd.chain_spec(),
@@ -316,7 +323,7 @@ mod tests {
                 reth.command.chain_spec().map(|c| c.chain.to_string()).unwrap_or(String::new());
             reth.logs.log_file_directory = reth.logs.log_file_directory.join(chain.clone());
             let log_dir = reth.logs.log_file_directory;
-            let end = format!("reth/logs/{}", chain);
+            let end = format!("reth/logs/{chain}");
             assert!(log_dir.as_ref().ends_with(end), "{log_dir:?}");
         }
     }
@@ -332,7 +339,7 @@ mod tests {
         }
         let log_dir = reth.logs.log_file_directory;
         let end = format!("reth/logs/{}", SUPPORTED_CHAINS[0]);
-        println!("{:?}", log_dir);
+        println!("{log_dir:?}");
         assert!(log_dir.as_ref().ends_with(end), "{log_dir:?}");
     }
 
@@ -346,7 +353,7 @@ mod tests {
         }
         let log_dir = reth.logs.log_file_directory;
         let end = "reth/logs".to_string();
-        println!("{:?}", log_dir);
+        println!("{log_dir:?}");
         assert!(log_dir.as_ref().ends_with(end), "{log_dir:?}");
     }
 

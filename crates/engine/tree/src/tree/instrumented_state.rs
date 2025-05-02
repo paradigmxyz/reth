@@ -13,58 +13,48 @@ use reth_trie::{
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 use std::{
-    sync::atomic::{AtomicU32, AtomicU64, Ordering},
+    sync::atomic::{AtomicU64, Ordering},
     time::{Duration, Instant},
 };
 
 /// Nanoseconds per second
 const NANOS_PER_SEC: u32 = 1_000_000_000;
 
-/// An atomic version of [`Duration`], using an [`AtomicU64`] to store the seconds part of the
-/// duration, and an [`AtomicU32`] for the nanoseconds part.
+/// An atomic version of [`Duration`], using an [`AtomicU64`] to store the total nanoseconds in the
+/// duration.
 #[derive(Default)]
 pub(crate) struct AtomicDuration {
-    /// The seconds part of the duration
-    seconds: AtomicU64,
-
     /// The nanoseconds part of the duration
-    nanos: AtomicU32,
+    ///
+    /// We would have to accumulate 584 years of nanoseconds to overflow a u64, so this is
+    /// sufficiently large for our use case. We don't expect to be adding arbitrary durations to
+    /// this value.
+    nanos: AtomicU64,
 }
 
 impl AtomicDuration {
-    /// The zero duration.
-    const ZERO: Self = Self { seconds: AtomicU64::new(0), nanos: AtomicU32::new(0) };
-
-    /// Creates a new [`AtomicDuration`] from a [`Duration`]
-    pub(crate) fn new(duration: Duration) -> Self {
-        Self {
-            seconds: AtomicU64::new(duration.as_secs()),
-            nanos: AtomicU32::new(duration.subsec_nanos()),
-        }
+    /// Returns a zero duration.
+    pub(crate) const fn zero() -> Self {
+        Self { nanos: AtomicU64::new(0) }
     }
 
     /// Returns the duration as a [`Duration`]
     pub(crate) fn duration(&self) -> Duration {
-        Duration::new(self.seconds.load(Ordering::Relaxed), self.nanos.load(Ordering::Relaxed))
+        let nanos = self.nanos.load(Ordering::Relaxed);
+        let seconds = nanos / NANOS_PER_SEC as u64;
+        let nanos = nanos % NANOS_PER_SEC as u64;
+        // `as u32` is ok because we did a mod by u32 const
+        Duration::new(seconds, nanos as u32)
     }
 
     /// Adds a [`Duration`] to the atomic duration.
     pub(crate) fn add_duration(&self, duration: Duration) {
-        // add the seconds part of the duration
-        self.seconds.fetch_add(duration.as_secs(), Ordering::Relaxed);
+        // this is `as_nanos` but without the `as u128` - we do not expect durations over 584 years
+        // as input here
+        let total_nanos =
+            duration.as_secs() * NANOS_PER_SEC as u64 + duration.subsec_nanos() as u64;
         // add the nanoseconds part of the duration
-        self.nanos.fetch_add(duration.subsec_nanos(), Ordering::Relaxed);
-
-        // carry over the nanoseconds to the seconds part if the nanoseconds part is greater than 1
-        // second
-        if self.nanos.load(Ordering::Relaxed) >= NANOS_PER_SEC {
-            // get the number of seconds to carry over
-            let carry_over = self.nanos.load(Ordering::Relaxed) / NANOS_PER_SEC;
-            // set the nanoseconds part to the remainder
-            self.nanos.fetch_sub(carry_over * NANOS_PER_SEC, Ordering::Relaxed);
-            // add the carry over to the seconds part
-            self.seconds.fetch_add(carry_over as u64, Ordering::Relaxed);
-        }
+        self.nanos.fetch_add(total_nanos, Ordering::Relaxed);
     }
 }
 
@@ -95,9 +85,9 @@ where
         Self {
             state_provider,
             metrics: StateProviderMetrics::default(),
-            total_storage_fetch_latency: AtomicDuration::ZERO,
-            total_code_fetch_latency: AtomicDuration::ZERO,
-            total_account_fetch_latency: AtomicDuration::ZERO,
+            total_storage_fetch_latency: AtomicDuration::zero(),
+            total_code_fetch_latency: AtomicDuration::zero(),
+            total_account_fetch_latency: AtomicDuration::zero(),
         }
     }
 }

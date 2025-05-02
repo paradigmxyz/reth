@@ -122,6 +122,9 @@ pub use storage::StorageEntry;
 
 pub mod sync;
 
+pub mod typed;
+pub use typed::IsTyped2718;
+
 /// Common header types
 pub mod header;
 pub use header::{Header, HeaderError, SealedHeader, SealedHeaderFor};

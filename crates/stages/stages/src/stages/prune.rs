@@ -172,7 +172,7 @@ mod tests {
     };
     use alloy_primitives::B256;
     use reth_ethereum_primitives::Block;
-    use reth_primitives_traits::{SealedBlock, SignedTransaction};
+    use reth_primitives_traits::SealedBlock;
     use reth_provider::{
         providers::StaticFileWriter, TransactionsProvider, TransactionsProviderExt,
     };

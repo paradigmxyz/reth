@@ -43,8 +43,7 @@ impl core::fmt::Display for DisplayFork {
                 // All networks that have merged are finalized.
                 write!(
                     f,
-                    "{:32} @{} (network is known to be merged)",
-                    name_with_eip, total_difficulty,
+                    "{name_with_eip:32} @{total_difficulty} (network is known to be merged)",
                 )?;
             }
             ForkCondition::Never => unreachable!(),
@@ -85,7 +84,8 @@ impl core::fmt::Display for DisplayFork {
 // - Paris                            @58750000000000000000000 (network is known to be merged)
 // Post-merge hard forks (timestamp based):
 // - Shanghai                         @1681338455
-// - Cancun                           @1710338135"
+// - Cancun                           @1710338135
+// - Prague                           @1746612311
 /// ```
 #[derive(Debug)]
 pub struct DisplayHardforks {

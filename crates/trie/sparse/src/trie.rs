@@ -616,10 +616,7 @@ impl<P> RevealedSparseTrie<P> {
                         current.extend_from_slice_unchecked(key);
                         assert!(
                             path.starts_with(&current),
-                            "path: {:?}, current: {:?}, key: {:?}",
-                            path,
-                            current,
-                            key
+                            "path: {path:?}, current: {current:?}, key: {key:?}",
                         );
                     }
 
@@ -631,11 +628,7 @@ impl<P> RevealedSparseTrie<P> {
                     let nibble = path[current.len()];
                     debug_assert!(
                         state_mask.is_bit_set(nibble),
-                        "current: {:?}, path: {:?}, nibble: {:?}, state_mask: {:?}",
-                        current,
-                        path,
-                        nibble,
-                        state_mask
+                        "current: {current:?}, path: {path:?}, nibble: {nibble:?}, state_mask: {state_mask:?}",
                     );
 
                     // If the branch node has a child that is a leaf node that we're removing,
@@ -1498,7 +1491,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                         SparseNode::Branch { .. } => removed_node.node,
                     }
                 }
-                SparseNode::Branch { mut state_mask, hash: _, store_in_db_trie: _ } => {
+                &SparseNode::Branch { mut state_mask, hash: _, store_in_db_trie: _ } => {
                     // If the node is a branch node, we need to check the number of children left
                     // after deleting the child at the given nibble.
 
@@ -2294,8 +2287,7 @@ mod tests {
             };
             assert!(
                 equals,
-                "path: {:?}\nproof node: {:?}\nsparse node: {:?}",
-                proof_node_path, proof_node, sparse_node
+                "path: {proof_node_path:?}\nproof node: {proof_node:?}\nsparse node: {sparse_node:?}"
             );
         }
     }

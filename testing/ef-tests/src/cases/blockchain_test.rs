@@ -76,7 +76,7 @@ impl BlockchainTestCase {
         name.contains("UncleFromSideChain")
     }
 
-    /// If the test expects an exception, return the the block number
+    /// If the test expects an exception, return the block number
     /// at which it must occur together with the original message.
     ///
     /// Note: There is a +1 here because the genesis block is not included
@@ -315,7 +315,6 @@ fn pre_execution_checks(
     let consensus: EthBeaconConsensus<ChainSpec> = EthBeaconConsensus::new(chain_spec);
 
     let sealed_header = block.sealed_header();
-    let header = block.header();
 
     <EthBeaconConsensus<ChainSpec> as Consensus<Block>>::validate_body_against_header(
         &consensus,
@@ -323,7 +322,6 @@ fn pre_execution_checks(
         sealed_header,
     )?;
     consensus.validate_header_against_parent(sealed_header, parent.sealed_header())?;
-    consensus.validate_header_with_total_difficulty(header, block.difficulty)?;
     consensus.validate_header(sealed_header)?;
     consensus.validate_block_pre_execution(block)?;
 

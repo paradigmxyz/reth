@@ -8,7 +8,7 @@
 //!
 //! This launches a regular reth node overriding the engine api payload builder with our custom.
 //!
-//! Credits to: <https://blog.merkle.io/blog/fastest-transaction-network-eth-polygon-bsc>
+//! Credits to: <https://merkle.io/blog/modifying-reth-to-build-the-fastest-transaction-network-on-bsc-and-polygon>
 
 #![warn(unused_crate_dependencies)]
 
