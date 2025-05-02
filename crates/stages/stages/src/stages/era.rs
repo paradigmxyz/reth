@@ -79,8 +79,11 @@ where
     fn unwind(
         &mut self,
         _provider: &Provider,
-        _input: UnwindInput,
+        input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        todo!()
+        match &self.source {
+            None => Ok(UnwindOutput { checkpoint: input.checkpoint}),
+            Some(_) => todo!()
+        }
     }
 }
