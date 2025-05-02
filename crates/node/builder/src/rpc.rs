@@ -3,7 +3,7 @@
 use crate::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle};
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
-use futures::TryFutureExt;
+use jsonrpsee::RpcModule;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_node_api::{
@@ -557,7 +557,7 @@ where
         let server_config = config.rpc.rpc_server_config();
         let rpc = match mode {
             RpcServerMode::TransportOnly | RpcServerMode::Both => {
-                Some(server_config.start(&modules.clone()).await??)
+                Some(server_config.start(&modules.clone()).await?)
             }
             _ => None,
         };
