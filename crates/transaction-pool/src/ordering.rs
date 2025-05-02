@@ -1,6 +1,6 @@
 use crate::traits::PoolTransaction;
 use alloy_primitives::U256;
-use std::{fmt::Debug, marker::PhantomData, cmp::Ordering};
+use std::{cmp::Ordering, fmt::Debug, marker::PhantomData};
 
 /// Priority of the transaction that can be missing.
 ///
