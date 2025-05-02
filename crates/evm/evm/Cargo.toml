@@ -58,10 +58,12 @@ std = [
     "derive_more/std",
     "reth-storage-api/std",
     "reth-trie-common/std",
+    "reth-ethereum-primitives/std",
 ]
 metrics = ["std", "dep:metrics", "dep:reth-metrics"]
 test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",
+    "reth-ethereum-primitives/test-utils",
 ]
 op = ["op-revm", "alloy-evm/op", "reth-primitives-traits/op"]

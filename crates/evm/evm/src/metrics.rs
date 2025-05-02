@@ -55,6 +55,8 @@ pub struct ExecutorMetrics {
     pub gas_processed_total: Counter,
     /// The instantaneous amount of gas processed per second.
     pub gas_per_second: Gauge,
+    /// The Histogram for amount of gas used.
+    pub gas_used_histogram: Histogram,
 
     /// The Histogram for amount of time taken to execute blocks.
     pub execution_histogram: Histogram,
@@ -90,18 +92,19 @@ impl ExecutorMetrics {
         // Update gas metrics.
         self.gas_processed_total.increment(block.header().gas_used());
         self.gas_per_second.set(block.header().gas_used() as f64 / execution_duration);
+        self.gas_used_histogram.record(block.header().gas_used() as f64);
         self.execution_histogram.record(execution_duration);
         self.execution_duration.set(execution_duration);
 
         output
     }
 
-    /// Execute the given block using the provided [`Executor`] and update metrics for the
+    /// Execute the given block using the provided [`BlockExecutor`] and update metrics for the
     /// execution.
     ///
     /// Compared to [`Self::metered_one`], this method additionally updates metrics for the number
     /// of accounts, storage slots and bytecodes loaded and updated.
-    /// Execute the given block using the provided [`Executor`] and update metrics for the
+    /// Execute the given block using the provided [`BlockExecutor`] and update metrics for the
     /// execution.
     pub fn execute_metered<E, DB>(
         &self,
