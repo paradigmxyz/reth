@@ -1,4 +1,4 @@
-//! Example for how hook into the bsc p2p network
+//! Example for how to hook into the bsc p2p network
 //!
 //! Run with
 //!
