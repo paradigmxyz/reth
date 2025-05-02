@@ -8,9 +8,7 @@ use std::{
 use alloy_consensus::BlockHeader;
 use alloy_primitives::BlockNumber;
 use reth_ethereum_primitives::Receipt;
-use reth_evm::execute::{
-    BasicBlockExecutorProvider, BlockExecutionError, BlockExecutionOutput, Executor,
-};
+use reth_evm::execute::{BlockExecutionError, BlockExecutionOutput, Executor};
 use reth_node_api::{Block as _, BlockBody as _, NodePrimitives};
 use reth_primitives_traits::{format_gas_throughput, RecoveredBlock, SignedTransaction};
 use reth_provider::{
@@ -31,7 +29,7 @@ pub(super) type BackfillJobResult<T> = Result<T, BlockExecutionError>;
 /// depending on the configured thresholds.
 #[derive(Debug)]
 pub struct BackfillJob<E, P> {
-    pub(crate) executor: BasicBlockExecutorProvider<E>,
+    pub(crate) evm_config: E,
     pub(crate) provider: P,
     pub(crate) prune_modes: PruneModes,
     pub(crate) thresholds: ExecutionStageThresholds,
@@ -77,7 +75,7 @@ where
             "Executing block range"
         );
 
-        let mut executor = self.executor.executor(StateProviderDatabase::new(
+        let mut executor = self.evm_config.batch_executor(StateProviderDatabase::new(
             self.provider
                 .history_by_block_number(self.range.start().saturating_sub(1))
                 .map_err(BlockExecutionError::other)?,
@@ -163,7 +161,7 @@ where
 /// iterator is advanced and yields ([`RecoveredBlock`], [`BlockExecutionOutput`])
 #[derive(Debug, Clone)]
 pub struct SingleBlockBackfillJob<E, P> {
-    pub(crate) executor: BasicBlockExecutorProvider<E>,
+    pub(crate) evm_config: E,
     pub(crate) provider: P,
     pub(crate) range: RangeInclusive<BlockNumber>,
     pub(crate) stream_parallelism: usize,
@@ -217,7 +215,7 @@ where
             .map_err(BlockExecutionError::other)?;
 
         // Configure the executor to use the previous block's state.
-        let executor = self.executor.executor(StateProviderDatabase::new(
+        let executor = self.evm_config.batch_executor(StateProviderDatabase::new(
             self.provider
                 .history_by_block_number(block_number.saturating_sub(1))
                 .map_err(BlockExecutionError::other)?,
@@ -234,7 +232,7 @@ where
 impl<E, P> From<BackfillJob<E, P>> for SingleBlockBackfillJob<E, P> {
     fn from(job: BackfillJob<E, P>) -> Self {
         Self {
-            executor: job.executor,
+            evm_config: job.evm_config,
             provider: job.provider,
             range: job.range,
             stream_parallelism: job.stream_parallelism,

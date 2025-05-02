@@ -6,7 +6,7 @@ use reth_basic_payload_builder::PayloadBuilder;
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_primitives::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle};
-use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
+use reth_evm::ConfigureEvm;
 use reth_network_api::FullNetwork;
 use reth_node_core::node_config::NodeConfig;
 use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter, TxTy};
@@ -84,9 +84,6 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
 
     /// Returns the node's evm config.
     fn evm_config(&self) -> &Self::Evm;
-
-    /// Returns the node's executor type.
-    fn block_executor(&self) -> &BasicBlockExecutorProvider<Self::Evm>;
 
     /// Returns the node's consensus type.
     fn consensus(&self) -> &Self::Consensus;

@@ -375,47 +375,6 @@ where
     }
 }
 
-impl<F> Clone for BasicBlockExecutorProvider<F>
-where
-    F: Clone,
-{
-    fn clone(&self) -> Self {
-        Self { strategy_factory: self.strategy_factory.clone() }
-    }
-}
-
-/// A generic block executor provider that can create executors using a strategy factory.
-#[derive(Debug, Default)]
-pub struct BasicBlockExecutorProvider<F> {
-    /// Strategy to create block executors.
-    strategy_factory: F,
-}
-
-impl<F> BasicBlockExecutorProvider<F> {
-    /// Creates a new `BasicBlockExecutorProvider` with the given strategy factory.
-    pub const fn new(strategy_factory: F) -> Self {
-        Self { strategy_factory }
-    }
-
-    /// Getter for `strategy_factory`.
-    pub const fn strategy_factory(&self) -> &F {
-        &self.strategy_factory
-    }
-}
-
-impl<F> BasicBlockExecutorProvider<F>
-where
-    F: ConfigureEvm + 'static,
-{
-    /// Create a `BasicBlockExecutor` for the given db.
-    pub fn executor<DB>(&self, db: DB) -> BasicBlockExecutor<F, DB>
-    where
-        DB: Database,
-    {
-        BasicBlockExecutor::new(self.strategy_factory.clone(), db)
-    }
-}
-
 /// A generic block executor that uses a [`BlockExecutor`] to
 /// execute blocks.
 #[expect(missing_debug_implementations)]

@@ -903,7 +903,7 @@ where
                 Ok(match hook {
                     InvalidBlockHookType::Witness => Box::new(InvalidBlockWitnessHook::new(
                         self.blockchain_db().clone(),
-                        self.components().block_executor().clone(),
+                        self.components().evm_config().clone(),
                         output_directory,
                         healthy_node_rpc_client.clone(),
                     )),

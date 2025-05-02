@@ -3,7 +3,7 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use futures::{Stream, StreamExt};
 use reth_ethereum_primitives::EthPrimitives;
-use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
+use reth_evm::ConfigureEvm;
 use reth_exex_types::ExExHead;
 use reth_node_api::NodePrimitives;
 use reth_provider::{BlockReader, Chain, HeaderProvider, StateProviderFactory};
@@ -86,7 +86,7 @@ where
     pub const fn new(
         node_head: BlockNumHash,
         provider: P,
-        executor: BasicBlockExecutorProvider<E>,
+        evm_config: E,
         notifications: Receiver<ExExNotification<E::Primitives>>,
         wal_handle: WalHandle<E::Primitives>,
     ) -> Self {
@@ -94,7 +94,7 @@ where
             inner: ExExNotificationsInner::WithoutHead(ExExNotificationsWithoutHead::new(
                 node_head,
                 provider,
-                executor,
+                evm_config,
                 notifications,
                 wal_handle,
             )),
@@ -114,7 +114,7 @@ where
             ExExNotificationsInner::WithHead(notifications) => ExExNotificationsWithoutHead::new(
                 notifications.initial_local_head,
                 notifications.provider,
-                notifications.executor,
+                notifications.evm_config,
                 notifications.notifications,
                 notifications.wal_handle,
             ),
@@ -132,7 +132,7 @@ where
                 Box::new(ExExNotificationsWithHead::new(
                     notifications.initial_local_head,
                     notifications.provider,
-                    notifications.executor,
+                    notifications.evm_config,
                     notifications.notifications,
                     notifications.wal_handle,
                     exex_head,
@@ -181,7 +181,7 @@ where
 {
     node_head: BlockNumHash,
     provider: P,
-    executor: BasicBlockExecutorProvider<E>,
+    evm_config: E,
     notifications: Receiver<ExExNotification<E::Primitives>>,
     wal_handle: WalHandle<E::Primitives>,
 }
@@ -193,7 +193,7 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ExExNotifications")
             .field("provider", &self.provider)
-            .field("executor", &self.executor)
+            .field("evm_config", &self.evm_config)
             .field("notifications", &self.notifications)
             .finish()
     }
@@ -207,11 +207,11 @@ where
     const fn new(
         node_head: BlockNumHash,
         provider: P,
-        executor: BasicBlockExecutorProvider<E>,
+        evm_config: E,
         notifications: Receiver<ExExNotification<E::Primitives>>,
         wal_handle: WalHandle<E::Primitives>,
     ) -> Self {
-        Self { node_head, provider, executor, notifications, wal_handle }
+        Self { node_head, provider, evm_config, notifications, wal_handle }
     }
 
     /// Subscribe to notifications with the given head.
@@ -219,7 +219,7 @@ where
         ExExNotificationsWithHead::new(
             self.node_head,
             self.provider,
-            self.executor,
+            self.evm_config,
             self.notifications,
             self.wal_handle,
             head,
@@ -254,7 +254,7 @@ where
     /// The node's local head at launch.
     initial_local_head: BlockNumHash,
     provider: P,
-    executor: BasicBlockExecutorProvider<E>,
+    evm_config: E,
     notifications: Receiver<ExExNotification<E::Primitives>>,
     wal_handle: WalHandle<E::Primitives>,
     /// The exex head at launch
@@ -278,7 +278,7 @@ where
     const fn new(
         node_head: BlockNumHash,
         provider: P,
-        executor: BasicBlockExecutorProvider<E>,
+        evm_config: E,
         notifications: Receiver<ExExNotification<E::Primitives>>,
         wal_handle: WalHandle<E::Primitives>,
         exex_head: ExExHead,
@@ -286,7 +286,7 @@ where
         Self {
             initial_local_head: node_head,
             provider,
-            executor,
+            evm_config,
             notifications,
             wal_handle,
             initial_exex_head: exex_head,
@@ -360,7 +360,7 @@ where
     ///   exex_head.number`). Nothing to do.
     fn check_backfill(&mut self) -> eyre::Result<()> {
         let backfill_job_factory =
-            BackfillJobFactory::new(self.executor.clone(), self.provider.clone());
+            BackfillJobFactory::new(self.evm_config.clone(), self.provider.clone());
         match self.initial_exex_head.block.number.cmp(&self.initial_local_head.number) {
             std::cmp::Ordering::Less => {
                 // ExEx is behind the node head, start backfill
@@ -523,7 +523,7 @@ mod tests {
             Some(ExExNotification::ChainCommitted {
                 new: Arc::new(
                     BackfillJobFactory::new(
-                        notifications.executor.clone(),
+                        notifications.evm_config.clone(),
                         notifications.provider.clone()
                     )
                     .backfill(1..=1)

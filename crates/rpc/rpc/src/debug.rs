@@ -16,10 +16,7 @@ use alloy_rpc_types_trace::geth::{
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
-use reth_evm::{
-    execute::{BasicBlockExecutorProvider, Executor},
-    ConfigureEvm, EvmEnvFor, TxEnvFor,
-};
+use reth_evm::{execute::Executor, ConfigureEvm, EvmEnvFor, TxEnvFor};
 use reth_primitives_traits::{
     Block as _, BlockBody, NodePrimitives, ReceiptWithBloom, RecoveredBlock, SignedTransaction,
 };
@@ -58,12 +55,8 @@ pub struct DebugApi<Eth, BlockExecutor> {
 
 impl<Eth, Evm> DebugApi<Eth, Evm> {
     /// Create a new instance of the [`DebugApi`]
-    pub fn new(
-        eth: Eth,
-        blocking_task_guard: BlockingTaskGuard,
-        block_executor: BasicBlockExecutorProvider<Evm>,
-    ) -> Self {
-        let inner = Arc::new(DebugApiInner { eth_api: eth, blocking_task_guard, block_executor });
+    pub fn new(eth: Eth, blocking_task_guard: BlockingTaskGuard, evm_config: Evm) -> Self {
+        let inner = Arc::new(DebugApiInner { eth_api: eth, blocking_task_guard, evm_config });
         Self { inner }
     }
 
@@ -636,7 +629,7 @@ where
             .eth_api()
             .spawn_with_state_at_block(block.parent_hash().into(), move |state_provider| {
                 let db = StateProviderDatabase::new(&state_provider);
-                let block_executor = this.inner.block_executor.executor(db);
+                let block_executor = this.inner.evm_config.batch_executor(db);
 
                 let mut witness_record = ExecutionWitnessRecord::default();
 
@@ -1290,5 +1283,5 @@ struct DebugApiInner<Eth, Evm> {
     // restrict the number of concurrent calls to blocking calls
     blocking_task_guard: BlockingTaskGuard,
     /// block executor for debug & trace apis
-    block_executor: BasicBlockExecutorProvider<Evm>,
+    evm_config: Evm,
 }

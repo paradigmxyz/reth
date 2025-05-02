@@ -5,9 +5,7 @@ use reth_db_api::{
     cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
 };
 use reth_db_common::DbTool;
-use reth_evm::{
-    execute::BasicBlockExecutorProvider, noop::NoopBlockExecutorProvider, ConfigureEvm,
-};
+use reth_evm::{noop::NoopBlockExecutorProvider, ConfigureEvm};
 use reth_node_builder::NodeTypesWithDB;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::{

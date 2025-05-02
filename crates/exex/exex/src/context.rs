@@ -1,6 +1,5 @@
 use crate::{ExExContextDyn, ExExEvent, ExExNotifications, ExExNotificationsStream};
 use alloy_eips::BlockNumHash;
-use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_exex_types::ExExHead;
 use reth_node_api::{FullNodeComponents, NodePrimitives, NodeTypes, PrimitivesTy};
 use reth_node_core::node_config::NodeConfig;
@@ -84,11 +83,6 @@ where
         self.components.evm_config()
     }
 
-    /// Returns the node's executor type.
-    pub fn block_executor(&self) -> &BasicBlockExecutorProvider<Node::Evm> {
-        self.components.block_executor()
-    }
-
     /// Returns the provider of the node.
     pub fn provider(&self) -> &Node::Provider {
         self.components.provider()
@@ -158,7 +152,7 @@ mod tests {
         {
             async fn _test_bounds(mut self) -> eyre::Result<()> {
                 self.ctx.pool();
-                self.ctx.block_executor();
+                self.ctx.evm_config();
                 self.ctx.provider();
                 self.ctx.network();
                 self.ctx.payload_builder_handle();

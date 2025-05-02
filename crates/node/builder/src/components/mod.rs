@@ -20,7 +20,7 @@ pub use execute::*;
 pub use network::*;
 pub use payload::*;
 pub use pool::*;
-use reth_evm::execute::BasicBlockExecutorProvider;
+
 use reth_network_p2p::BlockClient;
 use reth_payload_builder::PayloadBuilderHandle;
 use std::fmt::Debug;
@@ -59,9 +59,6 @@ pub trait NodeComponents<T: FullNodeTypes>: Clone + Debug + Unpin + Send + Sync 
     /// Returns the node's evm config.
     fn evm_config(&self) -> &Self::Evm;
 
-    /// Returns the node's executor type.
-    fn block_executor(&self) -> &BasicBlockExecutorProvider<Self::Evm>;
-
     /// Returns the node's consensus type.
     fn consensus(&self) -> &Self::Consensus;
 
@@ -82,8 +79,6 @@ pub struct Components<Node: FullNodeTypes, N: NetworkPrimitives, Pool, EVM, Cons
     pub transaction_pool: Pool,
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
     pub evm_config: EVM,
-    /// The node's executor type used to execute individual blocks and batches of blocks.
-    pub executor: BasicBlockExecutorProvider<EVM>,
     /// The consensus implementation of the node.
     pub consensus: Consensus,
     /// The network implementation of the node.
@@ -120,10 +115,6 @@ where
         &self.evm_config
     }
 
-    fn block_executor(&self) -> &BasicBlockExecutorProvider<Self::Evm> {
-        &self.executor
-    }
-
     fn consensus(&self) -> &Self::Consensus {
         &self.consensus
     }
@@ -149,7 +140,6 @@ where
         Self {
             transaction_pool: self.transaction_pool.clone(),
             evm_config: self.evm_config.clone(),
-            executor: self.executor.clone(),
             consensus: self.consensus.clone(),
             network: self.network.clone(),
             payload_builder_handle: self.payload_builder_handle.clone(),

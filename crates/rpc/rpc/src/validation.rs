@@ -18,10 +18,7 @@ use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
-use reth_evm::{
-    execute::{BasicBlockExecutorProvider, Executor},
-    ConfigureEvm,
-};
+use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::{metrics, metrics::Gauge, Metrics};
 use reth_node_api::NewPayloadError;
@@ -55,7 +52,7 @@ where
     pub fn new(
         provider: Provider,
         consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
-        executor_provider: BasicBlockExecutorProvider<E>,
+        evm_config: E,
         config: ValidationApiConfig,
         task_spawner: Box<dyn TaskSpawner>,
         payload_validator: Arc<
@@ -71,7 +68,7 @@ where
             provider,
             consensus,
             payload_validator,
-            executor_provider,
+            evm_config,
             disallow,
             validation_window,
             cached_state: Default::default(),
@@ -171,7 +168,7 @@ where
         let mut request_cache = self.cached_reads(parent_header_hash).await;
 
         let cached_db = request_cache.as_db_mut(StateProviderDatabase::new(&state_provider));
-        let executor = self.executor_provider.executor(cached_db);
+        let executor = self.evm_config.batch_executor(cached_db);
 
         let mut accessed_blacklisted = None;
         let output = executor.execute_with_state_closure(&block, |state| {
@@ -485,7 +482,7 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm> {
         >,
     >,
     /// Block executor factory.
-    executor_provider: BasicBlockExecutorProvider<E>,
+    evm_config: E,
     /// Set of disallowed addresses
     disallow: HashSet<Address>,
     /// The maximum block distance - parent to latest - allowed for validation

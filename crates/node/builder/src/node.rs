@@ -1,4 +1,3 @@
-use reth_evm::execute::BasicBlockExecutorProvider;
 // re-export the node api types
 pub use reth_node_api::{FullNodeTypes, NodeTypes};
 
@@ -102,8 +101,6 @@ where
 pub struct FullNode<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> {
     /// The evm configuration.
     pub evm_config: Node::Evm,
-    /// The executor of the node.
-    pub block_executor: BasicBlockExecutorProvider<Node::Evm>,
     /// The node's transaction pool.
     pub pool: Node::Pool,
     /// Handle to the node's network.
@@ -126,7 +123,6 @@ impl<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> Clone for FullNode<Node
     fn clone(&self) -> Self {
         Self {
             evm_config: self.evm_config.clone(),
-            block_executor: self.block_executor.clone(),
             pool: self.pool.clone(),
             network: self.network.clone(),
             provider: self.provider.clone(),

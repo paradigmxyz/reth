@@ -6,7 +6,7 @@ use reth_consensus::noop::NoopConsensus;
 use reth_engine_primitives::BeaconConsensusEngineHandle;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_ethereum_primitives::EthPrimitives;
-use reth_evm::execute::BasicBlockExecutorProvider;
+
 use reth_evm_ethereum::EthEvmConfig;
 use reth_network_api::noop::NoopNetwork;
 use reth_node_ethereum::EthereumEngineValidator;

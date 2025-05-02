@@ -497,7 +497,6 @@ where
             .with_network(node.network().clone())
             .with_executor(node.task_executor().clone())
             .with_evm_config(node.evm_config().clone())
-            .with_block_executor(node.block_executor().clone())
             .with_consensus(node.consensus().clone())
             .build_with_auth_server(module_config, engine_api, eth_api);
 

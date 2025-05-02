@@ -17,7 +17,7 @@ use tracing::*;
 pub fn install_ress_subprotocol<P, E, N>(
     args: RessArgs,
     provider: BlockchainProvider<P>,
-    block_executor: BasicBlockExecutorProvider<E>,
+    evm_config: E,
     network: N,
     task_executor: TaskExecutor,
     engine_events: EventStream<BeaconConsensusEngineEvent<EthPrimitives>>,

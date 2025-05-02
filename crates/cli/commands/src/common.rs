@@ -9,9 +9,7 @@ use reth_consensus::{noop::NoopConsensus, ConsensusError, FullConsensus};
 use reth_db::{init_db, open_db_read_only, DatabaseEnv};
 use reth_db_common::init::init_genesis;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
-use reth_evm::{
-    execute::BasicBlockExecutorProvider, noop::NoopBlockExecutorProvider, ConfigureEvm,
-};
+use reth_evm::{noop::NoopBlockExecutorProvider, ConfigureEvm};
 use reth_node_builder::{NodeTypes, NodeTypesWithDBAdapter};
 use reth_node_core::{
     args::{DatabaseArgs, DatadirArgs},
