@@ -453,6 +453,7 @@ where
     pub async fn launch_add_ons_with<F>(
         self,
         ctx: AddOnsContext<'_, N>,
+        mode: RpcServerMode,
         ext: F,
     ) -> eyre::Result<RpcHandle<N, EthB::EthApi>>
     where
@@ -464,7 +465,6 @@ where
     {
         let Self { eth_api_builder, engine_api_builder, hooks, .. } = self;
 
-        let engine_api = engine_api_builder.build_engine_api(&ctx).await?;
         let AddOnsContext { node, config, beacon_engine_handle, jwt_secret, engine_events } = ctx;
 
         info!(target: "reth::cli", "Engine API handler initialized");
@@ -499,7 +499,31 @@ where
             .with_evm_config(node.evm_config().clone())
             .with_block_executor(node.block_executor().clone())
             .with_consensus(node.consensus().clone())
-            .build_with_auth_server(module_config, engine_api, eth_api);
+
+        let (mut modules, mut registry, mut auth_module);
+
+        match mode {
+            RpcServerMode::TransportOnly => {
+                let (m, r) = self.launch_rpc_server(module_config, eth_api);
+                modules = m;
+                registry = r;
+                auth_module = AuthRpcModule::default();
+            }
+            RpcServerMode::AuthOnly => {
+                let (m, r) = self.launch_rpc_server(module_config, eth_api);
+                modules = TransportRpcModules::default();
+                registry = r;
+                let engine_api = engine_api_builder.build_engine_api(&ctx).await?;
+                auth_module = self.launch_auth_server(engine_api, &mut registry);
+            }
+            RpcServerMode::Both => {
+                let (m, r) = self.launch_rpc_server(module_config, eth_api);
+                modules = m;
+                registry = r;
+                let engine_api = engine_api_builder.build_engine_api(&ctx).await?;
+                auth_module = self.launch_auth_server(engine_api, &mut registry);
+            }
+        }
 
         // in dev mode we generate 20 random dev-signer accounts
         if config.dev.dev {
@@ -521,32 +545,19 @@ where
         extend_rpc_modules.extend_rpc_modules(ctx)?;
 
         let server_config = config.rpc.rpc_server_config();
-        let cloned_modules = modules.clone();
-        let launch_rpc = server_config.start(&cloned_modules).map_ok(|handle| {
-            if let Some(path) = handle.ipc_endpoint() {
-                info!(target: "reth::cli", %path, "RPC IPC server started");
+        let rpc = match mode {
+            RpcServerMode::TransportOnly | RpcServerMode::Both => {
+                Some(server_config.start(&modules.clone()).await??)
             }
-            if let Some(addr) = handle.http_local_addr() {
-                info!(target: "reth::cli", url=%addr, "RPC HTTP server started");
+            _ => None,
+        };
+    
+        let auth = match mode {
+            RpcServerMode::AuthOnly | RpcServerMode::Both => {
+                Some(auth_module.clone().start_server(auth_config).await?)
             }
-            if let Some(addr) = handle.ws_local_addr() {
-                info!(target: "reth::cli", url=%addr, "RPC WS server started");
-            }
-            handle
-        });
-
-        let launch_auth = auth_module.clone().start_server(auth_config).map_ok(|handle| {
-            let addr = handle.local_addr();
-            if let Some(ipc_endpoint) = handle.ipc_endpoint() {
-                info!(target: "reth::cli", url=%addr, ipc_endpoint=%ipc_endpoint, "RPC auth server started");
-            } else {
-                info!(target: "reth::cli", url=%addr, "RPC auth server started");
-            }
-            handle
-        });
-
-        // launch servers concurrently
-        let (rpc, auth) = futures::future::try_join(launch_rpc, launch_auth).await?;
+            _ => None,
+        };
 
         let handles = RethRpcServerHandles { rpc, auth };
 
