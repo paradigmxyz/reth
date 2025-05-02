@@ -607,7 +607,7 @@ mod tests {
                         result.insert(
                             ShardedKey::new(
                                 address,
-                                *list.last().expect("Chuck does not return empty list")
+                                *list.last().expect("Chunk does not return empty list")
                                     as BlockNumber,
                             ),
                             list,
