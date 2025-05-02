@@ -674,7 +674,7 @@ impl<P> RevealedSparseTrie<P> {
         // Update the prefix set to the prefix set of the nodes that still need to be updated.
         self.prefix_set = new_prefix_set;
 
-        trace!(target: "trie::sparse", ?depth, ?targets, "Updating nodes at depth");
+        trace!(target: "trie::sparse::update_rlp_node_level", ?depth, ?targets, "Updating nodes at depth");
         for (level, path) in targets {
             buffers.path_stack.push(RlpNodePathStackItem {
                 level,
