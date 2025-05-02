@@ -3486,22 +3486,16 @@ mod tests {
             ),
         ];
 
-        let mut i = 1;
         for (attribute, expected) in cases {
-            println!("case {}\n", i);
             let mut best = pool.best_transactions_with_attributes(attribute);
 
-            let mut j = 1;
             for expected_tx in expected {
-                println!("j {}\n", j);
                 let tx = best.next().expect("Transaction should be returned");
                 assert_eq!(tx.transaction, expected_tx);
-                j += 1;
             }
 
             // No more transactions should be returned
             assert!(best.next().is_none());
-            i += 1;
         }
     }
 
