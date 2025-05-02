@@ -4,11 +4,7 @@
 //! These tests use the `reth-era-downloader` client to download `.era1` files temporarily
 //! and verify that we can correctly read and decompress their data.
 //!
-//! Files are downloaded from the Nimbus mainnet server:
-//! <https://mainnet.era1.nimbus.team/>
-//! and
-//! from the Sepolia testnet server:
-//! <https://sepolia.era1.nimbus.team/>
+//! Files are downloaded from [`MAINNET_URL`] and [`SEPOLIA_URL`].
 
 use reqwest::{Client, Url};
 use reth_era::{
@@ -34,12 +30,12 @@ const fn main() {}
 
 /// Mainnet network name
 const MAINNET: &str = "mainnet";
-/// Default nimbus mainnet url
+/// Default mainnet url
 /// for downloading mainnet `.era1` files
-const MAINNET_URL: &str = "https://mainnet.era1.nimbus.team/";
+const MAINNET_URL: &str = "https://era.ithaca.xyz/era1/";
 
 /// Succinct list of mainnet files we want to download
-/// from <https://mainnet.era1.nimbus.team/>
+/// from <https://era.ithaca.xyz/era1/>
 /// for testing purposes
 const ERA1_MAINNET_FILES_NAMES: [&str; 6] = [
     "mainnet-00000-5ec1ffb8.era1",
@@ -53,12 +49,12 @@ const ERA1_MAINNET_FILES_NAMES: [&str; 6] = [
 /// Sepolia network name
 const SEPOLIA: &str = "sepolia";
 
-/// Default sepolia nimbus mainnet url
+/// Default sepolia mainnet url
 /// for downloading sepolia `.era1` files
-const SEPOLIA_URL: &str = "https://sepolia.era1.nimbus.team/";
+const SEPOLIA_URL: &str = "https://era.ithaca.xyz/sepolia-era1/";
 
 /// Succinct list of sepolia files we want to download
-/// from <https://sepolia.era1.nimbus.team/>
+/// from <https://era.ithaca.xyz/sepolia-era1/>
 /// for testing purposes
 const ERA1_SEPOLIA_FILES_NAMES: [&str; 3] =
     ["sepolia-00000-643a00f7.era1", "sepolia-00074-0e81003c.era1", "sepolia-00173-b6924da5.era1"];

@@ -7779,6 +7779,7 @@ dependencies = [
  "reth-ethereum-primitives",
  "snap",
  "tempfile",
+ "test-case",
  "thiserror 2.0.12",
  "tokio",
 ]
