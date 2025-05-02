@@ -65,6 +65,8 @@ pub struct TreeConfig {
     always_compare_trie_updates: bool,
     /// Whether to disable cross-block caching and parallel prewarming.
     disable_caching_and_prewarming: bool,
+    /// Whether to enable state provider metrics.
+    state_provider_metrics: bool,
     /// Cross-block cache size in bytes.
     cross_block_cache_size: u64,
     /// Whether the host has enough parallelism to run state root task.
@@ -86,6 +88,7 @@ impl Default for TreeConfig {
             legacy_state_root: false,
             always_compare_trie_updates: false,
             disable_caching_and_prewarming: false,
+            state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
             has_enough_parallelism: has_enough_parallelism(),
             max_proof_task_concurrency: DEFAULT_MAX_PROOF_TASK_CONCURRENCY,
@@ -106,6 +109,7 @@ impl TreeConfig {
         legacy_state_root: bool,
         always_compare_trie_updates: bool,
         disable_caching_and_prewarming: bool,
+        state_provider_metrics: bool,
         cross_block_cache_size: u64,
         has_enough_parallelism: bool,
         max_proof_task_concurrency: u64,
@@ -120,6 +124,7 @@ impl TreeConfig {
             legacy_state_root,
             always_compare_trie_updates,
             disable_caching_and_prewarming,
+            state_provider_metrics,
             cross_block_cache_size,
             has_enough_parallelism,
             max_proof_task_concurrency,
@@ -166,6 +171,11 @@ impl TreeConfig {
     /// of the new state root task
     pub const fn legacy_state_root(&self) -> bool {
         self.legacy_state_root
+    }
+
+    /// Returns whether or not state provider metrics are enabled.
+    pub const fn state_provider_metrics(&self) -> bool {
+        self.state_provider_metrics
     }
 
     /// Returns whether or not cross-block caching and parallel prewarming should be used.
@@ -257,6 +267,12 @@ impl TreeConfig {
     /// Setter for has enough parallelism.
     pub const fn with_has_enough_parallelism(mut self, has_enough_parallelism: bool) -> Self {
         self.has_enough_parallelism = has_enough_parallelism;
+        self
+    }
+
+    /// Setter for state provider metrics.
+    pub const fn with_state_provider_metrics(mut self, state_provider_metrics: bool) -> Self {
+        self.state_provider_metrics = state_provider_metrics;
         self
     }
 
