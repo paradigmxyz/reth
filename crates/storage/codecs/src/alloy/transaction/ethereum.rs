@@ -31,6 +31,7 @@ pub(super) trait ToTxCompact {
 ///
 /// See [`FromTxCompact::from_tx_compact`].
 pub trait FromTxCompact {
+    ///Type for the Transactions
     type TxType;
 
     /// Deserializes inner transaction using [`Compact`] encoding. The concrete type is determined
