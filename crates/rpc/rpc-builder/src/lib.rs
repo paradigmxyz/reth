@@ -552,14 +552,12 @@ where
     /// also configures the auth (engine api) server, which exposes a subset of the `eth_`
     /// namespace.
     #[expect(clippy::type_complexity)]
-    pub fn build_with_auth_server<EthApi>(
+    pub fn launch_rpc_server<EthApi>(
         self,
         module_config: TransportRpcModuleConfig,
-        engine: impl IntoEngineApiRpcModule,
         eth: EthApi,
     ) -> (
         TransportRpcModules,
-        AuthRpcModule,
         RpcRegistryInner<Provider, Pool, Network, Tasks, EthApi, BlockExecutor, Consensus>,
     )
     where
@@ -585,9 +583,29 @@ where
 
         let modules = registry.create_transport_rpc_modules(module_config);
 
-        let auth_module = registry.create_auth_module(engine);
+        (modules, registry)
+    }
 
-        (modules, auth_module, registry)
+    /// Creates and returns the auth (engine API) module for the given registry and engine.
+    /// RPC server setup, such as running only the transport server when the auth server is not
+    /// required.
+    pub fn launch_auth_server<EthApi>(
+        &self,
+        engine: impl IntoEngineApiRpcModule,
+        registry: &mut RpcRegistryInner<
+            Provider,
+            Pool,
+            Network,
+            Tasks,
+            EthApi,
+            BlockExecutor,
+            Consensus,
+        >,
+    ) -> AuthRpcModule
+    where
+        EthApi: EthApiTypes + FullEthApiServer<Provider = Provider, Pool = Pool>,
+    {
+        registry.create_auth_module(engine)
     }
 
     /// Converts the builder into a [`RpcRegistryInner`] which can be used to create all
@@ -2321,7 +2339,7 @@ impl RpcServerHandle {
     pub async fn eth_ipc_provider(
         &self,
     ) -> Option<impl Provider<alloy_network::Ethereum> + Clone + Unpin + 'static> {
-        self.new_ipc_provider_for().await
+        self.new_ws_provider_for().await
     }
 
     /// Returns an ipc provider from the rpc server handle for the
