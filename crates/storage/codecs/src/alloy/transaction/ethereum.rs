@@ -14,7 +14,7 @@ use bytes::{Buf, BufMut};
 /// serialized separately.
 ///
 /// See [`ToTxCompact::to_tx_compact`].
-pub(super) trait ToTxCompact {
+pub trait ToTxCompact {
     /// Serializes inner transaction using [`Compact`] encoding. Writes the result into `buf`.
     ///
     /// The written bytes do not contain signature and transaction type. This information be needs
@@ -31,7 +31,7 @@ pub(super) trait ToTxCompact {
 ///
 /// See [`FromTxCompact::from_tx_compact`].
 pub trait FromTxCompact {
-    ///Type for the Transactions
+    /// The transaction type that represents the set of transactions.
     type TxType;
 
     /// Deserializes inner transaction using [`Compact`] encoding. The concrete type is determined
