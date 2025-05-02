@@ -291,7 +291,7 @@ impl Decodable for TxCustom {
 
 impl InMemorySize for TxCustom {
     fn size(&self) -> usize {
-        todo!()
+        self.size()
     }
 }
 
