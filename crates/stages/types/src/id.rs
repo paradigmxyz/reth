@@ -141,7 +141,7 @@ mod tests {
     // Multiple places around the codebase assume headers is the first stage.
     // Feel free to remove this test if the assumption changes.
     #[test]
-    fn stage_all_headers_first() {
+    fn stage_era_first() {
         assert_eq!(*StageId::ALL.first().unwrap(), StageId::Era);
     }
 }
