@@ -3426,7 +3426,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-engine",
- "alloy-serde",
+ "alloy-serde 0.15.7",
  "async-trait",
  "derive_more",
  "eyre",
