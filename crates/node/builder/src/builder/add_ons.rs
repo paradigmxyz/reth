@@ -12,7 +12,7 @@ pub struct AddOns<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> {
     /// The `ExExs` (execution extensions) of the node.
     pub exexs: Vec<(String, Box<dyn BoxedLaunchExEx<Node>>)>,
     /// Custom stage installers
-    pub stage_installers: Vec<(String, Box<dyn BoxedInstallStages<Node>>)>,
+    pub stage_installer: Option<Box<dyn BoxedInstallStages<Node>>>,
     /// Additional captured addons.
     pub add_ons: AddOns,
 }

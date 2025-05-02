@@ -15,6 +15,7 @@ use crate::{
 use reth_exex::ExExContext;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes};
 use reth_node_core::node_config::NodeConfig;
+use reth_stages::StageSetBuilder;
 use reth_tasks::TaskExecutor;
 use std::{fmt, fmt::Debug, future::Future};
 
@@ -49,7 +50,7 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
             add_ons: AddOns {
                 hooks: NodeHooks::default(),
                 exexs: Vec::new(),
-                stage_installers: Vec::new(),
+                stage_installer: None,
                 add_ons: (),
             },
         }
@@ -185,7 +186,7 @@ where
             add_ons: AddOns {
                 hooks: NodeHooks::default(),
                 exexs: Vec::new(),
-                stage_installers: Vec::new(),
+                stage_installer: None,
                 add_ons,
             },
         }
@@ -232,7 +233,16 @@ where
         self.add_ons.exexs.push((exex_id.into(), Box::new(exex)));
         self
     }
-
+    /// Installs a custom stage installer in the node.
+    pub fn install_stages<F, R, E>(mut self, _stage: F) -> Self
+    where
+        F: FnOnce(StageSetBuilder<NodeAdapter<T, CB::Components>>) -> R + Send + 'static,
+        R: Future<Output = eyre::Result<E>> + Send,
+        E: Future<Output = eyre::Result<()>> + Send,
+    {
+        self.add_ons.stage_installer = None;
+        self
+    }
     /// Launches the node with the given closure.
     pub fn launch_with_fn<L, R>(self, launcher: L) -> R
     where
