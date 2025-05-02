@@ -2321,7 +2321,7 @@ impl RpcServerHandle {
     pub async fn eth_ipc_provider(
         &self,
     ) -> Option<impl Provider<alloy_network::Ethereum> + Clone + Unpin + 'static> {
-        self.new_ws_provider_for().await
+        self.new_ipc_provider_for().await
     }
 
     /// Returns an ipc provider from the rpc server handle for the

@@ -1,6 +1,5 @@
 use crate::{
     blinded::{BlindedProvider, BlindedProviderFactory, DefaultBlindedProviderFactory},
-    metrics::SparseStateTrieMetrics,
     RevealedSparseTrie, SparseTrie, TrieMasks,
 };
 use alloc::{collections::VecDeque, vec::Vec};
@@ -38,7 +37,8 @@ pub struct SparseStateTrie<F: BlindedProviderFactory = DefaultBlindedProviderFac
     /// Reusable buffer for RLP encoding of trie accounts.
     account_rlp_buf: Vec<u8>,
     /// Metrics for the sparse state trie.
-    metrics: SparseStateTrieMetrics,
+    #[cfg(feature = "metrics")]
+    metrics: crate::metrics::SparseStateTrieMetrics,
 }
 
 #[cfg(test)]
@@ -52,6 +52,7 @@ impl Default for SparseStateTrie {
             revealed_storage_paths: Default::default(),
             retain_updates: false,
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
+            #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
     }
@@ -89,6 +90,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
             revealed_storage_paths: Default::default(),
             retain_updates: false,
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
+            #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
     }
@@ -283,8 +285,11 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     ) -> SparseStateTrieResult<()> {
         let DecodedProofNodes { nodes, total_nodes, skipped_nodes, new_nodes } =
             decode_proof_nodes(account_subtree, &self.revealed_account_paths)?;
-        self.metrics.increment_total_account_nodes(total_nodes as u64);
-        self.metrics.increment_skipped_account_nodes(skipped_nodes as u64);
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.increment_total_account_nodes(total_nodes as u64);
+            self.metrics.increment_skipped_account_nodes(skipped_nodes as u64);
+        }
         let mut account_nodes = nodes.into_iter().peekable();
 
         if let Some(root_node) = Self::validate_root_node_decoded(&mut account_nodes)? {
@@ -334,8 +339,11 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
 
         let DecodedProofNodes { nodes, total_nodes, skipped_nodes, new_nodes } =
             decode_proof_nodes(storage_subtree.subtree, revealed_nodes)?;
-        self.metrics.increment_total_storage_nodes(total_nodes as u64);
-        self.metrics.increment_skipped_storage_nodes(skipped_nodes as u64);
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.increment_total_storage_nodes(total_nodes as u64);
+            self.metrics.increment_skipped_storage_nodes(skipped_nodes as u64);
+        }
         let mut nodes = nodes.into_iter().peekable();
 
         if let Some(root_node) = Self::validate_root_node_decoded(&mut nodes)? {
@@ -594,6 +602,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     /// If the trie has not been revealed, this function reveals the root node and returns its hash.
     pub fn root(&mut self) -> SparseStateTrieResult<B256> {
         // record revealed node metrics
+        #[cfg(feature = "metrics")]
         self.metrics.record();
 
         Ok(self.revealed_trie_mut()?.root())
@@ -602,6 +611,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     /// Returns sparse trie root and trie updates if the trie has been revealed.
     pub fn root_with_updates(&mut self) -> SparseStateTrieResult<(B256, TrieUpdates)> {
         // record revealed node metrics
+        #[cfg(feature = "metrics")]
         self.metrics.record();
 
         let storage_tries = self.storage_trie_updates();

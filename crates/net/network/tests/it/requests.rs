@@ -3,11 +3,10 @@
 
 use std::sync::Arc;
 
-use alloy_consensus::{Header, TxEip2930};
-use alloy_primitives::{Bytes, Signature, TxKind, U256};
+use alloy_consensus::Header;
 use rand::Rng;
 use reth_eth_wire::HeadersDirection;
-use reth_ethereum_primitives::{Block, Transaction, TransactionSigned};
+use reth_ethereum_primitives::Block;
 use reth_network::{
     test_utils::{NetworkEventStream, Testnet},
     BlockDownloaderProvider, NetworkEventListenerProvider,
@@ -18,29 +17,14 @@ use reth_network_p2p::{
     headers::client::{HeadersClient, HeadersRequest},
 };
 use reth_provider::test_utils::MockEthProvider;
-
-/// Returns a new [`TransactionSigned`] with some random parameters
-pub fn rng_transaction(rng: &mut impl rand::RngCore) -> TransactionSigned {
-    let request = Transaction::Eip2930(TxEip2930 {
-        chain_id: rng.random(),
-        nonce: rng.random(),
-        gas_price: rng.random(),
-        gas_limit: rng.random(),
-        to: TxKind::Create,
-        value: U256::from(rng.random::<u128>()),
-        input: Bytes::from(vec![1, 2]),
-        access_list: Default::default(),
-    });
-    let signature = Signature::new(U256::default(), U256::default(), true);
-
-    TransactionSigned::new_unhashed(request, signature)
-}
+use reth_transaction_pool::test_utils::TransactionGenerator;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_get_body() {
     reth_tracing::init_test_tracing();
     let mut rng = rand::rng();
     let mock_provider = Arc::new(MockEthProvider::default());
+    let mut tx_gen = TransactionGenerator::new(rand::rng());
 
     let mut net = Testnet::create_with(2, mock_provider.clone()).await;
 
@@ -65,7 +49,7 @@ async fn test_get_body() {
         // Set a new random block to the mock storage and request it via the network
         let block_hash = rng.random();
         let mut block: Block = Block::default();
-        block.body.transactions.push(rng_transaction(&mut rng));
+        block.body.transactions.push(tx_gen.gen_eip4844());
 
         mock_provider.add_block(block_hash, block.clone());
 
