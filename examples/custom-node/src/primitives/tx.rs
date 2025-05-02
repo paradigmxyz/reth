@@ -1,15 +1,10 @@
 use super::TxCustom;
 use alloy_consensus::{Signed, Transaction};
 use alloy_eips::{eip2718::Eip2718Result, Decodable2718, Encodable2718, Typed2718};
-use alloy_primitives::TxHash;
 use alloy_rlp::{BufMut, Decodable, Encodable, Result as RlpResult};
 use reth_codecs::Compact;
-use reth_ethereum::primitives::{
-    serde_bincode_compat::SerdeBincodeCompat, transaction::signed::RecoveryError, InMemorySize,
-    SignedTransaction,
-};
-
-use revm_primitives::{Address, Bytes};
+use reth_ethereum::primitives::{serde_bincode_compat::SerdeBincodeCompat, InMemorySize};
+use revm_primitives::Bytes;
 use serde::{Deserialize, Serialize};
 
 pub const TRANSFER_TX_TYPE_ID: u8 = 127;
@@ -90,26 +85,26 @@ impl Transaction for CustomTransaction {
     }
 }
 
-impl SignedTransaction for CustomTransaction {
-    fn tx_hash(&self) -> &TxHash {
-        self.inner.tx().tx_hash()
-    }
+// impl SignedTransaction for CustomTransaction {
+//     fn tx_hash(&self) -> &TxHash {
+//         self.inner.tx().tx_hash()
+//     }
 
-    fn recover_signer(&self) -> Result<Address, RecoveryError> {
-        self.inner.tx().recover_signer()
-    }
+//     fn recover_signer(&self) -> Result<Address, RecoveryError> {
+//         self.inner.tx().recover_signer()
+//     }
 
-    fn recover_signer_unchecked(&self) -> Result<Address, RecoveryError> {
-        self.inner.tx().recover_signer_unchecked()
-    }
+//     fn recover_signer_unchecked(&self) -> Result<Address, RecoveryError> {
+//         self.inner.tx().recover_signer_unchecked()
+//     }
 
-    fn recover_signer_unchecked_with_buf(
-        &self,
-        buf: &mut Vec<u8>,
-    ) -> Result<Address, RecoveryError> {
-        self.inner.tx().recover_signer_unchecked_with_buf(buf)
-    }
-}
+//     fn recover_signer_unchecked_with_buf(
+//         &self,
+//         buf: &mut Vec<u8>,
+//     ) -> Result<Address, RecoveryError> {
+//         self.inner.tx().recover_signer_unchecked_with_buf(buf)
+//     }
+// }
 
 impl Typed2718 for CustomTransaction {
     fn ty(&self) -> u8 {

@@ -1,20 +1,13 @@
-#[allow(unused_variables)]
 use alloy_consensus::{
     transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx},
     SignableTransaction, Transaction, TxType,
 };
-use alloy_eips::{
-    eip2930::AccessList, eip7702::SignedAuthorization, Decodable2718, Encodable2718, Typed2718,
-};
-use alloy_primitives::{Bytes, ChainId, Signature, TxHash, TxKind, B256, U256};
+use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization, Typed2718};
+use alloy_primitives::{Bytes, ChainId, Signature, TxKind, B256, U256};
 use alloy_rlp::{BufMut, Decodable, Encodable};
 use core::mem;
 use reth_codecs::Compact;
-use reth_ethereum::primitives::{
-    serde_bincode_compat::SerdeBincodeCompat, transaction::signed::RecoveryError, InMemorySize,
-    SignedTransaction,
-};
-use revm_primitives::Address;
+use reth_ethereum::primitives::{serde_bincode_compat::SerdeBincodeCompat, InMemorySize};
 
 /// A transaction with a priority fee ([EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -296,43 +289,6 @@ impl Decodable for TxCustom {
     }
 }
 
-impl Decodable2718 for TxCustom {
-    fn typed_decode(_ty: u8, _buf: &mut &[u8]) -> alloy_eips::eip2718::Eip2718Result<Self> {
-        todo!()
-    }
-
-    fn fallback_decode(_buf: &mut &[u8]) -> alloy_eips::eip2718::Eip2718Result<Self> {
-        todo!()
-    }
-}
-
-impl Encodable2718 for TxCustom {
-    fn encode_2718_len(&self) -> usize {
-        todo!()
-    }
-
-    fn encode_2718(&self, _out: &mut dyn BufMut) {
-        todo!()
-    }
-}
-
-impl SignedTransaction for TxCustom {
-    fn tx_hash(&self) -> &TxHash {
-        todo!()
-    }
-
-    fn recover_signer(&self) -> Result<Address, RecoveryError> {
-        todo!()
-    }
-
-    fn recover_signer_unchecked_with_buf(
-        &self,
-        _buf: &mut Vec<u8>,
-    ) -> Result<Address, RecoveryError> {
-        todo!()
-    }
-}
-
 impl InMemorySize for TxCustom {
     fn size(&self) -> usize {
         todo!()
@@ -346,7 +302,7 @@ impl SerdeBincodeCompat for TxCustom {
     type BincodeRepr<'a> = BincodeCompatTxCustom;
 
     fn as_repr(&self) -> Self::BincodeRepr<'_> {
-        todo!()
+        BincodeCompatTxCustom(self.clone())
     }
 
     fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
@@ -359,10 +315,11 @@ impl Compact for TxCustom {
     where
         B: alloy_rlp::bytes::BufMut + AsMut<[u8]>,
     {
-        todo!()
+        self.rlp_encoded_length()
     }
 
-    fn from_compact(_buf: &[u8], _len: usize) -> (Self, &[u8]) {
-        todo!()
+    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
+        let decoded = Self::decode(&mut buf).expect("invalid RLP");
+        (decoded, buf)
     }
 }
