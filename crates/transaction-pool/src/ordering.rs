@@ -13,23 +13,6 @@ pub enum Priority<T: Ord + Clone> {
     None,
 }
 
-impl<T: Ord + Clone> PartialOrd for Priority<T> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl<T: Ord + Clone> Ord for Priority<T> {
-    fn cmp(&self, other: &Self) -> Ordering {
-        match (self, other) {
-            (Self::Value(a), Self::Value(b)) => a.cmp(b),
-            (Self::Value(_), Self::None) => Ordering::Greater,
-            (Self::None, Self::Value(_)) => Ordering::Less,
-            (Self::None, Self::None) => Ordering::Equal,
-        }
-    }
-}
-
 impl<T: Ord + Clone> From<Option<T>> for Priority<T> {
     fn from(value: Option<T>) -> Self {
         value.map_or(Self::None, Priority::Value)
