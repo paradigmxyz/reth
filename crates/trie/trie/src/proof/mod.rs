@@ -132,6 +132,9 @@ where
                 TrieElement::Branch(node) => {
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
+                TrieElement::LeafHash(key, hash) => {
+                    hash_builder.add_leaf_hash(key, hash);
+                }
                 TrieElement::Leaf(hashed_address, account) => {
                     let proof_targets = targets.remove(&hashed_address);
                     let leaf_is_proof_target = proof_targets.is_some();
@@ -295,6 +298,9 @@ where
             match node {
                 TrieElement::Branch(node) => {
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
+                }
+                TrieElement::LeafHash(_, _) => {
+                    unreachable!("storage trie should not contain leaf hashes");
                 }
                 TrieElement::Leaf(hashed_slot, value) => {
                     hash_builder.add_leaf(

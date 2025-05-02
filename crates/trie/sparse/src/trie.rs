@@ -2213,6 +2213,9 @@ mod tests {
                 TrieElement::Branch(branch) => {
                     hash_builder.add_branch(branch.key, branch.value, branch.children_are_in_trie);
                 }
+                TrieElement::LeafHash(key, hash) => {
+                    hash_builder.add_leaf_hash(key, hash);
+                }
                 TrieElement::Leaf(key, account) => {
                     let account = account.into_trie_account(EMPTY_ROOT_HASH);
                     account.encode(&mut account_rlp);

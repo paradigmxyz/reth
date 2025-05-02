@@ -194,6 +194,9 @@ where
                     tracker.inc_branch();
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
+                TrieElement::LeafHash(key, hash) => {
+                    hash_builder.add_leaf_hash(key, hash);
+                }
                 TrieElement::Leaf(hashed_address, account) => {
                     tracker.inc_leaf();
                     hashed_entries_walked += 1;
@@ -427,6 +430,9 @@ where
                 TrieElement::Branch(node) => {
                     tracker.inc_branch();
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
+                }
+                TrieElement::LeafHash(_, _) => {
+                    unreachable!("storage trie should not contain leaf hashes");
                 }
                 TrieElement::Leaf(hashed_slot, value) => {
                     tracker.inc_leaf();

@@ -926,7 +926,6 @@ dependencies = [
 [[package]]
 name = "alloy-trie"
 version = "0.8.1"
-source = "git+https://github.com/alloy-rs/trie?branch=alexey%2Falways-store-branch-nodes#c848e4f4f8125548110405616126e6eaf28178a2"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",

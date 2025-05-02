@@ -29,6 +29,7 @@ pub struct HashBuilderState {
 
     /// Flag indicating if the current node is stored in the database.
     pub stored_in_database: bool,
+    pub is_leaf_node_hash: bool,
 }
 
 impl From<HashBuilderState> for HashBuilder {
@@ -41,6 +42,7 @@ impl From<HashBuilderState> for HashBuilder {
             tree_masks: state.tree_masks,
             hash_masks: state.hash_masks,
             stored_in_database: state.stored_in_database,
+            is_leaf_node_hash: state.is_leaf_node_hash,
             updated_branch_nodes: None,
             proof_retainer: None,
             all_branch_nodes_in_database: false,
@@ -59,6 +61,7 @@ impl From<HashBuilder> for HashBuilderState {
             tree_masks: state.tree_masks,
             hash_masks: state.hash_masks,
             stored_in_database: state.stored_in_database,
+            is_leaf_node_hash: state.is_leaf_node_hash,
         }
     }
 }
@@ -103,6 +106,9 @@ impl reth_codecs::Compact for HashBuilderState {
 
         buf.put_u8(self.stored_in_database as u8);
         len += 1;
+
+        buf.put_u8(self.is_leaf_node_hash as u8);
+        len += 1;
         len
     }
 
@@ -146,7 +152,22 @@ impl reth_codecs::Compact for HashBuilderState {
         }
 
         let stored_in_database = buf.get_u8() != 0;
-        (Self { key, stack, value, groups, tree_masks, hash_masks, stored_in_database }, buf)
+
+        let is_leaf_node_hash = buf.remaining() > 0 && buf.get_u8() != 0;
+
+        (
+            Self {
+                key,
+                stack,
+                value,
+                groups,
+                tree_masks,
+                hash_masks,
+                stored_in_database,
+                is_leaf_node_hash,
+            },
+            buf,
+        )
     }
 }
 

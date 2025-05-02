@@ -157,6 +157,9 @@ fn calculate_root_from_leaves_repeated(c: &mut Criterion) {
                                                 node.children_are_in_trie,
                                             );
                                         }
+                                        TrieElement::LeafHash(key, hash) => {
+                                            hb.add_leaf_hash(key, hash);
+                                        }
                                         TrieElement::Leaf(hashed_slot, value) => {
                                             hb.add_leaf(
                                                 Nibbles::unpack(hashed_slot),

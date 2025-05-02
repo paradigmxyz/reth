@@ -26,6 +26,8 @@ impl TrieBranchNode {
 pub enum TrieElement<Value> {
     /// Branch node.
     Branch(TrieBranchNode),
+    /// Leaf node with hash instead of the actual value.
+    LeafHash(Nibbles, B256),
     /// Leaf node.
     Leaf(B256, Value),
 }
@@ -199,12 +201,23 @@ where
                     // If it's possible to skip the current node in the walker, return a branch node
                     if self.walker.can_skip_current_node {
                         let hash = self.walker.hash().unwrap();
-                        let children_are_in_trie = self.walker.children_are_in_trie();
+                        let tree_flag = self.walker.children_are_in_trie();
+                        if self.walker.all_branch_nodes_in_database && !tree_flag {
+                            trace!(
+                                target: "trie::node_iter",
+                                ?key,
+                                ?hash,
+                                tree_flag,
+                                "Skipping current node in walker and returning leaf hash node"
+                            );
+                            return Ok(Some(TrieElement::LeafHash(key.clone(), hash)))
+                        }
+
                         trace!(
                             target: "trie::node_iter",
                             ?key,
                             ?hash,
-                            children_are_in_trie,
+                            tree_flag,
                             "Skipping current node in walker and returning branch node"
                         );
                         #[cfg(feature = "metrics")]
@@ -212,7 +225,7 @@ where
                         return Ok(Some(TrieElement::Branch(TrieBranchNode::new(
                             key.clone(),
                             hash,
-                            children_are_in_trie,
+                            tree_flag,
                         ))))
                     }
                 }
@@ -361,6 +374,9 @@ mod tests {
             match node {
                 TrieElement::Branch(branch) => {
                     hash_builder.add_branch(branch.key, branch.value, branch.children_are_in_trie);
+                }
+                TrieElement::LeafHash(key, hash) => {
+                    hash_builder.add_leaf_hash(key, hash);
                 }
                 TrieElement::Leaf(key, account) => {
                     hash_builder.add_leaf(
