@@ -44,6 +44,16 @@ pub struct RethRpcServerHandles {
     pub auth: AuthServerHandle,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum RpcServerMode {
+    /// Only start the transport (http/ws) RPC server
+    TransportOnly,
+    /// Only start the authenticated (engine) RPC server
+    AuthOnly,
+    /// Start both servers
+    Both,
+}
+
 /// Contains hooks that are called during the rpc setup.
 pub struct RpcHooks<Node: FullNodeComponents, EthApi> {
     /// Hooks to run once RPC server is running.
@@ -491,37 +501,37 @@ where
         let module_config = config.rpc.transport_rpc_module_config();
         debug!(target: "reth::cli", http=?module_config.http(), ws=?module_config.ws(), "Using RPC module config");
 
-        let (mut modules, mut auth_module, registry) = RpcModuleBuilder::default()
+        let builder = RpcModuleBuilder::default()
             .with_provider(node.provider().clone())
             .with_pool(node.pool().clone())
             .with_network(node.network().clone())
             .with_executor(node.task_executor().clone())
             .with_evm_config(node.evm_config().clone())
             .with_block_executor(node.block_executor().clone())
-            .with_consensus(node.consensus().clone())
+            .with_consensus(node.consensus().clone());
 
         let (mut modules, mut registry, mut auth_module);
 
         match mode {
             RpcServerMode::TransportOnly => {
-                let (m, r) = self.launch_rpc_server(module_config, eth_api);
+                let (m, r) = builder.launch_rpc_server(module_config, eth_api);
                 modules = m;
                 registry = r;
-                auth_module = AuthRpcModule::default();
+                auth_module = AuthRpcModule::new(RpcModule::new(()));
             }
             RpcServerMode::AuthOnly => {
-                let (m, r) = self.launch_rpc_server(module_config, eth_api);
+                let (m, r) = builder.launch_rpc_server(module_config, eth_api);
                 modules = TransportRpcModules::default();
                 registry = r;
                 let engine_api = engine_api_builder.build_engine_api(&ctx).await?;
-                auth_module = self.launch_auth_server(engine_api, &mut registry);
+                auth_module = builder.launch_auth_server(engine_api, &mut registry);
             }
             RpcServerMode::Both => {
-                let (m, r) = self.launch_rpc_server(module_config, eth_api);
+                let (m, r) = builder.launch_rpc_server(module_config, eth_api);
                 modules = m;
                 registry = r;
                 let engine_api = engine_api_builder.build_engine_api(&ctx).await?;
-                auth_module = self.launch_auth_server(engine_api, &mut registry);
+                auth_module = builder.launch_auth_server(engine_api, &mut registry);
             }
         }
 
