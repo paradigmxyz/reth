@@ -48,10 +48,10 @@ impl TryFromChain for ChainKind {
     fn try_to_url(&self) -> eyre::Result<Url> {
         Ok(match self {
             ChainKind::Named(NamedChain::Mainnet) => {
-                Url::parse("https://mainnet.era1.nimbus.team/").expect("URL should be valid")
+                Url::parse("https://era.ithaca.xyz/era1/").expect("URL should be valid")
             }
             ChainKind::Named(NamedChain::Sepolia) => {
-                Url::parse("https://sepolia.era1.nimbus.team/").expect("URL should be valid")
+                Url::parse("https://era.ithaca.xyz/sepolia-era1/").expect("URL should be valid")
             }
             chain => return Err(eyre!("No known host for ERA files on chain {chain:?}")),
         })
