@@ -352,6 +352,7 @@ where
     // tracing methods read from mempool, hence `LoadBlock` trait bound via
     // `TraceExt`
     Eth: TraceExt + 'static,
+    <<Eth as FullNodeTypes>::Types as NodeTypes>::ChainSpec: EthereumHardforks,
 {
     /// Returns all transaction traces that match the given filter.
     ///
