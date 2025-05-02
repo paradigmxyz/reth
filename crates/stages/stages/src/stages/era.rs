@@ -58,16 +58,16 @@ where
         match self.source.clone() {
             Some(source) => match source {
                 ImportSource::Path(path) => {
-                    let mut stream = read_dir(path).map_err(|e| StageError::Fatal(e.into()))?;
+                    let stream = read_dir(path).map_err(|e| StageError::Fatal(e.into()))?;
 
-                    era::import(&mut stream, provider, &mut self.hash_collector)
+                    era::import(stream, provider, &mut self.hash_collector)
                 }
                 ImportSource::Url(url, era_dir) => {
                     let folder = era_dir.into_boxed_path();
                     let client = EraClient::new(Client::new(), url, folder);
-                    let mut stream = EraStream::new(client, EraStreamConfig::default());
+                    let stream = EraStream::new(client, EraStreamConfig::default());
 
-                    era::import(&mut stream, provider, &mut self.hash_collector)
+                    era::import(stream, provider, &mut self.hash_collector)
                 }
             }
                 .map(|height| ExecOutput::done(StageCheckpoint::new(height)))
