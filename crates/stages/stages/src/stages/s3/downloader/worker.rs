@@ -28,7 +28,7 @@ pub(crate) enum WorkerRequest {
     Finish,
 }
 
-/// Spawns the requested number of workers and returns a `UnboundedReceiver` that all of them will
+/// Spawns the requested number of workers and returns an `UnboundedReceiver` that all of them will
 /// respond to.
 pub(crate) fn spawn_workers(
     url: &str,
