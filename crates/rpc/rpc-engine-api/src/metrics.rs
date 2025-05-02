@@ -119,6 +119,15 @@ pub(crate) struct BlobMetrics {
     pub(crate) blob_count: Counter,
     /// Count of blob misses
     pub(crate) blob_misses: Counter,
+
+    /// Number of blobs requested via getBlobsV2
+    pub(crate) get_blobs_requests_blobs_total: Counter,
+    /// Number of blobs requested via getBlobsV2 that are present in the blobpool
+    pub(crate) get_blobs_requests_blobs_in_blobpool_total : Counter,
+    /// Number of times getBlobsV2 responded with “hit”
+    pub(crate) get_blobs_requests_success_total: Counter,
+    /// Number of times getBlobsV2 responded with “miss”
+    pub(crate) get_blobs_requests_failure_total : Counter,
 }
 
 impl NewPayloadStatusResponseMetrics {
