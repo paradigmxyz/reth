@@ -46,7 +46,12 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
             config,
             adapter,
             components_builder,
-            add_ons: AddOns { hooks: NodeHooks::default(), exexs: Vec::new(), add_ons: () },
+            add_ons: AddOns {
+                hooks: NodeHooks::default(),
+                exexs: Vec::new(),
+                stage_installers: Vec::new(),
+                add_ons: (),
+            },
         }
     }
 }
@@ -177,7 +182,12 @@ where
             config,
             adapter,
             components_builder,
-            add_ons: AddOns { hooks: NodeHooks::default(), exexs: Vec::new(), add_ons },
+            add_ons: AddOns {
+                hooks: NodeHooks::default(),
+                exexs: Vec::new(),
+                stage_installers: Vec::new(),
+                add_ons,
+            },
         }
     }
 }

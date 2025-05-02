@@ -1,8 +1,7 @@
 //! Node add-ons. Depend on core [`NodeComponents`](crate::NodeComponents).
 
+use crate::{exex::BoxedLaunchExEx, hooks::NodeHooks, install_stages::BoxedInstallStages};
 use reth_node_api::{FullNodeComponents, NodeAddOns};
-
-use crate::{exex::BoxedLaunchExEx, hooks::NodeHooks};
 
 /// Additional node extensions.
 ///
@@ -12,6 +11,8 @@ pub struct AddOns<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> {
     pub hooks: NodeHooks<Node, AddOns>,
     /// The `ExExs` (execution extensions) of the node.
     pub exexs: Vec<(String, Box<dyn BoxedLaunchExEx<Node>>)>,
+    /// Custom stage installers
+    pub stage_installers: Vec<(String, Box<dyn BoxedInstallStages<Node>>)>,
     /// Additional captured addons.
     pub add_ons: AddOns,
 }

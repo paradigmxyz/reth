@@ -46,6 +46,9 @@ pub use aliases::*;
 /// Support for installing the ExExs (execution extensions) in a node.
 pub mod exex;
 
+/// Support for installing the stages in a node.
+pub mod install_stages;
+
 /// Re-export the core configuration traits.
 pub use reth_node_core::cli::config::{
     PayloadBuilderConfig, RethNetworkConfig, RethTransactionPoolConfig,
