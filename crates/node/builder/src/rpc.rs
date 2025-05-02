@@ -3,7 +3,7 @@
 use crate::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle};
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
-use futures::TryFutureExt;
+use futures::{TryFutureExt,FutureExt};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_node_api::{
@@ -457,9 +457,9 @@ where
 {
     /// Launches the RPC servers with the given context and an additional hook for extending
     /// modules.
-    pub async fn launch_add_ons_with<F>(
+    pub async fn launch_add_ons_with<'a,F>(
         self,
-        ctx: AddOnsContext<'_, N>,
+        ctx: AddOnsContext<'a, N>,
         mode: RpcServerMode,
         ext: F,
     ) -> eyre::Result<RpcHandle<N, EthB::EthApi>>
@@ -597,15 +597,14 @@ where
     }
 
     /// Launches only the engine/auth RPC server, skipping the transport/public server.
-pub async fn launch_add_ons_with_auth_only(
+pub async fn launch_add_ons_with_auth_only<'a>(
     self,
-    ctx: AddOnsContext<'_, N>,
+    ctx: AddOnsContext<'a, N>,
 ) -> eyre::Result<RpcHandle<N, EthB::EthApi>> {
     self.launch_add_ons_with(
         ctx,
         RpcServerMode::AuthOnly,
         |_, auth_module, _| {
-            // auth-only, ignore modules and registry
             let _ = auth_module;
             Ok(())
         },
@@ -613,9 +612,9 @@ pub async fn launch_add_ons_with_auth_only(
 }
 
 /// Launches only the transport RPC server, skipping the engine/auth server.
-pub async fn launch_add_ons_with_transport_only(
+pub async fn launch_add_ons_with_transport_only<'a>(
     self,
-    ctx: AddOnsContext<'_, N>,
+    ctx: AddOnsContext<'a, N>,
 ) -> eyre::Result<RpcHandle<N, EthB::EthApi>> {
     self.launch_add_ons_with(
         ctx,
