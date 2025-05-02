@@ -1,6 +1,6 @@
 //! Node add-ons. Depend on core [`NodeComponents`](crate::NodeComponents).
 
-use crate::{exex::BoxedLaunchExEx, hooks::NodeHooks, install_stages::BoxedInstallStages};
+use crate::{exex::BoxedLaunchExEx, hooks::NodeHooks, stages::BoxedInstallStages};
 use reth_node_api::{FullNodeComponents, NodeAddOns};
 
 /// Additional node extensions.

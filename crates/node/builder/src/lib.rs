@@ -47,7 +47,7 @@ pub use aliases::*;
 pub mod exex;
 
 /// Support for installing the stages in a node.
-pub mod install_stages;
+pub mod stages;
 
 /// Re-export the core configuration traits.
 pub use reth_node_core::cli::config::{
