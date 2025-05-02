@@ -1,10 +1,20 @@
+#[allow(unused_imports)]
 use super::TxCustom;
-use alloy_consensus::{Signed, Transaction};
+#[allow(unused_imports)]
+use alloy_consensus::{crypto::RecoveryError, Signed, Transaction};
 use alloy_eips::{eip2718::Eip2718Result, Decodable2718, Encodable2718, Typed2718};
+#[allow(unused_imports)]
+use alloy_primitives::{Signature, TxHash};
 use alloy_rlp::{BufMut, Decodable, Encodable, Result as RlpResult};
-use reth_codecs::Compact;
+use reth_codecs::{
+    alloy::transaction::{FromTxCompact, ToTxCompact},
+    Compact,
+};
 use reth_ethereum::primitives::{serde_bincode_compat::SerdeBincodeCompat, InMemorySize};
-use revm_primitives::Bytes;
+#[allow(unused_imports)]
+use reth_op::primitives::SignedTransaction;
+#[allow(unused_imports)]
+use revm_primitives::{Address, Bytes};
 use serde::{Deserialize, Serialize};
 
 pub const TRANSFER_TX_TYPE_ID: u8 = 127;
@@ -150,6 +160,28 @@ impl InMemorySize for CustomTransaction {
         self.inner.tx().size()
     }
 }
+impl FromTxCompact for CustomTransaction {
+    type TxType = TxCustom;
+
+    fn from_tx_compact(
+        buf: &[u8],
+        _tx_type: Self::TxType,
+        signature: alloy_primitives::Signature,
+    ) -> (Self, &[u8])
+    where
+        Self: Sized,
+    {
+        let (tx, buf) = TxCustom::from_compact(buf, buf.len());
+        let tx = Signed::new_unhashed(tx, signature);
+        (CustomTransaction { inner: tx }, buf)
+    }
+}
+
+impl ToTxCompact for CustomTransaction {
+    fn to_tx_compact(&self, buf: &mut (impl BufMut + AsMut<[u8]>)) {
+        self.inner.tx().to_compact(buf);
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BincodeCompatSignedTxCustom(pub Signed<TxCustom>);
@@ -171,14 +203,13 @@ impl Compact for CustomTransaction {
     where
         B: alloy_rlp::bytes::BufMut + AsMut<[u8]>,
     {
-        let start_len = buf.remaining_mut();
-        self.inner.tx().encode(buf);
-        start_len - buf.remaining_mut()
+        self.inner.tx().to_compact(buf)
     }
 
-    fn from_compact(_buf: &[u8], _len: usize) -> (Self, &[u8]) {
-        // let (inner, buf) = Signed::<TxCustom>::from_compact(buf, len);
-        // (Self { inner }, buf)
-        todo!()
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+        let (signature, rest) = Signature::from_compact(buf, len);
+        let (inner, buf) = <TxCustom as Compact>::from_compact(rest, len);
+        let signed = Signed::new_unhashed(inner, signature);
+        (CustomTransaction { inner: signed }, buf)
     }
 }

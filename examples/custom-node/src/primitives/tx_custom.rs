@@ -311,11 +311,15 @@ impl SerdeBincodeCompat for TxCustom {
 }
 
 impl Compact for TxCustom {
-    fn to_compact<B>(&self, _buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: alloy_rlp::bytes::BufMut + AsMut<[u8]>,
     {
-        self.rlp_encoded_length()
+        let mut temp_buf = Vec::with_capacity(self.rlp_encoded_length());
+        self.rlp_encode(&mut temp_buf);
+        let len = temp_buf.len();
+        buf.put_slice(&temp_buf);
+        len
     }
 
     fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
