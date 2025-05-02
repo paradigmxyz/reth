@@ -4,6 +4,7 @@ use crate::{
         best::{BestTransactions, BestTransactionsWithFees},
         size::SizeTracker,
     },
+    traits::BestTransactionsAttributes,
     Priority, SubPoolLimit, TransactionOrdering, ValidPoolTransaction,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -114,13 +115,12 @@ impl<T: TransactionOrdering> PendingPool<T> {
     }
 
     /// Same as `best` but only returns transactions that satisfy the given basefee and blobfee.
-    pub(crate) const fn best_with_basefee_and_blobfee(
+    pub(crate) fn best_with_basefee_and_blobfee(
         &self,
-        best: BestTransactions<T>,
         base_fee: u64,
         base_fee_per_blob_gas: u64,
     ) -> BestTransactionsWithFees<T> {
-        BestTransactionsWithFees { best, base_fee, base_fee_per_blob_gas }
+        BestTransactionsWithFees { best: self.best(), base_fee, base_fee_per_blob_gas }
     }
 
     /// Same as `best` but also includes the given unlocked transactions, also satisfy given basefee
@@ -138,9 +138,9 @@ impl<T: TransactionOrdering> PendingPool<T> {
         &self,
         unlocked: Vec<Arc<ValidPoolTransaction<T::Transaction>>>,
         origin_base_fee: u64,
-        base_fee: u64,
-        base_fee_per_blob_gas: u64,
-    ) -> BestTransactionsWithFees<T> {
+        attributes: Option<BestTransactionsAttributes>,
+    ) -> Box<dyn crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T::Transaction>>>>
+    {
         let mut best = self.best();
         let mut submission_id = self.submission_id;
         for tx in unlocked {
@@ -155,7 +155,15 @@ impl<T: TransactionOrdering> PendingPool<T> {
             best.all.insert(tx_id, transaction);
         }
 
-        self.best_with_basefee_and_blobfee(best, base_fee, base_fee_per_blob_gas)
+        if let Some(attributes) = attributes {
+            Box::new(BestTransactionsWithFees {
+                best,
+                base_fee: attributes.basefee,
+                base_fee_per_blob_gas: attributes.blob_fee.unwrap_or_default(),
+            })
+        } else {
+            Box::new(best)
+        }
     }
 
     /// Returns an iterator over all transactions in the pool
