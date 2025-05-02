@@ -9,6 +9,7 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::{merge::EPOCH_SLOTS, BlockNumHash, NumHash};
+use alloy_evm::block::BlockExecutor;
 use alloy_primitives::{
     map::{HashMap, HashSet},
     BlockNumber, B256,
@@ -33,12 +34,7 @@ use reth_engine_primitives::{
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_ethereum_primitives::EthPrimitives;
-use reth_evm::{
-    block::BlockExecutorFactory,
-    execute::{BasicBlockExecutor, BasicBlockExecutorProvider, Executor},
-    precompiles::PrecompilesMap,
-    ConfigureEvm, Database, Evm, EvmFactory,
-};
+use reth_evm::{ConfigureEvm, Evm};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes, PayloadTypes};
 use reth_primitives_traits::{
@@ -667,8 +663,6 @@ where
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes,
     V: EngineValidator<T, Block = N::Block>,
-    <<C as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::EvmFactory:
-        EvmFactory<Precompiles = PrecompilesMap>,
 {
     /// Creates a new [`EngineApiTreeHandler`].
     #[expect(clippy::too_many_arguments)]
@@ -717,7 +711,6 @@ where
             payload_processor,
             evm_config,
             precompile_cache,
-            evm_config,
         }
     }
 

@@ -54,10 +54,9 @@ impl CachedPrecompile {
     }
 
     pub(crate) fn wrap(precompile: DynPrecompile, cache: Arc<PrecompileCache>) -> DynPrecompile {
-        |data: &Bytes, gas_limit: u64| -> PrecompileResult {
-            Self::new(precompile, cache).call(data, gas_limit)
-        }
-        .into()
+        let wrapped = Self::new(precompile, cache);
+        move |data: &Bytes, gas_limit: u64| -> PrecompileResult { wrapped.call(data, gas_limit) }
+            .into()
     }
 
     fn increment_by_one_precompile_cache_hits(&self) {
