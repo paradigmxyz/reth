@@ -4,15 +4,17 @@ use alloy_eips::BlockId;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealable, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use alloy_rpc_types_eth::BlockNumberOrTag;
+use core::fmt;
+use reth_node_builder::FullNodeTypesAdapter;
 use eyre::Ok;
 use futures_util::Future;
 use jsonrpsee::http_client::{transport::HttpBackend, HttpClient};
 use reth_chainspec::EthereumHardforks;
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_api::{
-    Block, BlockBody, BlockTy, EngineApiMessageVersion, FullNodeComponents, PayloadTypes,
-    PrimitivesTy,
+    Block, BlockBody, BlockTy, EngineApiMessageVersion, FullNodeComponents, FullNodeTypes, PayloadTypes, PrimitivesTy
 };
+use reth_node_builder::Node;
 use reth_node_builder::{rpc::RethRpcAddOns, FullNode, NodeTypes};
 use reth_node_core::primitives::SignedTransaction;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
@@ -304,5 +306,40 @@ where
     /// Returns an Engine API client.
     pub fn engine_api_client(&self) -> HttpClient<AuthClientService<HttpBackend>> {
         self.inner.auth_server_handle().http_client()
+    }
+}
+
+impl<N, Payload, AddOns> 
+    Node<
+        FullNodeTypesAdapter<
+          N,
+            TmpDB,
+            BlockchainProvider<NodeTypesWithDBAdapter<OpNodeTypes, TmpDB>>,
+        >,
+    >
+    for NodeHelperType<
+        N,
+        BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>,
+    >
+where
+    N: FullNodeTypes<
+        DB = TmpDB,
+        Provider = BlockchainProvider<NodeTypesWithDBAdapter<crate::OpNode, TmpDB>>,
+    >,
+{
+    type ComponentsBuilder = <OpNode as Node<N>>::ComponentsBuilder;
+
+    type AddOns = <OpNode as Node<N>>::AddOns;
+
+    fn components_builder(&self) -> Self::ComponentsBuilder {
+        Self::components(self)
+    }
+
+    fn add_ons(&self) -> Self::AddOns {
+        Self::AddOns::builder()
+            .with_sequencer(self.args.sequencer.clone())
+            .with_da_config(self.da_config.clone())
+            .with_enable_tx_conditional(self.args.enable_tx_conditional)
+            .build()
     }
 }

@@ -5,7 +5,8 @@ use alloy_rpc_types_engine::PayloadAttributes;
 use reth_e2e_test_utils::{
     transaction::TransactionTestContext, wallet::Wallet, NodeHelperType, TmpDB,
 };
-use reth_node_api::NodeTypesWithDBAdapter;
+use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeTypesWithDBAdapter};
+use reth_node_builder::Node;
 use reth_optimism_chainspec::OpChainSpecBuilder;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_provider::providers::BlockchainProvider;
@@ -15,7 +16,7 @@ use tokio::sync::Mutex;
 
 /// Optimism Node Helper type
 pub(crate) type OpNode =
-    NodeHelperType<OpNodeTypes, BlockchainProvider<NodeTypesWithDBAdapter<OpNodeTypes, TmpDB>>>;
+    NodeHelperType<crate::OpNode, BlockchainProvider<NodeTypesWithDBAdapter<crate::OpNode, TmpDB>>>;
 
 /// Creates the initial setup with `num_nodes` of the node config, started and connected.
 pub async fn setup(num_nodes: usize) -> eyre::Result<(Vec<OpNode>, TaskManager, Wallet)> {

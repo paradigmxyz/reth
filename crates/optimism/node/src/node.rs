@@ -185,7 +185,7 @@ impl<DB, Provider, N> Node<N> for OpNode
 where
     N: FullNodeTypes<Types = OpNodeTypes, DB = DB, Provider = Provider>,
     DB: FullDatabase + 'static,
-    Provider: FullProvider<NodeTypesWithDBAdapter<OpNodeTypes, DB>>,
+    Provider: FullProvider<NodeTypesWithDBAdapter<N::Types, DB>>,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,

@@ -366,7 +366,7 @@ impl OpEthApiBuilder {
         let eth_api = reth_rpc::EthApiBuilder::new(
             provider,
             NoopTransactionPool::<OpPooledTransaction>::default(),
-            NoopNetwork::<OpNetworkPrimitives>::default(),
+            NoopNetwork::<OpNetworkPrimitives>::new(),
             evm_config,
         )
         .build_inner();
