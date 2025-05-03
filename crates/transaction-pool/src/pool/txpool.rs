@@ -352,7 +352,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         // tracked
         match best_transactions_attributes.basefee.cmp(&self.all_transactions.pending_fees.base_fee)
         {
-            Ordering::Equal | Ordering::Greater => {
+            Ordering::Equal => {
                 // for EIP-4844 transactions we also need to check if the blob fee is now lower than
                 // what's currently being tracked, if so we need to include transactions from the
                 // blob pool that are valid with the lower blob fee
@@ -363,13 +363,34 @@ impl<T: TransactionOrdering> TxPool<T> {
                     let unlocked_by_blob_fee =
                         self.blob_pool.satisfy_attributes(best_transactions_attributes);
 
-                    self.pending_pool.best_with_unlocked(
+                    Box::new(self.pending_pool.best_with_unlocked(
                         unlocked_by_blob_fee,
                         self.all_transactions.pending_fees.base_fee,
-                        Some(best_transactions_attributes),
-                    )
+                    ))
                 } else {
                     // Blob fee may increase.
+                    Box::new(self.pending_pool.best_with_basefee_and_blobfee(
+                        best_transactions_attributes.basefee,
+                        best_transactions_attributes.blob_fee.unwrap_or_default(),
+                    ))
+                }
+            }
+            Ordering::Greater => {
+                if best_transactions_attributes
+                    .blob_fee
+                    .is_some_and(|fee| fee < self.all_transactions.pending_fees.blob_fee as u64)
+                {
+                    let unlocked_by_blob_fee =
+                        self.blob_pool.satisfy_attributes(best_transactions_attributes);
+
+                    // include unlocked blob txs and because the base fee increases, new attributes
+                    // also need to be applied
+                    Box::new(self.pending_pool.best_with_unlocked_and_attributes(
+                        unlocked_by_blob_fee,
+                        self.all_transactions.pending_fees.base_fee,
+                        best_transactions_attributes,
+                    ))
+                } else {
                     Box::new(self.pending_pool.best_with_basefee_and_blobfee(
                         best_transactions_attributes.basefee,
                         best_transactions_attributes.blob_fee.unwrap_or_default(),
@@ -387,12 +408,12 @@ impl<T: TransactionOrdering> TxPool<T> {
                 // also include blob pool transactions that are now unlocked
                 unlocked.extend(self.blob_pool.satisfy_attributes(best_transactions_attributes));
 
-                self.pending_pool.best_with_unlocked(
+                Box::new(self.pending_pool.best_with_unlocked_and_attributes(
                     unlocked,
                     self.all_transactions.pending_fees.base_fee,
                     // blob fee may increase
-                    Some(best_transactions_attributes),
-                )
+                    best_transactions_attributes,
+                ))
             }
         }
     }

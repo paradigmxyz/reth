@@ -123,8 +123,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         BestTransactionsWithFees { best: self.best(), base_fee, base_fee_per_blob_gas }
     }
 
-    /// Same as `best` but also includes the given unlocked transactions, also satisfy given basefee
-    /// and blobfee.
+    /// Same as `best` but also includes the given unlocked transactions.
     ///
     /// This mimics the [`Self::add_transaction`] method, but does not insert the transactions into
     /// pool but only into the returned iterator.
@@ -137,10 +136,33 @@ impl<T: TransactionOrdering> PendingPool<T> {
     pub(crate) fn best_with_unlocked(
         &self,
         unlocked: Vec<Arc<ValidPoolTransaction<T::Transaction>>>,
+        base_fee: u64,
+    ) -> BestTransactions<T> {
+        let mut best = self.best();
+        let mut submission_id = self.submission_id;
+        for tx in unlocked {
+            submission_id += 1;
+            debug_assert!(!best.all.contains_key(tx.id()), "transaction already included");
+            let priority = self.ordering.priority(&tx.transaction, base_fee);
+            let tx_id = *tx.id();
+            let transaction = PendingTransaction { submission_id, transaction: tx, priority };
+            if best.ancestor(&tx_id).is_none() {
+                best.independent.insert(transaction.clone());
+            }
+            best.all.insert(tx_id, transaction);
+        }
+
+        best
+    }
+
+    /// Same as `best` but also includes the given unlocked transactions and also apply new
+    /// attributes.
+    pub(crate) fn best_with_unlocked_and_attributes(
+        &self,
+        unlocked: Vec<Arc<ValidPoolTransaction<T::Transaction>>>,
         origin_base_fee: u64,
-        attributes: Option<BestTransactionsAttributes>,
-    ) -> Box<dyn crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T::Transaction>>>>
-    {
+        attributes: BestTransactionsAttributes,
+    ) -> BestTransactionsWithFees<T> {
         let mut best = self.best();
         let mut submission_id = self.submission_id;
         for tx in unlocked {
@@ -155,14 +177,10 @@ impl<T: TransactionOrdering> PendingPool<T> {
             best.all.insert(tx_id, transaction);
         }
 
-        if let Some(attributes) = attributes {
-            Box::new(BestTransactionsWithFees {
-                best,
-                base_fee: attributes.basefee,
-                base_fee_per_blob_gas: attributes.blob_fee.unwrap_or_default(),
-            })
-        } else {
-            Box::new(best)
+        BestTransactionsWithFees {
+            best,
+            base_fee: attributes.basefee,
+            base_fee_per_blob_gas: attributes.blob_fee.unwrap_or_default(),
         }
     }
 
