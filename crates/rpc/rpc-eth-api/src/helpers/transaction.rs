@@ -4,7 +4,7 @@
 use super::{EthApiSpec, EthSigner, LoadBlock, LoadReceipt, LoadState, SpawnBlocking};
 use crate::{
     helpers::estimate::EstimateCall, FromEthApiError, FullEthApiTypes, IntoEthApiError,
-    RpcNodeCore, RpcNodeCoreExt, RpcReceipt, RpcTransaction,
+    RpcNodeCoreExt, RpcReceipt, RpcTransaction,
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader, Transaction};
 use alloy_dyn_abi::TypedData;
@@ -13,7 +13,7 @@ use alloy_network::TransactionBuilder;
 use alloy_primitives::{Address, Bytes, TxHash, B256};
 use alloy_rpc_types_eth::{transaction::TransactionRequest, BlockNumberOrTag, TransactionInfo};
 use futures::Future;
-use reth_node_api::BlockBody;
+use reth_node_api::{BlockBody, FullNodeComponents};
 use reth_primitives_traits::{RecoveredBlock, SignedTransaction};
 use reth_provider::{
     BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
@@ -242,8 +242,8 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         async move {
             // Check the pool first
             if include_pending {
-                if let Some(tx) =
-                    RpcNodeCore::pool(self).get_transaction_by_sender_and_nonce(sender, nonce)
+                if let Some(tx) = FullNodeComponents::pool(self)
+                    .get_transaction_by_sender_and_nonce(sender, nonce)
                 {
                     let transaction = tx.transaction.clone_into_consensus();
                     return Ok(Some(self.tx_resp_builder().fill_pending(transaction)?));
@@ -363,7 +363,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             let transaction = self.sign_request(&from, request).await?.with_signer(from);
 
             let pool_transaction =
-                <<Self as RpcNodeCore>::Pool as TransactionPool>::Transaction::try_from_consensus(
+                <<Self as FullNodeComponents>::Pool as TransactionPool>::Transaction::try_from_consensus(
                     transaction,
                 )
                 .map_err(|_| EthApiError::TransactionConversionError)?;

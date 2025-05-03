@@ -1,9 +1,10 @@
 //! Contains RPC handler implementations specific to blocks.
 
-use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
+use alloy_consensus::{transaction::TransactionMeta, BlockHeader, EthereumTxEnvelope, TxEip4844};
 use alloy_rpc_types_eth::{BlockId, TransactionReceipt};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
-use reth_primitives_traits::BlockBody;
+use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeTypes};
+use reth_primitives_traits::{BlockBody, NodePrimitives};
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
     types::RpcTypes,
@@ -15,7 +16,7 @@ use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
 use crate::EthApi;
 
-impl<Provider, Pool, Network, EvmConfig> EthBlocks for EthApi<Provider, Pool, Network, EvmConfig>
+impl<Components: FullNodeComponents> EthBlocks for EthApi<Components>
 where
     Self: LoadBlock<
         Error = EthApiError,
@@ -25,7 +26,9 @@ where
             Receipt = reth_ethereum_primitives::Receipt,
         >,
     >,
-    Provider: BlockReader + ChainSpecProvider,
+    Components::Provider: BlockReader + ChainSpecProvider,
+    <<Self as FullNodeTypes>::Types as NodeTypes>::Primitives:
+        NodePrimitives<SignedTx = EthereumTxEnvelope<TxEip4844>>,
 {
     async fn block_receipts(
         &self,
@@ -69,15 +72,9 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> LoadBlock for EthApi<Provider, Pool, Network, EvmConfig>
+impl<Components: FullNodeComponents> LoadBlock for EthApi<Components>
 where
-    Self: LoadPendingBlock
-        + SpawnBlocking
-        + RpcNodeCoreExt<
-            Pool: TransactionPool<
-                Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
-            >,
-        >,
-    Provider: BlockReader,
+    Self: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt,
+    Components::Provider: BlockReader,
 {
 }

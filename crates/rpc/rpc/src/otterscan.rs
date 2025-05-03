@@ -12,6 +12,8 @@ use alloy_rpc_types_trace::{
 };
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
+use reth_chainspec::EthereumHardforks;
+use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
@@ -74,6 +76,7 @@ where
         > + EthTransactions
         + TraceExt
         + 'static,
+    <<Eth as FullNodeTypes>::Types as NodeTypes>::ChainSpec: EthereumHardforks,
 {
     /// Handler for `ots_getHeaderByNumber` and `erigon_getHeaderByNumber`
     async fn get_header_by_number(

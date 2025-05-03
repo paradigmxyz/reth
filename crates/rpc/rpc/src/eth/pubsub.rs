@@ -13,9 +13,10 @@ use jsonrpsee::{
 };
 use reth_chain_state::CanonStateSubscriptions;
 use reth_network_api::NetworkInfo;
+use reth_node_api::FullNodeComponents;
 use reth_primitives_traits::NodePrimitives;
 use reth_rpc_eth_api::{
-    pubsub::EthPubSubApiServer, EthApiTypes, RpcNodeCore, RpcTransaction, TransactionCompat,
+    pubsub::EthPubSubApiServer, EthApiTypes, RpcTransaction, TransactionCompat,
 };
 use reth_rpc_eth_types::logs_utils;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
@@ -60,7 +61,7 @@ impl<Eth> EthPubSub<Eth> {
 #[async_trait::async_trait]
 impl<Eth> EthPubSubApiServer<RpcTransaction<Eth::NetworkTypes>> for EthPubSub<Eth>
 where
-    Eth: RpcNodeCore<
+    Eth: FullNodeComponents<
             Provider: BlockNumReader + CanonStateSubscriptions,
             Pool: TransactionPool,
             Network: NetworkInfo,
@@ -92,7 +93,7 @@ async fn handle_accepted<Eth>(
     params: Option<Params>,
 ) -> Result<(), ErrorObject<'static>>
 where
-    Eth: RpcNodeCore<
+    Eth: FullNodeComponents<
             Provider: BlockNumReader + CanonStateSubscriptions,
             Pool: TransactionPool,
             Network: NetworkInfo,
@@ -253,7 +254,7 @@ struct EthPubSubInner<EthApi> {
 
 impl<Eth> EthPubSubInner<Eth>
 where
-    Eth: RpcNodeCore<Provider: BlockNumReader>,
+    Eth: FullNodeComponents<Provider: BlockNumReader>,
 {
     /// Returns the current sync status for the `syncing` subscription
     fn sync_status(&self, is_syncing: bool) -> PubSubSyncStatus {
@@ -278,7 +279,7 @@ where
 
 impl<Eth> EthPubSubInner<Eth>
 where
-    Eth: RpcNodeCore<Pool: TransactionPool>,
+    Eth: FullNodeComponents<Pool: TransactionPool>,
 {
     /// Returns a stream that yields all transaction hashes emitted by the txpool.
     fn pending_transaction_hashes_stream(&self) -> impl Stream<Item = TxHash> {
@@ -295,7 +296,7 @@ where
 
 impl<N: NodePrimitives, Eth> EthPubSubInner<Eth>
 where
-    Eth: RpcNodeCore<Provider: CanonStateSubscriptions<Primitives = N>>,
+    Eth: FullNodeComponents<Provider: CanonStateSubscriptions<Primitives = N>>,
 {
     /// Returns a stream that yields all new RPC blocks.
     fn new_headers_stream(&self) -> impl Stream<Item = Header<N::BlockHeader>> {

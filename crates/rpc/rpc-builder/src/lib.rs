@@ -32,14 +32,15 @@ use jsonrpsee::{
     },
     Methods, RpcModule,
 };
-use reth_chainspec::EthereumHardforks;
+use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
-use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
+use reth_network_api::{noop::NoopNetwork, BlockClient, FullNetwork, NetworkInfo, Peers};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    AccountReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
-    ChangeSetReader, FullRpcProvider, ProviderBlock, StateProviderFactory,
+    AccountReader, BlockReader, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
+    DatabaseProviderFactory, EthStorage, FullRpcProvider, ProviderBlock, ProviderFactory,
+    StateProviderFactory, TransactionsProvider,
 };
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthApi, EthApiBuilder, EthBundle, MinerApi, NetApi,
@@ -52,7 +53,9 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{EthConfig, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, CompressionLayer, JwtAuthValidator, JwtSecret};
-use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
+use reth_tasks::{
+    pool::BlockingTaskGuard, TaskExecutor, TaskManager, TaskSpawner, TokioTaskExecutor,
+};
 use reth_transaction_pool::{noop::NoopTransactionPool, PoolTransaction, TransactionPool};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -73,6 +76,7 @@ pub use reth_ipc::server::{
     Builder as IpcServerBuilder, RpcServiceBuilder as IpcRpcServiceBuilder,
 };
 pub use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
+use tokio::sync::mpsc::unbounded_channel;
 pub use tower::layer::util::{Identity, Stack};
 
 /// Auth server utilities.
@@ -94,6 +98,16 @@ pub use eth::EthHandlers;
 // Rpc server metrics
 mod metrics;
 pub use metrics::{MeteredRequestFuture, RpcRequestMetricsService};
+use reth_chain_state::ForkChoiceSubscriptions;
+use reth_eth_wire_types::NetworkPrimitives;
+use reth_ethereum_engine_primitives::EthEngineTypes;
+use reth_ethereum_primitives::EthPrimitives;
+use reth_network::NetworkHandle;
+use reth_node_api::{
+    BlockTy, BodyTy, FullNodeComponents, FullNodeTypes, FullNodeTypesAdapter, HeaderTy, NodeTypes,
+    PayloadTypes, PrimitivesTy, TxTy,
+};
+use reth_payload_builder::{noop::NoopPayloadBuilderService, PayloadBuilderHandle};
 use reth_rpc::eth::sim_bundle::EthSimBundle;
 
 // Rpc rate limiter
@@ -174,6 +188,27 @@ impl<N, Provider, Pool, Network, Tasks, EvmConfig, BlockExecutor, Consensus>
     RpcModuleBuilder<N, Provider, Pool, Network, Tasks, EvmConfig, BlockExecutor, Consensus>
 where
     N: NodePrimitives,
+    Pool: TransactionPool + Unpin,
+    EvmConfig: ConfigureEvm,
+    Consensus: Clone + Unpin + FullConsensus<N>,
+    Network: Clone,
+    Provider: Clone
+        + DatabaseProviderFactory
+        + ForkChoiceSubscriptions
+        + reth_provider::StaticFileProviderFactory,
+    Tasks: Clone,
+    BlockExecutor: Clone,
+    N: NodePrimitives,
+    Provider: FullRpcProvider<Block = N::Block, Receipt = N::Receipt, Header = N::BlockHeader>
+        + CanonStateSubscriptions<Primitives = N>
+        + AccountReader
+        + ChangeSetReader,
+    Pool: TransactionPool + 'static,
+    Network: NetworkInfo + Peers + Clone + 'static,
+    Tasks: TaskSpawner + Clone + 'static,
+    EvmConfig: ConfigureEvm<Primitives = N>,
+    BlockExecutor: BlockExecutorProvider<Primitives = N>,
+    Network: FullNetwork<Client: BlockClient<Block = <N as NodePrimitives>::Block>>,
 {
     /// Create a new instance of the builder
     pub const fn new(
@@ -493,19 +528,44 @@ where
     }
 
     /// Instantiates a new [`EthApiBuilder`] from the configured components.
-    pub fn eth_api_builder(&self) -> EthApiBuilder<Provider, Pool, Network, EvmConfig>
+    pub fn eth_api_builder(&self) -> EthApiBuilder<impl FullNodeComponents>
     where
-        Provider: BlockReaderIdExt + Clone,
-        Pool: Clone,
-        Network: Clone,
-        EvmConfig: Clone,
+        <Provider as DatabaseProviderFactory>::DB:
+            Clone + reth_db_api::database_metrics::DatabaseMetrics + Unpin,
+        Provider: TransactionsProvider<Transaction = <N as NodePrimitives>::SignedTx>,
+        Provider: ForkChoiceSubscriptions<Header = <N as NodePrimitives>::BlockHeader>,
+        Consensus: FullConsensus<N, Error = ConsensusError>,
     {
-        EthApiBuilder::new(
-            self.provider.clone(),
-            self.pool.clone(),
-            self.network.clone(),
-            self.evm_config.clone(),
-        )
+        let Self {
+            provider,
+            pool: transaction_pool,
+            network,
+            executor,
+            evm_config,
+            block_executor,
+            consensus,
+            _primitives,
+        } = (*self).clone();
+
+        let (_, payload_builder_handle) = NoopPayloadBuilderService::<EthEngineTypes>::new();
+
+        let tasks = TaskManager::current();
+        let task_executor = tasks.executor();
+
+        let components = NodeAdapter::<FullNodeTypesAdapter<_, _, _>, _> {
+            provider,
+            task_executor,
+            components: Components {
+                transaction_pool,
+                evm_config,
+                executor: block_executor,
+                consensus,
+                network,
+                payload_builder_handle,
+            },
+        };
+
+        EthApiBuilder::new(components)
     }
 
     /// Initializes a new [`EthApiServer`] with the configured components and default settings.
@@ -513,20 +573,222 @@ where
     /// Note: This spawns all necessary tasks.
     ///
     /// See also [`EthApiBuilder`].
-    pub fn bootstrap_eth_api(&self) -> EthApi<Provider, Pool, Network, EvmConfig>
-    where
-        Provider: BlockReaderIdExt<Block = N::Block, Header = N::BlockHeader, Receipt = N::Receipt>
-            + StateProviderFactory
-            + CanonStateSubscriptions<Primitives = N>
-            + ChainSpecProvider
-            + Clone
-            + Unpin
-            + 'static,
-        Pool: Clone,
-        EvmConfig: Clone,
-        Network: Clone,
-    {
+    pub fn bootstrap_eth_api(&self) -> EthApi<impl FullNodeComponents> {
         self.eth_api_builder().build()
+    }
+}
+
+/// Container for the node's types and the components and other internals that can be used by
+/// addons of the node.
+#[derive(Debug)]
+pub struct NodeAdapter<T: FullNodeTypes, C: NodeComponents<T>> {
+    /// The components of the node.
+    pub components: C,
+    /// The task executor for the node.
+    pub task_executor: TaskExecutor,
+    /// The provider of the node.
+    pub provider: T::Provider,
+}
+
+/// An abstraction over the components of a node, consisting of:
+///  - evm and executor
+///  - transaction pool
+///  - network
+///  - payload builder.
+pub trait NodeComponents<T: FullNodeTypes>: Clone + Debug + Unpin + Send + Sync + 'static {
+    /// The transaction pool of the node.
+    type Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<T::Types>>> + Unpin;
+
+    /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
+    type Evm: ConfigureEvm<Primitives = <T::Types as NodeTypes>::Primitives>;
+
+    /// The type that knows how to execute blocks.
+    type Executor: BlockExecutorProvider<Primitives = <T::Types as NodeTypes>::Primitives>;
+
+    /// The consensus type of the node.
+    type Consensus: FullConsensus<<T::Types as NodeTypes>::Primitives, Error = ConsensusError>
+        + Clone
+        + Unpin
+        + 'static;
+
+    /// Network API.
+    type Network: FullNetwork<Client: BlockClient<Block = BlockTy<T::Types>>>;
+
+    /// Returns the transaction pool of the node.
+    fn pool(&self) -> &Self::Pool;
+
+    /// Returns the node's evm config.
+    fn evm_config(&self) -> &Self::Evm;
+
+    /// Returns the node's executor type.
+    fn block_executor(&self) -> &Self::Executor;
+
+    /// Returns the node's consensus type.
+    fn consensus(&self) -> &Self::Consensus;
+
+    /// Returns the handle to the network
+    fn network(&self) -> &Self::Network;
+
+    /// Returns the handle to the payload builder service handling payload building requests from
+    /// the engine.
+    fn payload_builder_handle(&self) -> &PayloadBuilderHandle<<T::Types as NodeTypes>::Payload>;
+}
+
+/// All the components of the node.
+///
+/// This provides access to all the components of the node.
+#[derive(Debug)]
+pub struct Components<Node: FullNodeTypes, Pool, EVM, Executor, Consensus, Network> {
+    /// The transaction pool of the node.
+    pub transaction_pool: Pool,
+    /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
+    pub evm_config: EVM,
+    /// The node's executor type used to execute individual blocks and batches of blocks.
+    pub executor: Executor,
+    /// The consensus implementation of the node.
+    pub consensus: Consensus,
+    /// The network implementation of the node.
+    pub network: Network,
+    /// The handle to the payload builder service.
+    pub payload_builder_handle: PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>,
+}
+
+impl<Node, Pool, EVM, Executor, Cons, N, Network> NodeComponents<Node>
+    for Components<Node, Pool, EVM, Executor, Cons, Network>
+where
+    Node: FullNodeTypes,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
+        + Unpin
+        + 'static,
+    EVM: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>> + 'static,
+    Executor: BlockExecutorProvider<Primitives = PrimitivesTy<Node::Types>>,
+    Cons:
+        FullConsensus<PrimitivesTy<Node::Types>, Error = ConsensusError> + Clone + Unpin + 'static,
+    Network: FullNetwork<Client: BlockClient<Block = BlockTy<Node::Types>>>,
+{
+    type Pool = Pool;
+    type Evm = EVM;
+    type Executor = Executor;
+    type Consensus = Cons;
+    type Network = Network;
+
+    fn pool(&self) -> &Self::Pool {
+        &self.transaction_pool
+    }
+
+    fn evm_config(&self) -> &Self::Evm {
+        &self.evm_config
+    }
+
+    fn block_executor(&self) -> &Self::Executor {
+        &self.executor
+    }
+
+    fn consensus(&self) -> &Self::Consensus {
+        &self.consensus
+    }
+
+    fn network(&self) -> &Self::Network {
+        &self.network
+    }
+
+    fn payload_builder_handle(&self) -> &PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload> {
+        &self.payload_builder_handle
+    }
+}
+
+impl<Node, Pool, EVM, Executor, Cons, Network> Clone
+    for Components<Node, Pool, EVM, Executor, Cons, Network>
+where
+    Node: FullNodeTypes,
+    Pool: TransactionPool,
+    EVM: ConfigureEvm,
+    Executor: BlockExecutorProvider,
+    Cons: Clone,
+    Network: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            transaction_pool: self.transaction_pool.clone(),
+            evm_config: self.evm_config.clone(),
+            executor: self.executor.clone(),
+            consensus: self.consensus.clone(),
+            network: self.network.clone(),
+            payload_builder_handle: self.payload_builder_handle.clone(),
+        }
+    }
+}
+
+/// A test [`Node`].
+#[derive(Debug, Default, Clone, Copy)]
+#[non_exhaustive]
+pub struct TestNode;
+
+impl NodeTypes for TestNode {
+    type Primitives = EthPrimitives;
+    type ChainSpec = ChainSpec;
+    type StateCommitment = reth_trie_db::MerklePatriciaTrie;
+    type Storage = EthStorage;
+    type Payload = EthEngineTypes;
+}
+
+impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeTypes for NodeAdapter<T, C> {
+    type Types = T::Types;
+    type DB = T::DB;
+    type Provider = T::Provider;
+}
+
+impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<T, C> {
+    type Pool = C::Pool;
+    type Evm = C::Evm;
+    type Executor = C::Executor;
+    type Consensus = C::Consensus;
+    type Network = C::Network;
+
+    fn pool(&self) -> &Self::Pool {
+        self.components.pool()
+    }
+
+    fn evm_config(&self) -> &Self::Evm {
+        self.components.evm_config()
+    }
+
+    fn block_executor(&self) -> &Self::Executor {
+        self.components.block_executor()
+    }
+
+    fn consensus(&self) -> &Self::Consensus {
+        self.components.consensus()
+    }
+
+    fn network(&self) -> &Self::Network {
+        self.components.network()
+    }
+
+    fn payload_builder_handle(
+        &self,
+    ) -> &reth_payload_builder::PayloadBuilderHandle<
+        <Self::Types as reth_node_api::NodeTypes>::Payload,
+    > {
+        self.components.payload_builder_handle()
+    }
+
+    fn provider(&self) -> &Self::Provider {
+        &self.provider
+    }
+
+    fn task_executor(&self) -> &TaskExecutor {
+        &self.task_executor
+    }
+}
+
+impl<T: FullNodeTypes, C: NodeComponents<T>> Clone for NodeAdapter<T, C> {
+    fn clone(&self) -> Self {
+        Self {
+            components: self.components.clone(),
+            task_executor: self.task_executor.clone(),
+            provider: self.provider.clone(),
+        }
     }
 }
 

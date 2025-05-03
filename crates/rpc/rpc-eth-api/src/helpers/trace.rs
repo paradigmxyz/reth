@@ -6,15 +6,15 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::{BlockId, TransactionInfo};
 use futures::Future;
-use reth_chainspec::ChainSpecProvider;
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_errors::ProviderError;
 use reth_evm::{
     system_calls::SystemCaller, ConfigureEvm, Database, Evm, EvmEnvFor, HaltReasonFor,
     InspectorFor, TxEnvFor,
 };
-use reth_node_api::NodePrimitives;
+use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_primitives_traits::{BlockBody, RecoveredBlock, SignedTransaction};
-use reth_provider::{BlockReader, ProviderBlock, ProviderHeader, ProviderTx};
+use reth_provider::ProviderBlock;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDb, StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
@@ -29,18 +29,7 @@ use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use std::sync::Arc;
 
 /// Executes CPU heavy tasks.
-pub trait Trace:
-    LoadState<
-    Provider: BlockReader,
-    Evm: ConfigureEvm<
-        Primitives: NodePrimitives<
-            BlockHeader = ProviderHeader<Self::Provider>,
-            SignedTx = ProviderTx<Self::Provider>,
-        >,
-    >,
-    Error: FromEvmError<Self::Evm>,
->
-{
+pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> {
     /// Executes the [`reth_evm::EvmEnv`] against the given [Database] without committing state
     /// changes.
     #[expect(clippy::type_complexity)]
@@ -154,6 +143,7 @@ pub trait Trace:
             + Send
             + 'static,
         R: Send + 'static,
+        <<Self as FullNodeTypes>::Types as NodeTypes>::ChainSpec: EthereumHardforks,
     {
         self.spawn_trace_transaction_in_block_with_inspector(hash, TracingInspector::new(config), f)
     }
@@ -186,6 +176,7 @@ pub trait Trace:
         Insp:
             for<'a, 'b> InspectorFor<Self::Evm, StateCacheDbRefMutWrapper<'a, 'b>> + Send + 'static,
         R: Send + 'static,
+        <<Self as FullNodeTypes>::Types as NodeTypes>::ChainSpec: EthereumHardforks,
     {
         async move {
             let (transaction, block) = match self.transaction_and_block(hash).await? {
@@ -250,6 +241,7 @@ pub trait Trace:
             + Send
             + 'static,
         R: Send + 'static,
+        <<Self as FullNodeTypes>::Types as NodeTypes>::ChainSpec: EthereumHardforks,
     {
         self.trace_block_until_with_inspector(
             block_id,
@@ -293,6 +285,7 @@ pub trait Trace:
         Insp:
             for<'a, 'b> InspectorFor<Self::Evm, StateCacheDbRefMutWrapper<'a, 'b>> + Send + 'static,
         R: Send + 'static,
+        <<Self as FullNodeTypes>::Types as NodeTypes>::ChainSpec: EthereumHardforks,
     {
         async move {
             let block = async {
@@ -410,6 +403,7 @@ pub trait Trace:
             + Send
             + 'static,
         R: Send + 'static,
+        <<Self as FullNodeTypes>::Types as NodeTypes>::ChainSpec: EthereumHardforks,
     {
         self.trace_block_until(block_id, block, None, config, f)
     }
@@ -452,6 +446,7 @@ pub trait Trace:
         Insp:
             for<'a, 'b> InspectorFor<Self::Evm, StateCacheDbRefMutWrapper<'a, 'b>> + Send + 'static,
         R: Send + 'static,
+        <<Self as FullNodeTypes>::Types as NodeTypes>::ChainSpec: EthereumHardforks,
     {
         self.trace_block_until_with_inspector(block_id, block, None, insp_setup, f)
     }
@@ -466,7 +461,10 @@ pub trait Trace:
         block: &RecoveredBlock<ProviderBlock<Self::Provider>>,
         db: &mut DB,
         evm_env: &EvmEnvFor<Self::Evm>,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), Self::Error>
+    where
+        <<Self as FullNodeTypes>::Types as NodeTypes>::ChainSpec: EthereumHardforks,
+    {
         let mut system_caller = SystemCaller::new(self.provider().chain_spec());
 
         // apply relevant system calls

@@ -10,14 +10,14 @@ use alloy_primitives::{eip191_hash_message, Address, Signature, B256};
 use alloy_rpc_types_eth::TransactionRequest;
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
+use reth_node_api::FullNodeComponents;
 use reth_rpc_eth_api::helpers::{signer::Result, AddDevSigners, EthSigner};
 use reth_rpc_eth_types::SignError;
 use reth_storage_api::BlockReader;
 
-impl<Provider, Pool, Network, EvmConfig> AddDevSigners
-    for EthApi<Provider, Pool, Network, EvmConfig>
+impl<Components: FullNodeComponents> AddDevSigners for EthApi<Components>
 where
-    Provider: BlockReader,
+    Components::Provider: BlockReader,
 {
     fn with_dev_accounts(&self) {
         *self.inner.signers().write() = DevSigner::random_signers(20)
