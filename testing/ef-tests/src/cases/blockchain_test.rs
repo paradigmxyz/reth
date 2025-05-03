@@ -64,8 +64,7 @@ impl BlockchainTestCase {
                 ForkSpec::ConstantinopleFix |
                 ForkSpec::MergeEOF |
                 ForkSpec::MergeMeterInitCode |
-                ForkSpec::MergePush0 |
-                ForkSpec::Unknown
+                ForkSpec::MergePush0
         )
     }
 
