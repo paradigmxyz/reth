@@ -1,0 +1,24 @@
+[package]
+name = "example-exex-test"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# reth
+reth.workspace = true
+reth-exex.workspace = true
+reth-node-ethereum.workspace = true
+reth-primitives.workspace = true
+reth-e2e-test-utils.workspace = true
+reth-chainspec.workspace = true
+reth-tracing.workspace = true
+
+# async utilities
+futures-util.workspace = true
+tokio = { workspace = true, features = ["full"] }
+
+# other dependencies
+eyre.workspace = true
+serde_json.workspace = true
