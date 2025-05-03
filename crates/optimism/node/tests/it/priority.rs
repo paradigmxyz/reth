@@ -98,13 +98,7 @@ fn build_components<Node>(
     OpConsensusBuilder,
 >
 where
-    Node: FullNodeTypes<
-        Types: NodeTypes<
-            Payload = OpEngineTypes,
-            ChainSpec = OpChainSpec,
-            Primitives = OpPrimitives,
-        >,
-    >,
+    Node: FullNodeTypes<Types: OpNodeTypes>,
 {
     let RollupArgs { disable_txpool_gossip, compute_pending_block, discovery_v4, .. } =
         RollupArgs::default();
