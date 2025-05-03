@@ -7,13 +7,15 @@ use alloy_eips::{
 };
 use alloy_primitives::{bytes::Buf, ChainId, TxHash};
 use alloy_rlp::{BufMut, Decodable, Encodable, Result as RlpResult};
-use op_alloy_consensus::OpTxEnvelope;
+use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope};
 use reth_codecs::Compact;
 use reth_ethereum::primitives::{
     serde_bincode_compat::SerdeBincodeCompat, transaction::signed::RecoveryError, InMemorySize,
     IsTyped2718, SignedTransaction,
 };
 use revm_primitives::{Address, Bytes, TxKind, B256, U256};
+
+use super::CustomTransactionEnvelope;
 
 macro_rules! delegate {
     ($self:expr => $tx:ident.$method:ident($($arg:expr),*)) => {
@@ -38,6 +40,24 @@ pub enum ExtendedTxEnvelope<BuiltIn, Other> {
 }
 
 pub type ExtendedOpTxEnvelope<T> = ExtendedTxEnvelope<OpTxEnvelope, T>;
+
+impl TryFrom<ExtendedTxEnvelope<OpTxEnvelope, CustomTransactionEnvelope>>
+    for ExtendedTxEnvelope<OpPooledTransaction, CustomTransactionEnvelope>
+{
+    type Error = OpTxEnvelope;
+
+    fn try_from(
+        value: ExtendedTxEnvelope<OpTxEnvelope, CustomTransactionEnvelope>,
+    ) -> Result<Self, Self::Error> {
+        match value {
+            ExtendedTxEnvelope::BuiltIn(tx) => {
+                let converted_tx: OpPooledTransaction = tx.clone().try_into().map_err(|_| tx)?;
+                Ok(ExtendedTxEnvelope::BuiltIn(converted_tx))
+            }
+            ExtendedTxEnvelope::Other(tx) => Ok(ExtendedTxEnvelope::Other(tx)),
+        }
+    }
+}
 
 impl<B, T> Transaction for ExtendedTxEnvelope<B, T>
 where

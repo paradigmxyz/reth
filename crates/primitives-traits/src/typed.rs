@@ -33,3 +33,10 @@ impl IsTyped2718 for op_alloy_consensus::OpTxEnvelope {
         op_alloy_consensus::OpTxType::is_type(type_id)
     }
 }
+
+#[cfg(feature = "op")]
+impl IsTyped2718 for op_alloy_consensus::OpPooledTransaction {
+    fn is_type(type_id: u8) -> bool {
+        op_alloy_consensus::OpTxType::is_type(type_id)
+    }
+}

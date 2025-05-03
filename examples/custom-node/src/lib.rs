@@ -9,7 +9,8 @@
 
 use chainspec::CustomChainSpec;
 use engine::CustomPayloadTypes;
-use primitives::CustomNodePrimitives;
+use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope};
+use primitives::{CustomNodePrimitives, CustomTransactionEnvelope, ExtendedOpTxEnvelope};
 use reth_ethereum::node::api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{components::ComponentsBuilder, Node, NodeComponentsBuilder};
 use reth_op::node::{
