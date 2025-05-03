@@ -1,17 +1,23 @@
 use futures_util::StreamExt;
-use reth::{api::FullNodeComponents, builder::NodeTypes, primitives::EthPrimitives};
-use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::testsuite::{
     actions::ProduceBlocks,
     setup::{NetworkSetup, Setup},
     TestBuilder,
 };
-use reth_exex::{ExExContext, ExExEvent};
-use reth_node_ethereum::{EthEngineTypes, EthereumNode};
+use reth_ethereum::{
+    chainspec::{ChainSpecBuilder, MAINNET},
+    exex::{ExExContext, ExExEvent},
+    node::{
+        api::{FullNodeComponents, NodeTypes},
+        EthEngineTypes, EthereumNode,
+    },
+    EthPrimitives,
+};
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     Arc,
 };
+
 mod wal_test;
 
 #[allow(unfulfilled_lint_expectations)]
@@ -48,7 +54,7 @@ async fn test_assertion_exex<
         if let Some(committed_chain) = notification.committed_chain() {
             let range = committed_chain.range();
             let blocks_count = *range.end() - *range.start() + 1;
-            println!("Received committed chain: {:?}", range);
+            println!("Received committed chain: {range:?}");
 
             // Increment blocks count
             #[allow(clippy::unnecessary_cast)]
@@ -73,16 +79,15 @@ async fn test_assertion_exex<
 }
 
 /// Verify test assertions after completion
-#[allow(unfulfilled_lint_expectations)]
 fn report_test_results(state: &TestState) {
     let blocks_received = state.received_blocks.load(Ordering::SeqCst);
     let saw_trie_updates = state.saw_trie_updates.load(Ordering::SeqCst);
     let last_finalized = state.last_finalized_block.load(Ordering::SeqCst);
 
     println!("========= ExEx Test Report =========");
-    println!("Total blocks received: {}", blocks_received);
-    println!("Trie updates observed: {}", saw_trie_updates);
-    println!("Last finalized block: {}", last_finalized);
+    println!("Total blocks received: {blocks_received}");
+    println!("Trie updates observed: {saw_trie_updates}");
+    println!("Last finalized block: {last_finalized}");
     println!("====================================");
 
     assert!(blocks_received > 0, "No blocks were received by the ExEx");
@@ -125,8 +130,8 @@ async fn run_exex_test() -> eyre::Result<()> {
     Ok(())
 }
 
-fn main() -> eyre::Result<()> {
+#[tokio::main]
+async fn main() -> eyre::Result<()> {
     println!("Starting ExEx test example");
-
-    tokio::runtime::Builder::new_multi_thread().enable_all().build()?.block_on(run_exex_test())
+    run_exex_test().await
 }
