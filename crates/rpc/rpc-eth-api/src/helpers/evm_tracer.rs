@@ -63,7 +63,7 @@ where
     Txs: Iterator<Item = (TransactionInfo, TxEnv)>,
     H: FnMut(TransactionInfo, I, ResultAndState<E::HaltReason>) -> Result<(), E::Error<DB::Error>>,
 {
-    /// Creates a new EvmTracer.
+    /// Creates a new `EvmTracer`.
     pub fn new(
         evm: E,
         transactions: Txs,
@@ -97,7 +97,7 @@ where
     H: FnMut(TransactionInfo, I, ResultAndState<E::HaltReason>) -> Result<(), E::Error<DB::Error>>,
 {
     ///Returns the next value
-    pub fn next(&mut self) -> Option<Result<(), E::Error<DB::Error>>> {
+    pub fn next_tracer(&mut self) -> Option<Result<(), E::Error<DB::Error>>> {
         let (tx_info, tx_env) = self.transactions.next()?;
 
         // Create a new inspector for this transaction.
@@ -107,7 +107,7 @@ where
         let result = {
             let mut evm = self.evm.create_evm_with_inspector(
                 self.db.clone(),
-                self.env.clone().into(),
+                self.env.clone(),
                 inspector.clone(),
             );
 
@@ -115,7 +115,7 @@ where
                 Ok(result) => result,
                 Err(err) => {
                     // Handle the error or log it as needed
-                    eprintln!("Error occurred: {:?}", err);
+                    eprintln!("Error occurred: {err:?}");
                     return None;
                 }
             }
