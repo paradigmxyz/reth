@@ -16,12 +16,15 @@ use reth_node_core::{
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
-use reth_rpc::eth::{EthApiTypes, FullEthApiServer};
+use reth_rpc::{
+    eth::{EthApiTypes, FullEthApiServer},
+    ValidationApiConfig,
+};
 use reth_rpc_api::{eth::helpers::AddDevSigners, IntoEngineApiRpcModule};
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerHandle},
     config::RethRpcServerConfig,
-    RpcModuleBuilder, RpcRegistryInner, RpcServerHandle, TransportRpcModules,
+    RpcModuleBuilder, RpcModuleConfig, RpcRegistryInner, RpcServerHandle, TransportRpcModules,
 };
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_eth_types::{cache::cache_new_blocks_task, EthConfig, EthStateCache};
@@ -33,7 +36,6 @@ use std::{
     future::Future,
     ops::{Deref, DerefMut},
 };
-
 /// Contains the handles to the spawned RPC servers.
 ///
 /// This can be used to access the endpoints of the servers.
@@ -44,7 +46,6 @@ pub struct RethRpcServerHandles {
     /// The handle to the auth server (engine API)
     pub auth: AuthServerHandle,
 }
-
 /// Contains hooks that are called during the rpc setup.
 pub struct RpcHooks<Node: FullNodeComponents, EthApi> {
     /// Hooks to run once RPC server is running.
@@ -296,6 +297,56 @@ where
         &self,
     ) -> &PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload> {
         self.node.payload_builder_handle()
+    }
+}
+
+/// Helper container to encapsulate [`RpcRegistryInner`], [`RpcServerHandle`].
+///
+/// This can be used to access installed modules, or create commonly used handlers like
+/// [`reth_rpc::eth::EthApi`].
+pub struct RpcHandleUnsafe<Node: FullNodeComponents, EthApi: EthApiTypes> {
+    /// Handle to launch rpc server
+    pub rpc_server_handle: RpcServerHandle,
+    /// Configured RPC modules.
+    pub rpc_registry: RpcRegistry<Node, EthApi>,
+    /// Notification channel for engine API events
+    ///
+    /// Caution: This is a multi-producer, multi-consumer broadcast and allows grants access to
+    /// dispatch events
+    pub engine_events:
+        EventSender<BeaconConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>>,
+    /// Handle to the beacon consensus engine.
+    pub beacon_engine_handle: BeaconConsensusEngineHandle<<Node::Types as NodeTypes>::Payload>,
+}
+
+impl<Node: FullNodeComponents, EthApi: EthApiTypes> Clone for RpcHandleUnsafe<Node, EthApi> {
+    fn clone(&self) -> Self {
+        Self {
+            rpc_server_handle: self.rpc_server_handle.clone(),
+            rpc_registry: self.rpc_registry.clone(),
+            engine_events: self.engine_events.clone(),
+            beacon_engine_handle: self.beacon_engine_handle.clone(),
+        }
+    }
+}
+
+impl<Node: FullNodeComponents, EthApi: EthApiTypes> Deref for RpcHandleUnsafe<Node, EthApi> {
+    type Target = RpcRegistry<Node, EthApi>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.rpc_registry
+    }
+}
+
+impl<Node: FullNodeComponents, EthApi: EthApiTypes> Debug for RpcHandleUnsafe<Node, EthApi>
+where
+    RpcRegistry<Node, EthApi>: Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RpcHandleUnsafe")
+            .field("rpc_server_handle", &self.rpc_server_handle)
+            .field("rpc_registry", &self.rpc_registry)
+            .finish()
     }
 }
 
@@ -562,6 +613,89 @@ where
 
         Ok(RpcHandle {
             rpc_server_handles: handles,
+            rpc_registry: registry,
+            engine_events,
+            beacon_engine_handle,
+        })
+    }
+
+    /// Launches the RPC server only.
+    pub async fn launch_addons_no_auth(
+        self,
+        ctx: AddOnsContext<'_, N>,
+    ) -> eyre::Result<RpcHandleUnsafe<N, EthB::EthApi>> {
+        let Self { eth_api_builder, hooks, .. } = self;
+        let AddOnsContext { node, config, beacon_engine_handle, engine_events, .. } = ctx;
+
+        info!(target: "reth::cli", "Engine API handler initialized");
+
+        let cache = EthStateCache::spawn_with(
+            node.provider().clone(),
+            config.rpc.eth_config().cache,
+            node.task_executor().clone(),
+        );
+
+        let new_canonical_blocks = node.provider().canonical_state_stream();
+        let c = cache.clone();
+        node.task_executor().spawn_critical(
+            "cache canonical blocks task",
+            Box::pin(async move {
+                cache_new_blocks_task(c, new_canonical_blocks).await;
+            }),
+        );
+
+        let ctx = EthApiCtx { components: &node, config: config.rpc.eth_config(), cache };
+        let eth_api = eth_api_builder.build_eth_api(ctx).await?;
+
+        let module_config = config.rpc.transport_rpc_module_config();
+        debug!(target: "reth::cli", http=?module_config.http(), ws=?module_config.ws(), "Using RPC module config");
+
+        let modules = RpcModuleBuilder::default()
+            .with_provider(node.provider().clone())
+            .with_pool(node.pool().clone())
+            .with_network(node.network().clone())
+            .with_executor(node.task_executor().clone())
+            .with_evm_config(node.evm_config().clone())
+            .with_block_executor(node.block_executor().clone())
+            .with_consensus(node.consensus().clone())
+            .build(module_config, eth_api.clone());
+        let rpc_registry_inner = RpcRegistryInner::new(
+            node.provider().clone(),
+            node.pool().clone(),
+            node.network().clone(),
+            node.task_executor().clone(),
+            node.consensus().clone(),
+            RpcModuleConfig::new(config.rpc.eth_config(), ValidationApiConfig::default()),
+            node.evm_config().clone(),
+            eth_api,
+            node.block_executor().clone(),
+        );
+        let registry = RpcRegistry { registry: rpc_registry_inner };
+
+        if config.dev.dev {
+            registry.eth_api().with_dev_accounts();
+        }
+
+        let server_config = config.rpc.rpc_server_config();
+        let cloned_modules = modules.clone();
+        let rpc_server_handle = server_config
+            .start(&cloned_modules)
+            .map_ok(|handle| {
+                if let Some(path) = handle.ipc_endpoint() {
+                    info!(target: "reth::cli", %path, "RPC IPC server started");
+                }
+                if let Some(addr) = handle.http_local_addr() {
+                    info!(target: "reth::cli", url=%addr, "RPC HTTP server started");
+                }
+                if let Some(addr) = handle.ws_local_addr() {
+                    info!(target: "reth::cli", url=%addr, "RPC WS server started");
+                }
+                handle
+            })
+            .await?;
+
+        Ok(RpcHandleUnsafe {
+            rpc_server_handle,
             rpc_registry: registry,
             engine_events,
             beacon_engine_handle,
