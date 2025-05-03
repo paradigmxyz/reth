@@ -476,6 +476,7 @@ pub trait Trace:
 
 pub struct MultiTransactionTracer<'a, DB, InspSetup, F, Evm, TxIter, Insp, R>
 where
+    Evm: ConfigureEvm,
     TxIter: Iterator<Item = (TransactionInfo, TxEnvFor<Evm>)>,
 {
     db: &'a mut CacheDB<StateProviderDatabase<'a>>,
@@ -489,6 +490,7 @@ where
 impl<'a, DB, InspSetup, F, Evm, TxIter, Insp, R> Iterator
     for MultiTransactionTracer<'a, DB, InspSetup, F, Evm, TxIter, Insp, R>
 where
+    Evm: ConfigureEvm,
     TxIter: Iterator<Item = (TransactionInfo, TxEnvFor<Evm>)> + 'a,
     InspSetup: FnMut() -> Insp,
     F: FnMut(TransactionInfo, Insp, ExecutionResult<HaltReasonFor<Evm>>, &EvmState, &StateCacheDb<'_>) -> Result<R, Error>,
