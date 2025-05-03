@@ -5,6 +5,7 @@ use crate::FromEvmError;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::{BlockId, TransactionInfo};
+use core::error::Error;
 use futures::Future;
 use reth_chainspec::ChainSpecProvider;
 use reth_errors::ProviderError;
@@ -26,7 +27,7 @@ use revm::{
     DatabaseCommit,
 };
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
-use std::sync::Arc;
+use std::{sync::Arc, marker::PhantomData};
 
 /// Executes CPU heavy tasks.
 pub trait Trace:
@@ -481,7 +482,7 @@ where
 {
     db: &'a mut CacheDB<StateProviderDatabase<'a>>,
     evm_env: EvmEnvFor<Evm>,
-    transactions: Peekable<TxIter>,
+    transactions: std::iter::Peekable<TxIter>,
     inspector_setup: InspSetup,
     result_handler: F,
     phantom: PhantomData<(Insp, R)>,
