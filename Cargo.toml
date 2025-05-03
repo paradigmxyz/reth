@@ -148,6 +148,7 @@ members = [
     "examples/db-access",
     "examples/exex-hello-world",
     "examples/exex-subscription",
+    "examples/exex-test",
     "examples/manual-p2p/",
     "examples/network-txpool/",
     "examples/network/",
@@ -161,7 +162,6 @@ members = [
     "examples/custom-beacon-withdrawals",
     "testing/ef-tests/",
     "testing/testing-utils",
-    "examples/exex-test",
 ]
 default-members = ["bin/reth"]
 exclude = ["book/sources", "book/cli"]

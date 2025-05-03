@@ -1,7 +1,10 @@
 use eyre::Result;
 use futures_util::StreamExt;
-use reth::{api::FullNodeComponents, builder::NodeTypes, primitives::EthPrimitives};
-use reth_exex::{ExExContext, ExExEvent};
+use reth_ethereum::{
+    exex::{ExExContext, ExExEvent},
+    node::api::{FullNodeComponents, NodeTypes},
+    EthPrimitives,
+};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -38,7 +41,7 @@ pub async fn wal_test_exex<
                 latest_finalized_block = 3; // Assuming block 3 was finalized
 
                 // Since we don't have access to the WAL handle, we'll simulate the check
-                println!("WAL test: Block finalized at height: {}", latest_finalized_block);
+                println!("WAL test: Block finalized at height: {latest_finalized_block}");
                 wal_cleared.store(true, Ordering::SeqCst);
             }
         }
