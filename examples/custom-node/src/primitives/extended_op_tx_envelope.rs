@@ -5,16 +5,15 @@ use alloy_eips::{
     eip7702::SignedAuthorization,
     Decodable2718, Encodable2718, Typed2718,
 };
-use alloy_primitives::{ChainId, TxHash};
+use alloy_primitives::{bytes::Buf, ChainId, TxHash};
 use alloy_rlp::{BufMut, Decodable, Encodable, Result as RlpResult};
-use op_alloy_consensus::{OpTxEnvelope, OpTxType};
+use op_alloy_consensus::OpTxEnvelope;
 use reth_codecs::Compact;
 use reth_ethereum::primitives::{
     serde_bincode_compat::SerdeBincodeCompat, transaction::signed::RecoveryError, InMemorySize,
     IsTyped2718, SignedTransaction,
 };
 use revm_primitives::{Address, Bytes, TxKind, B256, U256};
-use std::convert::TryInto;
 
 macro_rules! delegate {
     ($self:expr => $tx:ident.$method:ident($($arg:expr),*)) => {
@@ -29,6 +28,9 @@ macro_rules! delegate {
 ///
 /// This is intended to be used to extend existing presets, for example the ethereum or optstack
 /// transaction types.
+///
+/// Note: The other transaction type variants must not overlap with the builtin one, transaction
+/// types must be unique.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Hash, Eq, PartialEq)]
 pub enum ExtendedTxEnvelope<BuiltIn, Other> {
     BuiltIn(BuiltIn),
@@ -98,13 +100,7 @@ where
     }
 
     fn input(&self) -> &Bytes {
-        match self {
-            Self::BuiltIn(tx) => tx.input(),
-            Self::Other(_tx) => {
-                static EMPTY_BYTES: Bytes = Bytes::new();
-                &EMPTY_BYTES
-            }
-        }
+        delegate!(self => tx.input())
     }
 
     fn access_list(&self) -> Option<&AccessList> {
@@ -142,8 +138,8 @@ where
 
 impl<B, T> SignedTransaction for ExtendedTxEnvelope<B, T>
 where
-    B: SignedTransaction + SerdeBincodeCompat + IsTyped2718,
-    T: SignedTransaction + SerdeBincodeCompat,
+    B: SignedTransaction + IsTyped2718,
+    T: SignedTransaction,
 {
     fn tx_hash(&self) -> &TxHash {
         match self {
@@ -183,13 +179,13 @@ where
 
 impl<B, T> Decodable2718 for ExtendedTxEnvelope<B, T>
 where
-    B: Decodable2718 + SerdeBincodeCompat + IsTyped2718,
-    T: Decodable2718 + SerdeBincodeCompat,
+    B: Decodable2718 + IsTyped2718,
+    T: Decodable2718,
 {
     fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
         if B::is_type(ty) {
             let envelope = B::typed_decode(ty, buf)?;
-            Ok(Self::BuiltIn(B::from_repr(envelope.as_repr())))
+            Ok(Self::BuiltIn(envelope))
         } else {
             let other = T::typed_decode(ty, buf)?;
             Ok(Self::Other(other))
@@ -199,15 +195,7 @@ where
         if buf.is_empty() {
             return Err(Eip2718Error::RlpError(alloy_rlp::Error::InputTooShort));
         }
-
-        let type_byte = buf[0];
-        if B::is_type(type_byte) {
-            let envelope = B::fallback_decode(buf)?;
-            Ok(Self::BuiltIn(B::from_repr(envelope.as_repr())))
-        } else {
-            let other = T::fallback_decode(buf)?;
-            Ok(Self::Other(other))
-        }
+        B::fallback_decode(buf).map(Self::BuiltIn)
     }
 }
 
@@ -299,26 +287,26 @@ where
 
 impl<B, T> Compact for ExtendedTxEnvelope<B, T>
 where
-    B: Compact,
-    T: Compact,
+    B: Transaction + IsTyped2718 + Compact,
+    T: Transaction + Compact,
 {
     fn to_compact<Buf>(&self, buf: &mut Buf) -> usize
     where
         Buf: alloy_rlp::bytes::BufMut + AsMut<[u8]>,
     {
+        buf.put_u8(self.ty());
         match self {
             Self::BuiltIn(tx) => tx.to_compact(buf),
             Self::Other(tx) => tx.to_compact(buf),
         }
     }
 
-    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        if !buf.is_empty() {
-            let type_byte = buf[0];
-            if let Ok(_tx_type) = <u8 as TryInto<OpTxType>>::try_into(type_byte) {
-                let (tx, remaining) = B::from_compact(buf, len);
-                return (Self::BuiltIn(tx), remaining);
-            }
+    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
+        let type_byte = buf.get_u8();
+
+        if <B as IsTyped2718>::is_type(type_byte) {
+            let (tx, remaining) = B::from_compact(buf, len);
+            return (Self::BuiltIn(tx), remaining);
         }
 
         let (tx, remaining) = T::from_compact(buf, len);

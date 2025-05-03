@@ -10,7 +10,8 @@ use reth_rpc_eth_api::{
     RpcNodeCoreExt, RpcReceipt,
 };
 use reth_rpc_eth_types::{EthApiError, EthReceiptBuilder};
-use reth_storage_api::BlockReader;
+use reth_storage_api::{BlockReader, ProviderTx};
+use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
 use crate::EthApi;
 
@@ -70,7 +71,13 @@ where
 
 impl<Provider, Pool, Network, EvmConfig> LoadBlock for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt,
+    Self: LoadPendingBlock
+        + SpawnBlocking
+        + RpcNodeCoreExt<
+            Pool: TransactionPool<
+                Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
+            >,
+        >,
     Provider: BlockReader,
 {
 }
