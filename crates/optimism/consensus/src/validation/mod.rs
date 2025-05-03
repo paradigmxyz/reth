@@ -5,7 +5,7 @@ pub mod isthmus;
 
 use crate::proof::calculate_receipt_root_optimism;
 use alloc::{string::ToString, vec::Vec};
-use alloy_consensus::{BlockHeader, TxReceipt, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::{BlockHeader, TxReceipt, EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH};
 use alloy_primitives::{Bloom, B256};
 use op_alloy_consensus::{decode_holocene_extra_data, EIP1559ParamError};
 use reth_chainspec::{BaseFeeParams, EthChainSpec};
@@ -51,9 +51,32 @@ where
         // After isthmus we only ensure that the body has empty withdrawals
         isthmus::ensure_withdrawals_storage_root_is_some(header)
             .map_err(|err| ConsensusError::Other(err.to_string()))?;
-    } else {
+        let body_root = body.calculate_withdrawals_root();
+        if body_root != Some(EMPTY_ROOT_HASH) {
+            return Err(ConsensusError::BodyWithdrawalsRootDiff(
+                GotExpected { got: body_root.unwrap_or_default(), expected: EMPTY_ROOT_HASH }
+                    .into(),
+            ))
+        }
+    } else if chain_spec.is_canyon_active_at_timestamp(header.timestamp()) {
         // before isthmus we ensure that the header root matches the body
-        canyon::ensure_empty_withdrawals_root(header)?
+        let body_root = body.calculate_withdrawals_root();
+        if header.withdrawals_root() != body_root {
+            return Err(ConsensusError::BodyWithdrawalsRootDiff(
+                GotExpected {
+                    got: body_root.unwrap_or_default(),
+                    expected: header.withdrawals_root().unwrap_or_default(),
+                }
+                .into(),
+            ))
+        }
+    } else {
+        // Check that the withdrawals root in header is None
+        if header.withdrawals_root().is_some() {
+            return Err(ConsensusError::Other(
+                "Withdrawals root is not None before isthmus".to_string(),
+            ));
+        }
     }
 
     Ok(())
