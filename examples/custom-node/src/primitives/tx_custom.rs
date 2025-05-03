@@ -1,16 +1,26 @@
+use crate::primitives::{TxTypeCustom, TRANSFER_TX_TYPE_ID};
 use alloy_consensus::{
     transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx},
-    SignableTransaction, Transaction, TxType,
+    SignableTransaction, Transaction,
 };
 use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization, Typed2718};
 use alloy_primitives::{Bytes, ChainId, Signature, TxKind, B256, U256};
 use alloy_rlp::{BufMut, Decodable, Encodable};
 use core::mem;
-use reth_codecs::Compact;
 use reth_ethereum::primitives::{serde_bincode_compat::SerdeBincodeCompat, InMemorySize};
 
 /// A transaction with a priority fee ([EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)).
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    reth_codecs::Compact,
+)]
 #[serde(rename_all = "camelCase")]
 #[doc(alias = "CustomTransaction", alias = "TransactionCustom", alias = "CustomTx")]
 pub struct TxCustom {
@@ -75,8 +85,8 @@ pub struct TxCustom {
 impl TxCustom {
     /// Get the transaction type
     #[doc(alias = "transaction_type")]
-    pub const fn tx_type() -> TxType {
-        TxType::Eip1559
+    pub const fn tx_type() -> TxTypeCustom {
+        TxTypeCustom::Custom
     }
 
     /// Calculates a heuristic for the in-memory size of the [TxCustom]
@@ -254,7 +264,7 @@ impl Transaction for TxCustom {
 
 impl Typed2718 for TxCustom {
     fn ty(&self) -> u8 {
-        0x2A
+        TRANSFER_TX_TYPE_ID
     }
 }
 
@@ -307,23 +317,5 @@ impl SerdeBincodeCompat for TxCustom {
 
     fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
         repr.0.clone()
-    }
-}
-
-impl Compact for TxCustom {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: alloy_rlp::bytes::BufMut + AsMut<[u8]>,
-    {
-        let mut temp_buf = Vec::with_capacity(self.rlp_encoded_length());
-        self.rlp_encode(&mut temp_buf);
-        let len = temp_buf.len();
-        buf.put_slice(&temp_buf);
-        len
-    }
-
-    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
-        let decoded = Self::decode(&mut buf).expect("invalid RLP");
-        (decoded, buf)
     }
 }

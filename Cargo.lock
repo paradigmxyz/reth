@@ -3431,6 +3431,7 @@ dependencies = [
  "derive_more",
  "eyre",
  "jsonrpsee",
+ "modular-bitfield",
  "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
  "op-revm",
@@ -3447,6 +3448,7 @@ dependencies = [
  "revm",
  "revm-primitives",
  "serde",
+ "test-fuzz",
 ]
 
 [[package]]

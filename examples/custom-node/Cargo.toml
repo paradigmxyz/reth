@@ -43,6 +43,11 @@ eyre.workspace = true
 jsonrpsee.workspace = true
 serde.workspace = true
 
+modular-bitfield.workspace = true
+
+[dev-dependencies]
+test-fuzz.workspace = true
+
 [features]
 arbitrary = [
     "alloy-consensus/arbitrary",

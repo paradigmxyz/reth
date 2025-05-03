@@ -1,29 +1,29 @@
-#[allow(unused_imports)]
-use super::TxCustom;
-#[allow(unused_imports)]
-use alloy_consensus::{crypto::RecoveryError, Signed, Transaction};
+use super::{TxCustom, TxTypeCustom};
+use alloy_consensus::{
+    crypto::{
+        secp256k1::{recover_signer, recover_signer_unchecked},
+        RecoveryError,
+    },
+    SignableTransaction, Signed, Transaction,
+};
 use alloy_eips::{eip2718::Eip2718Result, Decodable2718, Encodable2718, Typed2718};
-#[allow(unused_imports)]
-use alloy_primitives::{Signature, TxHash};
+use alloy_primitives::{keccak256, Signature, TxHash};
 use alloy_rlp::{BufMut, Decodable, Encodable, Result as RlpResult};
 use reth_codecs::{
     alloy::transaction::{FromTxCompact, ToTxCompact},
     Compact,
 };
 use reth_ethereum::primitives::{serde_bincode_compat::SerdeBincodeCompat, InMemorySize};
-#[allow(unused_imports)]
 use reth_op::primitives::SignedTransaction;
-#[allow(unused_imports)]
 use revm_primitives::{Address, Bytes};
 use serde::{Deserialize, Serialize};
 
-pub const TRANSFER_TX_TYPE_ID: u8 = 127;
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, Eq, PartialEq)]
-pub struct CustomTransaction {
+pub struct CustomTransactionEnvelope {
     pub inner: Signed<TxCustom>,
 }
 
-impl Transaction for CustomTransaction {
+impl Transaction for CustomTransactionEnvelope {
     fn chain_id(&self) -> Option<alloy_primitives::ChainId> {
         self.inner.tx().chain_id()
     }
@@ -76,7 +76,7 @@ impl Transaction for CustomTransaction {
         self.inner.tx().value()
     }
 
-    fn input(&self) -> &revm_primitives::Bytes {
+    fn input(&self) -> &Bytes {
         // CustomTransactions have no input data
         static EMPTY_BYTES: Bytes = Bytes::new();
         &EMPTY_BYTES
@@ -95,34 +95,33 @@ impl Transaction for CustomTransaction {
     }
 }
 
-// impl SignedTransaction for CustomTransaction {
-//     fn tx_hash(&self) -> &TxHash {
-//         self.inner.tx().tx_hash()
-//     }
+impl SignedTransaction for CustomTransactionEnvelope {
+    fn tx_hash(&self) -> &TxHash {
+        self.inner.hash()
+    }
 
-//     fn recover_signer(&self) -> Result<Address, RecoveryError> {
-//         self.inner.tx().recover_signer()
-//     }
+    fn recover_signer(&self) -> Result<Address, RecoveryError> {
+        let signature_hash = self.inner.signature_hash();
+        recover_signer(self.inner.signature(), signature_hash)
+    }
 
-//     fn recover_signer_unchecked(&self) -> Result<Address, RecoveryError> {
-//         self.inner.tx().recover_signer_unchecked()
-//     }
-
-//     fn recover_signer_unchecked_with_buf(
-//         &self,
-//         buf: &mut Vec<u8>,
-//     ) -> Result<Address, RecoveryError> {
-//         self.inner.tx().recover_signer_unchecked_with_buf(buf)
-//     }
-// }
-
-impl Typed2718 for CustomTransaction {
-    fn ty(&self) -> u8 {
-        TRANSFER_TX_TYPE_ID
+    fn recover_signer_unchecked_with_buf(
+        &self,
+        buf: &mut Vec<u8>,
+    ) -> Result<Address, RecoveryError> {
+        self.inner.tx().encode_for_signing(buf);
+        let signature_hash = keccak256(buf);
+        recover_signer_unchecked(self.inner.signature(), signature_hash)
     }
 }
 
-impl Decodable2718 for CustomTransaction {
+impl Typed2718 for CustomTransactionEnvelope {
+    fn ty(&self) -> u8 {
+        self.inner.tx().ty()
+    }
+}
+
+impl Decodable2718 for CustomTransactionEnvelope {
     fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
         Ok(Self { inner: Signed::<TxCustom>::typed_decode(ty, buf)? })
     }
@@ -132,7 +131,7 @@ impl Decodable2718 for CustomTransaction {
     }
 }
 
-impl Encodable2718 for CustomTransaction {
+impl Encodable2718 for CustomTransactionEnvelope {
     fn encode_2718_len(&self) -> usize {
         self.inner.encode_2718_len()
     }
@@ -142,42 +141,39 @@ impl Encodable2718 for CustomTransaction {
     }
 }
 
-impl Decodable for CustomTransaction {
+impl Decodable for CustomTransactionEnvelope {
     fn decode(buf: &mut &[u8]) -> RlpResult<Self> {
         let inner = Signed::<TxCustom>::decode_2718(buf)?;
-        Ok(CustomTransaction { inner })
+        Ok(CustomTransactionEnvelope { inner })
     }
 }
 
-impl Encodable for CustomTransaction {
+impl Encodable for CustomTransactionEnvelope {
     fn encode(&self, out: &mut dyn BufMut) {
         self.inner.tx().encode(out)
     }
 }
 
-impl InMemorySize for CustomTransaction {
+impl InMemorySize for CustomTransactionEnvelope {
     fn size(&self) -> usize {
         self.inner.tx().size()
     }
 }
-impl FromTxCompact for CustomTransaction {
-    type TxType = TxCustom;
 
-    fn from_tx_compact(
-        buf: &[u8],
-        _tx_type: Self::TxType,
-        signature: alloy_primitives::Signature,
-    ) -> (Self, &[u8])
+impl FromTxCompact for CustomTransactionEnvelope {
+    type TxType = TxTypeCustom;
+
+    fn from_tx_compact(buf: &[u8], _tx_type: Self::TxType, signature: Signature) -> (Self, &[u8])
     where
         Self: Sized,
     {
         let (tx, buf) = TxCustom::from_compact(buf, buf.len());
         let tx = Signed::new_unhashed(tx, signature);
-        (CustomTransaction { inner: tx }, buf)
+        (CustomTransactionEnvelope { inner: tx }, buf)
     }
 }
 
-impl ToTxCompact for CustomTransaction {
+impl ToTxCompact for CustomTransactionEnvelope {
     fn to_tx_compact(&self, buf: &mut (impl BufMut + AsMut<[u8]>)) {
         self.inner.tx().to_compact(buf);
     }
@@ -186,7 +182,7 @@ impl ToTxCompact for CustomTransaction {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BincodeCompatSignedTxCustom(pub Signed<TxCustom>);
 
-impl SerdeBincodeCompat for CustomTransaction {
+impl SerdeBincodeCompat for CustomTransactionEnvelope {
     type BincodeRepr<'a> = BincodeCompatSignedTxCustom;
 
     fn as_repr(&self) -> Self::BincodeRepr<'_> {
@@ -198,18 +194,28 @@ impl SerdeBincodeCompat for CustomTransaction {
     }
 }
 
-impl Compact for CustomTransaction {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: alloy_rlp::bytes::BufMut + AsMut<[u8]>,
-    {
-        self.inner.tx().to_compact(buf)
+impl reth_codecs::alloy::transaction::Envelope for CustomTransactionEnvelope {
+    fn signature(&self) -> &Signature {
+        self.inner.signature()
     }
 
-    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        let (signature, rest) = Signature::from_compact(buf, len);
-        let (inner, buf) = <TxCustom as Compact>::from_compact(rest, len);
-        let signed = Signed::new_unhashed(inner, signature);
-        (CustomTransaction { inner: signed }, buf)
+    fn tx_type(&self) -> Self::TxType {
+        TxTypeCustom::Custom
     }
 }
+
+// impl Compact for CustomTransactionEnvelope {
+//     fn to_compact<B>(&self, buf: &mut B) -> usize
+//     where
+//         B: alloy_rlp::bytes::BufMut + AsMut<[u8]>,
+//     {
+//         self.inner.tx().to_compact(buf)
+//     }
+//
+//     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+//         let (signature, rest) = Signature::from_compact(buf, len);
+//         let (inner, buf) = <TxCustom as Compact>::from_compact(rest, len);
+//         let signed = Signed::new_unhashed(inner, signature);
+//         (CustomTransactionEnvelope { inner: signed }, buf)
+//     }
+// }
