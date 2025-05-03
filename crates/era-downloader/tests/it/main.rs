@@ -38,20 +38,24 @@ impl HttpClient for StubClient {
                 })))
                     as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
             }
-            "https://ethportal.net/era1/" => Ok(Box::new(futures::stream::once(Box::pin(async move {
-                Ok(bytes::Bytes::from(MAINNET_1))
-            })))
-                as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>),
+            "https://ethportal.net/era1/" => {
+                Ok(Box::new(futures::stream::once(Box::pin(async move {
+                    Ok(bytes::Bytes::from(MAINNET_1))
+                })))
+                    as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
+            }
             "https://ethportal.net/era1/mainnet-00001-a5364e9a.era1" => {
                 Ok(Box::new(futures::stream::once(Box::pin(async move {
                     Ok(bytes::Bytes::from(MAINNET_1))
                 })))
                     as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
             }
-            "https://era.nimbus.team/era1/" => Ok(Box::new(futures::stream::once(Box::pin(async move {
-                Ok(bytes::Bytes::from(MAINNET_1))
-            })))
-                as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>),
+            "https://era.nimbus.team/era1/" => {
+                Ok(Box::new(futures::stream::once(Box::pin(async move {
+                    Ok(bytes::Bytes::from(MAINNET_1))
+                })))
+                    as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
+            }
             "https://era.nimbus.team/era1/mainnet-00001-a5364e9a.era1" => {
                 Ok(Box::new(futures::stream::once(Box::pin(async move {
                     Ok(bytes::Bytes::from(MAINNET_1))
