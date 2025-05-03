@@ -7,13 +7,8 @@ license.workspace = true
 
 [dependencies]
 # reth
-reth.workspace = true
-reth-exex.workspace = true
-reth-node-ethereum.workspace = true
-reth-primitives.workspace = true
+reth-ethereum = { workspace = true, features = ["full", "node"] }
 reth-e2e-test-utils.workspace = true
-reth-chainspec.workspace = true
-reth-tracing.workspace = true
 
 # async utilities
 futures-util.workspace = true
