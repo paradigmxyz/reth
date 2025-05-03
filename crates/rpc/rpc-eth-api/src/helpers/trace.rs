@@ -354,23 +354,17 @@ pub trait Trace:
                     })
                     .peekable();
 
-                while let Some((tx_info, tx)) = transactions.next() {
-                    let mut inspector = inspector_setup();
-                    let (res, _) = this.inspect(
-                        StateCacheDbRefMutWrapper(&mut db),
-                        evm_env.clone(),
-                        tx,
-                        &mut inspector,
-                    )?;
-                    let ResultAndState { result, state } = res;
-                    results.push(f(tx_info, inspector, result, &state, &db)?);
-
-                    // need to apply the state changes of this transaction before executing the
-                    // next transaction, but only if there's a next transaction
-                    if transactions.peek().is_some() {
-                        // commit the state changes to the DB
-                        db.commit(state)
-                    }
+               let mut tracer = MultiTransactionTracer::new(
+                    &mut db,
+                    evm_env.clone(),
+                    transactions,
+                    inspector_setup,
+                    f,
+                    |db, env, tx, inspector| this.inspect(db, env, tx, inspector),
+                );
+                    
+                for result in tracer {
+                    results.push(result?);
                 }
 
                 Ok(Some(results))
@@ -476,5 +470,51 @@ pub trait Trace:
         })?;
 
         Ok(())
+    }
+}
+
+
+pub struct MultiTransactionTracer<'a, DB, InspSetup, F, Evm, TxIter, Insp, R>
+where
+    TxIter: Iterator<Item = (TransactionInfo, TxEnvFor<Evm>)>,
+{
+    db: &'a mut CacheDB<StateProviderDatabase<'a>>,
+    evm_env: EvmEnvFor<Evm>,
+    transactions: Peekable<TxIter>,
+    inspector_setup: InspSetup,
+    result_handler: F,
+    phantom: PhantomData<(Insp, R)>,
+}
+
+impl<'a, DB, InspSetup, F, Evm, TxIter, Insp, R> Iterator
+    for MultiTransactionTracer<'a, DB, InspSetup, F, Evm, TxIter, Insp, R>
+where
+    TxIter: Iterator<Item = (TransactionInfo, TxEnvFor<Evm>)> + 'a,
+    InspSetup: FnMut() -> Insp,
+    F: FnMut(TransactionInfo, Insp, ExecutionResult<HaltReasonFor<Evm>>, &EvmState, &StateCacheDb<'_>) -> Result<R, Error>,
+    Insp: for<'b, 'c> InspectorFor<Evm, StateCacheDbRefMutWrapper<'b, 'c>>,
+{
+    type Item = Result<R, Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (tx_info, tx) = self.transactions.next()?;
+
+        let mut inspector = (self.inspector_setup)();
+        let (res, _) = inspect_fn(
+            StateCacheDbRefMutWrapper(self.db),
+            self.evm_env.clone(),
+            tx,
+            &mut inspector,
+        )?;
+
+        let ResultAndState { result, state } = res;
+
+        let processed = (self.result_handler)(tx_info, inspector, result, &state, &self.db);
+
+        if self.transactions.peek().is_some() {
+            self.db.commit(state);
+        }
+
+        Some(processed)
     }
 }
