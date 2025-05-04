@@ -92,7 +92,7 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
     StorageHashingStage::default().unwind(&provider, unwind).unwrap();
     AccountHashingStage::default().unwind(&provider, unwind).unwrap();
 
-    MerkleStage::default_unwind().unwind(&provider, unwind)?;
+    MerkleStage::<N::Primitives>::new_unwind(NoopConsensus::arc()).unwind(&provider, unwind)?;
 
     // Bring Plainstate to TO (hashing stage execution requires it)
     let mut exec_stage = ExecutionStage::new(
@@ -155,9 +155,10 @@ where
     info!(target: "reth::cli", "Executing stage.");
     let provider = output_provider_factory.database_provider_rw()?;
 
-    let mut stage = MerkleStage::Execution {
+    let mut stage = MerkleStage::<N::Primitives>::Execution {
         // Forces updating the root instead of calculating from scratch
         clean_threshold: u64::MAX,
+        consensus: NoopConsensus::arc(),
     };
 
     loop {

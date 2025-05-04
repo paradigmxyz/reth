@@ -298,10 +298,16 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     )),
                     None,
                 ),
-                StageEnum::Merkle => (
-                    Box::new(MerkleStage::new_execution(config.stages.merkle.clean_threshold)),
-                    Some(Box::new(MerkleStage::default_unwind())),
-                ),
+                StageEnum::Merkle => {
+                    let consensus = Arc::new(components.consensus().clone());
+                    (
+                        Box::new(MerkleStage::<N::Primitives>::new_execution(
+                            config.stages.merkle.clean_threshold,
+                            consensus.clone(),
+                        )),
+                        Some(Box::new(MerkleStage::<N::Primitives>::new_unwind(consensus))),
+                    )
+                }
                 StageEnum::AccountHistory => (
                     Box::new(IndexAccountHistoryStage::new(
                         config.stages.index_account_history,

@@ -23,7 +23,7 @@ use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates,
     MemoryOverlayStateProvider, NewCanonicalChain,
 };
-use reth_consensus::{Consensus, FullConsensus};
+use reth_consensus::{Consensus, FullConsensus, HeaderValidator};
 pub use reth_engine_primitives::InvalidBlockHook;
 use reth_engine_primitives::{
     BeaconConsensusEngineEvent, BeaconEngineMessage, BeaconOnNewPayloadError, EngineValidator,
@@ -2545,25 +2545,18 @@ where
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
         debug!(target: "engine::tree", ?root_elapsed, block=?block_num_hash, "Calculated state root");
 
-        #[cfg(feature = "skip-state-root-validation")]
-        let _ = state_root;
         // ensure state root matches
-        #[cfg(not(feature = "skip-state-root-validation"))]
-        if state_root != block.header().state_root() {
-            // call post-block hook
-            self.on_invalid_block(&parent_block, &block, &output, Some((&trie_output, state_root)));
-            return Err((
-                ConsensusError::BodyStateRootDiff(
-                    reth_primitives_traits::GotExpected {
-                        got: state_root,
-                        expected: block.header().state_root(),
-                    }
-                    .into(),
-                )
-                .into(),
-                block,
-            ))
-        }
+        self.consensus
+            .validate_state_root(block.header(), state_root)
+            .inspect_err(|_| {
+                self.on_invalid_block(
+                    &parent_block,
+                    &block,
+                    &output,
+                    Some((&trie_output, state_root)),
+                );
+            })
+            .map_err(|err| (err.into(), block.clone()))?;
 
         // terminate prewarming task with good state output
         handle.terminate_caching(Some(output.state.clone()));

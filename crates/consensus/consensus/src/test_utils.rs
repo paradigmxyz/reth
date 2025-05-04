@@ -1,7 +1,10 @@
 use crate::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
+use alloy_primitives::B256;
 use core::sync::atomic::{AtomicBool, Ordering};
 use reth_execution_types::BlockExecutionResult;
-use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
+use reth_primitives_traits::{
+    Block, BlockHeader, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
+};
 
 /// Consensus engine implementation for testing
 #[derive(Debug)]
@@ -84,7 +87,7 @@ impl<B: Block> Consensus<B> for TestConsensus {
     }
 }
 
-impl<H> HeaderValidator<H> for TestConsensus {
+impl<H: BlockHeader> HeaderValidator<H> for TestConsensus {
     fn validate_header(&self, _header: &SealedHeader<H>) -> Result<(), ConsensusError> {
         if self.fail_validation() {
             Err(ConsensusError::BaseFeeMissing)
@@ -103,5 +106,9 @@ impl<H> HeaderValidator<H> for TestConsensus {
         } else {
             Ok(())
         }
+    }
+
+    fn validate_state_root(&self, _header: &H, _root: B256) -> Result<(), ConsensusError> {
+        Ok(())
     }
 }

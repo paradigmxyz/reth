@@ -37,6 +37,16 @@ pub trait ScrollHardforks: EthereumHardforks {
     fn is_darwin_v2_active_at_timestamp(&self, timestamp: u64) -> bool {
         self.scroll_fork_activation(ScrollHardfork::DarwinV2).active_at_timestamp(timestamp)
     }
+
+    /// Returns `true` if [`Euclid`](ScrollHardfork::Euclid) is active at given block timestamp.
+    fn is_euclid_active_at_timestamp(&self, timestamp: u64) -> bool {
+        self.scroll_fork_activation(ScrollHardfork::Euclid).active_at_timestamp(timestamp)
+    }
+
+    /// Returns `true` if [`EuclidV2`](ScrollHardfork::EuclidV2) is active at given block timestamp.
+    fn is_euclid_v2_active_at_timestamp(&self, timestamp: u64) -> bool {
+        self.scroll_fork_activation(ScrollHardfork::EuclidV2).active_at_timestamp(timestamp)
+    }
 }
 
 /// A type allowing to configure activation [`ForkCondition`]s for a given list of

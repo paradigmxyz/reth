@@ -277,7 +277,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
         // Unwind account history indices.
         self.unwind_account_history_indices(changed_accounts.iter())?;
-        let storage_range = BlockNumberAddress::range(range.clone());
+        let storage_range = BlockNumberAddress::range(range);
 
         let changed_storages = self
             .tx
@@ -309,36 +309,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             storage_prefix_sets,
             destroyed_accounts,
         };
-        let (new_state_root, trie_updates) = StateRoot::from_tx(&self.tx)
+        let (_, trie_updates) = StateRoot::from_tx(&self.tx)
             .with_prefix_sets(prefix_sets)
             .root_with_updates()
             .map_err(reth_db_api::DatabaseError::from)?;
 
-        let parent_number = range.start().saturating_sub(1);
-        let parent_state_root = self
-            .header_by_number(parent_number)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(parent_number.into()))?
-            .state_root();
-
-        #[cfg(feature = "skip-state-root-validation")]
-        {
-            let _ = parent_state_root;
-            debug!(target: "provider::db::unwind", ?new_state_root, block_number = parent_number);
-        }
-
-        // state root should be always correct as we are reverting state.
-        // but for sake of double verification we will check it again.
-        #[cfg(not(feature = "skip-state-root-validation"))]
-        if new_state_root != parent_state_root {
-            let parent_hash = self
-                .block_hash(parent_number)?
-                .ok_or_else(|| ProviderError::HeaderNotFound(parent_number.into()))?;
-            return Err(ProviderError::UnwindStateRootMismatch(Box::new(RootMismatch {
-                root: GotExpected { got: new_state_root, expected: parent_state_root },
-                block_number: parent_number,
-                block_hash: parent_hash,
-            })))
-        }
         self.write_trie_updates(&trie_updates)?;
 
         Ok(())

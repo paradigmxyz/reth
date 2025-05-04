@@ -311,28 +311,35 @@ where
     E: BlockExecutorProvider,
     ExecutionStages<E>: StageSet<Provider>,
     PruneSenderRecoveryStage: Stage<Provider>,
-    HashingStages: StageSet<Provider>,
+    HashingStages<E::Primitives>: StageSet<Provider>,
     HistoryIndexingStages: StageSet<Provider>,
     PruneStage: Stage<Provider>,
 {
     fn builder(self) -> StageSetBuilder<Provider> {
-        ExecutionStages::new(self.executor_provider, self.consensus, self.stages_config.clone())
-            .builder()
-            // If sender recovery prune mode is set, add the prune sender recovery stage.
-            .add_stage_opt(self.prune_modes.sender_recovery.map(|prune_mode| {
-                PruneSenderRecoveryStage::new(prune_mode, self.stages_config.prune.commit_threshold)
-            }))
-            .add_set(HashingStages { stages_config: self.stages_config.clone() })
-            .add_set(HistoryIndexingStages {
-                stages_config: self.stages_config.clone(),
-                prune_modes: self.prune_modes.clone(),
-            })
-            // If any prune modes are set, add the prune stage.
-            .add_stage_opt(self.prune_modes.is_empty().not().then(|| {
-                // Prune stage should be added after all hashing stages, because otherwise it will
-                // delete
-                PruneStage::new(self.prune_modes.clone(), self.stages_config.prune.commit_threshold)
-            }))
+        ExecutionStages::new(
+            self.executor_provider,
+            self.consensus.clone(),
+            self.stages_config.clone(),
+        )
+        .builder()
+        // If sender recovery prune mode is set, add the prune sender recovery stage.
+        .add_stage_opt(self.prune_modes.sender_recovery.map(|prune_mode| {
+            PruneSenderRecoveryStage::new(prune_mode, self.stages_config.prune.commit_threshold)
+        }))
+        .add_set(HashingStages {
+            stages_config: self.stages_config.clone(),
+            consensus: self.consensus,
+        })
+        .add_set(HistoryIndexingStages {
+            stages_config: self.stages_config.clone(),
+            prune_modes: self.prune_modes.clone(),
+        })
+        // If any prune modes are set, add the prune stage.
+        .add_stage_opt(self.prune_modes.is_empty().not().then(|| {
+            // Prune stage should be added after all hashing stages, because otherwise it will
+            // delete
+            PruneStage::new(self.prune_modes.clone(), self.stages_config.prune.commit_threshold)
+        }))
     }
 }
 
@@ -378,22 +385,25 @@ where
 }
 
 /// A set containing all stages that hash account state.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 #[non_exhaustive]
-pub struct HashingStages {
+pub struct HashingStages<P: NodePrimitives> {
     /// Configuration for each stage in the pipeline
     stages_config: StageConfig,
+    /// Consensus instance for validating blocks.
+    consensus: Arc<dyn FullConsensus<P, Error = ConsensusError>>,
 }
 
-impl<Provider> StageSet<Provider> for HashingStages
+impl<Provider, P> StageSet<Provider> for HashingStages<P>
 where
-    MerkleStage: Stage<Provider>,
+    P: NodePrimitives,
+    MerkleStage<P>: Stage<Provider>,
     AccountHashingStage: Stage<Provider>,
     StorageHashingStage: Stage<Provider>,
 {
     fn builder(self) -> StageSetBuilder<Provider> {
         StageSetBuilder::default()
-            .add_stage(MerkleStage::default_unwind())
+            .add_stage(MerkleStage::new_unwind(self.consensus.clone()))
             .add_stage(AccountHashingStage::new(
                 self.stages_config.account_hashing,
                 self.stages_config.etl.clone(),
@@ -402,7 +412,10 @@ where
                 self.stages_config.storage_hashing,
                 self.stages_config.etl.clone(),
             ))
-            .add_stage(MerkleStage::new_execution(self.stages_config.merkle.clean_threshold))
+            .add_stage(MerkleStage::new_execution(
+                self.stages_config.merkle.clean_threshold,
+                self.consensus,
+            ))
     }
 }
 

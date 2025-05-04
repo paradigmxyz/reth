@@ -3,8 +3,11 @@ use core::fmt::Debug;
 
 use crate::error::ScrollConsensusError;
 use alloy_consensus::{BlockHeader as _, TxReceipt, EMPTY_OMMER_ROOT_HASH};
+use alloy_primitives::B256;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
+use reth_consensus::{
+    validate_state_root, Consensus, ConsensusError, FullConsensus, HeaderValidator,
+};
 use reth_consensus_common::validation::{
     validate_against_parent_hash_number, validate_body_against_header, validate_header_gas,
 };
@@ -141,6 +144,14 @@ impl<ChainSpec: EthChainSpec + ScrollHardforks, H: BlockHeader> HeaderValidator<
             return Err(ConsensusError::Other(
                 ScrollConsensusError::UnexpectedBlobParams.to_string(),
             ))
+        }
+
+        Ok(())
+    }
+
+    fn validate_state_root(&self, header: &H, root: B256) -> Result<(), ConsensusError> {
+        if self.chain_spec.is_euclid_active_at_timestamp(header.timestamp()) {
+            validate_state_root(header, root)?;
         }
 
         Ok(())

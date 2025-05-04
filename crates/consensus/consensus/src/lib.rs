@@ -18,7 +18,7 @@ use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{
     constants::{MAXIMUM_GAS_LIMIT_BLOCK, MINIMUM_GAS_LIMIT},
     transaction::error::InvalidTransactionError,
-    Block, GotExpected, GotExpectedBoxed, NodePrimitives, RecoveredBlock, SealedBlock,
+    Block, BlockHeader, GotExpected, GotExpectedBoxed, NodePrimitives, RecoveredBlock, SealedBlock,
     SealedHeader,
 };
 
@@ -73,7 +73,7 @@ pub trait Consensus<B: Block>: HeaderValidator<B::Header> {
 
 /// HeaderValidator is a protocol that validates headers and their relationships.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait HeaderValidator<H = Header>: Debug + Send + Sync {
+pub trait HeaderValidator<H: BlockHeader = Header>: Debug + Send + Sync {
     /// Validate if header is correct and follows consensus specification.
     ///
     /// This is called on standalone header to check if all hashes are correct.
@@ -121,6 +121,22 @@ pub trait HeaderValidator<H = Header>: Debug + Send + Sync {
         }
         Ok(())
     }
+
+    /// Validate the block header against a provided expected state root.
+    fn validate_state_root(&self, header: &H, root: B256) -> Result<(), ConsensusError> {
+        validate_state_root(header, root)
+    }
+}
+
+/// Validate the provided state root against the block's state root.
+pub fn validate_state_root<H: BlockHeader>(header: &H, root: B256) -> Result<(), ConsensusError> {
+    if header.state_root() != root {
+        return Err(ConsensusError::BodyStateRootDiff(
+            GotExpected { got: root, expected: header.state_root() }.into(),
+        ))
+    }
+
+    Ok(())
 }
 
 /// Consensus Errors

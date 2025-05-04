@@ -130,7 +130,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         // build the full block client
         let consensus: Arc<dyn Consensus<BlockTy<N>, Error = ConsensusError>> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
-        let block_range_client = FullBlockClient::new(fetch_client, consensus);
+        let block_range_client = FullBlockClient::new(fetch_client, consensus.clone());
 
         // get best block number
         let best_block_number = provider_rw.best_block_number()?;
@@ -145,7 +145,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
         let mut account_hashing_stage = AccountHashingStage::default();
         let mut storage_hashing_stage = StorageHashingStage::default();
-        let mut merkle_stage = MerkleStage::default_execution();
+        let mut merkle_stage =
+            MerkleStage::<N::Primitives>::default_execution_with_consensus(consensus);
 
         for block in blocks.into_iter().rev() {
             let block_number = block.number;
