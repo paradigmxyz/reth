@@ -83,7 +83,13 @@ where
 
 impl<N> LoadBlock for BscEthApi<N>
 where
-    Self: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt,
+    Self: LoadPendingBlock
+        + SpawnBlocking
+        + RpcNodeCoreExt<
+            Pool: TransactionPool<
+                Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
+            >,
+        >,
     N: BscNodeCore,
 {
 }
