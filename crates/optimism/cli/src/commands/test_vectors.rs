@@ -72,7 +72,7 @@ impl Command {
         Ok(())
     }
     /// Returns the underlying chain being used to run this command
-    pub const fn chain_spec(&self) -> Option<&Arc<ChainSpec>> {
+    pub fn chain_spec(&self) -> Option<&Arc<ChainSpec>> {
         None
     }
 }

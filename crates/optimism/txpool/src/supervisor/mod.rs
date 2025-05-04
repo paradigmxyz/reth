@@ -6,7 +6,6 @@ pub use op_alloy_consensus::interop::*;
 mod client;
 pub use client::{SupervisorClient, DEFAULT_SUPERVISOR_URL};
 mod errors;
-pub use errors::InteropTxValidatorError;
+pub use errors::{InteropTxValidatorError, InvalidInboxEntry};
 mod message;
 pub use message::ExecutingDescriptor;
-pub mod metrics;

@@ -13,7 +13,6 @@ use alloy_rpc_types_engine::{
 use async_trait::async_trait;
 use core::fmt;
 use jsonrpsee::core::RpcResult;
-use jsonrpsee_types::error::ErrorObject;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::PayloadValidator;
@@ -28,14 +27,13 @@ use reth_primitives_traits::{
 };
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
 use reth_rpc_api::BlockSubmissionValidationApiServer;
-use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
+use reth_rpc_server_types::result::internal_rpc_err;
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use revm_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{oneshot, RwLock};
-use tracing::warn;
 
 /// The type that implements the `validation` rpc namespace trait
 #[derive(Clone, Debug, derive_more::Deref)]
@@ -118,6 +116,7 @@ where
     ) -> Result<(), ValidationApiError> {
         self.validate_message_against_header(block.sealed_header(), &message)?;
 
+        self.consensus.validate_header_with_total_difficulty(block.sealed_header(), U256::MAX)?;
         self.consensus.validate_header(block.sealed_header())?;
         self.consensus.validate_block_pre_execution(block.sealed_block())?;
 
@@ -173,8 +172,6 @@ where
         let mut accessed_blacklisted = None;
         let output = executor.execute_with_state_closure(&block, |state| {
             if !self.disallow.is_empty() {
-                // Check whether the submission interacted with any blacklisted account by scanning
-                // the `State`'s cache that records everything read form database during execution.
                 for account in state.cache.accounts.keys() {
                     if self.disallow.contains(account) {
                         accessed_blacklisted = Some(*account);
@@ -183,12 +180,12 @@ where
             }
         })?;
 
+        // update the cached reads
+        self.update_cached_reads(parent_header_hash, request_cache).await;
+
         if let Some(account) = accessed_blacklisted {
             return Err(ValidationApiError::Blacklist(account))
         }
-
-        // update the cached reads
-        self.update_cached_reads(parent_header_hash, request_cache).await;
 
         self.consensus.validate_block_post_execution(&block, &output)?;
 
@@ -420,7 +417,6 @@ where
         &self,
         _request: BuilderBlockValidationRequest,
     ) -> RpcResult<()> {
-        warn!(target: "rpc::flashbots", "Method `flashbots_validateBuilderSubmissionV1` is not supported");
         Err(internal_rpc_err("unimplemented"))
     }
 
@@ -428,7 +424,6 @@ where
         &self,
         _request: BuilderBlockValidationRequestV2,
     ) -> RpcResult<()> {
-        warn!(target: "rpc::flashbots", "Method `flashbots_validateBuilderSubmissionV2` is not supported");
         Err(internal_rpc_err("unimplemented"))
     }
 
@@ -443,7 +438,7 @@ where
         self.task_spawner.spawn_blocking(Box::pin(async move {
             let result = Self::validate_builder_submission_v3(&this, request)
                 .await
-                .map_err(ErrorObject::from);
+                .map_err(|err| internal_rpc_err(err.to_string()));
             let _ = tx.send(result);
         }));
 
@@ -461,7 +456,7 @@ where
         self.task_spawner.spawn_blocking(Box::pin(async move {
             let result = Self::validate_builder_submission_v4(&this, request)
                 .await
-                .map_err(ErrorObject::from);
+                .map_err(|err| internal_rpc_err(err.to_string()));
             let _ = tx.send(result);
         }));
 
@@ -545,6 +540,9 @@ pub enum ValidationApiError {
     ProposerPayment,
     #[error("invalid blobs bundle")]
     InvalidBlobsBundle,
+    /// When the transaction signature is invalid
+    #[error("invalid transaction signature")]
+    InvalidTransactionSignature,
     #[error("block accesses blacklisted address: {_0}")]
     Blacklist(Address),
     #[error(transparent)]
@@ -557,37 +555,6 @@ pub enum ValidationApiError {
     Execution(#[from] BlockExecutionError),
     #[error(transparent)]
     Payload(#[from] NewPayloadError),
-}
-
-impl From<ValidationApiError> for ErrorObject<'static> {
-    fn from(error: ValidationApiError) -> Self {
-        match error {
-            ValidationApiError::GasLimitMismatch(_) |
-            ValidationApiError::GasUsedMismatch(_) |
-            ValidationApiError::ParentHashMismatch(_) |
-            ValidationApiError::BlockHashMismatch(_) |
-            ValidationApiError::Blacklist(_) |
-            ValidationApiError::ProposerPayment |
-            ValidationApiError::InvalidBlobsBundle |
-            ValidationApiError::Blob(_) => invalid_params_rpc_err(error.to_string()),
-
-            ValidationApiError::MissingLatestBlock |
-            ValidationApiError::MissingParentBlock |
-            ValidationApiError::BlockTooOld |
-            ValidationApiError::Consensus(_) |
-            ValidationApiError::Provider(_) => internal_rpc_err(error.to_string()),
-            ValidationApiError::Execution(err) => match err {
-                error @ BlockExecutionError::Validation(_) => {
-                    invalid_params_rpc_err(error.to_string())
-                }
-                error @ BlockExecutionError::Internal(_) => internal_rpc_err(error.to_string()),
-            },
-            ValidationApiError::Payload(err) => match err {
-                error @ NewPayloadError::Eth(_) => invalid_params_rpc_err(error.to_string()),
-                error @ NewPayloadError::Other(_) => internal_rpc_err(error.to_string()),
-            },
-        }
-    }
 }
 
 /// Metrics for the validation endpoint.

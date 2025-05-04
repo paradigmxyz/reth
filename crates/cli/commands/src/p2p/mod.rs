@@ -16,7 +16,6 @@ use reth_node_core::{
     utils::get_single_header,
 };
 
-pub mod bootnode;
 mod rlpx;
 
 /// `reth p2p` command
@@ -86,9 +85,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         config.peers.trusted_nodes.extend(self.network.trusted_peers.clone());
 
         if config.peers.trusted_nodes.is_empty() && self.network.trusted_only {
-            eyre::bail!(
-                "No trusted nodes. Set trusted peer with `--trusted-peer <enode record>` or set `--trusted-only` to `false`"
-            )
+            eyre::bail!("No trusted nodes. Set trusted peer with `--trusted-peer <enode record>` or set `--trusted-only` to `false`")
         }
 
         config.peers.trusted_nodes_only = self.network.trusted_only;
@@ -165,9 +162,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
         Ok(())
     }
-}
-
-impl<C: ChainSpecParser> Command<C> {
     /// Returns the underlying chain being used to run this command
     pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         Some(&self.chain)

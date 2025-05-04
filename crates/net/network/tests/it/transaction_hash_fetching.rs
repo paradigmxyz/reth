@@ -1,4 +1,5 @@
 use alloy_primitives::U256;
+use rand::thread_rng;
 use reth_network::{
     test_utils::Testnet,
     transactions::{TransactionPropagationMode::Max, TransactionsManagerConfig},
@@ -39,8 +40,8 @@ async fn transaction_hash_fetching() {
         let peer_pool = peer.pool().unwrap();
 
         for _ in 0..num_tx_per_peer {
-            let mut tx_gen = TransactionGenerator::new(rand::rng());
-            let tx = tx_gen.gen_eip1559_pooled();
+            let mut gen = TransactionGenerator::new(thread_rng());
+            let tx = gen.gen_eip1559_pooled();
             let sender = tx.sender();
             provider.add_account(sender, ExtendedAccount::new(0, U256::from(100_000_000)));
             peer_pool.add_external_transaction(tx).await.unwrap();

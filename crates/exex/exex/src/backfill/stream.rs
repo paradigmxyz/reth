@@ -251,13 +251,14 @@ mod tests {
     };
     use reth_stages_api::ExecutionStageThresholds;
     use reth_testing_utils::generators;
+    use secp256k1::Keypair;
 
     #[tokio::test]
     async fn test_single_blocks() -> eyre::Result<()> {
         reth_tracing::init_test_tracing();
 
         // Create a key pair for the sender
-        let key_pair = generators::generate_key(&mut generators::rng());
+        let key_pair = Keypair::new_global(&mut generators::rng());
         let address = public_key_to_address(key_pair.public_key());
 
         let chain_spec = chain_spec(address);
@@ -294,7 +295,7 @@ mod tests {
         reth_tracing::init_test_tracing();
 
         // Create a key pair for the sender
-        let key_pair = generators::generate_key(&mut generators::rng());
+        let key_pair = Keypair::new_global(&mut generators::rng());
         let address = public_key_to_address(key_pair.public_key());
 
         let chain_spec = chain_spec(address);

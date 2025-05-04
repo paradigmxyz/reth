@@ -77,7 +77,7 @@ impl<P> RessProtocolConnection<P> {
     }
 
     /// Returns the next request id
-    const fn next_id(&mut self) -> u64 {
+    fn next_id(&mut self) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
         id

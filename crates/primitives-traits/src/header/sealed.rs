@@ -99,11 +99,6 @@ impl<H: Sealable> SealedHeader<H> {
         let hash = self.hash();
         (self.header, hash)
     }
-
-    /// Returns references to both the header and hash without taking ownership.
-    pub fn split_ref(&self) -> (&H, &BlockHash) {
-        (self.header(), self.hash_ref())
-    }
 }
 
 impl<H: Sealable> SealedHeader<&H> {
@@ -214,7 +209,7 @@ impl<H: crate::test_utils::TestHeader> SealedHeader<H> {
     }
 
     /// Returns a mutable reference to the header.
-    pub const fn header_mut(&mut self) -> &mut H {
+    pub fn header_mut(&mut self) -> &mut H {
         &mut self.header
     }
 
@@ -330,7 +325,7 @@ pub(super) mod serde_bincode_compat {
             }
 
             let mut bytes = [0u8; 1024];
-            rand::rng().fill(&mut bytes[..]);
+            rand::thread_rng().fill(&mut bytes[..]);
             let data = Data {
                 transaction: SealedHeader::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
                     .unwrap(),

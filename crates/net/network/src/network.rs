@@ -439,7 +439,7 @@ struct NetworkInner<N: NetworkPrimitives = EthNetworkPrimitives> {
     secret_key: SecretKey,
     /// The identifier used by this node.
     local_peer_id: PeerId,
-    /// Access to all the nodes.
+    /// Access to the all the nodes.
     peers: PeersHandle,
     /// The mode of the network
     network_mode: NetworkMode,

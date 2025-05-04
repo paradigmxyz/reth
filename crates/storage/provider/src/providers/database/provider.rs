@@ -11,13 +11,13 @@ use crate::{
     },
     AccountReader, BlockBodyWriter, BlockExecutionWriter, BlockHashReader, BlockNumReader,
     BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
-    DBProvider, HashingWriter, HeaderProvider, HeaderSyncGapProvider, HistoricalStateProvider,
-    HistoricalStateProviderRef, HistoryWriter, LatestStateProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RevertsInit,
-    StageCheckpointReader, StateCommitmentProvider, StateProviderBox, StateWriter,
-    StaticFileProviderFactory, StatsReader, StorageLocation, StorageReader, StorageTrieWriter,
-    TransactionVariant, TransactionsProvider, TransactionsProviderExt, TrieWriter,
-    WithdrawalsProvider,
+    DBProvider, HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
+    HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter, LatestStateProvider,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderError, PruneCheckpointReader,
+    PruneCheckpointWriter, RevertsInit, StageCheckpointReader, StateCommitmentProvider,
+    StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader, StorageLocation,
+    StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
+    TransactionsProviderExt, TrieWriter, WithdrawalsProvider,
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader, Header, TxReceipt};
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals, BlockHashOrNumber};
@@ -42,6 +42,7 @@ use reth_db_api::{
     BlockNumberList, DatabaseError, PlainAccountState, PlainStorageState,
 };
 use reth_execution_types::{Chain, ExecutionOutcome};
+use reth_network_p2p::headers::downloader::SyncTarget;
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, Block as _, BlockBody as _, Bytecode, GotExpected, NodePrimitives, RecoveredBlock,
@@ -73,6 +74,7 @@ use std::{
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::{mpsc, Arc},
 };
+use tokio::sync::watch;
 use tracing::{debug, trace};
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
@@ -515,7 +517,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     }
 
     /// Pass `DbTx` or `DbTxMut` mutable reference.
-    pub const fn tx_mut(&mut self) -> &mut TX {
+    pub fn tx_mut(&mut self) -> &mut TX {
         &mut self.tx
     }
 
@@ -937,10 +939,11 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderSyncGapProvider
 {
     type Header = HeaderTy<N>;
 
-    fn local_tip_header(
+    fn sync_gap(
         &self,
+        tip: watch::Receiver<B256>,
         highest_uninterrupted_block: BlockNumber,
-    ) -> ProviderResult<SealedHeader<Self::Header>> {
+    ) -> ProviderResult<HeaderSyncGap<Self::Header>> {
         let static_file_provider = self.static_file_provider();
 
         // Make sure Headers static file is at the same height. If it's further, this
@@ -973,7 +976,9 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderSyncGapProvider
             .sealed_header(highest_uninterrupted_block)?
             .ok_or_else(|| ProviderError::HeaderNotFound(highest_uninterrupted_block.into()))?;
 
-        Ok(local_head)
+        let target = SyncTarget::Tip(*tip.borrow());
+
+        Ok(HeaderSyncGap { local_head, target })
     }
 }
 

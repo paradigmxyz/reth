@@ -12,7 +12,7 @@ use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderResult;
 
 /// Database provider.
-pub trait DBProvider: Sized {
+pub trait DBProvider: Send + Sync + Sized + 'static {
     /// Underlying database transaction held by the provider.
     type Tx: DbTx;
 

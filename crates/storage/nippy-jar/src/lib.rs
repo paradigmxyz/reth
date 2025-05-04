@@ -189,7 +189,7 @@ impl<H: NippyJarHeader> NippyJar<H> {
     }
 
     /// Gets a mutable reference to the compressor.
-    pub const fn compressor_mut(&mut self) -> Option<&mut Compressors> {
+    pub fn compressor_mut(&mut self) -> Option<&mut Compressors> {
         self.compressor.as_mut()
     }
 
@@ -432,9 +432,9 @@ mod tests {
         let num_rows = 100;
 
         let mut vec: Vec<u8> = vec![0; value_length];
-        let mut rng = seed.map(SmallRng::seed_from_u64).unwrap_or_else(SmallRng::from_os_rng);
+        let mut rng = seed.map(SmallRng::seed_from_u64).unwrap_or_else(SmallRng::from_entropy);
 
-        let mut entry_gen = || {
+        let mut gen = || {
             (0..num_rows)
                 .map(|_| {
                     rng.fill_bytes(&mut vec[..]);
@@ -443,7 +443,7 @@ mod tests {
                 .collect()
         };
 
-        (entry_gen(), entry_gen())
+        (gen(), gen())
     }
 
     fn clone_with_result(col: &ColumnValues) -> ColumnResults<Vec<u8>> {
@@ -678,7 +678,7 @@ mod tests {
 
                 // Shuffled for chaos.
                 let mut data = col1.iter().zip(col2.iter()).enumerate().collect::<Vec<_>>();
-                data.shuffle(&mut rand::rng());
+                data.shuffle(&mut rand::thread_rng());
 
                 for (row_num, (v0, v1)) in data {
                     // Simulates `by_number` queries
@@ -716,7 +716,7 @@ mod tests {
 
                 // Shuffled for chaos.
                 let mut data = col1.iter().zip(col2.iter()).enumerate().collect::<Vec<_>>();
-                data.shuffle(&mut rand::rng());
+                data.shuffle(&mut rand::thread_rng());
 
                 // Imagine `Blocks` static file has two columns: `Block | StoredWithdrawals`
                 const BLOCKS_FULL_MASK: usize = 0b11;

@@ -13,11 +13,11 @@ use alloy_sol_macro::sol;
 use alloy_sol_types::SolCall;
 use reth::{
     builder::{components::ExecutorBuilder, BuilderContext},
+    cli::Cli,
     primitives::SealedBlock,
 };
 use reth_ethereum::{
     chainspec::ChainSpec,
-    cli::interface::Cli,
     evm::{
         primitives::{
             execute::{BlockExecutionError, BlockExecutor, InternalBlockExecutionError},
@@ -238,7 +238,7 @@ pub fn apply_withdrawals_contract_call(
         Ok(res) => res.state,
         Err(e) => {
             return Err(BlockExecutionError::Internal(InternalBlockExecutionError::Other(
-                format!("withdrawal contract system call revert: {e}").into(),
+                format!("withdrawal contract system call revert: {}", e).into(),
             )))
         }
     };

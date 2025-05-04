@@ -41,7 +41,7 @@ where
     }
 
     /// Returns the configured sequencer client, if any.
-    const fn sequencer_client(&self) -> Option<&SequencerClient> {
+    fn sequencer_client(&self) -> Option<&SequencerClient> {
         self.sequencer_client.as_ref()
     }
 
@@ -187,12 +187,12 @@ impl<Pool, Provider> OpEthExtApiInner<Pool, Provider> {
     }
 
     #[inline]
-    const fn pool(&self) -> &Pool {
+    fn pool(&self) -> &Pool {
         &self.pool
     }
 
     #[inline]
-    const fn provider(&self) -> &Provider {
+    fn provider(&self) -> &Provider {
         &self.provider
     }
 }

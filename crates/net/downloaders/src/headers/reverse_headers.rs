@@ -954,7 +954,7 @@ struct HeadersRequestOutcome<H> {
 // === impl OrderedHeadersResponse ===
 
 impl<H> HeadersRequestOutcome<H> {
-    const fn block_number(&self) -> u64 {
+    fn block_number(&self) -> u64 {
         self.request.start.as_number().expect("is number")
     }
 }
@@ -970,7 +970,7 @@ struct OrderedHeadersResponse<H> {
 // === impl OrderedHeadersResponse ===
 
 impl<H> OrderedHeadersResponse<H> {
-    const fn block_number(&self) -> u64 {
+    fn block_number(&self) -> u64 {
         self.request.start.as_number().expect("is number")
     }
 }
@@ -1067,7 +1067,7 @@ impl SyncTargetBlock {
     ///
     /// If the target block is a hash, this be converted into a `HashAndNumber`, but return `None`.
     /// The semantics should be equivalent to that of `Option::replace`.
-    const fn replace_number(&mut self, number: u64) -> Option<u64> {
+    fn replace_number(&mut self, number: u64) -> Option<u64> {
         match self {
             Self::Hash(hash) => {
                 *self = Self::HashAndNumber { hash: *hash, number };

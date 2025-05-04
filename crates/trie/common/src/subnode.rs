@@ -82,7 +82,7 @@ mod tests {
                 state_mask: TrieMask::new(1),
                 tree_mask: TrieMask::new(0),
                 hash_mask: TrieMask::new(1),
-                hashes: vec![B256::ZERO].into(),
+                hashes: vec![B256::ZERO],
                 root_hash: None,
             }),
         };

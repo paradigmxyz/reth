@@ -79,7 +79,7 @@ impl<I> Setup<I> {
     }
 
     /// Set the genesis block
-    pub const fn with_genesis(mut self, genesis: Genesis) -> Self {
+    pub fn with_genesis(mut self, genesis: Genesis) -> Self {
         self.genesis = Some(genesis);
         self
     }
@@ -103,13 +103,13 @@ impl<I> Setup<I> {
     }
 
     /// Set the network configuration
-    pub const fn with_network(mut self, network: NetworkSetup) -> Self {
+    pub fn with_network(mut self, network: NetworkSetup) -> Self {
         self.network = network;
         self
     }
 
     /// Set dev mode
-    pub const fn with_dev_mode(mut self, is_dev: bool) -> Self {
+    pub fn with_dev_mode(mut self, is_dev: bool) -> Self {
         self.is_dev = is_dev;
         self
     }
@@ -240,12 +240,12 @@ pub struct NetworkSetup {
 
 impl NetworkSetup {
     /// Create a new network setup with a single node
-    pub const fn single_node() -> Self {
+    pub fn single_node() -> Self {
         Self { node_count: 1 }
     }
 
     /// Create a new network setup with multiple nodes
-    pub const fn multi_node(count: usize) -> Self {
+    pub fn multi_node(count: usize) -> Self {
         Self { node_count: count }
     }
 }

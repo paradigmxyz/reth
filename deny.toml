@@ -43,7 +43,6 @@ allow = [
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
-    "BSL-1.0",
     "0BSD",
     "CC0-1.0",
     "ISC",
@@ -52,7 +51,6 @@ allow = [
     "Zlib",
     # https://github.com/rustls/webpki/blob/main/LICENSE ISC Style
     "LicenseRef-rustls-webpki",
-    "CDLA-Permissive-2.0",
 ]
 
 # Allow 1 or more licenses on a per-crate basis, so that particular licenses

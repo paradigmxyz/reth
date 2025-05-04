@@ -2,8 +2,7 @@
 
 use crate::{
     supervisor::{
-        metrics::SupervisorMetrics, parse_access_list_items_to_inbox_entries, ExecutingDescriptor,
-        InteropTxValidatorError,
+        parse_access_list_items_to_inbox_entries, ExecutingDescriptor, InteropTxValidatorError,
     },
     InvalidCrossTx,
 };
@@ -12,11 +11,7 @@ use alloy_primitives::{TxHash, B256};
 use alloy_rpc_client::ReqwestClient;
 use futures_util::future::BoxFuture;
 use op_alloy_consensus::interop::SafetyLevel;
-use std::{
-    borrow::Cow,
-    future::IntoFuture,
-    time::{Duration, Instant},
-};
+use std::{borrow::Cow, future::IntoFuture, time::Duration};
 use tracing::trace;
 
 /// Supervisor hosted by op-labs
@@ -24,7 +19,7 @@ use tracing::trace;
 pub const DEFAULT_SUPERVISOR_URL: &str = "http://localhost:1337/";
 
 /// The default request timeout to use
-const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(100);
+const DEFAULT_REQUEST_TIMOUT: Duration = Duration::from_millis(100);
 
 /// Implementation of the supervisor trait for the interop.
 #[derive(Debug, Clone)]
@@ -34,8 +29,6 @@ pub struct SupervisorClient {
     safety: SafetyLevel,
     /// The default request timeout
     timeout: Duration,
-    /// Metrics for tracking supervisor operations
-    metrics: SupervisorMetrics,
 }
 
 impl SupervisorClient {
@@ -45,22 +38,17 @@ impl SupervisorClient {
             .connect(supervisor_endpoint.into().as_str())
             .await
             .expect("building supervisor client");
-        Self {
-            client,
-            safety,
-            timeout: DEFAULT_REQUEST_TIMEOUT,
-            metrics: SupervisorMetrics::default(),
-        }
+        Self { client, safety, timeout: DEFAULT_REQUEST_TIMOUT }
     }
 
     /// Configures a custom timeout
-    pub const fn with_timeout(mut self, timeout: Duration) -> Self {
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self
     }
 
     /// Returns safely level
-    pub const fn safety(&self) -> SafetyLevel {
+    pub fn safety(&self) -> SafetyLevel {
         self.safety
     }
 
@@ -76,7 +64,6 @@ impl SupervisorClient {
             executing_descriptor,
             timeout: self.timeout,
             safety: self.safety,
-            metrics: self.metrics.clone(),
         }
     }
 
@@ -135,18 +122,17 @@ pub struct CheckAccessListRequest<'a> {
     executing_descriptor: ExecutingDescriptor,
     timeout: Duration,
     safety: SafetyLevel,
-    metrics: SupervisorMetrics,
 }
 
-impl<'a> CheckAccessListRequest<'a> {
+impl CheckAccessListRequest<'_> {
     /// Configures the timeout to use for the request if any.
-    pub const fn with_timeout(mut self, timeout: Duration) -> Self {
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self
     }
 
     /// Configures the [`SafetyLevel`] for this request
-    pub const fn with_safety(mut self, safety: SafetyLevel) -> Self {
+    pub fn with_safety(mut self, safety: SafetyLevel) -> Self {
         self.safety = safety;
         self
     }
@@ -157,23 +143,18 @@ impl<'a> IntoFuture for CheckAccessListRequest<'a> {
     type IntoFuture = BoxFuture<'a, Self::Output>;
 
     fn into_future(self) -> Self::IntoFuture {
-        let Self { client, inbox_entries, executing_descriptor, timeout, safety, metrics } = self;
+        let Self { client, inbox_entries, executing_descriptor, timeout, safety } = self;
         Box::pin(async move {
-            let start = Instant::now();
-
-            let result = tokio::time::timeout(
+            tokio::time::timeout(
                 timeout,
                 client.request(
                     "supervisor_checkAccessList",
                     (inbox_entries, safety, executing_descriptor),
                 ),
             )
-            .await;
-            metrics.record_supervisor_query(start.elapsed());
-
-            result
-                .map_err(|_| InteropTxValidatorError::Timeout(timeout.as_secs()))?
-                .map_err(InteropTxValidatorError::other)
+            .await
+            .map_err(|_| InteropTxValidatorError::ValidationTimeout(timeout.as_secs()))?
+            .map_err(InteropTxValidatorError::client)
         })
     }
 }

@@ -162,7 +162,7 @@ where
                         depth: trace.depth as u32,
                         from: trace.caller,
                         to: trace.address,
-                        value: Some(trace.value),
+                        value: trace.value,
                         input: trace.data,
                         output: trace.output,
                     })
