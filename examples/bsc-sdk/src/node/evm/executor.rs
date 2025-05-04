@@ -3,7 +3,9 @@ use crate::{
     consensus::{MAX_SYSTEM_REWARD, SYSTEM_ADDRESS, SYSTEM_REWARD_PERCENT},
     evm::transaction::BscTxEnv,
     hardforks::BscHardforks,
-    system_contracts::{get_upgrade_system_contracts, is_system_transaction, SystemContract},
+    system_contracts::{
+        get_upgrade_system_contracts, is_system_transaction, SystemContract, SYSTEM_REWARD_CONTRACT,
+    },
 };
 use alloy_consensus::{Transaction, TxReceipt};
 use alloy_eips::{eip7685::Requests, Encodable2718};
@@ -29,6 +31,7 @@ use revm::{
     state::Bytecode,
     Database as _, DatabaseCommit,
 };
+use std::str::FromStr;
 
 pub struct BscBlockExecutor<'a, EVM, Spec, R: ReceiptBuilder>
 where
@@ -261,7 +264,7 @@ where
         let system_reward_balance = self
             .evm
             .db_mut()
-            .basic(SYSTEM_ADDRESS)
+            .basic(Address::from_str(SYSTEM_REWARD_CONTRACT).unwrap())
             .map_err(BlockExecutionError::other)?
             .unwrap_or_default()
             .balance;
