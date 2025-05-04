@@ -114,12 +114,12 @@ impl<N: NetworkPrimitives> NetworkState<N> {
     }
 
     /// Returns mutable access to the [`PeersManager`]
-    pub(crate) fn peers_mut(&mut self) -> &mut PeersManager {
+    pub(crate) const fn peers_mut(&mut self) -> &mut PeersManager {
         &mut self.peers_manager
     }
 
     /// Returns mutable access to the [`Discovery`]
-    pub(crate) fn discovery_mut(&mut self) -> &mut Discovery {
+    pub(crate) const fn discovery_mut(&mut self) -> &mut Discovery {
         &mut self.discovery
     }
 
@@ -195,7 +195,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
 
         // Shuffle to propagate to a random sample of peers on every block announcement
         let mut peers: Vec<_> = self.active_peers.iter_mut().collect();
-        peers.shuffle(&mut rand::thread_rng());
+        peers.shuffle(&mut rand::rng());
 
         for (peer_id, peer) in peers {
             if peer.blocks.contains(&msg.hash) {

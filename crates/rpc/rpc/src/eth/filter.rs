@@ -539,7 +539,7 @@ where
                     // these are consecutive headers, so we can use the parent hash of the next
                     // block to get the current header's hash
                     let block_hash = match headers.get(idx + 1) {
-                        Some(parent) => parent.parent_hash(),
+                        Some(child) => child.parent_hash(),
                         None => self
                             .provider()
                             .block_hash(header.number())?
@@ -807,9 +807,9 @@ mod tests {
     fn test_block_range_iter() {
         let mut rng = generators::rng();
 
-        let start = rng.gen::<u32>() as u64;
-        let end = start.saturating_add(rng.gen::<u32>() as u64);
-        let step = rng.gen::<u16>() as u64;
+        let start = rng.random::<u32>() as u64;
+        let end = start.saturating_add(rng.random::<u32>() as u64);
+        let step = rng.random::<u16>() as u64;
         let range = start..=end;
         let mut iter = BlockRangeInclusiveIter::new(range.clone(), step);
         let (from, mut end) = iter.next().unwrap();

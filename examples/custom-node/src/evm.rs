@@ -9,17 +9,21 @@ use alloy_evm::{
 };
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpEvm};
 use op_revm::{OpSpecId, OpTransaction};
-use reth_evm::{
-    execute::{BlockAssembler, BlockAssemblerInput},
-    InspectorFor,
+use reth_ethereum::{
+    evm::primitives::{
+        execute::{BlockAssembler, BlockAssemblerInput},
+        InspectorFor,
+    },
+    node::api::ConfigureEvm,
+    primitives::{Receipt, SealedBlock, SealedHeader},
 };
-use reth_node_api::ConfigureEvm;
-use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_node::{
-    OpBlockAssembler, OpEvmConfig, OpEvmFactory, OpNextBlockEnvAttributes, OpRethReceiptBuilder,
+use reth_op::{
+    chainspec::OpChainSpec,
+    node::{
+        OpBlockAssembler, OpEvmConfig, OpEvmFactory, OpNextBlockEnvAttributes, OpRethReceiptBuilder,
+    },
+    DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned,
 };
-use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
-use reth_primitives_traits::{Receipt, SealedBlock, SealedHeader};
 use revm::{
     context::{result::ExecutionResult, TxEnv},
     database::State,

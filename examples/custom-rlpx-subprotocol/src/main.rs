@@ -18,7 +18,7 @@ use reth::builder::NodeHandle;
 use reth_ethereum::{
     network::{
         api::{test_utils::PeersHandleProvider, NetworkInfo},
-        config::SecretKey,
+        config::rng_secret_key,
         protocol::IntoRlpxSubProtocol,
         NetworkConfig, NetworkManager, NetworkProtocols,
     },
@@ -48,7 +48,7 @@ fn main() -> eyre::Result<()> {
         node.network.add_rlpx_sub_protocol(custom_rlpx_handler.into_rlpx_sub_protocol());
 
         // creates a separate network instance and adds the custom network subprotocol
-        let secret_key = SecretKey::new(&mut rand::thread_rng());
+        let secret_key = rng_secret_key();
         let (tx, mut from_peer1) = mpsc::unbounded_channel();
         let custom_rlpx_handler_2 = CustomRlpxProtoHandler { state: ProtocolState { events: tx } };
         let net_cfg = NetworkConfig::builder(secret_key)

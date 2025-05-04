@@ -226,6 +226,13 @@ Networking:
 
           If flag is set, but no value is passed, the default interface for docker `eth0` is tried.
 
+      --tx-propagation-policy <TX_PROPAGATION_POLICY>
+          Transaction Propagation Policy
+
+          The policy determines which peers transactions are gossiped to.
+
+          [default: All]
+
 RPC:
       --http
           Enable the HTTP-RPC server
@@ -354,6 +361,11 @@ RPC:
           Maximum gas limit for `eth_call` and call tracing RPC methods
 
           [default: 50000000]
+
+      --rpc.txfeecap <TX_FEE_CAP>
+          Maximum eth transaction fee that can be sent via the RPC APIs (0 = no cap)
+
+          [default: 1.0]
 
       --rpc.max-simulate-blocks <BLOCKS_COUNT>
           Maximum number of blocks for `eth_simulateV1` call
@@ -728,6 +740,9 @@ Engine:
       --engine.disable-caching-and-prewarming
           Disable cross-block caching and parallel prewarming
 
+      --engine.state-provider-metrics
+          Enable state provider latency metrics. This allows the engine to collect and report stats about how long state provider calls took during execution, but this does introduce slight overhead to state provider calls
+
       --engine.cross-block-cache-size <CROSS_BLOCK_CACHE_SIZE>
           Configure the size of cross-block cache in megabytes
 
@@ -738,6 +753,16 @@ Engine:
 
       --engine.accept-execution-requests-hash
           Enables accepting requests hash instead of an array of requests in `engine_newPayloadV4`
+
+      --engine.max-proof-task-concurrency <MAX_PROOF_TASK_CONCURRENCY>
+          Configure the maximum number of concurrent proof tasks
+
+          [default: 256]
+
+      --engine.reserved-cpu-cores <RESERVED_CPU_CORES>
+          Configure the number of reserved CPU cores for non-reth processes
+
+          [default: 1]
 
 Ress:
       --ress.enable

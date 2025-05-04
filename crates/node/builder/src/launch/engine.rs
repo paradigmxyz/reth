@@ -96,7 +96,7 @@ where
 
         // setup the launch context
         let ctx = ctx
-            .with_configured_globals()
+            .with_configured_globals(engine_tree_config.reserved_cpu_cores())
             // load the toml config
             .with_loaded_toml_config(config)?
             // add resolved peers
@@ -215,7 +215,6 @@ where
         let mut engine_service = if ctx.is_dev() {
             let eth_service = LocalEngineService::new(
                 consensus.clone(),
-                ctx.components().block_executor().clone(),
                 ctx.provider_factory().clone(),
                 ctx.blockchain_db().clone(),
                 pruner,
@@ -235,7 +234,6 @@ where
         } else {
             let eth_service = EngineService::new(
                 consensus.clone(),
-                ctx.components().block_executor().clone(),
                 ctx.chain_spec(),
                 network_client.clone(),
                 Box::pin(consensus_engine_stream),

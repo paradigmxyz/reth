@@ -93,3 +93,15 @@ pub use primitives::*;
 
 mod block_indices;
 pub use block_indices::*;
+
+mod block_writer;
+pub use block_writer::*;
+
+mod state_writer;
+pub use state_writer::*;
+
+mod header_sync_gap;
+pub use header_sync_gap::HeaderSyncGapProvider;
+
+mod full;
+pub use full::*;
