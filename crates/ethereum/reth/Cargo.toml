@@ -49,12 +49,14 @@ default = ["std"]
 std = [
     "reth-chainspec/std",
     "reth-ethereum-primitives/std",
+    "reth-ethereum-consensus/std",
     "reth-primitives-traits/std",
     "reth-consensus?/std",
     "reth-consensus-common?/std",
     "alloy-rpc-types-eth?/std",
     "reth-storage-api?/std",
     "reth-evm?/std",
+    "reth-evm-ethereum?/std",
     "reth-revm?/std",
 ]
 arbitrary = [
@@ -81,11 +83,21 @@ test-utils = [
     "reth-provider?/test-utils",
     "reth-trie?/test-utils",
     "reth-transaction-pool?/test-utils",
+    "reth-evm-ethereum?/test-utils",
 ]
 
-full = ["consensus", "evm", "node", "provider", "rpc", "exex", "trie", "pool", "network"]
+full = [
+    "consensus",
+    "evm",
+    "node",
+    "provider",
+    "rpc",
+    "exex",
+    "trie",
+    "pool",
+    "network",
+]
 
-alloy-compat = ["reth-ethereum-primitives/alloy-compat"]
 cli = ["dep:reth-ethereum-cli"]
 consensus = [
     "dep:reth-consensus",

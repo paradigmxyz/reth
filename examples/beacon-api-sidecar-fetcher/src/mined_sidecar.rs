@@ -10,7 +10,7 @@ use futures_util::{stream::FuturesUnordered, Future, Stream, StreamExt};
 use reqwest::{Error, StatusCode};
 use reth_ethereum::{
     pool::{BlobStoreError, TransactionPoolExt},
-    primitives::{RecoveredBlock, SignedTransaction},
+    primitives::RecoveredBlock,
     provider::CanonStateNotification,
 };
 use serde::{Deserialize, Serialize};

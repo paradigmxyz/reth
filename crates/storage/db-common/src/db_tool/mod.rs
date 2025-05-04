@@ -146,9 +146,11 @@ impl<N: ProviderNodeTypes> DbTool<N> {
         fs::remove_dir_all(static_files_path)?;
         fs::create_dir_all(static_files_path)?;
 
-        let exex_wal_path = exex_wal_path.as_ref();
-        info!(target: "reth::cli", "Dropping ExEx WAL at {:?}", exex_wal_path);
-        fs::remove_dir_all(exex_wal_path)?;
+        if exex_wal_path.as_ref().exists() {
+            let exex_wal_path = exex_wal_path.as_ref();
+            info!(target: "reth::cli", "Dropping ExEx WAL at {:?}", exex_wal_path);
+            fs::remove_dir_all(exex_wal_path)?;
+        }
 
         Ok(())
     }

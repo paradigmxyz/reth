@@ -32,7 +32,7 @@ pub fn benchmark_fetch_pending_hashes(group: &mut BenchmarkGroup<'_, WallTime>, 
     let mut peers = HashMap::default();
 
     for _i in 0..peers_num {
-        // NOTE: the worst case, each tx in the cache belongs to a differenct peer.
+        // NOTE: the worst case, each tx in the cache belongs to a different peer.
         let peer = PeerId::random();
         let hash = B256::random();
 
@@ -43,7 +43,7 @@ pub fn benchmark_fetch_pending_hashes(group: &mut BenchmarkGroup<'_, WallTime>, 
         buffer_hash_to_tx_fetcher(&mut tx_fetcher, hash, peer, 0, None);
     }
 
-    let group_id = format!("fetch pending hashes, peers num: {}", peers_num);
+    let group_id = format!("fetch pending hashes, peers num: {peers_num}");
 
     group.bench_function(group_id, |b| {
         b.iter(|| {
@@ -104,10 +104,10 @@ pub fn tx_fetch_bench(c: &mut Criterion) {
                             let peer_pool = peer.pool().unwrap();
 
                             for _ in 0..num_tx_per_peer {
-                                let mut gen =
+                                let mut tx_gen =
                                     TransactionGenerator::new(rand::rngs::StdRng::seed_from_u64(0));
 
-                                let tx = gen.gen_eip1559_pooled();
+                                let tx = tx_gen.gen_eip1559_pooled();
                                 let sender = tx.sender();
                                 provider.add_account(
                                     sender,

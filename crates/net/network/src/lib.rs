@@ -107,7 +107,6 @@
 //!
 //! - `serde` (default): Enable serde support for configuration types.
 //! - `test-utils`: Various utilities helpful for writing tests
-//! - `geth-tests`: Runs tests that require Geth to be installed locally.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
