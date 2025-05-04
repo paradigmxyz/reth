@@ -14,7 +14,7 @@ use super::{
 };
 use crate::{
     status::StatusMessage, EthNetworkPrimitives, EthVersion, NetworkPrimitives,
-    RawCapabilityMessage, SharedTransactions,
+    RawCapabilityMessage, Receipts69, SharedTransactions,
 };
 use alloc::{boxed::Box, sync::Arc};
 use alloy_primitives::{
@@ -114,6 +114,7 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
             }
             EthMessageID::GetReceipts => EthMessage::GetReceipts(RequestPair::decode(buf)?),
             EthMessageID::Receipts => EthMessage::Receipts(RequestPair::decode(buf)?),
+            EthMessageID::Receipts69 => EthMessage::Receipts69(RequestPair::decode(buf)?),
             EthMessageID::Other(_) => {
                 let raw_payload = Bytes::copy_from_slice(buf);
                 buf.advance(raw_payload.len());
@@ -258,7 +259,7 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
         feature = "serde",
         serde(bound = "N::Receipt: serde::Serialize + serde::de::DeserializeOwned")
     )]
-    Receipts69(RequestPair<Receipts<N::Receipt>>),
+    Receipts69(RequestPair<Receipts69<N::Receipt>>),
     /// Represents an encoded message that doesn't match any other variant
     Other(RawCapabilityMessage),
 }
@@ -331,7 +332,8 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::GetNodeData(request) => request.encode(out),
             Self::NodeData(data) => data.encode(out),
             Self::GetReceipts(request) => request.encode(out),
-            Self::Receipts(receipts) | Self::Receipts69(receipts) => receipts.encode(out),
+            Self::Receipts(receipts) => receipts.encode(out),
+            Self::Receipts69(receipt69) => receipt69.encode(out),
             Self::Other(unknown) => out.put_slice(&unknown.payload),
         }
     }
@@ -352,7 +354,8 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::GetNodeData(request) => request.length(),
             Self::NodeData(data) => data.length(),
             Self::GetReceipts(request) => request.length(),
-            Self::Receipts(receipts) | Self::Receipts69(receipts) => receipts.length(),
+            Self::Receipts(receipts) => receipts.length(),
+            Self::Receipts69(receipt69) => receipt69.length(),
             Self::Other(unknown) => unknown.length(),
         }
     }
@@ -436,6 +439,8 @@ pub enum EthMessageID {
     GetReceipts = 0x0f,
     /// Represents receipts.
     Receipts = 0x10,
+    /// Represents receipts for eth/69.
+    Receipts69 = 0x11,
     /// Represents unknown message types.
     Other(u8),
 }
@@ -459,6 +464,7 @@ impl EthMessageID {
             Self::NodeData => 0x0e,
             Self::GetReceipts => 0x0f,
             Self::Receipts => 0x10,
+            Self::Receipts69 => 0x11,
             Self::Other(value) => *value, // Return the stored `u8`
         }
     }

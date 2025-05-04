@@ -3,6 +3,7 @@
 //! An `RLPx` stream is multiplexed via the prepended message-id of a framed message.
 //! Capabilities are exchanged via the `RLPx` `Hello` message as pairs of `(id, version)`, <https://github.com/ethereum/devp2p/blob/master/rlpx.md#capability-messaging>
 
+use crate::types::Receipts69;
 use alloy_consensus::{BlockHeader, ReceiptWithBloom};
 use alloy_primitives::{Bytes, B256};
 use futures::FutureExt;
@@ -189,25 +190,9 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
             Self::Receipts(resp) => {
                 to_message!(resp, Receipts, id)
             }
-            Self::Receipts69(resp) => match resp {
-                Ok(res) => {
-                    let receipts = res
-                        .into_iter()
-                        .map(|batch| {
-                            batch
-                                .into_iter()
-                                .map(|r| ReceiptWithBloom {
-                                    receipt: r,
-                                    logs_bloom: Default::default(),
-                                })
-                                .collect()
-                        })
-                        .collect();
-                    let request = RequestPair { request_id: id, message: Receipts(receipts) };
-                    Ok(EthMessage::Receipts69(request))
-                }
-                Err(err) => Err(err),
-            },
+            Self::Receipts69(resp) => {
+                to_message!(resp, Receipts69, id)
+            }
         }
     }
 
