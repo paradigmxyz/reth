@@ -693,7 +693,7 @@ impl RpcModuleConfig {
     }
 
     /// Get a mutable reference to the eth namespace config
-    pub const fn eth_mut(&mut self) -> &mut EthConfig {
+    pub fn eth_mut(&mut self) -> &mut EthConfig {
         &mut self.eth
     }
 }
@@ -732,7 +732,7 @@ impl RpcModuleConfigBuilder {
     }
 
     /// Get a mutable reference to the eth namespace config, if any
-    pub const fn eth_mut(&mut self) -> &mut Option<EthConfig> {
+    pub fn eth_mut(&mut self) -> &mut Option<EthConfig> {
         &mut self.eth
     }
 
@@ -1732,22 +1732,22 @@ impl TransportRpcModuleConfig {
     }
 
     /// Get a mutable reference to the
-    pub const fn http_mut(&mut self) -> &mut Option<RpcModuleSelection> {
+    pub fn http_mut(&mut self) -> &mut Option<RpcModuleSelection> {
         &mut self.http
     }
 
     /// Get a mutable reference to the
-    pub const fn ws_mut(&mut self) -> &mut Option<RpcModuleSelection> {
+    pub fn ws_mut(&mut self) -> &mut Option<RpcModuleSelection> {
         &mut self.ws
     }
 
     /// Get a mutable reference to the
-    pub const fn ipc_mut(&mut self) -> &mut Option<RpcModuleSelection> {
+    pub fn ipc_mut(&mut self) -> &mut Option<RpcModuleSelection> {
         &mut self.ipc
     }
 
     /// Get a mutable reference to the
-    pub const fn config_mut(&mut self) -> &mut Option<RpcModuleConfig> {
+    pub fn config_mut(&mut self) -> &mut Option<RpcModuleConfig> {
         &mut self.config
     }
 
@@ -2289,7 +2289,7 @@ impl RpcServerHandle {
         let rpc_url = self.http_url()?;
         let provider = ProviderBuilder::default()
             .with_recommended_fillers()
-            .connect_http(rpc_url.parse().expect("valid url"));
+            .on_http(rpc_url.parse().expect("valid url"));
         Some(provider)
     }
 
@@ -2321,7 +2321,7 @@ impl RpcServerHandle {
     pub async fn eth_ipc_provider(
         &self,
     ) -> Option<impl Provider<alloy_network::Ethereum> + Clone + Unpin + 'static> {
-        self.new_ipc_provider_for().await
+        self.new_ws_provider_for().await
     }
 
     /// Returns an ipc provider from the rpc server handle for the

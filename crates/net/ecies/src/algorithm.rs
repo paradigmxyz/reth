@@ -15,7 +15,7 @@ use alloy_rlp::{Encodable, Rlp, RlpEncodable, RlpMaxEncodedLen};
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
 use ctr::Ctr64BE;
 use digest::{crypto_common::KeyIvInit, Digest};
-use rand_08::{thread_rng as rng, Rng};
+use rand::{thread_rng, Rng};
 use reth_network_peers::{id2pk, pk2id};
 use secp256k1::{
     ecdsa::{RecoverableSignature, RecoveryId},
@@ -312,9 +312,8 @@ impl ECIES {
 
     /// Create a new ECIES client with the given static secret key and remote peer ID.
     pub fn new_client(secret_key: SecretKey, remote_id: PeerId) -> Result<Self, ECIESError> {
-        // TODO(rand): use rng for nonce
-        let mut rng = rng();
-        let nonce = B256::random();
+        let mut rng = thread_rng();
+        let nonce = rng.gen();
         let ephemeral_secret_key = SecretKey::new(&mut rng);
         Self::new_static_client(secret_key, remote_id, nonce, ephemeral_secret_key)
     }
@@ -355,19 +354,19 @@ impl ECIES {
 
     /// Create a new ECIES server with the given static secret key.
     pub fn new_server(secret_key: SecretKey) -> Result<Self, ECIESError> {
-        let mut rng = rng();
-        let nonce = B256::random();
+        let mut rng = thread_rng();
+        let nonce = rng.gen();
         let ephemeral_secret_key = SecretKey::new(&mut rng);
         Self::new_static_server(secret_key, nonce, ephemeral_secret_key)
     }
 
     /// Return the contained remote peer ID.
-    pub const fn remote_id(&self) -> PeerId {
+    pub fn remote_id(&self) -> PeerId {
         self.remote_id.unwrap()
     }
 
     fn encrypt_message(&self, data: &[u8], out: &mut BytesMut) {
-        let mut rng = rng();
+        let mut rng = thread_rng();
 
         out.reserve(secp256k1::constants::UNCOMPRESSED_PUBLIC_KEY_SIZE + 16 + data.len() + 32);
 
@@ -383,7 +382,7 @@ impl ECIES {
         let enc_key = B128::from_slice(&key[..16]);
         let mac_key = sha256(&key[16..32]);
 
-        let iv = B128::random();
+        let iv: B128 = rng.gen();
         let mut encryptor = Ctr64BE::<Aes128>::new((&enc_key.0).into(), (&iv.0).into());
 
         let mut encrypted = data.to_vec();
@@ -443,7 +442,7 @@ impl ECIES {
         }
         .encode(&mut out);
 
-        out.resize(out.len() + rng().gen_range(100..=300), 0);
+        out.resize(out.len() + thread_rng().gen_range(100..=300), 0);
         out
     }
 
@@ -532,6 +531,8 @@ impl ECIES {
 
     /// Write an `ack` message to the given buffer.
     pub fn write_ack(&mut self, out: &mut BytesMut) {
+        let unencrypted = self.create_ack_unencrypted();
+
         let mut buf = out.split_off(out.len());
 
         // reserve space for length
@@ -539,7 +540,7 @@ impl ECIES {
 
         // encrypt and append
         let mut encrypted = buf.split_off(buf.len());
-        self.encrypt_message(self.create_ack_unencrypted().as_ref(), &mut encrypted);
+        self.encrypt_message(unencrypted.as_ref(), &mut encrypted);
         let len_bytes = u16::try_from(encrypted.len()).unwrap().to_be_bytes();
         buf.unsplit(encrypted);
 
@@ -685,7 +686,7 @@ impl ECIES {
         32
     }
 
-    pub const fn body_len(&self) -> usize {
+    pub fn body_len(&self) -> usize {
         let len = self.body_size.unwrap();
         Self::align_16(len) + 16
     }
@@ -762,7 +763,7 @@ mod tests {
 
     #[test]
     fn communicate() {
-        let mut rng = rng();
+        let mut rng = thread_rng();
         let server_secret_key = SecretKey::new(&mut rng);
         let server_public_key = PublicKey::from_secret_key(SECP256K1, &server_secret_key);
         let client_secret_key = SecretKey::new(&mut rng);

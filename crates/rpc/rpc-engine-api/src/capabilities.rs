@@ -5,6 +5,7 @@ pub const CAPABILITIES: &[&str] = &[
     "engine_forkchoiceUpdatedV1",
     "engine_forkchoiceUpdatedV2",
     "engine_forkchoiceUpdatedV3",
+    "engine_exchangeTransitionConfigurationV1",
     "engine_getClientVersionV1",
     "engine_getPayloadV1",
     "engine_getPayloadV2",

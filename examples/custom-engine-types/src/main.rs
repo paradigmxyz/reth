@@ -323,9 +323,9 @@ where
         ComponentsBuilder::default()
             .node_types::<N>()
             .pool(EthereumPoolBuilder::default())
-            .executor(EthereumExecutorBuilder::default())
             .payload(BasicPayloadServiceBuilder::default())
             .network(EthereumNetworkBuilder::default())
+            .executor(EthereumExecutorBuilder::default())
             .consensus(EthereumConsensusBuilder::default())
     }
 
@@ -339,7 +339,7 @@ where
 #[non_exhaustive]
 pub struct CustomPayloadBuilderBuilder;
 
-impl<Node, Pool> PayloadBuilderBuilder<Node, Pool, EthEvmConfig> for CustomPayloadBuilderBuilder
+impl<Node, Pool> PayloadBuilderBuilder<Node, Pool> for CustomPayloadBuilderBuilder
 where
     Node: FullNodeTypes<
         Types: NodeTypes<
@@ -358,13 +358,12 @@ where
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-        evm_config: EthEvmConfig,
     ) -> eyre::Result<Self::PayloadBuilder> {
         let payload_builder = CustomPayloadBuilder {
             inner: reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
                 ctx.provider().clone(),
                 pool,
-                evm_config,
+                EthEvmConfig::new(ctx.provider().chain_spec().clone()),
                 EthereumBuilderConfig::new(),
             ),
         };

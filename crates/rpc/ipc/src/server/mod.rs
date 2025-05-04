@@ -792,12 +792,11 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
 #[cfg(test)]
 #[expect(missing_docs)]
 pub fn dummy_name() -> String {
-    use rand::Rng;
-    let num: u64 = rand::rng().random();
+    let num: u64 = rand::Rng::gen(&mut rand::thread_rng());
     if cfg!(windows) {
-        format!(r"\\.\pipe\my-pipe-{num}")
+        format!(r"\\.\pipe\my-pipe-{}", num)
     } else {
-        format!(r"/tmp/my-uds-{num}")
+        format!(r"/tmp/my-uds-{}", num)
     }
 }
 
@@ -850,7 +849,7 @@ mod tests {
                     closed = c;
                 }
 
-                // Send back the error.
+                // Send back back the error.
                 Either::Right((Some(Err(e)), _)) => break Err(e.into()),
             }
         }

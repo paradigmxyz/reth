@@ -1,5 +1,5 @@
 // Reth block related imports
-use reth_ethereum::{provider::BlockReaderIdExt, Block};
+use reth::{primitives::Block, providers::BlockReaderIdExt};
 
 // Rpc related imports
 use jsonrpsee::proc_macros::rpc;

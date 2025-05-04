@@ -71,7 +71,7 @@ impl<Pool, Client, Evm> OpPayloadBuilder<Pool, Client, Evm> {
     }
 
     /// Configures the builder with the given [`OpBuilderConfig`].
-    pub const fn with_builder_config(
+    pub fn with_builder_config(
         pool: Pool,
         client: Client,
         evm_config: Evm,
@@ -381,15 +381,10 @@ impl<Txs> OpBuilder<'_, Txs> {
         ctx.execute_sequencer_transactions(&mut builder)?;
         builder.into_executor().apply_post_execution_changes()?;
 
-        let ExecutionWitnessRecord { hashed_state, codes, keys, lowest_block_number: _ } =
+        let ExecutionWitnessRecord { hashed_state, codes, keys } =
             ExecutionWitnessRecord::from_executed_state(&db);
         let state = state_provider.witness(Default::default(), hashed_state)?;
-        Ok(ExecutionWitness {
-            state: state.into_iter().collect(),
-            codes,
-            keys,
-            ..Default::default()
-        })
+        Ok(ExecutionWitness { state: state.into_iter().collect(), codes, keys })
     }
 }
 
@@ -440,7 +435,7 @@ pub struct ExecutionInfo {
 
 impl ExecutionInfo {
     /// Create a new instance with allocated slots.
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self { cumulative_gas_used: 0, cumulative_da_bytes_used: 0, total_fees: U256::ZERO }
     }
 

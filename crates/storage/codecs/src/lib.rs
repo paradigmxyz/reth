@@ -35,7 +35,7 @@ pub mod alloy;
 
 #[cfg(not(feature = "test-utils"))]
 #[cfg(any(test, feature = "alloy"))]
-pub mod alloy;
+mod alloy;
 
 pub mod txtype;
 

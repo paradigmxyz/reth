@@ -147,7 +147,7 @@ struct ProofSequencer {
 
 impl ProofSequencer {
     /// Gets the next sequence number and increments the counter
-    const fn next_sequence(&mut self) -> u64 {
+    fn next_sequence(&mut self) -> u64 {
         let seq = self.next_sequence;
         self.next_sequence += 1;
         seq
@@ -254,7 +254,7 @@ enum PendingMultiproofTask<Factory> {
 
 impl<Factory> PendingMultiproofTask<Factory> {
     /// Returns the proof sequence number of the task.
-    const fn proof_sequence_number(&self) -> u64 {
+    fn proof_sequence_number(&self) -> u64 {
         match self {
             Self::Storage(input) => input.proof_sequence_number,
             Self::Regular(input) => input.proof_sequence_number,

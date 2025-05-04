@@ -9,7 +9,6 @@ mod call;
 mod pending_block;
 
 use alloy_primitives::U256;
-use eyre::WrapErr;
 use op_alloy_network::Optimism;
 pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
 use reth_chain_state::CanonStateSubscriptions;
@@ -302,18 +301,18 @@ impl<N: OpNodeCore> OpEthApiInner<N> {
 pub struct OpEthApiBuilder {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
-    sequencer_url: Option<String>,
+    sequencer_client: Option<SequencerClient>,
 }
 
 impl OpEthApiBuilder {
     /// Creates a [`OpEthApiBuilder`] instance from core components.
     pub const fn new() -> Self {
-        Self { sequencer_url: None }
+        Self { sequencer_client: None }
     }
 
     /// With a [`SequencerClient`].
-    pub fn with_sequencer(mut self, sequencer_url: Option<String>) -> Self {
-        self.sequencer_url = sequencer_url;
+    pub fn with_sequencer(mut self, sequencer_client: Option<SequencerClient>) -> Self {
+        self.sequencer_client = sequencer_client;
         self
     }
 }
@@ -326,7 +325,7 @@ where
     type EthApi = OpEthApi<N>;
 
     async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
-        let Self { sequencer_url } = self;
+        let Self { sequencer_client } = self;
         let eth_api = reth_rpc::EthApiBuilder::new(
             ctx.components.provider().clone(),
             ctx.components.pool().clone(),
@@ -342,16 +341,6 @@ where
         .proof_permits(ctx.config.proof_permits)
         .gas_oracle_config(ctx.config.gas_oracle)
         .build_inner();
-
-        let sequencer_client = if let Some(url) = sequencer_url {
-            Some(
-                SequencerClient::new(&url)
-                    .await
-                    .wrap_err_with(|| "Failed to init sequencer client with: {url}")?,
-            )
-        } else {
-            None
-        };
 
         Ok(OpEthApi { inner: Arc::new(OpEthApiInner { eth_api, sequencer_client }) })
     }

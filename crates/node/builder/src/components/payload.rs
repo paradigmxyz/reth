@@ -9,9 +9,7 @@ use reth_transaction_pool::TransactionPool;
 use std::future::Future;
 
 /// A type that knows how to spawn the payload service.
-pub trait PayloadServiceBuilder<Node: FullNodeTypes, Pool: TransactionPool, EvmConfig>:
-    Send + Sized
-{
+pub trait PayloadServiceBuilder<Node: FullNodeTypes, Pool: TransactionPool>: Send + Sized {
     /// Spawns the [`PayloadBuilderService`] and returns the handle to it for use by the engine.
     ///
     /// We provide default implementation via [`BasicPayloadJobGenerator`] but it can be overridden
@@ -20,16 +18,15 @@ pub trait PayloadServiceBuilder<Node: FullNodeTypes, Pool: TransactionPool, EvmC
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-        evm_config: EvmConfig,
     ) -> impl Future<Output = eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>>>
            + Send;
 }
 
-impl<Node, F, Fut, Pool, EvmConfig> PayloadServiceBuilder<Node, Pool, EvmConfig> for F
+impl<Node, F, Fut, Pool> PayloadServiceBuilder<Node, Pool> for F
 where
     Node: FullNodeTypes,
     Pool: TransactionPool,
-    F: Fn(&BuilderContext<Node>, Pool, EvmConfig) -> Fut + Send,
+    F: Fn(&BuilderContext<Node>, Pool) -> Fut + Send,
     Fut: Future<Output = eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>>>
         + Send,
 {
@@ -37,17 +34,14 @@ where
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-        evm_config: EvmConfig,
     ) -> impl Future<Output = eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>>>
     {
-        self(ctx, pool, evm_config)
+        self(ctx, pool)
     }
 }
 
 /// A type that knows how to build a payload builder to plug into [`BasicPayloadServiceBuilder`].
-pub trait PayloadBuilderBuilder<Node: FullNodeTypes, Pool: TransactionPool, EvmConfig>:
-    Send + Sized
-{
+pub trait PayloadBuilderBuilder<Node: FullNodeTypes, Pool: TransactionPool>: Send + Sized {
     /// Payload builder implementation.
     type PayloadBuilder: PayloadBuilderFor<Node::Types> + Unpin + 'static;
 
@@ -58,7 +52,6 @@ pub trait PayloadBuilderBuilder<Node: FullNodeTypes, Pool: TransactionPool, EvmC
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-        evm_config: EvmConfig,
     ) -> impl Future<Output = eyre::Result<Self::PayloadBuilder>> + Send;
 }
 
@@ -68,26 +61,23 @@ pub struct BasicPayloadServiceBuilder<PB>(PB);
 
 impl<PB> BasicPayloadServiceBuilder<PB> {
     /// Create a new [`BasicPayloadServiceBuilder`].
-    pub const fn new(payload_builder_builder: PB) -> Self {
+    pub fn new(payload_builder_builder: PB) -> Self {
         Self(payload_builder_builder)
     }
 }
 
-impl<Node, Pool, PB, EvmConfig> PayloadServiceBuilder<Node, Pool, EvmConfig>
-    for BasicPayloadServiceBuilder<PB>
+impl<Node, Pool, PB> PayloadServiceBuilder<Node, Pool> for BasicPayloadServiceBuilder<PB>
 where
     Node: FullNodeTypes,
     Pool: TransactionPool,
-    EvmConfig: Send,
-    PB: PayloadBuilderBuilder<Node, Pool, EvmConfig>,
+    PB: PayloadBuilderBuilder<Node, Pool>,
 {
     async fn spawn_payload_builder_service(
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-        evm_config: EvmConfig,
     ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>> {
-        let payload_builder = self.0.build_payload_builder(ctx, pool, evm_config).await?;
+        let payload_builder = self.0.build_payload_builder(ctx, pool).await?;
 
         let conf = ctx.config().builder.clone();
 

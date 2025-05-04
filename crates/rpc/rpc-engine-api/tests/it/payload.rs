@@ -52,7 +52,7 @@ fn payload_body_roundtrip() {
 #[test]
 fn payload_validation_conversion() {
     let mut rng = generators::rng();
-    let parent = rng.random();
+    let parent = rng.gen();
     let block = random_block(
         &mut rng,
         100,

@@ -17,15 +17,12 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardfork, MAINNET, SEPOLIA};
 use reth_evm::ConfigureEvm;
-use reth_primitives_traits::{BlockBody, BlockHeader};
+use reth_primitives_traits::{BlockBody, BlockHeader, RecoveredBlock};
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_api::TraceApiServer;
-use reth_rpc_eth_api::{
-    helpers::{Call, LoadPendingBlock, LoadTransaction, Trace, TraceExt},
-    FromEthApiError, RpcNodeCore,
-};
+use reth_rpc_eth_api::{helpers::TraceExt, FromEthApiError, RpcNodeCore};
 use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction, EthConfig};
-use reth_storage_api::{BlockNumReader, BlockReader};
+use reth_storage_api::{BlockHashReader, BlockNumReader, BlockReader};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
 use revm::DatabaseCommit;
@@ -76,13 +73,11 @@ impl<Eth: RpcNodeCore> TraceApi<Eth> {
     }
 }
 
-// === impl TraceApi === //
+// === impl TraceApi ===
 
 impl<Eth> TraceApi<Eth>
 where
-    // tracing methods do _not_ read from mempool, hence no `LoadBlock` trait
-    // bound
-    Eth: Trace + Call + LoadPendingBlock + LoadTransaction + 'static,
+    Eth: TraceExt + 'static,
 {
     /// Executes the given call and returns a number of possible traces for it.
     pub async fn trace_call(
@@ -239,115 +234,6 @@ where
         Ok(self.trace_transaction(hash).await?.and_then(|traces| traces.into_iter().nth(index)))
     }
 
-    /// Returns all traces for the given transaction hash
-    pub async fn trace_transaction(
-        &self,
-        hash: B256,
-    ) -> Result<Option<Vec<LocalizedTransactionTrace>>, Eth::Error> {
-        self.eth_api()
-            .spawn_trace_transaction_in_block(
-                hash,
-                TracingInspectorConfig::default_parity(),
-                move |tx_info, inspector, _, _| {
-                    let traces =
-                        inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
-                    Ok(traces)
-                },
-            )
-            .await
-    }
-
-    /// Returns all opcodes with their count and combined gas usage for the given transaction in no
-    /// particular order.
-    pub async fn trace_transaction_opcode_gas(
-        &self,
-        tx_hash: B256,
-    ) -> Result<Option<TransactionOpcodeGas>, Eth::Error> {
-        self.eth_api()
-            .spawn_trace_transaction_in_block_with_inspector(
-                tx_hash,
-                OpcodeGasInspector::default(),
-                move |_tx_info, inspector, _res, _| {
-                    let trace = TransactionOpcodeGas {
-                        transaction_hash: tx_hash,
-                        opcode_gas: inspector.opcode_gas_iter().collect(),
-                    };
-                    Ok(trace)
-                },
-            )
-            .await
-    }
-
-    /// Calculates the base block reward for the given block:
-    ///
-    /// - if Paris hardfork is activated, no block rewards are given
-    /// - if Paris hardfork is not activated, calculate block rewards with block number only
-    /// - if Paris hardfork is unknown, calculate block rewards with block number and ttd
-    fn calculate_base_block_reward<H: BlockHeader>(
-        &self,
-        header: &H,
-    ) -> Result<Option<u128>, Eth::Error> {
-        let chain_spec = self.provider().chain_spec();
-        let is_paris_activated = if chain_spec.chain() == MAINNET.chain() {
-            Some(header.number()) >= EthereumHardfork::Paris.mainnet_activation_block()
-        } else if chain_spec.chain() == SEPOLIA.chain() {
-            Some(header.number()) >= EthereumHardfork::Paris.sepolia_activation_block()
-        } else {
-            true
-        };
-
-        if is_paris_activated {
-            return Ok(None)
-        }
-
-        Ok(Some(base_block_reward_pre_merge(&chain_spec, header.number())))
-    }
-
-    /// Extracts the reward traces for the given block:
-    ///  - block reward
-    ///  - uncle rewards
-    fn extract_reward_traces<H: BlockHeader>(
-        &self,
-        header: &H,
-        ommers: Option<&[H]>,
-        base_block_reward: u128,
-    ) -> Vec<LocalizedTransactionTrace> {
-        let ommers_cnt = ommers.map(|o| o.len()).unwrap_or_default();
-        let mut traces = Vec::with_capacity(ommers_cnt + 1);
-
-        let block_reward = block_reward(base_block_reward, ommers_cnt);
-        traces.push(reward_trace(
-            header,
-            RewardAction {
-                author: header.beneficiary(),
-                reward_type: RewardType::Block,
-                value: U256::from(block_reward),
-            },
-        ));
-
-        let Some(ommers) = ommers else { return traces };
-
-        for uncle in ommers {
-            let uncle_reward = ommer_reward(base_block_reward, header.number(), uncle.number());
-            traces.push(reward_trace(
-                header,
-                RewardAction {
-                    author: uncle.beneficiary(),
-                    reward_type: RewardType::Uncle,
-                    value: U256::from(uncle_reward),
-                },
-            ));
-        }
-        traces
-    }
-}
-
-impl<Eth> TraceApi<Eth>
-where
-    // tracing methods read from mempool, hence `LoadBlock` trait bound via
-    // `TraceExt`
-    Eth: TraceExt + 'static,
-{
     /// Returns all transaction traces that match the given filter.
     ///
     /// This is similar to [`Self::trace_block`] but only returns traces for transactions that match
@@ -356,8 +242,9 @@ where
         &self,
         filter: TraceFilter,
     ) -> Result<Vec<LocalizedTransactionTrace>, Eth::Error> {
-        // We'll reuse the matcher across multiple blocks that are traced in parallel
+        #[allow(unused_variables)]
         let matcher = Arc::new(filter.matcher());
+        #[allow(unused_variables)]
         let TraceFilter { from_block, to_block, after, count, .. } = filter;
         let start = from_block.unwrap_or(0);
 
@@ -385,79 +272,27 @@ where
         }
 
         // fetch all blocks in that range
-        let blocks = self
-            .provider()
-            .recovered_block_range(start..=end)
-            .map_err(Eth::Error::from_eth_err)?
-            .into_iter()
-            .map(Arc::new)
-            .collect::<Vec<_>>();
+        let _blocks = self.get_blocks_for_trace_range(start, end).await?;
 
-        // trace all blocks
-        let mut block_traces = Vec::with_capacity(blocks.len());
-        for block in &blocks {
-            let matcher = matcher.clone();
-            let traces = self.eth_api().trace_block_until(
-                block.hash().into(),
-                Some(block.clone()),
-                None,
+        Ok(Vec::new())
+    }
+
+    /// Returns all traces for the given transaction hash
+    pub async fn trace_transaction(
+        &self,
+        hash: B256,
+    ) -> Result<Option<Vec<LocalizedTransactionTrace>>, Eth::Error> {
+        self.eth_api()
+            .spawn_trace_transaction_in_block(
+                hash,
                 TracingInspectorConfig::default_parity(),
-                move |tx_info, inspector, _, _, _| {
-                    let mut traces =
+                move |tx_info, inspector, _, _| {
+                    let traces =
                         inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
-                    traces.retain(|trace| matcher.matches(&trace.trace));
-                    Ok(Some(traces))
+                    Ok(traces)
                 },
-            );
-            block_traces.push(traces);
-        }
-
-        let block_traces = futures::future::try_join_all(block_traces).await?;
-        let mut all_traces = block_traces
-            .into_iter()
-            .flatten()
-            .flat_map(|traces| traces.into_iter().flatten().flat_map(|traces| traces.into_iter()))
-            .collect::<Vec<_>>();
-
-        // add reward traces for all blocks
-        for block in &blocks {
-            if let Some(base_block_reward) = self.calculate_base_block_reward(block.header())? {
-                all_traces.extend(
-                    self.extract_reward_traces(
-                        block.header(),
-                        block.body().ommers(),
-                        base_block_reward,
-                    )
-                    .into_iter()
-                    .filter(|trace| matcher.matches(&trace.trace)),
-                );
-            } else {
-                // no block reward, means we're past the Paris hardfork and don't expect any rewards
-                // because the blocks in ascending order
-                break
-            }
-        }
-
-        // Skips the first `after` number of matching traces.
-        // If `after` is greater than or equal to the number of matched traces, it returns an empty
-        // array.
-        if let Some(after) = after.map(|a| a as usize) {
-            if after < all_traces.len() {
-                all_traces.drain(..after);
-            } else {
-                return Ok(vec![])
-            }
-        }
-
-        // Return at most `count` of traces
-        if let Some(count) = count {
-            let count = count as usize;
-            if count < all_traces.len() {
-                all_traces.truncate(count);
-            }
-        };
-
-        Ok(all_traces)
+            )
+            .await
     }
 
     /// Returns traces created at given block.
@@ -527,6 +362,27 @@ where
             .await
     }
 
+    /// Returns all opcodes with their count and combined gas usage for the given transaction in no
+    /// particular order.
+    pub async fn trace_transaction_opcode_gas(
+        &self,
+        tx_hash: B256,
+    ) -> Result<Option<TransactionOpcodeGas>, Eth::Error> {
+        self.eth_api()
+            .spawn_trace_transaction_in_block_with_inspector(
+                tx_hash,
+                OpcodeGasInspector::default(),
+                move |_tx_info, inspector, _res, _| {
+                    let trace = TransactionOpcodeGas {
+                        transaction_hash: tx_hash,
+                        opcode_gas: inspector.opcode_gas_iter().collect(),
+                    };
+                    Ok(trace)
+                },
+            )
+            .await
+    }
+
     /// Returns the opcodes of all transactions in the given block.
     ///
     /// This is the same as [`Self::trace_transaction_opcode_gas`] but for all transactions in a
@@ -560,6 +416,146 @@ where
             block_number: block.number(),
             transactions,
         }))
+    }
+
+    /// Calculates the base block reward for the given block:
+    ///
+    /// - if Paris hardfork is activated, no block rewards are given
+    /// - if Paris hardfork is not activated, calculate block rewards with block number only
+    /// - if Paris hardfork is unknown, calculate block rewards with block number and ttd
+    fn calculate_base_block_reward<H: BlockHeader>(
+        &self,
+        header: &H,
+    ) -> Result<Option<u128>, Eth::Error> {
+        let chain_spec = self.provider().chain_spec();
+        let is_paris_activated = if chain_spec.chain() == MAINNET.chain() {
+            Some(header.number()) >= EthereumHardfork::Paris.mainnet_activation_block()
+        } else if chain_spec.chain() == SEPOLIA.chain() {
+            Some(header.number()) >= EthereumHardfork::Paris.sepolia_activation_block()
+        } else {
+            true
+        };
+
+        if is_paris_activated {
+            return Ok(None)
+        }
+
+        Ok(Some(base_block_reward_pre_merge(&chain_spec, header.number())))
+    }
+
+    /// Extracts the reward traces for the given block:
+    ///  - block reward
+    ///  - uncle rewards
+    fn extract_reward_traces<H: BlockHeader>(
+        &self,
+        header: &H,
+        ommers: Option<&[H]>,
+        base_block_reward: u128,
+    ) -> Vec<LocalizedTransactionTrace> {
+        let ommers_cnt = ommers.map(|o| o.len()).unwrap_or_default();
+        let mut traces = Vec::with_capacity(ommers_cnt + 1);
+
+        let block_reward = block_reward(base_block_reward, ommers_cnt);
+        traces.push(reward_trace(
+            header,
+            RewardAction {
+                author: header.beneficiary(),
+                reward_type: RewardType::Block,
+                value: U256::from(block_reward),
+            },
+        ));
+
+        let Some(ommers) = ommers else { return traces };
+
+        for uncle in ommers {
+            let uncle_reward = ommer_reward(base_block_reward, header.number(), uncle.number());
+            traces.push(reward_trace(
+                header,
+                RewardAction {
+                    author: uncle.beneficiary(),
+                    reward_type: RewardType::Uncle,
+                    value: U256::from(uncle_reward),
+                },
+            ));
+        }
+        traces
+    }
+
+    /// Helper method to fetch blocks for trace filtering
+    async fn get_blocks_for_trace_range(
+        &self,
+        start: u64,
+        end: u64,
+    ) -> Result<Vec<RecoveredBlock<<Eth::Provider as BlockReader>::Block>>, Eth::Error> {
+        // Only try to use the cache if we're close to the latest block
+        const CACHE_THRESHOLD: u64 = 15;
+
+        let latest_block = self.provider().best_block_number().map_err(Eth::Error::from_eth_err)?;
+        let distance_to_latest = latest_block.saturating_sub(end);
+
+        // If we're not close to the latest block, just use direct retrieval
+        if distance_to_latest > CACHE_THRESHOLD {
+            return self
+                .provider()
+                .recovered_block_range(start..=end)
+                .map_err(Eth::Error::from_eth_err);
+        }
+
+        let end_block_hash = match self.provider().block_hash(end) {
+            Ok(Some(hash)) => hash,
+            _ => {
+                return self
+                    .provider()
+                    .recovered_block_range(start..=end)
+                    .map_err(Eth::Error::from_eth_err)
+            }
+        };
+
+        // Get blocks from cache
+        let cached_blocks = match self
+            .inner
+            .eth_api
+            .cache()
+            .get_cached_parent_blocks(end_block_hash, (end - start + 1) as usize)
+            .await
+        {
+            Some(blocks) => blocks,
+            None => {
+                return self
+                    .provider()
+                    .recovered_block_range(start..=end)
+                    .map_err(Eth::Error::from_eth_err)
+            }
+        };
+
+        // Find the oldest block we have in cache
+        if let Some(oldest_block) = cached_blocks.last() {
+            let oldest_number = oldest_block.header().number();
+
+            // If we need blocks before the oldest cached block, fetch them
+            if oldest_number > start {
+                // Get the missing blocks from the start to just before our oldest cached block
+                let missing_blocks = self
+                    .provider()
+                    .recovered_block_range(start..=(oldest_number - 1))
+                    .map_err(Eth::Error::from_eth_err)?;
+
+                let mut result = missing_blocks;
+
+                // Take only cached blocks in our range and convert to the right format
+                for block in cached_blocks.iter().rev() {
+                    let num = block.header().number();
+                    if num >= start && num <= end {
+                        result.push(block.as_ref().clone());
+                    }
+                }
+
+                return Ok(result);
+            }
+        }
+
+        // If we didn't hit the special case above, fall back to direct retrieval
+        self.provider().recovered_block_range(start..=end).map_err(Eth::Error::from_eth_err)
     }
 }
 

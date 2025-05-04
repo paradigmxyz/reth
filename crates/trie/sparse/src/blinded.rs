@@ -20,7 +20,7 @@ pub trait BlindedProviderFactory {
 }
 
 /// Revealed blinded trie node.
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(Debug)]
 pub struct RevealedNode {
     /// Raw trie node.
     pub node: Bytes,

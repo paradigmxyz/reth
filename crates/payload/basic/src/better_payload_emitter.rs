@@ -17,10 +17,7 @@ where
 {
     /// Create a new [`BetterPayloadEmitter`] with the given inner payload builder.
     /// Owns the sender half of a broadcast channel that emits the better payloads.
-    pub const fn new(
-        better_payloads_tx: broadcast::Sender<Arc<PB::BuiltPayload>>,
-        inner: PB,
-    ) -> Self {
+    pub fn new(better_payloads_tx: broadcast::Sender<Arc<PB::BuiltPayload>>, inner: PB) -> Self {
         Self { better_payloads_tx, inner }
     }
 }

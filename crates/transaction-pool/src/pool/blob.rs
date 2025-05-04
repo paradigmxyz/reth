@@ -59,7 +59,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         self.all.insert(transaction);
     }
 
-    const fn next_id(&mut self) -> u64 {
+    fn next_id(&mut self) -> u64 {
         let id = self.submission_id;
         self.submission_id = self.submission_id.wrapping_add(1);
         id

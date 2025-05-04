@@ -1,12 +1,10 @@
 use crate::primitives::CustomHeader;
 use alloy_genesis::Genesis;
-use reth_ethereum::{
-    chainspec::{EthChainSpec, EthereumHardforks, Hardfork, Hardforks},
-    primitives::SealedHeader,
-};
+use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardfork, Hardforks};
 use reth_network_peers::NodeRecord;
-use reth_op::chainspec::OpChainSpec;
+use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
+use reth_primitives_traits::SealedHeader;
 
 #[derive(Debug, Clone)]
 pub struct CustomChainSpec {
@@ -15,28 +13,23 @@ pub struct CustomChainSpec {
 }
 
 impl Hardforks for CustomChainSpec {
-    fn fork<H: Hardfork>(&self, fork: H) -> reth_ethereum::chainspec::ForkCondition {
+    fn fork<H: Hardfork>(&self, fork: H) -> reth_chainspec::ForkCondition {
         self.inner.fork(fork)
     }
 
-    fn forks_iter(
-        &self,
-    ) -> impl Iterator<Item = (&dyn Hardfork, reth_ethereum::chainspec::ForkCondition)> {
+    fn forks_iter(&self) -> impl Iterator<Item = (&dyn Hardfork, reth_chainspec::ForkCondition)> {
         self.inner.forks_iter()
     }
 
-    fn fork_id(&self, head: &reth_ethereum::chainspec::Head) -> reth_ethereum::chainspec::ForkId {
+    fn fork_id(&self, head: &reth_chainspec::Head) -> reth_chainspec::ForkId {
         self.inner.fork_id(head)
     }
 
-    fn latest_fork_id(&self) -> reth_ethereum::chainspec::ForkId {
+    fn latest_fork_id(&self) -> reth_chainspec::ForkId {
         self.inner.latest_fork_id()
     }
 
-    fn fork_filter(
-        &self,
-        head: reth_ethereum::chainspec::Head,
-    ) -> reth_ethereum::chainspec::ForkFilter {
+    fn fork_filter(&self, head: reth_chainspec::Head) -> reth_chainspec::ForkFilter {
         self.inner.fork_filter(head)
     }
 }
@@ -44,10 +37,7 @@ impl Hardforks for CustomChainSpec {
 impl EthChainSpec for CustomChainSpec {
     type Header = CustomHeader;
 
-    fn base_fee_params_at_block(
-        &self,
-        block_number: u64,
-    ) -> reth_ethereum::chainspec::BaseFeeParams {
+    fn base_fee_params_at_block(&self, block_number: u64) -> reth_chainspec::BaseFeeParams {
         self.inner.base_fee_params_at_block(block_number)
     }
 
@@ -55,10 +45,7 @@ impl EthChainSpec for CustomChainSpec {
         self.inner.blob_params_at_timestamp(timestamp)
     }
 
-    fn base_fee_params_at_timestamp(
-        &self,
-        timestamp: u64,
-    ) -> reth_ethereum::chainspec::BaseFeeParams {
+    fn base_fee_params_at_timestamp(&self, timestamp: u64) -> reth_chainspec::BaseFeeParams {
         self.inner.base_fee_params_at_timestamp(timestamp)
     }
 
@@ -66,11 +53,11 @@ impl EthChainSpec for CustomChainSpec {
         self.inner.bootnodes()
     }
 
-    fn chain(&self) -> reth_ethereum::chainspec::Chain {
+    fn chain(&self) -> reth_chainspec::Chain {
         self.inner.chain()
     }
 
-    fn deposit_contract(&self) -> Option<&reth_ethereum::chainspec::DepositContract> {
+    fn deposit_contract(&self) -> Option<&reth_chainspec::DepositContract> {
         self.inner.deposit_contract()
     }
 
@@ -102,8 +89,8 @@ impl EthChainSpec for CustomChainSpec {
 impl EthereumHardforks for CustomChainSpec {
     fn ethereum_fork_activation(
         &self,
-        fork: reth_ethereum::chainspec::EthereumHardfork,
-    ) -> reth_ethereum::chainspec::ForkCondition {
+        fork: reth_chainspec::EthereumHardfork,
+    ) -> reth_chainspec::ForkCondition {
         self.inner.ethereum_fork_activation(fork)
     }
 }
@@ -112,7 +99,7 @@ impl OpHardforks for CustomChainSpec {
     fn op_fork_activation(
         &self,
         fork: reth_optimism_forks::OpHardfork,
-    ) -> reth_ethereum::chainspec::ForkCondition {
+    ) -> reth_chainspec::ForkCondition {
         self.inner.op_fork_activation(fork)
     }
 }

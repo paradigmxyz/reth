@@ -135,18 +135,16 @@ impl LaunchContext {
     }
 
     /// Convenience function to [`Self::configure_globals`]
-    pub fn with_configured_globals(self, reserved_cpu_cores: usize) -> Self {
-        self.configure_globals(reserved_cpu_cores);
+    pub fn with_configured_globals(self) -> Self {
+        self.configure_globals();
         self
     }
 
     /// Configure global settings this includes:
     ///
     /// - Raising the file descriptor limit
-    /// - Configuring the global rayon thread pool with available parallelism. Honoring
-    ///   engine.reserved-cpu-cores to reserve given number of cores for O while using at least 1
-    ///   core for the rayon thread pool
-    pub fn configure_globals(&self, reserved_cpu_cores: usize) {
+    /// - Configuring the global rayon thread pool
+    pub fn configure_globals(&self) {
         // Raise the fd limit of the process.
         // Does not do anything on windows.
         match fdlimit::raise_fd_limit() {
@@ -157,11 +155,10 @@ impl LaunchContext {
             Err(err) => warn!(%err, "Failed to raise file descriptor limit"),
         }
 
-        // Reserving the given number of CPU cores for the rest of OS.
-        // Users can reserve more cores by setting engine.reserved-cpu-cores
-        // Note: The global rayon thread pool will use at least one core.
-        let num_threads = available_parallelism()
-            .map_or(0, |num| num.get().saturating_sub(reserved_cpu_cores).max(1));
+        // Limit the global rayon thread pool, reserving 1 core for the rest of the system.
+        // If the system only has 1 core the pool will use it.
+        let num_threads =
+            available_parallelism().map_or(0, |num| num.get().saturating_sub(1).max(1));
         if let Err(err) = ThreadPoolBuilder::new()
             .num_threads(num_threads)
             .thread_name(|i| format!("reth-rayon-{i}"))
@@ -190,8 +187,8 @@ impl<T> LaunchContextWith<T> {
     ///
     /// - Raising the file descriptor limit
     /// - Configuring the global rayon thread pool
-    pub fn configure_globals(&self, reserved_cpu_cores: u64) {
-        self.inner.configure_globals(reserved_cpu_cores.try_into().unwrap());
+    pub fn configure_globals(&self) {
+        self.inner.configure_globals();
     }
 
     /// Returns the data directory.
@@ -251,12 +248,12 @@ impl<L, R> LaunchContextWith<Attached<L, R>> {
     }
 
     /// Get a mutable reference to the right value.
-    pub const fn left_mut(&mut self) -> &mut L {
+    pub fn left_mut(&mut self) -> &mut L {
         &mut self.attachment.left
     }
 
     /// Get a mutable reference to the right value.
-    pub const fn right_mut(&mut self) -> &mut R {
+    pub fn right_mut(&mut self) -> &mut R {
         &mut self.attachment.right
     }
 }
@@ -297,7 +294,7 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     }
 
     /// Returns the attached [`NodeConfig`].
-    pub const fn node_config_mut(&mut self) -> &mut NodeConfig<ChainSpec> {
+    pub fn node_config_mut(&mut self) -> &mut NodeConfig<ChainSpec> {
         &mut self.left_mut().config
     }
 
@@ -307,7 +304,7 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     }
 
     /// Returns the attached toml config [`reth_config::Config`].
-    pub const fn toml_config_mut(&mut self) -> &mut reth_config::Config {
+    pub fn toml_config_mut(&mut self) -> &mut reth_config::Config {
         &mut self.left_mut().toml_config
     }
 
@@ -404,11 +401,7 @@ where
         {
             // Highly unlikely to happen, and given its destructive nature, it's better to panic
             // instead.
-            assert_ne!(
-                unwind_target,
-                PipelineTarget::Unwind(0),
-                "A static file <> database inconsistency was found that would trigger an unwind to block 0"
-            );
+            assert_ne!(unwind_target, PipelineTarget::Unwind(0), "A static file <> database inconsistency was found that would trigger an unwind to block 0");
 
             info!(target: "reth::cli", unwind_target = %unwind_target, "Executing an unwind after a failed storage consistency check.");
 
@@ -758,7 +751,7 @@ where
     }
 
     /// Returns mutable reference to the configured `NodeAdapter`.
-    pub const fn node_adapter_mut(&mut self) -> &mut NodeAdapter<T, CB::Components> {
+    pub fn node_adapter_mut(&mut self) -> &mut NodeAdapter<T, CB::Components> {
         &mut self.right_mut().node_adapter
     }
 
@@ -803,9 +796,7 @@ where
             let latest = self.blockchain_db().last_block_number()?;
             // bedrock height
             if latest < 105235063 {
-                error!(
-                    "Op-mainnet has been launched without importing the pre-Bedrock state. The chain can't progress without this. See also https://reth.rs/run/sync-op-mainnet.html?minimal-bootstrap-recommended"
-                );
+                error!("Op-mainnet has been launched without importing the pre-Bedrock state. The chain can't progress without this. See also https://reth.rs/run/sync-op-mainnet.html?minimal-bootstrap-recommended");
                 return Err(ProviderError::BestBlockNotFound)
             }
         }
@@ -987,12 +978,12 @@ impl<L, R> Attached<L, R> {
     }
 
     /// Get a mutable reference to the right value.
-    pub const fn left_mut(&mut self) -> &mut R {
+    pub fn left_mut(&mut self) -> &mut R {
         &mut self.right
     }
 
     /// Get a mutable reference to the right value.
-    pub const fn right_mut(&mut self) -> &mut R {
+    pub fn right_mut(&mut self) -> &mut R {
         &mut self.right
     }
 }

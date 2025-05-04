@@ -1,6 +1,8 @@
 //! Command for generating test vectors.
 
 use clap::{Parser, Subcommand};
+use reth_chainspec::ChainSpec;
+use std::sync::Arc;
 
 pub mod compact;
 pub mod tables;
@@ -54,5 +56,10 @@ impl Command {
             }
         }
         Ok(())
+    }
+
+    /// Returns the underlying chain being used to run this command
+    pub fn chain_spec(&self) -> Option<&Arc<ChainSpec>> {
+        None
     }
 }

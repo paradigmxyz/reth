@@ -425,7 +425,7 @@ impl<St, Primary> RlpxSatelliteStream<St, Primary> {
 
     /// Returns mutable access to the primary protocol.
     #[inline]
-    pub const fn primary_mut(&mut self) -> &mut Primary {
+    pub fn primary_mut(&mut self) -> &mut Primary {
         &mut self.primary.st
     }
 
@@ -437,7 +437,7 @@ impl<St, Primary> RlpxSatelliteStream<St, Primary> {
 
     /// Returns mutable access to the underlying [`P2PStream`].
     #[inline]
-    pub const fn inner_mut(&mut self) -> &mut P2PStream<St> {
+    pub fn inner_mut(&mut self) -> &mut P2PStream<St> {
         &mut self.inner.conn
     }
 

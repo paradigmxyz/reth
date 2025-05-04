@@ -27,7 +27,7 @@ mdbx_chk \- MDBX checking tool
 .SH DESCRIPTION
 The
 .B mdbx_chk
-utility intended to check an MDBX database file.
+utility is intended to check an MDBX database file.
 .SH OPTIONS
 .TP
 .BR \-V
@@ -55,7 +55,7 @@ check, including full check of all meta-pages and actual size of database file.
 .BR \-w
 Open environment in read-write mode and lock for writing while checking.
 This could be impossible if environment already used by another process(s)
-in an incompatible read-write mode. This allow rollback to last steady commit
+in an incompatible read-write mode. This allows rollback to last steady commit
 (in case environment was not closed properly) and then check transaction IDs
 of meta-pages. Otherwise, without \fB\-w\fP option environment will be
 opened in read-only mode.
@@ -90,7 +90,7 @@ then forcibly loads ones by sequential access and tries to lock database pages i
 .TP
 .BR \-n
 Open MDBX environment(s) which do not use subdirectories.
-This is legacy option. For now MDBX handles this automatically.
+This is a legacy option. For now MDBX handles this automatically.
 
 .SH DIAGNOSTICS
 Exit status is zero if no errors occur. Errors result in a non-zero exit status

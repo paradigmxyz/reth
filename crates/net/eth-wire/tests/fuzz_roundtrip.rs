@@ -28,7 +28,7 @@ where
 /// Default, Clone, or Serialize, and fuzz the wrapper type instead.
 fn roundtrip_fuzz<T>(thing: T)
 where
-    T: Encodable + Decodable + Clone + Serialize + Debug + PartialEq + Eq,
+    T: Encodable + Decodable + Clone + Serialize + Debug + PartialEq + Eq + Default,
 {
     roundtrip_encoding::<T>(thing)
 }

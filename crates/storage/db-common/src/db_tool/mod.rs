@@ -146,11 +146,9 @@ impl<N: ProviderNodeTypes> DbTool<N> {
         fs::remove_dir_all(static_files_path)?;
         fs::create_dir_all(static_files_path)?;
 
-        if exex_wal_path.as_ref().exists() {
-            let exex_wal_path = exex_wal_path.as_ref();
-            info!(target: "reth::cli", "Dropping ExEx WAL at {:?}", exex_wal_path);
-            fs::remove_dir_all(exex_wal_path)?;
-        }
+        let exex_wal_path = exex_wal_path.as_ref();
+        info!(target: "reth::cli", "Dropping ExEx WAL at {:?}", exex_wal_path);
+        fs::remove_dir_all(exex_wal_path)?;
 
         Ok(())
     }
@@ -190,7 +188,7 @@ impl ListFilter {
     }
 
     /// Updates the page with new `skip` and `len` values.
-    pub const fn update_page(&mut self, skip: usize, len: usize) {
+    pub fn update_page(&mut self, skip: usize, len: usize) {
         self.skip = skip;
         self.len = len;
     }

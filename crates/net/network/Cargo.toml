@@ -67,7 +67,6 @@ rustc-hash.workspace = true
 thiserror.workspace = true
 parking_lot.workspace = true
 rand.workspace = true
-rand_08.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
 derive_more.workspace = true
 schnellru.workspace = true
@@ -89,10 +88,12 @@ reth-tracing.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 
 # alloy deps for testing against nodes
+alloy-node-bindings.workspace = true
+alloy-provider = { workspace = true, features = ["admin-api"] }
 alloy-consensus.workspace = true
-alloy-genesis.workspace = true
 
 # misc
+serial_test.workspace = true
 tempfile.workspace = true
 url.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }
@@ -101,6 +102,7 @@ secp256k1 = { workspace = true, features = ["rand"] }
 criterion = { workspace = true, features = ["async_tokio", "html_reports"] }
 
 [features]
+geth-tests = []
 serde = [
     "dep:serde",
     "secp256k1/serde",
@@ -123,7 +125,6 @@ serde = [
     "reth-transaction-pool/serde",
     "reth-ethereum-primitives/serde",
     "reth-network-api/serde",
-    "rand_08/serde",
 ]
 test-utils = [
     "reth-transaction-pool/test-utils",

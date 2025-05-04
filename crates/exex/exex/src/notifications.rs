@@ -64,6 +64,7 @@ pub trait ExExNotificationsStream<N: NodePrimitives = EthPrimitives>:
 }
 
 #[derive(Debug)]
+#[expect(clippy::large_enum_variant)]
 enum ExExNotificationsInner<P, E>
 where
     E: BlockExecutorProvider,
@@ -72,7 +73,7 @@ where
     WithoutHead(ExExNotificationsWithoutHead<P, E>),
     /// A stream of [`ExExNotification`]s. The stream will only emit notifications for blocks that
     /// are committed or reverted after the given head.
-    WithHead(Box<ExExNotificationsWithHead<P, E>>),
+    WithHead(ExExNotificationsWithHead<P, E>),
     /// Internal state used when transitioning between [`ExExNotificationsInner::WithoutHead`] and
     /// [`ExExNotificationsInner::WithHead`].
     Invalid,
@@ -129,18 +130,16 @@ where
         let current = std::mem::replace(&mut self.inner, ExExNotificationsInner::Invalid);
         self.inner = ExExNotificationsInner::WithHead(match current {
             ExExNotificationsInner::WithoutHead(notifications) => {
-                Box::new(notifications.with_head(exex_head))
+                notifications.with_head(exex_head)
             }
-            ExExNotificationsInner::WithHead(notifications) => {
-                Box::new(ExExNotificationsWithHead::new(
-                    notifications.initial_local_head,
-                    notifications.provider,
-                    notifications.executor,
-                    notifications.notifications,
-                    notifications.wal_handle,
-                    exex_head,
-                ))
-            }
+            ExExNotificationsInner::WithHead(notifications) => ExExNotificationsWithHead::new(
+                notifications.initial_local_head,
+                notifications.provider,
+                notifications.executor,
+                notifications.notifications,
+                notifications.wal_handle,
+                exex_head,
+            ),
             ExExNotificationsInner::Invalid => unreachable!(),
         });
     }

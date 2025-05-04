@@ -183,7 +183,7 @@ impl S3Stage {
                     if let Err(err) = fetch(
                         filename,
                         &static_file_directory,
-                        &format!("{url}/{filename}"),
+                        &format!("{}/{filename}", url),
                         max_concurrent_requests,
                         Some(*file_hash),
                     )

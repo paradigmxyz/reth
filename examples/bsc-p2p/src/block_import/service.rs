@@ -394,7 +394,8 @@ mod tests {
             // Assert that at least one outcome matches our criteria
             assert!(
                 outcomes.iter().any(assert_fn),
-                "No outcome matched the expected criteria. Outcomes: {outcomes:?}"
+                "No outcome matched the expected criteria. Outcomes: {:?}",
+                outcomes
             );
         }
     }
