@@ -38,8 +38,7 @@ async fn test_history_imports_from_fresh_state_successfully() {
 
     let expected_block_number = 8191;
     let actual_block_number =
-        reth_era_utils::import(stream, &provider_factory.provider_rw().unwrap().0, hash_collector)
-            .unwrap();
+        reth_era_utils::import(stream, &provider_factory, hash_collector).unwrap();
 
     let static_file_provider = provider_factory.static_file_provider();
 
@@ -51,13 +50,7 @@ async fn test_history_imports_from_fresh_state_successfully() {
         let static_header_exists = header_static.is_ok() && header_static.unwrap().is_some();
 
         assert!(static_header_exists, "Block {block_num} should exist in static files");
-
-        // Only genesis block is in the db, others should be in static files
-        if block_num == 0 {
-            assert!(block_db.is_some(), "Genesis block should exist in the db");
-        } else {
-            assert!(block_db.is_none(), "Block {block_num} should not exist in db");
-        }
+        assert!(block_db.is_some(), "Block should exist in the db");
     }
     assert_eq!(actual_block_number, expected_block_number);
 }

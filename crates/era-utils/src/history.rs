@@ -13,7 +13,8 @@ use reth_etl::Collector;
 use reth_fs_util as fs;
 use reth_primitives_traits::{Block, FullBlockBody, FullBlockHeader, NodePrimitives};
 use reth_provider::{
-    BlockWriter, ProviderError, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
+    BlockWriter, DatabaseProviderFactory, ProviderError, StaticFileProviderFactory,
+    StaticFileSegment, StaticFileWriter,
 };
 use reth_storage_api::{DBProvider, HeaderProvider, NodePrimitivesProvider, StorageLocation};
 use std::sync::mpsc;
@@ -22,22 +23,23 @@ use tracing::info;
 /// Imports blocks from `downloader` using `provider`.
 ///
 /// Returns current block height.
-pub fn import<Downloader, Era, P, B, BB, BH>(
+pub fn import<Downloader, Era, PF, B, BB, BH>(
     mut downloader: Downloader,
-    provider: &P,
+    provider_factory: &PF,
     mut hash_collector: Collector<BlockHash, BlockNumber>,
 ) -> eyre::Result<BlockNumber>
 where
     B: Block<Header = BH, Body = BB>,
     BH: FullBlockHeader + Value,
     BB: FullBlockBody<
-        Transaction = <<P as NodePrimitivesProvider>::Primitives as NodePrimitives>::SignedTx,
+        Transaction = <<PF as NodePrimitivesProvider>::Primitives as NodePrimitives>::SignedTx,
         OmmerHeader = BH,
     >,
     Downloader: Stream<Item = eyre::Result<Era>> + Send + 'static + Unpin,
     Era: EraMeta + Send + 'static,
-    P: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory + BlockWriter<Block = B>,
-    <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
+    PF: DatabaseProviderFactory + StaticFileProviderFactory + NodePrimitivesProvider,
+    <PF as DatabaseProviderFactory>::ProviderRW: BlockWriter<Block = B> + DBProvider,
+    <PF as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
 {
     let (tx, rx) = mpsc::channel();
 
@@ -49,7 +51,9 @@ where
         tx.send(None)
     });
 
-    let static_file_provider = provider.static_file_provider();
+    let db_writer = provider_factory.database_provider_rw()?;
+
+    let static_file_provider = provider_factory.static_file_provider();
 
     // Consistency check of expected headers in static files vs DB is done on provider::sync_gap
     // when poll_execute_ready is polled.
@@ -69,7 +73,10 @@ where
     while let Some(meta) = rx.recv()? {
         let meta = meta?;
         let file = fs::open(meta.as_ref())?;
-        let mut reader = Era1Reader::new(file);
+        let mut reader = Era1Reader::new(file.try_clone()?);
+
+        let mut blocks_processed_per_file = 0;
+        let mut last_file_block_number = 0;
 
         for block in reader.iter() {
             let block = block?;
@@ -83,6 +90,7 @@ where
 
             let hash = header.hash_slow();
             last_header_number = number;
+            last_file_block_number = number;
 
             // Increase total difficulty
             td += header.difficulty();
@@ -91,14 +99,22 @@ where
             writer.append_header(&header, td, &hash)?;
 
             // Write bodies to database.
-            provider.append_block_bodies(
+            db_writer.append_block_bodies(
                 vec![(header.number(), Some(body))],
                 // We are writing transactions directly to static files.
                 StorageLocation::StaticFiles,
             )?;
 
             hash_collector.insert(hash, number)?;
+            blocks_processed_per_file += 1;
         }
+
+        info!(
+            target: "era::history::import",
+            "Committing era file: {file:?}, processed {} blocks, highest block: {}",
+            blocks_processed_per_file,
+            last_file_block_number
+        );
 
         writer.commit()?;
 
@@ -112,12 +128,12 @@ where
 
     // Database cursor for hash to number index
     let mut cursor_header_numbers =
-        provider.tx_ref().cursor_write::<RawTable<tables::HeaderNumbers>>()?;
+        db_writer.tx_ref().cursor_write::<RawTable<tables::HeaderNumbers>>()?;
     let mut first_sync = false;
 
     // If we only have the genesis block hash, then we are at first sync, and we can remove it,
     // add it to the collector and use tx.append on all hashes.
-    if provider.tx_ref().entries::<RawTable<tables::HeaderNumbers>>()? == 1 {
+    if db_writer.tx_ref().entries::<RawTable<tables::HeaderNumbers>>()? == 1 {
         if let Some((hash, block_number)) = cursor_header_numbers.last()? {
             if block_number.value()? == 0 {
                 hash_collector.insert(hash.key()?, 0)?;
@@ -147,5 +163,14 @@ where
         }
     }
 
+    info!(
+        target: "era::history::import",
+        "Starting final database commit. Total headers processed: {total_headers}, last block: {last_header_number}"
+    );
+    db_writer.commit()?;
+    info!(
+        target: "era::history::import",
+        "Import completed successfully. Highest block number: {last_header_number}"
+    );
     Ok(last_header_number)
 }
