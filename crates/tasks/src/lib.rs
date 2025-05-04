@@ -164,7 +164,7 @@ pub struct TaskManager {
     handle: Handle,
     /// Sender half for sending panic signals to this type
     panicked_tasks_tx: UnboundedSender<PanickedTaskError>,
-    /// Listens for panicked tasks
+    /// Listens for a panicked tasks
     panicked_tasks_rx: UnboundedReceiver<PanickedTaskError>,
     /// The [Signal] to fire when all tasks should be shutdown.
     ///
