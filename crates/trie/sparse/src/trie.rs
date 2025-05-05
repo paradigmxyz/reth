@@ -45,7 +45,8 @@ impl TrieMasks {
     }
 }
 
-/// A sparse trie that is either in a "blind" state (no nodes are revealed, root node hash is unknown) or in a "revealed" state (root node has been revealed and the trie can be updated).
+/// A sparse trie that is either in a "blind" state (no nodes are revealed, root node hash is
+/// unknown) or in a "revealed" state (root node has been revealed and the trie can be updated).
 ///
 /// In blind mode the trie does not contain any decoded node data, which saves memory but
 /// prevents direct access to node contents. The revealed mode stores decoded nodes along
@@ -542,9 +543,6 @@ impl<P> RevealedSparseTrie<P> {
     /// # Returns
     ///
     /// `Ok(())` if successful, or an error if node was not revealed.
-    ///
-    /// TODO: Check if `self.reveal_node_or_hash(child_path, &branch.stack[stack_ptr])?;` failing
-    /// TODO: is okay given we have inserted into `branch_node_tree_masks`
     pub fn reveal_node(
         &mut self,
         path: Nibbles,
@@ -894,7 +892,8 @@ impl<P> RevealedSparseTrie<P> {
     }
 
     /// Returns a list of (level, path) tuples identifying the nodes that have changed at the
-    /// specified depth, along with a new prefix set for the paths above the provided depth that remain unchanged.
+    /// specified depth, along with a new prefix set for the paths above the provided depth that
+    /// remain unchanged.
     ///
     /// Leaf nodes with a depth less than `depth` are returned too.
     ///
