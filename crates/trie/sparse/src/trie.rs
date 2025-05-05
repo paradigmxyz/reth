@@ -191,9 +191,6 @@ impl<P> SparseTrie<P> {
     /// Wipes the trie by removing all nodes and values,
     /// and resetting the trie to only contain an empty root node.
     ///
-    /// This is useful for when you want to reuse a trie instance without
-    /// creating a new one, clearing all of its contents.
-    ///
     /// Note: This method will error if the trie is blinded.
     pub fn wipe(&mut self) -> SparseTrieResult<()> {
         let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
