@@ -204,6 +204,8 @@ impl<P> SparseTrie<P> {
     /// Calculates the root hash of the trie.
     ///
     /// This will update any remaining dirty nodes before computing the root hash.
+    /// "dirty" nodes are nodes that need their hashes to be recomputed because one or more of their
+    /// children's hashes have changed.
     ///
     /// # Returns
     ///
