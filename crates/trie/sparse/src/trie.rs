@@ -45,8 +45,7 @@ impl TrieMasks {
     }
 }
 
-/// A sparse trie that is either in a "blind" state (nodes are hidden and only represented
-/// by their hashes) or in a "revealed" state (nodes have been loaded and can be updated).
+/// A sparse trie that is either in a "blind" state (no nodes are revealed, root node hash is unknown) or in a "revealed" state (root node has been revealed and the trie can be updated).
 ///
 /// In blind mode the trie does not contain any decoded node data, which saves memory but
 /// prevents direct access to node contents. The revealed mode stores decoded nodes along
