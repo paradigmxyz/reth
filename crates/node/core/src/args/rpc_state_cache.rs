@@ -40,7 +40,7 @@ pub struct RpcStateCacheArgs {
 
 impl RpcStateCacheArgs {
     /// Sets the Cache sizes to zero, effectively disabling caching.
-    pub fn set_zero_lengths(&mut self) {
+    pub const fn set_zero_lengths(&mut self) {
         self.max_blocks = 0;
         self.max_receipts = 0;
         self.max_headers = 0;
