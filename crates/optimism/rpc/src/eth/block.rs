@@ -7,12 +7,13 @@ use reth_chainspec::ChainSpecProvider;
 use reth_node_api::NodePrimitives;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
-use reth_primitives_traits::{BlockBody as _, HeaderTy};
+use reth_primitives_traits::{BlockBody as _, HeaderTy, TxTy};
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
     types::RpcTypes,
     RpcReceipt,
 };
+use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
 use crate::{OpEthApi, OpEthApiError, OpReceiptBuilder};
 
@@ -90,7 +91,9 @@ where
 impl<N> LoadBlock for OpEthApi<N>
 where
     N: OpNodeCore,
-    Self: LoadPendingBlock<NetworkTypes: RpcTypes<Header = Header<HeaderTy<Self::Primitives>>>>
-        + SpawnBlocking,
+    Self: LoadPendingBlock<
+            NetworkTypes: RpcTypes<Header = Header<HeaderTy<Self::Primitives>>>,
+            Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Primitives>>>,
+        > + SpawnBlocking,
 {
 }

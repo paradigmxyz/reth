@@ -10,9 +10,10 @@ use alloy_rlp::Encodable;
 use alloy_rpc_types_eth::{Block, BlockTransactions, Header, Index};
 use futures::Future;
 use reth_node_api::BlockBody;
-use reth_primitives_traits::{BlockTy, HeaderTy, ReceiptTy, RecoveredBlock, SealedBlock};
+use reth_primitives_traits::{BlockTy, HeaderTy, ReceiptTy, RecoveredBlock, SealedBlock, TxTy};
 use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt};
 use reth_rpc_types_compat::block::from_block;
+use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::sync::Arc;
 
 /// Result type of the fetched block receipts.
@@ -112,6 +113,8 @@ pub trait EthBlocks: LoadBlock {
     ) -> impl Future<Output = BlockAndReceiptsResult<Self>> + Send
     where
         Self: LoadReceipt,
+        Self::Pool:
+            TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Primitives>>>,
     {
         async move {
             if block_id.is_pending() {
@@ -196,8 +199,10 @@ pub trait EthBlocks: LoadBlock {
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
 pub trait LoadBlock:
-    LoadPendingBlock<NetworkTypes: RpcTypes<Header = Header<HeaderTy<Self::Primitives>>>>
-    + SpawnBlocking
+    LoadPendingBlock<
+        NetworkTypes: RpcTypes<Header = Header<HeaderTy<Self::Primitives>>>,
+        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Primitives>>>,
+    > + SpawnBlocking
 {
     /// Returns the block object for the given block id.
     #[expect(clippy::type_complexity)]

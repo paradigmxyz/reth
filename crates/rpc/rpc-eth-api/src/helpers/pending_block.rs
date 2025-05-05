@@ -15,7 +15,7 @@ use reth_evm::{
 };
 use reth_primitives_traits::{
     transaction::error::InvalidTransactionError, BlockTy, HeaderTy, ReceiptTy, RecoveredBlock,
-    SealedHeader,
+    SealedHeader, TxTy,
 };
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ProviderError, ReceiptProvider, StateProviderFactory,
@@ -23,7 +23,8 @@ use reth_provider::{
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
 use reth_transaction_pool::{
-    error::InvalidPoolTransactionError, BestTransactionsAttributes, TransactionPool,
+    error::InvalidPoolTransactionError, BestTransactionsAttributes, PoolTransaction,
+    TransactionPool,
 };
 use revm::context_interface::Block;
 use std::time::{Duration, Instant};
@@ -107,6 +108,8 @@ pub trait LoadPendingBlock: FullEthApiTypes {
     > + Send
     where
         Self: SpawnBlocking,
+        Self::Pool:
+            TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Primitives>>>,
     {
         async move {
             let pending = self.pending_block_env_and_cfg()?;
@@ -174,6 +177,8 @@ pub trait LoadPendingBlock: FullEthApiTypes {
         Self::Error,
     >
     where
+        Self::Pool:
+            TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Primitives>>>,
         EthApiError: From<ProviderError>,
     {
         let state_provider = self

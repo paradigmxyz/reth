@@ -83,6 +83,7 @@ test-utils = [
     "reth-provider?/test-utils",
     "reth-trie?/test-utils",
     "reth-transaction-pool?/test-utils",
+    "reth-evm-ethereum?/test-utils",
 ]
 
 full = [
