@@ -5,7 +5,7 @@ use reth_db_api::{
     cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
 };
 use reth_db_common::DbTool;
-use reth_evm::execute::BlockExecutorProvider;
+use reth_evm::ConfigureEvm;
 use reth_node_builder::NodeTypesWithDB;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::{
@@ -22,7 +22,7 @@ pub(crate) async fn dump_execution_stage<N, E, C>(
     to: u64,
     output_datadir: ChainPath<DataDirPath>,
     should_run: bool,
-    executor: BasicBlockExecutorProvider<E>,
+    evm_config: E,
     consensus: C,
 ) -> eyre::Result<()>
 where
@@ -34,7 +34,7 @@ where
 
     import_tables_with_range(&output_db, db_tool, from, to)?;
 
-    unwind_and_copy(db_tool, from, tip_block_number, &output_db, executor.clone())?;
+    unwind_and_copy(db_tool, from, tip_block_number, &output_db, evm_config.clone())?;
 
     if should_run {
         dry_run(
@@ -45,7 +45,7 @@ where
             ),
             to,
             from,
-            executor,
+            evm_config,
             consensus,
         )?;
     }
@@ -139,11 +139,11 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
     from: u64,
     tip_block_number: u64,
     output_db: &DatabaseEnv,
-    executor: impl BlockExecutorProvider<Primitives = N::Primitives>,
+    evm_config: impl ConfigureEvm<Primitives = N::Primitives>,
 ) -> eyre::Result<()> {
     let provider = db_tool.provider_factory.database_provider_rw()?;
 
-    let mut exec_stage = ExecutionStage::new_with_executor(executor, NoopConsensus::arc());
+    let mut exec_stage = ExecutionStage::new_with_executor(evm_config, NoopConsensus::arc());
 
     exec_stage.unwind(
         &provider,
@@ -169,7 +169,7 @@ fn dry_run<N, E, C>(
     output_provider_factory: ProviderFactory<N>,
     to: u64,
     from: u64,
-    executor: BasicBlockExecutorProvider<E>,
+    evm_config: E,
     consensus: C,
 ) -> eyre::Result<()>
 where
@@ -179,7 +179,7 @@ where
 {
     info!(target: "reth::cli", "Executing stage. [dry-run]");
 
-    let mut exec_stage = ExecutionStage::new_with_executor(executor, Arc::new(consensus));
+    let mut exec_stage = ExecutionStage::new_with_executor(evm_config, Arc::new(consensus));
 
     let input =
         reth_stages::ExecInput { target: Some(to), checkpoint: Some(StageCheckpoint::new(from)) };

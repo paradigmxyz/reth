@@ -4,7 +4,6 @@ use reth_network::{protocol::IntoRlpxSubProtocol, NetworkProtocols};
 use reth_network_api::FullNetwork;
 use reth_node_api::BeaconConsensusEngineEvent;
 use reth_node_core::args::RessArgs;
-use reth_node_ethereum::BasicBlockExecutorProvider;
 use reth_provider::providers::{BlockchainProvider, ProviderNodeTypes};
 use reth_ress_protocol::{NodeType, ProtocolState, RessProtocolHandler};
 use reth_ress_provider::{maintain_pending_state, PendingState, RethRessProtocolProvider};
@@ -40,7 +39,7 @@ where
     let (tx, mut rx) = mpsc::unbounded_channel();
     let provider = RethRessProtocolProvider::new(
         provider,
-        block_executor,
+        evm_config,
         Box::new(task_executor.clone()),
         args.max_witness_window,
         args.witness_max_parallel,

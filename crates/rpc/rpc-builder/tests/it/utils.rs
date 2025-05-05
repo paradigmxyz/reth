@@ -133,6 +133,5 @@ pub fn test_rpc_builder() -> RpcModuleBuilder<
         .with_network(NoopNetwork::default())
         .with_executor(TokioTaskExecutor::default())
         .with_evm_config(EthEvmConfig::mainnet())
-        .with_block_executor(BasicBlockExecutorProvider::new(EthEvmConfig::mainnet()))
         .with_consensus(NoopConsensus::default())
 }

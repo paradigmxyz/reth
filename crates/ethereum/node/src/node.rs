@@ -188,7 +188,7 @@ where
         let validation_api = ValidationApi::new(
             ctx.node.provider().clone(),
             Arc::new(ctx.node.consensus().clone()),
-            ctx.node.block_executor().clone(),
+            ctx.node.evm_config().clone(),
             ctx.config.rpc.flashbots_config(),
             Box::new(ctx.node.task_executor().clone()),
             Arc::new(EthereumEngineValidator::new(ctx.config.chain.clone())),

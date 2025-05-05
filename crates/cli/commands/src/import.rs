@@ -76,7 +76,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportComm
         let Environment { provider_factory, config, .. } = self.env.init::<N>(AccessRights::RW)?;
 
         let components = components(provider_factory.chain_spec());
-        let executor = components.executor().clone();
+        let executor = components.evm_config().clone();
         let consensus = Arc::new(components.consensus().clone());
         info!(target: "reth::cli", "Consensus engine initialized");
 
@@ -231,7 +231,7 @@ where
                 consensus.clone(),
                 header_downloader,
                 body_downloader,
-                executor,
+                evm_config,
                 config.stages.clone(),
                 PruneModes::default(),
             )

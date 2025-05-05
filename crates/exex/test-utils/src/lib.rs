@@ -25,7 +25,7 @@ use reth_db::{
 };
 use reth_db_common::init::init_genesis;
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
-use reth_evm_ethereum::{MockEvmConfig, MockExecutorProvider};
+use reth_evm_ethereum::MockEvmConfig;
 use reth_execution_types::Chain;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification, ExExNotifications, Wal};
 use reth_network::{config::rng_secret_key, NetworkConfigBuilder, NetworkManager};
@@ -251,7 +251,6 @@ pub async fn test_exex_context_with_chain_spec(
 ) -> eyre::Result<(ExExContext<Adapter>, TestExExHandle)> {
     let transaction_pool = testing_pool();
     let evm_config = MockEvmConfig::default();
-    let executor = MockExecutorProvider::default();
     let consensus = Arc::new(TestConsensus::default());
 
     let (static_dir, _) = create_test_static_files_dir();
@@ -283,7 +282,6 @@ pub async fn test_exex_context_with_chain_spec(
         components: Components {
             transaction_pool,
             evm_config,
-            executor,
             consensus,
             network,
             payload_builder_handle,
@@ -308,7 +306,7 @@ pub async fn test_exex_context_with_chain_spec(
     let notifications = ExExNotifications::new(
         head,
         components.provider.clone(),
-        components.components.executor.clone(),
+        components.components.evm_config.clone(),
         notifications_rx,
         wal.handle(),
     );
