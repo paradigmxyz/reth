@@ -15,7 +15,7 @@ use alloc::{format, sync::Arc};
 use alloy_consensus::{BlockHeader as _, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::B64;
 use core::fmt::Debug;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_chainspec::EthChainSpec;
 use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
 use reth_consensus_common::validation::{
     validate_against_parent_4844, validate_against_parent_eip1559_base_fee,
