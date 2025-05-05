@@ -1070,7 +1070,6 @@ mod tests {
         let mut tx4_v = f.validated(tx4.clone());
         tx4_v.timestamp = tx3_v.timestamp;
 
-
         let ord_1 = QueuedOrd(tx1_v.clone());
         let ord_2 = QueuedOrd(tx2_v.clone());
         let ord_3 = QueuedOrd(tx3_v.clone());
@@ -1083,7 +1082,6 @@ mod tests {
         pool.add_transaction(tx2_v);
         pool.add_transaction(tx3_v);
         pool.add_transaction(Arc::new(tx4_v));
-
 
         // from worst to best
         let mut iter = pool.best.iter();
