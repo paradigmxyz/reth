@@ -894,7 +894,7 @@ impl<P> RevealedSparseTrie<P> {
     }
 
     /// Returns a list of (level, path) tuples identifying the nodes that have changed at the
-    /// specified depth, along with a new prefix set for the paths that remain unchanged.
+    /// specified depth, along with a new prefix set for the paths above the provided depth that remain unchanged.
     ///
     /// Leaf nodes with a depth less than `depth` are returned too.
     ///
