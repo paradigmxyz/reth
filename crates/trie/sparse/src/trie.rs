@@ -985,7 +985,7 @@ impl<P> RevealedSparseTrie<P> {
     /// path in the provided buffers.
     ///
     /// The function uses a stack (`RlpNodeBuffers::path_stack`) to track the traversal and
-    /// accumulate RLP encodings. It panics if a node is not found at a required path.
+    /// accumulate RLP encodings.
     ///
     /// # Parameters
     ///
