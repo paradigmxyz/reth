@@ -482,6 +482,15 @@ impl MockTransaction {
         self
     }
 
+    /// Sets the authorization list for EIP-7702 transactions.
+    pub fn set_authorization_list(&mut self, list: Vec<SignedAuthorization>) -> &mut Self {
+        if let Self::Eip7702 { authorization_list, .. } = self {
+            *authorization_list = list;
+        }
+
+        self
+    }
+
     /// Sets the gas price for the transaction.
     pub const fn set_gas_price(&mut self, val: u128) -> &mut Self {
         match self {
