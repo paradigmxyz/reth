@@ -101,7 +101,7 @@ impl<ChainSpec: EthChainSpec + OpHardforks, B: Block> Consensus<B>
         }
 
         // Check empty shanghai-withdrawals
-        if self.chain_spec.is_shanghai_active_at_timestamp(block.timestamp()) {
+        if self.chain_spec.is_canyon_active_at_timestamp(block.timestamp()) {
             canyon::ensure_empty_shanghai_withdrawals(block.body()).map_err(|err| {
                 ConsensusError::Other(format!("failed to verify block {}: {err}", block.number()))
             })?
@@ -109,7 +109,7 @@ impl<ChainSpec: EthChainSpec + OpHardforks, B: Block> Consensus<B>
             return Ok(())
         }
 
-        if self.chain_spec.is_cancun_active_at_timestamp(block.timestamp()) {
+        if self.chain_spec.is_ecotone_active_at_timestamp(block.timestamp()) {
             validate_cancun_gas(block)?;
         }
 
