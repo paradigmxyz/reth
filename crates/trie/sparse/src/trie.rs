@@ -576,7 +576,7 @@ impl<P> RevealedSparseTrie<P> {
                     if branch.state_mask.is_bit_set(idx) {
                         let mut child_path = path.clone();
                         child_path.push_unchecked(idx);
-                        // Reveal each child node or record its has
+                        // Reveal each child node or hash it has
                         self.reveal_node_or_hash(child_path, &branch.stack[stack_ptr])?;
                         stack_ptr += 1;
                     }
