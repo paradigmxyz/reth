@@ -720,7 +720,7 @@ impl From<Genesis> for ChainSpec {
         ordered_hardforks.append(&mut hardforks);
 
         // Extract blob parameters directly from blob_schedule
-        let blob_params = BlobScheduleBlobParams::from_schedule(&genesis.config.blob_schedule);
+        let blob_params = genesis.config.blob_schedule_blob_params();
 
         // NOTE: in full node, we prune all receipts except the deposit contract's. We do not
         // have the deployment block in the genesis file, so we use block zero. We use the same
