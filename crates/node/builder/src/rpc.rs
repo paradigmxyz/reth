@@ -624,7 +624,7 @@ where
         self,
         ctx: AddOnsContext<'_, N>,
     ) -> eyre::Result<RpcHandleUnsafe<N, EthB::EthApi>> {
-        let Self { eth_api_builder, hooks, .. } = self;
+        let Self { eth_api_builder, .. } = self;
         let AddOnsContext { node, config, beacon_engine_handle, engine_events, .. } = ctx;
 
         info!(target: "reth::cli", "Engine API handler initialized");
