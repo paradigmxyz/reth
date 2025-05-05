@@ -212,9 +212,6 @@ fn validate_block_consensus(
 ) -> Result<(), StatelessValidationError> {
     let consensus = EthBeaconConsensus::new(chain_spec);
 
-    // For the beacon chain, total difficulty is ignored.
-    consensus.validate_header_with_total_difficulty(block.header(), U256::MAX)?;
-
     consensus.validate_header(block.sealed_header())?;
 
     consensus.validate_block_pre_execution(block)?;
