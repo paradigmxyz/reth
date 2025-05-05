@@ -3413,10 +3413,12 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-engine",
+ "alloy-serde 0.15.8",
  "async-trait",
  "derive_more",
  "eyre",
  "jsonrpsee",
+ "modular-bitfield",
  "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
  "op-revm",
@@ -3433,6 +3435,7 @@ dependencies = [
  "revm",
  "revm-primitives",
  "serde",
+ "test-fuzz",
 ]
 
 [[package]]
@@ -3494,6 +3497,18 @@ dependencies = [
  "reth-ethereum",
  "reth-op",
  "reth-tracing",
+ "tokio",
+]
+
+[[package]]
+name = "example-exex-test"
+version = "0.0.0"
+dependencies = [
+ "eyre",
+ "futures-util",
+ "reth-e2e-test-utils",
+ "reth-ethereum",
+ "serde_json",
  "tokio",
 ]
 

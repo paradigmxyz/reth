@@ -59,6 +59,8 @@ pub struct PayloadProcessor<N, Evm> {
     disable_transaction_prewarming: bool,
     /// Determines how to configure the evm for execution.
     evm_config: Evm,
+    /// whether precompile cache should be enabled.
+    precompile_cache_enabled: bool,
     /// Precompile cache.
     precompile_cache: Arc<PrecompileCache>,
     _marker: std::marker::PhantomData<N>,
@@ -79,6 +81,7 @@ impl<N, Evm> PayloadProcessor<N, Evm> {
             cross_block_cache_size: config.cross_block_cache_size(),
             disable_transaction_prewarming: config.disable_caching_and_prewarming(),
             evm_config,
+            precompile_cache_enabled: config.precompile_cache_enabled(),
             precompile_cache,
             _marker: Default::default(),
         }
@@ -262,6 +265,8 @@ where
             provider: provider_builder,
             metrics: PrewarmMetrics::default(),
             terminate_execution: Arc::new(AtomicBool::new(false)),
+            precompile_cache_enabled: self.precompile_cache_enabled,
+            precompile_cache: self.precompile_cache.clone(),
         };
 
         let prewarm_task = PrewarmCacheTask::new(
