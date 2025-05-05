@@ -651,7 +651,7 @@ impl<P> RevealedSparseTrie<P> {
             },
             TrieNode::Leaf(leaf) => match self.nodes.entry(path) {
                 Entry::Occupied(mut entry) => match entry.get() {
-                    // For a hash node, store the leaf's value and update the node as a leaf.
+                    // Replace a hash node with a revealed leaf node and store leaf node value.
                     SparseNode::Hash(hash) => {
                         let mut full = entry.key().clone();
                         full.extend_from_slice_unchecked(&leaf.key);
