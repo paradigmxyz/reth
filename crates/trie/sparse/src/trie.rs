@@ -57,12 +57,6 @@ impl TrieMasks {
 /// 2. Update tracking - changes to the trie structure can be tracked and selectively persisted
 /// 3. Incremental operations - nodes can be revealed as needed without loading the entire trie.
 ///    This is what gives rise to the notion of a "sparse" trie.
-///
-/// One way to visualize blind vs revealed: Imagine we take the Ethereum Trie that represents
-/// all state, and we started to "hide" some of the nodes. If we looked for that node in the
-/// Trie, it would not be available, but it does not mean that it is not there. Importantly,
-/// a "hidden" or "blind" node does not mean that it does not exists, it just means that it has
-/// not been revealed.
 #[derive(PartialEq, Eq, Default)]
 pub enum SparseTrie<P = DefaultBlindedProvider> {
     /// The trie is blind -- no nodes have been revealed
