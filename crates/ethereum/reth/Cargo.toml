@@ -83,6 +83,7 @@ test-utils = [
     "reth-provider?/test-utils",
     "reth-trie?/test-utils",
     "reth-transaction-pool?/test-utils",
+    "reth-evm-ethereum?/test-utils",
 ]
 
 full = [
@@ -97,7 +98,6 @@ full = [
     "network",
 ]
 
-alloy-compat = ["reth-ethereum-primitives/alloy-compat"]
 cli = ["dep:reth-ethereum-cli"]
 consensus = [
     "dep:reth-consensus",

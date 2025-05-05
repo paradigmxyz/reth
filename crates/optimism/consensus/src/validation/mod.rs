@@ -126,12 +126,12 @@ fn verify_receipts_optimism<R: DepositReceipt>(
     timestamp: u64,
 ) -> Result<(), ConsensusError> {
     // Calculate receipts root.
-    let receipts_with_bloom = receipts.iter().cloned().map(Into::into).collect::<Vec<_>>();
+    let receipts_with_bloom = receipts.iter().map(TxReceipt::with_bloom_ref).collect::<Vec<_>>();
     let receipts_root =
         calculate_receipt_root_optimism(&receipts_with_bloom, chain_spec, timestamp);
 
     // Calculate header logs bloom.
-    let logs_bloom = receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom());
+    let logs_bloom = receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom_ref());
 
     compare_receipts_root_and_logs_bloom(
         receipts_root,

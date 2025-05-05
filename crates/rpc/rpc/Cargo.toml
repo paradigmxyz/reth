@@ -70,6 +70,7 @@ http-body.workspace = true
 hyper.workspace = true
 jsonwebtoken.workspace = true
 serde_json.workspace = true
+jsonrpsee-types.workspace = true
 
 # async
 async-trait.workspace = true
