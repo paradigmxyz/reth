@@ -103,7 +103,7 @@ impl SparseTrie {
         Self::Blind
     }
 
-    /// Creates a new revealed but empty sparse trie.
+    /// Creates a new revealed but empty sparse trie with `SparseNode::Empty` as root node.
     ///
     /// # Examples
     ///
