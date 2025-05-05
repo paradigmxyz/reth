@@ -381,9 +381,11 @@ impl<Txs> OpBuilder<'_, Txs> {
         ctx.execute_sequencer_transactions(&mut builder)?;
         builder.into_executor().apply_post_execution_changes()?;
 
-        // force load `L2ToL1MessagePasser.sol` so l2 withdrawals root can be computed even if no
-        // l2 withdrawals in block
-        _ = db.load_cache_account(ADDRESS_L2_TO_L1_MESSAGE_PASSER)?;
+        if ctx.chain_spec.is_isthmus_active_at_timestamp(ctx.attributes().timestamp()) {
+            // force load `L2ToL1MessagePasser.sol` so l2 withdrawals root can be computed even if
+            // no l2 withdrawals in block
+            _ = db.load_cache_account(ADDRESS_L2_TO_L1_MESSAGE_PASSER)?;
+        }
 
         let ExecutionWitnessRecord { hashed_state, codes, keys, lowest_block_number: _ } =
             ExecutionWitnessRecord::from_executed_state(&db);
