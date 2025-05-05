@@ -47,7 +47,7 @@ async fn test_history_imports_from_fresh_state_successfully() {
     for block_num in checkpoint_blocks {
         let block_db = provider_factory.provider_rw().unwrap().block_by_number(block_num).unwrap();
         let header_static = static_file_provider.header_by_number(block_num);
-        let static_header_exists =  header_static.is_ok_and(|h| h.is_some());
+        let static_header_exists = header_static.is_ok_and(|h| h.is_some());
 
         assert!(static_header_exists, "Block {block_num} should exist in static files");
         assert!(block_db.is_some(), "Block should exist in the db");
