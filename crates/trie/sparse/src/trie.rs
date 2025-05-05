@@ -228,7 +228,7 @@ impl<P> SparseTrie<P> {
     /// An `Option` tuple consisting of:
     ///  - The trie root hash (`B256`).
     ///  - A [`SparseTrieUpdates`] structure containing information about updated nodes.
-    ///  - `None` if the true is still blind.
+    ///  - `None` if the trie is still blind.
     pub fn root_with_updates(&mut self) -> Option<(B256, SparseTrieUpdates)> {
         let revealed = self.as_revealed_mut()?;
         Some((revealed.root(), revealed.take_updates()))
