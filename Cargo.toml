@@ -148,6 +148,7 @@ members = [
     "examples/db-access",
     "examples/exex-hello-world",
     "examples/exex-subscription",
+    "examples/exex-test",
     "examples/manual-p2p/",
     "examples/network-txpool/",
     "examples/network/",

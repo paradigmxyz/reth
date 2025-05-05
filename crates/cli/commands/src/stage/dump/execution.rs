@@ -5,7 +5,7 @@ use reth_db_api::{
     cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
 };
 use reth_db_common::DbTool;
-use reth_evm::{execute::BlockExecutorProvider, noop::NoopBlockExecutorProvider};
+use reth_evm::execute::BlockExecutorProvider;
 use reth_node_builder::NodeTypesWithDB;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::{
@@ -34,7 +34,7 @@ where
 
     import_tables_with_range(&output_db, db_tool, from, to)?;
 
-    unwind_and_copy(db_tool, from, tip_block_number, &output_db)?;
+    unwind_and_copy(db_tool, from, tip_block_number, &output_db, executor.clone())?;
 
     if should_run {
         dry_run(
@@ -139,13 +139,11 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
     from: u64,
     tip_block_number: u64,
     output_db: &DatabaseEnv,
+    executor: impl BlockExecutorProvider<Primitives = N::Primitives>,
 ) -> eyre::Result<()> {
     let provider = db_tool.provider_factory.database_provider_rw()?;
 
-    let mut exec_stage = ExecutionStage::new_with_executor(
-        NoopBlockExecutorProvider::<N::Primitives>::default(),
-        NoopConsensus::arc(),
-    );
+    let mut exec_stage = ExecutionStage::new_with_executor(executor, NoopConsensus::arc());
 
     exec_stage.unwind(
         &provider,
