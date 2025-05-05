@@ -82,7 +82,7 @@ where
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         match &self.source {
-            None => Ok(UnwindOutput { checkpoint: input.checkpoint}),
+            None => Ok(UnwindOutput { checkpoint: input.checkpoint.with_block_number(input.unwind_to) }),
             Some(_) => todo!()
         }
     }
