@@ -5,7 +5,7 @@ use crate::{
     constants::{MAINNET_DEPOSIT_CONTRACT, MAINNET_PRUNE_DELETE_LIMIT},
     EthChainSpec,
 };
-use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, NamedChain};
 use alloy_consensus::{
     constants::{
@@ -16,7 +16,7 @@ use alloy_consensus::{
 };
 use alloy_eips::{
     eip1559::INITIAL_BASE_FEE, eip6110::MAINNET_DEPOSIT_CONTRACT_ADDRESS,
-    eip7685::EMPTY_REQUESTS_HASH, eip7840::BlobParams,
+    eip7685::EMPTY_REQUESTS_HASH, eip7892::BlobScheduleBlobParams,
 };
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
@@ -112,7 +112,7 @@ pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: MAINNET_PRUNE_DELETE_LIMIT,
-        blob_params: HardforkBlobParams::default(),
+        blob_params: BlobScheduleBlobParams::default(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -141,7 +141,7 @@ pub static SEPOLIA: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 10000,
-        blob_params: HardforkBlobParams::default(),
+        blob_params: BlobScheduleBlobParams::default(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -168,7 +168,7 @@ pub static HOLESKY: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 10000,
-        blob_params: HardforkBlobParams::default(),
+        blob_params: BlobScheduleBlobParams::default(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -197,7 +197,7 @@ pub static HOODI: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 10000,
-        blob_params: HardforkBlobParams::default(),
+        blob_params: BlobScheduleBlobParams::default(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -261,32 +261,6 @@ impl From<ForkBaseFeeParams> for BaseFeeParamsKind {
 #[derive(Clone, Debug, PartialEq, Eq, From)]
 pub struct ForkBaseFeeParams(Vec<(Box<dyn Hardfork>, BaseFeeParams)>);
 
-/// A container for hardforks that use eip-7804 blobs.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HardforkBlobParams {
-    /// Configuration for blob-related calculations for the Cancun hardfork.
-    pub cancun: BlobParams,
-    /// Configuration for blob-related calculations for the Prague hardfork.
-    pub prague: BlobParams,
-}
-
-impl HardforkBlobParams {
-    /// Constructs params for chainspec from a provided blob schedule.
-    /// Falls back to defaults if the schedule is missing.
-    pub fn from_schedule(blob_schedule: &BTreeMap<String, BlobParams>) -> Self {
-        Self {
-            cancun: blob_schedule.get("cancun").copied().unwrap_or_else(BlobParams::cancun),
-            prague: blob_schedule.get("prague").copied().unwrap_or_else(BlobParams::prague),
-        }
-    }
-}
-
-impl Default for HardforkBlobParams {
-    fn default() -> Self {
-        Self { cancun: BlobParams::cancun(), prague: BlobParams::prague() }
-    }
-}
-
 impl core::ops::Deref for ChainSpec {
     type Target = ChainHardforks;
 
@@ -330,7 +304,7 @@ pub struct ChainSpec {
     pub prune_delete_limit: usize,
 
     /// The settings passed for blob configurations for specific hardforks.
-    pub blob_params: HardforkBlobParams,
+    pub blob_params: BlobScheduleBlobParams,
 }
 
 impl Default for ChainSpec {
@@ -746,7 +720,7 @@ impl From<Genesis> for ChainSpec {
         ordered_hardforks.append(&mut hardforks);
 
         // Extract blob parameters directly from blob_schedule
-        let blob_params = HardforkBlobParams::from_schedule(&genesis.config.blob_schedule);
+        let blob_params = genesis.config.blob_schedule_blob_params();
 
         // NOTE: in full node, we prune all receipts except the deposit contract's. We do not
         // have the deployment block in the genesis file, so we use block zero. We use the same
@@ -1064,14 +1038,18 @@ mod tests {
     use super::*;
     use alloy_chains::Chain;
     use alloy_consensus::constants::ETH_TO_WEI;
-    use alloy_eips::eip4844::BLOB_TX_MIN_BLOB_GASPRICE;
+    use alloy_eips::{eip4844::BLOB_TX_MIN_BLOB_GASPRICE, eip7840::BlobParams};
     use alloy_evm::block::calc::{base_block_reward, block_reward};
     use alloy_genesis::{ChainConfig, GenesisAccount};
     use alloy_primitives::{b256, hex};
     use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
     use core::ops::Deref;
     use reth_ethereum_forks::{ForkCondition, ForkHash, ForkId, Head};
-    use std::{collections::HashMap, str::FromStr};
+    use std::{
+        collections::{BTreeMap, HashMap},
+        str::FromStr,
+        string::String,
+    };
 
     fn test_hardfork_fork_ids(spec: &ChainSpec, cases: &[(EthereumHardfork, ForkId)]) {
         for (hardfork, expected_id) in cases {
@@ -2549,8 +2527,8 @@ Post-merge hard forks (timestamp based):
          }
       }"#;
         let schedule: BTreeMap<String, BlobParams> = serde_json::from_str(s).unwrap();
-        let hardfork_params = HardforkBlobParams::from_schedule(&schedule);
-        let expected = HardforkBlobParams {
+        let hardfork_params = BlobScheduleBlobParams::from_schedule(&schedule);
+        let expected = BlobScheduleBlobParams {
             cancun: BlobParams {
                 target_blob_count: 3,
                 max_blob_count: 6,
@@ -2563,6 +2541,7 @@ Post-merge hard forks (timestamp based):
                 update_fraction: 3338477,
                 min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
             },
+            scheduled: Default::default(),
         };
         assert_eq!(hardfork_params, expected);
     }
