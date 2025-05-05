@@ -980,7 +980,7 @@ impl<P> RevealedSparseTrie<P> {
         self.rlp_node(prefix_set, &mut buffers)
     }
 
-    /// Recursively looks up or computes the RLP encoding of the node specified by the current
+    /// Looks up or computes the RLP encoding of the node specified by the current
     /// path in the provided buffers.
     ///
     /// The function uses a stack (`RlpNodeBuffers::path_stack`) to track the traversal and
