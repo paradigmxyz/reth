@@ -129,15 +129,6 @@ impl Database for WitnessDatabase<'_> {
     ///
     /// Returns an error if the bytecode for the given hash is not found in the map.
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        // TODO: This was added because the beacon root contract was not being included
-        // TODO: in the witness, when there were no transactions. See `notxs.json` in
-        // TODO: the execution spec tests. Once it is fixed, we can remove this.
-        use alloy_eips::eip4788::BEACON_ROOTS_CODE;
-        let beacon_root_hash = keccak256(BEACON_ROOTS_CODE.clone());
-        if code_hash == beacon_root_hash {
-            return Ok(Bytecode::new_raw(BEACON_ROOTS_CODE.clone()));
-        }
-
         let bytecode = self.bytecode.get(&code_hash).ok_or_else(|| {
             ProviderError::TrieWitnessError(format!("bytecode for {code_hash} not found"))
         })?;

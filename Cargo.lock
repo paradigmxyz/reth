@@ -9890,7 +9890,6 @@ name = "reth-stateless"
 version = "1.3.12"
 dependencies = [
  "alloy-consensus",
- "alloy-eips 0.15.9",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-trie",

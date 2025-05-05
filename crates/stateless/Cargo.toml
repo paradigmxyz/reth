@@ -17,7 +17,6 @@ alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-trie.workspace = true
 alloy-consensus.workspace = true
-alloy-eips = { workspace = true }
 
 # reth
 reth-ethereum-consensus.workspace = true
