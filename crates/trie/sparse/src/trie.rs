@@ -55,7 +55,8 @@ impl TrieMasks {
 /// The sparse trie design is optimised for:
 /// 1. Memory efficiency - only needed nodes are loaded into memory
 /// 2. Update tracking - changes to the trie structure can be tracked and selectively persisted
-/// 3. Incremental operations - nodes can be revealed as needed without loading the entire trie
+/// 3. Incremental operations - nodes can be revealed as needed without loading the entire trie.
+///    This is what gives rise to the notion of a "sparse" trie.
 ///
 /// One way to visualize blind vs revealed: Imagine we take the Ethereum Trie that represents
 /// all state, and we started to "hide" some of the nodes. If we looked for that node in the
