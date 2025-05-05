@@ -896,7 +896,7 @@ impl<P> RevealedSparseTrie<P> {
     /// Returns a list of (level, path) tuples identifying the nodes that have changed at the
     /// specified depth, along with a new prefix set for the paths that remain unchanged.
     ///
-    /// Nodes with a depth less than `depth` are returned in the new prefix set.
+    /// Leaf nodes with a depth less than `depth` are returned too.
     ///
     /// This method helps optimize hash recalculations by identifying which specific
     /// nodes need to be updated at each level of the trie.
