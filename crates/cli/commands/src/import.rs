@@ -184,7 +184,7 @@ pub fn build_import_pipeline<N, C, E>(
     evm_config: E,
 ) -> eyre::Result<(Pipeline<N>, impl Stream<Item = NodeEvent<N::Primitives>>)>
 where
-    N: ProviderNodeTypes + CliNodeTypes,
+    N: ProviderNodeTypes,
     C: FullConsensus<N::Primitives, Error = ConsensusError> + 'static,
     E: ConfigureEvm<Primitives = N::Primitives> + 'static,
 {
