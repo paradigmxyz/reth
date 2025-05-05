@@ -70,7 +70,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     ) -> eyre::Result<Pipeline<N>>
     where
-        N: ProviderNodeTypes<ChainSpec = C::ChainSpec, Primitives = EthPrimitives> + CliNodeTypes,
+        N: ProviderNodeTypes<ChainSpec = C::ChainSpec, Primitives = EthPrimitives>,
         Client: EthBlockClient + 'static,
     {
         // building network downloaders using the fetch client
