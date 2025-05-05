@@ -43,7 +43,7 @@ pub enum Error {
 #[derive(Debug, Clone)]
 pub struct SequencerClient {
     inner: Arc<SequencerClientInner>,
-} 
+}
 
 impl SequencerClientInner {
     /// Creates a new instance with the given endpoint and client.
