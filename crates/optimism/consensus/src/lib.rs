@@ -111,8 +111,6 @@ impl<ChainSpec: EthChainSpec + OpHardforks, B: Block> Consensus<B>
 
         if self.chain_spec.is_cancun_active_at_timestamp(block.timestamp()) {
             validate_cancun_gas(block)?;
-        } else {
-            return Ok(())
         }
 
         // Check withdrawals root field in header
