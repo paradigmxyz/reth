@@ -51,8 +51,6 @@ where
         tx.send(None)
     });
 
-    let db_writer = provider_factory.database_provider_rw()?;
-
     let static_file_provider = provider_factory.static_file_provider();
 
     // Consistency check of expected headers in static files vs DB is done on provider::sync_gap
@@ -71,6 +69,7 @@ where
     let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
 
     while let Some(meta) = rx.recv()? {
+        let db_writer = provider_factory.database_provider_rw()?;
         let meta = meta?;
         let file = fs::open(meta.as_ref())?;
         let mut reader = Era1Reader::new(file.try_clone()?);
@@ -117,11 +116,14 @@ where
         );
 
         writer.commit()?;
+        db_writer.commit()?;
 
         info!(target: "era::history::import", "Processed {}", meta.as_ref().to_string_lossy());
 
         meta.mark_as_processed()?;
     }
+
+    let db_writer: <PF as DatabaseProviderFactory>::ProviderRW = provider_factory.database_provider_rw()?;
 
     let total_headers = hash_collector.len();
     info!(target: "era::history::import", total = total_headers, "Writing headers hash index");
@@ -163,11 +165,6 @@ where
         }
     }
 
-    info!(
-        target: "era::history::import",
-        "Starting final database commit. Total headers processed: {total_headers}, last block: {last_header_number}"
-    );
-    db_writer.commit()?;
     info!(
         target: "era::history::import",
         "Import completed successfully. Highest block number: {last_header_number}"
