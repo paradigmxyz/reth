@@ -47,9 +47,8 @@ pub type PeerId = alloy_primitives::B512;
 
 /// Helper trait that unifies network API needed to launch node.
 pub trait FullNetwork:
-    NetworkPrimitives
-    + BlockDownloaderProvider<
-        Client: HeadersClient<Header = <Self as NetworkPrimitives>::BlockHeader>,
+    BlockDownloaderProvider<
+        Client: BlockClient<Block = <Self::Primitives as NetworkPrimitives>::Block>,
     > + NetworkSyncUpdater
     + NetworkInfo
     + NetworkEventListenerProvider
@@ -57,14 +56,14 @@ pub trait FullNetwork:
     + Peers
     + PeersHandleProvider
     + Clone
+    + Unpin
     + 'static
 {
 }
 
 impl<T> FullNetwork for T where
-    T: NetworkPrimitives
-        + BlockDownloaderProvider<
-            Client: HeadersClient<Header = <Self as NetworkPrimitives>::BlockHeader>,
+    T: BlockDownloaderProvider<
+            Client: BlockClient<Block = <Self::Primitives as NetworkPrimitives>::Block>,
         > + NetworkSyncUpdater
         + NetworkInfo
         + NetworkEventListenerProvider
@@ -72,6 +71,7 @@ impl<T> FullNetwork for T where
         + Peers
         + PeersHandleProvider
         + Clone
+        + Unpin
         + 'static
 {
 }

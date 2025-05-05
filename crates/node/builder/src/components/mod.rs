@@ -20,7 +20,7 @@ pub use execute::*;
 pub use network::*;
 pub use payload::*;
 pub use pool::*;
-use reth_network_p2p::BlockClient;
+use reth_network::NetworkPrimitives;
 use reth_payload_builder::PayloadBuilderHandle;
 use std::fmt::Debug;
 
@@ -28,7 +28,7 @@ use crate::{ConfigureEvm, FullNodeTypes};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network_api::FullNetwork;
-use reth_node_api::{BlockTy, BodyTy, HeaderTy, NodeTypes, PrimitivesTy, TxTy};
+use reth_node_api::{BlockTy, BodyTy, HeaderTy, NodeTypes, PrimitivesTy, ReceiptTy, TxTy};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
 /// An abstraction over the components of a node, consisting of:
@@ -54,8 +54,13 @@ pub trait NodeComponents<T: FullNodeTypes>: Clone + Debug + Unpin + Send + Sync 
 
     /// Network API.
     type Network: FullNetwork<
-        BlockHeader = HeaderTy<T::Types>,
-        Client: BlockClient<Block = BlockTy<T::Types>>,
+        Primitives: NetworkPrimitives<
+            BlockHeader = HeaderTy<T::Types>,
+            BlockBody = BodyTy<T::Types>,
+            Block = BlockTy<T::Types>,
+            Receipt = ReceiptTy<T::Types>,
+            BroadcastedTransaction = TxTy<T::Types>,
+        >,
     >;
 
     /// Returns the transaction pool of the node.
@@ -102,13 +107,20 @@ impl<Node, Pool, EVM, Executor, Cons, Network> NodeComponents<Node>
 where
     Node: FullNodeTypes,
     Network: FullNetwork<
-        BlockHeader = HeaderTy<Node::Types>,
-        BlockBody = BodyTy<Node::Types>,
-        Block = BlockTy<Node::Types>,
-        Client: BlockClient<Block = BlockTy<Node::Types>>,
+        Primitives: NetworkPrimitives<
+            BlockHeader = HeaderTy<Node::Types>,
+            BlockBody = BodyTy<Node::Types>,
+            Block = BlockTy<Node::Types>,
+            Receipt = ReceiptTy<Node::Types>,
+            BroadcastedTransaction = TxTy<Node::Types>,
+        >,
     >,
-    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
-        + Unpin
+    Pool: TransactionPool<
+            Transaction: PoolTransaction<
+                Consensus = TxTy<Node::Types>,
+                Pooled = <Network::Primitives as NetworkPrimitives>::PooledTransaction,
+            >,
+        > + Unpin
         + 'static,
     EVM: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>> + 'static,
     Executor: BlockExecutorProvider<Primitives = PrimitivesTy<Node::Types>>,

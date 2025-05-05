@@ -2,7 +2,7 @@
 
 use alloy_consensus::{RlpDecodableReceipt, RlpEncodableReceipt, TxReceipt};
 use alloy_rlp::{Decodable, Encodable};
-use core::fmt::Debug;
+use core::{fmt::Debug, marker::PhantomData};
 use reth_primitives_traits::{Block, BlockBody, BlockHeader, NodePrimitives, SignedTransaction};
 
 /// Abstraction over primitive types which might appear in network messages. See
@@ -30,6 +30,23 @@ pub trait NetworkPrimitives: Send + Sync + Unpin + Clone + Debug + 'static {
 
     /// The transaction type which peers return in `GetReceipts` messages.
     type Receipt: TxReceipt + RlpEncodableReceipt + RlpDecodableReceipt + Unpin + 'static;
+}
+
+impl<BH, BB, B, BT, PT, R> NetworkPrimitives for PhantomData<(BH, BB, B, BT, PT, R)>
+where
+    BH: BlockHeader + 'static,
+    BB: BlockBody + 'static,
+    B: Block<Header = BH, Body = BB> + Encodable + Decodable + 'static,
+    BT: SignedTransaction + 'static,
+    PT: SignedTransaction + TryFrom<BT> + 'static,
+    R: TxReceipt + RlpEncodableReceipt + RlpDecodableReceipt + Unpin + 'static,
+{
+    type BlockHeader = BH;
+    type BlockBody = BB;
+    type Block = B;
+    type BroadcastedTransaction = BT;
+    type PooledTransaction = PT;
+    type Receipt = R;
 }
 
 /// This is a helper trait for use in bounds, where some of the [`NetworkPrimitives`] associated

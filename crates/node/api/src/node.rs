@@ -7,9 +7,9 @@ use reth_consensus::{ConsensusError, FullConsensus};
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_primitives::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle};
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
-use reth_network_api::{BlockClient, FullNetwork};
+use reth_network_api::FullNetwork;
 use reth_node_core::node_config::NodeConfig;
-use reth_node_types::{BlockTy, HeaderTy, NodeTypes, NodeTypesWithDBAdapter, TxTy};
+use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter, TxTy};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
@@ -80,10 +80,7 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
         + 'static;
 
     /// Network API.
-    type Network: FullNetwork<
-        BlockHeader = HeaderTy<Self::Types>,
-        Client: BlockClient<Block = BlockTy<Self::Types>>,
-    >;
+    type Network: FullNetwork;
 
     /// Returns the transaction pool of the node.
     fn pool(&self) -> &Self::Pool;

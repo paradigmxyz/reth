@@ -2,9 +2,9 @@
 
 use std::future::Future;
 
+use reth_network::NetworkPrimitives;
 use reth_network_api::FullNetwork;
-use reth_network_p2p::BlockClient;
-use reth_node_api::{BlockTy, HeaderTy};
+use reth_node_api::{BlockTy, BodyTy, HeaderTy, ReceiptTy, TxTy};
 use reth_transaction_pool::TransactionPool;
 
 use crate::{BuilderContext, FullNodeTypes};
@@ -13,8 +13,13 @@ use crate::{BuilderContext, FullNodeTypes};
 pub trait NetworkBuilder<Node: FullNodeTypes, Pool: TransactionPool>: Send {
     /// The network built.
     type Network: FullNetwork<
-        BlockHeader = HeaderTy<Node::Types>,
-        Client: BlockClient<Block = BlockTy<Node::Types>>,
+        Primitives: NetworkPrimitives<
+            BlockHeader = HeaderTy<Node::Types>,
+            BlockBody = BodyTy<Node::Types>,
+            Block = BlockTy<Node::Types>,
+            Receipt = ReceiptTy<Node::Types>,
+            BroadcastedTransaction = TxTy<Node::Types>,
+        >,
     >;
 
     /// Launches the network implementation and returns the handle to it.
@@ -29,8 +34,13 @@ impl<Node, Net, F, Fut, Pool> NetworkBuilder<Node, Pool> for F
 where
     Node: FullNodeTypes,
     Net: FullNetwork<
-        BlockHeader = HeaderTy<Node::Types>,
-        Client: BlockClient<Block = BlockTy<Node::Types>>,
+        Primitives: NetworkPrimitives<
+            BlockHeader = HeaderTy<Node::Types>,
+            BlockBody = BodyTy<Node::Types>,
+            Block = BlockTy<Node::Types>,
+            Receipt = ReceiptTy<Node::Types>,
+            BroadcastedTransaction = TxTy<Node::Types>,
+        >,
     >,
     Pool: TransactionPool,
     F: Fn(&BuilderContext<Node>, Pool) -> Fut + Send,
