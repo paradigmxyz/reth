@@ -1299,7 +1299,8 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
     ///
     /// Returns `Ok(())` if the update is successful.
     ///
-    /// Note: If an update requires revealing a blinded node, an error is returned.
+    /// Note: If an update requires revealing a blinded node, an error is returned if the blinded
+    /// provider returns an error.
     pub fn update_leaf(&mut self, path: Nibbles, value: Vec<u8>) -> SparseTrieResult<()> {
         self.prefix_set.insert(path.clone());
         let existing = self.values.insert(path.clone(), value);
