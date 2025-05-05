@@ -277,7 +277,7 @@ pub struct RevealedSparseTrie<P = DefaultBlindedProvider> {
     /// Provider used for retrieving blinded nodes.
     /// This allows lazily loading parts of the trie from an external source.
     provider: P,
-    /// Map from a prefix (nibbles) to its corresponding sparse trie node.
+    /// Map from a path (nibbles) to its corresponding sparse trie node.
     /// This contains all of the reveal nodes in trie.
     nodes: HashMap<Nibbles, SparseNode>,
     /// Mask information for branch nodes that require tree storage.
