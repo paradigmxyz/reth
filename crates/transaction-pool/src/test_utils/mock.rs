@@ -484,11 +484,8 @@ impl MockTransaction {
 
     /// Sets the authorization list for EIP-7702 transactions.
     pub fn set_authorization_list(&mut self, list: Vec<SignedAuthorization>) -> &mut Self {
-        match self {
-            Self::Eip7702 { authorization_list, .. } => {
-                *authorization_list = list;
-            }
-            _ => {}
+        if let Self::Eip7702 { authorization_list, .. } = self {
+            *authorization_list = list;
         }
 
         self
