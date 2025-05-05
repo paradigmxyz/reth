@@ -123,7 +123,8 @@ where
         meta.mark_as_processed()?;
     }
 
-    let db_writer: <PF as DatabaseProviderFactory>::ProviderRW = provider_factory.database_provider_rw()?;
+    let db_writer: <PF as DatabaseProviderFactory>::ProviderRW =
+        provider_factory.database_provider_rw()?;
 
     let total_headers = hash_collector.len();
     info!(target: "era::history::import", total = total_headers, "Writing headers hash index");
