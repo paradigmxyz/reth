@@ -284,7 +284,7 @@ pub struct RevealedSparseTrie<P = DefaultBlindedProvider> {
     /// When a branch is set, the corresponding child subtree is stored in the database.
     branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
     /// Mask information for branch nodes that require hash storage.
-    /// When a bit is set, the cooresponding child is stored as a hash in the database.
+    /// When a bit is set, the corresponding child is stored as a hash in the database.
     branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
     /// Map from leaf key paths to their values.
     /// All values are stored here instead of directly in leaf nodes.
