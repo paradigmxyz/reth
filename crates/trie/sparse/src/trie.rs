@@ -53,7 +53,7 @@ impl TrieMasks {
 /// with additional information such as values, allowing direct manipulation.
 ///
 /// The sparse trie design is optimised for:
-/// 1. Memory efficiency - only needed nodes are loaded into memory
+/// 1. Memory efficiency - only revealed nodes are loaded into memory
 /// 2. Update tracking - changes to the trie structure can be tracked and selectively persisted
 /// 3. Incremental operations - nodes can be revealed as needed without loading the entire trie.
 ///    This is what gives rise to the notion of a "sparse" trie.
