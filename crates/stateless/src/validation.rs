@@ -6,7 +6,7 @@ use alloc::{
     vec::Vec,
 };
 use alloy_consensus::{Block, BlockHeader, Header};
-use alloy_primitives::{keccak256, map::B256Map, B256, U256};
+use alloy_primitives::{keccak256, map::B256Map, B256};
 use alloy_rlp::Decodable;
 use reth_chainspec::ChainSpec;
 use reth_consensus::{Consensus, HeaderValidator};
