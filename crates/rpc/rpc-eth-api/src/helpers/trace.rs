@@ -183,7 +183,8 @@ pub trait Trace:
             ) -> Result<R, Self::Error>
             + Send
             + 'static,
-        Insp: for<'a, 'b> InspectorFor<Self::Evm, StateCacheDbRefMutWrapper<'a, 'b>>,
+        Insp:
+            for<'a, 'b> InspectorFor<Self::Evm, StateCacheDbRefMutWrapper<'a, 'b>> + Send + 'static,
         R: Send + 'static,
     {
         async move {
