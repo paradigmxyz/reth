@@ -376,9 +376,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-network-primitives"
-version = "0.15.8"
+version = "0.15.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d770bdcca12fe2b3e973de3f17290065b42c6d9a10cbd9728877bbbbfb050b6"
+checksum = "a83c70f1509416f905f809a27006d3b8e2005d9d1e4aeee994882ae0397477c5"
 dependencies = [
  "alloy-consensus",
  "alloy-eips 0.15.9",
@@ -5831,9 +5831,9 @@ checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 
 [[package]]
 name = "op-alloy-consensus"
-version = "0.15.2"
+version = "0.15.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e379c2ae29efd7ef8bb1e943ec9b41d5a879aaa0d2b42518a61b828c109c08e"
+checksum = "375b501fad264f16781b608252b1b14c627359cc90cc09e80f6cbdac03fd8f07"
 dependencies = [
  "alloy-consensus",
  "alloy-eips 0.15.9",
@@ -5857,9 +5857,9 @@ checksum = "4ef71f23a8caf6f2a2d5cafbdc44956d44e6014dcb9aa58abf7e4e6481c6ec34"
 
 [[package]]
 name = "op-alloy-network"
-version = "0.15.2"
+version = "0.15.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "88448acc99df1110c06068a8f79bb6964acdbd585edc4093d3db6fd7493ff873"
+checksum = "3e65a776c7783650a4ffdf15bdf0526f4b8bdbe00b26df5aeeb1aa2939c6554f"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -5872,9 +5872,9 @@ dependencies = [
 
 [[package]]
 name = "op-alloy-rpc-jsonrpsee"
-version = "0.15.2"
+version = "0.15.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed9311771ba3c554bb02f0d2361c9ee3fa381fe162422433fb2f80bc7056eac0"
+checksum = "e9ce30de9f0e222c863ac8bd97f6f9a7eb6f7fb74309e2fbb6b5aca0035a66fb"
 dependencies = [
  "alloy-primitives",
  "jsonrpsee",
@@ -5882,9 +5882,9 @@ dependencies = [
 
 [[package]]
 name = "op-alloy-rpc-types"
-version = "0.15.2"
+version = "0.15.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fc04c0a67d17229d15738880264be31173f58e2bc3ec1192d72652b819e35d7"
+checksum = "1436a5d45b7620bbba236201236ef644abd943258b6349dc5e5a147d65a1fac4"
 dependencies = [
  "alloy-consensus",
  "alloy-eips 0.15.9",
@@ -5900,9 +5900,9 @@ dependencies = [
 
 [[package]]
 name = "op-alloy-rpc-types-engine"
-version = "0.15.2"
+version = "0.15.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5e5733a858cf7fb1adc678b1cb97f42578eac9b78de3abb5967dd95db0a4f14"
+checksum = "0b9767e25626d237857803577081a27082b2fd367934953e1144af433b1f4e07"
 dependencies = [
  "alloy-consensus",
  "alloy-eips 0.15.9",
