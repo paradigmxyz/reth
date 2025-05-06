@@ -52,7 +52,6 @@ pub trait FullNetwork:
     > + NetworkSyncUpdater
     + NetworkInfo
     + NetworkEventListenerProvider
-    + PeersInfo
     + Peers
     + PeersHandleProvider
     + Clone
@@ -67,7 +66,6 @@ impl<T> FullNetwork for T where
         > + NetworkSyncUpdater
         + NetworkInfo
         + NetworkEventListenerProvider
-        + PeersInfo
         + Peers
         + PeersHandleProvider
         + Clone
