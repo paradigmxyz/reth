@@ -35,7 +35,7 @@ impl WorkloadExecutor {
     }
 
     /// Returns the handle to the tokio runtime
-    pub(super) fn handle(&self) -> &Handle {
+    pub(super) const fn handle(&self) -> &Handle {
         &self.inner.handle
     }
 
@@ -51,7 +51,7 @@ impl WorkloadExecutor {
 
     /// Returns access to the rayon pool
     #[expect(unused)]
-    pub(super) fn rayon_pool(&self) -> &Arc<rayon::ThreadPool> {
+    pub(super) const fn rayon_pool(&self) -> &Arc<rayon::ThreadPool> {
         &self.inner.rayon_pool
     }
 }

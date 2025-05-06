@@ -1,9 +1,7 @@
 use alloy_consensus::BlockHeader;
-use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
 use futures_util::StreamExt;
 use reth_config::config::EtlConfig;
-use reth_consensus::HeaderValidator;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     table::Value,
@@ -12,22 +10,23 @@ use reth_db_api::{
     DbTxUnwindExt, RawKey, RawTable, RawValue,
 };
 use reth_etl::Collector;
-use reth_network_p2p::headers::{downloader::HeaderDownloader, error::HeadersDownloaderError};
+use reth_network_p2p::headers::{
+    downloader::{HeaderDownloader, HeaderSyncGap, SyncTarget},
+    error::HeadersDownloaderError,
+};
 use reth_primitives_traits::{serde_bincode_compat, FullBlockHeader, NodePrimitives, SealedHeader};
 use reth_provider::{
-    providers::StaticFileWriter, BlockHashReader, DBProvider, HeaderProvider, HeaderSyncGap,
+    providers::StaticFileWriter, BlockHashReader, DBProvider, HeaderProvider,
     HeaderSyncGapProvider, StaticFileProviderFactory,
 };
 use reth_stages_api::{
-    BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput,
-    HeadersCheckpoint, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
+    CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput, HeadersCheckpoint, Stage,
+    StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderError;
-use std::{
-    sync::Arc,
-    task::{ready, Context, Poll},
-};
+use std::task::{ready, Context, Poll};
+
 use tokio::sync::watch;
 use tracing::*;
 
@@ -49,9 +48,9 @@ pub struct HeaderStage<Provider, Downloader: HeaderDownloader> {
     /// Strategy for downloading the headers
     downloader: Downloader,
     /// The tip for the stage.
+    ///
+    /// This determines the sync target of the stage (set by the pipeline).
     tip: watch::Receiver<B256>,
-    /// Consensus client implementation
-    consensus: Arc<dyn HeaderValidator<Downloader::Header>>,
     /// Current sync gap.
     sync_gap: Option<HeaderSyncGap<Downloader::Header>>,
     /// ETL collector with `HeaderHash` -> `BlockNumber`
@@ -73,14 +72,12 @@ where
         database: Provider,
         downloader: Downloader,
         tip: watch::Receiver<B256>,
-        consensus: Arc<dyn HeaderValidator<Downloader::Header>>,
         etl_config: EtlConfig,
     ) -> Self {
         Self {
             provider: database,
             downloader,
             tip,
-            consensus,
             sync_gap: None,
             hash_collector: Collector::new(etl_config.file_size / 2, etl_config.dir.clone()),
             header_collector: Collector::new(etl_config.file_size / 2, etl_config.dir),
@@ -131,7 +128,7 @@ where
                     .map_err(|err| StageError::Fatal(Box::new(err)))?
                     .into();
 
-            let (header, header_hash) = sealed_header.split();
+            let (header, header_hash) = sealed_header.split_ref();
             if header.number() == 0 {
                 continue
             }
@@ -140,19 +137,8 @@ where
             // Increase total difficulty
             td += header.difficulty();
 
-            // Header validation
-            self.consensus.validate_header_with_total_difficulty(&header, td).map_err(|error| {
-                StageError::Block {
-                    block: Box::new(BlockWithParent::new(
-                        header.parent_hash(),
-                        NumHash::new(header.number(), header_hash),
-                    )),
-                    error: BlockErrorKind::Validation(error),
-                }
-            })?;
-
             // Append to Headers segment
-            writer.append_header(&header, td, &header_hash)?;
+            writer.append_header(header, td, header_hash)?;
         }
 
         info!(target: "sync::stages::headers", total = total_headers, "Writing headers hash index");
@@ -224,7 +210,9 @@ where
         }
 
         // Lookup the head and tip of the sync range
-        let gap = self.provider.sync_gap(self.tip.clone(), current_checkpoint.block_number)?;
+        let local_head = self.provider.local_tip_header(current_checkpoint.block_number)?;
+        let target = SyncTarget::Tip(*self.tip.borrow());
+        let gap = HeaderSyncGap { local_head, target };
         let tip = gap.target.tip();
         self.sync_gap = Some(gap.clone());
 
@@ -414,6 +402,7 @@ mod tests {
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators::{self, random_header, random_header_range};
     use reth_trie::{updates::TrieUpdates, HashedPostStateSorted};
+    use std::sync::Arc;
     use test_runner::HeadersTestRunner;
 
     mod test_runner {
@@ -432,7 +421,6 @@ mod tests {
             channel: (watch::Sender<B256>, watch::Receiver<B256>),
             downloader_factory: Box<dyn Fn() -> D + Send + Sync + 'static>,
             db: TestStageDB,
-            consensus: Arc<TestConsensus>,
         }
 
         impl Default for HeadersTestRunner<TestHeaderDownloader> {
@@ -441,14 +429,9 @@ mod tests {
                 Self {
                     client: client.clone(),
                     channel: watch::channel(B256::ZERO),
-                    consensus: Arc::new(TestConsensus::default()),
+
                     downloader_factory: Box::new(move || {
-                        TestHeaderDownloader::new(
-                            client.clone(),
-                            Arc::new(TestConsensus::default()),
-                            1000,
-                            1000,
-                        )
+                        TestHeaderDownloader::new(client.clone(), 1000, 1000)
                     }),
                     db: TestStageDB::default(),
                 }
@@ -469,7 +452,6 @@ mod tests {
                     self.db.factory.clone(),
                     (*self.downloader_factory)(),
                     self.channel.1.clone(),
-                    self.consensus.clone(),
                     EtlConfig::default(),
                 )
             }
@@ -570,7 +552,6 @@ mod tests {
                             .build(client.clone(), Arc::new(TestConsensus::default()))
                     }),
                     db: TestStageDB::default(),
-                    consensus: Arc::new(TestConsensus::default()),
                 }
             }
         }

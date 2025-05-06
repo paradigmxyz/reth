@@ -69,7 +69,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
                 id.clone(),
                 head,
                 components.provider().clone(),
-                components.block_executor().clone(),
+                components.evm_config().clone(),
                 exex_wal.handle(),
             );
             exex_handles.push(handle);

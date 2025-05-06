@@ -1,8 +1,4 @@
 //! High level error types for the reth in general.
-//!
-//! ## Feature Flags
-//!
-//! - `test-utils`: Export utilities for testing
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -11,6 +7,9 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![no_std]
+
+extern crate alloc;
 
 mod error;
 pub use error::{RethError, RethResult};

@@ -107,7 +107,6 @@
 //!
 //! - `serde` (default): Enable serde support for configuration types.
 //! - `test-utils`: Various utilities helpful for writing tests
-//! - `geth-tests`: Runs tests that require Geth to be installed locally.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -169,7 +168,7 @@ pub use manager::NetworkManager;
 pub use metrics::TxTypesCounter;
 pub use network::{NetworkHandle, NetworkProtocols};
 pub use swarm::NetworkConnectionState;
-pub use transactions::{FilterAnnouncement, MessageFilter, ValidateTx68};
+pub use transactions::{FilterAnnouncement, MessageFilter};
 
 /// re-export p2p interfaces
 pub use reth_network_p2p as p2p;

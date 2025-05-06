@@ -47,7 +47,7 @@ pub struct SnappyRlpCodec<T> {
 
 impl<T> SnappyRlpCodec<T> {
     /// Create a new codec for the given type
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self { _phantom: PhantomData }
     }
 }
@@ -58,12 +58,11 @@ impl<T: Decodable> SnappyRlpCodec<T> {
         let mut decoder = FrameDecoder::new(compressed_data);
         let mut decompressed = Vec::new();
         Read::read_to_end(&mut decoder, &mut decompressed).map_err(|e| {
-            E2sError::SnappyDecompression(format!("Failed to decompress data: {}", e))
+            E2sError::SnappyDecompression(format!("Failed to decompress data: {e}"))
         })?;
 
         let mut slice = decompressed.as_slice();
-        T::decode(&mut slice)
-            .map_err(|e| E2sError::Rlp(format!("Failed to decode RLP data: {}", e)))
+        T::decode(&mut slice).map_err(|e| E2sError::Rlp(format!("Failed to decode RLP data: {e}")))
     }
 }
 
@@ -78,11 +77,11 @@ impl<T: Encodable> SnappyRlpCodec<T> {
             let mut encoder = FrameEncoder::new(&mut compressed);
 
             Write::write_all(&mut encoder, &rlp_data).map_err(|e| {
-                E2sError::SnappyCompression(format!("Failed to compress data: {}", e))
+                E2sError::SnappyCompression(format!("Failed to compress data: {e}"))
             })?;
 
             encoder.flush().map_err(|e| {
-                E2sError::SnappyCompression(format!("Failed to flush encoder: {}", e))
+                E2sError::SnappyCompression(format!("Failed to flush encoder: {e}"))
             })?;
         }
 
@@ -105,7 +104,7 @@ pub trait DecodeCompressed {
 
 impl CompressedHeader {
     /// Create a new [`CompressedHeader`] from compressed data
-    pub fn new(data: Vec<u8>) -> Self {
+    pub const fn new(data: Vec<u8>) -> Self {
         Self { data }
     }
 
@@ -116,11 +115,11 @@ impl CompressedHeader {
             let mut encoder = FrameEncoder::new(&mut compressed);
 
             Write::write_all(&mut encoder, rlp_data).map_err(|e| {
-                E2sError::SnappyCompression(format!("Failed to compress header: {}", e))
+                E2sError::SnappyCompression(format!("Failed to compress header: {e}"))
             })?;
 
             encoder.flush().map_err(|e| {
-                E2sError::SnappyCompression(format!("Failed to flush encoder: {}", e))
+                E2sError::SnappyCompression(format!("Failed to flush encoder: {e}"))
             })?;
         }
         Ok(Self { data: compressed })
@@ -131,7 +130,7 @@ impl CompressedHeader {
         let mut decoder = FrameDecoder::new(self.data.as_slice());
         let mut decompressed = Vec::new();
         Read::read_to_end(&mut decoder, &mut decompressed).map_err(|e| {
-            E2sError::SnappyDecompression(format!("Failed to decompress header: {}", e))
+            E2sError::SnappyDecompression(format!("Failed to decompress header: {e}"))
         })?;
 
         Ok(decompressed)
@@ -186,7 +185,7 @@ pub struct CompressedBody {
 
 impl CompressedBody {
     /// Create a new [`CompressedBody`] from compressed data
-    pub fn new(data: Vec<u8>) -> Self {
+    pub const fn new(data: Vec<u8>) -> Self {
         Self { data }
     }
 
@@ -197,11 +196,11 @@ impl CompressedBody {
             let mut encoder = FrameEncoder::new(&mut compressed);
 
             Write::write_all(&mut encoder, rlp_data).map_err(|e| {
-                E2sError::SnappyCompression(format!("Failed to compress header: {}", e))
+                E2sError::SnappyCompression(format!("Failed to compress header: {e}"))
             })?;
 
             encoder.flush().map_err(|e| {
-                E2sError::SnappyCompression(format!("Failed to flush encoder: {}", e))
+                E2sError::SnappyCompression(format!("Failed to flush encoder: {e}"))
             })?;
         }
         Ok(Self { data: compressed })
@@ -212,7 +211,7 @@ impl CompressedBody {
         let mut decoder = FrameDecoder::new(self.data.as_slice());
         let mut decompressed = Vec::new();
         Read::read_to_end(&mut decoder, &mut decompressed).map_err(|e| {
-            E2sError::SnappyDecompression(format!("Failed to decompress body: {}", e))
+            E2sError::SnappyDecompression(format!("Failed to decompress body: {e}"))
         })?;
 
         Ok(decompressed)
@@ -237,7 +236,16 @@ impl CompressedBody {
 
     /// Decode this [`CompressedBody`] into an `alloy_consensus::BlockBody`
     pub fn decode_body<T: Decodable, H: Decodable>(&self) -> Result<BlockBody<T, H>, E2sError> {
-        self.decode()
+        let decompressed = self.decompress()?;
+        Self::decode_body_from_decompressed(&decompressed)
+    }
+
+    /// Decode decompressed body data into an `alloy_consensus::BlockBody`
+    pub fn decode_body_from_decompressed<T: Decodable, H: Decodable>(
+        data: &[u8],
+    ) -> Result<BlockBody<T, H>, E2sError> {
+        alloy_rlp::decode_exact::<BlockBody<T, H>>(data)
+            .map_err(|e| E2sError::Rlp(format!("Failed to decode RLP data: {e}")))
     }
 
     /// Create a [`CompressedBody`] from an `alloy_consensus::BlockBody`
@@ -264,7 +272,7 @@ pub struct CompressedReceipts {
 
 impl CompressedReceipts {
     /// Create a new [`CompressedReceipts`] from compressed data
-    pub fn new(data: Vec<u8>) -> Self {
+    pub const fn new(data: Vec<u8>) -> Self {
         Self { data }
     }
 
@@ -275,11 +283,11 @@ impl CompressedReceipts {
             let mut encoder = FrameEncoder::new(&mut compressed);
 
             Write::write_all(&mut encoder, rlp_data).map_err(|e| {
-                E2sError::SnappyCompression(format!("Failed to compress header: {}", e))
+                E2sError::SnappyCompression(format!("Failed to compress header: {e}"))
             })?;
 
             encoder.flush().map_err(|e| {
-                E2sError::SnappyCompression(format!("Failed to flush encoder: {}", e))
+                E2sError::SnappyCompression(format!("Failed to flush encoder: {e}"))
             })?;
         }
         Ok(Self { data: compressed })
@@ -289,7 +297,7 @@ impl CompressedReceipts {
         let mut decoder = FrameDecoder::new(self.data.as_slice());
         let mut decompressed = Vec::new();
         Read::read_to_end(&mut decoder, &mut decompressed).map_err(|e| {
-            E2sError::SnappyDecompression(format!("Failed to decompress receipts: {}", e))
+            E2sError::SnappyDecompression(format!("Failed to decompress receipts: {e}"))
         })?;
 
         Ok(decompressed)
@@ -343,7 +351,7 @@ pub struct TotalDifficulty {
 
 impl TotalDifficulty {
     /// Create a new [`TotalDifficulty`] from a U256 value
-    pub fn new(value: U256) -> Self {
+    pub const fn new(value: U256) -> Self {
         Self { value }
     }
 
@@ -395,7 +403,7 @@ pub struct Accumulator {
 
 impl Accumulator {
     /// Create a new [`Accumulator`] from a root hash
-    pub fn new(root: B256) -> Self {
+    pub const fn new(root: B256) -> Self {
         Self { root }
     }
 
@@ -445,7 +453,7 @@ pub struct BlockTuple {
 
 impl BlockTuple {
     /// Create a new [`BlockTuple`]
-    pub fn new(
+    pub const fn new(
         header: CompressedHeader,
         body: CompressedBody,
         receipts: CompressedReceipts,

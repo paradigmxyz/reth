@@ -38,7 +38,7 @@ async fn can_handle_blobs() -> eyre::Result<()> {
 
     let mut node = NodeTestContext::new(node, eth_payload_attributes).await?;
 
-    let wallets = Wallet::new(2).gen();
+    let wallets = Wallet::new(2).wallet_gen();
     let blob_wallet = wallets.first().unwrap();
     let second_wallet = wallets.last().unwrap();
 

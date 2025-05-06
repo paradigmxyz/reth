@@ -17,7 +17,7 @@ use reth_db_common::init::{init_genesis, InitStorageError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_local::MiningMode;
 use reth_engine_tree::tree::{InvalidBlockHook, InvalidBlockHooks, NoopInvalidBlockHook};
-use reth_evm::noop::NoopBlockExecutorProvider;
+use reth_evm::{noop::NoopEvmConfig, ConfigureEvm};
 use reth_fs_util as fs;
 use reth_invalid_block_hooks::InvalidBlockWitnessHook;
 use reth_network_p2p::headers::client::HeadersClient;
@@ -251,12 +251,12 @@ impl<L, R> LaunchContextWith<Attached<L, R>> {
     }
 
     /// Get a mutable reference to the right value.
-    pub fn left_mut(&mut self) -> &mut L {
+    pub const fn left_mut(&mut self) -> &mut L {
         &mut self.attachment.left
     }
 
     /// Get a mutable reference to the right value.
-    pub fn right_mut(&mut self) -> &mut R {
+    pub const fn right_mut(&mut self) -> &mut R {
         &mut self.attachment.right
     }
 }
@@ -297,7 +297,7 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     }
 
     /// Returns the attached [`NodeConfig`].
-    pub fn node_config_mut(&mut self) -> &mut NodeConfig<ChainSpec> {
+    pub const fn node_config_mut(&mut self) -> &mut NodeConfig<ChainSpec> {
         &mut self.left_mut().config
     }
 
@@ -307,7 +307,7 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     }
 
     /// Returns the attached toml config [`reth_config::Config`].
-    pub fn toml_config_mut(&mut self) -> &mut reth_config::Config {
+    pub const fn toml_config_mut(&mut self) -> &mut reth_config::Config {
         &mut self.left_mut().toml_config
     }
 
@@ -381,9 +381,10 @@ where
     /// Returns the [`ProviderFactory`] for the attached storage after executing a consistent check
     /// between the database and static files. **It may execute a pipeline unwind if it fails this
     /// check.**
-    pub async fn create_provider_factory<N>(&self) -> eyre::Result<ProviderFactory<N>>
+    pub async fn create_provider_factory<N, Evm>(&self) -> eyre::Result<ProviderFactory<N>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
+        Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
         let factory = ProviderFactory::new(
             self.right().clone(),
@@ -404,7 +405,11 @@ where
         {
             // Highly unlikely to happen, and given its destructive nature, it's better to panic
             // instead.
-            assert_ne!(unwind_target, PipelineTarget::Unwind(0), "A static file <> database inconsistency was found that would trigger an unwind to block 0");
+            assert_ne!(
+                unwind_target,
+                PipelineTarget::Unwind(0),
+                "A static file <> database inconsistency was found that would trigger an unwind to block 0"
+            );
 
             info!(target: "reth::cli", unwind_target = %unwind_target, "Executing an unwind after a failed storage consistency check.");
 
@@ -418,7 +423,7 @@ where
                     Arc::new(NoopConsensus::default()),
                     NoopHeaderDownloader::default(),
                     NoopBodiesDownloader::default(),
-                    NoopBlockExecutorProvider::<N::Primitives>::default(),
+                    NoopEvmConfig::<Evm>::default(),
                     self.toml_config().stages.clone(),
                     self.prune_modes(),
                 ))
@@ -445,13 +450,14 @@ where
     }
 
     /// Creates a new [`ProviderFactory`] and attaches it to the launch context.
-    pub async fn with_provider_factory<N>(
+    pub async fn with_provider_factory<N, Evm>(
         self,
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<ChainSpec>, ProviderFactory<N>>>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
+        Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
-        let factory = self.create_provider_factory().await?;
+        let factory = self.create_provider_factory::<N, Evm>().await?;
         let ctx = LaunchContextWith {
             inner: self.inner,
             attachment: self.attachment.map_right(|_| factory),
@@ -754,7 +760,7 @@ where
     }
 
     /// Returns mutable reference to the configured `NodeAdapter`.
-    pub fn node_adapter_mut(&mut self) -> &mut NodeAdapter<T, CB::Components> {
+    pub const fn node_adapter_mut(&mut self) -> &mut NodeAdapter<T, CB::Components> {
         &mut self.right_mut().node_adapter
     }
 
@@ -799,7 +805,9 @@ where
             let latest = self.blockchain_db().last_block_number()?;
             // bedrock height
             if latest < 105235063 {
-                error!("Op-mainnet has been launched without importing the pre-Bedrock state. The chain can't progress without this. See also https://reth.rs/run/sync-op-mainnet.html?minimal-bootstrap-recommended");
+                error!(
+                    "Op-mainnet has been launched without importing the pre-Bedrock state. The chain can't progress without this. See also https://reth.rs/run/sync-op-mainnet.html?minimal-bootstrap-recommended"
+                );
                 return Err(ProviderError::BestBlockNotFound)
             }
         }
@@ -897,7 +905,7 @@ where
                 Ok(match hook {
                     InvalidBlockHookType::Witness => Box::new(InvalidBlockWitnessHook::new(
                         self.blockchain_db().clone(),
-                        self.components().block_executor().clone(),
+                        self.components().evm_config().clone(),
                         output_directory,
                         healthy_node_rpc_client.clone(),
                     )),
@@ -981,12 +989,12 @@ impl<L, R> Attached<L, R> {
     }
 
     /// Get a mutable reference to the right value.
-    pub fn left_mut(&mut self) -> &mut R {
+    pub const fn left_mut(&mut self) -> &mut R {
         &mut self.right
     }
 
     /// Get a mutable reference to the right value.
-    pub fn right_mut(&mut self) -> &mut R {
+    pub const fn right_mut(&mut self) -> &mut R {
         &mut self.right
     }
 }

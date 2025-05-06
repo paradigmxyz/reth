@@ -83,7 +83,7 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> ImportReceiptsOpCommand<C> {
 
 impl<C: ChainSpecParser> ImportReceiptsOpCommand<C> {
     /// Returns the underlying chain being used to run this command
-    pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+    pub const fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         Some(&self.env.chain)
     }
 }
@@ -154,7 +154,9 @@ where
             }
         }
         None => {
-            eyre::bail!("Receipts was not initialized. Please import blocks and transactions before calling this command.");
+            eyre::bail!(
+                "Receipts was not initialized. Please import blocks and transactions before calling this command."
+            );
         }
     }
 
@@ -243,12 +245,16 @@ where
         .expect("transaction static files must exist before importing receipts");
 
     if total_receipts != total_imported_txns {
-        eyre::bail!("Number of receipts ({total_receipts}) inconsistent with transactions {total_imported_txns}")
+        eyre::bail!(
+            "Number of receipts ({total_receipts}) inconsistent with transactions {total_imported_txns}"
+        )
     }
 
     // Only commit if the receipt block height matches the one from transactions.
     if highest_block_receipts != highest_block_transactions {
-        eyre::bail!("Receipt block height ({highest_block_receipts}) inconsistent with transactions' {highest_block_transactions}")
+        eyre::bail!(
+            "Receipt block height ({highest_block_receipts}) inconsistent with transactions' {highest_block_transactions}"
+        )
     }
 
     // Required or any access-write provider factory will attempt to unwind to 0.
