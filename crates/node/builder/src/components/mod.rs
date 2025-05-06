@@ -24,10 +24,10 @@ pub use pool::*;
 use crate::{ConfigureEvm, FullNodeTypes};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_network::types::NetPrimitivesFor;
-use reth_network_api::{FullNetwork, PoolTxTy};
+use reth_network_api::FullNetwork;
 use reth_node_api::{NodeTypes, PrimitivesTy, TxTy};
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_transaction_pool::{PoolTransaction, TransactionPool};
+use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
 use std::fmt::Debug;
 
 /// An abstraction over the components of a node, consisting of:
@@ -89,10 +89,14 @@ impl<Node, Pool, EVM, Cons, Network> NodeComponents<Node>
     for Components<Node, Network, Pool, EVM, Cons>
 where
     Node: FullNodeTypes,
-    Network: FullNetwork<Primitives: NetPrimitivesFor<PrimitivesTy<Node::Types>>>,
-    Pool: TransactionPool<
-            Transaction: PoolTransaction<Consensus = TxTy<Node::Types>, Pooled = PoolTxTy<Network>>,
-        > + Unpin
+    Network: FullNetwork<
+        Primitives: NetPrimitivesFor<
+            PrimitivesTy<Node::Types>,
+            PooledTransaction = PoolPooledTx<Pool>,
+        >,
+    >,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
+        + Unpin
         + 'static,
     EVM: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>> + 'static,
     Cons:

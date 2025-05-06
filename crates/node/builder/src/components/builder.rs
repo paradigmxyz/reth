@@ -9,9 +9,9 @@ use crate::{
 };
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_network::types::NetPrimitivesFor;
-use reth_network_api::{FullNetwork, PoolTxTy};
+use reth_network_api::FullNetwork;
 use reth_node_api::{PrimitivesTy, TxTy};
-use reth_transaction_pool::{PoolTransaction, TransactionPool};
+use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
 use std::{future::Future, marker::PhantomData};
 
 /// A generic, general purpose and customizable [`NodeComponentsBuilder`] implementation.
@@ -296,14 +296,16 @@ impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB> NodeComponentsBuilder<Node>
     for ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB>
 where
     Node: FullNodeTypes,
-    PoolB: PoolBuilder<
-        Node,
-        Pool: TransactionPool<Transaction: PoolTransaction<Pooled = PoolTxTy<NetworkB::Network>>>,
-    >,
+    PoolB: PoolBuilder<Node, Pool: TransactionPool>,
     NetworkB: NetworkBuilder<
         Node,
         PoolB::Pool,
-        Network: FullNetwork<Primitives: NetPrimitivesFor<PrimitivesTy<Node::Types>>>,
+        Network: FullNetwork<
+            Primitives: NetPrimitivesFor<
+                PrimitivesTy<Node::Types>,
+                PooledTransaction = PoolPooledTx<PoolB::Pool>,
+            >,
+        >,
     >,
     PayloadB: PayloadServiceBuilder<Node, PoolB::Pool, ExecB::EVM>,
     ExecB: ExecutorBuilder<Node>,
@@ -378,13 +380,17 @@ pub trait NodeComponentsBuilder<Node: FullNodeTypes>: Send {
 
 impl<Node, Net, F, Fut, Pool, EVM, Cons> NodeComponentsBuilder<Node> for F
 where
-    Net: FullNetwork<Primitives: NetPrimitivesFor<PrimitivesTy<Node::Types>>>,
+    Net: FullNetwork<
+        Primitives: NetPrimitivesFor<
+            PrimitivesTy<Node::Types>,
+            PooledTransaction = PoolPooledTx<Pool>,
+        >,
+    >,
     Node: FullNodeTypes,
     F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
     Fut: Future<Output = eyre::Result<Components<Node, Net, Pool, EVM, Cons>>> + Send,
-    Pool: TransactionPool<
-            Transaction: PoolTransaction<Consensus = TxTy<Node::Types>, Pooled = PoolTxTy<Net>>,
-        > + Unpin
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
+        + Unpin
         + 'static,
     EVM: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>> + 'static,
     Cons:

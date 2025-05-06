@@ -30,12 +30,12 @@ pub use reth_network_types::{PeerKind, Reputation, ReputationChangeKind};
 pub use downloaders::BlockDownloaderProvider;
 pub use error::NetworkError;
 pub use events::{
-    DiscoveredEvent, DiscoveryEvent, NetPrimitivesTy, NetworkEvent, NetworkEventListenerProvider,
-    PeerRequest, PeerRequestSender, PoolTxTy,
+    DiscoveredEvent, DiscoveryEvent, NetworkEvent, NetworkEventListenerProvider, PeerRequest,
+    PeerRequestSender,
 };
 
 use reth_eth_wire_types::{
-    capability::Capabilities, BlockTy, DisconnectReason, EthVersion, Status,
+    capability::Capabilities, DisconnectReason, EthVersion, NetworkPrimitives, Status,
 };
 use reth_network_p2p::sync::NetworkSyncUpdater;
 use reth_network_peers::NodeRecord;
@@ -46,8 +46,9 @@ pub type PeerId = alloy_primitives::B512;
 
 /// Helper trait that unifies network API needed to launch node.
 pub trait FullNetwork:
-    BlockDownloaderProvider<Client: BlockClient<Block = BlockTy<Self::Primitives>>>
-    + NetworkSyncUpdater
+    BlockDownloaderProvider<
+        Client: BlockClient<Block = <Self::Primitives as NetworkPrimitives>::Block>,
+    > + NetworkSyncUpdater
     + NetworkInfo
     + NetworkEventListenerProvider
     + Peers
@@ -59,8 +60,9 @@ pub trait FullNetwork:
 }
 
 impl<T> FullNetwork for T where
-    T: BlockDownloaderProvider<Client: BlockClient<Block = BlockTy<Self::Primitives>>>
-        + NetworkSyncUpdater
+    T: BlockDownloaderProvider<
+            Client: BlockClient<Block = <Self::Primitives as NetworkPrimitives>::Block>,
+        > + NetworkSyncUpdater
         + NetworkInfo
         + NetworkEventListenerProvider
         + Peers
