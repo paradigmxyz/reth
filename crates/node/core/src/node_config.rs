@@ -421,7 +421,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     ///
     /// By setting the cache sizes to 0, caching of newly executed or fetched blocks will be
     /// effectively disabled.
-    pub fn with_disabled_rpc_cache(mut self) -> Self {
+    pub const fn with_disabled_rpc_cache(mut self) -> Self {
         self.rpc.rpc_state_cache.set_zero_lengths();
         self
     }
