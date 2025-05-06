@@ -65,6 +65,7 @@
 //!         executor_provider,
 //!         StageConfig::default(),
 //!         PruneModes::default(),
+//!         None,
 //!     ))
 //!     .build(provider_factory, static_file_producer);
 //! ```

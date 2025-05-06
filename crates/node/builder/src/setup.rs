@@ -17,7 +17,11 @@ use reth_network_p2p::{
 };
 use reth_node_api::HeaderTy;
 use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
-use reth_stages::{prelude::DefaultStages, stages::ExecutionStage, Pipeline, StageSet};
+use reth_stages::{
+    prelude::DefaultStages,
+    stages::{ExecutionStage, ImportSource},
+    Pipeline, StageSet,
+};
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::debug;
@@ -64,6 +68,7 @@ where
         static_file_producer,
         evm_config,
         exex_manager_handle,
+        None,
     )?;
 
     Ok(pipeline)
@@ -83,6 +88,7 @@ pub fn build_pipeline<N, H, B, Evm>(
     static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     evm_config: Evm,
     exex_manager_handle: ExExManagerHandle<N::Primitives>,
+    import_source: Option<ImportSource>,
 ) -> eyre::Result<Pipeline<N>>
 where
     N: ProviderNodeTypes,
@@ -114,6 +120,7 @@ where
                 evm_config.clone(),
                 stage_config.clone(),
                 prune_modes,
+                import_source,
             )
             .set(ExecutionStage::new(
                 evm_config,
