@@ -27,7 +27,7 @@ use std::fmt::Debug;
 use crate::{ConfigureEvm, FullNodeTypes};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_evm::execute::BlockExecutorProvider;
-use reth_network_api::FullNetwork;
+use reth_network_api::{FullNetwork, PoolTxTy};
 use reth_node_api::{BlockTy, BodyTy, HeaderTy, NodeTypes, PrimitivesTy, ReceiptTy, TxTy};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
@@ -116,10 +116,7 @@ where
         >,
     >,
     Pool: TransactionPool<
-            Transaction: PoolTransaction<
-                Consensus = TxTy<Node::Types>,
-                Pooled = <Network::Primitives as NetworkPrimitives>::PooledTransaction,
-            >,
+            Transaction: PoolTransaction<Consensus = TxTy<Node::Types>, Pooled = PoolTxTy<Network>>,
         > + Unpin
         + 'static,
     EVM: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>> + 'static,

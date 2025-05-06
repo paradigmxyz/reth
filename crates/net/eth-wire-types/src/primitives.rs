@@ -69,3 +69,23 @@ impl NetworkPrimitives for EthNetworkPrimitives {
     type PooledTransaction = reth_ethereum_primitives::PooledTransaction;
     type Receipt = reth_ethereum_primitives::Receipt;
 }
+
+/// Helper adapter type for accessing [`NodePrimitives`] block header types.
+pub type HeaderTy<N> = <N as NetworkPrimitives>::BlockHeader;
+
+/// Helper adapter type for accessing [`NodePrimitives`] block body types.
+pub type BodyTy<N> = <N as NetworkPrimitives>::BlockBody;
+
+/// Helper adapter type for accessing [`NodePrimitives`] block types.
+pub type BlockTy<N> = <N as NetworkPrimitives>::Block;
+
+/// Helper adapter type for accessing [`NodePrimitives`] receipt types.
+pub type ReceiptTy<N> = <N as NetworkPrimitives>::Receipt;
+
+/// Helper adapter type for accessing [`NodePrimitives`] signed transaction types that are
+/// broadcasted over the gossip P2P network.
+pub type P2PTxTy<N> = <N as NetworkPrimitives>::BroadcastedTransaction;
+
+/// Helper adapter type for accessing [`NodePrimitives`] signed transaction types that are stored
+/// in local view of mempool.
+pub type PoolTxTy<N> = <N as NetworkPrimitives>::PooledTransaction;

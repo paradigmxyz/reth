@@ -9,8 +9,8 @@ use crate::{
 };
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_evm::execute::BlockExecutorProvider;
-use reth_network::{NetworkEventListenerProvider, NetworkPrimitives};
-use reth_network_api::FullNetwork;
+use reth_network::NetworkPrimitives;
+use reth_network_api::{FullNetwork, PoolTxTy};
 use reth_node_api::{BlockTy, BodyTy, HeaderTy, PrimitivesTy, ReceiptTy, TxTy};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::{future::Future, marker::PhantomData};
@@ -299,11 +299,7 @@ where
     Node: FullNodeTypes,
     PoolB: PoolBuilder<
         Node,
-        Pool: TransactionPool<
-            Transaction: PoolTransaction<
-                Pooled = <<NetworkB::Network as NetworkEventListenerProvider>::Primitives as NetworkPrimitives>::PooledTransaction,
-            >,
-        >,
+        Pool: TransactionPool<Transaction: PoolTransaction<Pooled = PoolTxTy<NetworkB::Network>>>,
     >,
     NetworkB: NetworkBuilder<
         Node,
@@ -315,7 +311,8 @@ where
                 Block = BlockTy<Node::Types>,
                 Receipt = ReceiptTy<Node::Types>,
                 BroadcastedTransaction = TxTy<Node::Types>,
-            >,>
+            >,
+        >,
     >,
     PayloadB: PayloadServiceBuilder<Node, PoolB::Pool, ExecB::EVM>,
     ExecB: ExecutorBuilder<Node>,
@@ -410,10 +407,7 @@ where
     F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
     Fut: Future<Output = eyre::Result<Components<Node, Net, Pool, EVM, Executor, Cons>>> + Send,
     Pool: TransactionPool<
-            Transaction: PoolTransaction<
-                Consensus = TxTy<Node::Types>,
-                Pooled = <Net::Primitives as NetworkPrimitives>::PooledTransaction,
-            >,
+            Transaction: PoolTransaction<Consensus = TxTy<Node::Types>, Pooled = PoolTxTy<Net>>,
         > + Unpin
         + 'static,
     EVM: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>> + 'static,
