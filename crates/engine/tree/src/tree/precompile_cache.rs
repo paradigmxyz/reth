@@ -88,17 +88,14 @@ impl Precompile for CachedPrecompile {
         let cache_result = self.cache.get(&key);
 
         if let Some(ref entry) = cache_result {
-            if entry.gas_used > 0 {
-                // gas_used > 0 means successful execution
-                self.increment_by_one_precompile_cache_hits();
-                if gas_limit < entry.gas_used {
-                    return Err(PrecompileError::OutOfGas)
-                }
-                return entry.result.clone()
-            }
-
-            // the entry stored in the cache is an error, check the type
             match &entry.result {
+                Ok(_) => {
+                    self.increment_by_one_precompile_cache_hits();
+                    if gas_limit < entry.gas_used {
+                        return Err(PrecompileError::OutOfGas)
+                    }
+                    return entry.result.clone()
+                }
                 Err(PrecompileError::OutOfGas) => {
                     if gas_limit <= entry.err_gas_limit {
                         // entry.err_gas_limit gave OOG previously, anything equal or below
