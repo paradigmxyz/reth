@@ -346,6 +346,15 @@ where
 }
 
 /// Node add-ons containing RPC server configuration, with customizable eth API handler.
+///
+/// This struct can be used to provide the RPC server functionality. It is responsible for launching
+/// the regular RPC and the authenticated RPC server (engine API). It is intended to be used and
+/// modified as part of the [`NodeAddOns`] see for example `OpRpcAddons`, `EthereumAddOns`.
+///
+/// It can be modified to register RPC API handlers, see [`RpcAddOns::launch_add_ons_with`] which
+/// takes a closure that provides access to all the configured modules (namespaces), and is invoked
+/// just before the servers are launched. This can be used to extend the node with custom RPC
+/// methods or even replace existing method handlers, see also [`TransportRpcModules`].
 pub struct RpcAddOns<
     Node: FullNodeComponents,
     EthB: EthApiBuilder<Node>,
@@ -476,7 +485,7 @@ where
         );
 
         let ctx = EthApiCtx { components: &node, config: config.rpc.eth_config(), cache };
-        let eth_api = eth_api_builder.build_eth_api(ctx);
+        let eth_api = eth_api_builder.build_eth_api(ctx).await?;
 
         let auth_config = config.rpc.auth_server_config(jwt_secret)?;
         let module_config = config.rpc.transport_rpc_module_config();
@@ -529,7 +538,7 @@ where
         let launch_auth = auth_module.clone().start_server(auth_config).map_ok(|handle| {
             let addr = handle.local_addr();
             if let Some(ipc_endpoint) = handle.ipc_endpoint() {
-                info!(target: "reth::cli", url=%addr, ipc_endpoint=%ipc_endpoint,"RPC auth server started");
+                info!(target: "reth::cli", url=%addr, ipc_endpoint=%ipc_endpoint, "RPC auth server started");
             } else {
                 info!(target: "reth::cli", url=%addr, "RPC auth server started");
             }
@@ -621,7 +630,10 @@ pub trait EthApiBuilder<N: FullNodeComponents>: Default + Send + 'static {
         + 'static;
 
     /// Builds the [`EthApiServer`](reth_rpc_api::eth::EthApiServer) from the given context.
-    fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> Self::EthApi;
+    fn build_eth_api(
+        self,
+        ctx: EthApiCtx<'_, N>,
+    ) -> impl Future<Output = eyre::Result<Self::EthApi>> + Send;
 }
 
 /// Helper trait that provides the validator for the engine API
@@ -685,11 +697,19 @@ where
 }
 
 /// Builder for engine API RPC module.
+///
+/// This builder type is responsible for providing an instance of [`IntoEngineApiRpcModule`], which
+/// is effectively a helper trait that provides the type erased [`jsonrpsee::RpcModule`] instance
+/// that contains the method handlers for the engine API. See [`EngineApi`] for an implementation of
+/// [`IntoEngineApiRpcModule`].
 pub trait EngineApiBuilder<Node: FullNodeComponents>: Send + Sync {
-    /// The engine API RPC module. Only required to be convertible to an [`jsonrpsee`] module.
+    /// The engine API RPC module. Only required to be convertible to an [`jsonrpsee::RpcModule`].
     type EngineApi: IntoEngineApiRpcModule + Send + Sync;
 
-    /// Builds the engine API.
+    /// Builds the engine API instance given the provided [`AddOnsContext`].
+    ///
+    /// [`Self::EngineApi`] will be converted into the method handlers of the authenticated RPC
+    /// server (engine API).
     fn build_engine_api(
         self,
         ctx: &AddOnsContext<'_, Node>,
@@ -697,6 +717,10 @@ pub trait EngineApiBuilder<Node: FullNodeComponents>: Send + Sync {
 }
 
 /// Builder for basic [`EngineApi`] implementation.
+///
+/// This provides a basic default implementation for opstack and ethereum engine API via
+/// [`EngineTypes`] and uses the general purpose [`EngineApi`] implementation as the builder's
+/// output.
 #[derive(Debug, Default)]
 pub struct BasicEngineApiBuilder<EV> {
     engine_validator_builder: EV,

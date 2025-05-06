@@ -76,11 +76,6 @@ impl<Client, Tx> OpTransactionValidator<Client, Tx> {
         self.block_info.timestamp.load(Ordering::Relaxed)
     }
 
-    /// Returns the current block number.
-    fn block_number(&self) -> u64 {
-        self.block_info.number.load(Ordering::Relaxed)
-    }
-
     /// Whether to ensure that the transaction's sender has enough balance to also cover the L1 gas
     /// fee.
     pub fn require_l1_data_gas_fee(self, require_l1_data_gas_fee: bool) -> Self {
@@ -140,7 +135,7 @@ where
 
     /// Update the L1 block info for the given header and system transaction, if any.
     ///
-    /// Note: this supports optional system transaction, in case this is used in a dev setuo
+    /// Note: this supports optional system transaction, in case this is used in a dev setup
     pub fn update_l1_block_info<H, T>(&self, header: &H, tx: Option<&T>)
     where
         H: BlockHeader,
@@ -209,7 +204,7 @@ where
             }
             Some(Ok(_)) => {
                 // valid interop tx
-                transaction.set_interop_deadlone(
+                transaction.set_interop_deadline(
                     self.block_timestamp() + TRANSACTION_VALIDITY_WINDOW_SECS,
                 );
             }
@@ -262,7 +257,6 @@ where
             let cost_addition = match l1_block_info.l1_tx_data_fee(
                 self.chain_spec(),
                 self.block_timestamp(),
-                self.block_number(),
                 &encoded,
                 false,
             ) {

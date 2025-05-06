@@ -293,7 +293,7 @@ where
     /// Returns the RPC URL.
     pub fn rpc_url(&self) -> Url {
         let addr = self.inner.rpc_server_handle().http_local_addr().unwrap();
-        format!("http://{}", addr).parse().unwrap()
+        format!("http://{addr}").parse().unwrap()
     }
 
     /// Returns an RPC client.

@@ -104,7 +104,7 @@ Networking:
       --discovery.v5.lookup-interval <DISCOVERY_V5_LOOKUP_INTERVAL>
           The interval in seconds at which to carry out periodic lookup queries, for the whole run of the program
 
-          [default: 60]
+          [default: 20]
 
       --discovery.v5.bootstrap.lookup-interval <DISCOVERY_V5_BOOTSTRAP_LOOKUP_INTERVAL>
           The interval in seconds at which to carry out boost lookup queries, for a fixed number of times, at bootstrap
@@ -114,7 +114,7 @@ Networking:
       --discovery.v5.bootstrap.lookup-countdown <DISCOVERY_V5_BOOTSTRAP_LOOKUP_COUNTDOWN>
           The number of times to carry out boost lookup queries at bootstrap
 
-          [default: 100]
+          [default: 200]
 
       --trusted-peers <TRUSTED_PEERS>
           Comma separated enode URLs of trusted peers for P2P connections.
@@ -225,6 +225,13 @@ Networking:
           Name of network interface used to communicate with peers.
 
           If flag is set, but no value is passed, the default interface for docker `eth0` is tried.
+
+      --tx-propagation-policy <TX_PROPAGATION_POLICY>
+          Transaction Propagation Policy
+
+          The policy determines which peers transactions are gossiped to.
+
+          [default: All]
 
 RPC:
       --http
@@ -354,6 +361,11 @@ RPC:
           Maximum gas limit for `eth_call` and call tracing RPC methods
 
           [default: 50000000]
+
+      --rpc.txfeecap <TX_FEE_CAP>
+          Maximum eth transaction fee that can be sent via the RPC APIs (0 = no cap)
+
+          [default: 1.0]
 
       --rpc.max-simulate-blocks <BLOCKS_COUNT>
           Maximum number of blocks for `eth_simulateV1` call
@@ -527,6 +539,12 @@ TxPool:
           Maximum amount of time non-executable transaction are queued
 
           [default: 10800]
+
+      --txpool.transactions-backup <PATH>
+          Path to store the local transaction backup at, to survive node restarts
+
+      --txpool.disable-transactions-backup
+          Disables transaction backup to disk on node shutdown
 
 Builder:
       --builder.extradata <EXTRA_DATA>
@@ -717,7 +735,13 @@ Engine:
           Enable legacy state root
 
       --engine.caching-and-prewarming
-          Enable cross-block caching and parallel prewarming
+          CAUTION: This CLI flag has no effect anymore, use --engine.disable-caching-and-prewarming if you want to disable caching and prewarming
+
+      --engine.disable-caching-and-prewarming
+          Disable cross-block caching and parallel prewarming
+
+      --engine.state-provider-metrics
+          Enable state provider latency metrics. This allows the engine to collect and report stats about how long state provider calls took during execution, but this does introduce slight overhead to state provider calls
 
       --engine.cross-block-cache-size <CROSS_BLOCK_CACHE_SIZE>
           Configure the size of cross-block cache in megabytes
@@ -729,6 +753,16 @@ Engine:
 
       --engine.accept-execution-requests-hash
           Enables accepting requests hash instead of an array of requests in `engine_newPayloadV4`
+
+      --engine.max-proof-task-concurrency <MAX_PROOF_TASK_CONCURRENCY>
+          Configure the maximum number of concurrent proof tasks
+
+          [default: 256]
+
+      --engine.reserved-cpu-cores <RESERVED_CPU_CORES>
+          Configure the number of reserved CPU cores for non-reth processes
+
+          [default: 1]
 
 Ress:
       --ress.enable

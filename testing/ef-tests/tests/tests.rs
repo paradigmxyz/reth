@@ -12,7 +12,6 @@ macro_rules! general_state_test {
     };
 }
 
-#[allow(missing_docs)]
 mod general_state_tests {
     use super::*;
 
@@ -88,4 +87,4 @@ macro_rules! blockchain_test {
 }
 
 blockchain_test!(valid_blocks, ValidBlocks);
-// blockchain_test!(invalid_blocks, InvalidBlocks);
+blockchain_test!(invalid_blocks, InvalidBlocks);

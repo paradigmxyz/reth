@@ -195,7 +195,7 @@ impl AuthRpcModule {
     }
 
     /// Get a reference to the inner `RpcModule`.
-    pub fn module_mut(&mut self) -> &mut RpcModule<()> {
+    pub const fn module_mut(&mut self) -> &mut RpcModule<()> {
         &mut self.inner
     }
 

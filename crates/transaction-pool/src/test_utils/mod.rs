@@ -3,8 +3,8 @@
 use crate::{blobstore::InMemoryBlobStore, noop::MockTransactionValidator, Pool, PoolConfig};
 use std::ops::Deref;
 
-mod gen;
-pub use gen::*;
+mod tx_gen;
+pub use tx_gen::*;
 
 mod mock;
 pub use mock::*;

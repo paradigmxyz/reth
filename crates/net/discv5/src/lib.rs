@@ -83,6 +83,7 @@ impl Discv5 {
     ////////////////////////////////////////////////////////////////////////////////////////////////
 
     /// Adds the node to the table, if it is not already present.
+    #[expect(clippy::result_large_err)]
     pub fn add_node(&self, node_record: Enr<SecretKey>) -> Result<(), Error> {
         let EnrCombinedKeyWrapper(enr) = node_record.into();
         self.discv5.add_enr(enr).map_err(Error::AddNodeFailed)
@@ -333,27 +334,41 @@ impl Discv5 {
         Some(DiscoveredPeer { node_record, fork_id })
     }
 
-    /// Tries to convert an [`Enr`](discv5::Enr) into the backwards compatible type [`NodeRecord`],
-    /// w.r.t. local `RLPx` [`IpMode`]. Uses source socket as udp socket.
+    /// Tries to recover an unreachable [`Enr`](discv5::Enr) received via
+    /// [`discv5::Event::UnverifiableEnr`], into a [`NodeRecord`] usable by `RLPx`.
+    ///
+    /// NOTE: Fallback solution to be compatible with Geth which includes peers into the discv5
+    /// WAN topology which, for example, advertise in their ENR that localhost is their UDP IP
+    /// address. These peers are only discovered if they initiate a connection attempt, and we by
+    /// such means learn their reachable IP address. If we receive their ENR from any other peer
+    /// as part of a lookup query, we won't find a reachable IP address on which to dial them by
+    /// reading their ENR.
     pub fn try_into_reachable(
         &self,
         enr: &discv5::Enr,
         socket: SocketAddr,
     ) -> Result<NodeRecord, Error> {
+        // ignore UDP socket advertised in ENR, use sender socket instead
+        let address = socket.ip();
+        let udp_port = socket.port();
+
         let id = enr_to_discv4_id(enr).ok_or(Error::IncompatibleKeyType)?;
 
-        if enr.tcp4().is_none() && enr.tcp6().is_none() {
-            return Err(Error::UnreachableRlpx)
-        }
-        let Some(tcp_port) = (match self.rlpx_ip_mode {
+        let tcp_port = (match self.rlpx_ip_mode {
             IpMode::Ip4 => enr.tcp4(),
             IpMode::Ip6 => enr.tcp6(),
-            _ => unimplemented!("dual-stack support not implemented for rlpx"),
-        }) else {
-            return Err(Error::IpVersionMismatchRlpx(self.rlpx_ip_mode))
-        };
+            IpMode::DualStack => unimplemented!("dual-stack support not implemented for rlpx"),
+        })
+        .unwrap_or(
+            // tcp socket is missing from ENR, or is wrong IP version.
+            //
+            // by default geth runs discv5 and discv4 behind the same udp port (the discv4 default
+            // port 30303), so rlpx has a chance of successfully dialing the peer on its discv5
+            // udp port if its running geth's p2p code.
+            udp_port,
+        );
 
-        Ok(NodeRecord { address: socket.ip(), tcp_port, udp_port: socket.port(), id })
+        Ok(NodeRecord { address, tcp_port, udp_port, id })
     }
 
     /// Applies filtering rules on an ENR. Returns [`Ok`](FilterOutcome::Ok) if peer should be
@@ -364,6 +379,7 @@ impl Discv5 {
 
     /// Returns the [`ForkId`] of the given [`Enr`](discv5::Enr) w.r.t. the local node's network
     /// stack, if field is set.
+    #[expect(clippy::result_large_err)]
     pub fn get_fork_id<K: discv5::enr::EnrKey>(
         &self,
         enr: &discv5::enr::Enr<K>,
@@ -600,7 +616,7 @@ pub fn get_lookup_target(
     target[byte] ^= 1 << (7 - bit);
 
     // Randomize the bits after the target.
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     // Randomize remaining bits in the byte we modified.
     if bit < 7 {
         // Compute the mask of the bits that need to be randomized.
@@ -608,7 +624,7 @@ pub fn get_lookup_target(
         // Clear.
         target[byte] &= !bits_to_randomize;
         // Randomize.
-        target[byte] |= rng.gen::<u8>() & bits_to_randomize;
+        target[byte] |= rng.random::<u8>() & bits_to_randomize;
     }
     // Randomize remaining bytes.
     rng.fill_bytes(&mut target[byte + 1..]);
@@ -655,7 +671,7 @@ pub async fn lookup(
 mod test {
     use super::*;
     use ::enr::{CombinedKey, EnrKey};
-    use rand::thread_rng;
+    use rand_08::thread_rng;
     use reth_chainspec::MAINNET;
     use tracing::trace;
 
@@ -774,7 +790,6 @@ mod test {
     // <https://github.com/sigp/discv5/blob/master/src/kbucket/key.rs#L89-L101>
     #[expect(unreachable_pub)]
     #[expect(unused)]
-    #[allow(clippy::assign_op_pattern)]
     mod sigp {
         use alloy_primitives::U256;
         use enr::{

@@ -5,7 +5,6 @@ use std::{path::Path, sync::Arc};
 use criterion::{
     criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
-use pprof::criterion::{Output, PProfProfiler};
 use reth_db::test_utils::create_test_rw_db_with_path;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
@@ -21,7 +20,7 @@ use utils::*;
 
 criterion_group! {
     name = benches;
-    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    config = Criterion::default();
     targets = db, serialization
 }
 criterion_main!(benches);
@@ -64,8 +63,8 @@ pub fn serialization(c: &mut Criterion) {
 fn measure_table_serialization<T>(group: &mut BenchmarkGroup<'_, WallTime>)
 where
     T: Table,
-    T::Key: Default + Clone + for<'de> serde::Deserialize<'de>,
-    T::Value: Default + Clone + for<'de> serde::Deserialize<'de>,
+    T::Key: Clone + for<'de> serde::Deserialize<'de>,
+    T::Value: Clone + for<'de> serde::Deserialize<'de>,
 {
     let input = &load_vectors::<T>();
     group.bench_function(format!("{}.KeyEncode", T::NAME), move |b| {
@@ -117,8 +116,8 @@ where
 fn measure_table_db<T>(group: &mut BenchmarkGroup<'_, WallTime>)
 where
     T: Table,
-    T::Key: Default + Clone + for<'de> serde::Deserialize<'de>,
-    T::Value: Default + Clone + for<'de> serde::Deserialize<'de>,
+    T::Key: Clone + for<'de> serde::Deserialize<'de>,
+    T::Value: Clone + for<'de> serde::Deserialize<'de>,
 {
     let input = &load_vectors::<T>();
     let bench_db_path = Path::new(BENCH_DB_PATH);
@@ -198,8 +197,8 @@ where
 fn measure_dupsort_db<T>(group: &mut BenchmarkGroup<'_, WallTime>)
 where
     T: Table + DupSort,
-    T::Key: Default + Clone + for<'de> serde::Deserialize<'de>,
-    T::Value: Default + Clone + for<'de> serde::Deserialize<'de>,
+    T::Key: Clone + for<'de> serde::Deserialize<'de>,
+    T::Value: Clone + for<'de> serde::Deserialize<'de>,
     T::SubKey: Default + Clone + for<'de> serde::Deserialize<'de>,
 {
     let input = &load_vectors::<T>();

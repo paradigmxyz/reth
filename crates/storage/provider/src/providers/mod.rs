@@ -19,9 +19,6 @@ pub use state::{
     latest::{LatestStateProvider, LatestStateProviderRef},
 };
 
-mod bundle_state_provider;
-pub use bundle_state_provider::BundleStateProvider;
-
 mod consistent_view;
 pub use consistent_view::{ConsistentDbView, ConsistentViewError};
 
@@ -59,8 +56,3 @@ where
 {
 }
 impl<T> ProviderNodeTypes for T where T: NodeTypesForProvider + NodeTypesWithDB {}
-
-/// Helper trait expressing requirements for node types to be used in engine.
-pub trait EngineNodeTypes: ProviderNodeTypes {}
-
-impl<T> EngineNodeTypes for T where T: ProviderNodeTypes {}

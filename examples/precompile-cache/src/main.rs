@@ -8,28 +8,34 @@ use alloy_primitives::{Address, Bytes};
 use parking_lot::RwLock;
 use reth::{
     builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
-    revm::{
-        context::{Cfg, Context, TxEnv},
-        context_interface::{
-            result::{EVMError, HaltReason},
-            ContextTr,
-        },
-        handler::{EthPrecompiles, PrecompileProvider},
-        inspector::{Inspector, NoOpInspector},
-        interpreter::{interpreter::EthInterpreter, InputsImpl, InterpreterResult},
-        primitives::hardfork::SpecId,
-        MainBuilder, MainContext,
-    },
     tasks::TaskManager,
 };
-use reth_chainspec::{Chain, ChainSpec};
-use reth_evm::{Database, EvmEnv};
-use reth_node_api::{FullNodeTypes, NodeTypes};
-use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
-use reth_node_ethereum::{
-    evm::EthEvm, node::EthereumAddOns, BasicBlockExecutorProvider, EthEvmConfig, EthereumNode,
+use reth_ethereum::{
+    chainspec::{Chain, ChainSpec},
+    evm::{
+        primitives::{Database, EvmEnv},
+        revm::{
+            context::{Cfg, Context, TxEnv},
+            context_interface::{
+                result::{EVMError, HaltReason},
+                ContextTr,
+            },
+            handler::{EthPrecompiles, PrecompileProvider},
+            inspector::{Inspector, NoOpInspector},
+            interpreter::{interpreter::EthInterpreter, InputsImpl, InterpreterResult},
+            primitives::hardfork::SpecId,
+            MainBuilder, MainContext,
+        },
+    },
+    node::{
+        api::{FullNodeTypes, NodeTypes},
+        core::{args::RpcServerArgs, node_config::NodeConfig},
+        evm::EthEvm,
+        node::EthereumAddOns,
+        BasicBlockExecutorProvider, EthEvmConfig, EthereumNode,
+    },
+    EthPrimitives,
 };
-use reth_primitives::EthPrimitives;
 use reth_tracing::{RethTracer, Tracer};
 use schnellru::{ByLength, LruMap};
 use std::{collections::HashMap, sync::Arc};

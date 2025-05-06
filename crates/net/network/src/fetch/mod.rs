@@ -381,7 +381,7 @@ impl PeerState {
     /// If the state was already marked as `Closing` do nothing.
     ///
     /// Returns `true` if the peer is ready for another request.
-    fn on_request_finished(&mut self) -> bool {
+    const fn on_request_finished(&mut self) -> bool {
         if !matches!(self, Self::Closing) {
             *self = Self::Idle;
             return true
@@ -396,7 +396,6 @@ impl PeerState {
 struct Request<Req, Resp> {
     /// The issued request object
     // TODO: this can be attached to the response in error case
-    #[allow(dead_code)]
     request: Req,
     response: oneshot::Sender<Resp>,
 }

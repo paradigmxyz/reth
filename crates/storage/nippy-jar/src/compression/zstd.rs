@@ -320,7 +320,7 @@ impl ZstdDictionaries<'_> {
 /// A Zstd dictionary. It's created and serialized with [`ZstdDictionary::Raw`], and deserialized as
 /// [`ZstdDictionary::Loaded`].
 pub(crate) enum ZstdDictionary<'a> {
-    #[allow(dead_code)]
+    #[cfg_attr(not(test), expect(dead_code))]
     Raw(RawDictionary),
     Loaded(DecoderDictionary<'a>),
 }
@@ -371,6 +371,8 @@ impl PartialEq for ZstdDictionary<'_> {
         if let (Self::Raw(a), Self::Raw(b)) = (self, &other) {
             return a == b
         }
-        unimplemented!("`DecoderDictionary` can't be compared. So comparison should be done after decompressing a value.");
+        unimplemented!(
+            "`DecoderDictionary` can't be compared. So comparison should be done after decompressing a value."
+        );
     }
 }

@@ -168,10 +168,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                         // appending/truncating rows
                         for segment in event.paths {
                             // Ensure it's a file with the .conf extension
-                            #[allow(clippy::nonminimal_bool)]
-                            if !segment
+                            if segment
                                 .extension()
-                                .is_some_and(|s| s.to_str() == Some(CONFIG_FILE_EXTENSION))
+                                .is_none_or(|s| s.to_str() != Some(CONFIG_FILE_EXTENSION))
                             {
                                 continue
                             }
@@ -251,7 +250,7 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
     /// Creates a new [`StaticFileProviderInner`].
     fn new(path: impl AsRef<Path>, access: StaticFileAccess) -> ProviderResult<Self> {
         let _lock_file = if access.is_read_write() {
-            StorageLock::try_acquire(path.as_ref())?.into()
+            StorageLock::try_acquire(path.as_ref()).map_err(ProviderError::other)?.into()
         } else {
             None
         };
@@ -653,7 +652,6 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ///
     /// WARNING: No static file writer should be held before calling this function, otherwise it
     /// will deadlock.
-    #[allow(clippy::while_let_loop)]
     pub fn check_consistency<Provider>(
         &self,
         provider: &Provider,

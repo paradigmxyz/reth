@@ -8,11 +8,10 @@ use alloy_rpc_types_beacon::sidecar::{BeaconBlobBundle, SidecarIterator};
 use eyre::Result;
 use futures_util::{stream::FuturesUnordered, Future, Stream, StreamExt};
 use reqwest::{Error, StatusCode};
-use reth::{
-    core::primitives::SignedTransaction,
+use reth_ethereum::{
+    pool::{BlobStoreError, TransactionPoolExt},
     primitives::RecoveredBlock,
-    providers::CanonStateNotification,
-    transaction_pool::{BlobStoreError, TransactionPoolExt},
+    provider::CanonStateNotification,
 };
 use serde::{Deserialize, Serialize};
 use std::{

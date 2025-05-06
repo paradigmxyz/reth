@@ -17,12 +17,12 @@
 
 extern crate alloc;
 
-use alloc::{borrow::Cow, sync::Arc};
+use alloc::{borrow::Cow, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
 pub use alloy_evm::EthEvm;
 use alloy_evm::{
     eth::{EthBlockExecutionCtx, EthBlockExecutorFactory},
-    EthEvmFactory, FromRecoveredTx,
+    EthEvmFactory, FromRecoveredTx, FromTxWithEncoded,
 };
 use alloy_primitives::{Bytes, U256};
 use core::{convert::Infallible, fmt::Debug};
@@ -37,7 +37,7 @@ use revm::{
 };
 
 mod config;
-use alloy_eips::eip1559::INITIAL_BASE_FEE;
+use alloy_eips::{eip1559::INITIAL_BASE_FEE, eip7840::BlobParams};
 pub use config::{revm_spec, revm_spec_by_timestamp_and_block_number};
 use reth_ethereum_forks::EthereumHardfork;
 
@@ -48,6 +48,11 @@ pub use build::EthBlockAssembler;
 
 mod receipt;
 pub use receipt::RethReceiptBuilder;
+
+#[cfg(feature = "test-utils")]
+mod test_utils;
+#[cfg(feature = "test-utils")]
+pub use test_utils::*;
 
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone)]
@@ -93,6 +98,17 @@ impl<EvmFactory> EthEvmConfig<EvmFactory> {
         self.executor_factory.spec()
     }
 
+    /// Returns blob params by hard fork as specified in chain spec.
+    /// Blob params are in format `(spec id, target blob count, max blob count)`.
+    pub fn blob_max_and_target_count_by_hardfork(&self) -> Vec<(SpecId, u64, u64)> {
+        let cancun = self.chain_spec().blob_params.cancun();
+        let prague = self.chain_spec().blob_params.prague();
+        Vec::from([
+            (SpecId::CANCUN, cancun.target_blob_count, cancun.max_blob_count),
+            (SpecId::PRAGUE, prague.target_blob_count, prague.max_blob_count),
+        ])
+    }
+
     /// Sets the extra data for the block assembler.
     pub fn with_extra_data(mut self, extra_data: Bytes) -> Self {
         self.block_assembler.extra_data = extra_data;
@@ -102,8 +118,12 @@ impl<EvmFactory> EthEvmConfig<EvmFactory> {
 
 impl<EvmF> ConfigureEvm for EthEvmConfig<EvmF>
 where
-    EvmF: EvmFactory<Tx: TransactionEnv + FromRecoveredTx<TransactionSigned>, Spec = SpecId>
-        + Clone
+    EvmF: EvmFactory<
+            Tx: TransactionEnv
+                    + FromRecoveredTx<TransactionSigned>
+                    + FromTxWithEncoded<TransactionSigned>,
+            Spec = SpecId,
+        > + Clone
         + Debug
         + Send
         + Sync
@@ -128,7 +148,20 @@ where
         let spec = config::revm_spec(self.chain_spec(), header);
 
         // configure evm env based on parent block
-        let cfg_env = CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec);
+        let cfg_env = CfgEnv::new()
+            .with_chain_id(self.chain_spec().chain().id())
+            .with_spec(spec)
+            .with_blob_max_and_target_count(self.blob_max_and_target_count_by_hardfork());
+
+        // derive the EIP-4844 blob fees from the header's `excess_blob_gas` and the current
+        // blobparams
+        let blob_excess_gas_and_price = header
+            .excess_blob_gas
+            .zip(self.chain_spec().blob_params_at_timestamp(header.timestamp))
+            .map(|(excess_blob_gas, params)| {
+                let blob_gasprice = params.calc_blob_fee(excess_blob_gas);
+                BlobExcessGasAndPrice { excess_blob_gas, blob_gasprice }
+            });
 
         let block_env = BlockEnv {
             number: header.number(),
@@ -138,10 +171,7 @@ where
             prevrandao: if spec >= SpecId::MERGE { header.mix_hash() } else { None },
             gas_limit: header.gas_limit(),
             basefee: header.base_fee_per_gas().unwrap_or_default(),
-            // EIP-4844 excess blob gas of this block, introduced in Cancun
-            blob_excess_gas_and_price: header.excess_blob_gas.map(|excess_blob_gas| {
-                BlobExcessGasAndPrice::new(excess_blob_gas, spec >= SpecId::PRAGUE)
-            }),
+            blob_excess_gas_and_price,
         };
 
         EvmEnv { cfg_env, block_env }
@@ -160,16 +190,22 @@ where
         );
 
         // configure evm env based on parent block
-        let cfg = CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec_id);
+        let cfg = CfgEnv::new()
+            .with_chain_id(self.chain_spec().chain().id())
+            .with_spec(spec_id)
+            .with_blob_max_and_target_count(self.blob_max_and_target_count_by_hardfork());
 
+        let blob_params = self.chain_spec().blob_params_at_timestamp(attributes.timestamp);
         // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
         // cancun now, we need to set the excess blob gas to the default value(0)
         let blob_excess_gas_and_price = parent
-            .maybe_next_block_excess_blob_gas(
-                self.chain_spec().blob_params_at_timestamp(attributes.timestamp),
-            )
+            .maybe_next_block_excess_blob_gas(blob_params)
             .or_else(|| (spec_id == SpecId::CANCUN).then_some(0))
-            .map(|gas| BlobExcessGasAndPrice::new(gas, spec_id >= SpecId::PRAGUE));
+            .map(|excess_blob_gas| {
+                let blob_gasprice =
+                    blob_params.unwrap_or_else(BlobParams::cancun).calc_blob_fee(excess_blob_gas);
+                BlobExcessGasAndPrice { excess_blob_gas, blob_gasprice }
+            });
 
         let mut basefee = parent.next_block_base_fee(
             self.chain_spec().base_fee_params_at_timestamp(attributes.timestamp),
