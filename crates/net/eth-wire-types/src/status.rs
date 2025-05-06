@@ -77,6 +77,9 @@ impl Status {
             blockhash: self.blockhash,
             genesis: self.genesis,
             forkid: self.forkid,
+            earliest: 0,
+            latest: 0,
+            latest_hash: B256::ZERO,
         }
     }
 }
@@ -251,6 +254,15 @@ pub struct StatusEth69 {
     /// [EIP-2124](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2124.md).
     /// This was added in [`eth/64`](https://eips.ethereum.org/EIPS/eip-2364)
     pub forkid: ForkId,
+
+    /// Number of the earliest block available.
+    pub earliest: u64,
+
+    /// Number of the latest full block available.
+    pub latest: u64,
+
+    /// Hash of the latest full block.
+    pub latest_hash: B256,
 }
 
 impl Display for StatusEth69 {
@@ -433,15 +445,19 @@ mod tests {
 
     #[test]
     fn test_status_to_statuseth69_conversion() {
+        let blockhash= B256::from_str(
+            "feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d",
+        )
+        .unwrap();
         let status = StatusEth69 {
             version: EthVersion::Eth69,
             chain: Chain::from_named(NamedChain::Mainnet),
-            blockhash: B256::from_str(
-                "feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d",
-            )
-            .unwrap(),
+            blockhash,
             genesis: MAINNET_GENESIS_HASH,
             forkid: ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 },
+            earliest: 0,
+            latest: 0,
+            latest_hash: blockhash,
         };
         let status_converted: StatusEth69 = Status {
             version: EthVersion::Eth69,
@@ -460,18 +476,22 @@ mod tests {
 
     #[test]
     fn encode_eth69_status_message() {
+        let blockhash= B256::from_str(
+            "feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d",
+        )
+        .unwrap();
         let expected = hex!(
             "f84b4501a0feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13da0d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3c684b715077d80"
         );
         let status = StatusEth69 {
             version: EthVersion::Eth69,
             chain: Chain::from_named(NamedChain::Mainnet),
-            blockhash: B256::from_str(
-                "feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d",
-            )
-            .unwrap(),
+            blockhash,
             genesis: MAINNET_GENESIS_HASH,
             forkid: ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 },
+            earliest: 0,
+            latest: 0,
+            latest_hash: blockhash,
         };
 
         let mut rlp_status = vec![];
@@ -495,18 +515,22 @@ mod tests {
 
     #[test]
     fn decode_eth69_status_message() {
+        let blockhash= B256::from_str(
+            "feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d",
+        )
+        .unwrap();
         let data = hex!(
             "0xf84b4501a0feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13da0d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3c684b715077d80"
         );
         let expected = StatusEth69 {
             version: EthVersion::Eth69,
             chain: Chain::from_named(NamedChain::Mainnet),
-            blockhash: B256::from_str(
-                "feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d",
-            )
-            .unwrap(),
+            blockhash,
             genesis: MAINNET_GENESIS_HASH,
             forkid: ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 },
+            earliest: 0,
+            latest: 0,
+            latest_hash: blockhash,
         };
         let status = StatusEth69::decode(&mut &data[..]).unwrap();
         assert_eq!(status, expected);

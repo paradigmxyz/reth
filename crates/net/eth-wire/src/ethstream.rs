@@ -16,7 +16,7 @@ use alloy_primitives::bytes::{Bytes, BytesMut};
 use alloy_rlp::Encodable;
 use futures::{ready, Sink, SinkExt};
 use pin_project::pin_project;
-use reth_eth_wire_types::{NetworkPrimitives, RawCapabilityMessage};
+use reth_eth_wire_types::{NetworkPrimitives, RawCapabilityMessage, StatusMessage};
 use reth_ethereum_forks::ForkFilter;
 use std::{
     future::Future,
@@ -94,7 +94,7 @@ where
             %status,
             "sending eth status to peer"
         );
-        EthereumEthHandshake(&mut self.inner).eth_handshake(status, fork_filter).await?;
+        EthereumEthHandshake(&mut self.inner).eth_handshake(StatusMessage::Legacy(status), fork_filter).await?;
 
         // now we can create the `EthStream` because the peer has successfully completed
         // the handshake

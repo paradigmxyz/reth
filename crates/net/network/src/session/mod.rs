@@ -33,10 +33,9 @@ use counter::SessionCounter;
 use futures::{future::Either, io, FutureExt, StreamExt};
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
-    errors::EthStreamError, handshake::EthRlpxHandshake, multiplex::RlpxProtocolMultiplexer,
-    Capabilities, DisconnectReason, EthStream, EthVersion, HelloMessageWithProtocols,
-    NetworkPrimitives, Status, UnauthedP2PStream, HANDSHAKE_TIMEOUT,
+    errors::EthStreamError, handshake::EthRlpxHandshake, multiplex::RlpxProtocolMultiplexer, Capabilities, DisconnectReason, EthStream, EthVersion, HelloMessageWithProtocols, NetworkPrimitives, Status, StatusEth69, UnauthedP2PStream, HANDSHAKE_TIMEOUT
 };
+
 use reth_ethereum_forks::{ForkFilter, ForkId, ForkTransition, Head};
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::{PeerRequest, PeerRequestSender};
@@ -115,6 +114,8 @@ pub struct SessionManager<N: NetworkPrimitives> {
     metrics: SessionManagerMetrics,
     /// The [`EthRlpxHandshake`] is used to perform the initial handshake with the peer.
     handshake: Arc<dyn EthRlpxHandshake>,
+
+    status_eth69: StatusEth69,
 }
 
 // === impl SessionManager ===
@@ -131,6 +132,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         fork_filter: ForkFilter,
         extra_protocols: RlpxSubProtocols,
         handshake: Arc<dyn EthRlpxHandshake>,
+        status_eth69: StatusEth69,
     ) -> Self {
         let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(config.session_event_buffer);
         let (active_session_tx, active_session_rx) = mpsc::channel(config.session_event_buffer);
@@ -158,6 +160,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
             disconnections_counter: Default::default(),
             metrics: Default::default(),
             handshake,
+            status_eth69,
         }
     }
 

@@ -62,7 +62,7 @@ impl EthRlpxHandshake for EthHandshake {
         timeout_limit: Duration,
     ) -> Pin<Box<dyn Future<Output = Result<Status, EthStreamError>> + 'a + Send>> {
         Box::pin(async move {
-            timeout(timeout_limit, EthereumEthHandshake(unauth).eth_handshake(status, fork_filter))
+            timeout(timeout_limit, EthereumEthHandshake(unauth).eth_handshake(StatusMessage::Legacy(status), fork_filter))
                 .await
                 .map_err(|_| EthStreamError::StreamTimeout)?
         })
@@ -81,20 +81,17 @@ where
     /// Performs the `eth` rlpx protocol handshake using the given input stream.
     pub async fn eth_handshake(
         self,
-        status: Status,
+        status_msg: StatusMessage,
         fork_filter: ForkFilter,
     ) -> Result<Status, EthStreamError> {
         let unauth = self.0;
         // Send our status message
-        let status_msg =
-            alloy_rlp::encode(ProtocolMessage::<EthNetworkPrimitives>::from(EthMessage::<
-                EthNetworkPrimitives,
-            >::Status(
-                StatusMessage::Legacy(status),
-            )))
-            .into();
-        unauth.send(status_msg).await.map_err(EthStreamError::from)?;
-
+        let encoded_status = alloy_rlp::encode(
+            ProtocolMessage::<EthNetworkPrimitives>::from(EthMessage::Status(status_msg.clone()))
+        ).into();
+        
+        unauth.send(encoded_status).await.map_err(EthStreamError::from)?;
+        
         // Receive peer's response
         let their_msg_res = unauth.next().await;
         let their_msg = match their_msg_res {
@@ -117,7 +114,7 @@ where
             return Err(EthStreamError::MessageTooBig(their_msg.len()));
         }
 
-        let version = status.version;
+        let version = status_msg.version();
         let msg = match ProtocolMessage::<EthNetworkPrimitives>::decode_message(
             version,
             &mut their_msg.as_ref(),
@@ -138,14 +135,14 @@ where
             EthMessage::Status(their_status_message) => {
                 trace!("Validating incoming ETH status from peer");
 
-                if status.genesis != their_status_message.genesis() {
+                if status_msg.genesis() != their_status_message.genesis() {
                     unauth
                         .disconnect(DisconnectReason::ProtocolBreach)
                         .await
                         .map_err(EthStreamError::from)?;
                     return Err(EthHandshakeError::MismatchedGenesis(
                         GotExpected {
-                            expected: status.genesis,
+                            expected: status_msg.genesis(),
                             got: their_status_message.genesis(),
                         }
                         .into(),
@@ -153,41 +150,40 @@ where
                     .into());
                 }
 
-                if status.version != their_status_message.version() {
+                if status_msg.version() != their_status_message.version() {
                     unauth
                         .disconnect(DisconnectReason::ProtocolBreach)
                         .await
                         .map_err(EthStreamError::from)?;
                     return Err(EthHandshakeError::MismatchedProtocolVersion(GotExpected {
                         got: their_status_message.version(),
-                        expected: status.version,
+                        expected: status_msg.version(),
                     })
                     .into());
                 }
 
-                if status.chain != *their_status_message.chain() {
+                if *status_msg.chain() != *their_status_message.chain() {
                     unauth
                         .disconnect(DisconnectReason::ProtocolBreach)
                         .await
                         .map_err(EthStreamError::from)?;
                     return Err(EthHandshakeError::MismatchedChain(GotExpected {
                         got: *their_status_message.chain(),
-                        expected: status.chain,
+                        expected: *status_msg.chain(),
                     })
                     .into());
                 }
 
                 // Ensure total difficulty is reasonable
-                if status.total_difficulty.bit_len() > 160 {
-                    unauth
-                        .disconnect(DisconnectReason::ProtocolBreach)
-                        .await
-                        .map_err(EthStreamError::from)?;
-                    return Err(EthHandshakeError::TotalDifficultyBitLenTooLarge {
-                        got: status.total_difficulty.bit_len(),
-                        maximum: 160,
+                if let StatusMessage::Legacy(legacy) = status_msg {
+                    if legacy.total_difficulty.bit_len() > 160 {
+                        unauth.disconnect(DisconnectReason::ProtocolBreach).await?;
+                        return Err(EthHandshakeError::TotalDifficultyBitLenTooLarge {
+                            got: legacy.total_difficulty.bit_len(),
+                            maximum: 160,
+                        }
+                        .into());
                     }
-                    .into());
                 }
 
                 // Fork validation
