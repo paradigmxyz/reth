@@ -830,6 +830,8 @@ impl<P> RevealedSparseTrie<P> {
 
     /// Removes all nodes and values from the trie, resetting it to a blank state
     /// with only an empty root node.
+    ///
+    /// Note: All previously tracked changes to the trie are also removed.
     pub fn wipe(&mut self) {
         self.nodes = HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]);
         self.values = HashMap::default();
