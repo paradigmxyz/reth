@@ -1,15 +1,25 @@
 use crate::{StageCheckpoint, StageId};
 use alloy_primitives::{BlockHash, BlockNumber};
+use futures_util::StreamExt;
 use reqwest::{Client, Url};
 use reth_config::config::EtlConfig;
 use reth_db_api::{table::Value, transaction::DbTxMut};
-use reth_era_downloader::{read_dir, EraClient, EraStream, EraStreamConfig};
+use reth_era_downloader::{read_dir, EraClient, EraMeta, EraStream, EraStreamConfig};
 use reth_era_utils as era;
 use reth_etl::Collector;
 use reth_primitives_traits::{Block, FullBlockBody, FullBlockHeader, NodePrimitives};
-use reth_provider::{BlockWriter, DBProvider, NodePrimitivesProvider, StaticFileProviderFactory};
+use reth_provider::{
+    BlockWriter, DBProvider, HeaderProvider, NodePrimitivesProvider, StaticFileProviderFactory,
+    StaticFileWriter,
+};
 use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
-use std::path::PathBuf;
+use reth_static_file_types::StaticFileSegment;
+use reth_storage_errors::ProviderError;
+use std::{
+    fmt::Debug,
+    path::PathBuf,
+    task::{ready, Context, Poll},
+};
 
 /// The [ERA1](https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md)
 /// pre-merge history stage.
@@ -20,6 +30,7 @@ use std::path::PathBuf;
 pub struct EraStage {
     source: Option<ImportSource>,
     hash_collector: Collector<BlockHash, BlockNumber>,
+    item: Option<Box<dyn EraMeta + Sync + Send + 'static>>,
 }
 
 /// Describes where to get the era files from.
@@ -34,7 +45,11 @@ pub enum ImportSource {
 impl EraStage {
     /// Creates a new [`EraStage`].
     pub fn new(source: Option<ImportSource>, etl_config: EtlConfig) -> Self {
-        Self { source, hash_collector: Collector::new(etl_config.file_size, etl_config.dir) }
+        Self {
+            source,
+            item: None,
+            hash_collector: Collector::new(etl_config.file_size, etl_config.dir),
+        }
     }
 }
 
@@ -54,25 +69,56 @@ where
         StageId::Era
     }
 
-    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
-        match self.source.clone() {
-            Some(source) => match source {
+    fn poll_execute_ready(&mut self, cx: &mut Context<'_>, _input: ExecInput) -> Poll<Result<(), StageError>> {
+        if let Some(source) = self.source.clone() {
+            match source {
                 ImportSource::Path(path) => {
-                    let stream = read_dir(path).map_err(|e| StageError::Fatal(e.into()))?;
+                    let mut stream = read_dir(path).map_err(|e| StageError::Fatal(e.into()))?;
 
-                    era::import(stream, provider, &mut self.hash_collector)
+                    if let Some(next) = ready!(stream.poll_next_unpin(cx)).transpose().map_err(|e| StageError::Fatal(e.into()))? {
+                        self.item.replace(Box::new(next));
+                    }
                 }
                 ImportSource::Url(url, era_dir) => {
                     let folder = era_dir.into_boxed_path();
                     let client = EraClient::new(Client::new(), url, folder);
-                    let stream = EraStream::new(client, EraStreamConfig::default());
+                    let mut stream = EraStream::new(client, EraStreamConfig::default());
 
-                    era::import(stream, provider, &mut self.hash_collector)
+                    if let Some(next) = ready!(stream.poll_next_unpin(cx)).transpose().map_err(|e| StageError::Fatal(e.into()))? {
+                        self.item.replace(Box::new(next));
+                    }
                 }
             }
-                .map(|height| ExecOutput::done(StageCheckpoint::new(height)))
+        }
+
+        Poll::Ready(Ok(()))
+    }
+
+    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
+        match self.item.take() {
+            Some(source) => {
+                let static_file_provider = provider.static_file_provider();
+
+                // Consistency check of expected headers in static files vs DB is done on provider::sync_gap
+                // when poll_execute_ready is polled.
+                let last_header_number = static_file_provider
+                    .get_highest_static_file_block(StaticFileSegment::Headers)
+                    .unwrap_or_default();
+
+                // Find the latest total difficulty
+                let mut td = static_file_provider
+                    .header_td_by_number(last_header_number)?
+                    .ok_or(ProviderError::TotalDifficultyNotFound(last_header_number))?;
+
+                // Although headers were downloaded in reverse order, the collector iterates it in ascending
+                // order
+                let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
+
+                era::process(source.as_ref(), &mut writer, provider, &mut self.hash_collector, &mut td)
+            }
+                .map(|height| ExecOutput::done(StageCheckpoint::new(height.unwrap_or_default())))
                 .map_err(|e| StageError::Recoverable(e.into())),
-            None => Ok(ExecOutput { checkpoint: input.checkpoint.unwrap_or_else(|| StageCheckpoint::new(0)), done: true })
+            None => Ok(ExecOutput::done(StageCheckpoint::new(input.target())))
         }
     }
 

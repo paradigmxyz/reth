@@ -1,4 +1,4 @@
-use alloy_primitives::{BlockHash, BlockNumber};
+use alloy_primitives::{BlockHash, BlockNumber, U256};
 use futures_util::{Stream, StreamExt};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -13,7 +13,8 @@ use reth_etl::Collector;
 use reth_fs_util as fs;
 use reth_primitives_traits::{Block, FullBlockBody, FullBlockHeader, NodePrimitives};
 use reth_provider::{
-    BlockWriter, ProviderError, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
+    providers::StaticFileProviderRWRefMut, BlockWriter, ProviderError, StaticFileProviderFactory,
+    StaticFileSegment, StaticFileWriter,
 };
 use reth_storage_api::{DBProvider, HeaderProvider, NodePrimitivesProvider, StorageLocation};
 use std::sync::mpsc;
@@ -67,42 +68,9 @@ where
     let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
 
     while let Some(meta) = rx.recv()? {
-        let meta = meta?;
-        let file = fs::open(meta.as_ref())?;
-        let mut reader = Era1Reader::new(file);
-
-        for block in reader.iter() {
-            let block = block?;
-            let header: BH = block.header.decode()?;
-            let body: BB = block.body.decode()?;
-            let number = header.number();
-
-            if number == 0 {
-                continue;
-            }
-
-            let hash = header.hash_slow();
-            last_header_number = number;
-
-            // Increase total difficulty
-            td += header.difficulty();
-
-            // Append to Headers segment
-            writer.append_header(&header, td, &hash)?;
-
-            // Write bodies to database.
-            provider.append_block_bodies(
-                vec![(header.number(), Some(body))],
-                // We are writing transactions directly to static files.
-                StorageLocation::StaticFiles,
-            )?;
-
-            hash_collector.insert(hash, number)?;
+        if let Some(height) = process(&meta?, &mut writer, provider, hash_collector, &mut td)? {
+            last_header_number = height;
         }
-
-        info!(target: "era::history::import", "Processed {}", meta.as_ref().to_string_lossy());
-
-        meta.mark_as_processed()?;
     }
 
     let total_headers = hash_collector.len();
@@ -144,6 +112,69 @@ where
             cursor_header_numbers.upsert(hash, &number)?;
         }
     }
+
+    Ok(last_header_number)
+}
+
+/// Extracts block headers and bodies from `meta` and appends them using `writer` and `provider`.
+///
+/// Adds on to `total_difficulty` and collects hash to height using `hash_collector`.
+///
+/// Returns last block height.
+pub fn process<Era, P, B, BB, BH>(
+    meta: &Era,
+    writer: &mut StaticFileProviderRWRefMut<'_, <P as NodePrimitivesProvider>::Primitives>,
+    provider: &P,
+    hash_collector: &mut Collector<BlockHash, BlockNumber>,
+    total_difficulty: &mut U256,
+) -> eyre::Result<Option<BlockNumber>>
+where
+    B: Block<Header = BH, Body = BB>,
+    BH: FullBlockHeader + Value,
+    BB: FullBlockBody<
+        Transaction = <<P as NodePrimitivesProvider>::Primitives as NodePrimitives>::SignedTx,
+        OmmerHeader = BH,
+    >,
+    Era: EraMeta + ?Sized,
+    P: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory + BlockWriter<Block = B>,
+    <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
+{
+    let file = fs::open(meta.path())?;
+    let mut reader = Era1Reader::new(file);
+    let mut last_header_number = None;
+
+    for block in reader.iter() {
+        let block = block?;
+        let header: BH = block.header.decode()?;
+        let body: BB = block.body.decode()?;
+        let number = header.number();
+
+        if number == 0 {
+            continue;
+        }
+
+        let hash = header.hash_slow();
+        last_header_number = Some(number);
+
+        // Increase total difficulty
+        *total_difficulty += header.difficulty();
+
+        // Append to Headers segment
+        writer.append_header(&header, *total_difficulty, &hash)?;
+
+        // Write bodies to database.
+        provider.append_block_bodies(
+            vec![(header.number(), Some(body))],
+            // We are writing transactions directly to static files.
+            StorageLocation::StaticFiles,
+        )?;
+
+        hash_collector.insert(hash, number)?;
+    }
+
+    info!(target: "era::history::import", "Processed {}", meta.path().to_string_lossy());
+
+    meta.mark_as_processed()?;
 
     Ok(last_header_number)
 }

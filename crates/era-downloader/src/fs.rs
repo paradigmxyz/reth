@@ -93,7 +93,11 @@ impl AsRef<Path> for EraLocalMeta {
 
 impl EraMeta for EraLocalMeta {
     /// A no-op.
-    fn mark_as_processed(self) -> eyre::Result<()> {
+    fn mark_as_processed(&self) -> eyre::Result<()> {
         Ok(())
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
     }
 }
