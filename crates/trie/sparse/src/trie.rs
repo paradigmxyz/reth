@@ -69,7 +69,7 @@ pub enum SparseTrie<P = DefaultBlindedProvider> {
     /// The trie is blind -- no nodes have been revealed
     ///
     /// This is the default state. In this state,
-    /// the trie cannot be directly queried or modified until nodes are revealed.    
+    /// the trie cannot be directly queried or modified until nodes are revealed.
     #[default]
     Blind,
     /// Some nodes in the Trie have been revealed.

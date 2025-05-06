@@ -10210,6 +10210,7 @@ version = "1.3.12"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-trie",
  "arbitrary",
  "assert_matches",
  "auto_impl",
