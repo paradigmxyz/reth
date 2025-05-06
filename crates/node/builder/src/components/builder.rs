@@ -8,9 +8,10 @@ use crate::{
     BuilderContext, ConfigureEvm, FullNodeTypes,
 };
 use reth_consensus::{ConsensusError, FullConsensus};
-use reth_network::NetworkPrimitives;
-use reth_node_api::{BlockTy, BodyTy, HeaderTy, PrimitivesTy, TxTy};
-use reth_transaction_pool::{PoolTransaction, TransactionPool};
+use reth_network::types::NetPrimitivesFor;
+use reth_network_api::FullNetwork;
+use reth_node_api::{PrimitivesTy, TxTy};
+use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
 use std::{future::Future, marker::PhantomData};
 
 /// A generic, general purpose and customizable [`NodeComponentsBuilder`] implementation.
@@ -295,21 +296,15 @@ impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB> NodeComponentsBuilder<Node>
     for ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB>
 where
     Node: FullNodeTypes,
-    PoolB: PoolBuilder<
-        Node,
-        Pool: TransactionPool<
-            Transaction: PoolTransaction<
-                Pooled = <NetworkB::Primitives as NetworkPrimitives>::PooledTransaction,
-            >,
-        >,
-    >,
+    PoolB: PoolBuilder<Node, Pool: TransactionPool>,
     NetworkB: NetworkBuilder<
         Node,
         PoolB::Pool,
-        Primitives: NetworkPrimitives<
-            BlockHeader = HeaderTy<Node::Types>,
-            BlockBody = BodyTy<Node::Types>,
-            Block = BlockTy<Node::Types>,
+        Network: FullNetwork<
+            Primitives: NetPrimitivesFor<
+                PrimitivesTy<Node::Types>,
+                PooledTransaction = PoolPooledTx<PoolB::Pool>,
+            >,
         >,
     >,
     PayloadB: PayloadServiceBuilder<Node, PoolB::Pool, ExecB::EVM>,
@@ -317,7 +312,7 @@ where
     ConsB: ConsensusBuilder<Node>,
 {
     type Components =
-        Components<Node, NetworkB::Primitives, PoolB::Pool, ExecB::EVM, ConsB::Consensus>;
+        Components<Node, NetworkB::Network, PoolB::Pool, ExecB::EVM, ConsB::Consensus>;
 
     async fn build_components(
         self,
@@ -383,16 +378,17 @@ pub trait NodeComponentsBuilder<Node: FullNodeTypes>: Send {
     ) -> impl Future<Output = eyre::Result<Self::Components>> + Send;
 }
 
-impl<Node, N, F, Fut, Pool, EVM, Cons> NodeComponentsBuilder<Node> for F
+impl<Node, Net, F, Fut, Pool, EVM, Cons> NodeComponentsBuilder<Node> for F
 where
-    N: NetworkPrimitives<
-        BlockHeader = HeaderTy<Node::Types>,
-        BlockBody = BodyTy<Node::Types>,
-        Block = BlockTy<Node::Types>,
+    Net: FullNetwork<
+        Primitives: NetPrimitivesFor<
+            PrimitivesTy<Node::Types>,
+            PooledTransaction = PoolPooledTx<Pool>,
+        >,
     >,
     Node: FullNodeTypes,
     F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
-    Fut: Future<Output = eyre::Result<Components<Node, N, Pool, EVM, Cons>>> + Send,
+    Fut: Future<Output = eyre::Result<Components<Node, Net, Pool, EVM, Cons>>> + Send,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
         + 'static,
@@ -400,7 +396,7 @@ where
     Cons:
         FullConsensus<PrimitivesTy<Node::Types>, Error = ConsensusError> + Clone + Unpin + 'static,
 {
-    type Components = Components<Node, N, Pool, EVM, Cons>;
+    type Components = Components<Node, Net, Pool, EVM, Cons>;
 
     fn build_components(
         self,
