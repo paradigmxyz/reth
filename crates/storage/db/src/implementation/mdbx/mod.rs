@@ -511,7 +511,7 @@ mod tests {
     };
     use reth_libmdbx::Error;
     use reth_primitives_traits::{Account, StorageEntry};
-    use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
+    use reth_storage_errors::db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation};
     use std::str::FromStr;
     use tempfile::TempDir;
 
@@ -884,9 +884,7 @@ mod tests {
         // Seek exact
         let exact = cursor.seek_exact(missing_key).unwrap();
         assert_eq!(exact, None);
-        assert_eq!(cursor.current(), Ok(Some((missing_key + 1, B256::ZERO))));
-        assert_eq!(cursor.prev(), Ok(Some((missing_key - 1, B256::ZERO))));
-        assert_eq!(cursor.prev(), Ok(Some((missing_key - 2, B256::ZERO))));
+        assert_eq!(cursor.current(), Ok(None));
     }
 
     #[test]
@@ -971,11 +969,17 @@ mod tests {
 
         // Seek & delete key2 again
         assert_eq!(cursor.seek_exact(key2), Ok(None));
-        assert_eq!(cursor.delete_current(), Ok(()));
+        assert_eq!(
+            cursor.delete_current(),
+            Err(DatabaseError::Delete(DatabaseErrorInfo {
+                message: reth_libmdbx::Error::NoData.to_string().into_boxed_str(),
+                code: reth_libmdbx::Error::NoData.to_err_code()
+            }))
+        );
         // Assert that key1 is still there
         assert_eq!(cursor.seek_exact(key1), Ok(Some((key1, Account::default()))));
-        // Assert that key3 was deleted
-        assert_eq!(cursor.seek_exact(key3), Ok(None));
+        // Assert that key3 is still there
+        assert_eq!(cursor.seek_exact(key3), Ok(Some((key3, Account::default()))));
     }
 
     #[test]
