@@ -3082,12 +3082,15 @@ dependencies = [
  "reth-primitives-traits",
  "reth-provider",
  "reth-revm",
+ "reth-stateless",
+ "reth-tracing",
  "reth-trie",
  "reth-trie-db",
  "revm",
  "serde",
  "serde_json",
  "thiserror 2.0.12",
+ "tracing",
  "walkdir",
 ]
 
@@ -9624,6 +9627,7 @@ dependencies = [
  "jsonrpsee",
  "metrics",
  "pin-project",
+ "reth-chain-state",
  "reth-chainspec",
  "reth-consensus",
  "reth-engine-primitives",
@@ -9648,6 +9652,7 @@ dependencies = [
  "reth-rpc-layer",
  "reth-rpc-server-types",
  "reth-rpc-types-compat",
+ "reth-storage-api",
  "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
@@ -9927,6 +9932,29 @@ dependencies = [
  "reth-trie-common",
  "serde",
  "test-fuzz",
+]
+
+[[package]]
+name = "reth-stateless"
+version = "1.3.12"
+dependencies = [
+ "alloy-consensus",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-trie",
+ "itertools 0.14.0",
+ "reth-chainspec",
+ "reth-consensus",
+ "reth-errors",
+ "reth-ethereum-consensus",
+ "reth-evm",
+ "reth-evm-ethereum",
+ "reth-primitives",
+ "reth-revm",
+ "reth-trie-common",
+ "reth-trie-sparse",
+ "serde",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
