@@ -20,12 +20,12 @@ use reth::beacon_consensus::EthBeaconConsensus;
 use reth_ethereum::{
     chainspec::ChainSpecBuilder,
     network::api::noop::NoopNetwork,
-    node::{api::NodeTypesWithDBAdapter, EthEvmConfig, EthExecutorProvider, EthereumNode},
+    node::{api::NodeTypesWithDBAdapter, EthEvmConfig, EthereumNode},
     pool::noop::NoopTransactionPool,
     provider::{
         db::{mdbx::DatabaseArguments, open_db_read_only, ClientVersion, DatabaseEnv},
         providers::{BlockchainProvider, StaticFileProvider},
-        ChainSpecProvider, ProviderFactory,
+        ProviderFactory,
     },
     rpc::{
         builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, TransportRpcModuleConfig},
@@ -67,7 +67,6 @@ async fn main() -> eyre::Result<()> {
         .with_noop_network()
         .with_executor(TokioTaskExecutor::default())
         .with_evm_config(EthEvmConfig::new(spec.clone()))
-        .with_block_executor(EthExecutorProvider::ethereum(provider.chain_spec()))
         .with_consensus(EthBeaconConsensus::new(spec.clone()));
 
     let eth_api = EthApiBuilder::new(

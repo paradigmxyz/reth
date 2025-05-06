@@ -13,10 +13,7 @@ workspace = true
 
 [features]
 ef-tests = []
-asm-keccak = [
-    "alloy-primitives/asm-keccak",
-    "revm/asm-keccak",
-]
+asm-keccak = ["alloy-primitives/asm-keccak", "revm/asm-keccak"]
 
 [dependencies]
 reth-chainspec.workspace = true
@@ -30,7 +27,9 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 reth-evm.workspace = true
 reth-evm-ethereum.workspace = true
 reth-ethereum-consensus.workspace = true
-reth-revm = { workspace = true, features = ["std"] }
+reth-revm = { workspace = true, features = ["std", "witness"] }
+reth-stateless = { workspace = true }
+reth-tracing.workspace = true
 reth-trie.workspace = true
 reth-trie-db.workspace = true
 revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
@@ -46,6 +45,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 rayon.workspace = true
+tracing.workspace = true
 # TODO: When we build for a windows target on an ubuntu runner, crunchy tries to
 # get the wrong path, update this when the workflow has been updated
 #

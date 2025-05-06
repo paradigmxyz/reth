@@ -34,7 +34,7 @@ use reth_ethereum::{
     node::{
         api::{ConfigureEvm, FullNodeTypes, NodeTypes},
         node::EthereumAddOns,
-        BasicBlockExecutorProvider, EthereumNode,
+        EthereumNode,
     },
     primitives::{Header, SealedHeader},
     provider::BlockExecutionResult,
@@ -76,16 +76,11 @@ where
     Node: FullNodeTypes<Types = Types>,
 {
     type EVM = CustomEvmConfig;
-    type Executor = BasicBlockExecutorProvider<Self::EVM>;
 
-    async fn build_evm(
-        self,
-        ctx: &BuilderContext<Node>,
-    ) -> eyre::Result<(Self::EVM, Self::Executor)> {
+    async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
         let evm_config = CustomEvmConfig { inner: EthEvmConfig::new(ctx.chain_spec()) };
-        let executor = BasicBlockExecutorProvider::new(evm_config.clone());
 
-        Ok((evm_config, executor))
+        Ok(evm_config)
     }
 }
 

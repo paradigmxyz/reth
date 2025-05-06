@@ -3090,7 +3090,6 @@ impl PersistingKind {
         matches!(self, Self::PersistingDescendant)
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;

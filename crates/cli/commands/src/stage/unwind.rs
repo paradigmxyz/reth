@@ -13,7 +13,7 @@ use reth_config::Config;
 use reth_consensus::noop::NoopConsensus;
 use reth_db::DatabaseEnv;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
-use reth_evm::execute::BlockExecutorProvider;
+use reth_evm::ConfigureEvm;
 use reth_exex::ExExManagerHandle;
 use reth_provider::{
     providers::ProviderNodeTypes, BlockExecutionWriter, BlockNumReader, ChainStateBlockReader,
@@ -85,7 +85,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
             // This will build an offline-only pipeline if the `offline` flag is enabled
             let mut pipeline =
-                self.build_pipeline(config, provider_factory, components.executor().clone())?;
+                self.build_pipeline(config, provider_factory, components.evm_config().clone())?;
 
             // Move all applicable data from database to static files.
             pipeline.move_to_static_files()?;
@@ -117,7 +117,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         self,
         config: Config,
         provider_factory: ProviderFactory<N>,
-        executor: impl BlockExecutorProvider<Primitives = N::Primitives>,
+        evm_config: impl ConfigureEvm<Primitives = N::Primitives> + 'static,
     ) -> Result<Pipeline<N>, eyre::Error> {
         let stage_conf = &config.stages;
         let prune_modes = config.prune.clone().map(|prune| prune.segments).unwrap_or_default();
@@ -127,7 +127,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         let builder = if self.offline {
             Pipeline::<N>::builder().add_stages(
                 OfflineStages::new(
-                    executor,
+                    evm_config,
                     NoopConsensus::arc(),
                     config.stages,
                     prune_modes.clone(),
@@ -143,12 +143,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                     Arc::new(NoopConsensus::default()),
                     NoopHeaderDownloader::default(),
                     NoopBodiesDownloader::default(),
-                    executor.clone(),
+                    evm_config.clone(),
                     stage_conf.clone(),
                     prune_modes.clone(),
                 )
                 .set(ExecutionStage::new(
-                    executor,
+                    evm_config,
                     Arc::new(NoopConsensus::default()),
                     ExecutionStageThresholds {
                         max_blocks: None,

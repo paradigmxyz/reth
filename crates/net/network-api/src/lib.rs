@@ -30,8 +30,8 @@ pub use reth_network_types::{PeerKind, Reputation, ReputationChangeKind};
 pub use downloaders::BlockDownloaderProvider;
 pub use error::NetworkError;
 pub use events::{
-    DiscoveredEvent, DiscoveryEvent, NetworkEvent, NetworkEventListenerProvider, PeerRequest,
-    PeerRequestSender, PoolTxTy, PrimitivesTy,
+    DiscoveredEvent, DiscoveryEvent, NetPrimitivesTy, NetworkEvent, NetworkEventListenerProvider,
+    PeerRequest, PeerRequestSender, PoolTxTy,
 };
 
 use reth_eth_wire_types::{

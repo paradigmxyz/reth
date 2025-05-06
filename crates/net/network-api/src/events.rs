@@ -148,10 +148,10 @@ pub trait NetworkEventListenerProvider: NetworkPeersEvents {
 }
 
 /// Adapter for accessing data primitives types on [`NetworkEventListenerProvider`].
-pub type PrimitivesTy<N> = <N as NetworkEventListenerProvider>::Primitives;
+pub type NetPrimitivesTy<N> = <N as NetworkEventListenerProvider>::Primitives;
 
 /// Adapter for accessing pooled transaction types on [`NetworkEventListenerProvider`].
-pub type PoolTxTy<N> = reth_eth_wire_types::PoolTxTy<PrimitivesTy<N>>;
+pub type PoolTxTy<N> = reth_eth_wire_types::PoolTxTy<NetPrimitivesTy<N>>;
 
 /// Events produced by the `Discovery` manager.
 #[derive(Debug, Clone, PartialEq, Eq)]
