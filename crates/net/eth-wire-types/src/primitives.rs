@@ -2,7 +2,7 @@
 
 use alloy_consensus::{RlpDecodableReceipt, RlpEncodableReceipt, TxReceipt};
 use alloy_rlp::{Decodable, Encodable};
-use core::{fmt::Debug, marker::PhantomData};
+use core::fmt::Debug;
 use reth_primitives_traits::{Block, BlockBody, BlockHeader, NodePrimitives, SignedTransaction};
 
 /// Abstraction over primitive types which might appear in network messages. See
