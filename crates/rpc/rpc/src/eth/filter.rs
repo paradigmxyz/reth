@@ -549,7 +549,7 @@ where
                         maybe_block
                             .map(ProviderOrBlock::Block)
                             .unwrap_or_else(|| ProviderOrBlock::Provider(self.provider())),
-                        &filter,
+                        filter,
                         num_hash,
                         &receipts,
                         false,
