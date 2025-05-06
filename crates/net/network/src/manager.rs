@@ -249,6 +249,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             transactions_manager_config: _,
             nat,
             handshake,
+            status_eth69,
         } = config;
 
         let peers_manager = PeersManager::new(peers_config);
@@ -301,6 +302,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             fork_filter,
             extra_protocols,
             handshake,
+            status_eth69,
         );
 
         let state = NetworkState::new(

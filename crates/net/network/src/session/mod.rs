@@ -33,7 +33,9 @@ use counter::SessionCounter;
 use futures::{future::Either, io, FutureExt, StreamExt};
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
-    errors::EthStreamError, handshake::EthRlpxHandshake, multiplex::RlpxProtocolMultiplexer, Capabilities, DisconnectReason, EthStream, EthVersion, HelloMessageWithProtocols, NetworkPrimitives, Status, StatusEth69, UnauthedP2PStream, HANDSHAKE_TIMEOUT
+    errors::EthStreamError, handshake::EthRlpxHandshake, multiplex::RlpxProtocolMultiplexer,
+    Capabilities, DisconnectReason, EthStream, EthVersion, HelloMessageWithProtocols,
+    NetworkPrimitives, Status, StatusEth69, UnauthedP2PStream, HANDSHAKE_TIMEOUT,
 };
 
 use reth_ethereum_forks::{ForkFilter, ForkId, ForkTransition, Head};
@@ -226,6 +228,9 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         self.status.total_difficulty = head.total_difficulty;
         let transition = self.fork_filter.set_head(head);
         self.status.forkid = self.fork_filter.current();
+        self.status_eth69.latest = head.number;
+        self.status_eth69.latest_hash = head.hash;
+        self.status_eth69.forkid = self.status.forkid;
         transition
     }
 

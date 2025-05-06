@@ -445,10 +445,9 @@ mod tests {
 
     #[test]
     fn test_status_to_statuseth69_conversion() {
-        let blockhash= B256::from_str(
-            "feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d",
-        )
-        .unwrap();
+        let blockhash =
+            B256::from_str("feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d")
+                .unwrap();
         let status = StatusEth69 {
             version: EthVersion::Eth69,
             chain: Chain::from_named(NamedChain::Mainnet),
@@ -476,10 +475,9 @@ mod tests {
 
     #[test]
     fn encode_eth69_status_message() {
-        let blockhash= B256::from_str(
-            "feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d",
-        )
-        .unwrap();
+        let blockhash =
+            B256::from_str("feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d")
+                .unwrap();
         let expected = hex!(
             "f84b4501a0feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13da0d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3c684b715077d80"
         );
@@ -515,10 +513,9 @@ mod tests {
 
     #[test]
     fn decode_eth69_status_message() {
-        let blockhash= B256::from_str(
-            "feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d",
-        )
-        .unwrap();
+        let blockhash =
+            B256::from_str("feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d")
+                .unwrap();
         let data = hex!(
             "0xf84b4501a0feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13da0d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3c684b715077d80"
         );

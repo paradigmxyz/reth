@@ -62,9 +62,13 @@ impl EthRlpxHandshake for EthHandshake {
         timeout_limit: Duration,
     ) -> Pin<Box<dyn Future<Output = Result<Status, EthStreamError>> + 'a + Send>> {
         Box::pin(async move {
-            timeout(timeout_limit, EthereumEthHandshake(unauth).eth_handshake(StatusMessage::Legacy(status), fork_filter))
-                .await
-                .map_err(|_| EthStreamError::StreamTimeout)?
+            timeout(
+                timeout_limit,
+                EthereumEthHandshake(unauth)
+                    .eth_handshake(StatusMessage::Legacy(status), fork_filter),
+            )
+            .await
+            .map_err(|_| EthStreamError::StreamTimeout)?
         })
     }
 }
@@ -86,12 +90,13 @@ where
     ) -> Result<Status, EthStreamError> {
         let unauth = self.0;
         // Send our status message
-        let encoded_status = alloy_rlp::encode(
-            ProtocolMessage::<EthNetworkPrimitives>::from(EthMessage::Status(status_msg.clone()))
-        ).into();
-        
+        let encoded_status = alloy_rlp::encode(ProtocolMessage::<EthNetworkPrimitives>::from(
+            EthMessage::Status(status_msg.clone()),
+        ))
+        .into();
+
         unauth.send(encoded_status).await.map_err(EthStreamError::from)?;
-        
+
         // Receive peer's response
         let their_msg_res = unauth.next().await;
         let their_msg = match their_msg_res {

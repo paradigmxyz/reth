@@ -11,8 +11,7 @@ use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOV
 use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{
-    handshake::{EthHandshake, EthRlpxHandshake},
-    EthNetworkPrimitives, HelloMessage, HelloMessageWithProtocols, NetworkPrimitives, Status,
+    handshake::{EthHandshake, EthRlpxHandshake}, EthNetworkPrimitives, EthVersion, HelloMessage, HelloMessageWithProtocols, NetworkPrimitives, Status, StatusEth69
 };
 use reth_ethereum_forks::{ForkFilter, Head};
 use reth_network_peers::{mainnet_nodes, pk2id, sepolia_nodes, PeerId, TrustedPeer};
@@ -89,6 +88,8 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// This can be overridden to support custom handshake logic via the
     /// [`NetworkConfigBuilder`].
     pub handshake: Arc<dyn EthRlpxHandshake>,
+    /// This includes `latest`, `latest_hash`, and `earliest` fields not present in legacy `Status`.
+    pub status_eth69: StatusEth69,
 }
 
 // === impl NetworkConfig ===
@@ -623,7 +624,17 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
 
         // set the status
         let status = Status::spec_builder(&chain_spec, &head).build();
-
+        let status_eth69 = StatusEth69 {
+            version: EthVersion::Eth69,
+            chain: status.chain,
+            blockhash: status.blockhash,
+            genesis: status.genesis,
+            forkid: status.forkid,
+            earliest: 0,
+            latest: head.number,
+            latest_hash: head.hash,
+        };
+        
         // set a fork filter based on the chain spec and head
         let fork_filter = chain_spec.fork_filter(head);
 
@@ -664,6 +675,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             transactions_manager_config,
             nat,
             handshake,
+            status_eth69,
         }
     }
 }

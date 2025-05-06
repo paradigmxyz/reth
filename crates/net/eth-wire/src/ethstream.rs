@@ -94,7 +94,9 @@ where
             %status,
             "sending eth status to peer"
         );
-        EthereumEthHandshake(&mut self.inner).eth_handshake(StatusMessage::Legacy(status), fork_filter).await?;
+        EthereumEthHandshake(&mut self.inner)
+            .eth_handshake(StatusMessage::Legacy(status), fork_filter)
+            .await?;
 
         // now we can create the `EthStream` because the peer has successfully completed
         // the handshake
