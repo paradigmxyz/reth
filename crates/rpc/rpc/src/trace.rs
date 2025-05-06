@@ -5,6 +5,8 @@ use alloy_primitives::{
     map::{HashMap, HashSet},
     Address, BlockHash, Bytes, B256, U256,
 };
+use std::sync::Arc;
+
 use alloy_rpc_types_eth::{
     state::{EvmOverrides, StateOverride},
     transaction::TransactionRequest,
@@ -28,7 +30,7 @@ use reth_rpc_eth_api::{
     FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction, EthConfig};
-use reth_storage_api::{BlockNumReader, BlockReader};
+use reth_storage_api::{BlockIdReader, BlockNumReader, BlockReader};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
 use revm::DatabaseCommit;
@@ -38,12 +40,12 @@ use revm_inspectors::{
     tracing::{parity::populate_state_diff, TracingInspector, TracingInspectorConfig},
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 /// Response type for storage tracing that contains all accessed storage slots
 /// for a transaction.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TransactionStorageAccess {
     /// Hash of the transaction
     pub transaction_hash: B256,
@@ -57,11 +59,10 @@ pub struct TransactionStorageAccess {
 
 /// Response type for storage tracing that contains all accessed storage slots
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BlockStorageAccess {
     /// The block hash
     pub block_hash: BlockHash,
-    /// The block number
-    pub block_number: u64,
     /// All executed transactions in the block in the order they were executed
     pub transactions: Vec<TransactionStorageAccess>,
 }
@@ -618,13 +619,13 @@ where
 
         let Some(transactions) = res else { return Ok(None) };
 
-        let Some(block) = self.eth_api().recovered_block(block_id).await? else { return Ok(None) };
+        let Some(block_hash) =
+            self.provider().block_hash_for_id(block_id).map_err(Eth::Error::from_eth_err)?
+        else {
+            return Ok(None)
+        };
 
-        Ok(Some(BlockStorageAccess {
-            block_hash: block.hash(),
-            block_number: block.number(),
-            transactions,
-        }))
+        Ok(Some(BlockStorageAccess { block_hash, transactions }))
     }
 }
 
