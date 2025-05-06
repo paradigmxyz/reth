@@ -1,30 +1,36 @@
 //! Loads and formats OP block RPC response.
 
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
-use alloy_rpc_types_eth::BlockId;
+use alloy_rpc_types_eth::{BlockId, Header};
 use op_alloy_rpc_types::OpTransactionReceipt;
 use reth_chainspec::ChainSpecProvider;
-use reth_node_api::BlockBody;
+use reth_node_api::NodePrimitives;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
+use reth_primitives_traits::{BlockBody as _, HeaderTy, TxTy};
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
     types::RpcTypes,
     RpcReceipt,
 };
-use reth_storage_api::{BlockReader, HeaderProvider, ProviderTx};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
-use crate::{eth::OpNodeCore, OpEthApi, OpEthApiError, OpReceiptBuilder};
+use crate::{OpEthApi, OpEthApiError, OpReceiptBuilder};
+
+use super::OpNodeCore;
 
 impl<N> EthBlocks for OpEthApi<N>
 where
+    N: OpNodeCore<
+        Primitives: NodePrimitives<Receipt = OpReceipt, SignedTx = OpTransactionSigned>,
+        Provider: ChainSpecProvider<ChainSpec = OpChainSpec>,
+    >,
     Self: LoadBlock<
         Error = OpEthApiError,
+        Primitives = N::Primitives,
+        Provider = N::Provider,
         NetworkTypes: RpcTypes<Receipt = OpTransactionReceipt>,
-        Provider: BlockReader<Receipt = OpReceipt, Transaction = OpTransactionSigned>,
     >,
-    N: OpNodeCore<Provider: ChainSpecProvider<ChainSpec = OpChainSpec> + HeaderProvider>,
 {
     async fn block_receipts(
         &self,
@@ -84,11 +90,10 @@ where
 
 impl<N> LoadBlock for OpEthApi<N>
 where
-    Self: LoadPendingBlock<
-            Pool: TransactionPool<
-                Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
-            >,
-        > + SpawnBlocking,
     N: OpNodeCore,
+    Self: LoadPendingBlock<
+            NetworkTypes: RpcTypes<Header = Header<HeaderTy<Self::Primitives>>>,
+            Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Primitives>>>,
+        > + SpawnBlocking,
 {
 }

@@ -15,7 +15,9 @@ use reth_evm::{
     NextBlockEnvAttributes,
 };
 use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
-use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, NodePrimitives, TxTy};
+use reth_node_api::{
+    AddOnsContext, FullNodeComponents, NodeAddOns, NodePrimitives, PrimitivesTy, TxTy,
+};
 use reth_node_builder::{
     components::{
         BasicPayloadServiceBuilder, ComponentsBuilder, ConsensusBuilder, ExecutorBuilder,
@@ -127,7 +129,11 @@ pub struct EthereumEthApiBuilder;
 impl<N> EthApiBuilder<N> for EthereumEthApiBuilder
 where
     N: FullNodeComponents,
-    EthApiFor<N>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
+    EthApiFor<N>: FullEthApiServer<
+        Primitives = PrimitivesTy<N::Types>,
+        Provider = N::Provider,
+        Pool = N::Pool,
+    >,
 {
     type EthApi = EthApiFor<N>;
 
@@ -155,14 +161,22 @@ where
 #[derive(Debug)]
 pub struct EthereumAddOns<N: FullNodeComponents>
 where
-    EthApiFor<N>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
+    EthApiFor<N>: FullEthApiServer<
+        Primitives = PrimitivesTy<N::Types>,
+        Provider = N::Provider,
+        Pool = N::Pool,
+    >,
 {
     inner: RpcAddOns<N, EthereumEthApiBuilder, EthereumEngineValidatorBuilder>,
 }
 
 impl<N: FullNodeComponents> Default for EthereumAddOns<N>
 where
-    EthApiFor<N>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
+    EthApiFor<N>: FullEthApiServer<
+        Primitives = PrimitivesTy<N::Types>,
+        Provider = N::Provider,
+        Pool = N::Pool,
+    >,
 {
     fn default() -> Self {
         Self { inner: Default::default() }
@@ -239,7 +253,11 @@ where
             Payload = EthEngineTypes,
         >,
     >,
-    EthApiFor<N>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
+    EthApiFor<N>: FullEthApiServer<
+        Primitives = PrimitivesTy<N::Types>,
+        Provider = N::Provider,
+        Pool = N::Pool,
+    >,
 {
     type Validator = EthereumEngineValidator;
 

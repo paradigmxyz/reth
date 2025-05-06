@@ -10,6 +10,7 @@ use alloy_network::Ethereum;
 use alloy_primitives::{Bytes, U256};
 use derive_more::Deref;
 use reth_node_api::{FullNodeComponents, FullNodeTypes};
+use reth_primitives_traits::{BlockTy, ReceiptTy, TxTy};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
     node::RpcNodeCoreExt,
@@ -18,9 +19,7 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{
     EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
 };
-use reth_storage_api::{
-    BlockReader, BlockReaderIdExt, NodePrimitivesProvider, ProviderBlock, ProviderReceipt,
-};
+use reth_storage_api::{BlockReader, BlockReaderIdExt, NodePrimitivesProvider};
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner, TokioTaskExecutor,
@@ -203,13 +202,21 @@ where
 impl<Provider, Pool, Network, EvmConfig> RpcNodeCoreExt
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Provider: BlockReader + NodePrimitivesProvider + Clone + Unpin,
+    Provider: BlockReader<
+            Block = BlockTy<Provider::Primitives>,
+            Receipt = ReceiptTy<Provider::Primitives>,
+            Transaction = TxTy<Provider::Primitives>,
+        > + NodePrimitivesProvider
+        + Clone
+        + Unpin,
     Pool: Send + Sync + Clone + Unpin,
     Network: Send + Sync + Clone,
     EvmConfig: Send + Sync + Clone + Unpin,
 {
     #[inline]
-    fn cache(&self) -> &EthStateCache<ProviderBlock<Provider>, ProviderReceipt<Provider>> {
+    fn cache(
+        &self,
+    ) -> &EthStateCache<BlockTy<Provider::Primitives>, ReceiptTy<Provider::Primitives>> {
         self.inner.cache()
     }
 }

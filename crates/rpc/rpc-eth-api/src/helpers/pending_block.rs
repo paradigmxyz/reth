@@ -2,24 +2,23 @@
 //! RPC methods.
 
 use super::SpawnBlocking;
-use crate::{types::RpcTypes, EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
+use crate::{FromEthApiError, FullEthApiTypes};
 use alloy_consensus::{BlockHeader, Transaction};
 use alloy_eips::eip7840::BlobParams;
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use futures::Future;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm, Evm, SpecFor,
 };
-use reth_node_api::NodePrimitives;
 use reth_primitives_traits::{
-    transaction::error::InvalidTransactionError, Receipt, RecoveredBlock, SealedHeader,
+    transaction::error::InvalidTransactionError, BlockTy, HeaderTy, ReceiptTy, RecoveredBlock,
+    SealedHeader, TxTy,
 };
 use reth_provider::{
-    BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderError, ProviderHeader,
-    ProviderReceipt, ProviderTx, ReceiptProvider, StateProviderFactory,
+    BlockReader, BlockReaderIdExt, ProviderError, ReceiptProvider, StateProviderFactory,
 };
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
@@ -35,33 +34,14 @@ use tracing::debug;
 /// Loads a pending block from database.
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
-pub trait LoadPendingBlock:
-    EthApiTypes<
-        NetworkTypes: RpcTypes<
-            Header = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
-        >,
-        Error: FromEvmError<Self::Evm>,
-    > + RpcNodeCore<
-        Provider: BlockReaderIdExt<Receipt: Receipt>
-                      + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
-                      + StateProviderFactory,
-        Evm: ConfigureEvm<
-            Primitives: NodePrimitives<
-                BlockHeader = ProviderHeader<Self::Provider>,
-                SignedTx = ProviderTx<Self::Provider>,
-                Receipt = ProviderReceipt<Self::Provider>,
-                Block = ProviderBlock<Self::Provider>,
-            >,
-        >,
-    >
-{
+pub trait LoadPendingBlock: FullEthApiTypes {
     /// Returns a handle to the pending block.
     ///
     /// Data access in default (L1) trait method implementations.
     #[expect(clippy::type_complexity)]
     fn pending_block(
         &self,
-    ) -> &Mutex<Option<PendingBlock<ProviderBlock<Self::Provider>, ProviderReceipt<Self::Provider>>>>;
+    ) -> &Mutex<Option<PendingBlock<BlockTy<Self::Primitives>, ReceiptTy<Self::Primitives>>>>;
 
     /// Configures the [`PendingBlockEnv`] for the pending block
     ///
@@ -70,11 +50,7 @@ pub trait LoadPendingBlock:
     fn pending_block_env_and_cfg(
         &self,
     ) -> Result<
-        PendingBlockEnv<
-            ProviderBlock<Self::Provider>,
-            ProviderReceipt<Self::Provider>,
-            SpecFor<Self::Evm>,
-        >,
+        PendingBlockEnv<BlockTy<Self::Primitives>, ReceiptTy<Self::Primitives>, SpecFor<Self::Evm>>,
         Self::Error,
     > {
         if let Some(block) =
@@ -117,7 +93,7 @@ pub trait LoadPendingBlock:
     /// Returns [`ConfigureEvm::NextBlockEnvCtx`] for building a local pending block.
     fn next_env_attributes(
         &self,
-        parent: &SealedHeader<ProviderHeader<Self::Provider>>,
+        parent: &SealedHeader<HeaderTy<Self::Primitives>>,
     ) -> Result<<Self::Evm as ConfigureEvm>::NextBlockEnvCtx, Self::Error>;
 
     /// Returns the locally built pending block
@@ -126,17 +102,14 @@ pub trait LoadPendingBlock:
         &self,
     ) -> impl Future<
         Output = Result<
-            Option<(
-                RecoveredBlock<<Self::Provider as BlockReader>::Block>,
-                Vec<ProviderReceipt<Self::Provider>>,
-            )>,
+            Option<(RecoveredBlock<BlockTy<Self::Primitives>>, Vec<ReceiptTy<Self::Primitives>>)>,
             Self::Error,
         >,
     > + Send
     where
         Self: SpawnBlocking,
         Self::Pool:
-            TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
+            TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Primitives>>>,
     {
         async move {
             let pending = self.pending_block_env_and_cfg()?;
@@ -198,14 +171,14 @@ pub trait LoadPendingBlock:
     #[expect(clippy::type_complexity)]
     fn build_block(
         &self,
-        parent: &SealedHeader<ProviderHeader<Self::Provider>>,
+        parent: &SealedHeader<HeaderTy<Self::Primitives>>,
     ) -> Result<
-        (RecoveredBlock<ProviderBlock<Self::Provider>>, Vec<ProviderReceipt<Self::Provider>>),
+        (RecoveredBlock<BlockTy<Self::Primitives>>, Vec<ReceiptTy<Self::Primitives>>),
         Self::Error,
     >
     where
         Self::Pool:
-            TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
+            TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Primitives>>>,
         EthApiError: From<ProviderError>,
     {
         let state_provider = self

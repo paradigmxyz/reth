@@ -2,8 +2,7 @@
 
 use super::{LoadPendingBlock, LoadReceipt, SpawnBlocking};
 use crate::{
-    node::RpcNodeCoreExt, EthApiTypes, FromEthApiError, FullEthApiTypes, RpcBlock, RpcNodeCore,
-    RpcReceipt,
+    types::RpcTypes, EthApiTypes, FromEthApiError, RpcBlock, RpcHeader, RpcNodeCore, RpcReceipt,
 };
 use alloy_eips::BlockId;
 use alloy_primitives::{Sealable, U256};
@@ -11,10 +10,8 @@ use alloy_rlp::Encodable;
 use alloy_rpc_types_eth::{Block, BlockTransactions, Header, Index};
 use futures::Future;
 use reth_node_api::BlockBody;
-use reth_primitives_traits::{RecoveredBlock, SealedBlock};
-use reth_provider::{
-    BlockIdReader, BlockReader, BlockReaderIdExt, ProviderHeader, ProviderReceipt, ProviderTx,
-};
+use reth_primitives_traits::{BlockTy, HeaderTy, ReceiptTy, RecoveredBlock, SealedBlock, TxTy};
+use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt};
 use reth_rpc_types_compat::block::from_block;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::sync::Arc;
@@ -24,8 +21,8 @@ pub type BlockReceiptsResult<N, E> = Result<Option<Vec<RpcReceipt<N>>>, E>;
 /// Result type of the fetched block and its receipts.
 pub type BlockAndReceiptsResult<Eth> = Result<
     Option<(
-        SealedBlock<<<Eth as RpcNodeCore>::Provider as BlockReader>::Block>,
-        Arc<Vec<ProviderReceipt<<Eth as RpcNodeCore>::Provider>>>,
+        SealedBlock<BlockTy<<Eth as RpcNodeCore>::Primitives>>,
+        Arc<Vec<ReceiptTy<<Eth as RpcNodeCore>::Primitives>>>,
     )>,
     <Eth as EthApiTypes>::Error,
 >;
@@ -34,13 +31,10 @@ pub type BlockAndReceiptsResult<Eth> = Result<
 /// `eth_` namespace.
 pub trait EthBlocks: LoadBlock {
     /// Returns the block header for the given block id.
-    #[expect(clippy::type_complexity)]
     fn rpc_block_header(
         &self,
         block_id: BlockId,
-    ) -> impl Future<Output = Result<Option<Header<ProviderHeader<Self::Provider>>>, Self::Error>> + Send
-    where
-        Self: FullEthApiTypes,
+    ) -> impl Future<Output = Result<Option<RpcHeader<Self::NetworkTypes>>, Self::Error>> + Send
     {
         async move { Ok(self.rpc_block(block_id, false).await?.map(|block| block.header)) }
     }
@@ -54,13 +48,15 @@ pub trait EthBlocks: LoadBlock {
         block_id: BlockId,
         full: bool,
     ) -> impl Future<Output = Result<Option<RpcBlock<Self::NetworkTypes>>, Self::Error>> + Send
-    where
-        Self: FullEthApiTypes,
     {
         async move {
             let Some(block) = self.recovered_block(block_id).await? else { return Ok(None) };
 
-            let block = from_block((*block).clone(), full.into(), self.tx_resp_builder())?;
+            let block = from_block::<_, Self::Primitives>(
+                (*block).clone(),
+                full.into(),
+                self.tx_resp_builder(),
+            )?;
             Ok(Some(block))
         }
     }
@@ -118,7 +114,7 @@ pub trait EthBlocks: LoadBlock {
     where
         Self: LoadReceipt,
         Self::Pool:
-            TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
+            TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Primitives>>>,
     {
         async move {
             if block_id.is_pending() {
@@ -160,7 +156,7 @@ pub trait EthBlocks: LoadBlock {
     fn ommers(
         &self,
         block_id: BlockId,
-    ) -> Result<Option<Vec<ProviderHeader<Self::Provider>>>, Self::Error> {
+    ) -> Result<Option<Vec<HeaderTy<Self::Primitives>>>, Self::Error> {
         self.provider().ommers_by_id(block_id).map_err(Self::Error::from_eth_err)
     }
 
@@ -203,11 +199,10 @@ pub trait EthBlocks: LoadBlock {
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
 pub trait LoadBlock:
-    LoadPendingBlock
-    + SpawnBlocking
-    + RpcNodeCoreExt<
-        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
-    >
+    LoadPendingBlock<
+        NetworkTypes: RpcTypes<Header = Header<HeaderTy<Self::Primitives>>>,
+        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Primitives>>>,
+    > + SpawnBlocking
 {
     /// Returns the block object for the given block id.
     #[expect(clippy::type_complexity)]
@@ -215,10 +210,7 @@ pub trait LoadBlock:
         &self,
         block_id: BlockId,
     ) -> impl Future<
-        Output = Result<
-            Option<Arc<RecoveredBlock<<Self::Provider as BlockReader>::Block>>>,
-            Self::Error,
-        >,
+        Output = Result<Option<Arc<RecoveredBlock<BlockTy<Self::Primitives>>>>, Self::Error>,
     > + Send {
         async move {
             if block_id.is_pending() {
