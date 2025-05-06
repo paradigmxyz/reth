@@ -60,6 +60,16 @@ use reth_trie_db::MerklePatriciaTrie;
 use revm::context::TxEnv;
 use std::sync::Arc;
 
+/// Marker trait for Optimism node types with standard engine, chain spec, and primitives.
+pub trait OpNodeTypes:
+    NodeTypes<Payload = OpEngineTypes, ChainSpec = OpChainSpec, Primitives = OpPrimitives>
+{
+}
+/// Blanket impl for all node types that conform to the Optimism spec.
+impl<N> OpNodeTypes for N where
+    N: NodeTypes<Payload = OpEngineTypes, ChainSpec = OpChainSpec, Primitives = OpPrimitives>
+{
+}
 /// Storage implementation for Optimism.
 pub type OpStorage = EthStorage<OpTransactionSigned>;
 
@@ -102,13 +112,7 @@ impl OpNode {
         OpConsensusBuilder,
     >
     where
-        Node: FullNodeTypes<
-            Types: NodeTypes<
-                Payload = OpEngineTypes,
-                ChainSpec = OpChainSpec,
-                Primitives = OpPrimitives,
-            >,
-        >,
+        Node: FullNodeTypes<Types: OpNodeTypes>,
     {
         let RollupArgs { disable_txpool_gossip, compute_pending_block, discovery_v4, .. } =
             self.args;
@@ -558,8 +562,10 @@ where
                 "Default supervisor url is used, consider changing --rollup.supervisor-http."
             );
         }
-        let supervisor_client =
-            SupervisorClient::new(self.supervisor_http.clone(), self.supervisor_safety_level).await;
+        let supervisor_client = SupervisorClient::builder(self.supervisor_http.clone())
+            .minimum_safety(self.supervisor_safety_level)
+            .build()
+            .await;
 
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
             .no_eip4844()
