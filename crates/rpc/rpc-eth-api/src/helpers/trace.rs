@@ -183,8 +183,7 @@ pub trait Trace:
             ) -> Result<R, Self::Error>
             + Send
             + 'static,
-        Insp:
-            for<'a, 'b> InspectorFor<Self::Evm, StateCacheDbRefMutWrapper<'a, 'b>> + Send + 'static,
+        Insp: for<'a, 'b> InspectorFor<Self::Evm, StateCacheDbRefMutWrapper<'a, 'b>>,
         R: Send + 'static,
     {
         async move {
@@ -290,8 +289,7 @@ pub trait Trace:
             + Send
             + 'static,
         Setup: FnMut() -> Insp + Send + 'static,
-        Insp:
-            for<'a, 'b> InspectorFor<Self::Evm, StateCacheDbRefMutWrapper<'a, 'b>> + Send + 'static,
+        Insp: for<'a, 'b> InspectorFor<Self::Evm, StateCacheDbRefMutWrapper<'a, 'b>>,
         R: Send + 'static,
     {
         async move {
@@ -449,8 +447,7 @@ pub trait Trace:
             + Send
             + 'static,
         Setup: FnMut() -> Insp + Send + 'static,
-        Insp:
-            for<'a, 'b> InspectorFor<Self::Evm, StateCacheDbRefMutWrapper<'a, 'b>> + Send + 'static,
+        Insp: for<'a, 'b> InspectorFor<Self::Evm, StateCacheDbRefMutWrapper<'a, 'b>>,
         R: Send + 'static,
     {
         self.trace_block_until_with_inspector(block_id, block, None, insp_setup, f)
