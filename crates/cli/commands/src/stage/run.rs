@@ -263,7 +263,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 ),
                 StageEnum::Execution => (
                     Box::new(ExecutionStage::new(
-                        components.executor().clone(),
+                        components.evm_config().clone(),
                         Arc::new(components.consensus().clone()),
                         ExecutionStageThresholds {
                             max_blocks: Some(batch_size),
