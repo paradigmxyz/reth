@@ -273,6 +273,12 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
 
     /// Returns a new [`BasicBlockExecutor`].
     #[auto_impl(keep_default_for(&, Arc))]
+    fn executor<DB: Database>(&self, db: DB) -> BasicBlockExecutor<&Self, DB> {
+        BasicBlockExecutor::new(self, db)
+    }
+
+    /// Returns a new [`BasicBlockExecutor`].
+    #[auto_impl(keep_default_for(&, Arc))]
     fn batch_executor<DB: Database>(&self, db: DB) -> BasicBlockExecutor<&Self, DB> {
         BasicBlockExecutor::new(self, db)
     }
