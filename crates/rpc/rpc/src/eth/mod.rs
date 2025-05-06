@@ -1,4 +1,4 @@
-//! Sever implementation of `eth` namespace API.
+//! Server implementation of `eth` namespace API.
 
 pub mod builder;
 pub mod bundle;

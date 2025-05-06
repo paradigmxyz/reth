@@ -9,6 +9,11 @@ pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 2;
 /// Default maximum concurrency for proof tasks
 pub const DEFAULT_MAX_PROOF_TASK_CONCURRENCY: u64 = 256;
 
+/// Default number of reserved CPU cores for non-reth processes.
+///
+/// This will be deducated from the thread count of main reth global threadpool.
+pub const DEFAULT_RESERVED_CPU_CORES: usize = 1;
+
 const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = 256;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
 const DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE: usize = 4;
@@ -53,19 +58,23 @@ pub struct TreeConfig {
     /// a batch of downloaded blocks.
     max_execute_block_batch_size: usize,
     /// Whether to use the legacy state root calculation method instead of the
-    /// new state root task
+    /// new state root task.
     legacy_state_root: bool,
     /// Whether to always compare trie updates from the state root task to the trie updates from
     /// the regular state root calculation.
     always_compare_trie_updates: bool,
-    /// Whether to use cross-block caching and parallel prewarming
-    use_caching_and_prewarming: bool,
+    /// Whether to disable cross-block caching and parallel prewarming.
+    disable_caching_and_prewarming: bool,
+    /// Whether to enable state provider metrics.
+    state_provider_metrics: bool,
     /// Cross-block cache size in bytes.
     cross_block_cache_size: u64,
     /// Whether the host has enough parallelism to run state root task.
     has_enough_parallelism: bool,
     /// Maximum number of concurrent proof tasks
     max_proof_task_concurrency: u64,
+    /// Number of reserved CPU cores for non-reth processes
+    reserved_cpu_cores: usize,
 }
 
 impl Default for TreeConfig {
@@ -78,10 +87,12 @@ impl Default for TreeConfig {
             max_execute_block_batch_size: DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE,
             legacy_state_root: false,
             always_compare_trie_updates: false,
-            use_caching_and_prewarming: false,
+            disable_caching_and_prewarming: false,
+            state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
             has_enough_parallelism: has_enough_parallelism(),
             max_proof_task_concurrency: DEFAULT_MAX_PROOF_TASK_CONCURRENCY,
+            reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
         }
     }
 }
@@ -97,10 +108,12 @@ impl TreeConfig {
         max_execute_block_batch_size: usize,
         legacy_state_root: bool,
         always_compare_trie_updates: bool,
-        use_caching_and_prewarming: bool,
+        disable_caching_and_prewarming: bool,
+        state_provider_metrics: bool,
         cross_block_cache_size: u64,
         has_enough_parallelism: bool,
         max_proof_task_concurrency: u64,
+        reserved_cpu_cores: usize,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -110,10 +123,12 @@ impl TreeConfig {
             max_execute_block_batch_size,
             legacy_state_root,
             always_compare_trie_updates,
-            use_caching_and_prewarming,
+            disable_caching_and_prewarming,
+            state_provider_metrics,
             cross_block_cache_size,
             has_enough_parallelism,
             max_proof_task_concurrency,
+            reserved_cpu_cores,
         }
     }
 
@@ -147,15 +162,25 @@ impl TreeConfig {
         self.max_proof_task_concurrency
     }
 
+    /// Return the number of reserved CPU cores for non-reth processes
+    pub const fn reserved_cpu_cores(&self) -> usize {
+        self.reserved_cpu_cores
+    }
+
     /// Returns whether to use the legacy state root calculation method instead
     /// of the new state root task
     pub const fn legacy_state_root(&self) -> bool {
         self.legacy_state_root
     }
 
+    /// Returns whether or not state provider metrics are enabled.
+    pub const fn state_provider_metrics(&self) -> bool {
+        self.state_provider_metrics
+    }
+
     /// Returns whether or not cross-block caching and parallel prewarming should be used.
-    pub const fn use_caching_and_prewarming(&self) -> bool {
-        self.use_caching_and_prewarming
+    pub const fn disable_caching_and_prewarming(&self) -> bool {
+        self.disable_caching_and_prewarming
     }
 
     /// Returns whether to always compare trie updates from the state root task to the trie updates
@@ -214,9 +239,12 @@ impl TreeConfig {
         self
     }
 
-    /// Setter for whether to use the new state root task calculation method.
-    pub const fn with_caching_and_prewarming(mut self, use_caching_and_prewarming: bool) -> Self {
-        self.use_caching_and_prewarming = use_caching_and_prewarming;
+    /// Setter for whether to disable cross-block caching and parallel prewarming.
+    pub const fn without_caching_and_prewarming(
+        mut self,
+        disable_caching_and_prewarming: bool,
+    ) -> Self {
+        self.disable_caching_and_prewarming = disable_caching_and_prewarming;
         self
     }
 
@@ -242,6 +270,12 @@ impl TreeConfig {
         self
     }
 
+    /// Setter for state provider metrics.
+    pub const fn with_state_provider_metrics(mut self, state_provider_metrics: bool) -> Self {
+        self.state_provider_metrics = state_provider_metrics;
+        self
+    }
+
     /// Setter for maximum number of concurrent proof tasks.
     pub const fn with_max_proof_task_concurrency(
         mut self,
@@ -251,8 +285,14 @@ impl TreeConfig {
         self
     }
 
+    /// Setter for the number of reserved CPU cores for any non-reth processes
+    pub const fn with_reserved_cpu_cores(mut self, reserved_cpu_cores: usize) -> Self {
+        self.reserved_cpu_cores = reserved_cpu_cores;
+        self
+    }
+
     /// Whether or not to use state root task
-    pub fn use_state_root_task(&self) -> bool {
+    pub const fn use_state_root_task(&self) -> bool {
         self.has_enough_parallelism && !self.legacy_state_root
     }
 }

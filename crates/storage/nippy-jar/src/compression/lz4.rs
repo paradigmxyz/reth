@@ -10,12 +10,17 @@ impl Compression for Lz4 {
     fn decompress_to(&self, value: &[u8], dest: &mut Vec<u8>) -> Result<(), NippyJarError> {
         let previous_length = dest.len();
 
-        // SAFETY: We're setting len to the existing capacity.
-        unsafe {
-            dest.set_len(dest.capacity());
-        }
+        // Create a mutable slice from the spare capacity
+        let spare_capacity = dest.spare_capacity_mut();
+        // SAFETY: This is safe because we're using MaybeUninit's as_mut_ptr
+        let output = unsafe {
+            std::slice::from_raw_parts_mut(
+                spare_capacity.as_mut_ptr() as *mut u8,
+                spare_capacity.len(),
+            )
+        };
 
-        match lz4_flex::decompress_into(value, &mut dest[previous_length..]) {
+        match lz4_flex::decompress_into(value, output) {
             Ok(written) => {
                 // SAFETY: `compress_into` can only write if there's enough capacity. Therefore, it
                 // shouldn't write more than our capacity.
@@ -24,13 +29,7 @@ impl Compression for Lz4 {
                 }
                 Ok(())
             }
-            Err(_) => {
-                // SAFETY: we are resetting it to the previous value.
-                unsafe {
-                    dest.set_len(previous_length);
-                }
-                Err(NippyJarError::OutputTooSmall)
-            }
+            Err(_) => Err(NippyJarError::OutputTooSmall),
         }
     }
 
@@ -53,12 +52,17 @@ impl Compression for Lz4 {
     fn compress_to(&self, src: &[u8], dest: &mut Vec<u8>) -> Result<usize, NippyJarError> {
         let previous_length = dest.len();
 
-        // SAFETY: We're setting len to the existing capacity.
-        unsafe {
-            dest.set_len(dest.capacity());
-        }
+        // Create a mutable slice from the spare capacity
+        let spare_capacity = dest.spare_capacity_mut();
+        // SAFETY: This is safe because we're using MaybeUninit's as_mut_ptr
+        let output = unsafe {
+            std::slice::from_raw_parts_mut(
+                spare_capacity.as_mut_ptr() as *mut u8,
+                spare_capacity.len(),
+            )
+        };
 
-        match lz4_flex::compress_into(src, &mut dest[previous_length..]) {
+        match lz4_flex::compress_into(src, output) {
             Ok(written) => {
                 // SAFETY: `compress_into` can only write if there's enough capacity. Therefore, it
                 // shouldn't write more than our capacity.
@@ -67,13 +71,7 @@ impl Compression for Lz4 {
                 }
                 Ok(written)
             }
-            Err(_) => {
-                // SAFETY: we are resetting it to the previous value.
-                unsafe {
-                    dest.set_len(previous_length);
-                }
-                Err(NippyJarError::OutputTooSmall)
-            }
+            Err(_) => Err(NippyJarError::OutputTooSmall),
         }
     }
 

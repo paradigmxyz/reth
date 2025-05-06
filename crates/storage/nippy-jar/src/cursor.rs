@@ -64,7 +64,7 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
     }
 
     /// Resets cursor to the beginning.
-    pub fn reset(&mut self) {
+    pub const fn reset(&mut self) {
         self.row = 0;
     }
 

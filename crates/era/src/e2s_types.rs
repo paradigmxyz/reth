@@ -64,7 +64,7 @@ pub struct Header {
 
 impl Header {
     /// Create a new header with the specified type and length
-    pub fn new(header_type: [u8; 2], length: u32) -> Self {
+    pub const fn new(header_type: [u8; 2], length: u32) -> Self {
         Self { header_type, length, reserved: 0 }
     }
 
@@ -120,7 +120,7 @@ pub struct Entry {
 
 impl Entry {
     /// Create a new entry
-    pub fn new(entry_type: [u8; 2], data: Vec<u8>) -> Self {
+    pub const fn new(entry_type: [u8; 2], data: Vec<u8>) -> Self {
         Self { entry_type, data }
     }
 

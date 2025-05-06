@@ -2,7 +2,7 @@
 
 // TODO(rand): update ::random calls after rand_09 migration
 
-use alloy_consensus::{Block, Header, SignableTransaction, Transaction as _, TxLegacy};
+use alloy_consensus::{Header, SignableTransaction, Transaction as _, TxLegacy};
 use alloy_eips::{
     eip1898::BlockWithParent,
     eip4895::{Withdrawal, Withdrawals},
@@ -11,11 +11,12 @@ use alloy_eips::{
 use alloy_primitives::{Address, BlockNumber, Bytes, TxKind, B256, B64, U256};
 pub use rand::Rng;
 use rand::{distr::uniform::SampleRange, rngs::StdRng, SeedableRng};
-use reth_primitives::{
-    Account, BlockBody, Log, Receipt, SealedBlock, SealedHeader, StorageEntry, Transaction,
-    TransactionSigned,
+use reth_ethereum_primitives::{Block, BlockBody, Receipt, Transaction, TransactionSigned};
+use reth_primitives_traits::{
+    crypto::secp256k1::sign_message, proofs, Account, Block as _, Log, SealedBlock, SealedHeader,
+    StorageEntry,
 };
-use reth_primitives_traits::{crypto::secp256k1::sign_message, proofs, Block as _};
+
 use secp256k1::{Keypair, Secp256k1};
 use std::{
     cmp::{max, min},
@@ -171,10 +172,10 @@ pub fn sign_tx_with_key_pair(key_pair: Keypair, tx: Transaction) -> TransactionS
     let signature =
         sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
 
-    TransactionSigned::new_unhashed(tx, signature)
+    tx.into_signed(signature).into()
 }
 
-/// Generates a a new random [Keypair].
+/// Generates a new random [Keypair].
 pub fn generate_key<R: Rng>(_rng: &mut R) -> Keypair {
     let secp = Secp256k1::new();
     Keypair::new(&secp, &mut rand_08::thread_rng())
@@ -201,12 +202,16 @@ pub fn generate_keys<R: Rng>(_rng: &mut R, count: usize) -> Vec<Keypair> {
 /// transactions in the block.
 ///
 /// The ommer headers are not assumed to be valid.
-pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams) -> SealedBlock {
+pub fn random_block<R: Rng>(
+    rng: &mut R,
+    number: u64,
+    block_params: BlockParams,
+) -> SealedBlock<Block> {
     // Generate transactions
     let tx_count = block_params.tx_count.unwrap_or_else(|| rng.random::<u8>());
     let transactions: Vec<TransactionSigned> =
         (0..tx_count).map(|_| random_signed_tx(rng)).collect();
-    let total_gas = transactions.iter().fold(0, |sum, tx| sum + tx.transaction().gas_limit());
+    let total_gas = transactions.iter().fold(0, |sum, tx| sum + tx.gas_limit());
 
     // Generate ommers
     let ommers_count = block_params.ommers_count.unwrap_or_else(|| rng.random_range(0..2));
@@ -261,7 +266,7 @@ pub fn random_block_range<R: Rng>(
     rng: &mut R,
     block_numbers: RangeInclusive<BlockNumber>,
     block_range_params: BlockRangeParams,
-) -> Vec<SealedBlock> {
+) -> Vec<SealedBlock<Block>> {
     let mut blocks =
         Vec::with_capacity(block_numbers.end().saturating_sub(*block_numbers.start()) as usize);
     for idx in block_numbers {
@@ -276,7 +281,7 @@ pub fn random_block_range<R: Rng>(
             idx,
             BlockParams {
                 parent: Some(
-                    blocks.last().map(|block: &SealedBlock| block.hash()).unwrap_or(parent),
+                    blocks.last().map(|block: &SealedBlock<Block>| block.hash()).unwrap_or(parent),
                 ),
                 tx_count: Some(tx_count),
                 ommers_count: None,
@@ -304,7 +309,7 @@ pub fn random_changeset_range<'a, R: Rng, IBlk, IAcc>(
     key_range: Range<u64>,
 ) -> (Vec<ChangeSet>, BTreeMap<Address, AccountState>)
 where
-    IBlk: IntoIterator<Item = &'a SealedBlock>,
+    IBlk: IntoIterator<Item = &'a SealedBlock<Block>>,
     IAcc: IntoIterator<Item = (Address, (Account, Vec<StorageEntry>))>,
 {
     let mut state: BTreeMap<_, _> = accounts
@@ -483,10 +488,7 @@ mod tests {
     use alloy_consensus::TxEip1559;
     use alloy_eips::eip2930::AccessList;
     use alloy_primitives::{hex, Signature};
-    use reth_primitives_traits::{
-        crypto::secp256k1::{public_key_to_address, sign_message},
-        SignedTransaction,
-    };
+    use reth_primitives_traits::crypto::secp256k1::{public_key_to_address, sign_message};
     use std::str::FromStr;
 
     #[test]
@@ -513,7 +515,7 @@ mod tests {
                 sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), signature_hash)
                     .unwrap();
 
-            let signed = TransactionSigned::new_unhashed(tx.clone(), signature);
+            let signed: TransactionSigned = tx.clone().into_signed(signature).into();
             let recovered = signed.recover_signer().unwrap();
 
             let expected = public_key_to_address(key_pair.public_key());

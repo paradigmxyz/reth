@@ -189,7 +189,7 @@ impl<H: NippyJarHeader> NippyJar<H> {
     }
 
     /// Gets a mutable reference to the compressor.
-    pub fn compressor_mut(&mut self) -> Option<&mut Compressors> {
+    pub const fn compressor_mut(&mut self) -> Option<&mut Compressors> {
         self.compressor.as_mut()
     }
 
@@ -434,7 +434,7 @@ mod tests {
         let mut vec: Vec<u8> = vec![0; value_length];
         let mut rng = seed.map(SmallRng::seed_from_u64).unwrap_or_else(SmallRng::from_os_rng);
 
-        let mut gen = || {
+        let mut entry_gen = || {
             (0..num_rows)
                 .map(|_| {
                     rng.fill_bytes(&mut vec[..]);
@@ -443,7 +443,7 @@ mod tests {
                 .collect()
         };
 
-        (gen(), gen())
+        (entry_gen(), entry_gen())
     }
 
     fn clone_with_result(col: &ColumnValues) -> ColumnResults<Vec<u8>> {

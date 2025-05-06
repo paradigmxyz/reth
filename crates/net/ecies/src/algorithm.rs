@@ -362,7 +362,7 @@ impl ECIES {
     }
 
     /// Return the contained remote peer ID.
-    pub fn remote_id(&self) -> PeerId {
+    pub const fn remote_id(&self) -> PeerId {
         self.remote_id.unwrap()
     }
 
@@ -532,8 +532,6 @@ impl ECIES {
 
     /// Write an `ack` message to the given buffer.
     pub fn write_ack(&mut self, out: &mut BytesMut) {
-        let unencrypted = self.create_ack_unencrypted();
-
         let mut buf = out.split_off(out.len());
 
         // reserve space for length
@@ -541,7 +539,7 @@ impl ECIES {
 
         // encrypt and append
         let mut encrypted = buf.split_off(buf.len());
-        self.encrypt_message(unencrypted.as_ref(), &mut encrypted);
+        self.encrypt_message(self.create_ack_unencrypted().as_ref(), &mut encrypted);
         let len_bytes = u16::try_from(encrypted.len()).unwrap().to_be_bytes();
         buf.unsplit(encrypted);
 
@@ -687,7 +685,7 @@ impl ECIES {
         32
     }
 
-    pub fn body_len(&self) -> usize {
+    pub const fn body_len(&self) -> usize {
         let len = self.body_size.unwrap();
         Self::align_16(len) + 16
     }

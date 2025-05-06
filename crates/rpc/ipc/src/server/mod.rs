@@ -795,9 +795,9 @@ pub fn dummy_name() -> String {
     use rand::Rng;
     let num: u64 = rand::rng().random();
     if cfg!(windows) {
-        format!(r"\\.\pipe\my-pipe-{}", num)
+        format!(r"\\.\pipe\my-pipe-{num}")
     } else {
-        format!(r"/tmp/my-uds-{}", num)
+        format!(r"/tmp/my-uds-{num}")
     }
 }
 
@@ -850,7 +850,7 @@ mod tests {
                     closed = c;
                 }
 
-                // Send back back the error.
+                // Send back the error.
                 Either::Right((Some(Err(e)), _)) => break Err(e.into()),
             }
         }
