@@ -192,14 +192,6 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
     }
 }
 
-impl<N: NetworkPrimitives> NetworkPrimitives for NetworkHandle<N> {
-    type Block = N::Block;
-    type BlockBody = N::BlockBody;
-    type BlockHeader = N::BlockHeader;
-    type BroadcastedTransaction = N::BroadcastedTransaction;
-    type PooledTransaction = N::PooledTransaction;
-    type Receipt = N::Receipt;
-}
 // === API Implementations ===
 
 impl<N: NetworkPrimitives> NetworkPeersEvents for NetworkHandle<N> {
