@@ -32,23 +32,6 @@ pub trait NetworkPrimitives: Send + Sync + Unpin + Clone + Debug + 'static {
     type Receipt: TxReceipt + RlpEncodableReceipt + RlpDecodableReceipt + Unpin + 'static;
 }
 
-impl<BH, BB, B, BT, PT, R> NetworkPrimitives for PhantomData<(BH, BB, B, BT, PT, R)>
-where
-    BH: BlockHeader + 'static,
-    BB: BlockBody + 'static,
-    B: Block<Header = BH, Body = BB> + Encodable + Decodable + 'static,
-    BT: SignedTransaction + 'static,
-    PT: SignedTransaction + TryFrom<BT> + 'static,
-    R: TxReceipt + RlpEncodableReceipt + RlpDecodableReceipt + Unpin + 'static,
-{
-    type BlockHeader = BH;
-    type BlockBody = BB;
-    type Block = B;
-    type BroadcastedTransaction = BT;
-    type PooledTransaction = PT;
-    type Receipt = R;
-}
-
 /// This is a helper trait for use in bounds, where some of the [`NetworkPrimitives`] associated
 /// types must be the same as the [`NodePrimitives`] associated types.
 pub trait NetPrimitivesFor<N: NodePrimitives>:
