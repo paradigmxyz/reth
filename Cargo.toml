@@ -699,34 +699,34 @@ visibility = "0.1.1"
 walkdir = "2.3.3"
 vergen-git2 = "1.0.5"
 
-# [patch.crates-io]
-# alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-contract = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-json-rpc = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-network-primitives = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-pubsub = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-client = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-types-admin = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-types-debug = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-types-eth = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-types-mev = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-types-txpool = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-serde = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-signer-local = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-transport = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
+ [patch.crates-io]
+ alloy-consensus = { git = "https://github.com/alloy-rs/alloy", branch = "prestwich/filter-improvements" }
+ alloy-contract = { git = "https://github.com/alloy-rs/alloy",  branch = "prestwich/filter-improvements" }
+ alloy-eips = { git = "https://github.com/alloy-rs/alloy",  branch = "prestwich/filter-improvements" }
+ alloy-genesis = { git = "https://github.com/alloy-rs/alloy",  branch = "prestwich/filter-improvements" }
+ alloy-json-rpc = { git = "https://github.com/alloy-rs/alloy",  branch = "prestwich/filter-improvements" }
+ alloy-network = { git = "https://github.com/alloy-rs/alloy",  branch = "prestwich/filter-improvements" }
+ alloy-network-primitives = { git = "https://github.com/alloy-rs/alloy",  branch = "prestwich/filter-improvements" }
+ alloy-provider = { git = "https://github.com/alloy-rs/alloy",  branch = "prestwich/filter-improvements" }
+ alloy-pubsub = { git = "https://github.com/alloy-rs/alloy",  branch = "prestwich/filter-improvements" }
+ alloy-rpc-client = { git = "https://github.com/alloy-rs/alloy",  branch = "prestwich/filter-improvements" }
+ alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy",  branch = "prestwich/filter-improvements" }
+ alloy-rpc-types-admin = { git = "https://github.com/alloy-rs/alloy",  branch = "prestwich/filter-improvements" }
+ alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy",  branch = "prestwich/filter-improvements" }
+ alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy",  branch = "prestwich/filter-improvements" }
+ alloy-rpc-types-debug = { git = "https://github.com/alloy-rs/alloy",  branch = "prestwich/filter-improvements" }
+ alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy",  branch = "prestwich/filter-improvements" }
+ alloy-rpc-types-eth = { git = "https://github.com/alloy-rs/alloy",  branch = "prestwich/filter-improvements" }
+ alloy-rpc-types-mev = { git = "https://github.com/alloy-rs/alloy",  branch = "prestwich/filter-improvements" }
+ alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy",  branch = "prestwich/filter-improvements" }
+ alloy-rpc-types-txpool = { git = "https://github.com/alloy-rs/alloy",  branch = "prestwich/filter-improvements" }
+ alloy-serde = { git = "https://github.com/alloy-rs/alloy",  branch = "prestwich/filter-improvements" }
+ alloy-signer = { git = "https://github.com/alloy-rs/alloy",  branch = "prestwich/filter-improvements" }
+ alloy-signer-local = { git = "https://github.com/alloy-rs/alloy",  branch = "prestwich/filter-improvements" }
+ alloy-transport = { git = "https://github.com/alloy-rs/alloy",  branch = "prestwich/filter-improvements" }
+ alloy-transport-http = { git = "https://github.com/alloy-rs/alloy",  branch = "prestwich/filter-improvements" }
+ alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy",  branch = "prestwich/filter-improvements" }
+ alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy",  branch = "prestwich/filter-improvements" }
 #
 # op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", rev = "ad607c1" }
 # op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", rev = "ad607c1" }
