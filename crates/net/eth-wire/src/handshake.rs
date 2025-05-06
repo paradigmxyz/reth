@@ -91,7 +91,7 @@ where
         let unauth = self.0;
         // Send our status message
         let encoded_status = alloy_rlp::encode(ProtocolMessage::<EthNetworkPrimitives>::from(
-            EthMessage::Status(status_msg.clone()),
+            EthMessage::Status(status_msg),
         ))
         .into();
 

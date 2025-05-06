@@ -97,7 +97,7 @@ impl SequencerClient {
             Self::with_http_client(url, client)
         } else {
             let client = ClientBuilder::default().connect_with(endpoint).await?;
-            let inner = SequencerClientInner::new(sequencer_endpoint, client);
+            let inner = SequencerClientInner::new(sequencer_endpoint.to_owned(), client);
             Ok(Self { inner: Arc::new(inner) })
         }
     }
