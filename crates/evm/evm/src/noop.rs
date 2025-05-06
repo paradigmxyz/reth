@@ -1,61 +1,72 @@
-//! A no operation block executor implementation.
+//! Helpers for testing.
 
-use crate::{
-    execute::{BlockExecutorProvider, Executor},
-    Database, OnStateHook,
-};
-use reth_execution_errors::BlockExecutionError;
-use reth_execution_types::BlockExecutionResult;
-use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
+use crate::{ConfigureEvm, EvmEnvFor};
+use reth_primitives_traits::{BlockTy, HeaderTy, SealedBlock, SealedHeader};
 
-const UNAVAILABLE_FOR_NOOP: &str = "execution unavailable for noop";
+/// A no-op EVM config that panics on any call. Used as a typesystem hack to satisfy
+/// [`ConfigureEvm`] bounds.
+#[derive(Debug, Clone)]
+pub struct NoopEvmConfig<Inner>(core::marker::PhantomData<Inner>);
 
-/// A [`BlockExecutorProvider`] implementation that does nothing.
-#[derive(Debug, Default, Clone)]
-#[non_exhaustive]
-pub struct NoopBlockExecutorProvider<P>(core::marker::PhantomData<P>);
-
-impl<P: NodePrimitives> BlockExecutorProvider for NoopBlockExecutorProvider<P> {
-    type Primitives = P;
-
-    type Executor<DB: Database> = Self;
-
-    fn executor<DB>(&self, _: DB) -> Self::Executor<DB>
-    where
-        DB: Database,
-    {
-        Self::default()
+impl<Inner> Default for NoopEvmConfig<Inner> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
-impl<DB: Database, P: NodePrimitives> Executor<DB> for NoopBlockExecutorProvider<P> {
-    type Primitives = P;
-    type Error = BlockExecutionError;
-
-    fn execute_one(
-        &mut self,
-        _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
-    {
-        Err(BlockExecutionError::msg(UNAVAILABLE_FOR_NOOP))
+impl<Inner> NoopEvmConfig<Inner> {
+    /// Create a new instance of the no-op EVM config.
+    pub const fn new() -> Self {
+        Self(core::marker::PhantomData)
     }
 
-    fn execute_one_with_state_hook<F>(
-        &mut self,
-        _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-        _state_hook: F,
-    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
-    where
-        F: OnStateHook + 'static,
-    {
-        Err(BlockExecutionError::msg(UNAVAILABLE_FOR_NOOP))
+    fn inner(&self) -> &Inner {
+        unimplemented!("NoopEvmConfig should never be called")
+    }
+}
+
+impl<Inner> ConfigureEvm for NoopEvmConfig<Inner>
+where
+    Inner: ConfigureEvm,
+{
+    type Primitives = Inner::Primitives;
+    type Error = Inner::Error;
+    type NextBlockEnvCtx = Inner::NextBlockEnvCtx;
+    type BlockExecutorFactory = Inner::BlockExecutorFactory;
+    type BlockAssembler = Inner::BlockAssembler;
+
+    fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
+        self.inner().block_executor_factory()
     }
 
-    fn into_state(self) -> revm::database::State<DB> {
-        unreachable!()
+    fn block_assembler(&self) -> &Self::BlockAssembler {
+        self.inner().block_assembler()
     }
 
-    fn size_hint(&self) -> usize {
-        0
+    fn evm_env(&self, header: &HeaderTy<Self::Primitives>) -> EvmEnvFor<Self> {
+        self.inner().evm_env(header)
+    }
+
+    fn next_evm_env(
+        &self,
+        parent: &HeaderTy<Self::Primitives>,
+        attributes: &Self::NextBlockEnvCtx,
+    ) -> Result<EvmEnvFor<Self>, Self::Error> {
+        self.inner().next_evm_env(parent, attributes)
+    }
+
+    fn context_for_block<'a>(
+        &self,
+        block: &'a SealedBlock<BlockTy<Self::Primitives>>,
+    ) -> crate::ExecutionCtxFor<'a, Self> {
+        self.inner().context_for_block(block)
+    }
+
+    fn context_for_next_block(
+        &self,
+        parent: &SealedHeader<HeaderTy<Self::Primitives>>,
+        attributes: Self::NextBlockEnvCtx,
+    ) -> crate::ExecutionCtxFor<'_, Self> {
+        self.inner().context_for_next_block(parent, attributes)
     }
 }

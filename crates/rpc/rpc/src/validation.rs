@@ -18,7 +18,7 @@ use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
-use reth_evm::execute::{BlockExecutorProvider, Executor};
+use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::{metrics, metrics::Gauge, Metrics};
 use reth_node_api::NewPayloadError;
@@ -39,20 +39,20 @@ use tracing::warn;
 
 /// The type that implements the `validation` rpc namespace trait
 #[derive(Clone, Debug, derive_more::Deref)]
-pub struct ValidationApi<Provider, E: BlockExecutorProvider> {
+pub struct ValidationApi<Provider, E: ConfigureEvm> {
     #[deref]
     inner: Arc<ValidationApiInner<Provider, E>>,
 }
 
 impl<Provider, E> ValidationApi<Provider, E>
 where
-    E: BlockExecutorProvider,
+    E: ConfigureEvm,
 {
     /// Create a new instance of the [`ValidationApi`]
     pub fn new(
         provider: Provider,
         consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
-        executor_provider: E,
+        evm_config: E,
         config: ValidationApiConfig,
         task_spawner: Box<dyn TaskSpawner>,
         payload_validator: Arc<
@@ -68,7 +68,7 @@ where
             provider,
             consensus,
             payload_validator,
-            executor_provider,
+            evm_config,
             disallow,
             validation_window,
             cached_state: Default::default(),
@@ -107,7 +107,7 @@ where
         + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory
         + 'static,
-    E: BlockExecutorProvider,
+    E: ConfigureEvm + 'static,
 {
     /// Validates the given block and a [`BidTrace`] against it.
     pub async fn validate_message_against_block(
@@ -168,7 +168,7 @@ where
         let mut request_cache = self.cached_reads(parent_header_hash).await;
 
         let cached_db = request_cache.as_db_mut(StateProviderDatabase::new(&state_provider));
-        let executor = self.executor_provider.executor(cached_db);
+        let executor = self.evm_config.batch_executor(cached_db);
 
         let mut accessed_blacklisted = None;
         let output = executor.execute_with_state_closure(&block, |state| {
@@ -414,7 +414,7 @@ where
         + StateProviderFactory
         + Clone
         + 'static,
-    E: BlockExecutorProvider,
+    E: ConfigureEvm + 'static,
 {
     async fn validate_builder_submission_v1(
         &self,
@@ -469,7 +469,7 @@ where
     }
 }
 
-pub struct ValidationApiInner<Provider, E: BlockExecutorProvider> {
+pub struct ValidationApiInner<Provider, E: ConfigureEvm> {
     /// The provider that can interact with the chain.
     provider: Provider,
     /// Consensus implementation.
@@ -482,7 +482,7 @@ pub struct ValidationApiInner<Provider, E: BlockExecutorProvider> {
         >,
     >,
     /// Block executor factory.
-    executor_provider: E,
+    evm_config: E,
     /// Set of disallowed addresses
     disallow: HashSet<Address>,
     /// The maximum block distance - parent to latest - allowed for validation
@@ -498,7 +498,7 @@ pub struct ValidationApiInner<Provider, E: BlockExecutorProvider> {
     metrics: ValidationMetrics,
 }
 
-impl<Provider, E: BlockExecutorProvider> fmt::Debug for ValidationApiInner<Provider, E> {
+impl<Provider, E: ConfigureEvm> fmt::Debug for ValidationApiInner<Provider, E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ValidationApiInner").finish_non_exhaustive()
     }
