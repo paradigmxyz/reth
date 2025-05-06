@@ -118,7 +118,7 @@ impl WrappedPrecompile {
         Self { precompile, cache }
     }
 
-    /// Given a [`PrecompileProvider`] and cache for a specific precompiles, create a
+    /// Given a [`DynPrecompile`] and cache for a specific precompiles, create a
     /// wrapper that can be used inside Evm.
     fn wrap(precompile: DynPrecompile, cache: Arc<RwLock<PrecompileCache>>) -> DynPrecompile {
         let wrapped = Self::new(precompile, cache);
