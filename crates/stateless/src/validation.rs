@@ -12,7 +12,7 @@ use reth_chainspec::ChainSpec;
 use reth_consensus::{Consensus, HeaderValidator};
 use reth_errors::ConsensusError;
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
-use reth_evm::execute::{BlockExecutorProvider, Executor};
+use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_primitives::{RecoveredBlock, TransactionSigned};
 use reth_revm::state::Bytecode;
@@ -163,7 +163,7 @@ pub fn stateless_validation(
 
     // Execute the block
     let basic_block_executor = EthExecutorProvider::ethereum(chain_spec.clone());
-    let executor = basic_block_executor.executor(db);
+    let executor = basic_block_executor.batch_executor(db);
     let output = executor
         .execute(&current_block)
         .map_err(|e| StatelessValidationError::StatelessExecutionFailed(e.to_string()))?;
