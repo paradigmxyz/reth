@@ -11,7 +11,7 @@ use reth_consensus::{Consensus, HeaderValidator};
 use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert_genesis_state};
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
 use reth_ethereum_primitives::Block;
-use reth_evm::execute::{BlockExecutorProvider, Executor};
+use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_primitives_traits::{RecoveredBlock, SealedBlock};
 use reth_provider::{
@@ -126,10 +126,10 @@ impl BlockchainTestCase {
             // Non‑processing error – forward as‑is.
             //
             // This should only happen if we get an unexpected error from processing the block.
-            // Since it is unexpected, we treat it as a test failure. 
+            // Since it is unexpected, we treat it as a test failure.
             //
             // One reason for this happening is when one forgets to wrap the error from `run_case`
-            // so that it produces a `Error::BlockProcessingFailed`  
+            // so that it produces a `Error::BlockProcessingFailed`
             Err(other) => Err(other),
         }
     }
@@ -228,7 +228,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
 
         // Execute the block
         let state_db = StateProviderDatabase(provider.latest());
-        let executor = executor_provider.executor(state_db);
+        let executor = executor_provider.batch_executor(state_db);
         let output =
             executor.execute(block).map_err(|_| Error::BlockProcessingFailed { block_number })?;
 
