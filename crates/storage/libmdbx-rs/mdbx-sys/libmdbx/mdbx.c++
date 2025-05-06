@@ -2,7 +2,7 @@
 /// \author Леонид Юрьев aka Leonid Yuriev <leo@yuriev.ru> \date 2015-2025
 /* clang-format off */
 
-#define MDBX_BUILD_SOURCERY 678b8abfbcd2c27ef2c5da9ff730ef8ab7996c28097731154f8bdb538b2a5f96_v0_13_5_0_ge3324cef
+#define MDBX_BUILD_SOURCERY 4df7f8f177aee7f9f94c4e72f0d732384e9a870d7d79b8142abdeb4633e710cd_v0_13_6_0_ga971c76a
 
 #define LIBMDBX_INTERNALS
 #define MDBX_DEPRECATED
@@ -1478,6 +1478,7 @@ MDBX_INTERNAL int osal_resume_threads_after_remap(mdbx_handle_array_t *array);
 MDBX_INTERNAL int osal_msync(const osal_mmap_t *map, size_t offset, size_t length, enum osal_syncmode_bits mode_bits);
 MDBX_INTERNAL int osal_check_fs_rdonly(mdbx_filehandle_t handle, const pathchar_t *pathname, int err);
 MDBX_INTERNAL int osal_check_fs_incore(mdbx_filehandle_t handle);
+MDBX_INTERNAL int osal_check_fs_local(mdbx_filehandle_t handle, int flags);
 
 MDBX_MAYBE_UNUSED static inline uint32_t osal_getpid(void) {
   STATIC_ASSERT(sizeof(mdbx_pid_t) <= sizeof(uint32_t));
@@ -3577,7 +3578,7 @@ __cold std::string error::message() const {
 __cold void error::throw_exception() const {
   switch (code()) {
   case MDBX_EINVAL:
-    throw std::invalid_argument("mdbx");
+    throw std::invalid_argument("MDBX_EINVAL");
   case MDBX_ENOMEM:
     throw std::bad_alloc();
   case MDBX_SUCCESS:

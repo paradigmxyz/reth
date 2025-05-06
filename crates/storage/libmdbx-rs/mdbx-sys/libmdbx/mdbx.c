@@ -4,7 +4,7 @@
 
 #define xMDBX_ALLOY 1  /* alloyed build */
 
-#define MDBX_BUILD_SOURCERY 678b8abfbcd2c27ef2c5da9ff730ef8ab7996c28097731154f8bdb538b2a5f96_v0_13_5_0_ge3324cef
+#define MDBX_BUILD_SOURCERY 4df7f8f177aee7f9f94c4e72f0d732384e9a870d7d79b8142abdeb4633e710cd_v0_13_6_0_ga971c76a
 
 #define LIBMDBX_INTERNALS
 #define MDBX_DEPRECATED
@@ -1480,6 +1480,7 @@ MDBX_INTERNAL int osal_resume_threads_after_remap(mdbx_handle_array_t *array);
 MDBX_INTERNAL int osal_msync(const osal_mmap_t *map, size_t offset, size_t length, enum osal_syncmode_bits mode_bits);
 MDBX_INTERNAL int osal_check_fs_rdonly(mdbx_filehandle_t handle, const pathchar_t *pathname, int err);
 MDBX_INTERNAL int osal_check_fs_incore(mdbx_filehandle_t handle);
+MDBX_INTERNAL int osal_check_fs_local(mdbx_filehandle_t handle, int flags);
 
 MDBX_MAYBE_UNUSED static inline uint32_t osal_getpid(void) {
   STATIC_ASSERT(sizeof(mdbx_pid_t) <= sizeof(uint32_t));
@@ -4698,6 +4699,7 @@ static inline size_t dbi_bitmap_ctz(const MDBX_txn *txn, intptr_t bmi) {
       I = (I - 1) | (bitmap_chunk - 1);                                                                                \
       bitmap_item = TXN->dbi_sparse[(1 + I) / bitmap_chunk];                                                           \
       if (!bitmap_item)                                                                                                \
+        /* coverity[const_overflow] */                                                                                 \
         I += bitmap_chunk;                                                                                             \
       continue;                                                                                                        \
     } else if ((bitmap_item & 1) == 0) {                                                                               \
@@ -7882,11 +7884,17 @@ retry_snap_meta:
   uint8_t *const data_buffer = buffer + ceil_powerof2(meta_bytes, globals.sys_pagesize);
 #if MDBX_USE_COPYFILERANGE
   static bool copyfilerange_unavailable;
+#if (defined(__linux__) || defined(__gnu_linux__))
+  if (globals.linux_kernel_version >= 0x05030000 && globals.linux_kernel_version < 0x05130000)
+    copyfilerange_unavailable = true;
+#endif /* linux */
   bool not_the_same_filesystem = false;
-  struct statfs statfs_info;
-  if (fstatfs(fd, &statfs_info) || statfs_info.f_type == /* ECRYPTFS_SUPER_MAGIC */ 0xf15f)
-    /* avoid use copyfilerange_unavailable() to ecryptfs due bugs */
-    not_the_same_filesystem = true;
+  if (!copyfilerange_unavailable) {
+    struct statfs statfs_info;
+    if (fstatfs(fd, &statfs_info) || statfs_info.f_type == /* ECRYPTFS_SUPER_MAGIC */ 0xf15f)
+      /* avoid use copyfilerange_unavailable() to ecryptfs due bugs */
+      not_the_same_filesystem = true;
+  }
 #endif /* MDBX_USE_COPYFILERANGE */
 
   for (size_t offset = meta_bytes; rc == MDBX_SUCCESS && offset < used_size;) {
@@ -8071,14 +8079,24 @@ __cold static int copy2pathname(MDBX_txn *txn, const pathchar_t *dest_path, MDBX
     lock_op.l_whence = SEEK_SET;
     lock_op.l_start = 0;
     lock_op.l_len = OFF_T_MAX;
-    if (MDBX_FCNTL(newfd, MDBX_F_SETLK, &lock_op)
-#if (defined(__linux__) || defined(__gnu_linux__)) && defined(LOCK_EX) &&                                              \
-    (!defined(__ANDROID_API__) || __ANDROID_API__ >= 24)
-        || flock(newfd, LOCK_EX | LOCK_NB)
-#endif /* Linux */
-    )
+    if (MDBX_FCNTL(newfd, MDBX_F_SETLK, &lock_op))
       rc = errno;
   }
+
+#if defined(LOCK_EX) && (!defined(__ANDROID_API__) || __ANDROID_API__ >= 24)
+  if (rc == MDBX_SUCCESS && flock(newfd, LOCK_EX | LOCK_NB)) {
+    const int err_flock = errno, err_fs = osal_check_fs_local(newfd, 0);
+    if (err_flock != EAGAIN || err_fs != MDBX_EREMOTE) {
+      ERROR("%s flock(%" MDBX_PRIsPATH ") error %d, remote-fs check status %d", "unexpected", dest_path, err_flock,
+            err_fs);
+      rc = err_flock;
+    } else {
+      WARNING("%s flock(%" MDBX_PRIsPATH ") error %d, remote-fs check status %d", "ignore", dest_path, err_flock,
+              err_fs);
+    }
+  }
+#endif /* LOCK_EX && ANDROID_API >= 24 */
+
 #endif /* Windows / POSIX */
 
   if (rc == MDBX_SUCCESS)
@@ -8236,7 +8254,7 @@ int mdbx_cursor_bind(MDBX_txn *txn, MDBX_cursor *mc, MDBX_dbi dbi) {
       return MDBX_SUCCESS;
     rc = mdbx_cursor_unbind(mc);
     if (unlikely(rc != MDBX_SUCCESS))
-      return rc;
+      return (rc == MDBX_BAD_TXN) ? MDBX_EINVAL : rc;
   }
   cASSERT(mc, mc->next == mc);
 
@@ -8261,8 +8279,16 @@ int mdbx_cursor_unbind(MDBX_cursor *mc) {
     return LOG_IFERR(MDBX_EINVAL);
 
   int rc = check_txn(mc->txn, MDBX_TXN_FINISHED | MDBX_TXN_HAS_CHILD);
-  if (unlikely(rc != MDBX_SUCCESS))
+  if (unlikely(rc != MDBX_SUCCESS)) {
+    for (const MDBX_txn *txn = mc->txn; rc == MDBX_BAD_TXN && check_txn(txn, MDBX_TXN_FINISHED) == MDBX_SUCCESS;
+         txn = txn->nested)
+      if (dbi_state(txn, cursor_dbi(mc)) == 0)
+        /* специальный случай: курсор прикреплён к родительской транзакции, но соответствующий dbi-дескриптор ещё
+         * не использовался во вложенной транзакции, т.е. курсор ещё не импортирован в дочернюю транзакцию и не имеет
+         * связанного сохранённого состояния (поэтому mc→backup равен nullptr). */
+        rc = MDBX_EINVAL;
     return LOG_IFERR(rc);
+  }
 
   if (unlikely(!mc->txn || mc->txn->signature != txn_signature)) {
     ERROR("Wrong cursor's transaction %p 0x%x", __Wpedantic_format_voidptr(mc->txn), mc->txn ? mc->txn->signature : 0);
@@ -8417,9 +8443,8 @@ int mdbx_txn_release_all_cursors_ex(const MDBX_txn *txn, bool unbind, size_t *co
             MDBX_cursor *bk = mc->backup;
             mc->next = bk->next;
             mc->backup = bk->backup;
-            mc->backup = nullptr;
+            bk->backup = nullptr;
             bk->signature = 0;
-            bk = bk->next;
             osal_free(bk);
           } else {
             mc->signature = cur_signature_ready4dispose;
@@ -10803,7 +10828,7 @@ int mdbx_txn_lock(MDBX_env *env, bool dont_wait) {
 
   if (unlikely(env->flags & MDBX_RDONLY))
     return LOG_IFERR(MDBX_EACCESS);
-  if (unlikely(env->basal_txn->owner || (env->basal_txn->flags & MDBX_TXN_FINISHED) == 0))
+  if (dont_wait && unlikely(env->basal_txn->owner || (env->basal_txn->flags & MDBX_TXN_FINISHED) == 0))
     return LOG_IFERR(MDBX_BUSY);
 
   return LOG_IFERR(lck_txn_lock(env, dont_wait));
@@ -13238,15 +13263,16 @@ int mdbx_txn_commit_ex(MDBX_txn *txn, MDBX_commit_latency *latency) {
     /* Update parent's DBs array */
     eASSERT(env, parent->n_dbi == txn->n_dbi);
     TXN_FOREACH_DBI_ALL(txn, dbi) {
-      if (txn->dbi_state[dbi] & (DBI_CREAT | DBI_FRESH | DBI_DIRTY)) {
+      if (txn->dbi_state[dbi] != (parent->dbi_state[dbi] & ~(DBI_FRESH | DBI_CREAT | DBI_DIRTY))) {
+        eASSERT(env, (txn->dbi_state[dbi] & (DBI_CREAT | DBI_FRESH | DBI_DIRTY)) != 0 ||
+                         (txn->dbi_state[dbi] | DBI_STALE) ==
+                             (parent->dbi_state[dbi] & ~(DBI_FRESH | DBI_CREAT | DBI_DIRTY)));
         parent->dbs[dbi] = txn->dbs[dbi];
         /* preserve parent's status */
         const uint8_t state = txn->dbi_state[dbi] | (parent->dbi_state[dbi] & (DBI_CREAT | DBI_FRESH | DBI_DIRTY));
         DEBUG("dbi %zu dbi-state %s 0x%02x -> 0x%02x", dbi, (parent->dbi_state[dbi] != state) ? "update" : "still",
               parent->dbi_state[dbi], state);
         parent->dbi_state[dbi] = state;
-      } else {
-        eASSERT(env, txn->dbi_state[dbi] == (parent->dbi_state[dbi] & ~(DBI_FRESH | DBI_CREAT | DBI_DIRTY)));
       }
     }
 
@@ -20718,7 +20744,8 @@ int dxb_sync_locked(MDBX_env *env, unsigned flags, meta_t *const pending, troika
     if (!head.is_steady && meta_is_steady(pending))
       target = (meta_t *)head.ptr_c;
     else {
-      WARNING("%s", "skip update meta");
+      NOTICE("skip update meta%" PRIaPGNO " for txn#%" PRIaTXN ", since it is already steady",
+             data_page(head.ptr_c)->pgno, head.txnid);
       return MDBX_SUCCESS;
     }
   } else {
@@ -29322,7 +29349,7 @@ MDBX_INTERNAL int osal_check_fs_incore(mdbx_filehandle_t handle) {
   return MDBX_RESULT_FALSE;
 }
 
-static int osal_check_fs_local(mdbx_filehandle_t handle, int flags) {
+MDBX_INTERNAL int osal_check_fs_local(mdbx_filehandle_t handle, int flags) {
 #if defined(_WIN32) || defined(_WIN64)
   if (globals.running_under_Wine && !(flags & MDBX_EXCLUSIVE))
     return ERROR_NOT_CAPABLE /* workaround for Wine */;
@@ -30433,7 +30460,7 @@ __cold static LSTATUS mdbx_RegGetValue(HKEY hKey, LPCSTR lpSubKey, LPCSTR lpValu
 }
 #endif
 
-__cold MDBX_MAYBE_UNUSED static bool bootid_parse_uuid(bin128_t *s, const void *p, const size_t n) {
+MDBX_MAYBE_UNUSED __cold static bool bootid_parse_uuid(bin128_t *s, const void *p, const size_t n) {
   if (n > 31) {
     unsigned bits = 0;
     for (unsigned i = 0; i < n; ++i) /* try parse an UUID in text form */ {
@@ -35788,8 +35815,7 @@ __hot txnid_t txn_snapshot_oldest(const MDBX_txn *const txn) {
 }
 
 void txn_done_cursors(MDBX_txn *txn, const bool merge) {
-  tASSERT(txn, txn->cursors[FREE_DBI] == nullptr);
-  TXN_FOREACH_DBI_FROM(txn, i, /* skip FREE_DBI */ 1) {
+  TXN_FOREACH_DBI_ALL(txn, i) {
     MDBX_cursor *mc = txn->cursors[i];
     if (mc) {
       txn->cursors[i] = nullptr;
@@ -37352,11 +37378,11 @@ __dll_export
     const struct MDBX_version_info mdbx_version = {
         0,
         13,
-        5,
+        6,
         0,
         "", /* pre-release suffix of SemVer
-                                        0.13.5 */
-        {"2025-03-21T21:14:00+03:00", "eaa12f8b818d12a92de2b9a3bde3b5ea223953a0", "e3324cef918407fe48c90e513577ec99a0d15b62", "v0.13.5-0-ge3324cef"},
+                                        0.13.6 */
+        {"2025-04-22T11:53:23+03:00", "4ca2c913e8614a1ed09512353faa227f25245e9f", "a971c76afffbb2ce0aa6151f4683b94fe10dc843", "v0.13.6-0-ga971c76a"},
         sourcery};
 
 __dll_export
