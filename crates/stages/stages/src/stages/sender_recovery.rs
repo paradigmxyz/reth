@@ -599,7 +599,7 @@ mod tests {
         ///
         /// 1. If there are any entries in the [`tables::TransactionSenders`] table above a given
         ///    block number.
-        /// 2. If the is no requested block entry in the bodies table, but
+        /// 2. If there is no requested block entry in the bodies table, but
         ///    [`tables::TransactionSenders`] is not empty.
         fn ensure_no_senders_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
             let body_result = self
