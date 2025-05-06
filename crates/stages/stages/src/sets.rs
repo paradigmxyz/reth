@@ -38,8 +38,8 @@
 //! ```
 use crate::{
     stages::{
-        AccountHashingStage, BodyStage, EraStage, ExecutionStage, FinishStage, HeaderStage,
-        ImportSource, IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage,
+        AccountHashingStage, BodyStage, EraImportSource, EraStage, ExecutionStage, FinishStage,
+        HeaderStage, IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage,
         PruneSenderRecoveryStage, PruneStage, SenderRecoveryStage, StorageHashingStage,
         TransactionLookupStage,
     },
@@ -116,7 +116,7 @@ where
         evm_config: E,
         stages_config: StageConfig,
         prune_modes: PruneModes,
-        import_source: Option<ImportSource>,
+        import_source: Option<EraImportSource>,
     ) -> Self {
         Self {
             online: OnlineStages::new(
@@ -202,7 +202,7 @@ where
     stages_config: StageConfig,
 
     /// ERA Import source
-    import_source: Option<ImportSource>,
+    import_source: Option<EraImportSource>,
 }
 
 impl<Provider, H, B> OnlineStages<Provider, H, B>
@@ -217,7 +217,7 @@ where
         header_downloader: H,
         body_downloader: B,
         stages_config: StageConfig,
-        import_source: Option<ImportSource>,
+        import_source: Option<EraImportSource>,
     ) -> Self {
         Self { provider, tip, header_downloader, body_downloader, stages_config, import_source }
     }

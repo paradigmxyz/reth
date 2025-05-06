@@ -19,7 +19,7 @@ use reth_node_api::HeaderTy;
 use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
 use reth_stages::{
     prelude::DefaultStages,
-    stages::{ExecutionStage, ImportSource},
+    stages::{EraImportSource, ExecutionStage},
     Pipeline, StageSet,
 };
 use reth_static_file::StaticFileProducer;
@@ -88,7 +88,7 @@ pub fn build_pipeline<N, H, B, Evm>(
     static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     evm_config: Evm,
     exex_manager_handle: ExExManagerHandle<N::Primitives>,
-    import_source: Option<ImportSource>,
+    import_source: Option<EraImportSource>,
 ) -> eyre::Result<Pipeline<N>>
 where
     N: ProviderNodeTypes,
