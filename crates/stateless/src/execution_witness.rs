@@ -32,7 +32,7 @@ pub struct ExecutionWitness {
     pub keys: Vec<Bytes>,
     /// Block headers required for proving correctness of stateless execution.
     ///
-    /// This collection stores ancestor(parent) block headers needed to verify:
+    /// This collection stores ancestor (parent) block headers needed to verify:
     /// - State reads are correct (ie the code and accounts are correct wrt the pre-state root)
     /// - BLOCKHASH opcode execution results are correct
     ///
