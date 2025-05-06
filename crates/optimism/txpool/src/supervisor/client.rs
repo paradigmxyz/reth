@@ -40,12 +40,12 @@ impl SupervisorClient {
         SupervisorClientBuilder::new(supervisor_endpoint)
     }
 
-    /// Returns configured [`SupervisorClientInner::timeout`].
+    /// Returns configured timeout. See [`SupervisorClientInner`].
     pub fn timeout(&self) -> Duration {
         self.inner.timeout
     }
 
-    /// Returns configured minimum safety level [`SupervisorClientInner::safety`].
+    /// Returns configured minimum safety level. See [`SupervisorClient`].
     pub fn safety(&self) -> SafetyLevel {
         self.inner.safety
     }
@@ -135,7 +135,7 @@ pub struct SupervisorClientBuilder {
     /// NOTE: this timeout is only effective if it's shorter than the timeout configured for the
     /// underlying [`ReqwestClient`].
     timeout: Duration,
-    /// Minimum [`SafetyLevel`] accepted by this client.
+    /// Minimum [`SafetyLevel`] of cross-chain transactions accepted by this client.
     safety: SafetyLevel,
 }
 
