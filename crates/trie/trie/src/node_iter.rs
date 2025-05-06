@@ -210,39 +210,6 @@ where
                                 tree_flag,
                                 "Skipping current node in walker and returning leaf hash node"
                             );
-                            // This can be problematic, because if the parent branch will be
-                            // destroyed, the hash of the leaf node will change.
-                            //
-                            // Context:
-                            // - We store all branch nodes in the database
-                            // - We also store hashes for leaves inside branch nodes in the database
-                            //
-                            // Trie leaf paths:
-                            // - 0x00
-                            // - 0x010
-                            // - 0x011
-                            //
-                            // They form the following branch nodes that are all stored in the
-                            // database:
-                            // - 0x0 - nibbles 0, 1 set; stores hashes for the leaf node 0x00 and
-                            //   branch node 0x01
-                            // - 0x01 - nibbles 0, 1 set; stores hashes for the leaf nodes 0x010 and
-                            //   0x011
-                            //
-                            // When we remove the leaf at path 0x010, we need to remove the branch
-                            // node 0x01 because it now only has one nibble set.
-                            //
-                            // Problem:
-                            // The hash of the leaf at path 0x011 will change, because its path is
-                            // now 0x01 (instead of 0x011) and we store the remaining path in the
-                            // RLP encoding of the leaf.
-                            //
-                            // This means that we need to seek to the leaf at path 0x011, get its
-                            // value, and re-encode it with the new remaining path
-                            //
-                            // BUT: if it were a branch node with three nibbles set, then
-                            // it wouldn't get removed, and there would be no need to seek into the
-                            // remaining two leaves, because they're unchanged
                             return Ok(Some(TrieElement::LeafHash(key.clone(), hash)))
                         }
 
