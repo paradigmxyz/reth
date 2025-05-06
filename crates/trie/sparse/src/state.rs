@@ -283,12 +283,16 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
         branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
     ) -> SparseStateTrieResult<()> {
-        let DecodedProofNodes { nodes, total_nodes, skipped_nodes, new_nodes } =
-            decode_proof_nodes(account_subtree, &self.revealed_account_paths)?;
+        let DecodedProofNodes {
+            nodes,
+            new_nodes,
+            total_nodes: _total_nodes,
+            skipped_nodes: _skipped_nodes,
+        } = decode_proof_nodes(account_subtree, &self.revealed_account_paths)?;
         #[cfg(feature = "metrics")]
         {
-            self.metrics.increment_total_account_nodes(total_nodes as u64);
-            self.metrics.increment_skipped_account_nodes(skipped_nodes as u64);
+            self.metrics.increment_total_account_nodes(_total_nodes as u64);
+            self.metrics.increment_skipped_account_nodes(_skipped_nodes as u64);
         }
         let mut account_nodes = nodes.into_iter().peekable();
 
@@ -337,12 +341,16 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     ) -> SparseStateTrieResult<()> {
         let revealed_nodes = self.revealed_storage_paths.entry(account).or_default();
 
-        let DecodedProofNodes { nodes, total_nodes, skipped_nodes, new_nodes } =
-            decode_proof_nodes(storage_subtree.subtree, revealed_nodes)?;
+        let DecodedProofNodes {
+            nodes,
+            new_nodes,
+            total_nodes: _total_nodes,
+            skipped_nodes: _skipped_nodes,
+        } = decode_proof_nodes(storage_subtree.subtree, revealed_nodes)?;
         #[cfg(feature = "metrics")]
         {
-            self.metrics.increment_total_storage_nodes(total_nodes as u64);
-            self.metrics.increment_skipped_storage_nodes(skipped_nodes as u64);
+            self.metrics.increment_total_storage_nodes(_total_nodes as u64);
+            self.metrics.increment_skipped_storage_nodes(_skipped_nodes as u64);
         }
         let mut nodes = nodes.into_iter().peekable();
 
