@@ -21,7 +21,7 @@ use std::{
     task::{ready, Context, Poll},
 };
 
-type GlobalBoxStream = Box<
+type ThreadSafeEraStream = Box<
     dyn Stream<Item = eyre::Result<Box<dyn EraMeta + Sync + Send + 'static>>>
         + Send
         + Sync
@@ -38,7 +38,8 @@ pub struct EraStage {
     source: Option<ImportSource>,
     hash_collector: Collector<BlockHash, BlockNumber>,
     item: Option<Box<dyn EraMeta + Sync + Send + 'static>>,
-    stream: Option<GlobalBoxStream>,
+    stream: Option<ThreadSafeEraStream>,
+    last_block_height: Option<BlockNumber>,
 }
 
 impl Debug for EraStage {
@@ -68,6 +69,7 @@ impl EraStage {
             source,
             item: None,
             stream: None,
+            last_block_height: None,
             hash_collector: Collector::new(etl_config.file_size, etl_config.dir),
         }
     }
@@ -130,7 +132,7 @@ where
 
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         match self.item.take() {
-            Some(source) => {
+            Some(era) => {
                 let static_file_provider = provider.static_file_provider();
 
                 // Consistency check of expected headers in static files vs DB is done on provider::sync_gap
@@ -148,11 +150,20 @@ where
                 // order
                 let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
 
-                era::process(source.as_ref(), &mut writer, provider, &mut self.hash_collector, &mut td)
+                if let Some(height) = era::process(era.as_ref(), &mut writer, provider, &mut self.hash_collector, &mut td).map_err(|e| StageError::Recoverable(e.into()))? {
+                    self.last_block_height.replace(height);
+                }
+
+                Ok(ExecOutput { checkpoint: input.checkpoint(), done: false })
+            },
+            None => {
+                if self.source.is_some() {
+                    era::build_index(provider, &mut self.hash_collector)
+                        .map_err(|e| StageError::Recoverable(e.into()))?;
+                }
+
+                Ok(ExecOutput::done(StageCheckpoint::new(input.target())))
             }
-                .map(|height| ExecOutput::done(StageCheckpoint::new(height.unwrap_or_default())))
-                .map_err(|e| StageError::Recoverable(e.into())),
-            None => Ok(ExecOutput::done(StageCheckpoint::new(input.target())))
         }
     }
 
