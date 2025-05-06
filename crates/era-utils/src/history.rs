@@ -73,45 +73,7 @@ where
         }
     }
 
-    let total_headers = hash_collector.len();
-    info!(target: "era::history::import", total = total_headers, "Writing headers hash index");
-
-    // Database cursor for hash to number index
-    let mut cursor_header_numbers =
-        provider.tx_ref().cursor_write::<RawTable<tables::HeaderNumbers>>()?;
-    let mut first_sync = false;
-
-    // If we only have the genesis block hash, then we are at first sync, and we can remove it,
-    // add it to the collector and use tx.append on all hashes.
-    if provider.tx_ref().entries::<RawTable<tables::HeaderNumbers>>()? == 1 {
-        if let Some((hash, block_number)) = cursor_header_numbers.last()? {
-            if block_number.value()? == 0 {
-                hash_collector.insert(hash.key()?, 0)?;
-                cursor_header_numbers.delete_current()?;
-                first_sync = true;
-            }
-        }
-    }
-
-    let interval = (total_headers / 10).max(1);
-
-    // Build block hash to block number index
-    for (index, hash_to_number) in hash_collector.iter()?.enumerate() {
-        let (hash, number) = hash_to_number?;
-
-        if index > 0 && index % interval == 0 && total_headers > 100 {
-            info!(target: "era::history::import", progress = %format!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers hash index");
-        }
-
-        let hash = RawKey::<BlockHash>::from_vec(hash);
-        let number = RawValue::<BlockNumber>::from_vec(number);
-
-        if first_sync {
-            cursor_header_numbers.append(hash, &number)?;
-        } else {
-            cursor_header_numbers.upsert(hash, &number)?;
-        }
-    }
+    build_index(provider, hash_collector)?;
 
     Ok(last_header_number)
 }
@@ -177,4 +139,62 @@ where
     meta.mark_as_processed()?;
 
     Ok(last_header_number)
+}
+
+/// Dumps the contents of `hash_collector` into [`tables::HeaderNumbers`].
+pub fn build_index<P, B, BB, BH>(
+    provider: &P,
+    hash_collector: &mut Collector<BlockHash, BlockNumber>,
+) -> eyre::Result<()>
+where
+    B: Block<Header = BH, Body = BB>,
+    BH: FullBlockHeader + Value,
+    BB: FullBlockBody<
+        Transaction = <<P as NodePrimitivesProvider>::Primitives as NodePrimitives>::SignedTx,
+        OmmerHeader = BH,
+    >,
+    P: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory + BlockWriter<Block = B>,
+    <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
+{
+    let total_headers = hash_collector.len();
+    info!(target: "era::history::import", total = total_headers, "Writing headers hash index");
+
+    // Database cursor for hash to number index
+    let mut cursor_header_numbers =
+        provider.tx_ref().cursor_write::<RawTable<tables::HeaderNumbers>>()?;
+    let mut first_sync = false;
+
+    // If we only have the genesis block hash, then we are at first sync, and we can remove it,
+    // add it to the collector and use tx.append on all hashes.
+    if provider.tx_ref().entries::<RawTable<tables::HeaderNumbers>>()? == 1 {
+        if let Some((hash, block_number)) = cursor_header_numbers.last()? {
+            if block_number.value()? == 0 {
+                hash_collector.insert(hash.key()?, 0)?;
+                cursor_header_numbers.delete_current()?;
+                first_sync = true;
+            }
+        }
+    }
+
+    let interval = (total_headers / 10).max(1);
+
+    // Build block hash to block number index
+    for (index, hash_to_number) in hash_collector.iter()?.enumerate() {
+        let (hash, number) = hash_to_number?;
+
+        if index > 0 && index % interval == 0 && total_headers > 100 {
+            info!(target: "era::history::import", progress = %format!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers hash index");
+        }
+
+        let hash = RawKey::<BlockHash>::from_vec(hash);
+        let number = RawValue::<BlockNumber>::from_vec(number);
+
+        if first_sync {
+            cursor_header_numbers.append(hash, &number)?;
+        } else {
+            cursor_header_numbers.upsert(hash, &number)?;
+        }
+    }
+
+    Ok(())
 }
