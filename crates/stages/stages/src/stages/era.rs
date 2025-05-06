@@ -1,22 +1,23 @@
-use crate::{StageCheckpoint, StageId};
+use crate::{stages, StageCheckpoint, StageId};
 use alloy_primitives::{BlockHash, BlockNumber};
 use futures_util::{Stream, StreamExt};
 use reqwest::{Client, Url};
 use reth_config::config::EtlConfig;
-use reth_db_api::{table::Value, transaction::DbTxMut};
+use reth_db_api::{table::Value, tables, transaction::DbTxMut, DbTxUnwindExt};
 use reth_era_downloader::{read_dir, EraClient, EraMeta, EraStream, EraStreamConfig};
 use reth_era_utils as era;
 use reth_etl::Collector;
 use reth_primitives_traits::{Block, FullBlockBody, FullBlockHeader, NodePrimitives};
 use reth_provider::{
-    BlockWriter, DBProvider, HeaderProvider, NodePrimitivesProvider, StaticFileProviderFactory,
-    StaticFileWriter,
+    BlockHashReader, BlockReader, BlockWriter, DBProvider, HeaderProvider, NodePrimitivesProvider,
+    StaticFileProviderFactory, StaticFileWriter, StorageLocation,
 };
 use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::ProviderError;
 use std::{
     fmt::{Debug, Formatter},
+    fs,
     path::PathBuf,
     task::{ready, Context, Poll},
 };
@@ -83,7 +84,7 @@ where
         Transaction=<<Provider as NodePrimitivesProvider>::Primitives as NodePrimitives>::SignedTx,
         OmmerHeader=BH,
     >,
-    Provider: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory + BlockWriter<Block=B>,
+    Provider: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory + BlockWriter<Block=B> + BlockReader<Block=B>,
     <Provider as NodePrimitivesProvider>::Primitives:
     NodePrimitives<BlockHeader=BH, BlockBody=BB>,
 {
@@ -131,7 +132,7 @@ where
     }
 
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
-        match self.item.take() {
+        Ok(match self.item.take() {
             Some(era) => {
                 let static_file_provider = provider.static_file_provider();
 
@@ -154,27 +155,84 @@ where
                     self.last_block_height.replace(height);
                 }
 
-                Ok(ExecOutput { checkpoint: input.checkpoint(), done: false })
-            },
+                ExecOutput::in_progress(input.checkpoint())
+            }
             None => {
                 if self.source.is_some() {
                     era::build_index(provider, &mut self.hash_collector)
                         .map_err(|e| StageError::Recoverable(e.into()))?;
                 }
 
-                Ok(ExecOutput::done(StageCheckpoint::new(input.target())))
+                ExecOutput::done(StageCheckpoint::new(input.target()))
             }
-        }
+        })
     }
 
     fn unwind(
         &mut self,
-        _provider: &Provider,
+        provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        match &self.source {
-            None => Ok(UnwindOutput { checkpoint: input.checkpoint.with_block_number(input.unwind_to) }),
-            Some(_) => todo!()
+        self.hash_collector.clear();
+        self.item.take();
+        self.last_block_height.take();
+        self.stream.take();
+
+        if let Some(source) = &self.source {
+            // Wipe any unprocessed era files in the download temp directory
+            if let ImportSource::Url(_, path) = source {
+                if let Ok(dir) = path.read_dir() {
+                    for entry in dir.flatten() {
+                        let path = entry.path();
+
+                        if path.extension() == Some("era1".as_ref()) {
+                            let _ = fs::remove_file(path);
+                        }
+                    }
+                }
+            }
+
+            // First unwind the db tables, until the unwind_to block number. use the walker to unwind
+            // HeaderNumbers based on the index in CanonicalHeaders
+            // unwind from the next block number since the unwind_to block is exclusive
+            provider
+                .tx_ref()
+                .unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
+                    (input.unwind_to + 1)..,
+                )?;
+            provider.tx_ref().unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
+            provider
+                .tx_ref()
+                .unwind_table_by_num::<tables::HeaderTerminalDifficulties>(input.unwind_to)?;
+
+            // determine how many headers to unwind from the static files based on the highest block and
+            // the unwind_to block
+            let static_file_provider = provider.static_file_provider();
+            let highest_block = static_file_provider
+                .get_highest_static_file_block(StaticFileSegment::Headers)
+                .unwrap_or_default();
+            let static_file_headers_to_unwind = highest_block - input.unwind_to;
+            for block_number in (input.unwind_to + 1)..=highest_block {
+                let hash = static_file_provider.block_hash(block_number)?;
+                // we have to delete from HeaderNumbers here as well as in the above unwind, since that
+                // mapping contains entries for both headers in the db and headers in static files
+                //
+                // so if we are unwinding past the lowest block in the db, we have to iterate through
+                // the HeaderNumbers entries that we'll delete in static files below
+                if let Some(header_hash) = hash {
+                    provider.tx_ref().delete::<tables::HeaderNumbers>(header_hash, None)?;
+                }
+            }
+
+            // Now unwind the static files until the unwind_to block number
+            let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
+            writer.prune_headers(static_file_headers_to_unwind)?;
+
+            // Bodies
+            stages::ensure_consistency(provider, Some(input.unwind_to))?;
+            provider.remove_bodies_above(input.unwind_to, StorageLocation::Both)?;
         }
+
+        Ok(UnwindOutput { checkpoint: input.checkpoint.with_block_number(input.unwind_to) })
     }
 }
