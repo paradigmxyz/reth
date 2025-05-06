@@ -521,12 +521,13 @@ where
         }
     }
 
-    /// The ExEx ID must be unique.
+    /// Installs a hook
     pub fn install_stages<F, R, E>(self, stages: F) -> Self
     where
-        F: FnOnce(StageSetBuilder<NodeAdapter<T, CB::Components>>) -> R + Send + 'static,
+        F: FnOnce(StageSetBuilder<NodeTypesWithDBAdapter<T::Types, T::DB>>) -> R + Send + 'static,
         R: Future<Output = eyre::Result<E>> + Send,
-        E: Future<Output = eyre::Result<()>> + Send,
+        E: Future<Output = eyre::Result<StageSetBuilder<NodeTypesWithDBAdapter<T::Types, T::DB>>>>
+            + Send,
     {
         Self { builder: self.builder.install_stages(stages), task_executor: self.task_executor }
     }

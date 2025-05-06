@@ -10,7 +10,7 @@ use crate::{
     hooks::NodeHooks,
     launch::LaunchNode,
     rpc::{RethRpcAddOns, RethRpcServerHandles, RpcContext},
-    AddOns, FullNode,
+    AddOns, FullNode, NodeTypesWithDBAdapter,
 };
 use reth_exex::ExExContext;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes};
@@ -234,13 +234,14 @@ where
         self
     }
     /// Installs a custom stage installer in the node.
-    pub fn install_stages<F, R, E>(mut self, _stage: F) -> Self
+    pub fn install_stages<F, R, E>(mut self, stage: F) -> Self
     where
-        F: FnOnce(StageSetBuilder<NodeAdapter<T, CB::Components>>) -> R + Send + 'static,
+        F: FnOnce(StageSetBuilder<NodeTypesWithDBAdapter<T::Types, T::DB>>) -> R + Send + 'static,
         R: Future<Output = eyre::Result<E>> + Send,
-        E: Future<Output = eyre::Result<()>> + Send,
+        E: Future<Output = eyre::Result<StageSetBuilder<NodeTypesWithDBAdapter<T::Types, T::DB>>>>
+            + Send,
     {
-        self.add_ons.stage_installer = None;
+        self.add_ons.stage_installer = Some(Box::new(stage));
         self
     }
     /// Launches the node with the given closure.

@@ -1,12 +1,11 @@
-//! A trait for installing custom stages into a stage set.
-
-use std::future::Future;
+//! A trait for modifying the stages into a stage set.
 
 use futures::{future::BoxFuture, FutureExt};
 use reth_provider::providers::ProviderNodeTypes;
 use reth_stages::StageSetBuilder;
+use std::future::Future;
 
-/// A trait for installing custom stages into a stage set.
+/// A trait for installing custom stages.
 pub trait InstallStages<Node: ProviderNodeTypes>: Send {
     /// Installs custom stages into the stage set builder.
     ///
@@ -14,11 +13,13 @@ pub trait InstallStages<Node: ProviderNodeTypes>: Send {
     fn on_stages(
         self,
         stages: StageSetBuilder<Node>,
-    ) -> impl Future<Output = eyre::Result<impl Future<Output = eyre::Result<()>> + Send>> + Send;
+    ) -> impl Future<
+        Output = eyre::Result<impl Future<Output = eyre::Result<StageSetBuilder<Node>>> + Send>,
+    > + Send;
 }
 
 /// A boxed install stages.
-pub type BoxInstallStages = BoxFuture<'static, eyre::Result<()>>;
+pub type BoxInstallStages<Node> = BoxFuture<'static, eyre::Result<StageSetBuilder<Node>>>;
 
 /// A boxed version of [`InstallStages`] that returns a boxed future. Makes the trait object-safe.
 pub trait BoxedInstallStages<Node: ProviderNodeTypes>: Send {
@@ -26,7 +27,7 @@ pub trait BoxedInstallStages<Node: ProviderNodeTypes>: Send {
     fn on_stages(
         self: Box<Self>,
         stages: StageSetBuilder<Node>,
-    ) -> BoxFuture<'static, eyre::Result<BoxInstallStages>>;
+    ) -> BoxFuture<'static, eyre::Result<BoxInstallStages<Node>>>;
 }
 
 /// Implements [`BoxedInstallStages`] for any [`InstallStages`] that is [Send] and `'static`.
@@ -40,10 +41,10 @@ where
     fn on_stages(
         self: Box<Self>,
         stages: StageSetBuilder<Node>,
-    ) -> BoxFuture<'static, eyre::Result<BoxInstallStages>> {
+    ) -> BoxFuture<'static, eyre::Result<BoxInstallStages<Node>>> {
         async move {
             let stage = InstallStages::on_stages(*self, stages).await?;
-            Ok(Box::pin(stage) as BoxInstallStages)
+            Ok(Box::pin(stage) as BoxInstallStages<Node>)
         }
         .boxed()
     }
@@ -55,13 +56,14 @@ where
     Node: ProviderNodeTypes,
     F: FnOnce(StageSetBuilder<Node>) -> Fut + Send,
     Fut: Future<Output = eyre::Result<E>> + Send,
-    E: Future<Output = eyre::Result<()>> + Send,
+    E: Future<Output = eyre::Result<StageSetBuilder<Node>>> + Send,
 {
     fn on_stages(
         self,
         stages: StageSetBuilder<Node>,
-    ) -> impl Future<Output = eyre::Result<impl Future<Output = eyre::Result<()>> + Send>> + Send
-    {
+    ) -> impl Future<
+        Output = eyre::Result<impl Future<Output = eyre::Result<StageSetBuilder<Node>>> + Send>,
+    > + Send {
         self(stages)
     }
 }
