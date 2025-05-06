@@ -8,7 +8,7 @@ use itertools::Itertools;
 use metrics::Gauge;
 use reth_chain_state::ForkChoiceStream;
 use reth_ethereum_primitives::EthPrimitives;
-use reth_evm::execute::BlockExecutorProvider;
+use reth_evm::ConfigureEvm;
 use reth_metrics::{metrics::Counter, Metrics};
 use reth_node_api::NodePrimitives;
 use reth_primitives_traits::SealedHeader;
@@ -94,17 +94,17 @@ impl<N: NodePrimitives> ExExHandle<N> {
     ///
     /// Returns the handle, as well as a [`UnboundedSender`] for [`ExExEvent`]s and a
     /// [`mpsc::Receiver`] for [`ExExNotification`]s that should be given to the `ExEx`.
-    pub fn new<P, E: BlockExecutorProvider<Primitives = N>>(
+    pub fn new<P, E: ConfigureEvm<Primitives = N>>(
         id: String,
         node_head: BlockNumHash,
         provider: P,
-        executor: E,
+        evm_config: E,
         wal_handle: WalHandle<N>,
     ) -> (Self, UnboundedSender<ExExEvent>, ExExNotifications<P, E>) {
         let (notification_tx, notification_rx) = mpsc::channel(1);
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let notifications =
-            ExExNotifications::new(node_head, provider, executor, notification_rx, wal_handle);
+            ExExNotifications::new(node_head, provider, evm_config, notification_rx, wal_handle);
 
         (
             Self {
@@ -663,7 +663,7 @@ mod tests {
     use futures::{StreamExt, TryStreamExt};
     use rand::Rng;
     use reth_db_common::init::init_genesis;
-    use reth_evm_ethereum::{execute::EthExecutorProvider, MockExecutorProvider};
+    use reth_evm_ethereum::{execute::EthExecutorProvider, EthEvmConfig};
     use reth_primitives_traits::RecoveredBlock;
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory, BlockReader,
@@ -687,7 +687,7 @@ mod tests {
             "test_exex".to_string(),
             Default::default(),
             (),
-            MockExecutorProvider::default(),
+            EthEvmConfig::mainnet(),
             wal.handle(),
         );
 
@@ -707,7 +707,7 @@ mod tests {
             "test_exex_1".to_string(),
             Default::default(),
             (),
-            MockExecutorProvider::default(),
+            EthEvmConfig::mainnet(),
             wal.handle(),
         );
 
@@ -729,7 +729,7 @@ mod tests {
             "test_exex_1".to_string(),
             Default::default(),
             (),
-            MockExecutorProvider::default(),
+            EthEvmConfig::mainnet(),
             wal.handle(),
         );
 
@@ -757,7 +757,7 @@ mod tests {
             "test_exex".to_string(),
             Default::default(),
             (),
-            MockExecutorProvider::default(),
+            EthEvmConfig::mainnet(),
             wal.handle(),
         );
 
@@ -812,7 +812,7 @@ mod tests {
             "test_exex".to_string(),
             Default::default(),
             (),
-            MockExecutorProvider::default(),
+            EthEvmConfig::mainnet(),
             wal.handle(),
         );
 
@@ -863,7 +863,7 @@ mod tests {
             "test_exex".to_string(),
             Default::default(),
             (),
-            MockExecutorProvider::default(),
+            EthEvmConfig::mainnet(),
             wal.handle(),
         );
 
@@ -918,14 +918,14 @@ mod tests {
             "test_exex1".to_string(),
             Default::default(),
             (),
-            MockExecutorProvider::default(),
+            EthEvmConfig::mainnet(),
             wal.handle(),
         );
         let (exex_handle2, event_tx2, _) = ExExHandle::new(
             "test_exex2".to_string(),
             Default::default(),
             (),
-            MockExecutorProvider::default(),
+            EthEvmConfig::mainnet(),
             wal.handle(),
         );
 
@@ -975,14 +975,14 @@ mod tests {
             "test_exex1".to_string(),
             Default::default(),
             (),
-            MockExecutorProvider::default(),
+            EthEvmConfig::mainnet(),
             wal.handle(),
         );
         let (exex_handle2, event_tx2, _) = ExExHandle::new(
             "test_exex2".to_string(),
             Default::default(),
             (),
-            MockExecutorProvider::default(),
+            EthEvmConfig::mainnet(),
             wal.handle(),
         );
 
@@ -1038,7 +1038,7 @@ mod tests {
             "test_exex_1".to_string(),
             Default::default(),
             (),
-            MockExecutorProvider::default(),
+            EthEvmConfig::mainnet(),
             wal.handle(),
         );
 

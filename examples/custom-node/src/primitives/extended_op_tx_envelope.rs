@@ -1,6 +1,6 @@
 use alloy_consensus::Transaction;
 use alloy_eips::{
-    eip2718::{Eip2718Error, Eip2718Result},
+    eip2718::{Eip2718Error, Eip2718Result, IsTyped2718},
     eip2930::AccessList,
     eip7702::SignedAuthorization,
     Decodable2718, Encodable2718, Typed2718,
@@ -11,7 +11,7 @@ use op_alloy_consensus::OpTxEnvelope;
 use reth_codecs::Compact;
 use reth_ethereum::primitives::{
     serde_bincode_compat::SerdeBincodeCompat, transaction::signed::RecoveryError, InMemorySize,
-    IsTyped2718, SignedTransaction,
+    SignedTransaction,
 };
 use revm_primitives::{Address, Bytes, TxKind, B256, U256};
 

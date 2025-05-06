@@ -9,4 +9,4 @@ mod static_file_provider;
 pub use static_file_provider::StaticFileProviderFactory;
 
 mod full;
-pub use full::{FullProvider, FullRpcProvider};
+pub use full::FullProvider;
