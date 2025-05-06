@@ -75,7 +75,7 @@ pub struct TreeConfig {
     max_proof_task_concurrency: u64,
     /// Number of reserved CPU cores for non-reth processes
     reserved_cpu_cores: usize,
-    /// Wether to enable the precompile cache
++    /// Whether to enable the precompile cache
     precompile_cache_enabled: bool,
 }
 
