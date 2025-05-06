@@ -230,7 +230,7 @@ pub trait CliNodeComponents<N: CliNodeTypes> {
     /// Consensus implementation.
     type Consensus: FullConsensus<N::Primitives, Error = ConsensusError> + Clone + 'static;
 
-    /// Returns the block executor.
+    /// Returns the configured EVM.
     fn evm_config(&self) -> &Self::Evm;
     /// Returns the consensus implementation.
     fn consensus(&self) -> &Self::Consensus;
