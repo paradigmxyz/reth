@@ -1,6 +1,6 @@
 use crate::{
     blinded::{BlindedProvider, BlindedProviderFactory, DefaultBlindedProviderFactory},
-    RevealedSparseTrie, SparseTrie, TrieMasks,
+    LeafLookup, RevealedSparseTrie, SparseTrie, TrieMasks,
 };
 use alloc::{collections::VecDeque, vec::Vec};
 use alloy_primitives::{
@@ -104,6 +104,34 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     /// Returns `true` if account was already revealed.
     pub fn is_account_revealed(&self, account: B256) -> bool {
         self.revealed_account_paths.contains(&Nibbles::unpack(account))
+    }
+
+    /// Was the account witness for `address` complete?
+    pub fn check_valid_account_witness(&self, address: B256) -> bool {
+        let path = Nibbles::unpack(address);
+        let trie = match self.state_trie_ref() {
+            Some(t) => t,
+            None => return false,
+        };
+
+        matches!(
+            trie.find_leaf(&path, None),
+            Ok(LeafLookup::Exists | LeafLookup::NonExistent { .. })
+        )
+    }
+
+    /// Was the storage-slot witness for (`address`,`slot`) complete?
+    pub fn check_valid_storage_witness(&self, address: B256, slot: B256) -> bool {
+        let path = Nibbles::unpack(slot);
+        let trie = match self.storage_trie_ref(&address) {
+            Some(t) => t,
+            None => return false,
+        };
+
+        matches!(
+            trie.find_leaf(&path, None),
+            Ok(LeafLookup::Exists | LeafLookup::NonExistent { .. })
+        )
     }
 
     /// Returns `true` if storage slot for account was already revealed.
