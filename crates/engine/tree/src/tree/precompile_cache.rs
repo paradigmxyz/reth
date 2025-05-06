@@ -24,10 +24,10 @@ pub struct CacheKey(alloy_primitives::Bytes);
 pub struct CacheEntry {
     /// The actual result of executing the precompile.
     result: PrecompileResult,
-    /// Observed gas limit above which the precompile does not fail with out of gas.
-    upper_gas_limit: u64,
-    /// Observed gas limit below which the precompile fails with out of gas.
-    lower_gas_limit: u64,
+    /// Observed gas used on successful run
+    gas_used: u64,
+    /// Gas limit observed on call error.
+    err_gas_limit: u64,
 }
 
 /// A cache for precompile inputs / outputs.
@@ -88,82 +88,53 @@ impl Precompile for CachedPrecompile {
         let cache_result = self.cache.get(&key);
 
         if let Some(ref entry) = cache_result {
-            // for each precompile and input we store in lower_gas_limit the maximum gas for
-            // which we have received an out of gas error, any gas limit below that will fail
-            // with OOG too.
-            if gas_limit <= entry.lower_gas_limit {
+            if entry.gas_used > 0 {
+                // gas_used > 0 means successful execution
                 self.increment_by_one_precompile_cache_hits();
-
-                return Err(PrecompileError::OutOfGas);
+                if gas_limit < entry.gas_used {
+                    return Err(PrecompileError::OutOfGas)
+                }
+                return entry.result.clone()
             }
 
-            // for each precompile and input we store in upper_gas_limit the minimum gas for
-            // which we obtained a success, any gas limit above that value with succeed with
-            // the same response, we can use it from the cache.
-            if gas_limit >= entry.upper_gas_limit {
-                self.increment_by_one_precompile_cache_hits();
-
-                // no need to change gas on successful results, on success the gas spent is the same
-                // no matter gas the limit
-
-                return entry.result.clone();
+            // the entry stored in the cache is an error, check the type
+            match &entry.result {
+                Err(PrecompileError::OutOfGas) => {
+                    if gas_limit <= entry.err_gas_limit {
+                        // entry.err_gas_limit gave OOG previously, anything equal or below
+                        // should fail with OOG too.
+                        self.increment_by_one_precompile_cache_hits();
+                        return Err(PrecompileError::OutOfGas)
+                    }
+                }
+                err => {
+                    if gas_limit > entry.err_gas_limit {
+                        // entry.err_gas_limit did not give OOG previously (it gave `err`),
+                        // anything equal or above should not give it either
+                        self.increment_by_one_precompile_cache_hits();
+                        return err.clone()
+                    }
+                }
             }
         }
 
-        // cache miss or unknown gas limit, call the precompile
+        // cache miss or error with not yet seen gas limit, call the precompile
+        self.increment_by_one_precompile_cache_misses();
         let result = self.precompile.call(data, gas_limit);
 
         let previous_entry_count = self.cache_entry_count();
         match &result {
-            Ok(_) => {
-                if let Some(mut entry) = cache_result {
-                    // update cached result and upper gas limit
-                    entry.result = result.clone();
-                    entry.upper_gas_limit = entry.upper_gas_limit.min(gas_limit);
-                } else {
-                    self.increment_by_one_precompile_cache_misses();
-                    self.cache.insert(
-                        key,
-                        CacheEntry {
-                            result: result.clone(),
-                            upper_gas_limit: gas_limit,
-                            lower_gas_limit: 0,
-                        },
-                    );
-                }
-            }
-            Err(PrecompileError::OutOfGas) => {
-                if let Some(mut entry) = cache_result {
-                    // update cached result and lower gas limit
-                    entry.result = result.clone();
-                    entry.lower_gas_limit = entry.lower_gas_limit.max(gas_limit);
-                } else {
-                    self.increment_by_one_precompile_cache_misses();
-                    self.cache.insert(
-                        key,
-                        CacheEntry {
-                            result: result.clone(),
-                            upper_gas_limit: u64::MAX,
-                            lower_gas_limit: gas_limit,
-                        },
-                    );
-                }
+            Ok(val) => {
+                self.cache.insert(
+                    key,
+                    CacheEntry { result: result.clone(), gas_used: val.gas_used, err_gas_limit: 0 },
+                );
             }
             _ => {
-                // for other errors, update the cached result or insert cache entry
-                if let Some(mut entry) = cache_result {
-                    entry.result = result.clone();
-                } else {
-                    self.increment_by_one_precompile_cache_misses();
-                    self.cache.insert(
-                        key,
-                        CacheEntry {
-                            result: result.clone(),
-                            upper_gas_limit: gas_limit,
-                            lower_gas_limit: 0,
-                        },
-                    );
-                }
+                self.cache.insert(
+                    key,
+                    CacheEntry { result: result.clone(), gas_used: 0, err_gas_limit: gas_limit },
+                );
             }
         }
 
@@ -210,7 +181,7 @@ mod tests {
             bytes: alloy_primitives::Bytes::copy_from_slice(b"cached_result"),
         });
 
-        let expected = CacheEntry { result, upper_gas_limit: 100, lower_gas_limit: 100 };
+        let expected = CacheEntry { result, gas_used: 100, err_gas_limit: 100 };
         cache.cache.insert(key.clone(), expected.clone());
 
         let actual = cache.cache.get(&key).unwrap();
