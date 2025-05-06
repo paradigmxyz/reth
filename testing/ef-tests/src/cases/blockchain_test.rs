@@ -253,14 +253,11 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
         let state = state_provider.witness(Default::default(), hashed_state)?;
         let mut exec_witness = ExecutionWitness { state, codes, keys, headers: Default::default() };
 
-        let smallest = match lowest_block_number {
-            Some(smallest) => smallest,
-            None => {
-                // Return only the parent header, if there were no calls to the
-                // BLOCKHASH opcode.
-                block_number.saturating_sub(1)
-            }
-        };
+        let smallest = lowest_block_number.unwrap_or_else(|| {
+            // Return only the parent header, if there were no calls to the
+            // BLOCKHASH opcode.
+            block_number.saturating_sub(1)
+        });
 
         let range = smallest..block_number;
 
