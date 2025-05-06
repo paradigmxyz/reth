@@ -62,6 +62,7 @@ bincode.workspace = true
 blake3.workspace = true
 reqwest = { workspace = true, default-features = false, features = ["rustls-tls-native-roots", "blocking"] }
 serde = { workspace = true, features = ["derive"] }
+eyre.workspace = true
 
 [dev-dependencies]
 # reth
