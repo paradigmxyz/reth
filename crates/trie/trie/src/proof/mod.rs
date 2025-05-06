@@ -109,10 +109,10 @@ where
         let trie_cursor = self.trie_cursor_factory.account_trie_cursor()?;
 
         // Create the walker.
-        let mut prefix_set = self.prefix_sets.account_prefix_set.clone();
+        let mut prefix_set = self.prefix_sets.account_prefix_set;
         prefix_set.extend_keys(targets.keys().map(Nibbles::unpack));
         let walker = TrieWalker::new(trie_cursor, prefix_set.freeze())
-            .with_all_branch_nodes_in_database(true);
+            .with_all_branch_nodes_in_database(&self.prefix_sets.destroyed_accounts);
 
         // Create a hash builder to rebuild the root node since it is not available in the database.
         let retainer = targets.keys().map(Nibbles::unpack).collect();

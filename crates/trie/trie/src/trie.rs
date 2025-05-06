@@ -168,7 +168,7 @@ where
                     self.prefix_sets.account_prefix_set,
                 )
                 .with_deletions_retained(retain_updates)
-                .with_all_branch_nodes_in_database(true);
+                .with_all_branch_nodes_in_database(&self.prefix_sets.destroyed_accounts);
                 let node_iter = TrieNodeIter::state_trie(walker, hashed_account_cursor)
                     .with_last_hashed_key(state.last_account_key);
                 (hash_builder, node_iter)
@@ -179,7 +179,7 @@ where
                     .with_all_branch_nodes_in_database(true);
                 let walker = TrieWalker::new(trie_cursor, self.prefix_sets.account_prefix_set)
                     .with_deletions_retained(retain_updates)
-                    .with_all_branch_nodes_in_database(true);
+                    .with_all_branch_nodes_in_database(&self.prefix_sets.destroyed_accounts);
                 let node_iter = TrieNodeIter::state_trie(walker, hashed_account_cursor);
                 (hash_builder, node_iter)
             }

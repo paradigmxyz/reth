@@ -150,7 +150,7 @@ where
             prefix_sets.account_prefix_set,
         )
         .with_deletions_retained(retain_updates)
-        .with_all_branch_nodes_in_database(true);
+        .with_all_branch_nodes_in_database(&prefix_sets.destroyed_accounts);
         let mut account_node_iter = TrieNodeIter::state_trie(
             walker,
             hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?,

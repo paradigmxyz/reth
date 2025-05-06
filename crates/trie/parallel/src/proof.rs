@@ -215,7 +215,7 @@ where
             prefix_sets.account_prefix_set,
         )
         .with_deletions_retained(true)
-        .with_all_branch_nodes_in_database(true);
+        .with_all_branch_nodes_in_database(&prefix_sets.destroyed_accounts);
 
         // Create a hash builder to rebuild the root node since it is not available in the database.
         let retainer: ProofRetainer = targets.keys().map(Nibbles::unpack).collect();

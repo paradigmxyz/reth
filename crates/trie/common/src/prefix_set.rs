@@ -96,6 +96,12 @@ where
     }
 }
 
+impl FromIterator<Nibbles> for PrefixSetMut {
+    fn from_iter<I: IntoIterator<Item = Nibbles>>(iter: I) -> Self {
+        Self { all: false, keys: iter.into_iter().collect() }
+    }
+}
+
 impl PrefixSetMut {
     /// Create [`PrefixSetMut`] with pre-allocated capacity.
     pub fn with_capacity(capacity: usize) -> Self {

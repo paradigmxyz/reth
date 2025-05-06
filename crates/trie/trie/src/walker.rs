@@ -3,8 +3,12 @@ use crate::{
     trie_cursor::{subnode::SubNodePosition, CursorSubNode, TrieCursor},
     BranchNodeCompact, Nibbles,
 };
-use alloy_primitives::{map::HashSet, B256};
+use alloy_primitives::{
+    map::{B256Set, HashSet},
+    B256,
+};
 use reth_storage_errors::db::DatabaseError;
+use reth_trie_common::prefix_set::PrefixSetMut;
 use tracing::{instrument, trace};
 
 #[cfg(feature = "metrics")]
@@ -28,6 +32,7 @@ pub struct TrieWalker<C> {
     /// The retained trie node keys that need to be removed.
     removed_keys: Option<HashSet<Nibbles>>,
     pub all_branch_nodes_in_database: bool,
+    pub destroyed_paths: PrefixSet,
     #[cfg(feature = "metrics")]
     /// Walker metrics.
     metrics: WalkerMetrics,
@@ -43,6 +48,7 @@ impl<C> TrieWalker<C> {
             can_skip_current_node: false,
             removed_keys: None,
             all_branch_nodes_in_database: false,
+            destroyed_paths: PrefixSet::default(),
             #[cfg(feature = "metrics")]
             metrics: WalkerMetrics::default(),
         };
@@ -123,10 +129,38 @@ impl<C> TrieWalker<C> {
     /// Updates the skip node flag based on the walker's current state.
     fn update_skip_node(&mut self) {
         let old = self.can_skip_current_node;
-        self.can_skip_current_node = self
-            .stack
-            .last()
-            .is_some_and(|node| !self.changes.contains(node.full_key()) && node.hash_flag());
+        self.can_skip_current_node = self.stack.last().is_some_and(|node| {
+            if !node.hash_flag() {
+                // Can't skip a node that we don't know the hash for.
+                return false
+            }
+            if self.changes.contains(node.full_key()) {
+                // Can't skip a node that was changed.
+                return false
+            }
+            if self.all_branch_nodes_in_database {
+                // Special case when we store all branch nodes in the database, along with the
+                // hashes for leaf nodes.
+
+                if
+                // Current node doesn't have a tree flag set, so it's a leaf node. Only branch
+                // nodes have the tree flag set.
+                !node.tree_flag() &&
+                // Parent branch node of the current leaf node is at the path that has destroyed nodes.
+                // It means that some of the leaf node siblings were destroyed.
+                self.destroyed_paths.contains(&node.key)
+                {
+                    // Can't skip any of the leaf nodes that had its siblings destroyed.
+                    //
+                    // The reason for this is that if a branch node has two child leaf nodes, and
+                    // one of them is destroyed, then the branch node is deleted, and leaf node key
+                    // is changed. It also changes the leaf node hash, so we can't reuse it.
+                    return false
+                }
+            }
+
+            true
+        });
         trace!(
             target: "trie::walker",
             old,
@@ -148,6 +182,7 @@ impl<C: TrieCursor> TrieWalker<C> {
             can_skip_current_node: false,
             removed_keys: None,
             all_branch_nodes_in_database: false,
+            destroyed_paths: PrefixSet::default(),
             #[cfg(feature = "metrics")]
             metrics: WalkerMetrics::default(),
         };
@@ -162,11 +197,10 @@ impl<C: TrieCursor> TrieWalker<C> {
         this
     }
 
-    pub const fn with_all_branch_nodes_in_database(
-        mut self,
-        all_branch_nodes_in_database: bool,
-    ) -> Self {
-        self.all_branch_nodes_in_database = all_branch_nodes_in_database;
+    pub fn with_all_branch_nodes_in_database(mut self, destroyed_paths: &B256Set) -> Self {
+        self.all_branch_nodes_in_database = true;
+        self.destroyed_paths =
+            destroyed_paths.iter().map(Nibbles::unpack).collect::<PrefixSetMut>().freeze();
         self
     }
 

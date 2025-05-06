@@ -354,7 +354,6 @@ fn validate_state_root<H: BlockHeader + Sealable + Debug>(
     expected: SealedHeader<H>,
     target_block: BlockNumber,
 ) -> Result<(), StageError> {
-    return Ok(());
     if got == expected.state_root() {
         Ok(())
     } else {
