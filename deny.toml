@@ -52,6 +52,7 @@ allow = [
     "Zlib",
     # https://github.com/rustls/webpki/blob/main/LICENSE ISC Style
     "LicenseRef-rustls-webpki",
+    "CDLA-Permissive-2.0",
 ]
 
 # Allow 1 or more licenses on a per-crate basis, so that particular licenses
