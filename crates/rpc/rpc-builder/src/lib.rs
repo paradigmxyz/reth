@@ -32,15 +32,11 @@ use jsonrpsee::{
     },
     Methods, RpcModule,
 };
-use reth_chainspec::EthereumHardforks;
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_evm::ConfigureEvm;
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_primitives_traits::NodePrimitives;
-use reth_provider::{
-    AccountReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
-    ChangeSetReader, FullRpcProvider, ProviderBlock, StateProviderFactory,
-};
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthApi, EthApiBuilder, EthBundle, MinerApi, NetApi,
     OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, ValidationApiConfig, Web3Api,
@@ -52,6 +48,10 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{EthConfig, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, CompressionLayer, JwtAuthValidator, JwtSecret};
+use reth_storage_api::{
+    AccountReader, BlockReader, BlockReaderIdExt, ChangeSetReader, FullRpcProvider, ProviderBlock,
+    StateProviderFactory,
+};
 use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{noop::NoopTransactionPool, PoolTransaction, TransactionPool};
 use serde::{Deserialize, Serialize};
@@ -94,6 +94,7 @@ pub use eth::EthHandlers;
 // Rpc server metrics
 mod metrics;
 pub use metrics::{MeteredRequestFuture, RpcRequestMetricsService};
+use reth_chain_state::CanonStateSubscriptions;
 use reth_rpc::eth::sim_bundle::EthSimBundle;
 
 // Rpc rate limiter
