@@ -23,7 +23,7 @@ use alloy_eips::{eip2930::AccessList, eip4895::Withdrawals};
 use alloy_evm::block::{BlockExecutorFactory, BlockExecutorFor};
 use alloy_primitives::{Address, B256};
 use core::{error::Error, fmt::Debug};
-use execute::{BlockAssembler, BlockBuilder};
+use execute::{BasicBlockExecutor, BlockAssembler, BlockBuilder};
 use reth_primitives_traits::{
     BlockTy, HeaderTy, NodePrimitives, ReceiptTy, SealedBlock, SealedHeader, TxTy,
 };
@@ -269,6 +269,12 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         let evm = self.evm_with_env(db, evm_env);
         let ctx = self.context_for_next_block(parent, attributes);
         Ok(self.create_block_builder(evm, parent, ctx))
+    }
+
+    /// Returns a new [`BasicBlockExecutor`].
+    #[auto_impl(keep_default_for(&, Arc))]
+    fn batch_executor<DB: Database>(&self, db: DB) -> BasicBlockExecutor<&Self, DB> {
+        BasicBlockExecutor::new(self, db)
     }
 }
 

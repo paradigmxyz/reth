@@ -11,7 +11,7 @@ use super::stream::DEFAULT_PARALLELISM;
 /// Factory for creating new backfill jobs.
 #[derive(Debug, Clone)]
 pub struct BackfillJobFactory<E, P> {
-    executor: E,
+    evm_config: E,
     provider: P,
     prune_modes: PruneModes,
     thresholds: ExecutionStageThresholds,
@@ -20,9 +20,9 @@ pub struct BackfillJobFactory<E, P> {
 
 impl<E, P> BackfillJobFactory<E, P> {
     /// Creates a new [`BackfillJobFactory`].
-    pub fn new(executor: E, provider: P) -> Self {
+    pub fn new(evm_config: E, provider: P) -> Self {
         Self {
-            executor,
+            evm_config,
             provider,
             prune_modes: PruneModes::none(),
             thresholds: ExecutionStageThresholds {
@@ -64,7 +64,7 @@ impl<E: Clone, P: Clone> BackfillJobFactory<E, P> {
     /// Creates a new backfill job for the given range.
     pub fn backfill(&self, range: RangeInclusive<BlockNumber>) -> BackfillJob<E, P> {
         BackfillJob {
-            executor: self.executor.clone(),
+            evm_config: self.evm_config.clone(),
             provider: self.provider.clone(),
             prune_modes: self.prune_modes.clone(),
             range,
@@ -78,9 +78,9 @@ impl BackfillJobFactory<(), ()> {
     /// Creates a new [`BackfillJobFactory`] from [`FullNodeComponents`].
     pub fn new_from_components<Node: FullNodeComponents>(
         components: Node,
-    ) -> BackfillJobFactory<Node::Executor, Node::Provider> {
+    ) -> BackfillJobFactory<Node::Evm, Node::Provider> {
         BackfillJobFactory::<_, _>::new(
-            components.block_executor().clone(),
+            components.evm_config().clone(),
             components.provider().clone(),
         )
     }
