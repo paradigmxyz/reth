@@ -1343,8 +1343,9 @@ mod tests {
         let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
         let real_key = address!("0xa2c122be93b0074270ebee7f6b7292c7deb45047");
 
-        for i in 1..5 {
-            let key = ShardedKey::new(real_key, i * 100);
+        let shards = 5;
+        for i in 1..=shards {
+            let key = ShardedKey::new(real_key, if i == shards { u64::MAX } else { i * 100 });
             let list = IntegerList::new_pre_sorted([i * 100u64]);
 
             db.update(|tx| tx.put::<AccountsHistory>(key.clone(), list.clone()).expect(""))
