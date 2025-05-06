@@ -62,5 +62,6 @@ arbitrary = [
     "revm-primitives/arbitrary",
     "revm/arbitrary",
     "reth-ethereum/arbitrary",
+    "alloy-rpc-types-engine/arbitrary",
 ]
 default = []
