@@ -17,7 +17,11 @@ use reth_network_p2p::{
 };
 use reth_node_api::HeaderTy;
 use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
-use reth_stages::{prelude::DefaultStages, stages::ExecutionStage, Pipeline, StageSet};
+use reth_stages::{
+    prelude::DefaultStages,
+    stages::{EraImportSource, EraStage, ExecutionStage},
+    Pipeline, StageId, StageSet,
+};
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::debug;
@@ -37,6 +41,7 @@ pub fn build_networked_pipeline<N, Client, Evm>(
     static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     evm_config: Evm,
     exex_manager_handle: ExExManagerHandle<N::Primitives>,
+    era_import_source: Option<EraImportSource>,
 ) -> eyre::Result<Pipeline<N>>
 where
     N: ProviderNodeTypes,
@@ -64,6 +69,7 @@ where
         static_file_producer,
         evm_config,
         exex_manager_handle,
+        era_import_source,
     )?;
 
     Ok(pipeline)
@@ -83,6 +89,7 @@ pub fn build_pipeline<N, H, B, Evm>(
     static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     evm_config: Evm,
     exex_manager_handle: ExExManagerHandle<N::Primitives>,
+    era_import_source: Option<EraImportSource>,
 ) -> eyre::Result<Pipeline<N>>
 where
     N: ProviderNodeTypes,
@@ -101,28 +108,37 @@ where
 
     let prune_modes = prune_config.map(|prune| prune.segments).unwrap_or_default();
 
+    let stages = DefaultStages::new(
+        provider_factory.clone(),
+        tip_rx,
+        Arc::clone(&consensus),
+        header_downloader,
+        body_downloader,
+        evm_config.clone(),
+        stage_config.clone(),
+        prune_modes,
+    )
+    .set(ExecutionStage::new(
+        evm_config,
+        consensus,
+        stage_config.execution.into(),
+        stage_config.execution_external_clean_threshold(),
+        exex_manager_handle,
+    ));
+
+    let stages = if let Some(era_import_source) = era_import_source {
+        stages.add_before(
+            EraStage::new(Some(era_import_source), stage_config.etl.clone()),
+            StageId::Headers,
+        )
+    } else {
+        stages
+    };
+
     let pipeline = builder
         .with_tip_sender(tip_tx)
         .with_metrics_tx(metrics_tx)
-        .add_stages(
-            DefaultStages::new(
-                provider_factory.clone(),
-                tip_rx,
-                Arc::clone(&consensus),
-                header_downloader,
-                body_downloader,
-                evm_config.clone(),
-                stage_config.clone(),
-                prune_modes,
-            )
-            .set(ExecutionStage::new(
-                evm_config,
-                consensus,
-                stage_config.execution.into(),
-                stage_config.execution_external_clean_threshold(),
-                exex_manager_handle,
-            )),
-        )
+        .add_stages(stages)
         .build(provider_factory, static_file_producer);
 
     Ok(pipeline)
