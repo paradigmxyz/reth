@@ -1,12 +1,11 @@
-use crate::{OpBuiltPayload, OpNodeTypes, OpPayloadBuilderAttributes};
+use crate::{OpBuiltPayload, OpPayloadBuilderAttributes};
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, B256};
 use alloy_rpc_types_engine::PayloadAttributes;
 use reth_e2e_test_utils::{
     transaction::TransactionTestContext, wallet::Wallet, NodeHelperType, TmpDB,
 };
-use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeTypesWithDBAdapter};
-use reth_node_builder::Node;
+use reth_node_api::NodeTypesWithDBAdapter;
 use reth_optimism_chainspec::OpChainSpecBuilder;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_provider::providers::BlockchainProvider;

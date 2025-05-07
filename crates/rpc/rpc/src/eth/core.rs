@@ -100,7 +100,7 @@ where
     /// use reth_transaction_pool::{noop::NoopTransactionPool, EthPooledTransaction};
     /// let eth_api = EthApi::builder(
     ///     NoopProvider::default(),
-    ///     NoopTransactionPool::<EthPooledTransaction>::default(),
+    ///     NoopTransactionPool::default(),
     ///     NoopNetwork::default(),
     ///     EthEvmConfig::mainnet(),
     /// )

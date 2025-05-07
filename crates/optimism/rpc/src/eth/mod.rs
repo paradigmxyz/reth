@@ -16,7 +16,7 @@ use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_consensus::NoopConsensus;
 use reth_db_api::FullDatabase;
-use reth_evm::{noop::NoopBlockExecutorProvider, ConfigureEvm};
+use reth_evm::ConfigureEvm;
 use reth_network_api::{noop::NoopNetwork, NetworkInfo};
 use reth_node_api::{
     FullNodeComponents, FullNodeTypesAdapter, NodePrimitives, NodeTypes, NodeTypesWithDBAdapter,
@@ -347,7 +347,6 @@ impl OpEthApiBuilder {
                 NoopNetwork<OpNetworkPrimitives>,
                 NoopTransactionPool<OpPooledTransaction>,
                 OpEvmConfig,
-                NoopBlockExecutorProvider<OpPrimitives>,
                 NoopConsensus,
             >,
         >,
@@ -365,7 +364,7 @@ impl OpEthApiBuilder {
     {
         let eth_api = reth_rpc::EthApiBuilder::new(
             provider,
-            NoopTransactionPool::<OpPooledTransaction>::default(),
+            NoopTransactionPool::<OpPooledTransaction>::new(),
             NoopNetwork::<OpNetworkPrimitives>::new(),
             evm_config,
         )
@@ -430,7 +429,7 @@ impl<P> OpNodeOnlyEvm<P> {
         Self {
             provider,
             evm_config,
-            noop_pool: NoopTransactionPool::<OpPooledTransaction>::default(),
+            noop_pool: NoopTransactionPool::<OpPooledTransaction>::new(),
             noop_network: NoopNetwork::default(),
         }
     }

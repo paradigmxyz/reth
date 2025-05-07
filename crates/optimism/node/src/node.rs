@@ -9,10 +9,9 @@ use crate::{
 use op_alloy_consensus::{interop::SafetyLevel, OpPooledTransaction};
 use reth_chainspec::{EthChainSpec, Hardforks};
 use reth_evm::{ConfigureEvm, EvmFactory, EvmFactoryFor};
-use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives, PeersInfo};
+use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, PeersInfo};
 use reth_node_api::{
-    AddOnsContext, FullNodeComponents, KeyHasherTy, NodeAddOns, NodePrimitives,
-    NodeTypesWithDBAdapter, PrimitivesTy, TxTy,
+    AddOnsContext, FullNodeComponents, KeyHasherTy, NodeAddOns, NodePrimitives, PrimitivesTy, TxTy,
 };
 use reth_node_builder::{
     components::{
@@ -176,19 +175,16 @@ impl OpNode {
     }
 }
 
-impl NodeTypes for OpNode {
-    type Primitives = <OpNodeTypes as NodeTypes>::Primitives;
-    type ChainSpec = <OpNodeTypes as NodeTypes>::ChainSpec;
-    type StateCommitment = <OpNodeTypes as NodeTypes>::StateCommitment;
-    type Storage = <OpNodeTypes as NodeTypes>::Storage;
-    type Payload = <OpNodeTypes as NodeTypes>::Payload;
-}
-
-impl<DB, Provider, N> Node<N> for OpNode
+impl<N> Node<N> for OpNode
 where
-    N: FullNodeTypes<Types = OpNodeTypes, DB = DB, Provider = Provider>,
-    DB: FullDatabase + 'static,
-    Provider: FullProvider<NodeTypesWithDBAdapter<N::Types, DB>>,
+    N: FullNodeTypes<
+        Types: NodeTypes<
+            Payload = OpEngineTypes,
+            ChainSpec = OpChainSpec,
+            Primitives = OpPrimitives,
+            Storage = OpStorage,
+        >,
+    >,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
@@ -217,8 +213,7 @@ where
 
 impl<N> DebugNode<N> for OpNode
 where
-    Self: Node<N>,
-    N: FullNodeComponents<Types = OpNodeTypes>,
+    N: FullNodeComponents<Types = Self>,
 {
     type RpcBlock = alloy_rpc_types_eth::Block<op_alloy_consensus::OpTxEnvelope>;
 
@@ -234,11 +229,7 @@ where
     }
 }
 
-/// Basic blockchain types for OP stack.
-#[derive(Debug, Default, Clone)]
-pub struct OpNodeTypes;
-
-impl NodeTypes for OpNodeTypes {
+impl NodeTypes for OpNode {
     type Primitives = OpPrimitives;
     type ChainSpec = OpChainSpec;
     type StateCommitment = MerklePatriciaTrie;
@@ -294,7 +285,7 @@ where
 impl<N> NodeAddOns<N> for OpAddOns<N>
 where
     N: FullNodeComponents<
-        Types = OpNodeTypes,
+        Types = Self,
         Evm: ConfigureEvm<NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     >,
     OpEthApiError: FromEvmError<N::Evm>,
@@ -374,7 +365,7 @@ where
 impl<N> RethRpcAddOns<N> for OpAddOns<N>
 where
     N: FullNodeComponents<
-        Types = OpNodeTypes,
+        Types = OpNode,
         Evm: ConfigureEvm<NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     >,
     OpEthApiError: FromEvmError<N::Evm>,
@@ -390,7 +381,7 @@ where
 
 impl<N> EngineValidatorAddOn<N> for OpAddOns<N>
 where
-    N: FullNodeComponents<Types = OpNodeTypes>,
+    N: FullNodeComponents<Types = OpNode>,
     OpEthApiBuilder: EthApiBuilder<N>,
 {
     type Validator = OpEngineValidator<N::Provider>;

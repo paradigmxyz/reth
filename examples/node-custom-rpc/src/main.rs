@@ -133,7 +133,7 @@ mod tests {
     use jsonrpsee::{
         http_client::HttpClientBuilder, server::ServerBuilder, ws_client::WsClientBuilder,
     };
-    use reth_ethereum::pool::{noop::NoopTransactionPool, EthPooledTransaction};
+    use reth_ethereum::pool::noop::NoopTransactionPool;
 
     #[cfg(test)]
     impl<Pool> TxpoolExtApiServer for TxpoolExt<Pool>
@@ -204,7 +204,7 @@ mod tests {
     async fn start_server() -> std::net::SocketAddr {
         let server = ServerBuilder::default().build("127.0.0.1:0").await.unwrap();
         let addr = server.local_addr().unwrap();
-        let pool = NoopTransactionPool::<EthPooledTransaction>::default();
+        let pool = NoopTransactionPool::default();
         let api = TxpoolExt { pool };
         let server_handle = server.start(api.into_rpc());
 

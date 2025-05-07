@@ -35,14 +35,14 @@ pub struct NoopTransactionPool<T = EthPooledTransaction> {
     _marker: PhantomData<T>,
 }
 
-impl<T: EthPoolTransaction> NoopTransactionPool<T> {
+impl<T> NoopTransactionPool<T> {
     /// Creates a new [`NoopTransactionPool`].
     pub fn new() -> Self {
         Self { _marker: Default::default() }
     }
 }
 
-impl<T> Default for NoopTransactionPool<T> {
+impl Default for NoopTransactionPool<EthPooledTransaction> {
     fn default() -> Self {
         Self { _marker: Default::default() }
     }
