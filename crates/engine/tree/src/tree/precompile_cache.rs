@@ -2,7 +2,7 @@
 
 use alloy_primitives::Bytes;
 use reth_evm::precompiles::{DynPrecompile, Precompile};
-use revm::precompile::{PrecompileError, PrecompileResult};
+use revm::precompile::{PrecompileOutput, PrecompileResult};
 use std::sync::Arc;
 
 /// Cache for precompiles, for each input stores the result.
@@ -41,12 +41,8 @@ pub struct CacheKey(alloy_primitives::Bytes);
 /// Combined entry containing both the result and gas bounds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CacheEntry {
-    /// The actual result of executing the precompile.
-    result: PrecompileResult,
-    /// Observed gas used on successful run
-    gas_used: u64,
-    /// Gas limit observed on call error.
-    err_gas_limit: u64,
+    /// The actual output of executing the precompile.
+    output: PrecompileOutput,
 }
 
 /// A cache for precompile inputs / outputs.
@@ -100,54 +96,24 @@ impl Precompile for CachedPrecompile {
     fn call(&self, data: &Bytes, gas_limit: u64) -> PrecompileResult {
         let key = CacheKey(data.clone());
 
-        let cache_result = self.cache.get(&key);
-
-        if let Some(entry) = &cache_result {
-            match &entry.result {
-                Ok(_) => {
-                    self.increment_by_one_precompile_cache_hits();
-                    if gas_limit < entry.gas_used {
-                        return Err(PrecompileError::OutOfGas)
-                    }
-                    return entry.result.clone()
-                }
-                Err(PrecompileError::OutOfGas) => {
-                    if gas_limit <= entry.err_gas_limit {
-                        // entry.err_gas_limit gave OOG previously, anything equal or below
-                        // should fail with OOG too.
-                        self.increment_by_one_precompile_cache_hits();
-                        return Err(PrecompileError::OutOfGas)
-                    }
-                }
-                err => {
-                    if gas_limit > entry.err_gas_limit {
-                        // entry.err_gas_limit did not give OOG previously (it gave `err`),
-                        // anything equal or above should not give it either
-                        self.increment_by_one_precompile_cache_hits();
-                        return err.clone()
-                    }
-                }
+        if let Some(entry) = &self.cache.get(&key) {
+            self.increment_by_one_precompile_cache_hits();
+            if gas_limit >= entry.output.gas_used {
+                return Ok(entry.output.clone())
             }
         }
 
-        // cache miss or error with not yet seen gas limit, call the precompile
+        // cache miss, call the precompile
         self.increment_by_one_precompile_cache_misses();
         let result = self.precompile.call(data, gas_limit);
 
         let previous_cache_size = self.cache_size();
         match &result {
-            Ok(val) => {
-                self.cache.insert(
-                    key,
-                    CacheEntry { result: result.clone(), gas_used: val.gas_used, err_gas_limit: 0 },
-                );
+            Ok(output) => {
+                self.cache.insert(key, CacheEntry { output: output.clone() });
             }
             _ => {
                 self.increment_by_one_precompile_errors();
-                self.cache.insert(
-                    key,
-                    CacheEntry { result: result.clone(), gas_used: 0, err_gas_limit: gas_limit },
-                );
             }
         }
 
@@ -191,12 +157,12 @@ mod tests {
 
         let key = CacheKey(b"test_input".into());
 
-        let result = Ok(PrecompileOutput {
+        let output = PrecompileOutput {
             gas_used: 50,
             bytes: alloy_primitives::Bytes::copy_from_slice(b"cached_result"),
-        });
+        };
 
-        let expected = CacheEntry { result, gas_used: 100, err_gas_limit: 100 };
+        let expected = CacheEntry { output };
         cache.cache.insert(key.clone(), expected.clone());
 
         let actual = cache.cache.get(&key).unwrap();
