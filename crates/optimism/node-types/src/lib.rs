@@ -1,4 +1,4 @@
-//! EVM config for vanilla optimism.
+//! Optimism types derived from the [`OpPrimitives`].
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
