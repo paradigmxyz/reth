@@ -5325,6 +5325,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "lz4"
+version = "1.28.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a20b523e860d03443e98350ceaac5e71c6ba89aea7d960769ec3ce37f4de5af4"
+dependencies = [
+ "lz4-sys",
+]
+
+[[package]]
+name = "lz4-sys"
+version = "1.11.1+lz4-1.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6bd8c0d6c6ed0cd30b3652886bb8711dc4bb01d637a68105a3d5158039b418e6"
+dependencies = [
+ "cc",
+ "libc",
+]
+
+[[package]]
 name = "lz4_flex"
 version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6875,6 +6894,7 @@ version = "1.3.12"
 dependencies = [
  "alloy-rpc-types",
  "aquamarine",
+ "backon",
  "clap",
  "eyre",
  "reth-chainspec",
@@ -6910,6 +6930,8 @@ dependencies = [
  "reth-tasks",
  "reth-tokio-util",
  "reth-transaction-pool",
+ "similar-asserts",
+ "tempfile",
  "tokio",
  "tracing",
 ]
@@ -7058,6 +7080,7 @@ dependencies = [
  "futures",
  "human_bytes",
  "itertools 0.14.0",
+ "lz4",
  "proptest",
  "proptest-arbitrary-interop",
  "ratatui",
@@ -7108,6 +7131,7 @@ dependencies = [
  "secp256k1",
  "serde",
  "serde_json",
+ "tar",
  "tokio",
  "tokio-stream",
  "toml",
@@ -11464,6 +11488,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 
 [[package]]
+name = "tar"
+version = "0.4.44"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d863878d212c87a19c1a610eb53bb01fe12951c0501cf5a0d65f724914a667a"
+dependencies = [
+ "filetime",
+ "libc",
+ "xattr",
+]
+
+[[package]]
 name = "tar-no-std"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13174,6 +13209,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "05f360fc0b24296329c78fda852a1e9ae82de9cf7b27dae4b7f62f118f77b9ed"
 dependencies = [
  "tap",
+]
+
+[[package]]
+name = "xattr"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d65cbf2f12c15564212d48f4e3dfb87923d25d611f2aed18f4cb23f0413d89e"
+dependencies = [
+ "libc",
+ "rustix 1.0.7",
 ]
 
 [[package]]
