@@ -42,6 +42,16 @@ pub struct CacheKey(alloy_primitives::Bytes);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CacheEntry(PrecompileOutput);
 
+impl CacheEntry {
+    const fn gas_used(&self) -> u64 {
+        self.0.gas_used
+    }
+
+    fn to_precompile_result(&self) -> PrecompileResult {
+        Ok(self.0.clone())
+    }
+}
+
 /// A cache for precompile inputs / outputs.
 #[derive(Debug)]
 pub(crate) struct CachedPrecompile {
@@ -89,8 +99,8 @@ impl Precompile for CachedPrecompile {
 
         if let Some(entry) = &self.cache.get(&key) {
             self.increment_by_one_precompile_cache_hits();
-            if gas_limit >= entry.0.gas_used {
-                return Ok(entry.0.clone())
+            if gas_limit >= entry.gas_used() {
+                return entry.to_precompile_result()
             }
         }
 
