@@ -11,13 +11,15 @@
 
 extern crate alloc;
 
-use alloc::{fmt::Debug, string::String, sync::Arc, vec::Vec};
+use alloc::{fmt::Debug, string::String, vec::Vec};
 use alloy_consensus::Header;
-use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256, U256};
+use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256};
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{
-    constants::MINIMUM_GAS_LIMIT, transaction::error::InvalidTransactionError, Block, GotExpected,
-    GotExpectedBoxed, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
+    constants::{MAXIMUM_GAS_LIMIT_BLOCK, MINIMUM_GAS_LIMIT},
+    transaction::error::InvalidTransactionError,
+    Block, GotExpected, GotExpectedBoxed, NodePrimitives, RecoveredBlock, SealedBlock,
+    SealedHeader,
 };
 
 /// A consensus implementation that does nothing.
@@ -30,7 +32,7 @@ pub mod test_utils;
 /// [`Consensus`] implementation which knows full node primitives and is able to validation block's
 /// execution outcome.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait FullConsensus<N: NodePrimitives>: AsConsensus<N::Block> {
+pub trait FullConsensus<N: NodePrimitives>: Consensus<N::Block> {
     /// Validate a block considering world state, i.e. things that can not be checked before
     /// execution.
     ///
@@ -46,7 +48,7 @@ pub trait FullConsensus<N: NodePrimitives>: AsConsensus<N::Block> {
 
 /// Consensus is a protocol that chooses canonical chain.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait Consensus<B: Block>: AsHeaderValidator<B::Header> {
+pub trait Consensus<B: Block>: HeaderValidator<B::Header> {
     /// The error type related to consensus.
     type Error;
 
@@ -119,52 +121,6 @@ pub trait HeaderValidator<H = Header>: Debug + Send + Sync {
         }
         Ok(())
     }
-
-    /// Validate if the header is correct and follows the consensus specification, including
-    /// computed properties (like total difficulty).
-    ///
-    /// Some consensus engines may want to do additional checks here.
-    ///
-    /// Note: validating headers with TD does not include other HeaderValidator validation.
-    fn validate_header_with_total_difficulty(
-        &self,
-        header: &H,
-        total_difficulty: U256,
-    ) -> Result<(), ConsensusError>;
-}
-
-/// Helper trait to cast `Arc<dyn Consensus>` to `Arc<dyn HeaderValidator>`
-pub trait AsHeaderValidator<H>: HeaderValidator<H> {
-    /// Converts the [`Arc`] of self to [`Arc`] of [`HeaderValidator`]
-    fn as_header_validator<'a>(self: Arc<Self>) -> Arc<dyn HeaderValidator<H> + 'a>
-    where
-        Self: 'a;
-}
-
-impl<T: HeaderValidator<H>, H> AsHeaderValidator<H> for T {
-    fn as_header_validator<'a>(self: Arc<Self>) -> Arc<dyn HeaderValidator<H> + 'a>
-    where
-        Self: 'a,
-    {
-        self
-    }
-}
-
-/// Helper trait to cast `Arc<dyn FullConsensus>` to `Arc<dyn Consensus>`
-pub trait AsConsensus<B: Block>: Consensus<B> {
-    /// Converts the [`Arc`] of self to [`Arc`] of [`HeaderValidator`]
-    fn as_consensus<'a>(self: Arc<Self>) -> Arc<dyn Consensus<B, Error = Self::Error> + 'a>
-    where
-        Self: 'a;
-}
-
-impl<T: Consensus<B>, B: Block> AsConsensus<B> for T {
-    fn as_consensus<'a>(self: Arc<Self>) -> Arc<dyn Consensus<B, Error = Self::Error> + 'a>
-    where
-        Self: 'a,
-    {
-        self
-    }
 }
 
 /// Consensus Errors
@@ -175,6 +131,14 @@ pub enum ConsensusError {
     HeaderGasUsedExceedsGasLimit {
         /// The gas used in the block header.
         gas_used: u64,
+        /// The gas limit in the block header.
+        gas_limit: u64,
+    },
+    /// Error when the gas the gas limit is more than the maximum allowed.
+    #[error(
+        "header gas limit ({gas_limit}) exceed the maximum allowed gas limit ({MAXIMUM_GAS_LIMIT_BLOCK})"
+    )]
+    HeaderGasLimitExceedsMax {
         /// The gas limit in the block header.
         gas_limit: u64,
     },
@@ -412,6 +376,15 @@ pub enum ConsensusError {
     GasLimitInvalidMinimum {
         /// The child gas limit.
         child_gas_limit: u64,
+    },
+
+    /// Error indicating that the block gas limit is above the allowed maximum.
+    ///
+    /// This error occurs when the gas limit is more than the specified maximum gas limit.
+    #[error("child gas limit {block_gas_limit} is above the maximum allowed limit ({MAXIMUM_GAS_LIMIT_BLOCK})")]
+    GasLimitInvalidBlockMaximum {
+        /// block gas limit.
+        block_gas_limit: u64,
     },
 
     /// Error when the child gas limit exceeds the maximum allowed decrease.

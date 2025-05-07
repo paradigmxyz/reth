@@ -56,6 +56,13 @@ pub struct MaintainPoolConfig {
     /// Maximum amount of time non-executable, non local transactions are queued.
     /// Default: 3 hours
     pub max_tx_lifetime: Duration,
+
+    /// Apply no exemptions to the locally received transactions.
+    ///
+    /// This includes:
+    ///   - no price exemptions
+    ///   - no eviction exemptions
+    pub no_local_exemptions: bool,
 }
 
 impl Default for MaintainPoolConfig {
@@ -64,6 +71,7 @@ impl Default for MaintainPoolConfig {
             max_update_depth: 64,
             max_reload_accounts: 100,
             max_tx_lifetime: MAX_QUEUED_TRANSACTION_LIFETIME,
+            no_local_exemptions: false,
         }
     }
 }
@@ -257,8 +265,8 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                     .queued_transactions()
                     .into_iter()
                     .filter(|tx| {
-                        // filter stale external txs
-                        tx.origin.is_external() && tx.timestamp.elapsed() > config.max_tx_lifetime
+                        // filter stale transactions based on config
+                        (tx.origin.is_external() || config.no_local_exemptions) && tx.timestamp.elapsed() > config.max_tx_lifetime
                     })
                     .map(|tx| *tx.hash())
                     .collect();
@@ -567,7 +575,6 @@ fn load_accounts<Client, I>(
 ) -> Result<LoadedAccounts, Box<(HashSet<Address>, ProviderError)>>
 where
     I: IntoIterator<Item = Address>,
-
     Client: StateProviderFactory,
 {
     let addresses = addresses.into_iter();
@@ -731,7 +738,9 @@ mod tests {
     async fn test_save_local_txs_backup() {
         let temp_dir = tempfile::tempdir().unwrap();
         let transactions_path = temp_dir.path().join(FILENAME).with_extension(EXTENSION);
-        let tx_bytes = hex!("02f87201830655c2808505ef61f08482565f94388c818ca8b9251b393131c08a736a67ccb192978801049e39c4b5b1f580c001a01764ace353514e8abdfb92446de356b260e3c1225b73fc4c8876a6258d12a129a04f02294aa61ca7676061cd99f29275491218b4754b46a0248e5e42bc5091f507");
+        let tx_bytes = hex!(
+            "02f87201830655c2808505ef61f08482565f94388c818ca8b9251b393131c08a736a67ccb192978801049e39c4b5b1f580c001a01764ace353514e8abdfb92446de356b260e3c1225b73fc4c8876a6258d12a129a04f02294aa61ca7676061cd99f29275491218b4754b46a0248e5e42bc5091f507"
+        );
         let tx = PooledTransaction::decode_2718(&mut &tx_bytes[..]).unwrap();
         let provider = MockEthProvider::default();
         let transaction = EthPooledTransaction::from_pooled(tx.try_into_recovered().unwrap());

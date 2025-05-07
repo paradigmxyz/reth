@@ -2,7 +2,8 @@
 
 use crate::{
     supervisor::{
-        parse_access_list_items_to_inbox_entries, ExecutingDescriptor, InteropTxValidatorError,
+        metrics::SupervisorMetrics, parse_access_list_items_to_inbox_entries, ExecutingDescriptor,
+        InteropTxValidatorError,
     },
     InvalidCrossTx,
 };
@@ -11,7 +12,12 @@ use alloy_primitives::{TxHash, B256};
 use alloy_rpc_client::ReqwestClient;
 use futures_util::future::BoxFuture;
 use op_alloy_consensus::interop::SafetyLevel;
-use std::{borrow::Cow, future::IntoFuture, time::Duration};
+use std::{
+    borrow::Cow,
+    future::IntoFuture,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tracing::trace;
 
 /// Supervisor hosted by op-labs
@@ -19,37 +25,29 @@ use tracing::trace;
 pub const DEFAULT_SUPERVISOR_URL: &str = "http://localhost:1337/";
 
 /// The default request timeout to use
-const DEFAULT_REQUEST_TIMOUT: Duration = Duration::from_millis(100);
+pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(100);
 
 /// Implementation of the supervisor trait for the interop.
 #[derive(Debug, Clone)]
 pub struct SupervisorClient {
-    client: ReqwestClient,
-    /// The default
-    safety: SafetyLevel,
-    /// The default request timeout
-    timeout: Duration,
+    /// Stores type's data.
+    inner: Arc<SupervisorClientInner>,
 }
 
 impl SupervisorClient {
-    /// Creates a new supervisor validator.
-    pub async fn new(supervisor_endpoint: impl Into<String>, safety: SafetyLevel) -> Self {
-        let client = ReqwestClient::builder()
-            .connect(supervisor_endpoint.into().as_str())
-            .await
-            .expect("building supervisor client");
-        Self { client, safety, timeout: DEFAULT_REQUEST_TIMOUT }
+    /// Returns a new [`SupervisorClientBuilder`].
+    pub fn builder(supervisor_endpoint: impl Into<String>) -> SupervisorClientBuilder {
+        SupervisorClientBuilder::new(supervisor_endpoint)
     }
 
-    /// Configures a custom timeout
-    pub fn with_timeout(mut self, timeout: Duration) -> Self {
-        self.timeout = timeout;
-        self
+    /// Returns configured timeout. See [`SupervisorClientInner`].
+    pub fn timeout(&self) -> Duration {
+        self.inner.timeout
     }
 
-    /// Returns safely level
+    /// Returns configured minimum safety level. See [`SupervisorClient`].
     pub fn safety(&self) -> SafetyLevel {
-        self.safety
+        self.inner.safety
     }
 
     /// Executes a `supervisor_checkAccessList` with the configured safety level.
@@ -59,11 +57,12 @@ impl SupervisorClient {
         executing_descriptor: ExecutingDescriptor,
     ) -> CheckAccessListRequest<'a> {
         CheckAccessListRequest {
-            client: self.client.clone(),
+            client: self.inner.client.clone(),
             inbox_entries: Cow::Borrowed(inbox_entries),
             executing_descriptor,
-            timeout: self.timeout,
-            safety: self.safety,
+            timeout: self.inner.timeout,
+            safety: self.inner.safety,
+            metrics: self.inner.metrics.clone(),
         }
     }
 
@@ -114,6 +113,74 @@ impl SupervisorClient {
     }
 }
 
+/// Holds supervisor data. Inner type of [`SupervisorClient`].
+#[derive(Debug, Clone)]
+pub struct SupervisorClientInner {
+    client: ReqwestClient,
+    /// The default
+    safety: SafetyLevel,
+    /// The default request timeout
+    timeout: Duration,
+    /// Metrics for tracking supervisor operations
+    metrics: SupervisorMetrics,
+}
+
+/// Builds [`SupervisorClient`].
+#[derive(Debug)]
+pub struct SupervisorClientBuilder {
+    /// Supervisor server's socket.
+    endpoint: String,
+    /// Timeout for requests.
+    ///
+    /// NOTE: this timeout is only effective if it's shorter than the timeout configured for the
+    /// underlying [`ReqwestClient`].
+    timeout: Duration,
+    /// Minimum [`SafetyLevel`] of cross-chain transactions accepted by this client.
+    safety: SafetyLevel,
+}
+
+impl SupervisorClientBuilder {
+    /// Creates a new builder.
+    pub fn new(supervisor_endpoint: impl Into<String>) -> Self {
+        Self {
+            endpoint: supervisor_endpoint.into(),
+            timeout: DEFAULT_REQUEST_TIMEOUT,
+            safety: SafetyLevel::CrossUnsafe,
+        }
+    }
+
+    /// Configures a custom timeout
+    pub const fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
+    /// Sets minimum safety level to accept for cross chain transactions.
+    pub const fn minimum_safety(mut self, min_safety: SafetyLevel) -> Self {
+        self.safety = min_safety;
+        self
+    }
+
+    /// Creates a new supervisor validator.
+    pub async fn build(self) -> SupervisorClient {
+        let Self { endpoint, timeout, safety } = self;
+
+        let client = ReqwestClient::builder()
+            .connect(endpoint.as_str())
+            .await
+            .expect("building supervisor client");
+
+        SupervisorClient {
+            inner: Arc::new(SupervisorClientInner {
+                client,
+                safety,
+                timeout,
+                metrics: SupervisorMetrics::default(),
+            }),
+        }
+    }
+}
+
 /// A Request future that issues a `supervisor_checkAccessList` request.
 #[derive(Debug, Clone)]
 pub struct CheckAccessListRequest<'a> {
@@ -122,17 +189,18 @@ pub struct CheckAccessListRequest<'a> {
     executing_descriptor: ExecutingDescriptor,
     timeout: Duration,
     safety: SafetyLevel,
+    metrics: SupervisorMetrics,
 }
 
-impl CheckAccessListRequest<'_> {
+impl<'a> CheckAccessListRequest<'a> {
     /// Configures the timeout to use for the request if any.
-    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+    pub const fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self
     }
 
     /// Configures the [`SafetyLevel`] for this request
-    pub fn with_safety(mut self, safety: SafetyLevel) -> Self {
+    pub const fn with_safety(mut self, safety: SafetyLevel) -> Self {
         self.safety = safety;
         self
     }
@@ -143,18 +211,23 @@ impl<'a> IntoFuture for CheckAccessListRequest<'a> {
     type IntoFuture = BoxFuture<'a, Self::Output>;
 
     fn into_future(self) -> Self::IntoFuture {
-        let Self { client, inbox_entries, executing_descriptor, timeout, safety } = self;
+        let Self { client, inbox_entries, executing_descriptor, timeout, safety, metrics } = self;
         Box::pin(async move {
-            tokio::time::timeout(
+            let start = Instant::now();
+
+            let result = tokio::time::timeout(
                 timeout,
                 client.request(
                     "supervisor_checkAccessList",
                     (inbox_entries, safety, executing_descriptor),
                 ),
             )
-            .await
-            .map_err(|_| InteropTxValidatorError::ValidationTimeout(timeout.as_secs()))?
-            .map_err(InteropTxValidatorError::client)
+            .await;
+            metrics.record_supervisor_query(start.elapsed());
+
+            result
+                .map_err(|_| InteropTxValidatorError::Timeout(timeout.as_secs()))?
+                .map_err(InteropTxValidatorError::from_json_rpc)
         })
     }
 }

@@ -6,7 +6,7 @@ use crate::EthApi;
 use alloy_dyn_abi::TypedData;
 use alloy_eips::eip2718::Decodable2718;
 use alloy_network::{eip2718::Encodable2718, EthereumWallet, TransactionBuilder};
-use alloy_primitives::{eip191_hash_message, Address, PrimitiveSignature as Signature, B256};
+use alloy_primitives::{eip191_hash_message, Address, Signature, B256};
 use alloy_rpc_types_eth::TransactionRequest;
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
@@ -31,7 +31,6 @@ pub struct DevSigner {
     accounts: HashMap<Address, PrivateKeySigner>,
 }
 
-#[allow(dead_code)]
 impl DevSigner {
     /// Generates a random dev signer which satisfies [`EthSigner`] trait
     pub fn random<T: Decodable2718>() -> Box<dyn EthSigner<T>> {
@@ -44,7 +43,7 @@ impl DevSigner {
     pub fn random_signers<T: Decodable2718>(num: u32) -> Vec<Box<dyn EthSigner<T> + 'static>> {
         let mut signers = Vec::with_capacity(num as usize);
         for _ in 0..num {
-            let sk = PrivateKeySigner::random_with(&mut rand::thread_rng());
+            let sk = PrivateKeySigner::random();
 
             let address = sk.address();
             let addresses = vec![address];

@@ -1,26 +1,66 @@
 #![allow(missing_docs)]
 
-use alloy_primitives::{
-    private::proptest::test_runner::{RngAlgorithm, TestRng},
-    U256,
-};
-use criterion::*;
-use pprof::criterion::{Output, PProfProfiler};
+use alloy_primitives::{B256, U256};
+use criterion::{measurement::WallTime, *};
+use rand::SeedableRng;
+use reth_eth_wire::EthVersion;
+use reth_eth_wire_types::EthNetworkPrimitives;
 use reth_network::{
-    test_utils::Testnet,
+    test_utils::{
+        transactions::{buffer_hash_to_tx_fetcher, new_mock_session},
+        Testnet,
+    },
     transactions::{
-        TransactionFetcherConfig, TransactionPropagationMode::Max, TransactionsManagerConfig,
+        fetcher::TransactionFetcher, TransactionFetcherConfig, TransactionPropagationMode::Max,
+        TransactionsManagerConfig,
     },
 };
+use reth_network_peers::PeerId;
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 use reth_transaction_pool::{test_utils::TransactionGenerator, PoolTransaction, TransactionPool};
+use std::collections::HashMap;
 use tokio::runtime::Runtime as TokioRuntime;
 
 criterion_group!(
     name = tx_fetch_benches;
-    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
-    targets = tx_fetch_bench
+    config = Criterion::default();
+    targets = tx_fetch_bench, fetch_pending_hashes,
 );
+
+pub fn benchmark_fetch_pending_hashes(group: &mut BenchmarkGroup<'_, WallTime>, peers_num: usize) {
+    let mut tx_fetcher = TransactionFetcher::<EthNetworkPrimitives>::default();
+    let mut peers = HashMap::default();
+
+    for _i in 0..peers_num {
+        // NOTE: the worst case, each tx in the cache belongs to a different peer.
+        let peer = PeerId::random();
+        let hash = B256::random();
+
+        let (mut peer_data, _) = new_mock_session(peer, EthVersion::Eth66);
+        peer_data.seen_transactions_mut().insert(hash);
+        peers.insert(peer, peer_data);
+
+        buffer_hash_to_tx_fetcher(&mut tx_fetcher, hash, peer, 0, None);
+    }
+
+    let group_id = format!("fetch pending hashes, peers num: {peers_num}");
+
+    group.bench_function(group_id, |b| {
+        b.iter(|| {
+            tx_fetcher.on_fetch_pending_hashes(&peers, |_| true);
+        });
+    });
+}
+
+pub fn fetch_pending_hashes(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Fetch Pending Hashes");
+
+    for peers in [5, 10, 20, 100, 1000, 10000, 100000] {
+        benchmark_fetch_pending_hashes(&mut group, peers);
+    }
+
+    group.finish();
+}
 
 pub fn tx_fetch_bench(c: &mut Criterion) {
     let rt = TokioRuntime::new().unwrap();
@@ -64,11 +104,10 @@ pub fn tx_fetch_bench(c: &mut Criterion) {
                             let peer_pool = peer.pool().unwrap();
 
                             for _ in 0..num_tx_per_peer {
-                                let mut gen = TransactionGenerator::new(
-                                    TestRng::deterministic_rng(RngAlgorithm::ChaCha),
-                                );
+                                let mut tx_gen =
+                                    TransactionGenerator::new(rand::rngs::StdRng::seed_from_u64(0));
 
-                                let tx = gen.gen_eip1559_pooled();
+                                let tx = tx_gen.gen_eip1559_pooled();
                                 let sender = tx.sender();
                                 provider.add_account(
                                     sender,

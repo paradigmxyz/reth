@@ -13,7 +13,7 @@ use reth_primitives_traits::logs_bloom;
 
 /// Block builder for Ethereum.
 #[derive(Debug, Clone)]
-pub struct EthBlockAssembler<ChainSpec> {
+pub struct EthBlockAssembler<ChainSpec = reth_chainspec::ChainSpec> {
     /// The chainspec.
     pub chain_spec: Arc<ChainSpec>,
     /// Extra data to use for the blocks.

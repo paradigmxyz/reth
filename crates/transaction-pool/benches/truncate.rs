@@ -3,7 +3,6 @@ use alloy_primitives::Address;
 use criterion::{
     criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
-use pprof::criterion::{Output, PProfProfiler};
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use reth_transaction_pool::{
     pool::{BasefeeOrd, BlobTransactions, ParkedPool, PendingPool, QueuedOrd},
@@ -89,7 +88,9 @@ fn generate_many_transactions(
 
 /// Benchmarks all pool types for the truncate function.
 fn benchmark_pools(group: &mut BenchmarkGroup<'_, WallTime>, senders: usize, max_depth: usize) {
-    println!("Generating transactions for benchmark with {senders} unique senders and a max depth of {max_depth}...");
+    println!(
+        "Generating transactions for benchmark with {senders} unique senders and a max depth of {max_depth}..."
+    );
     let txs = generate_many_transactions(senders, max_depth, false);
 
     // benchmark parked pool
@@ -274,7 +275,7 @@ fn truncate_basefee(
 
 criterion_group! {
     name = truncate;
-    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    config = Criterion::default();
     targets = txpool_truncate
 }
 criterion_main!(truncate);

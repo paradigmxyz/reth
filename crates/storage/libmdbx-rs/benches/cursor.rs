@@ -2,7 +2,6 @@
 mod utils;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use pprof::criterion::{Output, PProfProfiler};
 use reth_libmdbx::{ffi::*, *};
 use std::{hint::black_box, ptr};
 use utils::*;
@@ -86,11 +85,11 @@ fn bench_get_seq_raw(c: &mut Criterion) {
     c.bench_function("bench_get_seq_raw", |b| {
         b.iter(|| unsafe {
             txn.txn_execute(|txn| {
-                mdbx_cursor_open(txn, dbi, &mut cursor);
+                mdbx_cursor_open(txn, dbi, &raw mut cursor);
                 let mut i = 0;
                 let mut count = 0u32;
 
-                while mdbx_cursor_get(cursor, &mut key, &mut data, MDBX_NEXT) == 0 {
+                while mdbx_cursor_get(cursor, &raw mut key, &raw mut data, MDBX_NEXT) == 0 {
                     i += key.iov_len + data.iov_len;
                     count += 1;
                 }
@@ -106,7 +105,7 @@ fn bench_get_seq_raw(c: &mut Criterion) {
 
 criterion_group! {
     name = benches;
-    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    config = Criterion::default();
     targets = bench_get_seq_iter, bench_get_seq_cursor, bench_get_seq_raw
 }
 criterion_main!(benches);

@@ -135,7 +135,7 @@ where
 
     /// Update the L1 block info for the given header and system transaction, if any.
     ///
-    /// Note: this supports optional system transaction, in case this is used in a dev setuo
+    /// Note: this supports optional system transaction, in case this is used in a dev setup
     pub fn update_l1_block_info<H, T>(&self, header: &H, tx: Option<&T>)
     where
         H: BlockHeader,
@@ -204,7 +204,7 @@ where
             }
             Some(Ok(_)) => {
                 // valid interop tx
-                transaction.set_interop_deadlone(
+                transaction.set_interop_deadline(
                     self.block_timestamp() + TRANSACTION_VALIDITY_WINDOW_SECS,
                 );
             }

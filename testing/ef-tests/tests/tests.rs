@@ -7,12 +7,12 @@ macro_rules! general_state_test {
     ($test_name:ident, $dir:ident) => {
         #[test]
         fn $test_name() {
+            reth_tracing::init_test_tracing();
             BlockchainTests::new(format!("GeneralStateTests/{}", stringify!($dir))).run();
         }
     };
 }
 
-#[allow(missing_docs)]
 mod general_state_tests {
     use super::*;
 
@@ -82,10 +82,11 @@ macro_rules! blockchain_test {
     ($test_name:ident, $dir:ident) => {
         #[test]
         fn $test_name() {
+            reth_tracing::init_test_tracing();
             BlockchainTests::new(format!("{}", stringify!($dir))).run();
         }
     };
 }
 
 blockchain_test!(valid_blocks, ValidBlocks);
-// blockchain_test!(invalid_blocks, InvalidBlocks);
+blockchain_test!(invalid_blocks, InvalidBlocks);

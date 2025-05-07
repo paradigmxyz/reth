@@ -644,14 +644,6 @@ impl<N: ProviderNodeTypes> CanonChainTracker for BlockchainProvider<N> {
         self.canonical_in_memory_state.last_received_update_timestamp()
     }
 
-    fn on_transition_configuration_exchanged(&self) {
-        self.canonical_in_memory_state.on_transition_configuration_exchanged();
-    }
-
-    fn last_exchanged_transition_configuration_timestamp(&self) -> Option<Instant> {
-        self.canonical_in_memory_state.last_exchanged_transition_configuration_timestamp()
-    }
-
     fn set_canonical_head(&self, header: SealedHeader<Self::Header>) {
         self.canonical_in_memory_state.set_canonical_head(header);
     }
@@ -856,7 +848,7 @@ mod tests {
         (database_blocks.to_vec(), in_memory_blocks.to_vec())
     }
 
-    #[allow(clippy::type_complexity, clippy::too_many_arguments)]
+    #[expect(clippy::type_complexity)]
     fn provider_with_chain_spec_and_random_blocks(
         rng: &mut impl Rng,
         chain_spec: Arc<ChainSpec>,
@@ -1321,8 +1313,8 @@ mod tests {
         );
 
         // A random block number should return None as the block is not found
-        let mut rng = rand::thread_rng();
-        let random_block_number: u64 = rng.gen();
+        let mut rng = rand::rng();
+        let random_block_number: u64 = rng.random();
         assert_eq!(provider.block_body_indices(random_block_number)?, None);
 
         Ok(())
@@ -2078,35 +2070,6 @@ mod tests {
     }
 
     #[test]
-    fn test_canon_state_tracker() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let (provider, _, _, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            TEST_BLOCKS_COUNT,
-            BlockRangeParams::default(),
-        )?;
-
-        let before = Instant::now();
-        provider.on_forkchoice_update_received(&Default::default());
-        let last_update_ts = provider.last_received_update_timestamp().unwrap();
-        let after = Instant::now();
-
-        // Ensure the timestamp is updated and between the before and after timestamps
-        assert!(before < last_update_ts && last_update_ts < after);
-
-        let before = Instant::now();
-        provider.on_transition_configuration_exchanged();
-        let last_update_ts = provider.last_exchanged_transition_configuration_timestamp().unwrap();
-        let after = Instant::now();
-
-        // Ensure the timestamp is updated and between the before and after timestamps
-        assert!(before < last_update_ts && last_update_ts < after);
-
-        Ok(())
-    }
-
-    #[test]
     fn test_block_id_reader() -> eyre::Result<()> {
         // Create a new provider
         let mut rng = generators::rng();
@@ -2223,7 +2186,6 @@ mod tests {
                 );
 
                 // Test range that spans database and in-memory
-                #[allow(unused_assignments)]
                 {
                     // This block will be persisted to disk and removed from memory AFTER the firsk database query. This ensures that we query the in-memory state before the database avoiding any race condition.
                     persist_block_after_db_tx_creation(provider.clone(), in_memory_blocks[0].number);

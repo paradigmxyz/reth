@@ -7,8 +7,6 @@ license.workspace = true
 
 [dependencies]
 alloy-consensus.workspace = true
-reth-provider = { workspace = true, features = ["test-utils"] }
+reth-ethereum = { workspace = true, features = ["test-utils", "network", "pool", "provider"] }
 eyre.workspace = true
 tokio.workspace = true
-reth-network.workspace = true
-reth-transaction-pool.workspace = true

@@ -206,7 +206,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             ReverseHeadersDownloaderBuilder::new(config.stages.headers)
                                 .build(fetch_client, consensus.clone()),
                             rx,
-                            consensus,
                             etl_config,
                         )),
                         None,
@@ -264,7 +263,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 ),
                 StageEnum::Execution => (
                     Box::new(ExecutionStage::new(
-                        components.executor().clone(),
+                        components.evm_config().clone(),
                         Arc::new(components.consensus().clone()),
                         ExecutionStageThresholds {
                             max_blocks: Some(batch_size),
@@ -380,6 +379,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
         Ok(())
     }
+}
+
+impl<C: ChainSpecParser> Command<C> {
     /// Returns the underlying chain being used to run this command
     pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         Some(&self.env.chain)

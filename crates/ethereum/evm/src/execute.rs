@@ -1,30 +1,12 @@
 //! Ethereum block execution strategy.
 
-use crate::EthEvmConfig;
-use alloc::sync::Arc;
-use reth_chainspec::ChainSpec;
-use reth_evm::execute::BasicBlockExecutorProvider;
-
 /// Helper type with backwards compatible methods to obtain Ethereum executor
 /// providers.
-#[derive(Debug)]
-pub struct EthExecutorProvider;
-
-impl EthExecutorProvider {
-    /// Creates a new default ethereum executor provider.
-    pub fn ethereum(chain_spec: Arc<ChainSpec>) -> BasicBlockExecutorProvider<EthEvmConfig> {
-        BasicBlockExecutorProvider::new(EthEvmConfig::new(chain_spec))
-    }
-
-    /// Returns a new provider for the mainnet.
-    pub fn mainnet() -> BasicBlockExecutorProvider<EthEvmConfig> {
-        BasicBlockExecutorProvider::new(EthEvmConfig::mainnet())
-    }
-}
+pub type EthExecutorProvider = crate::EthEvmConfig;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::EthEvmConfig;
     use alloy_consensus::{constants::ETH_TO_WEI, Header, TxLegacy};
     use alloy_eips::{
         eip2935::{HISTORY_SERVE_WINDOW, HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
@@ -35,9 +17,9 @@ mod tests {
     };
     use alloy_evm::block::BlockValidationError;
     use alloy_primitives::{b256, fixed_bytes, keccak256, Bytes, TxKind, B256, U256};
-    use reth_chainspec::{ChainSpecBuilder, EthereumHardfork, ForkCondition, MAINNET};
+    use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, ForkCondition, MAINNET};
     use reth_ethereum_primitives::{Block, BlockBody, Transaction};
-    use reth_evm::execute::{BasicBlockExecutorProvider, BlockExecutorProvider, Executor};
+    use reth_evm::{execute::Executor, ConfigureEvm};
     use reth_execution_types::BlockExecutionResult;
     use reth_primitives_traits::{
         crypto::secp256k1::public_key_to_address, Block as _, RecoveredBlock,
@@ -49,8 +31,7 @@ mod tests {
         state::{AccountInfo, Bytecode, EvmState},
         Database,
     };
-    use secp256k1::{Keypair, Secp256k1};
-    use std::sync::mpsc;
+    use std::sync::{mpsc, Arc};
 
     fn create_database_with_beacon_root_contract() -> CacheDB<EmptyDB> {
         let mut db = CacheDB::new(Default::default());
@@ -85,8 +66,8 @@ mod tests {
         db
     }
 
-    fn executor_provider(chain_spec: Arc<ChainSpec>) -> BasicBlockExecutorProvider<EthEvmConfig> {
-        BasicBlockExecutorProvider::new(EthEvmConfig::new(chain_spec))
+    fn evm_config(chain_spec: Arc<ChainSpec>) -> EthEvmConfig {
+        EthEvmConfig::new(chain_spec)
     }
 
     #[test]
@@ -103,9 +84,9 @@ mod tests {
                 .build(),
         );
 
-        let provider = executor_provider(chain_spec);
+        let provider = evm_config(chain_spec);
 
-        let mut executor = provider.executor(db);
+        let mut executor = provider.batch_executor(db);
 
         // attempt to execute a block without parent beacon block root, expect err
         let err = executor
@@ -185,11 +166,11 @@ mod tests {
                 .build(),
         );
 
-        let provider = executor_provider(chain_spec);
+        let provider = evm_config(chain_spec);
 
         // attempt to execute an empty block with parent beacon block root, this should not fail
         provider
-            .executor(db)
+            .batch_executor(db)
             .execute_one(&RecoveredBlock::new_unhashed(
                 Block {
                     header,
@@ -219,7 +200,7 @@ mod tests {
                 .build(),
         );
 
-        let provider = executor_provider(chain_spec);
+        let provider = evm_config(chain_spec);
 
         // construct the header for block one
         let header = Header {
@@ -230,7 +211,7 @@ mod tests {
             ..Header::default()
         };
 
-        let mut executor = provider.executor(db);
+        let mut executor = provider.batch_executor(db);
 
         // attempt to execute an empty block with parent beacon block root, this should not fail
         executor
@@ -264,8 +245,8 @@ mod tests {
         );
 
         let mut header = chain_spec.genesis_header().clone();
-        let provider = executor_provider(chain_spec);
-        let mut executor = provider.executor(db);
+        let provider = evm_config(chain_spec);
+        let mut executor = provider.batch_executor(db);
 
         // attempt to execute the genesis block with non-zero parent beacon block root, expect err
         header.parent_beacon_block_root = Some(B256::with_last_byte(0x69));
@@ -326,10 +307,10 @@ mod tests {
                 .build(),
         );
 
-        let provider = executor_provider(chain_spec);
+        let provider = evm_config(chain_spec);
 
         // execute header
-        let mut executor = provider.executor(db);
+        let mut executor = provider.batch_executor(db);
 
         // Now execute a block with the fixed header, ensure that it does not fail
         executor
@@ -393,8 +374,8 @@ mod tests {
                 .build(),
         );
 
-        let provider = executor_provider(chain_spec);
-        let mut executor = provider.executor(db);
+        let provider = evm_config(chain_spec);
+        let mut executor = provider.batch_executor(db);
 
         // construct the header for block one
         let header = Header { timestamp: 1, number: 1, ..Header::default() };
@@ -415,10 +396,9 @@ mod tests {
         // we load the account first, because revm expects it to be
         // loaded
         executor.with_state_mut(|state| state.basic(HISTORY_STORAGE_ADDRESS).unwrap());
-        assert!(executor.with_state_mut(|state| state
-            .storage(HISTORY_STORAGE_ADDRESS, U256::ZERO)
-            .unwrap()
-            .is_zero()));
+        assert!(executor.with_state_mut(|state| {
+            state.storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap().is_zero()
+        }));
     }
 
     #[test]
@@ -434,8 +414,8 @@ mod tests {
         );
 
         let header = chain_spec.genesis_header().clone();
-        let provider = executor_provider(chain_spec);
-        let mut executor = provider.executor(db);
+        let provider = evm_config(chain_spec);
+        let mut executor = provider.batch_executor(db);
 
         // attempt to execute genesis block, this should not fail
         executor
@@ -453,10 +433,9 @@ mod tests {
         // we load the account first, because revm expects it to be
         // loaded
         executor.with_state_mut(|state| state.basic(HISTORY_STORAGE_ADDRESS).unwrap());
-        assert!(executor.with_state_mut(|state| state
-            .storage(HISTORY_STORAGE_ADDRESS, U256::ZERO)
-            .unwrap()
-            .is_zero()));
+        assert!(executor.with_state_mut(|state| {
+            state.storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap().is_zero()
+        }));
     }
 
     #[test]
@@ -481,8 +460,8 @@ mod tests {
             parent_beacon_block_root: Some(B256::random()),
             ..Header::default()
         };
-        let provider = executor_provider(chain_spec);
-        let mut executor = provider.executor(db);
+        let provider = evm_config(chain_spec);
+        let mut executor = provider.batch_executor(db);
 
         // attempt to execute the fork activation block, this should not fail
         executor
@@ -505,10 +484,12 @@ mod tests {
         );
 
         // the hash of the block itself should not be in storage
-        assert!(executor.with_state_mut(|state| state
-            .storage(HISTORY_STORAGE_ADDRESS, U256::from(fork_activation_block))
-            .unwrap()
-            .is_zero()));
+        assert!(executor.with_state_mut(|state| {
+            state
+                .storage(HISTORY_STORAGE_ADDRESS, U256::from(fork_activation_block))
+                .unwrap()
+                .is_zero()
+        }));
     }
 
     // <https://github.com/ethereum/EIPs/pull/9144>
@@ -525,8 +506,8 @@ mod tests {
                 .build(),
         );
 
-        let provider = executor_provider(chain_spec);
-        let mut executor = provider.executor(db);
+        let provider = evm_config(chain_spec);
+        let mut executor = provider.batch_executor(db);
 
         let header = Header {
             parent_hash: B256::random(),
@@ -568,8 +549,8 @@ mod tests {
         let header = chain_spec.genesis_header().clone();
         let header_hash = header.hash_slow();
 
-        let provider = executor_provider(chain_spec);
-        let mut executor = provider.executor(db);
+        let provider = evm_config(chain_spec);
+        let mut executor = provider.batch_executor(db);
 
         // attempt to execute the genesis block, this should not fail
         executor
@@ -586,10 +567,9 @@ mod tests {
         // we load the account first, because revm expects it to be
         // loaded
         executor.with_state_mut(|state| state.basic(HISTORY_STORAGE_ADDRESS).unwrap());
-        assert!(executor.with_state_mut(|state| state
-            .storage(HISTORY_STORAGE_ADDRESS, U256::ZERO)
-            .unwrap()
-            .is_zero()));
+        assert!(executor.with_state_mut(|state| {
+            state.storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap().is_zero()
+        }));
 
         // attempt to execute block 1, this should not fail
         let header = Header {
@@ -621,10 +601,9 @@ mod tests {
                 .unwrap()),
             U256::ZERO
         );
-        assert!(executor.with_state_mut(|state| state
-            .storage(HISTORY_STORAGE_ADDRESS, U256::from(1))
-            .unwrap()
-            .is_zero()));
+        assert!(executor.with_state_mut(|state| {
+            state.storage(HISTORY_STORAGE_ADDRESS, U256::from(1)).unwrap().is_zero()
+        }));
 
         // attempt to execute block 2, this should not fail
         let header = Header {
@@ -661,10 +640,9 @@ mod tests {
                 .unwrap()),
             U256::ZERO
         );
-        assert!(executor.with_state_mut(|state| state
-            .storage(HISTORY_STORAGE_ADDRESS, U256::from(2))
-            .unwrap()
-            .is_zero()));
+        assert!(executor.with_state_mut(|state| {
+            state.storage(HISTORY_STORAGE_ADDRESS, U256::from(2)).unwrap().is_zero()
+        }));
     }
 
     #[test]
@@ -679,8 +657,7 @@ mod tests {
 
         let mut db = create_database_with_withdrawal_requests_contract();
 
-        let secp = Secp256k1::new();
-        let sender_key_pair = Keypair::new(&secp, &mut generators::rng());
+        let sender_key_pair = generators::generate_key(&mut generators::rng());
         let sender_address = public_key_to_address(sender_key_pair.public_key());
 
         db.insert_account_info(
@@ -689,7 +666,9 @@ mod tests {
         );
 
         // https://github.com/lightclient/sys-asm/blob/9282bdb9fd64e024e27f60f507486ffb2183cba2/test/Withdrawal.t.sol.in#L36
-        let validator_public_key = fixed_bytes!("111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111");
+        let validator_public_key = fixed_bytes!(
+            "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
+        );
         let withdrawal_amount = fixed_bytes!("0203040506070809");
         let input: Bytes = [&validator_public_key[..], &withdrawal_amount[..]].concat().into();
         assert_eq!(input.len(), 56);
@@ -715,9 +694,9 @@ mod tests {
             }),
         );
 
-        let provider = executor_provider(chain_spec);
+        let provider = evm_config(chain_spec);
 
-        let mut executor = provider.executor(db);
+        let mut executor = provider.batch_executor(db);
 
         let BlockExecutionResult { receipts, requests, .. } = executor
             .execute_one(
@@ -748,10 +727,8 @@ mod tests {
         // Create a state provider with the withdrawal requests contract pre-deployed
         let mut db = create_database_with_withdrawal_requests_contract();
 
-        // Initialize Secp256k1 for key pair generation
-        let secp = Secp256k1::new();
         // Generate a new key pair for the sender
-        let sender_key_pair = Keypair::new(&secp, &mut generators::rng());
+        let sender_key_pair = generators::generate_key(&mut generators::rng());
         // Get the sender's address from the public key
         let sender_address = public_key_to_address(sender_key_pair.public_key());
 
@@ -762,7 +739,9 @@ mod tests {
         );
 
         // Define the validator public key and withdrawal amount as fixed bytes
-        let validator_public_key = fixed_bytes!("111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111");
+        let validator_public_key = fixed_bytes!(
+            "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
+        );
         let withdrawal_amount = fixed_bytes!("2222222222222222");
         // Concatenate the validator public key and withdrawal amount into a single byte array
         let input: Bytes = [&validator_public_key[..], &withdrawal_amount[..]].concat().into();
@@ -791,7 +770,8 @@ mod tests {
         );
 
         // Create an executor from the state provider
-        let mut executor = executor_provider(chain_spec).executor(db);
+        let evm_config = evm_config(chain_spec);
+        let mut executor = evm_config.batch_executor(db);
 
         // Execute the block and capture the result
         let exec_result = executor.execute_one(
@@ -855,8 +835,8 @@ mod tests {
             vec![],
         );
 
-        let provider = executor_provider(chain_spec);
-        let executor = provider.executor(db);
+        let provider = evm_config(chain_spec);
+        let executor = provider.batch_executor(db);
 
         let (tx, rx) = mpsc::channel();
         let tx_clone = tx.clone();

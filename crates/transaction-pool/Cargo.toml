@@ -34,7 +34,7 @@ alloy-consensus = { workspace = true, features = ["kzg"] }
 # async/futures
 futures-util.workspace = true
 parking_lot.workspace = true
-tokio = { workspace = true, default-features = false, features = ["sync"] }
+tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true
 
 # metrics
@@ -61,15 +61,16 @@ proptest-arbitrary-interop = { workspace = true, optional = true }
 [dev-dependencies]
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
+alloy-primitives = { workspace = true, features = ["rand"] }
 paste.workspace = true
 rand.workspace = true
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 criterion.workspace = true
-pprof = { workspace = true, features = ["criterion", "flamegraph"] }
 assert_matches.workspace = true
 tempfile.workspace = true
 serde_json.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread"] }
 
 [features]
 serde = [
@@ -97,6 +98,7 @@ test-utils = [
     "reth-provider/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-ethereum-primitives/test-utils",
+    "alloy-primitives/rand",
 ]
 arbitrary = [
     "proptest",

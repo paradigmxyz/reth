@@ -28,7 +28,7 @@ impl std::fmt::Debug for CursorSubNode {
             .field("state_flag", &self.state_flag())
             .field("tree_flag", &self.tree_flag())
             .field("hash_flag", &self.hash_flag())
-            .field("hash", &self.hash())
+            .field("hash", &self.maybe_hash())
             .finish()
     }
 }
@@ -154,6 +154,21 @@ impl CursorSubNode {
         })
     }
 
+    /// Returns the hash of the current node, if any.
+    ///
+    /// Differs from [`Self::hash`] in that it returns `None` if the subnode is positioned at the
+    /// child without a hash mask bit set. [`Self::hash`] panics in that case.
+    fn maybe_hash(&self) -> Option<B256> {
+        self.node.as_ref().and_then(|node| match self.position {
+            // Get the root hash for the parent branch node
+            SubNodePosition::ParentBranch => node.root_hash,
+            // Or get it from the children
+            SubNodePosition::Child(nibble) => {
+                node.hash_mask.is_bit_set(nibble).then(|| node.hash_for_nibble(nibble))
+            }
+        })
+    }
+
     /// Returns the position to the current node.
     #[inline]
     pub const fn position(&self) -> SubNodePosition {
@@ -188,17 +203,17 @@ pub enum SubNodePosition {
 
 impl SubNodePosition {
     /// Returns `true` if the position is set to the parent branch node.
-    pub fn is_parent(&self) -> bool {
+    pub const fn is_parent(&self) -> bool {
         matches!(self, Self::ParentBranch)
     }
 
     /// Returns `true` if the position is set to a child node.
-    pub fn is_child(&self) -> bool {
+    pub const fn is_child(&self) -> bool {
         matches!(self, Self::Child(_))
     }
 
     /// Returns the nibble of the child node if the position is set to a child node.
-    pub fn as_child(&self) -> Option<u8> {
+    pub const fn as_child(&self) -> Option<u8> {
         match self {
             Self::Child(nibble) => Some(*nibble),
             _ => None,
@@ -207,14 +222,14 @@ impl SubNodePosition {
 
     /// Returns `true` if the position is set to a last child nibble (i.e. greater than or equal to
     /// 0xf).
-    pub fn is_last_child(&self) -> bool {
+    pub const fn is_last_child(&self) -> bool {
         match self {
             Self::ParentBranch => false,
             Self::Child(nibble) => *nibble >= 0xf,
         }
     }
 
-    fn increment(&mut self) {
+    const fn increment(&mut self) {
         match self {
             Self::ParentBranch => *self = Self::Child(0),
             Self::Child(nibble) => *nibble += 1,

@@ -5,12 +5,14 @@ use crate::{
 use alloy_consensus::{Block, BlockBody};
 use eyre::Result;
 use op_alloy_consensus::OpPooledTransaction;
-use reth_chainspec::{EthChainSpec, Hardforks};
-use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives};
-use reth_node_api::{FullNodeTypes, NodeTypes, TxTy};
+use reth_ethereum::{
+    chainspec::{EthChainSpec, Hardforks},
+    network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives},
+    node::api::{FullNodeTypes, NodeTypes, TxTy},
+    pool::{PoolTransaction, TransactionPool},
+};
 use reth_node_builder::{components::NetworkBuilder, BuilderContext};
-use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
-use reth_transaction_pool::{PoolTransaction, TransactionPool};
+use reth_op::{OpReceipt, OpTransactionSigned};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -80,13 +82,9 @@ where
         > + Unpin
         + 'static,
 {
-    type Primitives = CustomNetworkPrimitives;
+    type Network = NetworkHandle<CustomNetworkPrimitives>;
 
-    async fn build_network(
-        self,
-        ctx: &BuilderContext<Node>,
-        pool: Pool,
-    ) -> Result<NetworkHandle<Self::Primitives>> {
+    async fn build_network(self, ctx: &BuilderContext<Node>, pool: Pool) -> Result<Self::Network> {
         let network_config = self.network_config(ctx)?;
         let network = NetworkManager::builder(network_config).await?;
         let handle = ctx.start_network(network, pool);

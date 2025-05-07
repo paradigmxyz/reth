@@ -31,7 +31,10 @@ use std::{
 };
 use tracing::*;
 
-pub use reth_engine_primitives::DEFAULT_MEMORY_BLOCK_BUFFER_TARGET;
+pub use reth_engine_primitives::{
+    DEFAULT_MAX_PROOF_TASK_CONCURRENCY, DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
+    DEFAULT_RESERVED_CPU_CORES,
+};
 
 /// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
 pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
@@ -411,6 +414,15 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     pub fn with_unused_ports(mut self) -> Self {
         self.rpc = self.rpc.with_unused_ports();
         self.network = self.network.with_unused_ports();
+        self
+    }
+
+    /// Effectively disables the RPC state cache by setting the cache sizes to `0`.
+    ///
+    /// By setting the cache sizes to 0, caching of newly executed or fetched blocks will be
+    /// effectively disabled.
+    pub const fn with_disabled_rpc_cache(mut self) -> Self {
+        self.rpc.rpc_state_cache.set_zero_lengths();
         self
     }
 

@@ -12,26 +12,33 @@ use alloy_evm::{
 use alloy_sol_macro::sol;
 use alloy_sol_types::SolCall;
 use reth::{
-    api::{ConfigureEvm, NodeTypes},
-    builder::{components::ExecutorBuilder, BuilderContext, FullNodeTypes},
-    cli::Cli,
-    providers::BlockExecutionResult,
-    revm::{
-        context::{result::ExecutionResult, TxEnv},
-        db::State,
-        primitives::{address, hardfork::SpecId, Address},
-        DatabaseCommit,
+    builder::{components::ExecutorBuilder, BuilderContext},
+    primitives::SealedBlock,
+};
+use reth_ethereum::{
+    chainspec::ChainSpec,
+    cli::interface::Cli,
+    evm::{
+        primitives::{
+            execute::{BlockExecutionError, BlockExecutor, InternalBlockExecutionError},
+            Database, Evm, EvmEnv, InspectorFor, NextBlockEnvAttributes, OnStateHook,
+        },
+        revm::{
+            context::{result::ExecutionResult, TxEnv},
+            db::State,
+            primitives::{address, hardfork::SpecId, Address},
+            DatabaseCommit,
+        },
+        EthBlockAssembler, EthEvmConfig, RethReceiptBuilder,
     },
-};
-use reth_chainspec::ChainSpec;
-use reth_evm::{
-    execute::{BlockExecutionError, BlockExecutor, InternalBlockExecutionError},
-    Database, Evm, EvmEnv, InspectorFor, NextBlockEnvAttributes, OnStateHook,
-};
-use reth_evm_ethereum::{EthBlockAssembler, EthEvmConfig, RethReceiptBuilder};
-use reth_node_ethereum::{node::EthereumAddOns, BasicBlockExecutorProvider, EthereumNode};
-use reth_primitives::{
-    EthPrimitives, Header, Receipt, SealedBlock, SealedHeader, TransactionSigned,
+    node::{
+        api::{ConfigureEvm, FullNodeTypes, NodeTypes},
+        node::EthereumAddOns,
+        EthereumNode,
+    },
+    primitives::{Header, SealedHeader},
+    provider::BlockExecutionResult,
+    EthPrimitives, Receipt, TransactionSigned,
 };
 use std::{fmt::Display, sync::Arc};
 
@@ -69,16 +76,11 @@ where
     Node: FullNodeTypes<Types = Types>,
 {
     type EVM = CustomEvmConfig;
-    type Executor = BasicBlockExecutorProvider<Self::EVM>;
 
-    async fn build_evm(
-        self,
-        ctx: &BuilderContext<Node>,
-    ) -> eyre::Result<(Self::EVM, Self::Executor)> {
+    async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
         let evm_config = CustomEvmConfig { inner: EthEvmConfig::new(ctx.chain_spec()) };
-        let executor = BasicBlockExecutorProvider::new(evm_config.clone());
 
-        Ok((evm_config, executor))
+        Ok(evm_config)
     }
 }
 
@@ -199,6 +201,10 @@ where
     fn evm_mut(&mut self) -> &mut Self::Evm {
         self.inner.evm_mut()
     }
+
+    fn evm(&self) -> &Self::Evm {
+        self.inner.evm()
+    }
 }
 
 sol!(
@@ -227,7 +233,7 @@ pub fn apply_withdrawals_contract_call(
         Ok(res) => res.state,
         Err(e) => {
             return Err(BlockExecutionError::Internal(InternalBlockExecutionError::Other(
-                format!("withdrawal contract system call revert: {}", e).into(),
+                format!("withdrawal contract system call revert: {e}").into(),
             )))
         }
     };
