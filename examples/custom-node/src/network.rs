@@ -82,13 +82,9 @@ where
         > + Unpin
         + 'static,
 {
-    type Primitives = CustomNetworkPrimitives;
+    type Network = NetworkHandle<CustomNetworkPrimitives>;
 
-    async fn build_network(
-        self,
-        ctx: &BuilderContext<Node>,
-        pool: Pool,
-    ) -> Result<NetworkHandle<Self::Primitives>> {
+    async fn build_network(self, ctx: &BuilderContext<Node>, pool: Pool) -> Result<Self::Network> {
         let network_config = self.network_config(ctx)?;
         let network = NetworkManager::builder(network_config).await?;
         let handle = ctx.start_network(network, pool);
