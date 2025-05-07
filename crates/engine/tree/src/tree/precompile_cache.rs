@@ -61,16 +61,14 @@ impl CachedPrecompile {
         self.metrics.precompile_cache_misses.increment(1);
     }
 
-    fn cache_entry_count(&self) -> u64 {
-        self.cache.entry_count()
+    fn cache_size(&self) -> u64 {
+        self.cache.weighted_size()
     }
 
-    fn update_precompile_cache_size(&self, previous_entry_count: u64) {
-        let new_entry_count = self.cache.entry_count();
-        if new_entry_count > previous_entry_count {
-            self.metrics
-                .precompile_cache_size
-                .increment((new_entry_count - previous_entry_count) as f64);
+    fn update_precompile_cache_size(&self, previous_size: u64) {
+        let new_size = self.cache.weighted_size();
+        if new_size > previous_size {
+            self.metrics.precompile_cache_size.increment((new_size - previous_size) as f64);
         }
     }
 }
@@ -113,7 +111,7 @@ impl Precompile for CachedPrecompile {
         self.increment_by_one_precompile_cache_misses();
         let result = self.precompile.call(data, gas_limit);
 
-        let previous_entry_count = self.cache_entry_count();
+        let previous_cache_size = self.cache_size();
         match &result {
             Ok(val) => {
                 self.cache.insert(
@@ -129,7 +127,7 @@ impl Precompile for CachedPrecompile {
             }
         }
 
-        self.update_precompile_cache_size(previous_entry_count);
+        self.update_precompile_cache_size(previous_cache_size);
         result
     }
 }
@@ -146,8 +144,7 @@ pub(crate) struct CachedPrecompileMetrics {
 
     /// Precompile cache size
     ///
-    /// NOTE: this uses the moka caches' `entry_count`, NOT the `weighted_size` method to calculate
-    /// size.
+    /// NOTE: this uses the moka caches`weighted_size` method to calculate size.
     precompile_cache_size: metrics::Gauge,
 }
 
