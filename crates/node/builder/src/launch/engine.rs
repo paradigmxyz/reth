@@ -1,5 +1,13 @@
 //! Engine node related functionality.
 
+use crate::{
+    common::{Attached, LaunchContextWith, WithConfigs},
+    hooks::NodeHooks,
+    rpc::{EngineValidatorAddOn, RethRpcAddOns, RpcHandle},
+    setup::build_networked_pipeline,
+    AddOns, AddOnsContext, ExExLauncher, FullNode, LaunchContext, LaunchNode, NodeAdapter,
+    NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
+};
 use alloy_consensus::BlockHeader;
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
@@ -19,27 +27,20 @@ use reth_node_api::{
     PayloadAttributesBuilder, PayloadTypes,
 };
 use reth_node_core::{
+    args::TryToUrl,
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
     primitives::Head,
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
+use reth_stages::stages::EraImportSource;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
 use std::sync::Arc;
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-
-use crate::{
-    common::{Attached, LaunchContextWith, WithConfigs},
-    hooks::NodeHooks,
-    rpc::{EngineValidatorAddOn, RethRpcAddOns, RpcHandle},
-    setup::build_networked_pipeline,
-    AddOns, AddOnsContext, ExExLauncher, FullNode, LaunchContext, LaunchNode, NodeAdapter,
-    NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
-};
 
 /// The engine node launcher.
 #[derive(Debug)]
@@ -150,6 +151,21 @@ where
 
         let consensus = Arc::new(ctx.components().consensus().clone());
 
+        let era_import_source = if let Some(path) = node_config.era.path.clone() {
+            Some(EraImportSource::Path(path))
+        } else if let Some(url) = node_config
+            .era
+            .url
+            .clone()
+            .or_else(|| node_config.chain.chain().kind().try_to_url().ok())
+        {
+            let folder = node_config.datadir().data_dir().join("era");
+
+            Some(EraImportSource::Url(url, folder))
+        } else {
+            None
+        };
+
         // Configure the pipeline
         let pipeline_exex_handle =
             exex_manager_handle.clone().unwrap_or_else(ExExManagerHandle::empty);
@@ -165,6 +181,7 @@ where
             static_file_producer,
             ctx.components().evm_config().clone(),
             pipeline_exex_handle,
+            era_import_source,
         )?;
 
         // The new engine writes directly to static files. This ensures that they're up to the tip.

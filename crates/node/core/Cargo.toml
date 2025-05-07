@@ -52,6 +52,7 @@ toml.workspace = true
 serde.workspace = true
 strum = { workspace = true, features = ["derive"] }
 thiserror.workspace = true
+url.workspace = true
 
 # io
 dirs-next.workspace = true
