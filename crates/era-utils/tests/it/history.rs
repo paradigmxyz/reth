@@ -18,8 +18,6 @@ async fn test_history_imports_from_fresh_state_successfully() {
 
     let client = EraClient::new(Client::new(), url, folder);
 
-    client.fetch_file_list().await.unwrap();
-
     fs::write(index, "mainnet-00000-5ec1ffb8.era1\n").unwrap();
 
     let config = EraStreamConfig::default().with_max_files(1).with_max_concurrent_downloads(1);

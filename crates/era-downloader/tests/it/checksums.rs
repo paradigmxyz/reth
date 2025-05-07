@@ -16,8 +16,6 @@ async fn test_invalid_checksum_returns_error(url: &str) {
     let folder = folder.path().to_owned().into_boxed_path();
     let client = EraClient::new(FailingClient, base_url, folder.clone());
 
-    client.fetch_file_list().await.unwrap();
-
     let mut stream = EraStream::new(
         client,
         EraStreamConfig::default().with_max_files(2).with_max_concurrent_downloads(1),

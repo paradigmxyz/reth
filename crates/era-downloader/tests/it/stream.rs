@@ -16,8 +16,6 @@ async fn test_streaming_files_after_fetching_file_list(url: &str) {
     let folder = folder.path().to_owned().into_boxed_path();
     let client = EraClient::new(StubClient, base_url, folder.clone());
 
-    client.fetch_file_list().await.unwrap();
-
     let mut stream = EraStream::new(
         client,
         EraStreamConfig::default().with_max_files(2).with_max_concurrent_downloads(1),
