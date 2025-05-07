@@ -30,15 +30,3 @@ op-alloy-rpc-types-engine.workspace = true
 
 # misc
 serde.workspace = true
-
-[features]
-default = ["std"]
-std = [
-    "alloy-rpc-types-engine/std",
-    "op-alloy-rpc-types-engine/std",
-    "reth-optimism-chainspec/std",
-    "reth-optimism-primitives/std",
-    "reth-primitives-traits/std",
-    "reth-storage-api/std",
-    "serde/std",
-]
