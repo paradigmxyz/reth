@@ -38,8 +38,6 @@ pub struct ExportConfig {
     /// Last block to export
     pub last_block_number: BlockNumber,
     /// Number of blocks per era1 file
-    /// TODO: check if we can determine it
-    /// from the volume to export instead
     pub step: u64,
     /// Network name
     pub network: String,
@@ -102,7 +100,7 @@ where
         let prev_block_number = config.first_block_number - 1;
         provider
             .header_td_by_number(prev_block_number)?
-            .ok_or_else(|| eyre!("Total difficulty not found for block {}", prev_block_number))?
+            .ok_or_else(|| eyre!("Total difficulty not found for block {prev_block_number}"))?
     } else {
         U256::ZERO
     };
@@ -115,8 +113,7 @@ where
 
         info!(
             target: "era::history::export",
-            "Processing blocks {} to {} ({} blocks)",
-            start_block, end_block, block_count
+            "Processing blocks {start_block} to {end_block} ({block_count} blocks)"
         );
 
         let headers = provider.headers_range(start_block..=end_block)?;
@@ -139,9 +136,7 @@ where
             // Validate block number
             if expected_block_number != actual_block_number {
                 return Err(eyre!(
-                    "Expected header for block {}, got {}",
-                    expected_block_number,
-                    actual_block_number
+                    "Expected header for block {expected_block_number}, got {actual_block_number}"
                 ));
             }
 
@@ -189,9 +184,7 @@ where
             if last_report_time.elapsed() >= report_interval {
                 info!(
                     target: "era::history::export",
-                    "Export progress: block {}/{} ({:.2}%) - elapsed: {:?}",
-                    actual_block_number,
-                    last_block_number,
+                    "Export progress: block {actual_block_number}/{last_block_number} ({:.2}%) - elapsed: {:?}",
                     (total_blocks_processed as f64) /
                         ((last_block_number - config.first_block_number + 1) as f64) *
                         100.0,
@@ -213,9 +206,7 @@ where
 
             info!(
                 target: "era::history::export",
-                "Wrote ERA1 file: {:?} with {} blocks",
-                file_path,
-                blocks_written
+                "Wrote ERA1 file: {file_path:?} with {blocks_written} blocks"
             );
         }
     }

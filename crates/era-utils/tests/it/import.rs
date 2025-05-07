@@ -25,9 +25,9 @@ async fn test_history_imports_from_fresh_state_successfully() {
     let config = EraStreamConfig::default().with_max_files(1).with_max_concurrent_downloads(1);
 
     let stream = EraStream::new(client, config);
-    let pf = create_test_provider_factory();
+    let provider_factory = create_test_provider_factory();
 
-    init_genesis(&pf).unwrap();
+    init_genesis(&provider_factory).unwrap();
 
     let folder = tempdir().unwrap();
     let folder = Some(folder.path().to_owned());
@@ -35,7 +35,7 @@ async fn test_history_imports_from_fresh_state_successfully() {
 
     let expected_block_number = 8191;
     let actual_block_number =
-        reth_era_utils::import(stream, &pf.provider_rw().unwrap().0, hash_collector).unwrap();
+        reth_era_utils::import(stream, &provider_factory, hash_collector).unwrap();
 
     assert_eq!(actual_block_number, expected_block_number);
 }

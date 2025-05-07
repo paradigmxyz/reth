@@ -28,9 +28,7 @@ async fn test_history_import_export() {
 
     let stream = EraStream::new(client, config);
     let provider_factory = create_test_provider_factory();
-    let static_file_provider: reth_provider::providers::StaticFileProvider<
-        reth_ethereum_primitives::EthPrimitives,
-    > = provider_factory.static_file_provider();
+    let static_file_provider = provider_factory.static_file_provider();
     init_genesis(&provider_factory).unwrap();
 
     let folder = tempdir().unwrap();
@@ -38,8 +36,7 @@ async fn test_history_import_export() {
     let hash_collector = Collector::new(4096, folder);
 
     let expected_block_number = 8191;
-    let actual_block_number =
-        import(stream, &provider_factory.provider_rw().unwrap().0, hash_collector).unwrap();
+    let actual_block_number = import(stream, &provider_factory, hash_collector).unwrap();
 
     assert_eq!(actual_block_number, expected_block_number);
 
@@ -48,22 +45,22 @@ async fn test_history_import_export() {
         let header_static = static_file_provider.header_by_number(block_num);
         let static_header_exists = header_static.is_ok() && header_static.unwrap().is_some();
 
-        println!(
-            "Block {block_num}: DB={}, StaticHeader={}",
-            block_db.is_some(),
-            static_header_exists
-        );
+        assert!(static_header_exists, "Block {block_num} should exist in static files");
+        assert!(block_db.is_some(), "Block should exist in the db");
     }
 
     let export_dir = tempdir().unwrap();
     let export_config = ExportConfig {
         dir: export_dir.path().to_owned(),
         first_block_number: 0,
-        last_block_number: expected_block_number,
+        last_block_number: 100,
         step: 10,
-        network: "mainnet-test".to_string(),
+        network: "mainnet".to_string(),
     };
 
-    let _exported_files =
+    let exported_files =
         export(&provider_factory.provider_rw().unwrap().0, &export_config).unwrap();
+
+    // TODO: debug why we still export only the genesis block
+    println!("Exported files: {exported_files:?}");
 }
