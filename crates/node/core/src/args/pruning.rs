@@ -107,17 +107,11 @@ impl PruningArgs {
                     // spec
                     receipts: chain_spec
                         .deposit_contract()
-                        .map(|contract| PruneMode::Before(contract.block))
+                        .map(|contract: &reth_chainspec::DepositContract| PruneMode::Before(contract.block))
                         .or(Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE))),
                     account_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
                     storage_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
-                    receipts_log_filter: ReceiptsLogPruneConfig(
-                        chain_spec
-                            .deposit_contract()
-                            .map(|contract| (contract.address, PruneMode::Before(contract.block)))
-                            .into_iter()
-                            .collect(),
-                    ),
+                    receipts_log_filter: ReceiptsLogPruneConfig::default(),
                 },
             }
         }
