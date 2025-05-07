@@ -8,6 +8,7 @@ use test_case::test_case;
 
 #[test_case("https://mainnet.era1.nimbus.team/"; "nimbus")]
 #[test_case("https://era1.ethportal.net/"; "ethportal")]
+#[test_case("https://era.ithaca.xyz/era1/"; "ithaca")]
 #[tokio::test]
 async fn test_getting_file_name_after_fetching_file_list(url: &str) {
     let url = Url::from_str(url).unwrap();
