@@ -8997,7 +8997,6 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "reth-trie-common",
- "reth-trie-db",
  "revm",
  "serde",
  "serde_json",

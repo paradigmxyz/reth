@@ -57,7 +57,6 @@ use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, CoinbaseTipOrdering, EthPoolTransaction, PoolTransaction,
     TransactionPool, TransactionValidationTaskExecutor,
 };
-use reth_trie_db::MerklePatriciaTrie;
 use revm::context::TxEnv;
 use std::sync::Arc;
 
@@ -232,7 +231,7 @@ impl NodeTypes for OpNode {
     type ChainSpec = <OpTypes as NodeTypes>::ChainSpec;
     type StateCommitment = <OpTypes as NodeTypes>::StateCommitment;
     type Storage = <OpTypes as NodeTypes>::Storage;
-    type Payload = <OpTypes as NodeTypes>::Payload;
+    type Payload = OpEngineTypes;
 }
 
 /// Add-ons w.r.t. optimism.

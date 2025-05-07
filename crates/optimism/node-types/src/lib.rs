@@ -13,6 +13,7 @@ pub mod engine;
 pub use engine::OpEngineTypes;
 
 pub use reth_optimism_chainspec::*;
+use reth_optimism_payload_builder::OpPayloadTypes;
 pub use reth_optimism_primitives::*;
 pub use reth_trie_db::MerklePatriciaTrie;
 
@@ -28,7 +29,7 @@ impl NodeTypes for OpTypes {
     type ChainSpec = OpChainSpec;
     type StateCommitment = MerklePatriciaTrie;
     type Storage = OpStorage;
-    type Payload = OpEngineTypes;
+    type Payload = OpPayloadTypes;
 }
 
 /// Storage implementation for Optimism.
