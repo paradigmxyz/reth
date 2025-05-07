@@ -231,7 +231,7 @@ impl NodeTypes for OpNode {
     type ChainSpec = <OpTypes as NodeTypes>::ChainSpec;
     type StateCommitment = <OpTypes as NodeTypes>::StateCommitment;
     type Storage = <OpTypes as NodeTypes>::Storage;
-    type Payload = OpEngineTypes;
+    type Payload = OpEngineTypes<<OpTypes as NodeTypes>::Payload>;
 }
 
 /// Add-ons w.r.t. optimism.
