@@ -1377,6 +1377,11 @@ where
                 match request {
                     EngineApiRequest::InsertExecutedBlock(block) => {
                         let block_num_hash = block.recovered_block().num_hash();
+                        if block_num_hash.number <= self.state.tree_state.canonical_block_number() {
+                            // outdated block that can be skipped
+                            return Ok(())
+                        }
+
                         debug!(target: "engine::tree", block=?block_num_hash, "inserting already executed block");
                         let now = Instant::now();
 
