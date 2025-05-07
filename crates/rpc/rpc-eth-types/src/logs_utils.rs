@@ -91,7 +91,7 @@ where
         let mut transaction_hash = None;
 
         for log in receipt.logs() {
-            if filter.matches(&log) {
+            if filter.matches(log) {
                 // if this is the first match in the receipt's logs, look up the transaction hash
                 if transaction_hash.is_none() {
                     transaction_hash = match &provider_or_block {
