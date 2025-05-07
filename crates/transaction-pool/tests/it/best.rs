@@ -1,6 +1,6 @@
 //! Best transaction and filter testing
 
-use reth_transaction_pool::{noop::NoopTransactionPool, BestTransactions, TransactionPool};
+use reth_transaction_pool::{BestTransactions, NoopTransactionPool, TransactionPool};
 
 #[test]
 fn test_best_transactions() {

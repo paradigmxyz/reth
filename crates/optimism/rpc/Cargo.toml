@@ -29,6 +29,9 @@ reth-network-api.workspace = true
 reth-node-builder.workspace = true
 reth-chainspec.workspace = true
 reth-rpc-engine-api.workspace = true
+reth-provider.workspace = true
+reth-consensus.workspace = true
+reth-db-api.workspace = true
 
 # op-reth
 reth-optimism-chainspec.workspace = true
@@ -38,6 +41,8 @@ reth-optimism-txpool.workspace = true
 # TODO remove node-builder import
 reth-optimism-primitives = { workspace = true, features = ["reth-codec", "serde-bincode-compat"] }
 reth-optimism-forks.workspace = true
+reth-optimism-network.workspace = true
+reth-optimism-node-types.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
@@ -77,6 +82,10 @@ derive_more = { workspace = true, features = ["constructor"] }
 
 [dev-dependencies]
 reth-optimism-chainspec.workspace = true
+reth-db = { workspace = true, features = ["test-utils", "op"] }
+reth-optimism-node.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-db-common.workspace = true
 
 [features]
 client = [

@@ -53,6 +53,15 @@ impl Default for NoopNetwork<EthNetworkPrimitives> {
     }
 }
 
+impl<Net: NetworkPrimitives> NetworkPrimitives for NoopNetwork<Net> {
+    type Block = Net::Block;
+    type BlockHeader = Net::BlockHeader;
+    type BlockBody = Net::BlockBody;
+    type BroadcastedTransaction = Net::BroadcastedTransaction;
+    type PooledTransaction = Net::PooledTransaction;
+    type Receipt = Net::Receipt;
+}
+
 impl<Net> NetworkInfo for NoopNetwork<Net>
 where
     Net: Send + Sync,

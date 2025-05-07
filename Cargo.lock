@@ -8946,6 +8946,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-optimism-network"
+version = "1.3.12"
+dependencies = [
+ "alloy-consensus",
+ "op-alloy-consensus",
+ "reth-eth-wire-types",
+ "reth-optimism-primitives",
+]
+
+[[package]]
 name = "reth-optimism-node"
 version = "1.3.12"
 dependencies = [
@@ -8976,7 +8986,9 @@ dependencies = [
  "reth-optimism-consensus",
  "reth-optimism-evm",
  "reth-optimism-forks",
+ "reth-optimism-network",
  "reth-optimism-node",
+ "reth-optimism-node-types",
  "reth-optimism-payload-builder",
  "reth-optimism-primitives",
  "reth-optimism-rpc",
@@ -8996,11 +9008,26 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "reth-trie-common",
- "reth-trie-db",
  "revm",
  "serde",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "reth-optimism-node-types"
+version = "1.3.12"
+dependencies = [
+ "alloy-rpc-types-engine",
+ "op-alloy-rpc-types-engine",
+ "reth-node-api",
+ "reth-optimism-chainspec",
+ "reth-optimism-payload-builder",
+ "reth-optimism-primitives",
+ "reth-primitives-traits",
+ "reth-storage-api",
+ "reth-trie-db",
+ "serde",
 ]
 
 [[package]]
@@ -9035,6 +9062,7 @@ dependencies = [
  "reth-storage-api",
  "reth-transaction-pool",
  "revm",
+ "serde",
  "sha2 0.10.9",
  "thiserror 2.0.12",
  "tracing",
@@ -9097,6 +9125,10 @@ dependencies = [
  "reqwest",
  "reth-chain-state",
  "reth-chainspec",
+ "reth-consensus",
+ "reth-db",
+ "reth-db-api",
+ "reth-db-common",
  "reth-evm",
  "reth-network-api",
  "reth-node-api",
@@ -9104,10 +9136,14 @@ dependencies = [
  "reth-optimism-chainspec",
  "reth-optimism-evm",
  "reth-optimism-forks",
+ "reth-optimism-network",
+ "reth-optimism-node",
+ "reth-optimism-node-types",
  "reth-optimism-payload-builder",
  "reth-optimism-primitives",
  "reth-optimism-txpool",
  "reth-primitives-traits",
+ "reth-provider",
  "reth-rpc",
  "reth-rpc-api",
  "reth-rpc-engine-api",

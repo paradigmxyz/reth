@@ -1,0 +1,44 @@
+[package]
+name = "reth-optimism-node-types"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-primitives-traits.workspace = true
+reth-trie-db.workspace = true
+reth-storage-api.workspace = true
+reth-node-api.workspace = true
+
+# op-reth
+reth-optimism-primitives.workspace = true
+reth-optimism-chainspec.workspace = true
+reth-optimism-payload-builder.workspace = true
+
+# ethereum
+alloy-rpc-types-engine.workspace = true
+
+# optimism
+op-alloy-rpc-types-engine.workspace = true
+
+# misc
+serde.workspace = true
+
+[features]
+default = ["std"]
+std = [
+	"alloy-rpc-types-engine/std",
+	"op-alloy-rpc-types-engine/std",
+	"reth-optimism-chainspec/std",
+	"reth-optimism-primitives/std",
+	"reth-primitives-traits/std",
+	"reth-storage-api/std",
+	"serde/std"
+]
