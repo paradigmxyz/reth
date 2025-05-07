@@ -67,6 +67,9 @@ pub struct TrieNodeIter<C, H: HashedCursor> {
     /// The key that the [`HashedCursor`] previously advanced to using [`HashedCursor::next`].
     #[cfg(feature = "metrics")]
     previously_advanced_to_key: Option<B256>,
+    /// Stores the result of the last successful `next_hashed_entry`, used to avoid a redundant
+    /// `seek_hashed_entry` call if the walker points to the same key that was just return by
+    /// `next()`.
     last_next_result: Option<(B256, H::Value)>,
 }
 
@@ -128,7 +131,27 @@ where
     ///
     /// If `metrics` feature is enabled, also updates the metrics.
     fn seek_hashed_entry(&mut self, key: B256) -> Result<Option<(B256, H::Value)>, DatabaseError> {
+        if let Some((last_key, last_value)) = self.last_next_result {
+            if last_key == key {
+                trace!(target: "trie::node_iter", seek_key = ?key, "reusing result from last next() call instead of seeking");
+                self.last_next_result = None; // Consume the cached value
+
+                let result = Some((last_key, last_value));
+                self.last_seeked_hashed_entry = Some(SeekedHashedEntry { seeked_key: key, result });
+
+                #[cfg(feature = "metrics")]
+                {
+                    self.metrics.inc_leaf_nodes_seeked();
+                    if Some(key) == self.previously_advanced_to_key {
+                        self.metrics.inc_leaf_nodes_same_seeked_as_advanced();
+                    }
+                }
+                return Ok(result);
+            }
+        }
+
         self.last_next_result = None;
+
         if let Some(entry) = self
             .last_seeked_hashed_entry
             .as_ref()
@@ -140,16 +163,13 @@ where
             return Ok(entry);
         }
 
+        trace!(target: "trie::node_iter", ?key, "performing hashed cursor seek");
         let result = self.hashed_cursor.seek(key)?;
         self.last_seeked_hashed_entry = Some(SeekedHashedEntry { seeked_key: key, result });
 
         #[cfg(feature = "metrics")]
         {
             self.metrics.inc_leaf_nodes_seeked();
-
-            if Some(key) == self.previously_advanced_to_key {
-                self.metrics.inc_leaf_nodes_same_seeked_as_advanced();
-            }
         }
         Ok(result)
     }
@@ -161,13 +181,11 @@ where
         let result = self.hashed_cursor.next();
 
         self.last_next_result = result.clone()?;
-        self.last_seeked_hashed_entry = None;
+
         #[cfg(feature = "metrics")]
         {
             self.metrics.inc_leaf_nodes_advanced();
-
-            self.previously_advanced_to_key =
-                result.as_ref().ok().and_then(|result| result.as_ref().map(|(k, _)| *k));
+            self.previously_advanced_to_key = self.last_next_result.as_ref().map(|(k, _)| *k);
         }
         result
     }
@@ -285,26 +303,11 @@ where
                         );
 
                         self.should_check_walker_key = false;
+                        self.last_next_result = None;
                         continue
                     }
 
-                    if let Some((last_next_key, last_next_value)) = self.last_next_result {
-                        if last_next_key == seek_key {
-                            trace!(target: "trie::node_iter", ?seek_key, "skipping redundant hashed seek using last_next_result");
-                            self.current_hashed_entry = Some((last_next_key, last_next_value));
-                            self.last_seeked_hashed_entry = Some(SeekedHashedEntry {
-                                seeked_key: seek_key,
-                                result: self.current_hashed_entry,
-                            });
-                        } else {
-                            trace!(target: "trie::node_iter", ?seek_key, "seeking (last next was different)");
-                            self.current_hashed_entry = self.seek_hashed_entry(seek_key)?;
-                        }
-                        self.last_next_result = None;
-                    } else {
-                        trace!(target: "trie::node_iter", ?seek_key, "seeking (no last next result)");
-                        self.current_hashed_entry = self.seek_hashed_entry(seek_key)?;
-                    }
+                    self.current_hashed_entry = self.seek_hashed_entry(seek_key)?;
                 }
             }
         }
