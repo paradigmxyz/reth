@@ -9035,6 +9035,7 @@ dependencies = [
  "reth-storage-api",
  "reth-transaction-pool",
  "revm",
+ "serde",
  "sha2 0.10.9",
  "thiserror 2.0.12",
  "tracing",
