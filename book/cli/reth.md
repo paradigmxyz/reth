@@ -16,6 +16,7 @@ Commands:
   import-era    This syncs ERA encoded blocks from a directory
   dump-genesis  Dumps genesis block JSON configuration to stdout
   db            Database debugging utilities
+  download      Download public node snapshots
   stage         Manipulate individual stages
   p2p           P2P Debugging utilities
   config        Write config to stdout

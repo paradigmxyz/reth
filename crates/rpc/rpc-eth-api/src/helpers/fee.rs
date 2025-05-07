@@ -116,7 +116,7 @@ pub trait EthFees: LoadFee {
             // Fetch the headers and ensure we got all of them
             //
             // Treat a request for 1 block as a request for `newest_block..=newest_block`,
-            // otherwise `newest_block - 2
+            // otherwise `newest_block - 2`
             // NOTE: We ensured that block count is capped
             let start_block = end_block_plus - block_count;
 

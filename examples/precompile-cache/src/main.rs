@@ -32,7 +32,7 @@ use reth_ethereum::{
         core::{args::RpcServerArgs, node_config::NodeConfig},
         evm::EthEvm,
         node::EthereumAddOns,
-        BasicBlockExecutorProvider, EthEvmConfig, EthereumNode,
+        EthEvmConfig, EthereumNode,
     },
     EthPrimitives,
 };
@@ -181,17 +181,13 @@ where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
 {
     type EVM = EthEvmConfig<MyEvmFactory>;
-    type Executor = BasicBlockExecutorProvider<Self::EVM>;
 
-    async fn build_evm(
-        self,
-        ctx: &BuilderContext<Node>,
-    ) -> eyre::Result<(Self::EVM, Self::Executor)> {
+    async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
         let evm_config = EthEvmConfig::new_with_evm_factory(
             ctx.chain_spec(),
             MyEvmFactory { precompile_cache: self.precompile_cache.clone() },
         );
-        Ok((evm_config.clone(), BasicBlockExecutorProvider::new(evm_config)))
+        Ok(evm_config)
     }
 }
 
