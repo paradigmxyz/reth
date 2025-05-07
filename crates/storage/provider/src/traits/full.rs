@@ -2,11 +2,9 @@
 
 use crate::{
     AccountReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
-    HeaderProvider, StageCheckpointReader, StateProviderFactory, StaticFileProviderFactory,
-    TransactionsProvider,
+    StageCheckpointReader, StateProviderFactory, StaticFileProviderFactory,
 };
 use reth_chain_state::{CanonStateSubscriptions, ForkChoiceSubscriptions};
-use reth_chainspec::EthereumHardforks;
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_storage_api::NodePrimitivesProvider;
 use std::fmt::Debug;
@@ -53,34 +51,6 @@ impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
         + StageCheckpointReader
         + Clone
         + Debug
-        + Unpin
-        + 'static
-{
-}
-
-/// Helper trait to unify all provider traits required to support `eth` RPC server behaviour, for
-/// simplicity.
-pub trait FullRpcProvider:
-    StateProviderFactory
-    + ChainSpecProvider<ChainSpec: EthereumHardforks>
-    + BlockReaderIdExt
-    + HeaderProvider
-    + TransactionsProvider
-    + StageCheckpointReader
-    + Clone
-    + Unpin
-    + 'static
-{
-}
-
-impl<T> FullRpcProvider for T where
-    T: StateProviderFactory
-        + ChainSpecProvider<ChainSpec: EthereumHardforks>
-        + BlockReaderIdExt
-        + HeaderProvider
-        + TransactionsProvider
-        + StageCheckpointReader
-        + Clone
         + Unpin
         + 'static
 {

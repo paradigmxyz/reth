@@ -4,21 +4,23 @@ use crate::{
     models::{BlockchainTest, ForkSpec},
     Case, Error, Suite,
 };
-use alloy_rlp::Decodable;
+use alloy_rlp::{Decodable, Encodable};
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_chainspec::ChainSpec;
 use reth_consensus::{Consensus, HeaderValidator};
 use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert_genesis_state};
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
 use reth_ethereum_primitives::Block;
-use reth_evm::execute::{BlockExecutorProvider, Executor};
+use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_primitives_traits::{RecoveredBlock, SealedBlock};
 use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, DatabaseProviderFactory,
-    ExecutionOutcome, HistoryWriter, OriginalValuesKnown, StateWriter, StorageLocation,
+    ExecutionOutcome, HeaderProvider, HistoryWriter, OriginalValuesKnown, StateProofProvider,
+    StateWriter, StorageLocation,
 };
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord, State};
+use reth_stateless::{validation::stateless_validation, ExecutionWitness};
 use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
 use reth_trie_db::DatabaseStateRoot;
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
@@ -61,8 +63,7 @@ impl BlockchainTestCase {
                 ForkSpec::ConstantinopleFix |
                 ForkSpec::MergeEOF |
                 ForkSpec::MergeMeterInitCode |
-                ForkSpec::MergePush0 |
-                ForkSpec::Unknown
+                ForkSpec::MergePush0
         )
     }
 
@@ -127,10 +128,10 @@ impl BlockchainTestCase {
             // Non‑processing error – forward as‑is.
             //
             // This should only happen if we get an unexpected error from processing the block.
-            // Since it is unexpected, we treat it as a test failure. 
+            // Since it is unexpected, we treat it as a test failure.
             //
             // One reason for this happening is when one forgets to wrap the error from `run_case`
-            // so that it produces a `Error::BlockProcessingFailed`  
+            // so that it produces a `Error::BlockProcessingFailed`
             Err(other) => Err(other),
         }
     }
@@ -213,6 +214,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
 
     let executor_provider = EthExecutorProvider::ethereum(chain_spec.clone());
     let mut parent = genesis_block;
+    let mut program_inputs = Vec::new();
 
     for (block_index, block) in blocks.iter().enumerate() {
         // Note: same as the comment on `decode_blocks` as to why we cannot use block.number
@@ -227,15 +229,49 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
         pre_execution_checks(chain_spec.clone(), &parent, block)
             .map_err(|_| Error::BlockProcessingFailed { block_number })?;
 
+        let mut witness_record = ExecutionWitnessRecord::default();
+
         // Execute the block
-        let state_db = StateProviderDatabase(provider.latest());
-        let executor = executor_provider.executor(state_db);
-        let output =
-            executor.execute(block).map_err(|_| Error::BlockProcessingFailed { block_number })?;
+        let state_provider = provider.latest();
+        let state_db = StateProviderDatabase(&state_provider);
+        let executor = executor_provider.batch_executor(state_db);
+
+        let output = executor
+            .execute_with_state_closure(&(*block).clone(), |statedb: &State<_>| {
+                witness_record.record_executed_state(statedb);
+            })
+            .map_err(|_| Error::BlockProcessingFailed { block_number })?;
 
         // Consensus checks after block execution
         validate_block_post_execution(block, &chain_spec, &output.receipts, &output.requests)
             .map_err(|_| Error::BlockProcessingFailed { block_number })?;
+
+        // Generate the stateless witness
+        // TODO: Most of this code is copy-pasted from debug_executionWitness
+        let ExecutionWitnessRecord { hashed_state, codes, keys, lowest_block_number } =
+            witness_record;
+        let state = state_provider.witness(Default::default(), hashed_state)?;
+        let mut exec_witness = ExecutionWitness { state, codes, keys, headers: Default::default() };
+
+        let smallest = lowest_block_number.unwrap_or_else(|| {
+            // Return only the parent header, if there were no calls to the
+            // BLOCKHASH opcode.
+            block_number.saturating_sub(1)
+        });
+
+        let range = smallest..block_number;
+
+        exec_witness.headers = provider
+            .headers_range(range)?
+            .into_iter()
+            .map(|header| {
+                let mut serialized_header = Vec::new();
+                header.encode(&mut serialized_header);
+                serialized_header.into()
+            })
+            .collect();
+
+        program_inputs.push((block.clone(), exec_witness));
 
         // Compute and check the post state root
         let hashed_state =
@@ -279,6 +315,12 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     let expected_post_state = case.post_state.as_ref().ok_or(Error::MissingPostState)?;
     for (&address, account) in expected_post_state {
         account.assert_db(address, provider.tx_ref())?;
+    }
+
+    // Now validate using the stateless client if everything else passes
+    for (block, execution_witness) in program_inputs {
+        stateless_validation(block, execution_witness, chain_spec.clone())
+            .expect("stateless validation failed");
     }
 
     Ok(())

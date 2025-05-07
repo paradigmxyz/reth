@@ -115,6 +115,7 @@ test-utils = [
     "reth-prune-types/test-utils",
     "dep:reth-ethereum-primitives",
     "reth-ethereum-primitives?/test-utils",
+    "reth-evm-ethereum/test-utils",
 ]
 
 [[bench]]

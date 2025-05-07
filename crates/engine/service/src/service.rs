@@ -15,7 +15,7 @@ pub use reth_engine_tree::{
     engine::EngineApiEvent,
 };
 use reth_ethereum_primitives::EthPrimitives;
-use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
+use reth_evm::ConfigureEvm;
 use reth_network_p2p::BlockClient;
 use reth_node_types::{BlockTy, NodeTypes};
 use reth_payload_builder::PayloadBuilderHandle;
@@ -27,7 +27,6 @@ use reth_prune::PrunerWithFactory;
 use reth_stages_api::{MetricEventsSender, Pipeline};
 use reth_tasks::TaskSpawner;
 use std::{
-    marker::PhantomData,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -55,27 +54,23 @@ type EngineServiceType<N, Client> = ChainOrchestrator<
 // TODO(mattsse): remove hidde once fixed : <https://github.com/rust-lang/rust/issues/135363>
 //  otherwise rustdoc fails to resolve the alias
 #[doc(hidden)]
-pub struct EngineService<N, Client, E>
+pub struct EngineService<N, Client>
 where
     N: ProviderNodeTypes,
     Client: BlockClient<Block = BlockTy<N>> + 'static,
-    E: BlockExecutorProvider + 'static,
 {
     orchestrator: EngineServiceType<N, Client>,
-    _marker: PhantomData<E>,
 }
 
-impl<N, Client, E> EngineService<N, Client, E>
+impl<N, Client> EngineService<N, Client>
 where
     N: ProviderNodeTypes,
     Client: BlockClient<Block = BlockTy<N>> + 'static,
-    E: BlockExecutorProvider<Primitives = N::Primitives> + 'static,
 {
     /// Constructor for `EngineService`.
     #[expect(clippy::too_many_arguments)]
     pub fn new<V, C>(
         consensus: Arc<dyn FullConsensus<N::Primitives, Error = ConsensusError>>,
-        executor_factory: E,
         chain_spec: Arc<N::ChainSpec>,
         client: Client,
         incoming_requests: EngineMessageStream<N::Payload>,
@@ -105,30 +100,25 @@ where
 
         let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
 
-        let (to_tree_tx, from_tree) =
-            EngineApiTreeHandler::<N::Primitives, _, _, _, _, _>::spawn_new(
-                blockchain_db,
-                executor_factory,
-                consensus,
-                payload_validator,
-                persistence_handle,
-                payload_builder,
-                canonical_in_memory_state,
-                tree_config,
-                invalid_block_hook,
-                engine_kind,
-                evm_config,
-            );
+        let (to_tree_tx, from_tree) = EngineApiTreeHandler::<N::Primitives, _, _, _, _>::spawn_new(
+            blockchain_db,
+            consensus,
+            payload_validator,
+            persistence_handle,
+            payload_builder,
+            canonical_in_memory_state,
+            tree_config,
+            invalid_block_hook,
+            engine_kind,
+            evm_config,
+        );
 
         let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
         let handler = EngineHandler::new(engine_handler, downloader, incoming_requests);
 
         let backfill_sync = PipelineSync::new(pipeline, pipeline_task_spawner);
 
-        Self {
-            orchestrator: ChainOrchestrator::new(handler, backfill_sync),
-            _marker: Default::default(),
-        }
+        Self { orchestrator: ChainOrchestrator::new(handler, backfill_sync) }
     }
 
     /// Returns a mutable reference to the orchestrator.
@@ -137,11 +127,10 @@ where
     }
 }
 
-impl<N, Client, E> Stream for EngineService<N, Client, E>
+impl<N, Client> Stream for EngineService<N, Client>
 where
     N: ProviderNodeTypes,
     Client: BlockClient<Block = BlockTy<N>> + 'static,
-    E: BlockExecutorProvider + 'static,
 {
     type Item = ChainEvent<BeaconConsensusEngineEvent<N::Primitives>>;
 
@@ -164,7 +153,7 @@ mod tests {
     use reth_engine_tree::{test_utils::TestPipelineBuilder, tree::NoopInvalidBlockHook};
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_engine_primitives::EthEngineTypes;
-    use reth_evm_ethereum::{execute::EthExecutorProvider, EthEvmConfig};
+    use reth_evm_ethereum::EthEvmConfig;
     use reth_exex_types::FinishedExExHeight;
     use reth_network_p2p::test_utils::TestFullBlockClient;
     use reth_node_ethereum::EthereumEngineValidator;
@@ -198,7 +187,6 @@ mod tests {
         let pipeline_task_spawner = Box::<TokioTaskExecutor>::default();
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
 
-        let executor_factory = EthExecutorProvider::ethereum(chain_spec.clone());
         let blockchain_db =
             BlockchainProvider::with_latest(provider_factory.clone(), SealedHeader::default())
                 .unwrap();
@@ -211,7 +199,6 @@ mod tests {
         let (tx, _rx) = unbounded_channel();
         let _eth_service = EngineService::new(
             consensus,
-            executor_factory,
             chain_spec,
             client,
             Box::pin(incoming_requests),
