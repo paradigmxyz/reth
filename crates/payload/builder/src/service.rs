@@ -303,8 +303,10 @@ where
 
         let fut = async move {
             let res = fut.await;
-            if let Ok(ref payload) = res {
-                payload_events.send(Events::BuiltPayload(payload.clone().into())).ok();
+            if let Ok(payload) = &res {
+                if payload_events.receiver_count() > 0 {
+                    payload_events.send(Events::BuiltPayload(payload.clone().into())).ok();
+                }
 
                 resolved_metrics
                     .set_resolved_revenue(payload.block().number(), f64::from(payload.fees()));
