@@ -104,12 +104,11 @@ impl Precompile for CachedPrecompile {
             }
         }
 
-        // cache miss, call the precompile
-        self.increment_by_one_precompile_cache_misses();
         let result = self.precompile.call(data, gas_limit);
 
         match &result {
             Ok(output) => {
+                self.increment_by_one_precompile_cache_misses();
                 self.cache.insert(key, CacheEntry(output.clone()));
             }
             _ => {
