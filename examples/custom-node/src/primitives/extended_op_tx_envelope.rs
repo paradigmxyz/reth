@@ -1,4 +1,4 @@
-use alloy_consensus::Transaction;
+use alloy_consensus::{error::ValueError, Transaction};
 use alloy_eips::{
     eip2718::{Eip2718Error, Eip2718Result, IsTyped2718},
     eip2930::AccessList,
@@ -56,6 +56,22 @@ impl TryFrom<ExtendedTxEnvelope<OpTxEnvelope, CustomTransactionEnvelope>>
             }
             ExtendedTxEnvelope::Other(tx) => Ok(ExtendedTxEnvelope::Other(tx)),
         }
+    }
+}
+
+impl From<OpPooledTransaction> for ExtendedTxEnvelope<OpTxEnvelope, CustomTransactionEnvelope> {
+    fn from(_tx: OpPooledTransaction) -> Self {
+        todo!("Convert OpPooledTransaction -> ExtendedTxEnvelope")
+    }
+}
+
+impl TryFrom<ExtendedTxEnvelope<OpTxEnvelope, CustomTransactionEnvelope>> for OpPooledTransaction {
+    type Error = ValueError<OpTxEnvelope>;
+
+    fn try_from(
+        _tx: ExtendedTxEnvelope<OpTxEnvelope, CustomTransactionEnvelope>,
+    ) -> Result<Self, Self::Error> {
+        todo!("Convert ExtendedTxEnvelope -> OpPooledTransaction")
     }
 }
 

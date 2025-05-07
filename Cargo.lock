@@ -3424,6 +3424,7 @@ dependencies = [
  "reth-network-peers",
  "reth-node-builder",
  "reth-op",
+ "reth-optimism-consensus",
  "reth-optimism-forks",
  "reth-payload-builder",
  "reth-rpc-api",
