@@ -82,7 +82,11 @@ where
         StageId::Era
     }
 
-    fn poll_execute_ready(&mut self, cx: &mut Context<'_>, _input: ExecInput) -> Poll<Result<(), StageError>> {
+    fn poll_execute_ready(&mut self, cx: &mut Context<'_>, input: ExecInput) -> Poll<Result<(), StageError>> {
+        if input.target_reached() {
+            return Poll::Ready(Ok(()));
+        }
+
         if self.stream.is_none() {
             if let Some(source) = self.source.clone() {
                 match source {
@@ -141,11 +145,11 @@ where
                 // order
                 let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
 
-                if let Some(height) = era::process(era.as_ref(), &mut writer, provider, &mut self.hash_collector, &mut td).map_err(|e| StageError::Recoverable(e.into()))? {
-                    self.last_block_height.replace(height);
-                }
+                let height = era::process(era.as_ref(), &mut writer, provider, &mut self.hash_collector, &mut td, last_header_number).map_err(|e| StageError::Fatal(e.into()))?;
 
-                ExecOutput::in_progress(input.checkpoint())
+                self.last_block_height.replace(height);
+
+                ExecOutput::in_progress(StageCheckpoint::new(height))
             }
             None => {
                 if self.source.is_some() {
@@ -153,7 +157,7 @@ where
                         .map_err(|e| StageError::Recoverable(e.into()))?;
                 }
 
-                ExecOutput::done(StageCheckpoint::new(input.target()))
+                ExecOutput::done(StageCheckpoint::new(self.last_block_height.unwrap_or_else(|| input.target())))
             }
         })
     }
