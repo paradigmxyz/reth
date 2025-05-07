@@ -1,7 +1,7 @@
-use era_export::{export, ExportConfig};
 use reqwest::{Client, Url};
 use reth_db_common::init::init_genesis;
 use reth_era_downloader::{EraClient, EraStream, EraStreamConfig};
+use reth_era_utils::{export, import, ExportConfig};
 use reth_etl::Collector;
 use reth_provider::{
     test_utils::create_test_provider_factory, BlockReader, HeaderProvider,
@@ -28,7 +28,9 @@ async fn test_history_import_export() {
 
     let stream = EraStream::new(client, config);
     let provider_factory = create_test_provider_factory();
-
+    let static_file_provider: reth_provider::providers::StaticFileProvider<
+        reth_ethereum_primitives::EthPrimitives,
+    > = provider_factory.static_file_provider();
     init_genesis(&provider_factory).unwrap();
 
     let folder = tempdir().unwrap();
@@ -37,13 +39,9 @@ async fn test_history_import_export() {
 
     let expected_block_number = 8191;
     let actual_block_number =
-        reth_era_import::import(stream, &provider_factory.provider_rw().unwrap().0, hash_collector)
-            .unwrap();
+        import(stream, &provider_factory.provider_rw().unwrap().0, hash_collector).unwrap();
 
-    // provider_factory.provider_rw().unwrap().0.commit().unwrap();
     assert_eq!(actual_block_number, expected_block_number);
-
-    let static_file_provider = provider_factory.static_file_provider();
 
     for block_num in [0, 100, 1000, 8191] {
         let block_db = provider_factory.provider_rw().unwrap().block_by_number(block_num).unwrap();

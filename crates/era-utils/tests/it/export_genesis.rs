@@ -1,5 +1,5 @@
-use era_export::{export, ExportConfig};
 use reth_db_common::init::init_genesis;
+use reth_era_utils::{export, ExportConfig};
 use reth_fs_util as fs;
 use reth_provider::{test_utils::create_test_provider_factory, BlockReader};
 use tempfile::tempdir;
