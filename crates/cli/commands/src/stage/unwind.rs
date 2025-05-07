@@ -146,7 +146,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                     evm_config.clone(),
                     stage_conf.clone(),
                     prune_modes.clone(),
-                    None,
                 )
                 .set(ExecutionStage::new(
                     evm_config,

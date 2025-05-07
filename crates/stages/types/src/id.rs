@@ -137,11 +137,4 @@ mod tests {
 
         assert!(!StageId::Execution.is_downloading_stage());
     }
-
-    // Multiple places around the codebase assume headers is the first stage.
-    // Feel free to remove this test if the assumption changes.
-    #[test]
-    fn stage_era_first() {
-        assert_eq!(*StageId::ALL.first().unwrap(), StageId::Era);
-    }
 }

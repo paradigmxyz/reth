@@ -38,10 +38,9 @@
 //! ```
 use crate::{
     stages::{
-        AccountHashingStage, BodyStage, EraImportSource, EraStage, ExecutionStage, FinishStage,
-        HeaderStage, IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage,
-        PruneSenderRecoveryStage, PruneStage, SenderRecoveryStage, StorageHashingStage,
-        TransactionLookupStage,
+        AccountHashingStage, BodyStage, EraStage, ExecutionStage, FinishStage, HeaderStage,
+        IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, PruneSenderRecoveryStage,
+        PruneStage, SenderRecoveryStage, StorageHashingStage, TransactionLookupStage,
     },
     StageSet, StageSetBuilder,
 };
@@ -116,7 +115,6 @@ where
         evm_config: E,
         stages_config: StageConfig,
         prune_modes: PruneModes,
-        import_source: Option<EraImportSource>,
     ) -> Self {
         Self {
             online: OnlineStages::new(
@@ -125,7 +123,6 @@ where
                 header_downloader,
                 body_downloader,
                 stages_config.clone(),
-                import_source,
             ),
             evm_config,
             consensus,
@@ -200,9 +197,6 @@ where
     body_downloader: B,
     /// Configuration for each stage in the pipeline
     stages_config: StageConfig,
-
-    /// ERA Import source
-    import_source: Option<EraImportSource>,
 }
 
 impl<Provider, H, B> OnlineStages<Provider, H, B>
@@ -217,9 +211,8 @@ where
         header_downloader: H,
         body_downloader: B,
         stages_config: StageConfig,
-        import_source: Option<EraImportSource>,
     ) -> Self {
-        Self { provider, tip, header_downloader, body_downloader, stages_config, import_source }
+        Self { provider, tip, header_downloader, body_downloader, stages_config }
     }
 }
 
@@ -270,7 +263,6 @@ where
 {
     fn builder(self) -> StageSetBuilder<Provider> {
         StageSetBuilder::default()
-            .add_stage(EraStage::new(self.import_source, self.stages_config.etl.clone()))
             .add_stage(HeaderStage::new(
                 self.provider,
                 self.header_downloader,

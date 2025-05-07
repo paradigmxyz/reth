@@ -54,15 +54,6 @@ impl Debug for EraStage {
     }
 }
 
-/// Describes where to get the era files from.
-#[derive(Debug, Clone)]
-pub enum EraImportSource {
-    /// Remote HTTP accessible host.
-    Url(Url, PathBuf),
-    /// Local directory.
-    Path(PathBuf),
-}
-
 impl EraStage {
     /// Creates a new [`EraStage`].
     pub fn new(source: Option<EraImportSource>, etl_config: EtlConfig) -> Self {
@@ -235,4 +226,13 @@ where
 
         Ok(UnwindOutput { checkpoint: input.checkpoint.with_block_number(input.unwind_to) })
     }
+}
+
+/// Describes where to get the era files from.
+#[derive(Debug, Clone)]
+pub enum EraImportSource {
+    /// Remote HTTP accessible host.
+    Url(Url, PathBuf),
+    /// Local directory.
+    Path(PathBuf),
 }
