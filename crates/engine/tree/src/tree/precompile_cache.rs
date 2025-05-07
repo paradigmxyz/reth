@@ -31,12 +31,6 @@ pub struct CacheEntry {
 }
 
 /// A cache for precompile inputs / outputs.
-///
-/// This assumes that the precompile is a standard precompile, as in `StandardPrecompileFn`, meaning
-/// its inputs are only `(Bytes, u64)`.
-///
-/// NOTE: This does not work with "context stateful precompiles", ie `ContextStatefulPrecompile` or
-/// `ContextStatefulPrecompileMut`. They are explicitly banned.
 #[derive(Debug)]
 pub(crate) struct CachedPrecompile {
     /// Cache for precompile results and gas bounds.
