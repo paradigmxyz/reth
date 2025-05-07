@@ -361,6 +361,15 @@ pub trait EthApi<T: RpcObject, B: RpcObject, R: RpcObject, H: RpcObject> {
         keys: Vec<JsonStorageKey>,
         block_number: Option<BlockId>,
     ) -> RpcResult<EIP1186AccountProofResponse>;
+
+    /// Returns the account's balance, nonce, and code.
+    #[method(name = "getAccountInfo")]
+    async fn get_account_info(
+        &self,
+        address: Address,
+        block: BlockId,
+    ) -> RpcResult<Option<alloy_rpc_types_eth::AccountInfo>>;
+
 }
 
 #[async_trait::async_trait]
@@ -809,5 +818,14 @@ where
     ) -> RpcResult<EIP1186AccountProofResponse> {
         trace!(target: "rpc::eth", ?address, ?keys, ?block_number, "Serving eth_getProof");
         Ok(EthState::get_proof(self, address, keys, block_number)?.await?)
+    }
+
+    async fn get_account_info(
+        &self,
+        address: Address,
+        block: BlockId,
+    ) -> RpcResult<Option<alloy_rpc_types_eth::AccountInfo>> {
+        trace!(target: "rpc::eth", "Serving eth_getAccountInfo");
+        Ok(self.get_account_info(address, block).await?)
     }
 }
