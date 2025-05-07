@@ -1,3 +1,8 @@
+use crate::{
+    serde_bincode_compat::SerdeBincodeCompat,
+    size::InMemorySize,
+    transaction::signed::{RecoveryError, SignedTransaction},
+};
 use alloy_consensus::{error::ValueError, Transaction};
 use alloy_eips::{
     eip2718::{Eip2718Error, Eip2718Result, IsTyped2718},
@@ -9,13 +14,7 @@ use alloy_primitives::{bytes::Buf, ChainId, Signature, TxHash};
 use alloy_rlp::{BufMut, Decodable, Encodable, Result as RlpResult};
 use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope};
 use reth_codecs::Compact;
-use reth_ethereum::primitives::{
-    serde_bincode_compat::SerdeBincodeCompat, transaction::signed::RecoveryError, InMemorySize,
-    SignedTransaction,
-};
 use revm_primitives::{Address, Bytes, TxKind, B256, U256};
-
-use super::CustomTransactionEnvelope;
 
 macro_rules! delegate {
     ($self:expr => $tx:ident.$method:ident($($arg:expr),*)) => {
@@ -35,42 +34,42 @@ macro_rules! delegate {
 /// types must be unique.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Hash, Eq, PartialEq)]
 pub enum ExtendedTxEnvelope<BuiltIn, Other> {
+    /// The builtin transaction type.
     BuiltIn(BuiltIn),
+    /// The other transaction type.
     Other(Other),
 }
 
+/// A [`SignedTransaction`] implementation that combines the [`OpTxEnvelope`] and another
+/// transaction type.
 pub type ExtendedOpTxEnvelope<T> = ExtendedTxEnvelope<OpTxEnvelope, T>;
 
-impl TryFrom<ExtendedTxEnvelope<OpTxEnvelope, CustomTransactionEnvelope>>
-    for ExtendedTxEnvelope<OpPooledTransaction, CustomTransactionEnvelope>
+impl<Tx> TryFrom<ExtendedTxEnvelope<OpTxEnvelope, Tx>>
+    for ExtendedTxEnvelope<OpPooledTransaction, Tx>
 {
     type Error = OpTxEnvelope;
 
-    fn try_from(
-        value: ExtendedTxEnvelope<OpTxEnvelope, CustomTransactionEnvelope>,
-    ) -> Result<Self, Self::Error> {
+    fn try_from(value: ExtendedTxEnvelope<OpTxEnvelope, Tx>) -> Result<Self, Self::Error> {
         match value {
             ExtendedTxEnvelope::BuiltIn(tx) => {
                 let converted_tx: OpPooledTransaction = tx.clone().try_into().map_err(|_| tx)?;
-                Ok(ExtendedTxEnvelope::BuiltIn(converted_tx))
+                Ok(Self::BuiltIn(converted_tx))
             }
-            ExtendedTxEnvelope::Other(tx) => Ok(ExtendedTxEnvelope::Other(tx)),
+            ExtendedTxEnvelope::Other(tx) => Ok(Self::Other(tx)),
         }
     }
 }
 
-impl From<OpPooledTransaction> for ExtendedTxEnvelope<OpTxEnvelope, CustomTransactionEnvelope> {
+impl<Tx> From<OpPooledTransaction> for ExtendedTxEnvelope<OpTxEnvelope, Tx> {
     fn from(tx: OpPooledTransaction) -> Self {
-        ExtendedTxEnvelope::BuiltIn(tx.into())
+        Self::BuiltIn(tx.into())
     }
 }
 
-impl TryFrom<ExtendedTxEnvelope<OpTxEnvelope, CustomTransactionEnvelope>> for OpPooledTransaction {
+impl<Tx> TryFrom<ExtendedTxEnvelope<OpTxEnvelope, Tx>> for OpPooledTransaction {
     type Error = ValueError<OpTxEnvelope>;
 
-    fn try_from(
-        _tx: ExtendedTxEnvelope<OpTxEnvelope, CustomTransactionEnvelope>,
-    ) -> Result<Self, Self::Error> {
+    fn try_from(_tx: ExtendedTxEnvelope<OpTxEnvelope, Tx>) -> Result<Self, Self::Error> {
         match _tx {
             ExtendedTxEnvelope::BuiltIn(inner) => inner.try_into(),
             ExtendedTxEnvelope::Other(_tx) => Err(ValueError::new(
