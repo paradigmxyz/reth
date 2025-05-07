@@ -33,6 +33,12 @@ pub struct EngineArgs {
     #[arg(long = "engine.disable-caching-and-prewarming")]
     pub caching_and_prewarming_disabled: bool,
 
+    /// Enable state provider latency metrics. This allows the engine to collect and report stats
+    /// about how long state provider calls took during execution, but this does introduce slight
+    /// overhead to state provider calls.
+    #[arg(long = "engine.state-provider-metrics", default_value = "false")]
+    pub state_provider_metrics: bool,
+
     /// Configure the size of cross-block cache in megabytes
     #[arg(long = "engine.cross-block-cache-size", default_value_t = DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB)]
     pub cross_block_cache_size: u64,
@@ -64,6 +70,7 @@ impl Default for EngineArgs {
             state_root_task_compare_updates: false,
             caching_and_prewarming_enabled: true,
             caching_and_prewarming_disabled: false,
+            state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB,
             accept_execution_requests_hash: false,
             max_proof_task_concurrency: DEFAULT_MAX_PROOF_TASK_CONCURRENCY,
@@ -80,6 +87,7 @@ impl EngineArgs {
             .with_memory_block_buffer_target(self.memory_block_buffer_target)
             .with_legacy_state_root(self.legacy_state_root_task_enabled)
             .without_caching_and_prewarming(self.caching_and_prewarming_disabled)
+            .with_state_provider_metrics(self.state_provider_metrics)
             .with_always_compare_trie_updates(self.state_root_task_compare_updates)
             .with_cross_block_cache_size(self.cross_block_cache_size * 1024 * 1024)
             .with_max_proof_task_concurrency(self.max_proof_task_concurrency)

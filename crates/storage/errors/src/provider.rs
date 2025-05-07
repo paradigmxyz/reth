@@ -79,9 +79,6 @@ pub enum ProviderError {
     /// Unable to find the safe block.
     #[error("safe block does not exist")]
     SafeBlockNotFound,
-    /// Thrown when the cache service task dropped.
-    #[error("cache service task stopped")]
-    CacheServiceUnavailable,
     /// Thrown when we failed to lookup a block for the pending state.
     #[error("unknown block {_0}")]
     UnknownBlockHash(B256),
@@ -215,7 +212,6 @@ impl StaticFileWriterError {
         Self { message: message.into() }
     }
 }
-
 /// Consistent database view error.
 #[derive(Clone, Debug, PartialEq, Eq, Display)]
 pub enum ConsistentViewError {

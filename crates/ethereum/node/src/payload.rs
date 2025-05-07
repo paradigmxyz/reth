@@ -1,6 +1,6 @@
 //! Payload component configuration for the Ethereum node.
 
-use reth_chainspec::ChainSpec;
+use reth_chainspec::EthereumHardforks;
 use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
@@ -20,7 +20,7 @@ pub struct EthereumPayloadBuilder;
 
 impl<Types, Node, Pool, Evm> PayloadBuilderBuilder<Node, Pool, Evm> for EthereumPayloadBuilder
 where
-    Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
+    Types: NodeTypes<ChainSpec: EthereumHardforks, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin

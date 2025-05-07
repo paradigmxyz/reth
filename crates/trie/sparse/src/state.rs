@@ -1,7 +1,6 @@
 use crate::{
     blinded::{BlindedProvider, BlindedProviderFactory, DefaultBlindedProviderFactory},
-    metrics::SparseStateTrieMetrics,
-    RevealedSparseTrie, SparseTrie, TrieMasks,
+    LeafLookup, RevealedSparseTrie, SparseTrie, TrieMasks,
 };
 use alloc::{collections::VecDeque, vec::Vec};
 use alloy_primitives::{
@@ -38,7 +37,8 @@ pub struct SparseStateTrie<F: BlindedProviderFactory = DefaultBlindedProviderFac
     /// Reusable buffer for RLP encoding of trie accounts.
     account_rlp_buf: Vec<u8>,
     /// Metrics for the sparse state trie.
-    metrics: SparseStateTrieMetrics,
+    #[cfg(feature = "metrics")]
+    metrics: crate::metrics::SparseStateTrieMetrics,
 }
 
 #[cfg(test)]
@@ -52,6 +52,7 @@ impl Default for SparseStateTrie {
             revealed_storage_paths: Default::default(),
             retain_updates: false,
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
+            #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
     }
@@ -89,6 +90,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
             revealed_storage_paths: Default::default(),
             retain_updates: false,
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
+            #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
     }
@@ -102,6 +104,34 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     /// Returns `true` if account was already revealed.
     pub fn is_account_revealed(&self, account: B256) -> bool {
         self.revealed_account_paths.contains(&Nibbles::unpack(account))
+    }
+
+    /// Was the account witness for `address` complete?
+    pub fn check_valid_account_witness(&self, address: B256) -> bool {
+        let path = Nibbles::unpack(address);
+        let trie = match self.state_trie_ref() {
+            Some(t) => t,
+            None => return false,
+        };
+
+        matches!(
+            trie.find_leaf(&path, None),
+            Ok(LeafLookup::Exists | LeafLookup::NonExistent { .. })
+        )
+    }
+
+    /// Was the storage-slot witness for (`address`,`slot`) complete?
+    pub fn check_valid_storage_witness(&self, address: B256, slot: B256) -> bool {
+        let path = Nibbles::unpack(slot);
+        let trie = match self.storage_trie_ref(&address) {
+            Some(t) => t,
+            None => return false,
+        };
+
+        matches!(
+            trie.find_leaf(&path, None),
+            Ok(LeafLookup::Exists | LeafLookup::NonExistent { .. })
+        )
     }
 
     /// Returns `true` if storage slot for account was already revealed.
@@ -281,10 +311,17 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
         branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
     ) -> SparseStateTrieResult<()> {
-        let DecodedProofNodes { nodes, total_nodes, skipped_nodes, new_nodes } =
-            decode_proof_nodes(account_subtree, &self.revealed_account_paths)?;
-        self.metrics.increment_total_account_nodes(total_nodes as u64);
-        self.metrics.increment_skipped_account_nodes(skipped_nodes as u64);
+        let DecodedProofNodes {
+            nodes,
+            new_nodes,
+            total_nodes: _total_nodes,
+            skipped_nodes: _skipped_nodes,
+        } = decode_proof_nodes(account_subtree, &self.revealed_account_paths)?;
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.increment_total_account_nodes(_total_nodes as u64);
+            self.metrics.increment_skipped_account_nodes(_skipped_nodes as u64);
+        }
         let mut account_nodes = nodes.into_iter().peekable();
 
         if let Some(root_node) = Self::validate_root_node_decoded(&mut account_nodes)? {
@@ -332,10 +369,17 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     ) -> SparseStateTrieResult<()> {
         let revealed_nodes = self.revealed_storage_paths.entry(account).or_default();
 
-        let DecodedProofNodes { nodes, total_nodes, skipped_nodes, new_nodes } =
-            decode_proof_nodes(storage_subtree.subtree, revealed_nodes)?;
-        self.metrics.increment_total_storage_nodes(total_nodes as u64);
-        self.metrics.increment_skipped_storage_nodes(skipped_nodes as u64);
+        let DecodedProofNodes {
+            nodes,
+            new_nodes,
+            total_nodes: _total_nodes,
+            skipped_nodes: _skipped_nodes,
+        } = decode_proof_nodes(storage_subtree.subtree, revealed_nodes)?;
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.increment_total_storage_nodes(_total_nodes as u64);
+            self.metrics.increment_skipped_storage_nodes(_skipped_nodes as u64);
+        }
         let mut nodes = nodes.into_iter().peekable();
 
         if let Some(root_node) = Self::validate_root_node_decoded(&mut nodes)? {
@@ -594,6 +638,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     /// If the trie has not been revealed, this function reveals the root node and returns its hash.
     pub fn root(&mut self) -> SparseStateTrieResult<B256> {
         // record revealed node metrics
+        #[cfg(feature = "metrics")]
         self.metrics.record();
 
         Ok(self.revealed_trie_mut()?.root())
@@ -602,6 +647,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     /// Returns sparse trie root and trie updates if the trie has been revealed.
     pub fn root_with_updates(&mut self) -> SparseStateTrieResult<(B256, TrieUpdates)> {
         // record revealed node metrics
+        #[cfg(feature = "metrics")]
         self.metrics.record();
 
         let storage_tries = self.storage_trie_updates();

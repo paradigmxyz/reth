@@ -17,6 +17,7 @@ use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
 use error::{InsertBlockError, InsertBlockErrorKind, InsertBlockFatalError};
+use instrumented_state::InstrumentedStateProvider;
 use payload_processor::sparse_trie::StateRootComputeOutcome;
 use persistence_state::CurrentPersistenceAction;
 use reth_chain_state::{
@@ -31,7 +32,7 @@ use reth_engine_primitives::{
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_ethereum_primitives::EthPrimitives;
-use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
+use reth_evm::ConfigureEvm;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes, PayloadTypes};
 use reth_primitives_traits::{
@@ -40,9 +41,10 @@ use reth_primitives_traits::{
 use reth_provider::{
     providers::ConsistentDbView, BlockNumReader, BlockReader, DBProvider, DatabaseProviderFactory,
     ExecutionOutcome, HashedPostStateProvider, ProviderError, StateCommitmentProvider,
-    StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
+    StateProvider, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
+    TransactionVariant,
 };
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{database::StateProviderDatabase, State};
 use reth_stages_api::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_db::{DatabaseHashedPostState, StateCommitment};
@@ -66,6 +68,7 @@ use tracing::*;
 mod block_buffer;
 mod cached_state;
 pub mod error;
+mod instrumented_state;
 mod invalid_block_hook;
 mod invalid_headers;
 mod metrics;
@@ -84,11 +87,15 @@ pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
 use reth_evm::execute::BlockExecutionOutput;
 
-/// The largest gap for which the tree will be used for sync. See docs for `pipeline_run_threshold`
-/// for more information.
+/// The largest gap for which the tree will be used to sync individual blocks by downloading them.
 ///
-/// This is the default threshold, the distance to the head that the tree will be used for sync.
-/// If the distance exceeds this threshold, the pipeline will be used for sync.
+/// This is the default threshold, and represents the distance (gap) from the local head to a
+/// new (canonical) block, e.g. the forkchoice head block. If the block distance from the local head
+/// exceeds this threshold, the pipeline will be used to backfill the gap more efficiently.
+///
+/// E.g.: Local head `block.number` is 100 and the forkchoice head `block.number` is 133 (more than
+/// an epoch has slots), then this exceeds the threshold at which the pipeline should be used to
+/// backfill this gap.
 pub(crate) const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 
 /// Keeps track of the state of the tree.
@@ -559,13 +566,12 @@ pub enum TreeAction {
 ///
 /// This type is responsible for processing engine API requests, maintaining the canonical state and
 /// emitting events.
-pub struct EngineApiTreeHandler<N, P, E, T, V, C>
+pub struct EngineApiTreeHandler<N, P, T, V, C>
 where
     N: NodePrimitives,
     T: PayloadTypes,
 {
     provider: P,
-    executor_provider: E,
     consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
     payload_validator: V,
     /// Keeps track of internals such as executed and buffered blocks.
@@ -605,17 +611,18 @@ where
     engine_kind: EngineApiKind,
     /// The type responsible for processing new payloads
     payload_processor: PayloadProcessor<N, C>,
+    /// The EVM configuration.
+    evm_config: C,
 }
 
-impl<N, P: Debug, E: Debug, T: PayloadTypes + Debug, V: Debug, C: Debug> std::fmt::Debug
-    for EngineApiTreeHandler<N, P, E, T, V, C>
+impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C: Debug> std::fmt::Debug
+    for EngineApiTreeHandler<N, P, T, V, C>
 where
     N: NodePrimitives,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineApiTreeHandler")
             .field("provider", &self.provider)
-            .field("executor_provider", &self.executor_provider)
             .field("consensus", &self.consensus)
             .field("payload_validator", &self.payload_validator)
             .field("state", &self.state)
@@ -633,7 +640,7 @@ where
     }
 }
 
-impl<N, P, E, T, V, C> EngineApiTreeHandler<N, P, E, T, V, C>
+impl<N, P, T, V, C> EngineApiTreeHandler<N, P, T, V, C>
 where
     N: NodePrimitives,
     P: DatabaseProviderFactory
@@ -646,7 +653,6 @@ where
         + 'static,
     <P as DatabaseProviderFactory>::Provider:
         BlockReader<Block = N::Block, Header = N::BlockHeader>,
-    E: BlockExecutorProvider<Primitives = N>,
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes,
     V: EngineValidator<T, Block = N::Block>,
@@ -655,7 +661,6 @@ where
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         provider: P,
-        executor_provider: E,
         consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
         payload_validator: V,
         outgoing: UnboundedSender<EngineApiEvent<N>>,
@@ -671,11 +676,10 @@ where
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
 
         let payload_processor =
-            PayloadProcessor::new(WorkloadExecutor::default(), evm_config, &config);
+            PayloadProcessor::new(WorkloadExecutor::default(), evm_config.clone(), &config);
 
         Self {
             provider,
-            executor_provider,
             consensus,
             payload_validator,
             incoming,
@@ -692,6 +696,7 @@ where
             invalid_block_hook: Box::new(NoopInvalidBlockHook),
             engine_kind,
             payload_processor,
+            evm_config,
         }
     }
 
@@ -708,7 +713,6 @@ where
     #[expect(clippy::complexity)]
     pub fn spawn_new(
         provider: P,
-        executor_provider: E,
         consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
         payload_validator: V,
         persistence: PersistenceHandle<N>,
@@ -737,7 +741,6 @@ where
 
         let mut task = Self::new(
             provider,
-            executor_provider,
             consensus,
             payload_validator,
             tx,
@@ -1708,7 +1711,7 @@ where
     ///
     /// Assumes that `finish` has been called on the `persistence_state` at least once
     fn on_new_persisted_block(&mut self) -> ProviderResult<()> {
-        // If we have an on-disk reorg, we need to handle it firsrt before touching the in-memory
+        // If we have an on-disk reorg, we need to handle it first before touching the in-memory
         // state.
         if let Some(remove_above) = self.find_disk_reorg()? {
             self.remove_blocks(remove_above);
@@ -2445,18 +2448,17 @@ where
             handle.cache_metrics(),
         );
 
-        debug!(target: "engine::tree", block=?block_num_hash, "Executing block");
-
-        let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
-        let execution_start = Instant::now();
-        let output = ensure_ok!(self.metrics.executor.execute_metered(
-            executor,
-            &block,
-            Box::new(handle.state_hook()),
-        ));
-        let execution_finish = Instant::now();
-        let execution_time = execution_finish.duration_since(execution_start);
-        debug!(target: "engine::tree", elapsed = ?execution_time, number=?block_num_hash.number, "Executed block");
+        let (output, execution_finish) = if self.config.state_provider_metrics() {
+            let state_provider = InstrumentedStateProvider::from_state_provider(&state_provider);
+            let (output, execution_finish) =
+                ensure_ok!(self.execute_block(&state_provider, &block, &handle));
+            state_provider.record_total_latency();
+            (output, execution_finish)
+        } else {
+            let (output, execution_finish) =
+                ensure_ok!(self.execute_block(&state_provider, &block, &handle));
+            (output, execution_finish)
+        };
 
         // after executing the block we can stop executing transactions
         handle.stop_prewarming_execution();
@@ -2597,6 +2599,32 @@ where
 
         debug!(target: "engine::tree", block=?block_num_hash, "Finished inserting block");
         Ok(InsertPayloadOk::Inserted(BlockStatus::Valid))
+    }
+
+    /// Executes a block with the given state provider
+    fn execute_block<S: StateProvider>(
+        &self,
+        state_provider: S,
+        block: &RecoveredBlock<N::Block>,
+        handle: &PayloadHandle,
+    ) -> Result<(BlockExecutionOutput<N::Receipt>, Instant), InsertBlockErrorKind> {
+        debug!(target: "engine::tree", block=?block.num_hash(), "Executing block");
+        let mut db = State::builder()
+            .with_database(StateProviderDatabase::new(&state_provider))
+            .with_bundle_update()
+            .without_state_clear()
+            .build();
+        let executor = self.evm_config.executor_for_block(&mut db, block);
+        let execution_start = Instant::now();
+        let output = self.metrics.executor.execute_metered(
+            executor,
+            block,
+            Box::new(handle.state_hook()),
+        )?;
+        let execution_finish = Instant::now();
+        let execution_time = execution_finish.duration_since(execution_start);
+        debug!(target: "engine::tree", elapsed = ?execution_time, number=?block.number(), "Executed block");
+        Ok((output, execution_finish))
     }
 
     /// Compute state root for the given hashed post state in parallel.
@@ -3062,7 +3090,6 @@ impl PersistingKind {
         matches!(self, Self::PersistingDescendant)
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3081,8 +3108,7 @@ mod tests {
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_ethereum_primitives::{Block, EthPrimitives};
-    use reth_evm::test_utils::MockExecutorProvider;
-    use reth_evm_ethereum::EthEvmConfig;
+    use reth_evm_ethereum::MockEvmConfig;
     use reth_node_ethereum::EthereumEngineValidator;
     use reth_primitives_traits::Block as _;
     use reth_provider::test_utils::MockEthProvider;
@@ -3149,16 +3175,15 @@ mod tests {
         tree: EngineApiTreeHandler<
             EthPrimitives,
             MockEthProvider,
-            MockExecutorProvider,
             EthEngineTypes,
             EthereumEngineValidator,
-            EthEvmConfig,
+            MockEvmConfig,
         >,
         to_tree_tx: Sender<FromEngine<EngineApiRequest<EthEngineTypes, EthPrimitives>, Block>>,
         from_tree_rx: UnboundedReceiver<EngineApiEvent>,
         blocks: Vec<ExecutedBlockWithTrieUpdates>,
         action_rx: Receiver<PersistenceAction>,
-        executor_provider: MockExecutorProvider,
+        evm_config: MockEvmConfig,
         block_builder: TestBlockBuilder,
         provider: MockEthProvider,
     }
@@ -3185,7 +3210,6 @@ mod tests {
             let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
 
             let provider = MockEthProvider::default();
-            let executor_provider = MockExecutorProvider::default();
 
             let payload_validator = EthereumEngineValidator::new(chain_spec.clone());
 
@@ -3199,11 +3223,10 @@ mod tests {
             let (to_payload_service, _payload_command_rx) = unbounded_channel();
             let payload_builder = PayloadBuilderHandle::new(to_payload_service);
 
-            let evm_config = EthEvmConfig::new(chain_spec.clone());
+            let evm_config = MockEvmConfig::default();
 
             let tree = EngineApiTreeHandler::new(
                 provider.clone(),
-                executor_provider.clone(),
                 consensus,
                 payload_validator,
                 from_tree_tx,
@@ -3218,7 +3241,7 @@ mod tests {
                     .with_legacy_state_root(true)
                     .with_has_enough_parallelism(true),
                 EngineApiKind::Ethereum,
-                evm_config,
+                evm_config.clone(),
             );
 
             let block_builder = TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());
@@ -3228,7 +3251,7 @@ mod tests {
                 from_tree_rx,
                 blocks: vec![],
                 action_rx,
-                executor_provider,
+                evm_config,
                 block_builder,
                 provider,
             }
@@ -3286,7 +3309,7 @@ mod tests {
             &self,
             execution_outcomes: impl IntoIterator<Item = impl Into<ExecutionOutcome>>,
         ) {
-            self.executor_provider.extend(execution_outcomes);
+            self.evm_config.extend(execution_outcomes);
         }
 
         fn insert_block(

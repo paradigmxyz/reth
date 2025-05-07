@@ -29,7 +29,7 @@ use reth_engine_tree::{
     persistence::PersistenceHandle,
     tree::{EngineApiTreeHandler, InvalidBlockHook, TreeConfig},
 };
-use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
+use reth_evm::ConfigureEvm;
 use reth_node_types::BlockTy;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributesBuilder, PayloadTypes};
@@ -67,7 +67,6 @@ where
     #[expect(clippy::too_many_arguments)]
     pub fn new<B, V, C>(
         consensus: Arc<dyn FullConsensus<N::Primitives, Error = ConsensusError>>,
-        executor_factory: impl BlockExecutorProvider<Primitives = N::Primitives>,
         provider: ProviderFactory<N>,
         blockchain_db: BlockchainProvider<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
@@ -95,20 +94,18 @@ where
             PersistenceHandle::<N::Primitives>::spawn_service(provider, pruner, sync_metrics_tx);
         let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
 
-        let (to_tree_tx, from_tree) =
-            EngineApiTreeHandler::<N::Primitives, _, _, _, _, _>::spawn_new(
-                blockchain_db.clone(),
-                executor_factory,
-                consensus,
-                payload_validator,
-                persistence_handle,
-                payload_builder.clone(),
-                canonical_in_memory_state,
-                tree_config,
-                invalid_block_hook,
-                engine_kind,
-                evm_config,
-            );
+        let (to_tree_tx, from_tree) = EngineApiTreeHandler::<N::Primitives, _, _, _, _>::spawn_new(
+            blockchain_db.clone(),
+            consensus,
+            payload_validator,
+            persistence_handle,
+            payload_builder.clone(),
+            canonical_in_memory_state,
+            tree_config,
+            invalid_block_hook,
+            engine_kind,
+            evm_config,
+        );
 
         let handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
 
