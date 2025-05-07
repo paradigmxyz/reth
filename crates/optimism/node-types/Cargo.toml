@@ -18,7 +18,7 @@ reth-storage-api.workspace = true
 reth-node-api.workspace = true
 
 # op-reth
-reth-optimism-primitives.workspace = true
+reth-optimism-primitives = { workspace = true, features = ["serde"] }
 reth-optimism-chainspec.workspace = true
 reth-optimism-payload-builder.workspace = true
 
