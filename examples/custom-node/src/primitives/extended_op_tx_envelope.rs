@@ -5,7 +5,7 @@ use alloy_eips::{
     eip7702::SignedAuthorization,
     Decodable2718, Encodable2718, Typed2718,
 };
-use alloy_primitives::{bytes::Buf, ChainId, TxHash};
+use alloy_primitives::{bytes::Buf, ChainId, Signature, TxHash};
 use alloy_rlp::{BufMut, Decodable, Encodable, Result as RlpResult};
 use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope};
 use reth_codecs::Compact;
@@ -60,8 +60,8 @@ impl TryFrom<ExtendedTxEnvelope<OpTxEnvelope, CustomTransactionEnvelope>>
 }
 
 impl From<OpPooledTransaction> for ExtendedTxEnvelope<OpTxEnvelope, CustomTransactionEnvelope> {
-    fn from(_tx: OpPooledTransaction) -> Self {
-        todo!("Convert OpPooledTransaction -> ExtendedTxEnvelope")
+    fn from(tx: OpPooledTransaction) -> Self {
+        ExtendedTxEnvelope::BuiltIn(tx.into())
     }
 }
 
@@ -71,7 +71,17 @@ impl TryFrom<ExtendedTxEnvelope<OpTxEnvelope, CustomTransactionEnvelope>> for Op
     fn try_from(
         _tx: ExtendedTxEnvelope<OpTxEnvelope, CustomTransactionEnvelope>,
     ) -> Result<Self, Self::Error> {
-        todo!("Convert ExtendedTxEnvelope -> OpPooledTransaction")
+        match _tx {
+            ExtendedTxEnvelope::BuiltIn(inner) => inner.try_into(),
+            ExtendedTxEnvelope::Other(_tx) => Err(ValueError::new(
+                OpTxEnvelope::Legacy(alloy_consensus::Signed::new_unchecked(
+                    alloy_consensus::TxLegacy::default(),
+                    Signature::decode_rlp_vrs(&mut &[0u8; 65][..], |_| Ok(false)).unwrap(),
+                    B256::default(),
+                )),
+                "Cannot convert custom transaction to OpPooledTransaction",
+            )),
+        }
     }
 }
 

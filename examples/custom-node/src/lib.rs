@@ -58,7 +58,7 @@ where
         ComponentsBuilder::default()
             .node_types::<N>()
             .pool(CustomPoolBuilder::default())
-            .consensus(CustomConsensusBuilder::default())
+            .consensus(CustomConsensusBuilder)
     }
 
     fn add_ons(&self) -> Self::AddOns {}
