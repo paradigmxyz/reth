@@ -1,7 +1,12 @@
 use alloy_consensus::BlockHeader as _;
 use alloy_eips::BlockId;
 use alloy_evm::block::calc::{base_block_reward_pre_merge, block_reward, ommer_reward};
-use alloy_primitives::{map::HashSet, Bytes, B256, U256};
+use alloy_primitives::{
+    map::{HashMap, HashSet},
+    Address, BlockHash, Bytes, B256, U256,
+};
+use std::sync::{Arc, Mutex};
+
 use alloy_rpc_types_eth::{
     state::{EvmOverrides, StateOverride},
     transaction::TransactionRequest,
@@ -25,16 +30,42 @@ use reth_rpc_eth_api::{
     FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction, EthConfig};
-use reth_storage_api::{BlockNumReader, BlockReader};
+use reth_storage_api::{BlockIdReader, BlockNumReader, BlockReader};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
 use revm::DatabaseCommit;
 use revm_inspectors::{
     opcode::OpcodeGasInspector,
+    storage::StorageInspector,
     tracing::{parity::populate_state_diff, TracingInspector, TracingInspectorConfig},
 };
-use std::sync::Arc;
+use serde::{Deserialize, Serialize};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
+
+/// Response type for storage tracing that contains all accessed storage slots
+/// for a transaction.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransactionStorageAccess {
+    /// Hash of the transaction
+    pub transaction_hash: B256,
+    /// Tracks storage slots and access counter.
+    pub storage_access: HashMap<Address, HashMap<B256, u64>>,
+    /// Number of unique storage loads
+    pub unique_loads: u64,
+    /// Number of warm storage loads
+    pub warm_loads: u64,
+}
+
+/// Response type for storage tracing that contains all accessed storage slots
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockStorageAccess {
+    /// The block hash
+    pub block_hash: BlockHash,
+    /// All executed transactions in the block in the order they were executed
+    pub transactions: Vec<TransactionStorageAccess>,
+}
 
 /// `trace` API implementation.
 ///
@@ -560,6 +591,49 @@ where
             block_number: block.number(),
             transactions,
         }))
+    }
+
+    /// Returns all storage slots accessed during transaction execution along with their access
+    /// counts.
+    pub async fn trace_block_storage_access(
+        &self,
+        block_id: BlockId,
+    ) -> Result<Option<BlockStorageAccess>, Eth::Error> {
+        let shared_inspector = Arc::new(Mutex::new(Some(StorageInspector::default())));
+        let res = self
+            .eth_api()
+            .trace_block_inspector(
+                block_id,
+                None,
+                {
+                    let inspector = shared_inspector.clone();
+                    move || inspector.lock().unwrap().take().expect("inspector should be set")
+                },
+                {
+                    let inspector = shared_inspector.clone();
+                    move |tx_info, current_inspector, _res, _, _| {
+                        let trace = TransactionStorageAccess {
+                            transaction_hash: tx_info.hash.expect("tx hash is set"),
+                            storage_access: current_inspector.accessed_slots().clone(),
+                            unique_loads: current_inspector.unique_loads(),
+                            warm_loads: current_inspector.warm_loads(),
+                        };
+                        *inspector.lock().unwrap() = Some(current_inspector);
+                        Ok(trace)
+                    }
+                },
+            )
+            .await?;
+
+        let Some(transactions) = res else { return Ok(None) };
+
+        let Some(block_hash) =
+            self.provider().block_hash_for_id(block_id).map_err(Eth::Error::from_eth_err)?
+        else {
+            return Ok(None)
+        };
+
+        Ok(Some(BlockStorageAccess { block_hash, transactions }))
     }
 }
 
