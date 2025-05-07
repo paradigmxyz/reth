@@ -27,7 +27,7 @@ pub use validator::OpExecutionPayloadValidator;
 
 pub mod config;
 
-/// A default payload type for [`OpEngineTypes`]
+/// ZST that aggregates Optimism [`PayloadTypes`].
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]
 pub struct OpPayloadTypes<N: NodePrimitives = OpPrimitives>(core::marker::PhantomData<N>);
