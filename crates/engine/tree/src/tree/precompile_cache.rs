@@ -34,16 +34,13 @@ impl PrecompileCache {
     }
 }
 
-/// Cache key, just input for each precompile.
+/// Cache key, precompile call input.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CacheKey(alloy_primitives::Bytes);
 
-/// Combined entry containing both the result and gas bounds.
+/// Cache entry, precompile successful output.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CacheEntry {
-    /// The actual output of executing the precompile.
-    output: PrecompileOutput,
-}
+pub struct CacheEntry(PrecompileOutput);
 
 /// A cache for precompile inputs / outputs.
 #[derive(Debug)]
@@ -80,15 +77,9 @@ impl CachedPrecompile {
         self.metrics.precompile_errors.increment(1);
     }
 
-    fn cache_size(&self) -> u64 {
-        self.cache.weighted_size()
-    }
-
-    fn update_precompile_cache_size(&self, previous_size: u64) {
+    fn update_precompile_cache_size(&self) {
         let new_size = self.cache.weighted_size();
-        if new_size > previous_size {
-            self.metrics.precompile_cache_size.increment((new_size - previous_size) as f64);
-        }
+        self.metrics.precompile_cache_size.set(new_size as f64);
     }
 }
 
@@ -98,8 +89,8 @@ impl Precompile for CachedPrecompile {
 
         if let Some(entry) = &self.cache.get(&key) {
             self.increment_by_one_precompile_cache_hits();
-            if gas_limit >= entry.output.gas_used {
-                return Ok(entry.output.clone())
+            if gas_limit >= entry.0.gas_used {
+                return Ok(entry.0.clone())
             }
         }
 
@@ -107,22 +98,21 @@ impl Precompile for CachedPrecompile {
         self.increment_by_one_precompile_cache_misses();
         let result = self.precompile.call(data, gas_limit);
 
-        let previous_cache_size = self.cache_size();
         match &result {
             Ok(output) => {
-                self.cache.insert(key, CacheEntry { output: output.clone() });
+                self.cache.insert(key, CacheEntry(output.clone()));
             }
             _ => {
                 self.increment_by_one_precompile_errors();
             }
         }
 
-        self.update_precompile_cache_size(previous_cache_size);
+        self.update_precompile_cache_size();
         result
     }
 }
 
-/// Metrics for the cached precompile provider, showing hits / misses for each cache
+/// Metrics for the cached precompile.
 #[derive(reth_metrics::Metrics, Clone)]
 #[metrics(scope = "sync.caching")]
 pub(crate) struct CachedPrecompileMetrics {
@@ -162,7 +152,7 @@ mod tests {
             bytes: alloy_primitives::Bytes::copy_from_slice(b"cached_result"),
         };
 
-        let expected = CacheEntry { output };
+        let expected = CacheEntry(output);
         cache.cache.insert(key.clone(), expected.clone());
 
         let actual = cache.cache.get(&key).unwrap();
