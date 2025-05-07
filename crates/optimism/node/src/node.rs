@@ -29,6 +29,7 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_evm::{OpEvmConfig, OpNextBlockEnvAttributes};
 use reth_optimism_forks::OpHardforks;
+use reth_optimism_node_types::OpTypes;
 use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
     config::{OpBuilderConfig, OpDAConfig},
@@ -227,11 +228,11 @@ where
 }
 
 impl NodeTypes for OpNode {
-    type Primitives = OpPrimitives;
-    type ChainSpec = OpChainSpec;
-    type StateCommitment = MerklePatriciaTrie;
-    type Storage = OpStorage;
-    type Payload = OpEngineTypes;
+    type Primitives = <OpTypes as NodeTypes>::Primitives;
+    type ChainSpec = <OpTypes as NodeTypes>::ChainSpec;
+    type StateCommitment = <OpTypes as NodeTypes>::StateCommitment;
+    type Storage = <OpTypes as NodeTypes>::Storage;
+    type Payload = <OpTypes as NodeTypes>::Payload;
 }
 
 /// Add-ons w.r.t. optimism.
