@@ -188,6 +188,7 @@ impl<C: TrieCursor> TrieWalker<C> {
     fn node(&mut self, exact: bool) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let key = self.key().expect("key must exist").clone();
         let entry = if exact { self.cursor.seek_exact(key)? } else { self.cursor.seek(key)? };
+        #[cfg(feature = "metrics")]
         self.metrics.inc_branch_nodes_seeked();
 
         if let Some((_, node)) = &entry {
