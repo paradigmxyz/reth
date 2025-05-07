@@ -127,10 +127,10 @@ impl Precompile for CachedPrecompile {
 #[metrics(scope = "sync.caching")]
 pub(crate) struct CachedPrecompileMetrics {
     /// Precompile cache hits
-    precompile_cache_hits: metrics::Gauge,
+    precompile_cache_hits: metrics::Counter,
 
     /// Precompile cache misses
-    precompile_cache_misses: metrics::Gauge,
+    precompile_cache_misses: metrics::Counter,
 
     /// Precompile cache size
     ///
@@ -138,7 +138,7 @@ pub(crate) struct CachedPrecompileMetrics {
     precompile_cache_size: metrics::Gauge,
 
     /// Precompile execution errors.
-    precompile_errors: metrics::Gauge,
+    precompile_errors: metrics::Counter,
 }
 
 #[cfg(test)]
