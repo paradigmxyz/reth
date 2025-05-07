@@ -200,6 +200,19 @@ where
     type Payload = PL;
 }
 
+/// Adapter for accessing [`NodeTypes`] on a node. This type is useful for making a light-weight
+/// type that only implements [`NodeTypes`], from a more complex node type.
+#[derive(Debug, Clone, Default)]
+pub struct AnyNodeTypesAdapter<N = ()>(PhantomData<N>);
+
+impl<N: NodeTypes> NodeTypes for AnyNodeTypesAdapter<N> {
+    type Primitives = N::Primitives;
+    type ChainSpec = N::ChainSpec;
+    type StateCommitment = N::StateCommitment;
+    type Storage = N::Storage;
+    type Payload = N::Payload;
+}
+
 /// Helper adapter type for accessing [`NodePrimitives::Block`] on [`NodeTypes`].
 pub type BlockTy<N> = <PrimitivesTy<N> as NodePrimitives>::Block;
 

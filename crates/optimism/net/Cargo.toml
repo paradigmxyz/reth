@@ -23,3 +23,11 @@ alloy-consensus.workspace = true
 
 # optimism
 op-alloy-consensus.workspace = true
+
+[features]
+default = ["std"]
+std = [
+	"alloy-consensus/std",
+	"op-alloy-consensus/std",
+	"reth-optimism-primitives/std"
+]

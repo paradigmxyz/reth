@@ -42,6 +42,7 @@ reth-optimism-txpool.workspace = true
 reth-optimism-primitives = { workspace = true, features = ["reth-codec", "serde-bincode-compat"] }
 reth-optimism-forks.workspace = true
 reth-optimism-network.workspace = true
+reth-optimism-node-types.workspace = true
 
 # ethereum
 alloy-eips.workspace = true

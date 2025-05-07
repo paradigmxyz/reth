@@ -19,7 +19,7 @@ use reth_db_api::FullDatabase;
 use reth_evm::ConfigureEvm;
 use reth_network_api::{noop::NoopNetwork, NetworkInfo};
 use reth_node_api::{
-    FullNodeComponents, FullNodeTypesAdapter, NodePrimitives, NodeTypes, NodeTypesWithDBAdapter,
+    FullNodeComponents, FullNodeTypesAdapter, NodePrimitives, NodeTypesWithDBAdapter,
 };
 use reth_node_builder::{
     components::Components,
@@ -28,6 +28,7 @@ use reth_node_builder::{
 };
 use reth_optimism_evm::OpEvmConfig;
 use reth_optimism_network::OpNetworkPrimitives;
+use reth_optimism_node_types::OpTypes;
 use reth_optimism_primitives::{OpBlock, OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_optimism_txpool::OpPooledTransaction;
 use reth_provider::FullProvider;
@@ -335,15 +336,15 @@ impl OpEthApiBuilder {
     /// This is useful for building [`TraceApi`](reth_rpc::TraceApi) as standalone program without
     /// mempool.
     #[expect(clippy::complexity)]
-    pub fn build_evm_eth_api<N, DB, P>(
+    pub fn build_evm_eth_api<DB, P>(
         self,
         provider: P,
         evm_config: OpEvmConfig,
     ) -> OpEthApi<
         NodeAdapter<
-            FullNodeTypesAdapter<N, DB, P>,
+            FullNodeTypesAdapter<OpTypes, DB, P>,
             Components<
-                FullNodeTypesAdapter<N, DB, P>,
+                FullNodeTypesAdapter<OpTypes, DB, P>,
                 NoopNetwork<OpNetworkPrimitives>,
                 NoopTransactionPool<OpPooledTransaction>,
                 OpEvmConfig,
@@ -352,10 +353,9 @@ impl OpEthApiBuilder {
         >,
     >
     where
-        N: NodeTypes<Primitives = OpPrimitives>,
         DB: FullDatabase + 'static,
         P: FullProvider<
-            NodeTypesWithDBAdapter<N, DB>,
+            NodeTypesWithDBAdapter<OpTypes, DB>,
             Block = OpBlock,
             Receipt = OpReceipt,
             Transaction = OpTransactionSigned,
@@ -473,7 +473,6 @@ mod test {
     use reth_db_common::init::init_genesis;
     use reth_optimism_chainspec::OP_DEV;
     use reth_optimism_evm::OpEvmConfig;
-    use reth_optimism_node::OpNodeTypes;
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory_with_node_types,
     };
@@ -484,12 +483,12 @@ mod test {
 
     #[tokio::test]
     async fn build_trace_api() {
-        let factory = create_test_provider_factory_with_node_types::<OpNodeTypes>(OP_DEV.clone());
+        let factory = create_test_provider_factory_with_node_types::<OpTypes>(OP_DEV.clone());
         let _ = init_genesis(&factory).expect("should init genesis");
         let provider = BlockchainProvider::new(factory).expect("should build provider");
 
-        let eth_api = OpEthApiBuilder::default()
-            .build_evm_eth_api::<_, _, _>(provider, OpEvmConfig::op_dev());
+        let eth_api =
+            OpEthApiBuilder::default().build_evm_eth_api::<_, _>(provider, OpEvmConfig::op_dev());
 
         let trace = TraceApi::new(eth_api, BlockingTaskGuard::new(10), EthConfig::default());
 
