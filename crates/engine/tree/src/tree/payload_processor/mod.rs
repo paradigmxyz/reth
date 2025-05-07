@@ -62,7 +62,7 @@ pub struct PayloadProcessor<N, Evm> {
     /// whether precompile cache should be enabled.
     precompile_cache_enabled: bool,
     /// Precompile cache.
-    precompile_cache: Arc<PrecompileCache>,
+    precompile_cache: PrecompileCache,
     _marker: std::marker::PhantomData<N>,
 }
 
@@ -72,7 +72,7 @@ impl<N, Evm> PayloadProcessor<N, Evm> {
         executor: WorkloadExecutor,
         evm_config: Evm,
         config: &TreeConfig,
-        precompile_cache: Arc<PrecompileCache>,
+        precompile_cache: PrecompileCache,
     ) -> Self {
         Self {
             executor,
@@ -440,7 +440,7 @@ mod tests {
         payload_processor::{
             evm_state_to_hashed_post_state, executor::WorkloadExecutor, PayloadProcessor,
         },
-        precompile_cache::create_precompile_cache,
+        precompile_cache::PrecompileCache,
         StateProviderBuilder, TreeConfig,
     };
     use alloy_evm::block::StateChangeSource;
@@ -563,7 +563,7 @@ mod tests {
             WorkloadExecutor::default(),
             EthEvmConfig::new(factory.chain_spec()),
             &TreeConfig::default(),
-            Arc::new(create_precompile_cache()),
+            PrecompileCache::default(),
         );
         let provider = BlockchainProvider::new(factory).unwrap();
         let mut handle = payload_processor.spawn(

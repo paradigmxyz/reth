@@ -207,7 +207,7 @@ pub(super) struct PrewarmContext<N: NodePrimitives, P, Evm> {
     /// An atomic bool that tells prewarm tasks to not start any more execution.
     pub(super) terminate_execution: Arc<AtomicBool>,
     pub(super) precompile_cache_enabled: bool,
-    pub(super) precompile_cache: Arc<PrecompileCache>,
+    pub(super) precompile_cache: PrecompileCache,
 }
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>

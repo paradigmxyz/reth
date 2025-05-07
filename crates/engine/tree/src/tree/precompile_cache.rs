@@ -6,13 +6,32 @@ use revm::precompile::{PrecompileError, PrecompileResult};
 use std::sync::Arc;
 
 /// Cache for precompiles, for each input stores the result.
-pub type PrecompileCache =
-    mini_moka::sync::Cache<CacheKey, CacheEntry, alloy_primitives::map::DefaultHashBuilder>;
+#[derive(Debug, Clone)]
+pub struct PrecompileCache(
+    Arc<mini_moka::sync::Cache<CacheKey, CacheEntry, alloy_primitives::map::DefaultHashBuilder>>,
+);
 
-/// Create a new [`PrecompileCache`].
-pub fn create_precompile_cache() -> PrecompileCache {
-    mini_moka::sync::CacheBuilder::new(100_000)
-        .build_with_hasher(alloy_primitives::map::DefaultHashBuilder::default())
+impl Default for PrecompileCache {
+    fn default() -> Self {
+        Self(Arc::new(
+            mini_moka::sync::CacheBuilder::new(100_000)
+                .build_with_hasher(alloy_primitives::map::DefaultHashBuilder::default()),
+        ))
+    }
+}
+
+impl PrecompileCache {
+    fn get(&self, key: &CacheKey) -> Option<CacheEntry> {
+        self.0.get(key)
+    }
+
+    fn insert(&self, key: CacheKey, value: CacheEntry) {
+        self.0.insert(key, value);
+    }
+
+    fn weighted_size(&self) -> u64 {
+        self.0.weighted_size()
+    }
 }
 
 /// Cache key, just input for each precompile.
@@ -34,7 +53,7 @@ pub struct CacheEntry {
 #[derive(Debug)]
 pub(crate) struct CachedPrecompile {
     /// Cache for precompile results and gas bounds.
-    cache: Arc<PrecompileCache>,
+    cache: PrecompileCache,
     /// The precompile.
     precompile: DynPrecompile,
     /// Cache metrics.
@@ -43,11 +62,11 @@ pub(crate) struct CachedPrecompile {
 
 impl CachedPrecompile {
     /// `CachedPrecompile` constructor.
-    pub(crate) fn new(precompile: DynPrecompile, cache: Arc<PrecompileCache>) -> Self {
+    pub(crate) fn new(precompile: DynPrecompile, cache: PrecompileCache) -> Self {
         Self { precompile, cache, metrics: Default::default() }
     }
 
-    pub(crate) fn wrap(precompile: DynPrecompile, cache: Arc<PrecompileCache>) -> DynPrecompile {
+    pub(crate) fn wrap(precompile: DynPrecompile, cache: PrecompileCache) -> DynPrecompile {
         let wrapped = Self::new(precompile, cache);
         move |data: &Bytes, gas_limit: u64| -> PrecompileResult { wrapped.call(data, gas_limit) }
             .into()
@@ -160,7 +179,7 @@ mod tests {
         }
         .into();
 
-        let cache = CachedPrecompile::new(dyn_precompile, Arc::new(create_precompile_cache()));
+        let cache = CachedPrecompile::new(dyn_precompile, PrecompileCache::default());
 
         let key = CacheKey(b"test_input".into());
 
