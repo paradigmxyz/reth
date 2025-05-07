@@ -67,9 +67,9 @@ pub struct TrieNodeIter<C, H: HashedCursor> {
     /// The key that the [`HashedCursor`] previously advanced to using [`HashedCursor::next`].
     #[cfg(feature = "metrics")]
     previously_advanced_to_key: Option<B256>,
-    /// Stores the result of the last successful `next_hashed_entry`, used to avoid a redundant
-    /// `seek_hashed_entry` call if the walker points to the same key that was just return by
-    /// `next()`.
+    /// Stores the result of the last successful [`Self::next_hashed_entry`], used to avoid a
+    /// redundant [`Self::seek_hashed_entry`] call if the walker points to the same key that
+    /// was just return by `next()`.
     last_next_result: Option<(B256, H::Value)>,
 }
 
@@ -139,13 +139,6 @@ where
                 let result = Some((last_key, last_value));
                 self.last_seeked_hashed_entry = Some(SeekedHashedEntry { seeked_key: key, result });
 
-                #[cfg(feature = "metrics")]
-                {
-                    self.metrics.inc_leaf_nodes_seeked();
-                    if Some(key) == self.previously_advanced_to_key {
-                        self.metrics.inc_leaf_nodes_same_seeked_as_advanced();
-                    }
-                }
                 return Ok(result);
             }
         }
@@ -303,7 +296,6 @@ where
                         );
 
                         self.should_check_walker_key = false;
-                        self.last_next_result = None;
                         continue
                     }
 
