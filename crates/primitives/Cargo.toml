@@ -79,6 +79,7 @@ arbitrary = [
     "reth-ethereum-primitives/arbitrary",
     "reth-codecs/arbitrary",
     "alloy-primitives/arbitrary",
+    "c-kzg?/arbitrary",
 ]
 secp256k1 = [
     "reth-primitives-traits/secp256k1",
