@@ -98,7 +98,7 @@ impl Precompile for CachedPrecompile {
 
         let cache_result = self.cache.get(&key);
 
-        if let Some(ref entry) = cache_result {
+        if let Some(entry) = &cache_result {
             match &entry.result {
                 Ok(_) => {
                     self.increment_by_one_precompile_cache_hits();
