@@ -2455,7 +2455,7 @@ mod tests {
         prefix_set.extend_keys(state.clone().into_iter().map(|(nibbles, _)| nibbles));
         prefix_set.extend_keys(destroyed_accounts.iter().map(Nibbles::unpack));
         let walker =
-            TrieWalker::new(trie_cursor, prefix_set.freeze()).with_deletions_retained(true);
+            TrieWalker::state_trie(trie_cursor, prefix_set.freeze()).with_deletions_retained(true);
         let hashed_post_state = HashedPostState::default()
             .with_accounts(state.into_iter().map(|(nibbles, account)| {
                 (nibbles.pack().into_inner().unwrap().into(), Some(account))
