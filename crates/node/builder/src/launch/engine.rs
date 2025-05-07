@@ -160,6 +160,7 @@ where
             .or_else(|| node_config.chain.chain().kind().try_to_url().ok())
         {
             let folder = node_config.datadir().data_dir().join("era");
+            let _ = reth_fs_util::create_dir_all(&folder);
 
             Some(EraImportSource::Url(url, folder))
         } else {

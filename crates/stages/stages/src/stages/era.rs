@@ -17,7 +17,6 @@ use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::ProviderError;
 use std::{
     fmt::{Debug, Formatter},
-    fs,
     path::PathBuf,
     task::{ready, Context, Poll},
 };
@@ -177,7 +176,7 @@ where
                         let path = entry.path();
 
                         if path.extension() == Some("era1".as_ref()) {
-                            let _ = fs::remove_file(path);
+                            let _ = reth_fs_util::remove_file(path);
                         }
                     }
                 }
