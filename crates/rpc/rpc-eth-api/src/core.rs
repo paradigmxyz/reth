@@ -369,7 +369,6 @@ pub trait EthApi<T: RpcObject, B: RpcObject, R: RpcObject, H: RpcObject> {
         address: Address,
         block: BlockId,
     ) -> RpcResult<Option<alloy_rpc_types_eth::AccountInfo>>;
-
 }
 
 #[async_trait::async_trait]
