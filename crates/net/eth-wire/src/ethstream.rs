@@ -10,7 +10,7 @@ use crate::{
     message::{EthBroadcastMessage, ProtocolBroadcastMessage},
     p2pstream::HANDSHAKE_TIMEOUT,
     CanDisconnect, DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, ProtocolMessage,
-    Status,
+    StatusMessage,
 };
 use alloy_primitives::bytes::{Bytes, BytesMut};
 use alloy_rlp::Encodable;
@@ -66,19 +66,19 @@ where
     /// remote peer.
     pub async fn handshake<N: NetworkPrimitives>(
         self,
-        status: Status,
+        status: StatusMessage,
         fork_filter: ForkFilter,
-    ) -> Result<(EthStream<S, N>, Status), EthStreamError> {
+    ) -> Result<(EthStream<S, N>, StatusMessage), EthStreamError> {
         self.handshake_with_timeout(status, fork_filter, HANDSHAKE_TIMEOUT).await
     }
 
     /// Wrapper around handshake which enforces a timeout.
     pub async fn handshake_with_timeout<N: NetworkPrimitives>(
         self,
-        status: Status,
+        status: StatusMessage,
         fork_filter: ForkFilter,
         timeout_limit: Duration,
-    ) -> Result<(EthStream<S, N>, Status), EthStreamError> {
+    ) -> Result<(EthStream<S, N>, StatusMessage), EthStreamError> {
         timeout(timeout_limit, Self::handshake_without_timeout(self, status, fork_filter))
             .await
             .map_err(|_| EthStreamError::StreamTimeout)?
@@ -87,9 +87,9 @@ where
     /// Handshake with no timeout
     pub async fn handshake_without_timeout<N: NetworkPrimitives>(
         mut self,
-        status: Status,
+        status: StatusMessage,
         fork_filter: ForkFilter,
-    ) -> Result<(EthStream<S, N>, Status), EthStreamError> {
+    ) -> Result<(EthStream<S, N>, StatusMessage), EthStreamError> {
         trace!(
             %status,
             "sending eth status to peer"
@@ -98,7 +98,7 @@ where
 
         // now we can create the `EthStream` because the peer has successfully completed
         // the handshake
-        let stream = EthStream::new(status.version, self.inner);
+        let stream = EthStream::new(status.version(), self.inner);
 
         Ok((stream, status))
     }

@@ -1,7 +1,7 @@
 use crate::EthVersion;
 use alloy_chains::{Chain, NamedChain};
 use alloy_hardforks::{EthereumHardfork, ForkId, Head};
-use alloy_primitives::{hex, B256, U256};
+use alloy_primitives::{hex, B256, U256, U64};
 use alloy_rlp::{BufMut, Encodable, RlpDecodable, RlpEncodable};
 use core::fmt::{Debug, Display};
 use reth_chainspec::{EthChainSpec, Hardforks, MAINNET};
@@ -74,9 +74,11 @@ impl Status {
         StatusEth69 {
             version: EthVersion::Eth69,
             chain: self.chain,
-            blockhash: self.blockhash,
             genesis: self.genesis,
             forkid: self.forkid,
+            earliest: U64::ZERO, // Will be set from actual chain state in network layer
+            latest: U64::ZERO,   // Will be set from actual chain state in network layer
+            blockhash: self.blockhash,
         }
     }
 }
@@ -181,6 +183,7 @@ pub struct StatusBuilder {
     status: Status,
 }
 
+// eth69 todo: consider a StatusBuilder for eth69
 impl StatusBuilder {
     /// Consumes the type and creates the actual [`Status`] message.
     pub const fn build(self) -> Status {
@@ -239,9 +242,6 @@ pub struct StatusEth69 {
     /// [EIP155](https://eips.ethereum.org/EIPS/eip-155#list-of-chain-ids).
     pub chain: Chain,
 
-    /// The highest difficulty block hash the peer has seen
-    pub blockhash: B256,
-
     /// The genesis hash of the peer's chain.
     pub genesis: B256,
 
@@ -251,9 +251,26 @@ pub struct StatusEth69 {
     /// [EIP-2124](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2124.md).
     /// This was added in [`eth/64`](https://eips.ethereum.org/EIPS/eip-2364)
     pub forkid: ForkId,
+
+    /// Earliest block number this node can serve
+    pub earliest: U64,
+
+    /// Latest block number this node has (current head)
+    pub latest: U64,
+
+    /// Hash of the latest block this node has (current head)
+    pub blockhash: B256,
+}
+
+impl StatusEth69 {
+    /// Sets the [`EthVersion`] for the status.
+    pub const fn set_eth_version(&mut self, version: EthVersion) {
+        self.version = version;
+    }
 }
 
 impl Display for StatusEth69 {
+    // eth69 todo: add new fields
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let hexed_blockhash = hex::encode(self.blockhash);
         let hexed_genesis = hex::encode(self.genesis);
@@ -342,6 +359,22 @@ impl StatusMessage {
         }
     }
 
+    /// Returns the latest block hash
+    pub const fn blockhash(&self) -> B256 {
+        match self {
+            Self::Legacy(legacy_status) => legacy_status.blockhash,
+            Self::Eth69(status_69) => status_69.blockhash,
+        }
+    }
+
+    /// Sets the [`EthVersion`] for the status.
+    pub fn set_eth_version(&mut self, eth_version: EthVersion) {
+        match self {
+            Self::Legacy(legacy_status) => legacy_status.set_eth_version(eth_version),
+            Self::Eth69(status_69) => status_69.set_eth_version(eth_version),
+        }
+    }
+
     /// Converts to legacy Status since full support for EIP-7642
     /// is not fully implemented
     /// `<https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7642.md>`
@@ -377,6 +410,14 @@ impl Encodable for StatusMessage {
     }
 }
 
+impl Display for StatusMessage {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            StatusMessage::Legacy(s) => Display::fmt(s, f),
+            StatusMessage::Eth69(s69) => Display::fmt(s69, f),
+        }
+    }
+}
 #[cfg(test)]
 mod tests {
     use crate::{EthVersion, Status, StatusEth69};

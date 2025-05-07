@@ -2,10 +2,11 @@ use crate::{
     config::NetworkMode, message::PeerMessage, protocol::RlpxSubProtocol,
     swarm::NetworkConnectionState, transactions::TransactionsHandle, FetchClient,
 };
-use alloy_primitives::B256;
+use alloy_primitives::{B256, U64};
 use enr::Enr;
 use futures::StreamExt;
 use parking_lot::Mutex;
+use reth_chainspec::ChainSpec;
 use reth_discv4::{Discv4, NatResolver};
 use reth_discv5::Discv5;
 use reth_eth_wire::{
@@ -108,7 +109,11 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
 
     /// Update the status of the node.
     pub fn update_status(&self, head: Head) {
-        self.send_message(NetworkHandleMessage::StatusUpdate { head });
+        let merge_block = ChainSpec::default().paris_block().unwrap_or(0);
+        let earliest = if head.number >= merge_block { U64::from(merge_block) } else { U64::ZERO };
+        let latest = U64::from(head.number);
+
+        self.send_message(NetworkHandleMessage::StatusUpdate { head, earliest, latest });
     }
 
     /// Announce a block over devp2p
@@ -413,7 +418,12 @@ impl<N: NetworkPrimitives> NetworkSyncUpdater for NetworkHandle<N> {
 
     /// Update the status of the node.
     fn update_status(&self, head: Head) {
-        self.send_message(NetworkHandleMessage::StatusUpdate { head });
+        // Derive earliest_block as the Paris (Merge) activation block:
+        let merge_block = ChainSpec::default().paris_block().unwrap_or(0);
+        let earliest = if head.number >= merge_block { U64::from(merge_block) } else { U64::ZERO };
+        let latest = U64::from(head.number);
+
+        self.send_message(NetworkHandleMessage::StatusUpdate { head, earliest, latest });
     }
 }
 
@@ -516,6 +526,10 @@ pub(crate) enum NetworkHandleMessage<N: NetworkPrimitives = EthNetworkPrimitives
     StatusUpdate {
         /// The head status to apply.
         head: Head,
+        /// The head block number.
+        latest: U64,
+        /// Earliest block supported by the client.
+        earliest: U64,
     },
     /// Retrieves the current status via a oneshot sender.
     GetStatus(oneshot::Sender<NetworkStatus>),
