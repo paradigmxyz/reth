@@ -819,6 +819,7 @@ where
         Ok(EthState::get_proof(self, address, keys, block_number)?.await?)
     }
 
+    /// Handler for: `eth_getAccountInfo`
     async fn get_account_info(
         &self,
         address: Address,
