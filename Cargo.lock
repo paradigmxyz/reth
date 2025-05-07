@@ -113,8 +113,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus"
 version = "0.15.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e95f195ff89abc65469bb141b8ac73d69ea0c3589331f1ad10573f5e05beb168"
+source = "git+https://github.com/alloy-rs/alloy?branch=prestwich%2Ffilter-improvements#427cdeee48ae11687e2cf1162b7681dee56f8099"
 dependencies = [
  "alloy-eips 0.15.9",
  "alloy-primitives",
@@ -138,8 +137,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus-any"
 version = "0.15.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5eb741241cd0a6c59eb2d75221ae1530de821781d9a32d532ed010c1dec277a"
+source = "git+https://github.com/alloy-rs/alloy?branch=prestwich%2Ffilter-improvements#427cdeee48ae11687e2cf1162b7681dee56f8099"
 dependencies = [
  "alloy-consensus",
  "alloy-eips 0.15.9",
@@ -153,8 +151,7 @@ dependencies = [
 [[package]]
 name = "alloy-contract"
 version = "0.15.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3ea02cfa0b71757693251af6fae7052cf4011dfb0f8d1c59f94ae634f7355ae"
+source = "git+https://github.com/alloy-rs/alloy?branch=prestwich%2Ffilter-improvements#427cdeee48ae11687e2cf1162b7681dee56f8099"
 dependencies = [
  "alloy-consensus",
  "alloy-dyn-abi",
@@ -256,8 +253,7 @@ dependencies = [
 [[package]]
 name = "alloy-eips"
 version = "0.15.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c763c3a7c99d3eb61c8383a0c54264372f2ef13353cbb8fa0769c601c102a0a"
+source = "git+https://github.com/alloy-rs/alloy?branch=prestwich%2Ffilter-improvements#427cdeee48ae11687e2cf1162b7681dee56f8099"
 dependencies = [
  "alloy-eip2124",
  "alloy-eip2930",
@@ -298,8 +294,7 @@ dependencies = [
 [[package]]
 name = "alloy-genesis"
 version = "0.15.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b373f9795eb86bc3e043d50d4102e3623e2a5652ae628a478035ddb9d12d80c1"
+source = "git+https://github.com/alloy-rs/alloy?branch=prestwich%2Ffilter-improvements#427cdeee48ae11687e2cf1162b7681dee56f8099"
 dependencies = [
  "alloy-eips 0.15.9",
  "alloy-primitives",
@@ -337,8 +332,7 @@ dependencies = [
 [[package]]
 name = "alloy-json-rpc"
 version = "0.15.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1abf511974854b470e0e45588c2a06cceb38fa1ab2066d4cb61581e82687b76"
+source = "git+https://github.com/alloy-rs/alloy?branch=prestwich%2Ffilter-improvements#427cdeee48ae11687e2cf1162b7681dee56f8099"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
@@ -351,8 +345,7 @@ dependencies = [
 [[package]]
 name = "alloy-network"
 version = "0.15.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "adf68d6a8664c89847905b63fef561c54fd9ecb42ef92053e7935a61b8ec453e"
+source = "git+https://github.com/alloy-rs/alloy?branch=prestwich%2Ffilter-improvements#427cdeee48ae11687e2cf1162b7681dee56f8099"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -377,8 +370,7 @@ dependencies = [
 [[package]]
 name = "alloy-network-primitives"
 version = "0.15.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a83c70f1509416f905f809a27006d3b8e2005d9d1e4aeee994882ae0397477c5"
+source = "git+https://github.com/alloy-rs/alloy?branch=prestwich%2Ffilter-improvements#427cdeee48ae11687e2cf1162b7681dee56f8099"
 dependencies = [
  "alloy-consensus",
  "alloy-eips 0.15.9",
@@ -449,8 +441,7 @@ dependencies = [
 [[package]]
 name = "alloy-provider"
 version = "0.15.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64578f486297b27de47434f45659d3648e3326e195dab596e8a4161e91723bd5"
+source = "git+https://github.com/alloy-rs/alloy?branch=prestwich%2Ffilter-improvements#427cdeee48ae11687e2cf1162b7681dee56f8099"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
@@ -492,8 +483,7 @@ dependencies = [
 [[package]]
 name = "alloy-pubsub"
 version = "0.15.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7622a767f5db7bb0165895e821a643c9903e6422f9986663b754cce6b9e972d7"
+source = "git+https://github.com/alloy-rs/alloy?branch=prestwich%2Ffilter-improvements#427cdeee48ae11687e2cf1162b7681dee56f8099"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -535,8 +525,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-client"
 version = "0.15.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00bb8eb6eeeb6ba57a49e77cc73169ba099081daedb9596f61d91e27cfb8a012"
+source = "git+https://github.com/alloy-rs/alloy?branch=prestwich%2Ffilter-improvements#427cdeee48ae11687e2cf1162b7681dee56f8099"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -563,8 +552,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types"
 version = "0.15.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "815e430440eadcf61d7ea90dab5642bcf72056a8eacaffb97820d3a41fcdc0da"
+source = "git+https://github.com/alloy-rs/alloy?branch=prestwich%2Ffilter-improvements#427cdeee48ae11687e2cf1162b7681dee56f8099"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
@@ -576,8 +564,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-admin"
 version = "0.15.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "101f1e456d6d5df131a6a64c5a840073f90f959ec7a83296d2dbec5f43ef92be"
+source = "git+https://github.com/alloy-rs/alloy?branch=prestwich%2Ffilter-improvements#427cdeee48ae11687e2cf1162b7681dee56f8099"
 dependencies = [
  "alloy-genesis",
  "alloy-primitives",
@@ -588,8 +575,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-anvil"
 version = "0.15.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "329177b79cc1db6a82477cb470fe5fa1a07d06a13425392edc254c664536caed"
+source = "git+https://github.com/alloy-rs/alloy?branch=prestwich%2Ffilter-improvements#427cdeee48ae11687e2cf1162b7681dee56f8099"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -600,8 +586,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-any"
 version = "0.15.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a148344212e34b213a9e3516ace482df74f4146b43bd898f2e8c655707851ec3"
+source = "git+https://github.com/alloy-rs/alloy?branch=prestwich%2Ffilter-improvements#427cdeee48ae11687e2cf1162b7681dee56f8099"
 dependencies = [
  "alloy-consensus-any",
  "alloy-rpc-types-eth",
@@ -611,8 +596,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-beacon"
 version = "0.15.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a54a1dd8dbf5dd2fb6cefb771eeb22a955b7c7161bcb91928c41c5eddf1443b"
+source = "git+https://github.com/alloy-rs/alloy?branch=prestwich%2Ffilter-improvements#427cdeee48ae11687e2cf1162b7681dee56f8099"
 dependencies = [
  "alloy-eips 0.15.9",
  "alloy-primitives",
@@ -629,8 +613,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-debug"
 version = "0.15.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2838ef592345b46b4aeffbb8dd4c857a84d4d7e6f14a8edef34197d74bc1d39"
+source = "git+https://github.com/alloy-rs/alloy?branch=prestwich%2Ffilter-improvements#427cdeee48ae11687e2cf1162b7681dee56f8099"
 dependencies = [
  "alloy-primitives",
  "serde",
@@ -639,8 +622,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-engine"
 version = "0.15.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e228902dd802e9af385ca9d511f1556b647bf651d65574ae5e198447db96eaf"
+source = "git+https://github.com/alloy-rs/alloy?branch=prestwich%2Ffilter-improvements#427cdeee48ae11687e2cf1162b7681dee56f8099"
 dependencies = [
  "alloy-consensus",
  "alloy-eips 0.15.9",
@@ -661,8 +643,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-eth"
 version = "0.15.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f2530ba812172a7749b7af9bfbcb94cd555109e0a97458716b4543c36b81339"
+source = "git+https://github.com/alloy-rs/alloy?branch=prestwich%2Ffilter-improvements#427cdeee48ae11687e2cf1162b7681dee56f8099"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -673,7 +654,7 @@ dependencies = [
  "alloy-serde 0.15.9",
  "alloy-sol-types",
  "arbitrary",
- "itertools 0.14.0",
+ "itertools 0.13.0",
  "jsonrpsee-types",
  "serde",
  "serde_json",
@@ -683,8 +664,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-mev"
 version = "0.15.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "717c3044c0533878ff6c624eead2ed011762fccaa80cb122bb18c0d5b41ff70a"
+source = "git+https://github.com/alloy-rs/alloy?branch=prestwich%2Ffilter-improvements#427cdeee48ae11687e2cf1162b7681dee56f8099"
 dependencies = [
  "alloy-consensus",
  "alloy-eips 0.15.9",
@@ -698,8 +678,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-trace"
 version = "0.15.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4bc246ec9df92018d7be5bb3da2be87a2b9e35d076afa7c0f4dbeaefd2ba9ac0"
+source = "git+https://github.com/alloy-rs/alloy?branch=prestwich%2Ffilter-improvements#427cdeee48ae11687e2cf1162b7681dee56f8099"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -712,8 +691,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-txpool"
 version = "0.15.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f66c7991d20ac2dfbf2fe1aeb303e20abbdb1ee85b3eaf0cf8512deef2f2e5f7"
+source = "git+https://github.com/alloy-rs/alloy?branch=prestwich%2Ffilter-improvements#427cdeee48ae11687e2cf1162b7681dee56f8099"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -735,8 +713,7 @@ dependencies = [
 [[package]]
 name = "alloy-serde"
 version = "0.15.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57fd26c861032c1e91f430ef534e70a806d4486d3382d1e2e28033570b20fe43"
+source = "git+https://github.com/alloy-rs/alloy?branch=prestwich%2Ffilter-improvements#427cdeee48ae11687e2cf1162b7681dee56f8099"
 dependencies = [
  "alloy-primitives",
  "arbitrary",
@@ -747,8 +724,7 @@ dependencies = [
 [[package]]
 name = "alloy-signer"
 version = "0.15.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c37f6e07803121bd9597058f83726f7dc316fc630a0dad61c3c7a1fb784303c5"
+source = "git+https://github.com/alloy-rs/alloy?branch=prestwich%2Ffilter-improvements#427cdeee48ae11687e2cf1162b7681dee56f8099"
 dependencies = [
  "alloy-primitives",
  "async-trait",
@@ -762,8 +738,7 @@ dependencies = [
 [[package]]
 name = "alloy-signer-local"
 version = "0.15.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7ae7b607365e02bd879679dd295809d73391510ab21b917973317fb8b90228b"
+source = "git+https://github.com/alloy-rs/alloy?branch=prestwich%2Ffilter-improvements#427cdeee48ae11687e2cf1162b7681dee56f8099"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -851,8 +826,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport"
 version = "0.15.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c30aa026c88924cfa89ddfa77ad77aec05d2153c6838422dcdaf559a6e9e3175"
+source = "git+https://github.com/alloy-rs/alloy?branch=prestwich%2Ffilter-improvements#427cdeee48ae11687e2cf1162b7681dee56f8099"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -874,8 +848,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-http"
 version = "0.15.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3259b177d89bb02599bddb4cd3c11ec5a1ffdaaa01a2706e8298e08433f205f0"
+source = "git+https://github.com/alloy-rs/alloy?branch=prestwich%2Ffilter-improvements#427cdeee48ae11687e2cf1162b7681dee56f8099"
 dependencies = [
  "alloy-json-rpc",
  "alloy-transport",
@@ -889,8 +862,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-ipc"
 version = "0.15.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8722fa30fc71c11f7626b35712ffba266497f304ede4fe09fc2a3c130c1eee5"
+source = "git+https://github.com/alloy-rs/alloy?branch=prestwich%2Ffilter-improvements#427cdeee48ae11687e2cf1162b7681dee56f8099"
 dependencies = [
  "alloy-json-rpc",
  "alloy-pubsub",
@@ -909,8 +881,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-ws"
 version = "0.15.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fadcf1dc3105a51ac24070fed1a696334c7f77f639501e580c243490d0ba3d18"
+source = "git+https://github.com/alloy-rs/alloy?branch=prestwich%2Ffilter-improvements#427cdeee48ae11687e2cf1162b7681dee56f8099"
 dependencies = [
  "alloy-pubsub",
  "alloy-transport",

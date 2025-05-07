@@ -9,7 +9,7 @@ use reth_ethereum::{
         providers::ReadOnlyConfig, AccountReader, BlockReader, BlockSource, HeaderProvider,
         ReceiptProvider, StateProvider, TransactionsProvider,
     },
-    rpc::eth::primitives::{Filter, FilteredParams},
+    rpc::eth::primitives::Filter,
     TransactionSigned,
 };
 
@@ -201,21 +201,14 @@ fn receipts_provider_example<
     // TODO: Make it clearer how to choose between event_signature(topic0) (event name) and the
     // other 3 indexed topics. This API is a bit clunky and not obvious to use at the moment.
     let filter = Filter::new().address(addr).event_signature(topic);
-    let filter_params = FilteredParams::new(Some(filter));
-    let address_filter = FilteredParams::address_filter(&addr.into());
-    let topics_filter = FilteredParams::topics_filter(&[topic.into()]);
 
     // 3. If the address & topics filters match do something. We use the outer check against the
     // bloom filter stored in the header to avoid having to query the receipts table when there
     // is no instance of any event that matches the filter in the header.
-    if FilteredParams::matches_address(bloom, &address_filter) &&
-        FilteredParams::matches_topics(bloom, &topics_filter)
-    {
+    if filter.matches_bloom(bloom) {
         let receipts = provider.receipt(header_num)?.ok_or(eyre::eyre!("receipt not found"))?;
         for log in &receipts.logs {
-            if filter_params.filter_address(&log.address) &&
-                filter_params.filter_topics(log.topics())
-            {
+            if filter.matches(log) {
                 // Do something with the log e.g. decode it.
                 println!("Matching log found! {log:?}")
             }
