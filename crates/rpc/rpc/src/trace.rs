@@ -5,7 +5,7 @@ use alloy_primitives::{
     map::{HashMap, HashSet},
     Address, BlockHash, Bytes, B256, U256,
 };
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use alloy_rpc_types_eth::{
     state::{EvmOverrides, StateOverride},
@@ -599,20 +599,28 @@ where
         &self,
         block_id: BlockId,
     ) -> Result<Option<BlockStorageAccess>, Eth::Error> {
+        let shared_inspector = Arc::new(Mutex::new(Some(StorageInspector::default())));
         let res = self
             .eth_api()
             .trace_block_inspector(
                 block_id,
                 None,
-                StorageInspector::default,
-                move |tx_info, inspector, _res, _, _| {
-                    let trace = TransactionStorageAccess {
-                        transaction_hash: tx_info.hash.expect("tx hash is set"),
-                        storage_access: inspector.accessed_slots().clone(),
-                        unique_loads: inspector.unique_loads(),
-                        warm_loads: inspector.warm_loads(),
-                    };
-                    Ok(trace)
+                {
+                    let inspector = shared_inspector.clone();
+                    move || inspector.lock().unwrap().take().expect("inspector should be set")
+                },
+                {
+                    let inspector = shared_inspector.clone();
+                    move |tx_info, current_inspector, _res, _, _| {
+                        let trace = TransactionStorageAccess {
+                            transaction_hash: tx_info.hash.expect("tx hash is set"),
+                            storage_access: current_inspector.accessed_slots().clone(),
+                            unique_loads: current_inspector.unique_loads(),
+                            warm_loads: current_inspector.warm_loads(),
+                        };
+                        *inspector.lock().unwrap() = Some(current_inspector);
+                        Ok(trace)
+                    }
                 },
             )
             .await?;
