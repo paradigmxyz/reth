@@ -80,6 +80,10 @@ impl CachedPrecompile {
         self.metrics.precompile_cache_misses.increment(1);
     }
 
+    fn increment_by_one_precompile_errors(&self) {
+        self.metrics.precompile_errors.increment(1);
+    }
+
     fn cache_size(&self) -> u64 {
         self.cache.weighted_size()
     }
@@ -139,6 +143,7 @@ impl Precompile for CachedPrecompile {
                 );
             }
             _ => {
+                self.increment_by_one_precompile_errors();
                 self.cache.insert(
                     key,
                     CacheEntry { result: result.clone(), gas_used: 0, err_gas_limit: gas_limit },
@@ -165,6 +170,9 @@ pub(crate) struct CachedPrecompileMetrics {
     ///
     /// NOTE: this uses the moka caches`weighted_size` method to calculate size.
     precompile_cache_size: metrics::Gauge,
+
+    /// Precompile execution errors.
+    precompile_errors: metrics::Gauge,
 }
 
 #[cfg(test)]
