@@ -68,9 +68,8 @@ where
     let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
 
     while let Some(meta) = rx.recv()? {
-        if let Some(height) = process(&meta?, &mut writer, provider, hash_collector, &mut td)? {
-            last_header_number = height;
-        }
+        last_header_number =
+            process(&meta?, &mut writer, provider, hash_collector, &mut td, last_header_number)?;
     }
 
     build_index(provider, hash_collector)?;
@@ -89,7 +88,8 @@ pub fn process<Era, P, B, BB, BH>(
     provider: &P,
     hash_collector: &mut Collector<BlockHash, BlockNumber>,
     total_difficulty: &mut U256,
-) -> eyre::Result<Option<BlockNumber>>
+    mut last_header_number: BlockNumber,
+) -> eyre::Result<BlockNumber>
 where
     B: Block<Header = BH, Body = BB>,
     BH: FullBlockHeader + Value,
@@ -103,7 +103,6 @@ where
 {
     let file = fs::open(meta.path())?;
     let mut reader = Era1Reader::new(file);
-    let mut last_header_number = None;
 
     for block in reader.iter() {
         let block = block?;
@@ -111,12 +110,12 @@ where
         let body: BB = block.body.decode()?;
         let number = header.number();
 
-        if number == 0 {
+        if number <= last_header_number {
             continue;
         }
 
         let hash = header.hash_slow();
-        last_header_number = Some(number);
+        last_header_number = number;
 
         // Increase total difficulty
         *total_difficulty += header.difficulty();
