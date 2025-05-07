@@ -69,7 +69,7 @@ pub struct TrieNodeIter<C, H: HashedCursor> {
     previously_advanced_to_key: Option<B256>,
     /// Stores the result of the last successful [`Self::next_hashed_entry`], used to avoid a
     /// redundant [`Self::seek_hashed_entry`] call if the walker points to the same key that
-    /// was just return by `next()`.
+    /// was just returned by `next()`.
     last_next_result: Option<(B256, H::Value)>,
 }
 
