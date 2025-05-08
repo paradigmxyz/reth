@@ -25,7 +25,7 @@ use std::sync::Arc;
 /// A transaction validator that determines all transactions to be valid.
 ///
 /// An actual validator impl like
-/// [TransactionValidationTaskExecutor](reth_ethereum::pool::TransactionValidationTaskExecutor)
+/// [`TransactionValidationTaskExecutor`](reth_ethereum::pool::TransactionValidationTaskExecutor)
 /// would require up to date db access.
 ///
 /// CAUTION: This validator is not safe to use since it doesn't actually validate the transaction's
@@ -131,7 +131,7 @@ async fn maintain_txpool_commit() -> eyre::Result<()> {
         // wait for pool to process `CanonStateNotification::Commit` event correctly, and finally
         // the pool will be cleared
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        if txpool.len() == 0 {
+        if txpool.is_empty() {
             break;
         }
     }
