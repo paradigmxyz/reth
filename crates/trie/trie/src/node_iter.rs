@@ -64,9 +64,6 @@ pub struct TrieNodeIter<C, H: HashedCursor> {
 
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::TrieNodeIterMetrics,
-    /// The key that the [`HashedCursor`] previously advanced to using [`HashedCursor::next`].
-    #[cfg(feature = "metrics")]
-    previously_advanced_to_key: Option<B256>,
     /// Stores the result of the last successful [`Self::next_hashed_entry`], used to avoid a
     /// redundant [`Self::seek_hashed_entry`] call if the walker points to the same key that
     /// was just returned by `next()`.
@@ -112,8 +109,6 @@ where
             last_seeked_hashed_entry: None,
             #[cfg(feature = "metrics")]
             metrics: crate::metrics::TrieNodeIterMetrics::new(trie_type),
-            #[cfg(feature = "metrics")]
-            previously_advanced_to_key: None,
             last_next_result: None,
         }
     }
@@ -178,7 +173,6 @@ where
         #[cfg(feature = "metrics")]
         {
             self.metrics.inc_leaf_nodes_advanced();
-            self.previously_advanced_to_key = self.last_next_result.as_ref().map(|(k, _)| *k);
         }
         result
     }
