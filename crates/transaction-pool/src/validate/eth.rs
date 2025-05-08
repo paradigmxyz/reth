@@ -27,7 +27,7 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_primitives_traits::{
     transaction::error::InvalidTransactionError, Block, GotExpected, SealedBlock,
 };
-use reth_storage_api::{StateProvider, StateProviderFactory};
+use reth_storage_api::{StateProvider, StateProviderBox, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{
     marker::PhantomData,
@@ -84,13 +84,46 @@ where
     /// which can improve performance when validating many transactions.
     ///
     /// If `state` is `None`, a new state provider will be created.
-    pub fn validate_one_with_state(
+    ///
+    /// Convenience method for applying stateless and stateful checks on transaction. Under the
+    /// hood this calls same validations as [`validate_one_no_state`](Self::validate_one_no_state)
+    /// followed by [`validate_one_against_state`](Self::validate_one_against_state).
+    pub fn validate_one_with_state<P>(
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
-        state: &mut Option<Box<dyn StateProvider>>,
-    ) -> TransactionValidationOutcome<Tx> {
+        state: Option<P>,
+    ) -> TransactionValidationOutcome<Tx>
+    where
+        P: StateProvider,
+    {
         self.inner.validate_one_with_provider(origin, transaction, state)
+    }
+
+    /// Performs stateless validation on single transaction.
+    ///
+    /// Returns unaltered input transaction if all checks pass, so transaction can continue
+    /// through to stateful validation as argument to
+    /// [`validate_one_against_state`](Self::validate_one_against_state).
+    pub fn validate_one_no_state(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Tx,
+    ) -> Result<Tx, TransactionValidationOutcome<Tx>> {
+        self.inner.validate_one_no_state(origin, transaction)
+    }
+
+    /// Validates single transaction using given state.
+    pub fn validate_one_against_state<P>(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Tx,
+        state: P,
+    ) -> TransactionValidationOutcome<Tx>
+    where
+        P: StateProvider,
+    {
+        self.inner.validate_one_against_state(origin, transaction, state)
     }
 
     /// Validates all given transactions.
@@ -206,31 +239,31 @@ where
     /// Validates a single transaction using an optional cached state provider.
     /// If no provider is passed, a new one will be created. This allows reusing
     /// the same provider across multiple txs.
-    fn validate_one_with_provider(
+    fn validate_one_with_provider<P>(
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
-        maybe_state: &mut Option<Box<dyn StateProvider>>,
-    ) -> TransactionValidationOutcome<Tx> {
+        maybe_state: Option<P>,
+    ) -> TransactionValidationOutcome<Tx>
+    where
+        P: StateProvider,
+    {
         match self.validate_one_no_state(origin, transaction) {
             Ok(transaction) => {
                 // stateless checks passed, pass transaction down stateful validation pipeline
                 // If we don't have a state provider yet, fetch the latest state
-                if maybe_state.is_none() {
-                    match self.client.latest() {
-                        Ok(new_state) => {
-                            *maybe_state = Some(new_state);
-                        }
+                let state = match maybe_state {
+                    Some(state) => Box::new(state),
+                    None => match self.client.latest() {
+                        Ok(new_state) => new_state,
                         Err(err) => {
                             return TransactionValidationOutcome::Error(
                                 *transaction.hash(),
                                 Box::new(err),
                             )
                         }
-                    }
-                }
-
-                let state = maybe_state.as_deref().expect("provider is set");
+                    },
+                };
 
                 self.validate_one_against_state(origin, transaction, state)
             }
@@ -583,8 +616,7 @@ where
         origin: TransactionOrigin,
         transaction: Tx,
     ) -> TransactionValidationOutcome<Tx> {
-        let mut provider = None;
-        self.validate_one_with_provider(origin, transaction, &mut provider)
+        self.validate_one_with_provider::<StateProviderBox>(origin, transaction, None)
     }
 
     /// Validates all given transactions.
@@ -592,10 +624,11 @@ where
         &self,
         transactions: Vec<(TransactionOrigin, Tx)>,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
-        let mut provider = None;
         transactions
             .into_iter()
-            .map(|(origin, tx)| self.validate_one_with_provider(origin, tx, &mut provider))
+            .map(|(origin, tx)| {
+                self.validate_one_with_provider::<StateProviderBox>(origin, tx, None)
+            })
             .collect()
     }
 
