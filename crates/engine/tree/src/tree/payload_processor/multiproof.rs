@@ -17,8 +17,8 @@ use reth_provider::{
 };
 use reth_revm::state::EvmState;
 use reth_trie::{
-    prefix_set::TriePrefixSetsMut, updates::TrieUpdatesSorted, HashedPostState,
-    HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets, TrieInput,
+    prefix_set::TriePrefixSetsMut, updates::TrieUpdatesSorted, DecodedMultiProof, HashedPostState,
+    HashedPostStateSorted, HashedStorage, MultiProofTargets, TrieInput,
 };
 use reth_trie_parallel::{proof::ParallelProof, proof_task::ProofTaskManagerHandle};
 use std::{
@@ -32,6 +32,9 @@ use std::{
 };
 use tracing::{debug, error, trace};
 
+#[cfg(test)]
+use reth_trie::MultiProof;
+
 /// The size of proof targets chunk to spawn in one calculation.
 const MULTIPROOF_TARGETS_CHUNK_SIZE: usize = 10;
 
@@ -42,7 +45,7 @@ pub struct SparseTrieUpdate {
     /// The state update that was used to calculate the proof
     pub(crate) state: HashedPostState,
     /// The calculated multiproof
-    pub(crate) multiproof: MultiProof,
+    pub(crate) multiproof: DecodedMultiProof,
 }
 
 impl SparseTrieUpdate {
@@ -54,7 +57,7 @@ impl SparseTrieUpdate {
     /// Construct update from multiproof.
     #[cfg(test)]
     pub(super) fn from_multiproof(multiproof: MultiProof) -> Self {
-        Self { multiproof, ..Default::default() }
+        Self { multiproof: multiproof.try_into().unwrap(), ..Default::default() }
     }
 
     /// Extend update with contents of the other.
@@ -455,7 +458,7 @@ where
                 storage_proof_task_handle.clone(),
             )
             .with_branch_node_masks(true)
-            .storage_proof(hashed_address, proof_targets);
+            .decoded_storage_proof(hashed_address, proof_targets);
             let elapsed = start.elapsed();
             trace!(
                 target: "engine::root",
@@ -473,7 +476,10 @@ where
                             sequence_number: proof_sequence_number,
                             update: SparseTrieUpdate {
                                 state: hashed_state_update,
-                                multiproof: MultiProof::from_storage_proof(hashed_address, proof),
+                                multiproof: DecodedMultiProof::from_storage_proof(
+                                    hashed_address,
+                                    proof,
+                                ),
                             },
                             elapsed,
                         }),
@@ -523,7 +529,7 @@ where
                 storage_proof_task_handle.clone(),
             )
             .with_branch_node_masks(true)
-            .multiproof(proof_targets);
+            .decoded_multiproof(proof_targets);
             let elapsed = start.elapsed();
             trace!(
                 target: "engine::root",
@@ -973,7 +979,7 @@ where
 
                         if let Some(combined_update) = self.on_proof(
                             sequence_number,
-                            SparseTrieUpdate { state, multiproof: MultiProof::default() },
+                            SparseTrieUpdate { state, multiproof: Default::default() },
                         ) {
                             let _ = self.to_sparse_trie.send(combined_update);
                         }
@@ -1117,7 +1123,7 @@ mod tests {
     use super::*;
     use alloy_primitives::map::B256Set;
     use reth_provider::{providers::ConsistentDbView, test_utils::create_test_provider_factory};
-    use reth_trie::TrieInput;
+    use reth_trie::{MultiProof, TrieInput};
     use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofTaskManager};
     use revm_primitives::{B256, U256};
     use std::sync::Arc;
