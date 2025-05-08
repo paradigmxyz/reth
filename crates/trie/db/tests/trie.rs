@@ -23,7 +23,7 @@ use reth_trie::{
     BranchNodeCompact, HashBuilder, IntermediateStateRootState, Nibbles, StateRoot,
     StateRootProgress, StorageRoot, TrieMask,
 };
-use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot};
+use reth_trie_db::{DatabaseStorageRoot, StateRootFromTx};
 use std::{collections::BTreeMap, ops::Mul, str::FromStr, sync::Arc};
 
 fn insert_account(

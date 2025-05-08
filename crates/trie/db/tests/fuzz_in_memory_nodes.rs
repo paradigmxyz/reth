@@ -15,7 +15,7 @@ use reth_trie::{
     updates::TrieUpdates,
     HashedPostState, HashedStorage, StateRoot, StorageRoot,
 };
-use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot, DatabaseTrieCursorFactory};
+use reth_trie_db::{DatabaseStorageRoot, DatabaseTrieCursorFactory, StateRootFromTx};
 use std::collections::BTreeMap;
 
 proptest! {

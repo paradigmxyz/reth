@@ -13,7 +13,7 @@ use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter};
 use reth_primitives_traits::{Account, StorageEntry};
 use reth_trie::StateRoot;
-use reth_trie_db::DatabaseStateRoot;
+use reth_trie_db::StateRootFromTx;
 use std::sync::Arc;
 
 pub mod blocks;

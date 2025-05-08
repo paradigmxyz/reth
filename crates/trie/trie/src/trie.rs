@@ -36,6 +36,20 @@ pub struct StateRoot<T, H> {
     metrics: StateRootMetrics,
 }
 
+impl<T: Clone, H: Clone> Clone for StateRoot<T, H> {
+    fn clone(&self) -> Self {
+        Self {
+            trie_cursor_factory: self.trie_cursor_factory.clone(),
+            hashed_cursor_factory: self.hashed_cursor_factory.clone(),
+            prefix_sets: self.prefix_sets.clone(),
+            previous_state: self.previous_state.clone(),
+            threshold: self.threshold,
+            #[cfg(feature = "metrics")]
+            metrics: self.metrics.clone(),
+        }
+    }
+}
+
 impl<T, H> StateRoot<T, H> {
     /// Creates [`StateRoot`] with `trie_cursor_factory` and `hashed_cursor_factory`. All other
     /// parameters are set to reasonable defaults.
