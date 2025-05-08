@@ -4,7 +4,6 @@ use crate::{
         best::{BestTransactions, BestTransactionsWithFees},
         size::SizeTracker,
     },
-    traits::BestTransactionsAttributes,
     Priority, SubPoolLimit, TransactionOrdering, ValidPoolTransaction,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -133,11 +132,12 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// # Panics
     ///
     /// if the transaction is already included
-    pub(crate) fn best_with_unlocked(
+    pub(crate) fn best_with_unlocked_and_attributes(
         &self,
         unlocked: Vec<Arc<ValidPoolTransaction<T::Transaction>>>,
         base_fee: u64,
-    ) -> BestTransactions<T> {
+        base_fee_per_blob_gas: u64,
+    ) -> BestTransactionsWithFees<T> {
         let mut best = self.best();
         let mut submission_id = self.submission_id;
         for tx in unlocked {
@@ -152,36 +152,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             best.all.insert(tx_id, transaction);
         }
 
-        best
-    }
-
-    /// Same as `best` but also includes the given unlocked transactions and also apply new
-    /// attributes.
-    pub(crate) fn best_with_unlocked_and_attributes(
-        &self,
-        unlocked: Vec<Arc<ValidPoolTransaction<T::Transaction>>>,
-        origin_base_fee: u64,
-        attributes: BestTransactionsAttributes,
-    ) -> BestTransactionsWithFees<T> {
-        let mut best = self.best();
-        let mut submission_id = self.submission_id;
-        for tx in unlocked {
-            submission_id += 1;
-            debug_assert!(!best.all.contains_key(tx.id()), "transaction already included");
-            let priority = self.ordering.priority(&tx.transaction, origin_base_fee);
-            let tx_id = *tx.id();
-            let transaction = PendingTransaction { submission_id, transaction: tx, priority };
-            if best.ancestor(&tx_id).is_none() {
-                best.independent.insert(transaction.clone());
-            }
-            best.all.insert(tx_id, transaction);
-        }
-
-        BestTransactionsWithFees {
-            best,
-            base_fee: attributes.basefee,
-            base_fee_per_blob_gas: attributes.blob_fee.unwrap_or_default(),
-        }
+        BestTransactionsWithFees { best, base_fee, base_fee_per_blob_gas }
     }
 
     /// Returns an iterator over all transactions in the pool
