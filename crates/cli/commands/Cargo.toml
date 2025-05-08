@@ -66,6 +66,7 @@ futures.workspace = true
 tokio.workspace = true
 
 # misc
+async-trait.workspace = true
 ahash.workspace = true
 human_bytes.workspace = true
 eyre.workspace = true
