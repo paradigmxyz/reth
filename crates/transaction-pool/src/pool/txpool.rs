@@ -3157,9 +3157,10 @@ mod tests {
         let v1 = f.validated(tx_1);
         let v2 = f.validated(tx_2);
 
-        let _res = pool.add_transaction(v0.clone(), on_chain_balance, on_chain_nonce).unwrap();
-        let _res = pool.add_transaction(v1, on_chain_balance, on_chain_nonce).unwrap();
-        let _res = pool.add_transaction(v2, on_chain_balance, on_chain_nonce).unwrap();
+        let _res =
+            pool.add_transaction(v0.clone(), on_chain_balance, on_chain_nonce, None).unwrap();
+        let _res = pool.add_transaction(v1, on_chain_balance, on_chain_nonce, None).unwrap();
+        let _res = pool.add_transaction(v2, on_chain_balance, on_chain_nonce, None).unwrap();
 
         // The sender does not have enough balance to put all txs into pending.
         assert_eq!(1, pool.pending_transactions().len());
@@ -3319,10 +3320,11 @@ mod tests {
         let v3 = f.validated(tx_3);
 
         // Add them to the pool
-        let _res = pool.add_transaction(v0, on_chain_balance, on_chain_nonce).unwrap();
-        let _res = pool.add_transaction(v1.clone(), on_chain_balance, on_chain_nonce).unwrap();
-        let _res = pool.add_transaction(v2, on_chain_balance, on_chain_nonce).unwrap();
-        let _res = pool.add_transaction(v3, on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v0, on_chain_balance, on_chain_nonce, None).unwrap();
+        let _res =
+            pool.add_transaction(v1.clone(), on_chain_balance, on_chain_nonce, None).unwrap();
+        let _res = pool.add_transaction(v2, on_chain_balance, on_chain_nonce, None).unwrap();
+        let _res = pool.add_transaction(v3, on_chain_balance, on_chain_nonce, None).unwrap();
 
         assert_eq!(0, pool.queued_transactions().len());
         assert_eq!(4, pool.pending_transactions().len());
@@ -3336,7 +3338,7 @@ mod tests {
         // reinsert
         let removed_tx = removed_txs.pop().unwrap();
         let v1 = f.validated(removed_tx.transaction.clone());
-        let _res = pool.add_transaction(v1, on_chain_balance, on_chain_nonce).unwrap();
+        let _res = pool.add_transaction(v1, on_chain_balance, on_chain_nonce, None).unwrap();
         assert_eq!(0, pool.queued_transactions().len());
         assert_eq!(4, pool.pending_transactions().len());
     }
