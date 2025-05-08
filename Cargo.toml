@@ -751,5 +751,5 @@ revm-precompile = { git = "https://github.com/bluealloy/revm", rev = "9e06b57fdd
 
 revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "9d478001f63e9596b8c61e8e24b5a30dd9eaff04" }
 
-alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "198219d5a8f30805e75860af4243b9ca493baac3" }
-alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "198219d5a8f30805e75860af4243b9ca493baac3" }
+alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "0215b73b45ba4d07f0d5e608a8e6cbd8177874ba" }
+alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "0215b73b45ba4d07f0d5e608a8e6cbd8177874ba" }
