@@ -1,5 +1,4 @@
 use crate::{
-    serde_bincode_compat::SerdeBincodeCompat,
     size::InMemorySize,
     transaction::signed::{RecoveryError, SignedTransaction},
 };
@@ -10,10 +9,9 @@ use alloy_eips::{
     eip7702::SignedAuthorization,
     Decodable2718, Encodable2718, Typed2718,
 };
-use alloy_primitives::{bytes::Buf, ChainId, Signature, TxHash};
+use alloy_primitives::{ChainId, Signature, TxHash};
 use alloy_rlp::{BufMut, Decodable, Encodable, Result as RlpResult};
 use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope};
-use reth_codecs::Compact;
 use revm_primitives::{Address, Bytes, TxKind, B256, U256};
 
 macro_rules! delegate {
@@ -32,7 +30,8 @@ macro_rules! delegate {
 ///
 /// Note: The other transaction type variants must not overlap with the builtin one, transaction
 /// types must be unique.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Hash, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub enum ExtendedTxEnvelope<BuiltIn, Other> {
     /// The builtin transaction type.
     BuiltIn(BuiltIn),
@@ -298,59 +297,73 @@ where
     }
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub enum ExtendedTxEnvelopeRepr<'a, B: SerdeBincodeCompat, T: SerdeBincodeCompat> {
-    BuiltIn(B::BincodeRepr<'a>),
-    Other(T::BincodeRepr<'a>),
-}
+#[cfg(feature = "serde-bincode-compat")]
+mod serde_bincode_compat {
+    use super::*;
+    use crate::serde_bincode_compat::SerdeBincodeCompat;
 
-impl<B, T> SerdeBincodeCompat for ExtendedTxEnvelope<B, T>
-where
-    B: SerdeBincodeCompat + std::fmt::Debug,
-    T: SerdeBincodeCompat + std::fmt::Debug,
-{
-    type BincodeRepr<'a> = ExtendedTxEnvelopeRepr<'a, B, T>;
-
-    fn as_repr(&self) -> Self::BincodeRepr<'_> {
-        match self {
-            Self::BuiltIn(tx) => ExtendedTxEnvelopeRepr::BuiltIn(tx.as_repr()),
-            Self::Other(tx) => ExtendedTxEnvelopeRepr::Other(tx.as_repr()),
-        }
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[derive(Debug)]
+    pub enum ExtendedTxEnvelopeRepr<'a, B: SerdeBincodeCompat, T: SerdeBincodeCompat> {
+        BuiltIn(B::BincodeRepr<'a>),
+        Other(T::BincodeRepr<'a>),
     }
 
-    fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
-        match repr {
-            ExtendedTxEnvelopeRepr::BuiltIn(tx_repr) => Self::BuiltIn(B::from_repr(tx_repr)),
-            ExtendedTxEnvelopeRepr::Other(tx_repr) => Self::Other(T::from_repr(tx_repr)),
-        }
-    }
-}
-
-impl<B, T> Compact for ExtendedTxEnvelope<B, T>
-where
-    B: Transaction + IsTyped2718 + Compact,
-    T: Transaction + Compact,
-{
-    fn to_compact<Buf>(&self, buf: &mut Buf) -> usize
+    impl<B, T> SerdeBincodeCompat for ExtendedTxEnvelope<B, T>
     where
-        Buf: alloy_rlp::bytes::BufMut + AsMut<[u8]>,
+        B: SerdeBincodeCompat + std::fmt::Debug,
+        T: SerdeBincodeCompat + std::fmt::Debug,
     {
-        buf.put_u8(self.ty());
-        match self {
-            Self::BuiltIn(tx) => tx.to_compact(buf),
-            Self::Other(tx) => tx.to_compact(buf),
+        type BincodeRepr<'a> = ExtendedTxEnvelopeRepr<'a, B, T>;
+
+        fn as_repr(&self) -> Self::BincodeRepr<'_> {
+            match self {
+                Self::BuiltIn(tx) => ExtendedTxEnvelopeRepr::BuiltIn(tx.as_repr()),
+                Self::Other(tx) => ExtendedTxEnvelopeRepr::Other(tx.as_repr()),
+            }
+        }
+
+        fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
+            match repr {
+                ExtendedTxEnvelopeRepr::BuiltIn(tx_repr) => Self::BuiltIn(B::from_repr(tx_repr)),
+                ExtendedTxEnvelopeRepr::Other(tx_repr) => Self::Other(T::from_repr(tx_repr)),
+            }
         }
     }
+}
 
-    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
-        let type_byte = buf.get_u8();
+#[cfg(feature = "reth-codec")]
+mod compact {
+    use super::*;
+    use alloy_rlp::Buf;
+    use reth_codecs::Compact;
 
-        if <B as IsTyped2718>::is_type(type_byte) {
-            let (tx, remaining) = B::from_compact(buf, len);
-            return (Self::BuiltIn(tx), remaining);
+    impl<B, T> Compact for ExtendedTxEnvelope<B, T>
+    where
+        B: Transaction + IsTyped2718 + Compact,
+        T: Transaction + Compact,
+    {
+        fn to_compact<Buf>(&self, buf: &mut Buf) -> usize
+        where
+            Buf: alloy_rlp::bytes::BufMut + AsMut<[u8]>,
+        {
+            buf.put_u8(self.ty());
+            match self {
+                Self::BuiltIn(tx) => tx.to_compact(buf),
+                Self::Other(tx) => tx.to_compact(buf),
+            }
         }
 
-        let (tx, remaining) = T::from_compact(buf, len);
-        (Self::Other(tx), remaining)
+        fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
+            let type_byte = buf.get_u8();
+
+            if <B as IsTyped2718>::is_type(type_byte) {
+                let (tx, remaining) = B::from_compact(buf, len);
+                return (Self::BuiltIn(tx), remaining);
+            }
+
+            let (tx, remaining) = T::from_compact(buf, len);
+            (Self::Other(tx), remaining)
+        }
     }
 }
