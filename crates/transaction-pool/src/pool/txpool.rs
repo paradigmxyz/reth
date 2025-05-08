@@ -3396,7 +3396,7 @@ mod tests {
         let v2 = f.validated(tx_2);
         let v3 = f.validated(tx_3);
 
-        // Add them to the pool
+        // Add them to the  pool
         let _res =
             pool.add_transaction(v0.clone(), on_chain_balance, on_chain_nonce, None).unwrap();
         let _res = pool.add_transaction(v1, on_chain_balance, on_chain_nonce, None).unwrap();
