@@ -13,7 +13,7 @@ pub mod tx_custom;
 pub use tx_custom::*;
 
 use reth_ethereum::primitives::NodePrimitives;
-use reth_op::OpReceipt;
+use reth_op::{primitives::ExtendedOpTxEnvelope, OpReceipt};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CustomNodePrimitives;
