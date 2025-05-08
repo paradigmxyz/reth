@@ -1,5 +1,4 @@
-use crate::primitives::{CustomHeader, CustomTransactionEnvelope};
-use reth_op::primitives::ExtendedOpTxEnvelope;
+use crate::primitives::{CustomHeader, CustomTransactionEnvelope, ExtendedOpTxEnvelope};
 
 /// The Block type of this node
 pub type Block =

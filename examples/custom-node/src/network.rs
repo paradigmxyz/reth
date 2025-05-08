@@ -1,6 +1,8 @@
 use crate::{
     chainspec::CustomChainSpec,
-    primitives::{CustomHeader, CustomNodePrimitives, CustomTransactionEnvelope},
+    primitives::{
+        CustomHeader, CustomNodePrimitives, CustomTransactionEnvelope, ExtendedOpTxEnvelope,
+    },
 };
 use alloy_consensus::{Block, BlockBody};
 use eyre::Result;
@@ -12,10 +14,7 @@ use reth_ethereum::{
     pool::{PoolTransaction, TransactionPool},
 };
 use reth_node_builder::{components::NetworkBuilder, BuilderContext};
-use reth_op::{
-    primitives::{ExtendedOpTxEnvelope, ExtendedTxEnvelope},
-    OpReceipt,
-};
+use reth_op::{primitives::ExtendedTxEnvelope, OpReceipt};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]

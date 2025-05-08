@@ -9,14 +9,19 @@ use alloy_consensus::{
 use alloy_eips::{eip2718::Eip2718Result, Decodable2718, Encodable2718, Typed2718};
 use alloy_primitives::{keccak256, Signature, TxHash};
 use alloy_rlp::{BufMut, Decodable, Encodable, Result as RlpResult};
+use op_alloy_consensus::OpTxEnvelope;
 use reth_codecs::{
     alloy::transaction::{FromTxCompact, ToTxCompact},
     Compact,
 };
 use reth_ethereum::primitives::{serde_bincode_compat::SerdeBincodeCompat, InMemorySize};
-use reth_op::primitives::SignedTransaction;
+use reth_op::primitives::{ExtendedTxEnvelope, SignedTransaction};
 use revm_primitives::{Address, Bytes};
 use serde::{Deserialize, Serialize};
+
+/// A [`SignedTransaction`] implementation that combines the [`OpTxEnvelope`] and another
+/// transaction type.
+pub type ExtendedOpTxEnvelope<T> = ExtendedTxEnvelope<OpTxEnvelope, T>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, Eq, PartialEq)]
 pub struct CustomTransactionEnvelope {

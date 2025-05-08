@@ -40,10 +40,6 @@ pub enum ExtendedTxEnvelope<BuiltIn, Other> {
     Other(Other),
 }
 
-/// A [`SignedTransaction`] implementation that combines the [`OpTxEnvelope`] and another
-/// transaction type.
-pub type ExtendedOpTxEnvelope<T> = ExtendedTxEnvelope<OpTxEnvelope, T>;
-
 impl<Tx> TryFrom<ExtendedTxEnvelope<OpTxEnvelope, Tx>>
     for ExtendedTxEnvelope<OpPooledTransaction, Tx>
 {
