@@ -122,15 +122,15 @@ impl WrappedPrecompile {
     /// wrapper that can be used inside Evm.
     fn wrap(precompile: DynPrecompile, cache: Arc<RwLock<PrecompileCache>>) -> DynPrecompile {
         let wrapped = Self::new(precompile, cache);
-        move |data: &Bytes, gas_limit: u64| -> PrecompileResult { wrapped.call(data, gas_limit) }
+        move |data: &[u8], gas_limit: u64| -> PrecompileResult { wrapped.call(data, gas_limit) }
             .into()
     }
 }
 
 impl Precompile for WrappedPrecompile {
-    fn call(&self, data: &Bytes, gas: u64) -> PrecompileResult {
+    fn call(&self, data: &[u8], gas: u64) -> PrecompileResult {
         let mut cache = self.cache.write();
-        let key = (data.clone(), gas);
+        let key = (Bytes::copy_from_slice(data), gas);
 
         // get the result if it exists
         if let Some(result) = cache.cache.get(&key) {

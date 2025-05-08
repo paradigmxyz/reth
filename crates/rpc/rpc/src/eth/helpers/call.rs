@@ -145,7 +145,6 @@ where
                 .into_iter()
                 .map(Either::Left)
                 .collect(),
-            initcodes: Vec::new(),
         };
 
         Ok(env)

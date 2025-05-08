@@ -154,7 +154,6 @@ where
                 .into_iter()
                 .map(Either::Left)
                 .collect(),
-            initcodes: Vec::new(),
         };
 
         Ok(OpTransaction { base, enveloped_tx: Some(Bytes::new()), deposit: Default::default() })

@@ -1,8 +1,8 @@
 //! Contains a precompile cache that is backed by a moka cache.
 
-use alloy_primitives::Bytes;
 use reth_evm::precompiles::{DynPrecompile, Precompile};
 use revm::precompile::{PrecompileOutput, PrecompileResult};
+use revm_primitives::Bytes;
 use std::sync::Arc;
 
 /// Cache for precompiles, for each input stores the result.
@@ -71,7 +71,7 @@ impl CachedPrecompile {
 
     pub(crate) fn wrap(precompile: DynPrecompile, cache: PrecompileCache) -> DynPrecompile {
         let wrapped = Self::new(precompile, cache);
-        move |data: &Bytes, gas_limit: u64| -> PrecompileResult { wrapped.call(data, gas_limit) }
+        move |data: &[u8], gas_limit: u64| -> PrecompileResult { wrapped.call(data, gas_limit) }
             .into()
     }
 
@@ -94,8 +94,8 @@ impl CachedPrecompile {
 }
 
 impl Precompile for CachedPrecompile {
-    fn call(&self, data: &Bytes, gas_limit: u64) -> PrecompileResult {
-        let key = CacheKey(data.clone());
+    fn call(&self, data: &[u8], gas_limit: u64) -> PrecompileResult {
+        let key = CacheKey(Bytes::copy_from_slice(data));
 
         if let Some(entry) = &self.cache.get(&key) {
             self.increment_by_one_precompile_cache_hits();
@@ -147,7 +147,7 @@ mod tests {
 
     #[test]
     fn test_precompile_cache_basic() {
-        let dyn_precompile: DynPrecompile = |_input: &Bytes, _gas: u64| -> PrecompileResult {
+        let dyn_precompile: DynPrecompile = |_input: &[u8], _gas: u64| -> PrecompileResult {
             Ok(PrecompileOutput { gas_used: 0, bytes: Bytes::default() })
         }
         .into();
