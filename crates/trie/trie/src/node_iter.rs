@@ -199,23 +199,9 @@ where
                         let hash = self.walker.hash().unwrap();
                         let tree_flag = self.walker.children_are_in_trie();
                         if self.walker.all_branch_nodes_in_database && !tree_flag {
-                            trace!(
-                                target: "trie::node_iter",
-                                ?key,
-                                ?hash,
-                                tree_flag,
-                                "Skipping current node in walker and returning leaf hash node"
-                            );
                             return Ok(Some(TrieElement::LeafHash(key.clone(), hash)))
                         }
 
-                        trace!(
-                            target: "trie::node_iter",
-                            ?key,
-                            ?hash,
-                            tree_flag,
-                            "Skipping current node in walker and returning branch node"
-                        );
                         #[cfg(feature = "metrics")]
                         self.metrics.inc_branch_nodes_returned();
                         return Ok(Some(TrieElement::Branch(TrieBranchNode::new(
@@ -234,8 +220,6 @@ where
                     self.should_check_walker_key = false;
                     continue
                 }
-
-                trace!(target: "trie::node_iter", ?hashed_key, "Returning leaf node");
 
                 // Set the next hashed entry as a leaf node and return
                 trace!(target: "trie::node_iter", ?hashed_key, "next hashed entry");
