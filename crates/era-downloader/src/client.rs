@@ -142,7 +142,7 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
     /// Fetches the list of ERA1 files from `url` and stores it in a file located within `folder`.
     pub async fn fetch_file_list(&self) -> eyre::Result<()> {
         let (mut index, mut checksums) = try_join!(
-            self.client.get(self.url.clone()),
+            self.client.get(self.url.clone().join("index.html")?),
             self.client.get(self.url.clone().join(Self::CHECKSUMS)?),
         )?;
 

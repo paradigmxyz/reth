@@ -204,18 +204,18 @@ impl reth_codecs::alloy::transaction::Envelope for CustomTransactionEnvelope {
     }
 }
 
-// impl Compact for CustomTransactionEnvelope {
-//     fn to_compact<B>(&self, buf: &mut B) -> usize
-//     where
-//         B: alloy_rlp::bytes::BufMut + AsMut<[u8]>,
-//     {
-//         self.inner.tx().to_compact(buf)
-//     }
-//
-//     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-//         let (signature, rest) = Signature::from_compact(buf, len);
-//         let (inner, buf) = <TxCustom as Compact>::from_compact(rest, len);
-//         let signed = Signed::new_unhashed(inner, signature);
-//         (CustomTransactionEnvelope { inner: signed }, buf)
-//     }
-// }
+impl Compact for CustomTransactionEnvelope {
+    fn to_compact<B>(&self, buf: &mut B) -> usize
+    where
+        B: alloy_rlp::bytes::BufMut + AsMut<[u8]>,
+    {
+        self.inner.tx().to_compact(buf)
+    }
+
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+        let (signature, rest) = Signature::from_compact(buf, len);
+        let (inner, buf) = <TxCustom as Compact>::from_compact(rest, len);
+        let signed = Signed::new_unhashed(inner, signature);
+        (CustomTransactionEnvelope { inner: signed }, buf)
+    }
+}
