@@ -215,10 +215,7 @@ where
 
             let tx = provider.tx_ref();
             let progress = StateRoot::from_tx(tx)
-                .with_intermediate_state(checkpoint.map(IntermediateStateRootState::from).map(|mut state| {
-                    state.hash_builder = state.hash_builder.with_all_branch_nodes_in_database(true);
-                    state
-                }))
+                .with_intermediate_state(checkpoint.map(IntermediateStateRootState::from))
                 .root_with_progress()
                 .map_err(|e| {
                     error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "State root with progress failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
