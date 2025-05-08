@@ -323,7 +323,7 @@ mod tests {
     };
     use alloy_primitives::{
         b256,
-        map::{B256Map, HashMap},
+        map::{B256Map, B256Set, HashMap},
     };
     use alloy_trie::{
         BranchNodeCompact, HashBuilder, Nibbles, TrieAccount, TrieMask, EMPTY_ROOT_HASH,
@@ -347,7 +347,8 @@ mod tests {
 
         let mut prefix_set = PrefixSetMut::default();
         prefix_set.extend_keys(state.clone().into_iter().map(|(nibbles, _)| nibbles));
-        let walker = TrieWalker::state_trie(NoopAccountTrieCursor, prefix_set.freeze());
+        let walker =
+            TrieWalker::state_trie(NoopAccountTrieCursor, prefix_set.freeze(), &B256Set::default());
 
         let hashed_post_state = HashedPostState::default()
             .with_accounts(state.into_iter().map(|(nibbles, account)| {
@@ -506,8 +507,11 @@ mod tests {
         prefix_set.insert(Nibbles::unpack(account_5));
         let prefix_set = prefix_set.freeze();
 
-        let walker =
-            TrieWalker::state_trie(trie_cursor_factory.account_trie_cursor().unwrap(), prefix_set);
+        let walker = TrieWalker::state_trie(
+            trie_cursor_factory.account_trie_cursor().unwrap(),
+            prefix_set,
+            &B256Set::default(),
+        );
 
         let hashed_cursor_factory = MockHashedCursorFactory::new(
             BTreeMap::from([

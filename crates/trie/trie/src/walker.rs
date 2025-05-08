@@ -41,8 +41,14 @@ pub struct TrieWalker<C> {
 
 impl<C> TrieWalker<C> {
     /// Constructs a new `TrieWalker` for the state trie from existing stack and a cursor.
-    pub fn state_trie_from_stack(cursor: C, stack: Vec<CursorSubNode>, changes: PrefixSet) -> Self {
+    pub fn state_trie_from_stack(
+        cursor: C,
+        stack: Vec<CursorSubNode>,
+        changes: PrefixSet,
+        destroyed_accounts: &B256Set,
+    ) -> Self {
         Self::from_stack(cursor, stack, changes, crate::TrieType::State)
+            .with_all_branch_nodes_in_database(destroyed_accounts)
     }
 
     /// Constructs a new `TrieWalker` for the storage trie from existing stack and a cursor.
@@ -82,6 +88,14 @@ impl<C> TrieWalker<C> {
         if retained {
             self.removed_keys = Some(HashSet::default());
         }
+        self
+    }
+
+    fn with_all_branch_nodes_in_database(mut self, destroyed_paths: &B256Set) -> Self {
+        trace!(target: "trie::walker", trie_type = ?self.trie_type, ?destroyed_paths, "all branch nodes in database");
+        self.all_branch_nodes_in_database = true;
+        self.destroyed_paths =
+            destroyed_paths.iter().map(Nibbles::unpack).collect::<PrefixSetMut>().freeze();
         self
     }
 
@@ -194,8 +208,9 @@ impl<C> TrieWalker<C> {
 
 impl<C: TrieCursor> TrieWalker<C> {
     /// Constructs a new [`TrieWalker`] for the state trie.
-    pub fn state_trie(cursor: C, changes: PrefixSet) -> Self {
+    pub fn state_trie(cursor: C, changes: PrefixSet, destroyed_accounts: &B256Set) -> Self {
         Self::new(cursor, changes, crate::TrieType::State)
+            .with_all_branch_nodes_in_database(destroyed_accounts)
     }
 
     /// Constructs a new [`TrieWalker`] for the storage trie.
@@ -227,14 +242,6 @@ impl<C: TrieCursor> TrieWalker<C> {
         // Update the skip state for the root node.
         this.update_skip_node();
         this
-    }
-
-    pub fn with_all_branch_nodes_in_database(mut self, destroyed_paths: &B256Set) -> Self {
-        trace!(target: "trie::walker", trie_type = ?self.trie_type, ?destroyed_paths, "all branch nodes in database");
-        self.all_branch_nodes_in_database = true;
-        self.destroyed_paths =
-            destroyed_paths.iter().map(Nibbles::unpack).collect::<PrefixSetMut>().freeze();
-        self
     }
 
     /// Advances the walker to the next trie node and updates the skip node flag.

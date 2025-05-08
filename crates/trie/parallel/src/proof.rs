@@ -213,9 +213,9 @@ where
         let walker = TrieWalker::state_trie(
             trie_cursor_factory.account_trie_cursor().map_err(ProviderError::Database)?,
             prefix_sets.account_prefix_set,
+            &prefix_sets.destroyed_accounts,
         )
-        .with_deletions_retained(true)
-        .with_all_branch_nodes_in_database(&prefix_sets.destroyed_accounts);
+        .with_deletions_retained(true);
 
         // Create a hash builder to rebuild the root node since it is not available in the database.
         let retainer: ProofRetainer = targets.keys().map(Nibbles::unpack).collect();
