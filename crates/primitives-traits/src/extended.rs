@@ -12,7 +12,6 @@ use alloy_eips::{
 };
 use alloy_primitives::{ChainId, TxHash};
 use alloy_rlp::{BufMut, Decodable, Encodable, Result as RlpResult};
-use core::fmt;
 use revm_primitives::{Address, Bytes, TxKind, B256, U256};
 
 #[cfg(feature = "op")]
@@ -324,8 +323,8 @@ mod serde_bincode_compat {
 
     impl<B, T> SerdeBincodeCompat for ExtendedTxEnvelope<B, T>
     where
-        B: SerdeBincodeCompat + fmt::Debug,
-        T: SerdeBincodeCompat + fmt::Debug,
+        B: SerdeBincodeCompat + core::fmt::Debug,
+        T: SerdeBincodeCompat + core::fmt::Debug,
     {
         type BincodeRepr<'a> = ExtendedTxEnvelopeRepr<'a, B, T>;
 
