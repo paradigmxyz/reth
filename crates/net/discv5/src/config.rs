@@ -30,14 +30,29 @@ pub const DEFAULT_DISCOVERY_V5_ADDR_IPV6: Ipv6Addr = Ipv6Addr::UNSPECIFIED;
 
 /// The default port for discv5 via UDP.
 ///
-/// Default is port 9200.
+/// Default port is 9200 (since by default discv4 is also enabled, see
+/// [`default_discovery_v5_port`]).
 pub const DEFAULT_DISCOVERY_V5_PORT: u16 = 9200;
 
-/// The default [`discv5::ListenConfig`].
+/// Returns default discv5 port as 30303, if discv4 is disabled.
 ///
-/// This is different from the upstream default.
-pub const DEFAULT_DISCOVERY_V5_LISTEN_CONFIG: ListenConfig =
-    ListenConfig::Ipv4 { ip: DEFAULT_DISCOVERY_V5_ADDR, port: DEFAULT_DISCOVERY_V5_PORT };
+/// Atm, being on the v5 discovery network is still optional for L1 EL and only mandatory for CL.
+/// Reth runs v5 discovery using [`discv5`] which handles its own port binding logic. Hence,
+/// it isn't possible to run discv4 and discv5 on same UDP port in Reth currently.
+pub const fn default_discovery_v5_port(is_discv4_disabled: bool) -> u16 {
+    if is_discv4_disabled {
+        return 30303
+    }
+    DEFAULT_DISCOVERY_V5_PORT
+}
+
+/// The default [`discv5::ListenConfig`].
+pub const fn default_discovery_v5_listen_config(is_discv4_disabled: bool) -> ListenConfig {
+    ListenConfig::Ipv4 {
+        ip: DEFAULT_DISCOVERY_V5_ADDR,
+        port: default_discovery_v5_port(is_discv4_disabled),
+    }
+}
 
 /// Default interval in seconds at which to run a lookup up query.
 ///
@@ -85,6 +100,8 @@ pub struct ConfigBuilder {
     /// Custom filter rules to apply to a discovered peer in order to determine if it should be
     /// passed up to rlpx or dropped.
     discovered_peer_filter: Option<MustNotIncludeKeys>,
+    /// Flags if v4 discovery is disabled. This will effect the default discv5 port.
+    is_discv4_disabled: bool,
 }
 
 impl ConfigBuilder {
@@ -112,6 +129,7 @@ impl ConfigBuilder {
             bootstrap_lookup_interval: Some(bootstrap_lookup_interval),
             bootstrap_lookup_countdown: Some(bootstrap_lookup_countdown),
             discovered_peer_filter: Some(discovered_peer_filter),
+            is_discv4_disabled: false,
         }
     }
 
@@ -214,6 +232,12 @@ impl ConfigBuilder {
         self
     }
 
+    /// Sets discv4 as disabled. This effects the [`default_discovery_v5_listen_config`].
+    pub fn discv4_disabled(mut self) -> Self {
+        self.is_discv4_disabled = true;
+        self
+    }
+
     /// Returns a new [`Config`].
     pub fn build(self) -> Config {
         let Self {
@@ -226,14 +250,19 @@ impl ConfigBuilder {
             bootstrap_lookup_interval,
             bootstrap_lookup_countdown,
             discovered_peer_filter,
+            is_discv4_disabled,
         } = self;
 
         let mut discv5_config = discv5_config.unwrap_or_else(|| {
-            discv5::ConfigBuilder::new(DEFAULT_DISCOVERY_V5_LISTEN_CONFIG).build()
+            discv5::ConfigBuilder::new(default_discovery_v5_listen_config(is_discv4_disabled))
+                .build()
         });
 
-        discv5_config.listen_config =
-            amend_listen_config_wrt_rlpx(&discv5_config.listen_config, tcp_socket.ip());
+        discv5_config.listen_config = amend_listen_config_wrt_rlpx(
+            &discv5_config.listen_config,
+            tcp_socket.ip(),
+            default_discovery_v5_port(is_discv4_disabled),
+        );
 
         let fork = fork.map(|(key, fork_id)| (key, fork_id.into()));
 
@@ -305,6 +334,7 @@ impl Config {
             bootstrap_lookup_interval: None,
             bootstrap_lookup_countdown: None,
             discovered_peer_filter: None,
+            is_discv4_disabled: false,
         }
     }
 
@@ -375,15 +405,14 @@ pub const fn ipv6(listen_config: &ListenConfig) -> Option<SocketAddrV6> {
 pub fn amend_listen_config_wrt_rlpx(
     listen_config: &ListenConfig,
     rlpx_addr: IpAddr,
+    default_port: u16,
 ) -> ListenConfig {
     let discv5_socket_ipv4 = ipv4(listen_config);
     let discv5_socket_ipv6 = ipv6(listen_config);
 
-    let discv5_port_ipv4 =
-        discv5_socket_ipv4.map(|socket| socket.port()).unwrap_or(DEFAULT_DISCOVERY_V5_PORT);
+    let discv5_port_ipv4 = discv5_socket_ipv4.map(|socket| socket.port()).unwrap_or(default_port);
     let discv5_addr_ipv4 = discv5_socket_ipv4.map(|socket| *socket.ip());
-    let discv5_port_ipv6 =
-        discv5_socket_ipv6.map(|socket| socket.port()).unwrap_or(DEFAULT_DISCOVERY_V5_PORT);
+    let discv5_port_ipv6 = discv5_socket_ipv6.map(|socket| socket.port()).unwrap_or(default_port);
     let discv5_addr_ipv6 = discv5_socket_ipv6.map(|socket| *socket.ip());
 
     let (discv5_socket_ipv4, discv5_socket_ipv6) = discv5_sockets_wrt_rlpx_addr(
@@ -535,31 +564,33 @@ mod test {
 
     #[test]
     fn overwrite_ipv4_addr() {
+        const PORT: u16 = 9200;
         let rlpx_addr: Ipv4Addr = "192.168.0.1".parse().unwrap();
 
-        let listen_config = DEFAULT_DISCOVERY_V5_LISTEN_CONFIG;
+        let listen_config = ListenConfig::Ipv4 { ip: rlpx_addr, port: PORT };
 
-        let amended_config = amend_listen_config_wrt_rlpx(&listen_config, rlpx_addr.into());
+        let amended_config = amend_listen_config_wrt_rlpx(&listen_config, rlpx_addr.into(), PORT);
 
         let config_socket_ipv4 = ipv4(&amended_config).unwrap();
 
         assert_eq!(*config_socket_ipv4.ip(), rlpx_addr);
-        assert_eq!(config_socket_ipv4.port(), DEFAULT_DISCOVERY_V5_PORT);
+        assert_eq!(config_socket_ipv4.port(), PORT);
         assert_eq!(ipv6(&amended_config), ipv6(&listen_config));
     }
 
     #[test]
     fn overwrite_ipv6_addr() {
+        const PORT: u16 = 9200;
         let rlpx_addr: Ipv6Addr = "fe80::1".parse().unwrap();
 
-        let listen_config = DEFAULT_DISCOVERY_V5_LISTEN_CONFIG;
+        let listen_config = ListenConfig::Ipv6 { ip: rlpx_addr, port: PORT };
 
-        let amended_config = amend_listen_config_wrt_rlpx(&listen_config, rlpx_addr.into());
+        let amended_config = amend_listen_config_wrt_rlpx(&listen_config, rlpx_addr.into(), PORT);
 
         let config_socket_ipv6 = ipv6(&amended_config).unwrap();
 
         assert_eq!(*config_socket_ipv6.ip(), rlpx_addr);
-        assert_eq!(config_socket_ipv6.port(), DEFAULT_DISCOVERY_V5_PORT);
+        assert_eq!(config_socket_ipv6.port(), PORT);
         assert_eq!(ipv4(&amended_config), ipv4(&listen_config));
     }
 }
