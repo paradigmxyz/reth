@@ -9,8 +9,6 @@ pub use tx::*;
 
 pub mod tx_type;
 pub use tx_type::*;
-pub mod extended_op_tx_envelope;
-pub use extended_op_tx_envelope::*;
 pub mod tx_custom;
 pub use tx_custom::*;
 
