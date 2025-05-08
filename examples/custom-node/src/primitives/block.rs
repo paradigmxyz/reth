@@ -1,8 +1,11 @@
 use crate::primitives::CustomHeader;
-use reth_op::OpTransactionSigned;
+
+use super::{CustomTransactionEnvelope, ExtendedOpTxEnvelope};
 
 /// The Block type of this node
-pub type Block = alloy_consensus::Block<OpTransactionSigned, CustomHeader>;
+pub type Block =
+    alloy_consensus::Block<ExtendedOpTxEnvelope<CustomTransactionEnvelope>, CustomHeader>;
 
 /// The body type of this node
-pub type BlockBody = alloy_consensus::BlockBody<OpTransactionSigned, CustomHeader>;
+pub type BlockBody =
+    alloy_consensus::BlockBody<ExtendedOpTxEnvelope<CustomTransactionEnvelope>, CustomHeader>;
