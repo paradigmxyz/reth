@@ -23,6 +23,7 @@ pub struct TrieWalker<C> {
     pub cursor: C,
     /// A vector containing the trie nodes that have been visited.
     pub stack: Vec<CursorSubNode>,
+    trie_type: crate::TrieType,
     /// A flag indicating whether the current node can be skipped when traversing the trie. This
     /// is determined by whether the current key's prefix is included in the prefix set and if the
     /// hash flag is set.
@@ -41,13 +42,7 @@ pub struct TrieWalker<C> {
 impl<C> TrieWalker<C> {
     /// Constructs a new `TrieWalker` for the state trie from existing stack and a cursor.
     pub fn state_trie_from_stack(cursor: C, stack: Vec<CursorSubNode>, changes: PrefixSet) -> Self {
-        Self::from_stack(
-            cursor,
-            stack,
-            changes,
-            #[cfg(feature = "metrics")]
-            crate::TrieType::State,
-        )
+        Self::from_stack(cursor, stack, changes, crate::TrieType::State)
     }
 
     /// Constructs a new `TrieWalker` for the storage trie from existing stack and a cursor.
@@ -56,13 +51,7 @@ impl<C> TrieWalker<C> {
         stack: Vec<CursorSubNode>,
         changes: PrefixSet,
     ) -> Self {
-        Self::from_stack(
-            cursor,
-            stack,
-            changes,
-            #[cfg(feature = "metrics")]
-            crate::TrieType::Storage,
-        )
+        Self::from_stack(cursor, stack, changes, crate::TrieType::Storage)
     }
 
     /// Constructs a new `TrieWalker` from existing stack and a cursor.
@@ -70,11 +59,12 @@ impl<C> TrieWalker<C> {
         cursor: C,
         stack: Vec<CursorSubNode>,
         changes: PrefixSet,
-        #[cfg(feature = "metrics")] trie_type: crate::TrieType,
+        trie_type: crate::TrieType,
     ) -> Self {
         let mut this = Self {
             cursor,
             changes,
+            trie_type,
             stack,
             can_skip_current_node: false,
             removed_keys: None,
@@ -205,34 +195,21 @@ impl<C> TrieWalker<C> {
 impl<C: TrieCursor> TrieWalker<C> {
     /// Constructs a new [`TrieWalker`] for the state trie.
     pub fn state_trie(cursor: C, changes: PrefixSet) -> Self {
-        Self::new(
-            cursor,
-            changes,
-            #[cfg(feature = "metrics")]
-            crate::TrieType::State,
-        )
+        Self::new(cursor, changes, crate::TrieType::State)
     }
 
     /// Constructs a new [`TrieWalker`] for the storage trie.
     pub fn storage_trie(cursor: C, changes: PrefixSet) -> Self {
-        Self::new(
-            cursor,
-            changes,
-            #[cfg(feature = "metrics")]
-            crate::TrieType::Storage,
-        )
+        Self::new(cursor, changes, crate::TrieType::Storage)
     }
 
     /// Constructs a new `TrieWalker`, setting up the initial state of the stack and cursor.
-    fn new(
-        cursor: C,
-        changes: PrefixSet,
-        #[cfg(feature = "metrics")] trie_type: crate::TrieType,
-    ) -> Self {
+    fn new(cursor: C, changes: PrefixSet, trie_type: crate::TrieType) -> Self {
         // Initialize the walker with a single empty stack element.
         let mut this = Self {
             cursor,
             changes,
+            trie_type,
             stack: vec![CursorSubNode::default()],
             can_skip_current_node: false,
             removed_keys: None,
@@ -253,6 +230,7 @@ impl<C: TrieCursor> TrieWalker<C> {
     }
 
     pub fn with_all_branch_nodes_in_database(mut self, destroyed_paths: &B256Set) -> Self {
+        trace!(target: "trie::walker", trie_type = ?self.trie_type, ?destroyed_paths, "all branch nodes in database");
         self.all_branch_nodes_in_database = true;
         self.destroyed_paths =
             destroyed_paths.iter().map(Nibbles::unpack).collect::<PrefixSetMut>().freeze();
