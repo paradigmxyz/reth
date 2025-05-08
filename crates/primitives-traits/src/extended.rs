@@ -2,17 +2,26 @@ use crate::{
     size::InMemorySize,
     transaction::signed::{RecoveryError, SignedTransaction},
 };
-use alloy_consensus::{error::ValueError, Transaction};
+use alloc::vec::Vec;
+use alloy_consensus::Transaction;
 use alloy_eips::{
     eip2718::{Eip2718Error, Eip2718Result, IsTyped2718},
     eip2930::AccessList,
     eip7702::SignedAuthorization,
     Decodable2718, Encodable2718, Typed2718,
 };
-use alloy_primitives::{ChainId, Signature, TxHash};
+use alloy_primitives::{ChainId, TxHash};
 use alloy_rlp::{BufMut, Decodable, Encodable, Result as RlpResult};
-use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope};
 use revm_primitives::{Address, Bytes, TxKind, B256, U256};
+
+#[cfg(feature = "op")]
+use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope};
+
+#[cfg(feature = "op")]
+use alloy_primitives::Signature;
+
+#[cfg(feature = "op")]
+use alloy_consensus::error::ValueError;
 
 macro_rules! delegate {
     ($self:expr => $tx:ident.$method:ident($($arg:expr),*)) => {
@@ -39,6 +48,7 @@ pub enum ExtendedTxEnvelope<BuiltIn, Other> {
     Other(Other),
 }
 
+#[cfg(feature = "op")]
 impl<Tx> TryFrom<ExtendedTxEnvelope<OpTxEnvelope, Tx>>
     for ExtendedTxEnvelope<OpPooledTransaction, Tx>
 {
@@ -55,12 +65,14 @@ impl<Tx> TryFrom<ExtendedTxEnvelope<OpTxEnvelope, Tx>>
     }
 }
 
+#[cfg(feature = "op")]
 impl<Tx> From<OpPooledTransaction> for ExtendedTxEnvelope<OpTxEnvelope, Tx> {
     fn from(tx: OpPooledTransaction) -> Self {
         Self::BuiltIn(tx.into())
     }
 }
 
+#[cfg(feature = "op")]
 impl<Tx> TryFrom<ExtendedTxEnvelope<OpTxEnvelope, Tx>> for OpPooledTransaction {
     type Error = ValueError<OpTxEnvelope>;
 
@@ -333,37 +345,34 @@ mod serde_bincode_compat {
 }
 
 #[cfg(feature = "reth-codec")]
-mod compact {
-    use super::*;
-    use alloy_rlp::Buf;
-    use reth_codecs::Compact;
+use alloy_primitives::bytes::Buf;
 
-    impl<B, T> Compact for ExtendedTxEnvelope<B, T>
+#[cfg(feature = "reth-codec")]
+impl<B, T> reth_codecs::Compact for ExtendedTxEnvelope<B, T>
+where
+    B: Transaction + IsTyped2718 + reth_codecs::Compact,
+    T: Transaction + reth_codecs::Compact,
+{
+    fn to_compact<Buf>(&self, buf: &mut Buf) -> usize
     where
-        B: Transaction + IsTyped2718 + Compact,
-        T: Transaction + Compact,
+        Buf: alloy_rlp::bytes::BufMut + AsMut<[u8]>,
     {
-        fn to_compact<Buf>(&self, buf: &mut Buf) -> usize
-        where
-            Buf: alloy_rlp::bytes::BufMut + AsMut<[u8]>,
-        {
-            buf.put_u8(self.ty());
-            match self {
-                Self::BuiltIn(tx) => tx.to_compact(buf),
-                Self::Other(tx) => tx.to_compact(buf),
-            }
+        buf.put_u8(self.ty());
+        match self {
+            Self::BuiltIn(tx) => tx.to_compact(buf),
+            Self::Other(tx) => tx.to_compact(buf),
+        }
+    }
+
+    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
+        let type_byte = buf.get_u8();
+
+        if <B as IsTyped2718>::is_type(type_byte) {
+            let (tx, remaining) = B::from_compact(buf, len);
+            return (Self::BuiltIn(tx), remaining);
         }
 
-        fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
-            let type_byte = buf.get_u8();
-
-            if <B as IsTyped2718>::is_type(type_byte) {
-                let (tx, remaining) = B::from_compact(buf, len);
-                return (Self::BuiltIn(tx), remaining);
-            }
-
-            let (tx, remaining) = T::from_compact(buf, len);
-            (Self::Other(tx), remaining)
-        }
+        let (tx, remaining) = T::from_compact(buf, len);
+        (Self::Other(tx), remaining)
     }
 }
