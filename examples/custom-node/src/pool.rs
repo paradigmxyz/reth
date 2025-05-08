@@ -1,4 +1,5 @@
 // use jsonrpsee::tracing::{debug, info};
+use crate::primitives::CustomTransactionEnvelope;
 use op_alloy_consensus::{interop::SafetyLevel, OpTxEnvelope};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_node_builder::{
@@ -17,10 +18,9 @@ use reth_op::{
         blobstore::DiskFileBlobStore, CoinbaseTipOrdering, EthPoolTransaction,
         TransactionValidationTaskExecutor,
     },
+    primitives::ExtendedTxEnvelope,
 };
 use reth_optimism_forks::OpHardforks;
-
-use crate::primitives::{CustomTransactionEnvelope, ExtendedTxEnvelope};
 
 #[derive(Debug, Clone)]
 pub struct CustomPoolBuilder<
