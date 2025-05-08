@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crate::BlockTy;
 use alloy_primitives::{BlockNumber, B256};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_config::{config::StageConfig, PruneConfig};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_downloaders::{
@@ -16,6 +17,7 @@ use reth_network_p2p::{
     bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader, BlockClient,
 };
 use reth_node_api::HeaderTy;
+use reth_node_core::args::TryToUrl;
 use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
 use reth_stages::{
     prelude::DefaultStages,
@@ -41,7 +43,6 @@ pub fn build_networked_pipeline<N, Client, Evm>(
     static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     evm_config: Evm,
     exex_manager_handle: ExExManagerHandle<N::Primitives>,
-    era_import_source: Option<EraImportSource>,
 ) -> eyre::Result<Pipeline<N>>
 where
     N: ProviderNodeTypes,
@@ -56,6 +57,20 @@ where
     let body_downloader = BodiesDownloaderBuilder::new(config.bodies)
         .build(client, consensus.clone(), provider_factory.clone())
         .into_task_with(task_executor);
+
+    let era_import_source = if let Some(path) = config.era.path.clone() {
+        Some(EraImportSource::Path(path))
+    } else if let Some((url, folder)) = config
+        .era
+        .url
+        .clone()
+        .or_else(|| provider_factory.chain_spec().chain().kind().try_to_url().ok())
+        .zip(config.era.folder.clone())
+    {
+        Some(EraImportSource::Url(url, folder))
+    } else {
+        None
+    };
 
     let pipeline = build_pipeline(
         provider_factory,
