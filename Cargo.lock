@@ -278,8 +278,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-evm"
-version = "0.6.0"
-source = "git+https://github.com/alloy-rs/evm?rev=fc32cac#fc32cac47e3f3514d6e9a4cacc3cf1b6062088b9"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4e418c60ecf43d33a6afad2f5bf7ae7c1b7b47697b6318cd5f5259a3ad38b3ec"
 dependencies = [
  "alloy-consensus",
  "alloy-eips 0.15.10",
@@ -388,8 +389,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-op-evm"
-version = "0.6.0"
-source = "git+https://github.com/alloy-rs/evm?rev=fc32cac#fc32cac47e3f3514d6e9a4cacc3cf1b6062088b9"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce33f398aafac4080fe2bd5eb432abc44049ab134cb005305995736e8aba77b9"
 dependencies = [
  "alloy-consensus",
  "alloy-eips 0.15.10",
@@ -10444,8 +10446,9 @@ dependencies = [
 
 [[package]]
 name = "revm-inspectors"
-version = "0.20.1"
-source = "git+https://github.com/paradigmxyz/revm-inspectors?rev=9fe2ce1#9fe2ce1de6fa96140af49884ac74dd2822e1f121"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fcf5a83014dd36eeb5fd7e890d88549e918f33b18ab598d1c8079d89fa12527"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",

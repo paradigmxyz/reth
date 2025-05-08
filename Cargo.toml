@@ -455,13 +455,13 @@ revm-context = { version = "4.0.0", default-features = false }
 revm-context-interface = { version = "4.0.0", default-features = false }
 revm-database-interface = { version = "4.0.0", default-features = false }
 op-revm = { version = "4.0.0", default-features = false }
-revm-inspectors = "0.20.0"
+revm-inspectors = "0.21.0"
 
 # eth
 alloy-chains = { version = "0.2.0", default-features = false }
 alloy-dyn-abi = "1.1.0"
 alloy-eip2124 = { version = "0.2.0", default-features = false }
-alloy-evm = { version = "0.6.0", default-features = false }
+alloy-evm = { version = "0.7.0", default-features = false }
 alloy-primitives = { version = "1.1.0", default-features = false, features = ["map-foldhash"] }
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
 alloy-sol-macro = "1.1.0"
@@ -499,7 +499,7 @@ alloy-transport-ipc = { version = "0.15.10", default-features = false }
 alloy-transport-ws = { version = "0.15.10", default-features = false }
 
 # op
-alloy-op-evm = { version = "0.6.0", default-features = false }
+alloy-op-evm = { version = "0.7.0", default-features = false }
 alloy-op-hardforks = "0.2.0"
 op-alloy-rpc-types = { version = "0.15.4", default-features = false }
 op-alloy-rpc-types-engine = { version = "0.15.4", default-features = false }
@@ -734,9 +734,3 @@ vergen-git2 = "1.0.5"
 # op-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/op-alloy", rev = "ad607c1" }
 #
 # revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "1207e33" }
-
-[patch.crates-io]
-revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "9fe2ce1" }
-
-alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "fc32cac" }
-alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "fc32cac" }
