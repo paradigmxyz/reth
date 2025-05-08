@@ -10,12 +10,13 @@ use crate::{
     hooks::NodeHooks,
     launch::LaunchNode,
     rpc::{RethRpcAddOns, RethRpcServerHandles, RpcContext},
-    AddOns, FullNode,
+    AddOns, FullNode, NodeTypesWithDBAdapter,
 };
 
 use reth_exex::ExExContext;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes};
 use reth_node_core::node_config::NodeConfig;
+use reth_stages::StageSetBuilder;
 use reth_tasks::TaskExecutor;
 use std::{fmt, fmt::Debug, future::Future};
 
@@ -47,7 +48,12 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
             config,
             adapter,
             components_builder,
-            add_ons: AddOns { hooks: NodeHooks::default(), exexs: Vec::new(), add_ons: () },
+            add_ons: AddOns {
+                hooks: NodeHooks::default(),
+                exexs: Vec::new(),
+                stage_installer: None,
+                add_ons: (),
+            },
         }
     }
 }
@@ -173,7 +179,12 @@ where
             config,
             adapter,
             components_builder,
-            add_ons: AddOns { hooks: NodeHooks::default(), exexs: Vec::new(), add_ons },
+            add_ons: AddOns {
+                hooks: NodeHooks::default(),
+                exexs: Vec::new(),
+                stage_installer: None,
+                add_ons,
+            },
         }
     }
 }
@@ -218,7 +229,17 @@ where
         self.add_ons.exexs.push((exex_id.into(), Box::new(exex)));
         self
     }
-
+    /// Installs a custom stage installer in the node.
+    pub fn install_stages<F, R, E>(mut self, stage: F) -> Self
+    where
+        F: FnOnce(StageSetBuilder<NodeTypesWithDBAdapter<T::Types, T::DB>>) -> R + Send + 'static,
+        R: Future<Output = eyre::Result<E>> + Send,
+        E: Future<Output = eyre::Result<StageSetBuilder<NodeTypesWithDBAdapter<T::Types, T::DB>>>>
+            + Send,
+    {
+        self.add_ons.stage_installer = Some(Box::new(stage));
+        self
+    }
     /// Launches the node with the given closure.
     pub fn launch_with_fn<L, R>(self, launcher: L) -> R
     where
