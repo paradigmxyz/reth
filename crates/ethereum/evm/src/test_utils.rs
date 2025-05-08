@@ -9,7 +9,6 @@ use reth_evm::{
         BlockExecutionError, BlockExecutor, BlockExecutorFactory, BlockExecutorFor, ExecutableTx,
     },
     eth::{EthBlockExecutionCtx, EthEvmContext},
-    execute::BasicBlockExecutorProvider,
     ConfigureEvm, Database, EthEvm, EthEvmFactory, Evm, EvmEnvFor, EvmFactory,
 };
 use reth_execution_types::{BlockExecutionResult, ExecutionOutcome};
@@ -21,7 +20,7 @@ use revm::{
 };
 
 /// A helper type alias for mocked block executor provider.
-pub type MockExecutorProvider = BasicBlockExecutorProvider<MockEvmConfig>;
+pub type MockExecutorProvider = MockEvmConfig;
 
 /// A block executor provider that returns mocked execution results.
 #[derive(Clone, Debug)]

@@ -26,7 +26,7 @@ use alloy_evm::{
 };
 use alloy_primitives::{Bytes, U256};
 use core::{convert::Infallible, fmt::Debug};
-use reth_chainspec::{ChainSpec, EthChainSpec, HardforkBlobParams, MAINNET};
+use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
 use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_evm::{ConfigureEvm, EvmEnv, EvmFactory, NextBlockEnvAttributes, TransactionEnv};
 use reth_primitives_traits::{SealedBlock, SealedHeader};
@@ -101,7 +101,8 @@ impl<EvmFactory> EthEvmConfig<EvmFactory> {
     /// Returns blob params by hard fork as specified in chain spec.
     /// Blob params are in format `(spec id, target blob count, max blob count)`.
     pub fn blob_max_and_target_count_by_hardfork(&self) -> Vec<(SpecId, u64, u64)> {
-        let HardforkBlobParams { cancun, prague } = self.chain_spec().blob_params;
+        let cancun = self.chain_spec().blob_params.cancun();
+        let prague = self.chain_spec().blob_params.prague();
         Vec::from([
             (SpecId::CANCUN, cancun.target_blob_count, cancun.max_blob_count),
             (SpecId::PRAGUE, prague.target_blob_count, prague.max_blob_count),

@@ -146,9 +146,9 @@ mod swarm;
 mod trusted_peers_resolver;
 
 pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};
-pub use reth_eth_wire_types::{EthNetworkPrimitives, NetworkPrimitives};
+pub use reth_eth_wire_types::{primitives, EthNetworkPrimitives, NetworkPrimitives};
 pub use reth_network_api::{
-    BlockDownloaderProvider, DiscoveredEvent, DiscoveryEvent, NetworkEvent,
+    events, BlockDownloaderProvider, DiscoveredEvent, DiscoveryEvent, NetworkEvent,
     NetworkEventListenerProvider, NetworkInfo, PeerRequest, PeerRequestSender, Peers, PeersInfo,
 };
 pub use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState};

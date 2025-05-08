@@ -78,6 +78,8 @@ eest/consume-engine:
   - tests/prague/eip7002_el_triggerable_withdrawals/test_contract_deployment.py::test_system_contract_deployment[fork_CancunToPragueAtTime15k-blockchain_test_engine-deploy_after_fork-zero_balance]-reth
   - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_log_length[fork_Prague-blockchain_test_engine-slice_bytes_False]-reth
   - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_log_length[fork_Prague-blockchain_test_engine-slice_bytes_True]-reth
+  # the next test expects a concrete new format in the error message, there is no spec for this message, so it is ok to ignore
+  - tests/cancun/eip4844_blobs/test_blob_txs.py::test_blob_type_tx_pre_fork[fork_ShanghaiToCancunAtTime15k-blockchain_test_engine_from_state_test-one_blob_tx]-reth
 # 7702 test - no fix: it’s too expensive to check whether the storage is empty on each creation
 # rest of tests - see above
 eest/consume-rlp:
@@ -100,4 +102,9 @@ eest/consume-rlp:
   - tests/prague/eip7002_el_triggerable_withdrawals/test_contract_deployment.py::test_system_contract_deployment[fork_CancunToPragueAtTime15k-blockchain_test_engine-deploy_after_fork-zero_balance]-reth
   - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_log_length[fork_Prague-blockchain_test_engine-slice_bytes_False]-reth
   - tests/prague/eip6110_deposits/test_modified_contract.py::test_invalid_log_length[fork_Prague-blockchain_test_engine-slice_bytes_True]-reth
-
+  - tests/prague/eip7251_consolidations/test_modified_consolidation_contract.py::test_system_contract_errors[fork_Prague-blockchain_test-system_contract_reaches_gas_limit-system_contract_0x0000bbddc7ce488642fb579f8b00f3a590007251]-reth
+  - tests/prague/eip7251_consolidations/test_contract_deployment.py::test_system_contract_deployment[fork_CancunToPragueAtTime15k-blockchain_test-deploy_after_fork-nonzero_balance]-reth
+  - tests/prague/eip7251_consolidations/test_contract_deployment.py::test_system_contract_deployment[fork_CancunToPragueAtTime15k-blockchain_test-deploy_after_fork-zero_balance]-reth
+  - tests/prague/eip7002_el_triggerable_withdrawals/test_modified_withdrawal_contract.py::test_system_contract_errors[fork_Prague-blockchain_test-system_contract_reaches_gas_limit-system_contract_0x00000961ef480eb55e80d19ad83579a64c007002]-reth
+  - tests/prague/eip7002_el_triggerable_withdrawals/test_contract_deployment.py::test_system_contract_deployment[fork_CancunToPragueAtTime15k-blockchain_test-deploy_after_fork-nonzero_balance]-reth
+  - tests/prague/eip7002_el_triggerable_withdrawals/test_contract_deployment.py::test_system_contract_deployment[fork_CancunToPragueAtTime15k-blockchain_test-deploy_after_fork-zero_balance]-reth

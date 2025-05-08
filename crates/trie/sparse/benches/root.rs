@@ -131,7 +131,7 @@ fn calculate_root_from_leaves_repeated(c: &mut Criterion) {
                                         )
                                     };
 
-                                let walker = TrieWalker::new(
+                                let walker = TrieWalker::storage_trie(
                                     InMemoryStorageTrieCursor::new(
                                         B256::ZERO,
                                         NoopStorageTrieCursor::default(),
