@@ -4,6 +4,7 @@ use crate::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle};
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
 use futures::TryFutureExt;
+use jsonrpsee::RpcModule;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_node_api::{
@@ -765,5 +766,36 @@ where
             engine_validator,
             ctx.config.engine.accept_execution_requests_hash,
         ))
+    }
+}
+
+/// A noop Builder that satisfies the [`EngineApiBuilder`] trait without actually configuring an
+/// engine API module
+///
+/// This is intended to be used as a workaround for re-using all the existing ethereum node launch
+/// utilities which require an engine API.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct NoopEngineApiBuilder;
+
+impl<N: FullNodeComponents> EngineApiBuilder<N> for NoopEngineApiBuilder {
+    type EngineApi = NoopEngineApi;
+
+    async fn build_engine_api(self, _ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::EngineApi> {
+        Ok(NoopEngineApi::default())
+    }
+}
+
+/// Represents an empty Engine API [`RpcModule`].
+///
+/// This is only intended to be used in combination with the [`NoopEngineApiBuilder`] in order to
+/// satisfy trait bounds in the regular ethereum launch routine that mandate an engine API instance.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct NoopEngineApi;
+
+impl IntoEngineApiRpcModule for NoopEngineApi {
+    fn into_rpc_module(self) -> RpcModule<()> {
+        RpcModule::new(())
     }
 }
