@@ -7789,7 +7789,9 @@ name = "reth-era-utils"
 version = "1.3.12"
 dependencies = [
  "alloy-primitives",
+ "bytes",
  "eyre",
+ "futures",
  "futures-util",
  "reqwest",
  "reth-db-api",
