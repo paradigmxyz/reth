@@ -66,7 +66,10 @@ use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes, Payload
 use reth_tracing::{RethTracer, Tracer};
 use reth_trie_db::MerklePatriciaTrie;
 use serde::{Deserialize, Serialize};
-use std::{convert::Infallible, sync::Arc};
+use std::{
+    convert::Infallible,
+    sync::{atomic::AtomicBool, Arc},
+};
 use thiserror::Error;
 
 /// A custom payload attributes type.
@@ -391,7 +394,7 @@ where
         &self,
         args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
-        let BuildArguments { cached_reads, config, cancel, best_payload } = args;
+        let BuildArguments { cached_reads, config, cancel, best_payload, is_resolving: _ } = args;
         let PayloadConfig { parent_header, attributes } = config;
 
         // This reuses the default EthereumPayloadBuilder to build the payload
@@ -401,6 +404,7 @@ where
             config: PayloadConfig { parent_header, attributes: attributes.0 },
             cancel,
             best_payload,
+            is_resolving: Arc::new(AtomicBool::new(false)),
         })
     }
 
