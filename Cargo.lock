@@ -927,7 +927,7 @@ dependencies = [
 [[package]]
 name = "alloy-trie"
 version = "0.8.1"
-source = "git+https://github.com/alloy-rs/trie?branch=alexey%2Falways-store-branch-nodes#5e250b59192678bd6eec1f968de5dfd75cf5f56f"
+source = "git+https://github.com/alloy-rs/trie?branch=alexey%2Falways-store-branch-nodes#5dc6bd5066718bd6c198b6add762d61b4edb05b8"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -11523,7 +11523,7 @@ dependencies = [
  "getrandom 0.3.2",
  "once_cell",
  "rustix 1.0.7",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
