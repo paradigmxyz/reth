@@ -115,7 +115,7 @@ mod tests {
             for transaction in &block.body().transactions {
                 transaction_senders.push((
                     transaction_senders.len() as u64,
-                    transaction.recover_signer().expect("recover signer"),
+                    SignedTransaction::recover_signer(transaction).expect("recover signer"),
                 ));
             }
         }
