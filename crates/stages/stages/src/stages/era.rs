@@ -83,7 +83,7 @@ where
     }
 
     fn poll_execute_ready(&mut self, cx: &mut Context<'_>, input: ExecInput) -> Poll<Result<(), StageError>> {
-        if input.target_reached() {
+        if input.target_reached() || self.item.is_some() {
             return Poll::Ready(Ok(()));
         }
 
