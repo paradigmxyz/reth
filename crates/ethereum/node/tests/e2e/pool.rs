@@ -1,5 +1,5 @@
 use crate::utils::eth_payload_attributes;
-use alloy_consensus::{EthereumTxEnvelope, Transaction, TxEip4844};
+use alloy_consensus::{EthereumTxEnvelope, TxEip4844};
 use alloy_eips::{eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M, Encodable2718};
 use alloy_genesis::Genesis;
 use alloy_primitives::B256;
@@ -14,46 +14,10 @@ use reth_primitives_traits::Recovered;
 use reth_provider::CanonStateSubscriptions;
 use reth_tasks::TaskManager;
 use reth_transaction_pool::{
-    blobstore::InMemoryBlobStore, validate::ValidTransaction, BlockInfo, CoinbaseTipOrdering,
-    EthPooledTransaction, Pool, PoolTransaction, TransactionOrigin, TransactionPool,
-    TransactionPoolExt, TransactionValidationOutcome, TransactionValidator,
+    blobstore::InMemoryBlobStore, test_utils::OkValidator, BlockInfo, CoinbaseTipOrdering,
+    EthPooledTransaction, Pool, TransactionOrigin, TransactionPool, TransactionPoolExt,
 };
 use std::sync::Arc;
-
-/// A transaction validator that determines all transactions to be valid.
-///
-/// An actual validator impl like
-/// [`TransactionValidationTaskExecutor`](reth_transaction_pool::pool::TransactionValidationTaskExecutor)
-/// would require up to date db access.
-///
-/// CAUTION: This validator is not safe to use since it doesn't actually validate the transaction's
-/// properties such as chain id, balance, nonce, etc.
-#[derive(Debug, Default)]
-#[non_exhaustive]
-struct OkValidator;
-
-impl TransactionValidator for OkValidator {
-    type Transaction = EthPooledTransaction;
-
-    async fn validate_transaction(
-        &self,
-        _origin: TransactionOrigin,
-        transaction: Self::Transaction,
-    ) -> TransactionValidationOutcome<Self::Transaction> {
-        // Always return valid
-        let authorities = transaction.authorization_list().map(|auths| {
-            auths.iter().flat_map(|auth| auth.recover_authority()).collect::<Vec<_>>()
-        });
-        TransactionValidationOutcome::Valid {
-            balance: *transaction.cost(),
-            state_nonce: transaction.nonce(),
-            bytecode_hash: None,
-            transaction: ValidTransaction::Valid(transaction),
-            propagate: false,
-            authorities,
-        }
-    }
-}
 
 // Test that the pool's maintenance task can correctly handle `CanonStateNotification::Commit`
 // events
