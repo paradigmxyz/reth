@@ -580,11 +580,7 @@ impl From<InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::Eip2930NotSupported |
             InvalidTransaction::Eip1559NotSupported |
             InvalidTransaction::Eip4844NotSupported |
-            InvalidTransaction::Eip7702NotSupported |
-            InvalidTransaction::Eip7873NotSupported => Self::TxTypeNotSupported,
-            InvalidTransaction::Eip7873MissingTarget => {
-                Self::other(internal_rpc_err(err.to_string()))
-            }
+            InvalidTransaction::Eip7702NotSupported => Self::TxTypeNotSupported,
         }
     }
 }
