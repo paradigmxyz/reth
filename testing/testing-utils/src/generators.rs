@@ -16,7 +16,6 @@ use reth_primitives_traits::{
     crypto::secp256k1::sign_message, proofs, Account, Block as _, Log, SealedBlock, SealedHeader,
     StorageEntry,
 };
-
 use secp256k1::{Keypair, Secp256k1};
 use std::{
     cmp::{max, min},
@@ -488,7 +487,10 @@ mod tests {
     use alloy_consensus::TxEip1559;
     use alloy_eips::eip2930::AccessList;
     use alloy_primitives::{hex, Signature};
-    use reth_primitives_traits::crypto::secp256k1::{public_key_to_address, sign_message};
+    use reth_primitives_traits::{
+        crypto::secp256k1::{public_key_to_address, sign_message},
+        SignedTransaction,
+    };
     use std::str::FromStr;
 
     #[test]
