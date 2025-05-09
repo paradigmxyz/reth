@@ -42,7 +42,6 @@ alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-rpc-types-engine.workspace = true
 
-revm.workspace = true
 revm-primitives.workspace = true
 
 # common

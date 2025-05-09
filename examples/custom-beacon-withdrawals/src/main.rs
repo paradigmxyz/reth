@@ -7,7 +7,6 @@ use alloy_eips::eip4895::Withdrawal;
 use alloy_evm::{
     block::{BlockExecutorFactory, BlockExecutorFor, ExecutableTx},
     eth::{EthBlockExecutionCtx, EthBlockExecutor},
-    precompiles::PrecompilesMap,
     EthEvm, EthEvmFactory,
 };
 use alloy_sol_macro::sol;
@@ -102,7 +101,7 @@ impl BlockExecutorFactory for CustomEvmConfig {
 
     fn create_executor<'a, DB, I>(
         &'a self,
-        evm: EthEvm<&'a mut State<DB>, I, PrecompilesMap>,
+        evm: EthEvm<&'a mut State<DB>, I>,
         ctx: EthBlockExecutionCtx<'a>,
     ) -> impl BlockExecutorFor<'a, Self, DB, I>
     where
