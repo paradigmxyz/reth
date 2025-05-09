@@ -145,7 +145,7 @@ where
         // order
         let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
 
-        let height = era::process(era.as_ref(), &mut writer, provider, &mut self.hash_collector, &mut td, last_header_number, input.target).map_err(|e| StageError::Fatal(e.into()))?;
+        let height = era::process(era.as_ref(), &mut writer, provider, &mut self.hash_collector, &mut td, last_header_number..=input.target()).map_err(|e| StageError::Fatal(e.into()))?;
 
         self.last_block_height.replace(height);
 

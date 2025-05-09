@@ -17,7 +17,7 @@ use reth_provider::{
     StaticFileSegment, StaticFileWriter,
 };
 use reth_storage_api::{DBProvider, HeaderProvider, NodePrimitivesProvider, StorageLocation};
-use std::sync::mpsc;
+use std::{collections::Bound, range::RangeBounds, sync::mpsc};
 use tracing::info;
 
 /// Imports blocks from `downloader` using `provider`.
@@ -68,15 +68,8 @@ where
     let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
 
     while let Some(meta) = rx.recv()? {
-        last_header_number = process(
-            &meta?,
-            &mut writer,
-            provider,
-            hash_collector,
-            &mut td,
-            last_header_number,
-            None,
-        )?;
+        last_header_number =
+            process(&meta?, &mut writer, provider, hash_collector, &mut td, last_header_number..)?;
     }
 
     build_index(provider, hash_collector)?;
@@ -88,15 +81,20 @@ where
 ///
 /// Adds on to `total_difficulty` and collects hash to height using `hash_collector`.
 ///
+/// Skips all blocks below the [`start_bound`] of `block_numbers` and stops when reaching past the
+/// [`end_bound`] or the end of the file.
+///
 /// Returns last block height.
+///
+/// [`start_bound`]: RangeBounds::start_bound
+/// [`end_bound`]: RangeBounds::end_bound
 pub fn process<Era, P, B, BB, BH>(
     meta: &Era,
     writer: &mut StaticFileProviderRWRefMut<'_, <P as NodePrimitivesProvider>::Primitives>,
     provider: &P,
     hash_collector: &mut Collector<BlockHash, BlockNumber>,
     total_difficulty: &mut U256,
-    last_header_number: BlockNumber,
-    target: Option<BlockNumber>,
+    block_numbers: impl RangeBounds<BlockNumber>,
 ) -> eyre::Result<BlockNumber>
 where
     B: Block<Header = BH, Body = BB>,
@@ -113,30 +111,28 @@ where
     let mut reader = Era1Reader::new(file);
 
     let iter = reader.iter().map(|block| {
-        block.map(|block| {
+        block.and_then(|block| {
             let header: BH = block.header.decode()?;
             let body: BB = block.body.decode()?;
-            (header, body)
+
+            Ok((header, body))
         })
     });
 
-    process_iter(
-        iter,
-        meta,
-        writer,
-        provider,
-        hash_collector,
-        total_difficulty,
-        last_header_number,
-        target,
-    )
+    process_iter(iter, meta, writer, provider, hash_collector, total_difficulty, block_numbers)
 }
 
 /// Extracts block headers and bodies from `iter` and appends them using `writer` and `provider`.
 ///
 /// Adds on to `total_difficulty` and collects hash to height using `hash_collector`.
 ///
+/// Skips all blocks below the [`start_bound`] of `block_numbers` and stops when reaching past the
+/// [`end_bound`] or the end of the file.
+///
 /// Returns last block height.
+///
+/// [`start_bound`]: RangeBounds::start_bound
+/// [`end_bound`]: RangeBounds::end_bound
 pub fn process_iter<Era, P, B, BB, BH>(
     iter: impl Iterator<Item = Result<(BH, BB), E2sError>>,
     meta: &Era,
@@ -144,8 +140,7 @@ pub fn process_iter<Era, P, B, BB, BH>(
     provider: &P,
     hash_collector: &mut Collector<BlockHash, BlockNumber>,
     total_difficulty: &mut U256,
-    mut last_header_number: BlockNumber,
-    target: Option<BlockNumber>,
+    block_numbers: impl RangeBounds<BlockNumber>,
 ) -> eyre::Result<BlockNumber>
 where
     B: Block<Header = BH, Body = BB>,
@@ -158,6 +153,17 @@ where
     P: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory + BlockWriter<Block = B>,
     <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
 {
+    let mut last_header_number = match block_numbers.start_bound() {
+        Bound::Included(&number) => number,
+        Bound::Excluded(&number) => number.saturating_sub(1),
+        Bound::Unbounded => 0,
+    };
+    let target = match block_numbers.end_bound() {
+        Bound::Included(&number) => Some(number),
+        Bound::Excluded(&number) => Some(number.saturating_add(1)),
+        Bound::Unbounded => None,
+    };
+
     for block in iter {
         let (header, body) = block?;
         let number = header.number();
