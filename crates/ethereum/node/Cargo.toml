@@ -56,7 +56,6 @@ reth-payload-primitives.workspace = true
 reth-e2e-test-utils.workspace = true
 reth-rpc-eth-api.workspace = true
 reth-tasks.workspace = true
-reth-ethereum = { workspace = true, features = ["pool"] }
 
 alloy-primitives.workspace = true
 alloy-provider.workspace = true
@@ -92,5 +91,4 @@ test-utils = [
     "reth-evm/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-evm-ethereum/test-utils",
-    "reth-ethereum/test-utils",
 ]

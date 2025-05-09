@@ -7,9 +7,6 @@ use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::{
     node::NodeTestContext, transaction::TransactionTestContext, wallet::Wallet,
 };
-use reth_ethereum::pool::{
-    validate::ValidTransaction, TransactionValidationOutcome, TransactionValidator,
-};
 use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::EthereumNode;
@@ -17,8 +14,9 @@ use reth_primitives_traits::Recovered;
 use reth_provider::CanonStateSubscriptions;
 use reth_tasks::TaskManager;
 use reth_transaction_pool::{
-    blobstore::InMemoryBlobStore, BlockInfo, CoinbaseTipOrdering, EthPooledTransaction,
-    PoolTransaction, TransactionOrigin, TransactionPool, TransactionPoolExt,
+    blobstore::InMemoryBlobStore, validate::ValidTransaction, BlockInfo, CoinbaseTipOrdering,
+    EthPooledTransaction, PoolTransaction, TransactionOrigin, TransactionPool, TransactionPoolExt,
+    TransactionValidationOutcome, TransactionValidator,
 };
 use std::sync::Arc;
 
