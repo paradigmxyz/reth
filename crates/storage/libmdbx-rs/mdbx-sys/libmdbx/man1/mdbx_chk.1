@@ -1,6 +1,6 @@
-.\" Copyright 2015-2024 Leonid Yuriev <leo@yuriev.ru>.
+.\" Copyright 2015-2025 Leonid Yuriev <leo@yuriev.ru>.
 .\" Copying restrictions apply.  See COPYRIGHT/LICENSE.
-.TH MDBX_CHK 1 "2024-03-13" "MDBX 0.12.10"
+.TH MDBX_CHK 1 "2024-08-29" "MDBX 0.13"
 .SH NAME
 mdbx_chk \- MDBX checking tool
 .SH SYNOPSIS
@@ -22,7 +22,7 @@ mdbx_chk \- MDBX checking tool
 [\c
 .BR \-i ]
 [\c
-.BI \-s \ subdb\fR]
+.BI \-s \ table\fR]
 .BR \ dbpath
 .SH DESCRIPTION
 The
@@ -69,8 +69,8 @@ pages.
 Ignore wrong order errors, which will likely false-positive if custom
 comparator(s) was used.
 .TP
-.BR \-s \ subdb
-Verify and show info only for a specific subdatabase.
+.BR \-s \ table
+Verify and show info only for a specific table.
 .TP
 .BR \-0 | \-1 | \-2
 Using specific meta-page 0, or 2 for checking.
