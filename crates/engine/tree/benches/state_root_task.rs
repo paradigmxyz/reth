@@ -13,7 +13,8 @@ use reth_chain_state::EthPrimitives;
 use reth_chainspec::ChainSpec;
 use reth_db_common::init::init_genesis;
 use reth_engine_tree::tree::{
-    executor::WorkloadExecutor, PayloadProcessor, StateProviderBuilder, TreeConfig,
+    executor::WorkloadExecutor, precompile_cache::PrecompileCache, PayloadProcessor,
+    StateProviderBuilder, TreeConfig,
 };
 use reth_evm::OnStateHook;
 use reth_evm_ethereum::EthEvmConfig;
@@ -220,6 +221,7 @@ fn bench_state_root(c: &mut Criterion) {
                             WorkloadExecutor::default(),
                             EthEvmConfig::new(factory.chain_spec()),
                             &TreeConfig::default(),
+                            PrecompileCache::default(),
                         );
                         let provider = BlockchainProvider::new(factory).unwrap();
 

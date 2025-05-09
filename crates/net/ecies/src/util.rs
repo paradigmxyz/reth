@@ -4,7 +4,7 @@ use alloy_primitives::B256;
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 
-/// Hashes the input data with SHA256.
+/// Hashes the input data with SHA256 - <https://en.wikipedia.org/wiki/SHA-2>
 pub(crate) fn sha256(data: &[u8]) -> B256 {
     B256::from(Sha256::digest(data).as_ref())
 }

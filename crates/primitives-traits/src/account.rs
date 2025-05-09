@@ -296,12 +296,12 @@ mod tests {
         let mut buf = vec![];
         let bytecode = Bytecode::new_raw(Bytes::default());
         let len = bytecode.to_compact(&mut buf);
-        assert_eq!(len, 51);
+        assert_eq!(len, 14);
 
         let mut buf = vec![];
         let bytecode = Bytecode::new_raw(Bytes::from(&hex!("ffff")));
         let len = bytecode.to_compact(&mut buf);
-        assert_eq!(len, 53);
+        assert_eq!(len, 17);
 
         let mut buf = vec![];
         let bytecode = Bytecode(RevmBytecode::LegacyAnalyzed(LegacyAnalyzedBytecode::new(
