@@ -278,9 +278,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-evm"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e418c60ecf43d33a6afad2f5bf7ae7c1b7b47697b6318cd5f5259a3ad38b3ec"
+checksum = "b12d843be1f42ebec88e148f192fd7be61fcdfb6c81f640f58a55bf8feb0cfb5"
 dependencies = [
  "alloy-consensus",
  "alloy-eips 0.15.10",
@@ -389,9 +389,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-op-evm"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce33f398aafac4080fe2bd5eb432abc44049ab134cb005305995736e8aba77b9"
+checksum = "4acceb3a14fe4db314ed318d596f50814a1be370d506bfc53479d62859cc4560"
 dependencies = [
  "alloy-consensus",
  "alloy-eips 0.15.10",
@@ -6008,9 +6008,9 @@ dependencies = [
 
 [[package]]
 name = "op-revm"
-version = "4.0.0"
+version = "4.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f089bf23ffb6630f05db2af38d796fb5671b27e4c49d5b62ad0d025bb7f4350"
+checksum = "5b9a7d9aabd616254f2bf104a966cc4a48c88e3238e5ee4767157346775f0210"
 dependencies = [
  "auto_impl",
  "once_cell",
