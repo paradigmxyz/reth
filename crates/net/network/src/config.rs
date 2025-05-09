@@ -12,8 +12,7 @@ use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{
     handshake::{EthHandshake, EthRlpxHandshake},
-    EthNetworkPrimitives, HelloMessage, HelloMessageWithProtocols, NetworkPrimitives, Status,
-    StatusMessage,
+    EthNetworkPrimitives, HelloMessage, HelloMessageWithProtocols, NetworkPrimitives, UnifiedStatus,
 };
 use reth_ethereum_forks::{ForkFilter, Head};
 use reth_network_peers::{mainnet_nodes, pk2id, sepolia_nodes, PeerId, TrustedPeer};
@@ -74,7 +73,7 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The executor to use for spawning tasks.
     pub executor: Box<dyn TaskSpawner>,
     /// The `Status` message to send to peers at the beginning.
-    pub status: StatusMessage,
+    pub status: UnifiedStatus,
     /// Sets the hello message for the p2p handshake in `RLPx`
     pub hello_message: HelloMessageWithProtocols,
     /// Additional protocols to announce and handle in `RLPx`
@@ -623,9 +622,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         hello_message.port = listener_addr.port();
 
         // set the status
-        // eth69 todo: think about if we want to support eth69 status message when building
-        // NetworkConfig
-        let status = StatusMessage::Legacy(Status::spec_builder(&chain_spec, &head).build());
+        let status = UnifiedStatus::spec_builder(&chain_spec, &head);
 
         // set a fork filter based on the chain spec and head
         let fork_filter = chain_spec.fork_filter(head);

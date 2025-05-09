@@ -91,7 +91,7 @@ where
                     },
                     protocols: PeerProtocolInfo {
                         eth: Some(EthPeerInfo::Info(EthInfo {
-                            version: peer.status.version() as u64,
+                            version: peer.status.version as u64,
                         })),
                         snap: None,
                         other: Default::default(),

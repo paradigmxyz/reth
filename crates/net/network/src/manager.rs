@@ -268,7 +268,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
         if let Some(disc_config) = discovery_v4_config.as_mut() {
             // merge configured boot nodes
             disc_config.bootstrap_nodes.extend(resolved_boot_nodes.clone());
-            disc_config.add_eip868_pair("eth", status.forkid());
+            disc_config.add_eip868_pair("eth", status.forkid);
         }
 
         if let Some(discv5) = discovery_v5_config.as_mut() {
@@ -449,9 +449,9 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             protocol_version: hello_message.protocol_version as u64,
             eth_protocol_info: EthProtocolInfo {
                 difficulty: None,
-                head: status.blockhash(),
-                network: status.chain().id(),
-                genesis: status.genesis(),
+                head: status.blockhash,
+                network: status.chain.id(),
+                genesis: status.genesis,
                 config: Default::default(),
             },
         }
@@ -686,10 +686,8 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             NetworkHandleMessage::GetStatus(tx) => {
                 let _ = tx.send(self.status());
             }
-            NetworkHandleMessage::StatusUpdate { head, earliest, latest } => {
-                if let Some(transition) =
-                    self.swarm.sessions_mut().on_status_update(head, earliest, latest)
-                {
+            NetworkHandleMessage::StatusUpdate { head } => {
+                if let Some(transition) = self.swarm.sessions_mut().on_status_update(head) {
                     self.swarm.state_mut().update_fork_id(transition.current);
                 }
             }

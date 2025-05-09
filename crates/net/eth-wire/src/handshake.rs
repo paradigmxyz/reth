@@ -7,6 +7,7 @@ use bytes::{Bytes, BytesMut};
 use futures::{Sink, SinkExt, Stream};
 use reth_eth_wire_types::{
     DisconnectReason, EthMessage, EthNetworkPrimitives, ProtocolMessage, StatusMessage,
+    UnifiedStatus,
 };
 use reth_ethereum_forks::ForkFilter;
 use reth_primitives_traits::GotExpected;
@@ -21,10 +22,10 @@ pub trait EthRlpxHandshake: Debug + Send + Sync + 'static {
     fn handshake<'a>(
         &'a self,
         unauth: &'a mut dyn UnauthEth,
-        status: StatusMessage,
+        status: UnifiedStatus,
         fork_filter: ForkFilter,
         timeout_limit: Duration,
-    ) -> Pin<Box<dyn Future<Output = Result<StatusMessage, EthStreamError>> + 'a + Send>>;
+    ) -> Pin<Box<dyn Future<Output = Result<UnifiedStatus, EthStreamError>> + 'a + Send>>;
 }
 
 /// An unauthenticated stream that can send and receive messages.
@@ -57,10 +58,10 @@ impl EthRlpxHandshake for EthHandshake {
     fn handshake<'a>(
         &'a self,
         unauth: &'a mut dyn UnauthEth,
-        status: StatusMessage,
+        status: UnifiedStatus,
         fork_filter: ForkFilter,
         timeout_limit: Duration,
-    ) -> Pin<Box<dyn Future<Output = Result<StatusMessage, EthStreamError>> + 'a + Send>> {
+    ) -> Pin<Box<dyn Future<Output = Result<UnifiedStatus, EthStreamError>> + 'a + Send>> {
         Box::pin(async move {
             timeout(timeout_limit, EthereumEthHandshake(unauth).eth_handshake(status, fork_filter))
                 .await
@@ -81,13 +82,15 @@ where
     /// Performs the `eth` rlpx protocol handshake using the given input stream.
     pub async fn eth_handshake(
         self,
-        status: StatusMessage,
+        unified_status: UnifiedStatus,
         fork_filter: ForkFilter,
-    ) -> Result<StatusMessage, EthStreamError> {
+    ) -> Result<UnifiedStatus, EthStreamError> {
         let unauth = self.0;
+
+        let status: StatusMessage = unified_status.into();
         // Send our status message
         let status_msg = alloy_rlp::encode(ProtocolMessage::<EthNetworkPrimitives>::from(
-            EthMessage::Status(status.clone()),
+            EthMessage::Status(status),
         ))
         .into();
         unauth.send(status_msg).await.map_err(EthStreamError::from)?;
@@ -201,7 +204,7 @@ where
                     return Err(err.into());
                 }
 
-                Ok(their_status_message)
+                Ok(their_status_message.into())
             }
             _ => {
                 unauth

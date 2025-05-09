@@ -1,11 +1,146 @@
 use crate::EthVersion;
 use alloy_chains::{Chain, NamedChain};
 use alloy_hardforks::{EthereumHardfork, ForkId, Head};
-use alloy_primitives::{hex, B256, U256, U64};
+use alloy_primitives::{hex, B256, U256};
 use alloy_rlp::{BufMut, Encodable, RlpDecodable, RlpEncodable};
 use core::fmt::{Debug, Display};
 use reth_chainspec::{EthChainSpec, Hardforks, MAINNET};
 use reth_codecs_derive::add_arbitrary_tests;
+
+/// `UnifiedStatus`` is an internal superset of all ETH status fields.
+#[derive(Clone, Debug, PartialEq, Eq, Copy)]
+pub struct UnifiedStatus {
+    /// The eth protocol version (e.g. eth/66 to eth/69).
+    pub version: EthVersion,
+    /// The chain ID identifying the peer’s network.
+    pub chain: Chain,
+    /// The genesis block hash of the peer’s chain.
+    pub genesis: B256,
+    /// The fork ID as defined by EIP-2124.
+    pub forkid: ForkId,
+    /// The latest block hash known to the peer.
+    pub blockhash: B256,
+    /// The total difficulty of the peer’s best chain (eth/66–68 only).
+    pub total_difficulty: Option<U256>,
+    /// The earliest block this node can serve (eth/69 only).
+    pub earliest_block: Option<u64>,
+    /// The latest block number this node has (eth/69 only).
+    pub latest_block: Option<u64>,
+}
+
+/// Builder type for constructing a [`UnifiedStatus`] message.
+#[derive(Debug, Default)]
+pub struct UnifiedStatusBuilder {
+    status: UnifiedStatus,
+}
+
+impl UnifiedStatusBuilder {
+    /// Consumes the builder and returns the constructed [`UnifiedStatus`].
+    pub fn build(self) -> UnifiedStatus {
+        self.status
+    }
+
+    /// Sets the eth protocol version (e.g., eth/66, eth/69).
+    pub fn version(mut self, version: EthVersion) -> Self {
+        self.status.version = version;
+        self
+    }
+
+    /// Sets the chain ID
+    pub fn chain(mut self, chain: Chain) -> Self {
+        self.status.chain = chain;
+        self
+    }
+
+    /// Sets the genesis block hash of the chain.
+    pub fn genesis(mut self, genesis: B256) -> Self {
+        self.status.genesis = genesis;
+        self
+    }
+
+    /// Sets the fork ID, used for fork compatibility checks.
+    pub fn forkid(mut self, forkid: ForkId) -> Self {
+        self.status.forkid = forkid;
+        self
+    }
+
+    /// Sets the block hash of the current head.
+    pub fn blockhash(mut self, blockhash: B256) -> Self {
+        self.status.blockhash = blockhash;
+        self
+    }
+
+    /// Sets the total difficulty, if relevant (Some for eth/66–68).
+    pub fn total_difficulty(mut self, td: Option<U256>) -> Self {
+        self.status.total_difficulty = td;
+        self
+    }
+
+    /// Sets the earliest available block, if known (Some for eth/69).
+    pub fn earliest_block(mut self, earliest: Option<u64>) -> Self {
+        self.status.earliest_block = earliest;
+        self
+    }
+
+    /// Sets the latest known block, if known (Some for eth/69).
+    pub fn latest_block(mut self, latest: Option<u64>) -> Self {
+        self.status.latest_block = latest;
+        self
+    }
+}
+
+impl Default for UnifiedStatus {
+    fn default() -> Self {
+        let mainnet_genesis = MAINNET.genesis_hash();
+        UnifiedStatus {
+            version: EthVersion::Eth68,
+            chain: Chain::from_named(NamedChain::Mainnet),
+            genesis: mainnet_genesis,
+            forkid: MAINNET
+                .hardfork_fork_id(EthereumHardfork::Frontier)
+                .expect("Frontier must exist"),
+            blockhash: mainnet_genesis,
+            total_difficulty: Some(U256::from(17_179_869_184u64)),
+            earliest_block: Some(0),
+            latest_block: Some(0),
+        }
+    }
+}
+
+impl UnifiedStatus {
+    /// Helper for creating the UnifiedStatus builder
+    pub fn builder() -> UnifiedStatusBuilder {
+        Default::default()
+    }
+
+    /// Build from chain‑spec + head.  Earliest/latest default to full history.
+    pub fn spec_builder<Spec>(spec: &Spec, head: &Head) -> Self
+    where
+        Spec: EthChainSpec + Hardforks,
+    {
+        UnifiedStatus::builder()
+            .chain(spec.chain())
+            .genesis(spec.genesis_hash())
+            .forkid(spec.fork_id(head))
+            .blockhash(head.hash)
+            .total_difficulty(Some(head.total_difficulty))
+            .earliest_block(Some(0))
+            .latest_block(Some(head.number))
+            .build()
+    }
+
+    /// Override the `(earliest, latest)` history range we’ll advertise to
+    /// eth/69 peers.
+    pub fn set_history_range(&mut self, earliest: u64, latest: u64) {
+        self.earliest_block = Some(earliest);
+        self.latest_block = Some(latest);
+    }
+
+    /// Sets the [`EthVersion`] for the status.
+    pub fn set_eth_version(&mut self, v: EthVersion) {
+        self.version = v;
+    }
+}
 
 /// The status message is used in the eth protocol handshake to ensure that peers are on the same
 /// network and are following the same fork.
@@ -40,47 +175,6 @@ pub struct Status {
     /// [EIP-2124](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2124.md).
     /// This was added in [`eth/64`](https://eips.ethereum.org/EIPS/eip-2364)
     pub forkid: ForkId,
-}
-
-impl Status {
-    /// Helper for returning a builder for the status message.
-    pub fn builder() -> StatusBuilder {
-        Default::default()
-    }
-
-    /// Sets the [`EthVersion`] for the status.
-    pub const fn set_eth_version(&mut self, version: EthVersion) {
-        self.version = version;
-    }
-
-    /// Create a [`StatusBuilder`] from the given [`EthChainSpec`] and head block.
-    ///
-    /// Sets the `chain` and `genesis`, `blockhash`, and `forkid` fields based on the
-    /// [`EthChainSpec`] and head.
-    pub fn spec_builder<Spec>(spec: Spec, head: &Head) -> StatusBuilder
-    where
-        Spec: EthChainSpec + Hardforks,
-    {
-        Self::builder()
-            .chain(spec.chain())
-            .genesis(spec.genesis_hash())
-            .blockhash(head.hash)
-            .total_difficulty(head.total_difficulty)
-            .forkid(spec.fork_id(head))
-    }
-
-    /// Converts this [`Status`] into the [Eth69](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7642.md) variant that excludes the total difficulty field.
-    pub const fn into_eth69(self) -> StatusEth69 {
-        StatusEth69 {
-            version: EthVersion::Eth69,
-            chain: self.chain,
-            genesis: self.genesis,
-            forkid: self.forkid,
-            earliest: U64::ZERO, // Will be set from actual chain state in network layer
-            latest: U64::ZERO,   // Will be set from actual chain state in network layer
-            blockhash: self.blockhash,
-        }
-    }
 }
 
 impl Display for Status {
@@ -130,23 +224,6 @@ impl Debug for Status {
     }
 }
 
-// <https://etherscan.io/block/0>
-impl Default for Status {
-    fn default() -> Self {
-        let mainnet_genesis = MAINNET.genesis_hash();
-        Self {
-            version: EthVersion::Eth68,
-            chain: Chain::from_named(NamedChain::Mainnet),
-            total_difficulty: U256::from(17_179_869_184u64),
-            blockhash: mainnet_genesis,
-            genesis: mainnet_genesis,
-            forkid: MAINNET
-                .hardfork_fork_id(EthereumHardfork::Frontier)
-                .expect("The Frontier hardfork should always exist"),
-        }
-    }
-}
-
 /// Builder for [`Status`] messages.
 ///
 /// # Example
@@ -178,54 +255,6 @@ impl Default for Status {
 ///     }
 /// );
 /// ```
-#[derive(Debug, Default)]
-pub struct StatusBuilder {
-    status: Status,
-}
-
-// eth69 todo: consider a StatusBuilder for eth69
-impl StatusBuilder {
-    /// Consumes the type and creates the actual [`Status`] message.
-    pub const fn build(self) -> Status {
-        self.status
-    }
-
-    /// Sets the protocol version.
-    pub const fn version(mut self, version: EthVersion) -> Self {
-        self.status.version = version;
-        self
-    }
-
-    /// Sets the chain id.
-    pub const fn chain(mut self, chain: Chain) -> Self {
-        self.status.chain = chain;
-        self
-    }
-
-    /// Sets the total difficulty.
-    pub const fn total_difficulty(mut self, total_difficulty: U256) -> Self {
-        self.status.total_difficulty = total_difficulty;
-        self
-    }
-
-    /// Sets the block hash.
-    pub const fn blockhash(mut self, blockhash: B256) -> Self {
-        self.status.blockhash = blockhash;
-        self
-    }
-
-    /// Sets the genesis hash.
-    pub const fn genesis(mut self, genesis: B256) -> Self {
-        self.status.genesis = genesis;
-        self
-    }
-
-    /// Sets the fork id.
-    pub const fn forkid(mut self, forkid: ForkId) -> Self {
-        self.status.forkid = forkid;
-        self
-    }
-}
 
 /// Similar to [`Status`], but for `eth/69` version, which does not contain
 /// the `total_difficulty` field.
@@ -253,20 +282,13 @@ pub struct StatusEth69 {
     pub forkid: ForkId,
 
     /// Earliest block number this node can serve
-    pub earliest: U64,
+    pub earliest: u64,
 
     /// Latest block number this node has (current head)
-    pub latest: U64,
+    pub latest: u64,
 
     /// Hash of the latest block this node has (current head)
     pub blockhash: B256,
-}
-
-impl StatusEth69 {
-    /// Sets the [`EthVersion`] for the status.
-    pub const fn set_eth_version(&mut self, version: EthVersion) {
-        self.version = version;
-    }
 }
 
 impl Display for StatusEth69 {
@@ -299,19 +321,6 @@ impl Debug for StatusEth69 {
                 self.version, self.chain, hexed_blockhash, hexed_genesis, self.forkid
             )
         }
-    }
-}
-
-// <https://etherscan.io/block/0>
-impl Default for StatusEth69 {
-    fn default() -> Self {
-        Status::default().into()
-    }
-}
-
-impl From<Status> for StatusEth69 {
-    fn from(status: Status) -> Self {
-        status.into_eth69()
     }
 }
 
@@ -366,32 +375,6 @@ impl StatusMessage {
             Self::Eth69(status_69) => status_69.blockhash,
         }
     }
-
-    /// Sets the [`EthVersion`] for the status.
-    pub fn set_eth_version(&mut self, eth_version: EthVersion) {
-        match self {
-            Self::Legacy(legacy_status) => legacy_status.set_eth_version(eth_version),
-            Self::Eth69(status_69) => status_69.set_eth_version(eth_version),
-        }
-    }
-
-    /// Converts to legacy Status since full support for EIP-7642
-    /// is not fully implemented
-    /// `<https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7642.md>`
-    pub fn to_legacy(self) -> Status {
-        match self {
-            Self::Legacy(legacy_status) => legacy_status,
-            Self::Eth69(status_69) => Status {
-                version: status_69.version,
-                chain: status_69.chain,
-                // total_difficulty is omitted in Eth69.
-                total_difficulty: U256::default(),
-                blockhash: status_69.blockhash,
-                genesis: status_69.genesis,
-                forkid: status_69.forkid,
-            },
-        }
-    }
 }
 
 impl Encodable for StatusMessage {
@@ -415,6 +398,58 @@ impl Display for StatusMessage {
         match self {
             StatusMessage::Legacy(s) => Display::fmt(s, f),
             StatusMessage::Eth69(s69) => Display::fmt(s69, f),
+        }
+    }
+}
+
+impl From<UnifiedStatus> for StatusMessage {
+    fn from(s: UnifiedStatus) -> Self {
+        if s.version == EthVersion::Eth69 {
+            StatusMessage::Eth69(StatusEth69 {
+                version: s.version,
+                chain: s.chain,
+                genesis: s.genesis,
+                forkid: s.forkid,
+                earliest: s.earliest_block.unwrap_or(0),
+                latest: s.latest_block.unwrap_or(0),
+                blockhash: s.blockhash,
+            })
+        } else {
+            StatusMessage::Legacy(Status {
+                version: s.version,
+                chain: s.chain,
+                total_difficulty: s.total_difficulty.unwrap_or(U256::ZERO),
+                blockhash: s.blockhash,
+                genesis: s.genesis,
+                forkid: s.forkid,
+            })
+        }
+    }
+}
+
+impl From<StatusMessage> for UnifiedStatus {
+    fn from(msg: StatusMessage) -> Self {
+        match msg {
+            StatusMessage::Legacy(s) => UnifiedStatus {
+                version: s.version,
+                chain: s.chain,
+                genesis: s.genesis,
+                forkid: s.forkid,
+                blockhash: s.blockhash,
+                total_difficulty: Some(s.total_difficulty),
+                earliest_block: None,
+                latest_block: None,
+            },
+            StatusMessage::Eth69(e) => UnifiedStatus {
+                version: e.version,
+                chain: e.chain,
+                genesis: e.genesis,
+                forkid: e.forkid,
+                blockhash: e.blockhash,
+                total_difficulty: None,
+                earliest_block: Some(e.earliest),
+                latest_block: Some(e.latest),
+            },
         }
     }
 }

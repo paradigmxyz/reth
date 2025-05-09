@@ -13,7 +13,7 @@ use alloy_primitives::B256;
 use rand::seq::SliceRandom;
 use reth_eth_wire::{
     BlockHashNumber, Capabilities, DisconnectReason, EthNetworkPrimitives, NetworkPrimitives,
-    NewBlockHashes, StatusMessage,
+    NewBlockHashes, UnifiedStatus,
 };
 use reth_ethereum_forks::ForkId;
 use reth_network_api::{DiscoveredEvent, DiscoveryEvent, PeerRequest, PeerRequestSender};
@@ -146,7 +146,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
         &mut self,
         peer: PeerId,
         capabilities: Arc<Capabilities>,
-        status: Arc<StatusMessage>,
+        status: Arc<UnifiedStatus>,
         request_tx: PeerRequestSender<PeerRequest<N>>,
         timeout: Arc<AtomicU64>,
     ) {
@@ -154,13 +154,13 @@ impl<N: NetworkPrimitives> NetworkState<N> {
 
         // find the corresponding block number
         let block_number =
-            self.client.block_number(status.blockhash()).ok().flatten().unwrap_or_default();
-        self.state_fetcher.new_active_peer(peer, status.blockhash(), block_number, timeout);
+            self.client.block_number(status.blockhash).ok().flatten().unwrap_or_default();
+        self.state_fetcher.new_active_peer(peer, status.blockhash, block_number, timeout);
 
         self.active_peers.insert(
             peer,
             ActivePeer {
-                best_hash: status.blockhash(),
+                best_hash: status.blockhash,
                 capabilities,
                 request_tx,
                 pending_response: None,
