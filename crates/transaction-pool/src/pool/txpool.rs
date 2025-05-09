@@ -3602,7 +3602,7 @@ mod tests {
             tx6.clone(),
             tx7.clone(),
         ] {
-            pool.add_transaction(f.validated(tx.clone()), on_chain_balance, on_chain_nonce)
+            pool.add_transaction(f.validated(tx.clone()), on_chain_balance, on_chain_nonce, None)
                 .unwrap();
         }
 
