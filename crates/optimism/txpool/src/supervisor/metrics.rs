@@ -1,6 +1,10 @@
 //! Optimism supervisor and sequencer metrics
 
-use reth_metrics::{metrics::Histogram, Metrics};
+use crate::supervisor::{errors::InvalidInboxEntry, InteropTxValidatorError};
+use reth_metrics::{
+    metrics::{Counter, Histogram},
+    Metrics,
+};
 use std::time::Duration;
 
 /// Optimism supervisor metrics
@@ -9,6 +13,31 @@ use std::time::Duration;
 pub struct SupervisorMetrics {
     /// How long it takes to query the supervisor in the Optimism transaction pool
     pub(crate) supervisor_query_latency: Histogram,
+
+    /// Counter for the number of times the chain database was uninitialized
+    pub(crate) uninitialized_chain_database_count: Counter,
+    /// Counter for the number of times data was skipped
+    pub(crate) skipped_data_count: Counter,
+    /// Counter for the number of times an unknown chain was encountered
+    pub(crate) unknown_chain_count: Counter,
+    /// Counter for the number of times conflicting data was encountered
+    pub(crate) conflicting_data_count: Counter,
+    /// Counter for the number of times ineffective data was encountered
+    pub(crate) ineffective_data_count: Counter,
+    /// Counter for the number of times data was out of order
+    pub(crate) out_of_order_count: Counter,
+    /// Counter for the number of times data was awaiting replacement
+    pub(crate) awaiting_replacement_count: Counter,
+    /// Counter for the number of times data was out of scope
+    pub(crate) out_of_scope_count: Counter,
+    /// Counter for the number of times there was no parent for the first block
+    pub(crate) no_parent_for_first_block_count: Counter,
+    /// Counter for the number of times future data was encountered
+    pub(crate) future_data_count: Counter,
+    /// Counter for the number of times data was missed
+    pub(crate) missed_data_count: Counter,
+    /// Counter for the number of times data corruption was encountered
+    pub(crate) data_corruption_count: Counter,
 }
 
 impl SupervisorMetrics {
@@ -16,6 +45,32 @@ impl SupervisorMetrics {
     #[inline]
     pub fn record_supervisor_query(&self, duration: Duration) {
         self.supervisor_query_latency.record(duration.as_secs_f64());
+    }
+
+    /// Increments the metrics for the given error
+    pub fn increment_metrics_for_error(&self, error: &InteropTxValidatorError) {
+        use InvalidInboxEntry::{
+            AwaitingReplacement, ConflictingData, DataCorruption, FutureData, IneffectiveData,
+            MissedData, NoParentForFirstBlock, OutOfOrder, OutOfScope, SkippedData,
+            UninitializedChainDatabase, UnknownChain,
+        };
+
+        if let InteropTxValidatorError::InvalidEntry(inner) = error {
+            match inner {
+                UninitializedChainDatabase => self.uninitialized_chain_database_count.increment(1),
+                SkippedData => self.skipped_data_count.increment(1),
+                UnknownChain => self.unknown_chain_count.increment(1),
+                ConflictingData => self.conflicting_data_count.increment(1),
+                IneffectiveData => self.ineffective_data_count.increment(1),
+                OutOfOrder => self.out_of_order_count.increment(1),
+                AwaitingReplacement => self.awaiting_replacement_count.increment(1),
+                OutOfScope => self.out_of_scope_count.increment(1),
+                NoParentForFirstBlock => self.no_parent_for_first_block_count.increment(1),
+                FutureData => self.future_data_count.increment(1),
+                MissedData => self.missed_data_count.increment(1),
+                DataCorruption => self.data_corruption_count.increment(1),
+            }
+        }
     }
 }
 
