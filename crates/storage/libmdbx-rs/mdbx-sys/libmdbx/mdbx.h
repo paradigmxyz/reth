@@ -2240,12 +2240,12 @@ enum MDBX_option_t {
    * usual ones with followed flush by the `fdatasync()` syscall.
    * \details Depending on the operating system, storage subsystem
    * characteristics and the use case, higher performance can be achieved by
-   * either using write-through or a serie of usual/lazy writes followed by
+   * either using write-through or a series of usual/lazy writes followed by
    * the flush-to-disk.
    *
    * Basically for N chunks the latency/cost of write-through is:
    *  latency = N * (emit + round-trip-to-storage + storage-execution);
-   * And for serie of lazy writes with flush is:
+   * And for series of lazy writes with flush is:
    *  latency = N * (emit + storage-execution) + flush + round-trip-to-storage.
    *
    * So, for large N and/or noteable round-trip-to-storage the write+flush
