@@ -161,7 +161,7 @@ pub trait EthState: LoadState + SpawnBlocking {
     }
 
     /// Retrieves the account's balance, nonce, and code for a given address.
-     fn get_account_info(
+    fn get_account_info(
         &self,
         address: Address,
         block_id: BlockId,
