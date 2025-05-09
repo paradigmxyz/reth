@@ -1615,6 +1615,9 @@ impl<T: PoolTransaction> AllTransactions<T> {
         result
     }
 
+    /// Removes any pending auths for the given transaction.
+    ///
+    /// This is a noop for non EIP-7702 transactions.
     fn remove_auths(&mut self, tx: &PoolInternalTransaction<T>) {
         let Some(auths) = &tx.transaction.authority_ids else { return };
 
@@ -1974,6 +1977,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     #[cfg(any(test, feature = "test-utils"))]
     pub(crate) fn assert_invariants(&self) {
         assert_eq!(self.by_hash.len(), self.txs.len(), "by_hash.len() != txs.len()");
+        assert!(self.auths.len() <= self.txs.len(), "auths > txs.len()");
     }
 }
 
