@@ -196,6 +196,8 @@ jobs:
             FILTER="/"
           fi
           echo "filter: $FILTER"
+          sed -ie 's/RUST_LOG=info $reth node $FLAGS/RUST_LOG=info $reth node --engine.precompile-cache $FLAGS/' hivetests/clients/reth/reth.sh
+          cat hivetests/clients/reth/reth.sh
           .github/assets/hive/run_simulator.sh "${{ matrix.scenario.sim }}" "$FILTER"
 
       - name: Parse hive output
