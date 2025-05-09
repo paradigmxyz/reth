@@ -21,7 +21,6 @@ reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
 
 revm.workspace = true
-op-revm = { workspace = true, optional = true }
 
 # alloy
 alloy-primitives.workspace = true
@@ -50,7 +49,6 @@ std = [
     "revm/std",
     "reth-ethereum-forks/std",
     "alloy-evm/std",
-    "op-revm?/std",
     "reth-execution-errors/std",
     "reth-execution-types/std",
     "reth-storage-errors/std",
@@ -66,4 +64,4 @@ test-utils = [
     "reth-trie-common/test-utils",
     "reth-ethereum-primitives/test-utils",
 ]
-op = ["op-revm", "alloy-evm/op", "reth-primitives-traits/op"]
+op = ["alloy-evm/op", "reth-primitives-traits/op"]
