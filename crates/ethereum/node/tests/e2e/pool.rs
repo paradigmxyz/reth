@@ -15,15 +15,15 @@ use reth_provider::CanonStateSubscriptions;
 use reth_tasks::TaskManager;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, validate::ValidTransaction, BlockInfo, CoinbaseTipOrdering,
-    EthPooledTransaction, PoolTransaction, TransactionOrigin, TransactionPool, TransactionPoolExt,
-    TransactionValidationOutcome, TransactionValidator,
+    EthPooledTransaction, Pool, PoolTransaction, TransactionOrigin, TransactionPool,
+    TransactionPoolExt, TransactionValidationOutcome, TransactionValidator,
 };
 use std::sync::Arc;
 
 /// A transaction validator that determines all transactions to be valid.
 ///
 /// An actual validator impl like
-/// [`TransactionValidationTaskExecutor`](reth_ethereum::pool::TransactionValidationTaskExecutor)
+/// [`TransactionValidationTaskExecutor`](reth_transaction_pool::pool::TransactionValidationTaskExecutor)
 /// would require up to date db access.
 ///
 /// CAUTION: This validator is not safe to use since it doesn't actually validate the transaction's
@@ -33,7 +33,7 @@ use std::sync::Arc;
 struct OkValidator;
 
 impl TransactionValidator for OkValidator {
-    type Transaction = reth_ethereum::pool::EthPooledTransaction;
+    type Transaction = EthPooledTransaction;
 
     async fn validate_transaction(
         &self,
@@ -58,7 +58,7 @@ async fn maintain_txpool_commit() -> eyre::Result<()> {
     let tasks = TaskManager::current();
     let executor = tasks.executor();
 
-    let txpool = reth_ethereum::pool::Pool::new(
+    let txpool = Pool::new(
         OkValidator::default(),
         CoinbaseTipOrdering::default(),
         InMemoryBlobStore::default(),
