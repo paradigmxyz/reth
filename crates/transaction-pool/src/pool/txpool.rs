@@ -812,10 +812,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         if let Some(authority_list) = &transaction.authority_ids {
             for sender_id in authority_list {
-                if !self.pending_pool.get_txs_by_sender(*sender_id).is_empty() ||
-                    !self.queued_pool.get_txs_by_sender(*sender_id).is_empty() ||
-                    !self.basefee_pool.get_txs_by_sender(*sender_id).is_empty()
-                {
+                if self.all_transactions.txs_iter(*sender_id).next().is_some() {
                     return Err(PoolError::new(
                         *transaction.hash(),
                         PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::Eip7702(
