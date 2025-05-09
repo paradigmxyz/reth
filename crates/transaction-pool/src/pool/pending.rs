@@ -522,11 +522,18 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
     /// Get transactions by sender
     pub(crate) fn get_txs_by_sender(&self, sender: SenderId) -> Vec<TransactionId> {
+        self.iter_txs_by_sender(sender).copied().collect()
+    }
+
+    /// Returns an iterator over all transaction with the sender id
+    pub(crate) fn iter_txs_by_sender(
+        &self,
+        sender: SenderId,
+    ) -> impl Iterator<Item = &TransactionId> + '_ {
         self.by_id
             .range((sender.start_bound(), Unbounded))
             .take_while(move |(other, _)| sender == other.sender)
-            .map(|(tx_id, _)| *tx_id)
-            .collect()
+            .map(|(tx_id, _)| tx_id)
     }
 
     /// Retrieves a transaction with the given ID from the pool, if it exists.
