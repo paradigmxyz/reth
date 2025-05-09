@@ -19,7 +19,11 @@ extern crate alloc;
 
 use crate::execute::BasicBlockBuilder;
 use alloc::vec::Vec;
-use alloy_eips::{eip2930::AccessList, eip4895::Withdrawals};
+use alloy_eips::{
+    eip2718::{EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID},
+    eip2930::AccessList,
+    eip4895::Withdrawals,
+};
 use alloy_evm::{
     block::{BlockExecutorFactory, BlockExecutorFor},
     precompiles::PrecompilesMap,
@@ -358,6 +362,12 @@ impl TransactionEnv for TxEnv {
 
     fn set_access_list(&mut self, access_list: AccessList) {
         self.access_list = access_list;
+
+        if self.tx_type == LEGACY_TX_TYPE_ID {
+            // if this was previously marked as legacy tx, this must be upgraded to eip2930 with an
+            // accesslist
+            self.tx_type = EIP2930_TX_TYPE_ID;
+        }
     }
 }
 
