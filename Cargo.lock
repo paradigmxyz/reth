@@ -8668,6 +8668,7 @@ dependencies = [
 name = "reth-node-ethereum"
 version = "1.3.12"
 dependencies = [
+ "alloy-consensus",
  "alloy-contract",
  "alloy-eips 0.15.10",
  "alloy-genesis",
