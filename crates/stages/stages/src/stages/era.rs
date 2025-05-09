@@ -102,6 +102,7 @@ where
                     }
                     EraImportSource::Url(url, era_dir) => {
                         let folder = era_dir.into_boxed_path();
+                        let _ = reth_fs_util::create_dir_all(&folder);
                         let client = EraClient::new(Client::new(), url, folder);
 
                         self.stream.replace({
@@ -126,41 +127,35 @@ where
     }
 
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
-        Ok(match self.item.take() {
-            Some(era) => {
-                let static_file_provider = provider.static_file_provider();
+        let era = self.item.take().ok_or(StageError::MissingDownloadBuffer)?;
+        let static_file_provider = provider.static_file_provider();
 
-                // Consistency check of expected headers in static files vs DB is done on provider::sync_gap
-                // when poll_execute_ready is polled.
-                let last_header_number = static_file_provider
-                    .get_highest_static_file_block(StaticFileSegment::Headers)
-                    .unwrap_or_default();
+        // Consistency check of expected headers in static files vs DB is done on provider::sync_gap
+        // when poll_execute_ready is polled.
+        let last_header_number = static_file_provider
+            .get_highest_static_file_block(StaticFileSegment::Headers)
+            .unwrap_or_default();
 
-                // Find the latest total difficulty
-                let mut td = static_file_provider
-                    .header_td_by_number(last_header_number)?
-                    .ok_or(ProviderError::TotalDifficultyNotFound(last_header_number))?;
+        // Find the latest total difficulty
+        let mut td = static_file_provider
+            .header_td_by_number(last_header_number)?
+            .ok_or(ProviderError::TotalDifficultyNotFound(last_header_number))?;
 
-                // Although headers were downloaded in reverse order, the collector iterates it in ascending
-                // order
-                let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
+        // Although headers were downloaded in reverse order, the collector iterates it in ascending
+        // order
+        let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
 
-                let height = era::process(era.as_ref(), &mut writer, provider, &mut self.hash_collector, &mut td, last_header_number).map_err(|e| StageError::Fatal(e.into()))?;
+        let height = era::process(era.as_ref(), &mut writer, provider, &mut self.hash_collector, &mut td, last_header_number, input.target).map_err(|e| StageError::Fatal(e.into()))?;
 
-                self.last_block_height.replace(height);
+        self.last_block_height.replace(height);
 
-                ExecOutput::in_progress(StageCheckpoint::new(height))
-            }
-            None => {
-                if self.source.is_some() {
-                    era::build_index(provider, &mut self.hash_collector)
-                        .map_err(|e| StageError::Recoverable(e.into()))?;
-                    self.hash_collector.clear();
-                }
+        if !self.hash_collector.is_empty() {
+            era::build_index(provider, &mut self.hash_collector)
+                .map_err(|e| StageError::Recoverable(e.into()))?;
+            self.hash_collector.clear();
+        }
 
-                ExecOutput::done(StageCheckpoint::new(self.last_block_height.unwrap_or_else(|| input.target())))
-            }
-        })
+        Ok(ExecOutput::done(StageCheckpoint::new(height)))
     }
 
     fn unwind(
@@ -174,6 +169,10 @@ where
         self.stream.take();
 
         if let Some(source) = &self.source {
+            // Bodies
+            stages::ensure_consistency(provider, Some(input.unwind_to))?;
+            provider.remove_bodies_above(input.unwind_to, StorageLocation::Both)?;
+
             // Wipe any unprocessed era files in the download temp directory
             if let EraImportSource::Url(_, path) = source {
                 if let Ok(dir) = path.read_dir() {
@@ -222,10 +221,6 @@ where
             // Now unwind the static files until the unwind_to block number
             let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
             writer.prune_headers(static_file_headers_to_unwind)?;
-
-            // Bodies
-            stages::ensure_consistency(provider, Some(input.unwind_to))?;
-            provider.remove_bodies_above(input.unwind_to, StorageLocation::Both)?;
         }
 
         Ok(UnwindOutput { checkpoint: input.checkpoint.with_block_number(input.unwind_to) })
@@ -239,4 +234,209 @@ pub enum EraImportSource {
     Url(Url, PathBuf),
     /// Local directory.
     Path(PathBuf),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::{
+        stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
+    };
+    use alloy_primitives::B256;
+    use reth_testing_utils::generators::{self, random_header};
+    use test_runner::EraTestRunner;
+
+    mod test_runner {
+        use super::*;
+        use crate::test_utils::{TestRunnerError, TestStageDB};
+        use reth_db_api::{
+            models::{StoredBlockBodyIndices, StoredBlockOmmers},
+            transaction::DbTx,
+        };
+        use reth_primitives_traits::{SealedBlock, SealedHeader};
+        use reth_provider::BlockNumReader;
+        use reth_testing_utils::generators::{
+            random_block_range, random_signed_tx, BlockRangeParams,
+        };
+        use std::str::FromStr;
+        use tempfile::TempDir;
+        use tokio::sync::watch;
+
+        pub(crate) struct EraTestRunner {
+            channel: (watch::Sender<B256>, watch::Receiver<B256>),
+            db: TestStageDB,
+            tempdir: TempDir,
+        }
+
+        impl Default for EraTestRunner {
+            fn default() -> Self {
+                Self {
+                    tempdir: TempDir::new().unwrap(),
+                    channel: watch::channel(B256::ZERO),
+                    db: TestStageDB::default(),
+                }
+            }
+        }
+
+        impl StageTestRunner for EraTestRunner {
+            type S = EraStage;
+
+            fn db(&self) -> &TestStageDB {
+                &self.db
+            }
+
+            fn stage(&self) -> Self::S {
+                EraStage::new(
+                    Some(EraImportSource::Url(
+                        Url::from_str("https://era.ithaca.xyz/era1/").unwrap(),
+                        self.tempdir.path().join("era"),
+                    )),
+                    EtlConfig::default(),
+                )
+            }
+        }
+
+        impl ExecuteStageTestRunner for EraTestRunner {
+            type Seed = Vec<SealedBlock<reth_ethereum_primitives::Block>>;
+
+            fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
+                let start = input.checkpoint().block_number;
+                let end = input.target();
+
+                let static_file_provider = self.db.factory.static_file_provider();
+
+                let mut rng = generators::rng();
+
+                // Static files do not support gaps in headers, so we need to generate 0 to end
+                let blocks = random_block_range(
+                    &mut rng,
+                    0..=end,
+                    BlockRangeParams {
+                        parent: Some(B256::ZERO),
+                        tx_count: 0..2,
+                        ..Default::default()
+                    },
+                );
+                self.db.insert_headers_with_td(blocks.iter().map(|block| block.sealed_header()))?;
+                if let Some(progress) = blocks.get(start as usize) {
+                    // Insert last progress data
+                    {
+                        let tx = self.db.factory.provider_rw()?.into_tx();
+                        let mut static_file_producer = static_file_provider
+                            .get_writer(start, StaticFileSegment::Transactions)?;
+
+                        let body = StoredBlockBodyIndices {
+                            first_tx_num: 0,
+                            tx_count: progress.transaction_count() as u64,
+                        };
+
+                        static_file_producer.set_block_range(0..=progress.number);
+
+                        body.tx_num_range().try_for_each(|tx_num| {
+                            let transaction = random_signed_tx(&mut rng);
+                            static_file_producer.append_transaction(tx_num, &transaction).map(drop)
+                        })?;
+
+                        if body.tx_count != 0 {
+                            tx.put::<tables::TransactionBlocks>(
+                                body.last_tx_num(),
+                                progress.number,
+                            )?;
+                        }
+
+                        tx.put::<tables::BlockBodyIndices>(progress.number, body)?;
+
+                        if !progress.ommers_hash_is_empty() {
+                            tx.put::<tables::BlockOmmers>(
+                                progress.number,
+                                StoredBlockOmmers { ommers: progress.body().ommers.clone() },
+                            )?;
+                        }
+
+                        static_file_producer.commit()?;
+                        tx.commit()?;
+                    }
+                }
+                Ok(blocks)
+            }
+
+            /// Validate stored headers
+            fn validate_execution(
+                &self,
+                input: ExecInput,
+                output: Option<ExecOutput>,
+            ) -> Result<(), TestRunnerError> {
+                let initial_checkpoint = input.checkpoint().block_number;
+                match output {
+                    Some(output) if output.checkpoint.block_number > initial_checkpoint => {
+                        let provider = self.db.factory.provider()?;
+                        let mut td = provider
+                            .header_td_by_number(initial_checkpoint.saturating_sub(1))?
+                            .unwrap_or_default();
+
+                        for block_num in initial_checkpoint..output.checkpoint.block_number {
+                            // look up the header hash
+                            let hash = provider.block_hash(block_num)?.expect("no header hash");
+
+                            // validate the header number
+                            assert_eq!(provider.block_number(hash)?, Some(block_num));
+
+                            // validate the header
+                            let header = provider.header_by_number(block_num)?;
+                            assert!(header.is_some());
+                            let header = SealedHeader::seal_slow(header.unwrap());
+                            assert_eq!(header.hash(), hash);
+
+                            // validate the header total difficulty
+                            td += header.difficulty;
+                            assert_eq!(provider.header_td_by_number(block_num)?, Some(td));
+                        }
+                    }
+                    _ => self.check_no_header_entry_above(initial_checkpoint)?,
+                };
+                Ok(())
+            }
+
+            async fn after_execution(&self, headers: Self::Seed) -> Result<(), TestRunnerError> {
+                let tip = if headers.is_empty() {
+                    let tip = random_header(&mut generators::rng(), 0, None);
+                    self.db.insert_headers(std::iter::once(&tip))?;
+                    tip.hash()
+                } else {
+                    headers.last().unwrap().hash()
+                };
+                self.send_tip(tip);
+                Ok(())
+            }
+        }
+
+        impl UnwindStageTestRunner for EraTestRunner {
+            fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
+                self.check_no_header_entry_above(input.unwind_to)
+            }
+        }
+
+        impl EraTestRunner {
+            pub(crate) fn check_no_header_entry_above(
+                &self,
+                block: BlockNumber,
+            ) -> Result<(), TestRunnerError> {
+                self.db
+                    .ensure_no_entry_above_by_value::<tables::HeaderNumbers, _>(block, |val| val)?;
+                self.db.ensure_no_entry_above::<tables::CanonicalHeaders, _>(block, |key| key)?;
+                self.db.ensure_no_entry_above::<tables::Headers, _>(block, |key| key)?;
+                self.db.ensure_no_entry_above::<tables::HeaderTerminalDifficulties, _>(
+                    block,
+                    |num| num,
+                )?;
+                Ok(())
+            }
+
+            pub(crate) fn send_tip(&self, tip: B256) {
+                self.channel.0.send(tip).expect("failed to send tip");
+            }
+        }
+    }
+
+    stage_test_suite!(EraTestRunner, era);
 }
