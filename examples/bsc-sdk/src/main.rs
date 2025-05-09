@@ -1,0 +1,54 @@
+//! Example for how to use reth sdk to build a bsc node.
+//!
+//! Run with
+//!
+//! ```sh
+//! RUST_LOG=info cargo run --package example-bsc-sdk \
+//! --bin example-bsc-sdk \
+//! --all-features \
+//! node \
+//! --chain bsc \
+//! --debug.tip "0xe468563fd42441b615ef6132474b2b6692fea05c7523356b79b8e5a414909360"
+//! ```
+
+use crate::{
+    consensus::ParliaConsensus,
+    node::network::block_import::service::ImportService as BlockImportService,
+};
+use chainspec::parser::BscChainSpecParser;
+use clap::{Args, Parser};
+use node::{cli::Cli, BscNode};
+use reth::builder::NodeHandle;
+use std::sync::Arc;
+use tracing::error;
+
+pub mod chainspec;
+mod consensus;
+mod evm;
+mod hardforks;
+mod node;
+mod system_contracts;
+
+/// No Additional arguments
+#[derive(Debug, Clone, Copy, Default, Args)]
+#[non_exhaustive]
+pub struct NoArgs;
+
+fn main() -> eyre::Result<()> {
+    Cli::<BscChainSpecParser, NoArgs>::parse().run(|builder, _| async move {
+        let NodeHandle { node, node_exit_future: exit_future } =
+            builder.node(BscNode::default()).launch().await?;
+        let provider = node.provider.clone();
+        let consensus = Arc::new(ParliaConsensus { provider });
+        let (service, _) = BlockImportService::new(consensus, node.beacon_engine_handle.clone());
+
+        node.task_executor.spawn(async move {
+            if let Err(e) = service.await {
+                error!("Import service error: {}", e);
+            }
+        });
+
+        exit_future.await
+    })?;
+    Ok(())
+}
