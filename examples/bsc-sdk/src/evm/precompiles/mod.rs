@@ -72,6 +72,11 @@ impl BscPrecompiles {
             BscSpecId::LATEST => Self::new(latest()),
         }
     }
+
+    #[inline]
+    pub fn precompiles(&self) -> &'static Precompiles {
+        self.inner.precompiles
+    }
 }
 
 /// Returns precompiles for Istanbul spec.

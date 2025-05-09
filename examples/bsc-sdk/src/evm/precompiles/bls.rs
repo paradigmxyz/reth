@@ -22,7 +22,7 @@ const BLS_DST: &[u8] = bls::DST_ETHEREUM.as_bytes();
 /// The input is encoded as follows:
 /// | msg_hash |  signature  |  [{bls pubkey}]  |
 /// |    32    |      96     |      [{48}]      |
-fn bls_signature_validation_run(input: &Bytes, gas_limit: u64) -> PrecompileResult {
+fn bls_signature_validation_run(input: &[u8], gas_limit: u64) -> PrecompileResult {
     let cost = calc_gas_cost(input);
     if cost > gas_limit {
         return Err(PrecompileError::OutOfGas);
@@ -74,7 +74,7 @@ fn bls_signature_validation_run(input: &Bytes, gas_limit: u64) -> PrecompileResu
     Ok(PrecompileOutput::new(cost, output))
 }
 
-fn calc_gas_cost(input: &Bytes) -> u64 {
+fn calc_gas_cost(input: &[u8]) -> u64 {
     const BLS_SIGNATURE_VALIDATION_BASE: u64 = 1_000;
     const BLS_SIGNATURE_VALIDATION_PER_KER: u64 = 3_500;
 

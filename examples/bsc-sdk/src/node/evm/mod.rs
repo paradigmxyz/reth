@@ -14,7 +14,6 @@ use reth::{
     builder::{components::ExecutorBuilder, BuilderContext},
 };
 use reth_evm::{Evm, EvmEnv};
-use reth_node_ethereum::BasicBlockExecutorProvider;
 use reth_primitives::EthPrimitives;
 use revm::{
     context::{
@@ -45,12 +44,12 @@ pub struct BscEvm<DB: Database, I, P = BscPrecompiles> {
 impl<DB: Database, I, P> BscEvm<DB, I, P> {
     /// Provides a reference to the EVM context.
     pub const fn ctx(&self) -> &BscContext<DB> {
-        &self.inner.0.data.ctx
+        &self.inner.0.ctx
     }
 
     /// Provides a mutable reference to the EVM context.
     pub fn ctx_mut(&mut self) -> &mut BscContext<DB> {
-        &mut self.inner.0.data.ctx
+        &mut self.inner.0.ctx
     }
 }
 
@@ -82,6 +81,8 @@ where
     type Error = EVMError<DB::Error>;
     type HaltReason = HaltReason;
     type Spec = BscSpecId;
+    type Precompiles = P;
+    type Inspector = I;
 
     fn chain_id(&self) -> u64 {
         self.cfg.chain_id
@@ -137,13 +138,21 @@ where
     }
 
     fn finish(self) -> (Self::DB, EvmEnv<Self::Spec>) {
-        let Context { block: block_env, cfg: cfg_env, journaled_state, .. } = self.inner.0.data.ctx;
+        let Context { block: block_env, cfg: cfg_env, journaled_state, .. } = self.inner.0.ctx;
 
         (journaled_state.database, EvmEnv { block_env, cfg_env })
     }
 
     fn set_inspector_enabled(&mut self, enabled: bool) {
         self.inspect = enabled;
+    }
+
+    fn precompiles_mut(&mut self) -> &mut Self::Precompiles {
+        &mut self.inner.0.precompiles
+    }
+
+    fn inspector_mut(&mut self) -> &mut Self::Inspector {
+        &mut self.inner.0.inspector
     }
 }
 
@@ -157,15 +166,9 @@ where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = BscChainSpec, Primitives = EthPrimitives>>,
 {
     type EVM = BscEvmConfig;
-    type Executor = BasicBlockExecutorProvider<Self::EVM>;
 
-    async fn build_evm(
-        self,
-        ctx: &BuilderContext<Node>,
-    ) -> eyre::Result<(Self::EVM, Self::Executor)> {
+    async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
         let evm_config = BscEvmConfig::bsc(ctx.chain_spec());
-        let executor = BasicBlockExecutorProvider::new(evm_config.clone());
-
-        Ok((evm_config, executor))
+        Ok(evm_config)
     }
 }

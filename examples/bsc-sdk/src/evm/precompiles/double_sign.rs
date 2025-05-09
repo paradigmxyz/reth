@@ -73,7 +73,7 @@ pub(crate) struct SealContent {
 /// signer address| evidence height|
 ///
 /// 20 bytes      | 32 bytes       |
-fn double_sign_evidence_validation_run(input: &Bytes, gas_limit: u64) -> PrecompileResult {
+fn double_sign_evidence_validation_run(input: &[u8], gas_limit: u64) -> PrecompileResult {
     const DOUBLE_SIGN_EVIDENCE_VALIDATION_BASE: u64 = 10_000;
 
     if DOUBLE_SIGN_EVIDENCE_VALIDATION_BASE > gas_limit {

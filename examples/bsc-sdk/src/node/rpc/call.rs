@@ -3,6 +3,7 @@ use crate::evm::transaction::BscTxEnv;
 use alloy_consensus::TxType;
 use alloy_primitives::{TxKind, U256};
 use alloy_rpc_types::TransactionRequest;
+use alloy_signer::Either;
 use reth::rpc::server_types::eth::{revm_utils::CallFees, EthApiError, RpcInvalidTransactionError};
 use reth_evm::{block::BlockExecutorFactory, ConfigureEvm, EvmEnv, EvmFactory, SpecFor};
 use reth_primitives::NodePrimitives;
@@ -151,7 +152,11 @@ where
                 .map(|v| v.saturating_to())
                 .unwrap_or_default(),
             // EIP-7702 fields
-            authorization_list: authorization_list.unwrap_or_default(),
+            authorization_list: authorization_list
+                .unwrap_or_default()
+                .into_iter()
+                .map(Either::Left)
+                .collect(),
         };
 
         Ok(BscTxEnv::new(env))

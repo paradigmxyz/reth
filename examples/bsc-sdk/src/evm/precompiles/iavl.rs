@@ -26,33 +26,33 @@ pub(crate) const IAVL_PROOF_VALIDATION_PLATO: PrecompileWithAddress =
     PrecompileWithAddress(u64_to_address(101), iavl_proof_validation_run_plato);
 
 /// Run Iavl proof validation.
-fn iavl_proof_validation_run(input: &Bytes, gas_limit: u64) -> PrecompileResult {
+fn iavl_proof_validation_run(input: &[u8], gas_limit: u64) -> PrecompileResult {
     iavl_proof_validation_run_inner(input, gas_limit, false, false, false)
 }
 
 /// Run Iavl proof validation with Nano hardfork.
-fn iavl_proof_validation_run_nano(_input: &Bytes, _gas_limit: u64) -> PrecompileResult {
+fn iavl_proof_validation_run_nano(_input: &[u8], _gas_limit: u64) -> PrecompileResult {
     Err(PrecompileError::other("suspended"))
 }
 
 /// Run Iavl proof validation with Moran hardfork.
-fn iavl_proof_validation_run_moran(input: &Bytes, gas_limit: u64) -> PrecompileResult {
+fn iavl_proof_validation_run_moran(input: &[u8], gas_limit: u64) -> PrecompileResult {
     iavl_proof_validation_run_inner(input, gas_limit, true, false, false)
 }
 
 /// Run Iavl proof validation with Planck hardfork.
-fn iavl_proof_validation_run_planck(input: &Bytes, gas_limit: u64) -> PrecompileResult {
+fn iavl_proof_validation_run_planck(input: &[u8], gas_limit: u64) -> PrecompileResult {
     iavl_proof_validation_run_inner(input, gas_limit, false, true, false)
 }
 
 /// Run Iavl proof validation with Plato hardfork.
-fn iavl_proof_validation_run_plato(input: &Bytes, gas_limit: u64) -> PrecompileResult {
+fn iavl_proof_validation_run_plato(input: &[u8], gas_limit: u64) -> PrecompileResult {
     iavl_proof_validation_run_inner(input, gas_limit, false, false, true)
 }
 
 /// Run Iavl proof validation with given hardfork toggles.
 fn iavl_proof_validation_run_inner(
-    input: &Bytes,
+    input: &[u8],
     gas_limit: u64,
     is_moran: bool,
     is_planck: bool,
@@ -66,7 +66,7 @@ fn iavl_proof_validation_run_inner(
 
     let mut output = [0u8; 32];
     let mut bytes = BytesRef::Fixed(&mut output);
-    let res = iavl_proof::execute(input.as_ref(), &mut bytes, is_moran, is_planck, is_plato);
+    let res = iavl_proof::execute(input, &mut bytes, is_moran, is_planck, is_plato);
     match res {
         Ok(()) => Ok(PrecompileOutput::new(
             IAVL_PROOF_VALIDATION_BASE,
