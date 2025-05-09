@@ -7,7 +7,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     RawKey, RawTable, RawValue,
 };
-use reth_era::{era1_file::Era1Reader, execution_types::DecodeCompressed};
+use reth_era::{e2s_types::E2sError, era1_file::Era1Reader, execution_types::DecodeCompressed};
 use reth_era_downloader::EraMeta;
 use reth_etl::Collector;
 use reth_fs_util as fs;
@@ -95,7 +95,7 @@ pub fn process<Era, P, B, BB, BH>(
     provider: &P,
     hash_collector: &mut Collector<BlockHash, BlockNumber>,
     total_difficulty: &mut U256,
-    mut last_header_number: BlockNumber,
+    last_header_number: BlockNumber,
     target: Option<BlockNumber>,
 ) -> eyre::Result<BlockNumber>
 where
@@ -112,10 +112,54 @@ where
     let file = fs::open(meta.path())?;
     let mut reader = Era1Reader::new(file);
 
-    for block in reader.iter() {
-        let block = block?;
-        let header: BH = block.header.decode()?;
-        let body: BB = block.body.decode()?;
+    let iter = reader.iter().map(|block| {
+        block.map(|block| {
+            let header: BH = block.header.decode()?;
+            let body: BB = block.body.decode()?;
+            (header, body)
+        })
+    });
+
+    process_iter(
+        iter,
+        meta,
+        writer,
+        provider,
+        hash_collector,
+        total_difficulty,
+        last_header_number,
+        target,
+    )
+}
+
+/// Extracts block headers and bodies from `iter` and appends them using `writer` and `provider`.
+///
+/// Adds on to `total_difficulty` and collects hash to height using `hash_collector`.
+///
+/// Returns last block height.
+pub fn process_iter<Era, P, B, BB, BH>(
+    iter: impl Iterator<Item = Result<(BH, BB), E2sError>>,
+    meta: &Era,
+    writer: &mut StaticFileProviderRWRefMut<'_, <P as NodePrimitivesProvider>::Primitives>,
+    provider: &P,
+    hash_collector: &mut Collector<BlockHash, BlockNumber>,
+    total_difficulty: &mut U256,
+    mut last_header_number: BlockNumber,
+    target: Option<BlockNumber>,
+) -> eyre::Result<BlockNumber>
+where
+    B: Block<Header = BH, Body = BB>,
+    BH: FullBlockHeader + Value,
+    BB: FullBlockBody<
+        Transaction = <<P as NodePrimitivesProvider>::Primitives as NodePrimitives>::SignedTx,
+        OmmerHeader = BH,
+    >,
+    Era: EraMeta + ?Sized,
+    P: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory + BlockWriter<Block = B>,
+    <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
+{
+    for block in iter {
+        let (header, body) = block?;
         let number = header.number();
 
         if number <= last_header_number {
