@@ -138,8 +138,6 @@ where
             }
         }
 
-        self.last_next_result = None;
-
         if let Some(entry) = self
             .last_seeked_hashed_entry
             .as_ref()
