@@ -560,6 +560,8 @@ impl<P> RevealedSparseTrie<P> {
             self.branch_node_hash_masks.insert(path.clone(), hash_mask);
         }
 
+        // TODO: add traces here! to see what we're not revealing / what is turning into blind
+
         match node {
             TrieNode::EmptyRoot => {
                 // For an empty root, ensure that we are at the root path.
