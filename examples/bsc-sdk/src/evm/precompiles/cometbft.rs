@@ -46,19 +46,19 @@ const MAX_CONSENSUS_STATE_LENGTH: u64 = CHAIN_ID_LENGTH +
     VALIDATOR_SET_HASH_LENGTH +
     99 * SINGLE_VALIDATOR_BYTES_LENGTH;
 
-fn cometbft_light_block_validation_run(input: &Bytes, gas_limit: u64) -> PrecompileResult {
+fn cometbft_light_block_validation_run(input: &[u8], gas_limit: u64) -> PrecompileResult {
     cometbft_light_block_validation_run_inner(input, gas_limit, true)
 }
 
 fn cometbft_light_block_validation_run_before_hertz(
-    input: &Bytes,
+    input: &[u8],
     gas_limit: u64,
 ) -> PrecompileResult {
     cometbft_light_block_validation_run_inner(input, gas_limit, false)
 }
 
 fn cometbft_light_block_validation_run_inner(
-    input: &Bytes,
+    input: &[u8],
     gas_limit: u64,
     is_hertz: bool,
 ) -> PrecompileResult {
@@ -105,7 +105,7 @@ fn convert_light_block_from_proto(light_block_proto: &TmLightBlock) -> ConvertLi
 }
 
 type DecodeLightBlockResult = Result<(ConsensusState, TmLightBlock), PrecompileError>;
-fn decode_light_block_validation_input(input: &Bytes) -> DecodeLightBlockResult {
+fn decode_light_block_validation_input(input: &[u8]) -> DecodeLightBlockResult {
     let input_length = input.len() as u64;
     if input_length < CONSENSUS_STATE_LENGTH_BYTES_LENGTH {
         return Err(BscPrecompileError::CometBftInvalidInput.into());

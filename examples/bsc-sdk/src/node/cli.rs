@@ -1,6 +1,6 @@
 use crate::{
     chainspec::{parser::BscChainSpecParser, BscChainSpec},
-    node::{consensus::BscConsensus, execute::BscExecutorProvider, BscNode},
+    node::{consensus::BscConsensus, evm::config::BscEvmConfig, BscNode},
 };
 use clap::Parser;
 use reth::{
@@ -73,9 +73,8 @@ where
         // Install the prometheus recorder to be sure to record all metrics
         let _ = install_prometheus_recorder();
 
-        let components = |spec: Arc<C::ChainSpec>| {
-            (BscExecutorProvider::new(spec.clone()), BscConsensus::new(spec))
-        };
+        let components =
+            |spec: Arc<C::ChainSpec>| (BscEvmConfig::new(spec.clone()), BscConsensus::new(spec));
 
         match self.command {
             Commands::Node(command) => {
@@ -107,6 +106,9 @@ where
             #[cfg(feature = "dev")]
             Commands::TestVectors(_command) => todo!(),
             Commands::ImportEra(_command) => {
+                todo!()
+            }
+            Commands::Download(_command) => {
                 todo!()
             }
         }
