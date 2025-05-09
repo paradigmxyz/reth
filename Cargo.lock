@@ -9923,6 +9923,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-rpc-types-debug",
  "alloy-trie",
  "itertools 0.14.0",
  "reth-chainspec",
@@ -9935,7 +9936,6 @@ dependencies = [
  "reth-revm",
  "reth-trie-common",
  "reth-trie-sparse",
- "serde",
  "thiserror 2.0.12",
 ]
 
