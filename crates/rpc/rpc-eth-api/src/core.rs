@@ -363,12 +363,14 @@ pub trait EthApi<T: RpcObject, B: RpcObject, R: RpcObject, H: RpcObject> {
     ) -> RpcResult<EIP1186AccountProofResponse>;
 
     /// Returns the account's balance, nonce, and code.
+    ///
+    /// This is similar to `eth_getAccount` but does not return the storage root.
     #[method(name = "getAccountInfo")]
     async fn get_account_info(
         &self,
         address: Address,
         block: BlockId,
-    ) -> RpcResult<Option<alloy_rpc_types_eth::AccountInfo>>;
+    ) -> RpcResult<alloy_rpc_types_eth::AccountInfo>;
 }
 
 #[async_trait::async_trait]
@@ -824,7 +826,7 @@ where
         &self,
         address: Address,
         block: BlockId,
-    ) -> RpcResult<Option<alloy_rpc_types_eth::AccountInfo>> {
+    ) -> RpcResult<alloy_rpc_types_eth::AccountInfo> {
         trace!(target: "rpc::eth", "Serving eth_getAccountInfo");
         Ok(EthState::get_account_info(self, address, block).await?)
     }

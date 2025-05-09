@@ -165,17 +165,27 @@ pub trait EthState: LoadState + SpawnBlocking {
         &self,
         address: Address,
         block_id: BlockId,
-    ) -> impl Future<Output = Result<Option<AccountInfo>, Self::Error>> + Send {
+    ) -> impl Future<Output = Result<AccountInfo, Self::Error>> + Send {
         self.spawn_blocking_io(move |this| {
             let state = this.state_at_block_id(block_id)?;
-            let account = state.basic_account(&address).map_err(Self::Error::from_eth_err)?;
-            let Some(account) = account else { return Ok(None) };
+            let account = state
+                .basic_account(&address)
+                .map_err(Self::Error::from_eth_err)?
+                .unwrap_or_default();
 
             let balance = account.balance;
             let nonce = account.nonce;
-            let code = account.bytecode_hash.unwrap_or(KECCAK_EMPTY).into();
+            let code = if account.get_bytecode_hash() == KECCAK_EMPTY {
+                Default::default()
+            } else {
+                state
+                    .account_code(&address)
+                    .map_err(Self::Error::from_eth_err)?
+                    .unwrap_or_default()
+                    .original_bytes()
+            };
 
-            Ok(Some(AccountInfo { balance, nonce, code }))
+            Ok(AccountInfo { balance, nonce, code })
         })
     }
 }
