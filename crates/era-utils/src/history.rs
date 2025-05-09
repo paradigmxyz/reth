@@ -68,8 +68,15 @@ where
     let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
 
     while let Some(meta) = rx.recv()? {
-        last_header_number =
-            process(&meta?, &mut writer, provider, hash_collector, &mut td, last_header_number)?;
+        last_header_number = process(
+            &meta?,
+            &mut writer,
+            provider,
+            hash_collector,
+            &mut td,
+            last_header_number,
+            None,
+        )?;
     }
 
     build_index(provider, hash_collector)?;
@@ -89,6 +96,7 @@ pub fn process<Era, P, B, BB, BH>(
     hash_collector: &mut Collector<BlockHash, BlockNumber>,
     total_difficulty: &mut U256,
     mut last_header_number: BlockNumber,
+    target: Option<BlockNumber>,
 ) -> eyre::Result<BlockNumber>
 where
     B: Block<Header = BH, Body = BB>,
@@ -112,6 +120,11 @@ where
 
         if number <= last_header_number {
             continue;
+        }
+        if let Some(target) = target {
+            if number > target {
+                break;
+            }
         }
 
         let hash = header.hash_slow();
