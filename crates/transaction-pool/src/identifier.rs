@@ -38,6 +38,14 @@ impl SenderIdentifiers {
         })
     }
 
+    /// Returns the existing [`SenderId`] or assigns a new one if it's missing
+    pub fn sender_ids_or_create(
+        &mut self,
+        addrs: impl IntoIterator<Item = Address>,
+    ) -> Vec<SenderId> {
+        addrs.into_iter().filter_map(|addr| self.sender_id(&addr)).collect()
+    }
+
     /// Returns the current identifier and increments the counter.
     fn next_id(&mut self) -> SenderId {
         let id = self.id;
