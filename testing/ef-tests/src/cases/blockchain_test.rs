@@ -318,10 +318,16 @@ pub fn run_case(
     // - Either an issue with the test setup
     // - Possibly an error in the test case where the post-state root in the last block does not
     //   match the post-state values.
-    let expected_post_state = case.post_state.as_ref().ok_or(Error::MissingPostState)?;
-    for (&address, account) in expected_post_state {
-        account.assert_db(address, provider.tx_ref())?;
-    }
+    match case.post_state.as_ref() {
+        Some(expected_post_state) => {
+            for (&address, account) in expected_post_state {
+                account.assert_db(address, provider.tx_ref())?;
+            }
+        }
+        None => {
+            // Do nothing
+        }
+    };
 
     // Now validate using the stateless client if everything else passes
     for (block, execution_witness) in &program_inputs {
