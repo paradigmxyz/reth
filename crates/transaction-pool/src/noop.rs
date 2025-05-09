@@ -360,12 +360,14 @@ impl<T: EthPoolTransaction> TransactionValidator for MockTransactionValidator<T>
         TransactionValidationOutcome::Valid {
             balance: U256::MAX,
             state_nonce: 0,
+            bytecode_hash: None,
             transaction: ValidTransaction::new(transaction, maybe_sidecar),
             propagate: match origin {
                 TransactionOrigin::External => true,
                 TransactionOrigin::Local => self.propagate_local,
                 TransactionOrigin::Private => false,
             },
+            authorities: None,
         }
     }
 }

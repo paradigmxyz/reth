@@ -439,6 +439,8 @@ where
                 state_nonce,
                 transaction,
                 propagate,
+                bytecode_hash,
+                authorities,
             } => {
                 let sender_id = self.get_sender_id(transaction.sender());
                 let transaction_id = TransactionId::new(sender_id, transaction.nonce());
@@ -461,9 +463,11 @@ where
                     propagate,
                     timestamp: Instant::now(),
                     origin,
+                    authority_ids: authorities
+                        .map(|auths| auths.iter().map(|auth| self.get_sender_id(*auth)).collect()),
                 };
 
-                let added = pool.add_transaction(tx, balance, state_nonce)?;
+                let added = pool.add_transaction(tx, balance, state_nonce, bytecode_hash)?;
                 let hash = *added.hash();
 
                 // transaction was successfully inserted into the pool
@@ -1252,11 +1256,13 @@ mod tests {
                 [TransactionValidationOutcome::Valid {
                     balance: U256::from(1_000),
                     state_nonce: 0,
+                    bytecode_hash: None,
                     transaction: ValidTransaction::ValidWithSidecar {
                         transaction: tx,
                         sidecar: sidecar.clone(),
                     },
                     propagate: true,
+                    authorities: None,
                 }],
             );
         }
