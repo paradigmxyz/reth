@@ -201,7 +201,7 @@ where
         self.identifiers.write().sender_id_or_create(addr)
     }
 
-    /// Returns the internal [`SenderIds`] for the given addresses.
+    /// Returns the internal [`SenderId`]s for the given addresses.
     pub fn get_sender_ids(&self, addrs: impl IntoIterator<Item = Address>) -> Vec<SenderId> {
         self.identifiers.write().sender_ids_or_create(addrs)
     }
