@@ -149,7 +149,7 @@ where
     }
 
     fn calculate(self, retain_updates: bool) -> Result<StateRootProgress, StateRootError> {
-        trace!(target: "trie::state_root", "calculating state root");
+        trace!(target: "trie::state_root", account_prefix_set = ?self.prefix_sets.account_prefix_set, "calculating state root");
         let mut tracker = TrieTracker::default();
         let mut trie_updates = TrieUpdates::default();
 
