@@ -155,6 +155,7 @@ where
                 if self.source.is_some() {
                     era::build_index(provider, &mut self.hash_collector)
                         .map_err(|e| StageError::Recoverable(e.into()))?;
+                    self.hash_collector.clear();
                 }
 
                 ExecOutput::done(StageCheckpoint::new(self.last_block_height.unwrap_or_else(|| input.target())))
