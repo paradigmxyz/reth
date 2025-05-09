@@ -1,6 +1,6 @@
 use super::precompiles::BscPrecompiles;
 use revm::{
-    context::{ContextSetters, Evm as EvmCtx, EvmData},
+    context::{ContextSetters, Evm as EvmCtx},
     context_interface::ContextTr,
     handler::{
         instructions::{EthInstructions, InstructionProvider},
@@ -24,10 +24,19 @@ impl<CTX: ContextTr, INSP>
 {
     pub fn new(ctx: CTX, inspector: INSP) -> Self {
         Self(EvmCtx {
-            data: EvmData { ctx, inspector },
+            ctx,
+            inspector,
             instruction: EthInstructions::new_mainnet(),
             precompiles: BscPrecompiles::default(),
         })
+    }
+
+    /// Consumes self and returns a new Evm type with given Precompiles.
+    pub fn with_precompiles<OP>(
+        self,
+        precompiles: OP,
+    ) -> BscEvmInner<CTX, INSP, EthInstructions<EthInterpreter, CTX>, OP> {
+        BscEvmInner(self.0.with_precompiles(precompiles))
     }
 }
 
@@ -44,11 +53,11 @@ where
     type Inspector = INSP;
 
     fn inspector(&mut self) -> &mut Self::Inspector {
-        &mut self.0.data.inspector
+        &mut self.0.inspector
     }
 
     fn ctx_inspector(&mut self) -> (&mut Self::Context, &mut Self::Inspector) {
-        (&mut self.0.data.ctx, &mut self.0.data.inspector)
+        (&mut self.0.ctx, &mut self.0.inspector)
     }
 
     fn run_inspect_interpreter(
@@ -82,25 +91,25 @@ where
         >,
     ) -> <<Self::Instructions as InstructionProvider>::InterpreterTypes as InterpreterTypes>::Output
     {
-        let context = &mut self.0.data.ctx;
+        let context = &mut self.0.ctx;
         let instructions = &mut self.0.instruction;
         interpreter.run_plain(instructions.instruction_table(), context)
     }
 
     fn ctx(&mut self) -> &mut Self::Context {
-        &mut self.0.data.ctx
+        &mut self.0.ctx
     }
 
     fn ctx_ref(&self) -> &Self::Context {
-        &self.0.data.ctx
+        &self.0.ctx
     }
 
     fn ctx_instructions(&mut self) -> (&mut Self::Context, &mut Self::Instructions) {
-        (&mut self.0.data.ctx, &mut self.0.instruction)
+        (&mut self.0.ctx, &mut self.0.instruction)
     }
 
     fn ctx_precompiles(&mut self) -> (&mut Self::Context, &mut Self::Precompiles) {
-        (&mut self.0.data.ctx, &mut self.0.precompiles)
+        (&mut self.0.ctx, &mut self.0.precompiles)
     }
 }
 

@@ -22,7 +22,6 @@ use reth_trie_db::MerklePatriciaTrie;
 pub mod cli;
 pub mod consensus;
 pub mod evm;
-pub mod execute;
 pub mod network;
 pub mod rpc;
 

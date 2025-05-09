@@ -3636,7 +3636,7 @@ dependencies = [
  "alloy-chains",
  "alloy-consensus",
  "alloy-dyn-abi",
- "alloy-eips 0.15.8",
+ "alloy-eips 0.15.10",
  "alloy-evm",
  "alloy-genesis",
  "alloy-json-abi",
@@ -3646,6 +3646,7 @@ dependencies = [
  "alloy-rpc-types",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
+ "alloy-signer",
  "alloy-sol-macro",
  "alloy-sol-types",
  "async-trait",
@@ -8554,7 +8555,7 @@ name = "reth-era-utils"
 version = "1.4.1"
 dependencies = [
  "alloy-primitives",
- "bytes",
+ "bytes 1.10.1",
  "eyre",
  "futures",
  "futures-util",
