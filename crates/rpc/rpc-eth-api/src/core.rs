@@ -826,6 +826,6 @@ where
         block: BlockId,
     ) -> RpcResult<Option<alloy_rpc_types_eth::AccountInfo>> {
         trace!(target: "rpc::eth", "Serving eth_getAccountInfo");
-        Ok(self.get_account_info(address, block).await?)
+        Ok(EthState::get_account_info(self, address, block).await?)
     }
 }
