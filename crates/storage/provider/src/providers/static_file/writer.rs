@@ -359,18 +359,22 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         Ok(())
     }
 
-    /// Verifies if the incoming block number matches the next expected block number
-    /// for a static file. This ensures data continuity when adding new blocks.
-    fn check_next_block_number(&self, expected_block_number: u64) -> ProviderResult<()> {
+    /// Returns a block number that is one next to the current tip of static files.
+    pub fn next_block_number(&self) -> u64 {
         // The next static file block number can be found by checking the one after block_end.
-        // However if it's a new file that hasn't been added any data, its block range will actually
-        // be None. In that case, the next block will be found on `expected_block_start`.
-        let next_static_file_block = self
-            .writer
+        // However, if it's a new file that hasn't been added any data, its block range will
+        // actually be None. In that case, the next block will be found on `expected_block_start`.
+        self.writer
             .user_header()
             .block_end()
             .map(|b| b + 1)
-            .unwrap_or_else(|| self.writer.user_header().expected_block_start());
+            .unwrap_or_else(|| self.writer.user_header().expected_block_start())
+    }
+
+    /// Verifies if the incoming block number matches the next expected block number
+    /// for a static file. This ensures data continuity when adding new blocks.
+    fn check_next_block_number(&self, expected_block_number: u64) -> ProviderResult<()> {
+        let next_static_file_block = self.next_block_number();
 
         if expected_block_number != next_static_file_block {
             return Err(ProviderError::UnexpectedStaticFileBlockNumber(
