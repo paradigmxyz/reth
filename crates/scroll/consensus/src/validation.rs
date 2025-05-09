@@ -1,7 +1,7 @@
+use crate::error::ScrollConsensusError;
 use alloc::sync::Arc;
 use core::fmt::Debug;
 
-use crate::error::ScrollConsensusError;
 use alloy_consensus::{BlockHeader as _, TxReceipt, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::B256;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};

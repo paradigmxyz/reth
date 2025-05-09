@@ -1,6 +1,6 @@
 use alloy_consensus::{
     transaction::RlpEcdsaDecodableTx, Sealable, Sealed, Signed, Transaction, TxEip1559, TxEip2930,
-    TxLegacy, Typed2718,
+    TxEip7702, TxLegacy, Typed2718,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
@@ -38,6 +38,8 @@ pub enum ScrollTxEnvelope {
     Eip2930(Signed<TxEip2930>),
     /// A [`TxEip1559`] tagged with type 2.
     Eip1559(Signed<TxEip1559>),
+    /// EIP-7702 transaction
+    Eip7702(Signed<TxEip7702>),
     /// A [`TxL1Message`] tagged with type 0x7E.
     L1Message(Sealed<TxL1Message>),
 }
@@ -60,6 +62,12 @@ impl From<Signed<TxEip1559>> for ScrollTxEnvelope {
     }
 }
 
+impl From<Signed<TxEip7702>> for ScrollTxEnvelope {
+    fn from(v: Signed<TxEip7702>) -> Self {
+        Self::Eip7702(v)
+    }
+}
+
 impl From<TxL1Message> for ScrollTxEnvelope {
     fn from(v: TxL1Message) -> Self {
         v.seal_slow().into()
@@ -78,6 +86,7 @@ impl Typed2718 for ScrollTxEnvelope {
             Self::Legacy(tx) => tx.tx().ty(),
             Self::Eip2930(tx) => tx.tx().ty(),
             Self::Eip1559(tx) => tx.tx().ty(),
+            Self::Eip7702(tx) => tx.tx().ty(),
             Self::L1Message(tx) => tx.ty(),
         }
     }
@@ -89,6 +98,7 @@ impl Transaction for ScrollTxEnvelope {
             Self::Legacy(tx) => tx.tx().chain_id(),
             Self::Eip2930(tx) => tx.tx().chain_id(),
             Self::Eip1559(tx) => tx.tx().chain_id(),
+            Self::Eip7702(tx) => tx.tx().chain_id(),
             Self::L1Message(tx) => tx.chain_id(),
         }
     }
@@ -98,6 +108,7 @@ impl Transaction for ScrollTxEnvelope {
             Self::Legacy(tx) => tx.tx().nonce(),
             Self::Eip2930(tx) => tx.tx().nonce(),
             Self::Eip1559(tx) => tx.tx().nonce(),
+            Self::Eip7702(tx) => tx.tx().nonce(),
             Self::L1Message(tx) => tx.nonce(),
         }
     }
@@ -107,6 +118,7 @@ impl Transaction for ScrollTxEnvelope {
             Self::Legacy(tx) => tx.tx().gas_limit(),
             Self::Eip2930(tx) => tx.tx().gas_limit(),
             Self::Eip1559(tx) => tx.tx().gas_limit(),
+            Self::Eip7702(tx) => tx.tx().gas_limit(),
             Self::L1Message(tx) => tx.gas_limit(),
         }
     }
@@ -116,6 +128,7 @@ impl Transaction for ScrollTxEnvelope {
             Self::Legacy(tx) => tx.tx().gas_price(),
             Self::Eip2930(tx) => tx.tx().gas_price(),
             Self::Eip1559(tx) => tx.tx().gas_price(),
+            Self::Eip7702(tx) => tx.tx().gas_price(),
             Self::L1Message(tx) => tx.gas_price(),
         }
     }
@@ -125,6 +138,7 @@ impl Transaction for ScrollTxEnvelope {
             Self::Legacy(tx) => tx.tx().max_fee_per_gas(),
             Self::Eip2930(tx) => tx.tx().max_fee_per_gas(),
             Self::Eip1559(tx) => tx.tx().max_fee_per_gas(),
+            Self::Eip7702(tx) => tx.tx().max_fee_per_gas(),
             Self::L1Message(tx) => tx.max_fee_per_gas(),
         }
     }
@@ -134,6 +148,7 @@ impl Transaction for ScrollTxEnvelope {
             Self::Legacy(tx) => tx.tx().max_priority_fee_per_gas(),
             Self::Eip2930(tx) => tx.tx().max_priority_fee_per_gas(),
             Self::Eip1559(tx) => tx.tx().max_priority_fee_per_gas(),
+            Self::Eip7702(tx) => tx.tx().max_priority_fee_per_gas(),
             Self::L1Message(tx) => tx.max_priority_fee_per_gas(),
         }
     }
@@ -143,6 +158,7 @@ impl Transaction for ScrollTxEnvelope {
             Self::Legacy(tx) => tx.tx().max_fee_per_blob_gas(),
             Self::Eip2930(tx) => tx.tx().max_fee_per_blob_gas(),
             Self::Eip1559(tx) => tx.tx().max_fee_per_blob_gas(),
+            Self::Eip7702(tx) => tx.tx().max_fee_per_blob_gas(),
             Self::L1Message(tx) => tx.max_fee_per_blob_gas(),
         }
     }
@@ -152,6 +168,7 @@ impl Transaction for ScrollTxEnvelope {
             Self::Legacy(tx) => tx.tx().priority_fee_or_price(),
             Self::Eip2930(tx) => tx.tx().priority_fee_or_price(),
             Self::Eip1559(tx) => tx.tx().priority_fee_or_price(),
+            Self::Eip7702(tx) => tx.tx().priority_fee_or_price(),
             Self::L1Message(tx) => tx.priority_fee_or_price(),
         }
     }
@@ -161,6 +178,7 @@ impl Transaction for ScrollTxEnvelope {
             Self::Legacy(tx) => tx.tx().to(),
             Self::Eip2930(tx) => tx.tx().to(),
             Self::Eip1559(tx) => tx.tx().to(),
+            Self::Eip7702(tx) => tx.tx().to(),
             Self::L1Message(tx) => tx.to(),
         }
     }
@@ -170,6 +188,7 @@ impl Transaction for ScrollTxEnvelope {
             Self::Legacy(tx) => tx.tx().kind(),
             Self::Eip2930(tx) => tx.tx().kind(),
             Self::Eip1559(tx) => tx.tx().kind(),
+            Self::Eip7702(tx) => tx.tx().kind(),
             Self::L1Message(tx) => tx.kind(),
         }
     }
@@ -179,6 +198,7 @@ impl Transaction for ScrollTxEnvelope {
             Self::Legacy(tx) => tx.tx().value(),
             Self::Eip2930(tx) => tx.tx().value(),
             Self::Eip1559(tx) => tx.tx().value(),
+            Self::Eip7702(tx) => tx.tx().value(),
             Self::L1Message(tx) => tx.value(),
         }
     }
@@ -188,6 +208,7 @@ impl Transaction for ScrollTxEnvelope {
             Self::Legacy(tx) => tx.tx().input(),
             Self::Eip2930(tx) => tx.tx().input(),
             Self::Eip1559(tx) => tx.tx().input(),
+            Self::Eip7702(tx) => tx.tx().input(),
             Self::L1Message(tx) => tx.input(),
         }
     }
@@ -197,6 +218,7 @@ impl Transaction for ScrollTxEnvelope {
             Self::Legacy(tx) => tx.tx().access_list(),
             Self::Eip2930(tx) => tx.tx().access_list(),
             Self::Eip1559(tx) => tx.tx().access_list(),
+            Self::Eip7702(tx) => tx.tx().access_list(),
             Self::L1Message(tx) => tx.access_list(),
         }
     }
@@ -206,6 +228,7 @@ impl Transaction for ScrollTxEnvelope {
             Self::Legacy(tx) => tx.tx().blob_versioned_hashes(),
             Self::Eip2930(tx) => tx.tx().blob_versioned_hashes(),
             Self::Eip1559(tx) => tx.tx().blob_versioned_hashes(),
+            Self::Eip7702(tx) => tx.tx().blob_versioned_hashes(),
             Self::L1Message(tx) => tx.blob_versioned_hashes(),
         }
     }
@@ -215,6 +238,7 @@ impl Transaction for ScrollTxEnvelope {
             Self::Legacy(tx) => tx.tx().authorization_list(),
             Self::Eip2930(tx) => tx.tx().authorization_list(),
             Self::Eip1559(tx) => tx.tx().authorization_list(),
+            Self::Eip7702(tx) => tx.tx().authorization_list(),
             Self::L1Message(tx) => tx.authorization_list(),
         }
     }
@@ -224,6 +248,7 @@ impl Transaction for ScrollTxEnvelope {
             Self::Legacy(tx) => tx.tx().is_dynamic_fee(),
             Self::Eip2930(tx) => tx.tx().is_dynamic_fee(),
             Self::Eip1559(tx) => tx.tx().is_dynamic_fee(),
+            Self::Eip7702(tx) => tx.tx().is_dynamic_fee(),
             Self::L1Message(tx) => tx.is_dynamic_fee(),
         }
     }
@@ -233,6 +258,7 @@ impl Transaction for ScrollTxEnvelope {
             Self::Legacy(tx) => tx.tx().effective_gas_price(base_fee),
             Self::Eip2930(tx) => tx.tx().effective_gas_price(base_fee),
             Self::Eip1559(tx) => tx.tx().effective_gas_price(base_fee),
+            Self::Eip7702(tx) => tx.tx().effective_gas_price(base_fee),
             Self::L1Message(tx) => tx.effective_gas_price(base_fee),
         }
     }
@@ -242,6 +268,7 @@ impl Transaction for ScrollTxEnvelope {
             Self::Legacy(tx) => tx.tx().is_create(),
             Self::Eip2930(tx) => tx.tx().is_create(),
             Self::Eip1559(tx) => tx.tx().is_create(),
+            Self::Eip7702(tx) => tx.tx().is_create(),
             Self::L1Message(tx) => tx.is_create(),
         }
     }
@@ -264,6 +291,12 @@ impl ScrollTxEnvelope {
     #[inline]
     pub const fn is_eip1559(&self) -> bool {
         matches!(self, Self::Eip1559(_))
+    }
+
+    /// Returns true if the transaction is an EIP-7702 transaction.
+    #[inline]
+    pub const fn is_eip7702(&self) -> bool {
+        matches!(self, Self::Eip7702(_))
     }
 
     /// Returns true if the transaction is a deposit transaction.
@@ -296,6 +329,14 @@ impl ScrollTxEnvelope {
         }
     }
 
+    /// Returns the [`TxEip7702`] variant if the transaction is an EIP-1559 transaction.
+    pub const fn as_eip7702(&self) -> Option<&Signed<TxEip7702>> {
+        match self {
+            Self::Eip7702(tx) => Some(tx),
+            _ => None,
+        }
+    }
+
     /// Returns the [`TxL1Message`] variant if the transaction is a deposit transaction.
     pub const fn as_l1_message(&self) -> Option<&Sealed<TxL1Message>> {
         match self {
@@ -310,6 +351,7 @@ impl ScrollTxEnvelope {
             Self::Legacy(_) => ScrollTxType::Legacy,
             Self::Eip2930(_) => ScrollTxType::Eip2930,
             Self::Eip1559(_) => ScrollTxType::Eip1559,
+            Self::Eip7702(_) => ScrollTxType::Eip7702,
             Self::L1Message(_) => ScrollTxType::L1Message,
         }
     }
@@ -320,6 +362,7 @@ impl ScrollTxEnvelope {
             Self::Legacy(t) => t.eip2718_encoded_length(),
             Self::Eip2930(t) => t.eip2718_encoded_length(),
             Self::Eip1559(t) => t.eip2718_encoded_length(),
+            Self::Eip7702(t) => t.eip2718_encoded_length(),
             Self::L1Message(t) => t.eip2718_encoded_length(),
         }
     }
@@ -346,6 +389,7 @@ impl Decodable2718 for ScrollTxEnvelope {
         match ty.try_into().map_err(|_| Eip2718Error::UnexpectedType(ty))? {
             ScrollTxType::Eip2930 => Ok(Self::Eip2930(TxEip2930::rlp_decode_signed(buf)?)),
             ScrollTxType::Eip1559 => Ok(Self::Eip1559(TxEip1559::rlp_decode_signed(buf)?)),
+            ScrollTxType::Eip7702 => Ok(Self::Eip7702(TxEip7702::rlp_decode_signed(buf)?)),
             ScrollTxType::L1Message => Ok(Self::L1Message(TxL1Message::decode(buf)?.seal_slow())),
             ScrollTxType::Legacy => {
                 Err(alloy_rlp::Error::Custom("type-0 eip2718 transactions are not supported")
@@ -365,6 +409,7 @@ impl Encodable2718 for ScrollTxEnvelope {
             Self::Legacy(_) => None,
             Self::Eip2930(_) => Some(ScrollTxType::Eip2930 as u8),
             Self::Eip1559(_) => Some(ScrollTxType::Eip1559 as u8),
+            Self::Eip7702(_) => Some(ScrollTxType::Eip7702 as u8),
             Self::L1Message(_) => Some(ScrollTxType::L1Message as u8),
         }
     }
@@ -383,6 +428,9 @@ impl Encodable2718 for ScrollTxEnvelope {
             Self::Eip1559(tx) => {
                 tx.eip2718_encode(out);
             }
+            Self::Eip7702(tx) => {
+                tx.eip2718_encode(out);
+            }
             Self::L1Message(tx) => {
                 tx.eip2718_encode(out);
             }
@@ -392,8 +440,9 @@ impl Encodable2718 for ScrollTxEnvelope {
     fn trie_hash(&self) -> B256 {
         match self {
             Self::Legacy(tx) => *tx.hash(),
-            Self::Eip1559(tx) => *tx.hash(),
             Self::Eip2930(tx) => *tx.hash(),
+            Self::Eip1559(tx) => *tx.hash(),
+            Self::Eip7702(tx) => *tx.hash(),
             Self::L1Message(tx) => tx.seal(),
         }
     }
@@ -433,6 +482,8 @@ mod serde_from {
         Eip2930(Signed<TxEip2930>),
         #[serde(rename = "0x2", alias = "0x02")]
         Eip1559(Signed<TxEip1559>),
+        #[serde(rename = "0x4", alias = "0x04")]
+        Eip7702(Signed<TxEip7702>),
         #[serde(
             rename = "0x7e",
             alias = "0x7E",
@@ -456,6 +507,7 @@ mod serde_from {
                 TaggedTxEnvelope::Legacy(signed) => Self::Legacy(signed),
                 TaggedTxEnvelope::Eip2930(signed) => Self::Eip2930(signed),
                 TaggedTxEnvelope::Eip1559(signed) => Self::Eip1559(signed),
+                TaggedTxEnvelope::Eip7702(signed) => Self::Eip7702(signed),
                 TaggedTxEnvelope::L1Message(tx) => Self::L1Message(tx),
             }
         }
@@ -467,6 +519,7 @@ mod serde_from {
                 ScrollTxEnvelope::Legacy(signed) => Self::Legacy(signed),
                 ScrollTxEnvelope::Eip2930(signed) => Self::Eip2930(signed),
                 ScrollTxEnvelope::Eip1559(signed) => Self::Eip1559(signed),
+                ScrollTxEnvelope::Eip7702(signed) => Self::Eip7702(signed),
                 ScrollTxEnvelope::L1Message(tx) => Self::L1Message(tx),
             }
         }

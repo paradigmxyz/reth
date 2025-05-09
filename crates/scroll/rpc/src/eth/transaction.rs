@@ -81,6 +81,9 @@ where
             ScrollTypedTransaction::Eip1559(tx) => {
                 Signed::new_unchecked(tx, signature, hash).into()
             }
+            ScrollTypedTransaction::Eip7702(tx) => {
+                Signed::new_unchecked(tx, signature, hash).into()
+            }
             ScrollTypedTransaction::L1Message(tx) => {
                 ScrollTxEnvelope::L1Message(tx.seal_unchecked(hash))
             }

@@ -130,6 +130,7 @@ pub mod message;
 pub mod peers;
 pub mod protocol;
 pub mod transactions;
+pub mod transform;
 
 mod budget;
 mod builder;

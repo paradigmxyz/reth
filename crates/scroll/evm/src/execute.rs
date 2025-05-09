@@ -58,6 +58,10 @@ mod tests {
     use std::{convert::Infallible, sync::Arc};
 
     use alloy_consensus::{Block, BlockBody, Header};
+    use alloy_eips::{
+        eip7702::{constants::PER_EMPTY_ACCOUNT_COST, Authorization, SignedAuthorization},
+        Typed2718,
+    };
     use alloy_evm::{
         block::{BlockExecutionResult, BlockExecutor},
         Evm,
@@ -94,6 +98,8 @@ mod tests {
     const SCROLL_CHAIN_ID: u64 = 534352;
     const NOT_CURIE_BLOCK_NUMBER: u64 = 7096835;
     const CURIE_BLOCK_NUMBER: u64 = 7096837;
+    const EUCLID_V2_BLOCK_NUMBER: u64 = 14907015;
+    const EUCLID_V2_BLOCK_TIMESTAMP: u64 = 1745305200;
 
     const L1_BASE_FEE_SLOT: U256 = U256::from_limbs([1, 0, 0, 0]);
     const OVER_HEAD_SLOT: U256 = U256::from_limbs([2, 0, 0, 0]);
@@ -124,12 +130,18 @@ mod tests {
 
     fn block(
         number: u64,
+        timestamp: u64,
         transactions: Vec<ScrollTransactionSigned>,
     ) -> RecoveredBlock<<ScrollPrimitives as NodePrimitives>::Block> {
         let senders = transactions.iter().map(|t| t.recover_signer().unwrap()).collect();
         RecoveredBlock::new_unhashed(
             Block {
-                header: Header { number, gas_limit: BLOCK_GAS_LIMIT, ..Default::default() },
+                header: Header {
+                    number,
+                    timestamp,
+                    gas_limit: BLOCK_GAS_LIMIT,
+                    ..Default::default()
+                },
                 body: BlockBody { transactions, ..Default::default() },
             },
             senders,
@@ -156,6 +168,28 @@ mod tests {
                 gas_limit,
                 ..Default::default()
             }),
+            ScrollTxType::Eip7702 => {
+                let authorization = Authorization {
+                    chain_id: Default::default(),
+                    address: Address::random(),
+                    nonce: 0,
+                };
+                let signature =
+                    reth_primitives::sign_message(B256::random(), authorization.signature_hash())
+                        .unwrap();
+                ScrollTypedTransaction::Eip7702(alloy_consensus::TxEip7702 {
+                    to: Address::ZERO,
+                    chain_id: SCROLL_CHAIN_ID,
+                    gas_limit: gas_limit + PER_EMPTY_ACCOUNT_COST,
+                    authorization_list: vec![SignedAuthorization::new_unchecked(
+                        authorization,
+                        signature.v() as u8,
+                        signature.r(),
+                        signature.s(),
+                    )],
+                    ..Default::default()
+                })
+            }
             ScrollTxType::L1Message => {
                 ScrollTypedTransaction::L1Message(scroll_alloy_consensus::TxL1Message {
                     sender: Address::random(),
@@ -174,12 +208,13 @@ mod tests {
     fn execute_transaction(
         tx_type: ScrollTxType,
         block_number: u64,
+        block_timestamp: u64,
         expected_l1_fee: U256,
         expected_error: Option<&str>,
     ) -> eyre::Result<()> {
         // prepare transaction
         let transaction = transaction(tx_type, MIN_TRANSACTION_GAS);
-        let block = block(block_number, vec![transaction.clone()]);
+        let block = block(block_number, block_timestamp, vec![transaction.clone()]);
 
         // init strategy
         let mut state = state();
@@ -229,8 +264,10 @@ mod tests {
             assert!(res.unwrap_err().to_string().contains(error));
         } else {
             let BlockExecutionResult { receipts, .. } = output;
+            let gas_used =
+                MIN_TRANSACTION_GAS + if tx_type.is_eip7702() { PER_EMPTY_ACCOUNT_COST } else { 0 };
             let inner = alloy_consensus::Receipt {
-                cumulative_gas_used: MIN_TRANSACTION_GAS,
+                cumulative_gas_used: gas_used,
                 status: true.into(),
                 ..Default::default()
             };
@@ -241,6 +278,7 @@ mod tests {
                 ScrollTxType::Legacy => ScrollReceipt::Legacy(into_scroll_receipt(inner)),
                 ScrollTxType::Eip2930 => ScrollReceipt::Eip2930(into_scroll_receipt(inner)),
                 ScrollTxType::Eip1559 => ScrollReceipt::Eip1559(into_scroll_receipt(inner)),
+                ScrollTxType::Eip7702 => ScrollReceipt::Eip7702(into_scroll_receipt(inner)),
                 ScrollTxType::L1Message => ScrollReceipt::L1Message(inner),
             };
             let expected = vec![receipt];
@@ -254,7 +292,7 @@ mod tests {
     #[test]
     fn test_apply_pre_execution_changes_curie_block() -> eyre::Result<()> {
         // init curie transition block
-        let curie_block = block(7096836, vec![]);
+        let curie_block = block(CURIE_BLOCK_NUMBER - 1, 0, vec![]);
 
         // init strategy
         let mut state = state();
@@ -287,7 +325,7 @@ mod tests {
     #[test]
     fn test_apply_pre_execution_changes_not_curie_block() -> eyre::Result<()> {
         // init block
-        let not_curie_block = block(7096837, vec![]);
+        let not_curie_block = block(NOT_CURIE_BLOCK_NUMBER, 0, vec![]);
 
         // init strategy
         let mut state = state();
@@ -312,7 +350,7 @@ mod tests {
     fn test_execute_transactions_exceeds_block_gas_limit() -> eyre::Result<()> {
         // prepare transaction exceeding block gas limit
         let transaction = transaction(ScrollTxType::Legacy, BLOCK_GAS_LIMIT + 1);
-        let block = block(7096837, vec![transaction.clone()]);
+        let block = block(7096837, 0, vec![transaction.clone()]);
 
         // init strategy
         let mut state = state();
@@ -334,7 +372,7 @@ mod tests {
     fn test_execute_transactions_l1_message() -> eyre::Result<()> {
         // Execute l1 message on curie block
         let expected_l1_fee = U256::ZERO;
-        execute_transaction(ScrollTxType::L1Message, CURIE_BLOCK_NUMBER, expected_l1_fee, None)?;
+        execute_transaction(ScrollTxType::L1Message, CURIE_BLOCK_NUMBER, 0, expected_l1_fee, None)?;
         Ok(())
     }
 
@@ -342,7 +380,7 @@ mod tests {
     fn test_execute_transactions_legacy_curie_fork() -> eyre::Result<()> {
         // Execute legacy transaction on curie block
         let expected_l1_fee = U256::from(10);
-        execute_transaction(ScrollTxType::Legacy, CURIE_BLOCK_NUMBER, expected_l1_fee, None)?;
+        execute_transaction(ScrollTxType::Legacy, CURIE_BLOCK_NUMBER, 0, expected_l1_fee, None)?;
         Ok(())
     }
 
@@ -350,7 +388,13 @@ mod tests {
     fn test_execute_transactions_legacy_not_curie_fork() -> eyre::Result<()> {
         // Execute legacy before curie block
         let expected_l1_fee = U256::from(2);
-        execute_transaction(ScrollTxType::Legacy, NOT_CURIE_BLOCK_NUMBER, expected_l1_fee, None)?;
+        execute_transaction(
+            ScrollTxType::Legacy,
+            NOT_CURIE_BLOCK_NUMBER,
+            0,
+            expected_l1_fee,
+            None,
+        )?;
         Ok(())
     }
 
@@ -358,7 +402,7 @@ mod tests {
     fn test_execute_transactions_eip2930_curie_fork() -> eyre::Result<()> {
         // Execute eip2930 transaction on curie block
         let expected_l1_fee = U256::from(10);
-        execute_transaction(ScrollTxType::Eip2930, CURIE_BLOCK_NUMBER, expected_l1_fee, None)?;
+        execute_transaction(ScrollTxType::Eip2930, CURIE_BLOCK_NUMBER, 0, expected_l1_fee, None)?;
         Ok(())
     }
 
@@ -368,6 +412,7 @@ mod tests {
         execute_transaction(
             ScrollTxType::Eip2930,
             NOT_CURIE_BLOCK_NUMBER,
+            0,
             U256::ZERO,
             Some("Eip2930 is not supported"),
         )?;
@@ -378,18 +423,46 @@ mod tests {
     fn test_execute_transactions_eip1559_curie_fork() -> eyre::Result<()> {
         // Execute eip1559 transaction on curie block
         let expected_l1_fee = U256::from(10);
-        execute_transaction(ScrollTxType::Eip1559, CURIE_BLOCK_NUMBER, expected_l1_fee, None)?;
+        execute_transaction(ScrollTxType::Eip1559, CURIE_BLOCK_NUMBER, 0, expected_l1_fee, None)?;
         Ok(())
     }
 
     #[test]
-    fn test_execute_transactions_eip_not_curie_fork() -> eyre::Result<()> {
+    fn test_execute_transactions_eip1559_not_curie_fork() -> eyre::Result<()> {
         // Execute eip1559 transaction before curie block
         execute_transaction(
             ScrollTxType::Eip1559,
             NOT_CURIE_BLOCK_NUMBER,
+            0,
             U256::ZERO,
             Some("Eip1559 is not supported"),
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_execute_transactions_eip7702_euclid_v2_fork() -> eyre::Result<()> {
+        // Execute eip7702 transaction on euclid v2 block.
+        let expected_l1_fee = U256::from(19);
+        execute_transaction(
+            ScrollTxType::Eip7702,
+            EUCLID_V2_BLOCK_NUMBER,
+            EUCLID_V2_BLOCK_TIMESTAMP,
+            expected_l1_fee,
+            None,
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_execute_transactions_eip7702_not_euclid_v2_fork() -> eyre::Result<()> {
+        // Execute eip7702 transaction before euclid v2 block
+        execute_transaction(
+            ScrollTxType::Eip7702,
+            EUCLID_V2_BLOCK_NUMBER - 1,
+            EUCLID_V2_BLOCK_TIMESTAMP - 1,
+            U256::ZERO,
+            Some("Eip7702 is not supported"),
         )?;
         Ok(())
     }

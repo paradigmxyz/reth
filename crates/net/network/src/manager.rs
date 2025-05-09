@@ -249,6 +249,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             transactions_manager_config: _,
             nat,
             handshake,
+            header_transform,
         } = config;
 
         let peers_manager = PeersManager::new(peers_config);
@@ -308,6 +309,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             discovery,
             peers_manager,
             Arc::clone(&num_active_peers),
+            header_transform,
         );
 
         let swarm = Swarm::new(incoming, sessions, state);

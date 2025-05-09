@@ -135,15 +135,16 @@ where
 
         let hash = tx.tx().trie_hash();
 
+        let block = self.evm.block();
         // verify the transaction type is accepted by the current fork.
-        if tx.tx().is_eip2930() && !chain_spec.is_curie_active_at_block(self.evm.block().number) {
+        if tx.tx().is_eip2930() && !chain_spec.is_curie_active_at_block(block.number) {
             return Err(BlockValidationError::InvalidTx {
                 hash,
                 error: Box::new(InvalidTransaction::Eip2930NotSupported),
             }
             .into())
         }
-        if tx.tx().is_eip1559() && !chain_spec.is_curie_active_at_block(self.evm.block().number) {
+        if tx.tx().is_eip1559() && !chain_spec.is_curie_active_at_block(block.number) {
             return Err(BlockValidationError::InvalidTx {
                 hash,
                 error: Box::new(InvalidTransaction::Eip1559NotSupported),
@@ -157,7 +158,7 @@ where
             }
             .into())
         }
-        if tx.tx().is_eip7702() {
+        if tx.tx().is_eip7702() && !chain_spec.is_euclid_v2_active_at_timestamp(block.timestamp) {
             return Err(BlockValidationError::InvalidTx {
                 hash,
                 error: Box::new(InvalidTransaction::Eip7702NotSupported),

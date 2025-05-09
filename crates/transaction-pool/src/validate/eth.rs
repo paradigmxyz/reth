@@ -960,11 +960,13 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
     } else {
         SpecId::MERGE
     };
+    let is_eip7702_enabled = spec_id >= SpecId::PRAGUE;
 
     let gas = revm_interpreter::gas::calculate_initial_tx_gas(
         spec_id,
         transaction.input(),
         transaction.is_create(),
+        is_eip7702_enabled,
         transaction.access_list().map(|l| l.len()).unwrap_or_default() as u64,
         transaction
             .access_list()

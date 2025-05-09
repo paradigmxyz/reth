@@ -12,7 +12,7 @@ use std::sync::OnceLock;
 
 use alloy_consensus::{
     transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx},
-    SignableTransaction, Signed, Transaction, TxEip1559, TxEip2930, TxLegacy, Typed2718,
+    SignableTransaction, Signed, Transaction, TxEip1559, TxEip2930, TxEip7702, TxLegacy, Typed2718,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
@@ -113,10 +113,11 @@ impl SignedTransaction for ScrollTransactionSigned {
     ) -> Result<Address, RecoveryError> {
         match &self.transaction {
             // Scroll's L1 message does not have a signature. Directly return the `sender` address.
-            ScrollTypedTransaction::L1Message(tx) => return Ok(tx.sender),
             ScrollTypedTransaction::Legacy(tx) => tx.encode_for_signing(buf),
             ScrollTypedTransaction::Eip2930(tx) => tx.encode_for_signing(buf),
             ScrollTypedTransaction::Eip1559(tx) => tx.encode_for_signing(buf),
+            ScrollTypedTransaction::Eip7702(tx) => tx.encode_for_signing(buf),
+            ScrollTypedTransaction::L1Message(tx) => return Ok(tx.sender),
         };
         recover_signer_unchecked(&self.signature, keccak256(buf))
     }
@@ -174,6 +175,9 @@ impl Encodable2718 for ScrollTransactionSigned {
             ScrollTypedTransaction::Eip1559(dynamic_fee_tx) => {
                 dynamic_fee_tx.eip2718_encoded_length(&self.signature)
             }
+            ScrollTypedTransaction::Eip7702(authorization_list_tx) => {
+                authorization_list_tx.eip2718_encoded_length(&self.signature)
+            }
             ScrollTypedTransaction::L1Message(l1_message) => l1_message.eip2718_encoded_length(),
         }
     }
@@ -191,6 +195,9 @@ impl Encodable2718 for ScrollTransactionSigned {
             }
             ScrollTypedTransaction::Eip1559(dynamic_fee_tx) => {
                 dynamic_fee_tx.eip2718_encode(signature, out)
+            }
+            ScrollTypedTransaction::Eip7702(authorization_list_tx) => {
+                authorization_list_tx.eip2718_encode(signature, out)
             }
             ScrollTypedTransaction::L1Message(l1_message) => l1_message.encode_2718(out),
         }
@@ -210,6 +217,12 @@ impl Decodable2718 for ScrollTransactionSigned {
             ScrollTxType::Eip1559 => {
                 let (tx, signature, hash) = TxEip1559::rlp_decode_signed(buf)?.into_parts();
                 let signed_tx = Self::new_unhashed(ScrollTypedTransaction::Eip1559(tx), signature);
+                signed_tx.hash.get_or_init(|| hash);
+                Ok(signed_tx)
+            }
+            ScrollTxType::Eip7702 => {
+                let (tx, signature, hash) = TxEip7702::rlp_decode_signed(buf)?.into_parts();
+                let signed_tx = Self::new_unhashed(ScrollTypedTransaction::Eip7702(tx), signature);
                 signed_tx.hash.get_or_init(|| hash);
                 Ok(signed_tx)
             }
@@ -339,8 +352,9 @@ impl FromTxWithEncoded<ScrollTransactionSigned> for ScrollTransactionIntoTxEnv<T
     fn from_encoded_tx(tx: &ScrollTransactionSigned, caller: Address, encoded: Bytes) -> Self {
         let base = match &tx.transaction {
             ScrollTypedTransaction::Legacy(tx) => TxEnv::from_recovered_tx(tx, caller),
-            ScrollTypedTransaction::Eip1559(tx) => TxEnv::from_recovered_tx(tx, caller),
             ScrollTypedTransaction::Eip2930(tx) => TxEnv::from_recovered_tx(tx, caller),
+            ScrollTypedTransaction::Eip1559(tx) => TxEnv::from_recovered_tx(tx, caller),
+            ScrollTypedTransaction::Eip7702(tx) => TxEnv::from_recovered_tx(tx, caller),
             ScrollTypedTransaction::L1Message(tx) => {
                 let TxL1Message { to, value, gas_limit, input, queue_index: _, sender: _ } = tx;
                 TxEnv {
@@ -497,6 +511,9 @@ impl TryFrom<ScrollTransactionSigned> for ScrollPooledTransaction {
             ScrollTypedTransaction::Eip1559(tx) => {
                 Ok(Self::Eip1559(Signed::new_unchecked(tx, signature, hash)))
             }
+            ScrollTypedTransaction::Eip7702(tx) => {
+                Ok(Self::Eip7702(Signed::new_unchecked(tx, signature, hash)))
+            }
             ScrollTypedTransaction::L1Message(_) => {
                 Err(TryFromRecoveredTransactionError::UnsupportedTransactionType(0xfe))
             }
@@ -510,6 +527,7 @@ impl From<ScrollPooledTransaction> for ScrollTransactionSigned {
             ScrollPooledTransaction::Legacy(tx) => tx.into(),
             ScrollPooledTransaction::Eip2930(tx) => tx.into(),
             ScrollPooledTransaction::Eip1559(tx) => tx.into(),
+            ScrollPooledTransaction::Eip7702(tx) => tx.into(),
         }
     }
 }
@@ -565,6 +583,22 @@ impl FromRecoveredTx<ScrollTransactionSigned> for revm_scroll::ScrollTransaction
                 max_fee_per_blob_gas: Default::default(),
                 authorization_list: Default::default(),
                 tx_type: 2,
+                caller: sender,
+            },
+            ScrollTypedTransaction::Eip7702(tx) => TxEnv {
+                gas_limit: tx.gas_limit,
+                gas_price: tx.max_fee_per_gas,
+                gas_priority_fee: Some(tx.max_priority_fee_per_gas),
+                kind: tx.to.into(),
+                value: tx.value,
+                data: tx.input.clone(),
+                chain_id: Some(tx.chain_id),
+                nonce: tx.nonce,
+                access_list: tx.access_list.clone(),
+                blob_hashes: Default::default(),
+                max_fee_per_blob_gas: Default::default(),
+                authorization_list: tx.authorization_list.clone(),
+                tx_type: 4,
                 caller: sender,
             },
             ScrollTypedTransaction::L1Message(tx) => TxEnv {
@@ -642,6 +676,22 @@ impl FromRecoveredTx<ScrollTransactionSigned> for ScrollTransactionIntoTxEnv<TxE
                 tx_type: 2,
                 caller: sender,
             },
+            ScrollTypedTransaction::Eip7702(tx) => TxEnv {
+                gas_limit: tx.gas_limit,
+                gas_price: tx.max_fee_per_gas,
+                gas_priority_fee: Some(tx.max_priority_fee_per_gas),
+                kind: tx.to.into(),
+                value: tx.value,
+                data: tx.input.clone(),
+                chain_id: Some(tx.chain_id),
+                nonce: tx.nonce,
+                access_list: tx.access_list.clone(),
+                blob_hashes: Default::default(),
+                max_fee_per_blob_gas: Default::default(),
+                authorization_list: tx.authorization_list.clone(),
+                tx_type: 4,
+                caller: sender,
+            },
             ScrollTypedTransaction::L1Message(tx) => TxEnv {
                 gas_limit: tx.gas_limit,
                 gas_price: 0,
@@ -669,7 +719,9 @@ impl FromRecoveredTx<ScrollTransactionSigned> for ScrollTransactionIntoTxEnv<TxE
 #[cfg(feature = "serde-bincode-compat")]
 pub mod serde_bincode_compat {
     use alloc::borrow::Cow;
-    use alloy_consensus::transaction::serde_bincode_compat::{TxEip1559, TxEip2930, TxLegacy};
+    use alloy_consensus::transaction::serde_bincode_compat::{
+        TxEip1559, TxEip2930, TxEip7702, TxLegacy,
+    };
     use alloy_primitives::{Signature, TxHash};
     use reth_primitives_traits::{serde_bincode_compat::SerdeBincodeCompat, SignedTransaction};
     use serde::{Deserialize, Serialize};
@@ -681,6 +733,7 @@ pub mod serde_bincode_compat {
         Legacy(TxLegacy<'a>),
         Eip2930(TxEip2930<'a>),
         Eip1559(TxEip1559<'a>),
+        Eip7702(TxEip7702<'a>),
         L1Message(Cow<'a, scroll_alloy_consensus::TxL1Message>),
     }
 
@@ -690,6 +743,7 @@ pub mod serde_bincode_compat {
                 super::ScrollTypedTransaction::Legacy(tx) => Self::Legacy(TxLegacy::from(tx)),
                 super::ScrollTypedTransaction::Eip2930(tx) => Self::Eip2930(TxEip2930::from(tx)),
                 super::ScrollTypedTransaction::Eip1559(tx) => Self::Eip1559(TxEip1559::from(tx)),
+                super::ScrollTypedTransaction::Eip7702(tx) => Self::Eip7702(TxEip7702::from(tx)),
                 super::ScrollTypedTransaction::L1Message(tx) => Self::L1Message(Cow::Borrowed(tx)),
             }
         }
@@ -701,6 +755,7 @@ pub mod serde_bincode_compat {
                 ScrollTypedTransaction::Legacy(tx) => Self::Legacy(tx.into()),
                 ScrollTypedTransaction::Eip2930(tx) => Self::Eip2930(tx.into()),
                 ScrollTypedTransaction::Eip1559(tx) => Self::Eip1559(tx.into()),
+                ScrollTypedTransaction::Eip7702(tx) => Self::Eip7702(tx.into()),
                 ScrollTypedTransaction::L1Message(tx) => Self::L1Message(tx.into_owned()),
             }
         }

@@ -155,7 +155,7 @@ impl TransactionBuilder<Scroll> for ScrollTransactionRequest {
             TxType::Eip1559 | TxType::Eip4844 => ScrollTxType::Eip1559,
             TxType::Eip2930 => ScrollTxType::Eip2930,
             TxType::Legacy => ScrollTxType::Legacy,
-            TxType::Eip7702 => unimplemented!(),
+            TxType::Eip7702 => ScrollTxType::Eip7702,
         }
     }
 
@@ -165,7 +165,7 @@ impl TransactionBuilder<Scroll> for ScrollTransactionRequest {
             TxType::Eip1559 | TxType::Eip4844 => ScrollTxType::Eip1559,
             TxType::Eip2930 => ScrollTxType::Eip2930,
             TxType::Legacy => ScrollTxType::Legacy,
-            TxType::Eip7702 => unimplemented!(),
+            TxType::Eip7702 => ScrollTxType::Eip7702,
         })
     }
 
@@ -212,6 +212,7 @@ impl NetworkWallet<Scroll> for EthereumWallet {
             ScrollTypedTransaction::Legacy(tx) => TypedTransaction::Legacy(tx),
             ScrollTypedTransaction::Eip2930(tx) => TypedTransaction::Eip2930(tx),
             ScrollTypedTransaction::Eip1559(tx) => TypedTransaction::Eip1559(tx),
+            ScrollTypedTransaction::Eip7702(tx) => TypedTransaction::Eip7702(tx),
             ScrollTypedTransaction::L1Message(_) => {
                 return Err(alloy_signer::Error::other("not implemented for deposit tx"))
             }
@@ -221,6 +222,7 @@ impl NetworkWallet<Scroll> for EthereumWallet {
         Ok(match tx {
             TxEnvelope::Eip1559(tx) => ScrollTxEnvelope::Eip1559(tx),
             TxEnvelope::Eip2930(tx) => ScrollTxEnvelope::Eip2930(tx),
+            TxEnvelope::Eip7702(tx) => ScrollTxEnvelope::Eip7702(tx),
             TxEnvelope::Legacy(tx) => ScrollTxEnvelope::Legacy(tx),
             _ => unreachable!(),
         })

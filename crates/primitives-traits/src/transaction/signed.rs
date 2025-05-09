@@ -286,6 +286,7 @@ impl SignedTransaction for scroll_alloy_consensus::ScrollPooledTransaction {
             Self::Legacy(tx) => tx.hash(),
             Self::Eip2930(tx) => tx.hash(),
             Self::Eip1559(tx) => tx.hash(),
+            Self::Eip7702(tx) => tx.hash(),
         }
     }
 
@@ -302,6 +303,7 @@ impl SignedTransaction for scroll_alloy_consensus::ScrollPooledTransaction {
             Self::Legacy(tx) => tx.tx().encode_for_signing(buf),
             Self::Eip2930(tx) => tx.tx().encode_for_signing(buf),
             Self::Eip1559(tx) => tx.tx().encode_for_signing(buf),
+            Self::Eip7702(tx) => tx.tx().encode_for_signing(buf),
         }
         let signature_hash = keccak256(buf);
         recover_signer_unchecked(self.signature(), signature_hash)

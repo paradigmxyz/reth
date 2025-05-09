@@ -97,8 +97,16 @@ pub fn spec_id_at_timestamp_and_number(
     chain_spec: impl ScrollHardforks,
 ) -> ScrollSpecId {
     if chain_spec
-        .scroll_fork_activation(ScrollHardfork::DarwinV2)
+        .scroll_fork_activation(ScrollHardfork::EuclidV2)
+        .active_at_timestamp_or_number(timestamp, number)
+    {
+        ScrollSpecId::EUCLID
+    } else if chain_spec
+        .scroll_fork_activation(ScrollHardfork::Euclid)
         .active_at_timestamp_or_number(timestamp, number) ||
+        chain_spec
+            .scroll_fork_activation(ScrollHardfork::DarwinV2)
+            .active_at_timestamp_or_number(timestamp, number) ||
         chain_spec
             .scroll_fork_activation(ScrollHardfork::Darwin)
             .active_at_timestamp_or_number(timestamp, number)

@@ -460,17 +460,17 @@ reth-ress-protocol = { path = "crates/ress/protocol" }
 reth-ress-provider = { path = "crates/ress/provider" }
 
 # revm
-revm = { version = "22.0.1", default-features = false }
-revm-bytecode = { version = "3.0.0", default-features = false }
-revm-database = { version = "3.0.0", default-features = false }
-revm-state = { version = "3.0.0", default-features = false }
-revm-primitives = { version = "18.0.0", default-features = false }
-revm-interpreter = { version = "18.0.0", default-features = false }
-revm-inspector = { version = "3.0.0", default-features = false }
-revm-context = { version = "3.0.0", default-features = false }
-revm-context-interface = { version = "3.0.0", default-features = false }
-revm-database-interface = { version = "3.0.0", default-features = false }
-op-revm = { version = "3.0.2", default-features = false }
+revm = { git = "https://github.com/scroll-tech/revm", branch = "feat/reth", default-features = false, features = ["secp256r1", "enable_eip7702"] }
+revm-bytecode = { git = "https://github.com/scroll-tech/revm", branch = "feat/reth", default-features = false }
+revm-database = { git = "https://github.com/scroll-tech/revm", branch = "feat/reth", default-features = false }
+revm-state = { git = "https://github.com/scroll-tech/revm", branch = "feat/reth", default-features = false }
+revm-primitives = { git = "https://github.com/scroll-tech/revm", branch = "feat/reth", default-features = false }
+revm-interpreter = { git = "https://github.com/scroll-tech/revm", branch = "feat/reth", default-features = false }
+revm-inspector = { git = "https://github.com/scroll-tech/revm", branch = "feat/reth", default-features = false }
+revm-context = { git = "https://github.com/scroll-tech/revm", branch = "feat/reth", default-features = false }
+revm-context-interface = { git = "https://github.com/scroll-tech/revm", branch = "feat/reth", default-features = false }
+revm-database-interface = { git = "https://github.com/scroll-tech/revm", branch = "feat/reth", default-features = false }
+op-revm = { git = "https://github.com/scroll-tech/revm", branch = "feat/reth", default-features = false }
 revm-scroll = { git = "https://github.com/scroll-tech/scroll-revm", default-features = false }
 revm-inspectors = "0.20.0"
 
@@ -737,7 +737,9 @@ visibility = "0.1.1"
 walkdir = "2.3.3"
 vergen-git2 = "1.0.5"
 
-# [patch.crates-io]
+[patch.crates-io]
+revm = { git = "https://github.com/scroll-tech/revm", branch = "feat/reth" }
+op-revm = { git = "https://github.com/scroll-tech/revm", branch = "feat/reth" }
 # alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
 # alloy-contract = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
 # alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }

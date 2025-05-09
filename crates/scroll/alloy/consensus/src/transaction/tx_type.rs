@@ -31,6 +31,9 @@ pub enum ScrollTxType {
     /// EIP-1559 transaction type.
     #[display("eip1559")]
     Eip1559 = 2,
+    /// EIP-7702 transaction type.
+    #[display("eip7702")]
+    Eip7702 = 4,
     /// L1 message transaction type.
     #[display("l1_message")]
     L1Message = L1_MESSAGE_TX_TYPE_ID,
@@ -38,7 +41,8 @@ pub enum ScrollTxType {
 
 impl ScrollTxType {
     /// List of all variants.
-    pub const ALL: [Self; 4] = [Self::Legacy, Self::Eip1559, Self::Eip2930, Self::L1Message];
+    pub const ALL: [Self; 5] =
+        [Self::Legacy, Self::Eip1559, Self::Eip2930, Self::Eip7702, Self::L1Message];
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
@@ -69,6 +73,7 @@ impl TryFrom<u8> for ScrollTxType {
             x if x == Self::Legacy as u8 => Self::Legacy,
             x if x == Self::Eip2930 as u8 => Self::Eip2930,
             x if x == Self::Eip1559 as u8 => Self::Eip1559,
+            x if x == Self::Eip7702 as u8 => Self::Eip7702,
             x if x == Self::L1Message as u8 => Self::L1Message,
             _ => return Err(Eip2718Error::UnexpectedType(value)),
         })
@@ -133,6 +138,10 @@ impl Compact for ScrollTxType {
             Self::Legacy => COMPACT_IDENTIFIER_LEGACY,
             Self::Eip2930 => COMPACT_IDENTIFIER_EIP2930,
             Self::Eip1559 => COMPACT_IDENTIFIER_EIP1559,
+            Self::Eip7702 => {
+                buf.put_u8(alloy_eips::eip7702::constants::EIP7702_TX_TYPE_ID);
+                COMPACT_EXTENDED_IDENTIFIER_FLAG
+            }
             Self::L1Message => {
                 buf.put_u8(L1_MESSAGE_TX_TYPE_ID);
                 COMPACT_EXTENDED_IDENTIFIER_FLAG
@@ -153,6 +162,7 @@ impl Compact for ScrollTxType {
                 COMPACT_EXTENDED_IDENTIFIER_FLAG => {
                     let extended_identifier = buf.get_u8();
                     match extended_identifier {
+                        alloy_eips::eip7702::constants::EIP7702_TX_TYPE_ID => Self::Eip7702,
                         L1_MESSAGE_TX_TYPE_ID => Self::L1Message,
                         _ => panic!("Unsupported TxType identifier: {extended_identifier}"),
                     }
@@ -178,11 +188,12 @@ mod tests {
 
     #[test]
     fn test_all_tx_types() {
-        assert_eq!(ScrollTxType::ALL.len(), 4);
+        assert_eq!(ScrollTxType::ALL.len(), 5);
         let all = vec![
             ScrollTxType::Legacy,
             ScrollTxType::Eip1559,
             ScrollTxType::Eip2930,
+            ScrollTxType::Eip7702,
             ScrollTxType::L1Message,
         ];
         assert_eq!(ScrollTxType::ALL.to_vec(), all);

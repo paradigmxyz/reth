@@ -478,7 +478,15 @@ mod tests {
                 ),
                 (
                     Head { number: 7096836, timestamp: 1725264000, ..Default::default() },
-                    ForkId { hash: ForkHash([0x21, 0xa2, 0x07, 0x54]), next: 0 },
+                    ForkId { hash: ForkHash([0x21, 0xa2, 0x07, 0x54]), next: 1744815600 },
+                ),
+                (
+                    Head { number: 7096836, timestamp: 1744815600, ..Default::default() },
+                    ForkId { hash: ForkHash([0xca, 0xc5, 0x80, 0xca]), next: 1745305200 },
+                ),
+                (
+                    Head { number: 7096836, timestamp: 1745305200, ..Default::default() },
+                    ForkId { hash: ForkHash([0x0e, 0xcf, 0xb2, 0x31]), next: 0 },
                 ),
             ],
         );
@@ -554,7 +562,15 @@ mod tests {
                 ),
                 (
                     Head { number: 4740239, timestamp: 1724832000, ..Default::default() },
-                    ForkId { hash: ForkHash([0x69, 0xf3, 0x7e, 0xde]), next: 0 },
+                    ForkId { hash: ForkHash([0x69, 0xf3, 0x7e, 0xde]), next: 1741680000 },
+                ),
+                (
+                    Head { number: 4740239, timestamp: 1741680000, ..Default::default() },
+                    ForkId { hash: ForkHash([0xf7, 0xac, 0x7e, 0xfc]), next: 1741852800 },
+                ),
+                (
+                    Head { number: 4740239, timestamp: 1741852800, ..Default::default() },
+                    ForkId { hash: ForkHash([0x51, 0x7e, 0x0f, 0x1c]), next: 0 },
                 ),
             ],
         );

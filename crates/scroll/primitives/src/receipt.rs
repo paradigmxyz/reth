@@ -20,6 +20,8 @@ pub enum ScrollReceipt {
     Eip2930(ScrollTransactionReceipt),
     /// EIP-1559 receipt
     Eip1559(ScrollTransactionReceipt),
+    /// EIP-7702 receipt
+    Eip7702(ScrollTransactionReceipt),
     /// L1 message receipt
     L1Message(Receipt),
 }
@@ -31,6 +33,7 @@ impl ScrollReceipt {
             Self::Legacy(_) => ScrollTxType::Legacy,
             Self::Eip2930(_) => ScrollTxType::Eip2930,
             Self::Eip1559(_) => ScrollTxType::Eip1559,
+            Self::Eip7702(_) => ScrollTxType::Eip7702,
             Self::L1Message(_) => ScrollTxType::L1Message,
         }
     }
@@ -38,9 +41,10 @@ impl ScrollReceipt {
     /// Returns inner [`Receipt`],
     pub const fn as_receipt(&self) -> &Receipt {
         match self {
-            Self::Legacy(receipt) | Self::Eip2930(receipt) | Self::Eip1559(receipt) => {
-                &receipt.inner
-            }
+            Self::Legacy(receipt) |
+            Self::Eip2930(receipt) |
+            Self::Eip1559(receipt) |
+            Self::Eip7702(receipt) => &receipt.inner,
             Self::L1Message(receipt) => receipt,
         }
     }
@@ -48,9 +52,10 @@ impl ScrollReceipt {
     /// Returns length of RLP-encoded receipt fields with the given [`Bloom`] without an RLP header.
     pub fn rlp_encoded_fields_length(&self, bloom: &Bloom) -> usize {
         match self {
-            Self::Legacy(receipt) | Self::Eip2930(receipt) | Self::Eip1559(receipt) => {
-                receipt.rlp_encoded_fields_length_with_bloom(bloom)
-            }
+            Self::Legacy(receipt) |
+            Self::Eip2930(receipt) |
+            Self::Eip1559(receipt) |
+            Self::Eip7702(receipt) => receipt.rlp_encoded_fields_length_with_bloom(bloom),
             Self::L1Message(receipt) => receipt.rlp_encoded_fields_length_with_bloom(bloom),
         }
     }
@@ -58,9 +63,10 @@ impl ScrollReceipt {
     /// RLP-encodes receipt fields with the given [`Bloom`] without an RLP header.
     pub fn rlp_encode_fields(&self, bloom: &Bloom, out: &mut dyn BufMut) {
         match self {
-            Self::Legacy(receipt) | Self::Eip2930(receipt) | Self::Eip1559(receipt) => {
-                receipt.rlp_encode_fields_with_bloom(bloom, out)
-            }
+            Self::Legacy(receipt) |
+            Self::Eip2930(receipt) |
+            Self::Eip1559(receipt) |
+            Self::Eip7702(receipt) => receipt.rlp_encode_fields_with_bloom(bloom, out),
             Self::L1Message(receipt) => receipt.rlp_encode_fields_with_bloom(bloom, out),
         }
     }
@@ -92,6 +98,11 @@ impl ScrollReceipt {
                     RlpDecodableReceipt::rlp_decode_with_bloom(buf)?;
                 Ok(ReceiptWithBloom { receipt: Self::Eip1559(receipt), logs_bloom })
             }
+            ScrollTxType::Eip7702 => {
+                let ReceiptWithBloom { receipt, logs_bloom } =
+                    RlpDecodableReceipt::rlp_decode_with_bloom(buf)?;
+                Ok(ReceiptWithBloom { receipt: Self::Eip7702(receipt), logs_bloom })
+            }
             ScrollTxType::L1Message => {
                 let ReceiptWithBloom { receipt, logs_bloom } =
                     RlpDecodableReceipt::rlp_decode_with_bloom(buf)?;
@@ -103,9 +114,10 @@ impl ScrollReceipt {
     /// Returns the l1 fee for the transaction receipt.
     pub const fn l1_fee(&self) -> U256 {
         match self {
-            Self::Legacy(receipt) | Self::Eip2930(receipt) | Self::Eip1559(receipt) => {
-                receipt.l1_fee
-            }
+            Self::Legacy(receipt) |
+            Self::Eip2930(receipt) |
+            Self::Eip1559(receipt) |
+            Self::Eip7702(receipt) => receipt.l1_fee,
             Self::L1Message(_) => U256::ZERO,
         }
     }
@@ -281,6 +293,9 @@ mod compact {
                 }
                 ScrollTxType::Eip1559 => {
                     Self::Eip1559(ScrollTransactionReceipt::new(inner, l1_fee.unwrap_or_default()))
+                }
+                ScrollTxType::Eip7702 => {
+                    Self::Eip7702(ScrollTransactionReceipt::new(inner, l1_fee.unwrap_or_default()))
                 }
                 ScrollTxType::L1Message => Self::L1Message(inner),
             }

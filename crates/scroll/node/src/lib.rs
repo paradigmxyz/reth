@@ -4,7 +4,7 @@ pub use builder::{
     consensus::ScrollConsensusBuilder,
     engine::{ScrollEngineValidator, ScrollEngineValidatorBuilder},
     execution::ScrollExecutorBuilder,
-    network::{ScrollNetworkBuilder, ScrollNetworkPrimitives},
+    network::{ScrollHeaderTransform, ScrollNetworkBuilder, ScrollNetworkPrimitives},
     payload::ScrollPayloadBuilder,
     pool::ScrollPoolBuilder,
 };

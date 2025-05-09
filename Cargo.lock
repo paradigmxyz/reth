@@ -2318,7 +2318,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -3216,7 +3216,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "976dd42dc7e85965fe702eb8164f21f450704bdde31faefd6471dba214cb594e"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4499,7 +4499,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.61.0",
+ "windows-core 0.57.0",
 ]
 
 [[package]]
@@ -4858,7 +4858,7 @@ checksum = "e04d7f318608d35d4b61ddd75cbdaee86b023ebe2bd5a66ee0915f0bf93095a9"
 dependencies = [
  "hermit-abi 0.5.0",
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5213,7 +5213,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -6041,8 +6041,7 @@ dependencies = [
 [[package]]
 name = "op-revm"
 version = "3.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12f8646cb935063087579f44da58fe1dea329c280c3b35898d6fd01a928de91f"
+source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth#5a4b0594161975e3e711a681809b7d710f2c0fec"
 dependencies = [
  "auto_impl",
  "once_cell",
@@ -6660,7 +6659,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -10674,8 +10673,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "22.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5378e95ffe5c8377002dafeb6f7d370a55517cef7d6d6c16fc552253af3b123"
+source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth#5a4b0594161975e3e711a681809b7d710f2c0fec"
 dependencies = [
  "revm-bytecode",
  "revm-context",
@@ -10693,8 +10691,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e63e138d520c5c5bc25ecc82506e9e4e6e85a811809fc5251c594378dccabfc6"
+source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth#5a4b0594161975e3e711a681809b7d710f2c0fec"
 dependencies = [
  "bitvec",
  "phf",
@@ -10705,8 +10702,7 @@ dependencies = [
 [[package]]
 name = "revm-context"
 version = "3.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9765628dfea4f3686aa8f2a72471c52801e6b38b601939ac16965f49bac66580"
+source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth#5a4b0594161975e3e711a681809b7d710f2c0fec"
 dependencies = [
  "cfg-if",
  "derive-where",
@@ -10721,8 +10717,7 @@ dependencies = [
 [[package]]
 name = "revm-context-interface"
 version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82d74335aa1f14222cc4d3be1f62a029cc7dc03819cc8d080ff17b7e1d76375f"
+source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth#5a4b0594161975e3e711a681809b7d710f2c0fec"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -10736,8 +10731,7 @@ dependencies = [
 [[package]]
 name = "revm-database"
 version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e5c80c5a2fd605f2119ee32a63fb3be941fb6a81ced8cdb3397abca28317224"
+source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth#5a4b0594161975e3e711a681809b7d710f2c0fec"
 dependencies = [
  "alloy-eips 0.14.0",
  "revm-bytecode",
@@ -10750,8 +10744,7 @@ dependencies = [
 [[package]]
 name = "revm-database-interface"
 version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0e4dfbc734b1ea67b5e8f8b3c7dc4283e2210d978cdaf6c7a45e97be5ea53b3"
+source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth#5a4b0594161975e3e711a681809b7d710f2c0fec"
 dependencies = [
  "auto_impl",
  "revm-primitives",
@@ -10762,8 +10755,7 @@ dependencies = [
 [[package]]
 name = "revm-handler"
 version = "3.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8676379521c7bf179c31b685c5126ce7800eab5844122aef3231b97026d41a10"
+source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth#5a4b0594161975e3e711a681809b7d710f2c0fec"
 dependencies = [
  "auto_impl",
  "revm-bytecode",
@@ -10780,8 +10772,7 @@ dependencies = [
 [[package]]
 name = "revm-inspector"
 version = "3.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfed4ecf999a3f6ae776ae2d160478c5dca986a8c2d02168e04066b1e34c789e"
+source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth#5a4b0594161975e3e711a681809b7d710f2c0fec"
 dependencies = [
  "auto_impl",
  "revm-context",
@@ -10817,8 +10808,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "18.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "feb20260342003cfb791536e678ef5bbea1bfd1f8178b170e8885ff821985473"
+source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth#5a4b0594161975e3e711a681809b7d710f2c0fec"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -10829,8 +10819,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "19.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "418e95eba68c9806c74f3e36cd5d2259170b61e90ac608b17ff8c435038ddace"
+source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth#5a4b0594161975e3e711a681809b7d710f2c0fec"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -10854,8 +10843,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "18.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fc2283ff87358ec7501956c5dd8724a6c2be959c619c4861395ae5e0054575f"
+source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth#5a4b0594161975e3e711a681809b7d710f2c0fec"
 dependencies = [
  "alloy-primitives",
  "enumn",
@@ -10865,7 +10853,7 @@ dependencies = [
 [[package]]
 name = "revm-scroll"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/scroll-revm#ccf29efd0762f6e45f7dc1c290668c643658080e"
+source = "git+https://github.com/scroll-tech/scroll-revm#7890062bd11aad7edadf319d442f9913ae42bae1"
 dependencies = [
  "auto_impl",
  "enumn",
@@ -10879,8 +10867,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09dd121f6e66d75ab111fb51b4712f129511569bc3e41e6067ae760861418bd8"
+source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth#5a4b0594161975e3e711a681809b7d710f2c0fec"
 dependencies = [
  "bitflags 2.9.0",
  "revm-bytecode",
@@ -11112,7 +11099,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -11125,7 +11112,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.9.4",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -11191,7 +11178,7 @@ dependencies = [
  "security-framework 3.2.0",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -12087,7 +12074,7 @@ dependencies = [
  "getrandom 0.3.2",
  "once_cell",
  "rustix 1.0.5",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -12711,7 +12698,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69fff37da548239c3bf9e64a12193d261e8b22b660991c6fd2df057c168f435f"
 dependencies = [
  "cc",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -13237,7 +13224,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -13292,19 +13279,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "windows-core"
-version = "0.61.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4763c1de310c86d75a878046489e2e5ba02c649d185f21c67d4cf8a56d098980"
-dependencies = [
- "windows-implement 0.60.0",
- "windows-interface 0.59.1",
- "windows-link",
- "windows-result 0.3.2",
- "windows-strings 0.4.0",
-]
-
-[[package]]
 name = "windows-implement"
 version = "0.57.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13327,17 +13301,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "windows-implement"
-version = "0.60.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a47fddd13af08290e67f4acabf4b459f647552718f683a7b415d290ac744a836"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.101",
-]
-
-[[package]]
 name = "windows-interface"
 version = "0.57.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13353,17 +13316,6 @@ name = "windows-interface"
 version = "0.58.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "053c4c462dc91d3b1504c6fe5a726dd15e216ba718e84a0e46a88fbe5ded3515"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.101",
-]
-
-[[package]]
-name = "windows-interface"
-version = "0.59.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd9211b69f8dcdfa817bfd14bf1c97c9188afa36f4750130fcdf3f400eca9fa8"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -13429,15 +13381,6 @@ name = "windows-strings"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "87fa48cc5d406560701792be122a10132491cff9d0aeb23583cc2dcafc847319"
-dependencies = [
- "windows-link",
-]
-
-[[package]]
-name = "windows-strings"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a2ba9642430ee452d5a7aa78d72907ebe8cfda358e8cb7918a2050581322f97"
 dependencies = [
  "windows-link",
 ]

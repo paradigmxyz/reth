@@ -165,6 +165,7 @@ impl From<ScrollTypedTransaction> for ScrollTransactionRequest {
             ScrollTypedTransaction::Legacy(tx) => Self(tx.into()),
             ScrollTypedTransaction::Eip2930(tx) => Self(tx.into()),
             ScrollTypedTransaction::Eip1559(tx) => Self(tx.into()),
+            ScrollTypedTransaction::Eip7702(tx) => Self(tx.into()),
             ScrollTypedTransaction::L1Message(tx) => tx.into(),
         }
     }
@@ -175,6 +176,7 @@ impl From<ScrollTxEnvelope> for ScrollTransactionRequest {
         match value {
             ScrollTxEnvelope::Eip2930(tx) => tx.into(),
             ScrollTxEnvelope::Eip1559(tx) => tx.into(),
+            ScrollTxEnvelope::Eip7702(tx) => tx.into(),
             ScrollTxEnvelope::L1Message(tx) => tx.into(),
             _ => Default::default(),
         }

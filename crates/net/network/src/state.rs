@@ -6,6 +6,7 @@ use crate::{
     fetch::{BlockResponseOutcome, FetchAction, StateFetcher},
     message::{BlockRequest, NewBlockMessage, PeerResponse, PeerResponseResult},
     peers::{PeerAction, PeersManager},
+    transform::header::HeaderTransform,
     FetchClient,
 };
 use alloy_consensus::BlockHeader;
@@ -101,8 +102,10 @@ impl<N: NetworkPrimitives> NetworkState<N> {
         discovery: Discovery,
         peers_manager: PeersManager,
         num_active_peers: Arc<AtomicUsize>,
+        header_transform: Box<dyn HeaderTransform<N::BlockHeader>>,
     ) -> Self {
-        let state_fetcher = StateFetcher::new(peers_manager.handle(), num_active_peers);
+        let state_fetcher =
+            StateFetcher::new(peers_manager.handle(), num_active_peers, header_transform);
         Self {
             active_peers: Default::default(),
             peers_manager,
@@ -588,7 +591,7 @@ mod tests {
             queued_messages: Default::default(),
             client: BlockNumReader(Box::new(NoopProvider::default())),
             discovery: Discovery::noop(),
-            state_fetcher: StateFetcher::new(handle, Default::default()),
+            state_fetcher: StateFetcher::new(handle, Default::default(), Box::new(())),
         }
     }
 

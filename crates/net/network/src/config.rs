@@ -4,6 +4,7 @@ use crate::{
     error::NetworkError,
     import::{BlockImport, ProofOfStakeBlockImport},
     transactions::TransactionsManagerConfig,
+    transform::header::HeaderTransform,
     NetworkHandle, NetworkManager,
 };
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, Hardforks};
@@ -89,6 +90,8 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// This can be overridden to support custom handshake logic via the
     /// [`NetworkConfigBuilder`].
     pub handshake: Arc<dyn EthRlpxHandshake>,
+    /// A transformation hook applied to the downloaded headers.
+    pub header_transform: Box<dyn HeaderTransform<N::BlockHeader>>,
 }
 
 // === impl NetworkConfig ===
@@ -216,6 +219,8 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The Ethereum P2P handshake, see also:
     /// <https://github.com/ethereum/devp2p/blob/master/rlpx.md#initial-handshake>.
     handshake: Arc<dyn EthRlpxHandshake>,
+    /// The header transform type.
+    header_transform: Option<Box<dyn HeaderTransform<N::BlockHeader>>>,
 }
 
 impl NetworkConfigBuilder<EthNetworkPrimitives> {
@@ -256,6 +261,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             transactions_manager_config: Default::default(),
             nat: None,
             handshake: Arc::new(EthHandshake::default()),
+            header_transform: None,
         }
     }
 
@@ -564,6 +570,15 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         self
     }
 
+    /// Sets the header transform type.
+    pub fn header_transform(
+        mut self,
+        header_transform: Box<dyn HeaderTransform<N::BlockHeader>>,
+    ) -> Self {
+        self.header_transform = Some(header_transform);
+        self
+    }
+
     /// Consumes the type and creates the actual [`NetworkConfig`]
     /// for the given client type that can interact with the chain.
     ///
@@ -596,6 +611,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             transactions_manager_config,
             nat,
             handshake,
+            header_transform,
         } = self;
 
         let head = head.unwrap_or_else(|| Head {
@@ -664,6 +680,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             transactions_manager_config,
             nat,
             handshake,
+            header_transform: header_transform.unwrap_or_else(|| Box::new(())),
         }
     }
 }

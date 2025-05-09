@@ -106,4 +106,5 @@ allow-git = [
     "https://github.com/scroll-tech/sp1-intrinsics",
     "https://github.com/scroll-tech/poseidon-bn254",
     "https://github.com/scroll-tech/scroll-revm.git",
+    "https://github.com/scroll-tech/revm.git",
 ]

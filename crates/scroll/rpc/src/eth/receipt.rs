@@ -70,6 +70,9 @@ impl ScrollReceiptBuilder {
                     ScrollReceipt::Eip1559(_) => {
                         ScrollReceiptEnvelope::<Log>::Eip1559(receipt_with_bloom)
                     }
+                    ScrollReceipt::Eip7702(_) => {
+                        ScrollReceiptEnvelope::<Log>::Eip7702(receipt_with_bloom)
+                    }
                     ScrollReceipt::L1Message(_) => {
                         ScrollReceiptEnvelope::<Log>::L1Message(receipt_with_bloom)
                     }

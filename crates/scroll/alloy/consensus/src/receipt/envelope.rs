@@ -39,6 +39,11 @@ pub enum ScrollReceiptEnvelope<T = Log> {
     /// [EIP-1559]: https://eips.ethereum.org/EIPS/eip-1559
     #[cfg_attr(feature = "serde", serde(rename = "0x2", alias = "0x02"))]
     Eip1559(ReceiptWithBloom<Receipt<T>>),
+    /// Receipt envelope with type flag 4, containing a [EIP-7702] receipt.
+    ///
+    /// [EIP-7702]: https://eips.ethereum.org/EIPS/eip-7702
+    #[cfg_attr(feature = "serde", serde(rename = "0x4", alias = "0x04"))]
+    Eip7702(ReceiptWithBloom<Receipt<T>>),
     /// Receipt envelope with type flag 126, containing a [Scroll-L1-Message] receipt.
     #[cfg_attr(feature = "serde", serde(rename = "0x7e", alias = "0x7E"))]
     L1Message(ReceiptWithBloom<Receipt<T>>),
@@ -66,6 +71,9 @@ impl ScrollReceiptEnvelope<Log> {
             ScrollTxType::Eip1559 => {
                 Self::Eip1559(ReceiptWithBloom { receipt: inner_receipt, logs_bloom })
             }
+            ScrollTxType::Eip7702 => {
+                Self::Eip7702(ReceiptWithBloom { receipt: inner_receipt, logs_bloom })
+            }
             ScrollTxType::L1Message => {
                 Self::L1Message(ReceiptWithBloom { receipt: inner_receipt, logs_bloom })
             }
@@ -80,6 +88,7 @@ impl<T> ScrollReceiptEnvelope<T> {
             Self::Legacy(_) => ScrollTxType::Legacy,
             Self::Eip2930(_) => ScrollTxType::Eip2930,
             Self::Eip1559(_) => ScrollTxType::Eip1559,
+            Self::Eip7702(_) => ScrollTxType::Eip7702,
             Self::L1Message(_) => ScrollTxType::L1Message,
         }
     }
@@ -107,9 +116,11 @@ impl<T> ScrollReceiptEnvelope<T> {
     /// Return the receipt's bloom.
     pub const fn logs_bloom(&self) -> &Bloom {
         match self {
-            Self::Legacy(t) | Self::Eip2930(t) | Self::Eip1559(t) | Self::L1Message(t) => {
-                &t.logs_bloom
-            }
+            Self::Legacy(t) |
+            Self::Eip2930(t) |
+            Self::Eip1559(t) |
+            Self::Eip7702(t) |
+            Self::L1Message(t) => &t.logs_bloom,
         }
     }
 
@@ -133,9 +144,11 @@ impl<T> ScrollReceiptEnvelope<T> {
     /// receipt types may be added.
     pub const fn as_receipt(&self) -> Option<&Receipt<T>> {
         match self {
-            Self::Legacy(t) | Self::Eip2930(t) | Self::Eip1559(t) | Self::L1Message(t) => {
-                Some(&t.receipt)
-            }
+            Self::Legacy(t) |
+            Self::Eip2930(t) |
+            Self::Eip1559(t) |
+            Self::Eip7702(t) |
+            Self::L1Message(t) => Some(&t.receipt),
         }
     }
 }
@@ -144,9 +157,11 @@ impl ScrollReceiptEnvelope {
     /// Get the length of the inner receipt in the 2718 encoding.
     pub fn inner_length(&self) -> usize {
         match self {
-            Self::Legacy(t) | Self::Eip2930(t) | Self::Eip1559(t) | Self::L1Message(t) => {
-                t.length()
-            }
+            Self::Legacy(t) |
+            Self::Eip2930(t) |
+            Self::Eip1559(t) |
+            Self::Eip7702(t) |
+            Self::L1Message(t) => t.length(),
         }
     }
 
@@ -221,6 +236,7 @@ impl Encodable2718 for ScrollReceiptEnvelope {
             Self::Legacy(_) => None,
             Self::Eip2930(_) => Some(ScrollTxType::Eip2930 as u8),
             Self::Eip1559(_) => Some(ScrollTxType::Eip1559 as u8),
+            Self::Eip7702(_) => Some(ScrollTxType::Eip7702 as u8),
             Self::L1Message(_) => Some(ScrollTxType::L1Message as u8),
         }
     }
@@ -235,9 +251,11 @@ impl Encodable2718 for ScrollReceiptEnvelope {
             Some(ty) => out.put_u8(ty),
         }
         match self {
-            Self::L1Message(t) | Self::Legacy(t) | Self::Eip2930(t) | Self::Eip1559(t) => {
-                t.encode(out)
-            }
+            Self::Legacy(t) |
+            Self::Eip2930(t) |
+            Self::Eip1559(t) |
+            Self::Eip7702(t) |
+            Self::L1Message(t) => t.encode(out),
         }
     }
 }
@@ -248,6 +266,7 @@ impl Typed2718 for ScrollReceiptEnvelope {
             Self::Legacy(_) => ScrollTxType::Legacy,
             Self::Eip2930(_) => ScrollTxType::Eip2930,
             Self::Eip1559(_) => ScrollTxType::Eip1559,
+            Self::Eip7702(_) => ScrollTxType::Eip7702,
             Self::L1Message(_) => ScrollTxType::L1Message,
         };
         ty as u8
@@ -261,8 +280,9 @@ impl Decodable2718 for ScrollReceiptEnvelope {
                 Err(alloy_rlp::Error::Custom("type-0 eip2718 transactions are not supported")
                     .into())
             }
-            ScrollTxType::Eip1559 => Ok(Self::Eip1559(Decodable::decode(buf)?)),
             ScrollTxType::Eip2930 => Ok(Self::Eip2930(Decodable::decode(buf)?)),
+            ScrollTxType::Eip1559 => Ok(Self::Eip1559(Decodable::decode(buf)?)),
+            ScrollTxType::Eip7702 => Ok(Self::Eip7702(Decodable::decode(buf)?)),
             ScrollTxType::L1Message => Ok(Self::L1Message(Decodable::decode(buf)?)),
         }
     }

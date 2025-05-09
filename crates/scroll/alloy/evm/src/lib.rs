@@ -31,7 +31,7 @@ use revm::{
     Context, ExecuteEvm, InspectEvm, Inspector,
 };
 use revm_scroll::{
-    builder::{DefaultScrollContext, ScrollBuilder, ScrollContext},
+    builder::{DefaultScrollContext, MaybeWithEip7702, ScrollBuilder, ScrollContext},
     instructions::ScrollInstructions,
     precompile::ScrollPrecompileProvider,
     ScrollSpecId, ScrollTransaction,
@@ -174,7 +174,8 @@ where
     where
         Self: Sized,
     {
-        let Context { block: block_env, cfg: cfg_env, journaled_state, .. } = self.inner.0.data.ctx;
+        let ScrollContext { block: block_env, cfg: cfg_env, journaled_state, .. } =
+            self.inner.0.data.ctx;
 
         (journaled_state.database, EvmEnv { block_env, cfg_env })
     }
@@ -207,6 +208,7 @@ impl EvmFactory for ScrollEvmFactory {
                 .with_db(db)
                 .with_block(input.block_env)
                 .with_cfg(input.cfg_env)
+                .maybe_with_eip_7702()
                 .build_scroll_with_inspector(NoOpInspector {}),
             inspect: false,
         }
@@ -223,6 +225,7 @@ impl EvmFactory for ScrollEvmFactory {
                 .with_db(db)
                 .with_block(input.block_env)
                 .with_cfg(input.cfg_env)
+                .maybe_with_eip_7702()
                 .build_scroll_with_inspector(inspector),
             inspect: true,
         }
