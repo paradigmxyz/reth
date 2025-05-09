@@ -69,7 +69,7 @@ pub enum SparseTrie<P = DefaultBlindedProvider> {
     /// The trie is blind -- no nodes have been revealed
     ///
     /// This is the default state. In this state,
-    /// the trie cannot be directly queried or modified until nodes are revealed.    
+    /// the trie cannot be directly queried or modified until nodes are revealed.
     #[default]
     Blind,
     /// Some nodes in the Trie have been revealed.
@@ -261,6 +261,125 @@ impl<P: BlindedProvider> SparseTrie<P> {
     }
 }
 
+/// A representation for nibbles, that uses an even/odd flag.
+#[derive(Clone, PartialEq, Eq, Debug, Hash, Default)]
+pub struct PackedNibbles {
+    /// The nibbles themselves, stored as a byte array.
+    pub nibbles: SmallVec<[u8; 32]>,
+    /// The even/odd flag, indicating whether the length is even or odd.
+    pub even: bool,
+}
+
+impl PackedNibbles {
+    /// Returns whether or not the PackedNibbles is empty.
+    pub fn is_empty(&self) -> bool {
+        self.nibbles.is_empty()
+    }
+
+    /// Extends this PackedNibbles with the given PackedNibbles.
+    fn extend_path(&mut self, other: &PackedNibbles) {
+        // if we're odd we need to extend starting from the next nibble
+        //
+        // TODO: figure out if we should have it in the low or high nibble
+        // for example if we have 0x123, we're storing it as [0x12, 0x30], and we want to extend the
+        // path with 0x456, we need to end up with [0x12, 0x34, 0x56]
+        //
+        // this involves shifting everything over one nibble and merging the first byte of the
+        // second path with with the last byte of the first path
+        //
+        // If we're even, we're fine, and can just extend.
+        if other.is_empty() {
+            // if the other is empty, we can just return
+            return
+        }
+
+        if self.nibbles.is_empty() {
+            // if we're empty, we can just use the other nibbles
+            self.nibbles.copy_from_slice(&other.nibbles);
+            self.even = other.even;
+            return
+        }
+
+        // whether even or odd, we need to extend the nibbles
+        let prev_len = self.nibbles.len();
+        self.nibbles.extend_from_slice(&other.nibbles);
+
+        if self.even {
+            // we're even, set the value to the `other` even value
+            self.even = other.even;
+
+            // there's nothing left to do so return
+            return
+        }
+
+        // merge the boundary
+        // if we're odd, we need to set the high nibble to the low nibble of the next byte
+        self.nibbles[prev_len - 1] =
+            self.nibbles[prev_len - 1] | ((self.nibbles[prev_len] & 0xF0) >> 4);
+
+        // loop until one before the end
+        let last = self.nibbles.len() - 1;
+        for i in prev_len..last {
+            // shift over the current byte, then do the same merge
+            self.nibbles[i] = (self.nibbles[i] << 4) | ((self.nibbles[i + 1] & 0xF0) >> 4);
+        }
+
+        if other.even {
+            // if the other path is even, the last byte will have the original final byte, where we
+            // only care about the last nibble, so we need to shift it over
+            self.nibbles[last] = (self.nibbles[last] & 0x0F) << 4;
+        } else {
+            // if the second path is odd, we have shifted everything over already and don't need the
+            // final byte
+            self.nibbles.pop();
+        }
+
+        // we know that `self.even` is false, so we only set the even flag if both nibbles started
+        // out with odd lengths
+        //
+        // for this it's enough to check if the other had odd length
+        self.even = !other.even;
+    }
+
+    /// Pushes a single nibble to the end of the nibbles.
+    ///
+    /// This will only look at the high nibble of the byte passed.
+    ///
+    /// NOTE: if there is data in the low nibble, it
+    fn push_unchecked(&mut self, nibble: u8) {
+        // this is where i would mask the nibble
+        // let nibble = nibble & 0x0F;
+
+        // if we're empty, we can just push the nibble
+        if self.nibbles.is_empty() {
+            self.nibbles.push(nibble << 4);
+            self.even = false;
+            return
+        }
+
+        // we determine whether or not we should push a new low nibble or set the high nibble of
+        // the last byte based on the even value
+        if !self.even {
+            let last = self.nibbles.len() - 1;
+
+            // if we're odd, we need to set the high nibble of the last byte
+            self.nibbles[last] = self.nibbles[last] | nibble;
+        } else {
+            // if we're even, we need to push a new low nibble
+            self.nibbles.push(nibble << 4);
+        }
+
+        // finally set the even / odd to the opposite of the current value
+        self.even = !self.even;
+    }
+}
+
+impl From<Nibbles> for PackedNibbles {
+    fn from(nibbles: Nibbles) -> Self {
+        PackedNibbles { even: nibbles.len() % 2 == 0, nibbles: nibbles.pack() }
+    }
+}
+
 /// The representation of revealed sparse trie.
 ///
 /// The revealed sparse trie contains the actual trie structure with nodes, values, and
@@ -318,6 +437,14 @@ fn encode_nibbles(nibbles: &Nibbles) -> String {
     encoded[..nibbles.len()].to_string()
 }
 
+/// This encodes packed nibbles into a hex string.
+fn encode_packed_nibbles(packed: &PackedNibbles) -> String {
+    let actual_len = packed.nibbles.len() + if packed.even { 0 } else { 1 };
+    let encoded = hex::encode(&packed.nibbles);
+    encoded[..actual_len].to_string();
+    encoded
+}
+
 impl<P: BlindedProvider> fmt::Display for RevealedSparseTrie<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // This prints the trie in preorder traversal, using a stack
@@ -360,6 +487,7 @@ impl<P: BlindedProvider> fmt::Display for RevealedSparseTrie<P> {
                     // push the child node onto the stack with increased depth
                     let mut child_path = path.clone();
                     child_path.extend_from_slice_unchecked(key);
+                    let child_path = Nibbles::from(child_path);
                     if let Some(child_node) = self.nodes_ref().get(&child_path) {
                         stack.push((child_path, child_node, depth + 1));
                     }
@@ -371,6 +499,7 @@ impl<P: BlindedProvider> fmt::Display for RevealedSparseTrie<P> {
                         if state_mask.is_bit_set(i) {
                             let mut child_path = path.clone();
                             child_path.push_unchecked(i);
+                            let child_path = Nibbles::from(child_path);
                             if let Some(child_node) = self.nodes_ref().get(&child_path) {
                                 stack.push((child_path, child_node, depth + 1));
                             }
@@ -3614,6 +3743,98 @@ mod tests {
         sparse.wipe();
 
         assert_eq!(sparse.root(), EMPTY_ROOT_HASH);
+    }
+
+    #[test]
+    fn packed_nibbles_extend_path_both_odd() {
+        // for example if we have 0x123, we're storing it as [0x12, 0x30], and we want to extend the
+        // path with 0x456, we need to end up with [0x12, 0x34, 0x56]
+        let mut first_path: PackedNibbles = Nibbles::from_nibbles([0x1, 0x2, 0x3]).into();
+        let second_path: PackedNibbles = Nibbles::from_nibbles([0x4, 0x5, 0x6]).into();
+
+        first_path.extend_path(&second_path);
+        let expected: PackedNibbles = Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x5, 0x6]).into();
+        let hex_expected = hex::encode(expected.nibbles.clone());
+        let hex_first_path = hex::encode(first_path.nibbles.clone());
+        assert_eq!(first_path, expected, "Expected: {hex_expected}, got: {hex_first_path}");
+    }
+
+    #[test]
+    fn packed_nibbles_extend_path_first_odd() {
+        let mut first_path: PackedNibbles = Nibbles::from_nibbles([0x1, 0x2, 0x3]).into();
+        let second_path: PackedNibbles = Nibbles::from_nibbles([0x4, 0x5, 0x6, 0x7]).into();
+
+        first_path.extend_path(&second_path);
+        let expected: PackedNibbles =
+            Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7]).into();
+        let hex_expected = hex::encode(expected.nibbles.clone());
+        let hex_first_path = hex::encode(first_path.nibbles.clone());
+        assert_eq!(first_path, expected, "Expected: {hex_expected}, got: {hex_first_path}");
+    }
+
+    #[test]
+    fn packed_nibbles_extend_path_second_odd() {
+        let mut first_path: PackedNibbles = Nibbles::from_nibbles([0x1, 0x2]).into();
+        let second_path: PackedNibbles = Nibbles::from_nibbles([0x3, 0x4, 0x5]).into();
+
+        first_path.extend_path(&second_path);
+        let expected: PackedNibbles = Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x5]).into();
+        let hex_expected = hex::encode(expected.nibbles.clone());
+        let hex_first_path = hex::encode(first_path.nibbles.clone());
+        assert_eq!(first_path, expected, "Expected: {hex_expected}, got: {hex_first_path}");
+    }
+
+    #[test]
+    fn packed_nibbles_extend_path_both_even() {
+        let mut first_path: PackedNibbles = Nibbles::from_nibbles([0x1, 0x2]).into();
+        let second_path: PackedNibbles = Nibbles::from_nibbles([0x3, 0x4]).into();
+
+        first_path.extend_path(&second_path);
+        let expected: PackedNibbles = Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]).into();
+        let hex_expected = hex::encode(expected.nibbles.clone());
+        let hex_first_path = hex::encode(first_path.nibbles.clone());
+        assert_eq!(first_path, expected, "Expected: {hex_expected}, got: {hex_first_path}");
+    }
+
+    #[test]
+    fn packed_nibbles_extend_single_byte_path_even() {
+        let mut first_path: PackedNibbles = Nibbles::from_nibbles([0x1, 0x2]).into();
+        let second_path: PackedNibbles = Nibbles::from_nibbles([0x3]).into();
+
+        first_path.extend_path(&second_path);
+        let expected: PackedNibbles = Nibbles::from_nibbles([0x1, 0x2, 0x3]).into();
+        let hex_expected = hex::encode(expected.nibbles.clone());
+        let hex_first_path = hex::encode(first_path.nibbles.clone());
+        assert_eq!(first_path, expected, "Expected: {hex_expected}, got: {hex_first_path}");
+    }
+
+    #[test]
+    fn packed_nibbles_extend_single_byte_path_odd() {
+        let mut first_path: PackedNibbles = Nibbles::from_nibbles([0x1]).into();
+        let second_path: PackedNibbles = Nibbles::from_nibbles([0x2]).into();
+
+        first_path.extend_path(&second_path);
+        let expected: PackedNibbles = Nibbles::from_nibbles([0x1, 0x2]).into();
+        let hex_expected = hex::encode(expected.nibbles.clone());
+        let hex_first_path = hex::encode(first_path.nibbles.clone());
+        assert_eq!(first_path, expected, "Expected: {hex_expected}, got: {hex_first_path}");
+    }
+
+    #[test]
+    fn packed_nibbles_push_unchecked() {
+        let mut nibbles = PackedNibbles::default();
+        nibbles.push_unchecked(0x1);
+        assert_eq!(nibbles, Nibbles::from_nibbles([0x1]).into());
+        println!("{nibbles:?}");
+
+        nibbles.push_unchecked(0x2);
+        assert_eq!(nibbles, Nibbles::from_nibbles([0x1, 0x2]).into());
+
+        nibbles.push_unchecked(0x3);
+        assert_eq!(nibbles, Nibbles::from_nibbles([0x1, 0x2, 0x3]).into());
+
+        nibbles.push_unchecked(0x4);
+        assert_eq!(nibbles, Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]).into());
     }
 
     #[test]
