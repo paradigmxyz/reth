@@ -1,0 +1,35 @@
+name: Update Superchain Config
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'
+    - cron: '0 3 * * 4'
+
+permissions:
+  contents: write
+
+jobs:
+  update-superchain:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install required tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq zstd qpdf yq
+
+      - name: Run fetch_superchain_config.sh
+        run: |
+          chmod +x crates/optimism/chainspec/res/fetch_superchain_config.sh
+          cd crates/optimism/chainspec/res
+          ./fetch_superchain_config.sh
+
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && echo "No changes to commit" || git commit -m "chore: update superchain config"
+          git push
