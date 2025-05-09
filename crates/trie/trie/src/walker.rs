@@ -368,6 +368,10 @@ impl<C: TrieCursor> TrieWalker<C> {
                 trace!(target: "trie::walker", ?position, "found next sibling with state");
                 return Ok(())
             }
+            if self.changes.contains(subnode.full_key()) {
+                trace!(target: "trie::walker", ?subnode, "found next sibling with changes");
+                return Ok(())
+            }
             if position.is_last_child() {
                 trace!(target: "trie::walker", ?position, "checked all siblings");
                 break
