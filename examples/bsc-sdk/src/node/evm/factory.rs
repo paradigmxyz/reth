@@ -4,10 +4,11 @@ use crate::evm::{
         builder::BscBuilder,
         ctx::{BscContext, DefaultBsc},
     },
+    precompiles::BscPrecompiles,
     spec::BscSpecId,
     transaction::BscTxEnv,
 };
-use reth_evm::{EvmEnv, EvmFactory};
+use reth_evm::{precompiles::PrecompilesMap, EvmEnv, EvmFactory};
 use reth_revm::{Context, Database};
 use revm::{
     context::{
@@ -25,12 +26,13 @@ pub struct BscEvmFactory;
 
 impl EvmFactory for BscEvmFactory {
     type Evm<DB: Database<Error: Send + Sync + 'static>, I: Inspector<BscContext<DB>>> =
-        BscEvm<DB, I>;
+        BscEvm<DB, I, Self::Precompiles>;
     type Context<DB: Database<Error: Send + Sync + 'static>> = BscContext<DB>;
     type Tx = BscTxEnv<TxEnv>;
     type Error<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
     type HaltReason = HaltReason;
     type Spec = BscSpecId;
+    type Precompiles = PrecompilesMap;
 
     fn create_evm<DB: Database<Error: Send + Sync + 'static>>(
         &self,
@@ -42,7 +44,10 @@ impl EvmFactory for BscEvmFactory {
                 .with_block(input.block_env)
                 .with_cfg(input.cfg_env)
                 .with_db(db)
-                .build_bsc_with_inspector(NoOpInspector {}),
+                .build_bsc_with_inspector(NoOpInspector {})
+                .with_precompiles(PrecompilesMap::from_static(
+                    BscPrecompiles::default().precompiles(),
+                )),
             inspect: false,
         }
     }
@@ -61,7 +66,10 @@ impl EvmFactory for BscEvmFactory {
                 .with_block(input.block_env)
                 .with_cfg(input.cfg_env)
                 .with_db(db)
-                .build_bsc_with_inspector(inspector),
+                .build_bsc_with_inspector(inspector)
+                .with_precompiles(PrecompilesMap::from_static(
+                    BscPrecompiles::default().precompiles(),
+                )),
             inspect: true,
         }
     }

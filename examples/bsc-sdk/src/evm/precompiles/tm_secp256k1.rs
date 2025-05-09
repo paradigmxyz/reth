@@ -22,7 +22,7 @@ const SECP256K1_SIGNATURE_MSGHASH_LENGTH: usize = 32;
 /// | PubKey   | Signature    |  SignatureMsgHash    |
 ///
 /// | 33 bytes |  64 bytes    |       32 bytes       |
-fn tm_secp256k1_signature_recover_run(input: &Bytes, gas_limit: u64) -> PrecompileResult {
+fn tm_secp256k1_signature_recover_run(input: &[u8], gas_limit: u64) -> PrecompileResult {
     const TM_SECP256K1_SIGNATURE_RECOVER_BASE: u64 = 3_000;
 
     if TM_SECP256K1_SIGNATURE_RECOVER_BASE > gas_limit {
