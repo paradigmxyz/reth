@@ -699,7 +699,7 @@ visibility = "0.1.1"
 walkdir = "2.3.3"
 vergen-git2 = "1.0.5"
 
-# [patch.crates-io]
+[patch.crates-io]
 # alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
 # alloy-contract = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
 # alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
@@ -734,3 +734,5 @@ vergen-git2 = "1.0.5"
 # op-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/op-alloy", rev = "ad607c1" }
 #
 # revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "1207e33" }
+
+op-revm = { git = "https://github.com/bluealloy/revm", rev = "336b866" }
