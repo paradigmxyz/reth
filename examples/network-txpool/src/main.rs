@@ -9,13 +9,11 @@
 
 #![warn(unused_crate_dependencies)]
 
-use alloy_consensus::Transaction;
 use reth_ethereum::{
     network::{config::rng_secret_key, EthNetworkPrimitives, NetworkConfig, NetworkManager},
     pool::{
-        blobstore::InMemoryBlobStore, validate::ValidTransaction, CoinbaseTipOrdering,
-        EthPooledTransaction, PoolTransaction, TransactionListenerKind, TransactionOrigin,
-        TransactionPool, TransactionValidationOutcome, TransactionValidator,
+        blobstore::InMemoryBlobStore, test_utils::OkValidator, CoinbaseTipOrdering,
+        EthPooledTransaction, Pool, TransactionListenerKind, TransactionPool,
     },
     provider::test_utils::NoopProvider,
 };
@@ -28,7 +26,11 @@ async fn main() -> eyre::Result<()> {
     // remote or able to validate transaction against the latest state.
     let client = NoopProvider::default();
 
-    let pool = reth_ethereum::pool::Pool::new(
+    let pool: Pool<
+        OkValidator<EthPooledTransaction>,
+        CoinbaseTipOrdering<EthPooledTransaction>,
+        InMemoryBlobStore,
+    > = reth_ethereum::pool::Pool::new(
         OkValidator::default(),
         CoinbaseTipOrdering::default(),
         InMemoryBlobStore::default(),
@@ -65,39 +67,4 @@ async fn main() -> eyre::Result<()> {
     }
 
     Ok(())
-}
-
-/// A transaction validator that determines all transactions to be valid.
-///
-/// An actual validator impl like
-/// [TransactionValidationTaskExecutor](reth_ethereum::pool::TransactionValidationTaskExecutor)
-/// would require up to date db access.
-///
-/// CAUTION: This validator is not safe to use since it doesn't actually validate the transaction's
-/// properties such as chain id, balance, nonce, etc.
-#[derive(Debug, Default)]
-#[non_exhaustive]
-struct OkValidator;
-
-impl TransactionValidator for OkValidator {
-    type Transaction = EthPooledTransaction;
-
-    async fn validate_transaction(
-        &self,
-        _origin: TransactionOrigin,
-        transaction: Self::Transaction,
-    ) -> TransactionValidationOutcome<Self::Transaction> {
-        // Always return valid
-        let authorities = transaction.authorization_list().map(|auths| {
-            auths.iter().flat_map(|auth| auth.recover_authority()).collect::<Vec<_>>()
-        });
-        TransactionValidationOutcome::Valid {
-            balance: *transaction.cost(),
-            state_nonce: transaction.nonce(),
-            bytecode_hash: None,
-            transaction: ValidTransaction::Valid(transaction),
-            propagate: false,
-            authorities,
-        }
-    }
 }
