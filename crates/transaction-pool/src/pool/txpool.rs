@@ -748,10 +748,9 @@ impl<T: TransactionOrdering> TxPool<T> {
         }
     }
 
-    /// Determines if the tx sender is delegated or has a
-    /// pending delegation, and if so, ensures they have at most one in-flight
-    /// **executable** transaction, e.g. disallow stacked and nonce-gapped transactions
-    /// from the account.
+    /// Determines if the tx sender is delegated or has a  pending delegation, and if so, ensures
+    /// they have at most one in-flight **executable** transaction, e.g. disallow stacked and
+    /// nonce-gapped transactions from the account.
     fn check_delegation_limit(
         &self,
         transaction: &ValidPoolTransaction<T::Transaction>,
@@ -765,8 +764,10 @@ impl<T: TransactionOrdering> TxPool<T> {
             return Ok(())
         }
 
-        let pending_txs = self.pending_pool.get_txs_by_sender(transaction.sender_id());
-        if pending_txs.is_empty() {
+        let mut txs_by_sender =
+            self.pending_pool.iter_txs_by_sender(transaction.sender_id()).peekable();
+
+        if txs_by_sender.peek().is_none() {
             // Transaction with gapped nonce is not supported for delegated accounts
             if transaction.nonce() > on_chain_nonce {
                 return Err(PoolError::new(
@@ -779,8 +780,8 @@ impl<T: TransactionOrdering> TxPool<T> {
             return Ok(())
         }
 
-        // Transaction replacement is supported
-        if pending_txs.contains(&transaction.transaction_id) {
+        if txs_by_sender.any(|id| id == &transaction.transaction_id) {
+            // Transaction replacement is supported
             return Ok(())
         }
 
