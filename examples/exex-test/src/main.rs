@@ -105,7 +105,7 @@ async fn run_exex_test() -> eyre::Result<()> {
                 .chain(MAINNET.chain)
                 .genesis(
                     serde_json::from_str(include_str!(
-                        "../../../crates/e2e-test-utils/src/testsuite/assets/genesis.json"
+                        "../../../testing/e2e-test-utils/src/testsuite/assets/genesis.json"
                     ))
                     .unwrap(),
                 )

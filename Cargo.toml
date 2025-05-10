@@ -21,7 +21,6 @@ members = [
     "crates/consensus/common/",
     "crates/consensus/consensus/",
     "crates/consensus/debug-client/",
-    "crates/e2e-test-utils/",
     "crates/engine/invalid-block-hooks/",
     "crates/engine/local",
     "crates/engine/primitives/",
@@ -163,6 +162,7 @@ members = [
     "examples/custom-beacon-withdrawals",
     "testing/ef-tests/",
     "testing/testing-utils",
+    "testing/e2e-test-utils/",
 ]
 default-members = ["bin/reth"]
 exclude = ["book/sources", "book/cli"]
@@ -339,7 +339,7 @@ reth-discv4 = { path = "crates/net/discv4" }
 reth-discv5 = { path = "crates/net/discv5" }
 reth-dns-discovery = { path = "crates/net/dns" }
 reth-downloaders = { path = "crates/net/downloaders" }
-reth-e2e-test-utils = { path = "crates/e2e-test-utils" }
+reth-e2e-test-utils = { path = "testing/e2e-test-utils" }
 reth-ecies = { path = "crates/net/ecies" }
 reth-engine-local = { path = "crates/engine/local" }
 reth-engine-primitives = { path = "crates/engine/primitives", default-features = false }
