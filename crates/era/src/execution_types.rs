@@ -333,6 +333,18 @@ impl CompressedReceipts {
         let compressed = encoder.encode(data)?;
         Ok(Self::new(compressed))
     }
+    /// Encode a list of receipts to RLP format
+    pub fn encode_receipts_to_rlp<T: Encodable>(receipts: &[T]) -> Result<Vec<u8>, E2sError> {
+        let mut rlp_data = Vec::new();
+        alloy_rlp::encode_list(receipts, &mut rlp_data);
+        Ok(rlp_data)
+    }
+
+    /// Encode and compress a list of receipts
+    pub fn from_encodable_list<T: Encodable>(receipts: &[T]) -> Result<Self, E2sError> {
+        let rlp_data = Self::encode_receipts_to_rlp(receipts)?;
+        Self::from_rlp(&rlp_data)
+    }
 }
 
 impl DecodeCompressed for CompressedReceipts {
