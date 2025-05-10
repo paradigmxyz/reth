@@ -2,8 +2,8 @@ name: Update Superchain Config
 
 on:
   schedule:
-    - cron: '0 3 * * 1'
-    - cron: '0 3 * * 4'
+    - cron: '0 3 * * 0'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -26,10 +26,11 @@ jobs:
           cd crates/optimism/chainspec/res
           ./fetch_superchain_config.sh
 
-      - name: Commit changes
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git diff --cached --quiet && echo "No changes to commit" || git commit -m "chore: update superchain config"
-          git push
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "chore: update superchain config"
+          title: "chore: update superchain config"
+          body: "This PR updates the superchain configs via scheduled workflow."
+          branch: "ci/update-superchain-config"
+          delete-branch: true
