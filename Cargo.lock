@@ -7071,6 +7071,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "arbitrary",
+ "async-trait",
  "backon",
  "clap",
  "comfy-table",
