@@ -109,15 +109,20 @@ where
         let trie_cursor = self.trie_cursor_factory.account_trie_cursor()?;
 
         // Create the walker.
-        let mut prefix_set = self.prefix_sets.account_prefix_set.clone();
+        let mut prefix_set = self.prefix_sets.account_prefix_set;
         prefix_set.extend_keys(targets.keys().map(Nibbles::unpack));
-        let walker = TrieWalker::state_trie(trie_cursor, prefix_set.freeze());
+        let walker = TrieWalker::state_trie(
+            trie_cursor,
+            prefix_set.freeze(),
+            &self.prefix_sets.destroyed_accounts,
+        );
 
         // Create a hash builder to rebuild the root node since it is not available in the database.
         let retainer = targets.keys().map(Nibbles::unpack).collect();
         let mut hash_builder = HashBuilder::default()
             .with_proof_retainer(retainer)
-            .with_updates(self.collect_branch_node_masks);
+            .with_updates(self.collect_branch_node_masks)
+            .with_all_branch_nodes_in_database(true);
 
         // Initialize all storage multiproofs as empty.
         // Storage multiproofs for non empty tries will be overwritten if necessary.
@@ -129,6 +134,9 @@ where
             match account_node {
                 TrieElement::Branch(node) => {
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
+                }
+                TrieElement::LeafHash(key, hash) => {
+                    hash_builder.add_leaf_hash(key, hash);
                 }
                 TrieElement::Leaf(hashed_address, account) => {
                     let proof_targets = targets.remove(&hashed_address);
@@ -293,6 +301,9 @@ where
             match node {
                 TrieElement::Branch(node) => {
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
+                }
+                TrieElement::LeafHash(_, _) => {
+                    unreachable!("storage trie should not contain leaf hashes");
                 }
                 TrieElement::Leaf(hashed_slot, value) => {
                     hash_builder.add_leaf(

@@ -3,8 +3,12 @@ use crate::{
     trie_cursor::{subnode::SubNodePosition, CursorSubNode, TrieCursor},
     BranchNodeCompact, Nibbles,
 };
-use alloy_primitives::{map::HashSet, B256};
+use alloy_primitives::{
+    map::{B256Set, HashSet},
+    B256,
+};
 use reth_storage_errors::db::DatabaseError;
+use reth_trie_common::prefix_set::PrefixSetMut;
 use tracing::{instrument, trace};
 
 #[cfg(feature = "metrics")]
@@ -19,6 +23,7 @@ pub struct TrieWalker<C> {
     pub cursor: C,
     /// A vector containing the trie nodes that have been visited.
     pub stack: Vec<CursorSubNode>,
+    trie_type: crate::TrieType,
     /// A flag indicating whether the current node can be skipped when traversing the trie. This
     /// is determined by whether the current key's prefix is included in the prefix set and if the
     /// hash flag is set.
@@ -27,6 +32,8 @@ pub struct TrieWalker<C> {
     pub changes: PrefixSet,
     /// The retained trie node keys that need to be removed.
     removed_keys: Option<HashSet<Nibbles>>,
+    pub all_branch_nodes_in_database: bool,
+    pub destroyed_paths: PrefixSet,
     #[cfg(feature = "metrics")]
     /// Walker metrics.
     metrics: WalkerMetrics,
@@ -34,14 +41,14 @@ pub struct TrieWalker<C> {
 
 impl<C> TrieWalker<C> {
     /// Constructs a new `TrieWalker` for the state trie from existing stack and a cursor.
-    pub fn state_trie_from_stack(cursor: C, stack: Vec<CursorSubNode>, changes: PrefixSet) -> Self {
-        Self::from_stack(
-            cursor,
-            stack,
-            changes,
-            #[cfg(feature = "metrics")]
-            crate::TrieType::State,
-        )
+    pub fn state_trie_from_stack(
+        cursor: C,
+        stack: Vec<CursorSubNode>,
+        changes: PrefixSet,
+        destroyed_accounts: &B256Set,
+    ) -> Self {
+        Self::from_stack(cursor, stack, changes, crate::TrieType::State)
+            .with_all_branch_nodes_in_database(destroyed_accounts)
     }
 
     /// Constructs a new `TrieWalker` for the storage trie from existing stack and a cursor.
@@ -50,13 +57,7 @@ impl<C> TrieWalker<C> {
         stack: Vec<CursorSubNode>,
         changes: PrefixSet,
     ) -> Self {
-        Self::from_stack(
-            cursor,
-            stack,
-            changes,
-            #[cfg(feature = "metrics")]
-            crate::TrieType::Storage,
-        )
+        Self::from_stack(cursor, stack, changes, crate::TrieType::Storage)
     }
 
     /// Constructs a new `TrieWalker` from existing stack and a cursor.
@@ -64,14 +65,17 @@ impl<C> TrieWalker<C> {
         cursor: C,
         stack: Vec<CursorSubNode>,
         changes: PrefixSet,
-        #[cfg(feature = "metrics")] trie_type: crate::TrieType,
+        trie_type: crate::TrieType,
     ) -> Self {
         let mut this = Self {
             cursor,
             changes,
+            trie_type,
             stack,
             can_skip_current_node: false,
             removed_keys: None,
+            all_branch_nodes_in_database: false,
+            destroyed_paths: PrefixSet::default(),
             #[cfg(feature = "metrics")]
             metrics: WalkerMetrics::new(trie_type),
         };
@@ -84,6 +88,14 @@ impl<C> TrieWalker<C> {
         if retained {
             self.removed_keys = Some(HashSet::default());
         }
+        self
+    }
+
+    fn with_all_branch_nodes_in_database(mut self, destroyed_paths: &B256Set) -> Self {
+        trace!(target: "trie::walker", trie_type = ?self.trie_type, ?destroyed_paths, "all branch nodes in database");
+        self.all_branch_nodes_in_database = true;
+        self.destroyed_paths =
+            destroyed_paths.iter().map(Nibbles::unpack).collect::<PrefixSetMut>().freeze();
         self
     }
 
@@ -122,6 +134,14 @@ impl<C> TrieWalker<C> {
         self.stack.last().and_then(|n| n.hash())
     }
 
+    /// Returns the current hash in the trie if any.
+    ///
+    /// Differs from [`Self::hash`] in that it returns `None` if the subnode is positioned at the
+    /// child without a hash mask bit set. [`Self::hash`] panics in that case.
+    pub fn maybe_hash(&self) -> Option<B256> {
+        self.stack.last().and_then(|n| n.maybe_hash())
+    }
+
     /// Indicates whether the children of the current node are present in the trie.
     pub fn children_are_in_trie(&self) -> bool {
         self.stack.last().is_some_and(|n| n.tree_flag())
@@ -144,10 +164,38 @@ impl<C> TrieWalker<C> {
     /// Updates the skip node flag based on the walker's current state.
     fn update_skip_node(&mut self) {
         let old = self.can_skip_current_node;
-        self.can_skip_current_node = self
-            .stack
-            .last()
-            .is_some_and(|node| !self.changes.contains(node.full_key()) && node.hash_flag());
+        self.can_skip_current_node = self.stack.last().is_some_and(|node| {
+            if !node.hash_flag() {
+                // Can't skip a node that we don't know the hash for.
+                return false
+            }
+            if self.changes.contains(node.full_key()) {
+                // Can't skip a node that was changed.
+                return false
+            }
+            if self.all_branch_nodes_in_database {
+                // Special case when we store all branch nodes in the database, along with the
+                // hashes for leaf nodes.
+
+                if
+                // Current node doesn't have a tree flag set, so it's a leaf node. Only branch
+                // nodes have the tree flag set.
+                !node.tree_flag() &&
+                // Parent branch node of the current leaf node is at the path that has destroyed nodes.
+                // It means that some of the leaf node siblings were destroyed.
+                self.destroyed_paths.contains(&node.key)
+                {
+                    // Can't skip any of the leaf nodes that had its siblings destroyed.
+                    //
+                    // The reason for this is that if a branch node has two child leaf nodes, and
+                    // one of them is destroyed, then the branch node is deleted, and leaf node key
+                    // is changed. It also changes the leaf node hash, so we can't reuse it.
+                    return false
+                }
+            }
+
+            true
+        });
         trace!(
             target: "trie::walker",
             old,
@@ -160,38 +208,28 @@ impl<C> TrieWalker<C> {
 
 impl<C: TrieCursor> TrieWalker<C> {
     /// Constructs a new [`TrieWalker`] for the state trie.
-    pub fn state_trie(cursor: C, changes: PrefixSet) -> Self {
-        Self::new(
-            cursor,
-            changes,
-            #[cfg(feature = "metrics")]
-            crate::TrieType::State,
-        )
+    pub fn state_trie(cursor: C, changes: PrefixSet, destroyed_accounts: &B256Set) -> Self {
+        Self::new(cursor, changes, crate::TrieType::State)
+            .with_all_branch_nodes_in_database(destroyed_accounts)
     }
 
     /// Constructs a new [`TrieWalker`] for the storage trie.
     pub fn storage_trie(cursor: C, changes: PrefixSet) -> Self {
-        Self::new(
-            cursor,
-            changes,
-            #[cfg(feature = "metrics")]
-            crate::TrieType::Storage,
-        )
+        Self::new(cursor, changes, crate::TrieType::Storage)
     }
 
     /// Constructs a new `TrieWalker`, setting up the initial state of the stack and cursor.
-    fn new(
-        cursor: C,
-        changes: PrefixSet,
-        #[cfg(feature = "metrics")] trie_type: crate::TrieType,
-    ) -> Self {
+    fn new(cursor: C, changes: PrefixSet, trie_type: crate::TrieType) -> Self {
         // Initialize the walker with a single empty stack element.
         let mut this = Self {
             cursor,
             changes,
+            trie_type,
             stack: vec![CursorSubNode::default()],
             can_skip_current_node: false,
             removed_keys: None,
+            all_branch_nodes_in_database: false,
+            destroyed_paths: PrefixSet::default(),
             #[cfg(feature = "metrics")]
             metrics: WalkerMetrics::new(trie_type),
         };
@@ -328,6 +366,10 @@ impl<C: TrieCursor> TrieWalker<C> {
             let position = subnode.position();
             if subnode.state_flag() {
                 trace!(target: "trie::walker", ?position, "found next sibling with state");
+                return Ok(())
+            }
+            if self.changes.contains(subnode.full_key()) {
+                trace!(target: "trie::walker", ?subnode, "found next sibling with changes");
                 return Ok(())
             }
             if position.is_last_child() {

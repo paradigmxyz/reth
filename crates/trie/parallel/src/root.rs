@@ -148,6 +148,7 @@ where
         let walker = TrieWalker::state_trie(
             trie_cursor_factory.account_trie_cursor().map_err(ProviderError::Database)?,
             prefix_sets.account_prefix_set,
+            &prefix_sets.destroyed_accounts,
         )
         .with_deletions_retained(retain_updates);
         let mut account_node_iter = TrieNodeIter::state_trie(
@@ -155,12 +156,17 @@ where
             hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?,
         );
 
-        let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
+        let mut hash_builder = HashBuilder::default()
+            .with_updates(retain_updates)
+            .with_all_branch_nodes_in_database(true);
         let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
         while let Some(node) = account_node_iter.try_next().map_err(ProviderError::Database)? {
             match node {
                 TrieElement::Branch(node) => {
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
+                }
+                TrieElement::LeafHash(key, hash) => {
+                    hash_builder.add_leaf_hash(key, hash);
                 }
                 TrieElement::Leaf(hashed_address, account) => {
                     let (storage_root, _, updates) = match storage_roots.remove(&hashed_address) {

@@ -215,6 +215,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
             root_node,
             TrieMasks::none(),
             self.retain_updates,
+            true,
         )?;
 
         // Reveal the remaining proof nodes.
@@ -259,6 +260,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
             root_node,
             TrieMasks::none(),
             self.retain_updates,
+            false,
         )?;
 
         let revealed_nodes = self.revealed_storage_paths.entry(account).or_default();
@@ -334,6 +336,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                     tree_mask: branch_node_tree_masks.get(&Nibbles::default()).copied(),
                 },
                 self.retain_updates,
+                true,
             )?;
 
             // Reserve the capacity for new nodes ahead of time.
@@ -398,6 +401,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                         .copied(),
                 },
                 self.retain_updates,
+                false,
             )?;
 
             // Reserve the capacity for new nodes ahead of time.
@@ -494,6 +498,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                             trie_node,
                             TrieMasks::none(),
                             self.retain_updates,
+                            false,
                         )?;
                     } else {
                         // Reveal non-root storage trie node.
@@ -516,6 +521,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                         trie_node,
                         TrieMasks::none(),
                         self.retain_updates,
+                        true,
                     )?;
                 } else {
                     // Reveal non-root state trie node.
@@ -626,6 +632,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                         root_node,
                         TrieMasks { hash_mask, tree_mask },
                         self.retain_updates,
+                        true,
                     )
                     .map_err(Into::into)
             }
@@ -895,8 +902,9 @@ mod tests {
     use reth_trie::{updates::StorageTrieUpdates, HashBuilder, EMPTY_ROOT_HASH};
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
-        BranchNode, LeafNode, StorageMultiProof, TrieMask,
+        BranchNode, BranchNodeCompact, LeafNode, StorageMultiProof, TrieMask,
     };
+    use std::sync::Arc;
 
     #[test]
     fn validate_root_node_first_node_not_root() {
@@ -1220,7 +1228,23 @@ mod tests {
         pretty_assertions::assert_eq!(
             sparse_updates,
             TrieUpdates {
-                account_nodes: HashMap::default(),
+                account_nodes: HashMap::from_iter([(
+                    Nibbles::from_nibbles([0x1]),
+                    BranchNodeCompact {
+                        state_mask: TrieMask::new(0b11),
+                        tree_mask: TrieMask::default(),
+                        hash_mask: TrieMask::new(0b11),
+                        hashes: Arc::new(vec![
+                            b256!(
+                                "0x60a609d341cf463fbba963c8c0ee4e29561a1e6d63eaeb2e613b84b3734efa4d"
+                            ),
+                            b256!(
+                                "0x467e50cc243214ee52e747be078661fd75884c0ac83879818f4730c6146d75d1"
+                            )
+                        ]),
+                        root_hash: None
+                    }
+                )]),
                 storage_tries: HashMap::from_iter([(
                     b256!("0x1100000000000000000000000000000000000000000000000000000000000000"),
                     StorageTrieUpdates {

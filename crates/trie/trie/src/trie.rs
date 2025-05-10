@@ -149,7 +149,7 @@ where
     }
 
     fn calculate(self, retain_updates: bool) -> Result<StateRootProgress, StateRootError> {
-        trace!(target: "trie::state_root", "calculating state root");
+        trace!(target: "trie::state_root", account_prefix_set = ?self.prefix_sets.account_prefix_set, "calculating state root");
         let mut tracker = TrieTracker::default();
         let mut trie_updates = TrieUpdates::default();
 
@@ -158,11 +158,12 @@ where
         let hashed_account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
         let (mut hash_builder, mut account_node_iter) = match self.previous_state {
             Some(state) => {
-                let hash_builder = state.hash_builder.with_updates(retain_updates);
+                let hash_builder = state.hash_builder;
                 let walker = TrieWalker::state_trie_from_stack(
                     trie_cursor,
                     state.walker_stack,
                     self.prefix_sets.account_prefix_set,
+                    &self.prefix_sets.destroyed_accounts,
                 )
                 .with_deletions_retained(retain_updates);
                 let node_iter = TrieNodeIter::state_trie(walker, hashed_account_cursor)
@@ -170,14 +171,20 @@ where
                 (hash_builder, node_iter)
             }
             None => {
-                let hash_builder = HashBuilder::default().with_updates(retain_updates);
-                let walker =
-                    TrieWalker::state_trie(trie_cursor, self.prefix_sets.account_prefix_set)
-                        .with_deletions_retained(retain_updates);
+                let hash_builder = HashBuilder::default();
+                let walker = TrieWalker::state_trie(
+                    trie_cursor,
+                    self.prefix_sets.account_prefix_set,
+                    &self.prefix_sets.destroyed_accounts,
+                )
+                .with_deletions_retained(retain_updates);
                 let node_iter = TrieNodeIter::state_trie(walker, hashed_account_cursor);
                 (hash_builder, node_iter)
             }
         };
+
+        hash_builder =
+            hash_builder.with_updates(retain_updates).with_all_branch_nodes_in_database(true);
 
         let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
         let mut hashed_entries_walked = 0;
@@ -187,6 +194,9 @@ where
                 TrieElement::Branch(node) => {
                     tracker.inc_branch();
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
+                }
+                TrieElement::LeafHash(key, hash) => {
+                    hash_builder.add_leaf_hash(key, hash);
                 }
                 TrieElement::Leaf(hashed_address, account) => {
                     tracker.inc_leaf();
@@ -223,6 +233,8 @@ where
                     } else {
                         storage_root_calculator.root()?
                     };
+
+                    trace!(target: "trie::state_root", ?hashed_address, ?storage_root, "Calculated storage root");
 
                     account_rlp.clear();
                     let account = account.into_trie_account(storage_root);
@@ -419,6 +431,9 @@ where
                 TrieElement::Branch(node) => {
                     tracker.inc_branch();
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
+                }
+                TrieElement::LeafHash(_, _) => {
+                    unreachable!("storage trie should not contain leaf hashes");
                 }
                 TrieElement::Leaf(hashed_slot, value) => {
                     tracker.inc_leaf();
