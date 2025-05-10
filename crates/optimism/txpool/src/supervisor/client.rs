@@ -124,10 +124,12 @@ impl SupervisorClient {
     /// An implementation of `Stream` that is `Send`-able and tied to the lifetime `'a` of `self`.
     /// Each item yielded by the stream is a tuple `(TItem, Option<Result<(), InvalidCrossTx>>)`.
     ///   - The first element is the original `TItem` that was revalidated.
-    ///   - The second element is the `Option<Result<(), InvalidCrossTx>>` returned directly by the
-    ///     call to [`Self::is_valid_cross_tx`] for that `TItem`.
+    ///   - The second element is the `Option<Result<(), InvalidCrossTx>>` describes the outcome
+    ///     - `None`: Transaction was not identified as a cross-chain candidate by initial checks.
+    ///     - `Some(Ok(()))`: Supervisor confirmed the transaction is valid.
+    ///     - `Some(Err(InvalidCrossTx))`: Supervisor indicated the transaction is invalid.
     pub fn revalidate_interop_txs_stream<'a, TItem, InputIter>(
-        &'a self, // self is &'a SupervisorClient
+        &'a self,
         txs_to_revalidate: InputIter,
         current_timestamp: u64,
         revalidation_window: u64,
