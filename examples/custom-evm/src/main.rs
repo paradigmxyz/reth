@@ -2,9 +2,9 @@
 
 #![warn(unused_crate_dependencies)]
 
-use alloy_evm::{eth::EthEvmContext, EvmFactory};
+use alloy_evm::{eth::EthEvmContext, precompiles::PrecompilesMap, EvmFactory};
 use alloy_genesis::Genesis;
-use alloy_primitives::{address, Address, Bytes};
+use alloy_primitives::{address, Bytes};
 use reth::{
     builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
     tasks::TaskManager,
@@ -14,14 +14,11 @@ use reth_ethereum::{
     evm::{
         primitives::{Database, EvmEnv},
         revm::{
-            context::{Cfg, Context, TxEnv},
-            context_interface::{
-                result::{EVMError, HaltReason},
-                ContextTr,
-            },
-            handler::{EthPrecompiles, PrecompileProvider},
+            context::{Context, TxEnv},
+            context_interface::result::{EVMError, HaltReason},
+            handler::EthPrecompiles,
             inspector::{Inspector, NoOpInspector},
-            interpreter::{interpreter::EthInterpreter, InputsImpl, InterpreterResult},
+            interpreter::interpreter::EthInterpreter,
             precompile::{PrecompileFn, PrecompileOutput, PrecompileResult, Precompiles},
             primitives::hardfork::SpecId,
             MainBuilder, MainContext,
@@ -46,20 +43,26 @@ pub struct MyEvmFactory;
 
 impl EvmFactory for MyEvmFactory {
     type Evm<DB: Database, I: Inspector<EthEvmContext<DB>, EthInterpreter>> =
-        EthEvm<DB, I, CustomPrecompiles>;
+        EthEvm<DB, I, Self::Precompiles>;
     type Tx = TxEnv;
     type Error<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
     type HaltReason = HaltReason;
     type Context<DB: Database> = EthEvmContext<DB>;
     type Spec = SpecId;
+    type Precompiles = PrecompilesMap;
 
     fn create_evm<DB: Database>(&self, db: DB, input: EvmEnv) -> Self::Evm<DB, NoOpInspector> {
-        let evm = Context::mainnet()
+        let spec = input.cfg_env.spec;
+        let mut evm = Context::mainnet()
             .with_db(db)
             .with_cfg(input.cfg_env)
             .with_block(input.block_env)
             .build_mainnet_with_inspector(NoOpInspector {})
-            .with_precompiles(CustomPrecompiles::new());
+            .with_precompiles(PrecompilesMap::from_static(EthPrecompiles::default().precompiles));
+
+        if spec == SpecId::PRAGUE {
+            evm = evm.with_precompiles(PrecompilesMap::from_static(prague_custom()));
+        }
 
         EthEvm::new(evm, false)
     }
@@ -92,20 +95,6 @@ where
     }
 }
 
-/// A custom precompile that contains static precompiles.
-#[derive(Clone)]
-pub struct CustomPrecompiles {
-    pub precompiles: EthPrecompiles,
-}
-
-impl CustomPrecompiles {
-    /// Given a [`PrecompileProvider`] and cache for a specific precompiles, create a
-    /// wrapper that can be used inside Evm.
-    fn new() -> Self {
-        Self { precompiles: EthPrecompiles::default() }
-    }
-}
-
 /// Returns precompiles for Fjor spec.
 pub fn prague_custom() -> &'static Precompiles {
     static INSTANCE: OnceLock<Precompiles> = OnceLock::new();
@@ -121,39 +110,6 @@ pub fn prague_custom() -> &'static Precompiles {
             .into()]);
         precompiles
     })
-}
-
-impl<CTX: ContextTr> PrecompileProvider<CTX> for CustomPrecompiles {
-    type Output = InterpreterResult;
-
-    fn set_spec(&mut self, spec: <CTX::Cfg as Cfg>::Spec) -> bool {
-        let spec_id = spec.clone().into();
-        if spec_id == SpecId::PRAGUE {
-            self.precompiles = EthPrecompiles { precompiles: prague_custom(), spec: spec.into() }
-        } else {
-            PrecompileProvider::<CTX>::set_spec(&mut self.precompiles, spec);
-        }
-        true
-    }
-
-    fn run(
-        &mut self,
-        context: &mut CTX,
-        address: &Address,
-        inputs: &InputsImpl,
-        is_static: bool,
-        gas_limit: u64,
-    ) -> Result<Option<Self::Output>, String> {
-        self.precompiles.run(context, address, inputs, is_static, gas_limit)
-    }
-
-    fn warm_addresses(&self) -> Box<impl Iterator<Item = Address>> {
-        self.precompiles.warm_addresses()
-    }
-
-    fn contains(&self, address: &Address) -> bool {
-        self.precompiles.contains(address)
-    }
 }
 
 #[tokio::main]

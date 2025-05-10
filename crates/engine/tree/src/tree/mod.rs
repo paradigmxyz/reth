@@ -9,6 +9,7 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::{merge::EPOCH_SLOTS, BlockNumHash, NumHash};
+use alloy_evm::block::BlockExecutor;
 use alloy_primitives::{
     map::{HashMap, HashSet},
     BlockNumber, B256,
@@ -20,6 +21,7 @@ use error::{InsertBlockError, InsertBlockErrorKind, InsertBlockFatalError};
 use instrumented_state::InstrumentedStateProvider;
 use payload_processor::sparse_trie::StateRootComputeOutcome;
 use persistence_state::CurrentPersistenceAction;
+use precompile_cache::{CachedPrecompile, PrecompileCache};
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates,
     MemoryOverlayStateProvider, NewCanonicalChain,
@@ -32,7 +34,7 @@ use reth_engine_primitives::{
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_ethereum_primitives::EthPrimitives;
-use reth_evm::ConfigureEvm;
+use reth_evm::{ConfigureEvm, Evm};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes, PayloadTypes};
 use reth_primitives_traits::{
@@ -74,6 +76,7 @@ mod invalid_headers;
 mod metrics;
 mod payload_processor;
 mod persistence_state;
+pub mod precompile_cache;
 // TODO(alexey): compare trie updates in `insert_block_inner`
 #[expect(unused)]
 mod trie_updates;
@@ -613,6 +616,8 @@ where
     payload_processor: PayloadProcessor<N, C>,
     /// The EVM configuration.
     evm_config: C,
+    /// Precompile cache.
+    precompile_cache: PrecompileCache,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C: Debug> std::fmt::Debug
@@ -636,6 +641,8 @@ where
             .field("metrics", &self.metrics)
             .field("invalid_block_hook", &format!("{:p}", self.invalid_block_hook))
             .field("engine_kind", &self.engine_kind)
+            .field("payload_processor", &self.payload_processor)
+            .field("evm_config", &self.evm_config)
             .finish()
     }
 }
@@ -675,8 +682,14 @@ where
     ) -> Self {
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
 
-        let payload_processor =
-            PayloadProcessor::new(WorkloadExecutor::default(), evm_config.clone(), &config);
+        let precompile_cache = PrecompileCache::default();
+
+        let payload_processor = PayloadProcessor::new(
+            WorkloadExecutor::default(),
+            evm_config.clone(),
+            &config,
+            precompile_cache.clone(),
+        );
 
         Self {
             provider,
@@ -697,6 +710,7 @@ where
             engine_kind,
             payload_processor,
             evm_config,
+            precompile_cache,
         }
     }
 
@@ -2619,7 +2633,14 @@ where
             .with_bundle_update()
             .without_state_clear()
             .build();
-        let executor = self.evm_config.executor_for_block(&mut db, block);
+        let mut executor = self.evm_config.executor_for_block(&mut db, block);
+
+        if self.config.precompile_cache_enabled() {
+            executor.evm_mut().precompiles_mut().map_precompiles(|_, precompile| {
+                CachedPrecompile::wrap(precompile, self.precompile_cache.clone())
+            });
+        }
+
         let execution_start = Instant::now();
         let output = self.metrics.executor.execute_metered(
             executor,
