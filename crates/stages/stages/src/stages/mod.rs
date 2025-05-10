@@ -25,6 +25,7 @@ mod sender_recovery;
 mod tx_lookup;
 
 pub use bodies::*;
+pub use era::*;
 pub use execution::*;
 pub use finish::*;
 pub use hashing_account::*;
@@ -38,7 +39,9 @@ pub use s3::*;
 pub use sender_recovery::*;
 pub use tx_lookup::*;
 
+mod era;
 mod utils;
+
 use utils::*;
 
 #[cfg(test)]

@@ -93,13 +93,28 @@ impl<Http> EraStream<Http> {
 }
 
 /// Contains information about an ERA file.
-pub trait EraMeta: AsRef<Path> {
+pub trait EraMeta: Debug {
     /// Marking this particular ERA file as "processed" lets the caller hint that it is no longer
     /// going to be using it.
     ///
     /// The meaning of that is up to the implementation. The caller should assume that after this
     /// point is no longer possible to safely read it.
-    fn mark_as_processed(self) -> eyre::Result<()>;
+    fn mark_as_processed(&self) -> eyre::Result<()>;
+
+    /// A path to the era file.
+    ///
+    /// File should be openable and treated as read-only.
+    fn path(&self) -> &Path;
+}
+
+impl<T: EraMeta> EraMeta for Box<T> {
+    fn mark_as_processed(&self) -> eyre::Result<()> {
+        T::mark_as_processed(self)
+    }
+
+    fn path(&self) -> &Path {
+        T::path(self)
+    }
 }
 
 /// Contains information about ERA file that is hosted remotely and represented by a temporary
@@ -123,8 +138,12 @@ impl AsRef<Path> for EraRemoteMeta {
 
 impl EraMeta for EraRemoteMeta {
     /// Removes a temporary local file representation of the remotely hosted original.
-    fn mark_as_processed(self) -> eyre::Result<()> {
-        Ok(fs::remove_file(self.path)?)
+    fn mark_as_processed(&self) -> eyre::Result<()> {
+        Ok(fs::remove_file(&self.path)?)
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
     }
 }
 

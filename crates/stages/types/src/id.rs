@@ -8,6 +8,7 @@ pub enum StageId {
         note = "Static Files are generated outside of the pipeline and do not require a separate stage"
     )]
     StaticFile,
+    Era,
     Headers,
     Bodies,
     SenderRecovery,
@@ -28,7 +29,8 @@ pub enum StageId {
 
 impl StageId {
     /// All supported Stages
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
+        Self::Era,
         Self::Headers,
         Self::Bodies,
         Self::SenderRecovery,
@@ -63,6 +65,7 @@ impl StageId {
         match self {
             #[expect(deprecated)]
             Self::StaticFile => "StaticFile",
+            Self::Era => "Era",
             Self::Headers => "Headers",
             Self::Bodies => "Bodies",
             Self::SenderRecovery => "SenderRecovery",
@@ -83,7 +86,7 @@ impl StageId {
 
     /// Returns true if it's a downloading stage [`StageId::Headers`] or [`StageId::Bodies`]
     pub const fn is_downloading_stage(&self) -> bool {
-        matches!(self, Self::Headers | Self::Bodies)
+        matches!(self, Self::Era | Self::Headers | Self::Bodies)
     }
 
     /// Returns `true` if it's [`TransactionLookup`](StageId::TransactionLookup) stage.
@@ -109,6 +112,7 @@ mod tests {
 
     #[test]
     fn stage_id_as_string() {
+        assert_eq!(StageId::Era.to_string(), "Era");
         assert_eq!(StageId::Headers.to_string(), "Headers");
         assert_eq!(StageId::Bodies.to_string(), "Bodies");
         assert_eq!(StageId::SenderRecovery.to_string(), "SenderRecovery");
@@ -129,14 +133,8 @@ mod tests {
     fn is_downloading_stage() {
         assert!(StageId::Headers.is_downloading_stage());
         assert!(StageId::Bodies.is_downloading_stage());
+        assert!(StageId::Era.is_downloading_stage());
 
         assert!(!StageId::Execution.is_downloading_stage());
-    }
-
-    // Multiple places around the codebase assume headers is the first stage.
-    // Feel free to remove this test if the assumption changes.
-    #[test]
-    fn stage_all_headers_first() {
-        assert_eq!(*StageId::ALL.first().unwrap(), StageId::Headers);
     }
 }

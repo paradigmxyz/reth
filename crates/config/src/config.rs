@@ -6,6 +6,7 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
+use url::Url;
 
 #[cfg(feature = "serde")]
 const EXTENSION: &str = "toml";
@@ -100,6 +101,8 @@ impl Config {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]
 pub struct StageConfig {
+    /// ERA stage configuration.
+    pub era: EraConfig,
     /// Header stage configuration.
     pub headers: HeadersConfig,
     /// Body stage configuration.
@@ -136,6 +139,33 @@ impl StageConfig {
             .clean_threshold
             .max(self.account_hashing.clean_threshold)
             .max(self.storage_hashing.clean_threshold)
+    }
+}
+
+/// ERA stage configuration.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
+pub struct EraConfig {
+    /// Path to a local directory where ERA1 files are located.
+    ///
+    /// Conflicts with `url`.
+    pub path: Option<PathBuf>,
+    /// The base URL of an ERA1 file host to download from.
+    ///
+    /// Conflicts with `path`.
+    pub url: Option<Url>,
+    /// Path to a directory where files downloaded from `url` will be stored until processed.
+    ///
+    /// Required for `url`.
+    pub folder: Option<PathBuf>,
+}
+
+impl EraConfig {
+    /// Sets `folder` for temporary downloads as a directory called "era" inside `dir`.
+    pub fn with_datadir(mut self, dir: impl AsRef<Path>) -> Self {
+        self.folder = Some(dir.as_ref().join("era"));
+        self
     }
 }
 
