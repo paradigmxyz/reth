@@ -4,7 +4,7 @@ use reth_eth_wire_types::{
     message::RequestPair, BlockBodies, BlockHeaders, Capabilities, DisconnectReason, EthMessage,
     EthNetworkPrimitives, EthVersion, GetBlockBodies, GetBlockHeaders, GetNodeData,
     GetPooledTransactions, GetReceipts, NetworkPrimitives, NodeData, PooledTransactions, Receipts,
-    Status,
+    UnifiedStatus,
 };
 use reth_ethereum_forks::ForkId;
 use reth_network_p2p::error::{RequestError, RequestResult};
@@ -63,7 +63,7 @@ pub struct SessionInfo {
     /// Capabilities the peer announced.
     pub capabilities: Arc<Capabilities>,
     /// The status of the peer to which a session was established.
-    pub status: Arc<Status>,
+    pub status: Arc<UnifiedStatus>,
     /// Negotiated eth version of the session.
     pub version: EthVersion,
     /// The kind of peer this session represents
