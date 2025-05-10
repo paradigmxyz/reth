@@ -28,9 +28,9 @@ members = [
     "crates/engine/service",
     "crates/engine/tree/",
     "crates/engine/util/",
-    "crates/era",
-    "crates/era-downloader",
-    "crates/era-utils",
+    "crates/era/era",
+    "crates/era/downloader",
+    "crates/era/utils",
     "crates/errors/",
     "crates/ethereum/hardforks/",
     "crates/ethereum/cli/",
@@ -346,9 +346,9 @@ reth-engine-primitives = { path = "crates/engine/primitives", default-features =
 reth-engine-tree = { path = "crates/engine/tree" }
 reth-engine-service = { path = "crates/engine/service" }
 reth-engine-util = { path = "crates/engine/util" }
-reth-era = { path = "crates/era" }
-reth-era-downloader = { path = "crates/era-downloader" }
-reth-era-utils = { path = "crates/era-utils" }
+reth-era = { path = "crates/era/era" }
+reth-era-downloader = { path = "crates/era/downloader" }
+reth-era-utils = { path = "crates/era/utils" }
 reth-errors = { path = "crates/errors" }
 reth-eth-wire = { path = "crates/net/eth-wire" }
 reth-eth-wire-types = { path = "crates/net/eth-wire-types" }
