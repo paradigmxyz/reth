@@ -3,6 +3,7 @@
 //! An `RLPx` stream is multiplexed via the prepended message-id of a framed message.
 //! Capabilities are exchanged via the `RLPx` `Hello` message as pairs of `(id, version)`, <https://github.com/ethereum/devp2p/blob/master/rlpx.md#capability-messaging>
 
+use crate::types::Receipts69;
 use alloy_consensus::{BlockHeader, ReceiptWithBloom};
 use alloy_primitives::{Bytes, B256};
 use futures::FutureExt;
@@ -153,6 +154,8 @@ pub enum PeerResponseResult<N: NetworkPrimitives = EthNetworkPrimitives> {
     NodeData(RequestResult<Vec<Bytes>>),
     /// Represents a result containing receipts or an error.
     Receipts(RequestResult<Vec<Vec<ReceiptWithBloom<N::Receipt>>>>),
+    /// Represents a result containing receipts or an error for eth/69.
+    Receipts69(RequestResult<Vec<Vec<N::Receipt>>>),
 }
 
 // === impl PeerResponseResult ===
@@ -187,6 +190,9 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
             Self::Receipts(resp) => {
                 to_message!(resp, Receipts, id)
             }
+            Self::Receipts69(resp) => {
+                to_message!(resp, Receipts69, id)
+            }
         }
     }
 
@@ -198,6 +204,7 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
             Self::PooledTransactions(res) => res.as_ref().err(),
             Self::NodeData(res) => res.as_ref().err(),
             Self::Receipts(res) => res.as_ref().err(),
+            Self::Receipts69(res) => res.as_ref().err(),
         }
     }
 
