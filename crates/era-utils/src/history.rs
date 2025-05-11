@@ -119,7 +119,7 @@ where
     P: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory + BlockWriter<Block = B>,
     <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
 {
-    let mut reader = open(meta)?;
+    let reader = open(meta)?;
     let iter =
         reader
             .iter()
@@ -130,13 +130,16 @@ where
     process_iter(iter, writer, provider, hash_collector, total_difficulty, block_numbers)
 }
 
+/// An iterator that wraps era file extraction. After the final item [`EraMeta::mark_as_processed`]
+/// is called to ensure proper cleanup.
+#[derive(Debug)]
 pub struct ProcessIter<'a, Era: ?Sized, R: Read, BH, BB>
 where
     BH: FullBlockHeader + Value,
     BB: FullBlockBody<OmmerHeader = BH>,
 {
     iter: Map<
-        BlockTupleIterator<'a, R>,
+        BlockTupleIterator<R>,
         Box<dyn Fn(Result<BlockTuple, E2sError>) -> eyre::Result<(BH, BB)>>,
     >,
     era: &'a Era,
@@ -172,6 +175,7 @@ where
     }
 }
 
+/// Opens the era file described by `meta`.
 pub fn open<Era>(meta: &Era) -> eyre::Result<Era1Reader<std::fs::File>>
 where
     Era: EraMeta + ?Sized,
@@ -182,6 +186,7 @@ where
     Ok(reader)
 }
 
+/// Extracts a pair of [`FullBlockHeader`] and [`FullBlockBody`] from [`BlockTuple`].
 pub fn decode<BH, BB, E>(block: Result<BlockTuple, E>) -> eyre::Result<(BH, BB)>
 where
     BH: FullBlockHeader + Value,
@@ -207,7 +212,7 @@ where
 /// [`start_bound`]: RangeBounds::start_bound
 /// [`end_bound`]: RangeBounds::end_bound
 pub fn process_iter<P, B, BB, BH>(
-    mut iter: impl Iterator<Item = eyre::Result<(BH, BB)>> + Display,
+    mut iter: impl Iterator<Item = eyre::Result<(BH, BB)>>,
     writer: &mut StaticFileProviderRWRefMut<'_, <P as NodePrimitivesProvider>::Primitives>,
     provider: &P,
     hash_collector: &mut Collector<BlockHash, BlockNumber>,
@@ -267,7 +272,7 @@ where
         hash_collector.insert(hash, number)?;
     }
 
-    info!(target: "era::history::import", "Processed {iter}");
+    info!(target: "era::history::import", "Processed era file");
 
     Ok(last_header_number)
 }

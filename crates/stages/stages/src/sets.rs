@@ -38,7 +38,7 @@
 //! ```
 use crate::{
     stages::{
-        AccountHashingStage, BodyStage, EraStage, ExecutionStage, FinishStage, HeaderStage,
+        AccountHashingStage, BodyStage, ExecutionStage, FinishStage, HeaderStage,
         IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, PruneSenderRecoveryStage,
         PruneStage, SenderRecoveryStage, StorageHashingStage, TransactionLookupStage,
     },

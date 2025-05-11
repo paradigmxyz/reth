@@ -1,12 +1,12 @@
 use crate::{stages, StageCheckpoint, StageId};
 use alloy_primitives::{BlockHash, BlockNumber};
-use futures_util::{Stream, StreamExt, TryStreamExt};
+use futures_util::{Stream, StreamExt};
 use reqwest::{Client, Url};
 use reth_config::config::EtlConfig;
 use reth_db_api::{table::Value, tables, transaction::DbTxMut, DbTxUnwindExt};
+use reth_era::era1_file::Era1Reader;
 use reth_era_downloader::{read_dir, EraClient, EraMeta, EraStream, EraStreamConfig};
 use reth_era_utils as era;
-use reth_era_utils::{decode, open};
 use reth_etl::Collector;
 use reth_primitives_traits::{Block, FullBlockBody, FullBlockHeader, NodePrimitives};
 use reth_provider::{
@@ -22,10 +22,9 @@ use std::{
     task::{ready, Context, Poll},
 };
 
-type Item<BH, BB> =
-    Box<dyn Iterator<Item = eyre::Result<(BH, BB)>> + Send + Sync + 'static + Unpin>;
+type Item<BH, BB> = Box<dyn Iterator<Item = eyre::Result<(BH, BB)>> + Send + Sync + Unpin>;
 type ThreadSafeEraStream<BH, BB> =
-    Box<dyn Stream<Item = eyre::Result<Item<BH, BB>>> + Send + Sync + 'static + Unpin>;
+    Box<dyn Stream<Item = eyre::Result<Item<BH, BB>>> + Send + Sync + Unpin>;
 
 /// The [ERA1](https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md)
 /// pre-merge history stage.
@@ -94,11 +93,12 @@ where
 
                             Box::new(Box::pin(stream
                                 .map(|meta| meta.and_then(|meta| {
-                                    let mut reader = open(&meta)?;
+                                    let file = reth_fs_util::open(meta.path())?;
+                                    let reader = Era1Reader::new(file);
                                     let iter = reader.iter();
                                     let iter = iter.map(era::decode);
 
-                                    Ok(Box::new(iter.map(|v| v.map_err(|v| eyre::Error::from(v)))) as Item<BH, BB>)
+                                    Ok(Box::new(iter) as Item<BH, BB>)
                                 }))))
                         });
                     }
@@ -112,11 +112,12 @@ where
 
                             Box::new(Box::pin(stream
                                 .map(|meta| meta.and_then(|meta| {
-                                    let mut reader = open(&meta)?;
+                                    let file = reth_fs_util::open(meta.path())?;
+                                    let reader = Era1Reader::new(file);
                                     let iter = reader.iter();
                                     let iter = iter.map(era::decode);
 
-                                    Ok(Box::new(iter.map(|v| v.map_err(|v| eyre::Error::from(v)))) as Item<BH, BB>)
+                                    Ok(Box::new(iter) as Item<BH, BB>)
                                 }))))
                         });
                     }
