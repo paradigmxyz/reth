@@ -120,44 +120,44 @@ where
     <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
 {
     let mut reader = open(meta)?;
-    let iter = reader.iter().map(decode);
+    let iter =
+        reader
+            .iter()
+            .map(Box::new(decode)
+                as Box<dyn Fn(Result<BlockTuple, E2sError>) -> eyre::Result<(BH, BB)>>);
     let iter = ProcessIter { iter, era: meta };
 
     process_iter(iter, writer, provider, hash_collector, total_difficulty, block_numbers)
 }
 
-pub struct ProcessIter<'a, Era: ?Sized, R: Read, BH, BB, E, F>
+pub struct ProcessIter<'a, Era: ?Sized, R: Read, BH, BB>
 where
     BH: FullBlockHeader + Value,
     BB: FullBlockBody<OmmerHeader = BH>,
-    E: From<E2sError> + Error + Send + Sync + 'static,
-    F: Fn(Result<BlockTuple, E>) -> eyre::Result<(BH, BB)>,
 {
-    iter: Map<BlockTupleIterator<'a, R>, F>,
+    iter: Map<
+        BlockTupleIterator<'a, R>,
+        Box<dyn Fn(Result<BlockTuple, E2sError>) -> eyre::Result<(BH, BB)>>,
+    >,
     era: &'a Era,
 }
 
-impl<'a, Era: EraMeta + ?Sized, R: Read, BH, BB, E, F> Display
-    for ProcessIter<'a, Era, R, BH, BB, E, F>
+impl<'a, Era: EraMeta + ?Sized, R: Read, BH, BB> Display for ProcessIter<'a, Era, R, BH, BB>
 where
     BH: FullBlockHeader + Value,
     BB: FullBlockBody<OmmerHeader = BH>,
-    E: From<E2sError> + Error + Send + Sync + 'static,
-    F: Fn(Result<BlockTuple, E>) -> eyre::Result<(BH, BB)>,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         Display::fmt(&self.era.path().to_string_lossy(), f)
     }
 }
 
-impl<'a, Era, R, BH, BB, E, F> Iterator for ProcessIter<'a, Era, R, BH, BB, E, F>
+impl<'a, Era, R, BH, BB> Iterator for ProcessIter<'a, Era, R, BH, BB>
 where
     R: Read + Seek,
     Era: EraMeta + ?Sized,
     BH: FullBlockHeader + Value,
     BB: FullBlockBody<OmmerHeader = BH>,
-    E: From<E2sError> + Error + Send + Sync + 'static,
-    F: Fn(Result<BlockTuple, E>) -> eyre::Result<(BH, BB)>,
 {
     type Item = eyre::Result<(BH, BB)>;
 
