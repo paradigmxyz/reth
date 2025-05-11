@@ -2,8 +2,6 @@
 //!
 //! The import is downloaded using [`reth_era_downloader`] and parsed using [`reth_era`].
 
-#![feature(new_range_api)]
-
 mod history;
 
 /// Imports history from ERA files.

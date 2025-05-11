@@ -27,7 +27,7 @@ use std::{
     fmt::{Display, Formatter},
     io::{Read, Seek},
     iter::Map,
-    range::RangeBounds,
+    ops::RangeBounds,
     sync::mpsc,
 };
 use tracing::info;
