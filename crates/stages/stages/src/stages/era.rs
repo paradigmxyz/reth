@@ -50,7 +50,7 @@ where
 {
     fn create(self) -> Result<ThreadSafeEraStream<BH, BB>, StageError> {
         Ok(match self {
-            EraImportSource::Path(path) => {
+            Self::Path(path) => {
                 let stream = read_dir(path).map_err(|e| StageError::Fatal(e.into()))?;
 
                 Box::new(Box::pin(stream.map(|meta| {
@@ -64,7 +64,7 @@ where
                     })
                 })))
             }
-            EraImportSource::Url(url, era_dir) => {
+            Self::Url(url, era_dir) => {
                 let folder = era_dir.into_boxed_path();
                 let _ = reth_fs_util::create_dir_all(&folder);
                 let client = EraClient::new(Client::new(), url, folder);

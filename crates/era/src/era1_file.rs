@@ -468,7 +468,7 @@ mod tests {
         }
 
         // Read back from memory buffer
-        let mut reader = Era1Reader::new(Cursor::new(&buffer));
+        let reader = Era1Reader::new(Cursor::new(&buffer));
         let read_era1 = reader.read("testnet".to_string())?;
 
         // Verify core properties

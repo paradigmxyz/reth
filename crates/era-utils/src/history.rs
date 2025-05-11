@@ -130,6 +130,9 @@ where
     process_iter(iter, writer, provider, hash_collector, total_difficulty, block_numbers)
 }
 
+type ProcessInnerIter<R, BH, BB> =
+    Map<BlockTupleIterator<R>, Box<dyn Fn(Result<BlockTuple, E2sError>) -> eyre::Result<(BH, BB)>>>;
+
 /// An iterator that wraps era file extraction. After the final item [`EraMeta::mark_as_processed`]
 /// is called to ensure proper cleanup.
 #[derive(Debug)]
@@ -138,10 +141,7 @@ where
     BH: FullBlockHeader + Value,
     BB: FullBlockBody<OmmerHeader = BH>,
 {
-    iter: Map<
-        BlockTupleIterator<R>,
-        Box<dyn Fn(Result<BlockTuple, E2sError>) -> eyre::Result<(BH, BB)>>,
-    >,
+    iter: ProcessInnerIter<R, BH, BB>,
     era: &'a Era,
 }
 
