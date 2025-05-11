@@ -41,6 +41,7 @@ pub struct EraStage<BH, BB, F> {
 
 trait EraStreamFactory<BH, BB> {
     fn create(self, input: ExecInput) -> Result<ThreadSafeEraStream<BH, BB>, StageError>;
+    fn cleanup(&self) {}
 }
 
 impl<BH, BB> EraStreamFactory<BH, BB> for EraImportSource
@@ -87,6 +88,20 @@ where
                 })))
             }
         })
+    }
+
+    fn cleanup(&self) {
+        if let Self::Url(_, path) = self {
+            if let Ok(dir) = path.read_dir() {
+                for entry in dir.flatten() {
+                    let path = entry.path();
+
+                    if path.is_file() {
+                        let _ = reth_fs_util::remove_file(path);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -192,23 +207,13 @@ where
         self.last_block_height.take();
         self.stream.take();
 
-        if let Some(_source) = &self.source {
+        if let Some(source) = &self.source {
             // Bodies
             stages::ensure_consistency(provider, Some(input.unwind_to))?;
             provider.remove_bodies_above(input.unwind_to, StorageLocation::Both)?;
 
             // Wipe any unprocessed era files in the download temp directory
-            // if let EraImportSource::Url(_, path) = source {
-            //     if let Ok(dir) = path.read_dir() {
-            //         for entry in dir.flatten() {
-            //             let path = entry.path();
-            // 
-            //             if path.extension() == Some("era1".as_ref()) {
-            //                 let _ = reth_fs_util::remove_file(path);
-            //             }
-            //         }
-            //     }
-            // }
+            source.cleanup();
 
             // First unwind the db tables, until the unwind_to block number. use the walker to unwind
             // HeaderNumbers based on the index in CanonicalHeaders
