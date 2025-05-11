@@ -39,7 +39,7 @@ pub struct EraStage<BH, BB, F> {
     last_block_height: Option<BlockNumber>,
 }
 
-pub trait EraStreamFactory<BH, BB> {
+trait EraStreamFactory<BH, BB> {
     fn create(self) -> Result<ThreadSafeEraStream<BH, BB>, StageError>;
 }
 
@@ -270,6 +270,7 @@ mod tests {
         use super::*;
         use crate::test_utils::{TestRunnerError, TestStageDB};
         use alloy_consensus::{BlockBody, Header};
+        use futures_util::stream;
         use reth_db_api::{
             models::{StoredBlockBodyIndices, StoredBlockOmmers},
             transaction::DbTx,
@@ -280,53 +281,50 @@ mod tests {
         use reth_testing_utils::generators::{
             random_block_range, random_signed_tx, BlockRangeParams,
         };
-        use tempfile::TempDir;
         use tokio::sync::watch;
 
         pub(crate) struct EraTestRunner {
             channel: (watch::Sender<B256>, watch::Receiver<B256>),
             db: TestStageDB,
-            tempdir: TempDir,
+            responses: Vec<(Header, BlockBody<TransactionSigned>)>,
         }
 
         impl Default for EraTestRunner {
             fn default() -> Self {
                 Self {
-                    tempdir: TempDir::new().unwrap(),
                     channel: watch::channel(B256::ZERO),
                     db: TestStageDB::default(),
+                    responses: Default::default(),
                 }
             }
         }
 
-        struct TestIter;
+        #[derive(Clone)]
+        pub(crate) struct StubResponses(Vec<(Header, BlockBody<TransactionSigned>)>);
 
-        impl Iterator for TestIter {
-            type Item = (Header, BlockBody<TransactionSigned>);
-
-            fn next(&mut self) -> Option<Self::Item> {
-                todo!()
-            }
-        }
-
-        impl EraStreamFactory<Header, BlockBody<TransactionSigned>> for () {
+        impl EraStreamFactory<Header, BlockBody<TransactionSigned>> for StubResponses {
             fn create(
                 self,
             ) -> Result<ThreadSafeEraStream<Header, BlockBody<TransactionSigned>>, StageError>
             {
-                todo!()
+                let stream = stream::iter(vec![self.0]);
+
+                Ok(Box::new(Box::pin(stream.map(|meta| {
+                    Ok(Box::new(meta.into_iter().map(Ok))
+                        as Item<Header, BlockBody<TransactionSigned>>)
+                }))))
             }
         }
 
         impl StageTestRunner for EraTestRunner {
-            type S = EraStage<Header, BlockBody<TransactionSigned>, ()>;
+            type S = EraStage<Header, BlockBody<TransactionSigned>, StubResponses>;
 
             fn db(&self) -> &TestStageDB {
                 &self.db
             }
 
             fn stage(&self) -> Self::S {
-                EraStage::new(Some(()), EtlConfig::default())
+                EraStage::new(Some(StubResponses(self.responses.clone())), EtlConfig::default())
             }
         }
 
@@ -391,6 +389,8 @@ mod tests {
                         tx.commit()?;
                     }
                 }
+                self.responses =
+                    blocks.iter().map(|v| (v.header().clone(), v.body().clone())).collect();
                 Ok(blocks)
             }
 
