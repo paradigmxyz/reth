@@ -40,7 +40,7 @@ pub struct EraStage<BH, BB, F> {
 }
 
 trait EraStreamFactory<BH, BB> {
-    fn create(self) -> Result<ThreadSafeEraStream<BH, BB>, StageError>;
+    fn create(self, input: ExecInput) -> Result<ThreadSafeEraStream<BH, BB>, StageError>;
 }
 
 impl<BH, BB> EraStreamFactory<BH, BB> for EraImportSource
@@ -48,7 +48,7 @@ where
     BH: FullBlockHeader + Value,
     BB: FullBlockBody<OmmerHeader = BH>,
 {
-    fn create(self) -> Result<ThreadSafeEraStream<BH, BB>, StageError> {
+    fn create(self, input: ExecInput) -> Result<ThreadSafeEraStream<BH, BB>, StageError> {
         Ok(match self {
             Self::Path(path) => {
                 let stream = read_dir(path).map_err(|e| StageError::Fatal(e.into()))?;
@@ -69,7 +69,10 @@ where
                 let _ = reth_fs_util::create_dir_all(&folder);
                 let client = EraClient::new(Client::new(), url, folder);
 
-                let stream = EraStream::new(client, EraStreamConfig::default());
+                let stream = EraStream::new(
+                    client,
+                    EraStreamConfig::default().start_from(input.next_block()),
+                );
 
                 Box::new(Box::pin(stream.map(|meta| {
                     meta.and_then(|meta| {
@@ -134,7 +137,7 @@ where
 
         if self.stream.is_none() {
             if let Some(source) = self.source.clone() {
-                self.stream.replace(source.create()?);
+                self.stream.replace(source.create(input)?);
             }
         }
         if let Some(stream) = &mut self.stream {
@@ -564,6 +567,7 @@ mod tests {
         impl EraStreamFactory<Header, BlockBody<TransactionSigned>> for StubResponses {
             fn create(
                 self,
+                _input: ExecInput,
             ) -> Result<ThreadSafeEraStream<Header, BlockBody<TransactionSigned>>, StageError>
             {
                 let stream = stream::iter(vec![self.0]);
