@@ -272,12 +272,13 @@ mod tests {
         use alloy_consensus::{BlockBody, Header};
         use futures_util::stream;
         use reth_db_api::{
+            cursor::DbCursorRO,
             models::{StoredBlockBodyIndices, StoredBlockOmmers},
             transaction::DbTx,
         };
         use reth_ethereum_primitives::TransactionSigned;
         use reth_primitives_traits::{SealedBlock, SealedHeader};
-        use reth_provider::BlockNumReader;
+        use reth_provider::{BlockNumReader, TransactionsProvider};
         use reth_testing_utils::generators::{
             random_block_range, random_signed_tx, BlockRangeParams,
         };
@@ -425,6 +426,11 @@ mod tests {
                             td += header.difficulty;
                             assert_eq!(provider.header_td_by_number(block_num)?, Some(td));
                         }
+
+                        self.validate_db_blocks(
+                            output.checkpoint.block_number,
+                            output.checkpoint.block_number,
+                        )?;
                     }
                     _ => self.check_no_header_entry_above(initial_checkpoint)?,
                 };
@@ -468,6 +474,72 @@ mod tests {
 
             pub(crate) fn send_tip(&self, tip: B256) {
                 self.channel.0.send(tip).expect("failed to send tip");
+            }
+
+            /// Validate that the inserted block data is valid
+            pub(crate) fn validate_db_blocks(
+                &self,
+                prev_progress: BlockNumber,
+                highest_block: BlockNumber,
+            ) -> Result<(), TestRunnerError> {
+                let static_file_provider = self.db.factory.static_file_provider();
+
+                self.db.query(|tx| {
+                    // Acquire cursors on body related tables
+                    let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
+                    let mut ommers_cursor = tx.cursor_read::<tables::BlockOmmers>()?;
+                    let mut tx_block_cursor = tx.cursor_read::<tables::TransactionBlocks>()?;
+
+                    let first_body_key = match bodies_cursor.first()? {
+                        Some((key, _)) => key,
+                        None => return Ok(()),
+                    };
+
+                    let mut prev_number: Option<BlockNumber> = None;
+
+
+                    for entry in bodies_cursor.walk(Some(first_body_key))? {
+                        let (number, body) = entry?;
+
+                        // Validate sequentiality only after prev progress,
+                        // since the data before is mocked and can contain gaps
+                        if number > prev_progress {
+                            if let Some(prev_key) = prev_number {
+                                assert_eq!(prev_key + 1, number, "Body entries must be sequential");
+                            }
+                        }
+
+                        // Validate that the current entry is below or equals to the highest allowed block
+                        assert!(
+                            number <= highest_block,
+                            "We wrote a block body outside of our synced range. Found block with number {number}, highest block according to stage is {highest_block}",
+                        );
+
+                        let header = static_file_provider.header_by_number(number)?.expect("to be present");
+                        // Validate that ommers exist if any
+                        let stored_ommers =  ommers_cursor.seek_exact(number)?;
+                        if header.ommers_hash_is_empty() {
+                            assert!(stored_ommers.is_none(), "Unexpected ommers entry");
+                        } else {
+                            assert!(stored_ommers.is_some(), "Missing ommers entry");
+                        }
+
+                        let tx_block_id = tx_block_cursor.seek_exact(body.last_tx_num())?.map(|(_,b)| b);
+                        if body.tx_count == 0 {
+                            assert_ne!(tx_block_id,Some(number));
+                        } else {
+                            assert_eq!(tx_block_id, Some(number));
+                        }
+
+                        for tx_id in body.tx_num_range() {
+                            assert!(static_file_provider.transaction_by_id(tx_id)?.is_some(), "Transaction is missing.");
+                        }
+
+                        prev_number = Some(number);
+                    }
+                    Ok(())
+                })?;
+                Ok(())
             }
         }
     }
