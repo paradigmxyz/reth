@@ -51,7 +51,8 @@ where
     fn create(self, input: ExecInput) -> Result<ThreadSafeEraStream<BH, BB>, StageError> {
         Ok(match self {
             Self::Path(path) => {
-                let stream = read_dir(path).map_err(|e| StageError::Fatal(e.into()))?;
+                let stream =
+                    read_dir(path, input.next_block()).map_err(|e| StageError::Fatal(e.into()))?;
 
                 Box::new(Box::pin(stream.map(|meta| {
                     meta.and_then(|meta| {

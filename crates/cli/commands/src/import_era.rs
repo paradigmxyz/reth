@@ -73,7 +73,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
         let provider_factory = &provider_factory.provider_rw()?.0;
 
         if let Some(path) = self.import.path {
-            let stream = read_dir(path)?;
+            let stream = read_dir(path, 0)?;
 
             era::import(stream, provider_factory, &mut hash_collector)?;
         } else {

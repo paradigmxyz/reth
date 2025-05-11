@@ -1,3 +1,4 @@
+use crate::BLOCKS_PER_FILE;
 use alloy_primitives::{hex, hex::ToHexExt, BlockNumber};
 use bytes::Bytes;
 use eyre::{eyre, OptionExt};
@@ -10,8 +11,6 @@ use tokio::{
     io::{self, AsyncBufReadExt, AsyncWriteExt},
     join, try_join,
 };
-
-const BLOCKS_PER_FILE: u64 = 8192;
 
 /// Accesses the network over HTTP.
 pub trait HttpClient {
