@@ -270,6 +270,7 @@ mod tests {
         use super::*;
         use crate::test_utils::{TestRunnerError, TestStageDB};
         use alloy_consensus::{BlockBody, Header};
+        use alloy_primitives::TxNumber;
         use futures_util::stream;
         use reth_db_api::{
             cursor::DbCursorRO,
@@ -297,23 +298,6 @@ mod tests {
                     db: TestStageDB::default(),
                     responses: Default::default(),
                 }
-            }
-        }
-
-        #[derive(Clone)]
-        pub(crate) struct StubResponses(Vec<(Header, BlockBody<TransactionSigned>)>);
-
-        impl EraStreamFactory<Header, BlockBody<TransactionSigned>> for StubResponses {
-            fn create(
-                self,
-            ) -> Result<ThreadSafeEraStream<Header, BlockBody<TransactionSigned>>, StageError>
-            {
-                let stream = stream::iter(vec![self.0]);
-
-                Ok(Box::new(Box::pin(stream.map(|meta| {
-                    Ok(Box::new(meta.into_iter().map(Ok))
-                        as Item<Header, BlockBody<TransactionSigned>>)
-                }))))
             }
         }
 
@@ -395,7 +379,7 @@ mod tests {
                 Ok(blocks)
             }
 
-            /// Validate stored headers
+            /// Validate stored headers and bodies
             fn validate_execution(
                 &self,
                 input: ExecInput,
@@ -452,7 +436,24 @@ mod tests {
 
         impl UnwindStageTestRunner for EraTestRunner {
             fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
-                self.check_no_header_entry_above(input.unwind_to)
+                self.check_no_header_entry_above(input.unwind_to)?;
+
+                self.db.ensure_no_entry_above::<tables::BlockBodyIndices, _>(
+                    input.unwind_to,
+                    |key| key,
+                )?;
+                self.db
+                    .ensure_no_entry_above::<tables::BlockOmmers, _>(input.unwind_to, |key| key)?;
+                if let Some(last_tx_id) = self.last_tx_id()? {
+                    self.db
+                        .ensure_no_entry_above::<tables::Transactions, _>(last_tx_id, |key| key)?;
+                    self.db.ensure_no_entry_above::<tables::TransactionBlocks, _>(
+                        last_tx_id,
+                        |key| key,
+                    )?;
+                }
+
+                Ok(())
             }
         }
 
@@ -540,6 +541,37 @@ mod tests {
                     Ok(())
                 })?;
                 Ok(())
+            }
+
+            /// Get the last available tx id if any
+            pub(crate) fn last_tx_id(&self) -> Result<Option<TxNumber>, TestRunnerError> {
+                let last_body = self.db.query(|tx| {
+                    let v = tx.cursor_read::<tables::BlockBodyIndices>()?.last()?;
+                    Ok(v)
+                })?;
+                Ok(match last_body {
+                    Some((_, body)) if body.tx_count != 0 => {
+                        Some(body.first_tx_num + body.tx_count - 1)
+                    }
+                    _ => None,
+                })
+            }
+        }
+
+        #[derive(Clone)]
+        pub(crate) struct StubResponses(Vec<(Header, BlockBody<TransactionSigned>)>);
+
+        impl EraStreamFactory<Header, BlockBody<TransactionSigned>> for StubResponses {
+            fn create(
+                self,
+            ) -> Result<ThreadSafeEraStream<Header, BlockBody<TransactionSigned>>, StageError>
+            {
+                let stream = stream::iter(vec![self.0]);
+
+                Ok(Box::new(Box::pin(stream.map(|meta| {
+                    Ok(Box::new(meta.into_iter().map(Ok))
+                        as Item<Header, BlockBody<TransactionSigned>>)
+                }))))
             }
         }
     }
