@@ -7,7 +7,11 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     RawKey, RawTable, RawValue,
 };
-use reth_era::{e2s_types::E2sError, era1_file::Era1Reader, execution_types::DecodeCompressed};
+use reth_era::{
+    e2s_types::E2sError,
+    era1_file::{BlockTupleIterator, Era1Reader},
+    execution_types::{BlockTuple, DecodeCompressed},
+};
 use reth_era_downloader::EraMeta;
 use reth_etl::Collector;
 use reth_fs_util as fs;
@@ -17,7 +21,15 @@ use reth_provider::{
     StaticFileSegment, StaticFileWriter,
 };
 use reth_storage_api::{DBProvider, HeaderProvider, NodePrimitivesProvider, StorageLocation};
-use std::{collections::Bound, range::RangeBounds, sync::mpsc};
+use std::{
+    collections::Bound,
+    error::Error,
+    fmt::{Display, Formatter},
+    io::{Read, Seek},
+    iter::Map,
+    range::RangeBounds,
+    sync::mpsc,
+};
 use tracing::info;
 
 /// Imports blocks from `downloader` using `provider`.
@@ -107,19 +119,80 @@ where
     P: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory + BlockWriter<Block = B>,
     <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
 {
+    let mut reader = open(meta)?;
+    let iter = reader.iter().map(decode);
+    let iter = ProcessIter { iter, era: meta };
+
+    process_iter(iter, writer, provider, hash_collector, total_difficulty, block_numbers)
+}
+
+pub struct ProcessIter<'a, Era: ?Sized, R: Read, BH, BB, E, F>
+where
+    BH: FullBlockHeader + Value,
+    BB: FullBlockBody<OmmerHeader = BH>,
+    E: From<E2sError> + Error + Send + Sync + 'static,
+    F: Fn(Result<BlockTuple, E>) -> eyre::Result<(BH, BB)>,
+{
+    iter: Map<BlockTupleIterator<'a, R>, F>,
+    era: &'a Era,
+}
+
+impl<'a, Era: EraMeta + ?Sized, R: Read, BH, BB, E, F> Display
+    for ProcessIter<'a, Era, R, BH, BB, E, F>
+where
+    BH: FullBlockHeader + Value,
+    BB: FullBlockBody<OmmerHeader = BH>,
+    E: From<E2sError> + Error + Send + Sync + 'static,
+    F: Fn(Result<BlockTuple, E>) -> eyre::Result<(BH, BB)>,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(&self.era.path().to_string_lossy(), f)
+    }
+}
+
+impl<'a, Era, R, BH, BB, E, F> Iterator for ProcessIter<'a, Era, R, BH, BB, E, F>
+where
+    R: Read + Seek,
+    Era: EraMeta + ?Sized,
+    BH: FullBlockHeader + Value,
+    BB: FullBlockBody<OmmerHeader = BH>,
+    E: From<E2sError> + Error + Send + Sync + 'static,
+    F: Fn(Result<BlockTuple, E>) -> eyre::Result<(BH, BB)>,
+{
+    type Item = eyre::Result<(BH, BB)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.iter.next() {
+            Some(item) => Some(item),
+            None => match self.era.mark_as_processed() {
+                Ok(..) => None,
+                Err(e) => Some(Err(e)),
+            },
+        }
+    }
+}
+
+pub fn open<Era>(meta: &Era) -> eyre::Result<Era1Reader<std::fs::File>>
+where
+    Era: EraMeta + ?Sized,
+{
     let file = fs::open(meta.path())?;
-    let mut reader = Era1Reader::new(file);
+    let reader = Era1Reader::new(file);
 
-    let iter = reader.iter().map(|block| {
-        block.and_then(|block| {
-            let header: BH = block.header.decode()?;
-            let body: BB = block.body.decode()?;
+    Ok(reader)
+}
 
-            Ok((header, body))
-        })
-    });
+pub fn decode<BH, BB, E>(block: Result<BlockTuple, E>) -> eyre::Result<(BH, BB)>
+where
+    BH: FullBlockHeader + Value,
+    BB: FullBlockBody<OmmerHeader = BH>,
+    E: From<E2sError> + Error + Send + Sync + 'static,
+{
+    let block = block?;
+    let header: BH = block.header.decode()?;
+    let body: BB = block.body.decode()?;
 
-    process_iter(iter, meta, writer, provider, hash_collector, total_difficulty, block_numbers)
+    Ok((header, body))
 }
 
 /// Extracts block headers and bodies from `iter` and appends them using `writer` and `provider`.
@@ -133,9 +206,8 @@ where
 ///
 /// [`start_bound`]: RangeBounds::start_bound
 /// [`end_bound`]: RangeBounds::end_bound
-pub fn process_iter<Era, P, B, BB, BH>(
-    iter: impl Iterator<Item = Result<(BH, BB), E2sError>>,
-    meta: &Era,
+pub fn process_iter<P, B, BB, BH>(
+    mut iter: impl Iterator<Item = eyre::Result<(BH, BB)>> + Display,
     writer: &mut StaticFileProviderRWRefMut<'_, <P as NodePrimitivesProvider>::Primitives>,
     provider: &P,
     hash_collector: &mut Collector<BlockHash, BlockNumber>,
@@ -149,7 +221,6 @@ where
         Transaction = <<P as NodePrimitivesProvider>::Primitives as NodePrimitives>::SignedTx,
         OmmerHeader = BH,
     >,
-    Era: EraMeta + ?Sized,
     P: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory + BlockWriter<Block = B>,
     <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
 {
@@ -164,7 +235,7 @@ where
         Bound::Unbounded => None,
     };
 
-    for block in iter {
+    for block in &mut iter {
         let (header, body) = block?;
         let number = header.number();
 
@@ -196,9 +267,7 @@ where
         hash_collector.insert(hash, number)?;
     }
 
-    info!(target: "era::history::import", "Processed {}", meta.path().to_string_lossy());
-
-    meta.mark_as_processed()?;
+    info!(target: "era::history::import", "Processed {iter}");
 
     Ok(last_header_number)
 }
