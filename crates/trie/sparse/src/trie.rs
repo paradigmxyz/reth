@@ -205,14 +205,19 @@ impl<P> SparseTrie<P> {
         Ok(())
     }
 
-    /// Clears the trie by clearing the backing data structures, and resetting the trie to
+    /// Returns a cleared trie by clearing the backing data structures, and resetting the trie to
     /// only contain an empty root node.
     ///
+    /// Replaces the provider with a `DefaultBlindedProviderFactory`.
+    ///
     /// NOTE: This is a no-op if the trie is blinded.
-    pub fn clear(&mut self) {
-        if let Self::Revealed(revealed) = self {
+    pub fn cleared(self) -> SparseTrie<DefaultBlindedProvider> {
+        if let Self::Revealed(mut revealed) = self {
             revealed.clear();
+            return SparseTrie::Revealed(Box::new(revealed.with_provider(DefaultBlindedProvider)))
         }
+
+        SparseTrie::Blind
     }
 
     /// Calculates the root hash of the trie.
@@ -489,6 +494,11 @@ impl<P> RevealedSparseTrie<P> {
             updates: self.updates,
             rlp_buf: self.rlp_buf,
         }
+    }
+
+    /// Set the provider for the trie.
+    pub fn set_provider(&mut self, provider: P) {
+        self.provider = provider;
     }
 
     /// Configures the trie to retain information about updates.

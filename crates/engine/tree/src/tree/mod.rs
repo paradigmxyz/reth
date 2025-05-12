@@ -2167,7 +2167,7 @@ where
             // background task or try to compute it in parallel
             if self.config.use_state_root_task() {
                 match handle.state_root() {
-                    Ok(StateRootComputeOutcome { state_root, trie_updates }) => {
+                    Ok(StateRootComputeOutcome { state_root, trie_updates, trie: _ }) => {
                         let elapsed = execution_finish.elapsed();
                         info!(target: "engine::tree", ?state_root, ?elapsed, "State root task finished");
                         // we double check the state root here for good measure

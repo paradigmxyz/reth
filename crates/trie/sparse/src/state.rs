@@ -1,5 +1,8 @@
 use crate::{
-    blinded::{BlindedProvider, BlindedProviderFactory, DefaultBlindedProviderFactory},
+    blinded::{
+        BlindedProvider, BlindedProviderFactory, DefaultBlindedProvider,
+        DefaultBlindedProviderFactory,
+    },
     LeafLookup, RevealedSparseTrie, SparseTrie, TrieMasks,
 };
 use alloc::{collections::VecDeque, vec::Vec};
@@ -867,6 +870,12 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         let storage_trie = self.storages.get_mut(&address).ok_or(SparseTrieErrorKind::Blind)?;
         storage_trie.remove_leaf(slot)?;
         Ok(())
+    }
+
+    /// Clears and takes the account trie.
+    pub fn take_cleared_account_trie(&mut self) -> SparseTrie<DefaultBlindedProvider> {
+        let trie = std::mem::take(&mut self.state);
+        trie.cleared()
     }
 }
 

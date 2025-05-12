@@ -9,9 +9,9 @@ use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_trie::{updates::TrieUpdates, Nibbles};
 use reth_trie_parallel::root::ParallelStateRootError;
 use reth_trie_sparse::{
-    blinded::{BlindedProvider, BlindedProviderFactory},
+    blinded::{BlindedProvider, BlindedProviderFactory, DefaultBlindedProvider},
     errors::{SparseStateTrieResult, SparseTrieErrorKind},
-    SparseStateTrie,
+    SparseStateTrie, SparseTrie,
 };
 use std::{
     sync::mpsc,
@@ -109,7 +109,10 @@ where
         self.metrics.sparse_trie_final_update_duration_histogram.record(start.elapsed());
         self.metrics.sparse_trie_total_duration_histogram.record(now.elapsed());
 
-        Ok(StateRootComputeOutcome { state_root, trie_updates })
+        // take the account trie
+        let trie = self.trie.take_cleared_account_trie();
+
+        Ok(StateRootComputeOutcome { state_root, trie_updates, trie })
     }
 }
 
@@ -121,6 +124,8 @@ pub struct StateRootComputeOutcome {
     pub state_root: B256,
     /// The trie updates.
     pub trie_updates: TrieUpdates,
+    /// The account state trie.
+    pub trie: SparseTrie<DefaultBlindedProvider>,
 }
 
 /// Updates the sparse trie with the given proofs and state, and returns the elapsed time.
