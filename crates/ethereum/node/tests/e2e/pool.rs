@@ -72,7 +72,7 @@ async fn maintain_txpool_reorg() -> eyre::Result<()> {
         ),
     );
 
-    // build tx1 from two wallet1
+    // build tx1 from wallet1
     let envelop1 = TransactionTestContext::transfer_tx(1, w1.clone()).await;
     let tx1 = Recovered::new_unchecked(
         EthereumTxEnvelope::<TxEip4844>::from(envelop1.clone()),
@@ -112,7 +112,7 @@ async fn maintain_txpool_reorg() -> eyre::Result<()> {
     let payload1 = node.new_payload().await?;
 
     // clean up the internal pool of the provider node
-    node.inner.pool.remove_transactions(vec![tx_hash1.clone()]);
+    node.inner.pool.remove_transactions(vec![tx_hash1]);
 
     // inject tx2, make the node reorg and eventually generate `CanonStateNotification::Reorg` event
     // to propagate to the pool
@@ -127,8 +127,8 @@ async fn maintain_txpool_reorg() -> eyre::Result<()> {
     node.update_forkchoice(genesis_hash, block_hash1).await?;
 
     loop {
-        // wait for pool to process `CanonStateNotification::Reorg` event properly, and finally tx1
-        // will be added back to the pool and tx2 will be removed.
+        // wait for pool to process `CanonStateNotification::Commit` event correctly, and finally
+        // tx1 will be removed and tx2 is still in the pool
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         if txpool.get(&tx_hash1).is_none() && txpool.get(&tx_hash2).is_some() {
             break;
