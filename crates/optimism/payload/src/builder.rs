@@ -25,7 +25,7 @@ use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{transaction::OpTransaction, ADDRESS_L2_TO_L1_MESSAGE_PASSER};
 use reth_optimism_txpool::{
-    estimated_da_size::MaybeEstimatedDASize,
+    estimated_da_size::DataAvailabilitySized,
     interop::{is_valid_interop, MaybeInteropTransaction},
     OpPooledTx,
 };
@@ -638,10 +638,10 @@ where
 
         while let Some(tx) = best_txs.next(()) {
             let interop = tx.interop_deadline();
-            let da_size = tx.estimated_da_size();
+            let tx_da_size = tx.estimated_da_size();
             let tx = tx.into_consensus();
             if info.is_tx_over_limits(
-                da_size,
+                tx_da_size,
                 block_gas_limit,
                 tx_da_limit,
                 block_da_limit,
@@ -699,7 +699,7 @@ where
             // add gas used by the transaction to cumulative gas used, before creating the
             // receipt
             info.cumulative_gas_used += gas_used;
-            info.cumulative_da_bytes_used += da_size;
+            info.cumulative_da_bytes_used += tx_da_size;
 
             // update add to total fees
             let miner_fee = tx

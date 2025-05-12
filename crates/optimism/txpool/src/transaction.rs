@@ -1,5 +1,5 @@
 use crate::{
-    conditional::MaybeConditionalTransaction, estimated_da_size::MaybeEstimatedDASize,
+    conditional::MaybeConditionalTransaction, estimated_da_size::DataAvailabilitySized,
     interop::MaybeInteropTransaction,
 };
 use alloy_consensus::{
@@ -109,7 +109,7 @@ impl<Cons, Pooled> MaybeInteropTransaction for OpPooledTransaction<Cons, Pooled>
     }
 }
 
-impl<Cons: SignedTransaction, Pooled> MaybeEstimatedDASize for OpPooledTransaction<Cons, Pooled> {
+impl<Cons: SignedTransaction, Pooled> DataAvailabilitySized for OpPooledTransaction<Cons, Pooled> {
     fn estimated_da_size(&self) -> u64 {
         self.estimated_compressed_size()
     }
@@ -280,14 +280,14 @@ where
 /// Helper trait to provide payload builder with access to conditionals and encoded bytes of
 /// transaction.
 pub trait OpPooledTx:
-    MaybeConditionalTransaction + MaybeInteropTransaction + PoolTransaction + MaybeEstimatedDASize
+    MaybeConditionalTransaction + MaybeInteropTransaction + PoolTransaction + DataAvailabilitySized
 {
 }
 impl<T> OpPooledTx for T where
     T: MaybeConditionalTransaction
         + MaybeInteropTransaction
         + PoolTransaction
-        + MaybeEstimatedDASize
+        + DataAvailabilitySized
 {
 }
 
