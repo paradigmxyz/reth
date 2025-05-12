@@ -68,7 +68,7 @@ pub trait SignedTransaction:
         self.recover_signer_unchecked()
     }
 
-    /// Same as [`Self::recover_signer_unchecked`] but receives a buffer to operate on. This is used
+    /// Same as [`SignerRecoverable::recover_signer_unchecked`] but receives a buffer to operate on. This is used
     /// during batch recovery to avoid allocating a new buffer for each transaction.
     fn recover_signer_unchecked_with_buf(
         &self,
@@ -90,7 +90,7 @@ pub trait SignedTransaction:
     /// Tries to recover signer and return [`Recovered`].
     ///
     /// Returns `Err(Self)` if the transaction's signature is invalid, see also
-    /// [`SignedTransaction::recover_signer`].
+    /// [`SignerRecoverable::recover_signer`].
     #[auto_impl(keep_default_for(&, Arc))]
     fn try_into_recovered(self) -> Result<Recovered<Self>, Self> {
         match self.recover_signer() {
