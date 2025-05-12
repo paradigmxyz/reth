@@ -205,6 +205,16 @@ impl<P> SparseTrie<P> {
         Ok(())
     }
 
+    /// Clears the trie by clearing the backing data structures, and resetting the trie to
+    /// only contain an empty root node.
+    ///
+    /// NOTE: This is a no-op if the trie is blinded.
+    pub fn clear(&mut self) {
+        if let Self::Revealed(revealed) = self {
+            revealed.clear();
+        }
+    }
+
     /// Calculates the root hash of the trie.
     ///
     /// This will update any remaining dirty nodes before computing the root hash.
@@ -839,6 +849,22 @@ impl<P> RevealedSparseTrie<P> {
         self.updates = self.updates.is_some().then(SparseTrieUpdates::wiped);
     }
 
+    /// This clears all data structures in the sparse trie, keeping the backing data structures
+    /// allocated.
+    ///
+    /// This is useful for reusing the trie without needing to reallocate memory.
+    pub fn clear(&mut self) {
+        self.nodes.clear();
+        self.branch_node_tree_masks.clear();
+        self.branch_node_hash_masks.clear();
+        self.values.clear();
+        self.prefix_set.clear();
+        if let Some(updates) = self.updates.as_mut() {
+            updates.clear()
+        }
+        self.rlp_buf.clear();
+    }
+
     /// Calculates and returns the root hash of the trie.
     ///
     /// Before computing the hash, this function processes any remaining (dirty) nodes by
@@ -1325,22 +1351,6 @@ pub enum LeafLookup {
 }
 
 impl<P: BlindedProvider> RevealedSparseTrie<P> {
-    /// This clears all data structures in the sparse trie, keeping the backing data structures
-    /// allocated.
-    ///
-    /// This is useful for reusing the trie without needing to reallocate memory.
-    pub fn clear(&mut self) {
-        self.nodes.clear();
-        self.branch_node_tree_masks.clear();
-        self.branch_node_hash_masks.clear();
-        self.values.clear();
-        self.prefix_set.clear();
-        if let Some(updates) = self.updates.as_mut() {
-            updates.clear()
-        }
-        self.rlp_buf.clear();
-    }
-
     /// Attempts to find a leaf node at the specified path.
     ///
     /// This method traverses the trie from the root down to the given path, checking
