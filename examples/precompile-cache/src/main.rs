@@ -2,12 +2,17 @@
 
 #![warn(unused_crate_dependencies)]
 
-use alloy_evm::{eth::EthEvmContext, EvmFactory};
+use alloy_evm::{
+    eth::EthEvmContext,
+    precompiles::{DynPrecompile, Precompile, PrecompilesMap},
+    Evm, EvmFactory,
+};
 use alloy_genesis::Genesis;
-use alloy_primitives::{Address, Bytes};
+use alloy_primitives::Bytes;
 use parking_lot::RwLock;
 use reth::{
     builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
+    revm::precompile::PrecompileResult,
     tasks::TaskManager,
 };
 use reth_ethereum::{
@@ -15,14 +20,11 @@ use reth_ethereum::{
     evm::{
         primitives::{Database, EvmEnv},
         revm::{
-            context::{Cfg, Context, TxEnv},
-            context_interface::{
-                result::{EVMError, HaltReason},
-                ContextTr,
-            },
-            handler::{EthPrecompiles, PrecompileProvider},
+            context::{Context, TxEnv},
+            context_interface::result::{EVMError, HaltReason},
+            handler::EthPrecompiles,
             inspector::{Inspector, NoOpInspector},
-            interpreter::{interpreter::EthInterpreter, InputsImpl, InterpreterResult},
+            interpreter::interpreter::EthInterpreter,
             primitives::hardfork::SpecId,
             MainBuilder, MainContext,
         },
@@ -38,12 +40,10 @@ use reth_ethereum::{
 };
 use reth_tracing::{RethTracer, Tracer};
 use schnellru::{ByLength, LruMap};
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 /// Type alias for the LRU cache used within the [`PrecompileCache`].
-type PrecompileLRUCache = LruMap<(SpecId, Bytes, u64), Result<InterpreterResult, String>>;
-
-type WrappedEthEvm<DB, I> = EthEvm<DB, I, WrappedPrecompile<EthPrecompiles>>;
+type PrecompileLRUCache = LruMap<(Bytes, u64), PrecompileResult>;
 
 /// A cache for precompile inputs / outputs.
 ///
@@ -52,26 +52,28 @@ type WrappedEthEvm<DB, I> = EthEvm<DB, I, WrappedPrecompile<EthPrecompiles>>;
 ///
 /// NOTE: This does not work with "context stateful precompiles", ie `ContextStatefulPrecompile` or
 /// `ContextStatefulPrecompileMut`. They are explicitly banned.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct PrecompileCache {
     /// Caches for each precompile input / output.
-    cache: HashMap<Address, PrecompileLRUCache>,
+    cache: PrecompileLRUCache,
 }
 
 /// Custom EVM factory.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct MyEvmFactory {
     precompile_cache: Arc<RwLock<PrecompileCache>>,
 }
 
 impl EvmFactory for MyEvmFactory {
-    type Evm<DB: Database, I: Inspector<EthEvmContext<DB>, EthInterpreter>> = WrappedEthEvm<DB, I>;
+    type Evm<DB: Database, I: Inspector<EthEvmContext<DB>, EthInterpreter>> =
+        EthEvm<DB, I, PrecompilesMap>;
     type Tx = TxEnv;
     type Error<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
     type HaltReason = HaltReason;
     type Context<DB: Database> = EthEvmContext<DB>;
     type Spec = SpecId;
+    type Precompiles = PrecompilesMap;
 
     fn create_evm<DB: Database>(&self, db: DB, input: EvmEnv) -> Self::Evm<DB, NoOpInspector> {
         let new_cache = self.precompile_cache.clone();
@@ -81,9 +83,15 @@ impl EvmFactory for MyEvmFactory {
             .with_cfg(input.cfg_env)
             .with_block(input.block_env)
             .build_mainnet_with_inspector(NoOpInspector {})
-            .with_precompiles(WrappedPrecompile::new(EthPrecompiles::default(), new_cache));
+            .with_precompiles(PrecompilesMap::from_static(EthPrecompiles::default().precompiles));
 
-        EthEvm::new(evm, false)
+        let mut evm = EthEvm::new(evm, false);
+
+        evm.precompiles_mut().map_precompiles(|_, precompile| {
+            WrappedPrecompile::wrap(precompile, new_cache.clone())
+        });
+
+        evm
     }
 
     fn create_evm_with_inspector<DB: Database, I: Inspector<Self::Context<DB>, EthInterpreter>>(
@@ -98,82 +106,62 @@ impl EvmFactory for MyEvmFactory {
 
 /// A custom precompile that contains the cache and precompile it wraps.
 #[derive(Clone)]
-pub struct WrappedPrecompile<P> {
+pub struct WrappedPrecompile {
     /// The precompile to wrap.
-    precompile: P,
+    precompile: DynPrecompile,
     /// The cache to use.
     cache: Arc<RwLock<PrecompileCache>>,
-    /// The spec id to use.
-    spec: SpecId,
 }
 
-impl<P> WrappedPrecompile<P> {
-    /// Given a [`PrecompileProvider`] and cache for a specific precompiles, create a
+impl WrappedPrecompile {
+    fn new(precompile: DynPrecompile, cache: Arc<RwLock<PrecompileCache>>) -> Self {
+        Self { precompile, cache }
+    }
+
+    /// Given a [`DynPrecompile`] and cache for a specific precompiles, create a
     /// wrapper that can be used inside Evm.
-    fn new(precompile: P, cache: Arc<RwLock<PrecompileCache>>) -> Self {
-        WrappedPrecompile { precompile, cache: cache.clone(), spec: SpecId::default() }
+    fn wrap(precompile: DynPrecompile, cache: Arc<RwLock<PrecompileCache>>) -> DynPrecompile {
+        let wrapped = Self::new(precompile, cache);
+        move |data: &[u8], gas_limit: u64| -> PrecompileResult { wrapped.call(data, gas_limit) }
+            .into()
     }
 }
 
-impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> PrecompileProvider<CTX>
-    for WrappedPrecompile<P>
-{
-    type Output = P::Output;
-
-    fn set_spec(&mut self, spec: <CTX::Cfg as Cfg>::Spec) -> bool {
-        self.precompile.set_spec(spec.clone());
-        self.spec = spec.into();
-        true
-    }
-
-    fn run(
-        &mut self,
-        context: &mut CTX,
-        address: &Address,
-        inputs: &InputsImpl,
-        is_static: bool,
-        gas_limit: u64,
-    ) -> Result<Option<Self::Output>, String> {
+impl Precompile for WrappedPrecompile {
+    fn call(&self, data: &[u8], gas: u64) -> PrecompileResult {
         let mut cache = self.cache.write();
-        let key = (self.spec, inputs.input.clone(), gas_limit);
+        let key = (Bytes::copy_from_slice(data), gas);
 
         // get the result if it exists
-        if let Some(precompiles) = cache.cache.get_mut(address) {
-            if let Some(result) = precompiles.get(&key) {
-                return result.clone().map(Some)
-            }
+        if let Some(result) = cache.cache.get(&key) {
+            return result.clone()
         }
 
         // call the precompile if cache miss
-        let output = self.precompile.run(context, address, inputs, is_static, gas_limit);
+        let output = self.precompile.call(data, gas);
 
-        if let Some(output) = output.clone().transpose() {
-            // insert the result into the cache
-            cache
-                .cache
-                .entry(*address)
-                .or_insert(PrecompileLRUCache::new(ByLength::new(1024)))
-                .insert(key, output);
-        }
+        // insert the result into the cache
+        cache.cache.insert(key, output.clone());
 
         output
-    }
-
-    fn warm_addresses(&self) -> Box<impl Iterator<Item = Address>> {
-        self.precompile.warm_addresses()
-    }
-
-    fn contains(&self, address: &Address) -> bool {
-        self.precompile.contains(address)
     }
 }
 
 /// Builds a regular ethereum block executor that uses the custom EVM.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct MyExecutorBuilder {
     /// The precompile cache to use for all executors.
     precompile_cache: Arc<RwLock<PrecompileCache>>,
+}
+
+impl Default for MyExecutorBuilder {
+    fn default() -> Self {
+        let precompile_cache = PrecompileCache {
+            cache: LruMap::<(Bytes, u64), PrecompileResult>::new(ByLength::new(100)),
+        };
+        Self { precompile_cache: Arc::new(RwLock::new(precompile_cache)) }
+    }
 }
 
 impl<Node> ExecutorBuilder<Node> for MyExecutorBuilder

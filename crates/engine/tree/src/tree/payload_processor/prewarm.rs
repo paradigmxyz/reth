@@ -5,6 +5,7 @@ use crate::tree::{
     payload_processor::{
         executor::WorkloadExecutor, multiproof::MultiProofMessage, ExecutionCache,
     },
+    precompile_cache::{CachedPrecompile, PrecompileCache},
     StateProviderBuilder,
 };
 use alloy_consensus::transaction::Recovered;
@@ -205,6 +206,8 @@ pub(super) struct PrewarmContext<N: NodePrimitives, P, Evm> {
     pub(super) metrics: PrewarmMetrics,
     /// An atomic bool that tells prewarm tasks to not start any more execution.
     pub(super) terminate_execution: Arc<AtomicBool>,
+    pub(super) precompile_cache_enabled: bool,
+    pub(super) precompile_cache: PrecompileCache,
 }
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
@@ -226,6 +229,8 @@ where
             provider,
             metrics,
             terminate_execution,
+            precompile_cache_enabled,
+            precompile_cache,
         } = self;
 
         let state_provider = match provider.build() {
@@ -253,7 +258,13 @@ where
         evm_env.cfg_env.disable_nonce_check = true;
 
         // create a new executor and disable nonce checks in the env
-        let evm = evm_config.evm_with_env(state_provider, evm_env);
+        let mut evm = evm_config.evm_with_env(state_provider, evm_env);
+
+        if precompile_cache_enabled {
+            evm.precompiles_mut().map_precompiles(|_, precompile| {
+                CachedPrecompile::wrap(precompile, precompile_cache.clone())
+            });
+        }
 
         Some((evm, evm_config, metrics, terminate_execution))
     }
