@@ -251,29 +251,36 @@ where
                 }
             }
         } else {
-            debug!(target: "sync::stages::merkle::exec", current = ?current_block_number, target = ?to_block, "Updating trie");
-            let (root, updates) =
-                StateRoot::incremental_root_with_updates(provider.tx_ref(), range)
+            debug!(target: "sync::stages::merkle::exec", current = ?current_block_number, target = ?to_block, "Updating trie in chunks");
+            let mut current = from_block;
+            let mut final_root = B256::default();
+            while current < to_block {
+                let chunk_to = std::cmp::min(current + threshold - 1, to_block);
+                let chunk_range = current..=chunk_to;
+                let (root, updates) =
+                StateRoot::incremental_root_with_updates(provider.tx_ref(), chunk_range)
                     .map_err(|e| {
                         error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "Incremental state root failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
                         StageError::Fatal(Box::new(e))
                     })?;
-
-            provider.write_trie_updates(&updates)?;
+                provider.write_trie_updates(&updates)?;
+                final_root = root;
+                current = chunk_to + 1;
+            }
 
             let total_hashed_entries = (provider.count_entries::<tables::HashedAccounts>()? +
                 provider.count_entries::<tables::HashedStorages>()?)
                 as u64;
 
             let entities_checkpoint = EntitiesCheckpoint {
-                // This is fine because `range` doesn't have an upper bound, so in this `else`
-                // branch we're just hashing all remaining accounts and storage slots we have in the
-                // database.
+                // This is fine because we are processing all the accounts and storage slots in chunks
                 processed: total_hashed_entries,
                 total: total_hashed_entries,
             };
 
-            (root, entities_checkpoint)
+            // Clear existing checkpoints
+            self.save_execution_checkpoint(provider, None)?;
+            (final_root, entities_checkpoint)
         };
 
         // Reset the checkpoint
