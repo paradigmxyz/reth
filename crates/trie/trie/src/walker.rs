@@ -181,11 +181,9 @@ impl<C> TrieWalker<C> {
                 // Current node doesn't have a tree flag set, so it's a leaf node. Only branch
                 // nodes have the tree flag set.
                 !node.tree_flag() &&
-                // Parent branch node of the current leaf node is at the path that has
-                // modified or destroyed nodes. We cannot skip such a node because:
-                // 1. Destroyed leaf can collapse a branch node
-                // 2. Modified (in particular, inserted) leaf can create a branch node
-                (self.changes.contains(&node.key) || self.destroyed_paths.contains(&node.key))
+                // Parent branch node of the current leaf node is at the path that has destroyed nodes.
+                // It means that some of the leaf node siblings were destroyed.
+                self.destroyed_paths.contains(&node.key)
                 {
                     // Can't skip any of the leaf nodes that had its siblings destroyed.
                     //
