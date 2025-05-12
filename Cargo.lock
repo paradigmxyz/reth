@@ -4847,6 +4847,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "irys"
+version = "1.3.12"
+dependencies = [
+ "alloy-eips 0.15.10",
+ "alloy-genesis",
+ "alloy-primitives",
+ "alloy-rpc-types",
+ "eyre",
+ "futures",
+ "reth",
+ "reth-chainspec",
+ "reth-e2e-test-utils",
+ "reth-network",
+ "reth-node-ethereum",
+ "reth-tracing",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "is-terminal"
 version = "0.4.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"

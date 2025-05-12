@@ -1,0 +1,29 @@
+[package]
+name = "irys"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[dependencies]
+reth-e2e-test-utils.workspace = true
+reth-node-ethereum.workspace = true
+reth-tracing.workspace = true
+reth-network.workspace = true
+reth-chainspec.workspace = true
+alloy-primitives.workspace = true
+alloy-genesis.workspace = true
+alloy-rpc-types.workspace = true
+alloy-eips.workspace = true
+reth.workspace = true
+tokio.workspace = true
+eyre.workspace = true
+futures.workspace = true
+tracing.workspace = true
+serde_json.workspace = true
+
+[lints]
+# workspace = true
