@@ -1,5 +1,6 @@
 use crate::{BranchNodeCompact, Nibbles, StoredSubNode, CHILD_INDEX_RANGE};
 use alloy_primitives::B256;
+use reth_trie_common::prefix_set::PrefixSet;
 
 /// Cursor for iterating over a subtrie.
 #[derive(Clone)]
@@ -16,7 +17,7 @@ pub struct CursorSubNode {
 
 impl Default for CursorSubNode {
     fn default() -> Self {
-        Self::new(Nibbles::default(), None)
+        Self::new(Nibbles::default(), None, None)
     }
 }
 
@@ -55,13 +56,34 @@ impl From<CursorSubNode> for StoredSubNode {
 
 impl CursorSubNode {
     /// Creates a new [`CursorSubNode`] from a key and an optional node.
-    pub fn new(key: Nibbles, node: Option<BranchNodeCompact>) -> Self {
+    pub fn new(
+        key: Nibbles,
+        node: Option<BranchNodeCompact>,
+        mut changes: Option<&mut PrefixSet>,
+    ) -> Self {
         // Find the first nibble that is set in the state mask of the node.
         let position = node.as_ref().filter(|n| n.root_hash.is_none()).map_or(
             SubNodePosition::ParentBranch,
             |n| {
                 SubNodePosition::Child(
-                    CHILD_INDEX_RANGE.clone().find(|i| n.state_mask.is_bit_set(*i)).unwrap(),
+                    CHILD_INDEX_RANGE
+                        .clone()
+                        .find(|i| {
+                            if n.state_mask.is_bit_set(*i) {
+                                return true
+                            }
+
+                            if let Some(changes) = changes.as_mut() {
+                                let mut full_key = key.clone();
+                                full_key.push(*i);
+                                if changes.contains(&full_key) {
+                                    return true
+                                }
+                            }
+
+                            false
+                        })
+                        .unwrap(),
                 )
             },
         );

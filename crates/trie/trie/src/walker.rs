@@ -238,7 +238,7 @@ impl<C: TrieCursor> TrieWalker<C> {
 
         // Set up the root node of the trie in the stack, if it exists.
         if let Some((key, value)) = this.node(true).unwrap() {
-            this.stack[0] = CursorSubNode::new(key, Some(value));
+            this.stack[0] = CursorSubNode::new(key, Some(value), Some(&mut this.changes));
         }
 
         // Update the skip state for the root node.
@@ -323,7 +323,7 @@ impl<C: TrieCursor> TrieWalker<C> {
         }
 
         // Create a new CursorSubNode and push it to the stack.
-        let subnode = CursorSubNode::new(key, Some(node));
+        let subnode = CursorSubNode::new(key, Some(node), Some(&mut self.changes));
         let position = subnode.position();
         self.stack.push(subnode);
         self.update_skip_node();
