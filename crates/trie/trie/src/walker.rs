@@ -148,7 +148,7 @@ impl<C> TrieWalker<C> {
     }
 
     /// Returns the next unprocessed key in the trie along with its raw [`Nibbles`] representation.
-    #[instrument(level = "trace", target = "trie::walker", skip(self), ret)]
+    #[instrument(level = "trace", skip(self), ret)]
     pub fn next_unprocessed_key(&self) -> Option<(B256, Nibbles)> {
         self.key()
             .and_then(
@@ -294,7 +294,7 @@ impl<C: TrieCursor> TrieWalker<C> {
     }
 
     /// Consumes the next node in the trie, updating the stack.
-    #[instrument(level = "trace", target = "trie::walker", skip(self), ret)]
+    #[instrument(level = "trace", skip(self), ret)]
     fn consume_node(&mut self) -> Result<(), DatabaseError> {
         let Some((key, node)) = self.node(false)? else {
             // If no next node is found, clear the stack.
@@ -340,7 +340,7 @@ impl<C: TrieCursor> TrieWalker<C> {
     }
 
     /// Moves to the next sibling node in the trie, updating the stack.
-    #[instrument(level = "trace", target = "trie::walker", skip(self), ret)]
+    #[instrument(level = "trace", skip(self), ret)]
     fn move_to_next_sibling(
         &mut self,
         allow_root_to_child_nibble: bool,
