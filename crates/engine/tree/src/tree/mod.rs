@@ -85,7 +85,7 @@ pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
 use reth_evm::execute::BlockExecutionOutput;
 
-mod state;
+pub mod state;
 
 /// The largest gap for which the tree will be used to sync individual blocks by downloading them.
 ///

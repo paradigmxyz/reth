@@ -1,3 +1,5 @@
+//! Functionality related to tree state.
+
 use crate::engine::EngineApiKind;
 use alloy_eips::{merge::EPOCH_SLOTS, BlockNumHash};
 use alloy_primitives::{
@@ -29,7 +31,7 @@ const OPSTACK_PERSISTED_TRIE_UPDATES_RETENTION: u64 = EPOCH_SLOTS;
 /// - This only stores blocks that are connected to the canonical chain.
 /// - All executed blocks are valid and have been executed.
 #[derive(Debug, Default)]
-pub(crate) struct TreeState<N: NodePrimitives = EthPrimitives> {
+pub struct TreeState<N: NodePrimitives = EthPrimitives> {
     /// __All__ unique executed blocks by block hash that are connected to the canonical chain.
     ///
     /// This includes blocks of all forks.
