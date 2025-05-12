@@ -340,13 +340,7 @@ impl<C: TrieCursor> TrieWalker<C> {
     }
 
     /// Moves to the next sibling node in the trie, updating the stack.
-    #[instrument(
-        level = "trace",
-        target = "trie::walker",
-        skip(self),
-        fields(subnode = ?self.stack.last_mut()),
-        ret
-    )]
+    #[instrument(level = "trace", target = "trie::walker", skip(self), ret)]
     fn move_to_next_sibling(
         &mut self,
         allow_root_to_child_nibble: bool,
