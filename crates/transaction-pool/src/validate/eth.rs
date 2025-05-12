@@ -561,10 +561,14 @@ where
             }
         }
 
+        let authorities = transaction.authorization_list().map(|auths| {
+            auths.iter().flat_map(|auth| auth.recover_authority()).collect::<Vec<_>>()
+        });
         // Return the valid transaction
         TransactionValidationOutcome::Valid {
             balance: account.balance,
             state_nonce: account.nonce,
+            bytecode_hash: account.bytecode_hash,
             transaction: ValidTransaction::new(transaction, maybe_blob_sidecar),
             // by this point assume all external transactions should be propagated
             propagate: match origin {
@@ -574,6 +578,7 @@ where
                 }
                 TransactionOrigin::Private => false,
             },
+            authorities,
         }
     }
 
