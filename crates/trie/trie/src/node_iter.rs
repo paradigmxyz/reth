@@ -1,7 +1,9 @@
-use crate::{hashed_cursor::HashedCursor, trie_cursor::TrieCursor, walker::TrieWalker, Nibbles};
+use crate::{
+    hashed_cursor::HashedCursor, trie_cursor::TrieCursor, walker::TrieWalker, Nibbles, TrieType,
+};
 use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
-use tracing::trace;
+use tracing::{instrument, trace};
 
 /// Represents a branch node in the trie.
 #[derive(Debug)]
@@ -48,6 +50,8 @@ pub struct TrieNodeIter<C, H: HashedCursor> {
     pub walker: TrieWalker<C>,
     /// The cursor for the hashed entries.
     pub hashed_cursor: H,
+    /// The type of the trie.
+    trie_type: TrieType,
     /// The previous hashed key. If the iteration was previously interrupted, this value can be
     /// used to resume iterating from the last returned leaf node.
     previous_hashed_key: Option<B256>,
@@ -76,33 +80,20 @@ where
 {
     /// Creates a new [`TrieNodeIter`] for the state trie.
     pub fn state_trie(walker: TrieWalker<C>, hashed_cursor: H) -> Self {
-        Self::new(
-            walker,
-            hashed_cursor,
-            #[cfg(feature = "metrics")]
-            crate::TrieType::State,
-        )
+        Self::new(walker, hashed_cursor, TrieType::State)
     }
 
     /// Creates a new [`TrieNodeIter`] for the storage trie.
     pub fn storage_trie(walker: TrieWalker<C>, hashed_cursor: H) -> Self {
-        Self::new(
-            walker,
-            hashed_cursor,
-            #[cfg(feature = "metrics")]
-            crate::TrieType::Storage,
-        )
+        Self::new(walker, hashed_cursor, TrieType::Storage)
     }
 
     /// Creates a new [`TrieNodeIter`].
-    fn new(
-        walker: TrieWalker<C>,
-        hashed_cursor: H,
-        #[cfg(feature = "metrics")] trie_type: crate::TrieType,
-    ) -> Self {
+    fn new(walker: TrieWalker<C>, hashed_cursor: H, trie_type: TrieType) -> Self {
         Self {
             walker,
             hashed_cursor,
+            trie_type,
             previous_hashed_key: None,
             current_hashed_entry: None,
             should_check_walker_key: false,
@@ -193,6 +184,13 @@ where
     /// 5. Repeat.
     ///
     /// NOTE: The iteration will start from the key of the previous hashed entry if it was supplied.
+    #[instrument(
+        level = "trace",
+        target = "trie::node_iter",
+        skip_all,
+        fields(trie_type = ?self.trie_type),
+        ret
+    )]
     pub fn try_next(
         &mut self,
     ) -> Result<Option<TrieElement<<H as HashedCursor>::Value>>, DatabaseError> {
