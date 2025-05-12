@@ -408,6 +408,21 @@ where
         }
     }
 
+    /// Maps the [`EngineApiBuilder`] builder type.
+    pub fn with_engine_api<T>(self, engine_api_builder: T) -> RpcAddOns<Node, EthB, EV, T> {
+        let Self { hooks, eth_api_builder, engine_validator_builder, .. } = self;
+        RpcAddOns { hooks, eth_api_builder, engine_validator_builder, engine_api_builder }
+    }
+
+    /// Maps the [`EngineValidatorBuilder`] builder type.
+    pub fn with_engine_validator<T>(
+        self,
+        engine_validator_builder: T,
+    ) -> RpcAddOns<Node, EthB, T, EB> {
+        let Self { hooks, eth_api_builder, engine_api_builder, .. } = self;
+        RpcAddOns { hooks, eth_api_builder, engine_validator_builder, engine_api_builder }
+    }
+
     /// Sets the hook that is run once the rpc server is started.
     pub fn on_rpc_started<F>(mut self, hook: F) -> Self
     where
