@@ -191,6 +191,7 @@ impl OpReceipt {
 
         let mut deposit_nonce = None;
         let mut deposit_receipt_version = None;
+        let mut token_ratio = None;
 
         // For deposit receipts, try to decode nonce and version if they exist
         if tx_type == OpTxType::Deposit && buf.len() + header.payload_length > remaining {
@@ -204,6 +205,10 @@ impl OpReceipt {
             return Err(alloy_rlp::Error::UnexpectedLength);
         }
 
+        if tx_type == OpTxType::Deposit {
+            token_ratio = Some(Decodable::decode(buf)?);
+        }
+
         match tx_type {
             OpTxType::Legacy => Ok(Self::Legacy(Receipt { status, cumulative_gas_used, logs })),
             OpTxType::Eip2930 => Ok(Self::Eip2930(Receipt { status, cumulative_gas_used, logs })),
@@ -213,6 +218,7 @@ impl OpReceipt {
                 inner: Receipt { status, cumulative_gas_used, logs },
                 deposit_nonce,
                 deposit_receipt_version,
+                token_ratio,
             })),
         }
     }
@@ -393,6 +399,7 @@ mod compact {
         logs: Cow<'a, Vec<Log>>,
         deposit_nonce: Option<u64>,
         deposit_receipt_version: Option<u64>,
+        token_ratio: Option<u128>,
     }
 
     impl<'a> From<&'a OpReceipt> for CompactOpReceipt<'a> {
@@ -412,6 +419,11 @@ mod compact {
                 } else {
                     None
                 },
+                token_ratio: if let OpReceipt::Deposit(receipt) = receipt {
+                    receipt.token_ratio
+                } else {
+                    None
+                },
             }
         }
     }
@@ -425,6 +437,7 @@ mod compact {
                 logs,
                 deposit_nonce,
                 deposit_receipt_version,
+                token_ratio,
             } = receipt;
 
             let inner =
@@ -439,6 +452,7 @@ mod compact {
                     inner,
                     deposit_nonce,
                     deposit_receipt_version,
+                    token_ratio,
                 }),
             }
         }

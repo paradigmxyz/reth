@@ -132,19 +132,19 @@ pub fn parse_l1_info_tx_ecotone(data: &[u8]) -> Result<L1BlockInfo, OpBlockExecu
 
     let l1_base_fee_scalar = U256::try_from_be_slice(&data[..4])
         .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BaseFeeScalarConversion))?;
-    let l1_blob_base_fee_scalar = U256::try_from_be_slice(&data[4..8]).ok_or({
-        OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BlobBaseFeeScalarConversion)
-    })?;
+    // let l1_blob_base_fee_scalar = U256::try_from_be_slice(&data[4..8]).ok_or({
+    //     OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BlobBaseFeeScalarConversion)
+    // })?;
     let l1_base_fee = U256::try_from_be_slice(&data[32..64])
         .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BaseFeeConversion))?;
-    let l1_blob_base_fee = U256::try_from_be_slice(&data[64..96])
-        .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BlobBaseFeeConversion))?;
+    // let l1_blob_base_fee = U256::try_from_be_slice(&data[64..96])
+    //     .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BlobBaseFeeConversion))?;
 
     let mut l1block = L1BlockInfo::default();
     l1block.l1_base_fee = l1_base_fee;
     l1block.l1_base_fee_scalar = l1_base_fee_scalar;
-    l1block.l1_blob_base_fee = Some(l1_blob_base_fee);
-    l1block.l1_blob_base_fee_scalar = Some(l1_blob_base_fee_scalar);
+    // l1block.l1_blob_base_fee = Some(l1_blob_base_fee);
+    // l1block.l1_blob_base_fee_scalar = Some(l1_blob_base_fee_scalar);
 
     Ok(l1block)
 }
@@ -187,27 +187,27 @@ pub fn parse_l1_info_tx_isthmus(data: &[u8]) -> Result<L1BlockInfo, OpBlockExecu
 
     let l1_base_fee_scalar = U256::try_from_be_slice(&data[..4])
         .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BaseFeeScalarConversion))?;
-    let l1_blob_base_fee_scalar = U256::try_from_be_slice(&data[4..8]).ok_or({
+    let _l1_blob_base_fee_scalar = U256::try_from_be_slice(&data[4..8]).ok_or({
         OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BlobBaseFeeScalarConversion)
     })?;
     let l1_base_fee = U256::try_from_be_slice(&data[32..64])
         .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BaseFeeConversion))?;
-    let l1_blob_base_fee = U256::try_from_be_slice(&data[64..96])
+    let _l1_blob_base_fee = U256::try_from_be_slice(&data[64..96])
         .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BlobBaseFeeConversion))?;
-    let operator_fee_scalar = U256::try_from_be_slice(&data[160..164]).ok_or({
+    let _operator_fee_scalar = U256::try_from_be_slice(&data[160..164]).ok_or({
         OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::OperatorFeeScalarConversion)
     })?;
-    let operator_fee_constant = U256::try_from_be_slice(&data[164..172]).ok_or({
+    let _operator_fee_constant = U256::try_from_be_slice(&data[164..172]).ok_or({
         OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::OperatorFeeConstantConversion)
     })?;
 
     let mut l1block = L1BlockInfo::default();
     l1block.l1_base_fee = l1_base_fee;
     l1block.l1_base_fee_scalar = l1_base_fee_scalar;
-    l1block.l1_blob_base_fee = Some(l1_blob_base_fee);
-    l1block.l1_blob_base_fee_scalar = Some(l1_blob_base_fee_scalar);
-    l1block.operator_fee_scalar = Some(operator_fee_scalar);
-    l1block.operator_fee_constant = Some(operator_fee_constant);
+    // l1block.l1_blob_base_fee = Some(l1_blob_base_fee);
+    // l1block.l1_blob_base_fee_scalar = Some(l1_blob_base_fee_scalar);
+    // l1block.operator_fee_scalar = Some(operator_fee_scalar);
+    // l1block.operator_fee_constant = Some(operator_fee_constant);
 
     Ok(l1block)
 }

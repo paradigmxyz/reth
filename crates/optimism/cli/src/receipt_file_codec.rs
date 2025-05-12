@@ -113,6 +113,7 @@ impl TryFrom<OpGethReceipt> for OpReceipt {
                 inner: receipt,
                 deposit_nonce: None,
                 deposit_receipt_version: None,
+                token_ratio: None,
             })),
         }
     }
