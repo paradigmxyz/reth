@@ -47,6 +47,7 @@ use reth_stages_api::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_db::{DatabaseHashedPostState, StateCommitment};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
+use reth_trie_sparse::{blinded::DefaultBlindedProvider, SparseTrie};
 use state::TreeState;
 use std::{
     fmt::Debug,
@@ -2167,7 +2168,7 @@ where
             // background task or try to compute it in parallel
             if self.config.use_state_root_task() {
                 match handle.state_root() {
-                    Ok(StateRootComputeOutcome { state_root, trie_updates, trie: _ }) => {
+                    Ok(StateRootComputeOutcome { state_root, trie_updates, trie }) => {
                         let elapsed = execution_finish.elapsed();
                         info!(target: "engine::tree", ?state_root, ?elapsed, "State root task finished");
                         // we double check the state root here for good measure
@@ -2181,6 +2182,9 @@ where
                                 "State root task returned incorrect state root"
                             );
                         }
+
+                        // hold on to the sparse trie for the next payload
+                        self.payload_processor.set_sparse_trie(trie);
                     }
                     Err(error) => {
                         debug!(target: "engine::tree", %error, "Background parallel state root computation failed");

@@ -28,6 +28,7 @@ use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofTaskManager},
     root::ParallelStateRootError,
 };
+use reth_trie_sparse::{blinded::DefaultBlindedProvider, SparseTrie};
 use std::{
     collections::VecDeque,
     sync::{
@@ -67,6 +68,9 @@ where
     precompile_cache_enabled: bool,
     /// Precompile cache map.
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+    /// A sparse trie, kept around to be used for the state root computation so that allocations
+    /// can be minimized.
+    sparse_trie: Option<SparseTrie<DefaultBlindedProvider>>,
     _marker: std::marker::PhantomData<N>,
 }
 
@@ -91,6 +95,7 @@ where
             evm_config,
             precompile_cache_enabled: config.precompile_cache_enabled(),
             precompile_cache_map,
+            sparse_trie: None,
             _marker: Default::default(),
         }
     }
@@ -239,6 +244,11 @@ where
     {
         let prewarm_handle = self.spawn_caching_with(header, transactions, provider_builder, None);
         PayloadHandle { to_multi_proof: None, prewarm_handle, state_root: None }
+    }
+
+    /// Sets the sparse trie to be kept around for the state root computation.
+    pub(super) fn set_sparse_trie(&mut self, sparse_trie: SparseTrie<DefaultBlindedProvider>) {
+        self.sparse_trie = Some(sparse_trie);
     }
 
     /// Spawn prewarming optionally wired to the multiproof task for target updates.
