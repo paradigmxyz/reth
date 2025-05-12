@@ -273,7 +273,8 @@ where
                 as u64;
 
             let entities_checkpoint = EntitiesCheckpoint {
-                // This is fine because we are processing all the accounts and storage slots in chunks
+                // This is fine because we are processing all the accounts and storage slots in
+                // chunks
                 processed: total_hashed_entries,
                 total: total_hashed_entries,
             };
