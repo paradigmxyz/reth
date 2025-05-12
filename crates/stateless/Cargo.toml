@@ -17,10 +17,12 @@ alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-trie.workspace = true
 alloy-consensus.workspace = true
+alloy-rpc-types-debug.workspace = true
 
 # reth
 reth-ethereum-consensus.workspace = true
-reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
+reth-ethereum-primitives.workspace = true
 reth-errors.workspace = true
 reth-evm.workspace = true
 reth-evm-ethereum.workspace = true
@@ -33,4 +35,3 @@ reth-consensus.workspace = true
 # misc
 thiserror.workspace = true
 itertools.workspace = true
-serde.workspace = true # Needed because we copied `ExecutionWitness` into this crate

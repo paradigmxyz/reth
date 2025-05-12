@@ -101,6 +101,14 @@ use reth_evm::execute::BlockExecutionOutput;
 /// backfill this gap.
 pub(crate) const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 
+/// Default number of blocks to retain persisted trie updates
+const DEFAULT_PERSISTED_TRIE_UPDATES_RETENTION: u64 = EPOCH_SLOTS * 2;
+
+/// Number of blocks to retain persisted trie updates for OP Stack chains
+/// OP Stack chains only need `EPOCH_BLOCKS` as reorgs are relevant only when
+/// op-node reorgs to the same chain twice
+const OPSTACK_PERSISTED_TRIE_UPDATES_RETENTION: u64 = EPOCH_SLOTS;
+
 /// Keeps track of the state of the tree.
 ///
 /// ## Invariants
@@ -127,23 +135,26 @@ pub struct TreeState<N: NodePrimitives = EthPrimitives> {
     persisted_trie_updates: HashMap<B256, (BlockNumber, Arc<TrieUpdates>)>,
     /// Currently tracked canonical head of the chain.
     current_canonical_head: BlockNumHash,
+    /// The engine API variant of this handler
+    engine_kind: EngineApiKind,
 }
 
 impl<N: NodePrimitives> TreeState<N> {
     /// Returns a new, empty tree state that points to the given canonical head.
-    fn new(current_canonical_head: BlockNumHash) -> Self {
+    fn new(current_canonical_head: BlockNumHash, engine_kind: EngineApiKind) -> Self {
         Self {
             blocks_by_hash: HashMap::default(),
             blocks_by_number: BTreeMap::new(),
             current_canonical_head,
             parent_to_child: HashMap::default(),
             persisted_trie_updates: HashMap::default(),
+            engine_kind,
         }
     }
 
     /// Resets the state and points to the given canonical head.
     fn reset(&mut self, current_canonical_head: BlockNumHash) {
-        *self = Self::new(current_canonical_head);
+        *self = Self::new(current_canonical_head, self.engine_kind);
     }
 
     /// Returns the number of executed blocks stored.
@@ -292,6 +303,22 @@ impl<N: NodePrimitives> TreeState<N> {
         debug!(target: "engine::tree", ?upper_bound, ?last_persisted_hash, "Removed canonical blocks from the tree");
     }
 
+    /// Prunes old persisted trie updates based on the current block number
+    /// and chain type (OP Stack or regular)
+    pub fn prune_persisted_trie_updates(&mut self) {
+        let retention_blocks = if self.engine_kind.is_opstack() {
+            OPSTACK_PERSISTED_TRIE_UPDATES_RETENTION
+        } else {
+            DEFAULT_PERSISTED_TRIE_UPDATES_RETENTION
+        };
+
+        let earliest_block_to_retain =
+            self.current_canonical_head.number.saturating_sub(retention_blocks);
+
+        self.persisted_trie_updates
+            .retain(|_, (block_number, _)| *block_number > earliest_block_to_retain);
+    }
+
     /// Removes all blocks that are below the finalized block, as well as removing non-canonical
     /// sidechains that fork from below the finalized block.
     pub(crate) fn prune_finalized_sidechains(&mut self, finalized_num_hash: BlockNumHash) {
@@ -316,8 +343,7 @@ impl<N: NodePrimitives> TreeState<N> {
             }
         }
 
-        // remove trie updates that are below the finalized block
-        self.persisted_trie_updates.retain(|_, (block_num, _)| *block_num > finalized_num);
+        self.prune_persisted_trie_updates();
 
         // The only block that should remain at the `finalized` number now, is the finalized
         // block, if it exists.
@@ -505,11 +531,12 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
         block_buffer_limit: u32,
         max_invalid_header_cache_length: u32,
         canonical_block: BlockNumHash,
+        engine_kind: EngineApiKind,
     ) -> Self {
         Self {
             invalid_headers: InvalidHeaderCache::new(max_invalid_header_cache_length),
             buffer: BlockBuffer::new(block_buffer_limit),
-            tree_state: TreeState::new(canonical_block),
+            tree_state: TreeState::new(canonical_block, engine_kind),
             forkchoice_state_tracker: ForkchoiceStateTracker::default(),
         }
     }
@@ -751,6 +778,7 @@ where
             config.block_buffer_limit(),
             config.max_invalid_header_cache_length(),
             header.num_hash(),
+            kind,
         );
 
         let mut task = Self::new(
@@ -3243,7 +3271,8 @@ mod tests {
 
             let header = chain_spec.genesis_header().clone();
             let header = SealedHeader::seal_slow(header);
-            let engine_api_tree_state = EngineApiTreeState::new(10, 10, header.num_hash());
+            let engine_api_tree_state =
+                EngineApiTreeState::new(10, 10, header.num_hash(), EngineApiKind::Ethereum);
             let canonical_in_memory_state = CanonicalInMemoryState::with_head(header, None, None);
 
             let (to_payload_service, _payload_command_rx) = unbounded_channel();
@@ -3309,6 +3338,7 @@ mod tests {
                 current_canonical_head: blocks.last().unwrap().recovered_block().num_hash(),
                 parent_to_child,
                 persisted_trie_updates: HashMap::default(),
+                engine_kind: EngineApiKind::Ethereum,
             };
 
             let last_executed_block = blocks.last().unwrap().clone();
@@ -3761,7 +3791,7 @@ mod tests {
 
     #[test]
     fn test_tree_state_normal_descendant() {
-        let mut tree_state = TreeState::new(BlockNumHash::default());
+        let mut tree_state = TreeState::new(BlockNumHash::default(), EngineApiKind::Ethereum);
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
 
         tree_state.insert_executed(blocks[0].clone());
@@ -3784,7 +3814,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_tree_state_insert_executed() {
-        let mut tree_state = TreeState::new(BlockNumHash::default());
+        let mut tree_state = TreeState::new(BlockNumHash::default(), EngineApiKind::Ethereum);
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
 
         tree_state.insert_executed(blocks[0].clone());
@@ -3810,7 +3840,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_tree_state_insert_executed_with_reorg() {
-        let mut tree_state = TreeState::new(BlockNumHash::default());
+        let mut tree_state = TreeState::new(BlockNumHash::default(), EngineApiKind::Ethereum);
         let mut test_block_builder = TestBlockBuilder::eth();
         let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..6).collect();
 
@@ -3850,7 +3880,7 @@ mod tests {
     #[tokio::test]
     async fn test_tree_state_remove_before() {
         let start_num_hash = BlockNumHash::default();
-        let mut tree_state = TreeState::new(start_num_hash);
+        let mut tree_state = TreeState::new(start_num_hash, EngineApiKind::Ethereum);
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..6).collect();
 
         for block in &blocks {
@@ -3900,7 +3930,7 @@ mod tests {
     #[tokio::test]
     async fn test_tree_state_remove_before_finalized() {
         let start_num_hash = BlockNumHash::default();
-        let mut tree_state = TreeState::new(start_num_hash);
+        let mut tree_state = TreeState::new(start_num_hash, EngineApiKind::Ethereum);
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..6).collect();
 
         for block in &blocks {
@@ -3950,7 +3980,7 @@ mod tests {
     #[tokio::test]
     async fn test_tree_state_remove_before_lower_finalized() {
         let start_num_hash = BlockNumHash::default();
-        let mut tree_state = TreeState::new(start_num_hash);
+        let mut tree_state = TreeState::new(start_num_hash, EngineApiKind::Ethereum);
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..6).collect();
 
         for block in &blocks {

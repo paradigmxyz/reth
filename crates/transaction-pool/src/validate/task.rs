@@ -171,14 +171,13 @@ where
         {
             let res = {
                 let to_validation_task = self.to_validation_task.clone();
-                let to_validation_task = to_validation_task.lock().await;
                 let validator = self.validator.clone();
-                to_validation_task
-                    .send(Box::pin(async move {
-                        let res = validator.validate_transaction(origin, transaction).await;
-                        let _ = tx.send(res);
-                    }))
-                    .await
+                let fut = Box::pin(async move {
+                    let res = validator.validate_transaction(origin, transaction).await;
+                    let _ = tx.send(res);
+                });
+                let to_validation_task = to_validation_task.lock().await;
+                to_validation_task.send(fut).await
             };
             if res.is_err() {
                 return TransactionValidationOutcome::Error(
