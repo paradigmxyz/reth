@@ -346,12 +346,14 @@ impl<C: TrieCursor> TrieWalker<C> {
         allow_root_to_child_nibble: bool,
     ) -> Result<(), DatabaseError> {
         let Some(subnode) = self.stack.last_mut() else { return Ok(()) };
+        trace!(target: "trie::walker", ?subnode, "move to next sibling");
 
         // Check if the walker needs to backtrack to the previous level in the trie during its
         // traversal.
         if subnode.position().is_last_child() ||
             (subnode.position().is_parent() && !allow_root_to_child_nibble)
         {
+            trace!(target: "trie::walker", "backtracking to previous level");
             self.stack.pop();
             self.move_to_next_sibling(false)?;
             return Ok(())
@@ -360,6 +362,7 @@ impl<C: TrieCursor> TrieWalker<C> {
         subnode.inc_nibble();
 
         if subnode.node.is_none() {
+            trace!(target: "trie::walker", "subnode has no node");
             return self.consume_node()
         }
 
