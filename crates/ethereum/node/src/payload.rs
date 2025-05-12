@@ -1,5 +1,6 @@
 //! Payload component configuration for the Ethereum node.
 
+use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_36M;
 use reth_chainspec::EthereumHardforks;
 use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
