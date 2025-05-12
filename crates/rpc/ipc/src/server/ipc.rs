@@ -9,7 +9,7 @@ use jsonrpsee::{
         error::{reject_too_big_request, ErrorCode},
         ErrorObject, Id, InvalidRequest, Notification, Request,
     },
-    BatchResponseBuilder, MethodResponse, ResponsePayload,
+    BatchResponseBuilder, MethodResponse,
 };
 use std::sync::Arc;
 use tokio::sync::OwnedSemaphorePermit;
@@ -107,15 +107,6 @@ where
     S: RpcServiceT<MethodResponse = MethodResponse> + Send,
 {
     rpc_service.call(req).await
-}
-
-#[instrument(name = "notification", fields(method = notif.method.as_ref()), skip(notif), level = "TRACE")]
-fn execute_notification(notif: &Notif<'_>, _max_log_length: u32) -> MethodResponse {
-    // rx_log_from_json(notif, max_log_length);
-    let response =
-        MethodResponse::response(Id::Null, ResponsePayload::success(String::new()), usize::MAX);
-    // tx_log_from_str(response.as_result(), max_log_length);
-    response
 }
 
 pub(crate) async fn call_with_service<S>(
