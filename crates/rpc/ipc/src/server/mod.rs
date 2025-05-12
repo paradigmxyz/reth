@@ -712,59 +712,6 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
     ///
     /// The builder itself exposes a similar API as the [`tower::ServiceBuilder`]
     /// where it is possible to compose layers to the middleware.
-    ///
-    /// ```
-    /// use std::{
-    ///     net::SocketAddr,
-    ///     sync::{
-    ///         atomic::{AtomicUsize, Ordering},
-    ///         Arc,
-    ///     },
-    ///     time::Instant,
-    /// };
-    ///
-    /// use futures_util::future::BoxFuture;
-    /// use jsonrpsee::{
-    ///     server::{middleware::rpc::RpcServiceT, ServerBuilder},
-    ///     types::Request,
-    ///     MethodResponse,
-    /// };
-    /// use reth_ipc::server::{Builder, RpcServiceBuilder};
-    ///
-    /// #[derive(Clone)]
-    /// struct MyMiddleware<S> {
-    ///     service: S,
-    ///     count: Arc<AtomicUsize>,
-    /// }
-    ///
-    /// impl<'a, S> RpcServiceT<'a> for MyMiddleware<S>
-    /// where
-    ///     S: RpcServiceT<'a> + Send + Sync + Clone + 'static,
-    /// {
-    ///     type Future = BoxFuture<'a, MethodResponse>;
-    ///
-    ///     fn call(&self, req: Request<'a>) -> Self::Future {
-    ///         tracing::info!("MyMiddleware processed call {}", req.method);
-    ///         let count = self.count.clone();
-    ///         let service = self.service.clone();
-    ///
-    ///         Box::pin(async move {
-    ///             let rp = service.call(req).await;
-    ///             // Modify the state.
-    ///             count.fetch_add(1, Ordering::Relaxed);
-    ///             rp
-    ///         })
-    ///     }
-    /// }
-    ///
-    /// // Create a state per connection
-    /// // NOTE: The service type can be omitted once `start` is called on the server.
-    /// let m = RpcServiceBuilder::new().layer_fn(move |service: ()| MyMiddleware {
-    ///     service,
-    ///     count: Arc::new(AtomicUsize::new(0)),
-    /// });
-    /// let builder = Builder::default().set_rpc_middleware(m);
-    /// ```
     pub fn set_rpc_middleware<T>(
         self,
         rpc_middleware: RpcServiceBuilder<T>,
