@@ -1,6 +1,6 @@
 use crate::{cli::config::PayloadBuilderConfig, version::default_extra_data};
 use alloy_consensus::constants::MAXIMUM_EXTRA_DATA_SIZE;
-use alloy_eips::{eip1559::ETHEREUM_BLOCK_GAS_LIMIT_36M, merge::SLOT_DURATION};
+use alloy_eips::merge::SLOT_DURATION;
 use clap::{
     builder::{RangedU64ValueParser, TypedValueParser},
     Arg, Args, Command,
@@ -63,7 +63,7 @@ impl PayloadBuilderConfig for PayloadBuilderArgs {
     }
 
     fn gas_limit(&self) -> Option<u64> {
-        Some(self.gas_limit.unwrap_or(ETHEREUM_BLOCK_GAS_LIMIT_36M))
+        self.gas_limit
     }
 
     fn max_payload_tasks(&self) -> usize {
