@@ -1,21 +1,19 @@
-use async_trait::async_trait;
 use futures::Future;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_db::DatabaseEnv;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use std::{fmt, marker::PhantomData, sync::Arc};
 
-#[async_trait(?Send)]
 pub trait Launcher<C, Ext>
 where
     C: ChainSpecParser,
     Ext: clap::Args + fmt::Debug,
 {
-    async fn entrypoint<'a>(
+    fn entrypoint<'a>(
         self,
         builder: WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>,
         builder_args: Ext,
-    ) -> eyre::Result<()>
+    ) -> impl Future<Output = eyre::Result<()>>
     where
         Ext: 'a;
 }
@@ -31,7 +29,6 @@ impl<F, Fut> FnLauncher<F, Fut> {
     }
 }
 
-#[async_trait(?Send)]
 impl<C, Ext, F, Fut> Launcher<C, Ext> for FnLauncher<F, Fut>
 where
     C: ChainSpecParser,
@@ -39,14 +36,14 @@ where
     F: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
     Fut: Future<Output = eyre::Result<()>>,
 {
-    async fn entrypoint<'a>(
+    fn entrypoint<'a>(
         self,
         builder: WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>,
         builder_args: Ext,
-    ) -> eyre::Result<()>
+    ) -> impl Future<Output = eyre::Result<()>>
     where
         Ext: 'a,
     {
-        (self.func)(builder, builder_args).await
+        (self.func)(builder, builder_args)
     }
 }
