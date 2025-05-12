@@ -212,7 +212,7 @@ type FullTypesAdapter<T> = FullNodeTypesAdapter<
 
 /// Helper trait with a common set of requirements for the
 /// [`NodeTypes`] in CLI.
-pub trait CliNodeTypes: NodeTypes + NodeTypesForProvider {
+pub trait CliNodeTypes: NodeTypesForProvider {
     type Evm: ConfigureEvm<Primitives = Self::Primitives>;
 }
 
