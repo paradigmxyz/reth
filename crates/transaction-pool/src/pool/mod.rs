@@ -201,6 +201,11 @@ where
         self.identifiers.write().sender_id_or_create(addr)
     }
 
+    /// Returns the internal [`SenderId`]s for the given addresses.
+    pub fn get_sender_ids(&self, addrs: impl IntoIterator<Item = Address>) -> Vec<SenderId> {
+        self.identifiers.write().sender_ids_or_create(addrs)
+    }
+
     /// Returns all senders in the pool
     pub fn unique_senders(&self) -> HashSet<Address> {
         self.get_pool_data().unique_senders()
@@ -463,8 +468,7 @@ where
                     propagate,
                     timestamp: Instant::now(),
                     origin,
-                    authority_ids: authorities
-                        .map(|auths| auths.iter().map(|auth| self.get_sender_id(*auth)).collect()),
+                    authority_ids: authorities.map(|auths| self.get_sender_ids(auths)),
                 };
 
                 let added = pool.add_transaction(tx, balance, state_nonce, bytecode_hash)?;
