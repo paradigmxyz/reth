@@ -184,14 +184,25 @@ impl<P> SparseTrie<P> {
         masks: TrieMasks,
         retain_updates: bool,
     ) -> SparseTrieResult<&mut RevealedSparseTrie<P>> {
-        if self.is_blind() {
+        // we may have a completely empty revealed trie, in the case that we're reusing an allocated
+        // trie. In that case, we set the provider here and reveal the root node.
+        if let Self::Revealed(trie) = self {
+            // we only want to reveal the root if the root is not revealed yet (this is when the
+            // trie is empty)
+            if !trie.nodes.contains_key(&Nibbles::default()) {
+                trie.reveal_node(Nibbles::default(), root.clone(), masks)?;
+                trie.set_updates(retain_updates);
+                trie.set_provider(provider);
+            }
+        } else {
             *self = Self::Revealed(Box::new(RevealedSparseTrie::from_provider_and_root(
                 provider,
-                root,
+                root.clone(),
                 masks,
                 retain_updates,
             )?))
         }
+
         Ok(self.as_revealed_mut().unwrap())
     }
 
@@ -530,6 +541,17 @@ impl<P> RevealedSparseTrie<P> {
             self.updates = Some(SparseTrieUpdates::default());
         }
         self
+    }
+
+    /// Configures the trie to retain information about updates.
+    ///
+    /// This is the setter form of `with_updates`.
+    pub fn set_updates(&mut self, retain_updates: bool) {
+        if retain_updates {
+            self.updates = Some(SparseTrieUpdates::default());
+        } else {
+            self.updates = None;
+        }
     }
 
     /// Returns a reference to the current sparse trie updates.
