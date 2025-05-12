@@ -884,9 +884,7 @@ mod tests {
         // Seek exact
         let exact = cursor.seek_exact(missing_key).unwrap();
         assert_eq!(exact, None);
-        assert_eq!(cursor.current(), Ok(Some((missing_key + 1, B256::ZERO))));
-        assert_eq!(cursor.prev(), Ok(Some((missing_key - 1, B256::ZERO))));
-        assert_eq!(cursor.prev(), Ok(Some((missing_key - 2, B256::ZERO))));
+        assert_eq!(cursor.current(), Ok(None));
     }
 
     #[test]
@@ -971,11 +969,14 @@ mod tests {
 
         // Seek & delete key2 again
         assert_eq!(cursor.seek_exact(key2), Ok(None));
-        assert_eq!(cursor.delete_current(), Ok(()));
+        assert_eq!(
+            cursor.delete_current(),
+            Err(DatabaseError::Delete(reth_libmdbx::Error::NoData.into()))
+        );
         // Assert that key1 is still there
         assert_eq!(cursor.seek_exact(key1), Ok(Some((key1, Account::default()))));
-        // Assert that key3 was deleted
-        assert_eq!(cursor.seek_exact(key3), Ok(None));
+        // Assert that key3 is still there
+        assert_eq!(cursor.seek_exact(key3), Ok(Some((key3, Account::default()))));
     }
 
     #[test]
@@ -1343,8 +1344,9 @@ mod tests {
         let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
         let real_key = address!("0xa2c122be93b0074270ebee7f6b7292c7deb45047");
 
-        for i in 1..5 {
-            let key = ShardedKey::new(real_key, i * 100);
+        let shards = 5;
+        for i in 1..=shards {
+            let key = ShardedKey::new(real_key, if i == shards { u64::MAX } else { i * 100 });
             let list = IntegerList::new_pre_sorted([i * 100u64]);
 
             db.update(|tx| tx.put::<AccountsHistory>(key.clone(), list.clone()).expect(""))
