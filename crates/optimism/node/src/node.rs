@@ -889,3 +889,30 @@ impl NetworkPrimitives for OpNetworkPrimitives {
     type PooledTransaction = OpPooledTransaction;
     type Receipt = OpReceipt;
 }
+
+#[cfg(test)]
+mod test {
+    use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
+    use reth_node_api::NodeTypesWithDBAdapter;
+    use reth_optimism_chainspec::BASE_MAINNET;
+    use reth_provider::{
+        providers::{ProviderNodeTypes, StaticFileProvider},
+        ProviderFactory,
+    };
+
+    use super::*;
+
+    fn foo<T: ProviderNodeTypes>(_bar: T) {}
+
+    #[test]
+    fn provider_factory_impl_provider_node_types() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let db = create_test_rw_db();
+        let provider: ProviderFactory<NodeTypesWithDBAdapter<OpNode, _>> = ProviderFactory::new(
+            db,
+            BASE_MAINNET.clone(),
+            StaticFileProvider::read_write(static_dir.into_path()).expect("static file provider"),
+        );
+        foo(provider);
+    }
+}
