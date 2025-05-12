@@ -53,8 +53,11 @@ const MAX_BLOB_LIMIT: usize = 128;
 /// ## Implementers
 ///
 /// Implementing support for an engine API jsonrpsee RPC handler is done by defining the engine API
-/// server trait and implementing it on a type that can wrap this [`EngineApi`] type.
-/// See also [`EngineApiServer`] implementation for this type which is the L1 implementation.
+/// server trait and implementing it on a type that can either wrap this [`EngineApi`] type or
+/// use a custom [`EngineTypes`] implementation if it mirrors ethereum's versioned engine API
+/// endpoints (e.g. opstack).
+/// See also [`EngineApiServer`] implementation for this type which is the
+/// L1 implementation.
 pub struct EngineApi<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSpec> {
     inner: Arc<EngineApiInner<Provider, PayloadT, Pool, Validator, ChainSpec>>,
 }

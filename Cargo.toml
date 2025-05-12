@@ -30,9 +30,9 @@ members = [
     "crates/engine/util/",
     "crates/era",
     "crates/era-downloader",
-    "crates/era-import",
+    "crates/era-utils",
     "crates/errors/",
-    "crates/ethereum-forks/",
+    "crates/ethereum/hardforks/",
     "crates/ethereum/cli/",
     "crates/ethereum/consensus/",
     "crates/ethereum/engine-primitives/",
@@ -128,6 +128,7 @@ members = [
     "crates/stages/api/",
     "crates/stages/stages/",
     "crates/stages/types/",
+    "crates/stateless",
     "crates/static-file/static-file",
     "crates/static-file/types/",
     "crates/storage/codecs/",
@@ -167,6 +168,7 @@ members = [
     "examples/db-access",
     "examples/exex-hello-world",
     "examples/exex-subscription",
+    "examples/exex-test",
     "examples/manual-p2p/",
     "examples/network-txpool/",
     "examples/network/",
@@ -365,14 +367,14 @@ reth-engine-service = { path = "crates/engine/service" }
 reth-engine-util = { path = "crates/engine/util" }
 reth-era = { path = "crates/era" }
 reth-era-downloader = { path = "crates/era-downloader" }
-reth-era-import = { path = "crates/era-import" }
+reth-era-utils = { path = "crates/era-utils" }
 reth-errors = { path = "crates/errors" }
 reth-eth-wire = { path = "crates/net/eth-wire" }
 reth-eth-wire-types = { path = "crates/net/eth-wire-types" }
 reth-ethereum-cli = { path = "crates/ethereum/cli" }
 reth-ethereum-consensus = { path = "crates/ethereum/consensus", default-features = false }
 reth-ethereum-engine-primitives = { path = "crates/ethereum/engine-primitives", default-features = false }
-reth-ethereum-forks = { path = "crates/ethereum-forks", default-features = false }
+reth-ethereum-forks = { path = "crates/ethereum/hardforks", default-features = false }
 reth-ethereum-payload-builder = { path = "crates/ethereum/payload" }
 reth-ethereum-primitives = { path = "crates/ethereum/primitives", default-features = false }
 reth-ethereum = { path = "crates/ethereum/reth" }
@@ -441,6 +443,7 @@ reth-rpc-types-compat = { path = "crates/rpc/rpc-types-compat" }
 reth-stages = { path = "crates/stages/stages" }
 reth-stages-api = { path = "crates/stages/api" }
 reth-stages-types = { path = "crates/stages/types", default-features = false }
+reth-stateless = { path = "crates/stateless" }
 reth-static-file = { path = "crates/static-file/static-file" }
 reth-static-file-types = { path = "crates/static-file/types", default-features = false }
 reth-storage-api = { path = "crates/storage/storage-api", default-features = false }
@@ -471,49 +474,49 @@ revm-context = { git = "https://github.com/scroll-tech/revm", branch = "feat/ret
 revm-context-interface = { git = "https://github.com/scroll-tech/revm", branch = "feat/reth", default-features = false }
 revm-database-interface = { git = "https://github.com/scroll-tech/revm", branch = "feat/reth", default-features = false }
 op-revm = { git = "https://github.com/scroll-tech/revm", branch = "feat/reth", default-features = false }
-revm-scroll = { git = "https://github.com/scroll-tech/scroll-revm", default-features = false }
-revm-inspectors = "0.20.0"
+revm-scroll = { git = "https://github.com/scroll-tech/scroll-revm", branch = "feat/bump-revm", default-features = false }
+revm-inspectors = "0.21.0"
 
 # eth
 alloy-chains = { version = "0.2.0", default-features = false }
-alloy-dyn-abi = "1.0.0"
+alloy-dyn-abi = "1.1.0"
 alloy-eip2124 = { version = "0.2.0", default-features = false }
-alloy-evm = { version = "0.6.0", default-features = false }
-alloy-primitives = { version = "1.0.0", default-features = false, features = ["map-foldhash"] }
+alloy-evm = { version = "0.7.1", default-features = false }
+alloy-primitives = { version = "1.1.0", default-features = false, features = ["map-foldhash"] }
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
-alloy-sol-macro = "1.0.0"
-alloy-sol-types = { version = "1.0.0", default-features = false }
+alloy-sol-macro = "1.1.0"
+alloy-sol-types = { version = "1.1.0", default-features = false }
 alloy-trie = { version = "0.8.1", default-features = false }
 
 alloy-hardforks = "0.2.0"
 
-alloy-consensus = { version = "0.15.5", default-features = false }
-alloy-contract = { version = "0.15.5", default-features = false }
-alloy-eips = { version = "0.15.5", default-features = false }
-alloy-genesis = { version = "0.15.5", default-features = false }
-alloy-json-rpc = { version = "0.15.5", default-features = false }
-alloy-network = { version = "0.15.5", default-features = false }
-alloy-network-primitives = { version = "0.15.5", default-features = false }
-alloy-provider = { version = "0.15.5", features = ["reqwest"], default-features = false }
-alloy-pubsub = { version = "0.15.5", default-features = false }
-alloy-rpc-client = { version = "0.15.5", default-features = false }
-alloy-rpc-types = { version = "0.15.5", features = ["eth"], default-features = false }
-alloy-rpc-types-admin = { version = "0.15.5", default-features = false }
-alloy-rpc-types-anvil = { version = "0.15.5", default-features = false }
-alloy-rpc-types-beacon = { version = "0.15.5", default-features = false }
-alloy-rpc-types-debug = { version = "0.15.5", default-features = false }
-alloy-rpc-types-engine = { version = "0.15.5", default-features = false }
-alloy-rpc-types-eth = { version = "0.15.5", default-features = false }
-alloy-rpc-types-mev = { version = "0.15.5", default-features = false }
-alloy-rpc-types-trace = { version = "0.15.5", default-features = false }
-alloy-rpc-types-txpool = { version = "0.15.5", default-features = false }
-alloy-serde = { version = "0.15.5", default-features = false }
-alloy-signer = { version = "0.15.5", default-features = false }
-alloy-signer-local = { version = "0.15.5", default-features = false }
-alloy-transport = { version = "0.15.5" }
-alloy-transport-http = { version = "0.15.5", features = ["reqwest-rustls-tls"], default-features = false }
-alloy-transport-ipc = { version = "0.15.5", default-features = false }
-alloy-transport-ws = { version = "0.15.5", default-features = false }
+alloy-consensus = { version = "0.15.10", default-features = false }
+alloy-contract = { version = "0.15.10", default-features = false }
+alloy-eips = { version = "0.15.10", default-features = false }
+alloy-genesis = { version = "0.15.10", default-features = false }
+alloy-json-rpc = { version = "0.15.10", default-features = false }
+alloy-network = { version = "0.15.10", default-features = false }
+alloy-network-primitives = { version = "0.15.10", default-features = false }
+alloy-provider = { version = "0.15.10", features = ["reqwest"], default-features = false }
+alloy-pubsub = { version = "0.15.10", default-features = false }
+alloy-rpc-client = { version = "0.15.10", default-features = false }
+alloy-rpc-types = { version = "0.15.10", features = ["eth"], default-features = false }
+alloy-rpc-types-admin = { version = "0.15.10", default-features = false }
+alloy-rpc-types-anvil = { version = "0.15.10", default-features = false }
+alloy-rpc-types-beacon = { version = "0.15.10", default-features = false }
+alloy-rpc-types-debug = { version = "0.15.10", default-features = false }
+alloy-rpc-types-engine = { version = "0.15.10", default-features = false }
+alloy-rpc-types-eth = { version = "0.15.10", default-features = false }
+alloy-rpc-types-mev = { version = "0.15.10", default-features = false }
+alloy-rpc-types-trace = { version = "0.15.10", default-features = false }
+alloy-rpc-types-txpool = { version = "0.15.10", default-features = false }
+alloy-serde = { version = "0.15.10", default-features = false }
+alloy-signer = { version = "0.15.10", default-features = false }
+alloy-signer-local = { version = "0.15.10", default-features = false }
+alloy-transport = { version = "0.15.10" }
+alloy-transport-http = { version = "0.15.10", features = ["reqwest-rustls-tls"], default-features = false }
+alloy-transport-ipc = { version = "0.15.10", default-features = false }
+alloy-transport-ws = { version = "0.15.10", default-features = false }
 
 # scroll
 scroll-alloy-consensus = { path = "crates/scroll/alloy/consensus", default-features = false }
@@ -539,13 +542,13 @@ reth-scroll-txpool = { path = "crates/scroll/txpool" }
 poseidon-bn254 = { git = "https://github.com/scroll-tech/poseidon-bn254", rev = "526a64a", features = ["bn254"] }
 
 # op
-alloy-op-evm = { version = "0.6.0", default-features = false }
+alloy-op-evm = { version = "0.7.1", default-features = false }
 alloy-op-hardforks = "0.2.0"
-op-alloy-rpc-types = { version = "0.15.0", default-features = false }
-op-alloy-rpc-types-engine = { version = "0.15.0", default-features = false }
-op-alloy-network = { version = "0.15.0", default-features = false }
-op-alloy-consensus = { version = "0.15.0", default-features = false }
-op-alloy-rpc-jsonrpsee = { version = "0.15.0", default-features = false }
+op-alloy-rpc-types = { version = "0.15.4", default-features = false }
+op-alloy-rpc-types-engine = { version = "0.15.4", default-features = false }
+op-alloy-network = { version = "0.15.4", default-features = false }
+op-alloy-consensus = { version = "0.15.4", default-features = false }
+op-alloy-rpc-jsonrpsee = { version = "0.15.4", default-features = false }
 op-alloy-flz = { version = "0.13.0", default-features = false }
 
 # misc
@@ -570,6 +573,7 @@ humantime = "2.1"
 humantime-serde = "1.1"
 itertools = { version = "0.14", default-features = false }
 linked_hash_set = "0.1"
+lz4 = "1.28.1"
 modular-bitfield = "0.11.2"
 notify = { version = "8.0.0", default-features = false, features = ["macos_fsevent"] }
 nybbles = { version = "0.3.0", default-features = false }
@@ -590,6 +594,7 @@ strum = { version = "0.27", default-features = false }
 strum_macros = "0.27"
 syn = "2.0"
 thiserror = { version = "2.0.0", default-features = false }
+tar = "0.4.44"
 tracing = { version = "0.1.0", default-features = false }
 tracing-appender = "0.2"
 url = { version = "2.3", default-features = false }
@@ -655,7 +660,7 @@ secp256k1 = { version = "0.30", default-features = false, features = ["global-co
 rand_08 = { package = "rand", version = "0.8" }
 
 # for eip-4844
-c-kzg = "2.1.0"
+c-kzg = "2.1.1"
 
 # config
 toml = "0.8"

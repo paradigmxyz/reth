@@ -14,7 +14,7 @@ use bytes::{Buf, BufMut};
 /// serialized separately.
 ///
 /// See [`ToTxCompact::to_tx_compact`].
-pub(super) trait ToTxCompact {
+pub trait ToTxCompact {
     /// Serializes inner transaction using [`Compact`] encoding. Writes the result into `buf`.
     ///
     /// The written bytes do not contain signature and transaction type. This information be needs
@@ -30,7 +30,8 @@ pub(super) trait ToTxCompact {
 /// separately.
 ///
 /// See [`FromTxCompact::from_tx_compact`].
-pub(super) trait FromTxCompact {
+pub trait FromTxCompact {
+    /// The transaction type that represents the set of transactions.
     type TxType;
 
     /// Deserializes inner transaction using [`Compact`] encoding. The concrete type is determined
@@ -39,11 +40,7 @@ pub(super) trait FromTxCompact {
     /// Returns a tuple of 2 elements. The first element is the deserialized value and the second
     /// is a byte slice created from `buf` with a starting position advanced by the exact amount
     /// of bytes consumed for this process.  
-    fn from_tx_compact(
-        buf: &[u8],
-        tx_type: Self::TxType,
-        signature: Signature,
-    ) -> (Self, &[u8])
+    fn from_tx_compact(buf: &[u8], tx_type: Self::TxType, signature: Signature) -> (Self, &[u8])
     where
         Self: Sized;
 }
@@ -63,11 +60,7 @@ impl<Eip4844: Compact + Transaction> ToTxCompact for EthereumTxEnvelope<Eip4844>
 impl<Eip4844: Compact + Transaction> FromTxCompact for EthereumTxEnvelope<Eip4844> {
     type TxType = TxType;
 
-    fn from_tx_compact(
-        buf: &[u8],
-        tx_type: TxType,
-        signature: Signature,
-    ) -> (Self, &[u8]) {
+    fn from_tx_compact(buf: &[u8], tx_type: TxType, signature: Signature) -> (Self, &[u8]) {
         match tx_type {
             TxType::Legacy => {
                 let (tx, buf) = TxLegacy::from_compact(buf, buf.len());
@@ -98,8 +91,12 @@ impl<Eip4844: Compact + Transaction> FromTxCompact for EthereumTxEnvelope<Eip484
     }
 }
 
-pub(super) trait Envelope: FromTxCompact<TxType: Compact> {
+/// A trait for types convertible from a compact transaction type.
+pub trait Envelope: FromTxCompact<TxType: Compact> {
+    ///Returns the signature
     fn signature(&self) -> &Signature;
+
+    ///Returns the tx type
     fn tx_type(&self) -> Self::TxType;
 }
 
@@ -144,7 +141,7 @@ impl<T: Envelope + ToTxCompact + Transaction + Send + Sync> CompactEnvelope for 
         let sig_bit = self.signature().to_compact(buf) as u8;
         let zstd_bit = self.input().len() >= 32;
 
-       let tx_bits =  if zstd_bit {
+        let tx_bits = if zstd_bit {
             // compress the tx prefixed with txtype
             let mut tx_buf = Vec::with_capacity(256);
             let tx_bits = self.tx_type().to_compact(&mut tx_buf) as u8;
@@ -167,11 +164,11 @@ impl<T: Envelope + ToTxCompact + Transaction + Send + Sync> CompactEnvelope for 
                 }
                 .expect("Failed to compress"),
             );
-           tx_bits
+            tx_bits
         } else {
-           let tx_bits = self.tx_type().to_compact(buf) as u8;
+            let tx_bits = self.tx_type().to_compact(buf) as u8;
             self.to_tx_compact(buf);
-           tx_bits
+            tx_bits
         };
 
         let flags = sig_bit | (tx_bits << 1) | ((zstd_bit as u8) << 3);
@@ -189,7 +186,6 @@ impl<T: Envelope + ToTxCompact + Transaction + Send + Sync> CompactEnvelope for 
 
         let (signature, buf) = Signature::from_compact(buf, sig_bit);
 
-
         let (transaction, buf) = if zstd_bit != 0 {
             #[cfg(feature = "std")]
             {
@@ -198,8 +194,7 @@ impl<T: Envelope + ToTxCompact + Transaction + Send + Sync> CompactEnvelope for 
                     let decompressed = decompressor.decompress(buf);
 
                     let (tx_type, tx_buf) = T::TxType::from_compact(decompressed, tx_bits);
-                    let (tx, _) =
-                        Self::from_tx_compact(tx_buf, tx_type, signature);
+                    let (tx, _) = Self::from_tx_compact(tx_buf, tx_type, signature);
 
                     (tx, buf)
                 })
@@ -209,8 +204,7 @@ impl<T: Envelope + ToTxCompact + Transaction + Send + Sync> CompactEnvelope for 
                 let mut decompressor = reth_zstd_compressors::create_tx_decompressor();
                 let decompressed = decompressor.decompress(buf);
                 let (tx_type, tx_buf) = T::TxType::from_compact(decompressed, tx_bits);
-                let (tx, _) =
-                    Self::from_tx_compact(tx_buf, tx_type, signature);
+                let (tx, _) = Self::from_tx_compact(tx_buf, tx_type, signature);
 
                 (tx, buf)
             }

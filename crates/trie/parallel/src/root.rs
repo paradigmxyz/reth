@@ -145,7 +145,7 @@ where
             &hashed_state_sorted,
         );
 
-        let walker = TrieWalker::new(
+        let walker = TrieWalker::state_trie(
             trie_cursor_factory.account_trie_cursor().map_err(ProviderError::Database)?,
             prefix_sets.account_prefix_set,
         )

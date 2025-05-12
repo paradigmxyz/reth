@@ -135,7 +135,7 @@ where
 
     /// Update the L1 block info for the given header and system transaction, if any.
     ///
-    /// Note: this supports optional system transaction, in case this is used in a dev setuo
+    /// Note: this supports optional system transaction, in case this is used in a dev setup
     pub fn update_l1_block_info<H, T>(&self, header: &H, tx: Option<&T>)
     where
         H: BlockHeader,
@@ -246,6 +246,8 @@ where
             state_nonce,
             transaction: valid_tx,
             propagate,
+            bytecode_hash,
+            authorities,
         } = outcome
         {
             let mut l1_block_info = self.block_info.l1_block_info.read().clone();
@@ -283,6 +285,8 @@ where
                 state_nonce,
                 transaction: valid_tx,
                 propagate,
+                bytecode_hash,
+                authorities,
             }
         }
         outcome

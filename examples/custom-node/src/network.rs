@@ -1,6 +1,8 @@
 use crate::{
     chainspec::CustomChainSpec,
-    primitives::{CustomHeader, CustomNodePrimitives},
+    primitives::{
+        CustomHeader, CustomNodePrimitives, CustomTransactionEnvelope, ExtendedOpTxEnvelope,
+    },
 };
 use alloy_consensus::{Block, BlockBody};
 use eyre::Result;
@@ -12,7 +14,7 @@ use reth_ethereum::{
     pool::{PoolTransaction, TransactionPool},
 };
 use reth_node_builder::{components::NetworkBuilder, BuilderContext};
-use reth_op::{OpReceipt, OpTransactionSigned};
+use reth_op::{primitives::ExtendedTxEnvelope, OpReceipt};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -20,10 +22,10 @@ pub struct CustomNetworkPrimitives;
 
 impl NetworkPrimitives for CustomNetworkPrimitives {
     type BlockHeader = CustomHeader;
-    type BlockBody = BlockBody<OpTransactionSigned, CustomHeader>;
-    type Block = Block<OpTransactionSigned, CustomHeader>;
-    type BroadcastedTransaction = OpTransactionSigned;
-    type PooledTransaction = OpPooledTransaction;
+    type BlockBody = BlockBody<ExtendedOpTxEnvelope<CustomTransactionEnvelope>, CustomHeader>;
+    type Block = Block<ExtendedOpTxEnvelope<CustomTransactionEnvelope>, CustomHeader>;
+    type BroadcastedTransaction = ExtendedOpTxEnvelope<CustomTransactionEnvelope>;
+    type PooledTransaction = ExtendedTxEnvelope<OpPooledTransaction, CustomTransactionEnvelope>;
     type Receipt = OpReceipt;
 }
 
@@ -77,18 +79,14 @@ where
     Pool: TransactionPool<
             Transaction: PoolTransaction<
                 Consensus = TxTy<Node::Types>,
-                Pooled = OpPooledTransaction,
+                Pooled = ExtendedTxEnvelope<OpPooledTransaction, CustomTransactionEnvelope>,
             >,
         > + Unpin
         + 'static,
 {
-    type Primitives = CustomNetworkPrimitives;
+    type Network = NetworkHandle<CustomNetworkPrimitives>;
 
-    async fn build_network(
-        self,
-        ctx: &BuilderContext<Node>,
-        pool: Pool,
-    ) -> Result<NetworkHandle<Self::Primitives>> {
+    async fn build_network(self, ctx: &BuilderContext<Node>, pool: Pool) -> Result<Self::Network> {
         let network_config = self.network_config(ctx)?;
         let network = NetworkManager::builder(network_config).await?;
         let handle = ctx.start_network(network, pool);

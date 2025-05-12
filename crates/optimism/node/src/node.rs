@@ -8,7 +8,7 @@ use crate::{
 };
 use op_alloy_consensus::{interop::SafetyLevel, OpPooledTransaction};
 use reth_chainspec::{EthChainSpec, Hardforks};
-use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm, EvmFactory, EvmFactoryFor};
+use reth_evm::{ConfigureEvm, EvmFactory, EvmFactoryFor};
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives, PeersInfo};
 use reth_node_api::{
     AddOnsContext, FullNodeComponents, KeyHasherTy, NodeAddOns, NodePrimitives, PrimitivesTy, TxTy,
@@ -60,6 +60,16 @@ use reth_trie_db::MerklePatriciaTrie;
 use revm::context::TxEnv;
 use std::sync::Arc;
 
+/// Marker trait for Optimism node types with standard engine, chain spec, and primitives.
+pub trait OpNodeTypes:
+    NodeTypes<Payload = OpEngineTypes, ChainSpec = OpChainSpec, Primitives = OpPrimitives>
+{
+}
+/// Blanket impl for all node types that conform to the Optimism spec.
+impl<N> OpNodeTypes for N where
+    N: NodeTypes<Payload = OpEngineTypes, ChainSpec = OpChainSpec, Primitives = OpPrimitives>
+{
+}
 /// Storage implementation for Optimism.
 pub type OpStorage = EthStorage<OpTransactionSigned>;
 
@@ -102,13 +112,7 @@ impl OpNode {
         OpConsensusBuilder,
     >
     where
-        Node: FullNodeTypes<
-            Types: NodeTypes<
-                Payload = OpEngineTypes,
-                ChainSpec = OpChainSpec,
-                Primitives = OpPrimitives,
-            >,
-        >,
+        Node: FullNodeTypes<Types: OpNodeTypes>,
     {
         let RollupArgs { disable_txpool_gossip, compute_pending_block, discovery_v4, .. } =
             self.args;
@@ -465,16 +469,11 @@ where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
 {
     type EVM = OpEvmConfig;
-    type Executor = BasicBlockExecutorProvider<Self::EVM>;
 
-    async fn build_evm(
-        self,
-        ctx: &BuilderContext<Node>,
-    ) -> eyre::Result<(Self::EVM, Self::Executor)> {
+    async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
         let evm_config = OpEvmConfig::optimism(ctx.chain_spec());
-        let executor = BasicBlockExecutorProvider::new(evm_config.clone());
 
-        Ok((evm_config, executor))
+        Ok(evm_config)
     }
 }
 
@@ -558,8 +557,10 @@ where
                 "Default supervisor url is used, consider changing --rollup.supervisor-http."
             );
         }
-        let supervisor_client =
-            SupervisorClient::new(self.supervisor_http.clone(), self.supervisor_safety_level).await;
+        let supervisor_client = SupervisorClient::builder(self.supervisor_http.clone())
+            .minimum_safety(self.supervisor_safety_level)
+            .build()
+            .await;
 
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
             .no_eip4844()
@@ -818,13 +819,13 @@ where
         > + Unpin
         + 'static,
 {
-    type Primitives = OpNetworkPrimitives;
+    type Network = NetworkHandle<OpNetworkPrimitives>;
 
     async fn build_network(
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<NetworkHandle<Self::Primitives>> {
+    ) -> eyre::Result<Self::Network> {
         let network_config = self.network_config(ctx)?;
         let network = NetworkManager::builder(network_config).await?;
         let handle = ctx.start_network(network, pool);

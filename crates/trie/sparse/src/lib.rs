@@ -13,6 +13,7 @@ pub use trie::*;
 
 pub mod blinded;
 
+#[cfg(feature = "metrics")]
 mod metrics;
 
 /// Re-export sparse trie error types.

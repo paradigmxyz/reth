@@ -16,7 +16,6 @@ use reth_primitives_traits::{
     crypto::secp256k1::sign_message, proofs, Account, Block as _, Log, SealedBlock, SealedHeader,
     StorageEntry,
 };
-
 use secp256k1::{Keypair, Secp256k1};
 use std::{
     cmp::{max, min},

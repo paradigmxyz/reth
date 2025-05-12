@@ -5,6 +5,7 @@ use alloy_consensus::TxType;
 use alloy_evm::block::BlockExecutorFactory;
 use alloy_primitives::{TxKind, U256};
 use alloy_rpc_types::TransactionRequest;
+use alloy_signer::Either;
 use reth_evm::{ConfigureEvm, EvmEnv, EvmFactory, SpecFor};
 use reth_node_api::NodePrimitives;
 use reth_rpc_eth_api::{
@@ -139,7 +140,11 @@ where
                 .map(|v| v.saturating_to())
                 .unwrap_or_default(),
             // EIP-7702 fields
-            authorization_list: authorization_list.unwrap_or_default(),
+            authorization_list: authorization_list
+                .unwrap_or_default()
+                .into_iter()
+                .map(Either::Left)
+                .collect(),
         };
 
         Ok(env)

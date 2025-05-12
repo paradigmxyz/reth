@@ -4,7 +4,7 @@ use alloy_rpc_types_debug::ExecutionWitness;
 use pretty_assertions::Comparison;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::InvalidBlockHook;
-use reth_evm::execute::{BlockExecutorProvider, Executor};
+use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{database::StateProviderDatabase, db::BundleState, state::AccountInfo};
@@ -116,7 +116,7 @@ pub struct InvalidBlockWitnessHook<P, E> {
     /// The provider to read the historical state and do the EVM execution.
     provider: P,
     /// The EVM configuration to use for the execution.
-    executor: E,
+    evm_config: E,
     /// The directory to write the witness to. Additionally, diff files will be written to this
     /// directory in case of failed sanity checks.
     output_directory: PathBuf,
@@ -128,11 +128,11 @@ impl<P, E> InvalidBlockWitnessHook<P, E> {
     /// Creates a new witness hook.
     pub const fn new(
         provider: P,
-        executor: E,
+        evm_config: E,
         output_directory: PathBuf,
         healthy_node_client: Option<jsonrpsee::http_client::HttpClient>,
     ) -> Self {
-        Self { provider, executor, output_directory, healthy_node_client }
+        Self { provider, evm_config, output_directory, healthy_node_client }
     }
 }
 
@@ -143,7 +143,7 @@ where
         + Send
         + Sync
         + 'static,
-    E: BlockExecutorProvider<Primitives = N>,
+    E: ConfigureEvm<Primitives = N> + 'static,
     N: NodePrimitives,
 {
     fn on_invalid_block(
@@ -158,7 +158,7 @@ where
     {
         // TODO(alexey): unify with `DebugApi::debug_execution_witness`
 
-        let mut executor = self.executor.executor(StateProviderDatabase::new(
+        let mut executor = self.evm_config.batch_executor(StateProviderDatabase::new(
             self.provider.state_by_block_hash(parent_header.hash())?,
         ));
 
@@ -366,7 +366,7 @@ where
         + Send
         + Sync
         + 'static,
-    E: BlockExecutorProvider<Primitives = N>,
+    E: ConfigureEvm<Primitives = N> + 'static,
 {
     fn on_invalid_block(
         &self,

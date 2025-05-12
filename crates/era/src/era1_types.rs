@@ -328,30 +328,38 @@ mod tests {
         assert_eq!(era1_group.block_index.starting_number, 2000);
     }
 
-    #[test]
-    fn test_era1id_file_naming() {
-        // Test with real mainnet examples
-        // See <https://era1.ethportal.net/> or <https://mainnet.era1.nimbus.team/>
-        let mainnet_00000 = Era1Id::new("mainnet", 0, 8192).with_hash([0x5e, 0xc1, 0xff, 0xb8]);
-        assert_eq!(mainnet_00000.to_file_name(), "mainnet-00000-5ec1ffb8.era1");
-
-        let mainnet_00012 = Era1Id::new("mainnet", 12, 8192).with_hash([0x5e, 0xcb, 0x9b, 0xf9]);
-        assert_eq!(mainnet_00012.to_file_name(), "mainnet-00012-5ecb9bf9.era1");
-
-        // Test with real sepolia examples
-        // See <https://sepolia.era1.nimbus.team/>
-        let sepolia_00005 = Era1Id::new("sepolia", 5, 8192).with_hash([0x90, 0x91, 0x84, 0x72]);
-        assert_eq!(sepolia_00005.to_file_name(), "sepolia-00005-90918472.era1");
-
-        let sepolia_00019 = Era1Id::new("sepolia", 19, 8192).with_hash([0xfa, 0x77, 0x00, 0x19]);
-        assert_eq!(sepolia_00019.to_file_name(), "sepolia-00019-fa770019.era1");
-
-        // Test fallback to original format when no hash is provided
-        let id_without_hash = Era1Id::new("mainnet", 1000, 100);
-        assert_eq!(id_without_hash.to_file_name(), "mainnet-1000-100.era1");
-
-        // Test with larger era numbers to ensure proper zero-padding
-        let large_era = Era1Id::new("sepolia", 12345, 8192).with_hash([0xab, 0xcd, 0xef, 0x12]);
-        assert_eq!(large_era.to_file_name(), "sepolia-12345-abcdef12.era1");
+    #[test_case::test_case(
+        Era1Id::new("mainnet", 0, 8192).with_hash([0x5e, 0xc1, 0xff, 0xb8]),
+        "mainnet-00000-5ec1ffb8.era1";
+        "Mainnet 00000"
+    )]
+    #[test_case::test_case(
+        Era1Id::new("mainnet", 12, 8192).with_hash([0x5e, 0xcb, 0x9b, 0xf9]),
+        "mainnet-00012-5ecb9bf9.era1";
+        "Mainnet 00012"
+    )]
+    #[test_case::test_case(
+        Era1Id::new("sepolia", 5, 8192).with_hash([0x90, 0x91, 0x84, 0x72]),
+        "sepolia-00005-90918472.era1";
+        "Sepolia 00005"
+    )]
+    #[test_case::test_case(
+        Era1Id::new("sepolia", 19, 8192).with_hash([0xfa, 0x77, 0x00, 0x19]),
+        "sepolia-00019-fa770019.era1";
+        "Sepolia 00019"
+    )]
+    #[test_case::test_case(
+        Era1Id::new("mainnet", 1000, 100),
+        "mainnet-1000-100.era1";
+        "ID without hash"
+    )]
+    #[test_case::test_case(
+        Era1Id::new("sepolia", 12345, 8192).with_hash([0xab, 0xcd, 0xef, 0x12]),
+        "sepolia-12345-abcdef12.era1";
+        "Large block number"
+    )]
+    fn test_era1id_file_naming(id: Era1Id, expected_file_name: &str) {
+        let actual_file_name = id.to_file_name();
+        assert_eq!(actual_file_name, expected_file_name);
     }
 }
