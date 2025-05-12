@@ -272,11 +272,8 @@ where
                     // of this, we need to check that the current walker key has a prefix of the key
                     // that we seeked to.
                     let skip_hashed_seek = can_skip_node &&
-                        (self.walker.all_branch_nodes_in_database ||
-                            self.walker
-                                .key()
-                                .is_some_and(|key| key.has_prefix(&seek_prefix)) &&
-                                self.walker.children_are_in_trie());
+                        self.walker.key().is_some_and(|key| key.has_prefix(&seek_prefix)) &&
+                        self.walker.children_are_in_trie();
                     trace!(
                         target: "trie::node_iter",
                         can_skip_node,
