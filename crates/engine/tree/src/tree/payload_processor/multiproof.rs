@@ -32,9 +32,6 @@ use std::{
 };
 use tracing::{debug, error, trace};
 
-#[cfg(test)]
-use reth_trie::MultiProof;
-
 /// The size of proof targets chunk to spawn in one calculation.
 const MULTIPROOF_TARGETS_CHUNK_SIZE: usize = 10;
 
@@ -56,7 +53,7 @@ impl SparseTrieUpdate {
 
     /// Construct update from multiproof.
     #[cfg(test)]
-    pub(super) fn from_multiproof(multiproof: MultiProof) -> Self {
+    pub(super) fn from_multiproof(multiproof: reth_trie::MultiProof) -> Self {
         Self { multiproof: multiproof.try_into().unwrap(), ..Default::default() }
     }
 

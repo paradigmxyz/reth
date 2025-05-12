@@ -831,7 +831,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     }
 }
 
-/// Result of [`decode_proof_nodes`].
+/// Result of [`skip_revealed_nodes`].
 #[derive(Debug, PartialEq, Eq)]
 struct DecodedProofNodes {
     /// Filtered, decoded and sorted proof nodes.
