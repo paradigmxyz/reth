@@ -25,7 +25,7 @@ pub trait PayloadBuilderConfig {
     fn deadline(&self) -> Duration;
 
     /// Target gas limit for built blocks.
-    fn gas_limit(&self) -> u64;
+    fn gas_limit(&self) -> Option<u64>;
 
     /// Maximum number of tasks to spawn for building a payload.
     fn max_payload_tasks(&self) -> usize;
