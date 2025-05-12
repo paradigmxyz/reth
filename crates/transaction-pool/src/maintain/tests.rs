@@ -150,4 +150,3 @@ async fn test_save_local_txs_backup() {
 
     temp_dir.close().unwrap();
 }
-
