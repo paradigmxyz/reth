@@ -110,6 +110,18 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         self.revealed_account_paths.contains(&Nibbles::unpack(account))
     }
 
+    /// Uses the input `SparseTrie` to populate the backing data structures in the `state` trie.
+    pub fn populate_from<P>(&mut self, trie: Box<RevealedSparseTrie<P>>) {
+        if let Some(new_trie) = self.state.as_revealed_mut() {
+            new_trie.populate_from_trie(trie);
+        } else {
+            self.state = SparseTrie::revealed_with_provider(
+                self.provider_factory.account_node_provider(),
+                trie,
+            );
+        }
+    }
+
     /// Was the account witness for `address` complete?
     pub fn check_valid_account_witness(&self, address: B256) -> bool {
         let path = Nibbles::unpack(address);

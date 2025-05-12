@@ -64,7 +64,7 @@ impl TrieMasks {
 /// 2. Update tracking - changes to the trie structure can be tracked and selectively persisted
 /// 3. Incremental operations - nodes can be revealed as needed without loading the entire trie.
 ///    This is what gives rise to the notion of a "sparse" trie.
-#[derive(PartialEq, Eq, Default)]
+#[derive(PartialEq, Eq, Default, Clone)]
 pub enum SparseTrie<P = DefaultBlindedProvider> {
     /// The trie is blind -- no nodes have been revealed
     ///
@@ -193,6 +193,14 @@ impl<P> SparseTrie<P> {
             )?))
         }
         Ok(self.as_revealed_mut().unwrap())
+    }
+
+    /// Creates a new trie with the given provider and sparse trie.
+    pub fn revealed_with_provider<F>(
+        provider: P,
+        revealed: Box<RevealedSparseTrie<F>>,
+    ) -> SparseTrie<P> {
+        SparseTrie::Revealed(Box::new(revealed.with_provider(provider)))
     }
 
     /// Wipes the trie by removing all nodes and values,
@@ -494,6 +502,18 @@ impl<P> RevealedSparseTrie<P> {
             updates: self.updates,
             rlp_buf: self.rlp_buf,
         }
+    }
+
+    /// Sets all fields of this `RevealedSparseTrie` to the fields of the input
+    /// `RevealedSparseTrie`, except for the provider field.
+    pub fn populate_from_trie<BP>(&mut self, other: Box<RevealedSparseTrie<BP>>) {
+        self.nodes = other.nodes;
+        self.branch_node_tree_masks = other.branch_node_tree_masks;
+        self.branch_node_hash_masks = other.branch_node_hash_masks;
+        self.values = other.values;
+        self.prefix_set = other.prefix_set;
+        self.updates = other.updates;
+        self.rlp_buf = other.rlp_buf;
     }
 
     /// Set the provider for the trie.

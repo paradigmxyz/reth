@@ -139,7 +139,7 @@ where
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
     pub fn spawn<P>(
-        &self,
+        &mut self,
         header: SealedHeaderFor<N>,
         transactions: VecDeque<Recovered<N::SignedTx>>,
         provider_builder: StateProviderBuilder<N, P>,
@@ -196,11 +196,15 @@ where
             multi_proof_task.run();
         });
 
-        let mut sparse_trie_task = SparseTrieTask::new(
+        // take the sparse trie if it was set
+        let sparse_trie = self.sparse_trie.take();
+
+        let mut sparse_trie_task = SparseTrieTask::new_with_stored_trie(
             self.executor.clone(),
             sparse_trie_rx,
             proof_task.handle(),
             self.trie_metrics.clone(),
+            sparse_trie,
         );
 
         // wire the sparse trie to the state root response receiver
@@ -576,7 +580,7 @@ mod tests {
             }
         }
 
-        let payload_processor = PayloadProcessor::<EthPrimitives, _>::new(
+        let mut payload_processor = PayloadProcessor::<EthPrimitives, _>::new(
             WorkloadExecutor::default(),
             EthEvmConfig::new(factory.chain_spec()),
             &TreeConfig::default(),

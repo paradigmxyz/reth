@@ -47,7 +47,6 @@ use reth_stages_api::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_db::{DatabaseHashedPostState, StateCommitment};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use reth_trie_sparse::{blinded::DefaultBlindedProvider, SparseTrie};
 use state::TreeState;
 use std::{
     fmt::Debug,

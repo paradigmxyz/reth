@@ -63,6 +63,45 @@ where
         }
     }
 
+    /// Creates a new sparse trie, populating the accounts trie with the given cleared `SparseTrie`
+    /// if it exists.
+    pub(super) fn new_with_stored_trie(
+        executor: WorkloadExecutor,
+        updates: mpsc::Receiver<SparseTrieUpdate>,
+        blinded_provider_factory: BPF,
+        trie_metrics: MultiProofTaskMetrics,
+        sparse_trie: Option<SparseTrie<DefaultBlindedProvider>>,
+    ) -> Self {
+        if let Some(sparse_trie) = sparse_trie {
+            SparseTrieTask::with_accounts_trie(
+                executor,
+                updates,
+                blinded_provider_factory,
+                trie_metrics,
+                sparse_trie,
+            )
+        } else {
+            SparseTrieTask::new(executor, updates, blinded_provider_factory, trie_metrics)
+        }
+    }
+
+    /// Creates a new sparse trie task, using the given cleared `SparseTrie` for the accounts trie.
+    pub(super) fn with_accounts_trie(
+        executor: WorkloadExecutor,
+        updates: mpsc::Receiver<SparseTrieUpdate>,
+        blinded_provider_factory: BPF,
+        metrics: MultiProofTaskMetrics,
+        cleared_accounts_trie: SparseTrie<DefaultBlindedProvider>,
+    ) -> Self {
+        let mut trie = SparseStateTrie::new(blinded_provider_factory).with_updates(true);
+
+        if let SparseTrie::Revealed(cleared) = cleared_accounts_trie {
+            trie.populate_from(cleared);
+        }
+
+        Self { executor, updates, metrics, trie }
+    }
+
     /// Runs the sparse trie task to completion.
     ///
     /// This waits for new incoming [`SparseTrieUpdate`].
