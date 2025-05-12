@@ -1317,6 +1317,22 @@ pub enum LeafLookup {
 }
 
 impl<P: BlindedProvider> RevealedSparseTrie<P> {
+    /// This clears all data structures in the sparse trie, keeping the backing data structures
+    /// allocated.
+    ///
+    /// This is useful for reusing the trie without needing to reallocate memory.
+    pub fn clear(&mut self) {
+        self.nodes.clear();
+        self.branch_node_tree_masks.clear();
+        self.branch_node_hash_masks.clear();
+        self.values.clear();
+        self.prefix_set.clear();
+        if let Some(updates) = self.updates.as_mut() {
+            updates.clear()
+        }
+        self.rlp_buf.clear();
+    }
+
     /// Attempts to find a leaf node at the specified path.
     ///
     /// This method traverses the trie from the root down to the given path, checking
@@ -2018,6 +2034,15 @@ impl SparseTrieUpdates {
     /// Create new wiped sparse trie updates.
     pub fn wiped() -> Self {
         Self { wiped: true, ..Default::default() }
+    }
+
+    /// Clears the updates for use later, but keeps the backing data structures allocated.
+    ///
+    /// Sets `wiped` to `false`.
+    pub fn clear(&mut self) {
+        self.updated_nodes.clear();
+        self.removed_nodes.clear();
+        self.wiped = false;
     }
 }
 
