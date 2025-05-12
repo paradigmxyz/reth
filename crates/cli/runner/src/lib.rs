@@ -160,15 +160,7 @@ pub struct CliContext {
 /// Creates a new default tokio multi-thread [Runtime](tokio::runtime::Runtime) with all features
 /// enabled
 pub fn tokio_runtime() -> Result<tokio::runtime::Runtime, std::io::Error> {
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        // Keep the threads alive for at least the block time, which is 12 seconds at the time of
-        // writing, plus a little extra.
-        //
-        // This is to prevent the costly process of spawning new threads on every new block, and
-        // instead reuse the existing threads.
-        .thread_keep_alive(Duration::from_secs(15))
-        .build()
+    tokio::runtime::Builder::new_multi_thread().enable_all().build()
 }
 
 /// Runs the given future to completion or until a critical task panicked.
