@@ -68,8 +68,9 @@ pub trait SignedTransaction:
         self.recover_signer_unchecked()
     }
 
-    /// Same as [`SignerRecoverable::recover_signer_unchecked`] but receives a buffer to operate on. This is used
-    /// during batch recovery to avoid allocating a new buffer for each transaction.
+    /// Same as [`SignerRecoverable::recover_signer_unchecked`] but receives a buffer to operate on.
+    /// This is used during batch recovery to avoid allocating a new buffer for each
+    /// transaction.
     fn recover_signer_unchecked_with_buf(
         &self,
         buf: &mut Vec<u8>,
