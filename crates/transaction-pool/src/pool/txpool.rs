@@ -812,10 +812,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         if let Some(authority_list) = &transaction.authority_ids {
             for sender_id in authority_list {
-                if !self.pending_pool.get_txs_by_sender(*sender_id).is_empty() ||
-                    !self.queued_pool.get_txs_by_sender(*sender_id).is_empty() ||
-                    !self.basefee_pool.get_txs_by_sender(*sender_id).is_empty()
-                {
+                if self.all_transactions.txs_iter(*sender_id).next().is_some() {
                     return Err(PoolError::new(
                         *transaction.hash(),
                         PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::Eip7702(
@@ -1618,6 +1615,9 @@ impl<T: PoolTransaction> AllTransactions<T> {
         result
     }
 
+    /// Removes any pending auths for the given transaction.
+    ///
+    /// This is a noop for non EIP-7702 transactions.
     fn remove_auths(&mut self, tx: &PoolInternalTransaction<T>) {
         let Some(auths) = &tx.transaction.authority_ids else { return };
 
@@ -1977,6 +1977,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     #[cfg(any(test, feature = "test-utils"))]
     pub(crate) fn assert_invariants(&self) {
         assert_eq!(self.by_hash.len(), self.txs.len(), "by_hash.len() != txs.len()");
+        assert!(self.auths.len() <= self.txs.len(), "auths > txs.len()");
     }
 }
 
