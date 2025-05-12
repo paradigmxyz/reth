@@ -177,9 +177,7 @@ where
                     let _ = tx.send(res);
                 });
                 let to_validation_task = to_validation_task.lock().await;
-                to_validation_task
-                    .send(fut)
-                    .await
+                to_validation_task.send(fut).await
             };
             if res.is_err() {
                 return TransactionValidationOutcome::Error(
