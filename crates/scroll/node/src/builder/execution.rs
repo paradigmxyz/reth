@@ -1,4 +1,3 @@
-use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_node_builder::{components::ExecutorBuilder, BuilderContext, FullNodeTypes};
 use reth_node_types::NodeTypes;
 use reth_scroll_chainspec::ScrollChainSpec;
@@ -16,15 +15,10 @@ where
     Node::Types: NodeTypes<ChainSpec = ScrollChainSpec, Primitives = ScrollPrimitives>,
 {
     type EVM = ScrollEvmConfig;
-    type Executor = BasicBlockExecutorProvider<Self::EVM>;
 
-    async fn build_evm(
-        self,
-        ctx: &BuilderContext<Node>,
-    ) -> eyre::Result<(Self::EVM, Self::Executor)> {
+    async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
         let evm_config = ScrollEvmConfig::scroll(ctx.chain_spec());
-        let executor = BasicBlockExecutorProvider::new(evm_config.clone());
 
-        Ok((evm_config, executor))
+        Ok(evm_config)
     }
 }

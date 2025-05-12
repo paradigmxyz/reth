@@ -4,7 +4,7 @@ use super::setup;
 use alloy_primitives::BlockNumber;
 use eyre::Result;
 use reth_config::config::EtlConfig;
-use reth_consensus::{ConsensusError, FullConsensus};
+use reth_consensus::{noop::NoopConsensus, ConsensusError, FullConsensus};
 use reth_db::DatabaseEnv;
 use reth_db_api::{database::Database, table::TableImporter, tables};
 use reth_db_common::DbTool;

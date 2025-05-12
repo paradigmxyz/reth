@@ -1,5 +1,5 @@
 use reth_network::{
-    config::NetworkMode, transform::header::HeaderTransform, NetworkConfig, NetworkManager,
+    config::NetworkMode, NetworkHandle, transform::header::HeaderTransform, NetworkConfig, NetworkManager,
     NetworkPrimitives, PeersInfo,
 };
 use reth_node_api::TxTy;
@@ -31,13 +31,13 @@ where
         > + Unpin
         + 'static,
 {
-    type Primitives = ScrollNetworkPrimitives;
+    type Network = NetworkHandle<ScrollNetworkPrimitives>;
 
     async fn build_network(
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<reth_network::NetworkHandle<Self::Primitives>> {
+    ) -> eyre::Result<Self::Network> {
         // get the header transform.
         let chain_spec = ctx.chain_spec();
         let transform = ScrollHeaderTransform { chain_spec };

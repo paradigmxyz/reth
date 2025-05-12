@@ -1,14 +1,12 @@
 //! Execution primitives for EVM.
 
-use crate::{receipt::ScrollRethReceiptBuilder, ScrollEvmConfig};
-use std::{fmt::Debug, sync::Arc};
+use crate::ScrollEvmConfig;
+use std::fmt::Debug;
 
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{Address, B256};
-use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_primitives::SealedBlock;
 use reth_primitives_traits::Block;
-use reth_scroll_chainspec::ScrollChainSpec;
 
 /// Input for block execution.
 #[derive(Debug, Clone, Copy)]
@@ -39,18 +37,7 @@ impl<B: Block> From<&SealedBlock<B>> for ScrollBlockExecutionInput {
 
 /// Helper type with backwards compatible methods to obtain Scroll executor
 /// providers.
-#[derive(Debug)]
-pub struct ScrollExecutorProvider;
-
-impl ScrollExecutorProvider {
-    /// Creates a new default scroll executor provider.
-    pub fn scroll(chain_spec: Arc<ScrollChainSpec>) -> BasicBlockExecutorProvider<ScrollEvmConfig> {
-        BasicBlockExecutorProvider::new(ScrollEvmConfig::new(
-            chain_spec,
-            ScrollRethReceiptBuilder::default(),
-        ))
-    }
-}
+pub type ScrollExecutorProvider = ScrollEvmConfig;
 
 #[cfg(test)]
 mod tests {
@@ -64,6 +51,7 @@ mod tests {
     };
     use alloy_evm::{
         block::{BlockExecutionResult, BlockExecutor},
+        precompiles::PrecompilesMap,
         Evm,
     };
     use reth_chainspec::MIN_TRANSACTION_GAS;
@@ -115,7 +103,7 @@ mod tests {
         block: &RecoveredBlock<ScrollBlock>,
         state: &'a mut State<EmptyDBTyped<Infallible>>,
     ) -> ScrollBlockExecutor<
-        ScrollEvm<&'a mut State<EmptyDBTyped<Infallible>>, NoOpInspector>,
+        ScrollEvm<&'a mut State<EmptyDBTyped<Infallible>>, NoOpInspector, PrecompilesMap>,
         ScrollRethReceiptBuilder,
         Arc<ScrollChainSpec>,
     > {

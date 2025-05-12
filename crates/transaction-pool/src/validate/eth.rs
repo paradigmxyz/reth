@@ -998,6 +998,8 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
     } else {
         SpecId::MERGE
     };
+    // TODO(scroll): SpecId is starting to leak from revm to reth. Find a solution to avoid
+    // having to add `is_eip_7702_enabled` everywhere.
     let is_eip7702_enabled = spec_id >= SpecId::PRAGUE;
 
     let gas = revm_interpreter::gas::calculate_initial_tx_gas(
