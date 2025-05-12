@@ -59,8 +59,13 @@ tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thre
 
 # misc
 aquamarine.workspace = true
-eyre.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
+eyre.workspace = true
+
+[dev-dependencies]
+backon.workspace = true
+similar-asserts.workspace = true
+tempfile.workspace = true
 
 [features]
 default = ["jemalloc", "reth-revm/portable"]

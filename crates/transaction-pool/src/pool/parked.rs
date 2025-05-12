@@ -504,11 +504,10 @@ pub struct QueuedOrd<T: PoolTransaction>(Arc<ValidPoolTransaction<T>>);
 
 impl_ord_wrapper!(QueuedOrd);
 
-// TODO: temporary solution for ordering the queued pool.
 impl<T: PoolTransaction> Ord for QueuedOrd<T> {
     fn cmp(&self, other: &Self) -> Ordering {
-        // Higher price is better
-        self.max_fee_per_gas().cmp(&self.max_fee_per_gas()).then_with(||
+        // Higher fee is better
+        self.max_fee_per_gas().cmp(&other.max_fee_per_gas()).then_with(||
             // Lower timestamp is better
             other.timestamp.cmp(&self.timestamp))
     }
@@ -1051,5 +1050,51 @@ mod tests {
         let removed = pool.remove_transaction(&tx_id);
         assert!(removed.is_some());
         assert!(!pool.contains(&tx_id));
+    }
+
+    #[test]
+    fn test_parkpool_ord() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = ParkedPool::<QueuedOrd<_>>::default();
+
+        let tx1 = MockTransaction::eip1559().with_max_fee(100);
+        let tx1_v = f.validated_arc(tx1.clone());
+
+        let tx2 = MockTransaction::eip1559().with_max_fee(101);
+        let tx2_v = f.validated_arc(tx2.clone());
+
+        let tx3 = MockTransaction::eip1559().with_max_fee(101);
+        let tx3_v = f.validated_arc(tx3.clone());
+
+        let tx4 = MockTransaction::eip1559().with_max_fee(101);
+        let mut tx4_v = f.validated(tx4.clone());
+        tx4_v.timestamp = tx3_v.timestamp;
+
+        let ord_1 = QueuedOrd(tx1_v.clone());
+        let ord_2 = QueuedOrd(tx2_v.clone());
+        let ord_3 = QueuedOrd(tx3_v.clone());
+        assert!(ord_1 < ord_2);
+        // lower timestamp is better
+        assert!(ord_2 > ord_3);
+        assert!(ord_1 < ord_3);
+
+        pool.add_transaction(tx1_v);
+        pool.add_transaction(tx2_v);
+        pool.add_transaction(tx3_v);
+        pool.add_transaction(Arc::new(tx4_v));
+
+        // from worst to best
+        let mut iter = pool.best.iter();
+        let tx = iter.next().unwrap();
+        assert_eq!(tx.transaction.transaction, tx1);
+
+        let tx = iter.next().unwrap();
+        assert_eq!(tx.transaction.transaction, tx4);
+
+        let tx = iter.next().unwrap();
+        assert_eq!(tx.transaction.transaction, tx3);
+
+        let tx = iter.next().unwrap();
+        assert_eq!(tx.transaction.transaction, tx2);
     }
 }

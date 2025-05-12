@@ -5,6 +5,7 @@ use alloy_evm::{
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
         BlockExecutorFor, ExecutableTx, OnStateHook,
     },
+    precompiles::PrecompilesMap,
     Database, Evm, EvmEnv,
 };
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpEvm};
@@ -116,7 +117,7 @@ impl BlockExecutorFactory for CustomEvmConfig {
 
     fn create_executor<'a, DB, I>(
         &'a self,
-        evm: OpEvm<&'a mut State<DB>, I>,
+        evm: OpEvm<&'a mut State<DB>, I, PrecompilesMap>,
         ctx: OpBlockExecutionCtx,
     ) -> impl BlockExecutorFor<'a, Self, DB, I>
     where

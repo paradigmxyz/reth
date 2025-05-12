@@ -14,6 +14,8 @@ use alloy_primitives::{keccak256, Address, Signature, TxHash, B256};
 use alloy_rlp::{Decodable, Encodable};
 use core::hash::Hash;
 
+pub use alloy_consensus::crypto::RecoveryError;
+
 /// Helper trait that unifies all behaviour required by block to support full node operations.
 pub trait FullSignedTx: SignedTransaction + MaybeCompact + MaybeSerdeBincodeCompat {}
 impl<T> FullSignedTx for T where T: SignedTransaction + MaybeCompact + MaybeSerdeBincodeCompat {}
@@ -278,7 +280,3 @@ mod op {
         }
     }
 }
-/// Opaque error type for sender recovery.
-#[derive(Debug, Default, thiserror::Error)]
-#[error("Failed to recover the signer")]
-pub struct RecoveryError;

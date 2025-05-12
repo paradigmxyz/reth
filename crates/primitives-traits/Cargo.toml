@@ -16,7 +16,7 @@ workspace = true
 reth-codecs = { workspace = true, optional = true }
 
 # ethereum
-alloy-consensus.workspace = true
+alloy-consensus = { workspace = true, features = ["k256"] }
 alloy-eips.workspace = true
 alloy-genesis.workspace = true
 alloy-primitives = { workspace = true, features = ["k256"] }
@@ -31,7 +31,6 @@ op-alloy-consensus = { workspace = true, optional = true }
 
 # crypto
 secp256k1 = { workspace = true, features = ["recovery"], optional = true }
-k256.workspace = true
 
 # misc
 auto_impl.workspace = true
@@ -85,7 +84,6 @@ std = [
     "alloy-rlp/std",
     "bytes/std",
     "derive_more/std",
-    "k256/std",
     "once_cell/std",
     "secp256k1?/std",
     "thiserror/std",
@@ -96,7 +94,7 @@ std = [
     "revm-bytecode/std",
     "revm-state/std",
 ]
-secp256k1 = ["dep:secp256k1"]
+secp256k1 = ["alloy-consensus/secp256k1"]
 test-utils = [
     "arbitrary",
     "reth-codecs?/test-utils",
@@ -137,7 +135,6 @@ serde = [
     "revm-primitives/serde",
     "revm-primitives/serde",
     "op-alloy-consensus?/serde",
-    "k256/serde",
     "secp256k1?/serde",
     "alloy-trie/serde",
     "revm-bytecode/serde",

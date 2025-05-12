@@ -129,10 +129,11 @@ impl<C: ChainSpecParser> NodeCommand<C> {
     }
 }
 
-impl<
-        C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>,
-        Ext: clap::Args + fmt::Debug,
-    > NodeCommand<C, Ext>
+impl<C, Ext> NodeCommand<C, Ext>
+where
+    C: ChainSpecParser,
+    C::ChainSpec: EthChainSpec + EthereumHardforks,
+    Ext: clap::Args + fmt::Debug,
 {
     /// Launches the node
     ///
@@ -198,12 +199,14 @@ impl<
 
         launcher(builder, ext).await
     }
+}
+
+impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> NodeCommand<C, Ext> {
     /// Returns the underlying chain being used to run this command
     pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         Some(&self.chain)
     }
 }
-
 /// No Additional arguments
 #[derive(Debug, Clone, Copy, Default, Args)]
 #[non_exhaustive]

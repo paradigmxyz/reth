@@ -28,7 +28,7 @@ impl std::fmt::Debug for CursorSubNode {
             .field("state_flag", &self.state_flag())
             .field("tree_flag", &self.tree_flag())
             .field("hash_flag", &self.hash_flag())
-            .field("hash", &self.hash())
+            .field("hash", &self.maybe_hash())
             .finish()
     }
 }
@@ -151,6 +151,21 @@ impl CursorSubNode {
             SubNodePosition::ParentBranch => node.root_hash,
             // Or get it from the children
             SubNodePosition::Child(nibble) => Some(node.hash_for_nibble(nibble)),
+        })
+    }
+
+    /// Returns the hash of the current node, if any.
+    ///
+    /// Differs from [`Self::hash`] in that it returns `None` if the subnode is positioned at the
+    /// child without a hash mask bit set. [`Self::hash`] panics in that case.
+    fn maybe_hash(&self) -> Option<B256> {
+        self.node.as_ref().and_then(|node| match self.position {
+            // Get the root hash for the parent branch node
+            SubNodePosition::ParentBranch => node.root_hash,
+            // Or get it from the children
+            SubNodePosition::Child(nibble) => {
+                node.hash_mask.is_bit_set(nibble).then(|| node.hash_for_nibble(nibble))
+            }
         })
     }
 
