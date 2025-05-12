@@ -5,7 +5,7 @@ use std::sync::Arc;
 use alloy_primitives::TxHash;
 use alloy_rpc_types_eth::{
     pubsub::{Params, PubSubSyncStatus, SubscriptionKind, SyncStatusMetadata},
-    FilteredParams, Header, Log,
+    Filter, Header, Log,
 };
 use futures::StreamExt;
 use jsonrpsee::{
@@ -105,11 +105,11 @@ where
         SubscriptionKind::Logs => {
             // if no params are provided, used default filter params
             let filter = match params {
-                Some(Params::Logs(filter)) => FilteredParams::new(Some(*filter)),
+                Some(Params::Logs(filter)) => *filter,
                 Some(Params::Bool(_)) => {
                     return Err(invalid_params_rpc_err("Invalid params for logs"))
                 }
-                _ => FilteredParams::default(),
+                _ => Default::default(),
             };
             pipe_from_stream(accepted_sink, pubsub.log_stream(filter)).await
         }
@@ -308,7 +308,7 @@ where
     }
 
     /// Returns a stream that yields all logs that match the given filter.
-    fn log_stream(&self, filter: FilteredParams) -> impl Stream<Item = Log> {
+    fn log_stream(&self, filter: Filter) -> impl Stream<Item = Log> {
         BroadcastStream::new(self.eth_api.provider().subscribe_to_canonical_state())
             .map(move |canon_state| {
                 canon_state.expect("new block subscription never ends").block_receipts()
