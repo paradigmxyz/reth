@@ -18,7 +18,7 @@ use error::{InsertBlockError, InsertBlockErrorKind, InsertBlockFatalError};
 use instrumented_state::InstrumentedStateProvider;
 use payload_processor::sparse_trie::StateRootComputeOutcome;
 use persistence_state::CurrentPersistenceAction;
-use precompile_cache::{CachedPrecompile, PrecompileCache};
+use precompile_cache::{CachedPrecompile, PrecompileCacheMap};
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates,
     MemoryOverlayStateProvider, NewCanonicalChain,
@@ -268,8 +268,8 @@ where
     payload_processor: PayloadProcessor<N, C>,
     /// The EVM configuration.
     evm_config: C,
-    /// Precompile cache.
-    precompile_cache: PrecompileCache,
+    /// Precompile cache map.
+    precompile_cache_map: PrecompileCacheMap,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C: Debug> std::fmt::Debug
@@ -334,13 +334,13 @@ where
     ) -> Self {
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
 
-        let precompile_cache = PrecompileCache::default();
+        let precompile_cache_map = PrecompileCacheMap::default();
 
         let payload_processor = PayloadProcessor::new(
             WorkloadExecutor::default(),
             evm_config.clone(),
             &config,
-            precompile_cache.clone(),
+            precompile_cache_map.clone(),
         );
 
         Self {
@@ -362,7 +362,7 @@ where
             engine_kind,
             payload_processor,
             evm_config,
-            precompile_cache,
+            precompile_cache_map,
         }
     }
 
@@ -2275,7 +2275,7 @@ where
 
     /// Executes a block with the given state provider
     fn execute_block<S: StateProvider>(
-        &self,
+        &mut self,
         state_provider: S,
         block: &RecoveredBlock<N::Block>,
         handle: &PayloadHandle,
@@ -2289,8 +2289,11 @@ where
         let mut executor = self.evm_config.executor_for_block(&mut db, block);
 
         if self.config.precompile_cache_enabled() {
-            executor.evm_mut().precompiles_mut().map_precompiles(|_, precompile| {
-                CachedPrecompile::wrap(precompile, self.precompile_cache.clone())
+            executor.evm_mut().precompiles_mut().map_precompiles(|address, precompile| {
+                CachedPrecompile::wrap(
+                    precompile,
+                    self.precompile_cache_map.entry(*address).or_default().clone(),
+                )
             });
         }
 
