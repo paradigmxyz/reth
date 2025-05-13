@@ -699,7 +699,7 @@ visibility = "0.1.1"
 walkdir = "2.3.3"
 vergen-git2 = "1.0.5"
 
- [patch.crates-io]
+[patch.crates-io]
 # alloy-consensus = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
 # alloy-contract = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
 # alloy-eips = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
@@ -735,8 +735,8 @@ vergen-git2 = "1.0.5"
 #
 # revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "1207e33" }
 
-jsonrpsee =  { git = "https://github.com/mattsse/jsonrpsee", branch = "matt/make-rpc-service-pub" }
-jsonrpsee-core = { git =  "https://github.com/mattsse/jsonrpsee", branch = "matt/make-rpc-service-pub" }
-jsonrpsee-server = { git =  "https://github.com/mattsse/jsonrpsee", branch = "matt/make-rpc-service-pub" }
-jsonrpsee-http-client =  { git =  "https://github.com/mattsse/jsonrpsee", branch = "matt/make-rpc-service-pub" }
-jsonrpsee-types =  { git =  "https://github.com/mattsse/jsonrpsee", branch = "matt/make-rpc-service-pub" }
+jsonrpsee = { git = "https://github.com/mattsse/jsonrpsee", branch = "matt/make-rpc-service-pub" }
+jsonrpsee-core = { git = "https://github.com/mattsse/jsonrpsee", branch = "matt/make-rpc-service-pub" }
+jsonrpsee-server = { git = "https://github.com/mattsse/jsonrpsee", branch = "matt/make-rpc-service-pub" }
+jsonrpsee-http-client = { git = "https://github.com/mattsse/jsonrpsee", branch = "matt/make-rpc-service-pub" }
+jsonrpsee-types = { git = "https://github.com/mattsse/jsonrpsee", branch = "matt/make-rpc-service-pub" }
