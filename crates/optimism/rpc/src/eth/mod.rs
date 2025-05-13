@@ -283,18 +283,18 @@ struct OpEthApiInner<N: OpNodeCore> {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
     sequencer_client: Option<SequencerClient>,
-    ///flag for enabling txpool admission
+    /// Whether to enable submission of transactions to the transaction pool.
     enable_txpool_admission: bool,
 }
 
 impl<N: OpNodeCore> OpEthApiInner<N> {
     /// Returns a new [`OpEthApiInner`].
     const fn new(
-        enable_txpool_admission: bool,
         eth_api: EthApiNodeBackend<N>,
         sequencer_client: Option<SequencerClient>,
+        enable_txpool_admission: bool,
     ) -> Self {
-        Self { enable_txpool_admission, eth_api, sequencer_client }
+        Self { eth_api, sequencer_client, enable_txpool_admission }
     }
 
     /// Returns a reference to the [`EthApiNodeBackend`].
@@ -350,7 +350,7 @@ where
     type EthApi = OpEthApi<N>;
 
     async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
-        let Self { sequencer_url, .. } = self;
+        let Self { sequencer_url, enable_txpool_admission } = self;
         let eth_api = reth_rpc::EthApiBuilder::new(
             ctx.components.provider().clone(),
             ctx.components.pool().clone(),
@@ -367,7 +367,7 @@ where
         .gas_oracle_config(ctx.config.gas_oracle)
         .build_inner();
 
-        let sequencer_client = if let Some(ref url) = sequencer_url {
+        let sequencer_client = if let Some(url) = &sequencer_url {
             Some(
                 SequencerClient::new(url)
                     .await
@@ -377,10 +377,8 @@ where
             None
         };
 
-        let enable_txpool_admission = sequencer_url.is_none();
-
         Ok(OpEthApi {
-            inner: Arc::new(OpEthApiInner::new(enable_txpool_admission, eth_api, sequencer_client)),
+            inner: Arc::new(OpEthApiInner::new(eth_api, sequencer_client, enable_txpool_admission)),
         })
     }
 }
