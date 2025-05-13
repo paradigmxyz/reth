@@ -2036,7 +2036,7 @@ impl SparseTrieUpdates {
         Self { wiped: true, ..Default::default() }
     }
 
-    /// Clears the updates for use later, but keeps the backing data structures allocated.
+    /// Clears the updates, but keeps the backing data structures allocated.
     ///
     /// Sets `wiped` to `false`.
     pub fn clear(&mut self) {
