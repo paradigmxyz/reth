@@ -136,6 +136,12 @@ impl PrefixSetMut {
         self.keys.is_empty()
     }
 
+    /// Clears the inner vec for reuse, setting `all` to `false`.
+    pub fn clear(&mut self) {
+        self.all = false;
+        self.keys.clear();
+    }
+
     /// Returns a `PrefixSet` with the same elements as this set.
     ///
     /// If not yet sorted, the elements will be sorted and deduplicated.
