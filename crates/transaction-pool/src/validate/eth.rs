@@ -999,7 +999,7 @@ impl ForkTracker {
 
     /// Returns `true` if Osaka fork is activated.
     pub fn is_osaka_activated(&self) -> bool {
-        self.prague.load(std::sync::atomic::Ordering::Relaxed)
+        self.osaka.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Returns the max blob count.
