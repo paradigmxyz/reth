@@ -131,8 +131,8 @@ pub static SEPOLIA: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         hardforks,
         // https://sepolia.etherscan.io/tx/0x025ecbf81a2f1220da6285d1701dc89fb5a956b62562ee922e1a9efd73eb4b14
         deposit_contract: Some(DepositContract::new(
-            MAINNET_DEPOSIT_CONTRACT_ADDRESS,
-            11052984,
+            address!("0x7f02c3e3c98b133055b8b348b2ac625669ed295d"),
+            1273020,
             b256!("0x649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
