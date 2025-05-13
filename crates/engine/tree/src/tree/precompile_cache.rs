@@ -1,9 +1,20 @@
 //! Contains a precompile cache that is backed by a moka cache.
 
+use alloy_primitives::map::Entry;
 use reth_evm::precompiles::{DynPrecompile, Precompile};
 use revm::precompile::{PrecompileOutput, PrecompileResult};
-use revm_primitives::Bytes;
+use revm_primitives::{Address, Bytes, HashMap};
 use std::sync::Arc;
+
+/// Stores caches for each precompile.
+#[derive(Debug, Clone, Default)]
+pub struct PrecompileCacheMap(HashMap<Address, PrecompileCache>);
+
+impl PrecompileCacheMap {
+    pub(crate) fn entry(&mut self, address: Address) -> Entry<'_, Address, PrecompileCache> {
+        self.0.entry(address)
+    }
+}
 
 /// Cache for precompiles, for each input stores the result.
 #[derive(Debug, Clone)]

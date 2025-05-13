@@ -5,7 +5,7 @@ use crate::tree::{
     payload_processor::{
         executor::WorkloadExecutor, multiproof::MultiProofMessage, ExecutionCache,
     },
-    precompile_cache::{CachedPrecompile, PrecompileCache},
+    precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     StateProviderBuilder,
 };
 use alloy_consensus::transaction::Recovered;
@@ -207,7 +207,7 @@ pub(super) struct PrewarmContext<N: NodePrimitives, P, Evm> {
     /// An atomic bool that tells prewarm tasks to not start any more execution.
     pub(super) terminate_execution: Arc<AtomicBool>,
     pub(super) precompile_cache_enabled: bool,
-    pub(super) precompile_cache: PrecompileCache,
+    pub(super) precompile_cache_map: PrecompileCacheMap,
 }
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
@@ -230,7 +230,7 @@ where
             metrics,
             terminate_execution,
             precompile_cache_enabled,
-            precompile_cache,
+            mut precompile_cache_map,
         } = self;
 
         let state_provider = match provider.build() {
@@ -261,8 +261,11 @@ where
         let mut evm = evm_config.evm_with_env(state_provider, evm_env);
 
         if precompile_cache_enabled {
-            evm.precompiles_mut().map_precompiles(|_, precompile| {
-                CachedPrecompile::wrap(precompile, precompile_cache.clone())
+            evm.precompiles_mut().map_precompiles(|address, precompile| {
+                CachedPrecompile::wrap(
+                    precompile,
+                    precompile_cache_map.entry(*address).or_default().clone(),
+                )
             });
         }
 
