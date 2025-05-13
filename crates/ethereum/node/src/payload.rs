@@ -1,5 +1,5 @@
 //! Payload component configuration for the Ethereum node.
-
+use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_36M;
 use reth_chainspec::EthereumHardforks;
 use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
@@ -9,7 +9,7 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeTypes, NodeTypes, PrimitivesTy, TxTy};
 use reth_node_builder::{
-    components::PayloadBuilderBuilder, BuilderContext, PayloadBuilderConfig, PayloadTypes,
+    components::PayloadBuilderBuilder, BuilderContext, PayloadBuilderArgs, PayloadTypes,
 };
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
@@ -45,11 +45,20 @@ where
         evm_config: Evm,
     ) -> eyre::Result<Self::PayloadBuilder> {
         let conf = ctx.payload_builder_config();
+        let chain = ctx.chain_spec().chain();
+
+        let gas_limit = if let Some(args) = conf.as_any().downcast_ref::<PayloadBuilderArgs>() {
+            args.gas_limit_for(chain)
+        } else {
+            // Fallback default if downcast fails
+            ETHEREUM_BLOCK_GAS_LIMIT_36M
+        };
+
         Ok(reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
             ctx.provider().clone(),
             pool,
             evm_config,
-            EthereumBuilderConfig::new().with_gas_limit(conf.gas_limit_for(ctx.chain())),
+            EthereumBuilderConfig::new().with_gas_limit(gas_limit),
         ))
     }
 }
