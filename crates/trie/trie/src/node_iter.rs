@@ -1,7 +1,9 @@
-use crate::{hashed_cursor::HashedCursor, trie_cursor::TrieCursor, walker::TrieWalker, Nibbles};
+use crate::{
+    hashed_cursor::HashedCursor, trie_cursor::TrieCursor, walker::TrieWalker, Nibbles, TrieType,
+};
 use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
-use tracing::trace;
+use tracing::{instrument, trace};
 
 /// Represents a branch node in the trie.
 #[derive(Debug)]
@@ -48,6 +50,8 @@ pub struct TrieNodeIter<C, H: HashedCursor> {
     pub walker: TrieWalker<C>,
     /// The cursor for the hashed entries.
     pub hashed_cursor: H,
+    /// The type of the trie.
+    trie_type: TrieType,
     /// The previous hashed key. If the iteration was previously interrupted, this value can be
     /// used to resume iterating from the last returned leaf node.
     previous_hashed_key: Option<B256>,
@@ -64,9 +68,10 @@ pub struct TrieNodeIter<C, H: HashedCursor> {
 
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::TrieNodeIterMetrics,
-    /// The key that the [`HashedCursor`] previously advanced to using [`HashedCursor::next`].
-    #[cfg(feature = "metrics")]
-    previously_advanced_to_key: Option<B256>,
+    /// Stores the result of the last successful [`Self::next_hashed_entry`], used to avoid a
+    /// redundant [`Self::seek_hashed_entry`] call if the walker points to the same key that
+    /// was just returned by `next()`.
+    last_next_result: Option<(B256, H::Value)>,
 }
 
 impl<C, H: HashedCursor> TrieNodeIter<C, H>
@@ -75,41 +80,27 @@ where
 {
     /// Creates a new [`TrieNodeIter`] for the state trie.
     pub fn state_trie(walker: TrieWalker<C>, hashed_cursor: H) -> Self {
-        Self::new(
-            walker,
-            hashed_cursor,
-            #[cfg(feature = "metrics")]
-            crate::TrieType::State,
-        )
+        Self::new(walker, hashed_cursor, TrieType::State)
     }
 
     /// Creates a new [`TrieNodeIter`] for the storage trie.
     pub fn storage_trie(walker: TrieWalker<C>, hashed_cursor: H) -> Self {
-        Self::new(
-            walker,
-            hashed_cursor,
-            #[cfg(feature = "metrics")]
-            crate::TrieType::Storage,
-        )
+        Self::new(walker, hashed_cursor, TrieType::Storage)
     }
 
     /// Creates a new [`TrieNodeIter`].
-    fn new(
-        walker: TrieWalker<C>,
-        hashed_cursor: H,
-        #[cfg(feature = "metrics")] trie_type: crate::TrieType,
-    ) -> Self {
+    fn new(walker: TrieWalker<C>, hashed_cursor: H, trie_type: TrieType) -> Self {
         Self {
             walker,
             hashed_cursor,
+            trie_type,
             previous_hashed_key: None,
             current_hashed_entry: None,
             should_check_walker_key: false,
             last_seeked_hashed_entry: None,
             #[cfg(feature = "metrics")]
             metrics: crate::metrics::TrieNodeIterMetrics::new(trie_type),
-            #[cfg(feature = "metrics")]
-            previously_advanced_to_key: None,
+            last_next_result: None,
         }
     }
 
@@ -126,6 +117,18 @@ where
     ///
     /// If `metrics` feature is enabled, also updates the metrics.
     fn seek_hashed_entry(&mut self, key: B256) -> Result<Option<(B256, H::Value)>, DatabaseError> {
+        if let Some((last_key, last_value)) = self.last_next_result {
+            if last_key == key {
+                trace!(target: "trie::node_iter", seek_key = ?key, "reusing result from last next() call instead of seeking");
+                self.last_next_result = None; // Consume the cached value
+
+                let result = Some((last_key, last_value));
+                self.last_seeked_hashed_entry = Some(SeekedHashedEntry { seeked_key: key, result });
+
+                return Ok(result);
+            }
+        }
+
         if let Some(entry) = self
             .last_seeked_hashed_entry
             .as_ref()
@@ -137,16 +140,13 @@ where
             return Ok(entry);
         }
 
+        trace!(target: "trie::node_iter", ?key, "performing hashed cursor seek");
         let result = self.hashed_cursor.seek(key)?;
         self.last_seeked_hashed_entry = Some(SeekedHashedEntry { seeked_key: key, result });
 
         #[cfg(feature = "metrics")]
         {
             self.metrics.inc_leaf_nodes_seeked();
-
-            if Some(key) == self.previously_advanced_to_key {
-                self.metrics.inc_leaf_nodes_same_seeked_as_advanced();
-            }
         }
         Ok(result)
     }
@@ -156,12 +156,12 @@ where
     /// If `metrics` feature is enabled, also updates the metrics.
     fn next_hashed_entry(&mut self) -> Result<Option<(B256, H::Value)>, DatabaseError> {
         let result = self.hashed_cursor.next();
+
+        self.last_next_result = result.clone()?;
+
         #[cfg(feature = "metrics")]
         {
             self.metrics.inc_leaf_nodes_advanced();
-
-            self.previously_advanced_to_key =
-                result.as_ref().ok().and_then(|result| result.as_ref().map(|(k, _)| *k));
         }
         result
     }
@@ -184,6 +184,13 @@ where
     /// 5. Repeat.
     ///
     /// NOTE: The iteration will start from the key of the previous hashed entry if it was supplied.
+    #[instrument(
+        level = "trace",
+        target = "trie::node_iter",
+        skip_all,
+        fields(trie_type = ?self.trie_type),
+        ret
+    )]
     pub fn try_next(
         &mut self,
     ) -> Result<Option<TrieElement<<H as HashedCursor>::Value>>, DatabaseError> {
@@ -518,12 +525,6 @@ mod tests {
                 // Collect the siblings of the modified account
                 KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_4) },
                 KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_5) },
-                // We seek the account 5 because its hash is not in the branch node, but we already
-                // walked it before, so there should be no need for it.
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_5),
-                    visited_key: Some(account_5)
-                },
                 KeyVisit { visit_type: KeyVisitType::Next, visited_key: None },
             ],
         );

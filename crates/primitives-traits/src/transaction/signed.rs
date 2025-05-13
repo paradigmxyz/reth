@@ -1,12 +1,12 @@
 //! API of a signed transaction.
 
 use crate::{
-    crypto::secp256k1::{recover_signer, recover_signer_unchecked},
-    InMemorySize, MaybeCompact, MaybeSerde, MaybeSerdeBincodeCompat,
+    crypto::secp256k1::recover_signer_unchecked, InMemorySize, MaybeCompact, MaybeSerde,
+    MaybeSerdeBincodeCompat,
 };
 use alloc::{fmt, vec::Vec};
 use alloy_consensus::{
-    transaction::{Recovered, RlpEcdsaEncodableTx},
+    transaction::{Recovered, RlpEcdsaEncodableTx, SignerRecoverable},
     EthereumTxEnvelope, SignableTransaction,
 };
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
@@ -38,6 +38,7 @@ pub trait SignedTransaction:
     + alloy_consensus::Transaction
     + MaybeSerde
     + InMemorySize
+    + SignerRecoverable
 {
     /// Returns reference to transaction hash.
     fn tx_hash(&self) -> &TxHash;
@@ -54,29 +55,9 @@ pub trait SignedTransaction:
 
     /// Recover signer from signature and hash.
     ///
-    /// Returns `RecoveryError` if the transaction's signature is invalid following [EIP-2](https://eips.ethereum.org/EIPS/eip-2), see also `reth_primitive_traits::crypto::secp256k1::recover_signer`.
-    ///
-    /// Note:
-    ///
-    /// This can fail for some early ethereum mainnet transactions pre EIP-2, use
-    /// [`Self::recover_signer_unchecked`] if you want to recover the signer without ensuring that
-    /// the signature has a low `s` value.
-    fn recover_signer(&self) -> Result<Address, RecoveryError>;
-
-    /// Recover signer from signature and hash.
-    ///
     /// Returns an error if the transaction's signature is invalid.
     fn try_recover(&self) -> Result<Address, RecoveryError> {
         self.recover_signer()
-    }
-
-    /// Recover signer from signature and hash _without ensuring that the signature has a low `s`
-    /// value_.
-    ///
-    /// Returns `RecoveryError` if the transaction's signature is invalid, see also
-    /// `reth_primitive_traits::crypto::secp256k1::recover_signer_unchecked`.
-    fn recover_signer_unchecked(&self) -> Result<Address, RecoveryError> {
-        self.recover_signer_unchecked_with_buf(&mut Vec::new())
     }
 
     /// Recover signer from signature and hash _without ensuring that the signature has a low `s`
@@ -87,8 +68,9 @@ pub trait SignedTransaction:
         self.recover_signer_unchecked()
     }
 
-    /// Same as [`Self::recover_signer_unchecked`] but receives a buffer to operate on. This is used
-    /// during batch recovery to avoid allocating a new buffer for each transaction.
+    /// Same as [`SignerRecoverable::recover_signer_unchecked`] but receives a buffer to operate on.
+    /// This is used during batch recovery to avoid allocating a new buffer for each
+    /// transaction.
     fn recover_signer_unchecked_with_buf(
         &self,
         buf: &mut Vec<u8>,
@@ -109,7 +91,7 @@ pub trait SignedTransaction:
     /// Tries to recover signer and return [`Recovered`].
     ///
     /// Returns `Err(Self)` if the transaction's signature is invalid, see also
-    /// [`SignedTransaction::recover_signer`].
+    /// [`SignerRecoverable::recover_signer`].
     #[auto_impl(keep_default_for(&, Arc))]
     fn try_into_recovered(self) -> Result<Recovered<Self>, Self> {
         match self.recover_signer() {
@@ -151,11 +133,6 @@ where
         }
     }
 
-    fn recover_signer(&self) -> Result<Address, RecoveryError> {
-        let signature_hash = self.signature_hash();
-        recover_signer(self.signature(), signature_hash)
-    }
-
     fn recover_signer_unchecked_with_buf(
         &self,
         buf: &mut Vec<u8>,
@@ -187,10 +164,6 @@ mod op {
             }
         }
 
-        fn recover_signer(&self) -> Result<Address, RecoveryError> {
-            recover_signer(self.signature(), self.signature_hash())
-        }
-
         fn recover_signer_unchecked_with_buf(
             &self,
             buf: &mut Vec<u8>,
@@ -215,46 +188,6 @@ mod op {
                 Self::Eip7702(tx) => tx.hash(),
                 Self::Deposit(tx) => tx.hash_ref(),
             }
-        }
-
-        fn recover_signer(&self) -> Result<Address, RecoveryError> {
-            let signature_hash = match self {
-                Self::Legacy(tx) => tx.signature_hash(),
-                Self::Eip2930(tx) => tx.signature_hash(),
-                Self::Eip1559(tx) => tx.signature_hash(),
-                Self::Eip7702(tx) => tx.signature_hash(),
-                // Optimism's Deposit transaction does not have a signature. Directly return the
-                // `from` address.
-                Self::Deposit(tx) => return Ok(tx.from),
-            };
-            let signature = match self {
-                Self::Legacy(tx) => tx.signature(),
-                Self::Eip2930(tx) => tx.signature(),
-                Self::Eip1559(tx) => tx.signature(),
-                Self::Eip7702(tx) => tx.signature(),
-                Self::Deposit(_) => unreachable!("Deposit transactions should not be handled here"),
-            };
-            recover_signer(signature, signature_hash)
-        }
-
-        fn recover_signer_unchecked(&self) -> Result<Address, RecoveryError> {
-            let signature_hash = match self {
-                Self::Legacy(tx) => tx.signature_hash(),
-                Self::Eip2930(tx) => tx.signature_hash(),
-                Self::Eip1559(tx) => tx.signature_hash(),
-                Self::Eip7702(tx) => tx.signature_hash(),
-                // Optimism's Deposit transaction does not have a signature. Directly return the
-                // `from` address.
-                Self::Deposit(tx) => return Ok(tx.from),
-            };
-            let signature = match self {
-                Self::Legacy(tx) => tx.signature(),
-                Self::Eip2930(tx) => tx.signature(),
-                Self::Eip1559(tx) => tx.signature(),
-                Self::Eip7702(tx) => tx.signature(),
-                Self::Deposit(_) => unreachable!("Deposit transactions should not be handled here"),
-            };
-            recover_signer_unchecked(signature, signature_hash)
         }
 
         fn recover_signer_unchecked_with_buf(

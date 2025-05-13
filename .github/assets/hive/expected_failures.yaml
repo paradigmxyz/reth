@@ -29,13 +29,7 @@ engine-withdrawals:
   - Empty Withdrawals (Paris) (reth)
   - Corrupted Block Hash Payload (INVALID) (Paris) (reth)
   - Withdrawals Fork on Block 1 - 8 Block Re-Org NewPayload (Paris) (reth)
-  - Withdrawals Fork on Block 1 - 8 Block Re-Org, Sync (Paris) (reth)
-  - Withdrawals Fork on Block 8 - 10 Block Re-Org NewPayload (Paris) (reth)
-  - Withdrawals Fork on Block 8 - 10 Block Re-Org Sync (Paris) (reth)
   - Withdrawals Fork on Canonical Block 8 / Side Block 7 - 10 Block Re-Org (Paris) (reth)
-  - Withdrawals Fork on Canonical Block 8 / Side Block 7 - 10 Block Re-Org Sync (Paris) (reth)
-  - Withdrawals Fork on Canonical Block 8 / Side Block 9 - 10 Block Re-Org (Paris) (reth)
-  - Withdrawals Fork on Canonical Block 8 / Side Block 9 - 10 Block Re-Org Sync (Paris) (reth)
 
 engine-api: []
 
