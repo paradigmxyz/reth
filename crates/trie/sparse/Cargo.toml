@@ -73,9 +73,10 @@ test-utils = [
 ]
 arbitrary = [
     "std",
+    "alloy-primitives/arbitrary",
+    "alloy-trie/arbitrary",
     "reth-primitives-traits/arbitrary",
     "reth-trie-common/arbitrary",
-    "alloy-primitives/arbitrary",
     "smallvec/arbitrary",
 ]
 
