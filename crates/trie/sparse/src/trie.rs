@@ -3642,6 +3642,35 @@ mod tests {
     }
 
     #[test]
+    fn sparse_trie_clear() {
+        // tests that if we fill a sparse trie with some nodes and then clear it, it has the same
+        // contents as an empty sparse trie
+        let mut sparse = RevealedSparseTrie::default();
+        let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), value.clone())
+            .unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), value.clone())
+            .unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), value.clone())
+            .unwrap();
+        sparse.update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), value).unwrap();
+
+        sparse.clear();
+
+        // we have to update the root hash to be an empty one, because the `Default` impl of
+        // `RevealedSparseTrie` sets the root hash to `EMPTY_ROOT_HASH` in the constructor.
+        //
+        // The default impl is only used in tests.
+        sparse.nodes.insert(Nibbles::default(), SparseNode::Empty);
+
+        let empty_trie = RevealedSparseTrie::default();
+        assert_eq!(empty_trie, sparse);
+    }
+
+    #[test]
     fn sparse_trie_display() {
         let mut sparse = RevealedSparseTrie::default();
 
