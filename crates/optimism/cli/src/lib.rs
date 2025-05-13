@@ -122,7 +122,7 @@ where
     {
         let mut this = self.configure();
         this.set_runner(runner);
-        this.run(FnLauncher::new(launcher))
+        this.run(FnLauncher::new::<C, Ext>(launcher))
     }
 }
 

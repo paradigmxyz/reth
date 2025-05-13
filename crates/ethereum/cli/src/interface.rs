@@ -152,9 +152,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
             (EthExecutorProvider::ethereum(spec.clone()), EthBeaconConsensus::new(spec))
         };
         match self.command {
-            Commands::Node(command) => {
-                runner.run_command_until_exit(|ctx| command.execute(ctx, FnLauncher::new(launcher)))
-            }
+            Commands::Node(command) => runner.run_command_until_exit(|ctx| {
+                command.execute(ctx, FnLauncher::new::<C, Ext>(launcher))
+            }),
             Commands::Init(command) => {
                 runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
             }

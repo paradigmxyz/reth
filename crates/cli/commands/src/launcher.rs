@@ -24,7 +24,11 @@ pub struct FnLauncher<F, Fut> {
 }
 
 impl<F, Fut> FnLauncher<F, Fut> {
-    pub fn new(func: F) -> Self {
+    pub fn new<C, Ext>(func: F) -> Self
+    where
+        C: ChainSpecParser,
+        F: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
+    {
         Self { func, _result: PhantomData }
     }
 }
