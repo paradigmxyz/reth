@@ -1,0 +1,36 @@
+name: Update Superchain Config
+
+on:
+  schedule:
+    - cron: '0 3 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-superchain:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install required tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq zstd qpdf yq
+
+      - name: Run fetch_superchain_config.sh
+        run: |
+          chmod +x crates/optimism/chainspec/res/fetch_superchain_config.sh
+          cd crates/optimism/chainspec/res
+          ./fetch_superchain_config.sh
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "chore: update superchain config"
+          title: "chore: update superchain config"
+          body: "This PR updates the superchain configs via scheduled workflow."
+          branch: "ci/update-superchain-config"
+          delete-branch: true
