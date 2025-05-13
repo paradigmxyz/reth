@@ -16,7 +16,7 @@
 
 use clap::Parser;
 use jsonrpsee::{
-    core::{RpcResult, SubscriptionResult, __reexports::serde_json},
+    core::{RpcResult, SubscriptionResult},
     proc_macros::rpc,
     PendingSubscriptionSink, SubscriptionMessage,
 };
