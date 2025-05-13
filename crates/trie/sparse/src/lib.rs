@@ -13,6 +13,15 @@ pub use trie::*;
 
 pub mod blinded;
 
+mod nibbles;
+pub use nibbles::*;
+
+mod prefix_set;
+pub use prefix_set::*;
+
+mod node;
+pub use node::*;
+
 #[cfg(feature = "metrics")]
 mod metrics;
 

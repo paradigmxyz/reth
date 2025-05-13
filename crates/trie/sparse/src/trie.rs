@@ -1,4 +1,7 @@
-use crate::blinded::{BlindedProvider, DefaultBlindedProvider, RevealedNode};
+use crate::{
+    blinded::{BlindedProvider, DefaultBlindedProvider, RevealedNode},
+    ExtensionNodeRef, LeafNodeRef, PackedNibbles, PrefixSet, PrefixSetMut,
+};
 use alloc::{
     borrow::Cow,
     boxed::Box,
@@ -15,9 +18,8 @@ use alloy_primitives::{
 use alloy_rlp::Decodable;
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
-    prefix_set::{PrefixSet, PrefixSetMut},
-    BranchNodeCompact, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, RlpNode, TrieMask,
-    TrieNode, CHILD_INDEX_RANGE, EMPTY_ROOT_HASH,
+    BranchNodeCompact, BranchNodeRef, Nibbles, RlpNode, TrieMask, TrieNode, CHILD_INDEX_RANGE,
+    EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
 use tracing::trace;
@@ -243,7 +245,7 @@ impl<P: BlindedProvider> SparseTrie<P> {
     /// # Errors
     ///
     /// Returns an error if the trie is still blind, or if the update fails.
-    pub fn update_leaf(&mut self, path: Nibbles, value: Vec<u8>) -> SparseTrieResult<()> {
+    pub fn update_leaf(&mut self, path: PackedNibbles, value: Vec<u8>) -> SparseTrieResult<()> {
         let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
         revealed.update_leaf(path, value)?;
         Ok(())
@@ -254,154 +256,10 @@ impl<P: BlindedProvider> SparseTrie<P> {
     /// # Errors
     ///
     /// Returns an error if the trie is still blind, or if the leaf cannot be removed
-    pub fn remove_leaf(&mut self, path: &Nibbles) -> SparseTrieResult<()> {
+    pub fn remove_leaf(&mut self, path: &PackedNibbles) -> SparseTrieResult<()> {
         let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
         revealed.remove_leaf(path)?;
         Ok(())
-    }
-}
-
-/// A representation for nibbles, that uses an even/odd flag.
-#[derive(Clone, PartialEq, Eq, Debug, Hash, Default)]
-pub struct PackedNibbles {
-    /// The nibbles themselves, stored as a byte array.
-    pub nibbles: SmallVec<[u8; 32]>,
-    /// The even/odd flag, indicating whether the length is even or odd.
-    pub even: bool,
-}
-
-impl PackedNibbles {
-    /// Returns whether or not the [`PackedNibbles`] is empty.
-    pub fn is_empty(&self) -> bool {
-        self.nibbles.is_empty()
-    }
-
-    /// Extends this [`PackedNibbles`] with the given [`PackedNibbles`].
-    fn extend_path(&mut self, other: &PackedNibbles) {
-        if other.is_empty() {
-            // If `other` is empty, we can just return
-            return
-        }
-
-        if self.nibbles.is_empty() {
-            // If we're empty, we can just use the `other` nibbles
-            self.nibbles.copy_from_slice(&other.nibbles);
-            self.even = other.even;
-            return
-        }
-
-        if self.even {
-            // If we're even, we can just extend the nibbles with `other` and update the even flag
-            self.nibbles.extend_from_slice(&other.nibbles);
-            self.even = other.even;
-            return
-        }
-
-        // We're odd, so we need to merge nibbles one by one
-        let prev_len = self.nibbles.len();
-
-        // Reserve space for the new nibbles
-        let new_len = if other.even {
-            prev_len + other.nibbles.len()
-        } else {
-            prev_len + other.nibbles.len() - 1
-        };
-        self.nibbles.resize(new_len, 0);
-
-        // Merge the boundary.
-        //
-        // Example: `self` ends with [0x30] (representing "3") and `other` starts with [0x45]
-        // (representing "45").
-        // 1. Take first byte from `other`: 0x45
-        // 2. Mask low nibble:              0x45 & 0xF0 = 0x40
-        // 3. Shift right by 4:             0x40 >> 4   = 0x04
-        // 4. Take last byte from `self`:   0x30
-        // 5. Combine with OR:              0x30 | 0x04 = 0x34
-        //
-        // Result: self ends with [0x12, 0x34] and we continue merging the rest
-        self.nibbles[prev_len - 1] |= (other.nibbles[0] & 0xF0) >> 4;
-
-        // Process the rest of the bytes from `other`.
-        //
-        // Example: pushing bytes [0x45, 0x60] from `other` into the correct positions in `self`.
-        //
-        // For the first iteration:
-        // 1. current = 0x45, next = 0x60
-        // 2. Shift current left by 4:              0x45 << 4   = 0x50
-        // 3. Mask high nibble of next:             0x60 & 0xF0 = 0x60
-        // 4. Shift right by 4:                     0x60 >> 4   = 0x06
-        // 5. Combine with OR:                      0x50 | 0x06 = 0x56
-        // 6. Place at the next position in `self`: self.nibbles[prev_len + 0] = 0x56
-        for i in 0..other.nibbles.len() - 1 {
-            let current = other.nibbles[i];
-            let next = other.nibbles[i + 1];
-
-            let low_nibble = current << 4;
-            let high_nibble = (next & 0xF0) >> 4;
-
-            self.nibbles[prev_len + i] = low_nibble | high_nibble;
-        }
-
-        // Handle the last byte based on whether `other` is even or odd.
-        if other.even {
-            // If `other` is even, the resulting `self` will be odd, so we need to get the high
-            // nibble of the last byte of `other` and set it to the low nibble of the last byte of
-            // `self`.
-            //
-            // Example: `other` ends with [0x60] (representing "60"):
-            // 1. Mask low nibble:  0x60 & 0x0F = 0x00
-            // 2. Shift left by 4:  0x00 << 4   = 0x00
-            //
-            // If `other` ends with [0x67] (representing "67"):
-            // 1. Mask low nibble:  0x67 & 0x0F = 0x07
-            // 2. Shift left by 4:  0x07 << 4   = 0x70
-            let last = prev_len + other.nibbles.len() - 1;
-            let low_nibble = (other.nibbles[other.nibbles.len() - 1] & 0x0F) << 4;
-
-            self.nibbles[last] = low_nibble;
-        }
-
-        // We know that `self.even` is false, so we only set the even flag if both nibbles started
-        // out with odd lengths.
-        //
-        // For this it's enough to check if the other had odd length.
-        self.even = !other.even;
-    }
-
-    /// Pushes a single nibble to the end of the nibbles.
-    ///
-    /// This will only look at the high nibble of the byte passed, i.e. for `0x02` the nibble `2`
-    /// will be pushed.
-    ///
-    /// NOTE: if there is data in the low nibble, it will be ignored.
-    fn push_unchecked(&mut self, nibble: u8) {
-        // If we're empty, we can just push the nibble
-        if self.nibbles.is_empty() {
-            self.nibbles.push(nibble << 4);
-            self.even = false;
-            return
-        }
-
-        // We determine whether or not we should push a new low nibble or set the high nibble of
-        // the last byte based on the even value
-        if self.even {
-            // Push a new low nibble
-            self.nibbles.push(nibble << 4);
-        } else {
-            let last = self.nibbles.len() - 1;
-
-            // Set the high nibble of the last byte
-            self.nibbles[last] |= nibble & 0x0F;
-        }
-
-        // Finally set the even / odd to the opposite of the current value
-        self.even = !self.even;
-    }
-}
-
-impl From<Nibbles> for PackedNibbles {
-    fn from(nibbles: Nibbles) -> Self {
-        Self { even: nibbles.len() % 2 == 0, nibbles: nibbles.pack() }
     }
 }
 
@@ -425,14 +283,14 @@ pub struct RevealedSparseTrie<P = DefaultBlindedProvider> {
     provider: P,
     /// Map from a path (nibbles) to its corresponding sparse trie node.
     /// This contains all of the revealed nodes in trie.
-    nodes: HashMap<Nibbles, SparseNode>,
+    nodes: HashMap<PackedNibbles, SparseNode>,
     /// When a branch is set, the corresponding child subtree is stored in the database.
-    branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
+    branch_node_tree_masks: HashMap<PackedNibbles, TrieMask>,
     /// When a bit is set, the corresponding child is stored as a hash in the database.
-    branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
+    branch_node_hash_masks: HashMap<PackedNibbles, TrieMask>,
     /// Map from leaf key paths to their values.
     /// All values are stored here instead of directly in leaf nodes.
-    values: HashMap<Nibbles, Vec<u8>>,
+    values: HashMap<PackedNibbles, Vec<u8>>,
     /// Set of prefixes (key paths) that have been marked as updated.
     /// This is used to track which parts of the trie need to be recalculated.
     prefix_set: PrefixSetMut,
@@ -456,12 +314,6 @@ impl<P> fmt::Debug for RevealedSparseTrie<P> {
     }
 }
 
-/// Turns a [`Nibbles`] into a [`String`] by concatenating each nibbles' hex character.
-fn encode_nibbles(nibbles: &Nibbles) -> String {
-    let encoded = hex::encode(nibbles.pack());
-    encoded[..nibbles.len()].to_string()
-}
-
 /// This encodes packed nibbles into a hex string.
 fn encode_packed_nibbles(packed: &PackedNibbles) -> String {
     let actual_len = packed.nibbles.len() + if packed.even { 0 } else { 1 };
@@ -480,7 +332,11 @@ impl<P: BlindedProvider> fmt::Display for RevealedSparseTrie<P> {
         const INDENT: &str = "    ";
 
         // Track both path and depth
-        stack.push((Nibbles::default(), self.nodes_ref().get(&Nibbles::default()).unwrap(), 0));
+        stack.push((
+            PackedNibbles::default(),
+            self.nodes_ref().get(&PackedNibbles::default()).unwrap(),
+            0,
+        ));
 
         while let Some((path, node, depth)) = stack.pop() {
             if !visited.insert(path.clone()) {
@@ -492,7 +348,8 @@ impl<P: BlindedProvider> fmt::Display for RevealedSparseTrie<P> {
                 write!(f, "{}", INDENT.repeat(depth))?;
             }
 
-            let packed_path = if depth == 0 { String::from("Root") } else { encode_nibbles(&path) };
+            let packed_path =
+                if depth == 0 { String::from("Root") } else { encode_packed_nibbles(&path) };
 
             match node {
                 SparseNode::Empty | SparseNode::Hash(_) => {
@@ -501,8 +358,8 @@ impl<P: BlindedProvider> fmt::Display for RevealedSparseTrie<P> {
                 SparseNode::Leaf { key, .. } => {
                     // we want to append the key to the path
                     let mut full_path = path.clone();
-                    full_path.extend_from_slice_unchecked(key);
-                    let packed_path = encode_nibbles(&full_path);
+                    full_path.extend_path(key);
+                    let packed_path = encode_packed_nibbles(&full_path);
 
                     writeln!(f, "{packed_path} -> {node:?}")?;
                 }
@@ -511,8 +368,7 @@ impl<P: BlindedProvider> fmt::Display for RevealedSparseTrie<P> {
 
                     // push the child node onto the stack with increased depth
                     let mut child_path = path.clone();
-                    child_path.extend_from_slice_unchecked(key);
-                    let child_path = Nibbles::from(child_path);
+                    child_path.extend_path(key);
                     if let Some(child_node) = self.nodes_ref().get(&child_path) {
                         stack.push((child_path, child_node, depth + 1));
                     }
@@ -524,7 +380,6 @@ impl<P: BlindedProvider> fmt::Display for RevealedSparseTrie<P> {
                         if state_mask.is_bit_set(i) {
                             let mut child_path = path.clone();
                             child_path.push_unchecked(i);
-                            let child_path = Nibbles::from(child_path);
                             if let Some(child_node) = self.nodes_ref().get(&child_path) {
                                 stack.push((child_path, child_node, depth + 1));
                             }
@@ -542,7 +397,7 @@ impl Default for RevealedSparseTrie {
     fn default() -> Self {
         Self {
             provider: Default::default(),
-            nodes: HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]),
+            nodes: HashMap::from_iter([(PackedNibbles::default(), SparseNode::Empty)]),
             branch_node_tree_masks: HashMap::default(),
             branch_node_hash_masks: HashMap::default(),
             values: HashMap::default(),
@@ -579,7 +434,7 @@ impl RevealedSparseTrie {
             updates: None,
         }
         .with_updates(retain_updates);
-        this.reveal_node(Nibbles::default(), root, masks)?;
+        this.reveal_node(PackedNibbles::default(), root, masks)?;
         Ok(this)
     }
 }
@@ -610,7 +465,7 @@ impl<P> RevealedSparseTrie<P> {
             updates: None,
         }
         .with_updates(retain_updates);
-        this.reveal_node(Nibbles::default(), node, masks)?;
+        this.reveal_node(PackedNibbles::default(), node, masks)?;
         Ok(this)
     }
 
@@ -654,7 +509,7 @@ impl<P> RevealedSparseTrie<P> {
     }
 
     /// Returns an immutable reference to all nodes in the sparse trie.
-    pub const fn nodes_ref(&self) -> &HashMap<Nibbles, SparseNode> {
+    pub const fn nodes_ref(&self) -> &HashMap<PackedNibbles, SparseNode> {
         &self.nodes
     }
 
@@ -670,7 +525,7 @@ impl<P> RevealedSparseTrie<P> {
     /// - The value has not yet been revealed. In order to determine which is true, one would need
     ///   an exclusion proof.
     pub fn get_leaf_value(&self, path: &Nibbles) -> Option<&Vec<u8>> {
-        self.values.get(path)
+        self.values.get(&PackedNibbles::from(path.clone()))
     }
 
     /// Consumes and returns the currently accumulated trie updates.
@@ -698,7 +553,7 @@ impl<P> RevealedSparseTrie<P> {
     /// `Ok(())` if successful, or an error if node was not revealed.
     pub fn reveal_node(
         &mut self,
-        path: Nibbles,
+        path: PackedNibbles,
         node: TrieNode,
         masks: TrieMasks,
     ) -> SparseTrieResult<()> {
@@ -755,7 +610,7 @@ impl<P> RevealedSparseTrie<P> {
                         // All other node types can't be handled.
                         node @ (SparseNode::Empty | SparseNode::Leaf { .. }) => {
                             return Err(SparseTrieErrorKind::Reveal {
-                                path: entry.key().clone(),
+                                path: entry.key().clone().into(),
                                 node: Box::new(node.clone()),
                             }
                             .into())
@@ -770,10 +625,12 @@ impl<P> RevealedSparseTrie<P> {
                 Entry::Occupied(mut entry) => match entry.get() {
                     // Replace a hash node with a revealed extension node.
                     SparseNode::Hash(hash) => {
+                        let ext_key = PackedNibbles::from(ext.key);
+
                         let mut child_path = entry.key().clone();
-                        child_path.extend_from_slice_unchecked(&ext.key);
+                        child_path.extend_path(&ext_key);
                         entry.insert(SparseNode::Extension {
-                            key: ext.key,
+                            key: ext_key,
                             // Memoize the hash of a previously blinded node in a new extension
                             // node.
                             hash: Some(*hash),
@@ -787,16 +644,18 @@ impl<P> RevealedSparseTrie<P> {
                     // All other node types can't be handled.
                     node @ (SparseNode::Empty | SparseNode::Leaf { .. }) => {
                         return Err(SparseTrieErrorKind::Reveal {
-                            path: entry.key().clone(),
+                            path: entry.key().clone().into(),
                             node: Box::new(node.clone()),
                         }
                         .into())
                     }
                 },
                 Entry::Vacant(entry) => {
+                    let ext_key = PackedNibbles::from(ext.key);
+
                     let mut child_path = entry.key().clone();
-                    child_path.extend_from_slice_unchecked(&ext.key);
-                    entry.insert(SparseNode::new_ext(ext.key));
+                    child_path.extend_path(&ext_key);
+                    entry.insert(SparseNode::new_ext(ext_key));
                     self.reveal_node_or_hash(child_path, &ext.child)?;
                 }
             },
@@ -804,11 +663,13 @@ impl<P> RevealedSparseTrie<P> {
                 Entry::Occupied(mut entry) => match entry.get() {
                     // Replace a hash node with a revealed leaf node and store leaf node value.
                     SparseNode::Hash(hash) => {
+                        let leaf_key = PackedNibbles::from(leaf.key);
+
                         let mut full = entry.key().clone();
-                        full.extend_from_slice_unchecked(&leaf.key);
+                        full.extend_path(&leaf_key);
                         self.values.insert(full, leaf.value);
                         entry.insert(SparseNode::Leaf {
-                            key: leaf.key,
+                            key: leaf_key,
                             // Memoize the hash of a previously blinded node in a new leaf
                             // node.
                             hash: Some(*hash),
@@ -821,16 +682,18 @@ impl<P> RevealedSparseTrie<P> {
                     SparseNode::Extension { .. } |
                     SparseNode::Branch { .. }) => {
                         return Err(SparseTrieErrorKind::Reveal {
-                            path: entry.key().clone(),
+                            path: entry.key().clone().into(),
                             node: Box::new(node.clone()),
                         }
                         .into())
                     }
                 },
                 Entry::Vacant(entry) => {
+                    let leaf_key = PackedNibbles::from(leaf.key);
+
                     let mut full = entry.key().clone();
-                    full.extend_from_slice_unchecked(&leaf.key);
-                    entry.insert(SparseNode::new_leaf(leaf.key));
+                    full.extend_path(&leaf_key);
+                    entry.insert(SparseNode::new_leaf(leaf_key));
                     self.values.insert(full, leaf.value);
                 }
             },
@@ -857,7 +720,7 @@ impl<P> RevealedSparseTrie<P> {
     ///
     /// Will error if there's a conflict between a new hash node and an existing one
     /// at the same path
-    fn reveal_node_or_hash(&mut self, path: Nibbles, child: &[u8]) -> SparseTrieResult<()> {
+    fn reveal_node_or_hash(&mut self, path: PackedNibbles, child: &[u8]) -> SparseTrieResult<()> {
         if child.len() == B256::len_bytes() + 1 {
             let hash = B256::from_slice(&child[1..]);
             match self.nodes.entry(path) {
@@ -865,7 +728,7 @@ impl<P> RevealedSparseTrie<P> {
                     // Hash node with a different hash can't be handled.
                     SparseNode::Hash(previous_hash) if previous_hash != &hash => {
                         return Err(SparseTrieErrorKind::Reveal {
-                            path: entry.key().clone(),
+                            path: entry.key().clone().into(),
                             node: Box::new(SparseNode::Hash(hash)),
                         }
                         .into())
@@ -898,15 +761,20 @@ impl<P> RevealedSparseTrie<P> {
     ///
     /// Returns an error if a blinded node or an empty node is encountered unexpectedly,
     /// as these prevent proper removal of the leaf.
-    fn take_nodes_for_path(&mut self, path: &Nibbles) -> SparseTrieResult<Vec<RemovedSparseNode>> {
-        let mut current = Nibbles::default(); // Start traversal from the root
+    fn take_nodes_for_path(
+        &mut self,
+        path: &PackedNibbles,
+    ) -> SparseTrieResult<Vec<RemovedSparseNode>> {
+        let mut current = PackedNibbles::default(); // Start traversal from the root
         let mut nodes = Vec::new(); // Collect traversed nodes
 
         while let Some(node) = self.nodes.remove(&current) {
             match &node {
                 SparseNode::Empty => return Err(SparseTrieErrorKind::Blind.into()),
                 &SparseNode::Hash(hash) => {
-                    return Err(SparseTrieErrorKind::BlindedNode { path: current, hash }.into())
+                    return Err(
+                        SparseTrieErrorKind::BlindedNode { path: current.into(), hash }.into()
+                    )
                 }
                 SparseNode::Leaf { key: _key, .. } => {
                     // Leaf node is always the one that we're deleting, and no other leaf nodes can
@@ -915,7 +783,7 @@ impl<P> RevealedSparseTrie<P> {
                     #[cfg(debug_assertions)]
                     {
                         let mut current = current.clone();
-                        current.extend_from_slice_unchecked(_key);
+                        current.extend_path(_key);
                         assert_eq!(&current, path);
                     }
 
@@ -930,7 +798,7 @@ impl<P> RevealedSparseTrie<P> {
                     #[cfg(debug_assertions)]
                     {
                         let mut current = current.clone();
-                        current.extend_from_slice_unchecked(key);
+                        current.extend_path(key);
                         assert!(
                             path.starts_with(&current),
                             "path: {path:?}, current: {current:?}, key: {key:?}",
@@ -938,11 +806,11 @@ impl<P> RevealedSparseTrie<P> {
                     }
 
                     let path = current.clone();
-                    current.extend_from_slice_unchecked(key);
+                    current.extend_path(key);
                     nodes.push(RemovedSparseNode { path, node, unset_branch_nibble: None });
                 }
                 SparseNode::Branch { state_mask, .. } => {
-                    let nibble = path[current.len()];
+                    let nibble = path.get_nibble(current.len());
                     debug_assert!(
                         state_mask.is_bit_set(nibble),
                         "current: {current:?}, path: {path:?}, nibble: {nibble:?}, state_mask: {state_mask:?}",
@@ -953,15 +821,15 @@ impl<P> RevealedSparseTrie<P> {
                     // Any other branch nodes will not require unsetting the nibble, because
                     // deleting one leaf node can not remove the whole path
                     // where the branch node is located.
-                    let mut child_path =
-                        Nibbles::from_nibbles([current.as_slice(), &[nibble]].concat());
+                    let mut child_path = current.clone();
+                    child_path.push_unchecked(nibble);
                     let unset_branch_nibble = self
                         .nodes
                         .get(&child_path)
                         .is_some_and(move |node| match node {
                             SparseNode::Leaf { key, .. } => {
                                 // Get full path of the leaf node
-                                child_path.extend_from_slice_unchecked(key);
+                                child_path.extend_path(key);
                                 &child_path == path
                             }
                             _ => false,
@@ -987,7 +855,7 @@ impl<P> RevealedSparseTrie<P> {
     ///
     /// Note: All previously tracked changes to the trie are also removed.
     pub fn wipe(&mut self) {
-        self.nodes = HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]);
+        self.nodes = HashMap::from_iter([(PackedNibbles::default(), SparseNode::Empty)]);
         self.values = HashMap::default();
         self.prefix_set = PrefixSetMut::all();
         self.updates = self.updates.is_some().then(SparseTrieUpdates::wiped);
@@ -1064,9 +932,9 @@ impl<P> RevealedSparseTrie<P> {
         &self,
         prefix_set: &mut PrefixSet,
         depth: usize,
-    ) -> (Vec<(usize, Nibbles)>, PrefixSetMut) {
+    ) -> (Vec<(usize, PackedNibbles)>, PrefixSetMut) {
         let mut unchanged_prefix_set = PrefixSetMut::default();
-        let mut paths = Vec::from([(Nibbles::default(), 0)]);
+        let mut paths = Vec::from([(PackedNibbles::default(), 0)]);
         let mut targets = Vec::new();
 
         while let Some((mut path, level)) = paths.pop() {
@@ -1089,7 +957,7 @@ impl<P> RevealedSparseTrie<P> {
                     } else {
                         unchanged_prefix_set.insert(path.clone());
 
-                        path.extend_from_slice_unchecked(key);
+                        path.extend_path(key);
                         paths.push((path, level + 1));
                     }
                 }
@@ -1166,15 +1034,16 @@ impl<P> RevealedSparseTrie<P> {
             // Check if the path is in the prefix set.
             // First, check the cached value. If it's `None`, then check the prefix set, and update
             // the cached value.
-            let mut prefix_set_contains =
-                |path: &Nibbles| *is_in_prefix_set.get_or_insert_with(|| prefix_set.contains(path));
+            let mut prefix_set_contains = |path: &PackedNibbles| {
+                *is_in_prefix_set.get_or_insert_with(|| prefix_set.contains(path))
+            };
 
             let (rlp_node, node_type) = match node {
                 SparseNode::Empty => (RlpNode::word_rlp(&EMPTY_ROOT_HASH), SparseNodeType::Empty),
                 SparseNode::Hash(hash) => (RlpNode::word_rlp(hash), SparseNodeType::Hash),
                 SparseNode::Leaf { key, hash } => {
                     let mut path = path.clone();
-                    path.extend_from_slice_unchecked(key);
+                    path.extend_path(key);
                     if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
                         (RlpNode::word_rlp(&hash), SparseNodeType::Leaf)
                     } else {
@@ -1187,7 +1056,7 @@ impl<P> RevealedSparseTrie<P> {
                 }
                 SparseNode::Extension { key, hash, store_in_db_trie } => {
                     let mut child_path = path.clone();
-                    child_path.extend_from_slice_unchecked(key);
+                    child_path.extend_path(key);
                     if let Some((hash, store_in_db_trie)) =
                         hash.zip(*store_in_db_trie).filter(|_| !prefix_set_contains(&path))
                     {
@@ -1442,7 +1311,7 @@ pub enum LeafLookupError {
     /// This means the witness is not complete.
     BlindedNode {
         /// Path to the blinded node.
-        path: Nibbles,
+        path: PackedNibbles,
         /// Hash of the blinded node.
         hash: B256,
     },
@@ -1450,7 +1319,7 @@ pub enum LeafLookupError {
     /// This means the witness is malformed.
     ValueMismatch {
         /// Path to the leaf.
-        path: Nibbles,
+        path: PackedNibbles,
         /// Expected value.
         expected: Option<Vec<u8>>,
         /// Actual value found.
@@ -1466,7 +1335,7 @@ pub enum LeafLookup {
     /// Leaf does not exist (exclusion proof found).
     NonExistent {
         /// Path where the search diverged from the target path.
-        diverged_at: Nibbles,
+        diverged_at: PackedNibbles,
     },
 }
 
@@ -1491,14 +1360,14 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
     ///   value.
     pub fn find_leaf(
         &self,
-        path: &Nibbles,
+        path: &PackedNibbles,
         expected_value: Option<&Vec<u8>>,
     ) -> Result<LeafLookup, LeafLookupError> {
         // Helper function to check if a value matches the expected value
         fn check_value_match(
             actual_value: &Vec<u8>,
             expected_value: Option<&Vec<u8>>,
-            path: &Nibbles,
+            path: &PackedNibbles,
         ) -> Result<(), LeafLookupError> {
             if let Some(expected) = expected_value {
                 if actual_value != expected {
@@ -1512,7 +1381,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
             Ok(())
         }
 
-        let mut current = Nibbles::default(); // Start at the root
+        let mut current = PackedNibbles::default(); // Start at the root
 
         // Inclusion proof
         //
@@ -1547,7 +1416,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
 
                     // Temporarily append the leaf key to `current`
                     let saved_len = current.len();
-                    current.extend_from_slice_unchecked(key);
+                    current.extend_path(key);
 
                     if &current == path {
                         // This should have been handled by our initial values map check
@@ -1566,7 +1435,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                 Some(SparseNode::Extension { key, .. }) => {
                     // Temporarily append the extension key to `current`
                     let saved_len = current.len();
-                    current.extend_from_slice_unchecked(key);
+                    current.extend_path(key);
 
                     if path.len() < current.len() || !path.starts_with(&current) {
                         let diverged_at = current.slice(..saved_len);
@@ -1577,7 +1446,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                 }
                 Some(SparseNode::Branch { state_mask, .. }) => {
                     // Check if branch has a child at the next nibble in our path
-                    let nibble = path[current.len()];
+                    let nibble = path.get_nibble(current.len());
                     if !state_mask.is_bit_set(nibble) {
                         // No child at this nibble - exclusion proof
                         return Ok(LeafLookup::NonExistent { diverged_at: current });
@@ -1606,7 +1475,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
             _ => {
                 // No leaf at exactly the target path
                 let parent_path = if path.is_empty() {
-                    Nibbles::default()
+                    PackedNibbles::default()
                 } else {
                     path.slice(0..path.len() - 1)
                 };
@@ -1631,7 +1500,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
     ///
     /// Note: If an update requires revealing a blinded node, an error is returned if the blinded
     /// provider returns an error.
-    pub fn update_leaf(&mut self, path: Nibbles, value: Vec<u8>) -> SparseTrieResult<()> {
+    pub fn update_leaf(&mut self, path: PackedNibbles, value: Vec<u8>) -> SparseTrieResult<()> {
         self.prefix_set.insert(path.clone());
         let existing = self.values.insert(path.clone(), value);
         if existing.is_some() {
@@ -1639,7 +1508,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
             return Ok(())
         }
 
-        let mut current = Nibbles::default();
+        let mut current = PackedNibbles::default();
         while let Some(node) = self.nodes.get_mut(&current) {
             match node {
                 SparseNode::Empty => {
@@ -1647,10 +1516,12 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                     break
                 }
                 &mut SparseNode::Hash(hash) => {
-                    return Err(SparseTrieErrorKind::BlindedNode { path: current, hash }.into())
+                    return Err(
+                        SparseTrieErrorKind::BlindedNode { path: current.into(), hash }.into()
+                    )
                 }
                 SparseNode::Leaf { key: current_key, .. } => {
-                    current.extend_from_slice_unchecked(current_key);
+                    current.extend_path(current_key);
 
                     // this leaf is being updated
                     if current == path {
@@ -1668,7 +1539,10 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                     self.nodes.reserve(3);
                     self.nodes.insert(
                         current.slice(..common),
-                        SparseNode::new_split_branch(current[common], path[common]),
+                        SparseNode::new_split_branch(
+                            current.get_nibble(common),
+                            path.get_nibble(common),
+                        ),
                     );
                     self.nodes.insert(
                         path.slice(..=common),
@@ -1682,7 +1556,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                     break;
                 }
                 SparseNode::Extension { key, .. } => {
-                    current.extend_from_slice(key);
+                    current.extend_path(key);
 
                     if !path.starts_with(&current) {
                         // find the common prefix
@@ -1696,7 +1570,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                             // Check if the extension node child is a hash that needs to be revealed
                             if self.nodes.get(&current).unwrap().is_hash() {
                                 if let Some(RevealedNode { node, tree_mask, hash_mask }) =
-                                    self.provider.blinded_node(&current)?
+                                    self.provider.blinded_node(&Nibbles::from(current.clone()))?
                                 {
                                     let decoded = TrieNode::decode(&mut &node[..])?;
                                     trace!(
@@ -1719,7 +1593,10 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                         // create state mask for new branch node
                         // NOTE: this might overwrite the current extension node
                         self.nodes.reserve(3);
-                        let branch = SparseNode::new_split_branch(current[common], path[common]);
+                        let branch = SparseNode::new_split_branch(
+                            current.get_nibble(common),
+                            path.get_nibble(common),
+                        );
                         self.nodes.insert(current.slice(..common), branch);
 
                         // create new leaf
@@ -1736,7 +1613,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                     }
                 }
                 SparseNode::Branch { state_mask, .. } => {
-                    let nibble = path[current.len()];
+                    let nibble = path.get_nibble(current.len());
                     current.push_unchecked(nibble);
                     if !state_mask.is_bit_set(nibble) {
                         state_mask.set_bit(nibble);
@@ -1760,11 +1637,13 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
     ///
     /// Returns `Ok(())` if the leaf is successfully removed, otherwise returns an error
     /// if the leaf is not present or if a blinded node prevents removal.
-    pub fn remove_leaf(&mut self, path: &Nibbles) -> SparseTrieResult<()> {
+    pub fn remove_leaf(&mut self, path: &PackedNibbles) -> SparseTrieResult<()> {
         if self.values.remove(path).is_none() {
             if let Some(&SparseNode::Hash(hash)) = self.nodes.get(path) {
                 // Leaf is present in the trie, but it's blinded.
-                return Err(SparseTrieErrorKind::BlindedNode { path: path.clone(), hash }.into())
+                return Err(
+                    SparseTrieErrorKind::BlindedNode { path: path.clone().into(), hash }.into()
+                )
             }
 
             trace!(target: "trie::sparse", ?path, "Leaf node is not present in the trie");
@@ -1785,14 +1664,14 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
         {
             let mut child_path = child.path.clone();
             let SparseNode::Leaf { key, .. } = &child.node else { panic!("expected leaf node") };
-            child_path.extend_from_slice_unchecked(key);
+            child_path.extend_path(key);
             assert_eq!(&child_path, path);
         }
 
         // If we don't have any other removed nodes, insert an empty node at the root.
         if removed_nodes.is_empty() {
             debug_assert!(self.nodes.is_empty());
-            self.nodes.insert(Nibbles::default(), SparseNode::Empty);
+            self.nodes.insert(PackedNibbles::default(), SparseNode::Empty);
 
             return Ok(())
         }
@@ -1805,7 +1684,9 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
             let new_node = match &removed_node.node {
                 SparseNode::Empty => return Err(SparseTrieErrorKind::Blind.into()),
                 &SparseNode::Hash(hash) => {
-                    return Err(SparseTrieErrorKind::BlindedNode { path: removed_path, hash }.into())
+                    return Err(
+                        SparseTrieErrorKind::BlindedNode { path: removed_path.into(), hash }.into()
+                    )
                 }
                 SparseNode::Leaf { .. } => {
                     unreachable!("we already popped the leaf node")
@@ -1816,9 +1697,11 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                     match &child.node {
                         SparseNode::Empty => return Err(SparseTrieErrorKind::Blind.into()),
                         &SparseNode::Hash(hash) => {
-                            return Err(
-                                SparseTrieErrorKind::BlindedNode { path: child.path, hash }.into()
-                            )
+                            return Err(SparseTrieErrorKind::BlindedNode {
+                                path: child.path.into(),
+                                hash,
+                            }
+                            .into())
                         }
                         // For a leaf node, we collapse the extension node into a leaf node,
                         // extending the key. While it's impossible to encounter an extension node
@@ -1829,7 +1712,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                             self.nodes.remove(&child.path);
 
                             let mut new_key = key.clone();
-                            new_key.extend_from_slice_unchecked(leaf_key);
+                            new_key.extend_path(leaf_key);
                             SparseNode::new_leaf(new_key)
                         }
                         // For an extension node, we collapse them into one extension node,
@@ -1838,7 +1721,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                             self.nodes.remove(&child.path);
 
                             let mut new_key = key.clone();
-                            new_key.extend_from_slice_unchecked(extension_key);
+                            new_key.extend_path(extension_key);
                             SparseNode::new_ext(new_key)
                         }
                         // For a branch node, we just leave the extension node as-is.
@@ -1867,7 +1750,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                         if self.nodes.get(&child_path).unwrap().is_hash() {
                             trace!(target: "trie::sparse", ?child_path, "Retrieving remaining blinded branch child");
                             if let Some(RevealedNode { node, tree_mask, hash_mask }) =
-                                self.provider.blinded_node(&child_path)?
+                                self.provider.blinded_node(&Nibbles::from(child_path.clone()))?
                             {
                                 let decoded = TrieNode::decode(&mut &node[..])?;
                                 trace!(
@@ -1894,7 +1777,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                             SparseNode::Empty => return Err(SparseTrieErrorKind::Blind.into()),
                             &SparseNode::Hash(hash) => {
                                 return Err(SparseTrieErrorKind::BlindedNode {
-                                    path: child_path,
+                                    path: child_path.into(),
                                     hash,
                                 }
                                 .into())
@@ -1905,8 +1788,9 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                             SparseNode::Leaf { key, .. } => {
                                 delete_child = true;
 
-                                let mut new_key = Nibbles::from_nibbles_unchecked([child_nibble]);
-                                new_key.extend_from_slice_unchecked(key);
+                                let mut new_key = PackedNibbles::default();
+                                new_key.push_unchecked(child_nibble);
+                                new_key.extend_path(key);
                                 SparseNode::new_leaf(new_key)
                             }
                             // If the only child node is an extension node, we downgrade the branch
@@ -1915,14 +1799,17 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                             SparseNode::Extension { key, .. } => {
                                 delete_child = true;
 
-                                let mut new_key = Nibbles::from_nibbles_unchecked([child_nibble]);
-                                new_key.extend_from_slice_unchecked(key);
+                                let mut new_key = PackedNibbles::default();
+                                new_key.push_unchecked(child_nibble);
+                                new_key.extend_path(key);
                                 SparseNode::new_ext(new_key)
                             }
                             // If the only child is a branch node, we downgrade the current branch
                             // node into a one-nibble extension node.
                             SparseNode::Branch { .. } => {
-                                SparseNode::new_ext(Nibbles::from_nibbles_unchecked([child_nibble]))
+                                let mut new_key = PackedNibbles::default();
+                                new_key.push_unchecked(child_nibble);
+                                SparseNode::new_ext(new_key)
                             }
                         };
 
@@ -2007,7 +1894,7 @@ pub enum SparseNode {
     /// Sparse leaf node with remaining key suffix.
     Leaf {
         /// Remaining key suffix for the leaf node.
-        key: Nibbles,
+        key: PackedNibbles,
         /// Pre-computed hash of the sparse node.
         /// Can be reused unless this trie path has been updated.
         hash: Option<B256>,
@@ -2015,7 +1902,7 @@ pub enum SparseNode {
     /// Sparse extension node with key.
     Extension {
         /// The key slice stored by this extension node.
-        key: Nibbles,
+        key: PackedNibbles,
         /// Pre-computed hash of the sparse node.
         /// Can be reused unless this trie path has been updated.
         ///
@@ -2049,8 +1936,8 @@ impl SparseNode {
     pub fn from_node(node: TrieNode) -> Self {
         match node {
             TrieNode::EmptyRoot => Self::Empty,
-            TrieNode::Leaf(leaf) => Self::new_leaf(leaf.key),
-            TrieNode::Extension(ext) => Self::new_ext(ext.key),
+            TrieNode::Leaf(leaf) => Self::new_leaf(leaf.key.into()),
+            TrieNode::Extension(ext) => Self::new_ext(ext.key.into()),
             TrieNode::Branch(branch) => Self::new_branch(branch.state_mask),
         }
     }
@@ -2070,12 +1957,12 @@ impl SparseNode {
     }
 
     /// Create new [`SparseNode::Extension`] from the key slice.
-    pub const fn new_ext(key: Nibbles) -> Self {
+    pub const fn new_ext(key: PackedNibbles) -> Self {
         Self::Extension { key, hash: None, store_in_db_trie: None }
     }
 
     /// Create new [`SparseNode::Leaf`] from leaf key and value.
-    pub const fn new_leaf(key: Nibbles) -> Self {
+    pub const fn new_leaf(key: PackedNibbles) -> Self {
         Self::Leaf { key, hash: None }
     }
 
@@ -2090,7 +1977,7 @@ impl SparseNode {
 #[derive(Debug)]
 struct RemovedSparseNode {
     /// The path at which the node was located.
-    path: Nibbles,
+    path: PackedNibbles,
     /// The removed node
     node: SparseNode,
     /// For branch nodes, an optional nibble that should be unset due to the node being removed.
@@ -2114,7 +2001,7 @@ pub struct RlpNodeBuffers {
     /// Stack of RLP nodes
     rlp_node_stack: Vec<RlpNodeStackItem>,
     /// Reusable branch child path
-    branch_child_buf: SmallVec<[Nibbles; 16]>,
+    branch_child_buf: SmallVec<[PackedNibbles; 16]>,
     /// Reusable branch value stack
     branch_value_stack_buf: SmallVec<[RlpNode; 16]>,
 }
@@ -2125,12 +2012,12 @@ impl RlpNodeBuffers {
         Self {
             path_stack: vec![RlpNodePathStackItem {
                 level: 0,
-                path: Nibbles::default(),
+                path: PackedNibbles::default(),
                 is_in_prefix_set: None,
             }],
             rlp_node_stack: Vec::new(),
-            branch_child_buf: SmallVec::<[Nibbles; 16]>::new_const(),
-            branch_value_stack_buf: SmallVec::<[RlpNode; 16]>::new_const(),
+            branch_child_buf: SmallVec::new_const(),
+            branch_value_stack_buf: SmallVec::new_const(),
         }
     }
 }
@@ -2141,7 +2028,7 @@ struct RlpNodePathStackItem {
     /// Level at which the node is located. Higher numbers correspond to lower levels in the trie.
     level: usize,
     /// Path to the node.
-    path: Nibbles,
+    path: PackedNibbles,
     /// Whether the path is in the prefix set. If [`None`], then unknown yet.
     is_in_prefix_set: Option<bool>,
 }
@@ -2150,7 +2037,7 @@ struct RlpNodePathStackItem {
 #[derive(Debug)]
 struct RlpNodeStackItem {
     /// Path to the node.
-    path: Nibbles,
+    path: PackedNibbles,
     /// RLP node.
     rlp_node: RlpNode,
     /// Type of the node.
@@ -2163,8 +2050,8 @@ struct RlpNodeStackItem {
 /// one to make batch updates to a persistent database.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SparseTrieUpdates {
-    pub(crate) updated_nodes: HashMap<Nibbles, BranchNodeCompact>,
-    pub(crate) removed_nodes: HashSet<Nibbles>,
+    pub(crate) updated_nodes: HashMap<PackedNibbles, BranchNodeCompact>,
+    pub(crate) removed_nodes: HashSet<PackedNibbles>,
     pub(crate) wiped: bool,
 }
 
