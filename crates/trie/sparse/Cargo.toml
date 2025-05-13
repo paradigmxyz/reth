@@ -54,12 +54,13 @@ rand_08.workspace = true
 [features]
 default = ["std", "metrics"]
 std = [
-    "reth-storage-api/std",
-    "reth-primitives-traits/std",
-    "reth-execution-errors/std",
-    "reth-trie-common/std",
     "alloy-primitives/std",
     "alloy-rlp/std",
+    "alloy-trie/std",
+    "reth-execution-errors/std",
+    "reth-primitives-traits/std",
+    "reth-storage-api/std",
+    "reth-trie-common/std",
     "tracing/std",
 ]
 metrics = ["dep:reth-metrics", "dep:metrics", "std"]
