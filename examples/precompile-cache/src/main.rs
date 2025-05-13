@@ -42,7 +42,7 @@ use reth_tracing::{RethTracer, Tracer};
 use schnellru::{ByLength, LruMap};
 use std::sync::Arc;
 
-/// Type alias for the LRU cache used within the [`PrecompileCache`].
+/// Type alias for the LRU cache used within the [`PrecompileCacheMap`].
 type PrecompileLRUCache = LruMap<(Bytes, u64), PrecompileResult>;
 
 /// A cache for precompile inputs / outputs.
@@ -53,7 +53,7 @@ type PrecompileLRUCache = LruMap<(Bytes, u64), PrecompileResult>;
 /// NOTE: This does not work with "context stateful precompiles", ie `ContextStatefulPrecompile` or
 /// `ContextStatefulPrecompileMut`. They are explicitly banned.
 #[derive(Debug)]
-pub struct PrecompileCache {
+pub struct PrecompileCacheMap {
     /// Caches for each precompile input / output.
     cache: PrecompileLRUCache,
 }
@@ -62,7 +62,7 @@ pub struct PrecompileCache {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct MyEvmFactory {
-    precompile_cache: Arc<RwLock<PrecompileCache>>,
+    precompile_cache_map: Arc<RwLock<PrecompileCacheMap>>,
 }
 
 impl EvmFactory for MyEvmFactory {
@@ -76,7 +76,7 @@ impl EvmFactory for MyEvmFactory {
     type Precompiles = PrecompilesMap;
 
     fn create_evm<DB: Database>(&self, db: DB, input: EvmEnv) -> Self::Evm<DB, NoOpInspector> {
-        let new_cache = self.precompile_cache.clone();
+        let new_cache = self.precompile_cache_map.clone();
 
         let evm = Context::mainnet()
             .with_db(db)
@@ -110,17 +110,17 @@ pub struct WrappedPrecompile {
     /// The precompile to wrap.
     precompile: DynPrecompile,
     /// The cache to use.
-    cache: Arc<RwLock<PrecompileCache>>,
+    cache: Arc<RwLock<PrecompileCacheMap>>,
 }
 
 impl WrappedPrecompile {
-    fn new(precompile: DynPrecompile, cache: Arc<RwLock<PrecompileCache>>) -> Self {
+    fn new(precompile: DynPrecompile, cache: Arc<RwLock<PrecompileCacheMap>>) -> Self {
         Self { precompile, cache }
     }
 
     /// Given a [`DynPrecompile`] and cache for a specific precompiles, create a
     /// wrapper that can be used inside Evm.
-    fn wrap(precompile: DynPrecompile, cache: Arc<RwLock<PrecompileCache>>) -> DynPrecompile {
+    fn wrap(precompile: DynPrecompile, cache: Arc<RwLock<PrecompileCacheMap>>) -> DynPrecompile {
         let wrapped = Self::new(precompile, cache);
         move |data: &[u8], gas_limit: u64| -> PrecompileResult { wrapped.call(data, gas_limit) }
             .into()
@@ -152,15 +152,15 @@ impl Precompile for WrappedPrecompile {
 #[non_exhaustive]
 pub struct MyExecutorBuilder {
     /// The precompile cache to use for all executors.
-    precompile_cache: Arc<RwLock<PrecompileCache>>,
+    precompile_cache_map: Arc<RwLock<PrecompileCacheMap>>,
 }
 
 impl Default for MyExecutorBuilder {
     fn default() -> Self {
-        let precompile_cache = PrecompileCache {
+        precompile_cache_map = PrecompileCacheMap {
             cache: LruMap::<(Bytes, u64), PrecompileResult>::new(ByLength::new(100)),
         };
-        Self { precompile_cache: Arc::new(RwLock::new(precompile_cache)) }
+        Self { precompile_cache_map: Arc::new(RwLock::new(precompile_cache_map)) }
     }
 }
 
@@ -173,7 +173,7 @@ where
     async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
         let evm_config = EthEvmConfig::new_with_evm_factory(
             ctx.chain_spec(),
-            MyEvmFactory { precompile_cache: self.precompile_cache.clone() },
+            MyEvmFactory { precompile_cache_map: self.precompile_cache_map.clone() },
         );
         Ok(evm_config)
     }
