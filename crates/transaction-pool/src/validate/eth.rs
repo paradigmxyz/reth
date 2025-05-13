@@ -706,13 +706,13 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             // cancun is activated by default
             cancun: true,
 
-            // prague not yet activated
+            // prague is activated by default
             prague: true,
 
             // osaka not yet activated
             osaka: false,
 
-            // max blob count is cancun by default
+            // max blob count is prague by default
             max_blob_count: BlobParams::prague().max_blob_count,
         }
     }
