@@ -2292,7 +2292,7 @@ where
             executor.evm_mut().precompiles_mut().map_precompiles(|address, precompile| {
                 CachedPrecompile::wrap(
                     precompile,
-                    self.precompile_cache_map.entry(*address).or_default().clone(),
+                    self.precompile_cache_map.cache_for_address(*address),
                 )
             });
         }
