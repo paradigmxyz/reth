@@ -49,7 +49,8 @@ impl SupervisorMetrics {
     pub fn increment_metrics_for_error(&self, error: &InteropTxValidatorError) {
         use InvalidInboxEntry::{
             AwaitingReplacement, ConflictingData, DataCorruption, FutureData, IneffectiveData,
-            MissedData, NoParentForFirstBlock, OutOfOrder, OutOfScope, SkippedData, UnknownChain,
+            MissedData, NoParentForFirstBlock, OutOfOrder, OutOfScope, SkippedData,
+            UninitializedChainDatabase, UnknownChain,
         };
 
         if let InteropTxValidatorError::InvalidEntry(inner) = error {
@@ -65,7 +66,7 @@ impl SupervisorMetrics {
                 FutureData => self.future_data_count.increment(1),
                 MissedData => self.missed_data_count.increment(1),
                 DataCorruption => self.data_corruption_count.increment(1),
-                _ => {}
+                UninitializedChainDatabase => {}
             }
         }
     }
