@@ -16,7 +16,7 @@
 
 use clap::Parser;
 use jsonrpsee::{
-    core::{RpcResult, SubscriptionResult},
+    core::{RpcResult, SubscriptionResult, __reexports::serde_json},
     proc_macros::rpc,
     PendingSubscriptionSink, SubscriptionMessage,
 };
@@ -117,8 +117,9 @@ where
             loop {
                 sleep(Duration::from_secs(delay)).await;
 
-                let msg = SubscriptionMessage::from_json(&pool.pool_size().total)
-                    .expect("Failed to serialize `usize`");
+                let msg = SubscriptionMessage::from(
+                    serde_json::value::to_raw_value(&pool.pool_size().total).expect("serialize"),
+                );
                 let _ = sink.send(msg).await;
             }
         });
