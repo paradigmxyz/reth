@@ -3,7 +3,7 @@ use crate::{
     transaction::signed::{RecoveryError, SignedTransaction},
 };
 use alloc::vec::Vec;
-use alloy_consensus::Transaction;
+use alloy_consensus::{transaction::SignerRecoverable, Transaction};
 use alloy_eips::{
     eip2718::{Eip2718Error, Eip2718Result, IsTyped2718},
     eip2930::AccessList,
@@ -136,6 +136,20 @@ where
     }
 }
 
+impl<B, T> SignerRecoverable for ExtendedTxEnvelope<B, T>
+where
+    B: SignedTransaction + IsTyped2718,
+    T: SignedTransaction,
+{
+    fn recover_signer(&self) -> Result<Address, RecoveryError> {
+        delegate!(self => tx.recover_signer())
+    }
+
+    fn recover_signer_unchecked(&self) -> Result<Address, RecoveryError> {
+        delegate!(self => tx.recover_signer_unchecked())
+    }
+}
+
 impl<B, T> SignedTransaction for ExtendedTxEnvelope<B, T>
 where
     B: SignedTransaction + IsTyped2718,
@@ -146,14 +160,6 @@ where
             Self::BuiltIn(tx) => tx.tx_hash(),
             Self::Other(tx) => tx.tx_hash(),
         }
-    }
-
-    fn recover_signer(&self) -> Result<Address, RecoveryError> {
-        delegate!(self => tx.recover_signer())
-    }
-
-    fn recover_signer_unchecked(&self) -> Result<Address, RecoveryError> {
-        delegate!(self => tx.recover_signer_unchecked())
     }
 
     fn recover_signer_unchecked_with_buf(

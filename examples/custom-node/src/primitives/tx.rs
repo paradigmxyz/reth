@@ -4,6 +4,7 @@ use alloy_consensus::{
         secp256k1::{recover_signer, recover_signer_unchecked},
         RecoveryError,
     },
+    transaction::SignerRecoverable,
     SignableTransaction, Signed, Transaction,
 };
 use alloy_eips::{eip2718::Eip2718Result, Decodable2718, Encodable2718, Typed2718};
@@ -100,14 +101,21 @@ impl Transaction for CustomTransactionEnvelope {
     }
 }
 
-impl SignedTransaction for CustomTransactionEnvelope {
-    fn tx_hash(&self) -> &TxHash {
-        self.inner.hash()
-    }
-
+impl SignerRecoverable for CustomTransactionEnvelope {
     fn recover_signer(&self) -> Result<Address, RecoveryError> {
         let signature_hash = self.inner.signature_hash();
         recover_signer(self.inner.signature(), signature_hash)
+    }
+
+    fn recover_signer_unchecked(&self) -> Result<Address, RecoveryError> {
+        let signature_hash = self.inner.signature_hash();
+        recover_signer_unchecked(self.inner.signature(), signature_hash)
+    }
+}
+
+impl SignedTransaction for CustomTransactionEnvelope {
+    fn tx_hash(&self) -> &TxHash {
+        self.inner.hash()
     }
 
     fn recover_signer_unchecked_with_buf(
