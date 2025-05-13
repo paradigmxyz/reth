@@ -27,6 +27,7 @@ use reth_trie::{
 use reth_trie_db::{
     DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,
     DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness, StateCommitment,
+    StorageProofFromTx,
 };
 use std::fmt::Debug;
 
@@ -343,7 +344,8 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StorageRoo
     ) -> ProviderResult<reth_trie::StorageProof> {
         let mut revert_storage = self.revert_storage(address)?;
         revert_storage.extend(&hashed_storage);
-        StorageProof::overlay_storage_proof(self.tx(), address, slot, revert_storage)
+        StorageProof::from_tx(self.tx(), address)
+            .overlay_storage_proof(address, slot, revert_storage)
             .map_err(ProviderError::from)
     }
 
@@ -355,7 +357,8 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StorageRoo
     ) -> ProviderResult<StorageMultiProof> {
         let mut revert_storage = self.revert_storage(address)?;
         revert_storage.extend(&hashed_storage);
-        StorageProof::overlay_storage_multiproof(self.tx(), address, slots, revert_storage)
+        StorageProof::from_tx(self.tx(), address)
+            .overlay_storage_multiproof(address, slots, revert_storage)
             .map_err(ProviderError::from)
     }
 }
