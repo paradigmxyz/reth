@@ -2,13 +2,15 @@
 //! previous blocks.
 
 use super::{EthApiError, EthResult, EthStateCache, RpcInvalidTransactionError};
-use alloy_consensus::{constants::GWEI_TO_WEI, BlockHeader, Transaction};
+use alloy_consensus::{
+    constants::GWEI_TO_WEI, transaction::SignerRecoverable, BlockHeader, Transaction,
+};
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types_eth::BlockId;
 use derive_more::{Deref, DerefMut, From, Into};
 use itertools::Itertools;
-use reth_primitives_traits::{BlockBody, SignedTransaction};
+use reth_primitives_traits::BlockBody;
 use reth_rpc_server_types::{
     constants,
     constants::gas_oracle::{

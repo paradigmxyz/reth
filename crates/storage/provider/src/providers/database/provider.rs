@@ -19,7 +19,10 @@ use crate::{
     TransactionVariant, TransactionsProvider, TransactionsProviderExt, TrieWriter,
     WithdrawalsProvider,
 };
-use alloy_consensus::{transaction::TransactionMeta, BlockHeader, Header, TxReceipt};
+use alloy_consensus::{
+    transaction::{SignerRecoverable, TransactionMeta},
+    BlockHeader, Header, TxReceipt,
+};
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals, BlockHashOrNumber};
 use alloy_primitives::{
     keccak256,

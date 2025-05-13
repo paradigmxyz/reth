@@ -106,7 +106,7 @@ where
             // ensure certain settings take effect
             .with_adjusted_configs()
             // Create the provider factory
-            .with_provider_factory().await?
+            .with_provider_factory::<_, <CB::Components as NodeComponents<T>>::Evm>().await?
             .inspect(|_| {
                 info!(target: "reth::cli", "Database opened");
             })
@@ -163,7 +163,7 @@ where
             ctx.prune_config(),
             max_block,
             static_file_producer,
-            ctx.components().block_executor().clone(),
+            ctx.components().evm_config().clone(),
             pipeline_exex_handle,
         )?;
 
@@ -362,7 +362,6 @@ where
 
         let full_node = FullNode {
             evm_config: ctx.components().evm_config().clone(),
-            block_executor: ctx.components().block_executor().clone(),
             pool: ctx.components().pool().clone(),
             network: ctx.components().network().clone(),
             provider: ctx.node_adapter().provider.clone(),

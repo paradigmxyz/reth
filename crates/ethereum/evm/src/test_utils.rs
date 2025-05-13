@@ -2,6 +2,7 @@ use crate::EthEvmConfig;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::Header;
 use alloy_eips::eip7685::Requests;
+use alloy_evm::precompiles::PrecompilesMap;
 use parking_lot::Mutex;
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_evm::{
@@ -9,7 +10,6 @@ use reth_evm::{
         BlockExecutionError, BlockExecutor, BlockExecutorFactory, BlockExecutorFor, ExecutableTx,
     },
     eth::{EthBlockExecutionCtx, EthEvmContext},
-    execute::BasicBlockExecutorProvider,
     ConfigureEvm, Database, EthEvm, EthEvmFactory, Evm, EvmEnvFor, EvmFactory,
 };
 use reth_execution_types::{BlockExecutionResult, ExecutionOutcome};
@@ -21,7 +21,7 @@ use revm::{
 };
 
 /// A helper type alias for mocked block executor provider.
-pub type MockExecutorProvider = BasicBlockExecutorProvider<MockEvmConfig>;
+pub type MockExecutorProvider = MockEvmConfig;
 
 /// A block executor provider that returns mocked execution results.
 #[derive(Clone, Debug)]
@@ -55,7 +55,7 @@ impl BlockExecutorFactory for MockEvmConfig {
 
     fn create_executor<'a, DB, I>(
         &'a self,
-        evm: EthEvm<&'a mut State<DB>, I>,
+        evm: EthEvm<&'a mut State<DB>, I, PrecompilesMap>,
         _ctx: Self::ExecutionCtx<'a>,
     ) -> impl BlockExecutorFor<'a, Self, DB, I>
     where
@@ -70,7 +70,7 @@ impl BlockExecutorFactory for MockEvmConfig {
 #[derive(derive_more::Debug)]
 pub struct MockExecutor<'a, DB: Database, I> {
     result: ExecutionOutcome,
-    evm: EthEvm<&'a mut State<DB>, I>,
+    evm: EthEvm<&'a mut State<DB>, I, PrecompilesMap>,
     #[debug(skip)]
     hook: Option<Box<dyn reth_evm::OnStateHook>>,
 }
@@ -78,7 +78,7 @@ pub struct MockExecutor<'a, DB: Database, I> {
 impl<'a, DB: Database, I: Inspector<EthEvmContext<&'a mut State<DB>>>> BlockExecutor
     for MockExecutor<'a, DB, I>
 {
-    type Evm = EthEvm<&'a mut State<DB>, I>;
+    type Evm = EthEvm<&'a mut State<DB>, I, PrecompilesMap>;
     type Transaction = TransactionSigned;
     type Receipt = Receipt;
 

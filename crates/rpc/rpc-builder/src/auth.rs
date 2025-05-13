@@ -78,7 +78,7 @@ impl AuthServerConfig {
             ipc_handle = Some(res);
         }
 
-        Ok(AuthServerHandle { handle, local_addr, secret, ipc_endpoint, ipc_handle })
+        Ok(AuthServerHandle { handle: Some(handle), local_addr, secret, ipc_endpoint, ipc_handle })
     }
 }
 
@@ -250,7 +250,7 @@ impl AuthRpcModule {
 #[must_use = "Server stops if dropped"]
 pub struct AuthServerHandle {
     local_addr: SocketAddr,
-    handle: jsonrpsee::server::ServerHandle,
+    handle: Option<jsonrpsee::server::ServerHandle>,
     secret: JwtSecret,
     ipc_endpoint: Option<String>,
     ipc_handle: Option<jsonrpsee::server::ServerHandle>,
@@ -259,6 +259,22 @@ pub struct AuthServerHandle {
 // === impl AuthServerHandle ===
 
 impl AuthServerHandle {
+    /// Creates a new handle that isn't connected to any server.
+    ///
+    /// This can be used to satisfy types that require an engine API.
+    pub fn noop() -> Self {
+        Self {
+            local_addr: SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::LOCALHOST),
+                constants::DEFAULT_AUTH_PORT,
+            ),
+            handle: None,
+            secret: JwtSecret::random(),
+            ipc_endpoint: None,
+            ipc_handle: None,
+        }
+    }
+
     /// Returns the [`SocketAddr`] of the http server if started.
     pub const fn local_addr(&self) -> SocketAddr {
         self.local_addr
@@ -266,7 +282,8 @@ impl AuthServerHandle {
 
     /// Tell the server to stop without waiting for the server to stop.
     pub fn stop(self) -> Result<(), AlreadyStoppedError> {
-        self.handle.stop()
+        let Some(handle) = self.handle else { return Ok(()) };
+        handle.stop()
     }
 
     /// Returns the url to the http server

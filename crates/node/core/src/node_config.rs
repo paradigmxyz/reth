@@ -417,6 +417,15 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         self
     }
 
+    /// Effectively disables the RPC state cache by setting the cache sizes to `0`.
+    ///
+    /// By setting the cache sizes to 0, caching of newly executed or fetched blocks will be
+    /// effectively disabled.
+    pub const fn with_disabled_rpc_cache(mut self) -> Self {
+        self.rpc.rpc_state_cache.set_zero_lengths();
+        self
+    }
+
     /// Resolve the final datadir path.
     pub fn datadir(&self) -> ChainPath<DataDirPath>
     where
