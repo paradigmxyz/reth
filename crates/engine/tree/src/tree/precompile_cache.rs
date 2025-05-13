@@ -1,6 +1,5 @@
 //! Contains a precompile cache that is backed by a moka cache.
 
-use alloy_primitives::map::Entry;
 use reth_evm::precompiles::{DynPrecompile, Precompile};
 use revm::precompile::{PrecompileOutput, PrecompileResult};
 use revm_primitives::{Address, Bytes, HashMap};
@@ -11,12 +10,8 @@ use std::sync::Arc;
 pub struct PrecompileCacheMap(HashMap<Address, PrecompileCache>);
 
 impl PrecompileCacheMap {
-    pub(crate) fn entry(&mut self, address: Address) -> Entry<'_, Address, PrecompileCache> {
-        self.0.entry(address)
-    }
-
     pub(crate) fn cache_for_address(&mut self, address: Address) -> PrecompileCache {
-        self.entry(address).or_default().clone()
+        self.0.entry(address).or_default().clone()
     }
 }
 
