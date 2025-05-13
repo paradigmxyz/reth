@@ -2,8 +2,11 @@
 
 use reth_evm::precompiles::{DynPrecompile, Precompile};
 use revm::precompile::{PrecompileOutput, PrecompileResult};
-use revm_primitives::Bytes;
+use revm_primitives::{Address, Bytes, HashMap};
 use std::sync::Arc;
+
+/// Stores caches for each precompile.
+pub type PrecompileCacheMap = HashMap<Address, PrecompileCache>;
 
 /// Cache for precompiles, for each input stores the result.
 #[derive(Debug, Clone)]
