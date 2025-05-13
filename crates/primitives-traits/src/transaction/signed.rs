@@ -311,4 +311,3 @@ impl SignedTransaction for scroll_alloy_consensus::ScrollPooledTransaction {
         recover_signer_unchecked(self.signature(), signature_hash)
     }
 }
-

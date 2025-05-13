@@ -316,30 +316,26 @@ where
     PruneStage: Stage<Provider>,
 {
     fn builder(self) -> StageSetBuilder<Provider> {
-        ExecutionStages::new(
-            self.evm_config,
-            self.consensus.clone(),
-            self.stages_config.clone(),
-        )
-        .builder()
-        // If sender recovery prune mode is set, add the prune sender recovery stage.
-        .add_stage_opt(self.prune_modes.sender_recovery.map(|prune_mode| {
-            PruneSenderRecoveryStage::new(prune_mode, self.stages_config.prune.commit_threshold)
-        }))
-        .add_set(HashingStages {
-            stages_config: self.stages_config.clone(),
-            consensus: self.consensus,
-        })
-        .add_set(HistoryIndexingStages {
-            stages_config: self.stages_config.clone(),
-            prune_modes: self.prune_modes.clone(),
-        })
-        // If any prune modes are set, add the prune stage.
-        .add_stage_opt(self.prune_modes.is_empty().not().then(|| {
-            // Prune stage should be added after all hashing stages, because otherwise it will
-            // delete
-            PruneStage::new(self.prune_modes.clone(), self.stages_config.prune.commit_threshold)
-        }))
+        ExecutionStages::new(self.evm_config, self.consensus.clone(), self.stages_config.clone())
+            .builder()
+            // If sender recovery prune mode is set, add the prune sender recovery stage.
+            .add_stage_opt(self.prune_modes.sender_recovery.map(|prune_mode| {
+                PruneSenderRecoveryStage::new(prune_mode, self.stages_config.prune.commit_threshold)
+            }))
+            .add_set(HashingStages {
+                stages_config: self.stages_config.clone(),
+                consensus: self.consensus,
+            })
+            .add_set(HistoryIndexingStages {
+                stages_config: self.stages_config.clone(),
+                prune_modes: self.prune_modes.clone(),
+            })
+            // If any prune modes are set, add the prune stage.
+            .add_stage_opt(self.prune_modes.is_empty().not().then(|| {
+                // Prune stage should be added after all hashing stages, because otherwise it will
+                // delete
+                PruneStage::new(self.prune_modes.clone(), self.stages_config.prune.commit_threshold)
+            }))
     }
 }
 

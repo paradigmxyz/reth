@@ -1,6 +1,6 @@
 use reth_network::{
-    config::NetworkMode, NetworkHandle, transform::header::HeaderTransform, NetworkConfig, NetworkManager,
-    NetworkPrimitives, PeersInfo,
+    config::NetworkMode, transform::header::HeaderTransform, NetworkConfig, NetworkHandle,
+    NetworkManager, NetworkPrimitives, PeersInfo,
 };
 use reth_node_api::TxTy;
 use reth_node_builder::{components::NetworkBuilder, BuilderContext, FullNodeTypes};
