@@ -157,7 +157,7 @@ pub struct MyExecutorBuilder {
 
 impl Default for MyExecutorBuilder {
     fn default() -> Self {
-        precompile_cache_map = PrecompileCacheMap {
+       let precompile_cache_map = PrecompileCacheMap {
             cache: LruMap::<(Bytes, u64), PrecompileResult>::new(ByLength::new(100)),
         };
         Self { precompile_cache_map: Arc::new(RwLock::new(precompile_cache_map)) }
