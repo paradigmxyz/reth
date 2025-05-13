@@ -262,10 +262,7 @@ where
 
         if precompile_cache_enabled {
             evm.precompiles_mut().map_precompiles(|address, precompile| {
-                CachedPrecompile::wrap(
-                    precompile,
-                    precompile_cache_map.entry(*address).or_default().clone(),
-                )
+                CachedPrecompile::wrap(precompile, precompile_cache_map.cache_for_address(*address))
             });
         }
 

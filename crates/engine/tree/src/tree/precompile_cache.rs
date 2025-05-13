@@ -1,6 +1,5 @@
 //! Contains a precompile cache that is backed by a moka cache.
 
-use alloy_primitives::map::Entry;
 use reth_evm::precompiles::{DynPrecompile, Precompile};
 use revm::precompile::{PrecompileOutput, PrecompileResult};
 use revm_primitives::{Address, Bytes, HashMap};
@@ -11,8 +10,8 @@ use std::sync::Arc;
 pub struct PrecompileCacheMap(HashMap<Address, PrecompileCache>);
 
 impl PrecompileCacheMap {
-    pub(crate) fn entry(&mut self, address: Address) -> Entry<'_, Address, PrecompileCache> {
-        self.0.entry(address)
+    pub(crate) fn cache_for_address(&mut self, address: Address) -> PrecompileCache {
+        self.0.entry(address).or_default().clone()
     }
 }
 
@@ -178,5 +177,60 @@ mod tests {
         let actual = cache.cache.get(&key).unwrap();
 
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_precompile_cache_map_separate_addresses() {
+        let input_data = b"same_input";
+        let gas_limit = 100_000;
+
+        let address1 = Address::repeat_byte(1);
+        let address2 = Address::repeat_byte(2);
+
+        let mut cache_map = PrecompileCacheMap::default();
+
+        // create the first precompile with a specific output
+        let precompile1: DynPrecompile = {
+            move |data: &[u8], _gas: u64| -> PrecompileResult {
+                assert_eq!(data, input_data);
+
+                Ok(PrecompileOutput {
+                    gas_used: 5000,
+                    bytes: alloy_primitives::Bytes::copy_from_slice(b"output_from_precompile_1"),
+                })
+            }
+        }
+        .into();
+
+        // create the second precompile with a different output
+        let precompile2: DynPrecompile = {
+            move |data: &[u8], _gas: u64| -> PrecompileResult {
+                assert_eq!(data, input_data);
+
+                Ok(PrecompileOutput {
+                    gas_used: 7000,
+                    bytes: alloy_primitives::Bytes::copy_from_slice(b"output_from_precompile_2"),
+                })
+            }
+        }
+        .into();
+
+        let wrapped_precompile1 =
+            CachedPrecompile::wrap(precompile1, cache_map.cache_for_address(address1));
+        let wrapped_precompile2 =
+            CachedPrecompile::wrap(precompile2, cache_map.cache_for_address(address2));
+
+        // first invocation of precompile1 (cache miss)
+        let result1 = wrapped_precompile1.call(input_data, gas_limit).unwrap();
+        assert_eq!(result1.bytes.as_ref(), b"output_from_precompile_1");
+
+        // first invocation of precompile2 with the same input (should be a cache miss)
+        // if cache was incorrectly shared, we'd get precompile1's result
+        let result2 = wrapped_precompile2.call(input_data, gas_limit).unwrap();
+        assert_eq!(result2.bytes.as_ref(), b"output_from_precompile_2");
+
+        // second invocation of precompile1 (should be a cache hit)
+        let result3 = wrapped_precompile1.call(input_data, gas_limit).unwrap();
+        assert_eq!(result3.bytes.as_ref(), b"output_from_precompile_1");
     }
 }
