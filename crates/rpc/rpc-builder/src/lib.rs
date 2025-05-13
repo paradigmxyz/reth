@@ -27,10 +27,10 @@ use http::{header::AUTHORIZATION, HeaderMap};
 use jsonrpsee::{
     core::RegisterMethodError,
     server::{
-        middleware::rpc::{RpcService, RpcServiceT},
-        AlreadyStoppedError, IdProvider, RpcServiceBuilder, ServerHandle,
+        middleware::rpc::{RpcService, RpcServiceBuilder, RpcServiceT},
+        AlreadyStoppedError, IdProvider, ServerHandle,
     },
-    Methods, RpcModule,
+    MethodResponse, Methods, RpcModule,
 };
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::{ConsensusError, FullConsensus};
@@ -69,6 +69,7 @@ pub use cors::CorsDomainError;
 
 // re-export for convenience
 pub use jsonrpsee::server::ServerBuilder;
+use jsonrpsee::server::ServerConfigBuilder;
 pub use reth_ipc::server::{
     Builder as IpcServerBuilder, RpcServiceBuilder as IpcRpcServiceBuilder,
 };
@@ -1071,13 +1072,13 @@ where
 #[derive(Debug)]
 pub struct RpcServerConfig<RpcMiddleware = Identity> {
     /// Configs for JSON-RPC Http.
-    http_server_config: Option<ServerBuilder<Identity, Identity>>,
+    http_server_config: Option<ServerConfigBuilder>,
     /// Allowed CORS Domains for http
     http_cors_domains: Option<String>,
     /// Address where to bind the http server to
     http_addr: Option<SocketAddr>,
     /// Configs for WS server
-    ws_server_config: Option<ServerBuilder<Identity, Identity>>,
+    ws_server_config: Option<ServerConfigBuilder>,
     /// Allowed CORS Domains for ws.
     ws_cors_domains: Option<String>,
     /// Address where to bind the ws server to
@@ -1114,12 +1115,12 @@ impl Default for RpcServerConfig<Identity> {
 
 impl RpcServerConfig {
     /// Creates a new config with only http set
-    pub fn http(config: ServerBuilder<Identity, Identity>) -> Self {
+    pub fn http(config: ServerConfigBuilder) -> Self {
         Self::default().with_http(config)
     }
 
     /// Creates a new config with only ws set
-    pub fn ws(config: ServerBuilder<Identity, Identity>) -> Self {
+    pub fn ws(config: ServerConfigBuilder) -> Self {
         Self::default().with_ws(config)
     }
 
@@ -1132,7 +1133,7 @@ impl RpcServerConfig {
     ///
     /// Note: this always configures an [`EthSubscriptionIdProvider`] [`IdProvider`] for
     /// convenience. To set a custom [`IdProvider`], please use [`Self::with_id_provider`].
-    pub fn with_http(mut self, config: ServerBuilder<Identity, Identity>) -> Self {
+    pub fn with_http(mut self, config: ServerConfigBuilder) -> Self {
         self.http_server_config =
             Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
         self
@@ -1142,7 +1143,7 @@ impl RpcServerConfig {
     ///
     /// Note: this always configures an [`EthSubscriptionIdProvider`] [`IdProvider`] for
     /// convenience. To set a custom [`IdProvider`], please use [`Self::with_id_provider`].
-    pub fn with_ws(mut self, config: ServerBuilder<Identity, Identity>) -> Self {
+    pub fn with_ws(mut self, config: ServerConfigBuilder) -> Self {
         self.ws_server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
         self
     }
@@ -1216,11 +1217,11 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
     where
         I: IdProvider + Clone + 'static,
     {
-        if let Some(http) = self.http_server_config {
-            self.http_server_config = Some(http.set_id_provider(id_provider.clone()));
+        if let Some(config) = self.http_server_config {
+            self.http_server_config = Some(config.set_id_provider(id_provider.clone()));
         }
-        if let Some(ws) = self.ws_server_config {
-            self.ws_server_config = Some(ws.set_id_provider(id_provider.clone()));
+        if let Some(config) = self.ws_server_config {
+            self.ws_server_config = Some(config.set_id_provider(id_provider.clone()));
         }
         if let Some(ipc) = self.ipc_server_config {
             self.ipc_server_config = Some(ipc.set_id_provider(id_provider));
@@ -1292,7 +1293,14 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
     where
         RpcMiddleware: Layer<RpcRequestMetricsService<RpcService>> + Clone + Send + 'static,
         for<'a> <RpcMiddleware as Layer<RpcRequestMetricsService<RpcService>>>::Service:
-            Send + Sync + 'static + RpcServiceT<'a>,
+            Send
+                + Sync
+                + 'static
+                + RpcServiceT<
+                    MethodResponse = MethodResponse,
+                    BatchResponse = MethodResponse,
+                    NotificationResponse = MethodResponse,
+                >,
     {
         let mut http_handle = None;
         let mut ws_handle = None;
@@ -1342,8 +1350,8 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
             // we merge this into one server using the http setup
             modules.config.ensure_ws_http_identical()?;
 
-            if let Some(builder) = self.http_server_config {
-                let server = builder
+            if let Some(config) = self.http_server_config {
+                let server = ServerBuilder::new()
                     .set_http_middleware(
                         tower::ServiceBuilder::new()
                             .option_layer(Self::maybe_cors_layer(cors)?)
@@ -1360,6 +1368,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                                 .unwrap_or_default(),
                         ),
                     )
+                    .set_config(config.build())
                     .build(http_socket_addr)
                     .await
                     .map_err(|err| {
@@ -1390,9 +1399,9 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
         let mut http_local_addr = None;
         let mut http_server = None;
 
-        if let Some(builder) = self.ws_server_config {
-            let server = builder
-                .ws_only()
+        if let Some(config) = self.ws_server_config {
+            let server = ServerBuilder::new()
+                .set_config(config.ws_only().build())
                 .set_http_middleware(
                     tower::ServiceBuilder::new()
                         .option_layer(Self::maybe_cors_layer(self.ws_cors_domains.clone())?)
@@ -1415,9 +1424,9 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
             ws_server = Some(server);
         }
 
-        if let Some(builder) = self.http_server_config {
-            let server = builder
-                .http_only()
+        if let Some(config) = self.http_server_config {
+            let server = ServerBuilder::new()
+                .set_config(config.http_only().build())
                 .set_http_middleware(
                     tower::ServiceBuilder::new()
                         .option_layer(Self::maybe_cors_layer(self.http_cors_domains.clone())?)

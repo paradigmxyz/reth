@@ -29,7 +29,7 @@ impl TransportSenderT for Sender {
         Ok(self.inner.write_all(msg.as_bytes()).await?)
     }
 
-    async fn send_ping(&mut self) ->  Result<(), Self::Error> {
+    async fn send_ping(&mut self) -> Result<(), Self::Error> {
         tracing::trace!("send ping - not implemented");
         Err(IpcError::NotSupported)
     }

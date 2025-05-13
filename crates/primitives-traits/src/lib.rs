@@ -94,7 +94,7 @@ pub use alloy_consensus::{
 pub use transaction::{
     execute::FillTxEnv,
     signed::{FullSignedTx, SignedTransaction},
-    FullTransaction, Transaction, SignerRecoverable
+    FullTransaction, SignerRecoverable, Transaction,
 };
 
 pub mod block;

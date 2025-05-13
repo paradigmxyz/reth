@@ -7,8 +7,9 @@ use alloy_primitives::{Address, U256};
 use clap::Parser;
 use futures::TryStreamExt;
 use jsonrpsee::{
-    core::SubscriptionResult, proc_macros::rpc, tracing, PendingSubscriptionSink,
-    SubscriptionMessage,
+    core::{SubscriptionResult, __reexports::serde_json},
+    proc_macros::rpc,
+    tracing, PendingSubscriptionSink, SubscriptionMessage,
 };
 use reth_ethereum::{
     exex::{ExExContext, ExExEvent, ExExNotification},
@@ -85,7 +86,9 @@ impl StorageWatcherApiServer for StorageWatcherRpc {
             let Ok(mut rx) = resp_rx.await else { return };
 
             while let Some(diff) = rx.recv().await {
-                let msg = SubscriptionMessage::from_json(&diff).expect("serialize");
+                let msg = SubscriptionMessage::from(
+                    serde_json::value::to_raw_value(&diff).expect("serialize"),
+                );
                 if sink.send(msg).await.is_err() {
                     break;
                 }

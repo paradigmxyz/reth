@@ -6,7 +6,10 @@ use alloy_rpc_types_engine::ForkchoiceState;
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use eyre::Ok;
 use futures_util::Future;
-use jsonrpsee::http_client::{transport::HttpBackend, HttpClient};
+use jsonrpsee::{
+    core::middleware::layer::RpcLogger,
+    http_client::{transport::HttpBackend, HttpClient, RpcService},
+};
 use reth_chainspec::EthereumHardforks;
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_api::{
@@ -302,7 +305,9 @@ where
     }
 
     /// Returns an Engine API client.
-    pub fn engine_api_client(&self) -> HttpClient<AuthClientService<HttpBackend>> {
+    pub fn engine_api_client(
+        &self,
+    ) -> HttpClient<RpcLogger<RpcService<AuthClientService<HttpBackend>>>> {
         self.inner.auth_server_handle().http_client()
     }
 }

@@ -1,6 +1,6 @@
 //! [`jsonrpsee`] helper layer for rate limiting certain methods.
 
-use jsonrpsee::{server::middleware::rpc::RpcServiceT, types::Request, MethodResponse};
+use jsonrpsee::{server::middleware::rpc::RpcServiceT, types::Request};
 use std::{
     future::Future,
     pin::Pin,
@@ -114,7 +114,7 @@ impl<F> std::fmt::Debug for RateLimitingRequestFuture<F> {
     }
 }
 
-impl<F: Future<Output = MethodResponse>> Future for RateLimitingRequestFuture<F> {
+impl<F: Future> Future for RateLimitingRequestFuture<F> {
     type Output = F::Output;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {

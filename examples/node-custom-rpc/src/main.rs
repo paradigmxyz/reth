@@ -131,7 +131,8 @@ where
 mod tests {
     use super::*;
     use jsonrpsee::{
-        http_client::HttpClientBuilder, server::ServerBuilder, ws_client::WsClientBuilder,
+        core::__reexports::serde_json, http_client::HttpClientBuilder, server::ServerBuilder,
+        ws_client::WsClientBuilder,
     };
     use reth_ethereum::pool::noop::NoopTransactionPool;
 
@@ -164,8 +165,10 @@ mod tests {
                 // Send pool size repeatedly, with a 10-second delay
                 loop {
                     sleep(Duration::from_millis(delay)).await;
-                    let message = SubscriptionMessage::from_json(&pool.pool_size().total)
-                        .expect("serialize usize");
+                    let message = SubscriptionMessage::from(
+                        serde_json::value::to_raw_value(&pool.pool_size().total)
+                            .expect("serialize usize"),
+                    );
 
                     // Just ignore errors if a client has dropped
                     let _ = sink.send(message).await;
