@@ -26,7 +26,7 @@ use reth_trie::{
 };
 use reth_trie_db::{
     DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,
-    DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness, StateCommitment,
+    DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness, StateCommitment,DatabaseTrieCursorFactory,DatabaseHashedCursorFactory
 };
 use std::fmt::Debug;
 
@@ -385,7 +385,7 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StateProof
 
     fn witness(&self, mut input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
         input.prepend(self.revert_state()?);
-        TrieWitness::overlay_witness(self.tx(), input, target)
+        TrieWitness::overlay_witness(&TrieWitness::new(DatabaseTrieCursorFactory::new(self.tx()),DatabaseHashedCursorFactory::new(self.tx())), input, target)
             .map_err(ProviderError::from)
             .map(|hm| hm.into_values().collect())
     }

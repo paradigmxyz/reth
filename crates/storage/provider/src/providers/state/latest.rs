@@ -18,7 +18,7 @@ use reth_trie::{
 };
 use reth_trie_db::{
     DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
-    DatabaseTrieWitness, StateCommitment,
+    DatabaseTrieWitness, StateCommitment,DatabaseTrieCursorFactory,DatabaseHashedCursorFactory
 };
 
 /// State provider over latest state that takes tx reference.
@@ -144,7 +144,7 @@ impl<Provider: DBProvider + StateCommitmentProvider> StateProofProvider
     }
 
     fn witness(&self, input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
-        TrieWitness::overlay_witness(self.tx(), input, target)
+        TrieWitness::overlay_witness(&TrieWitness::new(DatabaseTrieCursorFactory::new(self.tx()),DatabaseHashedCursorFactory::new(self.tx())),input, target)
             .map_err(ProviderError::from)
             .map(|hm| hm.into_values().collect())
     }
