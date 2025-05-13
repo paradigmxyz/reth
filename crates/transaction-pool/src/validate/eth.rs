@@ -705,10 +705,10 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             cancun: true,
 
             // prague not yet activated
-            prague: false,
+            prague: true,
 
             // max blob count is cancun by default
-            max_blob_count: BlobParams::cancun().max_blob_count,
+            max_blob_count: BlobParams::prague().max_blob_count,
         }
     }
 
