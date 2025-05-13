@@ -20,8 +20,8 @@ use reth_node_builder::{
     },
     node::{FullNodeTypes, NodeTypes},
     rpc::{
-        BasicEngineApiBuilder, EngineValidatorAddOn, EngineValidatorBuilder, EthApiBuilder,
-        RethRpcAddOns, RpcAddOns, RpcHandle,
+        EngineValidatorAddOn, EngineValidatorBuilder, EthApiBuilder, RethRpcAddOns, RpcAddOns,
+        RpcHandle,
     },
     BuilderContext, DebugNode, Node, NodeAdapter, NodeComponentsBuilder,
 };
@@ -195,8 +195,6 @@ where
     type AddOns = OpAddOns<
         NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
         OpEthApiBuilder,
-        OpEngineValidatorBuilder,
-        OpEngineApiBuilder<OpEngineValidatorBuilder>,
     >;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
@@ -243,8 +241,8 @@ impl NodeTypes for OpNode {
 pub struct OpAddOns<
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
-    EV,
-    EB = BasicEngineApiBuilder<EV>,
+    EV = OpEngineValidatorBuilder,
+    EB = OpEngineApiBuilder<OpEngineValidatorBuilder>,
 > {
     /// Rpc add-ons responsible for launching the RPC servers and instantiating the RPC handlers
     /// and eth-api.
@@ -258,13 +256,7 @@ pub struct OpAddOns<
     enable_tx_conditional: bool,
 }
 
-impl<N> Default
-    for OpAddOns<
-        N,
-        OpEthApiBuilder,
-        OpEngineValidatorBuilder,
-        OpEngineApiBuilder<OpEngineValidatorBuilder>,
-    >
+impl<N> Default for OpAddOns<N, OpEthApiBuilder>
 where
     N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>,
     OpEthApiBuilder: EthApiBuilder<N>,
@@ -274,13 +266,7 @@ where
     }
 }
 
-impl<N>
-    OpAddOns<
-        N,
-        OpEthApiBuilder,
-        OpEngineValidatorBuilder,
-        OpEngineApiBuilder<OpEngineValidatorBuilder>,
-    >
+impl<N> OpAddOns<N, OpEthApiBuilder>
 where
     N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>,
     OpEthApiBuilder: EthApiBuilder<N>,
@@ -291,13 +277,7 @@ where
     }
 }
 
-impl<N> NodeAddOns<N>
-    for OpAddOns<
-        N,
-        OpEthApiBuilder,
-        OpEngineValidatorBuilder,
-        OpEngineApiBuilder<OpEngineValidatorBuilder>,
-    >
+impl<N> NodeAddOns<N> for OpAddOns<N, OpEthApiBuilder>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
@@ -382,13 +362,7 @@ where
     }
 }
 
-impl<N> RethRpcAddOns<N>
-    for OpAddOns<
-        N,
-        OpEthApiBuilder,
-        OpEngineValidatorBuilder,
-        OpEngineApiBuilder<OpEngineValidatorBuilder>,
-    >
+impl<N> RethRpcAddOns<N> for OpAddOns<N, OpEthApiBuilder>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
@@ -410,13 +384,7 @@ where
     }
 }
 
-impl<N> EngineValidatorAddOn<N>
-    for OpAddOns<
-        N,
-        OpEthApiBuilder,
-        OpEngineValidatorBuilder,
-        OpEngineApiBuilder<OpEngineValidatorBuilder>,
-    >
+impl<N> EngineValidatorAddOn<N> for OpAddOns<N, OpEthApiBuilder>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
@@ -469,14 +437,7 @@ impl OpAddOnsBuilder {
 
 impl OpAddOnsBuilder {
     /// Builds an instance of [`OpAddOns`].
-    pub fn build<N>(
-        self,
-    ) -> OpAddOns<
-        N,
-        OpEthApiBuilder,
-        OpEngineValidatorBuilder,
-        OpEngineApiBuilder<OpEngineValidatorBuilder>,
-    >
+    pub fn build<N>(self) -> OpAddOns<N, OpEthApiBuilder>
     where
         N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>,
         OpEthApiBuilder: EthApiBuilder<N>,
@@ -486,8 +447,8 @@ impl OpAddOnsBuilder {
         OpAddOns {
             rpc_add_ons: RpcAddOns::new(
                 OpEthApiBuilder::default().with_sequencer(sequencer_url.clone()),
-                Default::default(),
-                Default::default(),
+                OpEngineValidatorBuilder::default(),
+                OpEngineApiBuilder::default(),
             ),
             da_config: da_config.unwrap_or_default(),
             sequencer_url,
