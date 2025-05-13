@@ -132,8 +132,7 @@ where
 mod tests {
     use super::*;
     use jsonrpsee::{
-        core::__reexports::serde_json, http_client::HttpClientBuilder, server::ServerBuilder,
-        ws_client::WsClientBuilder,
+        http_client::HttpClientBuilder, server::ServerBuilder, ws_client::WsClientBuilder,
     };
     use reth_ethereum::pool::noop::NoopTransactionPool;
 
