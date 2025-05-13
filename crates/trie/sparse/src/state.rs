@@ -9,6 +9,7 @@ use alloy_primitives::{
     Bytes, B256,
 };
 use alloy_rlp::{Decodable, Encodable};
+use alloy_trie::proof::DecodedProofNodes;
 use core::{fmt, iter::Peekable};
 use reth_execution_errors::{SparseStateTrieErrorKind, SparseStateTrieResult, SparseTrieErrorKind};
 use reth_primitives_traits::Account;
@@ -313,12 +314,12 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
         branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
     ) -> SparseStateTrieResult<()> {
-        let DecodedProofNodes {
+        let FilteredProofNodes {
             nodes,
             new_nodes,
             total_nodes: _total_nodes,
             skipped_nodes: _skipped_nodes,
-        } = skip_revealed_nodes(account_subtree, &self.revealed_account_paths)?;
+        } = filter_revealed_nodes(account_subtree, &self.revealed_account_paths)?;
         #[cfg(feature = "metrics")]
         {
             self.metrics.increment_total_account_nodes(_total_nodes as u64);
@@ -371,12 +372,12 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     ) -> SparseStateTrieResult<()> {
         let revealed_nodes = self.revealed_storage_paths.entry(account).or_default();
 
-        let DecodedProofNodes {
+        let FilteredProofNodes {
             nodes,
             new_nodes,
             total_nodes: _total_nodes,
             skipped_nodes: _skipped_nodes,
-        } = skip_revealed_nodes(storage_subtree.subtree, revealed_nodes)?;
+        } = filter_revealed_nodes(storage_subtree.subtree, revealed_nodes)?;
         #[cfg(feature = "metrics")]
         {
             self.metrics.increment_total_storage_nodes(_total_nodes as u64);
@@ -831,9 +832,9 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     }
 }
 
-/// Result of [`skip_revealed_nodes`].
+/// Result of [`filter_revealed_nodes`].
 #[derive(Debug, PartialEq, Eq)]
-struct DecodedProofNodes {
+struct FilteredProofNodes {
     /// Filtered, decoded and sorted proof nodes.
     nodes: Vec<(Nibbles, TrieNode)>,
     /// Number of nodes in the proof.
@@ -845,13 +846,13 @@ struct DecodedProofNodes {
     new_nodes: usize,
 }
 
-/// Does not decode the proof nodes, but instead just skips the nodes that are already revealed and
-/// returns additional information about the number of total, skipped, and new nodes.
-fn skip_revealed_nodes(
-    proof_nodes: alloy_trie::proof::DecodedProofNodes,
+/// Filters the decoded nodes that are already revealed and returns additional information about the
+/// number of total, skipped, and new nodes.
+fn filter_revealed_nodes(
+    proof_nodes: DecodedProofNodes,
     revealed_nodes: &HashSet<Nibbles>,
-) -> alloy_rlp::Result<DecodedProofNodes> {
-    let mut result = DecodedProofNodes {
+) -> alloy_rlp::Result<FilteredProofNodes> {
+    let mut result = FilteredProofNodes {
         nodes: Vec::with_capacity(proof_nodes.len()),
         total_nodes: 0,
         skipped_nodes: 0,
@@ -1240,7 +1241,7 @@ mod tests {
     }
 
     #[test]
-    fn test_skip_revealed_nodes() {
+    fn test_filter_revealed_nodes() {
         let revealed_nodes = HashSet::from_iter([Nibbles::from_nibbles([0x0])]);
         let leaf = TrieNode::Leaf(LeafNode::new(Nibbles::default(), alloy_rlp::encode([])));
         let leaf_encoded = alloy_rlp::encode(&leaf);
@@ -1254,11 +1255,11 @@ mod tests {
             (Nibbles::from_nibbles([0x1]), leaf.clone()),
         ]);
 
-        let decoded = skip_revealed_nodes(proof_nodes, &revealed_nodes).unwrap();
+        let decoded = filter_revealed_nodes(proof_nodes, &revealed_nodes).unwrap();
 
         assert_eq!(
             decoded,
-            DecodedProofNodes {
+            FilteredProofNodes {
                 nodes: vec![(Nibbles::default(), branch), (Nibbles::from_nibbles([0x1]), leaf)],
                 // Branch, leaf, leaf
                 total_nodes: 3,
