@@ -271,112 +271,137 @@ pub struct PackedNibbles {
 }
 
 impl PackedNibbles {
-    /// Returns whether or not the PackedNibbles is empty.
+    /// Returns whether or not the [`PackedNibbles`] is empty.
     pub fn is_empty(&self) -> bool {
         self.nibbles.is_empty()
     }
 
-    /// Extends this PackedNibbles with the given PackedNibbles.
+    /// Extends this [`PackedNibbles`] with the given [`PackedNibbles`].
     fn extend_path(&mut self, other: &PackedNibbles) {
-        // if we're odd we need to extend starting from the next nibble
-        //
-        // TODO: figure out if we should have it in the low or high nibble
-        // for example if we have 0x123, we're storing it as [0x12, 0x30], and we want to extend the
-        // path with 0x456, we need to end up with [0x12, 0x34, 0x56]
-        //
-        // this involves shifting everything over one nibble and merging the first byte of the
-        // second path with with the last byte of the first path
-        //
-        // If we're even, we're fine, and can just extend.
         if other.is_empty() {
-            // if the other is empty, we can just return
+            // If `other` is empty, we can just return
             return
         }
 
         if self.nibbles.is_empty() {
-            // if we're empty, we can just use the other nibbles
+            // If we're empty, we can just use the `other` nibbles
             self.nibbles.copy_from_slice(&other.nibbles);
             self.even = other.even;
             return
         }
 
-        // whether even or odd, we need to extend the nibbles
-        let prev_len = self.nibbles.len();
-        self.nibbles.extend_from_slice(&other.nibbles);
-
         if self.even {
-            // we're even, set the value to the `other` even value
+            // If we're even, we can just extend the nibbles with `other` and update the even flag
+            self.nibbles.extend_from_slice(&other.nibbles);
             self.even = other.even;
-
-            // there's nothing left to do so return
             return
         }
 
-        // merge the boundary
-        // if we're odd, we need to set the high nibble to the low nibble of the next byte
-        self.nibbles[prev_len - 1] =
-            self.nibbles[prev_len - 1] | ((self.nibbles[prev_len] & 0xF0) >> 4);
+        // We're odd, so we need to merge nibbles one by one
+        let prev_len = self.nibbles.len();
 
-        // loop until one before the end
-        let last = self.nibbles.len() - 1;
-        for i in prev_len..last {
-            // shift over the current byte, then do the same merge
-            self.nibbles[i] = (self.nibbles[i] << 4) | ((self.nibbles[i + 1] & 0xF0) >> 4);
-        }
-
-        if other.even {
-            // if the other path is even, the last byte will have the original final byte, where we
-            // only care about the last nibble, so we need to shift it over
-            self.nibbles[last] = (self.nibbles[last] & 0x0F) << 4;
+        // Reserve space for the new nibbles
+        let new_len = if other.even {
+            prev_len + other.nibbles.len()
         } else {
-            // if the second path is odd, we have shifted everything over already and don't need the
-            // final byte
-            self.nibbles.pop();
+            prev_len + other.nibbles.len() - 1
+        };
+        self.nibbles.resize(new_len, 0);
+
+        // Merge the boundary.
+        //
+        // Example: `self` ends with [0x30] (representing "3") and `other` starts with [0x45]
+        // (representing "45").
+        // 1. Take first byte from `other`: 0x45
+        // 2. Mask low nibble:              0x45 & 0xF0 = 0x40
+        // 3. Shift right by 4:             0x40 >> 4   = 0x04
+        // 4. Take last byte from `self`:   0x30
+        // 5. Combine with OR:              0x30 | 0x04 = 0x34
+        //
+        // Result: self ends with [0x12, 0x34] and we continue merging the rest
+        self.nibbles[prev_len - 1] |= (other.nibbles[0] & 0xF0) >> 4;
+
+        // Process the rest of the bytes from `other`.
+        //
+        // Example: pushing bytes [0x45, 0x60] from `other` into the correct positions in `self`.
+        //
+        // For the first iteration:
+        // 1. current = 0x45, next = 0x60
+        // 2. Shift current left by 4:              0x45 << 4   = 0x50
+        // 3. Mask high nibble of next:             0x60 & 0xF0 = 0x60
+        // 4. Shift right by 4:                     0x60 >> 4   = 0x06
+        // 5. Combine with OR:                      0x50 | 0x06 = 0x56
+        // 6. Place at the next position in `self`: self.nibbles[prev_len + 0] = 0x56
+        for i in 0..other.nibbles.len() - 1 {
+            let current = other.nibbles[i];
+            let next = other.nibbles[i + 1];
+
+            let low_nibble = current << 4;
+            let high_nibble = (next & 0xF0) >> 4;
+
+            self.nibbles[prev_len + i] = low_nibble | high_nibble;
         }
 
-        // we know that `self.even` is false, so we only set the even flag if both nibbles started
-        // out with odd lengths
+        // Handle the last byte based on whether `other` is even or odd.
+        if other.even {
+            // If `other` is even, the resulting `self` will be odd, so we need to get the high
+            // nibble of the last byte of `other` and set it to the low nibble of the last byte of
+            // `self`.
+            //
+            // Example: `other` ends with [0x60] (representing "60"):
+            // 1. Mask low nibble:  0x60 & 0x0F = 0x00
+            // 2. Shift left by 4:  0x00 << 4   = 0x00
+            //
+            // If `other` ends with [0x67] (representing "67"):
+            // 1. Mask low nibble:  0x67 & 0x0F = 0x07
+            // 2. Shift left by 4:  0x07 << 4   = 0x70
+            let last = prev_len + other.nibbles.len() - 1;
+            let low_nibble = (other.nibbles[other.nibbles.len() - 1] & 0x0F) << 4;
+
+            self.nibbles[last] = low_nibble;
+        }
+
+        // We know that `self.even` is false, so we only set the even flag if both nibbles started
+        // out with odd lengths.
         //
-        // for this it's enough to check if the other had odd length
+        // For this it's enough to check if the other had odd length.
         self.even = !other.even;
     }
 
     /// Pushes a single nibble to the end of the nibbles.
     ///
-    /// This will only look at the high nibble of the byte passed.
+    /// This will only look at the high nibble of the byte passed, i.e. for `0x02` the nibble `2`
+    /// will be pushed.
     ///
-    /// NOTE: if there is data in the low nibble, it
+    /// NOTE: if there is data in the low nibble, it will be ignored.
     fn push_unchecked(&mut self, nibble: u8) {
-        // this is where i would mask the nibble
-        // let nibble = nibble & 0x0F;
-
-        // if we're empty, we can just push the nibble
+        // If we're empty, we can just push the nibble
         if self.nibbles.is_empty() {
             self.nibbles.push(nibble << 4);
             self.even = false;
             return
         }
 
-        // we determine whether or not we should push a new low nibble or set the high nibble of
+        // We determine whether or not we should push a new low nibble or set the high nibble of
         // the last byte based on the even value
-        if !self.even {
+        if self.even {
+            // Push a new low nibble
+            self.nibbles.push(nibble << 4);
+        } else {
             let last = self.nibbles.len() - 1;
 
-            // if we're odd, we need to set the high nibble of the last byte
-            self.nibbles[last] = self.nibbles[last] | nibble;
-        } else {
-            // if we're even, we need to push a new low nibble
-            self.nibbles.push(nibble << 4);
+            // Set the high nibble of the last byte
+            self.nibbles[last] |= nibble & 0x0F;
         }
 
-        // finally set the even / odd to the opposite of the current value
+        // Finally set the even / odd to the opposite of the current value
         self.even = !self.even;
     }
 }
 
 impl From<Nibbles> for PackedNibbles {
     fn from(nibbles: Nibbles) -> Self {
-        PackedNibbles { even: nibbles.len() % 2 == 0, nibbles: nibbles.pack() }
+        Self { even: nibbles.len() % 2 == 0, nibbles: nibbles.pack() }
     }
 }
 
