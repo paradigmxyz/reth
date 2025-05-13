@@ -2541,7 +2541,7 @@ Post-merge hard forks (timestamp based):
                 update_fraction: 3338477,
                 min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
             },
-            scheduled: Default::default(),
+            ..Default::default()
         };
         assert_eq!(hardfork_params, expected);
     }

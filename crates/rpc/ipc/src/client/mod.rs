@@ -10,7 +10,7 @@ use jsonrpsee::{
     async_client::{Client, ClientBuilder},
     core::client::{ReceivedMessage, TransportReceiverT, TransportSenderT},
 };
-use std::{future::Future, io, time::Duration};
+use std::{io, time::Duration};
 use tokio::io::AsyncWriteExt;
 use tokio_util::codec::FramedRead;
 
@@ -29,11 +29,9 @@ impl TransportSenderT for Sender {
         Ok(self.inner.write_all(msg.as_bytes()).await?)
     }
 
-    fn send_ping(&mut self) -> impl Future<Output = Result<(), Self::Error>> {
-        async {
-            tracing::trace!("send ping - not implemented");
-            Err(IpcError::NotSupported)
-        }
+    async fn send_ping(&mut self) ->  Result<(), Self::Error> {
+        tracing::trace!("send ping - not implemented");
+        Err(IpcError::NotSupported)
     }
 
     /// Close the connection.

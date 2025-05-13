@@ -291,7 +291,7 @@ impl Default for RpcServiceBuilder<Identity> {
 
 impl RpcServiceBuilder<Identity> {
     /// Create a new [`RpcServiceBuilder`].
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self(tower::ServiceBuilder::new())
     }
 }
