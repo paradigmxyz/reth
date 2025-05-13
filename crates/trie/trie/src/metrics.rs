@@ -50,6 +50,8 @@ impl TrieRootMetrics {
 #[derive(Clone, Metrics)]
 #[metrics(scope = "trie.walker")]
 pub struct WalkerMetrics {
+    /// The number of branch nodes seeked by the walker.
+    branch_nodes_seeked_total: Counter,
     /// The number of subnodes out of order due to wrong tree mask.
     out_of_order_subnode: Counter,
 }
@@ -58,6 +60,11 @@ impl WalkerMetrics {
     /// Create new metrics for the given trie type.
     pub fn new(ty: TrieType) -> Self {
         Self::new_with_labels(&[("type", ty.as_str())])
+    }
+
+    /// Increment `branch_nodes_seeked_total`.
+    pub fn inc_branch_nodes_seeked(&self) {
+        self.branch_nodes_seeked_total.increment(1);
     }
 
     /// Increment `out_of_order_subnode`.

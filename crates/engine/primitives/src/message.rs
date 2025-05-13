@@ -188,7 +188,7 @@ impl<Payload: PayloadTypes> Display for BeaconEngineMessage<Payload> {
     }
 }
 
-/// A clonable sender type that can be used to send engine API messages.
+/// A cloneable sender type that can be used to send engine API messages.
 ///
 /// This type mirrors consensus related functions of the engine API.
 #[derive(Debug, Clone)]

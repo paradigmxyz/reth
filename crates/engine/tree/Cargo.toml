@@ -42,6 +42,7 @@ alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-rpc-types-engine.workspace = true
 
+revm.workspace = true
 revm-primitives.workspace = true
 
 # common
@@ -70,13 +71,13 @@ reth-tracing = { workspace = true, optional = true }
 
 [dev-dependencies]
 # reth
+reth-evm-ethereum.workspace = true
 reth-chain-state = { workspace = true, features = ["test-utils"] }
 reth-chainspec.workspace = true
 reth-db-common.workspace = true
 reth-ethereum-consensus.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-evm = { workspace = true, features = ["test-utils"] }
-reth-evm-ethereum.workspace = true
 reth-exex-types.workspace = true
 reth-network-p2p = { workspace = true, features = ["test-utils"] }
 reth-prune-types.workspace = true
@@ -133,5 +134,6 @@ test-utils = [
     "reth-trie-parallel/test-utils",
     "reth-ethereum-primitives/test-utils",
     "reth-node-ethereum/test-utils",
+    "reth-evm-ethereum/test-utils",
 ]
 skip-state-root-validation = ["reth-stages/skip-state-root-validation"]

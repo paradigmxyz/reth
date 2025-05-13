@@ -28,6 +28,7 @@ crates_to_check=(
     reth-ethereum-forks
     reth-ethereum-primitives
     reth-ethereum-consensus
+    reth-stateless
 
     ## optimism
     reth-optimism-chainspec

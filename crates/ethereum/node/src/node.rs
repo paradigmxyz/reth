@@ -2,20 +2,17 @@
 
 pub use crate::{payload::EthereumPayloadBuilder, EthereumEngineValidator};
 use crate::{EthEngineTypes, EthEvmConfig};
-use alloy_eips::merge::EPOCH_SLOTS;
-use reth_chainspec::{ChainSpec, EthChainSpec};
+use alloy_eips::{eip7840::BlobParams, merge::EPOCH_SLOTS};
+use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
-use reth_ethereum_primitives::{EthPrimitives, PooledTransaction};
-use reth_evm::{
-    execute::BasicBlockExecutorProvider, ConfigureEvm, EvmFactory, EvmFactoryFor,
-    NextBlockEnvAttributes,
-};
+use reth_ethereum_primitives::{EthPrimitives, PooledTransaction, TransactionSigned};
+use reth_evm::{ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes};
 use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
-use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, TxTy};
+use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, NodePrimitives, TxTy};
 use reth_node_builder::{
     components::{
         BasicPayloadServiceBuilder, ComponentsBuilder, ConsensusBuilder, ExecutorBuilder,
@@ -191,7 +188,7 @@ where
         let validation_api = ValidationApi::new(
             ctx.node.provider().clone(),
             Arc::new(ctx.node.consensus().clone()),
-            ctx.node.block_executor().clone(),
+            ctx.node.evm_config().clone(),
             ctx.config.rpc.flashbots_config(),
             Box::new(ctx.node.task_executor().clone()),
             Arc::new(EthereumEngineValidator::new(ctx.config.chain.clone())),
@@ -304,17 +301,11 @@ where
     Node: FullNodeTypes<Types = Types>,
 {
     type EVM = EthEvmConfig;
-    type Executor = BasicBlockExecutorProvider<EthEvmConfig>;
 
-    async fn build_evm(
-        self,
-        ctx: &BuilderContext<Node>,
-    ) -> eyre::Result<(Self::EVM, Self::Executor)> {
+    async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
         let evm_config = EthEvmConfig::new(ctx.chain_spec())
             .with_extra_data(ctx.payload_builder_config().extra_data_bytes());
-        let executor = BasicBlockExecutorProvider::new(evm_config.clone());
-
-        Ok((evm_config, executor))
+        Ok(evm_config)
     }
 }
 
@@ -330,7 +321,10 @@ pub struct EthereumPoolBuilder {
 
 impl<Types, Node> PoolBuilder<Node> for EthereumPoolBuilder
 where
-    Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
+    Types: NodeTypes<
+        ChainSpec: EthereumHardforks,
+        Primitives: NodePrimitives<SignedTx = TransactionSigned>,
+    >,
     Node: FullNodeTypes<Types = Types>,
 {
     type Pool = EthTransactionPool<Node::Provider, DiskFileBlobStore>;
@@ -342,13 +336,14 @@ where
         let blob_cache_size = if let Some(blob_cache_size) = pool_config.blob_cache_size {
             blob_cache_size
         } else {
-            // get the current blob params for the current timestamp
+            // get the current blob params for the current timestamp, fallback to default Cancun
+            // params
             let current_timestamp =
                 SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs();
             let blob_params = ctx
                 .chain_spec()
                 .blob_params_at_timestamp(current_timestamp)
-                .unwrap_or(ctx.chain_spec().blob_params.cancun);
+                .unwrap_or_else(BlobParams::cancun);
 
             // Derive the blob cache size from the target blob count, to auto scale it by
             // multiplying it with the slot count for 2 epochs: 384 for pectra
@@ -440,13 +435,13 @@ where
         > + Unpin
         + 'static,
 {
-    type Primitives = EthNetworkPrimitives;
+    type Network = NetworkHandle<EthNetworkPrimitives>;
 
     async fn build_network(
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<NetworkHandle> {
+    ) -> eyre::Result<Self::Network> {
         let network = ctx.network_builder().await?;
         let handle = ctx.start_network(network, pool);
         info!(target: "reth::cli", enode=%handle.local_node_record(), "P2P networking initialized");

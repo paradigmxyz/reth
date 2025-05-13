@@ -308,9 +308,8 @@ pub enum ForkSpec {
     MergePush0,
     /// Cancun
     Cancun,
-    /// Fork Spec which is unknown to us
-    #[serde(other)]
-    Unknown,
+    /// Prague
+    Prague,
 }
 
 impl From<ForkSpec> for ChainSpec {
@@ -342,9 +341,7 @@ impl From<ForkSpec> for ChainSpec {
             ForkSpec::ByzantiumToConstantinopleAt5 | ForkSpec::Constantinople => {
                 panic!("Overridden with PETERSBURG")
             }
-            ForkSpec::Unknown => {
-                panic!("Unknown fork");
-            }
+            ForkSpec::Prague => spec_builder.prague_activated(),
         }
         .build()
     }

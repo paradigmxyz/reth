@@ -6,7 +6,7 @@ use reth_consensus::noop::NoopConsensus;
 use reth_engine_primitives::BeaconConsensusEngineHandle;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_ethereum_primitives::EthPrimitives;
-use reth_evm::execute::BasicBlockExecutorProvider;
+
 use reth_evm_ethereum::EthEvmConfig;
 use reth_network_api::noop::NoopNetwork;
 use reth_node_ethereum::EthereumEngineValidator;
@@ -125,7 +125,6 @@ pub fn test_rpc_builder() -> RpcModuleBuilder<
     NoopNetwork,
     TokioTaskExecutor,
     EthEvmConfig,
-    BasicBlockExecutorProvider<EthEvmConfig>,
     NoopConsensus,
 > {
     RpcModuleBuilder::default()
@@ -134,6 +133,5 @@ pub fn test_rpc_builder() -> RpcModuleBuilder<
         .with_network(NoopNetwork::default())
         .with_executor(TokioTaskExecutor::default())
         .with_evm_config(EthEvmConfig::mainnet())
-        .with_block_executor(BasicBlockExecutorProvider::new(EthEvmConfig::mainnet()))
         .with_consensus(NoopConsensus::default())
 }

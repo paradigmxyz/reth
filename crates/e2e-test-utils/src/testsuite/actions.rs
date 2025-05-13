@@ -447,7 +447,7 @@ impl<I: Sync + Send + 'static> Action<I> for Sequence<I> {
     }
 }
 
-/// Action that braodcasts the next new payload
+/// Action that broadcasts the next new payload
 #[derive(Debug, Default)]
 pub struct BroadcastNextNewPayload {}
 

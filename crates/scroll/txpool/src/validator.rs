@@ -155,6 +155,8 @@ where
             state_nonce,
             transaction: valid_tx,
             propagate,
+            bytecode_hash,
+            authorities,
         } = outcome
         {
             let mut l1_block_info = self.block_info.l1_block_info.read().clone();
@@ -191,8 +193,10 @@ where
             return TransactionValidationOutcome::Valid {
                 balance,
                 state_nonce,
+                bytecode_hash,
                 transaction: valid_tx,
                 propagate,
+                authorities,
             }
         }
 

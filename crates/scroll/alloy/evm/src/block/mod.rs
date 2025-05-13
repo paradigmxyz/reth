@@ -16,7 +16,7 @@ use alloy_evm::{
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
         BlockExecutorFor, BlockValidationError, ExecutableTx, OnStateHook,
     },
-    Database, Evm, FromRecoveredTx, FromTxWithEncoded,
+    Database, Evm, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
 };
 use alloy_primitives::{B256, U256};
 use revm::{
@@ -25,6 +25,8 @@ use revm::{
         TxEnv,
     },
     database::State,
+    handler::PrecompileProvider,
+    interpreter::InterpreterResult,
     DatabaseCommit, Inspector,
 };
 use revm_scroll::builder::ScrollContext;
@@ -231,10 +233,11 @@ pub trait EvmExt: Evm {
     fn l1_fee(&self) -> Option<U256>;
 }
 
-impl<DB, I> EvmExt for ScrollEvm<DB, I>
+impl<DB, I, P> EvmExt for ScrollEvm<DB, I, P>
 where
     DB: Database,
     I: Inspector<ScrollContext<DB>>,
+    P: PrecompileProvider<ScrollContext<DB>, Output = InterpreterResult>,
 {
     fn with_base_fee_check(&mut self, enabled: bool) {
         self.ctx_mut().cfg.disable_base_fee = !enabled;
@@ -304,7 +307,7 @@ where
 
     fn create_executor<'a, DB, I>(
         &'a self,
-        evm: ScrollEvm<&'a mut State<DB>, I>,
+        evm: <ScrollEvmFactory as EvmFactory>::Evm<&'a mut State<DB>, I>,
         _ctx: Self::ExecutionCtx<'a>,
     ) -> impl BlockExecutorFor<'a, Self, DB, I>
     where

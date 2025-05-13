@@ -11,13 +11,13 @@ use core::{
 use std::sync::OnceLock;
 
 use alloy_consensus::{
-    transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx},
+    transaction::{Either, RlpEcdsaDecodableTx, RlpEcdsaEncodableTx},
     SignableTransaction, Signed, Transaction, TxEip1559, TxEip2930, TxEip7702, TxLegacy, Typed2718,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
     eip2930::AccessList,
-    eip7702::SignedAuthorization,
+    eip7702::{RecoveredAuthority, RecoveredAuthorization, SignedAuthorization},
 };
 use alloy_evm::{FromRecoveredTx, FromTxWithEncoded};
 use alloy_primitives::{keccak256, Address, Bytes, Signature, TxHash, TxKind, Uint, B256};
@@ -597,7 +597,21 @@ impl FromRecoveredTx<ScrollTransactionSigned> for revm_scroll::ScrollTransaction
                 access_list: tx.access_list.clone(),
                 blob_hashes: Default::default(),
                 max_fee_per_blob_gas: Default::default(),
-                authorization_list: tx.authorization_list.clone(),
+                authorization_list: tx
+                    .authorization_list
+                    .iter()
+                    .map(|auth| {
+                        Either::Right(RecoveredAuthorization::new_unchecked(
+                            auth.inner().clone(),
+                            auth.signature()
+                                .ok()
+                                .and_then(|signature| {
+                                    recover_signer(&signature, auth.signature_hash()).ok()
+                                })
+                                .map_or(RecoveredAuthority::Invalid, RecoveredAuthority::Valid),
+                        ))
+                    })
+                    .collect(),
                 tx_type: 4,
                 caller: sender,
             },
@@ -688,7 +702,21 @@ impl FromRecoveredTx<ScrollTransactionSigned> for ScrollTransactionIntoTxEnv<TxE
                 access_list: tx.access_list.clone(),
                 blob_hashes: Default::default(),
                 max_fee_per_blob_gas: Default::default(),
-                authorization_list: tx.authorization_list.clone(),
+                authorization_list: tx
+                    .authorization_list
+                    .iter()
+                    .map(|auth| {
+                        Either::Right(RecoveredAuthorization::new_unchecked(
+                            auth.inner().clone(),
+                            auth.signature()
+                                .ok()
+                                .and_then(|signature| {
+                                    recover_signer(&signature, auth.signature_hash()).ok()
+                                })
+                                .map_or(RecoveredAuthority::Invalid, RecoveredAuthority::Valid),
+                        ))
+                    })
+                    .collect(),
                 tx_type: 4,
                 caller: sender,
             },

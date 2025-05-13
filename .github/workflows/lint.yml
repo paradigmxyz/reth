@@ -99,7 +99,7 @@ jobs:
 
   crate-checks:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: rui314/setup-mold@v1
@@ -234,8 +234,7 @@ jobs:
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
       - name: Ensure no arbitrary or proptest dependency on default build
-        # TODO enable arbitrary check again after https://github.com/ethereum/c-kzg-4844/pull/553 run: cargo tree --package reth -e=features,no-dev | grep -Eq "arbitrary|proptest" && exit 1 || exit 0
-        run: cargo tree --package reth -e=features,no-dev | grep -Eq "proptest" && exit 1 || exit 0
+        run: cargo tree --package reth -e=features,no-dev | grep -Eq "arbitrary|proptest" && exit 1 || exit 0
 
   # Checks that selected rates can compile with power set of features
   features:

@@ -13,9 +13,10 @@ use futures::Future;
 use reth_node_api::BlockBody;
 use reth_primitives_traits::{RecoveredBlock, SealedBlock};
 use reth_provider::{
-    BlockIdReader, BlockReader, BlockReaderIdExt, ProviderHeader, ProviderReceipt,
+    BlockIdReader, BlockReader, BlockReaderIdExt, ProviderHeader, ProviderReceipt, ProviderTx,
 };
 use reth_rpc_types_compat::block::from_block;
+use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::sync::Arc;
 
 /// Result type of the fetched block receipts.
@@ -116,6 +117,8 @@ pub trait EthBlocks: LoadBlock {
     ) -> impl Future<Output = BlockAndReceiptsResult<Self>> + Send
     where
         Self: LoadReceipt,
+        Self::Pool:
+            TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
     {
         async move {
             if block_id.is_pending() {
@@ -199,7 +202,13 @@ pub trait EthBlocks: LoadBlock {
 /// Loads a block from database.
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
-pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
+pub trait LoadBlock:
+    LoadPendingBlock
+    + SpawnBlocking
+    + RpcNodeCoreExt<
+        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
+    >
+{
     /// Returns the block object for the given block id.
     #[expect(clippy::type_complexity)]
     fn recovered_block(

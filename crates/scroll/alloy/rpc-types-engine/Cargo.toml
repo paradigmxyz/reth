@@ -30,6 +30,7 @@ default = ["std"]
 arbitrary = [
     "dep:arbitrary",
     "alloy-primitives/arbitrary",
+    "alloy-rpc-types-engine/arbitrary",
 ]
 std = [
     "alloy-primitives/std",

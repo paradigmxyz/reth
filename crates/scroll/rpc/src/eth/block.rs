@@ -8,7 +8,7 @@ use reth_chainspec::ChainSpecProvider;
 use reth_node_api::BlockBody;
 use reth_primitives::TransactionMeta;
 use reth_primitives_traits::SignedTransaction;
-use reth_provider::{BlockReader, HeaderProvider};
+use reth_provider::{BlockReader, HeaderProvider, ProviderTx};
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
     types::RpcTypes,
@@ -16,6 +16,7 @@ use reth_rpc_eth_api::{
 };
 use reth_scroll_chainspec::ScrollChainSpec;
 use reth_scroll_primitives::{ScrollReceipt, ScrollTransactionSigned};
+use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use scroll_alloy_rpc_types::ScrollTransactionReceipt;
 
 impl<N> EthBlocks for ScrollEthApi<N>
@@ -70,7 +71,11 @@ where
 
 impl<N> LoadBlock for ScrollEthApi<N>
 where
-    Self: LoadPendingBlock + SpawnBlocking,
+    Self: LoadPendingBlock<
+            Pool: TransactionPool<
+                Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
+            >,
+        > + SpawnBlocking,
     N: ScrollNodeCore,
 {
 }

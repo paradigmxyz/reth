@@ -106,7 +106,7 @@ where
             // ensure certain settings take effect
             .with_adjusted_configs()
             // Create the provider factory
-            .with_provider_factory().await?
+            .with_provider_factory::<_, <CB::Components as NodeComponents<T>>::Evm>().await?
             .inspect(|_| {
                 info!(target: "reth::cli", "Database opened");
             })
@@ -163,7 +163,7 @@ where
             ctx.prune_config(),
             max_block,
             static_file_producer,
-            ctx.components().block_executor().clone(),
+            ctx.components().evm_config().clone(),
             pipeline_exex_handle,
         )?;
 
@@ -215,7 +215,6 @@ where
         let mut engine_service = if ctx.is_dev() {
             let eth_service = LocalEngineService::new(
                 consensus.clone(),
-                ctx.components().block_executor().clone(),
                 ctx.provider_factory().clone(),
                 ctx.blockchain_db().clone(),
                 pruner,
@@ -235,7 +234,6 @@ where
         } else {
             let eth_service = EngineService::new(
                 consensus.clone(),
-                ctx.components().block_executor().clone(),
                 ctx.chain_spec(),
                 network_client.clone(),
                 Box::pin(consensus_engine_stream),
@@ -364,7 +362,6 @@ where
 
         let full_node = FullNode {
             evm_config: ctx.components().evm_config().clone(),
-            block_executor: ctx.components().block_executor().clone(),
             pool: ctx.components().pool().clone(),
             network: ctx.components().network().clone(),
             provider: ctx.node_adapter().provider.clone(),

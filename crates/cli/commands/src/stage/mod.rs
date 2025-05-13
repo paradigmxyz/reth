@@ -52,9 +52,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             Subcommands::Run(command) => command.execute::<N, _, _, P>(ctx, components).await,
             Subcommands::Drop(command) => command.execute::<N>().await,
             Subcommands::Dump(command) => command.execute::<N, _, _>(components).await,
-            Subcommands::Unwind(command) => command.execute::<N>().await,
+            Subcommands::Unwind(command) => command.execute::<N, _, _>(components).await,
         }
     }
+}
+
+impl<C: ChainSpecParser> Command<C> {
     /// Returns the underlying chain being used to run this command
     pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         match self.command {

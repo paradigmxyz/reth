@@ -16,7 +16,7 @@ mod tx;
 extern crate alloc;
 
 use alloc::vec::Vec;
-use alloy_evm::{Database, Evm, EvmEnv, EvmFactory};
+use alloy_evm::{precompiles::PrecompilesMap, Database, Evm, EvmEnv, EvmFactory};
 use alloy_primitives::{Address, Bytes, TxKind, U256};
 use core::{
     fmt::Debug,
@@ -52,12 +52,12 @@ pub struct ScrollEvm<DB: Database, I, P = ScrollPrecompileProvider> {
 impl<DB: Database, I, P> ScrollEvm<DB, I, P> {
     /// Provides a reference to the EVM context.
     pub const fn ctx(&self) -> &ScrollContext<DB> {
-        &self.inner.0.data.ctx
+        &self.inner.0.ctx
     }
 
     /// Provides a mutable reference to the EVM context.
     pub const fn ctx_mut(&mut self) -> &mut ScrollContext<DB> {
-        &mut self.inner.0.data.ctx
+        &mut self.inner.0.ctx
     }
 }
 
@@ -88,6 +88,8 @@ where
     type Error = EVMError<DB::Error>;
     type HaltReason = HaltReason;
     type Spec = ScrollSpecId;
+    type Precompiles = P;
+    type Inspector = I;
 
     fn block(&self) -> &BlockEnv {
         &self.block
@@ -174,14 +176,21 @@ where
     where
         Self: Sized,
     {
-        let ScrollContext { block: block_env, cfg: cfg_env, journaled_state, .. } =
-            self.inner.0.data.ctx;
+        let Context { block: block_env, cfg: cfg_env, journaled_state, .. } = self.inner.0.ctx;
 
         (journaled_state.database, EvmEnv { block_env, cfg_env })
     }
 
     fn set_inspector_enabled(&mut self, enabled: bool) {
         self.inspect = enabled;
+    }
+
+    fn precompiles_mut(&mut self) -> &mut Self::Precompiles {
+        &mut self.inner.0.precompiles
+    }
+
+    fn inspector_mut(&mut self) -> &mut Self::Inspector {
+        &mut self.inner.0.inspector
     }
 }
 
@@ -191,25 +200,30 @@ where
 pub struct ScrollEvmFactory;
 
 impl EvmFactory for ScrollEvmFactory {
-    type Evm<DB: Database, I: Inspector<ScrollContext<DB>>> = ScrollEvm<DB, I>;
+    type Evm<DB: Database, I: Inspector<ScrollContext<DB>>> = ScrollEvm<DB, I, Self::Precompiles>;
     type Context<DB: Database> = ScrollContext<DB>;
     type Tx = ScrollTransactionIntoTxEnv<TxEnv>;
     type Error<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
     type HaltReason = HaltReason;
     type Spec = ScrollSpecId;
+    type Precompiles = PrecompilesMap;
 
     fn create_evm<DB: Database>(
         &self,
         db: DB,
         input: EvmEnv<ScrollSpecId>,
     ) -> Self::Evm<DB, NoOpInspector> {
+        let spec_id = input.cfg_env.spec;
         ScrollEvm {
             inner: Context::scroll()
                 .with_db(db)
                 .with_block(input.block_env)
                 .with_cfg(input.cfg_env)
                 .maybe_with_eip_7702()
-                .build_scroll_with_inspector(NoOpInspector {}),
+                .build_scroll_with_inspector(NoOpInspector {})
+                .with_precompiles(PrecompilesMap::from_static(
+                    ScrollPrecompileProvider::new_with_spec(spec_id).precompiles(),
+                )),
             inspect: false,
         }
     }
@@ -220,13 +234,17 @@ impl EvmFactory for ScrollEvmFactory {
         input: EvmEnv<ScrollSpecId>,
         inspector: I,
     ) -> Self::Evm<DB, I> {
+        let spec_id = input.cfg_env.spec;
         ScrollEvm {
             inner: Context::scroll()
                 .with_db(db)
                 .with_block(input.block_env)
                 .with_cfg(input.cfg_env)
                 .maybe_with_eip_7702()
-                .build_scroll_with_inspector(inspector),
+                .build_scroll_with_inspector(inspector)
+                .with_precompiles(PrecompilesMap::from_static(
+                    ScrollPrecompileProvider::new_with_spec(spec_id).precompiles(),
+                )),
             inspect: true,
         }
     }

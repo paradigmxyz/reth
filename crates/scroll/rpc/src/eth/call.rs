@@ -1,5 +1,6 @@
 use super::ScrollNodeCore;
 use crate::{ScrollEthApi, ScrollEthApiError};
+use alloy_consensus::transaction::Either;
 
 use alloy_primitives::{TxKind, U256};
 use alloy_rpc_types_eth::transaction::TransactionRequest;
@@ -144,7 +145,11 @@ where
                 .map(|v| v.saturating_to())
                 .unwrap_or_default(),
             // EIP-7702 fields
-            authorization_list: authorization_list.unwrap_or_default(),
+            authorization_list: authorization_list
+                .unwrap_or_default()
+                .into_iter()
+                .map(Either::Left)
+                .collect(),
         };
 
         Ok(ScrollTransactionIntoTxEnv::new(base, Some(Default::default())))
