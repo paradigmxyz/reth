@@ -14,8 +14,6 @@ pub struct SupervisorMetrics {
     /// How long it takes to query the supervisor in the Optimism transaction pool
     pub(crate) supervisor_query_latency: Histogram,
 
-    /// Counter for the number of times the chain database was uninitialized
-    pub(crate) uninitialized_chain_database_count: Counter,
     /// Counter for the number of times data was skipped
     pub(crate) skipped_data_count: Counter,
     /// Counter for the number of times an unknown chain was encountered
@@ -51,13 +49,11 @@ impl SupervisorMetrics {
     pub fn increment_metrics_for_error(&self, error: &InteropTxValidatorError) {
         use InvalidInboxEntry::{
             AwaitingReplacement, ConflictingData, DataCorruption, FutureData, IneffectiveData,
-            MissedData, NoParentForFirstBlock, OutOfOrder, OutOfScope, SkippedData,
-            UninitializedChainDatabase, UnknownChain,
+            MissedData, NoParentForFirstBlock, OutOfOrder, OutOfScope, SkippedData, UnknownChain,
         };
 
         if let InteropTxValidatorError::InvalidEntry(inner) = error {
             match inner {
-                UninitializedChainDatabase => self.uninitialized_chain_database_count.increment(1),
                 SkippedData => self.skipped_data_count.increment(1),
                 UnknownChain => self.unknown_chain_count.increment(1),
                 ConflictingData => self.conflicting_data_count.increment(1),
@@ -69,6 +65,7 @@ impl SupervisorMetrics {
                 FutureData => self.future_data_count.increment(1),
                 MissedData => self.missed_data_count.increment(1),
                 DataCorruption => self.data_corruption_count.increment(1),
+                _ => {}
             }
         }
     }
