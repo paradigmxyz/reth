@@ -3,14 +3,11 @@
 use crate::{assert::assert_equal, Error};
 use alloy_consensus::Header as RethHeader;
 use alloy_eips::eip4895::Withdrawals;
+use alloy_genesis::GenesisAccount;
 use alloy_primitives::{keccak256, Address, Bloom, Bytes, B256, B64, U256};
 use reth_chainspec::{ChainSpec, ChainSpecBuilder};
-use reth_db_api::{
-    cursor::DbDupCursorRO,
-    tables,
-    transaction::{DbTx, DbTxMut},
-};
-use reth_primitives_traits::{Account as RethAccount, Bytecode, SealedHeader, StorageEntry};
+use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
+use reth_primitives_traits::SealedHeader;
 use serde::Deserialize;
 use std::{collections::BTreeMap, ops::Deref};
 
@@ -27,8 +24,6 @@ pub struct BlockchainTest {
     pub blocks: Vec<Block>,
     /// The expected post state.
     pub post_state: Option<BTreeMap<Address, Account>>,
-    /// The expected post state merkle root.
-    pub post_state_hash: Option<B256>,
     /// The test pre-state.
     pub pre: State,
     /// Hash of the best block.
@@ -158,40 +153,32 @@ pub struct TransactionSequence {
 pub struct State(BTreeMap<Address, Account>);
 
 impl State {
-    /// Write the state to the database.
-    pub fn write_to_db(&self, tx: &impl DbTxMut) -> Result<(), Error> {
-        for (&address, account) in &self.0 {
-            let hashed_address = keccak256(address);
-            let has_code = !account.code.is_empty();
-            let code_hash = has_code.then(|| keccak256(&account.code));
-            let reth_account = RethAccount {
-                balance: account.balance,
-                nonce: account.nonce.to::<u64>(),
-                bytecode_hash: code_hash,
-            };
-            tx.put::<tables::PlainAccountState>(address, reth_account)?;
-            tx.put::<tables::HashedAccounts>(hashed_address, reth_account)?;
-
-            if let Some(code_hash) = code_hash {
-                tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(account.code.clone()))?;
-            }
-
-            for (k, v) in &account.storage {
-                if v.is_zero() {
-                    continue
-                }
-                let storage_key = B256::from_slice(&k.to_be_bytes::<32>());
-                tx.put::<tables::PlainStorageState>(
-                    address,
-                    StorageEntry { key: storage_key, value: *v },
-                )?;
-                tx.put::<tables::HashedStorages>(
-                    hashed_address,
-                    StorageEntry { key: keccak256(storage_key), value: *v },
-                )?;
-            }
-        }
-        Ok(())
+    /// Return state as genesis state.
+    pub fn into_genesis_state(self) -> BTreeMap<Address, GenesisAccount> {
+        self.0
+            .into_iter()
+            .map(|(address, account)| {
+                let storage = account
+                    .storage
+                    .iter()
+                    .filter(|(_, v)| !v.is_zero())
+                    .map(|(k, v)| {
+                        (
+                            B256::from_slice(&k.to_be_bytes::<32>()),
+                            B256::from_slice(&v.to_be_bytes::<32>()),
+                        )
+                    })
+                    .collect();
+                let account = GenesisAccount {
+                    balance: account.balance,
+                    nonce: Some(account.nonce.try_into().unwrap()),
+                    code: Some(account.code).filter(|c| !c.is_empty()),
+                    storage: Some(storage),
+                    private_key: None,
+                };
+                (address, account)
+            })
+            .collect::<BTreeMap<_, _>>()
     }
 }
 
@@ -321,9 +308,8 @@ pub enum ForkSpec {
     MergePush0,
     /// Cancun
     Cancun,
-    /// Fork Spec which is unknown to us
-    #[serde(other)]
-    Unknown,
+    /// Prague
+    Prague,
 }
 
 impl From<ForkSpec> for ChainSpec {
@@ -355,9 +341,7 @@ impl From<ForkSpec> for ChainSpec {
             ForkSpec::ByzantiumToConstantinopleAt5 | ForkSpec::Constantinople => {
                 panic!("Overridden with PETERSBURG")
             }
-            ForkSpec::Unknown => {
-                panic!("Unknown fork");
-            }
+            ForkSpec::Prague => spec_builder.prague_activated(),
         }
         .build()
     }

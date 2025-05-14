@@ -45,7 +45,10 @@ use utils::*;
 mod tests {
     use super::*;
     use crate::test_utils::{StorageKind, TestStageDB};
-    use alloy_primitives::{address, hex_literal::hex, keccak256, BlockNumber, B256, U256};
+    use alloy_consensus::{SignableTransaction, TxLegacy};
+    use alloy_primitives::{
+        address, hex_literal::hex, keccak256, BlockNumber, Signature, B256, U256,
+    };
     use alloy_rlp::Decodable;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db::mdbx::{cursor::Cursor, RW};
@@ -360,9 +363,20 @@ mod tests {
     ) where
         <T as Table>::Value: Default,
     {
+        update_db_with_and_check::<T>(db, key, expected, &Default::default());
+    }
+
+    /// Inserts the given value at key and compare the check consistency result against the expected
+    /// one.
+    fn update_db_with_and_check<T: Table<Key = u64>>(
+        db: &TestStageDB,
+        key: u64,
+        expected: Option<PipelineTarget>,
+        value: &T::Value,
+    ) {
         let provider_rw = db.factory.provider_rw().unwrap();
         let mut cursor = provider_rw.tx_ref().cursor_write::<T>().unwrap();
-        cursor.insert(key, &Default::default()).unwrap();
+        cursor.insert(key, value).unwrap();
         provider_rw.commit().unwrap();
 
         assert!(matches!(
@@ -487,14 +501,20 @@ mod tests {
             .unwrap();
 
         // Creates a gap of one transaction: static_file <missing> db
-        update_db_and_check::<tables::Transactions>(
+        update_db_with_and_check::<tables::Transactions>(
             &db,
             current + 2,
             Some(PipelineTarget::Unwind(89)),
+            &TxLegacy::default().into_signed(Signature::test_signature()).into(),
         );
 
         // Fill the gap, and ensure no unwind is necessary.
-        update_db_and_check::<tables::Transactions>(&db, current + 1, None);
+        update_db_with_and_check::<tables::Transactions>(
+            &db,
+            current + 1,
+            None,
+            &TxLegacy::default().into_signed(Signature::test_signature()).into(),
+        );
     }
 
     #[test]

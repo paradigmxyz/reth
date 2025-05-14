@@ -7,6 +7,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![allow(missing_docs, clippy::needless_pass_by_ref_mut)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![allow(clippy::borrow_as_ptr)]
 
 pub extern crate reth_mdbx_sys as ffi;
 

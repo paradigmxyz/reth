@@ -145,7 +145,7 @@ impl FromStr for TransactionPropagationKind {
         match s {
             "All" | "all" => Ok(Self::All),
             "Trusted" | "trusted" => Ok(Self::Trusted),
-            _ => Err(format!("Invalid transaction propagation policy: {}", s)),
+            _ => Err(format!("Invalid transaction propagation policy: {s}")),
         }
     }
 }

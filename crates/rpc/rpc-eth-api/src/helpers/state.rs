@@ -5,7 +5,7 @@ use crate::{EthApiTypes, FromEthApiError, RpcNodeCore, RpcNodeCoreExt};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::BlockId;
 use alloy_primitives::{Address, Bytes, B256, U256};
-use alloy_rpc_types_eth::{Account, EIP1186AccountProofResponse};
+use alloy_rpc_types_eth::{Account, AccountInfo, EIP1186AccountProofResponse};
 use alloy_serde::JsonStorageKey;
 use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
@@ -157,6 +157,35 @@ pub trait EthState: LoadState + SpawnBlocking {
                 .map_err(Self::Error::from_eth_err)?;
 
             Ok(Some(Account { balance, nonce, code_hash, storage_root }))
+        })
+    }
+
+    /// Retrieves the account's balance, nonce, and code for a given address.
+    fn get_account_info(
+        &self,
+        address: Address,
+        block_id: BlockId,
+    ) -> impl Future<Output = Result<AccountInfo, Self::Error>> + Send {
+        self.spawn_blocking_io(move |this| {
+            let state = this.state_at_block_id(block_id)?;
+            let account = state
+                .basic_account(&address)
+                .map_err(Self::Error::from_eth_err)?
+                .unwrap_or_default();
+
+            let balance = account.balance;
+            let nonce = account.nonce;
+            let code = if account.get_bytecode_hash() == KECCAK_EMPTY {
+                Default::default()
+            } else {
+                state
+                    .account_code(&address)
+                    .map_err(Self::Error::from_eth_err)?
+                    .unwrap_or_default()
+                    .original_bytes()
+            };
+
+            Ok(AccountInfo { balance, nonce, code })
         })
     }
 }

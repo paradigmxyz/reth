@@ -13,8 +13,7 @@
 
 #![warn(unused_crate_dependencies)]
 
-use reth::cli::Cli;
-use reth_ethereum::node::EthereumNode;
+use reth_ethereum::{cli::interface::Cli, node::EthereumNode};
 
 fn main() {
     Cli::parse_args()

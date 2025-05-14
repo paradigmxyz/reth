@@ -170,7 +170,7 @@ pub struct RpcServerArgs {
     )]
     pub rpc_gas_cap: u64,
 
-    /// Maximum eth transaction fee that can be sent via the RPC APIs (0 = no cap)
+    /// Maximum eth transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap)
     #[arg(
         long = "rpc.txfeecap",
         alias = "rpc-txfeecap",

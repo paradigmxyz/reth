@@ -244,7 +244,7 @@ mod tests {
         MetricServer::new(config).serve().await.unwrap();
 
         // Send request to the metrics endpoint
-        let url = format!("http://{}", listen_addr);
+        let url = format!("http://{listen_addr}");
         let response = Client::new().get(&url).send().await.unwrap();
         assert!(response.status().is_success());
 

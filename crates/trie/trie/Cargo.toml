@@ -30,7 +30,7 @@ alloy-consensus.workspace = true
 alloy-trie.workspace = true
 
 # tracing
-tracing.workspace = true
+tracing = { workspace = true, features = ["attributes"] }
 
 # misc
 auto_impl.workspace = true

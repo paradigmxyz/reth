@@ -26,8 +26,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           types: |
-            fix
             feat
+            fix
             chore
             test
             perf
@@ -35,6 +35,7 @@ jobs:
             docs
             ci
             revert
+            deps
         continue-on-error: true
       - name: Add PR Comment for Invalid Title
         if: steps.lint_pr_title.outcome == 'failure'
@@ -58,6 +59,8 @@ jobs:
             - `refactor`: Changes to improve code structure
             - `docs`: Documentation updates
             - `ci`: Changes to CI/CD configurations
+            - `revert`: Reverts a previously merged PR
+            - `deps`: Updates dependencies
             
             **Breaking Changes**
 

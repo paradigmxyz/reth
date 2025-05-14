@@ -9,14 +9,17 @@ use reth_consensus::{noop::NoopConsensus, ConsensusError, FullConsensus};
 use reth_db::{init_db, open_db_read_only, DatabaseEnv};
 use reth_db_common::init::init_genesis;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
-use reth_evm::{execute::BlockExecutorProvider, noop::NoopBlockExecutorProvider};
-use reth_node_builder::{NodeTypes, NodeTypesWithDBAdapter};
+use reth_evm::{noop::NoopEvmConfig, ConfigureEvm};
+use reth_node_api::FullNodeTypesAdapter;
+use reth_node_builder::{
+    Node, NodeComponents, NodeComponentsBuilder, NodeTypes, NodeTypesWithDBAdapter,
+};
 use reth_node_core::{
     args::{DatabaseArgs, DatadirArgs},
     dirs::{ChainPath, DataDirPath},
 };
 use reth_provider::{
-    providers::{NodeTypesForProvider, StaticFileProvider},
+    providers::{BlockchainProvider, NodeTypesForProvider, StaticFileProvider},
     ProviderFactory, StaticFileProviderFactory,
 };
 use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
@@ -140,7 +143,11 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
 
             // Highly unlikely to happen, and given its destructive nature, it's better to panic
             // instead.
-            assert_ne!(unwind_target, PipelineTarget::Unwind(0), "A static file <> database inconsistency was found that would trigger an unwind to block 0");
+            assert_ne!(
+                unwind_target,
+                PipelineTarget::Unwind(0),
+                "A static file <> database inconsistency was found that would trigger an unwind to block 0"
+            );
 
             info!(target: "reth::cli", unwind_target = %unwind_target, "Executing an unwind after a failed storage consistency check.");
 
@@ -154,7 +161,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
                     Arc::new(NoopConsensus::default()),
                     NoopHeaderDownloader::default(),
                     NoopBodiesDownloader::default(),
-                    NoopBlockExecutorProvider::<N::Primitives>::default(),
+                    NoopEvmConfig::<N::Evm>::default(),
                     config.stages.clone(),
                     prune_modes.clone(),
                 ))
@@ -196,33 +203,48 @@ impl AccessRights {
     }
 }
 
+/// Helper alias to satisfy `FullNodeTypes` bound on [`Node`] trait generic.
+type FullTypesAdapter<T> = FullNodeTypesAdapter<
+    T,
+    Arc<DatabaseEnv>,
+    BlockchainProvider<NodeTypesWithDBAdapter<T, Arc<DatabaseEnv>>>,
+>;
+
 /// Helper trait with a common set of requirements for the
 /// [`NodeTypes`] in CLI.
-pub trait CliNodeTypes: NodeTypes + NodeTypesForProvider {}
-impl<N> CliNodeTypes for N where N: NodeTypes + NodeTypesForProvider {}
+pub trait CliNodeTypes: NodeTypesForProvider {
+    type Evm: ConfigureEvm<Primitives = Self::Primitives>;
+}
+
+impl<N> CliNodeTypes for N
+where
+    N: Node<FullTypesAdapter<Self>> + NodeTypesForProvider,
+{
+    type Evm = <<N::ComponentsBuilder as NodeComponentsBuilder<FullTypesAdapter<Self>>>::Components as NodeComponents<FullTypesAdapter<Self>>>::Evm;
+}
 
 /// Helper trait aggregating components required for the CLI.
 pub trait CliNodeComponents<N: CliNodeTypes> {
-    /// Block executor.
-    type Executor: BlockExecutorProvider<Primitives = N::Primitives>;
+    /// Evm to use.
+    type Evm: ConfigureEvm<Primitives = N::Primitives> + 'static;
     /// Consensus implementation.
     type Consensus: FullConsensus<N::Primitives, Error = ConsensusError> + Clone + 'static;
 
-    /// Returns the block executor.
-    fn executor(&self) -> &Self::Executor;
+    /// Returns the configured EVM.
+    fn evm_config(&self) -> &Self::Evm;
     /// Returns the consensus implementation.
     fn consensus(&self) -> &Self::Consensus;
 }
 
 impl<N: CliNodeTypes, E, C> CliNodeComponents<N> for (E, C)
 where
-    E: BlockExecutorProvider<Primitives = N::Primitives>,
+    E: ConfigureEvm<Primitives = N::Primitives> + 'static,
     C: FullConsensus<N::Primitives, Error = ConsensusError> + Clone + 'static,
 {
-    type Executor = E;
+    type Evm = E;
     type Consensus = C;
 
-    fn executor(&self) -> &Self::Executor {
+    fn evm_config(&self) -> &Self::Evm {
         &self.0
     }
 

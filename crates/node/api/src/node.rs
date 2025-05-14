@@ -6,7 +6,7 @@ use reth_basic_payload_builder::PayloadBuilder;
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_primitives::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle};
-use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
+use reth_evm::ConfigureEvm;
 use reth_network_api::FullNetwork;
 use reth_node_core::node_config::NodeConfig;
 use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter, TxTy};
@@ -70,9 +70,6 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
     type Evm: ConfigureEvm<Primitives = <Self::Types as NodeTypes>::Primitives>;
 
-    /// The type that knows how to execute blocks.
-    type Executor: BlockExecutorProvider<Primitives = <Self::Types as NodeTypes>::Primitives>;
-
     /// The consensus type of the node.
     type Consensus: FullConsensus<<Self::Types as NodeTypes>::Primitives, Error = ConsensusError>
         + Clone
@@ -87,9 +84,6 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
 
     /// Returns the node's evm config.
     fn evm_config(&self) -> &Self::Evm;
-
-    /// Returns the node's executor type.
-    fn block_executor(&self) -> &Self::Executor;
 
     /// Returns the node's consensus type.
     fn consensus(&self) -> &Self::Consensus;

@@ -363,7 +363,7 @@ RPC:
           [default: 50000000]
 
       --rpc.txfeecap <TX_FEE_CAP>
-          Maximum eth transaction fee that can be sent via the RPC APIs (0 = no cap)
+          Maximum eth transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap)
 
           [default: 1.0]
 
@@ -555,8 +555,6 @@ Builder:
       --builder.gaslimit <GAS_LIMIT>
           Target gas limit for built blocks
 
-          [default: 36000000]
-
       --builder.interval <DURATION>
           The interval at which the job should build a new payload after the last.
 
@@ -735,7 +733,13 @@ Engine:
           Enable legacy state root
 
       --engine.caching-and-prewarming
-          Enable cross-block caching and parallel prewarming
+          CAUTION: This CLI flag has no effect anymore, use --engine.disable-caching-and-prewarming if you want to disable caching and prewarming
+
+      --engine.disable-caching-and-prewarming
+          Disable cross-block caching and parallel prewarming
+
+      --engine.state-provider-metrics
+          Enable state provider latency metrics. This allows the engine to collect and report stats about how long state provider calls took during execution, but this does introduce slight overhead to state provider calls
 
       --engine.cross-block-cache-size <CROSS_BLOCK_CACHE_SIZE>
           Configure the size of cross-block cache in megabytes
@@ -757,6 +761,9 @@ Engine:
           Configure the number of reserved CPU cores for non-reth processes
 
           [default: 1]
+
+      --engine.precompile-cache
+          Enable precompile cache
 
 Ress:
       --ress.enable

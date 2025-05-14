@@ -13,8 +13,10 @@ Commands:
   init          Initialize the database from a genesis file
   init-state    Initialize the database from a state dump file
   import        This syncs RLP encoded blocks from a file
+  import-era    This syncs ERA encoded blocks from a directory
   dump-genesis  Dumps genesis block JSON configuration to stdout
   db            Database debugging utilities
+  download      Download public node snapshots
   stage         Manipulate individual stages
   p2p           P2P Debugging utilities
   config        Write config to stdout

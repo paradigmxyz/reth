@@ -83,11 +83,8 @@ async fn worker_fetch(
             WorkerRequest::Download { chunk_index, start, end } => {
                 data_file.seek(tokio::io::SeekFrom::Start(start as u64)).await?;
 
-                let mut response = client
-                    .get(&url)
-                    .header(RANGE, format!("bytes={}-{}", start, end))
-                    .send()
-                    .await?;
+                let mut response =
+                    client.get(&url).header(RANGE, format!("bytes={start}-{end}")).send().await?;
 
                 let mut written_bytes = 0;
                 while let Some(chunk) = response.chunk().await? {

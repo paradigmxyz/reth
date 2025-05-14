@@ -32,7 +32,7 @@ use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use std::{sync::Arc, time::Instant};
 use tokio::sync::oneshot;
-use tracing::{trace, warn};
+use tracing::{debug, trace, warn};
 
 /// The Engine API response sender.
 pub type EngineApiSender<Ok> = oneshot::Sender<EngineApiResult<Ok>>;
@@ -53,8 +53,11 @@ const MAX_BLOB_LIMIT: usize = 128;
 /// ## Implementers
 ///
 /// Implementing support for an engine API jsonrpsee RPC handler is done by defining the engine API
-/// server trait and implementing it on a type that can wrap this [`EngineApi`] type.
-/// See also [`EngineApiServer`] implementation for this type which is the L1 implementation.
+/// server trait and implementing it on a type that can either wrap this [`EngineApi`] type or
+/// use a custom [`EngineTypes`] implementation if it mirrors ethereum's versioned engine API
+/// endpoints (e.g. opstack).
+/// See also [`EngineApiServer`] implementation for this type which is the
+/// L1 implementation.
 pub struct EngineApi<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSpec> {
     inner: Arc<EngineApiInner<Provider, PayloadT, Pool, Validator, ChainSpec>>,
 }
@@ -974,7 +977,7 @@ where
         &self,
         payload_id: PayloadId,
     ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV2> {
-        trace!(target: "rpc::engine", "Serving engine_getPayloadV2");
+        debug!(target: "rpc::engine", id = %payload_id, "Serving engine_getPayloadV2");
         Ok(self.get_payload_v2_metered(payload_id).await?)
     }
 

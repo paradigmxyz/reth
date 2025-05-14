@@ -1,0 +1,38 @@
+name: reproducible-build
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 1 */2 * *"
+
+jobs:
+  build:
+    name: build reproducible binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          target: x86_64-unknown-linux-gnu
+      - name: Install cross main
+        run: |
+          cargo install cross --git https://github.com/cross-rs/cross
+      - name: Install cargo-cache
+        run: |
+          cargo install cargo-cache
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - name: Build Reth
+        run: |
+          make build-reproducible
+          mv target/x86_64-unknown-linux-gnu/release/reth reth-build-1
+      - name: Clean cache
+        run: make clean && cargo cache -a
+      - name: Build Reth again
+        run: |
+          make build-reproducible
+          mv target/x86_64-unknown-linux-gnu/release/reth reth-build-2
+      - name: Compare binaries
+        run: cmp reth-build-1 reth-build-2

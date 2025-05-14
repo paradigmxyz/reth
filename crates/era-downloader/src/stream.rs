@@ -1,6 +1,7 @@
 use crate::{client::HttpClient, EraClient};
 use futures_util::{stream::FuturesOrdered, FutureExt, Stream, StreamExt};
 use reqwest::Url;
+use reth_fs_util as fs;
 use std::{
     collections::VecDeque,
     fmt::{Debug, Formatter},
@@ -45,6 +46,20 @@ impl EraStreamConfig {
 }
 
 /// An asynchronous stream of ERA1 files.
+///
+/// # Examples
+/// ```
+/// use futures_util::StreamExt;
+/// use reth_era_downloader::{EraStream, HttpClient};
+///
+/// # async fn import(mut stream: EraStream<impl HttpClient + Clone + Send + Sync + 'static + Unpin>) -> eyre::Result<()> {
+/// while let Some(file) = stream.next().await {
+///     let file = file?;
+///     // Process `file: Box<Path>`
+/// }
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Debug)]
 pub struct EraStream<Http> {
     download_stream: DownloadStream,
@@ -67,6 +82,7 @@ impl<Http> EraStream<Http> {
                 files_count: Box::pin(async move { usize::MAX }),
                 next_url: Box::pin(async move { Ok(None) }),
                 recover_index: Box::pin(async move { 0 }),
+                fetch_file_list: Box::pin(async move { Ok(()) }),
                 state: Default::default(),
                 max_files: config.max_files,
                 index: 0,
@@ -76,8 +92,44 @@ impl<Http> EraStream<Http> {
     }
 }
 
+/// Contains information about an ERA file.
+pub trait EraMeta: AsRef<Path> {
+    /// Marking this particular ERA file as "processed" lets the caller hint that it is no longer
+    /// going to be using it.
+    ///
+    /// The meaning of that is up to the implementation. The caller should assume that after this
+    /// point is no longer possible to safely read it.
+    fn mark_as_processed(self) -> eyre::Result<()>;
+}
+
+/// Contains information about ERA file that is hosted remotely and represented by a temporary
+/// local file.
+#[derive(Debug)]
+pub struct EraRemoteMeta {
+    path: Box<Path>,
+}
+
+impl EraRemoteMeta {
+    const fn new(path: Box<Path>) -> Self {
+        Self { path }
+    }
+}
+
+impl AsRef<Path> for EraRemoteMeta {
+    fn as_ref(&self) -> &Path {
+        self.path.as_ref()
+    }
+}
+
+impl EraMeta for EraRemoteMeta {
+    /// Removes a temporary local file representation of the remotely hosted original.
+    fn mark_as_processed(self) -> eyre::Result<()> {
+        Ok(fs::remove_file(self.path)?)
+    }
+}
+
 impl<Http: HttpClient + Clone + Send + Sync + 'static + Unpin> Stream for EraStream<Http> {
-    type Item = eyre::Result<Box<Path>>;
+    type Item = eyre::Result<EraRemoteMeta>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if let Poll::Ready(fut) = self.starting_stream.poll_next_unpin(cx) {
@@ -98,7 +150,8 @@ impl<Http: HttpClient + Clone + Send + Sync + 'static + Unpin> Stream for EraStr
     }
 }
 
-type DownloadFuture = Pin<Box<dyn Future<Output = eyre::Result<Box<Path>>>>>;
+type DownloadFuture =
+    Pin<Box<dyn Future<Output = eyre::Result<EraRemoteMeta>> + Send + Sync + 'static>>;
 
 struct DownloadStream {
     downloads: FuturesOrdered<DownloadFuture>,
@@ -114,7 +167,7 @@ impl Debug for DownloadStream {
 }
 
 impl Stream for DownloadStream {
-    type Item = eyre::Result<Box<Path>>;
+    type Item = eyre::Result<EraRemoteMeta>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         for _ in 0..self.max_concurrent_downloads - self.downloads.len() {
@@ -140,6 +193,7 @@ struct StartingStream<Http> {
     files_count: Pin<Box<dyn Future<Output = usize> + Send + Sync + 'static>>,
     next_url: Pin<Box<dyn Future<Output = eyre::Result<Option<Url>>> + Send + Sync + 'static>>,
     recover_index: Pin<Box<dyn Future<Output = u64> + Send + Sync + 'static>>,
+    fetch_file_list: Pin<Box<dyn Future<Output = eyre::Result<()>> + Send + Sync + 'static>>,
     state: State,
     max_files: usize,
     index: u64,
@@ -160,6 +214,7 @@ impl<Http> Debug for StartingStream<Http> {
 enum State {
     #[default]
     Initial,
+    FetchFileList,
     RecoverIndex,
     CountFiles,
     Missing(usize),
@@ -167,11 +222,20 @@ enum State {
 }
 
 impl<Http: HttpClient + Clone + Send + Sync + 'static + Unpin> Stream for StartingStream<Http> {
-    type Item = Pin<Box<dyn Future<Output = eyre::Result<Box<Path>>>>>;
+    type Item = DownloadFuture;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if self.state == State::Initial {
-            self.recover_index();
+            self.fetch_file_list();
+        }
+
+        if self.state == State::FetchFileList {
+            if let Poll::Ready(result) = self.fetch_file_list.poll_unpin(cx) {
+                match result {
+                    Ok(_) => self.recover_index(),
+                    Err(e) => return Poll::Ready(Some(Box::pin(async move { Err(e) }))),
+                }
+            }
         }
 
         if self.state == State::RecoverIndex {
@@ -206,7 +270,9 @@ impl<Http: HttpClient + Clone + Send + Sync + 'static + Unpin> Stream for Starti
                 return Poll::Ready(url.transpose().map(|url| -> DownloadFuture {
                     let mut client = self.client.clone();
 
-                    Box::pin(async move { client.download_to_file(url?).await })
+                    Box::pin(
+                        async move { client.download_to_file(url?).await.map(EraRemoteMeta::new) },
+                    )
                 }));
             }
         }
@@ -222,6 +288,15 @@ impl<Http> StartingStream<Http> {
 }
 
 impl<Http: HttpClient + Clone + Send + Sync + 'static> StartingStream<Http> {
+    fn fetch_file_list(&mut self) {
+        let client = self.client.clone();
+
+        Pin::new(&mut self.fetch_file_list)
+            .set(Box::pin(async move { client.fetch_file_list().await }));
+
+        self.state = State::FetchFileList;
+    }
+
     fn recover_index(&mut self) {
         let client = self.client.clone();
 

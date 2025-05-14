@@ -88,7 +88,7 @@ When updating this, also update:
 - .github/workflows/lint.yml
 -->
 
-The Minimum Supported Rust Version (MSRV) of this project is [1.85.0](https://blog.rust-lang.org/2025/02/20/Rust-1.85.0.html).
+The Minimum Supported Rust Version (MSRV) of this project is [1.86.0](https://blog.rust-lang.org/2025/04/03/Rust-1.86.0/).
 
 See the book for detailed instructions on how to [build from source](https://paradigmxyz.github.io/reth/installation/source.html).
 
@@ -104,21 +104,14 @@ cd reth
 Next, run the tests:
 
 ```sh
-# Without Geth
-cargo test --workspace
+cargo nextest run --workspace
 
-# With Geth
-cargo test --workspace --features geth-tests
-
-# With Ethereum Foundation tests
-#
-# Note: Requires cloning https://github.com/ethereum/tests
-#
-#   cd testing/ef-tests && git clone https://github.com/ethereum/tests ethereum-tests
-cargo test -p ef-tests --features ef-tests
+# Run the Ethereum Foundation tests
+make ef-tests
 ```
 
-We recommend using [`cargo nextest`](https://nexte.st/) to speed up testing. With nextest installed, simply substitute `cargo test` with `cargo nextest run`.
+We highly recommend using [`cargo nextest`](https://nexte.st/) to speed up testing.
+Using `cargo test` to run tests may work fine, but this is not tested and does not support more advanced features like retries for spurious failures.
 
 > **Note**
 >

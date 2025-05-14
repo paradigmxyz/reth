@@ -1,0 +1,67 @@
+[package]
+name = "reth-evm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-execution-errors.workspace = true
+reth-execution-types.workspace = true
+reth-metrics = { workspace = true, optional = true }
+reth-primitives-traits.workspace = true
+reth-storage-api.workspace = true
+reth-storage-errors.workspace = true
+reth-trie-common.workspace = true
+
+revm.workspace = true
+
+# alloy
+alloy-primitives.workspace = true
+alloy-eips.workspace = true
+alloy-evm.workspace = true
+alloy-consensus.workspace = true
+
+auto_impl.workspace = true
+derive_more.workspace = true
+futures-util.workspace = true
+metrics = { workspace = true, optional = true }
+
+[dev-dependencies]
+reth-ethereum-primitives.workspace = true
+reth-ethereum-forks.workspace = true
+alloy-consensus.workspace = true
+metrics-util = { workspace = true, features = ["debugging"] }
+
+[features]
+default = ["std"]
+std = [
+    "reth-primitives-traits/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "alloy-consensus/std",
+    "revm/std",
+    "reth-ethereum-forks/std",
+    "alloy-evm/std",
+    "reth-execution-errors/std",
+    "reth-execution-types/std",
+    "reth-storage-errors/std",
+    "futures-util/std",
+    "derive_more/std",
+    "reth-storage-api/std",
+    "reth-trie-common/std",
+    "reth-ethereum-primitives/std",
+]
+metrics = ["std", "dep:metrics", "dep:reth-metrics"]
+test-utils = [
+    "reth-primitives-traits/test-utils",
+    "reth-trie-common/test-utils",
+    "reth-ethereum-primitives/test-utils",
+]
+op = ["alloy-evm/op", "reth-primitives-traits/op"]

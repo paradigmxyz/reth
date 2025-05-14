@@ -125,6 +125,7 @@ pub enum AnyNode {
 
 impl AnyNode {
     /// Returns the peer id of the node.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn peer_id(&self) -> PeerId {
         match self {
             Self::NodeRecord(record) => record.id,
@@ -135,6 +136,7 @@ impl AnyNode {
     }
 
     /// Returns the full node record if available.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn node_record(&self) -> Option<NodeRecord> {
         match self {
             Self::NodeRecord(record) => Some(*record),

@@ -5,7 +5,7 @@ comprising of the following key changes:
 1. A new transaction type, [`0x7E (Deposit)`][deposit-spec], which is used to deposit funds from L1 to L2.
 1. Modifications to the `PayloadAttributes` that allow the [sequencer][sequencer] to submit transactions to the EL through the Engine API. Payloads will be built with deposit transactions at the top of the block,
    with the first deposit transaction always being the "L1 Info Transaction."
-1. EIP-1559 denominator and elasticity parameters have been adjusted to account for the lower block time (2s) on L2. Otherwise, the 1559 formula remains the same.
+1. [EIP-1559](https://eips.ethereum.org/EIPS/eip-1559) denominator and elasticity parameters have been adjusted to account for the lower block time (2s) on L2. Otherwise, the 1559 formula remains the same.
 1. Network fees are distributed to the various [fee vaults][l2-el-spec].
 1. ... and some other minor changes.
 

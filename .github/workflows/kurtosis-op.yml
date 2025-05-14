@@ -64,8 +64,8 @@ jobs:
           kurtosis engine start
           kurtosis run --enclave op-devnet github.com/ethpandaops/optimism-package --args-file .github/assets/kurtosis_op_network_params.yaml
           ENCLAVE_ID=$(curl http://127.0.0.1:9779/api/enclaves | jq --raw-output 'keys[0]')
-          GETH_PORT=$(curl "http://127.0.0.1:9779/api/enclaves/$ENCLAVE_ID/services" | jq '."op-el-1-op-geth-op-node-op-kurtosis".public_ports.rpc.number')
-          RETH_PORT=$(curl "http://127.0.0.1:9779/api/enclaves/$ENCLAVE_ID/services" | jq '."op-el-2-op-reth-op-node-op-kurtosis".public_ports.rpc.number')
+          GETH_PORT=$(curl "http://127.0.0.1:9779/api/enclaves/$ENCLAVE_ID/services" | jq '."op-el-2151908-1-op-geth-op-node-op-kurtosis".public_ports.rpc.number')
+          RETH_PORT=$(curl "http://127.0.0.1:9779/api/enclaves/$ENCLAVE_ID/services" | jq '."op-el-2151908-2-op-reth-op-node-op-kurtosis".public_ports.rpc.number')
           echo "GETH_RPC=http://127.0.0.1:$GETH_PORT" >> $GITHUB_ENV
           echo "RETH_RPC=http://127.0.0.1:$RETH_PORT" >> $GITHUB_ENV
 
@@ -79,8 +79,8 @@ jobs:
             if [ $BLOCK_GETH -ge 100 ] && [ $BLOCK_RETH -ge 100 ] ; then exit 0; fi
             echo "Waiting for clients to advance..., Reth: $BLOCK_RETH Geth: $BLOCK_GETH"
           done
-          kurtosis service logs -a op-devnet op-el-2-op-reth-op-node-op-kurtosis
-          kurtosis service logs -a op-devnet op-cl-2-op-node-op-reth-op-kurtosis
+          kurtosis service logs -a op-devnet op-el-2151908-2-op-reth-op-node-op-kurtosis
+          kurtosis service logs -a op-devnet op-cl-2151908-2-op-node-op-reth-op-kurtosis
           exit 1
 
 
