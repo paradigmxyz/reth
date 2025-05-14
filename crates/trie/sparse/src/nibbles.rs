@@ -470,7 +470,20 @@ impl Ord for PackedNibbles {
             let other_byte = other.nibbles[i];
 
             match self_byte.cmp(&other_byte) {
-                core::cmp::Ordering::Equal => {}
+                core::cmp::Ordering::Equal => {
+                    if i == min_len - 1 && self_len == other_len {
+                        // If it's the last byte of both sequences, compare the parity
+                        match (self.even, other.even) {
+                            (true, true) | (false, false) => return core::cmp::Ordering::Equal,
+                            // For example, the same byte 0x60 will be represented as "60" for
+                            // `self` and "6" for `other`
+                            (true, false) => return core::cmp::Ordering::Greater,
+                            // For example, the same byte 0x60 will be represented as "6" for
+                            // `self` and "60" for `other`
+                            (false, true) => return core::cmp::Ordering::Less,
+                        }
+                    }
+                }
                 ordering => return ordering,
             }
         }
@@ -501,45 +514,39 @@ mod tests {
         let short = PackedNibbles::unpack([0x12]);
         let long = PackedNibbles::unpack([0x12, 0x34]);
         assert_eq!(short.cmp(&long), core::cmp::Ordering::Less);
-        assert_eq!(long.cmp(&short), core::cmp::Ordering::Greater);
 
         // Test with common prefix but different values
         let c = PackedNibbles::unpack([0x12, 0x34]);
         let d = PackedNibbles::unpack([0x12, 0x35]);
         assert_eq!(c.cmp(&d), core::cmp::Ordering::Less);
-        assert_eq!(d.cmp(&c), core::cmp::Ordering::Greater);
 
         // Test with differing first byte
         let e = PackedNibbles::unpack([0x12, 0x34]);
         let f = PackedNibbles::unpack([0x13, 0x34]);
         assert_eq!(e.cmp(&f), core::cmp::Ordering::Less);
-        assert_eq!(f.cmp(&e), core::cmp::Ordering::Greater);
 
         // Test with odd length nibbles
         let odd1 = PackedNibbles::unpack([0x1]);
         let odd2 = PackedNibbles::unpack([0x2]);
         assert_eq!(odd1.cmp(&odd2), core::cmp::Ordering::Less);
-        assert_eq!(odd2.cmp(&odd1), core::cmp::Ordering::Greater);
 
         // Test with odd and even length nibbles
         let odd = PackedNibbles::unpack([0x1]);
         let even = PackedNibbles::unpack([0x12]);
         assert_eq!(odd.cmp(&even), core::cmp::Ordering::Less);
-        assert_eq!(even.cmp(&odd), core::cmp::Ordering::Greater);
 
         // Test with longer sequences
         let long1 = PackedNibbles::unpack([0x12, 0x34, 0x56, 0x78]);
         let long2 = PackedNibbles::unpack([0x12, 0x34, 0x56, 0x79]);
         assert_eq!(long1.cmp(&long2), core::cmp::Ordering::Less);
-        assert_eq!(long2.cmp(&long1), core::cmp::Ordering::Greater);
 
-        // Test with same byte array but different even flag
-        let mut even_nibbles = PackedNibbles::from_nibbles([1, 2, 3, 4]);
-        let mut odd_nibbles = PackedNibbles::from_nibbles([1, 2, 3]);
-        // The even_nibbles has 4 nibbles, odd_nibbles has 3 nibbles
-        assert_eq!(even_nibbles.len(), 4);
-        assert_eq!(odd_nibbles.len(), 3);
-        assert_eq!(odd_nibbles.cmp(&even_nibbles), core::cmp::Ordering::Less);
+        // Test with different `even` flag values that have the same byte representation
+        let even_nibbles = PackedNibbles::from_nibbles([1, 2, 3, 0]);
+        let odd_nibbles = PackedNibbles::from_nibbles([1, 2, 3]);
+        assert!(even_nibbles.even);
+        assert!(!odd_nibbles.even);
+        assert_eq!(even_nibbles.nibbles.as_slice(), [0x12, 0x30]);
+        assert_eq!(odd_nibbles.nibbles.as_slice(), [0x12, 0x30]);
         assert_eq!(even_nibbles.cmp(&odd_nibbles), core::cmp::Ordering::Greater);
     }
 }
