@@ -15,7 +15,7 @@ pub use reth_engine_tree::{
     engine::EngineApiEvent,
 };
 use reth_ethereum_primitives::EthPrimitives;
-use reth_evm::{block::BlockExecutorFactory, ConfigureEvm, EvmFactory};
+use reth_evm::ConfigureEvm;
 use reth_network_p2p::BlockClient;
 use reth_node_types::{BlockTy, NodeTypes};
 use reth_payload_builder::PayloadBuilderHandle;
@@ -27,7 +27,6 @@ use reth_prune::PrunerWithFactory;
 use reth_stages_api::{MetricEventsSender, Pipeline};
 use reth_tasks::TaskSpawner;
 use std::{
-    hash::Hash,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -90,7 +89,6 @@ where
     where
         V: EngineValidator<N::Payload, Block = BlockTy<N>>,
         C: ConfigureEvm<Primitives = N::Primitives> + 'static,
-        <<<C as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::EvmFactory as EvmFactory>::Spec: Hash + Eq + Default
     {
         let engine_kind =
             if chain_spec.is_optimism() { EngineApiKind::OpStack } else { EngineApiKind::Ethereum };

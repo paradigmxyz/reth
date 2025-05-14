@@ -30,7 +30,7 @@ use reth_engine_primitives::{
     ExecutionPayload, ForkchoiceStateTracker, OnForkChoiceUpdated,
 };
 use reth_errors::{ConsensusError, ProviderResult};
-use reth_evm::{ConfigureEvm, Evm};
+use reth_evm::{ConfigureEvm, Evm, SpecFor};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes, PayloadTypes};
 use reth_primitives_traits::{
@@ -226,7 +226,6 @@ where
     N: NodePrimitives,
     T: PayloadTypes,
     C: ConfigureEvm<Primitives = N> + 'static,
-    <<<C as reth_evm::ConfigureEvm>::BlockExecutorFactory as alloy_evm::block::BlockExecutorFactory>::EvmFactory as alloy_evm::EvmFactory>::Spec: std::hash::Hash + Eq,
 {
     provider: P,
     consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
@@ -271,7 +270,7 @@ where
     /// The EVM configuration.
     evm_config: C,
     /// Precompile cache map.
-    precompile_cache_map: PrecompileCacheMap<<<<C as reth_evm::ConfigureEvm>::BlockExecutorFactory as alloy_evm::block::BlockExecutorFactory>::EvmFactory as alloy_evm::EvmFactory>::Spec>,
+    precompile_cache_map: PrecompileCacheMap<SpecFor<C>>,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
@@ -279,7 +278,6 @@ impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
 where
     N: NodePrimitives,
     C: Debug + ConfigureEvm<Primitives = N>,
-    <<<C as reth_evm::ConfigureEvm>::BlockExecutorFactory as alloy_evm::block::BlockExecutorFactory>::EvmFactory as alloy_evm::EvmFactory>::Spec: std::hash::Hash + Eq,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineApiTreeHandler")
@@ -319,7 +317,6 @@ where
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes,
     V: EngineValidator<T, Block = N::Block>,
-    <<<C as reth_evm::ConfigureEvm>::BlockExecutorFactory as alloy_evm::block::BlockExecutorFactory>::EvmFactory as alloy_evm::EvmFactory>::Spec: std::hash::Hash + Eq + Default,
 {
     /// Creates a new [`EngineApiTreeHandler`].
     #[expect(clippy::too_many_arguments)]
@@ -2294,12 +2291,11 @@ where
         let mut executor = self.evm_config.executor_for_block(&mut db, block);
 
         if self.config.precompile_cache_enabled() {
-            let spec_id = *self.evm_config.evm_env(block.header()).spec_id();
             executor.evm_mut().precompiles_mut().map_precompiles(|address, precompile| {
                 CachedPrecompile::wrap(
                     precompile,
                     self.precompile_cache_map.cache_for_address(*address),
-                    spec_id,
+                    *self.evm_config.evm_env(block.header()).spec_id(),
                 )
             });
         }
