@@ -61,23 +61,28 @@ impl PackedNibbles {
         }
 
         // If other is longer than self, it can't be a prefix
-        let other_len = other.len();
-        let self_len = self.len();
-
-        if other_len > self_len {
+        if other.len() > self.len() {
             return false;
         }
 
-        // TODO: this can be optimized
-
-        // Compare each nibble individually
-        for i in 0..other_len {
-            if self.get_nibble(i) != other.get_nibble(i) {
-                return false;
-            }
+        // Compare all bytes of other except the last one
+        let other_last = other.nibbles.len() - 1;
+        if other_last > 0 && self.nibbles[..other_last] != other.nibbles[..other_last] {
+            return false;
         }
 
-        true
+        // All bytes except the last one are equal, so we need to compare the last byte
+        // of other
+        let self_last = self.nibbles[other_last];
+        let other_last = other.nibbles[other_last];
+        if other.even {
+            // If other is even, we just need to compare the last byte to self
+            self_last == other_last
+        } else {
+            // If other is odd, and we're at its last byte, we need to compare only
+            // the first nibble of both bytes
+            self_last & 0xf0 == other_last & 0xf0
+        }
     }
 
     /// Returns the total number of nibbles in this [`PackedNibbles`].
@@ -547,5 +552,42 @@ mod tests {
         assert_eq!(even_nibbles.nibbles.as_slice(), [0x12, 0x30]);
         assert_eq!(odd_nibbles.nibbles.as_slice(), [0x12, 0x30]);
         assert_eq!(even_nibbles.cmp(&odd_nibbles), core::cmp::Ordering::Greater);
+    }
+
+    #[test]
+    fn test_packed_nibbles_starts_with() {
+        let a = PackedNibbles::from_nibbles([1, 2, 3, 4]);
+
+        // Test empty nibbles
+        let empty = PackedNibbles::default();
+        assert!(a.starts_with(&empty));
+        assert!(empty.starts_with(&empty));
+        assert!(!empty.starts_with(&a));
+
+        // Test with same nibbles
+        assert!(a.starts_with(&a));
+
+        // Test with prefix
+        let prefix = PackedNibbles::from_nibbles([1, 2]);
+        assert!(a.starts_with(&prefix));
+        assert!(!prefix.starts_with(&a));
+
+        // Test with different first nibble
+        let different = PackedNibbles::from_nibbles([2, 2, 3, 4]);
+        assert!(!a.starts_with(&different));
+
+        // Test with longer sequence
+        let longer = PackedNibbles::from_nibbles([1, 2, 3, 4, 5, 6]);
+        assert!(!a.starts_with(&longer));
+
+        // Test with even nibbles and odd prefix
+        let even_nibbles = PackedNibbles::from_nibbles([1, 2, 3, 4]);
+        let odd_prefix = PackedNibbles::from_nibbles([1, 2, 3]);
+        assert!(even_nibbles.starts_with(&odd_prefix));
+
+        // Test with odd nibbles and even prefix
+        let odd_nibbles = PackedNibbles::from_nibbles([1, 2, 3]);
+        let even_prefix = PackedNibbles::from_nibbles([1, 2]);
+        assert!(odd_nibbles.starts_with(&even_prefix));
     }
 }
