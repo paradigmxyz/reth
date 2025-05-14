@@ -1,15 +1,19 @@
 //! JSON-RPC service middleware.
-use futures_util::future::BoxFuture;
+use futures::{
+    future::Either,
+    stream::{FuturesOrdered, StreamExt},
+};
 use jsonrpsee::{
+    core::middleware::{Batch, BatchEntry},
     server::{
         middleware::rpc::{ResponseFuture, RpcServiceT},
         IdProvider,
     },
-    types::{error::reject_too_many_subscriptions, ErrorCode, ErrorObject, Request},
-    BoundedSubscriptions, ConnectionId, MethodCallback, MethodResponse, MethodSink, Methods,
-    SubscriptionState,
+    types::{error::reject_too_many_subscriptions, ErrorCode, ErrorObject, Id, Request},
+    BatchResponse, BatchResponseBuilder, BoundedSubscriptions, ConnectionId, MethodCallback,
+    MethodResponse, MethodSink, Methods, SubscriptionState,
 };
-use std::sync::Arc;
+use std::{future::Future, sync::Arc};
 
 /// JSON-RPC service middleware.
 #[derive(Clone, Debug)]
@@ -46,12 +50,12 @@ impl RpcService {
     }
 }
 
-impl<'a> RpcServiceT<'a> for RpcService {
-    // The rpc module is already boxing the futures and
-    // it's used to under the hood by the RpcService.
-    type Future = ResponseFuture<BoxFuture<'a, MethodResponse>>;
+impl RpcServiceT for RpcService {
+    type MethodResponse = MethodResponse;
+    type NotificationResponse = Option<MethodResponse>;
+    type BatchResponse = BatchResponse;
 
-    fn call(&self, req: Request<'a>) -> Self::Future {
+    fn call<'a>(&self, req: Request<'a>) -> impl Future<Output = Self::MethodResponse> + Send + 'a {
         let conn_id = self.conn_id;
         let max_response_body_size = self.max_response_body_size;
 
@@ -122,5 +126,45 @@ impl<'a> RpcServiceT<'a> for RpcService {
                 }
             },
         }
+    }
+
+    fn batch<'a>(&self, req: Batch<'a>) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
+        let entries: Vec<_> = req.into_iter().collect();
+
+        let mut got_notif = false;
+        let mut batch_response = BatchResponseBuilder::new_with_limit(self.max_response_body_size);
+
+        let mut pending_calls: FuturesOrdered<_> = entries
+            .into_iter()
+            .filter_map(|v| match v {
+                Ok(BatchEntry::Call(call)) => Some(Either::Right(self.call(call))),
+                Ok(BatchEntry::Notification(_n)) => {
+                    got_notif = true;
+                    None
+                }
+                Err(_err) => Some(Either::Left(async {
+                    MethodResponse::error(Id::Null, ErrorObject::from(ErrorCode::InvalidRequest))
+                })),
+            })
+            .collect();
+        async move {
+            while let Some(response) = pending_calls.next().await {
+                if let Err(too_large) = batch_response.append(response) {
+                    let mut error_batch = BatchResponseBuilder::new_with_limit(1);
+                    let _ = error_batch.append(too_large);
+                    return error_batch.finish();
+                }
+            }
+
+            batch_response.finish()
+        }
+    }
+
+    #[allow(clippy::manual_async_fn)]
+    fn notification<'a>(
+        &self,
+        _n: jsonrpsee::core::middleware::Notification<'a>,
+    ) -> impl Future<Output = Self::NotificationResponse> + Send + 'a {
+        async move { None }
     }
 }
