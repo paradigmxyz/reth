@@ -15,9 +15,8 @@ use reth_evm::{
     ConfigureEvm,
 };
 use reth_payload_primitives::{BuiltPayload, EngineApiMessageVersion, PayloadTypes};
-use reth_primitives_traits::{
-    block::Block as _, BlockBody as _, BlockTy, HeaderTy, SealedBlock, SignedTransaction,
-};
+use reth_primitives::transaction::SignedTransaction;
+use reth_primitives_traits::{block::Block as _, BlockBody as _, BlockTy, HeaderTy, SealedBlock};
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_storage_api::{errors::ProviderError, BlockReader, StateProviderFactory};
 use std::{
@@ -298,7 +297,7 @@ where
         }
 
         let tx_recovered =
-            tx.try_clone_into_recovered().map_err(|_| ProviderError::SenderRecoveryError)?;
+            tx.try_into_recovered().map_err(|_| ProviderError::SenderRecoveryError)?;
         let gas_used = match builder.execute_transaction(tx_recovered) {
             Ok(gas_used) => gas_used,
             Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {

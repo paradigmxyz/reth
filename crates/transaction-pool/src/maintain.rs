@@ -623,7 +623,7 @@ where
 
     let pool_transactions = txs_signed
         .into_iter()
-        .filter_map(|tx| tx.try_clone_into_recovered().ok())
+        .filter_map(|tx| tx.try_into_recovered().ok())
         .filter_map(|tx| {
             // Filter out errors
             <P::Transaction as PoolTransaction>::try_from_consensus(tx).ok()

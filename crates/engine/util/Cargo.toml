@@ -21,6 +21,7 @@ reth-evm.workspace = true
 reth-revm.workspace = true
 reth-storage-api.workspace = true
 reth-payload-primitives.workspace = true
+reth-primitives.workspace = true
 
 # alloy
 alloy-rpc-types-engine.workspace = true
