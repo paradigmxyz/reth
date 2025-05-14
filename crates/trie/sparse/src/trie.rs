@@ -1994,21 +1994,10 @@ impl Debug for RlpNodeBuffers {
 }
 
 impl RlpNodeBuffers {
-    /// Returns a new instance of `RlpNodeBuffers` with default values.
-    fn default() -> Self {
-        Self {
-            path_stack: Vec::new(),
-            rlp_node_stack: Vec::new(),
-            branch_children_paths: SmallVec::new(),
-            branch_children_values: SmallVec::new(),
-            rlp: Vec::new(),
-        }
-    }
-
     /// Clears the buffers and inserts the root path on the stack.
     ///
     /// This method reuses existing buffers, avoiding unnecessary allocations.
-    fn clear_with_root_path(&mut self) {
+    pub fn clear_with_root_path(&mut self) {
         self.path_stack.clear();
         self.path_stack.push(RlpNodePathStackItem {
             level: 0,
@@ -2022,8 +2011,7 @@ impl RlpNodeBuffers {
     }
 
     /// Returns `true` if the buffers are empty.
-    #[cfg(debug_assertions)]
-    fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.path_stack.is_empty() &&
             self.rlp_node_stack.is_empty() &&
             self.branch_children_paths.is_empty() &&
