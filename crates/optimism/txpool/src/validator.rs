@@ -230,6 +230,22 @@ where
         )
         .await
     }
+    
+    /// Validates all given transactions.
+    ///
+    /// Returns all outcomes for the given transactions in the same order.
+    ///
+    /// See also [`Self::validate_one`]
+    pub async fn validate_all_with_origin(
+        &self,
+        origin: TransactionOrigin,
+        transactions: Vec<Tx>,
+    ) -> Vec<TransactionValidationOutcome<Tx>> {
+        futures_util::future::join_all(
+            transactions.into_iter().map(|tx| self.validate_one(origin, tx)),
+        )
+        .await
+    }
 
     /// Performs the necessary opstack specific checks based on top of the regular eth outcome.
     fn apply_op_checks(
@@ -336,7 +352,7 @@ where
         origin: TransactionOrigin,
         transactions: Vec<Self::Transaction>,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        todo!()
+        self.validate_all_with_origin(origin, transactions).await
     }
 
     fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
