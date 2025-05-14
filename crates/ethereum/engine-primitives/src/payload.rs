@@ -44,7 +44,7 @@ pub struct EthBuiltPayload {
 impl EthBuiltPayload {
     /// Initializes the payload with the given initial block
     ///
-    /// Caution: This does not set any [`BlobTransactionSidecarVariant`].
+    /// Caution: This does not set any [`BlobSidecars`].
     pub const fn new(
         id: PayloadId,
         block: Arc<SealedBlock<Block>>,
@@ -229,7 +229,7 @@ pub enum BlobSidecars {
     Empty,
     /// EIP-4844 style sidecars.
     Eip4844(Vec<BlobTransactionSidecar>),
-    /// EIP-7549 style sidecars.
+    /// EIP-7594 style sidecars.
     Eip7594(Vec<BlobTransactionSidecarEip7594>),
 }
 
@@ -239,8 +239,8 @@ impl BlobSidecars {
         Self::Eip4844(sidecars)
     }
 
-    /// Create new EIP-7549 style sidecars.
-    pub const fn eip7549(sidecars: Vec<BlobTransactionSidecarEip7594>) -> Self {
+    /// Create new EIP-7594 style sidecars.
+    pub const fn eip7594(sidecars: Vec<BlobTransactionSidecarEip7594>) -> Self {
         Self::Eip7594(sidecars)
     }
 }
