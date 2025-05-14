@@ -485,7 +485,8 @@ where
         let id = match subscription_id {
             jsonrpsee_types::SubscriptionId::Num(n) => FilterId::Num(n),
             jsonrpsee_types::SubscriptionId::Str(s) => FilterId::Str(s.to_string()),
-        };        let mut filters = self.active_filters.inner.lock().await;
+        };
+        let mut filters = self.active_filters.inner.lock().await;
         filters.insert(
             id.clone(),
             ActiveFilter {
