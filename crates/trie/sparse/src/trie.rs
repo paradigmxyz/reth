@@ -4,7 +4,6 @@ use alloc::{
     boxed::Box,
     fmt,
     string::{String, ToString},
-    vec,
     vec::Vec,
 };
 use alloy_primitives::{
@@ -13,6 +12,7 @@ use alloy_primitives::{
     B256,
 };
 use alloy_rlp::Decodable;
+use core::fmt::Debug;
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
@@ -294,8 +294,6 @@ pub struct RevealedSparseTrie<P = DefaultBlindedProvider> {
     prefix_set: PrefixSetMut,
     /// Optional tracking of trie updates for later use.
     updates: Option<SparseTrieUpdates>,
-    /// Reusable buffer for RLP encoding of nodes.
-    rlp_buf: Vec<u8>,
     /// Reusable buffers for [`Self::rlp_node`].
     rlp_node_buffers: RlpNodeBuffers,
 }
@@ -309,7 +307,7 @@ impl<P> fmt::Debug for RevealedSparseTrie<P> {
             .field("values", &self.values)
             .field("prefix_set", &self.prefix_set)
             .field("updates", &self.updates)
-            .field("rlp_buf", &hex::encode(&self.rlp_buf))
+            .field("rlp_node_buffers", &self.rlp_node_buffers)
             .finish_non_exhaustive()
     }
 }
@@ -396,7 +394,6 @@ impl Default for RevealedSparseTrie {
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
             updates: None,
-            rlp_buf: Vec::new(),
             rlp_node_buffers: RlpNodeBuffers::default(),
         }
     }
@@ -424,7 +421,6 @@ impl RevealedSparseTrie {
             branch_node_hash_masks: HashMap::default(),
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
-            rlp_buf: Vec::new(),
             updates: None,
             rlp_node_buffers: RlpNodeBuffers::default(),
         }
@@ -457,7 +453,6 @@ impl<P> RevealedSparseTrie<P> {
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
             updates: None,
-            rlp_buf: Vec::new(),
             rlp_node_buffers: RlpNodeBuffers::default(),
         }
         .with_updates(retain_updates);
@@ -482,7 +477,6 @@ impl<P> RevealedSparseTrie<P> {
             values: self.values,
             prefix_set: self.prefix_set,
             updates: self.updates,
-            rlp_buf: self.rlp_buf,
             rlp_node_buffers: self.rlp_node_buffers,
         }
     }
@@ -1019,8 +1013,9 @@ impl<P> RevealedSparseTrie<P> {
                         (RlpNode::word_rlp(&hash), SparseNodeType::Leaf)
                     } else {
                         let value = self.values.get(&path).unwrap();
-                        self.rlp_buf.clear();
-                        let rlp_node = LeafNodeRef { key, value }.rlp(&mut self.rlp_buf);
+                        self.rlp_node_buffers.rlp.clear();
+                        let rlp_node =
+                            LeafNodeRef { key, value }.rlp(&mut self.rlp_node_buffers.rlp);
                         *hash = rlp_node.as_hash();
                         (rlp_node, SparseNodeType::Leaf)
                     }
@@ -1046,8 +1041,9 @@ impl<P> RevealedSparseTrie<P> {
                             rlp_node: child,
                             node_type: child_node_type,
                         } = self.rlp_node_buffers.rlp_node_stack.pop().unwrap();
-                        self.rlp_buf.clear();
-                        let rlp_node = ExtensionNodeRef::new(key, &child).rlp(&mut self.rlp_buf);
+                        self.rlp_node_buffers.rlp.clear();
+                        let rlp_node =
+                            ExtensionNodeRef::new(key, &child).rlp(&mut self.rlp_node_buffers.rlp);
                         *hash = rlp_node.as_hash();
 
                         let store_in_db_trie_value = child_node_type.store_in_db_trie();
@@ -1206,12 +1202,12 @@ impl<P> RevealedSparseTrie<P> {
                         "Branch node masks"
                     );
 
-                    self.rlp_buf.clear();
+                    self.rlp_node_buffers.rlp.clear();
                     let branch_node_ref = BranchNodeRef::new(
                         &self.rlp_node_buffers.branch_value_stack_buf,
                         *state_mask,
                     );
-                    let rlp_node = branch_node_ref.rlp(&mut self.rlp_buf);
+                    let rlp_node = branch_node_ref.rlp(&mut self.rlp_node_buffers.rlp);
                     *hash = rlp_node.as_hash();
 
                     // Save a branch node update only if it's not a root node, and we need to
@@ -1344,7 +1340,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
         if let Some(updates) = self.updates.as_mut() {
             updates.clear()
         }
-        self.rlp_buf.clear();
+        self.rlp_node_buffers.rlp.clear();
     }
 
     /// Attempts to find a leaf node at the specified path.
@@ -1983,7 +1979,7 @@ struct RemovedSparseNode {
 /// Collection of reusable buffers for [`RevealedSparseTrie::rlp_node`] calculations.
 ///
 /// These buffers reduce allocations when computing RLP representations during trie updates.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Default, Clone, PartialEq, Eq)]
 pub struct RlpNodeBuffers {
     /// Stack of RLP node paths
     path_stack: Vec<RlpNodePathStackItem>,
@@ -1993,9 +1989,34 @@ pub struct RlpNodeBuffers {
     branch_child_buf: SmallVec<[Nibbles; 16]>,
     /// Reusable branch value stack
     branch_value_stack_buf: SmallVec<[RlpNode; 16]>,
+    /// Reusable buffer for RLP encoding of nodes.
+    rlp: Vec<u8>,
+}
+
+impl Debug for RlpNodeBuffers {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RlpNodeBuffers")
+            .field("path_stack", &self.path_stack)
+            .field("rlp_node_stack", &self.rlp_node_stack)
+            .field("branch_child_buf", &self.branch_child_buf)
+            .field("branch_value_stack_buf", &self.branch_value_stack_buf)
+            .field("rlp", &hex::encode(&self.rlp))
+            .finish()
+    }
 }
 
 impl RlpNodeBuffers {
+    /// Returns a new instance of `RlpNodeBuffers` with default values.
+    fn default() -> Self {
+        Self {
+            path_stack: Vec::new(),
+            rlp_node_stack: Vec::new(),
+            branch_child_buf: SmallVec::new(),
+            branch_value_stack_buf: SmallVec::new(),
+            rlp: Vec::new(),
+        }
+    }
+
     /// Clears the buffers and inserts the root path on the stack.
     ///
     /// This method reuses existing buffers, avoiding unnecessary allocations.
@@ -2009,6 +2030,7 @@ impl RlpNodeBuffers {
         self.rlp_node_stack.clear();
         self.branch_child_buf.clear();
         self.branch_value_stack_buf.clear();
+        self.rlp.clear();
     }
 
     /// Returns `true` if the buffers are empty.
@@ -2017,7 +2039,8 @@ impl RlpNodeBuffers {
         self.path_stack.is_empty() &&
             self.rlp_node_stack.is_empty() &&
             self.branch_child_buf.is_empty() &&
-            self.branch_value_stack_buf.is_empty()
+            self.branch_value_stack_buf.is_empty() &&
+            self.rlp.is_empty()
     }
 }
 
@@ -2275,7 +2298,6 @@ mod find_leaf_tests {
             values: Default::default(),
             prefix_set: Default::default(),
             updates: None,
-            rlp_buf: Vec::new(),
             rlp_node_buffers: RlpNodeBuffers::default(),
         };
 
@@ -2319,7 +2341,6 @@ mod find_leaf_tests {
             values,
             prefix_set: Default::default(),
             updates: None,
-            rlp_buf: Vec::new(),
             rlp_node_buffers: RlpNodeBuffers::default(),
         };
 
