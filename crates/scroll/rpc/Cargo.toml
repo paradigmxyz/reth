@@ -29,6 +29,7 @@ reth-chainspec.workspace = true
 
 # scroll
 reth-scroll-chainspec.workspace = true
+reth-scroll-evm.workspace = true
 reth-scroll-primitives = { workspace = true, features = ["serde", "serde-bincode-compat", "reth-codec"] }
 scroll-alloy-consensus.workspace = true
 scroll-alloy-evm.workspace = true

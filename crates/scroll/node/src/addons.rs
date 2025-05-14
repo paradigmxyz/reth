@@ -1,5 +1,5 @@
 use crate::{ScrollEngineValidator, ScrollEngineValidatorBuilder, ScrollStorage};
-use reth_evm::{ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes};
+use reth_evm::{ConfigureEvm, EvmFactory, EvmFactoryFor};
 use reth_node_api::{AddOnsContext, NodeAddOns};
 use reth_node_builder::{
     rpc::{
@@ -12,6 +12,7 @@ use reth_node_types::NodeTypes;
 use reth_rpc_eth_types::error::FromEvmError;
 use reth_scroll_chainspec::ScrollChainSpec;
 use reth_scroll_engine_primitives::ScrollEngineTypes;
+use reth_scroll_evm::ScrollNextBlockEnvAttributes;
 use reth_scroll_primitives::ScrollPrimitives;
 use reth_scroll_rpc::{eth::ScrollEthApiBuilder, ScrollEthApi, ScrollEthApiError};
 use revm::context::TxEnv;
@@ -64,7 +65,7 @@ where
             Storage = ScrollStorage,
             Payload = ScrollEngineTypes,
         >,
-        Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
+        Evm: ConfigureEvm<NextBlockEnvCtx = ScrollNextBlockEnvAttributes>,
     >,
     ScrollEthApiError: FromEvmError<N::Evm>,
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = ScrollTransactionIntoTxEnv<TxEnv>>,
@@ -89,7 +90,7 @@ where
             Storage = ScrollStorage,
             Payload = ScrollEngineTypes,
         >,
-        Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
+        Evm: ConfigureEvm<NextBlockEnvCtx = ScrollNextBlockEnvAttributes>,
     >,
     ScrollEthApiError: FromEvmError<N::Evm>,
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = ScrollTransactionIntoTxEnv<TxEnv>>,

@@ -20,7 +20,7 @@ mod receipt;
 use crate::build::ScrollBlockAssembler;
 use std::sync::Arc;
 
-use alloy_primitives::{BlockNumber, BlockTimestamp};
+use alloy_primitives::{Address, BlockNumber, BlockTimestamp};
 use reth_primitives_traits::NodePrimitives;
 use reth_scroll_chainspec::ScrollChainSpec;
 use reth_scroll_primitives::ScrollPrimitives;
@@ -125,4 +125,17 @@ pub fn spec_id_at_timestamp_and_number(
     } else {
         ScrollSpecId::SHANGHAI
     }
+}
+
+/// The attributes for the next block env.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScrollNextBlockEnvAttributes {
+    /// The timestamp of the next block.
+    pub timestamp: u64,
+    /// The suggested fee recipient for the next block.
+    pub suggested_fee_recipient: Address,
+    /// Block gas limit.
+    pub gas_limit: u64,
+    /// The base fee of the next block.
+    pub base_fee: u64,
 }

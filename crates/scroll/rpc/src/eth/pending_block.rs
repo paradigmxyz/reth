@@ -3,9 +3,8 @@
 use crate::ScrollEthApi;
 
 use alloy_consensus::{BlockHeader, Header};
-use alloy_primitives::B256;
 use reth_chainspec::EthChainSpec;
-use reth_evm::{ConfigureEvm, NextBlockEnvAttributes};
+use reth_evm::ConfigureEvm;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderHeader, ProviderReceipt,
@@ -17,6 +16,7 @@ use reth_rpc_eth_api::{
     EthApiTypes, RpcNodeCore,
 };
 use reth_rpc_eth_types::{error::FromEvmError, PendingBlock};
+use reth_scroll_evm::ScrollNextBlockEnvAttributes;
 use reth_scroll_primitives::{ScrollBlock, ScrollReceipt, ScrollTransactionSigned};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use scroll_alloy_hardforks::ScrollHardforks;
@@ -46,7 +46,7 @@ where
                 Receipt = ProviderReceipt<Self::Provider>,
                 Block = ProviderBlock<Self::Provider>,
             >,
-            NextBlockEnvCtx = NextBlockEnvAttributes,
+            NextBlockEnvCtx = ScrollNextBlockEnvAttributes,
         >,
     >,
 {
@@ -63,13 +63,11 @@ where
         &self,
         parent: &SealedHeader<ProviderHeader<Self::Provider>>,
     ) -> Result<<Self::Evm as ConfigureEvm>::NextBlockEnvCtx, Self::Error> {
-        Ok(NextBlockEnvAttributes {
-            timestamp: parent.timestamp().saturating_add(12),
+        Ok(ScrollNextBlockEnvAttributes {
+            timestamp: parent.timestamp().saturating_add(3),
             suggested_fee_recipient: parent.beneficiary(),
-            prev_randao: B256::random(),
             gas_limit: parent.gas_limit(),
-            parent_beacon_block_root: None,
-            withdrawals: None,
+            base_fee: parent.base_fee_per_gas().unwrap_or_default(),
         })
     }
 }

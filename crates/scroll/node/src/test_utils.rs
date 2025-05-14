@@ -32,7 +32,7 @@ pub async fn setup(
         Arc::new(
             ScrollChainSpecBuilder::scroll_mainnet()
                 .genesis(genesis)
-                .darwin_v2_activated()
+                .euclid_v2_activated()
                 .build(Default::default()),
         ),
         is_dev,

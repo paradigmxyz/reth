@@ -1,8 +1,9 @@
-use crate::{build::ScrollBlockAssembler, ScrollEvmConfig};
+use crate::{build::ScrollBlockAssembler, ScrollEvmConfig, ScrollNextBlockEnvAttributes};
 use alloy_consensus::{BlockHeader, Header};
 use alloy_evm::{FromRecoveredTx, FromTxWithEncoded};
+use alloy_primitives::B256;
 use reth_chainspec::EthChainSpec;
-use reth_evm::{ConfigureEvm, EvmEnv, ExecutionCtxFor, NextBlockEnvAttributes};
+use reth_evm::{ConfigureEvm, EvmEnv, ExecutionCtxFor};
 use reth_primitives_traits::{
     BlockTy, NodePrimitives, SealedBlock, SealedHeader, SignedTransaction,
 };
@@ -37,7 +38,7 @@ where
 {
     type Primitives = N;
     type Error = Infallible;
-    type NextBlockEnvCtx = NextBlockEnvAttributes;
+    type NextBlockEnvCtx = ScrollNextBlockEnvAttributes;
     type BlockExecutorFactory = ScrollBlockExecutorFactory<R, Arc<ChainSpec>>;
     type BlockAssembler = ScrollBlockAssembler<ChainSpec>;
 
@@ -107,11 +108,9 @@ where
             beneficiary: coinbase,
             timestamp: attributes.timestamp,
             difficulty: U256::ZERO,
-            prevrandao: Some(attributes.prev_randao),
+            prevrandao: Some(B256::ZERO),
             gas_limit: attributes.gas_limit,
-            // calculate basefee based on parent block's gas usage
-            // TODO(scroll): update with correct block fee calculation for block building.
-            basefee: 100,
+            basefee: attributes.base_fee,
             blob_excess_gas_and_price: None,
         };
 
@@ -268,13 +267,11 @@ mod tests {
         };
 
         // curie block attributes
-        let attributes = NextBlockEnvAttributes {
+        let attributes = ScrollNextBlockEnvAttributes {
             timestamp: 1719994277,
             suggested_fee_recipient: Address::random(),
-            prev_randao: B256::random(),
             gas_limit: 10000000,
-            parent_beacon_block_root: None,
-            withdrawals: None,
+            base_fee: 155157341,
         };
 
         // get next cfg env and block env
@@ -290,10 +287,9 @@ mod tests {
             number: header.number + 1,
             beneficiary: config.chain_spec().config.fee_vault_address.unwrap(),
             timestamp: attributes.timestamp,
-            prevrandao: Some(attributes.prev_randao),
+            prevrandao: Some(B256::ZERO),
             difficulty: U256::ZERO,
-            // TODO(scroll): this shouldn't be 0 at curie fork
-            basefee: 100,
+            basefee: 155157341,
             gas_limit: header.gas_limit,
             blob_excess_gas_and_price: None,
         };

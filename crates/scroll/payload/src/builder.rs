@@ -1,6 +1,6 @@
 //! Scroll's payload builder implementation.
 
-use super::ScrollPayloadBuilderError;
+use super::{PayloadBuildingBaseFeeProvider, ScrollPayloadBuilderError};
 use alloy_consensus::{Transaction, Typed2718};
 use alloy_primitives::{B256, U256};
 use alloy_rlp::Encodable;
@@ -14,7 +14,7 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_evm::{
     block::{BlockExecutionError, BlockValidationError},
     execute::{BlockBuilder, BlockBuilderOutcome, ProviderError},
-    ConfigureEvm, Database, Evm, NextBlockEnvAttributes,
+    ConfigureEvm, Database, Evm,
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::PayloadId;
@@ -25,6 +25,7 @@ use reth_primitives_traits::{
 };
 use reth_revm::{cancelled::CancelOnDrop, database::StateProviderDatabase, db::State};
 use reth_scroll_engine_primitives::{ScrollBuiltPayload, ScrollPayloadBuilderAttributes};
+use reth_scroll_evm::ScrollNextBlockEnvAttributes;
 use reth_scroll_primitives::{ScrollPrimitives, ScrollTransactionSigned};
 use reth_storage_api::{StateProvider, StateProviderFactory};
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
@@ -91,14 +92,15 @@ impl<Pool, Client, Evm, T> ScrollPayloadBuilder<Pool, Client, Evm, T>
 where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ScrollTransactionSigned>>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + ScrollHardforks>,
-    Evm: ConfigureEvm<Primitives = ScrollPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
+    Evm:
+        ConfigureEvm<Primitives = ScrollPrimitives, NextBlockEnvCtx = ScrollNextBlockEnvAttributes>,
 {
-    /// Constructs an Scroll payload from the transactions sent via the
+    /// Constructs a Scroll payload from the transactions sent via the
     /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
     /// the payload attributes, the transaction pool will be ignored and the only transactions
     /// included in the payload will be those sent through the attributes.
     ///
-    /// Given build arguments including an Scroll client, transaction pool,
+    /// Given build arguments including a Scroll client, transaction pool,
     /// and configuration, this function creates a transaction payload. Returns
     /// a result indicating success with the payload or an error in case of failure.
     fn build_payload<'a, Txs>(
@@ -140,7 +142,8 @@ where
     Client:
         StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + ScrollHardforks> + Clone,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ScrollTransactionSigned>>,
-    Evm: ConfigureEvm<Primitives = ScrollPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
+    Evm:
+        ConfigureEvm<Primitives = ScrollPrimitives, NextBlockEnvCtx = ScrollNextBlockEnvAttributes>,
     Txs: ScrollPayloadTransactions<Pool::Transaction>,
 {
     type Attributes = ScrollPayloadBuilderAttributes;
@@ -209,8 +212,10 @@ impl<Txs> ScrollBuilder<'_, Txs> {
         ctx: ScrollPayloadBuilderCtx<EvmConfig, ChainSpec>,
     ) -> Result<BuildOutcomeKind<ScrollBuiltPayload>, PayloadBuilderError>
     where
-        EvmConfig:
-            ConfigureEvm<Primitives = ScrollPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
+        EvmConfig: ConfigureEvm<
+            Primitives = ScrollPrimitives,
+            NextBlockEnvCtx = ScrollNextBlockEnvAttributes,
+        >,
         ChainSpec: EthChainSpec + ScrollHardforks,
         Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = ScrollTransactionSigned>>,
     {
@@ -316,7 +321,8 @@ pub struct ScrollPayloadBuilderCtx<Evm: ConfigureEvm, ChainSpec> {
 
 impl<Evm, ChainSpec> ScrollPayloadBuilderCtx<Evm, ChainSpec>
 where
-    Evm: ConfigureEvm<Primitives = ScrollPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
+    Evm:
+        ConfigureEvm<Primitives = ScrollPrimitives, NextBlockEnvCtx = ScrollNextBlockEnvAttributes>,
     ChainSpec: EthChainSpec + ScrollHardforks,
 {
     /// Returns the parent block the payload will be build on.
@@ -353,17 +359,25 @@ where
         &'a self,
         db: &'a mut State<DB>,
     ) -> Result<impl BlockBuilder<Primitives = Evm::Primitives> + 'a, PayloadBuilderError> {
+        // get the base fee for the attributes.
+        let base_fee: u64 = if self.chain_spec.is_curie_active_at_block(self.parent().number + 1) {
+            db.payload_building_base_fee()
+                .map_err(|err| PayloadBuilderError::Other(Box::new(err)))?
+                .try_into()
+                .expect("base fee limited to 10_000_000_000")
+        } else {
+            0
+        };
+
         self.evm_config
             .builder_for_next_block(
                 db,
                 self.parent(),
-                NextBlockEnvAttributes {
+                ScrollNextBlockEnvAttributes {
                     timestamp: self.attributes().timestamp(),
                     suggested_fee_recipient: self.attributes().suggested_fee_recipient(),
-                    prev_randao: self.attributes().prev_randao(),
                     gas_limit: SCROLL_GAS_LIMIT_10M,
-                    parent_beacon_block_root: self.attributes().parent_beacon_block_root(),
-                    withdrawals: None,
+                    base_fee,
                 },
             )
             .map_err(PayloadBuilderError::other)
@@ -372,7 +386,8 @@ where
 
 impl<Evm, ChainSpec> ScrollPayloadBuilderCtx<Evm, ChainSpec>
 where
-    Evm: ConfigureEvm<Primitives = ScrollPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
+    Evm:
+        ConfigureEvm<Primitives = ScrollPrimitives, NextBlockEnvCtx = ScrollNextBlockEnvAttributes>,
     ChainSpec: EthChainSpec + ScrollHardforks,
 {
     /// Executes all sequencer transactions that are included in the payload attributes.

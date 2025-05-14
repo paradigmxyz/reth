@@ -154,6 +154,20 @@ impl ScrollChainSpecBuilder {
         self
     }
 
+    /// Enable `Euclid` at genesis
+    pub fn euclid_activated(mut self) -> Self {
+        self = self.darwin_v2_activated();
+        self.inner = self.inner.with_fork(ScrollHardfork::Euclid, ForkCondition::Timestamp(0));
+        self
+    }
+
+    /// Enable `EuclidV2` at genesis
+    pub fn euclid_v2_activated(mut self) -> Self {
+        self = self.euclid_activated();
+        self.inner = self.inner.with_fork(ScrollHardfork::EuclidV2, ForkCondition::Timestamp(0));
+        self
+    }
+
     /// Build the resulting [`ScrollChainSpec`].
     ///
     /// # Panics

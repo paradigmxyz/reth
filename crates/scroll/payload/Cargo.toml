@@ -12,16 +12,18 @@ exclude.workspace = true
 workspace = true
 
 [dependencies]
-#  alloy
+# alloy
 alloy-rlp.workspace = true
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 
 # scroll-alloy
+reth-scroll-evm.workspace = true
 scroll-alloy-hardforks.workspace = true
+scroll-alloy-evm.workspace = true
 scroll-alloy-consensus.workspace = true
 
-#  revm
+# revm
 revm.workspace = true
 
 # reth
@@ -70,6 +72,7 @@ std = [
     "reth-scroll-forks/std",
     "scroll-alloy-consensus/std",
     "scroll-alloy-hardforks/std",
+    "scroll-alloy-evm/std",
 ]
 test-utils = [
     "dep:futures-util",

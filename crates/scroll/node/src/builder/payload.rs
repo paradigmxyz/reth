@@ -1,9 +1,10 @@
-use reth_evm::{ConfigureEvm, NextBlockEnvAttributes};
+use reth_evm::ConfigureEvm;
 use reth_node_api::PrimitivesTy;
 use reth_node_builder::{components::PayloadBuilderBuilder, BuilderContext, FullNodeTypes};
 use reth_node_types::{NodeTypes, TxTy};
 use reth_scroll_chainspec::ScrollChainSpec;
 use reth_scroll_engine_primitives::ScrollEngineTypes;
+use reth_scroll_evm::ScrollNextBlockEnvAttributes;
 use reth_scroll_payload::ScrollPayloadTransactions;
 use reth_scroll_primitives::{ScrollPrimitives, ScrollTransactionSigned};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
@@ -60,7 +61,7 @@ where
     >,
     Evm: ConfigureEvm<
             Primitives = PrimitivesTy<Node::Types>,
-            NextBlockEnvCtx = NextBlockEnvAttributes,
+            NextBlockEnvCtx = ScrollNextBlockEnvAttributes,
         > + 'static,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ScrollTransactionSigned>>
         + Unpin
