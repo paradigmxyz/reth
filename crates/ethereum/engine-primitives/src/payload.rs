@@ -136,7 +136,7 @@ impl EthBuiltPayload {
 
     /// Try converting built payload into [`ExecutionPayloadEnvelopeV5`].
     pub fn try_into_v5(self) -> Result<ExecutionPayloadEnvelopeV5, String> {
-        let EthBuiltPayload { block, fees, sidecars, requests, .. } = self;
+        let Self { block, fees, sidecars, requests, .. } = self;
 
         let blobs_bundle = BlobsBundleV2::from(
             sidecars
