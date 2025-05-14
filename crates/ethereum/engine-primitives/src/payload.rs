@@ -1,7 +1,10 @@
 //! Contains types required for building a payload.
 
-use alloc::{borrow::ToOwned, string::String, sync::Arc, vec::Vec};
-use alloy_eips::{eip4895::Withdrawals, eip7594::BlobTransactionSidecarVariant, eip7685::Requests};
+use alloc::{sync::Arc, vec::Vec};
+use alloy_eips::{
+    eip4844::BlobTransactionSidecar, eip4895::Withdrawals, eip7594::BlobTransactionSidecarEip7594,
+    eip7685::Requests,
+};
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{
@@ -13,6 +16,8 @@ use core::convert::Infallible;
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives_traits::SealedBlock;
+
+use crate::BuiltPayloadConversionError;
 
 /// Contains the built payload.
 ///
@@ -29,7 +34,7 @@ pub struct EthBuiltPayload {
     pub(crate) fees: U256,
     /// The blobs, proofs, and commitments in the block. If the block is pre-cancun, this will be
     /// empty.
-    pub(crate) sidecars: Vec<BlobTransactionSidecarVariant>,
+    pub(crate) sidecars: BlobSidecars,
     /// The requests of the payload
     pub(crate) requests: Option<Requests>,
 }
@@ -46,7 +51,7 @@ impl EthBuiltPayload {
         fees: U256,
         requests: Option<Requests>,
     ) -> Self {
-        Self { id, block, fees, sidecars: Vec::new(), requests }
+        Self { id, block, fees, requests, sidecars: BlobSidecars::Empty }
     }
 
     /// Returns the identifier of the payload.
@@ -65,45 +70,29 @@ impl EthBuiltPayload {
     }
 
     /// Returns the blob sidecars.
-    pub fn sidecars(&self) -> &[BlobTransactionSidecarVariant] {
+    pub fn sidecars(&self) -> &BlobSidecars {
         &self.sidecars
     }
 
-    /// Adds sidecars to the payload.
-    pub fn extend_sidecars(
-        &mut self,
-        sidecars: impl IntoIterator<Item = BlobTransactionSidecarVariant>,
-    ) {
-        self.sidecars.extend(sidecars)
-    }
-
     /// Same as [`Self::extend_sidecars`] but returns the type again.
-    pub fn with_sidecars(
-        mut self,
-        sidecars: impl IntoIterator<Item = BlobTransactionSidecarVariant>,
-    ) -> Self {
-        self.extend_sidecars(sidecars);
+    pub fn with_sidecars(mut self, sidecars: impl Into<BlobSidecars>) -> Self {
+        self.sidecars = sidecars.into();
         self
     }
 
     /// Try converting built payload into [`ExecutionPayloadEnvelopeV3`].
     ///
     /// Returns an error if the payload contains non EIP-4844 sidecar.
-    pub fn try_into_v3(self) -> Result<ExecutionPayloadEnvelopeV3, String> {
+    pub fn try_into_v3(self) -> Result<ExecutionPayloadEnvelopeV3, BuiltPayloadConversionError> {
         let Self { block, fees, sidecars, .. } = self;
 
-        let blobs_bundle = BlobsBundleV1::from(
-            sidecars
-                .into_iter()
-                .map(|sidecar| {
-                    if let BlobTransactionSidecarVariant::Eip4844(sidecar) = sidecar {
-                        Ok(sidecar)
-                    } else {
-                        Err("unexpected sidecar type in v1 bundle".to_owned())
-                    }
-                })
-                .collect::<Result<Vec<_>, _>>()?,
-        );
+        let blobs_bundle = match sidecars {
+            BlobSidecars::Empty => BlobsBundleV1::empty(),
+            BlobSidecars::Eip4844(sidecars) => BlobsBundleV1::from(sidecars),
+            BlobSidecars::Eip7594(_) => {
+                return Err(BuiltPayloadConversionError::UnexpectedEip7594Sidecars)
+            }
+        };
 
         Ok(ExecutionPayloadEnvelopeV3 {
             execution_payload: ExecutionPayloadV3::from_block_unchecked(
@@ -127,7 +116,7 @@ impl EthBuiltPayload {
     /// Try converting built payload into [`ExecutionPayloadEnvelopeV4`].
     ///
     /// Returns an error if the payload contains non EIP-4844 sidecar.
-    pub fn try_into_v4(self) -> Result<ExecutionPayloadEnvelopeV4, String> {
+    pub fn try_into_v4(self) -> Result<ExecutionPayloadEnvelopeV4, BuiltPayloadConversionError> {
         Ok(ExecutionPayloadEnvelopeV4 {
             execution_requests: self.requests.clone().unwrap_or_default(),
             envelope_inner: self.try_into()?,
@@ -135,21 +124,16 @@ impl EthBuiltPayload {
     }
 
     /// Try converting built payload into [`ExecutionPayloadEnvelopeV5`].
-    pub fn try_into_v5(self) -> Result<ExecutionPayloadEnvelopeV5, String> {
+    pub fn try_into_v5(self) -> Result<ExecutionPayloadEnvelopeV5, BuiltPayloadConversionError> {
         let Self { block, fees, sidecars, requests, .. } = self;
 
-        let blobs_bundle = BlobsBundleV2::from(
-            sidecars
-                .into_iter()
-                .map(|sidecar| {
-                    if let BlobTransactionSidecarVariant::Eip7594(sidecar) = sidecar {
-                        Ok(sidecar)
-                    } else {
-                        Err("unexpected sidecar type in v2 bundle".to_owned())
-                    }
-                })
-                .collect::<Result<Vec<_>, _>>()?,
-        );
+        let blobs_bundle = match sidecars {
+            BlobSidecars::Empty => BlobsBundleV2::empty(),
+            BlobSidecars::Eip7594(sidecars) => BlobsBundleV2::from(sidecars),
+            BlobSidecars::Eip4844(_) => {
+                return Err(BuiltPayloadConversionError::UnexpectedEip4844Sidecars)
+            }
+        };
 
         Ok(ExecutionPayloadEnvelopeV5 {
             execution_payload: ExecutionPayloadV3::from_block_unchecked(
@@ -214,7 +198,7 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV2 {
 }
 
 impl TryFrom<EthBuiltPayload> for ExecutionPayloadEnvelopeV3 {
-    type Error = String;
+    type Error = BuiltPayloadConversionError;
 
     fn try_from(value: EthBuiltPayload) -> Result<Self, Self::Error> {
         value.try_into_v3()
@@ -222,7 +206,7 @@ impl TryFrom<EthBuiltPayload> for ExecutionPayloadEnvelopeV3 {
 }
 
 impl TryFrom<EthBuiltPayload> for ExecutionPayloadEnvelopeV4 {
-    type Error = String;
+    type Error = BuiltPayloadConversionError;
 
     fn try_from(value: EthBuiltPayload) -> Result<Self, Self::Error> {
         value.try_into_v4()
@@ -230,10 +214,46 @@ impl TryFrom<EthBuiltPayload> for ExecutionPayloadEnvelopeV4 {
 }
 
 impl TryFrom<EthBuiltPayload> for ExecutionPayloadEnvelopeV5 {
-    type Error = String;
+    type Error = BuiltPayloadConversionError;
 
     fn try_from(value: EthBuiltPayload) -> Result<Self, Self::Error> {
         value.try_into_v5()
+    }
+}
+
+/// An enum representing blob transaction sidecars belonging to [`EthBuiltPayload`].
+#[derive(Clone, Default, Debug)]
+pub enum BlobSidecars {
+    /// No sidecars (default).
+    #[default]
+    Empty,
+    /// EIP-4844 style sidecars.
+    Eip4844(Vec<BlobTransactionSidecar>),
+    /// EIP-7549 style sidecars.
+    Eip7594(Vec<BlobTransactionSidecarEip7594>),
+}
+
+impl BlobSidecars {
+    /// Create new EIP-4844 style sidecars.
+    pub fn eip4844(sidecars: Vec<BlobTransactionSidecar>) -> Self {
+        Self::Eip4844(sidecars)
+    }
+
+    /// Create new EIP-7549 style sidecars.
+    pub fn eip7549(sidecars: Vec<BlobTransactionSidecarEip7594>) -> Self {
+        Self::Eip7594(sidecars)
+    }
+}
+
+impl From<Vec<BlobTransactionSidecar>> for BlobSidecars {
+    fn from(value: Vec<BlobTransactionSidecar>) -> Self {
+        Self::eip4844(value)
+    }
+}
+
+impl From<Vec<BlobTransactionSidecarEip7594>> for BlobSidecars {
+    fn from(value: Vec<BlobTransactionSidecarEip7594>) -> Self {
+        Self::eip7549(value)
     }
 }
 

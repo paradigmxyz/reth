@@ -14,6 +14,9 @@ extern crate alloc;
 mod payload;
 pub use payload::{EthBuiltPayload, EthPayloadBuilderAttributes};
 
+mod error;
+pub use error::*;
+
 use alloy_rpc_types_engine::{ExecutionData, ExecutionPayload, ExecutionPayloadEnvelopeV5};
 pub use alloy_rpc_types_engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
