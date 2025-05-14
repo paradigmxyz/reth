@@ -6,11 +6,15 @@ use core::{
 use arrayvec::ArrayVec;
 use reth_trie_common::Nibbles;
 
+/// The capacity of the underlying byte array. This limits the maximum size of [`PackedNibbles`] to
+/// 64 nibbles, or 256 bits.
+const CAPACITY_BYTES: usize = 32;
+
 /// A representation for nibbles, that uses an even/odd flag.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct PackedNibbles {
     /// The nibbles themselves, stored as a byte array.
-    pub nibbles: ArrayVec<u8, 32>,
+    pub nibbles: ArrayVec<u8, CAPACITY_BYTES>,
     /// The even/odd flag, indicating whether the length is even or odd.
     pub even: bool,
 }
@@ -260,7 +264,9 @@ impl PackedNibbles {
         if self.nibbles.is_empty() || self.even {
             // If we're empty or even, we can just extend the nibbles with `other` and update the
             // even flag
-            self.nibbles.try_extend_from_slice(&other.nibbles).expect("nibbles length is 32");
+            self.nibbles
+                .try_extend_from_slice(&other.nibbles)
+                .expect("nibbles length is {CAPACITY_BYTES}");
             self.even = other.even;
             return;
         }
@@ -274,6 +280,8 @@ impl PackedNibbles {
         } else {
             prev_len + other.nibbles.len() - 1
         };
+        assert!(new_len <= CAPACITY_BYTES);
+        // SAFETY: we're checking that new length will not exceed the capacity
         unsafe { self.nibbles.set_len(new_len) };
 
         // Merge the boundary.
