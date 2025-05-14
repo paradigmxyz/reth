@@ -6,7 +6,9 @@ use reth_chainspec::{Chain, ChainKind, NamedChain};
 use reth_network::{protocol::IntoRlpxSubProtocol, NetworkPrimitives};
 use reth_transaction_pool::PoolConfig;
 use std::{borrow::Cow, time::Duration};
-const HOODI_SEPOLIA_BLOCK_GAS_LIMIT: u64 = 60_000_000;
+
+/// 60M gas limit
+const ETHEREUM_BLOCK_GAS_LIMIT_60M: u64 = 60_000_000;
 
 /// A trait that provides payload builder settings.
 ///
@@ -33,7 +35,7 @@ pub trait PayloadBuilderConfig {
     /// Maximum number of tasks to spawn for building a payload.
     fn max_payload_tasks(&self) -> usize;
 
-    /// Returns the configured gas limit if set, or a chain-specific default
+    /// Returns the configured gas limit if set, or a chain-specific default.
     fn gas_limit_for(&self, chain: Chain) -> u64 {
         if let Some(limit) = self.gas_limit() {
             return limit;
@@ -41,7 +43,7 @@ pub trait PayloadBuilderConfig {
 
         match chain.kind() {
             ChainKind::Named(NamedChain::Sepolia | NamedChain::Hoodi) => {
-                HOODI_SEPOLIA_BLOCK_GAS_LIMIT
+                ETHEREUM_BLOCK_GAS_LIMIT_60M
             }
             _ => ETHEREUM_BLOCK_GAS_LIMIT_36M,
         }
