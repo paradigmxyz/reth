@@ -13,6 +13,9 @@ mod base_fee;
 pub mod builder;
 pub use builder::{ScrollPayloadBuilder, ScrollPayloadTransactions};
 
+pub mod config;
+pub use config::ScrollBuilderConfig;
+
 mod error;
 pub use error::ScrollPayloadBuilderError;
 

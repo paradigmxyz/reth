@@ -1,6 +1,8 @@
 //! Scroll's payload builder implementation.
 
 use super::{PayloadBuildingBaseFeeProvider, ScrollPayloadBuilderError};
+use crate::config::ScrollBuilderConfig;
+
 use alloy_consensus::{Transaction, Typed2718};
 use alloy_primitives::{B256, U256};
 use alloy_rlp::Encodable;
@@ -67,12 +69,19 @@ pub struct ScrollPayloadBuilder<Pool, Client, Evm, Txs = ()> {
     pub client: Client,
     /// The type responsible for yielding the best transactions to include in a payload.
     pub best_transactions: Txs,
+    /// Payload builder configuration.
+    pub builder_config: ScrollBuilderConfig,
 }
 
 impl<Pool, Evm, Client> ScrollPayloadBuilder<Pool, Client, Evm> {
     /// Creates a new [`ScrollPayloadBuilder`].
-    pub const fn new(pool: Pool, evm_config: Evm, client: Client) -> Self {
-        Self { evm_config, pool, client, best_transactions: () }
+    pub const fn new(
+        pool: Pool,
+        evm_config: Evm,
+        client: Client,
+        builder_config: ScrollBuilderConfig,
+    ) -> Self {
+        Self { evm_config, pool, client, best_transactions: (), builder_config }
     }
 }
 
@@ -83,8 +92,8 @@ impl<Pool, Client, Evm, Txs> ScrollPayloadBuilder<Pool, Client, Evm, Txs> {
         self,
         best_transactions: T,
     ) -> ScrollPayloadBuilder<Pool, Client, Evm, T> {
-        let Self { evm_config, pool, client, .. } = self;
-        ScrollPayloadBuilder { evm_config, pool, client, best_transactions }
+        let Self { evm_config, pool, client, builder_config, .. } = self;
+        ScrollPayloadBuilder { evm_config, pool, client, best_transactions, builder_config }
     }
 }
 
