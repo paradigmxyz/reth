@@ -7,7 +7,7 @@ pub mod signed;
 pub mod error;
 pub mod recover;
 
-pub use alloy_consensus::transaction::{TransactionInfo, TransactionMeta};
+pub use alloy_consensus::transaction::{SignerRecoverable, TransactionInfo, TransactionMeta};
 
 use crate::{InMemorySize, MaybeCompact, MaybeSerde};
 use core::{fmt, hash::Hash};
