@@ -459,17 +459,17 @@ impl PartialOrd for PackedNibbles {
 // TODO: this can be optimized
 impl Ord for PackedNibbles {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        // Get the lengths of both nibble sequences
-        let self_len = self.len();
-        let other_len = other.len();
+        // Get the lengths of both byte sequences
+        let self_len = self.nibbles.len();
+        let other_len = other.nibbles.len();
 
-        // Compare nibbles one by one until a difference is found
+        // Compare bytes one by one until a difference is found
         let min_len = core::cmp::min(self_len, other_len);
         for i in 0..min_len {
-            let self_nibble = self.get_nibble(i);
-            let other_nibble = other.get_nibble(i);
+            let self_byte = self.nibbles[i];
+            let other_byte = other.nibbles[i];
 
-            match self_nibble.cmp(&other_nibble) {
+            match self_byte.cmp(&other_byte) {
                 core::cmp::Ordering::Equal => {}
                 ordering => return ordering,
             }
@@ -532,5 +532,14 @@ mod tests {
         let long2 = PackedNibbles::unpack([0x12, 0x34, 0x56, 0x79]);
         assert_eq!(long1.cmp(&long2), core::cmp::Ordering::Less);
         assert_eq!(long2.cmp(&long1), core::cmp::Ordering::Greater);
+
+        // Test with same byte array but different even flag
+        let mut even_nibbles = PackedNibbles::from_nibbles([1, 2, 3, 4]);
+        let mut odd_nibbles = PackedNibbles::from_nibbles([1, 2, 3]);
+        // The even_nibbles has 4 nibbles, odd_nibbles has 3 nibbles
+        assert_eq!(even_nibbles.len(), 4);
+        assert_eq!(odd_nibbles.len(), 3);
+        assert_eq!(odd_nibbles.cmp(&even_nibbles), core::cmp::Ordering::Less);
+        assert_eq!(even_nibbles.cmp(&odd_nibbles), core::cmp::Ordering::Greater);
     }
 }
