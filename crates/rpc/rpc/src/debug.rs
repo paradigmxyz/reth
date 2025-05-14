@@ -940,7 +940,7 @@ where
 
     /// Handler for `debug_getBadBlocks`
     async fn bad_blocks(&self) -> RpcResult<Vec<RpcBlock>> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(vec![])
     }
 
     /// Handler for `debug_traceChain`
