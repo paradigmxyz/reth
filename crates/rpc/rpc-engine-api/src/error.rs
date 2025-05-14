@@ -172,23 +172,7 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             ),
             // Error responses from the consensus engine
             EngineApiError::ForkChoiceUpdate(ref err) => match err {
-                BeaconForkChoiceUpdateError::ForkchoiceUpdateError(err) => match err {
-                    ForkchoiceUpdateError::UpdatedInvalidPayloadAttributes => {
-                        jsonrpsee_types::error::ErrorObject::owned(
-                            -38003,
-                            "Invalid payload attributes",
-                            None::<()>,
-                        )
-                    }
-                    ForkchoiceUpdateError::InvalidState |
-                    ForkchoiceUpdateError::UnknownFinalBlock => {
-                        jsonrpsee_types::error::ErrorObject::owned(
-                            -38002,
-                            "Invalid forkchoice state",
-                            None::<()>,
-                        )
-                    }
-                },
+                BeaconForkChoiceUpdateError::ForkchoiceUpdateError(err) => (*err).into(),
                 BeaconForkChoiceUpdateError::EngineUnavailable |
                 BeaconForkChoiceUpdateError::Internal(_) => {
                     jsonrpsee_types::error::ErrorObject::owned(

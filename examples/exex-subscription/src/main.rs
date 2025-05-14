@@ -7,9 +7,8 @@ use alloy_primitives::{Address, U256};
 use clap::Parser;
 use futures::TryStreamExt;
 use jsonrpsee::{
-    core::{SubscriptionResult, __reexports::serde_json},
-    proc_macros::rpc,
-    tracing, PendingSubscriptionSink, SubscriptionMessage,
+    core::SubscriptionResult, proc_macros::rpc, tracing, PendingSubscriptionSink,
+    SubscriptionMessage,
 };
 use reth_ethereum::{
     exex::{ExExContext, ExExEvent, ExExNotification},
