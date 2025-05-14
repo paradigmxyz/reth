@@ -1110,7 +1110,10 @@ impl<P> RevealedSparseTrie<P> {
 
                     let mut tree_mask = TrieMask::default();
                     let mut hash_mask = TrieMask::default();
-                    let mut hashes = Vec::new();
+                    // TODO: this allocation may be wasted if `&e.path == child_path` below fails.
+                    // We need to first check if all children hashes are ready to be calculated, and
+                    // only then allocate.
+                    let mut hashes = Vec::with_capacity(self.buffers.branch_children_paths.len());
                     for (i, child_path) in self.buffers.branch_children_paths.iter().enumerate() {
                         if self.buffers.rlp_node_stack.last().is_some_and(|e| &e.path == child_path)
                         {
