@@ -5,6 +5,9 @@
 use alloy_consensus::{TxEnvelope, TxType, TypedTransaction};
 pub use alloy_network::*;
 use alloy_primitives::{Address, Bytes, ChainId, TxKind, U256};
+use alloy_provider::fillers::{
+    ChainIdFiller, GasFiller, JoinFill, NonceFiller, RecommendedFillers,
+};
 use alloy_rpc_types_eth::AccessList;
 use scroll_alloy_consensus::{self, ScrollTxEnvelope, ScrollTxType, ScrollTypedTransaction};
 use scroll_alloy_rpc_types::ScrollTransactionRequest;
@@ -226,5 +229,13 @@ impl NetworkWallet<Scroll> for EthereumWallet {
             TxEnvelope::Legacy(tx) => ScrollTxEnvelope::Legacy(tx),
             _ => unreachable!(),
         })
+    }
+}
+
+impl RecommendedFillers for Scroll {
+    type RecommendedFillers = JoinFill<GasFiller, JoinFill<NonceFiller, ChainIdFiller>>;
+
+    fn recommended_fillers() -> Self::RecommendedFillers {
+        Default::default()
     }
 }

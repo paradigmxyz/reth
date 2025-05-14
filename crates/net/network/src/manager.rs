@@ -21,7 +21,7 @@ use crate::{
     discovery::Discovery,
     error::{NetworkError, ServiceKind},
     eth_requests::IncomingEthRequest,
-    import::{BlockImport, BlockImportEvent, BlockImportOutcome, BlockValidation, NewBlockEvent},
+    import::{BlockImportEvent, BlockImportOutcome, BlockValidation},
     listener::ConnectionListener,
     message::{NewBlockMessage, PeerMessage},
     metrics::{DisconnectMetrics, NetworkMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
@@ -41,6 +41,7 @@ use reth_eth_wire::{DisconnectReason, EthNetworkPrimitives, NetworkPrimitives};
 use reth_fs_util::{self as fs, FsPathError};
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
 use reth_network_api::{
+    block::NewBlockWithPeer,
     events::{PeerEvent, SessionInfo},
     test_utils::PeersHandle,
     EthProtocolInfo, NetworkEvent, NetworkStatus, PeerInfo, PeerRequest,
@@ -108,7 +109,7 @@ pub struct NetworkManager<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Receiver half of the command channel set up between this type and the [`NetworkHandle`]
     from_handle_rx: UnboundedReceiverStream<NetworkHandleMessage<N>>,
     /// Handles block imports according to the `eth` protocol.
-    block_import: Box<dyn BlockImport<N::Block>>,
+    block_import: EventSender<NewBlockWithPeer<N::Block>>,
     /// Sender for high level network events.
     event_sender: EventSender<NetworkEvent<PeerRequest<N>>>,
     /// Sender half to send events to the
@@ -236,7 +237,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             peers_config,
             sessions_config,
             chain_id,
-            block_import,
+            block_import: _,
             network_mode,
             boot_nodes,
             executor,
@@ -338,7 +339,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             swarm,
             handle,
             from_handle_rx: UnboundedReceiverStream::new(from_handle_rx),
-            block_import,
+            block_import: EventSender::new(1000),
             event_sender,
             to_transactions_manager: None,
             to_eth_request_handler: None,
@@ -521,6 +522,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
         }
     }
 
+    #[allow(dead_code)]
     /// Invoked after a `NewBlock` message from the peer was validated
     fn on_block_import_result(&mut self, event: BlockImportEvent<N::Block>) {
         match event {
@@ -587,14 +589,15 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     // update peer's state, to track what blocks this peer has seen
                     this.swarm.state_mut().on_new_block_hashes(peer_id, hashes.0.clone());
                     // start block import process for the hashes
-                    this.block_import.on_new_block(peer_id, NewBlockEvent::Hashes(hashes));
+                    // this.block_import.on_new_block(peer_id, NewBlockEvent::Hashes(hashes));
                 })
             }
             PeerMessage::NewBlock(block) => {
                 self.within_pow_or_disconnect(peer_id, move |this| {
                     this.swarm.state_mut().on_new_block(peer_id, block.hash);
+                    let block = Arc::unwrap_or_clone(block.block);
                     // start block import process
-                    this.block_import.on_new_block(peer_id, NewBlockEvent::Block(block));
+                    this.block_import.notify(NewBlockWithPeer { peer_id, block: block.block });
                 });
             }
             PeerMessage::PooledTransactions(msg) => {
@@ -624,6 +627,9 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     /// Handler for received messages from a handle
     fn on_handle_message(&mut self, msg: NetworkHandleMessage<N>) {
         match msg {
+            NetworkHandleMessage::EthWireBlockListener(tx) => {
+                let _ = tx.send(self.block_import.new_listener());
+            }
             NetworkHandleMessage::DiscoveryListener(tx) => {
                 self.swarm.state_mut().discovery_mut().add_listener(tx);
             }
@@ -1070,11 +1076,6 @@ impl<N: NetworkPrimitives> Future for NetworkManager<N> {
         let mut poll_durations = NetworkManagerPollDurations::default();
 
         let this = self.get_mut();
-
-        // poll new block imports (expected to be a noop for POS)
-        while let Poll::Ready(outcome) = this.block_import.poll(cx) {
-            this.on_block_import_result(outcome);
-        }
 
         // These loops drive the entire state of network and does a lot of work. Under heavy load
         // (many messages/events), data may arrive faster than it can be processed (incoming

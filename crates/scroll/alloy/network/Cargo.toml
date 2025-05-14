@@ -12,6 +12,8 @@ exclude.workspace = true
 workspace = true
 
 [dependencies]
+alloy-provider.workspace = true
+
 scroll-alloy-consensus.workspace = true
 scroll-alloy-rpc-types.workspace = true
 

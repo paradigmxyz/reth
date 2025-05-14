@@ -14,6 +14,7 @@ use reth_eth_wire::{
 };
 use reth_ethereum_forks::Head;
 use reth_network_api::{
+    block::{EthWireBlockListenerProvider, NewBlockWithPeer},
     events::{NetworkPeersEvents, PeerEvent, PeerEventStream},
     test_utils::{PeersHandle, PeersHandleProvider},
     BlockDownloaderProvider, DiscoveryEvent, NetworkError, NetworkEvent,
@@ -221,6 +222,18 @@ impl<N: NetworkPrimitives> NetworkEventListenerProvider for NetworkHandle<N> {
         let (tx, rx) = mpsc::unbounded_channel();
         let _ = self.manager().send(NetworkHandleMessage::DiscoveryListener(tx));
         UnboundedReceiverStream::new(rx)
+    }
+}
+
+impl<N: NetworkPrimitives> EthWireBlockListenerProvider for NetworkHandle<N> {
+    type Block = <N as NetworkPrimitives>::Block;
+
+    async fn eth_wire_block_listener(
+        &self,
+    ) -> Result<EventStream<NewBlockWithPeer<Self::Block>>, oneshot::error::RecvError> {
+        let (tx, rx) = oneshot::channel();
+        self.send_message(NetworkHandleMessage::EthWireBlockListener(tx));
+        rx.await
     }
 }
 
@@ -546,4 +559,6 @@ pub(crate) enum NetworkHandleMessage<N: NetworkPrimitives = EthNetworkPrimitives
     AddRlpxSubProtocol(RlpxSubProtocol),
     /// Connect to the given peer.
     ConnectPeer(PeerId, PeerKind, PeerAddr),
+    /// Retries a eth wire new block event listener.
+    EthWireBlockListener(oneshot::Sender<EventStream<NewBlockWithPeer<N::Block>>>),
 }

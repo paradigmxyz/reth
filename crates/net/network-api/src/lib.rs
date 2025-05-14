@@ -20,7 +20,11 @@ pub mod events;
 /// Implementation of network traits for that does nothing.
 pub mod noop;
 
+/// Type used for the eth wire bridge.
+pub mod block;
+
 pub mod test_utils;
+use block::EthWireBlockListenerProvider;
 use test_utils::PeersHandleProvider;
 
 pub use alloy_rpc_types_admin::EthProtocolInfo;
@@ -53,6 +57,7 @@ pub trait FullNetwork:
     + NetworkEventListenerProvider
     + Peers
     + PeersHandleProvider
+    + EthWireBlockListenerProvider<Block = <Self::Primitives as NetworkPrimitives>::Block>
     + Clone
     + Unpin
     + 'static
@@ -67,6 +72,7 @@ impl<T> FullNetwork for T where
         + NetworkEventListenerProvider
         + Peers
         + PeersHandleProvider
+        + EthWireBlockListenerProvider<Block = <Self::Primitives as NetworkPrimitives>::Block>
         + Clone
         + Unpin
         + 'static

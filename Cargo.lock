@@ -8650,6 +8650,7 @@ version = "1.3.12"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-admin",
+ "async-trait",
  "auto_impl",
  "derive_more",
  "enr",
@@ -8659,6 +8660,7 @@ dependencies = [
  "reth-network-p2p",
  "reth-network-peers",
  "reth-network-types",
+ "reth-primitives-traits",
  "reth-tokio-util",
  "serde",
  "thiserror 2.0.12",
@@ -11460,6 +11462,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-network",
  "alloy-primitives",
+ "alloy-provider",
  "alloy-rpc-types-eth",
  "alloy-signer",
  "scroll-alloy-consensus",
