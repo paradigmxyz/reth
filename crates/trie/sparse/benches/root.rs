@@ -190,7 +190,7 @@ fn calculate_root_from_leaves_repeated(c: &mut Criterion) {
                             for (key, value) in &init_state {
                                 sparse
                                     .update_leaf(
-                                        Nibbles::unpack(key),
+                                        PackedNibbles::unpack(key),
                                         alloy_rlp::encode_fixed_size(value).to_vec(),
                                     )
                                     .unwrap();
@@ -203,7 +203,7 @@ fn calculate_root_from_leaves_repeated(c: &mut Criterion) {
                                 for (key, value) in update {
                                     sparse
                                         .update_leaf(
-                                            Nibbles::unpack(key),
+                                            PackedNibbles::unpack(key),
                                             alloy_rlp::encode_fixed_size(value).to_vec(),
                                         )
                                         .unwrap();

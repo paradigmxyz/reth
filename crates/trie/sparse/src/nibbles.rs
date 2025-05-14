@@ -13,15 +13,17 @@ const CAPACITY_BYTES: usize = 32;
 /// A representation for nibbles, that uses an even/odd flag.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct PackedNibbles {
-    /// The nibbles themselves, stored as a byte array.
-    pub nibbles: ArrayVec<u8, CAPACITY_BYTES>,
     /// The even/odd flag, indicating whether the length is even or odd.
-    pub even: bool,
+    // NOTE: This field goes before the `nibbles` field to compare it first when deriving the
+    // `PartialEq` trait.
+    pub(crate) even: bool,
+    /// The nibbles themselves, stored as a byte array.
+    pub(crate) nibbles: ArrayVec<u8, CAPACITY_BYTES>,
 }
 
 impl Default for PackedNibbles {
     fn default() -> Self {
-        Self { nibbles: ArrayVec::new(), even: true }
+        Self { even: true, nibbles: ArrayVec::new() }
     }
 }
 

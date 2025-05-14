@@ -114,7 +114,7 @@ impl<'a> ExtensionNodeRef<'a> {
 
     /// Returns the length of RLP encoded fields of extension node.
     #[inline]
-    fn rlp_payload_length(&self) -> usize {
+    const fn rlp_payload_length(&self) -> usize {
         let mut encoded_key_len = self.key.len() / 2 + 1;
         // For extension nodes the first byte cannot be greater than 0x80.
         if encoded_key_len != 1 {
