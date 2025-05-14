@@ -480,7 +480,12 @@ where
         kind: FilterKind<RpcTransaction<Eth::NetworkTypes>>,
     ) -> RpcResult<FilterId> {
         let last_poll_block_number = self.provider().best_block_number().to_rpc_result()?;
-        let id = FilterId::from(self.id_provider.next_id());
+        let subscription_id = self.id_provider.next_id();
+
+        let id = match subscription_id {
+            jsonrpsee_types::SubscriptionId::Num(n) => FilterId::Num(n),
+            jsonrpsee_types::SubscriptionId::Str(s) => FilterId::Str(s.into_owned()),
+        };
         let mut filters = self.active_filters.inner.lock().await;
         filters.insert(
             id.clone(),
