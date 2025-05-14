@@ -70,7 +70,7 @@ impl EthBuiltPayload {
     }
 
     /// Returns the blob sidecars.
-    pub fn sidecars(&self) -> &BlobSidecars {
+    pub const fn sidecars(&self) -> &BlobSidecars {
         &self.sidecars
     }
 
@@ -235,12 +235,12 @@ pub enum BlobSidecars {
 
 impl BlobSidecars {
     /// Create new EIP-4844 style sidecars.
-    pub fn eip4844(sidecars: Vec<BlobTransactionSidecar>) -> Self {
+    pub const fn eip4844(sidecars: Vec<BlobTransactionSidecar>) -> Self {
         Self::Eip4844(sidecars)
     }
 
     /// Create new EIP-7549 style sidecars.
-    pub fn eip7549(sidecars: Vec<BlobTransactionSidecarEip7594>) -> Self {
+    pub const fn eip7549(sidecars: Vec<BlobTransactionSidecarEip7594>) -> Self {
         Self::Eip7594(sidecars)
     }
 }
