@@ -9,7 +9,7 @@ use eyre::{eyre, Result};
 use reth_chainspec::ChainSpec;
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_ethereum_primitives::Block;
-use reth_node_api::{NodeTypes, PayloadTypes};
+use reth_node_api::{EngineTypes, NodeTypes, PayloadTypes};
 use reth_node_core::primitives::RecoveredBlock;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_rpc_api::clients::EthApiClient;
@@ -66,7 +66,10 @@ impl<I> Drop for Setup<I> {
     }
 }
 
-impl<I> Setup<I> {
+impl<I> Setup<I>
+where
+    I: EngineTypes,
+{
     /// Create a new setup with default values
     pub fn new() -> Self {
         Self::default()
