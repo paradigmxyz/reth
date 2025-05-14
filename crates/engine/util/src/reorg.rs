@@ -298,7 +298,7 @@ where
         }
 
         let tx_recovered =
-            tx.try_clone_into_recovered().map_err(|_| ProviderError::SenderRecoveryError)?;
+            tx.try_into_recovered().map_err(|_| ProviderError::SenderRecoveryError)?;
         let gas_used = match builder.execute_transaction(tx_recovered) {
             Ok(gas_used) => gas_used,
             Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
