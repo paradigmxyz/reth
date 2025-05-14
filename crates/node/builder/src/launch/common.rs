@@ -1087,7 +1087,7 @@ mod tests {
                     storage_history_full: false,
                     storage_history_distance: None,
                     storage_history_before: None,
-                    receipts_log_filter: vec![],
+                    receipts_log_filter: None,
                 },
                 ..NodeConfig::test()
             };
