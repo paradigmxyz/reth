@@ -10,6 +10,7 @@
 #![allow(clippy::useless_let_if_seq)]
 
 pub mod validator;
+use alloy_eips::eip7594::BlobTransactionSidecarVariant;
 pub use validator::EthereumExecutionPayloadValidator;
 
 use alloy_consensus::{Transaction, Typed2718};
@@ -318,7 +319,11 @@ where
     let mut payload = EthBuiltPayload::new(attributes.id, sealed_block, total_fees, requests);
 
     // extend the payload with the blob sidecars from the executed txs
-    payload.extend_sidecars(blob_sidecars.into_iter().map(Arc::unwrap_or_clone));
+    payload.extend_sidecars(
+        blob_sidecars
+            .into_iter()
+            .map(|sidecar| BlobTransactionSidecarVariant::Eip4844(Arc::unwrap_or_clone(sidecar))),
+    );
 
     Ok(BuildOutcome::Better { payload, cached_reads })
 }

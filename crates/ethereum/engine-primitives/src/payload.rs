@@ -1,12 +1,13 @@
 //! Contains types required for building a payload.
 
-use alloc::{sync::Arc, vec::Vec};
-use alloy_eips::{eip4844::BlobTransactionSidecar, eip4895::Withdrawals, eip7685::Requests};
+use alloc::{borrow::ToOwned, string::String, sync::Arc, vec::Vec};
+use alloy_eips::{eip4895::Withdrawals, eip7594::BlobTransactionSidecarVariant, eip7685::Requests};
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{
-    ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
-    ExecutionPayloadFieldV2, ExecutionPayloadV1, ExecutionPayloadV3, PayloadAttributes, PayloadId,
+    BlobsBundleV1, BlobsBundleV2, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
+    ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ExecutionPayloadFieldV2,
+    ExecutionPayloadV1, ExecutionPayloadV3, PayloadAttributes, PayloadId,
 };
 use core::convert::Infallible;
 use reth_ethereum_primitives::{Block, EthPrimitives};
@@ -28,7 +29,7 @@ pub struct EthBuiltPayload {
     pub(crate) fees: U256,
     /// The blobs, proofs, and commitments in the block. If the block is pre-cancun, this will be
     /// empty.
-    pub(crate) sidecars: Vec<BlobTransactionSidecar>,
+    pub(crate) sidecars: Vec<BlobTransactionSidecarVariant>,
     /// The requests of the payload
     pub(crate) requests: Option<Requests>,
 }
@@ -38,7 +39,7 @@ pub struct EthBuiltPayload {
 impl EthBuiltPayload {
     /// Initializes the payload with the given initial block
     ///
-    /// Caution: This does not set any [`BlobTransactionSidecar`].
+    /// Caution: This does not set any [`BlobTransactionSidecarVariant`].
     pub const fn new(
         id: PayloadId,
         block: Arc<SealedBlock<Block>>,
@@ -64,22 +65,110 @@ impl EthBuiltPayload {
     }
 
     /// Returns the blob sidecars.
-    pub fn sidecars(&self) -> &[BlobTransactionSidecar] {
+    pub fn sidecars(&self) -> &[BlobTransactionSidecarVariant] {
         &self.sidecars
     }
 
     /// Adds sidecars to the payload.
-    pub fn extend_sidecars(&mut self, sidecars: impl IntoIterator<Item = BlobTransactionSidecar>) {
+    pub fn extend_sidecars(
+        &mut self,
+        sidecars: impl IntoIterator<Item = BlobTransactionSidecarVariant>,
+    ) {
         self.sidecars.extend(sidecars)
     }
 
     /// Same as [`Self::extend_sidecars`] but returns the type again.
     pub fn with_sidecars(
         mut self,
-        sidecars: impl IntoIterator<Item = BlobTransactionSidecar>,
+        sidecars: impl IntoIterator<Item = BlobTransactionSidecarVariant>,
     ) -> Self {
         self.extend_sidecars(sidecars);
         self
+    }
+
+    /// Try converting built payload into [`ExecutionPayloadEnvelopeV3`].
+    ///
+    /// Returns an error if the payload contains non EIP-4844 sidecar.
+    pub fn try_into_v3(self) -> Result<ExecutionPayloadEnvelopeV3, String> {
+        let Self { block, fees, sidecars, .. } = self;
+
+        let blobs_bundle = BlobsBundleV1::from(
+            sidecars
+                .into_iter()
+                .map(|sidecar| {
+                    if let BlobTransactionSidecarVariant::Eip4844(sidecar) = sidecar {
+                        Ok(sidecar)
+                    } else {
+                        Err("unexpected sidecar type in v1 bundle".to_owned())
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+
+        Ok(ExecutionPayloadEnvelopeV3 {
+            execution_payload: ExecutionPayloadV3::from_block_unchecked(
+                block.hash(),
+                &Arc::unwrap_or_clone(block).into_block(),
+            ),
+            block_value: fees,
+            // From the engine API spec:
+            //
+            // > Client software **MAY** use any heuristics to decide whether to set
+            // `shouldOverrideBuilder` flag or not. If client software does not implement any
+            // heuristic this flag **SHOULD** be set to `false`.
+            //
+            // Spec:
+            // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
+            should_override_builder: false,
+            blobs_bundle,
+        })
+    }
+
+    /// Try converting built payload into [`ExecutionPayloadEnvelopeV4`].
+    ///
+    /// Returns an error if the payload contains non EIP-4844 sidecar.
+    pub fn try_into_v4(self) -> Result<ExecutionPayloadEnvelopeV4, String> {
+        Ok(ExecutionPayloadEnvelopeV4 {
+            execution_requests: self.requests.clone().unwrap_or_default(),
+            envelope_inner: self.try_into()?,
+        })
+    }
+
+    /// Try converting built payload into [`ExecutionPayloadEnvelopeV5`].
+    pub fn try_into_v5(self) -> Result<ExecutionPayloadEnvelopeV5, String> {
+        let EthBuiltPayload { block, fees, sidecars, requests, .. } = self;
+
+        let blobs_bundle = BlobsBundleV2::from(
+            sidecars
+                .into_iter()
+                .map(|sidecar| {
+                    if let BlobTransactionSidecarVariant::Eip7594(sidecar) = sidecar {
+                        Ok(sidecar)
+                    } else {
+                        Err("unexpected sidecar type in v2 bundle".to_owned())
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+
+        Ok(ExecutionPayloadEnvelopeV5 {
+            execution_payload: ExecutionPayloadV3::from_block_unchecked(
+                block.hash(),
+                &Arc::unwrap_or_clone(block).into_block(),
+            ),
+            block_value: fees,
+            // From the engine API spec:
+            //
+            // > Client software **MAY** use any heuristics to decide whether to set
+            // `shouldOverrideBuilder` flag or not. If client software does not implement any
+            // heuristic this flag **SHOULD** be set to `false`.
+            //
+            // Spec:
+            // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
+            should_override_builder: false,
+            blobs_bundle,
+            execution_requests: requests.unwrap_or_default(),
+        })
     }
 }
 
@@ -124,36 +213,27 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV2 {
     }
 }
 
-impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV3 {
-    fn from(value: EthBuiltPayload) -> Self {
-        let EthBuiltPayload { block, fees, sidecars, .. } = value;
+impl TryFrom<EthBuiltPayload> for ExecutionPayloadEnvelopeV3 {
+    type Error = String;
 
-        Self {
-            execution_payload: ExecutionPayloadV3::from_block_unchecked(
-                block.hash(),
-                &Arc::unwrap_or_clone(block).into_block(),
-            ),
-            block_value: fees,
-            // From the engine API spec:
-            //
-            // > Client software **MAY** use any heuristics to decide whether to set
-            // `shouldOverrideBuilder` flag or not. If client software does not implement any
-            // heuristic this flag **SHOULD** be set to `false`.
-            //
-            // Spec:
-            // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
-            should_override_builder: false,
-            blobs_bundle: sidecars.into(),
-        }
+    fn try_from(value: EthBuiltPayload) -> Result<Self, Self::Error> {
+        value.try_into_v3()
     }
 }
 
-impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV4 {
-    fn from(value: EthBuiltPayload) -> Self {
-        Self {
-            execution_requests: value.requests.clone().unwrap_or_default(),
-            envelope_inner: value.into(),
-        }
+impl TryFrom<EthBuiltPayload> for ExecutionPayloadEnvelopeV4 {
+    type Error = String;
+
+    fn try_from(value: EthBuiltPayload) -> Result<Self, Self::Error> {
+        value.try_into_v4()
+    }
+}
+
+impl TryFrom<EthBuiltPayload> for ExecutionPayloadEnvelopeV5 {
+    type Error = String;
+
+    fn try_from(value: EthBuiltPayload) -> Result<Self, Self::Error> {
+        value.try_into_v5()
     }
 }
 
