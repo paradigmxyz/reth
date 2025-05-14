@@ -468,7 +468,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                     let mut full_path = path.clone();
                     full_path.extend_path(&PackedNibbles::from(leaf.key.clone()));
                     if maybe_account.is_none() {
-                        let hashed_address = B256::from_slice(&full_path.as_slice());
+                        let hashed_address = B256::from_slice(full_path.as_slice());
                         let account = TrieAccount::decode(&mut &leaf.value[..])?;
                         if account.storage_root != EMPTY_ROOT_HASH {
                             queue.push_back((
@@ -1007,7 +1007,7 @@ mod tests {
             .state_trie_ref()
             .unwrap()
             .nodes_ref()
-            .contains_key(&Nibbles::from_nibbles([0x0])),);
+            .contains_key(&PackedNibbles::from_nibbles([0x0])),);
         assert_eq!(
             sparse.state_trie_ref().unwrap().get_leaf_value(&Nibbles::from_nibbles([0x0])),
             Some(&leaf_value)
@@ -1020,7 +1020,7 @@ mod tests {
             .state_trie_ref()
             .unwrap()
             .nodes_ref()
-            .contains_key(&Nibbles::from_nibbles([0x0])),);
+            .contains_key(&PackedNibbles::from_nibbles([0x0])),);
         assert!(sparse
             .state_trie_ref()
             .unwrap()
@@ -1034,7 +1034,7 @@ mod tests {
             .state_trie_ref()
             .unwrap()
             .nodes_ref()
-            .contains_key(&Nibbles::from_nibbles([0x0])));
+            .contains_key(&PackedNibbles::from_nibbles([0x0])));
         assert!(sparse
             .state_trie_ref()
             .unwrap()
@@ -1086,7 +1086,7 @@ mod tests {
             .storage_trie_ref(&B256::ZERO)
             .unwrap()
             .nodes_ref()
-            .contains_key(&Nibbles::from_nibbles([0x0])),);
+            .contains_key(&PackedNibbles::from_nibbles([0x0])),);
         assert_eq!(
             sparse
                 .storage_trie_ref(&B256::ZERO)
@@ -1102,7 +1102,7 @@ mod tests {
             .storage_trie_ref(&B256::ZERO)
             .unwrap()
             .nodes_ref()
-            .contains_key(&Nibbles::from_nibbles([0x0])),);
+            .contains_key(&PackedNibbles::from_nibbles([0x0])),);
         assert!(sparse
             .storage_trie_ref(&B256::ZERO)
             .unwrap()
@@ -1116,7 +1116,7 @@ mod tests {
             .storage_trie_ref(&B256::ZERO)
             .unwrap()
             .nodes_ref()
-            .contains_key(&Nibbles::from_nibbles([0x0])));
+            .contains_key(&PackedNibbles::from_nibbles([0x0])));
         assert!(sparse
             .storage_trie_ref(&B256::ZERO)
             .unwrap()
@@ -1251,7 +1251,7 @@ mod tests {
 
     #[test]
     fn test_decode_proof_nodes() {
-        let revealed_nodes = HashSet::from_iter([Nibbles::from_nibbles([0x0])]);
+        let revealed_nodes = HashSet::from_iter([PackedNibbles::from_nibbles([0x0])]);
         let leaf = TrieNode::Leaf(LeafNode::new(Nibbles::default(), alloy_rlp::encode([])));
         let leaf_encoded = alloy_rlp::encode(&leaf);
         let branch = TrieNode::Branch(BranchNode::new(
@@ -1269,7 +1269,10 @@ mod tests {
         assert_eq!(
             decoded,
             DecodedProofNodes {
-                nodes: vec![(Nibbles::default(), branch), (Nibbles::from_nibbles([0x1]), leaf)],
+                nodes: vec![
+                    (PackedNibbles::default(), branch),
+                    (PackedNibbles::from_nibbles([0x1]), leaf)
+                ],
                 // Branch, leaf, leaf
                 total_nodes: 3,
                 // Revealed leaf node with path 0x1

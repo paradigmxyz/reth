@@ -7,7 +7,7 @@ use itertools::Itertools;
 use reth_trie_common::{
     HashedPostState, Nibbles, TrieAccount, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use reth_trie_sparse::{errors::SparseStateTrieResult, SparseStateTrie, SparseTrie};
+use reth_trie_sparse::{errors::SparseStateTrieResult, PackedNibbles, SparseStateTrie, SparseTrie};
 
 /// Calculates the post-execution state root by applying state changes to a sparse trie.
 ///
@@ -43,7 +43,7 @@ pub(crate) fn calculate_state_root(
         for (hashed_slot, value) in
             storage.storage.into_iter().sorted_unstable_by_key(|(slot, _)| *slot)
         {
-            let nibbles = Nibbles::unpack(hashed_slot);
+            let nibbles = PackedNibbles::unpack(hashed_slot);
             if value.is_zero() {
                 storage_trie.remove_leaf(&nibbles)?;
             } else {

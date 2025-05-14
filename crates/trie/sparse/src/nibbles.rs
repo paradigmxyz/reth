@@ -22,6 +22,24 @@ impl Default for PackedNibbles {
 }
 
 impl PackedNibbles {
+    pub fn from_nibbles(nibbles: impl IntoIterator<Item = u8>) -> Self {
+        let mut packed = Self::default();
+        // TODO: this can be optimized
+        for nibble in nibbles {
+            packed.push_unchecked(nibble);
+        }
+        packed
+    }
+
+    pub fn from_nibbles_unchecked(nibbles: impl IntoIterator<Item = u8>) -> Self {
+        let mut packed = Self::default();
+        // TODO: this can be optimized
+        for nibble in nibbles {
+            packed.push_unchecked(nibble);
+        }
+        packed
+    }
+
     pub fn unpack(bytes: impl AsRef<[u8]>) -> Self {
         Self {
             // TODO: this can be optimized
@@ -231,7 +249,7 @@ impl PackedNibbles {
     pub fn extend_path(&mut self, other: &Self) {
         if other.is_empty() {
             // If `other` is empty, we can just return
-            return
+            return;
         }
 
         if self.nibbles.is_empty() || self.even {
@@ -239,7 +257,7 @@ impl PackedNibbles {
             // even flag
             self.nibbles.try_extend_from_slice(&other.nibbles).expect("nibbles length is 32");
             self.even = other.even;
-            return
+            return;
         }
 
         // We're odd, so we need to merge nibbles one by one
@@ -323,7 +341,7 @@ impl PackedNibbles {
         if self.nibbles.is_empty() {
             self.nibbles.push(nibble << 4);
             self.even = false;
-            return
+            return;
         }
 
         // We determine whether or not we should push a new high nibble or set the low nibble of
@@ -457,8 +475,62 @@ impl Ord for PackedNibbles {
             }
         }
 
-        // If we've compared all nibbles and they're equal up to the min length,
+        // If we've compared all bytes and they're equal up to the min length,
         // the shorter sequence comes first
         self_len.cmp(&other_len)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_packed_nibbles_ord() {
+        // Test empty nibbles
+        let empty1 = PackedNibbles::default();
+        let empty2 = PackedNibbles::default();
+        assert_eq!(empty1.cmp(&empty2), core::cmp::Ordering::Equal);
+
+        // Test with same nibbles
+        let a = PackedNibbles::unpack([0x12, 0x34]);
+        let b = PackedNibbles::unpack([0x12, 0x34]);
+        assert_eq!(a.cmp(&b), core::cmp::Ordering::Equal);
+
+        // Test with different lengths
+        let short = PackedNibbles::unpack([0x12]);
+        let long = PackedNibbles::unpack([0x12, 0x34]);
+        assert_eq!(short.cmp(&long), core::cmp::Ordering::Less);
+        assert_eq!(long.cmp(&short), core::cmp::Ordering::Greater);
+
+        // Test with common prefix but different values
+        let c = PackedNibbles::unpack([0x12, 0x34]);
+        let d = PackedNibbles::unpack([0x12, 0x35]);
+        assert_eq!(c.cmp(&d), core::cmp::Ordering::Less);
+        assert_eq!(d.cmp(&c), core::cmp::Ordering::Greater);
+
+        // Test with differing first byte
+        let e = PackedNibbles::unpack([0x12, 0x34]);
+        let f = PackedNibbles::unpack([0x13, 0x34]);
+        assert_eq!(e.cmp(&f), core::cmp::Ordering::Less);
+        assert_eq!(f.cmp(&e), core::cmp::Ordering::Greater);
+
+        // Test with odd length nibbles
+        let odd1 = PackedNibbles::unpack([0x1]);
+        let odd2 = PackedNibbles::unpack([0x2]);
+        assert_eq!(odd1.cmp(&odd2), core::cmp::Ordering::Less);
+        assert_eq!(odd2.cmp(&odd1), core::cmp::Ordering::Greater);
+
+        // Test with odd and even length nibbles
+        let odd = PackedNibbles::unpack([0x1]);
+        let even = PackedNibbles::unpack([0x12]);
+        assert_eq!(odd.cmp(&even), core::cmp::Ordering::Less);
+        assert_eq!(even.cmp(&odd), core::cmp::Ordering::Greater);
+
+        // Test with longer sequences
+        let long1 = PackedNibbles::unpack([0x12, 0x34, 0x56, 0x78]);
+        let long2 = PackedNibbles::unpack([0x12, 0x34, 0x56, 0x79]);
+        assert_eq!(long1.cmp(&long2), core::cmp::Ordering::Less);
+        assert_eq!(long2.cmp(&long1), core::cmp::Ordering::Greater);
     }
 }
