@@ -56,6 +56,12 @@ pub struct PruningArgs {
     /// Prune receipts before the specified block number. The specified block number is not pruned.
     #[arg(long = "prune.receipts.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["receipts_full", "receipts_distance"])]
     pub receipts_before: Option<BlockNumber>,
+    // Receipts Log Filter
+    /// Configure receipts log filter. Format:
+    /// <`address`>:<`prune_mode`>[,<`address`>:<`prune_mode`>...] Where <`prune_mode`> can be
+    /// 'full', 'distance:<`blocks`>', or 'before:<`block_number`>'
+    #[arg(long = "prune.receiptslogfilter", value_name = "FILTER_CONFIG", conflicts_with_all = &["receipts_full", "receipts_distance",  "receipts_before"], value_parser = parse_receipts_log_filter)]
+    pub receipts_log_filter: Option<ReceiptsLogPruneConfig>,
 
     // Account History
     /// Prunes all account history.
@@ -81,18 +87,11 @@ pub struct PruningArgs {
     /// pruned.
     #[arg(long = "prune.storagehistory.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["storage_history_full", "storage_history_distance"])]
     pub storage_history_before: Option<BlockNumber>,
-
-    // Receipts Log Filter
-    /// Configure receipts log filter. Format:
-    /// <`address`>:<`prune_mode`>[,<`address`>:<`prune_mode`>...] Where <`prune_mode`> can be
-    /// 'full', 'distance:<`blocks`>', or 'before:<`block_number`>'
-    #[arg(long = "prune.receiptslogfilter", value_name = "FILTER_CONFIG", value_parser = parse_receipts_log_filter)]
-    pub receipts_log_filter: Option<ReceiptsLogPruneConfig>,
 }
 
 impl PruningArgs {
     /// Returns pruning configuration.
-    pub fn prune_config(&self, chain_spec: &impl EthChainSpec) -> Option<PruneConfig> {
+    pub fn prune_config(&self, _chain_spec: &impl EthChainSpec) -> Option<PruneConfig> {
         // Initialise with a default prune configuration.
         let mut config = PruneConfig::default();
 
@@ -103,21 +102,10 @@ impl PruningArgs {
                 segments: PruneModes {
                     sender_recovery: Some(PruneMode::Full),
                     transaction_lookup: None,
-                    // prune all receipts if chain doesn't have deposit contract specified in chain
-                    // spec
-                    receipts: chain_spec
-                        .deposit_contract()
-                        .map(|contract| PruneMode::Before(contract.block))
-                        .or(Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE))),
+                    receipts: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
                     account_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
                     storage_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
-                    receipts_log_filter: ReceiptsLogPruneConfig(
-                        chain_spec
-                            .deposit_contract()
-                            .map(|contract| (contract.address, PruneMode::Before(contract.block)))
-                            .into_iter()
-                            .collect(),
-                    ),
+                    receipts_log_filter: Default::default(),
                 },
             }
         }
@@ -141,8 +129,13 @@ impl PruningArgs {
         if let Some(mode) = self.storage_history_prune_mode() {
             config.segments.storage_history = Some(mode);
         }
-        if let Some(receipt_logs) = self.receipts_log_filter.clone() {
+        if let Some(receipt_logs) =
+            self.receipts_log_filter.as_ref().filter(|c| !c.is_empty()).cloned()
+        {
             config.segments.receipts_log_filter = receipt_logs;
+            // need to remove the receipts segment filter entirely because that takes precendence
+            // over the logs filter
+            config.segments.receipts.take();
         }
 
         Some(config)
