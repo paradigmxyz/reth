@@ -330,6 +330,14 @@ where
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
         self.validate_all(transactions).await
     }
+    
+    async fn validate_transactions_with_origin(
+        &self,
+        origin: TransactionOrigin,
+        transactions: Vec<Self::Transaction>,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        todo!()
+    }
 
     fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
     where

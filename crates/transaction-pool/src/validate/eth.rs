@@ -127,6 +127,17 @@ where
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
         self.validate_all(transactions)
     }
+    
+    async fn validate_transactions_with_origin(
+        &self,
+        origin: TransactionOrigin,
+        transactions: Vec<Self::Transaction>,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        let futures = transactions
+                    .into_iter()
+                    .map(|tx| self.validate_transaction(origin, tx));
+        futures_util::future::join_all(futures).await
+    }
 
     fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
     where
