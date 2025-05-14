@@ -1,5 +1,4 @@
 use alloy_primitives::{B256, U256};
-use alloy_rpc_types_engine::ForkchoiceUpdateError;
 use jsonrpsee_types::error::{
     INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE, INVALID_PARAMS_MSG, SERVER_ERROR_MSG,
 };
