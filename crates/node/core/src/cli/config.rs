@@ -33,15 +33,14 @@ pub trait PayloadBuilderConfig {
     /// Maximum number of tasks to spawn for building a payload.
     fn max_payload_tasks(&self) -> usize;
 
+    /// Returns the configured gas limit if set, or a chain-specific default
     fn gas_limit_for(&self, chain: Chain) -> u64 {
-        const HOODI_SEPOLIA_BLOCK_GAS_LIMIT: u64 = 60_000_000;
-
         if let Some(limit) = self.gas_limit() {
             return limit;
         }
 
         match chain.kind() {
-            ChainKind::Named(NamedChain::Sepolia | NamedChain::Hoodi) => {
+            ChainKind::Named(NamedChain::Sepolia) | ChainKind::Named(NamedChain::Hoodi) => {
                 HOODI_SEPOLIA_BLOCK_GAS_LIMIT
             }
             _ => ETHEREUM_BLOCK_GAS_LIMIT_36M,
