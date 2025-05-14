@@ -1,4 +1,5 @@
 use crate::{Cli, Commands};
+use eyre::{eyre, Result};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::launcher::Launcher;
 use reth_cli_runner::CliRunner;
@@ -35,16 +36,19 @@ where
         self.runner = Some(runner);
     }
 
-    /// Assigin extra tracing layers to the runner.
-    pub fn set_layers(&mut self, layers: Layers) {
-        self.layers = Some(layers);
+    /// Access to tracing layers.
+    ///
+    /// Returns a mutable reference to the tracing layers, or error
+    /// if tracing initialized and layers have detached already.
+    pub fn access_tracing_layers(&mut self) -> Result<&mut Layers> {
+        self.layers.as_mut().ok_or_else(|| eyre!("Tracing already initialized"))
     }
 
     /// Execute the configured cli command.
     ///
     /// This accepts a closure that is used to launch the node via the
     /// [`NodeCommand`](reth_cli_commands::node::NodeCommand).
-    pub fn run(mut self, launcher: impl Launcher<C, Ext>) -> eyre::Result<()> {
+    pub fn run(mut self, launcher: impl Launcher<C, Ext>) -> Result<()> {
         let runner = match self.runner.take() {
             Some(runner) => runner,
             None => CliRunner::try_default_runtime()?,
@@ -56,9 +60,8 @@ where
             self.cli.logs.log_file_directory =
                 self.cli.logs.log_file_directory.join(chain_spec.chain.to_string());
         }
-        self.init_tracing()?;
-        info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.cli.logs.log_file_directory);
 
+        self.init_tracing()?;
         // Install the prometheus recorder to be sure to record all metrics
         let _ = install_prometheus_recorder();
 
@@ -101,10 +104,11 @@ where
     /// Initializes tracing with the configured options.
     ///
     /// If file logging is enabled, this function stores guard to the struct.
-    pub fn init_tracing(&mut self) -> eyre::Result<()> {
+    pub fn init_tracing(&mut self) -> Result<()> {
         if self.guard.is_none() {
             let layers = self.layers.take().unwrap_or_default();
             self.guard = self.cli.logs.init_tracing_with_layers(layers)?;
+            info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.cli.logs.log_file_directory);
         }
         Ok(())
     }
