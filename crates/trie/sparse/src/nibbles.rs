@@ -11,7 +11,7 @@ use reth_trie_common::Nibbles;
 const CAPACITY_BYTES: usize = 32;
 
 /// A representation for nibbles, that uses an even/odd flag.
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq, Hash)]
 pub struct PackedNibbles {
     /// The even/odd flag, indicating whether the length is even or odd.
     // NOTE: This field goes before the `nibbles` field to compare it first when deriving the
@@ -24,6 +24,31 @@ pub struct PackedNibbles {
 impl Default for PackedNibbles {
     fn default() -> Self {
         Self { even: true, nibbles: ArrayVec::new() }
+    }
+}
+
+// Custom `Clone` implementation because `ArrayVec` is not specialized for `Copy` types.
+impl Clone for PackedNibbles {
+    #[inline]
+    fn clone(&self) -> Self {
+        let mut nibbles = ArrayVec::new_const();
+        // SAFETY: `nibbles` is a valid contiguous slice of length
+        // `CAPACITY_BYTES` non-overlapping with `self.nibbles`.
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                self.nibbles.as_ptr(),
+                nibbles.as_mut_ptr(),
+                self.nibbles.len(),
+            );
+            nibbles.set_len(self.nibbles.len());
+        }
+        Self { even: self.even, nibbles }
+    }
+
+    #[inline]
+    fn clone_from(&mut self, source: &Self) {
+        self.even = source.even;
+        self.nibbles.clone_from(&source.nibbles);
     }
 }
 
