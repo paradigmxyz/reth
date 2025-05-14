@@ -69,9 +69,9 @@ where
 
         let tx_type = if request.authorization_list.is_some() {
             TxType::Eip7702
-        } else if request.has_eip4844_fields {
+        } else if request.has_eip4844_fields() {
             TxType::Eip4844
-        } else if request.has_eip1559_fields {
+        } else if request.has_eip1559_fields() {
             TxType::Eip1559
         } else if request.access_list.is_some() {
             TxType::Eip2930
