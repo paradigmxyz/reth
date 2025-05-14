@@ -296,6 +296,8 @@ pub struct RevealedSparseTrie<P = DefaultBlindedProvider> {
     updates: Option<SparseTrieUpdates>,
     /// Reusable buffer for RLP encoding of nodes.
     rlp_buf: Vec<u8>,
+    /// Reusable buffers for [`Self::rlp_node`].
+    rlp_node_buffers: RlpNodeBuffers,
 }
 
 impl<P> fmt::Debug for RevealedSparseTrie<P> {
@@ -395,6 +397,7 @@ impl Default for RevealedSparseTrie {
             prefix_set: PrefixSetMut::default(),
             updates: None,
             rlp_buf: Vec::new(),
+            rlp_node_buffers: RlpNodeBuffers::default(),
         }
     }
 }
@@ -423,6 +426,7 @@ impl RevealedSparseTrie {
             prefix_set: PrefixSetMut::default(),
             rlp_buf: Vec::new(),
             updates: None,
+            rlp_node_buffers: RlpNodeBuffers::default(),
         }
         .with_updates(retain_updates);
         this.reveal_node(Nibbles::default(), root, masks)?;
@@ -452,8 +456,9 @@ impl<P> RevealedSparseTrie<P> {
             branch_node_hash_masks: HashMap::default(),
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
-            rlp_buf: Vec::new(),
             updates: None,
+            rlp_buf: Vec::new(),
+            rlp_node_buffers: RlpNodeBuffers::default(),
         }
         .with_updates(retain_updates);
         this.reveal_node(Nibbles::default(), node, masks)?;
@@ -478,6 +483,7 @@ impl<P> RevealedSparseTrie<P> {
             prefix_set: self.prefix_set,
             updates: self.updates,
             rlp_buf: self.rlp_buf,
+            rlp_node_buffers: self.rlp_node_buffers,
         }
     }
 
@@ -848,7 +854,8 @@ impl<P> RevealedSparseTrie<P> {
     pub fn root(&mut self) -> B256 {
         // Take the current prefix set
         let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
-        let rlp_node = self.rlp_node_allocate(&mut prefix_set);
+        self.rlp_node_buffers.clear_with_root_path();
+        let rlp_node = self.rlp_node(&mut prefix_set);
         if let Some(root_hash) = rlp_node.as_hash() {
             root_hash
         } else {
@@ -867,7 +874,6 @@ impl<P> RevealedSparseTrie<P> {
     pub fn update_rlp_node_level(&mut self, depth: usize) {
         // Take the current prefix set
         let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
-        let mut buffers = RlpNodeBuffers::default();
 
         // Get the nodes that have changed at the given depth.
         let (targets, new_prefix_set) = self.get_changed_nodes_at_depth(&mut prefix_set, depth);
@@ -876,12 +882,12 @@ impl<P> RevealedSparseTrie<P> {
 
         trace!(target: "trie::sparse", ?depth, ?targets, "Updating nodes at depth");
         for (level, path) in targets {
-            buffers.path_stack.push(RlpNodePathStackItem {
+            self.rlp_node_buffers.path_stack.push(RlpNodePathStackItem {
                 level,
                 path,
                 is_in_prefix_set: Some(true),
             });
-            self.rlp_node(&mut prefix_set, &mut buffers);
+            self.rlp_node(&mut prefix_set);
         }
     }
 
@@ -964,16 +970,6 @@ impl<P> RevealedSparseTrie<P> {
         (targets, unchanged_prefix_set)
     }
 
-    /// Look up or calculate the RLP of the node at the root path.
-    ///
-    /// # Panics
-    ///
-    /// If the node at provided path does not exist.
-    pub fn rlp_node_allocate(&mut self, prefix_set: &mut PrefixSet) -> RlpNode {
-        let mut buffers = RlpNodeBuffers::new_with_root_path();
-        self.rlp_node(prefix_set, &mut buffers)
-    }
-
     /// Looks up or computes the RLP encoding of the node specified by the current
     /// path in the provided buffers.
     ///
@@ -988,11 +984,8 @@ impl<P> RevealedSparseTrie<P> {
     /// # Panics
     ///
     /// If the node at provided path does not exist.
-    pub fn rlp_node(
-        &mut self,
-        prefix_set: &mut PrefixSet,
-        buffers: &mut RlpNodeBuffers,
-    ) -> RlpNode {
+    pub fn rlp_node(&mut self, prefix_set: &mut PrefixSet) -> RlpNode {
+        let buffers = &mut self.rlp_node_buffers;
         let _starting_path = buffers.path_stack.last().map(|item| item.path.clone());
 
         'main: while let Some(RlpNodePathStackItem { level, path, mut is_in_prefix_set }) =
@@ -1276,8 +1269,9 @@ impl<P> RevealedSparseTrie<P> {
             buffers.rlp_node_stack.push(RlpNodeStackItem { path, rlp_node, node_type });
         }
 
-        debug_assert_eq!(buffers.rlp_node_stack.len(), 1);
-        buffers.rlp_node_stack.pop().unwrap().rlp_node
+        let rlp_node = buffers.rlp_node_stack.pop().unwrap().rlp_node;
+        debug_assert!(rlp_node.is_empty());
+        rlp_node
     }
 }
 
@@ -1969,7 +1963,7 @@ struct RemovedSparseNode {
 /// Collection of reusable buffers for [`RevealedSparseTrie::rlp_node`] calculations.
 ///
 /// These buffers reduce allocations when computing RLP representations during trie updates.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct RlpNodeBuffers {
     /// Stack of RLP node paths
     path_stack: Vec<RlpNodePathStackItem>,
@@ -1982,23 +1976,34 @@ pub struct RlpNodeBuffers {
 }
 
 impl RlpNodeBuffers {
-    /// Creates a new instance of buffers with the root path on the stack.
-    fn new_with_root_path() -> Self {
-        Self {
-            path_stack: vec![RlpNodePathStackItem {
-                level: 0,
-                path: Nibbles::default(),
-                is_in_prefix_set: None,
-            }],
-            rlp_node_stack: Vec::new(),
-            branch_child_buf: SmallVec::<[Nibbles; 16]>::new_const(),
-            branch_value_stack_buf: SmallVec::<[RlpNode; 16]>::new_const(),
-        }
+    /// Clears the buffers and inserts the root path on the stack.
+    ///
+    /// The difference from creating a new instance using `Self::new_with_root_path()` is that this
+    /// method reuses the existing buffers, avoiding unnecessary allocations.
+    fn clear_with_root_path(&mut self) {
+        self.path_stack.clear();
+        self.path_stack.push(RlpNodePathStackItem {
+            level: 0,
+            path: Nibbles::default(),
+            is_in_prefix_set: None,
+        });
+        self.rlp_node_stack.clear();
+        self.branch_child_buf.clear();
+        self.branch_value_stack_buf.clear();
+    }
+
+    /// Returns `true` if the buffers are empty.
+    #[cfg(debug_assertions)]
+    fn is_empty(&self) -> bool {
+        self.path_stack.is_empty() &&
+            self.rlp_node_stack.is_empty() &&
+            self.branch_child_buf.is_empty() &&
+            self.branch_value_stack_buf.is_empty()
     }
 }
 
 /// RLP node path stack item.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct RlpNodePathStackItem {
     /// Level at which the node is located. Higher numbers correspond to lower levels in the trie.
     level: usize,
@@ -2009,7 +2014,7 @@ struct RlpNodePathStackItem {
 }
 
 /// RLP node stack item.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct RlpNodeStackItem {
     /// Path to the node.
     path: Nibbles,
@@ -2252,6 +2257,7 @@ mod find_leaf_tests {
             prefix_set: Default::default(),
             updates: None,
             rlp_buf: Vec::new(),
+            rlp_node_buffers: RlpNodeBuffers::default(),
         };
 
         let result = sparse.find_leaf(&leaf_path, None);
@@ -2295,6 +2301,7 @@ mod find_leaf_tests {
             prefix_set: Default::default(),
             updates: None,
             rlp_buf: Vec::new(),
+            rlp_node_buffers: RlpNodeBuffers::default(),
         };
 
         let result = sparse.find_leaf(&search_path, None);
