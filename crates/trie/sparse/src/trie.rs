@@ -1094,26 +1094,28 @@ impl<P> RevealedSparseTrie<P> {
                     }
                     let retain_updates = self.updates.is_some() && prefix_set_contains(&path);
 
-                    self.rlp_node_buffers.branch_child_buf.clear();
+                    self.rlp_node_buffers.branch_children_paths.clear();
                     // Walk children in a reverse order from `f` to `0`, so we pop the `0` first
                     // from the stack and keep walking in the sorted order.
                     for bit in CHILD_INDEX_RANGE.rev() {
                         if state_mask.is_bit_set(bit) {
                             let mut child = path.clone();
                             child.push_unchecked(bit);
-                            self.rlp_node_buffers.branch_child_buf.push(child);
+                            self.rlp_node_buffers.branch_children_paths.push(child);
                         }
                     }
 
-                    self.rlp_node_buffers
-                        .branch_value_stack_buf
-                        .resize(self.rlp_node_buffers.branch_child_buf.len(), Default::default());
+                    self.rlp_node_buffers.branch_children_values.resize(
+                        self.rlp_node_buffers.branch_children_paths.len(),
+                        Default::default(),
+                    );
                     let mut added_children = false;
 
                     let mut tree_mask = TrieMask::default();
                     let mut hash_mask = TrieMask::default();
                     let mut hashes = Vec::new();
-                    for (i, child_path) in self.rlp_node_buffers.branch_child_buf.iter().enumerate()
+                    for (i, child_path) in
+                        self.rlp_node_buffers.branch_children_paths.iter().enumerate()
                     {
                         if self
                             .rlp_node_buffers
@@ -1171,8 +1173,9 @@ impl<P> RevealedSparseTrie<P> {
                             // Insert children in the resulting buffer in a normal order,
                             // because initially we iterated in reverse.
                             // SAFETY: i < len and len is never 0
-                            let original_idx = self.rlp_node_buffers.branch_child_buf.len() - i - 1;
-                            self.rlp_node_buffers.branch_value_stack_buf[original_idx] = child;
+                            let original_idx =
+                                self.rlp_node_buffers.branch_children_paths.len() - i - 1;
+                            self.rlp_node_buffers.branch_children_values[original_idx] = child;
                             added_children = true;
                         } else {
                             debug_assert!(!added_children);
@@ -1182,7 +1185,7 @@ impl<P> RevealedSparseTrie<P> {
                                 is_in_prefix_set,
                             });
                             self.rlp_node_buffers.path_stack.extend(
-                                self.rlp_node_buffers.branch_child_buf.drain(..).map(|path| {
+                                self.rlp_node_buffers.branch_children_paths.drain(..).map(|path| {
                                     RlpNodePathStackItem {
                                         level: level + 1,
                                         path,
@@ -1204,7 +1207,7 @@ impl<P> RevealedSparseTrie<P> {
 
                     self.rlp_node_buffers.rlp.clear();
                     let branch_node_ref = BranchNodeRef::new(
-                        &self.rlp_node_buffers.branch_value_stack_buf,
+                        &self.rlp_node_buffers.branch_children_values,
                         *state_mask,
                     );
                     let rlp_node = branch_node_ref.rlp(&mut self.rlp_node_buffers.rlp);
@@ -1981,15 +1984,15 @@ struct RemovedSparseNode {
 /// These buffers reduce allocations when computing RLP representations during trie updates.
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct RlpNodeBuffers {
-    /// Stack of RLP node paths
+    /// Stack of RLP node paths.
     path_stack: Vec<RlpNodePathStackItem>,
-    /// Stack of RLP nodes
+    /// Stack of RLP nodes.
     rlp_node_stack: Vec<RlpNodeStackItem>,
-    /// Reusable branch child path
-    branch_child_buf: SmallVec<[Nibbles; 16]>,
-    /// Reusable branch value stack
-    branch_value_stack_buf: SmallVec<[RlpNode; 16]>,
-    /// Reusable buffer for RLP encoding of nodes.
+    /// Buffer of branch node children paths.
+    branch_children_paths: SmallVec<[Nibbles; 16]>,
+    /// Buffer of branch node children values.
+    branch_children_values: SmallVec<[RlpNode; 16]>,
+    /// Buffer for RLP encoding of nodes.
     rlp: Vec<u8>,
 }
 
@@ -1998,8 +2001,8 @@ impl Debug for RlpNodeBuffers {
         f.debug_struct("RlpNodeBuffers")
             .field("path_stack", &self.path_stack)
             .field("rlp_node_stack", &self.rlp_node_stack)
-            .field("branch_child_buf", &self.branch_child_buf)
-            .field("branch_value_stack_buf", &self.branch_value_stack_buf)
+            .field("branch_children_paths", &self.branch_children_paths)
+            .field("branch_children_values", &self.branch_children_values)
             .field("rlp", &hex::encode(&self.rlp))
             .finish()
     }
@@ -2011,8 +2014,8 @@ impl RlpNodeBuffers {
         Self {
             path_stack: Vec::new(),
             rlp_node_stack: Vec::new(),
-            branch_child_buf: SmallVec::new(),
-            branch_value_stack_buf: SmallVec::new(),
+            branch_children_paths: SmallVec::new(),
+            branch_children_values: SmallVec::new(),
             rlp: Vec::new(),
         }
     }
@@ -2028,8 +2031,8 @@ impl RlpNodeBuffers {
             is_in_prefix_set: None,
         });
         self.rlp_node_stack.clear();
-        self.branch_child_buf.clear();
-        self.branch_value_stack_buf.clear();
+        self.branch_children_paths.clear();
+        self.branch_children_values.clear();
         self.rlp.clear();
     }
 
@@ -2038,8 +2041,8 @@ impl RlpNodeBuffers {
     fn is_empty(&self) -> bool {
         self.path_stack.is_empty() &&
             self.rlp_node_stack.is_empty() &&
-            self.branch_child_buf.is_empty() &&
-            self.branch_value_stack_buf.is_empty() &&
+            self.branch_children_paths.is_empty() &&
+            self.branch_children_values.is_empty() &&
             self.rlp.is_empty()
     }
 }
