@@ -16,7 +16,7 @@ use executor::WorkloadExecutor;
 use multiproof::*;
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
-use reth_evm::{ConfigureEvm, OnStateHook};
+use reth_evm::{block::BlockExecutorFactory, ConfigureEvm, EvmFactory, OnStateHook};
 use reth_primitives_traits::{NodePrimitives, SealedHeaderFor};
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateCommitmentProvider,
@@ -30,10 +30,10 @@ use reth_trie_parallel::{
 };
 use std::{
     collections::VecDeque,
+    hash::Hash,
     sync::{
         atomic::AtomicBool,
-        mpsc,
-        mpsc::{channel, Sender},
+        mpsc::{self, channel, Sender},
         Arc,
     },
 };
@@ -47,7 +47,12 @@ pub mod sparse_trie;
 
 /// Entrypoint for executing the payload.
 #[derive(Debug, Clone)]
-pub struct PayloadProcessor<N, Evm> {
+pub struct PayloadProcessor<N, Evm>
+where
+    N: NodePrimitives,
+    Evm: ConfigureEvm<Primitives = N> + 'static,
+    <<<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::EvmFactory as EvmFactory>::Spec: Hash + Eq,
+{
     /// The executor used by to spawn tasks.
     executor: WorkloadExecutor,
     /// The most recent cache used for execution.
@@ -63,17 +68,22 @@ pub struct PayloadProcessor<N, Evm> {
     /// whether precompile cache should be enabled.
     precompile_cache_enabled: bool,
     /// Precompile cache map.
-    precompile_cache_map: PrecompileCacheMap,
+    precompile_cache_map: PrecompileCacheMap<<<<Evm as reth_evm::ConfigureEvm>::BlockExecutorFactory as alloy_evm::block::BlockExecutorFactory>::EvmFactory as alloy_evm::EvmFactory>::Spec>,
     _marker: std::marker::PhantomData<N>,
 }
 
-impl<N, Evm> PayloadProcessor<N, Evm> {
+impl<N, Evm> PayloadProcessor<N, Evm>
+where
+    N: NodePrimitives,
+    Evm: ConfigureEvm<Primitives = N> + 'static,
+    <<<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::EvmFactory as EvmFactory>::Spec: Hash + Eq,
+{
     /// Creates a new payload processor.
     pub fn new(
         executor: WorkloadExecutor,
         evm_config: Evm,
         config: &TreeConfig,
-        precompile_cache_map: PrecompileCacheMap,
+        precompile_cache_map: PrecompileCacheMap<<<<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::EvmFactory as EvmFactory>::Spec>,
     ) -> Self {
         Self {
             executor,
@@ -93,6 +103,7 @@ impl<N, Evm> PayloadProcessor<N, Evm>
 where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N> + 'static,
+   <<<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::EvmFactory as EvmFactory>::Spec: Hash + Eq,
 {
     /// Spawns all background tasks and returns a handle connected to the tasks.
     ///

@@ -9,6 +9,7 @@
 use core::fmt;
 use std::{
     fmt::{Debug, Formatter},
+    hash::Hash,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -29,7 +30,7 @@ use reth_engine_tree::{
     persistence::PersistenceHandle,
     tree::{EngineApiTreeHandler, InvalidBlockHook, TreeConfig},
 };
-use reth_evm::ConfigureEvm;
+use reth_evm::{block::BlockExecutorFactory, ConfigureEvm, EvmFactory};
 use reth_node_types::BlockTy;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributesBuilder, PayloadTypes};
@@ -85,6 +86,7 @@ where
         B: PayloadAttributesBuilder<<N::Payload as PayloadTypes>::PayloadAttributes>,
         V: EngineValidator<N::Payload, Block = BlockTy<N>>,
         C: ConfigureEvm<Primitives = N::Primitives> + 'static,
+        <<<C as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::EvmFactory as EvmFactory>::Spec: Hash + Eq + Default
     {
         let chain_spec = provider.chain_spec();
         let engine_kind =
