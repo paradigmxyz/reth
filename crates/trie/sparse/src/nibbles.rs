@@ -1,7 +1,6 @@
 use core::{
     fmt,
     ops::{Bound, RangeBounds},
-    slice,
 };
 
 use arrayvec::ArrayVec;
@@ -25,32 +24,18 @@ impl Default for PackedNibbles {
 impl PackedNibbles {
     pub fn unpack(bytes: impl AsRef<[u8]>) -> Self {
         Self {
+            // TODO: this can be optimized
             nibbles: bytes.as_ref().iter().copied().collect(),
             even: bytes.as_ref().len() % 2 == 0,
         }
     }
 
+    /// Returns `true` if this [`PackedNibbles`] is empty.
     pub const fn is_empty(&self) -> bool {
         self.nibbles.is_empty()
     }
 
-    /// Returns `true` if this `PackedNibbles` starts with the nibbles in `other`.
-    ///
-    /// This method correctly handles even/odd nibble sequences and compares the
-    /// actual nibble values, not just the byte representation.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use crate::PackedNibbles;
-    ///
-    /// let nibbles1 = PackedNibbles::from_nibbles(&[0x0A, 0x0B, 0x0C, 0x0D]);
-    /// let nibbles2 = PackedNibbles::from_nibbles(&[0x0A, 0x0B]);
-    /// let nibbles3 = PackedNibbles::from_nibbles(&[0x0A, 0x0C]);
-    ///
-    /// assert!(nibbles1.starts_with(&nibbles2));
-    /// assert!(!nibbles1.starts_with(&nibbles3));
-    /// ```
+    /// Returns `true` if this [`PackedNibbles`] starts with the nibbles in `other`.
     pub fn starts_with(&self, other: &Self) -> bool {
         // If other is empty, it's a prefix of any sequence
         if other.is_empty() {
@@ -65,6 +50,8 @@ impl PackedNibbles {
             return false;
         }
 
+        // TODO: this can be optimized
+
         // Compare each nibble individually
         for i in 0..other_len {
             if self.get_nibble(i) != other.get_nibble(i) {
@@ -75,7 +62,7 @@ impl PackedNibbles {
         true
     }
 
-    /// Returns the total number of nibbles in this `PackedNibbles`.
+    /// Returns the total number of nibbles in this [`PackedNibbles`].
     pub const fn len(&self) -> usize {
         if self.even {
             self.nibbles.len() * 2
@@ -88,7 +75,7 @@ impl PackedNibbles {
         self.nibbles.as_slice()
     }
 
-    /// Returns the length of the common prefix between this `PackedNibbles` and `other`.
+    /// Returns the length of the common prefix between this [`PackedNibbles`] and `other`.
     ///
     /// # Examples
     ///
@@ -104,6 +91,8 @@ impl PackedNibbles {
     pub fn common_prefix_length(&self, other: &Self) -> usize {
         let len = core::cmp::min(self.len(), other.len());
 
+        // TODO: this can be optimized
+
         // Compare each nibble individually until a mismatch is found
         for i in 0..len {
             if self.get_nibble(i) != other.get_nibble(i) {
@@ -115,7 +104,7 @@ impl PackedNibbles {
         len
     }
 
-    /// Returns the last nibble in this `PackedNibbles`, or `None` if empty.
+    /// Returns the last nibble in this [`PackedNibbles`], or `None` if empty.
     ///
     /// # Examples
     ///
@@ -133,8 +122,7 @@ impl PackedNibbles {
             return None;
         }
 
-        let len = self.len();
-        Some(self.get_nibble(len - 1))
+        Some(self.get_nibble(self.len() - 1))
     }
 
     /// Gets the nibble at the given position.
@@ -160,7 +148,7 @@ impl PackedNibbles {
         }
     }
 
-    /// Creates a new `PackedNibbles` containing the nibbles in the specified range.
+    /// Creates a new [`PackedNibbles`] containing the nibbles in the specified range.
     ///
     /// This method accepts any type that implements `RangeBounds<usize>`,
     /// including full ranges (`..`), ranges with one bound (`..end` or `start..`),
@@ -191,8 +179,7 @@ impl PackedNibbles {
     ///
     /// # Panics
     ///
-    /// This method will panic if the range is out of bounds for this `PackedNibbles`.
-    #[inline]
+    /// This method will panic if the range is out of bounds for this [`PackedNibbles`].
     pub fn slice<R>(&self, range: R) -> Self
     where
         R: RangeBounds<usize>,
@@ -213,13 +200,11 @@ impl PackedNibbles {
         };
 
         // Check bounds
-        assert!((start <= end), "slice start ({}) > end ({})", start, end);
-
         assert!(start <= len && end <= len, "slice bounds out of range (len: {})", len);
 
         // Fast path for empty slice
         if start == end {
-            return Self { nibbles: ArrayVec::new(), even: true };
+            return Self::default();
         }
 
         // Simple case - if we're slicing the whole thing
@@ -229,7 +214,9 @@ impl PackedNibbles {
 
         // Create a new array to hold the sliced nibbles
         let slice_len = end - start;
-        let mut result = Self { nibbles: ArrayVec::new(), even: slice_len % 2 == 0 };
+        let mut result = Self::default();
+
+        // TODO: this can be optimized
 
         // Copy nibbles one at a time
         for i in 0..slice_len {
@@ -241,7 +228,7 @@ impl PackedNibbles {
     }
 
     /// Extends this [`PackedNibbles`] with the given [`PackedNibbles`].
-    pub fn extend_path(&mut self, other: &PackedNibbles) {
+    pub fn extend_path(&mut self, other: &Self) {
         if other.is_empty() {
             // If `other` is empty, we can just return
             return
@@ -423,10 +410,10 @@ impl fmt::Debug for PackedNibbles {
     }
 }
 
+// TODO: this can be optimized
 impl From<Nibbles> for PackedNibbles {
     fn from(nibbles: Nibbles) -> Self {
         let mut packed = Self::default();
-        // TODO: this is inefficient
         for b in nibbles.iter().copied() {
             packed.push_unchecked(b);
         }
@@ -434,16 +421,14 @@ impl From<Nibbles> for PackedNibbles {
     }
 }
 
+// TODO: this can be optimized
 impl From<PackedNibbles> for Nibbles {
     fn from(packed: PackedNibbles) -> Self {
-        let len = packed.len();
-        let mut nibbles = Vec::with_capacity(len);
-
-        for i in 0..len {
-            nibbles.push(packed.get_nibble(i));
+        let mut nibbles = Self::new();
+        for i in 0..packed.len() {
+            nibbles.push_unchecked(packed.get_nibble(i));
         }
-
-        Self::from_nibbles(&nibbles)
+        nibbles
     }
 }
 
@@ -453,6 +438,7 @@ impl PartialOrd for PackedNibbles {
     }
 }
 
+// TODO: this can be optimized
 impl Ord for PackedNibbles {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         // Get the lengths of both nibble sequences
