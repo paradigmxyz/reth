@@ -1,9 +1,10 @@
 //! Actions that can be performed in tests.
 
 use crate::testsuite::Environment;
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::{Bytes, B256, U256};
 use alloy_rpc_types_engine::{
-    ExecutionPayloadV3, ForkchoiceState, PayloadAttributes, PayloadStatusEnum,
+    payload::ExecutionPayloadEnvelopeV3, ExecutionPayloadV3, ForkchoiceState, PayloadAttributes,
+    PayloadStatusEnum,
 };
 use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction};
 use eyre::Result;
@@ -375,6 +376,110 @@ where
             }
             debug!("Forkchoice update broadcasted successfully");
             Ok(())
+        })
+    }
+}
+
+/// Action that checks whether the broadcasted new payload has been accepted
+#[derive(Debug, Default)]
+pub struct CheckPayloadAccepted {}
+
+impl<Engine> Action<Engine> for CheckPayloadAccepted
+where
+    Engine: EngineTypes<ExecutionPayloadEnvelopeV3 = ExecutionPayloadEnvelopeV3>
+        + PayloadTypes<PayloadAttributes = PayloadAttributes>,
+    ExecutionPayloadEnvelopeV3: From<<Engine as EngineTypes>::ExecutionPayloadEnvelopeV3>,
+{
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            let mut accepted_check: bool = false;
+
+            let latest_block = env
+                .latest_block_info
+                .as_mut()
+                .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
+
+            let payload_id = *env
+                .payload_id_history
+                .get(&(latest_block.number + 1))
+                .ok_or_else(|| eyre::eyre!("Cannot find payload_id"))?;
+
+            for (idx, client) in env.node_clients.iter().enumerate() {
+                let rpc_client = &client.rpc;
+
+                // get the last header by number using latest_head_number
+                let rpc_latest_header =
+                    EthApiClient::<Transaction, Block, Receipt, Header>::header_by_number(
+                        rpc_client,
+                        alloy_eips::BlockNumberOrTag::Latest,
+                    )
+                    .await?
+                    .ok_or_else(|| eyre::eyre!("No latest header found from rpc"))?;
+
+                // perform several checks
+                let next_new_payload = env
+                    .latest_payload_built
+                    .as_ref()
+                    .ok_or_else(|| eyre::eyre!("No next built payload found"))?;
+
+                let built_payload =
+                    EngineApiClient::<Engine>::get_payload_v3(&client.engine, payload_id).await?;
+
+                let execution_payload_envelope: ExecutionPayloadEnvelopeV3 = built_payload;
+                let new_payload_block_hash = execution_payload_envelope
+                    .execution_payload
+                    .payload_inner
+                    .payload_inner
+                    .block_hash;
+
+                if rpc_latest_header.hash != new_payload_block_hash {
+                    debug!(
+                        "Client {}: The hash is not matched: {:?} {:?}",
+                        idx, rpc_latest_header.hash, new_payload_block_hash
+                    );
+                    continue;
+                }
+
+                if rpc_latest_header.inner.difficulty != U256::ZERO {
+                    debug!(
+                        "Client {}: difficulty != 0: {:?}",
+                        idx, rpc_latest_header.inner.difficulty
+                    );
+                    continue;
+                }
+
+                if rpc_latest_header.inner.mix_hash != next_new_payload.prev_randao {
+                    debug!(
+                        "Client {}: The mix_hash and prev_randao is not same: {:?} {:?}",
+                        idx, rpc_latest_header.inner.mix_hash, next_new_payload.prev_randao
+                    );
+                    continue;
+                }
+
+                let extra_len = rpc_latest_header.inner.extra_data.len();
+                if extra_len <= 32 {
+                    debug!("Client {}: extra_len is fewer than 32. extra_len: {}", idx, extra_len);
+                    continue;
+                }
+
+                // at least one client passes all the check, save the header in Env
+                if !accepted_check {
+                    accepted_check = true;
+                    // save the header in Env
+                    env.latest_header_time = next_new_payload.timestamp;
+
+                    // add it to header history
+                    env.latest_fork_choice_state.head_block_hash = rpc_latest_header.hash;
+                    latest_block.hash = rpc_latest_header.hash as B256;
+                    latest_block.number = rpc_latest_header.inner.number;
+                }
+            }
+
+            if accepted_check {
+                Ok(())
+            } else {
+                Err(eyre::eyre!("No clients passed payload acceptance checks"))
+            }
         })
     }
 }
