@@ -253,7 +253,7 @@ impl From<Vec<BlobTransactionSidecar>> for BlobSidecars {
 
 impl From<Vec<BlobTransactionSidecarEip7594>> for BlobSidecars {
     fn from(value: Vec<BlobTransactionSidecarEip7594>) -> Self {
-        Self::eip7549(value)
+        Self::eip7594(value)
     }
 }
 
