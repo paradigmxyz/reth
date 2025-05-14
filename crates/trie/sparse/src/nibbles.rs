@@ -25,12 +25,12 @@ impl Default for PackedNibbles {
 impl PackedNibbles {
     pub fn unpack(bytes: impl AsRef<[u8]>) -> Self {
         Self {
-            nibbles: ArrayVec::from_iter(bytes.as_ref().iter().copied()),
+            nibbles: bytes.as_ref().iter().copied().collect(),
             even: bytes.as_ref().len() % 2 == 0,
         }
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.nibbles.is_empty()
     }
 
@@ -76,10 +76,7 @@ impl PackedNibbles {
     }
 
     /// Returns the total number of nibbles in this `PackedNibbles`.
-    ///
-    /// This accounts for the `even` flag - for odd-length nibbles, the
-    /// returned count is 2 * byte_count - 1.
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         if self.even {
             self.nibbles.len() * 2
         } else {
@@ -280,7 +277,7 @@ impl PackedNibbles {
         // Example: `self` ends with [0x30] (representing "3") and `other` starts with [0x45]
         // (representing "45").
         // 1. Take first byte from `other`: 0x45
-        // 2. Mask low nibble:              0x45 & 0xF0 = 0x40
+        // 2. Mask high nibble:             0x45 & 0xF0 = 0x40
         // 3. Shift right by 4:             0x40 >> 4   = 0x04
         // 4. Take last byte from `self`:   0x30
         // 5. Combine with OR:              0x30 | 0x04 = 0x34
@@ -288,25 +285,24 @@ impl PackedNibbles {
         // Result: self ends with [0x12, 0x34] and we continue merging the rest
         self.nibbles[prev_len - 1] |= (other.nibbles[0] & 0xF0) >> 4;
 
-        // Process the rest of the bytes from `other`.
+        // Process the rest of the bytes from `other` by shifting the nibbles to the right.
         //
         // Example: pushing bytes [0x45, 0x60] from `other` into the correct positions in `self`.
         //
         // For the first iteration:
         // 1. current = 0x45, next = 0x60
-        // 2. Shift current left by 4:              0x45 << 4   = 0x50
-        // 3. Mask high nibble of next:             0x60 & 0xF0 = 0x60
-        // 4. Shift right by 4:                     0x60 >> 4   = 0x06
-        // 5. Combine with OR:                      0x50 | 0x06 = 0x56
-        // 6. Place at the next position in `self`: self.nibbles[prev_len + 0] = 0x56
+        // 2. Shift current low nibble left by 4:   (0x45 & 0x0F) << 4 = 0x50
+        // 3. Shift next high nibble right by 4:    (0x60 & 0xF0) >> 4 = 0x06
+        // 4. Combine with OR:                      0x50 | 0x06 = 0x56
+        // 5. Place at the next position in `self`: self.nibbles[prev_len + 0] = 0x56
         for i in 0..other.nibbles.len() - 1 {
             let current = other.nibbles[i];
             let next = other.nibbles[i + 1];
 
-            let low_nibble = current << 4;
-            let high_nibble = (next & 0xF0) >> 4;
+            let high_nibble = (current & 0x0F) << 4;
+            let low_nibble = (next & 0xF0) >> 4;
 
-            self.nibbles[prev_len + i] = low_nibble | high_nibble;
+            self.nibbles[prev_len + i] = high_nibble | low_nibble;
         }
 
         // Handle the last byte based on whether `other` is even or odd.
@@ -337,10 +333,10 @@ impl PackedNibbles {
 
     /// Pushes a single nibble to the end of the nibbles.
     ///
-    /// This will only look at the high nibble of the byte passed, i.e. for `0x02` the nibble `2`
+    /// This will only look at the low nibble of the byte passed, i.e. for `0x02` the nibble `2`
     /// will be pushed.
     ///
-    /// NOTE: if there is data in the low nibble, it will be ignored.
+    /// NOTE: if there is data in the high nibble, it will be ignored.
     pub fn push_unchecked(&mut self, nibble: u8) {
         // If we're empty, we can just push the nibble
         if self.nibbles.is_empty() {
@@ -349,15 +345,15 @@ impl PackedNibbles {
             return
         }
 
-        // We determine whether or not we should push a new low nibble or set the high nibble of
+        // We determine whether or not we should push a new high nibble or set the low nibble of
         // the last byte based on the even value
         if self.even {
-            // Push a new low nibble
+            // Push a new byte with the nibble in the high position
             self.nibbles.push(nibble << 4);
         } else {
             let last = self.nibbles.len() - 1;
 
-            // Set the high nibble of the last byte
+            // Set the low nibble of the last byte
             self.nibbles[last] |= nibble & 0x0F;
         }
 
@@ -415,20 +411,20 @@ impl fmt::Debug for PackedNibbles {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "PackedNibbles(0x")?;
-        
+
         // For all bytes except potentially the last one, print the full byte
         let full_bytes = if self.even { self.nibbles.len() } else { self.nibbles.len() - 1 };
-        
+
         for &byte in &self.nibbles[0..full_bytes] {
             write!(f, "{:02x}", byte)?;
         }
-        
+
         // If odd, print only the high nibble of the last byte
         if !self.even && !self.nibbles.is_empty() {
             let last_byte = self.nibbles[self.nibbles.len() - 1];
             write!(f, "{:x}", (last_byte & 0xF0) >> 4)?;
         }
-        
+
         write!(f, ")")
     }
 }
@@ -446,8 +442,14 @@ impl From<Nibbles> for PackedNibbles {
 
 impl From<PackedNibbles> for Nibbles {
     fn from(packed: PackedNibbles) -> Self {
-        // TODO: this is not correct for odd number of nibbles
-        Self::unpack(packed.nibbles)
+        let len = packed.len();
+        let mut nibbles = Vec::with_capacity(len);
+
+        for i in 0..len {
+            nibbles.push(packed.get_nibble(i));
+        }
+
+        Nibbles::from_nibbles(&nibbles)
     }
 }
 
