@@ -1,10 +1,14 @@
-use core::ops::{Bound, RangeBounds};
+use core::{
+    fmt,
+    ops::{Bound, RangeBounds},
+    slice,
+};
 
 use arrayvec::ArrayVec;
 use reth_trie_common::Nibbles;
 
 /// A representation for nibbles, that uses an even/odd flag.
-#[derive(Clone, PartialEq, Eq, Debug, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct PackedNibbles {
     /// The nibbles themselves, stored as a byte array.
     pub nibbles: ArrayVec<u8, 32>,
@@ -145,9 +149,7 @@ impl PackedNibbles {
     ///
     /// Panics if the position is out of bounds.
     pub fn get_nibble(&self, pos: usize) -> u8 {
-        if pos >= self.len() {
-            panic!("position {} out of bounds (len: {})", pos, self.len());
-        }
+        assert!(pos < self.len(), "position {} out of bounds (len: {})", pos, self.len());
 
         let byte_pos = pos / 2;
         let byte = self.nibbles[byte_pos];
@@ -214,13 +216,9 @@ impl PackedNibbles {
         };
 
         // Check bounds
-        if start > end {
-            panic!("slice start ({}) > end ({})", start, end);
-        }
+        assert!((start <= end), "slice start ({}) > end ({})", start, end);
 
-        if start > len || end > len {
-            panic!("slice bounds out of range (len: {})", len);
-        }
+        assert!(start <= len && end <= len, "slice bounds out of range (len: {})", len);
 
         // Fast path for empty slice
         if start == end {
@@ -268,6 +266,14 @@ impl PackedNibbles {
 
         // We're odd, so we need to merge nibbles one by one
         let prev_len = self.nibbles.len();
+
+        // Reserve space for the new nibbles
+        let new_len = if other.even {
+            prev_len + other.nibbles.len()
+        } else {
+            prev_len + other.nibbles.len() - 1
+        };
+        unsafe { self.nibbles.set_len(new_len) };
 
         // Merge the boundary.
         //
@@ -385,12 +391,15 @@ impl PackedNibbles {
         let current_nibble_count =
             if self.even { self.nibbles.len() * 2 } else { self.nibbles.len() * 2 - 1 };
 
-        if new_len > current_nibble_count {
-            panic!("new_len {} is greater than current length {}", new_len, current_nibble_count);
-        }
+        assert!(
+            new_len <= current_nibble_count,
+            "new_len {} is greater than current length {}",
+            new_len,
+            current_nibble_count
+        );
 
         // Calculate new array length - ceiling division for odd lengths
-        let new_array_len = (new_len + 1) / 2;
+        let new_array_len = new_len.div_ceil(2);
 
         // Update even flag based on the new length
         self.even = new_len % 2 == 0;
@@ -402,11 +411,36 @@ impl PackedNibbles {
     }
 }
 
+impl fmt::Debug for PackedNibbles {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "PackedNibbles(0x")?;
+        
+        // For all bytes except potentially the last one, print the full byte
+        let full_bytes = if self.even { self.nibbles.len() } else { self.nibbles.len() - 1 };
+        
+        for &byte in &self.nibbles[0..full_bytes] {
+            write!(f, "{:02x}", byte)?;
+        }
+        
+        // If odd, print only the high nibble of the last byte
+        if !self.even && !self.nibbles.is_empty() {
+            let last_byte = self.nibbles[self.nibbles.len() - 1];
+            write!(f, "{:x}", (last_byte & 0xF0) >> 4)?;
+        }
+        
+        write!(f, ")")
+    }
+}
+
 impl From<Nibbles> for PackedNibbles {
     fn from(nibbles: Nibbles) -> Self {
-        let mut packed = ArrayVec::new();
-        nibbles.pack_to(&mut packed);
-        Self { even: nibbles.len() % 2 == 0, nibbles: packed }
+        let mut packed = Self::default();
+        // TODO: this is inefficient
+        for b in nibbles.iter().copied() {
+            packed.push_unchecked(b);
+        }
+        packed
     }
 }
 

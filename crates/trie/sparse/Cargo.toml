@@ -25,6 +25,7 @@ alloy-rlp.workspace = true
 # misc
 arrayvec = "0.7"
 auto_impl.workspace = true
+const-hex = "1.14"
 nybbles.workspace = true
 smallvec = { workspace = true, features = ["const_new"] }
 

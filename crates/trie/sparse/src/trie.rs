@@ -22,7 +22,7 @@ use reth_trie_common::{
     EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
-use tracing::trace;
+use tracing::{info, trace};
 
 /// Struct for passing around branch node mask information.
 ///
