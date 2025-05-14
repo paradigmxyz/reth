@@ -11,7 +11,6 @@ use reth_engine_tree::{
     tree::TreeConfig,
 };
 use reth_engine_util::EngineMessageStreamExt;
-use reth_evm::{block::BlockExecutorFactory, ConfigureEvm, EvmFactory};
 use reth_exex::ExExManagerHandle;
 use reth_network::{NetworkSyncUpdater, SyncState};
 use reth_network_api::BlockDownloaderProvider;
@@ -29,7 +28,7 @@ use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
-use std::{hash::Hash, sync::Arc};
+use std::sync::Arc;
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -79,7 +78,6 @@ where
     LocalPayloadAttributesBuilder<Types::ChainSpec>: PayloadAttributesBuilder<
         <<Types as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
     >,
-    <<<<<CB as NodeComponentsBuilder<T>>::Components as NodeComponents<T>>::Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::EvmFactory as EvmFactory>::Spec: Hash + Eq + Default
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
 

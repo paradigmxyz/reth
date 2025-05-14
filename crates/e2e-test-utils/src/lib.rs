@@ -5,7 +5,6 @@ use reth_chainspec::{ChainSpec, EthChainSpec};
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_network_api::test_utils::PeersHandleProvider;
-use reth_node_api::ConfigureEvm;
 use reth_node_builder::{
     components::NodeComponentsBuilder,
     rpc::{EngineValidatorAddOn, RethRpcAddOns},
@@ -17,7 +16,7 @@ use reth_node_core::args::{DiscoveryArgs, NetworkArgs, RpcServerArgs};
 use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::TaskManager;
-use std::{hash::Hash, sync::Arc};
+use std::sync::Arc;
 use tracing::{span, Level};
 use wallet::Wallet;
 
@@ -222,11 +221,6 @@ where
                 TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
                 Components: NodeComponents<
                     TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
-                    Evm: ConfigureEvm<
-                        BlockExecutorFactory: BlockExecutorFactory<
-                            EvmFactory: EvmFactory<Spec: Hash + Eq + Default>,
-                        >,
-                    >,
                     Network: PeersHandleProvider,
                 >,
             >,
@@ -261,11 +255,6 @@ where
                 TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
                 Components: NodeComponents<
                     TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
-                    Evm: ConfigureEvm<
-                        BlockExecutorFactory: BlockExecutorFactory<
-                            EvmFactory: EvmFactory<Spec: Hash + Eq + Default>,
-                        >,
-                    >,
                     Network: PeersHandleProvider,
                 >,
             >,

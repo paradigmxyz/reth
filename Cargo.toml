@@ -740,3 +740,4 @@ jsonrpsee-core = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "m
 jsonrpsee-server = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
 jsonrpsee-http-client = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
 jsonrpsee-types = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
+alloy-evm = { git = "https://github.com/alloy-rs/alloy-evm", rev = "43a9151b14383b7f78dfe5f01e702ede3701ed9a"}
