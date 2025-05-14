@@ -247,15 +247,9 @@ impl PackedNibbles {
             return
         }
 
-        if self.nibbles.is_empty() {
-            // If we're empty, we can just use the `other` nibbles
-            self.nibbles.copy_from_slice(&other.nibbles);
-            self.even = other.even;
-            return
-        }
-
-        if self.even {
-            // If we're even, we can just extend the nibbles with `other` and update the even flag
+        if self.nibbles.is_empty() || self.even {
+            // If we're empty or even, we can just extend the nibbles with `other` and update the
+            // even flag
             self.nibbles.try_extend_from_slice(&other.nibbles).expect("nibbles length is 32");
             self.even = other.even;
             return
@@ -449,7 +443,7 @@ impl From<PackedNibbles> for Nibbles {
             nibbles.push(packed.get_nibble(i));
         }
 
-        Nibbles::from_nibbles(&nibbles)
+        Self::from_nibbles(&nibbles)
     }
 }
 
@@ -461,22 +455,24 @@ impl PartialOrd for PackedNibbles {
 
 impl Ord for PackedNibbles {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        // First compare the nibbles arrays
-        let nibbles_ordering = self.nibbles.cmp(&other.nibbles);
+        // Get the lengths of both nibble sequences
+        let self_len = self.len();
+        let other_len = other.len();
 
-        // If the nibbles are equal, use the even flag to break the tie
-        // When even flags are the same, the ordering is already determined by nibbles
-        // When even flags differ, we need special handling
-        if nibbles_ordering == core::cmp::Ordering::Equal && self.even != other.even {
-            // For two otherwise identical sequences, the even one is "less than" the odd one
-            // because the odd one has an implicit trailing 0 nibble
-            if self.even {
-                core::cmp::Ordering::Less
-            } else {
-                core::cmp::Ordering::Greater
+        // Compare nibbles one by one until a difference is found
+        let min_len = core::cmp::min(self_len, other_len);
+        for i in 0..min_len {
+            let self_nibble = self.get_nibble(i);
+            let other_nibble = other.get_nibble(i);
+
+            match self_nibble.cmp(&other_nibble) {
+                core::cmp::Ordering::Equal => {}
+                ordering => return ordering,
             }
-        } else {
-            nibbles_ordering
         }
+
+        // If we've compared all nibbles and they're equal up to the min length,
+        // the shorter sequence comes first
+        self_len.cmp(&other_len)
     }
 }

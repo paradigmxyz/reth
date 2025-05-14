@@ -174,8 +174,7 @@ where
                 }
             }
 
-            let root = storage_trie.root();
-            tracing::info!(target: "engine::root::sparse", ?address, ?root, "Storage trie root");
+            storage_trie.root();
 
             SparseStateTrieResult::Ok((address, storage_trie))
         })
