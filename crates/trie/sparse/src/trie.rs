@@ -1978,8 +1978,7 @@ pub struct RlpNodeBuffers {
 impl RlpNodeBuffers {
     /// Clears the buffers and inserts the root path on the stack.
     ///
-    /// The difference from creating a new instance using `Self::new_with_root_path()` is that this
-    /// method reuses the existing buffers, avoiding unnecessary allocations.
+    /// This method reuses existing buffers, avoiding unnecessary allocations.
     fn clear_with_root_path(&mut self) {
         self.path_stack.clear();
         self.path_stack.push(RlpNodePathStackItem {
