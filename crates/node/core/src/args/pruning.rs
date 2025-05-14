@@ -98,20 +98,6 @@ impl PruningArgs {
 
         // If --full is set, use full node defaults.
         if self.full {
-            let receipts_log_filter = self
-                .receipts_log_filter
-                .clone()
-                // we keep deposit contract logs by default
-                .unwrap_or_else(|| {
-                    ReceiptsLogPruneConfig(
-                        chain_spec
-                            .deposit_contract()
-                            .map(|contract| (contract.address, PruneMode::Before(contract.block)))
-                            .into_iter()
-                            .collect(),
-                    )
-                });
-
             config = PruneConfig {
                 block_interval: config.block_interval,
                 segments: PruneModes {
@@ -119,14 +105,19 @@ impl PruningArgs {
                     transaction_lookup: None,
                     // prune all receipts if chain doesn't have deposit contract specified in chain
                     // spec
-                    // TODO: what to do here
                     receipts: chain_spec
                         .deposit_contract()
                         .map(|contract| PruneMode::Before(contract.block))
                         .or(Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE))),
                     account_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
                     storage_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
-                    receipts_log_filter,
+                    receipts_log_filter: ReceiptsLogPruneConfig(
+                        chain_spec
+                            .deposit_contract()
+                            .map(|contract| (contract.address, PruneMode::Before(contract.block)))
+                            .into_iter()
+                            .collect(),
+                    ),
                 },
             }
         }
@@ -149,6 +140,9 @@ impl PruningArgs {
         }
         if let Some(mode) = self.storage_history_prune_mode() {
             config.segments.storage_history = Some(mode);
+        }
+        if let Some(receipt_logs) = self.receipts_log_filter.clone() {
+            config.segments.receipts_log_filter = receipt_logs;
         }
 
         Some(config)
