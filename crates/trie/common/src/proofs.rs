@@ -413,7 +413,7 @@ impl DecodedMultiProof {
         }
     }
 
-    /// Create a [`MultiProof`] from a [`DecodedStorageMultiProof`].
+    /// Create a [`DecodedMultiProof`] from a [`DecodedStorageMultiProof`].
     pub fn from_storage_proof(
         hashed_address: B256,
         storage_proof: DecodedStorageMultiProof,

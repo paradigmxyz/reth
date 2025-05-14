@@ -310,7 +310,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     /// Reveals an account multiproof.
     pub fn reveal_account_multiproof(
         &mut self,
-        account_subtree: alloy_trie::proof::DecodedProofNodes,
+        account_subtree: DecodedProofNodes,
         branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
         branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
     ) -> SparseStateTrieResult<()> {
