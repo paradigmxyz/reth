@@ -74,7 +74,7 @@ impl EthBuiltPayload {
         &self.sidecars
     }
 
-    /// Same as [`Self::extend_sidecars`] but returns the type again.
+    /// Sets blob transactions sidecars on the payload.
     pub fn with_sidecars(mut self, sidecars: impl Into<BlobSidecars>) -> Self {
         self.sidecars = sidecars.into();
         self

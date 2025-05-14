@@ -12,7 +12,7 @@
 extern crate alloc;
 
 mod payload;
-pub use payload::{EthBuiltPayload, EthPayloadBuilderAttributes};
+pub use payload::{BlobSidecars, EthBuiltPayload, EthPayloadBuilderAttributes};
 
 mod error;
 pub use error::*;
