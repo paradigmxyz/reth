@@ -86,8 +86,8 @@ pub struct PruningArgs {
     /// Configure receipts log filter. Format:
     /// <`address`>:<`prune_mode`>[,<`address`>:<`prune_mode`>...] Where <`prune_mode`> can be
     /// 'full', 'distance:<`blocks`>', or 'before:<`block_number`>'
-    #[arg(long = "prune.receiptslogfilter", value_name = "FILTER_CONFIG", value_delimiter = ',', value_parser = parse_receipts_log_filter)]
-    pub receipts_log_filter: Vec<String>,
+    #[arg(long = "prune.receiptslogfilter", value_name = "FILTER_CONFIG", value_parser = parse_receipts_log_filter)]
+    pub receipts_log_filter: Option<ReceiptsLogPruneConfig>,
 }
 
 impl PruningArgs {
@@ -98,6 +98,20 @@ impl PruningArgs {
 
         // If --full is set, use full node defaults.
         if self.full {
+            let receipts_log_filter = self
+                .receipts_log_filter
+                .clone()
+                // we keep deposit contract logs by default
+                .unwrap_or_else(|| {
+                    ReceiptsLogPruneConfig(
+                        chain_spec
+                            .deposit_contract()
+                            .map(|contract| (contract.address, PruneMode::Before(contract.block)))
+                            .into_iter()
+                            .collect(),
+                    )
+                });
+
             config = PruneConfig {
                 block_interval: config.block_interval,
                 segments: PruneModes {
@@ -105,19 +119,14 @@ impl PruningArgs {
                     transaction_lookup: None,
                     // prune all receipts if chain doesn't have deposit contract specified in chain
                     // spec
+                    // TODO: what to do here
                     receipts: chain_spec
                         .deposit_contract()
                         .map(|contract| PruneMode::Before(contract.block))
                         .or(Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE))),
                     account_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
                     storage_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
-                    receipts_log_filter: ReceiptsLogPruneConfig(
-                        chain_spec
-                            .deposit_contract()
-                            .map(|contract| (contract.address, PruneMode::Before(contract.block)))
-                            .into_iter()
-                            .collect(),
-                    ),
+                    receipts_log_filter,
                 },
             }
         }
@@ -144,6 +153,7 @@ impl PruningArgs {
 
         Some(config)
     }
+
     const fn sender_recovery_prune_mode(&self) -> Option<PruneMode> {
         if self.sender_recovery_full {
             Some(PruneMode::Full)
@@ -205,6 +215,7 @@ impl PruningArgs {
     }
 }
 
+/// Parses `,` separated pruning info into [`ReceiptsLogPruneConfig`].
 pub(crate) fn parse_receipts_log_filter(
     value: &str,
 ) -> Result<ReceiptsLogPruneConfig, ReceiptsLogError> {
@@ -236,9 +247,8 @@ pub(crate) fn parse_receipts_log_filter(
                 if parts.len() < 3 {
                     return Err(ReceiptsLogError::InvalidFilterFormat(filter.to_string()));
                 }
-                let block_number = parts[2]
-                    .parse::<BlockNumber>()
-                    .map_err(ReceiptsLogError::InvalidBlockNumber)?;
+                let block_number =
+                    parts[2].parse::<u64>().map_err(ReceiptsLogError::InvalidBlockNumber)?;
                 PruneMode::Before(block_number)
             }
             _ => return Err(ReceiptsLogError::InvalidPruneMode(parts[1].to_string())),
@@ -251,6 +261,7 @@ pub(crate) fn parse_receipts_log_filter(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::address;
     use clap::Parser;
 
     /// A helper type to parse Args more easily
@@ -262,6 +273,22 @@ mod tests {
 
     #[test]
     fn pruning_args_sanity_check() {
+        let args = CommandParser::<PruningArgs>::parse_from([
+            "reth",
+            "--prune.receiptslogfilter",
+            "0x0000000000000000000000000000000000000003:before:5000000",
+        ])
+        .args;
+        let mut config = ReceiptsLogPruneConfig::default();
+        config.0.insert(
+            address!("0x0000000000000000000000000000000000000003"),
+            PruneMode::Before(5000000),
+        );
+        assert_eq!(args.receipts_log_filter, Some(config));
+    }
+
+    #[test]
+    fn parse_receiptslogfilter() {
         let default_args = PruningArgs::default();
         let args = CommandParser::<PruningArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
