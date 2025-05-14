@@ -380,13 +380,14 @@ where
     }
 }
 
-/// Action that check whether broadcasted new payload has been accepted
+/// Action that checks whether the broadcasted new payload has been accepted
 #[derive(Debug, Default)]
 pub struct CheckPayloadAccepted {}
 
 impl<Engine> Action<Engine> for CheckPayloadAccepted
 where
-    Engine: EngineTypes + PayloadTypes<PayloadAttributes = PayloadAttributes>,
+    Engine: EngineTypes<ExecutionPayloadEnvelopeV3 = ExecutionPayloadEnvelopeV3>
+        + PayloadTypes<PayloadAttributes = PayloadAttributes>,
     ExecutionPayloadEnvelopeV3: From<<Engine as EngineTypes>::ExecutionPayloadEnvelopeV3>,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
@@ -398,11 +399,10 @@ where
                 .as_mut()
                 .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
 
-            let payload_id = env
+            let payload_id = *env
                 .payload_id_history
                 .get(&(latest_block.number + 1))
-                .ok_or_else(|| eyre::eyre!("Cannot find payload_id"))?
-                .clone();
+                .ok_or_else(|| eyre::eyre!("Cannot find payload_id"))?;
 
             for (idx, client) in env.node_clients.iter().enumerate() {
                 let rpc_client = &client.rpc;
@@ -425,7 +425,7 @@ where
                 let built_payload =
                     EngineApiClient::<Engine>::get_payload_v3(&client.engine, payload_id).await?;
 
-                let execution_payload_envelope: ExecutionPayloadEnvelopeV3 = built_payload.into();
+                let execution_payload_envelope: ExecutionPayloadEnvelopeV3 = built_payload;
                 let new_payload_block_hash = execution_payload_envelope
                     .execution_payload
                     .payload_inner
@@ -457,7 +457,7 @@ where
                 }
 
                 let extra_len = rpc_latest_header.inner.extra_data.len();
-                if extra_len <= 32 as usize {
+                if extra_len <= 32 {
                     debug!("Client {}: extra_len is fewer than 32. extra_len: {}", idx, extra_len);
                     continue;
                 }
