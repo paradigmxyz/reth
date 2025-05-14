@@ -3,7 +3,7 @@ use crate::{
     transaction::signed::{RecoveryError, SignedTransaction},
 };
 use alloc::vec::Vec;
-use alloy_consensus::Transaction;
+use alloy_consensus::{transaction::SignerRecoverable, Transaction};
 use alloy_eips::{
     eip2718::{Eip2718Error, Eip2718Result, IsTyped2718},
     eip2930::AccessList,
@@ -13,15 +13,6 @@ use alloy_eips::{
 use alloy_primitives::{ChainId, TxHash};
 use alloy_rlp::{BufMut, Decodable, Encodable, Result as RlpResult};
 use revm_primitives::{Address, Bytes, TxKind, B256, U256};
-
-#[cfg(feature = "op")]
-use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope};
-
-#[cfg(feature = "op")]
-use alloy_primitives::Signature;
-
-#[cfg(feature = "op")]
-use alloy_consensus::error::ValueError;
 
 macro_rules! delegate {
     ($self:expr => $tx:ident.$method:ident($($arg:expr),*)) => {
@@ -46,49 +37,6 @@ pub enum ExtendedTxEnvelope<BuiltIn, Other> {
     BuiltIn(BuiltIn),
     /// The other transaction type.
     Other(Other),
-}
-
-#[cfg(feature = "op")]
-impl<Tx> TryFrom<ExtendedTxEnvelope<OpTxEnvelope, Tx>>
-    for ExtendedTxEnvelope<OpPooledTransaction, Tx>
-{
-    type Error = OpTxEnvelope;
-
-    fn try_from(value: ExtendedTxEnvelope<OpTxEnvelope, Tx>) -> Result<Self, Self::Error> {
-        match value {
-            ExtendedTxEnvelope::BuiltIn(tx) => {
-                let converted_tx: OpPooledTransaction = tx.clone().try_into().map_err(|_| tx)?;
-                Ok(Self::BuiltIn(converted_tx))
-            }
-            ExtendedTxEnvelope::Other(tx) => Ok(Self::Other(tx)),
-        }
-    }
-}
-
-#[cfg(feature = "op")]
-impl<Tx> From<OpPooledTransaction> for ExtendedTxEnvelope<OpTxEnvelope, Tx> {
-    fn from(tx: OpPooledTransaction) -> Self {
-        Self::BuiltIn(tx.into())
-    }
-}
-
-#[cfg(feature = "op")]
-impl<Tx> TryFrom<ExtendedTxEnvelope<OpTxEnvelope, Tx>> for OpPooledTransaction {
-    type Error = ValueError<OpTxEnvelope>;
-
-    fn try_from(_tx: ExtendedTxEnvelope<OpTxEnvelope, Tx>) -> Result<Self, Self::Error> {
-        match _tx {
-            ExtendedTxEnvelope::BuiltIn(inner) => inner.try_into(),
-            ExtendedTxEnvelope::Other(_tx) => Err(ValueError::new(
-                OpTxEnvelope::Legacy(alloy_consensus::Signed::new_unchecked(
-                    alloy_consensus::TxLegacy::default(),
-                    Signature::decode_rlp_vrs(&mut &[0u8; 65][..], |_| Ok(false)).unwrap(),
-                    B256::default(),
-                )),
-                "Cannot convert custom transaction to OpPooledTransaction",
-            )),
-        }
-    }
 }
 
 impl<B, T> Transaction for ExtendedTxEnvelope<B, T>
@@ -188,6 +136,20 @@ where
     }
 }
 
+impl<B, T> SignerRecoverable for ExtendedTxEnvelope<B, T>
+where
+    B: SignedTransaction + IsTyped2718,
+    T: SignedTransaction,
+{
+    fn recover_signer(&self) -> Result<Address, RecoveryError> {
+        delegate!(self => tx.recover_signer())
+    }
+
+    fn recover_signer_unchecked(&self) -> Result<Address, RecoveryError> {
+        delegate!(self => tx.recover_signer_unchecked())
+    }
+}
+
 impl<B, T> SignedTransaction for ExtendedTxEnvelope<B, T>
 where
     B: SignedTransaction + IsTyped2718,
@@ -198,14 +160,6 @@ where
             Self::BuiltIn(tx) => tx.tx_hash(),
             Self::Other(tx) => tx.tx_hash(),
         }
-    }
-
-    fn recover_signer(&self) -> Result<Address, RecoveryError> {
-        delegate!(self => tx.recover_signer())
-    }
-
-    fn recover_signer_unchecked(&self) -> Result<Address, RecoveryError> {
-        delegate!(self => tx.recover_signer_unchecked())
     }
 
     fn recover_signer_unchecked_with_buf(
@@ -304,6 +258,55 @@ where
             Err(_) => {
                 *buf = original;
                 T::decode(buf).map(Self::Other)
+            }
+        }
+    }
+}
+
+#[cfg(feature = "op")]
+mod op {
+    use crate::ExtendedTxEnvelope;
+    use alloy_consensus::error::ValueError;
+    use alloy_primitives::{Signature, B256};
+    use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope};
+
+    impl<Tx> TryFrom<ExtendedTxEnvelope<OpTxEnvelope, Tx>>
+        for ExtendedTxEnvelope<OpPooledTransaction, Tx>
+    {
+        type Error = OpTxEnvelope;
+
+        fn try_from(value: ExtendedTxEnvelope<OpTxEnvelope, Tx>) -> Result<Self, Self::Error> {
+            match value {
+                ExtendedTxEnvelope::BuiltIn(tx) => {
+                    let converted_tx: OpPooledTransaction =
+                        tx.clone().try_into().map_err(|_| tx)?;
+                    Ok(Self::BuiltIn(converted_tx))
+                }
+                ExtendedTxEnvelope::Other(tx) => Ok(Self::Other(tx)),
+            }
+        }
+    }
+
+    impl<Tx> From<OpPooledTransaction> for ExtendedTxEnvelope<OpTxEnvelope, Tx> {
+        fn from(tx: OpPooledTransaction) -> Self {
+            Self::BuiltIn(tx.into())
+        }
+    }
+
+    impl<Tx> TryFrom<ExtendedTxEnvelope<OpTxEnvelope, Tx>> for OpPooledTransaction {
+        type Error = ValueError<OpTxEnvelope>;
+
+        fn try_from(_tx: ExtendedTxEnvelope<OpTxEnvelope, Tx>) -> Result<Self, Self::Error> {
+            match _tx {
+                ExtendedTxEnvelope::BuiltIn(inner) => inner.try_into(),
+                ExtendedTxEnvelope::Other(_tx) => Err(ValueError::new(
+                    OpTxEnvelope::Legacy(alloy_consensus::Signed::new_unchecked(
+                        alloy_consensus::TxLegacy::default(),
+                        Signature::decode_rlp_vrs(&mut &[0u8; 65][..], |_| Ok(false)).unwrap(),
+                        B256::default(),
+                    )),
+                    "Cannot convert custom transaction to OpPooledTransaction",
+                )),
             }
         }
     }

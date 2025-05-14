@@ -555,8 +555,6 @@ Builder:
       --builder.gaslimit <GAS_LIMIT>
           Target gas limit for built blocks
 
-          [default: 36000000]
-
       --builder.interval <DURATION>
           The interval at which the job should build a new payload after the last.
 
@@ -763,6 +761,9 @@ Engine:
           Configure the number of reserved CPU cores for non-reth processes
 
           [default: 1]
+
+      --engine.precompile-cache
+          Enable precompile cache
 
 Ress:
       --ress.enable

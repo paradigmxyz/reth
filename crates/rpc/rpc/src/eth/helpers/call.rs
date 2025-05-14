@@ -5,6 +5,7 @@ use alloy_consensus::TxType;
 use alloy_evm::block::BlockExecutorFactory;
 use alloy_primitives::{TxKind, U256};
 use alloy_rpc_types::TransactionRequest;
+use alloy_signer::Either;
 use reth_evm::{ConfigureEvm, EvmEnv, EvmFactory, SpecFor};
 use reth_node_api::NodePrimitives;
 use reth_rpc_eth_api::{
@@ -59,7 +60,10 @@ where
 
         let tx_type = if request.authorization_list.is_some() {
             TxType::Eip7702
-        } else if request.sidecar.is_some() || request.max_fee_per_blob_gas.is_some() {
+        } else if request.sidecar.is_some() ||
+            request.blob_versioned_hashes.is_some() ||
+            request.max_fee_per_blob_gas.is_some()
+        {
             TxType::Eip4844
         } else if request.max_fee_per_gas.is_some() || request.max_priority_fee_per_gas.is_some() {
             TxType::Eip1559
@@ -139,7 +143,11 @@ where
                 .map(|v| v.saturating_to())
                 .unwrap_or_default(),
             // EIP-7702 fields
-            authorization_list: authorization_list.unwrap_or_default(),
+            authorization_list: authorization_list
+                .unwrap_or_default()
+                .into_iter()
+                .map(Either::Left)
+                .collect(),
         };
 
         Ok(env)

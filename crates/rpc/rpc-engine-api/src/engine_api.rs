@@ -32,7 +32,7 @@ use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use std::{sync::Arc, time::Instant};
 use tokio::sync::oneshot;
-use tracing::{trace, warn};
+use tracing::{debug, trace, warn};
 
 /// The Engine API response sender.
 pub type EngineApiSender<Ok> = oneshot::Sender<EngineApiResult<Ok>>;
@@ -977,7 +977,7 @@ where
         &self,
         payload_id: PayloadId,
     ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV2> {
-        trace!(target: "rpc::engine", "Serving engine_getPayloadV2");
+        debug!(target: "rpc::engine", id = %payload_id, "Serving engine_getPayloadV2");
         Ok(self.get_payload_v2_metered(payload_id).await?)
     }
 

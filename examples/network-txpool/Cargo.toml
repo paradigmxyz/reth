@@ -6,7 +6,6 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-alloy-consensus.workspace = true
 reth-ethereum = { workspace = true, features = ["test-utils", "network", "pool", "provider"] }
 eyre.workspace = true
 tokio.workspace = true

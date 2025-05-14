@@ -1,6 +1,6 @@
 use super::OpNodeCore;
 use crate::{OpEthApi, OpEthApiError};
-use alloy_consensus::TxType;
+use alloy_consensus::{transaction::Either, TxType};
 use alloy_primitives::{Bytes, TxKind, U256};
 use alloy_rpc_types_eth::transaction::TransactionRequest;
 use op_revm::OpTransaction;
@@ -69,7 +69,10 @@ where
 
         let tx_type = if request.authorization_list.is_some() {
             TxType::Eip7702
-        } else if request.sidecar.is_some() || request.max_fee_per_blob_gas.is_some() {
+        } else if request.sidecar.is_some() ||
+            request.blob_versioned_hashes.is_some() ||
+            request.max_fee_per_blob_gas.is_some()
+        {
             TxType::Eip4844
         } else if request.max_fee_per_gas.is_some() || request.max_priority_fee_per_gas.is_some() {
             TxType::Eip1559
@@ -149,7 +152,11 @@ where
                 .map(|v| v.saturating_to())
                 .unwrap_or_default(),
             // EIP-7702 fields
-            authorization_list: authorization_list.unwrap_or_default(),
+            authorization_list: authorization_list
+                .unwrap_or_default()
+                .into_iter()
+                .map(Either::Left)
+                .collect(),
         };
 
         Ok(OpTransaction { base, enveloped_tx: Some(Bytes::new()), deposit: Default::default() })

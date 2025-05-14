@@ -3,7 +3,7 @@
 use alloy_consensus::BlockHeader;
 use alloy_primitives::TxHash;
 use alloy_rpc_types_eth::{
-    BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
+    BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, Log,
     PendingTransactionFilterKind,
 };
 use async_trait::async_trait;
@@ -443,7 +443,7 @@ where
                     maybe_block
                         .map(ProviderOrBlock::Block)
                         .unwrap_or_else(|| ProviderOrBlock::Provider(self.provider())),
-                    &FilteredParams::new(Some(filter)),
+                    &filter,
                     block_num_hash,
                     &receipts,
                     false,
@@ -518,11 +518,6 @@ where
         }
 
         let mut all_logs = Vec::new();
-        let filter_params = FilteredParams::new(Some(filter.clone()));
-
-        // derive bloom filters from filter input, so we can check headers for matching logs
-        let address_filter = FilteredParams::address_filter(&filter.address);
-        let topics_filter = FilteredParams::topics_filter(&filter.topics);
 
         // loop over the range of new blocks and check logs if the filter matches the log's bloom
         // filter
@@ -530,49 +525,47 @@ where
             BlockRangeInclusiveIter::new(from_block..=to_block, self.max_headers_range)
         {
             let headers = self.provider().headers_range(from..=to)?;
+            for (idx, header) in headers
+                .iter()
+                .enumerate()
+                .filter(|(_, header)| filter.matches_bloom(header.logs_bloom()))
+            {
+                // these are consecutive headers, so we can use the parent hash of the next
+                // block to get the current header's hash
+                let block_hash = match headers.get(idx + 1) {
+                    Some(child) => child.parent_hash(),
+                    None => self
+                        .provider()
+                        .block_hash(header.number())?
+                        .ok_or_else(|| ProviderError::HeaderNotFound(header.number().into()))?,
+                };
 
-            for (idx, header) in headers.iter().enumerate() {
-                // only if filter matches
-                if FilteredParams::matches_address(header.logs_bloom(), &address_filter) &&
-                    FilteredParams::matches_topics(header.logs_bloom(), &topics_filter)
+                let num_hash = BlockNumHash::new(header.number(), block_hash);
+                if let Some((receipts, maybe_block)) =
+                    self.eth_cache().get_receipts_and_maybe_block(num_hash.hash).await?
                 {
-                    // these are consecutive headers, so we can use the parent hash of the next
-                    // block to get the current header's hash
-                    let block_hash = match headers.get(idx + 1) {
-                        Some(child) => child.parent_hash(),
-                        None => self
-                            .provider()
-                            .block_hash(header.number())?
-                            .ok_or_else(|| ProviderError::HeaderNotFound(header.number().into()))?,
-                    };
+                    append_matching_block_logs(
+                        &mut all_logs,
+                        maybe_block
+                            .map(ProviderOrBlock::Block)
+                            .unwrap_or_else(|| ProviderOrBlock::Provider(self.provider())),
+                        filter,
+                        num_hash,
+                        &receipts,
+                        false,
+                        header.timestamp(),
+                    )?;
 
-                    let num_hash = BlockNumHash::new(header.number(), block_hash);
-                    if let Some((receipts, maybe_block)) =
-                        self.eth_cache().get_receipts_and_maybe_block(num_hash.hash).await?
-                    {
-                        append_matching_block_logs(
-                            &mut all_logs,
-                            maybe_block
-                                .map(ProviderOrBlock::Block)
-                                .unwrap_or_else(|| ProviderOrBlock::Provider(self.provider())),
-                            &filter_params,
-                            num_hash,
-                            &receipts,
-                            false,
-                            header.timestamp(),
-                        )?;
-
-                        // size check but only if range is multiple blocks, so we always return all
-                        // logs of a single block
-                        let is_multi_block_range = from_block != to_block;
-                        if let Some(max_logs_per_response) = limits.max_logs_per_response {
-                            if is_multi_block_range && all_logs.len() > max_logs_per_response {
-                                return Err(EthFilterError::QueryExceedsMaxResults {
-                                    max_logs: max_logs_per_response,
-                                    from_block,
-                                    to_block: num_hash.number.saturating_sub(1),
-                                });
-                            }
+                    // size check but only if range is multiple blocks, so we always return all
+                    // logs of a single block
+                    let is_multi_block_range = from_block != to_block;
+                    if let Some(max_logs_per_response) = limits.max_logs_per_response {
+                        if is_multi_block_range && all_logs.len() > max_logs_per_response {
+                            return Err(EthFilterError::QueryExceedsMaxResults {
+                                max_logs: max_logs_per_response,
+                                from_block,
+                                to_block: num_hash.number.saturating_sub(1),
+                            });
                         }
                     }
                 }
