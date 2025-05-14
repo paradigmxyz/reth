@@ -465,11 +465,10 @@ impl Ord for PackedNibbles {
 
         // Compare bytes one by one until a difference is found
         let min_len = core::cmp::min(self_len, other_len);
-        for i in 0..min_len {
-            let self_byte = self.nibbles[i];
-            let other_byte = other.nibbles[i];
-
-            match self_byte.cmp(&other_byte) {
+        for (i, (self_byte, other_byte)) in
+            self.nibbles.iter().zip(other.nibbles.iter()).enumerate()
+        {
+            match self_byte.cmp(other_byte) {
                 core::cmp::Ordering::Equal => {
                     if i == min_len - 1 && self_len == other_len {
                         // If it's the last byte of both sequences, compare the parity
