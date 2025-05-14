@@ -117,9 +117,17 @@ impl<C> TrieWalker<C> {
         self.stack.last().map(|n| n.full_key())
     }
 
-    /// Returns the current hash in the trie if any.
+    /// Returns the current hash in the trie, if any.
     pub fn hash(&self) -> Option<B256> {
         self.stack.last().and_then(|n| n.hash())
+    }
+
+    /// Returns the current hash in the trie, if any.
+    ///
+    /// Differs from [`Self::hash`] in that it returns `None` if the subnode is positioned at the
+    /// child without a hash mask bit set. [`Self::hash`] panics in that case.
+    pub fn maybe_hash(&self) -> Option<B256> {
+        self.stack.last().and_then(|n| n.maybe_hash())
     }
 
     /// Indicates whether the children of the current node are present in the trie.
