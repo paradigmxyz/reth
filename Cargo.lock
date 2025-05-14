@@ -651,7 +651,7 @@ dependencies = [
  "derive_more",
  "ethereum_ssz",
  "ethereum_ssz_derive",
- "jsonrpsee-types",
+ "jsonrpsee-types 0.25.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "jsonwebtoken",
  "rand 0.8.5",
  "serde",
@@ -674,7 +674,7 @@ dependencies = [
  "alloy-sol-types",
  "arbitrary",
  "itertools 0.14.0",
- "jsonrpsee-types",
+ "jsonrpsee-types 0.25.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde",
  "serde_json",
  "thiserror 2.0.12",
@@ -3402,7 +3402,7 @@ dependencies = [
  "async-trait",
  "derive_more",
  "eyre",
- "jsonrpsee",
+ "jsonrpsee 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
  "modular-bitfield",
  "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
@@ -3548,7 +3548,7 @@ name = "example-node-custom-rpc"
 version = "0.0.0"
 dependencies = [
  "clap",
- "jsonrpsee",
+ "jsonrpsee 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
  "reth-ethereum",
  "serde_json",
  "tokio",
@@ -3597,7 +3597,7 @@ version = "0.0.0"
 dependencies = [
  "eyre",
  "futures",
- "jsonrpsee",
+ "jsonrpsee 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
  "reth",
  "reth-ethereum",
  "tokio",
@@ -3623,7 +3623,7 @@ dependencies = [
  "clap",
  "eyre",
  "futures",
- "jsonrpsee",
+ "jsonrpsee 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
  "reth-ethereum",
  "serde",
  "serde_json",
@@ -4946,12 +4946,23 @@ version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fba77a59c4c644fd48732367624d1bcf6f409f9c9a286fbc71d2f1fc0b2ea16"
 dependencies = [
+ "jsonrpsee-core 0.25.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "jsonrpsee-proc-macros 0.25.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "jsonrpsee-types 0.25.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tracing",
+]
+
+[[package]]
+name = "jsonrpsee"
+version = "0.25.1"
+source = "git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub#720591fd2697576ab80267bfe90352c412125547"
+dependencies = [
  "jsonrpsee-client-transport",
- "jsonrpsee-core",
+ "jsonrpsee-core 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
  "jsonrpsee-http-client",
- "jsonrpsee-proc-macros",
+ "jsonrpsee-proc-macros 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
  "jsonrpsee-server",
- "jsonrpsee-types",
+ "jsonrpsee-types 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
  "jsonrpsee-wasm-client",
  "jsonrpsee-ws-client",
  "tokio",
@@ -4961,15 +4972,14 @@ dependencies = [
 [[package]]
 name = "jsonrpsee-client-transport"
 version = "0.25.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2a320a3f1464e4094f780c4d48413acd786ce5627aaaecfac9e9c7431d13ae1"
+source = "git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub#720591fd2697576ab80267bfe90352c412125547"
 dependencies = [
  "base64 0.22.1",
  "futures-channel",
  "futures-util",
  "gloo-net",
  "http",
- "jsonrpsee-core",
+ "jsonrpsee-core 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
  "pin-project",
  "rustls",
  "rustls-pki-types",
@@ -4990,13 +5000,34 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "693c93cbb7db25f4108ed121304b671a36002c2db67dff2ee4391a688c738547"
 dependencies = [
  "async-trait",
+ "futures-util",
+ "http",
+ "jsonrpsee-types 0.25.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "parking_lot",
+ "pin-project",
+ "rand 0.9.1",
+ "rustc-hash 2.1.1",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.12",
+ "tokio",
+ "tower",
+ "tracing",
+]
+
+[[package]]
+name = "jsonrpsee-core"
+version = "0.25.1"
+source = "git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub#720591fd2697576ab80267bfe90352c412125547"
+dependencies = [
+ "async-trait",
  "bytes",
  "futures-timer",
  "futures-util",
  "http",
  "http-body",
  "http-body-util",
- "jsonrpsee-types",
+ "jsonrpsee-types 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
  "parking_lot",
  "pin-project",
  "rand 0.9.1",
@@ -5014,16 +5045,15 @@ dependencies = [
 [[package]]
 name = "jsonrpsee-http-client"
 version = "0.25.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6962d2bd295f75e97dd328891e58fce166894b974c1f7ce2e7597f02eeceb791"
+source = "git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub#720591fd2697576ab80267bfe90352c412125547"
 dependencies = [
  "base64 0.22.1",
  "http-body",
  "hyper",
  "hyper-rustls",
  "hyper-util",
- "jsonrpsee-core",
- "jsonrpsee-types",
+ "jsonrpsee-core 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
+ "jsonrpsee-types 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
  "rustls",
  "rustls-platform-verifier",
  "serde",
@@ -5048,10 +5078,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsonrpsee-proc-macros"
+version = "0.25.1"
+source = "git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub#720591fd2697576ab80267bfe90352c412125547"
+dependencies = [
+ "heck",
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.101",
+]
+
+[[package]]
 name = "jsonrpsee-server"
 version = "0.25.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d38b0bcf407ac68d241f90e2d46041e6a06988f97fe1721fb80b91c42584fae6"
+source = "git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub#720591fd2697576ab80267bfe90352c412125547"
 dependencies = [
  "futures-util",
  "http",
@@ -5059,8 +5100,8 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
- "jsonrpsee-core",
- "jsonrpsee-types",
+ "jsonrpsee-core 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
+ "jsonrpsee-types 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
  "pin-project",
  "route-recognizer",
  "serde",
@@ -5087,27 +5128,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsonrpsee-types"
+version = "0.25.1"
+source = "git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub#720591fd2697576ab80267bfe90352c412125547"
+dependencies = [
+ "http",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.12",
+]
+
+[[package]]
 name = "jsonrpsee-wasm-client"
 version = "0.25.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b67695cbcf4653f39f8f8738925547e0e23fd9fe315bccf951097b9f6a38781"
+source = "git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub#720591fd2697576ab80267bfe90352c412125547"
 dependencies = [
  "jsonrpsee-client-transport",
- "jsonrpsee-core",
- "jsonrpsee-types",
+ "jsonrpsee-core 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
+ "jsonrpsee-types 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
  "tower",
 ]
 
 [[package]]
 name = "jsonrpsee-ws-client"
 version = "0.25.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2da2694c9ff271a9d3ebfe520f6b36820e85133a51be77a3cb549fd615095261"
+source = "git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub#720591fd2697576ab80267bfe90352c412125547"
 dependencies = [
  "http",
  "jsonrpsee-client-transport",
- "jsonrpsee-core",
- "jsonrpsee-types",
+ "jsonrpsee-core 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
+ "jsonrpsee-types 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
  "tower",
  "url",
 ]
@@ -5989,7 +6039,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d817bec4d9475405cb69f3c990946763b26ba6c70cfa03674d21c77c671864c"
 dependencies = [
  "alloy-primitives",
- "jsonrpsee",
+ "jsonrpsee 0.25.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -7611,7 +7661,7 @@ dependencies = [
  "derive_more",
  "eyre",
  "futures-util",
- "jsonrpsee",
+ "jsonrpsee 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
  "reth-chainspec",
  "reth-db",
  "reth-engine-local",
@@ -8373,7 +8423,7 @@ dependencies = [
  "alloy-rpc-types-debug",
  "eyre",
  "futures",
- "jsonrpsee",
+ "jsonrpsee 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
  "pretty_assertions",
  "reth-chainspec",
  "reth-engine-primitives",
@@ -8398,7 +8448,7 @@ dependencies = [
  "futures",
  "futures-util",
  "interprocess",
- "jsonrpsee",
+ "jsonrpsee 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
  "pin-project",
  "rand 0.9.1",
  "reth-tracing",
@@ -8661,7 +8711,7 @@ dependencies = [
  "eyre",
  "fdlimit",
  "futures",
- "jsonrpsee",
+ "jsonrpsee 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
  "rayon",
  "reth-basic-payload-builder",
  "reth-chain-state",
@@ -9188,9 +9238,9 @@ dependencies = [
  "async-trait",
  "derive_more",
  "eyre",
- "jsonrpsee",
- "jsonrpsee-core",
- "jsonrpsee-types",
+ "jsonrpsee 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
+ "jsonrpsee-core 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
+ "jsonrpsee-types 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
  "op-alloy-consensus",
  "op-alloy-network",
  "op-alloy-rpc-jsonrpsee",
@@ -9602,8 +9652,8 @@ dependencies = [
  "http",
  "http-body",
  "hyper",
- "jsonrpsee",
- "jsonrpsee-types",
+ "jsonrpsee 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
+ "jsonrpsee-types 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
  "jsonwebtoken",
  "parking_lot",
  "pin-project",
@@ -9667,7 +9717,7 @@ dependencies = [
  "alloy-rpc-types-trace",
  "alloy-rpc-types-txpool",
  "alloy-serde 1.0.1",
- "jsonrpsee",
+ "jsonrpsee 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
  "reth-engine-primitives",
  "reth-network-peers",
  "reth-rpc-eth-api",
@@ -9682,7 +9732,7 @@ dependencies = [
  "alloy-rpc-types-eth",
  "alloy-rpc-types-trace",
  "futures",
- "jsonrpsee",
+ "jsonrpsee 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
  "jsonrpsee-http-client",
  "reth-ethereum-primitives",
  "reth-rpc-api",
@@ -9705,7 +9755,7 @@ dependencies = [
  "alloy-rpc-types-trace",
  "clap",
  "http",
- "jsonrpsee",
+ "jsonrpsee 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
  "metrics",
  "pin-project",
  "reth-chain-state",
@@ -9757,8 +9807,8 @@ dependencies = [
  "alloy-rpc-types-engine",
  "assert_matches",
  "async-trait",
- "jsonrpsee-core",
- "jsonrpsee-types",
+ "jsonrpsee-core 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
+ "jsonrpsee-types 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
  "metrics",
  "parking_lot",
  "reth-chainspec",
@@ -9802,8 +9852,8 @@ dependencies = [
  "auto_impl",
  "dyn-clone",
  "futures",
- "jsonrpsee",
- "jsonrpsee-types",
+ "jsonrpsee 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
+ "jsonrpsee-types 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
  "parking_lot",
  "reth-chainspec",
  "reth-errors",
@@ -9838,8 +9888,8 @@ dependencies = [
  "derive_more",
  "futures",
  "itertools 0.14.0",
- "jsonrpsee-core",
- "jsonrpsee-types",
+ "jsonrpsee-core 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
+ "jsonrpsee-types 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
  "metrics",
  "rand 0.9.1",
  "reth-chain-state",
@@ -9875,7 +9925,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "http",
  "http-body-util",
- "jsonrpsee",
+ "jsonrpsee 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
  "jsonrpsee-http-client",
  "pin-project",
  "reqwest",
@@ -9892,8 +9942,8 @@ dependencies = [
  "alloy-eips 1.0.1",
  "alloy-primitives",
  "alloy-rpc-types-engine",
- "jsonrpsee-core",
- "jsonrpsee-types",
+ "jsonrpsee-core 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
+ "jsonrpsee-types 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
  "reth-errors",
  "reth-network-api",
  "serde",
@@ -9907,7 +9957,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-primitives",
  "alloy-rpc-types-eth",
- "jsonrpsee-types",
+ "jsonrpsee-types 0.25.1 (git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub)",
  "reth-primitives-traits",
  "serde",
 ]
