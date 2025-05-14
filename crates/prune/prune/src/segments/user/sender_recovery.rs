@@ -90,7 +90,6 @@ mod tests {
         Itertools,
     };
     use reth_db_api::tables;
-    use reth_primitives_traits::SignedTransaction;
     use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader};
     use reth_prune_types::{PruneCheckpoint, PruneMode, PruneProgress, PruneSegment};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
@@ -115,7 +114,7 @@ mod tests {
             for transaction in &block.body().transactions {
                 transaction_senders.push((
                     transaction_senders.len() as u64,
-                    SignedTransaction::recover_signer(transaction).expect("recover signer"),
+                    transaction.recover_signer().expect("recover signer"),
                 ));
             }
         }

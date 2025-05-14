@@ -1,4 +1,4 @@
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{transaction::SignerRecoverable, BlockHeader};
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_genesis::ChainConfig;
 use alloy_primitives::{Address, Bytes, B256};
@@ -940,7 +940,7 @@ where
 
     /// Handler for `debug_getBadBlocks`
     async fn bad_blocks(&self) -> RpcResult<Vec<RpcBlock>> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(vec![])
     }
 
     /// Handler for `debug_traceChain`

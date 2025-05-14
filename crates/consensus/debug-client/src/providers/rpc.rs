@@ -25,13 +25,7 @@ impl<N: Network, PrimitiveBlock> RpcBlockProvider<N, PrimitiveBlock> {
         convert: impl Fn(N::BlockResponse) -> PrimitiveBlock + Send + Sync + 'static,
     ) -> eyre::Result<Self> {
         Ok(Self {
-            provider: Arc::new(
-                ProviderBuilder::new()
-                    .disable_recommended_fillers()
-                    .network::<N>()
-                    .connect(rpc_url)
-                    .await?,
-            ),
+            provider: Arc::new(ProviderBuilder::default().connect(rpc_url).await?),
             url: rpc_url.to_string(),
             convert: Arc::new(convert),
         })

@@ -443,7 +443,9 @@ where
                     let _ = tx.send(result);
                 }),
             );
-            rx.await??;
+            rx.await?.inspect_err(|err| {
+                error!(target: "reth::cli", unwind_target = %unwind_target, %err, "failed to run unwind")
+            })?;
         }
 
         Ok(factory)

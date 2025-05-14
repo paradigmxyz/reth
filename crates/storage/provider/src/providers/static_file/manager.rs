@@ -7,7 +7,10 @@ use crate::{
     ReceiptProvider, StageCheckpointReader, StatsReader, TransactionVariant, TransactionsProvider,
     TransactionsProviderExt, WithdrawalsProvider,
 };
-use alloy_consensus::{transaction::TransactionMeta, Header};
+use alloy_consensus::{
+    transaction::{SignerRecoverable, TransactionMeta},
+    Header,
+};
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals, BlockHashOrNumber};
 use alloy_primitives::{
     b256, keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
