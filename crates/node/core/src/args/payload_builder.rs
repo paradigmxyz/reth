@@ -1,14 +1,12 @@
 use crate::{cli::config::PayloadBuilderConfig, version::default_extra_data};
 use alloy_consensus::constants::MAXIMUM_EXTRA_DATA_SIZE;
-use alloy_eips::{eip1559::ETHEREUM_BLOCK_GAS_LIMIT_36M, merge::SLOT_DURATION};
+use alloy_eips::merge::SLOT_DURATION;
 use clap::{
     builder::{RangedU64ValueParser, TypedValueParser},
     Arg, Args, Command,
 };
-use reth_chainspec::{Chain, ChainKind, NamedChain};
 use reth_cli_util::{parse_duration_from_secs, parse_duration_from_secs_or_ms};
-use std::{borrow::Cow, ffi::OsStr, time::Duration}; // Import the Chain type from the correct module
-const HOODI_SEPOLIA_BLOCK_GAS_LIMIT: u64 = 60_000_000;
+use std::{borrow::Cow, ffi::OsStr, time::Duration};
 
 /// Parameters for configuring the Payload Builder
 #[derive(Debug, Clone, Args, PartialEq, Eq)]
@@ -70,21 +68,6 @@ impl PayloadBuilderConfig for PayloadBuilderArgs {
 
     fn max_payload_tasks(&self) -> usize {
         self.max_payload_tasks
-    }
-}
-impl PayloadBuilderArgs {
-    /// Returns the configured gas limit if set, or a chain-specific default
-    pub fn gas_limit_for(&self, chain: Chain) -> u64 {
-        if let Some(limit) = self.gas_limit {
-            return limit;
-        }
-
-        match chain.kind() {
-            ChainKind::Named(NamedChain::Sepolia) | ChainKind::Named(NamedChain::Hoodi) => {
-                HOODI_SEPOLIA_BLOCK_GAS_LIMIT
-            }
-            _ => ETHEREUM_BLOCK_GAS_LIMIT_36M,
-        }
     }
 }
 
