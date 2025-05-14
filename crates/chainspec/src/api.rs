@@ -89,6 +89,8 @@ impl EthChainSpec for ChainSpec {
             Some(self.blob_params.prague)
         } else if self.is_cancun_active_at_timestamp(timestamp) {
             Some(self.blob_params.cancun)
+        } else if self.is_osaka_active_at_timestamp(timestamp) {
+            Some(self.blob_params.osaka)
         } else {
             None
         }
