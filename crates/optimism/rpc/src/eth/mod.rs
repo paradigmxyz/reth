@@ -283,9 +283,20 @@ struct OpEthApiInner<N: OpNodeCore> {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
     sequencer_client: Option<SequencerClient>,
+    /// Whether to enable submission of transactions to the transaction pool.
+    enable_txpool_admission: bool,
 }
 
 impl<N: OpNodeCore> OpEthApiInner<N> {
+    /// Returns a new [`OpEthApiInner`].
+    const fn new(
+        eth_api: EthApiNodeBackend<N>,
+        sequencer_client: Option<SequencerClient>,
+        enable_txpool_admission: bool,
+    ) -> Self {
+        Self { eth_api, sequencer_client, enable_txpool_admission }
+    }
+
     /// Returns a reference to the [`EthApiNodeBackend`].
     const fn eth_api(&self) -> &EthApiNodeBackend<N> {
         &self.eth_api
@@ -295,6 +306,11 @@ impl<N: OpNodeCore> OpEthApiInner<N> {
     const fn sequencer_client(&self) -> Option<&SequencerClient> {
         self.sequencer_client.as_ref()
     }
+
+    /// Returns whether transaction pool admission is enabled.
+    const fn enable_txpool_admission(&self) -> bool {
+        self.enable_txpool_admission
+    }
 }
 
 /// Builds [`OpEthApi`] for Optimism.
@@ -303,17 +319,25 @@ pub struct OpEthApiBuilder {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
     sequencer_url: Option<String>,
+    /// Enable txpool admission flag
+    enable_txpool_admission: bool,
 }
 
 impl OpEthApiBuilder {
     /// Creates a [`OpEthApiBuilder`] instance from core components.
     pub const fn new() -> Self {
-        Self { sequencer_url: None }
+        Self { sequencer_url: None, enable_txpool_admission: false }
     }
 
     /// With a [`SequencerClient`].
     pub fn with_sequencer(mut self, sequencer_url: Option<String>) -> Self {
         self.sequencer_url = sequencer_url;
+        self
+    }
+
+    /// With a flag to enable txpool admission
+    pub const fn with_enable_txpool_admission(mut self, enable_txpool_admission: bool) -> Self {
+        self.enable_txpool_admission = enable_txpool_admission;
         self
     }
 }
@@ -326,7 +350,7 @@ where
     type EthApi = OpEthApi<N>;
 
     async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
-        let Self { sequencer_url } = self;
+        let Self { sequencer_url, enable_txpool_admission } = self;
         let eth_api = reth_rpc::EthApiBuilder::new(
             ctx.components.provider().clone(),
             ctx.components.pool().clone(),
@@ -343,16 +367,18 @@ where
         .gas_oracle_config(ctx.config.gas_oracle)
         .build_inner();
 
-        let sequencer_client = if let Some(url) = sequencer_url {
+        let sequencer_client = if let Some(url) = &sequencer_url {
             Some(
-                SequencerClient::new(&url)
+                SequencerClient::new(url)
                     .await
-                    .wrap_err_with(|| "Failed to init sequencer client with: {url}")?,
+                    .wrap_err_with(|| format!("Failed to init sequencer client with: {url}"))?,
             )
         } else {
             None
         };
 
-        Ok(OpEthApi { inner: Arc::new(OpEthApiInner { eth_api, sequencer_client }) })
+        Ok(OpEthApi {
+            inner: Arc::new(OpEthApiInner::new(eth_api, sequencer_client, enable_txpool_admission)),
+        })
     }
 }

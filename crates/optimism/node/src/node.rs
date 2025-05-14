@@ -204,6 +204,7 @@ where
             .with_sequencer(self.args.sequencer.clone())
             .with_da_config(self.da_config.clone())
             .with_enable_tx_conditional(self.args.enable_tx_conditional)
+            .with_enable_txpool_admission(self.args.enable_txpool_admission)
             .build()
     }
 }
@@ -415,6 +416,8 @@ pub struct OpAddOnsBuilder {
     da_config: Option<OpDAConfig>,
     /// Enable transaction conditionals.
     enable_tx_conditional: bool,
+    /// Enable txpool admission
+    enable_txpool_admission: bool,
 }
 
 impl OpAddOnsBuilder {
@@ -435,6 +438,11 @@ impl OpAddOnsBuilder {
         self.enable_tx_conditional = enable_tx_conditional;
         self
     }
+    /// Configure if transaction pool submission should be enabled.
+    pub const fn with_enable_txpool_admission(mut self, enable_txpool_admission: bool) -> Self {
+        self.enable_txpool_admission = enable_txpool_admission;
+        self
+    }
 }
 
 impl OpAddOnsBuilder {
@@ -444,11 +452,14 @@ impl OpAddOnsBuilder {
         N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>,
         OpEthApiBuilder: EthApiBuilder<N>,
     {
-        let Self { sequencer_url, da_config, enable_tx_conditional } = self;
+        let Self { sequencer_url, da_config, enable_tx_conditional, enable_txpool_admission } =
+            self;
 
         OpAddOns {
             rpc_add_ons: RpcAddOns::new(
-                OpEthApiBuilder::default().with_sequencer(sequencer_url.clone()),
+                OpEthApiBuilder::default()
+                    .with_sequencer(sequencer_url.clone())
+                    .with_enable_txpool_admission(enable_txpool_admission),
                 Default::default(),
                 Default::default(),
             ),

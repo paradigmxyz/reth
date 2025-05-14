@@ -43,13 +43,15 @@ where
                     tracing::debug!(target: "rpc::eth", %err, hash=% *pool_transaction.hash(), "failed to forward raw transaction");
                 })?;
 
-            // Retain tx in local tx pool after forwarding, for local RPC usage.
-            let _ = self
-                .pool()
-                .add_transaction(TransactionOrigin::Local, pool_transaction)
-                .await.inspect_err(|err| {
-                    tracing::warn!(target: "rpc::eth", %err, %hash, "successfully sent tx to sequencer, but failed to persist in local tx pool");
-            });
+            // If configured, retain tx in local tx pool after forwarding, for local RPC usage.
+            if self.inner.enable_txpool_admission() {
+                let _ = self
+                    .pool()
+                    .add_transaction(TransactionOrigin::Local, pool_transaction)
+                    .await.inspect_err(|err| {
+                        tracing::warn!(target: "rpc::eth", %err, %hash, "successfully sent tx to sequencer, but failed to persist in local tx pool");
+                });
+            }
 
             return Ok(hash)
         }
