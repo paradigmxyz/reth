@@ -785,8 +785,7 @@ mod tests {
 
                 // received new item from the stream.
                 Either::Right((Some(Ok(item)), c)) => {
-                    let json_str = serde_json::to_string(&item)?;
-                    let raw_value = JsonRawValue::from_string(json_str)?;
+                    let raw_value = serde_json::value::to_raw_value(&item)?;
                     let notif = SubscriptionMessage::from(raw_value);
 
                     // NOTE: this will block until there a spot in the queue
