@@ -116,6 +116,14 @@ pub trait SignedTransaction:
     fn with_signer(self, signer: Address) -> Recovered<Self> {
         Recovered::new_unchecked(self, signer)
     }
+
+    /// Returns the [`Recovered`] transaction with the given signer, using a reference to self.
+    ///
+    /// Note: assumes the given signer is the signer of this transaction.
+    #[auto_impl(keep_default_for(&, Arc))]
+    fn with_signer_ref(&self, signer: Address) -> Recovered<&Self> {
+        Recovered::new_unchecked(self, signer)
+    }
 }
 
 impl<T> SignedTransaction for EthereumTxEnvelope<T>
