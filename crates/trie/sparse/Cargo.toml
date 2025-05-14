@@ -24,7 +24,6 @@ alloy-rlp.workspace = true
 
 # misc
 auto_impl.workspace = true
-smallvec = { workspace = true, features = ["const_new"] }
 
 # metrics
 reth-metrics = { workspace = true, optional = true }
@@ -75,7 +74,6 @@ arbitrary = [
     "reth-primitives-traits/arbitrary",
     "reth-trie-common/arbitrary",
     "alloy-primitives/arbitrary",
-    "smallvec/arbitrary",
 ]
 
 [[bench]]

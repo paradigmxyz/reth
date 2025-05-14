@@ -19,7 +19,6 @@ use reth_trie_common::{
     BranchNodeCompact, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, RlpNode, TrieMask,
     TrieNode, CHILD_INDEX_RANGE, EMPTY_ROOT_HASH,
 };
-use smallvec::SmallVec;
 use tracing::{event_enabled, trace, Level};
 
 /// Struct for passing around branch node mask information.
@@ -1974,9 +1973,9 @@ pub struct RlpNodeBuffers {
     /// Stack of RLP nodes.
     rlp_node_stack: Vec<RlpNodeStackItem>,
     /// Buffer of branch node children paths.
-    branch_children_paths: SmallVec<[Nibbles; 16]>,
+    branch_children_paths: Vec<Nibbles>,
     /// Buffer of branch node children values.
-    branch_children_values: SmallVec<[RlpNode; 16]>,
+    branch_children_values: Vec<RlpNode>,
     /// Buffer for RLP encoding of nodes.
     rlp: Vec<u8>,
 }
