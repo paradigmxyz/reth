@@ -380,7 +380,7 @@ where
     }
 }
 
-/// Action that check whether broadcasted new payload has been accepted
+/// Action that checks whether the broadcasted new payload has been accepted
 #[derive(Debug, Default)]
 pub struct CheckPayloadAccepted {}
 
