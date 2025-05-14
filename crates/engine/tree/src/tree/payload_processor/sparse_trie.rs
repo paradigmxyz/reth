@@ -73,7 +73,7 @@ where
         sparse_trie: Option<SparseTrie<DefaultBlindedProvider>>,
     ) -> Self {
         if let Some(sparse_trie) = sparse_trie {
-            SparseTrieTask::with_accounts_trie(
+            Self::with_accounts_trie(
                 executor,
                 updates,
                 blinded_provider_factory,
@@ -81,7 +81,7 @@ where
                 sparse_trie,
             )
         } else {
-            SparseTrieTask::new(executor, updates, blinded_provider_factory, trie_metrics)
+            Self::new(executor, updates, blinded_provider_factory, trie_metrics)
         }
     }
 

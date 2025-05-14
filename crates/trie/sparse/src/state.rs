@@ -5,7 +5,7 @@ use crate::{
     },
     LeafLookup, RevealedSparseTrie, SparseTrie, TrieMasks,
 };
-use alloc::{collections::VecDeque, vec::Vec};
+use alloc::{collections::VecDeque, vec::Vec, boxed::Box};
 use alloy_primitives::{
     hex,
     map::{B256Map, HashMap, HashSet},
@@ -358,7 +358,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     ) -> SparseStateTrieResult<()> {
         let FilteredProofNodes {
             nodes,
-            new_nodes,
+            new_nodes: _,
             total_nodes: _total_nodes,
             skipped_nodes: _skipped_nodes,
         } = filter_revealed_nodes(account_subtree, &self.revealed_account_paths)?;
@@ -662,7 +662,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         &mut self,
     ) -> SparseStateTrieResult<&mut RevealedSparseTrie<F::AccountNodeProvider>> {
         match self.state {
-            SparseTrie::Blind => {
+            SparseTrie::Blind { allocated: _ } => {
                 let (root_node, hash_mask, tree_mask) = self
                     .provider_factory
                     .account_node_provider()
@@ -883,7 +883,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
 
     /// Clears and takes the account trie.
     pub fn take_cleared_account_trie(&mut self) -> SparseTrie<DefaultBlindedProvider> {
-        let trie = std::mem::take(&mut self.state);
+        let trie = core::mem::take(&mut self.state);
         trie.cleared()
     }
 }
@@ -988,7 +988,7 @@ mod tests {
         assert_eq!(proofs.len(), 1);
 
         let mut sparse = SparseStateTrie::default();
-        assert_eq!(sparse.state, SparseTrie::Blind);
+        assert_eq!(sparse.state, SparseTrie::Blind { allocated: None });
 
         sparse.reveal_account(Default::default(), proofs.into_inner()).unwrap();
         assert_eq!(sparse.state, SparseTrie::revealed_empty());
