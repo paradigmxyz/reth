@@ -6,7 +6,8 @@ pre-build = [
     "apt-get update && apt-get install --assume-yes --no-install-recommends llvm-dev libclang-10-dev clang-10",
 ]
 
+[target.x86_64-pc-windows-gnu]
+pre-build = ["apt-get update && apt-get install --assume-yes mingw-w64"]
+
 [build.env]
-passthrough = [
-    "JEMALLOC_SYS_WITH_LG_PAGE",
-]
+passthrough = ["JEMALLOC_SYS_WITH_LG_PAGE"]
