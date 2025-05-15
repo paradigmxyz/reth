@@ -3,7 +3,6 @@ use crate::create_superchain_specs;
 
 create_superchain_specs!(
     ("arena-z", "mainnet"),
-    ("arena-z-testnet", "sepolia"),
     ("automata", "mainnet"),
     ("base-devnet-0", "sepolia-dev-0"),
     ("bob", "mainnet"),
