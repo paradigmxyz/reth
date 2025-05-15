@@ -4943,7 +4943,8 @@ dependencies = [
 [[package]]
 name = "jsonrpsee"
 version = "0.25.1"
-source = "git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub#720591fd2697576ab80267bfe90352c412125547"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fba77a59c4c644fd48732367624d1bcf6f409f9c9a286fbc71d2f1fc0b2ea16"
 dependencies = [
  "jsonrpsee-client-transport",
  "jsonrpsee-core",
@@ -4960,7 +4961,8 @@ dependencies = [
 [[package]]
 name = "jsonrpsee-client-transport"
 version = "0.25.1"
-source = "git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub#720591fd2697576ab80267bfe90352c412125547"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2a320a3f1464e4094f780c4d48413acd786ce5627aaaecfac9e9c7431d13ae1"
 dependencies = [
  "base64 0.22.1",
  "futures-channel",
@@ -4984,7 +4986,8 @@ dependencies = [
 [[package]]
 name = "jsonrpsee-core"
 version = "0.25.1"
-source = "git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub#720591fd2697576ab80267bfe90352c412125547"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "693c93cbb7db25f4108ed121304b671a36002c2db67dff2ee4391a688c738547"
 dependencies = [
  "async-trait",
  "bytes",
@@ -5011,7 +5014,8 @@ dependencies = [
 [[package]]
 name = "jsonrpsee-http-client"
 version = "0.25.1"
-source = "git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub#720591fd2697576ab80267bfe90352c412125547"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6962d2bd295f75e97dd328891e58fce166894b974c1f7ce2e7597f02eeceb791"
 dependencies = [
  "base64 0.22.1",
  "http-body",
@@ -5033,7 +5037,8 @@ dependencies = [
 [[package]]
 name = "jsonrpsee-proc-macros"
 version = "0.25.1"
-source = "git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub#720591fd2697576ab80267bfe90352c412125547"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2fa4f5daed39f982a1bb9d15449a28347490ad42b212f8eaa2a2a344a0dce9e9"
 dependencies = [
  "heck",
  "proc-macro-crate",
@@ -5045,7 +5050,8 @@ dependencies = [
 [[package]]
 name = "jsonrpsee-server"
 version = "0.25.1"
-source = "git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub#720591fd2697576ab80267bfe90352c412125547"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d38b0bcf407ac68d241f90e2d46041e6a06988f97fe1721fb80b91c42584fae6"
 dependencies = [
  "futures-util",
  "http",
@@ -5071,7 +5077,8 @@ dependencies = [
 [[package]]
 name = "jsonrpsee-types"
 version = "0.25.1"
-source = "git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub#720591fd2697576ab80267bfe90352c412125547"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "66df7256371c45621b3b7d2fb23aea923d577616b9c0e9c0b950a6ea5c2be0ca"
 dependencies = [
  "http",
  "serde",
@@ -5082,7 +5089,8 @@ dependencies = [
 [[package]]
 name = "jsonrpsee-wasm-client"
 version = "0.25.1"
-source = "git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub#720591fd2697576ab80267bfe90352c412125547"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b67695cbcf4653f39f8f8738925547e0e23fd9fe315bccf951097b9f6a38781"
 dependencies = [
  "jsonrpsee-client-transport",
  "jsonrpsee-core",
@@ -5093,7 +5101,8 @@ dependencies = [
 [[package]]
 name = "jsonrpsee-ws-client"
 version = "0.25.1"
-source = "git+https://github.com/paradigmxyz/jsonrpsee?branch=matt%2Fmake-rpc-service-pub#720591fd2697576ab80267bfe90352c412125547"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2da2694c9ff271a9d3ebfe520f6b36820e85133a51be77a3cb549fd615095261"
 dependencies = [
  "http",
  "jsonrpsee-client-transport",
@@ -7618,6 +7627,7 @@ dependencies = [
  "reth-payload-primitives",
  "reth-provider",
  "reth-rpc-api",
+ "reth-rpc-builder",
  "reth-rpc-eth-api",
  "reth-rpc-layer",
  "reth-rpc-server-types",
