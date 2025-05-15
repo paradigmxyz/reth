@@ -37,7 +37,7 @@ use tracing::{debug, trace};
 pub(super) struct PrewarmCacheTask<N, P, Evm>
 where
     N: NodePrimitives,
-    Evm: ConfigureEvm<Primitives = N> + 'static,
+    Evm: ConfigureEvm<Primitives = N>,
 {
     /// The executor used to spawn execution tasks.
     executor: WorkloadExecutor,
@@ -203,7 +203,7 @@ where
 pub(super) struct PrewarmContext<N, P, Evm>
 where
     N: NodePrimitives,
-    Evm: ConfigureEvm<Primitives = N> + 'static,
+    Evm: ConfigureEvm<Primitives = N>,
 {
     pub(super) header: SealedHeaderFor<N>,
     pub(super) evm_config: Evm,

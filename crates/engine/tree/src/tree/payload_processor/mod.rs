@@ -49,7 +49,7 @@ pub mod sparse_trie;
 pub struct PayloadProcessor<N, Evm>
 where
     N: NodePrimitives,
-    Evm: ConfigureEvm<Primitives = N> + 'static,
+    Evm: ConfigureEvm<Primitives = N>,
 {
     /// The executor used by to spawn tasks.
     executor: WorkloadExecutor,
@@ -73,7 +73,7 @@ where
 impl<N, Evm> PayloadProcessor<N, Evm>
 where
     N: NodePrimitives,
-    Evm: ConfigureEvm<Primitives = N> + 'static,
+    Evm: ConfigureEvm<Primitives = N>,
 {
     /// Creates a new payload processor.
     pub fn new(
