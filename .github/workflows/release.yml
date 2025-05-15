@@ -80,11 +80,11 @@ jobs:
 
       - name: Build Reth
         run: make PROFILE=${{ matrix.configs.profile }} ${{ matrix.build.command }}-${{ matrix.configs.target }}
-      - name: Move binary
-        run: |
-          mkdir artifacts
-          [[ "${{ matrix.configs.target }}" == *windows* ]] && ext=".exe"
-          mv "target/${{ matrix.configs.target }}/${{ matrix.configs.profile }}/${{ matrix.build.binary }}${ext}" ./artifacts
+      # - name: Move binary
+      #   run: |
+      #     mkdir artifacts
+      #     [[ "${{ matrix.configs.target }}" == *windows* ]] && ext=".exe"
+      #     mv "target/${{ matrix.configs.target }}/${{ matrix.configs.profile }}/${{ matrix.build.binary }}${ext}" ./artifacts
 
       # - name: Configure GPG and create artifacts
       #   env:
