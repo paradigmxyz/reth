@@ -58,8 +58,10 @@ async fn maintain_txpool_stale_eviction() -> eyre::Result<()> {
 
     let wallet = Wallet::default();
 
-    let mut config = reth_transaction_pool::maintain::MaintainPoolConfig::default();
-    config.max_tx_lifetime = Duration::from_secs(1);
+    let config = reth_transaction_pool::maintain::MaintainPoolConfig {
+        max_tx_lifetime: Duration::from_secs(1),
+        ..Default::default()
+    };
 
     executor.spawn_critical(
         "txpool maintenance task",
@@ -74,7 +76,7 @@ async fn maintain_txpool_stale_eviction() -> eyre::Result<()> {
 
     // create a tx with insufficient gas fee and it will be parked
     let envelop =
-        TransactionTestContext::transfer_tx_with_gas_fee(1, Some(8 as u128), wallet.inner).await;
+        TransactionTestContext::transfer_tx_with_gas_fee(1, Some(8_u128), wallet.inner).await;
     let tx = Recovered::new_unchecked(
         EthereumTxEnvelope::<TxEip4844>::from(envelop.clone()),
         Default::default(),
