@@ -1,4 +1,4 @@
-use super::{TxCustom, TxTypeCustom};
+use super::{TxPayment, TxTypeCustom};
 use alloy_consensus::{
     crypto::{
         secp256k1::{recover_signer, recover_signer_unchecked},
@@ -26,7 +26,7 @@ pub type ExtendedOpTxEnvelope<T> = Extended<OpTxEnvelope, T>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, Eq, PartialEq)]
 pub struct CustomTransactionEnvelope {
-    pub inner: Signed<TxCustom>,
+    pub inner: Signed<TxPayment>,
 }
 
 impl Transaction for CustomTransactionEnvelope {
@@ -136,11 +136,11 @@ impl Typed2718 for CustomTransactionEnvelope {
 
 impl Decodable2718 for CustomTransactionEnvelope {
     fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
-        Ok(Self { inner: Signed::<TxCustom>::typed_decode(ty, buf)? })
+        Ok(Self { inner: Signed::<TxPayment>::typed_decode(ty, buf)? })
     }
 
     fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
-        Ok(Self { inner: Signed::<TxCustom>::fallback_decode(buf)? })
+        Ok(Self { inner: Signed::<TxPayment>::fallback_decode(buf)? })
     }
 }
 
@@ -156,7 +156,7 @@ impl Encodable2718 for CustomTransactionEnvelope {
 
 impl Decodable for CustomTransactionEnvelope {
     fn decode(buf: &mut &[u8]) -> RlpResult<Self> {
-        let inner = Signed::<TxCustom>::decode_2718(buf)?;
+        let inner = Signed::<TxPayment>::decode_2718(buf)?;
         Ok(CustomTransactionEnvelope { inner })
     }
 }
@@ -180,7 +180,7 @@ impl FromTxCompact for CustomTransactionEnvelope {
     where
         Self: Sized,
     {
-        let (tx, buf) = TxCustom::from_compact(buf, buf.len());
+        let (tx, buf) = TxPayment::from_compact(buf, buf.len());
         let tx = Signed::new_unhashed(tx, signature);
         (CustomTransactionEnvelope { inner: tx }, buf)
     }
@@ -193,7 +193,7 @@ impl ToTxCompact for CustomTransactionEnvelope {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct BincodeCompatSignedTxCustom(pub Signed<TxCustom>);
+pub struct BincodeCompatSignedTxCustom(pub Signed<TxPayment>);
 
 impl SerdeBincodeCompat for CustomTransactionEnvelope {
     type BincodeRepr<'a> = BincodeCompatSignedTxCustom;
@@ -227,7 +227,7 @@ impl Compact for CustomTransactionEnvelope {
 
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
         let (signature, rest) = Signature::from_compact(buf, len);
-        let (inner, buf) = <TxCustom as Compact>::from_compact(rest, len);
+        let (inner, buf) = <TxPayment as Compact>::from_compact(rest, len);
         let signed = Signed::new_unhashed(inner, signature);
         (CustomTransactionEnvelope { inner: signed }, buf)
     }
