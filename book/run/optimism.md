@@ -89,7 +89,7 @@ Consider adding the `--l1.trustrpc` flag to improve performance, if the connecti
 [l2-el-spec]: https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/exec-engine.md
 [deposit-spec]: https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/deposits.md
 [derivation-spec]: https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/derivation.md
-[superchain-reigstry]: https://github.com/ethereum-optimism/superchain-registry
+[superchain-registry]: https://github.com/ethereum-optimism/superchain-registry
 
 [op-node-docker]: https://console.cloud.google.com/artifacts/docker/oplabs-tools-artifacts/us/images/op-node
 
