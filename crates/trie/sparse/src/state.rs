@@ -5,7 +5,7 @@ use crate::{
     },
     LeafLookup, RevealedSparseTrie, SparseTrie, TrieMasks,
 };
-use alloc::{collections::VecDeque, vec::Vec, boxed::Box};
+use alloc::{boxed::Box, collections::VecDeque, vec::Vec};
 use alloy_primitives::{
     hex,
     map::{B256Map, HashMap, HashSet},
