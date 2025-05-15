@@ -519,7 +519,7 @@ mod tests {
     fn create_test_db(kind: DatabaseEnvKind) -> Arc<DatabaseEnv> {
         Arc::new(create_test_db_with_path(
             kind,
-            &tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
+            &tempfile::TempDir::new().expect(ERROR_TEMPDIR).keep(),
         ))
     }
 
@@ -1171,7 +1171,7 @@ mod tests {
 
     #[test]
     fn db_closure_put_get() {
-        let path = TempDir::new().expect(ERROR_TEMPDIR).into_path();
+        let path = TempDir::new().expect(ERROR_TEMPDIR).keep();
 
         let value = Account {
             nonce: 18446744073709551615,
