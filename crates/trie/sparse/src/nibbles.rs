@@ -538,6 +538,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_packed_nibbles_clone() {
+        let a = PackedNibbles::from_nibbles([1, 2, 3]);
+        #[allow(clippy::redundant_clone)]
+        let b = a.clone();
+        assert_eq!(a, b);
+    }
+
+    #[test]
     fn test_packed_nibbles_ord() {
         // Test empty nibbles
         let empty1 = PackedNibbles::default();
