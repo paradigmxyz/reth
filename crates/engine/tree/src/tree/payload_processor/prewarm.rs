@@ -266,14 +266,15 @@ where
         evm_env.cfg_env.disable_nonce_check = true;
 
         // create a new executor and disable nonce checks in the env
-        let mut evm = evm_config.evm_with_env(state_provider, evm_env.clone());
+        let spec_id = *evm_env.spec_id();
+        let mut evm = evm_config.evm_with_env(state_provider, evm_env);
 
         if precompile_cache_enabled {
             evm.precompiles_mut().map_precompiles(|address, precompile| {
                 CachedPrecompile::wrap(
                     precompile,
                     precompile_cache_map.cache_for_address(*address),
-                    *evm_env.spec_id(),
+                    spec_id,
                 )
             });
         }
