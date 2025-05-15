@@ -629,7 +629,7 @@ criterion = { package = "codspeed-criterion-compat", version = "2.7" }
 proptest = "1.4"
 proptest-derive = "0.5"
 similar-asserts = { version = "1.5.0", features = ["serde"] }
-tempfile = "3.8"
+tempfile = "3.20"
 test-fuzz = "7"
 rstest = "0.24.0"
 test-case = "3"
