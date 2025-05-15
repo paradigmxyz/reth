@@ -23,7 +23,7 @@ use revm_primitives::Address;
     reth_codecs::Compact,
 )]
 #[serde(rename_all = "camelCase")]
-#[doc(alias = "PaymentTransaction", alias = "TransactionPayment", alias = "CustomTransaction")]
+#[doc(alias = "PaymentTransaction", alias = "TransactionPayment", alias = "PaymentTx")]
 pub struct TxPayment {
     /// EIP-155: Simple replay attack protection
     #[serde(with = "alloy_serde::quantity")]
