@@ -548,7 +548,7 @@ where
             .map_err(|_| EngineApiError::UnknownPayload)?
             .try_into()
             .map_err(|_| {
-                warn!("could not transform built payload into ExecutionPayloadV3");
+                warn!("could not transform built payload into ExecutionPayloadEnvelopeV4");
                 EngineApiError::UnknownPayload
             })
     }
@@ -561,6 +561,54 @@ where
         let start = Instant::now();
         let res = Self::get_payload_v4(self, payload_id).await;
         self.inner.metrics.latency.get_payload_v4.record(start.elapsed());
+        res
+    }
+
+    /// Handler for `engine_getPayloadV5`
+    ///
+    /// Returns the most recent version of the payload that is available in the corresponding
+    /// payload build process at the time of receiving this call.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/15399c2e2f16a5f800bf3f285640357e2c245ad9/src/engine/osaka.md#engine_getpayloadv5>
+    ///
+    /// Note:
+    /// > Provider software MAY stop the corresponding build process after serving this call.
+    pub async fn get_payload_v5(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV5> {
+        // First we fetch the payload attributes to check the timestamp
+        let attributes = self.get_payload_attributes(payload_id).await?;
+
+        // validate timestamp according to engine rules
+        validate_payload_timestamp(
+            &self.inner.chain_spec,
+            EngineApiMessageVersion::V5,
+            attributes.timestamp(),
+        )?;
+
+        // Now resolve the payload
+        self.inner
+            .payload_store
+            .resolve(payload_id)
+            .await
+            .ok_or(EngineApiError::UnknownPayload)?
+            .map_err(|_| EngineApiError::UnknownPayload)?
+            .try_into()
+            .map_err(|_| {
+                warn!("could not transform built payload into ExecutionPayloadEnvelopeV5");
+                EngineApiError::UnknownPayload
+            })
+    }
+
+    /// Metrics version of `get_payload_v5`
+    pub async fn get_payload_v5_metered(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV5> {
+        let start = Instant::now();
+        let res = Self::get_payload_v5(self, payload_id).await;
+        self.inner.metrics.latency.get_payload_v5.record(start.elapsed());
         res
     }
 
@@ -1026,10 +1074,10 @@ where
     /// > Provider software MAY stop the corresponding build process after serving this call.
     async fn get_payload_v5(
         &self,
-        _payload_id: PayloadId,
+        payload_id: PayloadId,
     ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV5> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV5");
-        Err(internal_rpc_err("unimplemented"))
+        Ok(self.get_payload_v5_metered(payload_id).await?)
     }
 
     /// Handler for `engine_getPayloadBodiesByHashV1`
