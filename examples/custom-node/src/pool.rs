@@ -18,13 +18,13 @@ use reth_op::{
         blobstore::DiskFileBlobStore, CoinbaseTipOrdering, EthPoolTransaction,
         TransactionValidationTaskExecutor,
     },
-    primitives::ExtendedTxEnvelope,
+    primitives::Extended,
 };
 use reth_optimism_forks::OpHardforks;
 
 #[derive(Debug, Clone)]
 pub struct CustomPoolBuilder<
-    T = OpPooledTransaction<ExtendedTxEnvelope<OpTxEnvelope, CustomTransactionEnvelope>>,
+    T = OpPooledTransaction<Extended<OpTxEnvelope, CustomTransactionEnvelope>>,
 > {
     /// Enforced overrides that are applied to the pool config.
     pub pool_config_overrides: PoolBuilderConfigOverrides,
@@ -82,8 +82,8 @@ impl<Node, T> PoolBuilder<Node> for CustomPoolBuilder<T>
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec: OpHardforks>>,
     <Node::Types as NodeTypes>::Primitives:
-        NodePrimitives<SignedTx = ExtendedTxEnvelope<OpTxEnvelope, CustomTransactionEnvelope>>,
-    T: EthPoolTransaction<Consensus = ExtendedTxEnvelope<OpTxEnvelope, CustomTransactionEnvelope>>
+        NodePrimitives<SignedTx = Extended<OpTxEnvelope, CustomTransactionEnvelope>>,
+    T: EthPoolTransaction<Consensus = Extended<OpTxEnvelope, CustomTransactionEnvelope>>
         + MaybeConditionalTransaction
         + MaybeInteropTransaction,
 {
