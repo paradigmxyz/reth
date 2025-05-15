@@ -6,17 +6,16 @@ use crate::{
 };
 use alloy_primitives::B256;
 use eyre::Result;
-use jsonrpsee::http_client::{transport::HttpBackend, HttpClient, RpcService};
+use jsonrpsee::http_client::HttpClient;
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_node_api::{NodeTypes, PayloadTypes};
 use reth_payload_builder::PayloadId;
-use reth_rpc_layer::AuthClientService;
-use setup::Setup;
 use std::{collections::HashMap, marker::PhantomData};
 pub mod actions;
 pub mod setup;
+use crate::testsuite::setup::Setup;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
-use jsonrpsee::core::middleware::layer::RpcLogger;
+use reth_rpc_builder::auth::AuthServerHandle;
 
 #[cfg(test)]
 mod examples;
@@ -27,7 +26,14 @@ pub struct NodeClient {
     /// Regular JSON-RPC client
     pub rpc: HttpClient,
     /// Engine API client
-    pub engine: HttpClient<RpcLogger<RpcService<AuthClientService<HttpBackend>>>>,
+    pub engine: AuthServerHandle,
+}
+
+impl NodeClient {
+    /// Instantiates a new [`NodeClient`] with the given handles
+    pub const fn new(rpc: HttpClient, engine: AuthServerHandle) -> Self {
+        Self { rpc, engine }
+    }
 }
 
 /// Represents the latest block information.

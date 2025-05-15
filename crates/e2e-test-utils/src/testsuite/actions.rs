@@ -108,7 +108,7 @@ where
 
             let node_client = &env.node_clients[self.node_idx];
             let rpc_client = &node_client.rpc;
-            let engine_client = &node_client.engine;
+            let engine_client = node_client.engine.http_client();
 
             // get the latest block to use as parent
             let latest_block =
@@ -132,7 +132,7 @@ where
             };
 
             let fcu_result = EngineApiClient::<Engine>::fork_choice_updated_v2(
-                engine_client,
+                &engine_client,
                 fork_choice_state,
                 Some(self.payload_attributes.clone()),
             )
@@ -148,7 +148,7 @@ where
 
                         // get the payload that was built
                         let _engine_payload =
-                            EngineApiClient::<Engine>::get_payload_v2(engine_client, payload_id)
+                            EngineApiClient::<Engine>::get_payload_v2(&engine_client, payload_id)
                                 .await?;
                         Ok(())
                     } else {
@@ -284,7 +284,7 @@ where
                 .ok_or_else(|| eyre::eyre!("No payload attributes found for latest block"))?;
 
             let fcu_result = EngineApiClient::<Engine>::fork_choice_updated_v3(
-                &env.node_clients[0].engine,
+                &env.node_clients[0].engine.http_client(),
                 fork_choice_state,
                 Some(payload_attributes.clone()),
             )
@@ -301,10 +301,12 @@ where
 
             sleep(Duration::from_secs(1)).await;
 
-            let built_payload: PayloadAttributes =
-                EngineApiClient::<Engine>::get_payload_v3(&env.node_clients[0].engine, payload_id)
-                    .await?
-                    .into();
+            let built_payload: PayloadAttributes = EngineApiClient::<Engine>::get_payload_v3(
+                &env.node_clients[0].engine.http_client(),
+                payload_id,
+            )
+            .await?
+            .into();
             env.payload_id_history.insert(latest_block.number + 1, payload_id);
             env.latest_payload_built = Some(built_payload);
 
@@ -350,10 +352,8 @@ where
             );
 
             for (idx, client) in env.node_clients.iter().enumerate() {
-                let engine_client = &client.engine;
-
                 match EngineApiClient::<Engine>::fork_choice_updated_v3(
-                    engine_client,
+                    &client.engine.http_client(),
                     fork_choice_state,
                     payload.clone(),
                 )
@@ -422,8 +422,11 @@ where
                     .as_ref()
                     .ok_or_else(|| eyre::eyre!("No next built payload found"))?;
 
-                let built_payload =
-                    EngineApiClient::<Engine>::get_payload_v3(&client.engine, payload_id).await?;
+                let built_payload = EngineApiClient::<Engine>::get_payload_v3(
+                    &client.engine.http_client(),
+                    payload_id,
+                )
+                .await?;
 
                 let execution_payload_envelope: ExecutionPayloadEnvelopeV3 = built_payload;
                 let new_payload_block_hash = execution_payload_envelope
@@ -577,7 +580,7 @@ where
             let mut successful_broadcast: bool = false;
 
             for client in &env.node_clients {
-                let engine = &client.engine;
+                let engine = client.engine.http_client();
                 let rpc_client = &client.rpc;
 
                 // Get latest block from the client
@@ -635,7 +638,7 @@ where
                 // The latest block should contain the latest_payload_built
                 let execution_payload = ExecutionPayloadV3::from_block_slow(&latest_block);
                 let result = EngineApiClient::<Engine>::new_payload_v3(
-                    engine,
+                    &engine,
                     execution_payload,
                     vec![],
                     parent_beacon_block_root,
