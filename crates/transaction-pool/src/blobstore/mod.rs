@@ -1,6 +1,6 @@
 //! Storage for blob data of EIP4844 transactions.
 
-use alloy_eips::eip4844::{BlobAndProofV1, BlobTransactionSidecar};
+use alloy_eips::eip4844::{BlobAndProofV1, BlobAndProofV2, BlobTransactionSidecar};
 use alloy_primitives::B256;
 pub use disk::{DiskFileBlobStore, DiskFileBlobStoreConfig, OpenDiskFileBlobStore};
 pub use mem::InMemoryBlobStore;
@@ -69,11 +69,19 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     fn get_exact(&self, txs: Vec<B256>)
         -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError>;
 
-    /// Return the [`BlobTransactionSidecar`]s for a list of blob versioned hashes.
-    fn get_by_versioned_hashes(
+    /// Return the [`BlobAndProofV1`]s for a list of blob versioned hashes.
+    fn get_by_versioned_hashes_v1(
         &self,
         versioned_hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError>;
+
+    /// Return the [`BlobAndProofV2`]s for a list of blob versioned hashes.
+    /// Blobs and proofs are returned only if they are present for _all_ requested
+    /// versioned hashes.
+    fn get_by_versioned_hashes_v2(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Option<Vec<BlobAndProofV2>>, BlobStoreError>;
 
     /// Data size of all transactions in the blob store.
     fn data_size_hint(&self) -> Option<usize>;
