@@ -226,7 +226,12 @@ where
                         break  Ok(())
                     },
                 };
-                let msg = to_subscription_message(&item)?;
+                let msg = SubscriptionMessage::new(
+                    sink.method_name(),
+                    sink.subscription_id(),
+                    &item
+                ).map_err(SubscriptionSerializeError::new)?;
+
                 if sink.send(msg).await.is_err() {
                     break Ok(());
                 }
