@@ -19,7 +19,12 @@
 extern crate alloc;
 
 // Re-export alloy-op-hardforks types.
+<<<<<<< HEAD
 pub use alloy_op_hardforks::{OpHardfork, OpHardforks};
+=======
+pub use alloy_op_hardforks::{op_sepolia::*, OpHardfork, OpHardforks};
+pub use reth_ethereum_forks::ForkCondition;
+>>>>>>> e282c6b1d (Replace magic numbers with constants for op sepolia hardforks)
 
 use alloc::vec;
 use alloy_primitives::U256;
@@ -122,17 +127,17 @@ pub static OP_SEPOLIA_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
                 total_difficulty: U256::ZERO,
             },
         ),
-        (OpHardfork::Bedrock.boxed(), ForkCondition::Block(0)),
+      (OpHardfork::Bedrock.boxed(), ForkCondition::Block(0)),
         (OpHardfork::Regolith.boxed(), ForkCondition::Timestamp(0)),
-        (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(1699981200)),
-        (OpHardfork::Canyon.boxed(), ForkCondition::Timestamp(1699981200)),
-        (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(1708534800)),
-        (OpHardfork::Ecotone.boxed(), ForkCondition::Timestamp(1708534800)),
-        (OpHardfork::Fjord.boxed(), ForkCondition::Timestamp(1716998400)),
-        (OpHardfork::Granite.boxed(), ForkCondition::Timestamp(1723478400)),
-        (OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(1732633200)),
-        (EthereumHardfork::Prague.boxed(), ForkCondition::Timestamp(1744905600)),
-        (OpHardfork::Isthmus.boxed(), ForkCondition::Timestamp(1744905600)),
+        (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(OP_SEPOLIA_CANYON_TIMESTAMP)),
+        (OpHardfork::Canyon.boxed(), ForkCondition::Timestamp(OP_SEPOLIA_CANYON_TIMESTAMP)),
+        (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(OP_SEPOLIA_ECOTONE_TIMESTAMP)),
+        (OpHardfork::Ecotone.boxed(), ForkCondition::Timestamp(OP_SEPOLIA_ECOTONE_TIMESTAMP)),
+        (OpHardfork::Fjord.boxed(), ForkCondition::Timestamp(OP_SEPOLIA_FJORD_TIMESTAMP)),
+        (OpHardfork::Granite.boxed(), ForkCondition::Timestamp(OP_SEPOLIA_GRANITE_TIMESTAMP)),
+        (OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(OP_SEPOLIA_HOLOCENE_TIMESTAMP)),
+        (EthereumHardfork::Prague.boxed(), ForkCondition::Timestamp(OP_SEPOLIA_ISTHMUS_TIMESTAMP)),
+        (OpHardfork::Isthmus.boxed(), ForkCondition::Timestamp(OP_SEPOLIA_ISTHMUS_TIMESTAMP)),
     ])
 });
 
