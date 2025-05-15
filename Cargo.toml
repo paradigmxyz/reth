@@ -727,11 +727,13 @@ vergen-git2 = "1.0.5"
 # alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
 # alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
 # alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
+alloy-hardforks = { git = "https://github.com/alloy-rs/hardforks.git", branch = "main" }
 #
 # op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", rev = "ad607c1" }
 # op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", rev = "ad607c1" }
 # op-alloy-rpc-types = { git = "https://github.com/alloy-rs/op-alloy", rev = "ad607c1" }
 # op-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/op-alloy", rev = "ad607c1" }
+alloy-op-hardforks = { git = "https://github.com/alloy-rs/hardforks.git", branch = "main" }
 #
 # revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "1207e33" }
 
