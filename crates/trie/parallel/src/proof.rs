@@ -156,8 +156,7 @@ where
 
         // Now decode the nodes of the proof
         let proof = proof
-            .try_into()
-            .map_err(|err: alloy_rlp::Error| ParallelStateRootError::Other(err.to_string()))?;
+            .try_into()?;
 
         Ok(proof)
     }
@@ -346,8 +345,7 @@ where
 
         // Now decode the nodes of the multiproof
         let multiproof = multiproof
-            .try_into()
-            .map_err(|err: alloy_rlp::Error| ParallelStateRootError::Other(err.to_string()))?;
+            .try_into()?;
 
         Ok(multiproof)
     }

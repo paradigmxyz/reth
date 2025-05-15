@@ -53,8 +53,8 @@ impl SparseTrieUpdate {
 
     /// Construct update from multiproof.
     #[cfg(test)]
-    pub(super) fn from_multiproof(multiproof: reth_trie::MultiProof) -> Self {
-        Self { multiproof: multiproof.try_into().unwrap(), ..Default::default() }
+    pub(super) fn from_multiproof(multiproof: reth_trie::MultiProof) -> alloy_rlp::Result<Self> {
+        Ok(Self { multiproof: multiproof.try_into()?, ..Default::default() })
     }
 
     /// Extend update with contents of the other.
@@ -1172,11 +1172,11 @@ mod tests {
         let proof2 = MultiProof::default();
         sequencer.next_sequence = 2;
 
-        let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proof1));
+        let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proof1).unwrap());
         assert_eq!(ready.len(), 1);
         assert!(!sequencer.has_pending());
 
-        let ready = sequencer.add_proof(1, SparseTrieUpdate::from_multiproof(proof2));
+        let ready = sequencer.add_proof(1, SparseTrieUpdate::from_multiproof(proof2).unwrap());
         assert_eq!(ready.len(), 1);
         assert!(!sequencer.has_pending());
     }
@@ -1189,15 +1189,15 @@ mod tests {
         let proof3 = MultiProof::default();
         sequencer.next_sequence = 3;
 
-        let ready = sequencer.add_proof(2, SparseTrieUpdate::from_multiproof(proof3));
+        let ready = sequencer.add_proof(2, SparseTrieUpdate::from_multiproof(proof3).unwrap());
         assert_eq!(ready.len(), 0);
         assert!(sequencer.has_pending());
 
-        let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proof1));
+        let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proof1).unwrap());
         assert_eq!(ready.len(), 1);
         assert!(sequencer.has_pending());
 
-        let ready = sequencer.add_proof(1, SparseTrieUpdate::from_multiproof(proof2));
+        let ready = sequencer.add_proof(1, SparseTrieUpdate::from_multiproof(proof2).unwrap());
         assert_eq!(ready.len(), 2);
         assert!(!sequencer.has_pending());
     }
@@ -1209,10 +1209,10 @@ mod tests {
         let proof3 = MultiProof::default();
         sequencer.next_sequence = 3;
 
-        let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proof1));
+        let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proof1).unwrap());
         assert_eq!(ready.len(), 1);
 
-        let ready = sequencer.add_proof(2, SparseTrieUpdate::from_multiproof(proof3));
+        let ready = sequencer.add_proof(2, SparseTrieUpdate::from_multiproof(proof3).unwrap());
         assert_eq!(ready.len(), 0);
         assert!(sequencer.has_pending());
     }
@@ -1223,10 +1223,10 @@ mod tests {
         let proof1 = MultiProof::default();
         let proof2 = MultiProof::default();
 
-        let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proof1));
+        let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proof1).unwrap());
         assert_eq!(ready.len(), 1);
 
-        let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proof2));
+        let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proof2).unwrap());
         assert_eq!(ready.len(), 0);
         assert!(!sequencer.has_pending());
     }
@@ -1237,12 +1237,12 @@ mod tests {
         let proofs: Vec<_> = (0..5).map(|_| MultiProof::default()).collect();
         sequencer.next_sequence = 5;
 
-        sequencer.add_proof(4, SparseTrieUpdate::from_multiproof(proofs[4].clone()));
-        sequencer.add_proof(2, SparseTrieUpdate::from_multiproof(proofs[2].clone()));
-        sequencer.add_proof(1, SparseTrieUpdate::from_multiproof(proofs[1].clone()));
-        sequencer.add_proof(3, SparseTrieUpdate::from_multiproof(proofs[3].clone()));
+        sequencer.add_proof(4, SparseTrieUpdate::from_multiproof(proofs[4].clone()).unwrap());
+        sequencer.add_proof(2, SparseTrieUpdate::from_multiproof(proofs[2].clone()).unwrap());
+        sequencer.add_proof(1, SparseTrieUpdate::from_multiproof(proofs[1].clone()).unwrap());
+        sequencer.add_proof(3, SparseTrieUpdate::from_multiproof(proofs[3].clone()).unwrap());
 
-        let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proofs[0].clone()));
+        let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proofs[0].clone()).unwrap());
         assert_eq!(ready.len(), 5);
         assert!(!sequencer.has_pending());
     }
