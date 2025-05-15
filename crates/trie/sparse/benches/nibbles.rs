@@ -163,5 +163,35 @@ fn bench_clone(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_eq_same_len, bench_eq_diff_len, bench_common_prefixes, bench_clone);
+fn bench_slice(c: &mut Criterion) {
+    let mut rng = rand::rng();
+    let mut group = c.benchmark_group("slice");
+
+    // Test with different nibble lengths
+    for size in [16, 32, 64] {
+        // Generate random nibbles
+        let (nybbles, packed_nibbles) = generate_nibbles(&mut rng, size);
+
+        // Slice middle 25%
+        let start = size / 4;
+        let end = start + (size / 2);
+        group.bench_with_input(BenchmarkId::new("Nibbles", size), &size, |b, _| {
+            b.iter(|| nybbles.slice(start..end))
+        });
+        group.bench_with_input(BenchmarkId::new("PackedNibbles", size), &size, |b, _| {
+            b.iter(|| packed_nibbles.slice(start..end))
+        });
+    }
+
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    bench_eq_same_len,
+    bench_eq_diff_len,
+    bench_common_prefixes,
+    bench_clone,
+    bench_slice
+);
 criterion_main!(benches);
