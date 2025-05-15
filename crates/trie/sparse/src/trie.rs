@@ -17,7 +17,7 @@ use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
     BranchNodeCompact, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, RlpNode, TrieMask,
-    TrieNode, CHILD_INDEX_RANGE, EMPTY_ROOT_HASH,
+    TrieNode, CHILD_INDEX_RANGE, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use smallvec::SmallVec;
 use tracing::trace;
@@ -861,7 +861,7 @@ impl<P> RevealedSparseTrie<P> {
         // Take the current prefix set
         let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
         let mut buffers = RlpNodeBuffers::default();
-        let mut rlp_buf = Vec::new();
+        let mut rlp_buf = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
 
         // Get the nodes that have changed at the given depth.
         let (targets, new_prefix_set) = self.get_changed_nodes_at_depth(&mut prefix_set, depth);
