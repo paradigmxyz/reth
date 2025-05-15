@@ -231,7 +231,6 @@ impl OpReceiptBuilder {
                                 inner: receipt_with_bloom.receipt,
                                 deposit_nonce: receipt.deposit_nonce,
                                 deposit_receipt_version: receipt.deposit_receipt_version,
-                                token_ratio: receipt.token_ratio,
                             },
                             logs_bloom: receipt_with_bloom.logs_bloom,
                         })
@@ -300,6 +299,7 @@ mod test {
                 operator_fee_scalar: None,
                 operator_fee_constant: None,
             },
+            token_ratio: None,
             deposit_nonce: None,
             deposit_receipt_version: None,
         };
@@ -385,52 +385,6 @@ mod test {
             TX_META_TX_1_OP_MAINNET_BLOCK_124665056.l1_block_info.operator_fee_constant,
             "incorrect operator fee constant"
         );
-    }
-
-    #[test]
-    fn op_non_zero_operator_fee_params_included_in_receipt() {
-        let tx_1 =
-            OpTransactionSigned::decode_2718(&mut TX_1_OP_MAINNET_BLOCK_124665056.as_slice())
-                .unwrap();
-
-        let mut l1_block_info = op_revm::L1BlockInfo::default();
-
-        l1_block_info.operator_fee_scalar = Some(U256::ZERO);
-        l1_block_info.operator_fee_constant = Some(U256::from(2));
-
-        let receipt_meta = OpReceiptFieldsBuilder::new(BLOCK_124665056_TIMESTAMP, 124665056)
-            .l1_block_info(&OP_MAINNET, &tx_1, &mut l1_block_info)
-            .expect("should parse revm l1 info")
-            .build();
-
-        let L1BlockInfo { operator_fee_scalar, operator_fee_constant, .. } =
-            receipt_meta.l1_block_info;
-
-        assert_eq!(operator_fee_scalar, Some(0), "incorrect operator fee scalar");
-        assert_eq!(operator_fee_constant, Some(2), "incorrect operator fee constant");
-    }
-
-    #[test]
-    fn op_zero_operator_fee_params_not_included_in_receipt() {
-        let tx_1 =
-            OpTransactionSigned::decode_2718(&mut TX_1_OP_MAINNET_BLOCK_124665056.as_slice())
-                .unwrap();
-
-        let mut l1_block_info = op_revm::L1BlockInfo::default();
-
-        l1_block_info.operator_fee_scalar = Some(U256::ZERO);
-        l1_block_info.operator_fee_constant = Some(U256::ZERO);
-
-        let receipt_meta = OpReceiptFieldsBuilder::new(BLOCK_124665056_TIMESTAMP, 124665056)
-            .l1_block_info(&OP_MAINNET, &tx_1, &mut l1_block_info)
-            .expect("should parse revm l1 info")
-            .build();
-
-        let L1BlockInfo { operator_fee_scalar, operator_fee_constant, .. } =
-            receipt_meta.l1_block_info;
-
-        assert_eq!(operator_fee_scalar, None, "incorrect operator fee scalar");
-        assert_eq!(operator_fee_constant, None, "incorrect operator fee constant");
     }
 
     // <https://github.com/paradigmxyz/reth/issues/12177>

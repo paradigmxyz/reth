@@ -126,11 +126,10 @@ mod op {
 
     impl InMemorySize for op_alloy_consensus::OpDepositReceipt {
         fn size(&self) -> usize {
-            let Self { inner, deposit_nonce, deposit_receipt_version, token_ratio } = self;
+            let Self { inner, deposit_nonce, deposit_receipt_version } = self;
             inner.size() +
                 core::mem::size_of_val(deposit_nonce) +
-                core::mem::size_of_val(deposit_receipt_version) +
-                core::mem::size_of_val(token_ratio)
+                core::mem::size_of_val(deposit_receipt_version)
         }
     }
 

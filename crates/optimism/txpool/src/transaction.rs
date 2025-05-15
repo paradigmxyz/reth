@@ -311,6 +311,8 @@ mod tests {
             mint: None,
             value: U256::ZERO,
             gas_limit: 0,
+            eth_tx_value: None,
+            eth_value: None,
             is_system_transaction: false,
             input: Default::default(),
         };
