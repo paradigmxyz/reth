@@ -6,10 +6,7 @@ use alloy_rpc_types_engine::ForkchoiceState;
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use eyre::Ok;
 use futures_util::Future;
-use jsonrpsee::{
-    core::middleware::layer::RpcLogger,
-    http_client::{transport::HttpBackend, HttpClient, RpcService},
-};
+use jsonrpsee::http_client::HttpClient;
 use reth_chainspec::EthereumHardforks;
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_api::{
@@ -23,8 +20,8 @@ use reth_provider::{
     BlockReader, BlockReaderIdExt, CanonStateNotificationStream, CanonStateSubscriptions,
     StageCheckpointReader,
 };
+use reth_rpc_builder::auth::AuthServerHandle;
 use reth_rpc_eth_api::helpers::{EthApiSpec, EthTransactions, TraceExt};
-use reth_rpc_layer::AuthClientService;
 use reth_stages_types::StageId;
 use std::pin::Pin;
 use tokio_stream::StreamExt;
@@ -305,9 +302,7 @@ where
     }
 
     /// Returns an Engine API client.
-    pub fn engine_api_client(
-        &self,
-    ) -> HttpClient<RpcLogger<RpcService<AuthClientService<HttpBackend>>>> {
-        self.inner.auth_server_handle().http_client()
+    pub fn auth_server_handle(&self) -> AuthServerHandle {
+        self.inner.auth_server_handle().clone()
     }
 }
