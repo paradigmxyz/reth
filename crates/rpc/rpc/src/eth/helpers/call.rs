@@ -1,7 +1,6 @@
 //! Contains RPC handler implementations specific to endpoints that call/execute within evm.
 
 use crate::EthApi;
-use alloy_consensus::TxType;
 use alloy_evm::block::BlockExecutorFactory;
 use alloy_primitives::{TxKind, U256};
 use alloy_rpc_types::TransactionRequest;
@@ -58,17 +57,7 @@ where
             return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into_eth_err())
         }
 
-        let tx_type = if request.authorization_list.is_some() {
-            TxType::Eip7702
-        } else if request.has_eip4844_fields() {
-            TxType::Eip4844
-        } else if request.has_eip1559_fields() {
-            TxType::Eip1559
-        } else if request.access_list.is_some() {
-            TxType::Eip2930
-        } else {
-            TxType::Legacy
-        } as u8;
+        let tx_type = request.minimal_tx_type() as u8;
 
         let TransactionRequest {
             from,
