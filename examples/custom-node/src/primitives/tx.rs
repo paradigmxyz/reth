@@ -16,13 +16,13 @@ use reth_codecs::{
     Compact,
 };
 use reth_ethereum::primitives::{serde_bincode_compat::SerdeBincodeCompat, InMemorySize};
-use reth_op::primitives::{ExtendedTxEnvelope, SignedTransaction};
+use reth_op::primitives::{Extended, SignedTransaction};
 use revm_primitives::{Address, Bytes};
 use serde::{Deserialize, Serialize};
 
 /// A [`SignedTransaction`] implementation that combines the [`OpTxEnvelope`] and another
 /// transaction type.
-pub type ExtendedOpTxEnvelope<T> = ExtendedTxEnvelope<OpTxEnvelope, T>;
+pub type ExtendedOpTxEnvelope<T> = Extended<OpTxEnvelope, T>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, Eq, PartialEq)]
 pub struct CustomTransactionEnvelope {
