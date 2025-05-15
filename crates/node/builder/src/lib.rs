@@ -19,8 +19,8 @@ pub mod node;
 pub use node::*;
 
 /// Support for accessing the EngineApi outside the RPC server context.
-mod engine_api_sender;
-pub use engine_api_sender::EngineApiSender;
+mod engine_api_callback;
+pub use engine_api_callback::{with_sender, EngineApiFn};
 
 /// Support for configuring the components of a node.
 pub mod components;
