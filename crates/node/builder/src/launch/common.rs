@@ -332,6 +332,7 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     }
 
     /// Returns the configured [`PruneConfig`]
+    ///
     /// Any configuration set in CLI will take precedence over those set in toml
     pub fn prune_config(&self) -> Option<PruneConfig> {
         let Some(mut node_prune_config) = self.node_config().prune_config() else {
@@ -1086,7 +1087,7 @@ mod tests {
                     storage_history_full: false,
                     storage_history_distance: None,
                     storage_history_before: None,
-                    receipts_log_filter: vec![],
+                    receipts_log_filter: None,
                 },
                 ..NodeConfig::test()
             };

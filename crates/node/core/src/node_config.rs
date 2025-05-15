@@ -283,11 +283,8 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     }
 
     /// Returns pruning configuration.
-    pub fn prune_config(&self) -> Option<PruneConfig>
-    where
-        ChainSpec: EthChainSpec,
-    {
-        self.pruning.prune_config(&self.chain)
+    pub fn prune_config(&self) -> Option<PruneConfig> {
+        self.pruning.prune_config()
     }
 
     /// Returns the max block that the node should run to, looking it up from the network if

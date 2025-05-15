@@ -258,7 +258,7 @@ pub async fn test_exex_context_with_chain_spec(
     let provider_factory = ProviderFactory::<NodeTypesWithDBAdapter<TestNode, _>>::new(
         db,
         chain_spec.clone(),
-        StaticFileProvider::read_write(static_dir.into_path()).expect("static file provider"),
+        StaticFileProvider::read_write(static_dir.keep()).expect("static file provider"),
     );
 
     let genesis_hash = init_genesis(&provider_factory)?;
