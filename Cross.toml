@@ -7,6 +7,11 @@ pre-build = [
 ]
 
 [target.x86_64-pc-windows-gnu]
+# Why do we need a custom Dockerfile on Windows:
+# 1. `reth-libmdbx` stopped working with MinGW 9.3 that cross image comes with.
+# 2. To be able to update the version of MinGW, we need to also update the Ubuntu that the image is based on.
+#
+# Also see https://github.com/cross-rs/cross/issues/1667
 dockerfile = "./Dockerfile.x86_64-pc-windows-gnu"
 
 [build.env]
