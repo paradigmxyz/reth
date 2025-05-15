@@ -19,7 +19,7 @@
 extern crate alloc;
 
 // Re-export alloy-op-hardforks types.
-pub use alloy_op_hardforks::{OpHardfork, OpHardforks};
+pub use alloy_op_hardforks::{base_sepolia::*, OpHardfork, OpHardforks};
 pub use reth_ethereum_forks::ForkCondition;
 
 use alloc::vec;
@@ -163,15 +163,24 @@ pub static BASE_SEPOLIA_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
         ),
         (OpHardfork::Bedrock.boxed(), ForkCondition::ZERO_BLOCK),
         (OpHardfork::Regolith.boxed(), ForkCondition::ZERO_TIMESTAMP),
-        (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(1699981200)),
-        (OpHardfork::Canyon.boxed(), ForkCondition::Timestamp(1699981200)),
-        (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(1708534800)),
-        (OpHardfork::Ecotone.boxed(), ForkCondition::Timestamp(1708534800)),
-        (OpHardfork::Fjord.boxed(), ForkCondition::Timestamp(1716998400)),
-        (OpHardfork::Granite.boxed(), ForkCondition::Timestamp(1723478400)),
-        (OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(1732633200)),
-        (EthereumHardfork::Prague.boxed(), ForkCondition::Timestamp(1744905600)),
-        (OpHardfork::Isthmus.boxed(), ForkCondition::Timestamp(1744905600)),
+        (
+            EthereumHardfork::Shanghai.boxed(),
+            ForkCondition::Timestamp(BASE_SEPOLIA_CANYON_TIMESTAMP),
+        ),
+        (OpHardfork::Canyon.boxed(), ForkCondition::Timestamp(BASE_SEPOLIA_CANYON_TIMESTAMP)),
+        (
+            EthereumHardfork::Cancun.boxed(),
+            ForkCondition::Timestamp(BASE_SEPOLIA_ECOTONE_TIMESTAMP),
+        ),
+        (OpHardfork::Ecotone.boxed(), ForkCondition::Timestamp(BASE_SEPOLIA_ECOTONE_TIMESTAMP)),
+        (OpHardfork::Fjord.boxed(), ForkCondition::Timestamp(BASE_SEPOLIA_FJORD_TIMESTAMP)),
+        (OpHardfork::Granite.boxed(), ForkCondition::Timestamp(BASE_SEPOLIA_GRANITE_TIMESTAMP)),
+        (OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(BASE_SEPOLIA_ECOTONE_TIMESTAMP)),
+        (
+            EthereumHardfork::Prague.boxed(),
+            ForkCondition::Timestamp(BASE_SEPOLIA_ISTHMUS_TIMESTAMP),
+        ),
+        (OpHardfork::Isthmus.boxed(), ForkCondition::Timestamp(BASE_SEPOLIA_ISTHMUS_TIMESTAMP)),
     ])
 });
 
