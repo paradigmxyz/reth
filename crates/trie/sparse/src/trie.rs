@@ -17,7 +17,7 @@ use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
     BranchNodeCompact, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, RlpNode, TrieMask,
-    TrieNode, CHILD_INDEX_RANGE, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    TrieNode, CHILD_INDEX_RANGE, EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
 use tracing::trace;
@@ -294,6 +294,8 @@ pub struct RevealedSparseTrie<P = DefaultBlindedProvider> {
     prefix_set: PrefixSetMut,
     /// Optional tracking of trie updates for later use.
     updates: Option<SparseTrieUpdates>,
+    /// Reusable buffer for RLP encoding of nodes.
+    rlp_buf: Vec<u8>,
 }
 
 impl<P> fmt::Debug for RevealedSparseTrie<P> {
@@ -391,6 +393,7 @@ impl Default for RevealedSparseTrie {
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
             updates: None,
+            rlp_buf: Vec::new(),
         }
     }
 }
@@ -417,6 +420,7 @@ impl RevealedSparseTrie {
             branch_node_hash_masks: HashMap::default(),
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
+            rlp_buf: Vec::new(),
             updates: None,
         }
         .with_updates(retain_updates);
@@ -448,6 +452,7 @@ impl<P> RevealedSparseTrie<P> {
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
             updates: None,
+            rlp_buf: Vec::new(),
         }
         .with_updates(retain_updates);
         this.reveal_node(Nibbles::default(), node, masks)?;
@@ -471,6 +476,7 @@ impl<P> RevealedSparseTrie<P> {
             values: self.values,
             prefix_set: self.prefix_set,
             updates: self.updates,
+            rlp_buf: self.rlp_buf,
         }
     }
 
@@ -861,7 +867,6 @@ impl<P> RevealedSparseTrie<P> {
         // Take the current prefix set
         let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
         let mut buffers = RlpNodeBuffers::default();
-        let mut rlp_buf = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
 
         // Get the nodes that have changed at the given depth.
         let (targets, new_prefix_set) = self.get_changed_nodes_at_depth(&mut prefix_set, depth);
@@ -869,13 +874,15 @@ impl<P> RevealedSparseTrie<P> {
         self.prefix_set = new_prefix_set;
 
         trace!(target: "trie::sparse", ?depth, ?targets, "Updating nodes at depth");
+
+        let mut temp_rlp_buf = core::mem::take(&mut self.rlp_buf);
         for (level, path) in targets {
             buffers.path_stack.push(RlpNodePathStackItem {
                 level,
                 path,
                 is_in_prefix_set: Some(true),
             });
-            self.rlp_node(&mut prefix_set, &mut buffers, &mut rlp_buf);
+            self.rlp_node(&mut prefix_set, &mut buffers, &mut temp_rlp_buf);
         }
     }
 
@@ -965,8 +972,8 @@ impl<P> RevealedSparseTrie<P> {
     /// If the node at provided path does not exist.
     pub fn rlp_node_allocate(&mut self, prefix_set: &mut PrefixSet) -> RlpNode {
         let mut buffers = RlpNodeBuffers::new_with_root_path();
-        let mut rlp_buf = Vec::new();
-        self.rlp_node(prefix_set, &mut buffers, &mut rlp_buf)
+        let mut temp_rlp_buf = core::mem::take(&mut self.rlp_buf);
+        self.rlp_node(prefix_set, &mut buffers, &mut temp_rlp_buf)
     }
 
     /// Looks up or computes the RLP encoding of the node specified by the current
@@ -1326,6 +1333,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
         if let Some(updates) = self.updates.as_mut() {
             updates.clear()
         }
+        self.rlp_buf.clear();
     }
 
     /// Attempts to find a leaf node at the specified path.
@@ -2246,6 +2254,7 @@ mod find_leaf_tests {
             values: Default::default(),
             prefix_set: Default::default(),
             updates: None,
+            rlp_buf: Vec::new(),
         };
 
         let result = sparse.find_leaf(&leaf_path, None);
@@ -2288,6 +2297,7 @@ mod find_leaf_tests {
             values,
             prefix_set: Default::default(),
             updates: None,
+            rlp_buf: Vec::new(),
         };
 
         let result = sparse.find_leaf(&search_path, None);
