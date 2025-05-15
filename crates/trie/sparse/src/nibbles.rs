@@ -11,11 +11,9 @@ use reth_trie_common::Nibbles;
 const CAPACITY_BYTES: usize = 32;
 
 /// A representation for nibbles, that uses an even/odd flag.
-#[derive(PartialEq, Eq, Hash)]
+#[derive(Hash, PartialEq, Eq)]
 pub struct PackedNibbles {
     /// The even/odd flag, indicating whether the length is even or odd.
-    // NOTE: This field goes before the `nibbles` field to compare it first when deriving the
-    // `PartialEq` trait.
     pub(crate) even: bool,
     /// The nibbles themselves, stored as a byte array.
     pub(crate) nibbles: ArrayVec<u8, CAPACITY_BYTES>,
@@ -24,6 +22,28 @@ pub struct PackedNibbles {
 impl Default for PackedNibbles {
     fn default() -> Self {
         Self { even: true, nibbles: ArrayVec::new() }
+    }
+}
+
+impl fmt::Debug for PackedNibbles {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "PackedNibbles(0x")?;
+
+        // For all bytes except potentially the last one, print the full byte
+        let full_bytes = if self.even { self.nibbles.len() } else { self.nibbles.len() - 1 };
+
+        for &byte in &self.nibbles[0..full_bytes] {
+            write!(f, "{:02x}", byte)?;
+        }
+
+        // If odd, print only the high nibble of the last byte
+        if !self.even && !self.nibbles.is_empty() {
+            let last_byte = self.nibbles[self.nibbles.len() - 1];
+            write!(f, "{:x}", (last_byte & 0xF0) >> 4)?;
+        }
+
+        write!(f, ")")
     }
 }
 
@@ -52,7 +72,75 @@ impl Clone for PackedNibbles {
     }
 }
 
+impl PartialOrd for PackedNibbles {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+// TODO: this can be optimized
+impl Ord for PackedNibbles {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        // Get the lengths of both byte sequences
+        let self_len = self.nibbles.len();
+        let other_len = other.nibbles.len();
+
+        // Compare bytes one by one until a difference is found
+        let min_len = core::cmp::min(self_len, other_len);
+        for (i, (self_byte, other_byte)) in
+            self.nibbles.iter().zip(other.nibbles.iter()).enumerate()
+        {
+            match self_byte.cmp(other_byte) {
+                core::cmp::Ordering::Equal => {
+                    if i == min_len - 1 && self_len == other_len {
+                        // If it's the last byte of both sequences, compare the parity
+                        match (self.even, other.even) {
+                            (true, true) | (false, false) => return core::cmp::Ordering::Equal,
+                            // For example, the same byte 0x60 will be represented as "60" for
+                            // `self` and "6" for `other`
+                            (true, false) => return core::cmp::Ordering::Greater,
+                            // For example, the same byte 0x60 will be represented as "6" for
+                            // `self` and "60" for `other`
+                            (false, true) => return core::cmp::Ordering::Less,
+                        }
+                    }
+                }
+                ordering => return ordering,
+            }
+        }
+
+        // If we've compared all bytes and they're equal up to the min length,
+        // the shorter sequence comes first
+        self_len.cmp(&other_len)
+    }
+}
+
+// TODO: this can be optimized
+impl From<Nibbles> for PackedNibbles {
+    fn from(nibbles: Nibbles) -> Self {
+        let mut packed = Self::default();
+        for b in nibbles.iter().copied() {
+            packed.push_unchecked(b);
+        }
+        packed
+    }
+}
+
+// TODO: this can be optimized
+impl From<PackedNibbles> for Nibbles {
+    fn from(packed: PackedNibbles) -> Self {
+        let mut nibbles = Self::new();
+        for i in 0..packed.len() {
+            nibbles.push_unchecked(packed.get_nibble(i));
+        }
+        nibbles
+    }
+}
+
 impl PackedNibbles {
+    /// Creates a new `PackedNibbles` instance from an iterator of nibbles.
+    ///
+    /// Each item in the iterator should be a nibble (0-15).
     pub fn from_nibbles(nibbles: impl IntoIterator<Item = u8>) -> Self {
         let mut packed = Self::default();
         // TODO: this can be optimized
@@ -62,6 +150,10 @@ impl PackedNibbles {
         packed
     }
 
+    /// Creates a new `PackedNibbles` instance from an iterator of nibbles without checking bounds.
+    ///
+    /// Each item in the iterator should be a nibble (0-15).
+    /// This function is essentially identical to `from_nibbles` but is kept for API compatibility.
     pub fn from_nibbles_unchecked(nibbles: impl IntoIterator<Item = u8>) -> Self {
         let mut packed = Self::default();
         // TODO: this can be optimized
@@ -71,6 +163,9 @@ impl PackedNibbles {
         packed
     }
 
+    /// Creates a new `PackedNibbles` instance from a slice of bytes.
+    ///
+    /// This treats each byte as a single element rather than unpacking into nibbles.
     pub fn unpack(bytes: impl AsRef<[u8]>) -> Self {
         Self {
             // TODO: this can be optimized
@@ -125,23 +220,12 @@ impl PackedNibbles {
         }
     }
 
+    /// Returns a slice of the underlying bytes.
     pub fn as_slice(&self) -> &[u8] {
         self.nibbles.as_slice()
     }
 
     /// Returns the length of the common prefix between this [`PackedNibbles`] and `other`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use crate::PackedNibbles;
-    ///
-    /// // Create nibbles with values [0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F]
-    /// let a = PackedNibbles::unpack(&[0xAB, 0xCD, 0xEF]);
-    /// // Create nibbles with values [0x0A, 0x0B, 0x0C, 0x0D]
-    /// let b = PackedNibbles::unpack(&[0xAB, 0xCD]);
-    /// assert_eq!(a.common_prefix_length(&b), 4); // Common prefix is [0x0A, 0x0B, 0x0C, 0x0D]
-    /// ```
     pub fn common_prefix_length(&self, other: &Self) -> usize {
         let len = core::cmp::min(self.len(), other.len());
 
@@ -159,18 +243,6 @@ impl PackedNibbles {
     }
 
     /// Returns the last nibble in this [`PackedNibbles`], or `None` if empty.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use crate::PackedNibbles;
-    ///
-    /// let nibbles = PackedNibbles::from_nibbles(&[0x0A, 0x0B, 0x0C]);
-    /// assert_eq!(nibbles.last(), Some(0x0C));
-    ///
-    /// let empty = PackedNibbles::default();
-    /// assert_eq!(empty.last(), None);
-    /// ```
     pub fn last(&self) -> Option<u8> {
         if self.is_empty() {
             return None;
@@ -204,40 +276,14 @@ impl PackedNibbles {
 
     /// Creates a new [`PackedNibbles`] containing the nibbles in the specified range.
     ///
-    /// This method accepts any type that implements `RangeBounds<usize>`,
+    /// This method accepts any type that implements [`RangeBounds<usize>`],
     /// including full ranges (`..`), ranges with one bound (`..end` or `start..`),
     /// inclusive ranges (`start..=end`), or standard ranges (`start..end`).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use crate::PackedNibbles;
-    ///
-    /// let original = PackedNibbles::from_nibbles(&[0x0A, 0x0B, 0x0C, 0x0D]);
-    ///
-    /// // Using a standard range
-    /// let sliced = original.slice(1..3);
-    /// assert_eq!(sliced.get_nibble(0), 0x0B);
-    /// assert_eq!(sliced.get_nibble(1), 0x0C);
-    /// assert_eq!(sliced.len(), 2);
-    ///
-    /// // Using an inclusive range
-    /// let sliced = original.slice(1..=2);
-    /// assert_eq!(sliced.get_nibble(0), 0x0B);
-    /// assert_eq!(sliced.get_nibble(1), 0x0C);
-    ///
-    /// // Using a full range
-    /// let sliced = original.slice(..);
-    /// assert_eq!(sliced.len(), original.len());
-    /// ```
     ///
     /// # Panics
     ///
     /// This method will panic if the range is out of bounds for this [`PackedNibbles`].
-    pub fn slice<R>(&self, range: R) -> Self
-    where
-        R: RangeBounds<usize>,
-    {
+    pub fn slice(&self, range: impl RangeBounds<usize>) -> Self {
         // Determine the start and end indices from the range bounds
         let len = self.len();
 
@@ -266,16 +312,96 @@ impl PackedNibbles {
             return self.clone();
         }
 
-        // Create a new array to hold the sliced nibbles
-        let slice_len = end - start;
-        let mut result = Self::default();
+        // Calculate byte offsets
+        let start_byte = start / 2;
+        let end_byte = end.div_ceil(2);
+        let mut result = Self { even: (end - start) % 2 == 0, nibbles: ArrayVec::new() };
 
-        // TODO: this can be optimized
+        // Fast path for byte-aligned slices (both start and end on even nibbles)
+        if start % 2 == 0 && end % 2 == 0 {
+            // Copy bytes directly without bit manipulation
+            result
+                .nibbles
+                .try_extend_from_slice(&self.nibbles[start_byte..end_byte])
+                .expect("nibbles length is {CAPACITY_BYTES}");
+            return result;
+        }
 
-        // Copy nibbles one at a time
-        for i in 0..slice_len {
-            let nibble = self.get_nibble(start + i);
-            result.push_unchecked(nibble);
+        // Handle non-aligned cases
+        unsafe {
+            match (start % 2 == 0, end % 2 == 0) {
+                (true, false) => {
+                    // Start on even, end on odd: copy full bytes except last one
+                    if end_byte > start_byte {
+                        for byte in &self.nibbles[start_byte..end_byte - 1] {
+                            result.nibbles.push_unchecked(*byte);
+                        }
+                    }
+                    // Add last byte with masked high nibble
+                    if start_byte < end_byte {
+                        let last_byte = self.nibbles[end_byte - 1] & 0xF0;
+                        result.nibbles.push_unchecked(last_byte);
+                    }
+                }
+                (false, true) => {
+                    // Start on odd, end on even
+
+                    // First byte (only low nibble)
+                    let first_byte = (self.nibbles[start_byte] & 0x0F) << 4;
+
+                    if end_byte > start_byte + 1 {
+                        // First combined byte (low nibble from start_byte, high nibble from
+                        // start_byte+1)
+                        result.nibbles.push_unchecked(
+                            first_byte | ((self.nibbles[start_byte + 1] & 0xF0) >> 4),
+                        );
+
+                        // Middle bytes until the last one need to be shifted
+                        for i in start_byte + 1..end_byte - 1 {
+                            let high = (self.nibbles[i] & 0x0F) << 4;
+                            let low = (self.nibbles[i + 1] & 0xF0) >> 4;
+                            result.nibbles.push_unchecked(high | low);
+                        }
+
+                        // Last byte (only high nibble)
+                        result.nibbles.push_unchecked((self.nibbles[end_byte - 1] & 0xF0) >> 4);
+                    } else {
+                        // Just a lower nibble of the first byte
+                        result.nibbles.push_unchecked(first_byte);
+                    }
+                }
+                (false, false) => {
+                    // Start on odd, end on odd
+
+                    // First byte (only low nibble)
+                    let first_byte = (self.nibbles[start_byte] & 0x0F) << 4;
+
+                    if end_byte > start_byte + 1 {
+                        // First combined byte (low nibble from start_byte, high nibble from
+                        // start_byte+1)
+                        result.nibbles.push_unchecked(
+                            first_byte | ((self.nibbles[start_byte + 1] & 0xF0) >> 4),
+                        );
+
+                        // If we have at least one full byte between first and last
+                        if end_byte > start_byte + 2 {
+                            // Middle bytes need to be shifted
+                            for i in start_byte + 1..end_byte - 1 {
+                                let high = (self.nibbles[i] & 0x0F) << 4;
+                                let low = (self.nibbles[i + 1] & 0xF0) >> 4;
+                                result.nibbles.push_unchecked(high | low);
+                            }
+                        }
+                    } else {
+                        // Just one byte with both nibbles - this is a single nibble
+                        // For start=1, end=2, we need the low nibble from byte 0
+                        result.nibbles.push_unchecked(first_byte & 0xF0);
+                    }
+                }
+                (true, true) => {
+                    unreachable!("This case should have been handled by the fast path")
+                }
+            }
         }
 
         result
@@ -407,17 +533,6 @@ impl PackedNibbles {
     ///
     /// The provided length is the number of nibbles to keep, not the number of bytes.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use crate::PackedNibbles;
-    ///
-    /// let mut nibbles = PackedNibbles::from_nibbles(&[0x0A, 0x0B, 0x0C, 0x0D]);
-    /// nibbles.truncate(2);
-    /// assert_eq!(nibbles.nibbles.len(), 1);
-    /// assert_eq!(nibbles.even, true);
-    /// ```
-    ///
     /// # Panics
     ///
     /// This method will panic if `new_len` is greater than the current nibble count.
@@ -443,93 +558,6 @@ impl PackedNibbles {
         if new_array_len < self.nibbles.len() {
             self.nibbles.truncate(new_array_len);
         }
-    }
-}
-
-impl fmt::Debug for PackedNibbles {
-    #[inline]
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "PackedNibbles(0x")?;
-
-        // For all bytes except potentially the last one, print the full byte
-        let full_bytes = if self.even { self.nibbles.len() } else { self.nibbles.len() - 1 };
-
-        for &byte in &self.nibbles[0..full_bytes] {
-            write!(f, "{:02x}", byte)?;
-        }
-
-        // If odd, print only the high nibble of the last byte
-        if !self.even && !self.nibbles.is_empty() {
-            let last_byte = self.nibbles[self.nibbles.len() - 1];
-            write!(f, "{:x}", (last_byte & 0xF0) >> 4)?;
-        }
-
-        write!(f, ")")
-    }
-}
-
-// TODO: this can be optimized
-impl From<Nibbles> for PackedNibbles {
-    fn from(nibbles: Nibbles) -> Self {
-        let mut packed = Self::default();
-        for b in nibbles.iter().copied() {
-            packed.push_unchecked(b);
-        }
-        packed
-    }
-}
-
-// TODO: this can be optimized
-impl From<PackedNibbles> for Nibbles {
-    fn from(packed: PackedNibbles) -> Self {
-        let mut nibbles = Self::new();
-        for i in 0..packed.len() {
-            nibbles.push_unchecked(packed.get_nibble(i));
-        }
-        nibbles
-    }
-}
-
-impl PartialOrd for PackedNibbles {
-    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-// TODO: this can be optimized
-impl Ord for PackedNibbles {
-    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        // Get the lengths of both byte sequences
-        let self_len = self.nibbles.len();
-        let other_len = other.nibbles.len();
-
-        // Compare bytes one by one until a difference is found
-        let min_len = core::cmp::min(self_len, other_len);
-        for (i, (self_byte, other_byte)) in
-            self.nibbles.iter().zip(other.nibbles.iter()).enumerate()
-        {
-            match self_byte.cmp(other_byte) {
-                core::cmp::Ordering::Equal => {
-                    if i == min_len - 1 && self_len == other_len {
-                        // If it's the last byte of both sequences, compare the parity
-                        match (self.even, other.even) {
-                            (true, true) | (false, false) => return core::cmp::Ordering::Equal,
-                            // For example, the same byte 0x60 will be represented as "60" for
-                            // `self` and "6" for `other`
-                            (true, false) => return core::cmp::Ordering::Greater,
-                            // For example, the same byte 0x60 will be represented as "6" for
-                            // `self` and "60" for `other`
-                            (false, true) => return core::cmp::Ordering::Less,
-                        }
-                    }
-                }
-                ordering => return ordering,
-            }
-        }
-
-        // If we've compared all bytes and they're equal up to the min length,
-        // the shorter sequence comes first
-        self_len.cmp(&other_len)
     }
 }
 
@@ -632,5 +660,71 @@ mod tests {
         let odd_nibbles = PackedNibbles::from_nibbles([1, 2, 3]);
         let even_prefix = PackedNibbles::from_nibbles([1, 2]);
         assert!(odd_nibbles.starts_with(&even_prefix));
+    }
+
+    #[test]
+    fn test_packed_nibbles_slice() {
+        // Test with empty nibbles
+        let empty = PackedNibbles::default();
+        assert_eq!(empty.slice(..), empty);
+
+        // Test with even number of nibbles
+        let even = PackedNibbles::from_nibbles([0, 1, 2, 3, 4, 5]);
+        assert!(even.even);
+
+        // Full slice
+        assert_eq!(even.slice(..), even);
+        assert_eq!(even.slice(0..6), even);
+
+        // Empty slice
+        assert_eq!(even.slice(3..3), PackedNibbles::default());
+
+        // Beginning slices (even start)
+        assert_eq!(even.slice(0..2), PackedNibbles::from_nibbles(0..2));
+
+        // Middle slices (even start, even end)
+        assert_eq!(even.slice(2..4), PackedNibbles::from_nibbles(2..4));
+
+        // End slices (even start)
+        assert_eq!(even.slice(4..6), PackedNibbles::from_nibbles(4..6));
+
+        // Test with odd number of nibbles
+        let odd = PackedNibbles::from_nibbles(0..5);
+        assert!(!odd.even);
+
+        // Full slice
+        assert_eq!(odd.slice(..), odd);
+        assert_eq!(odd.slice(0..5), odd);
+
+        // Beginning slices (odd length)
+        assert_eq!(odd.slice(0..3), PackedNibbles::from_nibbles(0..3));
+
+        // Middle slices with odd start
+        assert_eq!(odd.slice(1..4), PackedNibbles::from_nibbles(1..4));
+
+        // Middle slices with odd end
+        assert_eq!(odd.slice(1..3), PackedNibbles::from_nibbles(1..3));
+
+        // End slices (odd start)
+        assert_eq!(odd.slice(2..5), PackedNibbles::from_nibbles(2..5));
+
+        // Special cases - both odd start and end
+        assert_eq!(odd.slice(1..4), PackedNibbles::from_nibbles(1..4));
+
+        // Single nibble slices
+        assert_eq!(even.slice(2..3), PackedNibbles::from_nibbles(2..3));
+
+        assert_eq!(even.slice(3..4), PackedNibbles::from_nibbles(3..4));
+
+        // Test with alternate syntax
+        assert_eq!(even.slice(2..), PackedNibbles::from_nibbles(2..6));
+        assert_eq!(even.slice(..4), PackedNibbles::from_nibbles(0..4));
+        assert_eq!(even.slice(..=3), PackedNibbles::from_nibbles(0..4));
+
+        // More complex test case with the max length array sliced at the end
+        assert_eq!(
+            PackedNibbles::from_nibbles(0..64).slice(1..),
+            PackedNibbles::from_nibbles(1..64)
+        );
     }
 }
