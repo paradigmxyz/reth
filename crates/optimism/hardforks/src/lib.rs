@@ -19,7 +19,7 @@
 extern crate alloc;
 
 // Re-export alloy-op-hardforks types.
-pub use alloy_op_hardforks::{OpHardfork, OpHardforks};
+pub use alloy_op_hardforks::{base_mainnet::*, OpHardfork, OpHardforks};
 pub use reth_ethereum_forks::ForkCondition;
 
 use alloc::vec;
@@ -201,14 +201,23 @@ pub static BASE_MAINNET_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
         ),
         (OpHardfork::Bedrock.boxed(), ForkCondition::ZERO_BLOCK),
         (OpHardfork::Regolith.boxed(), ForkCondition::ZERO_TIMESTAMP),
-        (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(1704992401)),
-        (OpHardfork::Canyon.boxed(), ForkCondition::Timestamp(1704992401)),
-        (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(1710374401)),
-        (OpHardfork::Ecotone.boxed(), ForkCondition::Timestamp(1710374401)),
-        (OpHardfork::Fjord.boxed(), ForkCondition::Timestamp(1720627201)),
-        (OpHardfork::Granite.boxed(), ForkCondition::Timestamp(1726070401)),
-        (OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(1736445601)),
-        (EthereumHardfork::Prague.boxed(), ForkCondition::Timestamp(1746806401)),
-        (OpHardfork::Isthmus.boxed(), ForkCondition::Timestamp(1746806401)),
+        (
+            EthereumHardfork::Shanghai.boxed(),
+            ForkCondition::Timestamp(BASE_MAINNET_CANYON_TIMESTAMP),
+        ),
+        (OpHardfork::Canyon.boxed(), ForkCondition::Timestamp(BASE_MAINNET_CANYON_TIMESTAMP)),
+        (
+            EthereumHardfork::Cancun.boxed(),
+            ForkCondition::Timestamp(BASE_MAINNET_ECOTONE_TIMESTAMP),
+        ),
+        (OpHardfork::Ecotone.boxed(), ForkCondition::Timestamp(BASE_MAINNET_ECOTONE_TIMESTAMP)),
+        (OpHardfork::Fjord.boxed(), ForkCondition::Timestamp(BASE_MAINNET_FJORD_TIMESTAMP)),
+        (OpHardfork::Granite.boxed(), ForkCondition::Timestamp(BASE_MAINNET_GRANITE_TIMESTAMP)),
+        (OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(BASE_MAINNET_HOLOCENE_TIMESTAMP)),
+        (
+            EthereumHardfork::Prague.boxed(),
+            ForkCondition::Timestamp(BASE_MAINNET_ISTHMUS_TIMESTAMP),
+        ),
+        (OpHardfork::Isthmus.boxed(), ForkCondition::Timestamp(BASE_MAINNET_ISTHMUS_TIMESTAMP)),
     ])
 });
