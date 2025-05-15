@@ -19,7 +19,7 @@
 extern crate alloc;
 
 // Re-export alloy-op-hardforks types.
-pub use alloy_op_hardforks::{OpHardfork, OpHardforks};
+pub use alloy_op_hardforks::{op_mainnet::*, OpHardfork, OpHardforks};
 pub use reth_ethereum_forks::ForkCondition;
 
 use alloc::vec;
@@ -74,29 +74,29 @@ pub static OP_MAINNET_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
         (EthereumHardfork::Petersburg.boxed(), ForkCondition::ZERO_BLOCK),
         (EthereumHardfork::Istanbul.boxed(), ForkCondition::ZERO_BLOCK),
         (EthereumHardfork::MuirGlacier.boxed(), ForkCondition::ZERO_BLOCK),
-        (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(3950000)),
-        (EthereumHardfork::London.boxed(), ForkCondition::Block(105235063)),
-        (EthereumHardfork::ArrowGlacier.boxed(), ForkCondition::Block(105235063)),
-        (EthereumHardfork::GrayGlacier.boxed(), ForkCondition::Block(105235063)),
+        (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(OP_MAINNET_BEDROCK_BLOCK)),
+        (EthereumHardfork::London.boxed(), ForkCondition::Block(OP_MAINNET_BEDROCK_BLOCK)),
+        (EthereumHardfork::ArrowGlacier.boxed(), ForkCondition::Block(OP_MAINNET_BEDROCK_BLOCK)),
+        (EthereumHardfork::GrayGlacier.boxed(), ForkCondition::Block(OP_MAINNET_BEDROCK_BLOCK)),
         (
             EthereumHardfork::Paris.boxed(),
             ForkCondition::TTD {
-                activation_block_number: 105235063,
-                fork_block: Some(105235063),
+                activation_block_number: OP_MAINNET_BEDROCK_BLOCK,
+                fork_block: Some(OP_MAINNET_BEDROCK_BLOCK),
                 total_difficulty: U256::ZERO,
             },
         ),
-        (OpHardfork::Bedrock.boxed(), ForkCondition::Block(105235063)),
+        (OpHardfork::Bedrock.boxed(), ForkCondition::Block(OP_MAINNET_BEDROCK_BLOCK)),
         (OpHardfork::Regolith.boxed(), ForkCondition::ZERO_TIMESTAMP),
-        (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(1704992401)),
-        (OpHardfork::Canyon.boxed(), ForkCondition::Timestamp(1704992401)),
-        (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(1710374401)),
-        (OpHardfork::Ecotone.boxed(), ForkCondition::Timestamp(1710374401)),
-        (OpHardfork::Fjord.boxed(), ForkCondition::Timestamp(1720627201)),
-        (OpHardfork::Granite.boxed(), ForkCondition::Timestamp(1726070401)),
-        (OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(1736445601)),
-        (EthereumHardfork::Prague.boxed(), ForkCondition::Timestamp(1746806401)),
-        (OpHardfork::Isthmus.boxed(), ForkCondition::Timestamp(1746806401)),
+        (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(OP_MAINNET_CANYON_TIMESTAMP)),
+        (OpHardfork::Canyon.boxed(), ForkCondition::Timestamp(OP_MAINNET_CANYON_TIMESTAMP)),
+        (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(OP_MAINNET_ECOTONE_TIMESTAMP)),
+        (OpHardfork::Ecotone.boxed(), ForkCondition::Timestamp(OP_MAINNET_ECOTONE_TIMESTAMP)),
+        (OpHardfork::Fjord.boxed(), ForkCondition::Timestamp(OP_MAINNET_FJORD_TIMESTAMP)),
+        (OpHardfork::Granite.boxed(), ForkCondition::Timestamp(OP_MAINNET_GRANITE_TIMESTAMP)),
+        (OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(OP_MAINNET_HOLOCENE_TIMESTAMP)),
+        (EthereumHardfork::Prague.boxed(), ForkCondition::Timestamp(OP_MAINNET_ISTHMUS_TIMESTAMP)),
+        (OpHardfork::Isthmus.boxed(), ForkCondition::Timestamp(OP_MAINNET_ISTHMUS_TIMESTAMP)),
     ])
 });
 /// Optimism Sepolia list of hardforks.
