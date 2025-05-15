@@ -490,11 +490,7 @@ typedef mode_t mdbx_mode_t;
 
 #ifndef MDBX_PRINTF_ARGS
 #if defined(__GNUC__) || __has_attribute(__format__) || defined(DOXYGEN)
-#if defined(__MINGW__) || defined(__MINGW32__) || defined(__MINGW64__)
-#define MDBX_PRINTF_ARGS(format_index, first_arg) __attribute__((__format__(__gnu_printf__, format_index, first_arg)))
-#else
 #define MDBX_PRINTF_ARGS(format_index, first_arg) __attribute__((__format__(__printf__, format_index, first_arg)))
-#endif /* MinGW */
 #else
 #define MDBX_PRINTF_ARGS(format_index, first_arg)
 #endif
