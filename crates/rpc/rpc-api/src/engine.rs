@@ -225,7 +225,7 @@ pub trait EngineApi<Engine: EngineTypes> {
     #[method(name = "exchangeCapabilities")]
     async fn exchange_capabilities(&self, capabilities: Vec<String>) -> RpcResult<Vec<String>>;
 
-    /// Fetch blobs for the consensus layer from the in-memory blob cache.
+    /// Fetch blobs for the consensus layer from the blob store.
     #[method(name = "getBlobsV1")]
     async fn get_blobs_v1(
         &self,
@@ -233,11 +233,14 @@ pub trait EngineApi<Engine: EngineTypes> {
     ) -> RpcResult<Vec<Option<BlobAndProofV1>>>;
 
     /// Fetch blobs for the consensus layer from the blob store.
+    ///
+    /// Returns a response only if blobs and proofs are present for _all_ of the versioned hashes:
+    ///     2. Client software MUST return null in case of any missing or older version blobs.
     #[method(name = "getBlobsV2")]
     async fn get_blobs_v2(
         &self,
         versioned_hashes: Vec<B256>,
-    ) -> RpcResult<Vec<Option<BlobAndProofV2>>>;
+    ) -> RpcResult<Option<Vec<BlobAndProofV2>>>;
 }
 
 /// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>

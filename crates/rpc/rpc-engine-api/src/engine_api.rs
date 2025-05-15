@@ -784,7 +784,7 @@ where
 
         self.inner
             .tx_pool
-            .get_blobs_for_versioned_hashes(&versioned_hashes)
+            .get_blobs_for_versioned_hashes_v1(&versioned_hashes)
             .map_err(|err| EngineApiError::Internal(Box::new(err)))
     }
 
@@ -1095,7 +1095,7 @@ where
     async fn get_blobs_v2(
         &self,
         _versioned_hashes: Vec<B256>,
-    ) -> RpcResult<Vec<Option<BlobAndProofV2>>> {
+    ) -> RpcResult<Option<Vec<BlobAndProofV2>>> {
         trace!(target: "rpc::engine", "Serving engine_getBlobsV2");
         Err(internal_rpc_err("unimplemented"))
     }
