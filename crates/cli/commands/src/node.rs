@@ -230,18 +230,29 @@ mod tests {
     }
 
     #[test]
-    fn parse_common_node_command_chain_args() {
+    fn parse_rommon_node_command_chain_args() {
         for chain in SUPPORTED_CHAINS {
-            let args: NodeCommand<EthereumChainSpecParser> =
-                NodeCommand::parse_from(["reth", "--chain", chain]);
+            let args: NodeCommand<EthereumChainSpecParser> = NodeCommand::parse_from([
+                "reth",
+                "--chain",
+                chain,
+                "--builder.gaslimit",
+                "10000000",
+            ]);
             assert_eq!(args.chain.chain, chain.parse::<reth_chainspec::Chain>().unwrap());
         }
     }
 
     #[test]
     fn parse_discovery_addr() {
-        let cmd: NodeCommand<EthereumChainSpecParser> =
-            NodeCommand::try_parse_args_from(["reth", "--discovery.addr", "127.0.0.1"]).unwrap();
+        let cmd: NodeCommand<EthereumChainSpecParser> = NodeCommand::try_parse_args_from([
+            "reth",
+            "--discovery.addr",
+            "127.0.0.1",
+            "--builder.gaslimit",
+            "10000000",
+        ])
+        .unwrap();
         assert_eq!(cmd.network.discovery.addr, IpAddr::V4(Ipv4Addr::LOCALHOST));
     }
 
@@ -253,6 +264,8 @@ mod tests {
             "127.0.0.1",
             "--addr",
             "127.0.0.1",
+            "--builder.gaslimit",
+            "10000000",
         ])
         .unwrap();
         assert_eq!(cmd.network.discovery.addr, IpAddr::V4(Ipv4Addr::LOCALHOST));
@@ -261,46 +274,83 @@ mod tests {
 
     #[test]
     fn parse_discovery_port() {
-        let cmd: NodeCommand<EthereumChainSpecParser> =
-            NodeCommand::try_parse_args_from(["reth", "--discovery.port", "300"]).unwrap();
+        let cmd: NodeCommand<EthereumChainSpecParser> = NodeCommand::try_parse_args_from([
+            "reth",
+            "--discovery.port",
+            "300",
+            "--builder.gaslimit",
+            "10000000",
+        ])
+        .unwrap();
         assert_eq!(cmd.network.discovery.port, 300);
     }
 
     #[test]
     fn parse_port() {
-        let cmd: NodeCommand<EthereumChainSpecParser> =
-            NodeCommand::try_parse_args_from(["reth", "--discovery.port", "300", "--port", "99"])
-                .unwrap();
+        let cmd: NodeCommand<EthereumChainSpecParser> = NodeCommand::try_parse_args_from([
+            "reth",
+            "--discovery.port",
+            "300",
+            "--port",
+            "99",
+            "--builder.gaslimit",
+            "10000000",
+        ])
+        .unwrap();
         assert_eq!(cmd.network.discovery.port, 300);
         assert_eq!(cmd.network.port, 99);
     }
 
     #[test]
     fn parse_metrics_port() {
-        let cmd: NodeCommand<EthereumChainSpecParser> =
-            NodeCommand::try_parse_args_from(["reth", "--metrics", "9001"]).unwrap();
+        let cmd: NodeCommand<EthereumChainSpecParser> = NodeCommand::try_parse_args_from([
+            "reth",
+            "--metrics",
+            "9001",
+            "--builder.gaslimit",
+            "10000000",
+        ])
+        .unwrap();
         assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
 
-        let cmd: NodeCommand<EthereumChainSpecParser> =
-            NodeCommand::try_parse_args_from(["reth", "--metrics", ":9001"]).unwrap();
+        let cmd: NodeCommand<EthereumChainSpecParser> = NodeCommand::try_parse_args_from([
+            "reth",
+            "--metrics",
+            ":9001",
+            "--builder.gaslimit",
+            "10000000",
+        ])
+        .unwrap();
         assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
 
-        let cmd: NodeCommand<EthereumChainSpecParser> =
-            NodeCommand::try_parse_args_from(["reth", "--metrics", "localhost:9001"]).unwrap();
+        let cmd: NodeCommand<EthereumChainSpecParser> = NodeCommand::try_parse_args_from([
+            "reth",
+            "--metrics",
+            "localhost:9001",
+            "--builder.gaslimit",
+            "10000000",
+        ])
+        .unwrap();
         assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
     }
 
     #[test]
     fn parse_config_path() {
-        let cmd: NodeCommand<EthereumChainSpecParser> =
-            NodeCommand::try_parse_args_from(["reth", "--config", "my/path/to/reth.toml"]).unwrap();
+        let cmd: NodeCommand<EthereumChainSpecParser> = NodeCommand::try_parse_args_from([
+            "reth",
+            "--config",
+            "my/path/to/reth.toml",
+            "--builder.gaslimit",
+            "10000000",
+        ])
+        .unwrap();
         // always store reth.toml in the data dir, not the chain specific data dir
         let data_dir = cmd.datadir.resolve_datadir(cmd.chain.chain);
         let config_path = cmd.config.unwrap_or_else(|| data_dir.config());
         assert_eq!(config_path, Path::new("my/path/to/reth.toml"));
 
         let cmd: NodeCommand<EthereumChainSpecParser> =
-            NodeCommand::try_parse_args_from(["reth"]).unwrap();
+            NodeCommand::try_parse_args_from(["reth", "--builder.gaslimit", "10000000"]).unwrap();
 
         // always store reth.toml in the data dir, not the chain specific data dir
         let data_dir = cmd.datadir.resolve_datadir(cmd.chain.chain);
@@ -312,15 +362,21 @@ mod tests {
     #[test]
     fn parse_db_path() {
         let cmd: NodeCommand<EthereumChainSpecParser> =
-            NodeCommand::try_parse_args_from(["reth"]).unwrap();
+            NodeCommand::try_parse_args_from(["reth", "--builder.gaslimit", "10000000"]).unwrap();
         let data_dir = cmd.datadir.resolve_datadir(cmd.chain.chain);
 
         let db_path = data_dir.db();
         let end = format!("reth/{}/db", SUPPORTED_CHAINS[0]);
         assert!(db_path.ends_with(end), "{:?}", cmd.config);
 
-        let cmd: NodeCommand<EthereumChainSpecParser> =
-            NodeCommand::try_parse_args_from(["reth", "--datadir", "my/custom/path"]).unwrap();
+        let cmd: NodeCommand<EthereumChainSpecParser> = NodeCommand::try_parse_args_from([
+            "reth",
+            "--datadir",
+            "my/custom/path",
+            "--builder.gaslimit",
+            "10000000",
+        ])
+        .unwrap();
         let data_dir = cmd.datadir.resolve_datadir(cmd.chain.chain);
 
         let db_path = data_dir.db();
@@ -329,7 +385,8 @@ mod tests {
 
     #[test]
     fn parse_instance() {
-        let mut cmd: NodeCommand<EthereumChainSpecParser> = NodeCommand::parse_from(["reth"]);
+        let mut cmd: NodeCommand<EthereumChainSpecParser> =
+            NodeCommand::parse_from(["reth", "--builder.gaslimit", "10000000"]);
         cmd.rpc.adjust_instance_ports(cmd.instance);
         cmd.network.port = DEFAULT_DISCOVERY_PORT;
         // check rpc port numbers
@@ -340,7 +397,7 @@ mod tests {
         assert_eq!(cmd.network.port, 30303);
 
         let mut cmd: NodeCommand<EthereumChainSpecParser> =
-            NodeCommand::parse_from(["reth", "--instance", "2"]);
+            NodeCommand::parse_from(["reth", "--instance", "2", "--builder.gaslimit", "10000000"]);
         cmd.rpc.adjust_instance_ports(cmd.instance);
         cmd.network.port = DEFAULT_DISCOVERY_PORT + 2 - 1;
         // check rpc port numbers
@@ -351,7 +408,7 @@ mod tests {
         assert_eq!(cmd.network.port, 30304);
 
         let mut cmd: NodeCommand<EthereumChainSpecParser> =
-            NodeCommand::parse_from(["reth", "--instance", "3"]);
+            NodeCommand::parse_from(["reth", "--instance", "3", "--builder.gaslimit", "10000000"]);
         cmd.rpc.adjust_instance_ports(cmd.instance);
         cmd.network.port = DEFAULT_DISCOVERY_PORT + 3 - 1;
         // check rpc port numbers
@@ -364,8 +421,12 @@ mod tests {
 
     #[test]
     fn parse_with_unused_ports() {
-        let cmd: NodeCommand<EthereumChainSpecParser> =
-            NodeCommand::parse_from(["reth", "--with-unused-ports"]);
+        let cmd: NodeCommand<EthereumChainSpecParser> = NodeCommand::parse_from([
+            "reth",
+            "--with-unused-ports",
+            "--builder.gaslimit",
+            "10000000",
+        ]);
         assert!(cmd.with_unused_ports);
     }
 
@@ -376,6 +437,8 @@ mod tests {
             "--with-unused-ports",
             "--instance",
             "2",
+            "--builder.gaslimit",
+            "10000000",
         ])
         .unwrap_err();
         assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
@@ -383,7 +446,8 @@ mod tests {
 
     #[test]
     fn with_unused_ports_check_zero() {
-        let mut cmd: NodeCommand<EthereumChainSpecParser> = NodeCommand::parse_from(["reth"]);
+        let mut cmd: NodeCommand<EthereumChainSpecParser> =
+            NodeCommand::parse_from(["reth", "--builder.gaslimit", "10000000"]);
         cmd.rpc = cmd.rpc.with_unused_ports();
         cmd.network = cmd.network.with_unused_ports();
 

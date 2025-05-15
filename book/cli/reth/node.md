@@ -6,7 +6,7 @@ Start the node
 $ reth node --help
 ```
 ```txt
-Usage: reth node [OPTIONS]
+Usage: reth node [OPTIONS] --builder.gaslimit <GAS_LIMIT>
 
 Options:
       --config <FILE>
@@ -554,8 +554,6 @@ Builder:
 
       --builder.gaslimit <GAS_LIMIT>
           Target gas limit for built blocks
-
-          [default: 36000000]
 
       --builder.interval <DURATION>
           The interval at which the job should build a new payload after the last.

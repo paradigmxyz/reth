@@ -17,7 +17,7 @@ pub struct PayloadBuilderArgs {
     pub extra_data: String,
 
     /// Target gas limit for built blocks.
-    #[arg(long = "builder.gaslimit", default_value_t = ETHEREUM_BLOCK_GAS_LIMIT_36M, value_name = "GAS_LIMIT")]
+    #[arg(long = "builder.gaslimit", value_name = "GAS_LIMIT")]
     pub gas_limit: u64,
 
     /// The interval at which the job should build a new payload after the last.
@@ -112,9 +112,14 @@ mod tests {
 
     #[test]
     fn test_args_with_valid_max_tasks() {
-        let args =
-            CommandParser::<PayloadBuilderArgs>::parse_from(["reth", "--builder.max-tasks", "1"])
-                .args;
+        let args = CommandParser::<PayloadBuilderArgs>::parse_from([
+            "reth",
+            "--builder.max-tasks",
+            "1",
+            "--builder.gaslimit",
+            "10000000",
+        ])
+        .args;
         assert_eq!(args.max_payload_tasks, 1)
     }
 
@@ -135,6 +140,8 @@ mod tests {
             "reth",
             "--builder.extradata",
             extra_data.as_str(),
+            "--builder.gaslimit",
+            "10000000",
         ])
         .args;
         assert_eq!(args.extra_data, extra_data);
@@ -154,23 +161,38 @@ mod tests {
     #[test]
     fn payload_builder_args_default_sanity_check() {
         let default_args = PayloadBuilderArgs::default();
-        let args = CommandParser::<PayloadBuilderArgs>::parse_from(["reth"]).args;
+        let args = CommandParser::<PayloadBuilderArgs>::parse_from([
+            "reth",
+            "--builder.gaslimit",
+            "36000000",
+        ])
+        .args;
         assert_eq!(args, default_args);
     }
 
     #[test]
     fn test_args_with_s_interval() {
-        let args =
-            CommandParser::<PayloadBuilderArgs>::parse_from(["reth", "--builder.interval", "50"])
-                .args;
+        let args = CommandParser::<PayloadBuilderArgs>::parse_from([
+            "reth",
+            "--builder.interval",
+            "50",
+            "--builder.gaslimit",
+            "10000000",
+        ])
+        .args;
         assert_eq!(args.interval, Duration::from_secs(50));
     }
 
     #[test]
     fn test_args_with_ms_interval() {
-        let args =
-            CommandParser::<PayloadBuilderArgs>::parse_from(["reth", "--builder.interval", "50ms"])
-                .args;
+        let args = CommandParser::<PayloadBuilderArgs>::parse_from([
+            "reth",
+            "--builder.interval",
+            "50ms",
+            "--builder.gaslimit",
+            "10000000",
+        ])
+        .args;
         assert_eq!(args.interval, Duration::from_millis(50));
     }
 }

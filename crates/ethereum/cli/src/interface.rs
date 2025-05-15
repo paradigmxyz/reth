@@ -286,7 +286,15 @@ mod tests {
 
     #[test]
     fn parse_color_mode() {
-        let reth = Cli::try_parse_args_from(["reth", "node", "--color", "always"]).unwrap();
+        let reth = Cli::try_parse_args_from([
+            "reth",
+            "node",
+            "--color",
+            "always",
+            "--builder.gaslimit",
+            "10000000",
+        ])
+        .unwrap();
         assert_eq!(reth.logs.color, ColorMode::Always);
     }
 
@@ -313,7 +321,8 @@ mod tests {
     /// always tied to the specific chain's name.
     #[test]
     fn parse_logs_path_node() {
-        let mut reth = Cli::try_parse_args_from(["reth", "node"]).unwrap();
+        let mut reth =
+            Cli::try_parse_args_from(["reth", "node", "--builder.gaslimit", "10000000"]).unwrap();
         if let Some(chain_spec) = reth.command.chain_spec() {
             reth.logs.log_file_directory =
                 reth.logs.log_file_directory.join(chain_spec.chain.to_string());
@@ -325,7 +334,15 @@ mod tests {
         let mut iter = SUPPORTED_CHAINS.iter();
         iter.next();
         for chain in iter {
-            let mut reth = Cli::try_parse_args_from(["reth", "node", "--chain", chain]).unwrap();
+            let mut reth = Cli::try_parse_args_from([
+                "reth",
+                "node",
+                "--chain",
+                chain,
+                "--builder.gaslimit",
+                "10000000",
+            ])
+            .unwrap();
             let chain =
                 reth.command.chain_spec().map(|c| c.chain.to_string()).unwrap_or(String::new());
             reth.logs.log_file_directory = reth.logs.log_file_directory.join(chain.clone());

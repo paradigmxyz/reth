@@ -181,7 +181,12 @@ mod test {
 
     #[test]
     fn parse_dev() {
-        let cmd = NodeCommand::<OpChainSpecParser, NoArgs>::parse_from(["op-reth", "--dev"]);
+        let cmd = NodeCommand::<OpChainSpecParser, NoArgs>::parse_from([
+            "op-reth",
+            "--dev",
+            "--builder.gaslimit",
+            "30000000",
+        ]);
         let chain = OP_DEV.clone();
         assert_eq!(cmd.chain.chain, chain.chain);
         assert_eq!(cmd.chain.genesis_hash(), chain.genesis_hash());
@@ -232,6 +237,8 @@ mod test {
             "9003",
             "--log.file.max-size",
             "100",
+            "--builder.gaslimit",
+            "10000000",
         ]);
 
         match cmd.command {
