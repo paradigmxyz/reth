@@ -12,6 +12,7 @@ pre-build = [
 # 2. To be able to update the version of MinGW, we need to also update the Ubuntu that the image is based on.
 #
 # Also see https://github.com/cross-rs/cross/issues/1667
+# Inspired by https://github.com/cross-rs/cross/blob/9e2298e17170655342d3248a9c8ac37ef92ba38f/docker/Dockerfile.x86_64-pc-windows-gnu#L51
 dockerfile = "./Dockerfile.x86_64-pc-windows-gnu"
 
 [build.env]
