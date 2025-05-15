@@ -166,6 +166,19 @@ pub trait EngineApi<Engine: EngineTypes> {
         payload_id: PayloadId,
     ) -> RpcResult<Engine::ExecutionPayloadEnvelopeV4>;
 
+    /// Post Osaka payload handler.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/15399c2e2f16a5f800bf3f285640357e2c245ad9/src/engine/osaka.md#engine_getpayloadv5>.
+    ///
+    /// Returns the most recent version of the payload that is available in the corresponding
+    /// payload build process at the time of receiving this call. Note:
+    /// > Provider software MAY stop the corresponding build process after serving this call.
+    #[method(name = "getPayloadV5")]
+    async fn get_payload_v5(
+        &self,
+        payload_id: PayloadId,
+    ) -> RpcResult<Engine::ExecutionPayloadEnvelopeV5>;
+
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1>
     #[method(name = "getPayloadBodiesByHashV1")]
     async fn get_payload_bodies_by_hash_v1(
