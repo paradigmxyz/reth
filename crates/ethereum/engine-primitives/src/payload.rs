@@ -257,6 +257,18 @@ impl From<Vec<BlobTransactionSidecarEip7594>> for BlobSidecars {
     }
 }
 
+impl From<alloc::vec::IntoIter<BlobTransactionSidecar>> for BlobSidecars {
+    fn from(value: alloc::vec::IntoIter<BlobTransactionSidecar>) -> Self {
+        value.collect::<Vec<_>>().into()
+    }
+}
+
+impl From<alloc::vec::IntoIter<BlobTransactionSidecarEip7594>> for BlobSidecars {
+    fn from(value: alloc::vec::IntoIter<BlobTransactionSidecarEip7594>) -> Self {
+        value.collect::<Vec<_>>().into()
+    }
+}
+
 /// Container type for all components required to build a payload.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct EthPayloadBuilderAttributes {
