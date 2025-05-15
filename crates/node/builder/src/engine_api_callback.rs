@@ -1,4 +1,4 @@
-//! EngineApiBuilder providing access to the built Api through a channel.
+//! EngineApiBuilder callback wrapper.
 
 use crate::rpc::EngineApiBuilder;
 use eyre::Result;
@@ -6,7 +6,7 @@ use reth_node_api::{AddOnsContext, FullNodeComponents};
 use reth_rpc_api::IntoEngineApiRpcModule;
 use tokio::sync::oneshot;
 
-/// Builder that wraps an `EngineApiBuilder` and executes a callback with the built API.
+/// Provides access to an EngineApi instance with a callback
 #[derive(Debug)]
 pub struct EngineApiFn<B, F> {
     /// The inner builder
