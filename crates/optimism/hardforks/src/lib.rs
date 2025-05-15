@@ -74,7 +74,7 @@ pub static OP_MAINNET_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
         (EthereumHardfork::Petersburg.boxed(), ForkCondition::ZERO_BLOCK),
         (EthereumHardfork::Istanbul.boxed(), ForkCondition::ZERO_BLOCK),
         (EthereumHardfork::MuirGlacier.boxed(), ForkCondition::ZERO_BLOCK),
-        (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(OP_MAINNET_BEDROCK_BLOCK)),
+        (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(OP_MAINNET_BERLIN_BLOCK)),
         (EthereumHardfork::London.boxed(), ForkCondition::Block(OP_MAINNET_BEDROCK_BLOCK)),
         (EthereumHardfork::ArrowGlacier.boxed(), ForkCondition::Block(OP_MAINNET_BEDROCK_BLOCK)),
         (EthereumHardfork::GrayGlacier.boxed(), ForkCondition::Block(OP_MAINNET_BEDROCK_BLOCK)),
