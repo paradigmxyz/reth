@@ -1015,7 +1015,7 @@ where
         Ok(self.get_payload_v4_metered(payload_id).await?)
     }
 
-    /// Handler for `engine_newPayloadV5`
+    /// Handler for `engine_getPayloadV5`
     ///
     /// Returns the most recent version of the payload that is available in the corresponding
     /// payload build process at the time of receiving this call.
