@@ -105,7 +105,7 @@ where
         self.inner.validate_batch(transactions)
     }
     
-    /// Validates all given transactions wit origin.
+    /// Validates all given transactions with origin.
     ///
     /// Returns all outcomes for the given transactions in the same order.
     ///
