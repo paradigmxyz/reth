@@ -5,6 +5,8 @@ use reth_evm::precompiles::{DynPrecompile, Precompile};
 use revm::precompile::{PrecompileOutput, PrecompileResult};
 use revm_primitives::{Address, HashMap};
 use std::{hash::Hash, sync::Arc};
+use parking_lot::RwLock;
+use schnellru::LruMap;
 
 /// Stores caches for each precompile.
 #[derive(Debug, Clone, Default)]
@@ -24,7 +26,7 @@ where
 /// Cache for precompiles, for each input stores the result.
 #[derive(Debug, Clone)]
 pub struct PrecompileCache<S>(
-    Arc<mini_moka::sync::Cache<CacheKey<S>, CacheEntry, alloy_primitives::map::DefaultHashBuilder>>,
+    Arc<RwLock<LruMap<CacheKey<S>, CacheEntry>>>,
 )
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone;
@@ -34,10 +36,9 @@ where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     fn default() -> Self {
-        Self(Arc::new(
-            mini_moka::sync::CacheBuilder::new(100_000)
-                .build_with_hasher(alloy_primitives::map::DefaultHashBuilder::default()),
-        ))
+        Self(Arc::new(RwLock::new(
+            LruMap::new(schnellru::ByLength::new(100_000))
+        )))
     }
 }
 
@@ -46,15 +47,15 @@ where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     fn get(&self, key: &CacheKey<S>) -> Option<CacheEntry> {
-        self.0.get(key)
+        self.0.read().get(key).cloned()
     }
 
     fn insert(&self, key: CacheKey<S>, value: CacheEntry) {
-        self.0.insert(key, value);
+        self.0.write().insert(key, value);
     }
 
     fn weighted_size(&self) -> u64 {
-        self.0.weighted_size()
+        self.0.read().len() as u64
     }
 }
 
@@ -146,7 +147,7 @@ where
         if let Some(entry) = &self.cache.get(&key) {
             self.increment_by_one_precompile_cache_hits();
             if gas_limit >= entry.gas_used() {
-                return entry.to_precompile_result()
+                return entry.to_precompile_result();
             }
         }
 
@@ -155,6 +156,7 @@ where
         match &result {
             Ok(output) => {
                 self.increment_by_one_precompile_cache_misses();
+                let key = CacheKey::new(self.spec_id.clone(), Bytes::copy_from_slice(data));
                 self.cache.insert(key, CacheEntry(output.clone()));
             }
             _ => {
@@ -166,6 +168,14 @@ where
         result
     }
 }
+
+// Remove this implementation if not needed in the generic version
+// or adapt to work with the generic key
+// impl std::borrow::Borrow<[u8]> for CacheKey {
+//     fn borrow(&self) -> &[u8] {
+//         self.0.as_ref()
+//     }
+// }
 
 /// Metrics for the cached precompile.
 #[derive(reth_metrics::Metrics, Clone)]
@@ -179,7 +189,7 @@ pub(crate) struct CachedPrecompileMetrics {
 
     /// Precompile cache size
     ///
-    /// NOTE: this uses the moka caches`weighted_size` method to calculate size.
+    /// NOTE: this uses the LruMap's length as the size metric.
     precompile_cache_size: metrics::Gauge,
 
     /// Precompile execution errors.
