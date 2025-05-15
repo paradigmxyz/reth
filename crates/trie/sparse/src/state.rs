@@ -14,9 +14,10 @@ use core::{fmt, iter::Peekable};
 use reth_execution_errors::{SparseStateTrieErrorKind, SparseStateTrieResult, SparseTrieErrorKind};
 use reth_primitives_traits::Account;
 use reth_trie_common::{
+    proof::ProofNodes,
     updates::{StorageTrieUpdates, TrieUpdates},
-    DecodedMultiProof, DecodedStorageMultiProof, Nibbles, RlpNode, TrieAccount, TrieMask, TrieNode,
-    EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    DecodedMultiProof, DecodedStorageMultiProof, MultiProof, Nibbles, RlpNode, StorageMultiProof,
+    TrieAccount, TrieMask, TrieNode, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use tracing::trace;
 
@@ -281,7 +282,17 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
 
     /// Reveal unknown trie paths from multiproof.
     /// NOTE: This method does not extensively validate the proof.
-    pub fn reveal_multiproof(
+    pub fn reveal_multiproof(&mut self, multiproof: MultiProof) -> SparseStateTrieResult<()> {
+        // first decode the multiproof
+        let decoded_multiproof = multiproof.try_into()?;
+
+        // then reveal the decoded multiproof
+        self.reveal_decoded_multiproof(decoded_multiproof)
+    }
+
+    /// Reveal unknown trie paths from decoded multiproof.
+    /// NOTE: This method does not extensively validate the proof.
+    pub fn reveal_decoded_multiproof(
         &mut self,
         multiproof: DecodedMultiProof,
     ) -> SparseStateTrieResult<()> {
@@ -293,7 +304,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         } = multiproof;
 
         // first reveal the account proof nodes
-        self.reveal_account_multiproof(
+        self.reveal_decoded_account_multiproof(
             account_subtree,
             branch_node_hash_masks,
             branch_node_tree_masks,
@@ -301,7 +312,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
 
         // then reveal storage proof nodes for each storage trie
         for (account, storage_subtree) in storages {
-            self.reveal_storage_multiproof(account, storage_subtree)?;
+            self.reveal_decoded_storage_multiproof(account, storage_subtree)?;
         }
 
         Ok(())
@@ -309,6 +320,22 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
 
     /// Reveals an account multiproof.
     pub fn reveal_account_multiproof(
+        &mut self,
+        account_subtree: ProofNodes,
+        branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
+        branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
+    ) -> SparseStateTrieResult<()> {
+        // decode the multiproof first
+        let decoded_multiproof = account_subtree.try_into()?;
+        self.reveal_decoded_account_multiproof(
+            decoded_multiproof,
+            branch_node_hash_masks,
+            branch_node_tree_masks,
+        )
+    }
+
+    /// Reveals a decoded account multiproof.
+    pub fn reveal_decoded_account_multiproof(
         &mut self,
         account_subtree: DecodedProofNodes,
         branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
@@ -366,6 +393,17 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
 
     /// Reveals a storage multiproof for the given address.
     pub fn reveal_storage_multiproof(
+        &mut self,
+        account: B256,
+        storage_subtree: StorageMultiProof,
+    ) -> SparseStateTrieResult<()> {
+        // decode the multiproof first
+        let decoded_multiproof = storage_subtree.try_into()?;
+        self.reveal_decoded_storage_multiproof(account, decoded_multiproof)
+    }
+
+    /// Reveals a decoded storage multiproof for the given address.
+    pub fn reveal_decoded_storage_multiproof(
         &mut self,
         account: B256,
         storage_subtree: DecodedStorageMultiProof,
@@ -989,7 +1027,7 @@ mod tests {
         };
 
         // Reveal multiproof and check that the state trie contains the leaf node and value
-        sparse.reveal_multiproof(multiproof.clone().try_into().unwrap()).unwrap();
+        sparse.reveal_decoded_multiproof(multiproof.clone().try_into().unwrap()).unwrap();
         assert!(sparse
             .state_trie_ref()
             .unwrap()
@@ -1016,7 +1054,7 @@ mod tests {
 
         // Reveal multiproof again and check that the state trie still does not contain the leaf
         // node and value, because they were already revealed before
-        sparse.reveal_multiproof(multiproof.try_into().unwrap()).unwrap();
+        sparse.reveal_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
         assert!(!sparse
             .state_trie_ref()
             .unwrap()
@@ -1068,7 +1106,7 @@ mod tests {
         };
 
         // Reveal multiproof and check that the storage trie contains the leaf node and value
-        sparse.reveal_multiproof(multiproof.clone().try_into().unwrap()).unwrap();
+        sparse.reveal_decoded_multiproof(multiproof.clone().try_into().unwrap()).unwrap();
         assert!(sparse
             .storage_trie_ref(&B256::ZERO)
             .unwrap()
@@ -1098,7 +1136,7 @@ mod tests {
 
         // Reveal multiproof again and check that the storage trie still does not contain the leaf
         // node and value, because they were already revealed before
-        sparse.reveal_multiproof(multiproof.try_into().unwrap()).unwrap();
+        sparse.reveal_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
         assert!(!sparse
             .storage_trie_ref(&B256::ZERO)
             .unwrap()
@@ -1168,7 +1206,7 @@ mod tests {
 
         let mut sparse = SparseStateTrie::default().with_updates(true);
         sparse
-            .reveal_multiproof(
+            .reveal_decoded_multiproof(
                 MultiProof {
                     account_subtree: proof_nodes,
                     branch_node_hash_masks: HashMap::from_iter([(

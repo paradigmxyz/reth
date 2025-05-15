@@ -1242,7 +1242,8 @@ mod tests {
         sequencer.add_proof(1, SparseTrieUpdate::from_multiproof(proofs[1].clone()).unwrap());
         sequencer.add_proof(3, SparseTrieUpdate::from_multiproof(proofs[3].clone()).unwrap());
 
-        let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proofs[0].clone()).unwrap());
+        let ready =
+            sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proofs[0].clone()).unwrap());
         assert_eq!(ready.len(), 5);
         assert!(!sequencer.has_pending());
     }

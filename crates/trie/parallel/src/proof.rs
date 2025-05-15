@@ -155,8 +155,7 @@ where
         let proof = self.storage_proof(hashed_address, target_slots)?;
 
         // Now decode the nodes of the proof
-        let proof = proof
-            .try_into()?;
+        let proof = proof.try_into()?;
 
         Ok(proof)
     }
@@ -344,8 +343,7 @@ where
         let multiproof = self.multiproof(targets)?;
 
         // Now decode the nodes of the multiproof
-        let multiproof = multiproof
-            .try_into()?;
+        let multiproof = multiproof.try_into()?;
 
         Ok(multiproof)
     }

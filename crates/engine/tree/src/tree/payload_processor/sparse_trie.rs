@@ -137,7 +137,7 @@ where
     let started_at = Instant::now();
 
     // Reveal new accounts and storage slots.
-    trie.reveal_multiproof(multiproof)?;
+    trie.reveal_decoded_multiproof(multiproof)?;
     let reveal_multiproof_elapsed = started_at.elapsed();
     trace!(
         target: "engine::root::sparse",

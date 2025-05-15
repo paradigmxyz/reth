@@ -154,7 +154,7 @@ where
             tx,
         );
         let mut sparse_trie = SparseStateTrie::new(blinded_provider_factory);
-        sparse_trie.reveal_multiproof(multiproof.try_into()?)?;
+        sparse_trie.reveal_multiproof(multiproof)?;
 
         // Attempt to update state trie to gather additional information for the witness.
         for (hashed_address, hashed_slots) in
