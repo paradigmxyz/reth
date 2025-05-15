@@ -3,7 +3,6 @@
 use crate::args::error::ReceiptsLogError;
 use alloy_primitives::{Address, BlockNumber};
 use clap::{builder::RangedU64ValueParser, Args};
-use reth_chainspec::EthChainSpec;
 use reth_config::config::PruneConfig;
 use reth_prune_types::{PruneMode, PruneModes, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE};
 use std::collections::BTreeMap;
@@ -91,7 +90,7 @@ pub struct PruningArgs {
 
 impl PruningArgs {
     /// Returns pruning configuration.
-    pub fn prune_config(&self, _chain_spec: &impl EthChainSpec) -> Option<PruneConfig> {
+    pub fn prune_config(&self) -> Option<PruneConfig> {
         // Initialise with a default prune configuration.
         let mut config = PruneConfig::default();
 
