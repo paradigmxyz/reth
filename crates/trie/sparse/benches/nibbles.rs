@@ -18,67 +18,53 @@ fn generate_nibbles(rng: &mut impl Rng, length: usize) -> (Nibbles, PackedNibble
 
 fn bench_eq_same_len(c: &mut Criterion) {
     let mut rng = rand::rng();
-    let mut group = c.benchmark_group("eq_comparison_same_len");
 
+    let mut group = c.benchmark_group("eq_comparison_same_len_eq");
     for size in [4, 8, 16, 32, 64] {
-        // Generate test data for each size
         let (nybbles1, packed1) = generate_nibbles(&mut rng, size);
-        let (nybbles2, packed2) = generate_nibbles(&mut rng, size);
 
-        // Clone for identical comparison
         let nybbles1_clone = nybbles1.clone();
         let packed1_clone = packed1.clone();
 
-        // Equal comparison for Nibbles
-        group.bench_with_input(BenchmarkId::new("Nibbles_eq_true", size), &size, |b, _| {
+        group.bench_with_input(BenchmarkId::new("Nibbles", size), &size, |b, _| {
             b.iter(|| nybbles1.eq(&nybbles1_clone))
         });
-
-        // Equal comparison for PackedNibbles
-        group.bench_with_input(BenchmarkId::new("PackedNibbles_eq_true", size), &size, |b, _| {
+        group.bench_with_input(BenchmarkId::new("PackedNibbles", size), &size, |b, _| {
             b.iter(|| packed1.eq(&packed1_clone))
         });
+    }
+    group.finish();
 
-        // Not equal comparison for Nibbles
-        group.bench_with_input(BenchmarkId::new("Nibbles_eq_false", size), &size, |b, _| {
+    let mut group = c.benchmark_group("eq_comparison_same_len_not_eq");
+    for size in [4, 8, 16, 32, 64] {
+        let (nybbles1, packed1) = generate_nibbles(&mut rng, size);
+        let (nybbles2, packed2) = generate_nibbles(&mut rng, size);
+
+        group.bench_with_input(BenchmarkId::new("Nibbles", size), &size, |b, _| {
             b.iter(|| nybbles1.eq(&nybbles2))
         });
-
-        // Not equal comparison for PackedNibbles
-        group.bench_with_input(BenchmarkId::new("PackedNibbles_eq_false", size), &size, |b, _| {
+        group.bench_with_input(BenchmarkId::new("PackedNibbles", size), &size, |b, _| {
             b.iter(|| packed1.eq(&packed2))
         });
     }
-
     group.finish();
 }
 
 fn bench_eq_diff_len(c: &mut Criterion) {
     let mut rng = rand::rng();
-    let mut group = c.benchmark_group("eq_comparison_diff_len");
 
+    let mut group = c.benchmark_group("eq_comparison_diff_len");
     for (len1, len2) in [(4, 8), (8, 16), (16, 32), (32, 64)] {
-        // Generate test data for each size
         let (nybbles1, packed1) = generate_nibbles(&mut rng, len1);
         let (nybbles2, packed2) = generate_nibbles(&mut rng, len2);
 
-        let benchmark_name = format!("{}_{}", len1, len2);
-
-        // Not equal comparison for Nibbles (different lengths)
-        group.bench_with_input(
-            BenchmarkId::new("Nibbles_diff_len", &benchmark_name),
-            &benchmark_name,
-            |b, _| b.iter(|| nybbles1.eq(&nybbles2)),
-        );
-
-        // Not equal comparison for PackedNibbles (different lengths)
-        group.bench_with_input(
-            BenchmarkId::new("PackedNibbles_diff_len", &benchmark_name),
-            &benchmark_name,
-            |b, _| b.iter(|| packed1.eq(&packed2)),
-        );
+        group.bench_with_input(BenchmarkId::new("Nibbles", len1), &len1, |b, _| {
+            b.iter(|| nybbles1.eq(&nybbles2))
+        });
+        group.bench_with_input(BenchmarkId::new("PackedNibbles", len1), &len1, |b, _| {
+            b.iter(|| packed1.eq(&packed2))
+        });
     }
-
     group.finish();
 }
 
@@ -103,71 +89,56 @@ fn generate_prefixed_nibbles(
 
 fn bench_common_prefixes(c: &mut Criterion) {
     let mut rng = rand::rng();
-    let mut group = c.benchmark_group("eq_with_common_prefix");
 
-    // Test nibbles with increasing common prefix lengths
     for size in [32, 64] {
+        let mut group = c.benchmark_group(format!("eq_with_common_prefix_size_{}", size));
         for prefix_percent in [25, 50, 75, 90] {
             let prefix_len = (size * prefix_percent) / 100;
 
-            // Generate two sets of nibbles with common prefix
             let (nibbles1, nibbles2) = generate_prefixed_nibbles(&mut rng, size, prefix_len);
 
-            // Create instances
             let nybbles1 = Nibbles::from_nibbles_unchecked(nibbles1.clone());
             let packed1 = PackedNibbles::from_nibbles(nibbles1);
 
             let nybbles2 = Nibbles::from_nibbles_unchecked(nibbles2.clone());
             let packed2 = PackedNibbles::from_nibbles(nibbles2);
 
-            let benchmark_name = format!("size_{}_prefix_{}%", size, prefix_percent);
-
-            // Benchmark equality comparison with common prefix
             group.bench_with_input(
-                BenchmarkId::new("Nibbles_common_prefix", &benchmark_name),
-                &benchmark_name,
+                BenchmarkId::new("Nibbles", prefix_percent),
+                &prefix_percent,
                 |b, _| b.iter(|| nybbles1.eq(&nybbles2)),
             );
-
             group.bench_with_input(
-                BenchmarkId::new("PackedNibbles_common_prefix", &benchmark_name),
-                &benchmark_name,
+                BenchmarkId::new("PackedNibbles", prefix_percent),
+                &prefix_percent,
                 |b, _| b.iter(|| packed1.eq(&packed2)),
             );
         }
+        group.finish();
     }
-
-    group.finish();
 }
 
 fn bench_clone(c: &mut Criterion) {
     let mut rng = rand::rng();
-    let mut group = c.benchmark_group("clone");
 
-    // Test with different nibble lengths
+    let mut group = c.benchmark_group("clone");
     for size in [4, 8, 16, 32, 64] {
-        // Generate test data for each size
         let (nybbles, packed) = generate_nibbles(&mut rng, size);
 
-        // Benchmark cloning for Nibbles
         group.bench_with_input(BenchmarkId::new("Nibbles", size), &size, |b, _| {
             b.iter(|| nybbles.clone())
         });
-
-        // Benchmark cloning for PackedNibbles
         group.bench_with_input(BenchmarkId::new("PackedNibbles", size), &size, |b, _| {
             b.iter(|| packed.clone())
         });
     }
-
     group.finish();
 }
 
 fn bench_slice(c: &mut Criterion) {
     let mut rng = rand::rng();
-    let mut group = c.benchmark_group("slice");
 
-    // Test with different nibble lengths
+    let mut group = c.benchmark_group("slice");
     for size in [16, 32, 64] {
         // Generate random nibbles
         let (nybbles, packed_nibbles) = generate_nibbles(&mut rng, size);
@@ -175,6 +146,7 @@ fn bench_slice(c: &mut Criterion) {
         // Slice middle 25%
         let start = size / 4;
         let end = start + (size / 2);
+
         group.bench_with_input(BenchmarkId::new("Nibbles", size), &size, |b, _| {
             b.iter(|| nybbles.slice(start..end))
         });
@@ -182,7 +154,6 @@ fn bench_slice(c: &mut Criterion) {
             b.iter(|| packed_nibbles.slice(start..end))
         });
     }
-
     group.finish();
 }
 
