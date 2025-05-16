@@ -6,7 +6,10 @@ use crate::{
     helpers::estimate::EstimateCall, FromEthApiError, FullEthApiTypes, IntoEthApiError,
     RpcNodeCore, RpcNodeCoreExt, RpcReceipt, RpcTransaction,
 };
-use alloy_consensus::{transaction::TransactionMeta, BlockHeader, Transaction};
+use alloy_consensus::{
+    transaction::{SignerRecoverable, TransactionMeta},
+    BlockHeader, Transaction,
+};
 use alloy_dyn_abi::TypedData;
 use alloy_eips::{eip2718::Encodable2718, BlockId};
 use alloy_network::TransactionBuilder;
@@ -483,7 +486,7 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
                             // part of pending block) and already. We don't need to
                             // check for pre EIP-2 because this transaction could be pre-EIP-2.
                             let transaction = tx
-                                .into_recovered_unchecked()
+                                .try_into_recovered_unchecked()
                                 .map_err(|_| EthApiError::InvalidTransactionSignature)?;
 
                             let tx = TransactionSource::Block {
