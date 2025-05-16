@@ -19,17 +19,13 @@
 extern crate alloc;
 
 // Re-export alloy-op-hardforks types.
-<<<<<<< HEAD
-pub use alloy_op_hardforks::{OpHardfork, OpHardforks};
-=======
 pub use alloy_op_hardforks::{op_sepolia::*, OpHardfork, OpHardforks};
 pub use reth_ethereum_forks::ForkCondition;
->>>>>>> e282c6b1d (Replace magic numbers with constants for op sepolia hardforks)
 
 use alloc::vec;
 use alloy_primitives::U256;
 use once_cell::sync::Lazy as LazyLock;
-use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
+use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, Hardfork};
 
 /// Dev hardforks
 pub static DEV_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
@@ -127,7 +123,7 @@ pub static OP_SEPOLIA_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
                 total_difficulty: U256::ZERO,
             },
         ),
-      (OpHardfork::Bedrock.boxed(), ForkCondition::Block(0)),
+        (OpHardfork::Bedrock.boxed(), ForkCondition::Block(0)),
         (OpHardfork::Regolith.boxed(), ForkCondition::Timestamp(0)),
         (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(OP_SEPOLIA_CANYON_TIMESTAMP)),
         (OpHardfork::Canyon.boxed(), ForkCondition::Timestamp(OP_SEPOLIA_CANYON_TIMESTAMP)),
