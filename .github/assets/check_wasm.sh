@@ -41,6 +41,7 @@ exclude_crates=(
   reth-node-metrics
   reth-optimism-cli
   reth-optimism-node
+  reth-optimism-node-types
   reth-optimism-payload-builder
   reth-optimism-rpc
   reth-optimism-storage
