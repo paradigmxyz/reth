@@ -5944,8 +5944,7 @@ checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 [[package]]
 name = "op-alloy-consensus"
 version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f318b09e24148f07392c5e011bae047a0043851f9041145df5f3b01e4fedd1e"
+source = "git+https://github.com/Rimeeeeee/op-alloy?branch=mint-nonoptional#d134e4d222bc1840ff56627c9aefae967fc1c8d4"
 dependencies = [
  "alloy-consensus",
  "alloy-eips 1.0.3",
@@ -5970,8 +5969,7 @@ checksum = "4ef71f23a8caf6f2a2d5cafbdc44956d44e6014dcb9aa58abf7e4e6481c6ec34"
 [[package]]
 name = "op-alloy-network"
 version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a567640236a672a1a0007959c437dbe846dd3e8e9b1d5656dba9c8b4879f67a"
+source = "git+https://github.com/Rimeeeeee/op-alloy?branch=mint-nonoptional#d134e4d222bc1840ff56627c9aefae967fc1c8d4"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -5985,8 +5983,7 @@ dependencies = [
 [[package]]
 name = "op-alloy-rpc-jsonrpsee"
 version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d817bec4d9475405cb69f3c990946763b26ba6c70cfa03674d21c77c671864c"
+source = "git+https://github.com/Rimeeeeee/op-alloy?branch=mint-nonoptional#d134e4d222bc1840ff56627c9aefae967fc1c8d4"
 dependencies = [
  "alloy-primitives",
  "jsonrpsee",
@@ -5995,8 +5992,7 @@ dependencies = [
 [[package]]
 name = "op-alloy-rpc-types"
 version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15ede8322c10c21249de4fced204e2af4978972e715afee34b6fe684d73880cf"
+source = "git+https://github.com/Rimeeeeee/op-alloy?branch=mint-nonoptional#d134e4d222bc1840ff56627c9aefae967fc1c8d4"
 dependencies = [
  "alloy-consensus",
  "alloy-eips 1.0.3",
@@ -6014,8 +6010,7 @@ dependencies = [
 [[package]]
 name = "op-alloy-rpc-types-engine"
 version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6f6cb2e937e88faa8f3d38d38377398d17e44cecd5b019e6d7e1fbde0f5af2a"
+source = "git+https://github.com/Rimeeeeee/op-alloy?branch=mint-nonoptional#d134e4d222bc1840ff56627c9aefae967fc1c8d4"
 dependencies = [
  "alloy-consensus",
  "alloy-eips 1.0.3",
