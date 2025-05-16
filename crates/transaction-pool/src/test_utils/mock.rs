@@ -18,6 +18,7 @@ use alloy_consensus::{
 };
 use alloy_eips::{
     eip1559::MIN_PROTOCOL_BASE_FEE,
+    eip2718::WithEncoded,
     eip2930::AccessList,
     eip4844::{BlobTransactionSidecar, BlobTransactionValidationError, DATA_GAS_PER_BLOB},
     eip7702::SignedAuthorization,
@@ -685,6 +686,10 @@ impl PoolTransaction for MockTransaction {
 
     fn into_consensus(self) -> Recovered<Self::Consensus> {
         self.into()
+    }
+
+    fn into_consensus_with2718(self) -> WithEncoded<Recovered<Self::Consensus>> {
+        WithEncoded::new(Bytes::new(), self.into())
     }
 
     fn from_pooled(pooled: Recovered<Self::Pooled>) -> Self {
