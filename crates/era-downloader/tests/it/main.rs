@@ -38,7 +38,7 @@ impl HttpClient for StubClient {
 
         async move {
             match url.to_string().as_str() {
-                "https://mainnet.era1.nimbus.team/index.html" => {
+                "https://mainnet.era1.nimbus.team/" => {
                     Ok(Box::new(futures::stream::once(Box::pin(async move {
                         Ok(bytes::Bytes::from(NIMBUS))
                     })))
