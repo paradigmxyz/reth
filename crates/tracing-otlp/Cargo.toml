@@ -15,6 +15,7 @@ opentelemetry-otlp = "0.29.0"
 tracing-opentelemetry = "0.30.0"
 tracing-subscriber.workspace = true
 tracing.workspace = true
+opentelemetry-semantic-conventions = "0.29.0"
 
 [lints]
 workspace = true
