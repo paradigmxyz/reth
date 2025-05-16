@@ -104,7 +104,7 @@ where
     ) -> Vec<TransactionValidationOutcome<Tx>> {
         self.inner.validate_batch(transactions)
     }
-    
+
     /// Validates all given transactions with origin.
     ///
     /// Returns all outcomes for the given transactions in the same order.
@@ -140,7 +140,7 @@ where
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
         self.validate_all(transactions)
     }
-    
+
     async fn validate_transactions_with_origin(
         &self,
         origin: TransactionOrigin,
@@ -624,7 +624,7 @@ where
             .map(|(origin, tx)| self.validate_one_with_provider(origin, tx, &mut provider))
             .collect()
     }
-    
+
     /// Validates all given transactions with origin.
     fn validate_batch_with_origin(
         &self,

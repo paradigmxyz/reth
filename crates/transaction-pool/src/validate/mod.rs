@@ -205,8 +205,8 @@ pub trait TransactionValidator: Debug + Send + Sync {
             .await
         }
     }
-    
-    /// Validates a batch of transactions against an origin.
+
+    /// Validates a batch of transactions with that given origin.
     ///
     /// Must return all outcomes for the given transactions in the same order.
     ///
@@ -216,9 +216,7 @@ pub trait TransactionValidator: Debug + Send + Sync {
         origin: TransactionOrigin,
         transactions: Vec<Self::Transaction>,
     ) -> impl Future<Output = Vec<TransactionValidationOutcome<Self::Transaction>>> + Send {
-        let futures = transactions
-                    .into_iter()
-                    .map(|tx| self.validate_transaction(origin, tx));
+        let futures = transactions.into_iter().map(|tx| self.validate_transaction(origin, tx));
         futures_util::future::join_all(futures)
     }
 
@@ -259,7 +257,7 @@ where
             Self::Right(v) => v.validate_transactions(transactions).await,
         }
     }
-    
+
     async fn validate_transactions_with_origin(
         &self,
         origin: TransactionOrigin,

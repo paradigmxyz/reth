@@ -230,7 +230,7 @@ where
         )
         .await
     }
-    
+
     /// Validates all given transactions.
     ///
     /// Returns all outcomes for the given transactions in the same order.
@@ -346,7 +346,7 @@ where
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
         self.validate_all(transactions).await
     }
-    
+
     async fn validate_transactions_with_origin(
         &self,
         origin: TransactionOrigin,
