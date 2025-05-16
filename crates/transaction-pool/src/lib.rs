@@ -247,8 +247,13 @@ where
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = V::Transaction>,
     ) -> Vec<(TxHash, TransactionValidationOutcome<V::Transaction>)> {
-        futures_util::future::join_all(transactions.into_iter().map(|tx| self.validate(origin, tx)))
+        self.pool
+            .validator()
+            .validate_transactions(transactions.into_iter().map(|tx| (origin, tx)).collect())
             .await
+            .into_iter()
+            .map(|tx| (tx.tx_hash(), tx))
+            .collect()
     }
 
     /// Validates the given transaction
