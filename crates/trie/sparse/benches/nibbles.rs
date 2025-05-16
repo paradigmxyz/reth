@@ -175,12 +175,51 @@ fn bench_slice(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_starts_with(c: &mut Criterion) {
+    let mut rng = rand::rng();
+
+    let mut group = c.benchmark_group("starts_with_true");
+    for size in [16, 32, 64] {
+        let prefix_len = 16;
+
+        let (full_nybbles, full_packed) = generate_nibbles(&mut rng, size);
+
+        let nybbles_prefix = full_nybbles.slice(0..prefix_len);
+        let packed_prefix = full_packed.slice(0..prefix_len);
+
+        group.bench_with_input(BenchmarkId::new("Nibbles", size), &size, |b, _| {
+            b.iter(|| full_nybbles.starts_with(&nybbles_prefix))
+        });
+        group.bench_with_input(BenchmarkId::new("PackedNibbles", size), &size, |b, _| {
+            b.iter(|| full_packed.starts_with(&packed_prefix))
+        });
+    }
+    group.finish();
+
+    let mut group = c.benchmark_group("starts_with_false");
+    for size in [16, 32, 64] {
+        let prefix_len = 16;
+
+        let (nybbles1, packed1) = generate_nibbles(&mut rng, size);
+        let (nybbles2, packed2) = generate_nibbles(&mut rng, prefix_len);
+
+        group.bench_with_input(BenchmarkId::new("Nibbles", size), &size, |b, _| {
+            b.iter(|| nybbles1.starts_with(&nybbles2))
+        });
+        group.bench_with_input(BenchmarkId::new("PackedNibbles", size), &size, |b, _| {
+            b.iter(|| packed1.starts_with(&packed2))
+        });
+    }
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_eq_same_len,
     bench_eq_diff_len,
     bench_common_prefixes,
     bench_clone,
-    bench_slice
+    bench_slice,
+    bench_starts_with
 );
 criterion_main!(benches);
