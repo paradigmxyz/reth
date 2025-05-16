@@ -8,7 +8,12 @@ use futures_util::{
 };
 use reth_execution_types::ChangedAccount;
 use reth_storage_api::{errors::provider::ProviderError, StateProviderFactory};
-use std::collections::HashSet;
+use std::{
+    collections::HashSet,
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
+};
 use tokio::sync::oneshot;
 use tracing::debug;
 
@@ -226,39 +231,43 @@ impl DriftMonitor {
         task_spawner.spawn_blocking(fut);
     }
 
-    /// Process the result of account reloading
-    pub fn process_reload_result(&mut self) -> DriftMonitorResult {
-        if self.reload_accounts_fut.is_terminated() {
-            return DriftMonitorResult::NoChange;
-        }
-
-        // This is safe because we just checked that the future is not terminated
-        match futures_util::FutureExt::now_or_never(&mut self.reload_accounts_fut) {
-            Some(Ok(Ok(accounts))) => {
-                // reloaded accounts successfully
-                // extend accounts we failed to load from database
-                self.dirty_addresses.extend(accounts.failed_to_load.iter());
-                DriftMonitorResult::AccountsLoaded(accounts)
-            }
-            Some(Ok(Err(res))) => {
-                // failed to load accounts from state
-                let (accs, err) = *res;
-                debug!(target: "txpool", %err, "failed to load accounts");
-                self.dirty_addresses.extend(accs);
-                DriftMonitorResult::Failed
-            }
-            Some(Err(_)) => {
-                // failed to receive the accounts, sender dropped, only possible if task panicked
-                self.set_state(PoolDriftState::Drifted);
-                DriftMonitorResult::Failed
-            }
-            _ => DriftMonitorResult::NoChange,
-        }
-    }
-
     /// update metrics based on the current state
     pub fn update_metrics(&self) {
         self.metrics.set_dirty_accounts_len(self.dirty_addresses.len());
+    }
+}
+
+impl Future for DriftMonitor {
+    type Output = DriftMonitorResult;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // Check if reload future is ready
+        if !self.reload_accounts_fut.is_terminated() {
+            match self.reload_accounts_fut.poll_unpin(cx) {
+                Poll::Ready(Ok(Ok(accounts))) => {
+                    // reloaded accounts successfully
+                    // extend accounts we failed to load from database
+                    self.dirty_addresses.extend(accounts.failed_to_load.iter());
+                    return Poll::Ready(DriftMonitorResult::AccountsLoaded(accounts));
+                }
+                Poll::Ready(Ok(Err(res))) => {
+                    // failed to load accounts from state
+                    let (accs, err) = *res;
+                    debug!(target: "txpool", %err, "failed to load accounts");
+                    self.dirty_addresses.extend(accs);
+                    return Poll::Ready(DriftMonitorResult::Failed);
+                }
+                Poll::Ready(Err(_)) => {
+                    // failed to receive the accounts, sender dropped, only possible if task
+                    // panicked
+                    self.set_state(PoolDriftState::Drifted);
+                    return Poll::Ready(DriftMonitorResult::Failed);
+                }
+                Poll::Pending => return Poll::Pending,
+            }
+        }
+
+        Poll::Ready(DriftMonitorResult::NoChange)
     }
 }
 

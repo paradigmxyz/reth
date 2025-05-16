@@ -15,6 +15,7 @@ use crate::{
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_rlp::Encodable;
+use drift_monitor::DriftMonitorResult;
 use futures_util::{future::BoxFuture, FutureExt, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
@@ -201,17 +202,21 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
         // of the block time
         tokio::select! {
             // handle reloaded accounts
-            _ = async { futures_util::future::pending::<()>().await }, if !drift_monitor.is_reloading() => {
-                // this branch will never execute, it's just a placeholder
-                // for when we don't have account reloads running
+            result = &mut drift_monitor => {
+                match result {
+                    DriftMonitorResult::AccountsLoaded(accounts) => {
+                        pool.update_accounts(accounts.accounts);
+                    }
+                    DriftMonitorResult::Failed => {
+                        debug!(target: "txpool", dirty_addresses=%drift_monitor.dirty_address_count(), "Account reload failed, addresses added back to dirty set");
+                    }
+                    DriftMonitorResult::NoChange => {
+                        // continue - this shouldn't happen in practice since we only
+                        // poll when there's an active reload
+                        debug!(target: "txpool", "No active account reload operation");
+                    }
+                }
             }
-            _ = async {}, if drift_monitor.is_reloading() => {
-                if let drift_monitor::DriftMonitorResult::AccountsLoaded(LoadedAccounts { accounts, .. }) = drift_monitor.process_reload_result() {
-                     // update the pool with the loaded accounts
-                     pool.update_accounts(accounts);
-                 }
-            }
-
             // handle new canonical events
             ev = events.next() => {
                 if ev.is_none() {
