@@ -364,7 +364,7 @@ impl PackedNibbles {
                         }
 
                         // Last byte (only high nibble)
-                        result.nibbles.push_unchecked((self.nibbles[end_byte - 1] & 0xF0) >> 4);
+                        result.nibbles.push_unchecked((self.nibbles[end_byte - 1] & 0x0F) << 4);
                     } else {
                         // Just a lower nibble of the first byte
                         result.nibbles.push_unchecked(first_byte);
