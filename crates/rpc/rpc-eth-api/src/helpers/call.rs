@@ -155,7 +155,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             {
                                 return Err(
                                     EthApiError::other(EthSimulateError::GasLimitReached).into()
-                                );
+                                )
                             }
                         }
                         apply_block_overrides(block_overrides, &mut db, &mut evm_env.block_env);
