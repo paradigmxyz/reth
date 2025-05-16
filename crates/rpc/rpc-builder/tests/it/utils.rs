@@ -123,7 +123,6 @@ pub fn test_rpc_builder() -> RpcModuleBuilder<
     NoopProvider,
     TestPool,
     NoopNetwork,
-    TokioTaskExecutor,
     EthEvmConfig,
     NoopConsensus,
 > {
@@ -131,7 +130,7 @@ pub fn test_rpc_builder() -> RpcModuleBuilder<
         .with_provider(NoopProvider::default())
         .with_pool(TestPoolBuilder::default().into())
         .with_network(NoopNetwork::default())
-        .with_executor(TokioTaskExecutor::default())
+        .with_executor(Box::new(TokioTaskExecutor::default()))
         .with_evm_config(EthEvmConfig::mainnet())
         .with_consensus(NoopConsensus::default())
 }
