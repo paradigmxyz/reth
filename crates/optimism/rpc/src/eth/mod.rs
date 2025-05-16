@@ -430,7 +430,7 @@ impl<P> OpNodeOnlyEvm<P> {
             provider,
             evm_config,
             noop_pool: NoopTransactionPool::<OpPooledTransaction>::new(),
-            noop_network: NoopNetwork::default(),
+            noop_network: NoopNetwork::<OpNetworkPrimitives>::new(),
         }
     }
 }
@@ -443,7 +443,7 @@ where
     type Provider = P;
     type Pool = NoopTransactionPool<OpPooledTransaction>;
     type Evm = OpEvmConfig;
-    type Network = NoopNetwork;
+    type Network = NoopNetwork<OpNetworkPrimitives>;
     type PayloadBuilder = ();
 
     fn pool(&self) -> &Self::Pool {
