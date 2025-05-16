@@ -225,11 +225,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
 
                 // process the event
                 if let Some(event) = ev {
-                    // try processing as a reorg first
-                    if !canon_processor.process_reorg(event.clone(), &client, &pool, &mut drift_monitor).await {
-                        // if not a reorg, try as a commit
-                        canon_processor.process_commit(event, &client, &pool, &mut drift_monitor);
-                    }
+                    canon_processor.on_event(event, &client, &pool, &mut drift_monitor).await;
                 }
             }
 

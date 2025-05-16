@@ -111,6 +111,23 @@ where
         }
     }
 
+    /// Process incoming event.
+    pub async fn on_event<Client, P>(
+        &mut self,
+        event: CanonStateNotification<N>,
+        client: &Client,
+        pool: &P,
+        drift_monitor: &mut DriftMonitor,
+    ) where
+        Client: reth_storage_api::StateProviderFactory + ChainSpecProvider + Clone + 'static,
+        P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
+    {
+        if !self.process_reorg(event.clone(), client, pool, drift_monitor).await {
+            // if not a reorg, try as a commit
+            self.process_commit(event, client, pool, drift_monitor);
+        }
+    }
+
     /// Update finalized blocks and return finalized blob hashes if any
     pub fn update_finalized<Client>(&mut self, client: &Client) -> Option<BlobStoreUpdates>
     where
@@ -123,7 +140,7 @@ where
     }
 
     /// Process a reorg event
-    pub async fn process_reorg<Client, P>(
+    async fn process_reorg<Client, P>(
         &mut self,
         event: CanonStateNotification<N>,
         client: &Client,
@@ -261,7 +278,7 @@ where
     }
 
     /// Process a commit event
-    pub fn process_commit<Client, P>(
+    fn process_commit<Client, P>(
         &mut self,
         event: CanonStateNotification<N>,
         client: &Client,
