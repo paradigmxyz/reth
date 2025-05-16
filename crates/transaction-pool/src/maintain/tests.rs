@@ -2,8 +2,9 @@
 
 use super::*;
 use crate::{
-    blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder, CoinbaseTipOrdering,
-    EthPooledTransaction, Pool, TransactionOrigin,
+    blobstore::InMemoryBlobStore, metrics::MaintainPoolMetrics,
+    validate::EthTransactionValidatorBuilder, CoinbaseTipOrdering, EthPooledTransaction, Pool,
+    TransactionOrigin,
 };
 use alloy_consensus::transaction::PooledTransaction;
 use alloy_eips::eip2718::Decodable2718;

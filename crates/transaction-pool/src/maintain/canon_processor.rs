@@ -128,6 +128,29 @@ where
         }
     }
 
+    /// Returns a Future for processing an event
+    ///
+    /// This is used by the `PoolMaintainer` to manually poll the event processing
+    pub fn process_event<'a, Client, P>(
+        &'a mut self,
+        event: CanonStateNotification<N>,
+        client: &'a Client,
+        pool: &'a P,
+        drift_monitor: &'a mut DriftMonitor,
+    ) -> impl std::future::Future<Output = ()> + 'a
+    where
+        Client: reth_storage_api::StateProviderFactory + ChainSpecProvider + Clone + 'static,
+        P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
+    {
+        let event_clone = event.clone();
+        async move {
+            if !self.process_reorg(event_clone, client, pool, drift_monitor).await {
+                // if not a reorg, try as a commit
+                self.process_commit(event, client, pool, drift_monitor);
+            }
+        }
+    }
+
     /// Update finalized blocks and return finalized blob hashes if any
     pub fn update_finalized<Client>(&mut self, client: &Client) -> Option<BlobStoreUpdates>
     where
@@ -136,7 +159,14 @@ where
         let finalized =
             self.finalized_tracker.update(client.finalized_block_number().ok().flatten())?;
 
-        Some(self.blob_store_tracker.on_finalized_block(finalized))
+        let updates = self.blob_store_tracker.on_finalized_block(finalized);
+
+        // Increment metrics for finalized blobs if they exist
+        if let BlobStoreUpdates::Finalized(ref blobs) = updates {
+            self.metrics.inc_deleted_tracked_blobs(blobs.len());
+        }
+
+        Some(updates)
     }
 
     /// Process a reorg event
