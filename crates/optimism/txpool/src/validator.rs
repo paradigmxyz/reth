@@ -231,7 +231,7 @@ where
         .await
     }
 
-    /// Validates all given transactions.
+    /// Validates all given transactions with the specified origin parameter.
     ///
     /// Returns all outcomes for the given transactions in the same order.
     ///
