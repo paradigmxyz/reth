@@ -34,7 +34,7 @@ use jsonrpsee::{
 };
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::{ConsensusError, FullConsensus};
-use reth_evm::{op_revm::api::exec, ConfigureEvm};
+use reth_evm::{ConfigureEvm};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_primitives_traits::NodePrimitives;
 use reth_rpc::{
