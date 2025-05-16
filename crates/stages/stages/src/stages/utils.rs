@@ -124,7 +124,7 @@ where
 
     // observability
     let total_entries = collector.len();
-    let interval = (total_entries / 1000).max(1);
+    let interval = (total_entries / 10).max(1);
 
     for (index, element) in collector.iter()?.enumerate() {
         let (k, v) = element?;
