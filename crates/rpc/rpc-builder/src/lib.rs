@@ -209,8 +209,7 @@ where
     /// [`EthApi`] which requires a [`TransactionPool`] implementation.
     pub fn with_noop_pool(
         self,
-    ) -> RpcModuleBuilder<N, Provider, NoopTransactionPool, Network, EvmConfig, Consensus>
-    {
+    ) -> RpcModuleBuilder<N, Provider, NoopTransactionPool, Network, EvmConfig, Consensus> {
         let Self { provider, executor, network, evm_config, consensus, _primitives, .. } = self;
         RpcModuleBuilder {
             provider,
@@ -259,8 +258,7 @@ where
     pub fn with_executor(
         self,
         executor: Box<dyn TaskSpawner + 'static>,
-    ) -> RpcModuleBuilder<N, Provider, Pool, Network, EvmConfig, Consensus>
-    {
+    ) -> RpcModuleBuilder<N, Provider, Pool, Network, EvmConfig, Consensus> {
         let Self { pool, network, provider, evm_config, consensus, _primitives, .. } = self;
         RpcModuleBuilder { provider, network, pool, executor, evm_config, consensus, _primitives }
     }

@@ -118,14 +118,9 @@ pub async fn launch_http_ws_same_port(modules: impl Into<RpcModuleSelection>) ->
 }
 
 /// Returns an [`RpcModuleBuilder`] with testing components.
-pub fn test_rpc_builder() -> RpcModuleBuilder<
-    EthPrimitives,
-    NoopProvider,
-    TestPool,
-    NoopNetwork,
-    EthEvmConfig,
-    NoopConsensus,
-> {
+pub fn test_rpc_builder(
+) -> RpcModuleBuilder<EthPrimitives, NoopProvider, TestPool, NoopNetwork, EthEvmConfig, NoopConsensus>
+{
     RpcModuleBuilder::default()
         .with_provider(NoopProvider::default())
         .with_pool(TestPoolBuilder::default().into())
