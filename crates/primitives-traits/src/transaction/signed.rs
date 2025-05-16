@@ -104,6 +104,7 @@ pub trait SignedTransaction:
     /// ensuring that the signature has a low `s` value_ (EIP-2).
     ///
     /// Returns `RecoveryError` if the transaction's signature is invalid.
+    #[deprecated(note = "Use try_into_recovered_unchecked instead")]
     #[auto_impl(keep_default_for(&, Arc))]
     fn into_recovered_unchecked(self) -> Result<Recovered<Self>, RecoveryError> {
         self.recover_signer_unchecked().map(|signer| Recovered::new_unchecked(self, signer))
