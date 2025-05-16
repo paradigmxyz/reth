@@ -29,7 +29,13 @@ pub trait NetworkPrimitives: Send + Sync + Unpin + Clone + Debug + 'static {
     type PooledTransaction: SignedTransaction + TryFrom<Self::BroadcastedTransaction> + 'static;
 
     /// The transaction type which peers return in `GetReceipts` messages.
-    type Receipt: TxReceipt + RlpEncodableReceipt + RlpDecodableReceipt + Unpin + 'static;
+    type Receipt: TxReceipt
+        + RlpEncodableReceipt
+        + RlpDecodableReceipt
+        + Encodable
+        + Decodable
+        + Unpin
+        + 'static;
 }
 
 /// This is a helper trait for use in bounds, where some of the [`NetworkPrimitives`] associated
