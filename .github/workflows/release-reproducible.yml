@@ -8,7 +8,6 @@ on:
       - v*
 
 env:
-  REPO_NAME: ${{ github.repository_owner }}/reth
   DOCKER_REPRODUCIBLE_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/reth-reproducible
 
 jobs:
