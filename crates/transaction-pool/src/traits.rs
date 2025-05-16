@@ -12,7 +12,7 @@ use alloy_consensus::{
     error::ValueError, transaction::PooledTransaction, BlockHeader, Signed, Typed2718,
 };
 use alloy_eips::{
-    eip2718::Encodable2718,
+    eip2718::{Encodable2718, WithEncoded},
     eip2930::AccessList,
     eip4844::{
         env_settings::KzgSettings, BlobAndProofV1, BlobAndProofV2, BlobTransactionSidecar,
@@ -979,6 +979,14 @@ pub trait PoolTransaction:
 
     /// Define a method to convert from the `Self` type to `Consensus`
     fn into_consensus(self) -> Recovered<Self::Consensus>;
+
+    /// Converts the transaction into consensus format while preserving the EIP-2718 encoded bytes.
+    /// This is used to optimize transaction execution by reusing cached encoded bytes instead of
+    /// re-encoding the transaction. The cached bytes are particularly useful in payload building
+    /// where the same transaction may be executed multiple times.
+    fn into_consensus_with2718(self) -> WithEncoded<Recovered<Self::Consensus>> {
+        self.into_consensus().into_encoded()
+    }
 
     /// Define a method to convert from the `Pooled` type to `Self`
     fn from_pooled(pooled: Recovered<Self::Pooled>) -> Self;
