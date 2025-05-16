@@ -159,7 +159,12 @@ where
             let current_sub_res = pubsub.sync_status(initial_sync_status);
 
             // send the current status immediately
-            let msg = to_subscription_message(&current_sub_res)?;
+            let msg = SubscriptionMessage::new(
+                accepted_sink.method_name(),
+                accepted_sink.subscription_id(),
+                &current_sub_res,
+            )
+            .map_err(SubscriptionSerializeError::new)?;
 
             if accepted_sink.send(msg).await.is_err() {
                 return Ok(())
@@ -174,7 +179,13 @@ where
 
                     // send a new message now that the status changed
                     let sync_status = pubsub.sync_status(current_syncing);
-                    let msg = to_subscription_message(&sync_status)?;
+                    let msg = SubscriptionMessage::new(
+                        accepted_sink.method_name(),
+                        accepted_sink.subscription_id(),
+                        &sync_status,
+                    )
+                    .map_err(SubscriptionSerializeError::new)?;
+
                     if accepted_sink.send(msg).await.is_err() {
                         break
                     }
@@ -328,11 +339,4 @@ where
                 futures::stream::iter(all_logs)
             })
     }
-}
-
-/// Serializes a messages into a raw [`SubscriptionMessage`].
-fn to_subscription_message<T: Serialize>(
-    msg: &T,
-) -> Result<SubscriptionMessage, SubscriptionSerializeError> {
-    serde_json::value::to_raw_value(msg).map(Into::into).map_err(SubscriptionSerializeError::new)
 }
