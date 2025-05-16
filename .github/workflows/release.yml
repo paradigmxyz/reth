@@ -7,6 +7,12 @@ on:
   push:
     tags:
       - v*
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Enable dry run mode (builds artifacts but skips uploads and release creation)"
+        type: boolean
+        default: true
 
 env:
   REPO_NAME: ${{ github.repository_owner }}/reth
@@ -95,12 +101,14 @@ jobs:
         shell: bash
 
       - name: Upload artifact
+        if: ${{ github.event.inputs.dry_run == 'false' }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz
           path: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz
 
       - name: Upload signature
+        if: ${{ github.event.inputs.dry_run == 'false' }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz.asc
@@ -110,6 +118,7 @@ jobs:
     name: draft release
     needs: [build, extract-version]
     runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.dry_run == 'false' }}
     env:
       VERSION: ${{ needs.extract-version.outputs.VERSION }}
     permissions:
@@ -190,3 +199,25 @@ jobs:
           done
           tag_name="${{ env.VERSION }}"
           echo "$body" | gh release create --draft -t "Reth $tag_name" -F "-" "$tag_name" "${assets[@]}"
+
+  dry-run-summary:
+    name: dry run summary
+    needs: [build, extract-version]
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.dry_run == 'true' }}
+    env:
+      VERSION: ${{ needs.extract-version.outputs.VERSION }}
+    steps:
+      - name: Summarize dry run
+        run: |
+          echo "## 🧪 Release Dry Run Summary"
+          echo ""
+          echo "✅ Successfully completed dry run for commit ${{ github.sha }}"
+          echo ""
+          echo "### What would happen in a real release:"
+          echo "- Binary artifacts would be uploaded to GitHub"
+          echo "- Docker images would be pushed to registry"
+          echo "- A draft release would be created"
+          echo ""
+          echo "### Next Steps"
+          echo "To perform a real release, push a git tag."
