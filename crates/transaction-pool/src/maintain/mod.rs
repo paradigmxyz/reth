@@ -1,33 +1,27 @@
 //! Support for maintaining the state of the transaction pool
 
-mod canon_processor;
-mod drift_monitor;
-#[cfg(test)]
-mod tests;
-
 use crate::{
-    blobstore::BlobStoreUpdates,
     error::PoolError,
-    metrics::MaintainPoolMetrics,
     traits::{TransactionPool, TransactionPoolExt},
-    BlockInfo, PoolTransaction,
+    PoolTransaction,
 };
-use alloy_consensus::BlockHeader;
-use alloy_eips::BlockNumberOrTag;
 use alloy_rlp::Encodable;
-use drift_monitor::DriftMonitorResult;
-use futures_util::{future::BoxFuture, FutureExt, Stream, StreamExt};
+use futures_util::{future::BoxFuture, Stream};
 use reth_chain_state::CanonStateNotification;
-use reth_chainspec::{ChainSpecProvider, EthChainSpec};
+use reth_chainspec::ChainSpecProvider;
 use reth_fs_util::FsPathError;
-use reth_primitives_traits::{
-    transaction::signed::SignedTransaction, NodePrimitives, SealedHeader,
-};
+use reth_primitives_traits::{transaction::signed::SignedTransaction, NodePrimitives};
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::path::{Path, PathBuf};
-use tokio::time::{self, Duration};
+use tokio::time::Duration;
 use tracing::{debug, error, info, trace, warn};
+
+mod canon_processor;
+mod drift_monitor;
+mod pool_maintainer;
+#[cfg(test)]
+mod tests;
 
 // Re-export key components
 pub use canon_processor::{CanonEventProcessor, CanonEventProcessorConfig, FinalizedBlockTracker};
@@ -86,6 +80,9 @@ impl LocalTransactionBackupConfig {
     }
 }
 
+// Re-export PoolMaintainer for public use
+pub use pool_maintainer::{PoolMaintainer, PoolMaintainerBuilder, PoolMaintainerHooks};
+
 /// Returns a spawnable future for maintaining the state of the transaction pool.
 pub fn maintain_transaction_pool_future<N, Client, P, St, Tasks>(
     client: Client,
@@ -96,155 +93,14 @@ pub fn maintain_transaction_pool_future<N, Client, P, St, Tasks>(
 ) -> BoxFuture<'static, ()>
 where
     N: NodePrimitives,
-    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static,
-    P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
+    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + Unpin + 'static,
+    P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + Unpin + 'static,
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
 {
-    async move {
-        maintain_transaction_pool(client, pool, events, task_spawner, config).await;
-    }
-    .boxed()
-}
+    let maintainer = PoolMaintainerBuilder::new(client, pool, events, task_spawner, config).build();
 
-/// Maintains the state of the transaction pool by handling new blocks and reorgs.
-///
-/// This listens for any new blocks and reorgs and updates the transaction pool's state accordingly
-pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
-    client: Client,
-    pool: P,
-    mut events: St,
-    task_spawner: Tasks,
-    config: MaintainPoolConfig,
-) where
-    N: NodePrimitives,
-    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static,
-    P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
-    St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
-    Tasks: TaskSpawner + 'static,
-{
-    let metrics = MaintainPoolMetrics::default();
-    let MaintainPoolConfig { max_update_depth, max_reload_accounts, .. } = config;
-
-    // ensure the pool points to latest state
-    if let Ok(Some(latest)) = client.header_by_number_or_tag(BlockNumberOrTag::Latest) {
-        let latest = SealedHeader::seal_slow(latest);
-        let chain_spec = client.chain_spec();
-        let info = BlockInfo {
-            block_gas_limit: latest.gas_limit(),
-            last_seen_block_hash: latest.hash(),
-            last_seen_block_number: latest.number(),
-            pending_basefee: latest
-                .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(latest.timestamp()))
-                .unwrap_or_default(),
-            pending_blob_fee: latest
-                .maybe_next_block_blob_fee(chain_spec.blob_params_at_timestamp(latest.timestamp())),
-        };
-        pool.set_block_info(info);
-    }
-
-    // Create our new components
-    let mut drift_monitor = DriftMonitor::new(max_reload_accounts, metrics.clone());
-
-    let canon_processor_config = CanonEventProcessorConfig { max_update_depth };
-
-    let mut canon_processor = CanonEventProcessor::new(
-        client.finalized_block_number().ok().flatten(),
-        canon_processor_config,
-        metrics.clone(),
-    );
-
-    // eviction interval for stale non local txs
-    let mut stale_eviction_interval = time::interval(config.max_tx_lifetime);
-
-    // The update loop that waits for new blocks and reorgs and performs pool updates
-    // Listen for new chain events and derive the update action for the pool
-    loop {
-        trace!(target: "txpool", state=?drift_monitor.state(), "awaiting new block or reorg");
-
-        drift_monitor.update_metrics();
-        let pool_info = pool.block_info();
-
-        // after performing a pool update after a new block we have some time to properly update
-        // dirty accounts and correct if the pool drifted from current state, for example after
-        // restart or a pipeline run
-        if drift_monitor.state().is_drifted() {
-            // assuming all senders are dirty
-            drift_monitor.set_dirty_addresses(pool.unique_senders());
-            // make sure we toggle the state back to in sync
-            drift_monitor.set_state(PoolDriftState::InSync);
-        }
-
-        // if we have accounts that are out of sync with the pool, we reload them in chunks
-        if drift_monitor.has_dirty_addresses() && !drift_monitor.is_reloading() {
-            drift_monitor.start_reload_accounts(
-                client.clone(),
-                pool_info.last_seen_block_hash,
-                &task_spawner,
-            );
-        }
-
-        // check if we have a new finalized block
-        if let Some(BlobStoreUpdates::Finalized(blobs)) = canon_processor.update_finalized(&client)
-        {
-            metrics.inc_deleted_tracked_blobs(blobs.len());
-            // remove all finalized blobs from the blob store
-            pool.delete_blobs(blobs);
-            // and also do periodic cleanup
-            let pool = pool.clone();
-            task_spawner.spawn_blocking(Box::pin(async move {
-                debug!(target: "txpool", "cleaning up blob store");
-                pool.cleanup_blobs();
-            }));
-        }
-
-        // select of account reloads and new canonical state updates which should arrive at the rate
-        // of the block time
-        tokio::select! {
-            // handle reloaded accounts
-            result = &mut drift_monitor => {
-                match result {
-                    DriftMonitorResult::AccountsLoaded(accounts) => {
-                        pool.update_accounts(accounts.accounts);
-                    }
-                    DriftMonitorResult::Failed => {
-                        debug!(target: "txpool", dirty_addresses=%drift_monitor.dirty_address_count(), "Account reload failed, addresses added back to dirty set");
-                    }
-                }
-            }
-            // handle new canonical events
-            ev = events.next() => {
-                if ev.is_none() {
-                    // the stream ended, we are done
-                    break;
-                }
-
-                // on receiving the first event on start up, mark the pool as drifted to explicitly
-                // trigger revalidation and clear out outdated txs.
-                drift_monitor.on_first_event();
-
-                // process the event
-                if let Some(event) = ev {
-                    canon_processor.on_event(event, &client, &pool, &mut drift_monitor).await;
-                }
-            }
-
-            // handle stale transaction eviction
-            _ = stale_eviction_interval.tick() => {
-                let stale_txs: Vec<_> = pool
-                    .queued_transactions()
-                    .into_iter()
-                    .filter(|tx| {
-                        // filter stale transactions based on config
-                        (tx.origin.is_external() || config.no_local_exemptions) && tx.timestamp.elapsed() > config.max_tx_lifetime
-                    })
-                    .map(|tx| *tx.hash())
-                    .collect();
-                debug!(target: "txpool", count=%stale_txs.len(), "removing stale transactions");
-                pool.remove_transactions(stale_txs);
-            }
-        }
-    }
+    Box::pin(maintainer)
 }
 
 /// Loads transactions from a file, decodes them from the RLP format, and inserts them
