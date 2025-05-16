@@ -10273,7 +10273,7 @@ dependencies = [
 
 [[package]]
 name = "reth-tracing-otlp"
-version = "1.3.12"
+version = "1.4.1"
 dependencies = [
  "opentelemetry",
  "opentelemetry-otlp",

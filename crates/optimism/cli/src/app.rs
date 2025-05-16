@@ -26,7 +26,7 @@ where
     Ext: clap::Args + fmt::Debug,
 {
     pub(crate) fn new(cli: Cli<C, Ext>) -> Self {
-        Self { cli, runner: None, layers: None, guard: None }
+        Self { cli, runner: None, layers: Some(Layers::new()), guard: None }
     }
 
     /// Sets the runner for the CLI commander.
