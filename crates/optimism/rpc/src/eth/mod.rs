@@ -420,7 +420,7 @@ pub struct OpNodeOnlyEvm<P> {
     provider: P,
     evm_config: OpEvmConfig,
     noop_pool: NoopTransactionPool<OpPooledTransaction>,
-    noop_network: NoopNetwork,
+    noop_network: NoopNetwork<OpNetworkPrimitives>,
 }
 
 impl<P> OpNodeOnlyEvm<P> {
