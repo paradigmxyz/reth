@@ -83,8 +83,6 @@ impl PoolDriftState {
 pub enum DriftMonitorResult {
     /// Accounts were loaded successfully
     AccountsLoaded(LoadedAccounts),
-    /// No accounts were loaded (no change)
-    NoChange,
     /// The account reload future failed
     Failed,
 }
@@ -266,8 +264,8 @@ impl Future for DriftMonitor {
                 Poll::Pending => return Poll::Pending,
             }
         }
-
-        Poll::Ready(DriftMonitorResult::NoChange)
+        // no active reload operation - return Pending to avoid busy polling
+        Poll::Pending
     }
 }
 
