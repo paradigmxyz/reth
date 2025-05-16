@@ -52,15 +52,16 @@ impl Clone for PackedNibbles {
     #[inline]
     fn clone(&self) -> Self {
         let mut nibbles = ArrayVec::new_const();
-        // SAFETY: `nibbles` is a valid contiguous slice of length
-        // `CAPACITY_BYTES` non-overlapping with `self.nibbles`.
         unsafe {
+            // SAFETY: We fill `nibbles` with `self.nibbles.len()` number of elements below.
+            nibbles.set_len(self.nibbles.len());
+            // SAFETY: `nibbles` is a valid contiguous slice of length
+            // `CAPACITY_BYTES` non-overlapping with `self.nibbles`.
             core::ptr::copy_nonoverlapping(
                 self.nibbles.as_ptr(),
                 nibbles.as_mut_ptr(),
                 self.nibbles.len(),
             );
-            nibbles.set_len(self.nibbles.len());
         }
         Self { even: self.even, nibbles }
     }
@@ -276,135 +277,95 @@ impl PackedNibbles {
 
     /// Creates a new [`PackedNibbles`] containing the nibbles in the specified range.
     ///
-    /// This method accepts any type that implements [`RangeBounds<usize>`],
-    /// including full ranges (`..`), ranges with one bound (`..end` or `start..`),
-    /// inclusive ranges (`start..=end`), or standard ranges (`start..end`).
-    ///
     /// # Panics
     ///
     /// This method will panic if the range is out of bounds for this [`PackedNibbles`].
     pub fn slice(&self, range: impl RangeBounds<usize>) -> Self {
-        // Determine the start and end indices from the range bounds
+        // Determine the start and end nibbl indices from the range bounds
         let len = self.len();
-
         let start = match range.start_bound() {
             Bound::Included(&idx) => idx,
             Bound::Excluded(&idx) => idx + 1,
             Bound::Unbounded => 0,
         };
-
         let end = match range.end_bound() {
             Bound::Included(&idx) => idx + 1,
             Bound::Excluded(&idx) => idx,
             Bound::Unbounded => len,
         };
-
-        // Check bounds
-        assert!(start <= len && end <= len, "slice bounds out of range (len: {})", len);
+        assert!(start <= end && end <= len);
 
         // Fast path for empty slice
         if start == end {
             return Self::default();
         }
 
-        // Simple case - if we're slicing the whole thing
+        // Fast path for full slice
         if start == 0 && end == len {
             return self.clone();
         }
 
-        // Calculate byte offsets
-        let start_byte = start / 2;
-        let end_byte = end.div_ceil(2);
-        let mut result = Self { even: (end - start) % 2 == 0, nibbles: ArrayVec::new() };
+        let nibble_count = end - start;
 
-        // Fast path for byte-aligned slices (both start and end on even nibbles)
-        if start % 2 == 0 && end % 2 == 0 {
-            // Copy bytes directly without bit manipulation
-            result
-                .nibbles
-                .try_extend_from_slice(&self.nibbles[start_byte..end_byte])
-                .expect("nibbles length is {CAPACITY_BYTES}");
-            return result;
+        // Calculate starting and ending byte indices. Both indices include full bytes in case if
+        // `start` or `end` are odd.
+        //
+        // For example, for byte representation `[0x12, 0x34]` and `start = 1, end = 2` this
+        // will calculate `from_byte = 0` and `to_byte = 1`, and the sliced nibbles after patching
+        // below will be represented as `[0x23]`.
+        let from_byte = start / 2;
+        let to_byte = end.div_ceil(2);
+
+        // Calculate the byte count that needs to be allocated for the sliced nibbles **BEFORE** the
+        // patching below is done.
+        //
+        // For the example above, this will calculate `byte_count = 2` to be able to store `[0x12,
+        // 0x34]`, and then do additional patching.
+        let byte_count = to_byte - from_byte;
+
+        let mut out = ArrayVec::<u8, 32>::new();
+        unsafe {
+            // SAFETY: We fill `out` with `byte_count` elements below.
+            out.set_len(byte_count);
+            // SAFETY: `out` is a valid contiguous slice of length
+            // `CAPACITY_BYTES` non-overlapping with `self.nibbles`.
+            core::ptr::copy_nonoverlapping(
+                self.nibbles.as_ptr().add(from_byte),
+                out.as_mut_ptr(),
+                byte_count,
+            );
         }
 
-        // Handle non-aligned cases
-        unsafe {
-            match (start % 2 == 0, end % 2 == 0) {
-                (true, false) => {
-                    // Start on even, end on odd: copy full bytes except last one
-                    if end_byte > start_byte {
-                        for byte in &self.nibbles[start_byte..end_byte - 1] {
-                            result.nibbles.push_unchecked(*byte);
-                        }
-                    }
-                    // Add last byte with masked high nibble
-                    if start_byte < end_byte {
-                        let last_byte = self.nibbles[end_byte - 1] & 0xF0;
-                        result.nibbles.push_unchecked(last_byte);
-                    }
-                }
-                (false, true) => {
-                    // Start on odd, end on even
+        // Patch first and/or last byte, if needed.
+        let start_odd = start % 2 != 0;
+        let end_odd = end % 2 != 0;
 
-                    // First byte (only low nibble)
-                    let first_byte = (self.nibbles[start_byte] & 0x0F) << 4;
-
-                    if end_byte > start_byte + 1 {
-                        // First combined byte (low nibble from start_byte, high nibble from
-                        // start_byte+1)
-                        result.nibbles.push_unchecked(
-                            first_byte | ((self.nibbles[start_byte + 1] & 0xF0) >> 4),
-                        );
-
-                        // Middle bytes until the last one need to be shifted
-                        for i in start_byte + 1..end_byte - 1 {
-                            let high = (self.nibbles[i] & 0x0F) << 4;
-                            let low = (self.nibbles[i + 1] & 0xF0) >> 4;
-                            result.nibbles.push_unchecked(high | low);
-                        }
-
-                        // Last byte (only high nibble)
-                        result.nibbles.push_unchecked((self.nibbles[end_byte - 1] & 0x0F) << 4);
-                    } else {
-                        // Just a lower nibble of the first byte
-                        result.nibbles.push_unchecked(first_byte);
-                    }
-                }
-                (false, false) => {
-                    // Start on odd, end on odd
-
-                    // First byte (only low nibble)
-                    let first_byte = (self.nibbles[start_byte] & 0x0F) << 4;
-
-                    if end_byte > start_byte + 1 {
-                        // First combined byte (low nibble from start_byte, high nibble from
-                        // start_byte+1)
-                        result.nibbles.push_unchecked(
-                            first_byte | ((self.nibbles[start_byte + 1] & 0xF0) >> 4),
-                        );
-
-                        // If we have at least one full byte between first and last
-                        if end_byte > start_byte + 2 {
-                            // Middle bytes need to be shifted
-                            for i in start_byte + 1..end_byte - 1 {
-                                let high = (self.nibbles[i] & 0x0F) << 4;
-                                let low = (self.nibbles[i + 1] & 0xF0) >> 4;
-                                result.nibbles.push_unchecked(high | low);
-                            }
-                        }
-                    } else {
-                        // Just one byte with both nibbles - this is a single nibble
-                        // For start=1, end=2, we need the low nibble from byte 0
-                        result.nibbles.push_unchecked(first_byte & 0xF0);
-                    }
-                }
-                (true, true) => {
-                    unreachable!("This case should have been handled by the fast path")
+        // If we start on an odd nibble, we need to shift everything left by 4 bits.
+        //
+        // For `out = [0x12, 0x34]`, it will be turned into `[0x23, 0x40]`.
+        if start_odd {
+            if byte_count > 1 {
+                for i in 0..byte_count - 1 {
+                    out[i] = (out[i] << 4) | (out[i + 1] >> 4);
                 }
             }
+            out[byte_count - 1] <<= 4;
         }
 
-        result
+        // If we end on an odd nibble, we need to mask the last byte, so it has only the high nibble
+        // set.
+        //
+        // For `out = [0x12, 0x34]`, it will be turned into `[0x12, 0x30]`.
+        if end_odd {
+            // The very last nibble is in the *high* half of the last byte -> mask it away.
+            out[byte_count - 1] &= 0xF0;
+        }
+
+        // SAFETY: We've already checked that the length is valid, and we're setting the length
+        // to a smaller value.
+        unsafe { out.set_len(nibble_count.div_ceil(2)) };
+
+        Self { nibbles: out, even: (end - start) % 2 == 0 }
     }
 
     /// Extends this [`PackedNibbles`] with the given [`PackedNibbles`].
