@@ -10500,9 +10500,9 @@ dependencies = [
 
 [[package]]
 name = "revm-inspectors"
-version = "0.22.1"
+version = "0.22.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6745857d9a4fcb03821e899a7072f9faca0eca5113f544ebcdf1b2c70b7d1fd1"
+checksum = "b7be11a6666252d5331e5bcab524b87459e9822c01430dbbdc182eab112b995f"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
