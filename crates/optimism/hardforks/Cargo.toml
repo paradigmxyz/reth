@@ -16,8 +16,10 @@ workspace = true
 reth-ethereum-forks.workspace = true
 
 # ethereum
-alloy-op-hardforks.workspace = true
 alloy-primitives.workspace = true
+
+# optimism
+alloy-op-hardforks.workspace = true
 
 # misc
 once_cell.workspace = true
