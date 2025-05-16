@@ -16,10 +16,10 @@ fn generate_nibbles(rng: &mut impl Rng, length: usize) -> (Nibbles, PackedNibble
     (nybbles_nibbles, packed_nibbles)
 }
 
-fn bench_eq_same_len(c: &mut Criterion) {
+fn bench_eq(c: &mut Criterion) {
     let mut rng = rand::rng();
 
-    let mut group = c.benchmark_group("eq_comparison_same_len_eq");
+    let mut group = c.benchmark_group("eq");
     for size in [4, 8, 16, 32, 64] {
         let (nybbles1, packed1) = generate_nibbles(&mut rng, size);
 
@@ -31,38 +31,6 @@ fn bench_eq_same_len(c: &mut Criterion) {
         });
         group.bench_with_input(BenchmarkId::new("PackedNibbles", size), &size, |b, _| {
             b.iter(|| packed1.eq(&packed1_clone))
-        });
-    }
-    group.finish();
-
-    let mut group = c.benchmark_group("eq_comparison_same_len_not_eq");
-    for size in [4, 8, 16, 32, 64] {
-        let (nybbles1, packed1) = generate_nibbles(&mut rng, size);
-        let (nybbles2, packed2) = generate_nibbles(&mut rng, size);
-
-        group.bench_with_input(BenchmarkId::new("Nibbles", size), &size, |b, _| {
-            b.iter(|| nybbles1.eq(&nybbles2))
-        });
-        group.bench_with_input(BenchmarkId::new("PackedNibbles", size), &size, |b, _| {
-            b.iter(|| packed1.eq(&packed2))
-        });
-    }
-    group.finish();
-}
-
-fn bench_eq_diff_len(c: &mut Criterion) {
-    let mut rng = rand::rng();
-
-    let mut group = c.benchmark_group("eq_comparison_diff_len");
-    for (len1, len2) in [(4, 8), (8, 16), (16, 32), (32, 64)] {
-        let (nybbles1, packed1) = generate_nibbles(&mut rng, len1);
-        let (nybbles2, packed2) = generate_nibbles(&mut rng, len2);
-
-        group.bench_with_input(BenchmarkId::new("Nibbles", len1), &len1, |b, _| {
-            b.iter(|| nybbles1.eq(&nybbles2))
-        });
-        group.bench_with_input(BenchmarkId::new("PackedNibbles", len1), &len1, |b, _| {
-            b.iter(|| packed1.eq(&packed2))
         });
     }
     group.finish();
@@ -215,8 +183,7 @@ fn bench_starts_with(c: &mut Criterion) {
 
 criterion_group!(
     benches,
-    bench_eq_same_len,
-    bench_eq_diff_len,
+    bench_eq,
     bench_common_prefixes,
     bench_clone,
     bench_slice,
