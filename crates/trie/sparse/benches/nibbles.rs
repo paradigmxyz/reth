@@ -11,7 +11,9 @@ fn generate_nibbles(rng: &mut impl Rng, length: usize) -> (Nibbles, PackedNibble
 
     // Create instances of both types with same values
     let nybbles_nibbles = Nibbles::from_nibbles_unchecked(nibbles.clone());
+    assert_eq!(nybbles_nibbles.as_slice().len(), length);
     let packed_nibbles = PackedNibbles::from_nibbles(nibbles);
+    assert_eq!(packed_nibbles.as_slice().len(), length / 2);
 
     (nybbles_nibbles, packed_nibbles)
 }
@@ -20,7 +22,7 @@ fn bench_eq(c: &mut Criterion) {
     let mut rng = rand::rng();
 
     let mut group = c.benchmark_group("eq");
-    for size in [4, 8, 16, 32, 64] {
+    for size in [32, 64] {
         let (nybbles1, packed1) = generate_nibbles(&mut rng, size);
 
         let nybbles1_clone = nybbles1.clone();
@@ -59,7 +61,7 @@ fn bench_common_prefixes(c: &mut Criterion) {
     let mut rng = rand::rng();
 
     for size in [32, 64] {
-        let mut group = c.benchmark_group(format!("eq_with_common_prefix_size_{}", size));
+        let mut group = c.benchmark_group(format!("common_prefix_{size}"));
         for prefix_percent in [25, 50, 75, 90] {
             let prefix_len = (size * prefix_percent) / 100;
 
@@ -90,7 +92,7 @@ fn bench_clone(c: &mut Criterion) {
     let mut rng = rand::rng();
 
     let mut group = c.benchmark_group("clone");
-    for size in [4, 8, 16, 32, 64] {
+    for size in [16, 32, 64] {
         let (nybbles, packed) = generate_nibbles(&mut rng, size);
 
         group.bench_with_input(BenchmarkId::new("Nibbles", size), &size, |b, _| {
@@ -107,7 +109,7 @@ fn bench_slice(c: &mut Criterion) {
     let mut rng = rand::rng();
 
     let mut group = c.benchmark_group("slice_even");
-    for size in [16, 32, 64] {
+    for size in [32, 64] {
         // Generate random nibbles
         let (nybbles, packed_nibbles) = generate_nibbles(&mut rng, size);
 
@@ -125,7 +127,7 @@ fn bench_slice(c: &mut Criterion) {
     group.finish();
 
     let mut group = c.benchmark_group("slice_odd");
-    for size in [16, 32, 64] {
+    for size in [32, 64] {
         // Generate random nibbles
         let (nybbles, packed_nibbles) = generate_nibbles(&mut rng, size);
 
@@ -147,7 +149,7 @@ fn bench_starts_with(c: &mut Criterion) {
     let mut rng = rand::rng();
 
     let mut group = c.benchmark_group("starts_with_true");
-    for size in [16, 32, 64] {
+    for size in [32, 64] {
         let prefix_len = 16;
 
         let (full_nybbles, full_packed) = generate_nibbles(&mut rng, size);
@@ -165,7 +167,7 @@ fn bench_starts_with(c: &mut Criterion) {
     group.finish();
 
     let mut group = c.benchmark_group("starts_with_false");
-    for size in [16, 32, 64] {
+    for size in [32, 64] {
         let prefix_len = 16;
 
         let (nybbles1, packed1) = generate_nibbles(&mut rng, size);
@@ -181,12 +183,44 @@ fn bench_starts_with(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_ord(c: &mut Criterion) {
+    let mut rng = rand::rng();
+
+    for size in [32, 64] {
+        let mut group = c.benchmark_group(format!("ord_{size}"));
+        for prefix_percent in [50, 75, 90] {
+            let prefix_len = (size * prefix_percent) / 100;
+
+            let (nibbles1, nibbles2) = generate_prefixed_nibbles(&mut rng, size, prefix_len);
+
+            let nybbles1 = Nibbles::from_nibbles_unchecked(nibbles1.clone());
+            let packed1 = PackedNibbles::from_nibbles(nibbles1);
+
+            let nybbles2 = Nibbles::from_nibbles_unchecked(nibbles2.clone());
+            let packed2 = PackedNibbles::from_nibbles(nibbles2);
+
+            group.bench_with_input(
+                BenchmarkId::new("Nibbles", prefix_percent),
+                &prefix_percent,
+                |b, _| b.iter(|| nybbles1.partial_cmp(&nybbles2)),
+            );
+            group.bench_with_input(
+                BenchmarkId::new("PackedNibbles", prefix_percent),
+                &prefix_percent,
+                |b, _| b.iter(|| packed1.partial_cmp(&packed2)),
+            );
+        }
+        group.finish();
+    }
+}
+
 criterion_group!(
     benches,
     bench_eq,
     bench_common_prefixes,
     bench_clone,
     bench_slice,
-    bench_starts_with
+    bench_starts_with,
+    bench_ord
 );
 criterion_main!(benches);

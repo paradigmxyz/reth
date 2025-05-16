@@ -86,33 +86,34 @@ impl Ord for PackedNibbles {
         let self_len = self.nibbles.len();
         let other_len = other.nibbles.len();
 
-        // Compare bytes one by one until a difference is found
+        // Compare bytes up to the common length
         let min_len = core::cmp::min(self_len, other_len);
-        for (i, (self_byte, other_byte)) in
-            self.nibbles.iter().zip(other.nibbles.iter()).enumerate()
-        {
-            match self_byte.cmp(other_byte) {
-                core::cmp::Ordering::Equal => {
-                    if i == min_len - 1 && self_len == other_len {
-                        // If it's the last byte of both sequences, compare the parity
-                        match (self.even, other.even) {
-                            (true, true) | (false, false) => return core::cmp::Ordering::Equal,
-                            // For example, the same byte 0x60 will be represented as "60" for
-                            // `self` and "6" for `other`
-                            (true, false) => return core::cmp::Ordering::Greater,
-                            // For example, the same byte 0x60 will be represented as "6" for
-                            // `self` and "60" for `other`
-                            (false, true) => return core::cmp::Ordering::Less,
-                        }
-                    }
-                }
-                ordering => return ordering,
-            }
+        let self_common = &self.nibbles[..min_len];
+        let other_common = &other.nibbles[..min_len];
+        if self_common != other_common {
+            return self_common.cmp(other_common);
         }
 
         // If we've compared all bytes and they're equal up to the min length,
-        // the shorter sequence comes first
-        self_len.cmp(&other_len)
+        // compare the lengths
+        match self_len.cmp(&other_len) {
+            core::cmp::Ordering::Equal => {
+                // Lengths are equal, compare the parity
+                match (self.even, other.even) {
+                    (true, true) | (false, false) => core::cmp::Ordering::Equal,
+                    // For example, the same byte 0x60 will be represented as "60" for
+                    // `self` and "6" for `other`
+                    (true, false) => core::cmp::Ordering::Greater,
+                    // For example, the same byte 0x60 will be represented as "6" for
+                    // `self` and "60" for `other`
+                    (false, true) => core::cmp::Ordering::Less,
+                }
+            }
+            len_cmp => {
+                // Lengths are different, so just order by length
+                len_cmp
+            }
+        }
     }
 }
 
