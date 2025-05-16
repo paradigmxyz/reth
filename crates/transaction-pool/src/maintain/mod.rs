@@ -210,11 +210,6 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                     DriftMonitorResult::Failed => {
                         debug!(target: "txpool", dirty_addresses=%drift_monitor.dirty_address_count(), "Account reload failed, addresses added back to dirty set");
                     }
-                    DriftMonitorResult::NoChange => {
-                        // continue - this shouldn't happen in practice since we only
-                        // poll when there's an active reload
-                        debug!(target: "txpool", "No active account reload operation");
-                    }
                 }
             }
             // handle new canonical events
