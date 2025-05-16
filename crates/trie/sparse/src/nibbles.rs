@@ -346,10 +346,19 @@ impl PackedNibbles {
         if start_odd {
             if byte_count > 1 {
                 for i in 0..byte_count - 1 {
-                    out[i] = (out[i] << 4) | (out[i + 1] >> 4);
+                    // SAFETY: all accesses are within bounds, because `out` is initialized with
+                    // exactly `byte_count` bytes.
+                    unsafe {
+                        let next = *out.get_unchecked(i + 1);
+                        let current = out.get_unchecked_mut(i);
+                        *current = (*current << 4) | (next >> 4);
+                    }
                 }
             }
-            out[byte_count - 1] <<= 4;
+            // SAFETY: access is within bounds, because `out` is initialized with exactly
+            // `byte_count` bytes.
+            let last = unsafe { out.get_unchecked_mut(byte_count - 1) };
+            *last <<= 4;
         }
 
         // If we end on an odd nibble, we need to mask the last byte, so it has only the high nibble
@@ -357,8 +366,10 @@ impl PackedNibbles {
         //
         // For `out = [0x12, 0x34]`, it will be turned into `[0x12, 0x30]`.
         if end_odd {
-            // The very last nibble is in the *high* half of the last byte -> mask it away.
-            out[byte_count - 1] &= 0xF0;
+            // SAFETY: access is within bounds, because `out` is initialized with exactly
+            // `byte_count` bytes.
+            let last = unsafe { out.get_unchecked_mut(byte_count - 1) };
+            *last &= 0xF0;
         }
 
         // SAFETY: We've already checked that the length is valid, and we're setting the length

@@ -138,7 +138,7 @@ fn bench_clone(c: &mut Criterion) {
 fn bench_slice(c: &mut Criterion) {
     let mut rng = rand::rng();
 
-    let mut group = c.benchmark_group("slice");
+    let mut group = c.benchmark_group("slice_even");
     for size in [16, 32, 64] {
         // Generate random nibbles
         let (nybbles, packed_nibbles) = generate_nibbles(&mut rng, size);
@@ -146,6 +146,24 @@ fn bench_slice(c: &mut Criterion) {
         // Slice middle 25%
         let start = size / 4;
         let end = start + (size / 2);
+
+        group.bench_with_input(BenchmarkId::new("Nibbles", size), &size, |b, _| {
+            b.iter(|| nybbles.slice(start..end))
+        });
+        group.bench_with_input(BenchmarkId::new("PackedNibbles", size), &size, |b, _| {
+            b.iter(|| packed_nibbles.slice(start..end))
+        });
+    }
+    group.finish();
+
+    let mut group = c.benchmark_group("slice_odd");
+    for size in [16, 32, 64] {
+        // Generate random nibbles
+        let (nybbles, packed_nibbles) = generate_nibbles(&mut rng, size);
+
+        // Slice middle 25%
+        let start = size / 4 + 1;
+        let end = start + (size / 2) + 1;
 
         group.bench_with_input(BenchmarkId::new("Nibbles", size), &size, |b, _| {
             b.iter(|| nybbles.slice(start..end))
