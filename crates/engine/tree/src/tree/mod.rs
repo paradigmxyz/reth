@@ -2167,13 +2167,13 @@ where
                         let elapsed = execution_finish.elapsed();
                         info!(target: "engine::tree", ?state_root, ?elapsed, "State root task finished");
                         // we double check the state root here for good measure
-                        if state_root == block.header().state_root() {
+                        if state_root == block.header().state_root(&hashed_state) {
                             maybe_state_root = Some((state_root, trie_updates, elapsed))
                         } else {
                             warn!(
                                 target: "engine::tree",
                                 ?state_root,
-                                block_state_root = ?block.header().state_root(),
+                                block_state_root = ?block.header().state_root(&hashed_state),
                                 "State root task returned incorrect state root"
                             );
                         }
@@ -2222,12 +2222,16 @@ where
         debug!(target: "engine::tree", ?root_elapsed, block=?block_num_hash, "Calculated state root");
 
         // ensure state root matches
-        if state_root != block.header().state_root() {
+        if state_root != block.header().state_root(&hashed_state) {
             // call post-block hook
             self.on_invalid_block(&parent_block, &block, &output, Some((&trie_output, state_root)));
             return Err((
                 ConsensusError::BodyStateRootDiff(
-                    GotExpected { got: state_root, expected: block.header().state_root() }.into(),
+                    GotExpected {
+                        got: state_root,
+                        expected: block.header().state_root(&hashed_state),
+                    }
+                    .into(),
                 )
                 .into(),
                 block,
@@ -2272,6 +2276,25 @@ where
         debug!(target: "engine::tree", block=?block_num_hash, "Finished inserting block");
         Ok(InsertPayloadOk::Inserted(BlockStatus::Valid))
     }
+    fn metered<F, R, B>(&self, block: &RecoveredBlock<B>, f: F) -> R
+    where
+        F: FnOnce() -> R,
+        B: reth_primitives_traits::Block,
+    {
+        // Execute the block and record the elapsed time.
+        let execute_start = Instant::now();
+        let output = f();
+        let execution_duration = execute_start.elapsed().as_secs_f64();
+
+        // Update gas metrics.
+        self.gas_processed_total.increment(block.header().gas_used());
+        self.gas_per_second.set(block.header().gas_used() as f64 / execution_duration);
+        self.gas_used_histogram.record(block.header().gas_used() as f64);
+        self.execution_histogram.record(execution_duration);
+        self.execution_duration.set(execution_duration);
+
+        output
+    }
 
     /// Executes a block with the given state provider
     fn execute_block<S: StateProvider>(
@@ -2298,11 +2321,32 @@ where
         }
 
         let execution_start = Instant::now();
-        let output = self.metrics.executor.execute_metered(
-            executor,
-            block,
-            Box::new(handle.state_hook()),
-        )?;
+        // Start timing (like the metered function does)
+        let execute_start = Instant::now();
+
+        // Do the actual execution (what execute_metered was doing)
+        executor.apply_pre_execution_changes()?;
+        for tx in block.transactions_recovered() {
+            executor.execute_transaction(tx)?;
+        }
+        let (mut db, result) = executor.finish().map(|(evm, result)| (evm.into_db(), result))?;
+
+        // Calculate how long it took
+        let execution_duration = execute_start.elapsed().as_secs_f64();
+
+        // Update metrics (notice the new pattern: self.metrics.executor.XXXXX)
+        self.metrics.executor.gas_processed_total.increment(block.header().gas_used());
+        self.metrics
+            .executor
+            .gas_per_second
+            .set(block.header().gas_used() as f64 / execution_duration);
+        self.metrics.executor.gas_used_histogram.record(block.header().gas_used() as f64);
+        self.metrics.executor.execution_histogram.record(execution_duration);
+        self.metrics.executor.execution_duration.set(execution_duration);
+
+        // Create the output
+        db.borrow_mut().merge_transitions(BundleRetention::Reverts);
+        let output = BlockExecutionOutput { result, state: db.borrow_mut().take_bundle() };
         let execution_finish = Instant::now();
         let execution_time = execution_finish.duration_since(execution_start);
         debug!(target: "engine::tree", elapsed = ?execution_time, number=?block.number(), "Executed block");

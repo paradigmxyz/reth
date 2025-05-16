@@ -31,7 +31,11 @@ impl OnStateHook for MeteredStateHook {
         // Update the metrics for the number of accounts, storage slots and bytecodes loaded
         let accounts = state.keys().len();
         let storage_slots = state.values().map(|account| account.storage.len()).sum::<usize>();
-        let bytecodes = state.values().filter(|account| !account.info.is_empty_code_hash()).count();
+        let bytecodes = state
+            .values()
+            .filter(|account| !account.info.is_empty_code_hash())
+            .collect::<Vec<_>>()
+            .len();
 
         self.metrics.accounts_loaded_histogram.record(accounts as f64);
         self.metrics.storage_slots_loaded_histogram.record(storage_slots as f64);
@@ -75,26 +79,6 @@ pub struct ExecutorMetrics {
 }
 
 impl ExecutorMetrics {
-    fn metered<F, R, B>(&self, block: &RecoveredBlock<B>, f: F) -> R
-    where
-        F: FnOnce() -> R,
-        B: reth_primitives_traits::Block,
-    {
-        // Execute the block and record the elapsed time.
-        let execute_start = Instant::now();
-        let output = f();
-        let execution_duration = execute_start.elapsed().as_secs_f64();
-
-        // Update gas metrics.
-        self.gas_processed_total.increment(block.header().gas_used());
-        self.gas_per_second.set(block.header().gas_used() as f64 / execution_duration);
-        self.gas_used_histogram.record(block.header().gas_used() as f64);
-        self.execution_histogram.record(execution_duration);
-        self.execution_duration.set(execution_duration);
-
-        output
-    }
-
     /// Execute the given block using the provided [`BlockExecutor`] and update metrics for the
     /// execution.
     ///
@@ -112,32 +96,33 @@ impl ExecutorMetrics {
         DB: Database,
         E: BlockExecutor<Evm: Evm<DB: BorrowMut<State<DB>>>>,
     {
-        // clone here is cheap, all the metrics are Option<Arc<_>>. additionally
-        // they are globally registered so that the data recorded in the hook will
-        // be accessible.
         let wrapper = MeteredStateHook { metrics: self.clone(), inner_hook: state_hook };
-
         let mut executor = executor.with_state_hook(Some(Box::new(wrapper)));
 
-        // Use metered to execute and track timing/gas metrics
-        let (mut db, result) = self.metered(input, || {
-            executor.apply_pre_execution_changes()?;
-            for tx in input.transactions_recovered() {
-                executor.execute_transaction(tx)?;
-            }
-            executor.finish().map(|(evm, result)| (evm.into_db(), result))
-        })?;
+        // Replace self.metered(input, || { ... })? with this:
+        // Start timing
+        let execute_start = Instant::now();
 
-        // merge transactions into bundle state
+        let output = executor.apply_pre_execution_changes()?;
+        for tx in input.transactions_recovered() {
+            executor.execute_transaction(tx)?;
+        }
+        let (mut db, result) = executor.finish().map(|(evm, result)| (evm.into_db(), result))?;
+
+        let execution_duration = execute_start.elapsed().as_secs_f64();
+        self.gas_processed_total.increment(input.header().gas_used());
+        self.gas_per_second.set(input.header().gas_used() as f64 / execution_duration);
+        self.gas_used_histogram.record(input.header().gas_used() as f64);
+        self.execution_histogram.record(execution_duration);
+        self.execution_duration.set(execution_duration);
+
         db.borrow_mut().merge_transitions(BundleRetention::Reverts);
         let output = BlockExecutionOutput { result, state: db.borrow_mut().take_bundle() };
 
-        // Update the metrics for the number of accounts, storage slots and bytecodes updated
         let accounts = output.state.state.len();
         let storage_slots =
             output.state.state.values().map(|account| account.storage.len()).sum::<usize>();
         let bytecodes = output.state.contracts.len();
-
         self.accounts_updated_histogram.record(accounts as f64);
         self.storage_slots_updated_histogram.record(storage_slots as f64);
         self.bytecodes_updated_histogram.record(bytecodes as f64);
@@ -151,7 +136,21 @@ impl ExecutorMetrics {
         F: FnOnce(&RecoveredBlock<B>) -> R,
         B: reth_primitives_traits::Block,
     {
-        self.metered(input, || f(input))
+        // Start timing
+        let execute_start = Instant::now();
+
+        // Execute the function
+        let output = f(input);
+
+        // Calculate execution time and update metrics
+        let execution_duration = execute_start.elapsed().as_secs_f64();
+        self.gas_processed_total.increment(input.header().gas_used());
+        self.gas_per_second.set(input.header().gas_used() as f64 / execution_duration);
+        self.gas_used_histogram.record(input.header().gas_used() as f64);
+        self.execution_histogram.record(execution_duration);
+        self.execution_duration.set(execution_duration);
+
+        output
     }
 }
 
