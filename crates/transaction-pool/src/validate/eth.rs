@@ -104,6 +104,19 @@ where
     ) -> Vec<TransactionValidationOutcome<Tx>> {
         self.inner.validate_batch(transactions)
     }
+
+    /// Validates all given transactions with origin.
+    ///
+    /// Returns all outcomes for the given transactions in the same order.
+    ///
+    /// See also [`Self::validate_one`]
+    pub fn validate_all_with_origin(
+        &self,
+        origin: TransactionOrigin,
+        transactions: Vec<Tx>,
+    ) -> Vec<TransactionValidationOutcome<Tx>> {
+        self.inner.validate_batch_with_origin(origin, transactions)
+    }
 }
 
 impl<Client, Tx> TransactionValidator for EthTransactionValidator<Client, Tx>
@@ -126,6 +139,14 @@ where
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
         self.validate_all(transactions)
+    }
+
+    async fn validate_transactions_with_origin(
+        &self,
+        origin: TransactionOrigin,
+        transactions: Vec<Self::Transaction>,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        self.validate_all_with_origin(origin, transactions)
     }
 
     fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
@@ -601,6 +622,19 @@ where
         transactions
             .into_iter()
             .map(|(origin, tx)| self.validate_one_with_provider(origin, tx, &mut provider))
+            .collect()
+    }
+
+    /// Validates all given transactions with origin.
+    fn validate_batch_with_origin(
+        &self,
+        origin: TransactionOrigin,
+        transactions: Vec<Tx>,
+    ) -> Vec<TransactionValidationOutcome<Tx>> {
+        let mut provider = None;
+        transactions
+            .into_iter()
+            .map(|tx| self.validate_one_with_provider(origin, tx, &mut provider))
             .collect()
     }
 
