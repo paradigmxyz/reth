@@ -15,7 +15,7 @@ use alloy_eips::{
     eip2718::Encodable2718,
     eip2930::AccessList,
     eip4844::{
-        env_settings::KzgSettings, BlobAndProofV1, BlobTransactionSidecar,
+        env_settings::KzgSettings, BlobAndProofV1, BlobAndProofV2, BlobTransactionSidecar,
         BlobTransactionValidationError,
     },
     eip7702::SignedAuthorization,
@@ -495,11 +495,19 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         tx_hashes: Vec<TxHash>,
     ) -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError>;
 
-    /// Return the [`BlobTransactionSidecar`]s for a list of blob versioned hashes.
-    fn get_blobs_for_versioned_hashes(
+    /// Return the [`BlobAndProofV1`]s for a list of blob versioned hashes.
+    fn get_blobs_for_versioned_hashes_v1(
         &self,
         versioned_hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError>;
+
+    /// Return the [`BlobAndProofV2`]s for a list of blob versioned hashes.
+    /// Blobs and proofs are returned only if they are present for _all_ of the requested versioned
+    /// hashes.
+    fn get_blobs_for_versioned_hashes_v2(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Option<Vec<BlobAndProofV2>>, BlobStoreError>;
 }
 
 /// Extension for [TransactionPool] trait that allows to set the current block info.

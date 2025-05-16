@@ -173,7 +173,7 @@ pub use crate::{
     },
 };
 use crate::{identifier::TransactionId, pool::PoolInner};
-use alloy_eips::eip4844::{BlobAndProofV1, BlobTransactionSidecar};
+use alloy_eips::eip4844::{BlobAndProofV1, BlobAndProofV2, BlobTransactionSidecar};
 use alloy_primitives::{Address, TxHash, B256, U256};
 use aquamarine as _;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
@@ -602,11 +602,18 @@ where
         self.pool.blob_store().get_exact(tx_hashes)
     }
 
-    fn get_blobs_for_versioned_hashes(
+    fn get_blobs_for_versioned_hashes_v1(
         &self,
         versioned_hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
-        self.pool.blob_store().get_by_versioned_hashes(versioned_hashes)
+        self.pool.blob_store().get_by_versioned_hashes_v1(versioned_hashes)
+    }
+
+    fn get_blobs_for_versioned_hashes_v2(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Option<Vec<BlobAndProofV2>>, BlobStoreError> {
+        self.pool.blob_store().get_by_versioned_hashes_v2(versioned_hashes)
     }
 }
 

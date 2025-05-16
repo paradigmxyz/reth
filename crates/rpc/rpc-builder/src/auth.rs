@@ -1,16 +1,15 @@
 use crate::error::{RpcError, ServerKind};
 use http::header::AUTHORIZATION;
 use jsonrpsee::{
-    core::{middleware::layer::RpcLogger, RegisterMethodError},
-    http_client::{transport::HttpBackend, HeaderMap, HttpClient, RpcService},
+    core::{client::SubscriptionClientT, RegisterMethodError},
+    http_client::HeaderMap,
     server::{AlreadyStoppedError, RpcModule},
     Methods,
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_types::EthSubscriptionIdProvider;
 use reth_rpc_layer::{
-    secret_to_bearer_header, AuthClientLayer, AuthClientService, AuthLayer, JwtAuthValidator,
-    JwtSecret,
+    secret_to_bearer_header, AuthClientLayer, AuthLayer, JwtAuthValidator, JwtSecret,
 };
 use reth_rpc_server_types::constants;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -301,7 +300,9 @@ impl AuthServerHandle {
     }
 
     /// Returns a http client connected to the server.
-    pub fn http_client(&self) -> HttpClient<RpcLogger<RpcService<AuthClientService<HttpBackend>>>> {
+    ///
+    /// This client uses the JWT token to authenticate requests.
+    pub fn http_client(&self) -> impl SubscriptionClientT + Clone + Send + Sync + Unpin + 'static {
         // Create a middleware that adds a new JWT token to every request.
         let secret_layer = AuthClientLayer::new(self.secret);
         let middleware = tower::ServiceBuilder::default().layer(secret_layer);
