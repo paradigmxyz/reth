@@ -69,7 +69,7 @@ pub enum SparseTrie<P = DefaultBlindedProvider> {
     /// The trie is blind -- no nodes have been revealed
     ///
     /// This is the default state. In this state,
-    /// the trie cannot be directly queried or modified until nodes are revealed.    
+    /// the trie cannot be directly queried or modified until nodes are revealed.
     #[default]
     Blind,
     /// Some nodes in the Trie have been revealed.
@@ -1317,6 +1317,22 @@ pub enum LeafLookup {
 }
 
 impl<P: BlindedProvider> RevealedSparseTrie<P> {
+    /// This clears all data structures in the sparse trie, keeping the backing data structures
+    /// allocated.
+    ///
+    /// This is useful for reusing the trie without needing to reallocate memory.
+    pub fn clear(&mut self) {
+        self.nodes.clear();
+        self.branch_node_tree_masks.clear();
+        self.branch_node_hash_masks.clear();
+        self.values.clear();
+        self.prefix_set.clear();
+        if let Some(updates) = self.updates.as_mut() {
+            updates.clear()
+        }
+        self.rlp_buf.clear();
+    }
+
     /// Attempts to find a leaf node at the specified path.
     ///
     /// This method traverses the trie from the root down to the given path, checking
@@ -2019,6 +2035,15 @@ impl SparseTrieUpdates {
     pub fn wiped() -> Self {
         Self { wiped: true, ..Default::default() }
     }
+
+    /// Clears the updates, but keeps the backing data structures allocated.
+    ///
+    /// Sets `wiped` to `false`.
+    pub fn clear(&mut self) {
+        self.updated_nodes.clear();
+        self.removed_nodes.clear();
+        self.wiped = false;
+    }
 }
 
 #[cfg(test)]
@@ -2405,7 +2430,7 @@ mod tests {
         prefix_set.extend_keys(state.clone().into_iter().map(|(nibbles, _)| nibbles));
         prefix_set.extend_keys(destroyed_accounts.iter().map(Nibbles::unpack));
         let walker =
-            TrieWalker::new(trie_cursor, prefix_set.freeze()).with_deletions_retained(true);
+            TrieWalker::state_trie(trie_cursor, prefix_set.freeze()).with_deletions_retained(true);
         let hashed_post_state = HashedPostState::default()
             .with_accounts(state.into_iter().map(|(nibbles, account)| {
                 (nibbles.pack().into_inner().unwrap().into(), Some(account))
@@ -3614,6 +3639,35 @@ mod tests {
         sparse.wipe();
 
         assert_eq!(sparse.root(), EMPTY_ROOT_HASH);
+    }
+
+    #[test]
+    fn sparse_trie_clear() {
+        // tests that if we fill a sparse trie with some nodes and then clear it, it has the same
+        // contents as an empty sparse trie
+        let mut sparse = RevealedSparseTrie::default();
+        let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), value.clone())
+            .unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), value.clone())
+            .unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), value.clone())
+            .unwrap();
+        sparse.update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), value).unwrap();
+
+        sparse.clear();
+
+        // we have to update the root hash to be an empty one, because the `Default` impl of
+        // `RevealedSparseTrie` sets the root hash to `EMPTY_ROOT_HASH` in the constructor.
+        //
+        // The default impl is only used in tests.
+        sparse.nodes.insert(Nibbles::default(), SparseNode::Empty);
+
+        let empty_trie = RevealedSparseTrie::default();
+        assert_eq!(empty_trie, sparse);
     }
 
     #[test]

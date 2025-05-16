@@ -3,7 +3,7 @@
 
 use alloc::vec::Vec;
 use alloy_consensus::{
-    transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx},
+    transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx, SignerRecoverable},
     EthereumTxEnvelope, SignableTransaction, Signed, TxEip1559, TxEip2930, TxEip4844, TxEip7702,
     TxLegacy, TxType, Typed2718,
 };
@@ -640,14 +640,21 @@ impl reth_codecs::Compact for TransactionSigned {
     }
 }
 
-impl SignedTransaction for TransactionSigned {
-    fn tx_hash(&self) -> &TxHash {
-        self.hash.get_or_init(|| self.recalculate_hash())
-    }
-
+impl SignerRecoverable for TransactionSigned {
     fn recover_signer(&self) -> Result<Address, RecoveryError> {
         let signature_hash = self.signature_hash();
         recover_signer(&self.signature, signature_hash)
+    }
+
+    fn recover_signer_unchecked(&self) -> Result<Address, RecoveryError> {
+        let signature_hash = self.signature_hash();
+        recover_signer_unchecked(&self.signature, signature_hash)
+    }
+}
+
+impl SignedTransaction for TransactionSigned {
+    fn tx_hash(&self) -> &TxHash {
+        self.hash.get_or_init(|| self.recalculate_hash())
     }
 
     fn recover_signer_unchecked_with_buf(

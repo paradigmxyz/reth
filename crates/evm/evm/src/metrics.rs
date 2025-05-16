@@ -31,11 +31,7 @@ impl OnStateHook for MeteredStateHook {
         // Update the metrics for the number of accounts, storage slots and bytecodes loaded
         let accounts = state.keys().len();
         let storage_slots = state.values().map(|account| account.storage.len()).sum::<usize>();
-        let bytecodes = state
-            .values()
-            .filter(|account| !account.info.is_empty_code_hash())
-            .collect::<Vec<_>>()
-            .len();
+        let bytecodes = state.values().filter(|account| !account.info.is_empty_code_hash()).count();
 
         self.metrics.accounts_loaded_histogram.record(accounts as f64);
         self.metrics.storage_slots_loaded_histogram.record(storage_slots as f64);

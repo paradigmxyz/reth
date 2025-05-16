@@ -6,7 +6,7 @@ use crate::{
     traits::{PoolTransaction, TransactionOrigin},
     PriceBumpConfig,
 };
-use alloy_eips::eip4844::BlobTransactionSidecar;
+use alloy_eips::{eip4844::BlobTransactionSidecar, eip7702::SignedAuthorization};
 use alloy_primitives::{Address, TxHash, B256, U256};
 use futures_util::future::Either;
 use reth_primitives_traits::{Recovered, SealedBlock};
@@ -35,6 +35,8 @@ pub enum TransactionValidationOutcome<T: PoolTransaction> {
         balance: U256,
         /// Current nonce of the sender.
         state_nonce: u64,
+        /// Code hash of the sender.
+        bytecode_hash: Option<B256>,
         /// The validated transaction.
         ///
         /// See also [`ValidTransaction`].
@@ -44,6 +46,8 @@ pub enum TransactionValidationOutcome<T: PoolTransaction> {
         transaction: ValidTransaction<T>,
         /// Whether to propagate the transaction to the network.
         propagate: bool,
+        /// The authorities of EIP-7702 transaction.
+        authorities: Option<Vec<Address>>,
     },
     /// The transaction is considered invalid indefinitely: It violates constraints that prevent
     /// this transaction from ever becoming valid.
@@ -268,6 +272,8 @@ pub struct ValidPoolTransaction<T: PoolTransaction> {
     pub timestamp: Instant,
     /// Where this transaction originated from.
     pub origin: TransactionOrigin,
+    /// The sender ids of the 7702 transaction authorities.
+    pub authority_ids: Option<Vec<SenderId>>,
 }
 
 // === impl ValidPoolTransaction ===
@@ -376,6 +382,22 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.transaction.size()
     }
 
+    /// Returns the [`SignedAuthorization`] list of the transaction.
+    ///
+    /// Returns `None` if this transaction is not EIP-7702.
+    pub fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
+        self.transaction.authorization_list()
+    }
+
+    /// Returns the number of blobs of [`SignedAuthorization`] in this transactions
+    ///
+    /// This is convenience function for `len(authorization_list)`.
+    ///
+    /// Returns `None` for non-eip7702 transactions.
+    pub fn authorization_count(&self) -> Option<u64> {
+        self.transaction.authorization_count()
+    }
+
     /// EIP-4844 blob transactions and normal transactions are treated as mutually exclusive per
     /// account.
     ///
@@ -454,6 +476,7 @@ impl<T: PoolTransaction> Clone for ValidPoolTransaction<T> {
             propagate: self.propagate,
             timestamp: self.timestamp,
             origin: self.origin,
+            authority_ids: self.authority_ids.clone(),
         }
     }
 }

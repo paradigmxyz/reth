@@ -143,8 +143,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         for tx_bytes in &self.transactions {
             debug!(target: "reth::cli", bytes = ?tx_bytes, "Decoding transaction");
             let transaction = TransactionSigned::decode(&mut &Bytes::from_str(tx_bytes)?[..])?
-                .try_clone_into_recovered()
-                .map_err(|e| eyre::eyre!("failed to recover tx: {e}"))?;
+                .try_into_recovered()
+                .map_err(|tx| eyre::eyre!("failed to recover tx: {}", tx.tx_hash()))?;
 
             let encoded_length = match transaction.inner() {
                 TransactionSigned::Eip4844(tx) => {
