@@ -34,7 +34,7 @@ use jsonrpsee::{
 };
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::{ConsensusError, FullConsensus};
-use reth_evm::ConfigureEvm;
+use reth_evm::{op_revm::api::exec, ConfigureEvm};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_primitives_traits::NodePrimitives;
 use reth_rpc::{
@@ -255,23 +255,18 @@ where
     }
 
     /// Configure the task executor to use for additional tasks.
-    pub fn with_executor(
-        self,
-        executor: Box<dyn TaskSpawner + 'static>,
-    ) -> RpcModuleBuilder<N, Provider, Pool, Network, EvmConfig, Consensus> {
+    pub fn with_executor(self, executor: Box<dyn TaskSpawner + 'static>) -> Self {
         let Self { pool, network, provider, evm_config, consensus, _primitives, .. } = self;
-        RpcModuleBuilder { provider, network, pool, executor, evm_config, consensus, _primitives }
+        Self { provider, network, pool, executor, evm_config, consensus, _primitives }
     }
 
     /// Configure [`TokioTaskExecutor`] as the task executor to use for additional tasks.
     ///
     /// This will spawn additional tasks directly via `tokio::task::spawn`, See
     /// [`TokioTaskExecutor`].
-    pub fn with_tokio_executor(
-        self,
-    ) -> RpcModuleBuilder<N, Provider, Pool, Network, EvmConfig, Consensus> {
+    pub fn with_tokio_executor(self) -> Self {
         let Self { pool, network, provider, evm_config, consensus, _primitives, .. } = self;
-        RpcModuleBuilder {
+        Self {
             provider,
             network,
             pool,
@@ -361,7 +356,6 @@ where
     /// This behaves exactly as [`RpcModuleBuilder::build`] for the [`TransportRpcModules`], but
     /// also configures the auth (engine api) server, which exposes a subset of the `eth_`
     /// namespace.
-    #[expect(clippy::type_complexity)]
     pub fn build_with_auth_server<EthApi>(
         self,
         module_config: TransportRpcModuleConfig,
@@ -588,8 +582,7 @@ where
     {
         let blocking_pool_guard = BlockingTaskGuard::new(config.eth.max_tracing_requests);
 
-        let arc_executor: Arc<dyn TaskSpawner + 'static> = Arc::from(executor.clone());
-        let eth = EthHandlers::bootstrap(config.eth, arc_executor, eth_api);
+        let eth = EthHandlers::bootstrap(config.eth, executor.clone(), eth_api);
 
         Self {
             provider,
