@@ -104,6 +104,19 @@ where
     ) -> Vec<TransactionValidationOutcome<Tx>> {
         self.inner.validate_batch(transactions)
     }
+
+    /// Validates all given transactions with origin.
+    ///
+    /// Returns all outcomes for the given transactions in the same order.
+    ///
+    /// See also [`Self::validate_one`]
+    pub fn validate_all_with_origin(
+        &self,
+        origin: TransactionOrigin,
+        transactions: Vec<Tx>,
+    ) -> Vec<TransactionValidationOutcome<Tx>> {
+        self.inner.validate_batch_with_origin(origin, transactions)
+    }
 }
 
 impl<Client, Tx> TransactionValidator for EthTransactionValidator<Client, Tx>
@@ -126,6 +139,14 @@ where
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
         self.validate_all(transactions)
+    }
+
+    async fn validate_transactions_with_origin(
+        &self,
+        origin: TransactionOrigin,
+        transactions: Vec<Self::Transaction>,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        self.validate_all_with_origin(origin, transactions)
     }
 
     fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
@@ -604,6 +625,19 @@ where
             .collect()
     }
 
+    /// Validates all given transactions with origin.
+    fn validate_batch_with_origin(
+        &self,
+        origin: TransactionOrigin,
+        transactions: Vec<Tx>,
+    ) -> Vec<TransactionValidationOutcome<Tx>> {
+        let mut provider = None;
+        transactions
+            .into_iter()
+            .map(|tx| self.validate_one_with_provider(origin, tx, &mut provider))
+            .collect()
+    }
+
     fn on_new_head_block<T: BlockHeader>(&self, new_tip_block: &T) {
         // update all forks
         if self.chain_spec().is_cancun_active_at_timestamp(new_tip_block.timestamp()) {
@@ -642,8 +676,10 @@ pub struct EthTransactionValidatorBuilder<Client> {
     shanghai: bool,
     /// Fork indicator whether we are in the Cancun hardfork.
     cancun: bool,
-    /// Fork indicator whether we are in the Cancun hardfork.
+    /// Fork indicator whether we are in the Prague hardfork.
     prague: bool,
+    /// Fork indicator whether we are in the Osaka hardfork.
+    osaka: bool,
     /// Max blob count at the block's timestamp.
     max_blob_count: u64,
     /// Whether using EIP-2718 type transactions is allowed
@@ -704,11 +740,14 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             // cancun is activated by default
             cancun: true,
 
-            // prague not yet activated
-            prague: false,
+            // prague is activated by default
+            prague: true,
 
-            // max blob count is cancun by default
-            max_blob_count: BlobParams::cancun().max_blob_count,
+            // osaka not yet activated
+            osaka: false,
+
+            // max blob count is prague by default
+            max_blob_count: BlobParams::prague().max_blob_count,
         }
     }
 
@@ -751,6 +790,17 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
     /// Set the Prague fork.
     pub const fn set_prague(mut self, prague: bool) -> Self {
         self.prague = prague;
+        self
+    }
+
+    /// Disables the Osaka fork.
+    pub const fn no_osaka(self) -> Self {
+        self.set_osaka(false)
+    }
+
+    /// Set the Osaka fork.
+    pub const fn set_osaka(mut self, osaka: bool) -> Self {
+        self.osaka = osaka;
         self
     }
 
@@ -812,9 +862,10 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
     where
         Client: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     {
-        self.cancun = self.client.chain_spec().is_cancun_active_at_timestamp(timestamp);
         self.shanghai = self.client.chain_spec().is_shanghai_active_at_timestamp(timestamp);
+        self.cancun = self.client.chain_spec().is_cancun_active_at_timestamp(timestamp);
         self.prague = self.client.chain_spec().is_prague_active_at_timestamp(timestamp);
+        self.osaka = self.client.chain_spec().is_osaka_active_at_timestamp(timestamp);
         self.max_blob_count = self
             .client
             .chain_spec()
@@ -856,6 +907,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             shanghai,
             cancun,
             prague,
+            osaka,
             eip2718,
             eip1559,
             eip4844,
@@ -869,6 +921,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             ..
         } = self;
 
+        // TODO: use osaka max blob count once <https://github.com/alloy-rs/alloy/pull/2427> is released
         let max_blob_count = if prague {
             BlobParams::prague().max_blob_count
         } else {
@@ -879,6 +932,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             shanghai: AtomicBool::new(shanghai),
             cancun: AtomicBool::new(cancun),
             prague: AtomicBool::new(prague),
+            osaka: AtomicBool::new(osaka),
             max_blob_count: AtomicU64::new(max_blob_count),
         };
 
@@ -955,6 +1009,8 @@ pub struct ForkTracker {
     pub cancun: AtomicBool,
     /// Tracks if prague is activated at the block's timestamp.
     pub prague: AtomicBool,
+    /// Tracks if osaka is activated at the block's timestamp.
+    pub osaka: AtomicBool,
     /// Tracks max blob count at the block's timestamp.
     pub max_blob_count: AtomicU64,
 }
@@ -973,6 +1029,11 @@ impl ForkTracker {
     /// Returns `true` if Prague fork is activated.
     pub fn is_prague_activated(&self) -> bool {
         self.prague.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Returns `true` if Osaka fork is activated.
+    pub fn is_osaka_activated(&self) -> bool {
+        self.osaka.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Returns the max blob count.
@@ -1028,6 +1089,7 @@ mod tests {
     use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, U256};
     use reth_ethereum_primitives::PooledTransaction;
+    use reth_primitives_traits::SignedTransaction;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 
     fn get_transaction() -> EthPooledTransaction {
@@ -1047,6 +1109,7 @@ mod tests {
             shanghai: false.into(),
             cancun: false.into(),
             prague: false.into(),
+            osaka: false.into(),
             max_blob_count: 0.into(),
         };
 

@@ -9,13 +9,12 @@ use interprocess::local_socket::{
     GenericFilePath, ListenerOptions, ToFsName,
 };
 use jsonrpsee::{
-    core::TEN_MB_SIZE_BYTES,
+    core::{middleware::layer::RpcLoggerLayer, JsonRawValue, TEN_MB_SIZE_BYTES},
     server::{
-        middleware::rpc::{RpcLoggerLayer, RpcServiceT},
-        stop_channel, ConnectionGuard, ConnectionPermit, IdProvider, RandomIntegerIdProvider,
-        ServerHandle, StopHandle,
+        middleware::rpc::RpcServiceT, stop_channel, ConnectionGuard, ConnectionPermit, IdProvider,
+        RandomIntegerIdProvider, ServerHandle, StopHandle,
     },
-    BoundedSubscriptions, MethodSink, Methods,
+    BoundedSubscriptions, MethodResponse, MethodSink, Methods,
 };
 use std::{
     future::Future,
@@ -66,7 +65,7 @@ impl<HttpMiddleware, RpcMiddleware> IpcServer<HttpMiddleware, RpcMiddleware> {
 
 impl<HttpMiddleware, RpcMiddleware> IpcServer<HttpMiddleware, RpcMiddleware>
 where
-    RpcMiddleware: for<'a> Layer<RpcService, Service: RpcServiceT<'a>> + Clone + Send + 'static,
+    RpcMiddleware: for<'a> Layer<RpcService, Service: RpcServiceT> + Clone + Send + 'static,
     HttpMiddleware: Layer<
             TowerServiceNoHttp<RpcMiddleware>,
             Service: Service<
@@ -292,7 +291,7 @@ impl Default for RpcServiceBuilder<Identity> {
 
 impl RpcServiceBuilder<Identity> {
     /// Create a new [`RpcServiceBuilder`].
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self(tower::ServiceBuilder::new())
     }
 }
@@ -357,7 +356,8 @@ pub struct TowerServiceNoHttp<L> {
 impl<RpcMiddleware> Service<String> for TowerServiceNoHttp<RpcMiddleware>
 where
     RpcMiddleware: for<'a> Layer<RpcService>,
-    for<'a> <RpcMiddleware as Layer<RpcService>>::Service: Send + Sync + 'static + RpcServiceT<'a>,
+    for<'a> <RpcMiddleware as Layer<RpcService>>::Service:
+        Send + Sync + 'static + RpcServiceT<MethodResponse = MethodResponse>,
 {
     /// The response of a handled RPC call
     ///
@@ -435,7 +435,7 @@ fn process_connection<'b, RpcMiddleware, HttpMiddleware>(
     params: ProcessConnection<'_, HttpMiddleware, RpcMiddleware>,
 ) where
     RpcMiddleware: Layer<RpcService> + Clone + Send + 'static,
-    for<'a> <RpcMiddleware as Layer<RpcService>>::Service: RpcServiceT<'a>,
+    for<'a> <RpcMiddleware as Layer<RpcService>>::Service: RpcServiceT,
     HttpMiddleware: Layer<TowerServiceNoHttp<RpcMiddleware>> + Send + 'static,
     <HttpMiddleware as Layer<TowerServiceNoHttp<RpcMiddleware>>>::Service: Send
     + Service<
@@ -464,7 +464,7 @@ fn process_connection<'b, RpcMiddleware, HttpMiddleware>(
         local_socket_stream,
     ));
 
-    let (tx, rx) = mpsc::channel::<String>(server_cfg.message_buffer_capacity as usize);
+    let (tx, rx) = mpsc::channel::<Box<JsonRawValue>>(server_cfg.message_buffer_capacity as usize);
     let method_sink = MethodSink::new_with_limit(tx, server_cfg.max_response_body_size);
     let tower_service = TowerServiceNoHttp {
         inner: ServiceData {
@@ -493,7 +493,7 @@ async fn to_ipc_service<S, T>(
     ipc: IpcConn<JsonRpcStream<T>>,
     service: S,
     stop_handle: StopHandle,
-    rx: mpsc::Receiver<String>,
+    rx: mpsc::Receiver<Box<JsonRawValue>>,
 ) where
     S: Service<String, Response = Option<String>> + Send + 'static,
     S::Error: Into<Box<dyn core::error::Error + Send + Sync>>,
@@ -520,7 +520,7 @@ async fn to_ipc_service<S, T>(
             }
             item = rx_item.next() => {
                 if let Some(item) = item {
-                    conn.push_back(item);
+                    conn.push_back(item.to_string());
                 }
             }
             _ = &mut stopped => {
@@ -712,59 +712,6 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
     ///
     /// The builder itself exposes a similar API as the [`tower::ServiceBuilder`]
     /// where it is possible to compose layers to the middleware.
-    ///
-    /// ```
-    /// use std::{
-    ///     net::SocketAddr,
-    ///     sync::{
-    ///         atomic::{AtomicUsize, Ordering},
-    ///         Arc,
-    ///     },
-    ///     time::Instant,
-    /// };
-    ///
-    /// use futures_util::future::BoxFuture;
-    /// use jsonrpsee::{
-    ///     server::{middleware::rpc::RpcServiceT, ServerBuilder},
-    ///     types::Request,
-    ///     MethodResponse,
-    /// };
-    /// use reth_ipc::server::{Builder, RpcServiceBuilder};
-    ///
-    /// #[derive(Clone)]
-    /// struct MyMiddleware<S> {
-    ///     service: S,
-    ///     count: Arc<AtomicUsize>,
-    /// }
-    ///
-    /// impl<'a, S> RpcServiceT<'a> for MyMiddleware<S>
-    /// where
-    ///     S: RpcServiceT<'a> + Send + Sync + Clone + 'static,
-    /// {
-    ///     type Future = BoxFuture<'a, MethodResponse>;
-    ///
-    ///     fn call(&self, req: Request<'a>) -> Self::Future {
-    ///         tracing::info!("MyMiddleware processed call {}", req.method);
-    ///         let count = self.count.clone();
-    ///         let service = self.service.clone();
-    ///
-    ///         Box::pin(async move {
-    ///             let rp = service.call(req).await;
-    ///             // Modify the state.
-    ///             count.fetch_add(1, Ordering::Relaxed);
-    ///             rp
-    ///         })
-    ///     }
-    /// }
-    ///
-    /// // Create a state per connection
-    /// // NOTE: The service type can be omitted once `start` is called on the server.
-    /// let m = RpcServiceBuilder::new().layer_fn(move |service: ()| MyMiddleware {
-    ///     service,
-    ///     count: Arc::new(AtomicUsize::new(0)),
-    /// });
-    /// let builder = Builder::default().set_rpc_middleware(m);
-    /// ```
     pub fn set_rpc_middleware<T>(
         self,
         rpc_middleware: RpcServiceBuilder<T>,
@@ -808,8 +755,8 @@ mod tests {
     use futures::future::select;
     use jsonrpsee::{
         core::{
-            client,
-            client::{ClientT, Error, Subscription, SubscriptionClientT},
+            client::{self, ClientT, Error, Subscription, SubscriptionClientT},
+            middleware::{Batch, BatchEntry, Notification},
             params::BatchRequestBuilder,
         },
         rpc_params,
@@ -838,7 +785,8 @@ mod tests {
 
                 // received new item from the stream.
                 Either::Right((Some(Ok(item)), c)) => {
-                    let notif = SubscriptionMessage::from_json(&item)?;
+                    let raw_value = serde_json::value::to_raw_value(&item)?;
+                    let notif = SubscriptionMessage::from(raw_value);
 
                     // NOTE: this will block until there a spot in the queue
                     // and you might want to do something smarter if it's
@@ -1035,13 +983,18 @@ mod tests {
         #[derive(Clone)]
         struct ModifyRequestIf<S>(S);
 
-        impl<'a, S> RpcServiceT<'a> for ModifyRequestIf<S>
+        impl<S> RpcServiceT for ModifyRequestIf<S>
         where
-            S: Send + Sync + RpcServiceT<'a>,
+            S: Send + Sync + RpcServiceT,
         {
-            type Future = S::Future;
+            type MethodResponse = S::MethodResponse;
+            type NotificationResponse = S::NotificationResponse;
+            type BatchResponse = S::BatchResponse;
 
-            fn call(&self, mut req: Request<'a>) -> Self::Future {
+            fn call<'a>(
+                &self,
+                mut req: Request<'a>,
+            ) -> impl Future<Output = Self::MethodResponse> + Send + 'a {
                 // Re-direct all calls that isn't `say_hello` to `say_goodbye`
                 if req.method == "say_hello" {
                     req.method = "say_goodbye".into();
@@ -1050,6 +1003,46 @@ mod tests {
                 }
 
                 self.0.call(req)
+            }
+
+            fn batch<'a>(
+                &self,
+                mut batch: Batch<'a>,
+            ) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
+                for call in batch.iter_mut() {
+                    match call {
+                        Ok(BatchEntry::Call(req)) => {
+                            if req.method == "say_hello" {
+                                req.method = "say_goodbye".into();
+                            } else if req.method == "say_goodbye" {
+                                req.method = "say_hello".into();
+                            }
+                        }
+                        Ok(BatchEntry::Notification(n)) => {
+                            if n.method == "say_hello" {
+                                n.method = "say_goodbye".into();
+                            } else if n.method == "say_goodbye" {
+                                n.method = "say_hello".into();
+                            }
+                        }
+                        // Invalid request, we don't care about it.
+                        Err(_err) => {}
+                    }
+                }
+
+                self.0.batch(batch)
+            }
+
+            fn notification<'a>(
+                &self,
+                mut n: Notification<'a>,
+            ) -> impl Future<Output = Self::NotificationResponse> + Send + 'a {
+                if n.method == "say_hello" {
+                    n.method = "say_goodbye".into();
+                } else if n.method == "say_goodbye" {
+                    n.method = "say_hello".into();
+                }
+                self.0.notification(n)
             }
         }
 

@@ -9,9 +9,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![allow(clippy::useless_let_if_seq)]
 
-pub mod validator;
-pub use validator::EthereumExecutionPayloadValidator;
-
 use alloy_consensus::{Transaction, Typed2718};
 use alloy_primitives::U256;
 use reth_basic_payload_builder::{
@@ -29,11 +26,13 @@ use reth_evm_ethereum::EthEvmConfig;
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
+use reth_primitives_traits::transaction::error::InvalidTransactionError;
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_storage_api::StateProviderFactory;
 use reth_transaction_pool::{
-    error::InvalidPoolTransactionError, BestTransactions, BestTransactionsAttributes,
-    PoolTransaction, TransactionPool, ValidPoolTransaction,
+    error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
+    BestTransactions, BestTransactionsAttributes, PoolTransaction, TransactionPool,
+    ValidPoolTransaction,
 };
 use revm::context_interface::Block as _;
 use std::sync::Arc;
@@ -41,8 +40,9 @@ use tracing::{debug, trace, warn};
 
 mod config;
 pub use config::*;
-use reth_primitives_traits::transaction::error::InvalidTransactionError;
-use reth_transaction_pool::error::Eip4844PoolTransactionError;
+
+pub mod validator;
+pub use validator::EthereumExecutionPayloadValidator;
 
 type BestTransactionsIter<Pool> = Box<
     dyn BestTransactions<Item = Arc<ValidPoolTransaction<<Pool as TransactionPool>::Transaction>>>,
@@ -315,10 +315,9 @@ where
     let sealed_block = Arc::new(block.sealed_block().clone());
     debug!(target: "payload_builder", id=%attributes.id, sealed_block_header = ?sealed_block.sealed_header(), "sealed built block");
 
-    let mut payload = EthBuiltPayload::new(attributes.id, sealed_block, total_fees, requests);
-
-    // extend the payload with the blob sidecars from the executed txs
-    payload.extend_sidecars(blob_sidecars.into_iter().map(Arc::unwrap_or_clone));
+    let payload = EthBuiltPayload::new(attributes.id, sealed_block, total_fees, requests)
+        // add blob sidecars from the executed txs
+        .with_sidecars(blob_sidecars.into_iter().map(Arc::unwrap_or_clone).collect::<Vec<_>>());
 
     Ok(BuildOutcome::Better { payload, cached_reads })
 }

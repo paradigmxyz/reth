@@ -368,7 +368,7 @@ where
     DebugApiClient::raw_block(client, block_id).await.unwrap_err();
     DebugApiClient::raw_transaction(client, B256::default()).await.unwrap();
     DebugApiClient::raw_receipts(client, block_id).await.unwrap();
-    assert!(is_unimplemented(DebugApiClient::bad_blocks(client).await.err().unwrap()));
+    DebugApiClient::bad_blocks(client).await.unwrap();
 }
 
 async fn test_basic_net_calls<C>(client: &C)

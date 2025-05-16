@@ -7,14 +7,21 @@ on:
   push:
     tags:
       - v*
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Enable dry run mode (builds artifacts but skips uploads and release creation)"
+        type: boolean
+        default: true
 
 env:
   REPO_NAME: ${{ github.repository_owner }}/reth
-  OP_IMAGE_NAME: ${{ github.repository_owner }}/op-reth
   IMAGE_NAME: ${{ github.repository_owner }}/reth
+  OP_IMAGE_NAME: ${{ github.repository_owner }}/op-reth
+  REPRODUCIBLE_IMAGE_NAME: ${{ github.repository_owner }}/reth-reproducible
   CARGO_TERM_COLOR: always
-  DOCKER_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/reth
-  DOCKER_REPRODUCIBLE_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/reth-reproducible
+  DOCKER_IMAGE_NAME_URL: ghcr.io/${{ github.repository_owner }}/reth
+  DOCKER_OP_IMAGE_NAME_URL: ghcr.io/${{ github.repository_owner }}/op-reth
 
 jobs:
   extract-version:
@@ -22,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Extract version
-        run: echo "VERSION=$(echo ${GITHUB_REF#refs/tags/})" >> $GITHUB_OUTPUT
+        run: echo "VERSION=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
         id: extract_version
     outputs:
       VERSION: ${{ steps.extract_version.outputs.VERSION }}
@@ -96,55 +103,24 @@ jobs:
         shell: bash
 
       - name: Upload artifact
+        if: ${{ github.event.inputs.dry_run == 'false' }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz
           path: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz
 
       - name: Upload signature
+        if: ${{ github.event.inputs.dry_run == 'false' }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz.asc
           path: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz.asc
 
-  build-reproducible:
-    name: build and push reproducible image
-    runs-on: ubuntu-latest
-    needs: extract-version
-    permissions:
-      packages: write
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push reproducible image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile.reproducible
-          push: true
-          tags: |
-            ${{ env.DOCKER_REPRODUCIBLE_IMAGE_NAME }}:${{ needs.extract-version.outputs.VERSION }}
-            ${{ env.DOCKER_REPRODUCIBLE_IMAGE_NAME }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          provenance: false
-        env:
-          DOCKER_BUILD_RECORD_UPLOAD: false
-
   draft-release:
     name: draft release
-    needs: [build, build-reproducible, extract-version]
+    needs: [build, extract-version]
     runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.dry_run == 'false' }}
     env:
       VERSION: ${{ needs.extract-version.outputs.VERSION }}
     permissions:
@@ -158,12 +134,6 @@ jobs:
           fetch-depth: 0
       - name: Download artifacts
         uses: actions/download-artifact@v4
-      - name: Generate full changelog
-        id: changelog
-        run: |
-          echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
-          echo "$(git log --pretty=format:"- %s" $(git describe --tags --abbrev=0 ${{ env.VERSION }}^)..${{ env.VERSION }})" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
       - name: Create release draft
         env:
           GITHUB_USER: ${{ github.repository_owner }}
@@ -207,27 +177,33 @@ jobs:
 
           *See [Update Priorities](https://paradigmxyz.github.io/reth/installation/priorities.html) for more information about this table.*
 
-          ## All Changes
-
-          ${{ steps.changelog.outputs.CHANGELOG }}
-
           ## Binaries
 
           [See pre-built binaries documentation.](https://paradigmxyz.github.io/reth/installation/binaries.html)
 
           The binaries are signed with the PGP key: `50FB 7CC5 5B2E 8AFA 59FE 03B7 AA5E D56A 7FBF 253E`
 
+          ### Reth
+
           | System | Architecture | Binary | PGP Signature |
           |:---:|:---:|:---:|:---|
-          | <img src="https://simpleicons.org/icons/linux.svg" style="width: 32px;"/> | x86_64 | [reth-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz.asc) |
-          | <img src="https://simpleicons.org/icons/linux.svg" style="width: 32px;"/> | aarch64 | [reth-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz.asc) |
-          | <img src="https://simpleicons.org/icons/windows.svg" style="width: 32px;"/> | x86_64 | [reth-${{ env.VERSION }}-x86_64-pc-windows-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-pc-windows-gnu.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-pc-windows-gnu.tar.gz.asc) |
-          | <img src="https://simpleicons.org/icons/apple.svg" style="width: 32px;"/> | x86_64 | [reth-${{ env.VERSION }}-x86_64-apple-darwin.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-apple-darwin.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-apple-darwin.tar.gz.asc) |
-          | <img src="https://simpleicons.org/icons/apple.svg" style="width: 32px;"/> | aarch64 | [reth-${{ env.VERSION }}-aarch64-apple-darwin.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-aarch64-apple-darwin.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-aarch64-apple-darwin.tar.gz.asc) |
-          | | | | |
-          | **System** | **Option** | - | **Resource** |
-          | <img src="https://simpleicons.org/icons/docker.svg" style="width: 32px;"/> | Docker | | [${{ env.IMAGE_NAME }}](https://github.com/paradigmxyz/reth/pkgs/container/reth) |
-          | <img src="https://simpleicons.org/icons/docker.svg" style="width: 32px;"/> | Docker (Reproducible) | | [${{ env.IMAGE_NAME }}-reproducible](https://github.com/paradigmxyz/reth/pkgs/container/reth-reproducible) |
+          | <img src="https://www.svgrepo.com/download/473700/linux.svg" style="width: 32px;"/> | x86_64 | [reth-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz.asc) |
+          | <img src="https://www.svgrepo.com/download/473700/linux.svg" style="width: 32px;"/> | aarch64 | [reth-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz.asc) |
+          | <img src="https://www.svgrepo.com/download/513083/windows-174.svg" style="width: 32px;"/> | x86_64 | [reth-${{ env.VERSION }}-x86_64-pc-windows-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-pc-windows-gnu.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-pc-windows-gnu.tar.gz.asc) |
+          | <img src="https://www.svgrepo.com/download/511330/apple-173.svg" style="width: 32px;"/> | x86_64 | [reth-${{ env.VERSION }}-x86_64-apple-darwin.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-apple-darwin.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-x86_64-apple-darwin.tar.gz.asc) |
+          | <img src="https://www.svgrepo.com/download/511330/apple-173.svg" style="width: 32px;"/> | aarch64 | [reth-${{ env.VERSION }}-aarch64-apple-darwin.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-aarch64-apple-darwin.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/reth-${{ env.VERSION }}-aarch64-apple-darwin.tar.gz.asc) |
+          | <img src="https://www.svgrepo.com/download/473589/docker.svg" style="width: 32px;"/> | Docker | [${{ env.IMAGE_NAME }}](${{ env.DOCKER_IMAGE_NAME_URL }}) | - |
+
+          ### OP-Reth
+
+          | System | Architecture | Binary | PGP Signature |
+          |:---:|:---:|:---:|:---|
+          | <img src="https://www.svgrepo.com/download/473700/linux.svg" style="width: 32px;"/> | x86_64 | [op-reth-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/op-reth-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/op-reth-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz.asc) |
+          | <img src="https://www.svgrepo.com/download/473700/linux.svg" style="width: 32px;"/> | aarch64 | [op-reth-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/op-reth-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/op-reth-${{ env.VERSION }}-aarch64-unknown-linux-gnu.tar.gz.asc) |
+          | <img src="https://www.svgrepo.com/download/513083/windows-174.svg" style="width: 32px;"/> | x86_64 | [op-reth-${{ env.VERSION }}-x86_64-pc-windows-gnu.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/op-reth-${{ env.VERSION }}-x86_64-pc-windows-gnu.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/op-reth-${{ env.VERSION }}-x86_64-pc-windows-gnu.tar.gz.asc) |
+          | <img src="https://www.svgrepo.com/download/511330/apple-173.svg" style="width: 32px;"/> | x86_64 | [op-reth-${{ env.VERSION }}-x86_64-apple-darwin.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/op-reth-${{ env.VERSION }}-x86_64-apple-darwin.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/op-reth-${{ env.VERSION }}-x86_64-apple-darwin.tar.gz.asc) |
+          | <img src="https://www.svgrepo.com/download/511330/apple-173.svg" style="width: 32px;"/> | aarch64 | [op-reth-${{ env.VERSION }}-aarch64-apple-darwin.tar.gz](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/op-reth-${{ env.VERSION }}-aarch64-apple-darwin.tar.gz) | [PGP Signature](https://github.com/${{ env.REPO_NAME }}/releases/download/${{ env.VERSION }}/op-reth-${{ env.VERSION }}-aarch64-apple-darwin.tar.gz.asc) |
+          | <img src="https://www.svgrepo.com/download/473589/docker.svg" style="width: 32px;"/> | Docker | [${{ env.OP_IMAGE_NAME }}](${{ env.DOCKER_OP_IMAGE_NAME_URL }}) | - |
           ENDBODY
           )
           assets=()
@@ -236,3 +212,25 @@ jobs:
           done
           tag_name="${{ env.VERSION }}"
           echo "$body" | gh release create --draft -t "Reth $tag_name" -F "-" "$tag_name" "${assets[@]}"
+
+  dry-run-summary:
+    name: dry run summary
+    needs: [build, extract-version]
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.dry_run == 'true' }}
+    env:
+      VERSION: ${{ needs.extract-version.outputs.VERSION }}
+    steps:
+      - name: Summarize dry run
+        run: |
+          echo "## 🧪 Release Dry Run Summary"
+          echo ""
+          echo "✅ Successfully completed dry run for commit ${{ github.sha }}"
+          echo ""
+          echo "### What would happen in a real release:"
+          echo "- Binary artifacts would be uploaded to GitHub"
+          echo "- Docker images would be pushed to registry"
+          echo "- A draft release would be created"
+          echo ""
+          echo "### Next Steps"
+          echo "To perform a real release, push a git tag."
