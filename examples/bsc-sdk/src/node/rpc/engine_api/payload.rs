@@ -1,7 +1,7 @@
 use crate::node::rpc::engine_api::validator::BscExecutionData;
 use alloy_rpc_types_engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
-    ExecutionPayloadV1,
+    ExecutionPayloadEnvelopeV5, ExecutionPayloadV1,
 };
 use reth::{
     payload::{EthBuiltPayload, EthPayloadBuilderAttributes},
@@ -36,4 +36,5 @@ impl EngineTypes for BscPayloadTypes {
     type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadEnvelopeV3 = ExecutionPayloadEnvelopeV3;
     type ExecutionPayloadEnvelopeV4 = ExecutionPayloadEnvelopeV4;
+    type ExecutionPayloadEnvelopeV5 = ExecutionPayloadEnvelopeV5;
 }

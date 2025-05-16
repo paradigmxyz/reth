@@ -3645,7 +3645,7 @@ dependencies = [
  "alloy-chains",
  "alloy-consensus",
  "alloy-dyn-abi",
- "alloy-eips 0.15.11",
+ "alloy-eips 1.0.3",
  "alloy-evm",
  "alloy-genesis",
  "alloy-json-abi",
@@ -9275,7 +9275,7 @@ dependencies = [
 name = "reth-ipc"
 version = "1.4.6"
 dependencies = [
- "bytes",
+ "bytes 1.10.1",
  "futures",
  "futures-util",
  "interprocess",
@@ -13234,7 +13234,7 @@ dependencies = [
  "indexmap 2.9.0",
  "pin-project-lite",
  "slab",
- "sync_wrapper",
+ "sync_wrapper 1.0.2",
  "tokio",
  "tokio-util",
  "tower-layer",
