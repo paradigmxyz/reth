@@ -884,6 +884,7 @@ impl<P> RevealedSparseTrie<P> {
             });
             self.rlp_node(&mut prefix_set, &mut buffers, &mut temp_rlp_buf);
         }
+        self.rlp_buf = temp_rlp_buf;
     }
 
     /// Returns a list of (level, path) tuples identifying the nodes that have changed at the
@@ -973,7 +974,10 @@ impl<P> RevealedSparseTrie<P> {
     pub fn rlp_node_allocate(&mut self, prefix_set: &mut PrefixSet) -> RlpNode {
         let mut buffers = RlpNodeBuffers::new_with_root_path();
         let mut temp_rlp_buf = core::mem::take(&mut self.rlp_buf);
-        self.rlp_node(prefix_set, &mut buffers, &mut temp_rlp_buf)
+        let result = self.rlp_node(prefix_set, &mut buffers, &mut temp_rlp_buf);
+        self.rlp_buf = temp_rlp_buf;
+
+        result
     }
 
     /// Looks up or computes the RLP encoding of the node specified by the current
