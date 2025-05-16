@@ -10211,7 +10211,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "arbitrary",
- "arrayvec",
  "assert_matches",
  "auto_impl",
  "codspeed-criterion-compat",
@@ -10235,6 +10234,7 @@ dependencies = [
  "reth-trie-common",
  "reth-trie-db",
  "smallvec",
+ "tinyvec",
  "tracing",
 ]
 

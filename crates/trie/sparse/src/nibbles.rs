@@ -3,20 +3,22 @@ use core::{
     ops::{Bound, RangeBounds},
 };
 
-use arrayvec::ArrayVec;
 use reth_trie_common::Nibbles;
+use tinyvec::ArrayVec;
 
 /// The capacity of the underlying byte array. This limits the maximum size of [`PackedNibbles`] to
 /// 64 nibbles, or 256 bits.
 const CAPACITY_BYTES: usize = 32;
 
 /// A representation for nibbles, that uses an even/odd flag.
-#[derive(Hash, PartialEq, Eq)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
 pub struct PackedNibbles {
     /// The even/odd flag, indicating whether the length is even or odd.
+    // This field goes first, because the derived implementation of `PartialEq` compares the fields
+    // in order, so we can short-circuit the comparison if the `even` flag is different.
     pub(crate) even: bool,
     /// The nibbles themselves, stored as a byte array.
-    pub(crate) nibbles: ArrayVec<u8, CAPACITY_BYTES>,
+    pub(crate) nibbles: ArrayVec<[u8; CAPACITY_BYTES]>,
 }
 
 impl Default for PackedNibbles {
@@ -44,32 +46,6 @@ impl fmt::Debug for PackedNibbles {
         }
 
         write!(f, ")")
-    }
-}
-
-// Custom `Clone` implementation because `ArrayVec` is not specialized for `Copy` types.
-impl Clone for PackedNibbles {
-    #[inline]
-    fn clone(&self) -> Self {
-        let mut nibbles = ArrayVec::new_const();
-        unsafe {
-            // SAFETY: We fill `nibbles` with `self.nibbles.len()` number of elements below.
-            nibbles.set_len(self.nibbles.len());
-            // SAFETY: `nibbles` is a valid contiguous slice of length
-            // `CAPACITY_BYTES` non-overlapping with `self.nibbles`.
-            core::ptr::copy_nonoverlapping(
-                self.nibbles.as_ptr(),
-                nibbles.as_mut_ptr(),
-                self.nibbles.len(),
-            );
-        }
-        Self { even: self.even, nibbles }
-    }
-
-    #[inline]
-    fn clone_from(&mut self, source: &Self) {
-        self.even = source.even;
-        self.nibbles.clone_from(&source.nibbles);
     }
 }
 
@@ -140,6 +116,10 @@ impl From<PackedNibbles> for Nibbles {
 }
 
 impl PackedNibbles {
+    pub const fn new() -> Self {
+        Self { even: true, nibbles: ArrayVec::from_array_empty([0; CAPACITY_BYTES]) }
+    }
+
     /// Creates a new `PackedNibbles` instance from an iterator of nibbles.
     ///
     /// Each item in the iterator should be a nibble (0-15).
@@ -177,7 +157,7 @@ impl PackedNibbles {
     }
 
     /// Returns `true` if this [`PackedNibbles`] is empty.
-    pub const fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.nibbles.is_empty()
     }
 
@@ -214,7 +194,7 @@ impl PackedNibbles {
     }
 
     /// Returns the total number of nibbles in this [`PackedNibbles`].
-    pub const fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         if self.even {
             self.nibbles.len() * 2
         } else {
@@ -265,7 +245,8 @@ impl PackedNibbles {
         assert!(pos < self.len(), "position {} out of bounds (len: {})", pos, self.len());
 
         let byte_pos = pos / 2;
-        let byte = self.nibbles[byte_pos];
+        // SAFETY: We have asserted that the position is within the current length.
+        let byte = unsafe { self.nibbles.get_unchecked(byte_pos) };
 
         if pos % 2 == 0 {
             // For even positions, return the high nibble
@@ -324,7 +305,7 @@ impl PackedNibbles {
         // 0x34]`, and then do additional patching.
         let byte_count = to_byte - from_byte;
 
-        let mut out = ArrayVec::<u8, 32>::new();
+        let mut out = ArrayVec::from_array_empty([0; CAPACITY_BYTES]);
         unsafe {
             // SAFETY: We fill `out` with `byte_count` elements below.
             out.set_len(byte_count);
@@ -375,7 +356,7 @@ impl PackedNibbles {
 
         // SAFETY: We've already checked that the length is valid, and we're setting the length
         // to a smaller value.
-        unsafe { out.set_len(nibble_count.div_ceil(2)) };
+        out.set_len(nibble_count.div_ceil(2));
 
         Self { nibbles: out, even: (end - start) % 2 == 0 }
     }
@@ -390,9 +371,7 @@ impl PackedNibbles {
         if self.nibbles.is_empty() || self.even {
             // If we're empty or even, we can just extend the nibbles with `other` and update the
             // even flag
-            self.nibbles
-                .try_extend_from_slice(&other.nibbles)
-                .expect("nibbles length is {CAPACITY_BYTES}");
+            self.nibbles.extend_from_slice(&other.nibbles);
             self.even = other.even;
             return;
         }
@@ -407,8 +386,7 @@ impl PackedNibbles {
             prev_len + other.nibbles.len() - 1
         };
         assert!(new_len <= CAPACITY_BYTES);
-        // SAFETY: we're checking that new length will not exceed the capacity
-        unsafe { self.nibbles.set_len(new_len) };
+        self.nibbles.set_len(new_len);
 
         // Merge the boundary.
         //

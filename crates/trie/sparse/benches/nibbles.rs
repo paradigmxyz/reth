@@ -110,7 +110,6 @@ fn bench_slice(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("slice_even");
     for size in [32, 64] {
-        // Generate random nibbles
         let (nybbles, packed_nibbles) = generate_nibbles(&mut rng, size);
 
         // Slice middle 25%
@@ -128,7 +127,6 @@ fn bench_slice(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("slice_odd");
     for size in [32, 64] {
-        // Generate random nibbles
         let (nybbles, packed_nibbles) = generate_nibbles(&mut rng, size);
 
         // Slice middle 25%
