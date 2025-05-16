@@ -984,7 +984,9 @@ pub trait PoolTransaction:
     /// This is used to optimize transaction execution by reusing cached encoded bytes instead of
     /// re-encoding the transaction. The cached bytes are particularly useful in payload building
     /// where the same transaction may be executed multiple times.
-    fn into_consensus_with2718(self) -> WithEncoded<Recovered<Self::Consensus>>;
+    fn into_consensus_with2718(self) -> WithEncoded<Recovered<Self::Consensus>> {
+        self.into_consensus().into_encoded()
+    }
 
     /// Define a method to convert from the `Pooled` type to `Self`
     fn from_pooled(pooled: Recovered<Self::Pooled>) -> Self;
@@ -1148,10 +1150,6 @@ impl PoolTransaction for EthPooledTransaction {
 
     fn into_consensus(self) -> Recovered<Self::Consensus> {
         self.transaction
-    }
-
-    fn into_consensus_with2718(self) -> WithEncoded<Recovered<Self::Consensus>> {
-        self.transaction.into_encoded()
     }
 
     fn from_pooled(tx: Recovered<Self::Pooled>) -> Self {

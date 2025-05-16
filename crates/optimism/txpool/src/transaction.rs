@@ -11,7 +11,7 @@ use alloy_rpc_types_eth::erc4337::TransactionConditional;
 use c_kzg::KzgSettings;
 use core::fmt::Debug;
 use reth_optimism_primitives::OpTransactionSigned;
-use reth_primitives_traits::{InMemorySize, SignedTransaction, WithEncoded};
+use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use reth_transaction_pool::{
     EthBlobTransactionSidecar, EthPoolTransaction, EthPooledTransaction, PoolTransaction,
 };
@@ -130,10 +130,6 @@ where
 
     fn into_consensus(self) -> Recovered<Self::Consensus> {
         self.inner.transaction
-    }
-
-    fn into_consensus_with2718(self) -> WithEncoded<Recovered<Self::Consensus>> {
-        self.inner.transaction.into_encoded()
     }
 
     fn from_pooled(tx: Recovered<Self::Pooled>) -> Self {
