@@ -1,8 +1,11 @@
 use crate::{
-    blinded::{BlindedProvider, BlindedProviderFactory, DefaultBlindedProviderFactory},
+    blinded::{
+        BlindedProvider, BlindedProviderFactory, DefaultBlindedProvider,
+        DefaultBlindedProviderFactory,
+    },
     LeafLookup, RevealedSparseTrie, SparseTrie, TrieMasks,
 };
-use alloc::{collections::VecDeque, vec::Vec};
+use alloc::{boxed::Box, collections::VecDeque, vec::Vec};
 use alloy_primitives::{
     hex,
     map::{B256Map, HashMap, HashSet},
@@ -104,6 +107,18 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     /// Returns `true` if account was already revealed.
     pub fn is_account_revealed(&self, account: B256) -> bool {
         self.revealed_account_paths.contains(&Nibbles::unpack(account))
+    }
+
+    /// Uses the input `SparseTrie` to populate the backing data structures in the `state` trie.
+    pub fn populate_from<P>(&mut self, trie: Box<RevealedSparseTrie<P>>) {
+        if let Some(new_trie) = self.state.as_revealed_mut() {
+            new_trie.populate_from_trie(trie);
+        } else {
+            self.state = SparseTrie::revealed_with_provider(
+                self.provider_factory.account_node_provider(),
+                trie,
+            );
+        }
     }
 
     /// Was the account witness for `address` complete?
@@ -313,7 +328,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     ) -> SparseStateTrieResult<()> {
         let DecodedProofNodes {
             nodes,
-            new_nodes,
+            new_nodes: _,
             total_nodes: _total_nodes,
             skipped_nodes: _skipped_nodes,
         } = decode_proof_nodes(account_subtree, &self.revealed_account_paths)?;
@@ -335,9 +350,6 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                 },
                 self.retain_updates,
             )?;
-
-            // Reserve the capacity for new nodes ahead of time.
-            trie.reserve_nodes(new_nodes);
 
             // Reveal the remaining proof nodes.
             for (path, node) in account_nodes {
@@ -609,7 +621,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         &mut self,
     ) -> SparseStateTrieResult<&mut RevealedSparseTrie<F::AccountNodeProvider>> {
         match self.state {
-            SparseTrie::Blind => {
+            SparseTrie::Blind { allocated: _ } => {
                 let (root_node, hash_mask, tree_mask) = self
                     .provider_factory
                     .account_node_provider()
@@ -827,6 +839,12 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         storage_trie.remove_leaf(slot)?;
         Ok(())
     }
+
+    /// Clears and takes the account trie.
+    pub fn take_cleared_account_trie(&mut self) -> SparseTrie<DefaultBlindedProvider> {
+        let trie = core::mem::take(&mut self.state);
+        trie.cleared()
+    }
 }
 
 /// Result of [`decode_proof_nodes`].
@@ -930,7 +948,7 @@ mod tests {
         assert_eq!(proofs.len(), 1);
 
         let mut sparse = SparseStateTrie::default();
-        assert_eq!(sparse.state, SparseTrie::Blind);
+        assert_eq!(sparse.state, SparseTrie::Blind { allocated: None });
 
         sparse.reveal_account(Default::default(), proofs.into_inner()).unwrap();
         assert_eq!(sparse.state, SparseTrie::revealed_empty());
