@@ -58,8 +58,6 @@ pub(crate) mod root;
 pub mod validation;
 pub(crate) mod witness_db;
 
-mod execution_witness;
-pub use execution_witness::ExecutionWitness;
 /// Enum that specifies the fork
 pub mod fork_spec;
 
