@@ -129,9 +129,13 @@ pub enum StatelessValidationError {
 /// `current_block`.
 pub fn stateless_validation(
     current_block: RecoveredBlock<Block<TransactionSigned>>,
-    witness: ExecutionWitness,
+    mut witness: ExecutionWitness,
     chain_spec: Arc<ChainSpec>,
 ) -> Result<B256, StatelessValidationError> {
+    // Add coinbase account to keys that should be checked
+    let coinbase = current_block.header().beneficiary;
+    witness.keys.push(coinbase.0.into());
+
     let mut ancestor_headers: Vec<Header> = witness
         .headers
         .iter()
