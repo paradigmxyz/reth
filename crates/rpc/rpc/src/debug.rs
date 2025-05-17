@@ -287,7 +287,7 @@ where
                                 Ok(inspector)
                             })
                             .await?;
-                        return Ok(FourByteFrame::from(&inspector).into())
+                        Ok(FourByteFrame::from(&inspector).into())
                     }
                     GethDebugBuiltInTracerType::CallTracer => {
                         let call_config = tracer_config
@@ -310,7 +310,7 @@ where
                                 Ok(frame.into())
                             })
                             .await?;
-                        return Ok(frame)
+                        Ok(frame)
                     }
                     GethDebugBuiltInTracerType::PreStateTracer => {
                         let prestate_config = tracer_config
@@ -341,7 +341,7 @@ where
                                 Ok(frame)
                             })
                             .await?;
-                        return Ok(frame.into())
+                        Ok(frame.into())
                     }
                     GethDebugBuiltInTracerType::NoopTracer => Ok(NoopFrame::default().into()),
                     GethDebugBuiltInTracerType::MuxTracer => {
@@ -380,7 +380,7 @@ where
                                 Ok(frame.into())
                             })
                             .await?;
-                        return Ok(frame)
+                        Ok(frame)
                     }
                     GethDebugBuiltInTracerType::FlatCallTracer => {
                         let flat_call_config = tracer_config
@@ -406,7 +406,7 @@ where
                             })
                             .await?;
 
-                        return Ok(frame.into());
+                        Ok(frame.into())
                     }
                 },
                 #[cfg(not(feature = "js-tracer"))]
