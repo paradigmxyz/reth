@@ -2,8 +2,12 @@
 
 use reth_evm::precompiles::{DynPrecompile, Precompile};
 use revm::precompile::{PrecompileOutput, PrecompileResult};
-use revm_primitives::{Address, Bytes, HashMap};
-use std::sync::Arc;
+use revm_primitives::{Address, Bytes};
+use std::{
+    collections::HashMap,
+    hash::Hash,
+    sync::{Arc, RwLock},
+};
 
 /// Stores caches for each precompile.
 #[derive(Debug, Clone, Default)]
@@ -18,29 +22,30 @@ impl PrecompileCacheMap {
 /// Cache for precompiles, for each input stores the result.
 #[derive(Debug, Clone)]
 pub struct PrecompileCache(
-    Arc<mini_moka::sync::Cache<CacheKey, CacheEntry, alloy_primitives::map::DefaultHashBuilder>>,
+    Arc<RwLock<HashMap<CacheKey, CacheEntry, alloy_primitives::map::DefaultHashBuilder>>>,
 );
 
 impl Default for PrecompileCache {
     fn default() -> Self {
-        Self(Arc::new(
-            mini_moka::sync::CacheBuilder::new(100_000)
-                .build_with_hasher(alloy_primitives::map::DefaultHashBuilder::default()),
-        ))
+        Self(Arc::new(RwLock::new(HashMap::with_hasher(
+            alloy_primitives::map::DefaultHashBuilder::default(),
+        ))))
     }
 }
 
 impl PrecompileCache {
-    fn get(&self, key: &CacheKey) -> Option<CacheEntry> {
-        self.0.get(key)
+    fn get(&self, key: &[u8]) -> Option<CacheEntry> {
+        self.0.read().ok()?.get(key).cloned()
     }
 
     fn insert(&self, key: CacheKey, value: CacheEntry) {
-        self.0.insert(key, value);
+        if let Ok(mut map) = self.0.write() {
+            map.insert(key, value);
+        }
     }
 
     fn weighted_size(&self) -> u64 {
-        self.0.weighted_size()
+        self.0.read().map(|map| map.len() as u64).unwrap_or(0)
     }
 }
 
@@ -105,12 +110,10 @@ impl CachedPrecompile {
 
 impl Precompile for CachedPrecompile {
     fn call(&self, data: &[u8], gas_limit: u64) -> PrecompileResult {
-        let key = CacheKey(Bytes::copy_from_slice(data));
-
-        if let Some(entry) = &self.cache.get(&key) {
+        if let Some(entry) = self.cache.get(data) {
             self.increment_by_one_precompile_cache_hits();
             if gas_limit >= entry.gas_used() {
-                return entry.to_precompile_result()
+                return entry.to_precompile_result();
             }
         }
 
@@ -119,6 +122,7 @@ impl Precompile for CachedPrecompile {
         match &result {
             Ok(output) => {
                 self.increment_by_one_precompile_cache_misses();
+                let key = CacheKey(Bytes::copy_from_slice(data));
                 self.cache.insert(key, CacheEntry(output.clone()));
             }
             _ => {
@@ -128,6 +132,12 @@ impl Precompile for CachedPrecompile {
 
         self.update_precompile_cache_size();
         result
+    }
+}
+
+impl std::borrow::Borrow<[u8]> for CacheKey {
+    fn borrow(&self) -> &[u8] {
+        self.0.as_ref()
     }
 }
 
@@ -174,7 +184,7 @@ mod tests {
         let expected = CacheEntry(output);
         cache.cache.insert(key.clone(), expected.clone());
 
-        let actual = cache.cache.get(&key).unwrap();
+        let actual = cache.cache.get(key.0.as_ref()).unwrap();
 
         assert_eq!(actual, expected);
     }
