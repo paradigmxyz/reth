@@ -1,5 +1,6 @@
 use crate::{witness_db::WitnessDatabase, ExecutionWitness};
 use alloc::{
+    boxed::Box,
     collections::BTreeMap,
     string::{String, ToString},
     sync::Arc,
@@ -87,7 +88,7 @@ pub enum StatelessValidationError {
 
     /// Error when recovering signers
     #[error("error recovering the signers in the block")]
-    SignerRecovery(#[from] BlockRecoveryError<EthereumBlock>),
+    SignerRecovery(#[from] Box<BlockRecoveryError<EthereumBlock>>),
 }
 
 /// Performs stateless validation of a block using the provided witness data.
@@ -130,8 +131,9 @@ pub fn stateless_validation(
     witness: ExecutionWitness,
     chain_spec: Arc<ChainSpec>,
 ) -> Result<B256, StatelessValidationError> {
-    let current_block =
-        current_block.try_into_recovered().map_err(StatelessValidationError::from)?;
+    let current_block = current_block
+        .try_into_recovered()
+        .map_err(|err| StatelessValidationError::SignerRecovery(Box::new(err)))?;
 
     let mut ancestor_headers: Vec<Header> = witness
         .headers
