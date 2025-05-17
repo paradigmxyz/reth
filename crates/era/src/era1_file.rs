@@ -67,8 +67,8 @@ pub struct Era1Reader<R: Read> {
 
 /// An iterator of [`BlockTuple`] streaming from [`E2StoreReader`].
 #[derive(Debug)]
-pub struct BlockTupleIterator<'r, R: Read> {
-    reader: &'r mut E2StoreReader<R>,
+pub struct BlockTupleIterator<R: Read> {
+    reader: E2StoreReader<R>,
     headers: VecDeque<CompressedHeader>,
     bodies: VecDeque<CompressedBody>,
     receipts: VecDeque<CompressedReceipts>,
@@ -78,8 +78,8 @@ pub struct BlockTupleIterator<'r, R: Read> {
     block_index: Option<BlockIndex>,
 }
 
-impl<'r, R: Read> BlockTupleIterator<'r, R> {
-    fn new(reader: &'r mut E2StoreReader<R>) -> Self {
+impl<R: Read> BlockTupleIterator<R> {
+    fn new(reader: E2StoreReader<R>) -> Self {
         Self {
             reader,
             headers: Default::default(),
@@ -93,7 +93,7 @@ impl<'r, R: Read> BlockTupleIterator<'r, R> {
     }
 }
 
-impl<'r, R: Read + Seek> Iterator for BlockTupleIterator<'r, R> {
+impl<R: Read + Seek> Iterator for BlockTupleIterator<R> {
     type Item = Result<BlockTuple, E2sError>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -101,7 +101,7 @@ impl<'r, R: Read + Seek> Iterator for BlockTupleIterator<'r, R> {
     }
 }
 
-impl<'r, R: Read + Seek> BlockTupleIterator<'r, R> {
+impl<R: Read + Seek> BlockTupleIterator<R> {
     fn next_result(&mut self) -> Result<Option<BlockTuple>, E2sError> {
         loop {
             let Some(entry) = self.reader.read_next_entry()? else {
@@ -161,13 +161,13 @@ impl<R: Read + Seek> Era1Reader<R> {
     }
 
     /// Returns an iterator of [`BlockTuple`] streaming from `reader`.
-    pub fn iter(&mut self) -> BlockTupleIterator<'_, R> {
-        BlockTupleIterator::new(&mut self.reader)
+    pub fn iter(self) -> BlockTupleIterator<R> {
+        BlockTupleIterator::new(self.reader)
     }
 
     /// Reads and parses an Era1 file from the underlying reader, assembling all components
     /// into a complete [`Era1File`] with an [`Era1Id`] that includes the provided network name.
-    pub fn read(&mut self, network_name: String) -> Result<Era1File, E2sError> {
+    pub fn read(mut self, network_name: String) -> Result<Era1File, E2sError> {
         // Validate version entry
         let _version_entry = match self.reader.read_version()? {
             Some(entry) if entry.is_version() => entry,
@@ -230,7 +230,7 @@ impl Era1Reader<File> {
         network_name: impl Into<String>,
     ) -> Result<Era1File, E2sError> {
         let file = File::open(path).map_err(E2sError::Io)?;
-        let mut reader = Self::new(file);
+        let reader = Self::new(file);
         reader.read(network_name.into())
     }
 }
@@ -468,7 +468,7 @@ mod tests {
         }
 
         // Read back from memory buffer
-        let mut reader = Era1Reader::new(Cursor::new(&buffer));
+        let reader = Era1Reader::new(Cursor::new(&buffer));
         let read_era1 = reader.read("testnet".to_string())?;
 
         // Verify core properties
