@@ -68,10 +68,7 @@ impl Compact for AlloyTxDeposit {
             source_hash: tx.source_hash,
             from: tx.from,
             to: tx.to,
-            mint: match tx.mint {
-                Some(m) => m,
-                None => 0,
-            },
+            mint: tx.mint.unwrap_or_default(),
             value: tx.value,
             gas_limit: tx.gas_limit,
             is_system_transaction: tx.is_system_transaction,
