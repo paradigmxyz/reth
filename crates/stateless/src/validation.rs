@@ -6,8 +6,9 @@ use alloc::{
     vec::Vec,
 };
 use alloy_consensus::{Block, BlockHeader, Header};
-use alloy_primitives::{keccak256, map::B256Map, B256};
+use alloy_primitives::{keccak256, map::B256Map, Address, B256, U256};
 use alloy_rlp::Decodable;
+use alloy_trie::TrieAccount;
 use reth_chainspec::ChainSpec;
 use reth_consensus::{Consensus, HeaderValidator};
 use reth_errors::ConsensusError;
@@ -157,10 +158,11 @@ pub fn stateless_validation(
     };
 
     // First verify that the pre-state reads are correct
-    let (mut sparse_trie, bytecode) = verify_execution_witness(&witness, pre_state_root)?;
+    let (mut sparse_trie, accounts, storage_slots, bytecode) =
+        verify_execution_witness(&witness, pre_state_root)?;
 
     // Create an in-memory database that will use the reads to validate the block
-    let db = WitnessDatabase::new(&sparse_trie, bytecode, ancestor_hashes);
+    let db = WitnessDatabase::new(&sparse_trie, accounts, storage_slots, bytecode, ancestor_hashes);
 
     // Execute the block
     let basic_block_executor = EthExecutorProvider::ethereum(chain_spec.clone());
@@ -241,7 +243,15 @@ fn validate_block_consensus(
 pub fn verify_execution_witness(
     witness: &ExecutionWitness,
     pre_state_root: B256,
-) -> Result<(SparseStateTrie, B256Map<Bytecode>), StatelessValidationError> {
+) -> Result<
+    (
+        SparseStateTrie,
+        BTreeMap<Address, Option<TrieAccount>>,
+        BTreeMap<(Address, U256), U256>,
+        B256Map<Bytecode>,
+    ),
+    StatelessValidationError,
+> {
     let mut trie = SparseStateTrie::new(DefaultBlindedProviderFactory);
     let mut state_witness = B256Map::default();
     let mut bytecode = B256Map::default();
@@ -266,13 +276,19 @@ pub fn verify_execution_witness(
     trie.reveal_witness(pre_state_root, &state_witness)
         .map_err(|_e| StatelessValidationError::WitnessRevealFailed { pre_state_root })?;
 
+    let mut accounts: BTreeMap<Address, Option<TrieAccount>> = BTreeMap::new();
+    let mut storage_slots: BTreeMap<(Address, U256), U256> = BTreeMap::new();
+
+    // TODO: Add code here that iterates through all of the keys that will be accessed and check
+    // that they have valid witnesses
+
     // Calculate the root
     let computed_root = trie
         .root()
         .map_err(|_e| StatelessValidationError::StatelessPreStateRootCalculationFailed)?;
 
     if computed_root == pre_state_root {
-        Ok((trie, bytecode))
+        Ok((trie, accounts, storage_slots, bytecode))
     } else {
         Err(StatelessValidationError::PreStateRootMismatch {
             got: computed_root,

@@ -31,10 +31,12 @@ pub(crate) struct WitnessDatabase<'a> {
     bytecode: B256Map<Bytecode>,
     /// The sparse Merkle Patricia Trie containing account and storage state.
     /// This is used to provide account/storage values during EVM execution.
-    /// TODO: Ideally we do not have this trie and instead a simple map.
-    /// TODO: Then as a corollary we can avoid unnecessary hashing in `Database::storage`
-    /// TODO: and `Database::basic` without needing to cache the hashed Addresses and Keys
+    /// TODO: This will be removed, once `accounts` and `storage_slots`
+    /// TODO: properly implemented
     trie: &'a SparseStateTrie,
+
+    accounts: BTreeMap<Address, Option<TrieAccount>>,
+    storage_slots: BTreeMap<(Address, U256), U256>,
 }
 
 impl<'a> WitnessDatabase<'a> {
@@ -53,10 +55,18 @@ impl<'a> WitnessDatabase<'a> {
     ///    the block limit.
     pub(crate) const fn new(
         trie: &'a SparseStateTrie,
+        accounts: BTreeMap<Address, Option<TrieAccount>>,
+        storage_slots: BTreeMap<(Address, U256), U256>,
         bytecode: B256Map<Bytecode>,
         ancestor_hashes: BTreeMap<u64, B256>,
     ) -> Self {
-        Self { trie, block_hashes_by_block_number: ancestor_hashes, bytecode }
+        Self {
+            trie,
+            block_hashes_by_block_number: ancestor_hashes,
+            bytecode,
+            accounts,
+            storage_slots,
+        }
     }
 }
 
