@@ -25,8 +25,8 @@ use reth_trie::{
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdatesSorted,
     walker::TrieWalker,
-    HashBuilder, HashedPostStateSorted, MultiProof, MultiProofTargets, Nibbles, StorageMultiProof,
-    TRIE_ACCOUNT_RLP_MAX_SIZE,
+    DecodedMultiProof, DecodedStorageMultiProof, HashBuilder, HashedPostStateSorted, MultiProof,
+    MultiProofTargets, Nibbles, StorageMultiProof, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::proof::ProofRetainer;
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
@@ -143,6 +143,21 @@ where
         );
 
         proof_result
+    }
+
+    /// Generate a [`DecodedStorageMultiProof`] for the given proof by first calling
+    /// `storage_proof`, then decoding the proof nodes.
+    pub fn decoded_storage_proof(
+        self,
+        hashed_address: B256,
+        target_slots: B256Set,
+    ) -> Result<DecodedStorageMultiProof, ParallelStateRootError> {
+        let proof = self.storage_proof(hashed_address, target_slots)?;
+
+        // Now decode the nodes of the proof
+        let proof = proof.try_into()?;
+
+        Ok(proof)
     }
 
     /// Generate a state multiproof according to specified targets.
@@ -316,6 +331,21 @@ where
         );
 
         Ok(MultiProof { account_subtree, branch_node_hash_masks, branch_node_tree_masks, storages })
+    }
+
+    /// Returns a [`DecodedMultiProof`] for the given proof.
+    ///
+    /// Uses `multiproof` first to get the proof, and then decodes the nodes of the multiproof.
+    pub fn decoded_multiproof(
+        self,
+        targets: MultiProofTargets,
+    ) -> Result<DecodedMultiProof, ParallelStateRootError> {
+        let multiproof = self.multiproof(targets)?;
+
+        // Now decode the nodes of the multiproof
+        let multiproof = multiproof.try_into()?;
+
+        Ok(multiproof)
     }
 }
 

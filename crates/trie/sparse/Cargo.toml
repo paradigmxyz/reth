@@ -17,6 +17,7 @@ reth-primitives-traits.workspace = true
 reth-execution-errors.workspace = true
 reth-trie-common.workspace = true
 tracing.workspace = true
+alloy-trie.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
@@ -53,12 +54,13 @@ rand_08.workspace = true
 [features]
 default = ["std", "metrics"]
 std = [
-    "reth-storage-api/std",
-    "reth-primitives-traits/std",
-    "reth-execution-errors/std",
-    "reth-trie-common/std",
     "alloy-primitives/std",
     "alloy-rlp/std",
+    "alloy-trie/std",
+    "reth-execution-errors/std",
+    "reth-primitives-traits/std",
+    "reth-storage-api/std",
+    "reth-trie-common/std",
     "tracing/std",
 ]
 metrics = ["dep:reth-metrics", "dep:metrics", "std"]
@@ -72,9 +74,10 @@ test-utils = [
 ]
 arbitrary = [
     "std",
+    "alloy-primitives/arbitrary",
+    "alloy-trie/arbitrary",
     "reth-primitives-traits/arbitrary",
     "reth-trie-common/arbitrary",
-    "alloy-primitives/arbitrary",
     "smallvec/arbitrary",
 ]
 

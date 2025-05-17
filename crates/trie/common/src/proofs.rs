@@ -308,6 +308,14 @@ pub struct DecodedMultiProof {
 }
 
 impl DecodedMultiProof {
+    /// Returns true if the multiproof is empty.
+    pub fn is_empty(&self) -> bool {
+        self.account_subtree.is_empty() &&
+            self.branch_node_hash_masks.is_empty() &&
+            self.branch_node_tree_masks.is_empty() &&
+            self.storages.is_empty()
+    }
+
     /// Return the account proof nodes for the given account path.
     pub fn account_proof_nodes(&self, path: &Nibbles) -> Vec<(Nibbles, TrieNode)> {
         self.account_subtree.matching_nodes_sorted(path)
@@ -403,6 +411,36 @@ impl DecodedMultiProof {
                 }
             }
         }
+    }
+
+    /// Create a [`DecodedMultiProof`] from a [`DecodedStorageMultiProof`].
+    pub fn from_storage_proof(
+        hashed_address: B256,
+        storage_proof: DecodedStorageMultiProof,
+    ) -> Self {
+        Self {
+            storages: B256Map::from_iter([(hashed_address, storage_proof)]),
+            ..Default::default()
+        }
+    }
+}
+
+impl TryFrom<MultiProof> for DecodedMultiProof {
+    type Error = alloy_rlp::Error;
+
+    fn try_from(multi_proof: MultiProof) -> Result<Self, Self::Error> {
+        let account_subtree = DecodedProofNodes::try_from(multi_proof.account_subtree)?;
+        let storages = multi_proof
+            .storages
+            .into_iter()
+            .map(|(address, storage)| Ok((address, storage.try_into()?)))
+            .collect::<Result<B256Map<_>, alloy_rlp::Error>>()?;
+        Ok(Self {
+            account_subtree,
+            branch_node_hash_masks: multi_proof.branch_node_hash_masks,
+            branch_node_tree_masks: multi_proof.branch_node_tree_masks,
+            storages,
+        })
     }
 }
 
@@ -510,6 +548,20 @@ impl DecodedStorageMultiProof {
         };
 
         Ok(DecodedStorageProof { key: slot, nibbles, value, proof })
+    }
+}
+
+impl TryFrom<StorageMultiProof> for DecodedStorageMultiProof {
+    type Error = alloy_rlp::Error;
+
+    fn try_from(multi_proof: StorageMultiProof) -> Result<Self, Self::Error> {
+        let subtree = DecodedProofNodes::try_from(multi_proof.subtree)?;
+        Ok(Self {
+            root: multi_proof.root,
+            subtree,
+            branch_node_hash_masks: multi_proof.branch_node_hash_masks,
+            branch_node_tree_masks: multi_proof.branch_node_tree_masks,
+        })
     }
 }
 
