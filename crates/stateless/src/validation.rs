@@ -7,7 +7,7 @@ use alloc::{
     vec::Vec,
 };
 use alloy_consensus::{Block, BlockHeader, Header};
-use alloy_primitives::{keccak256, map::B256Map, Address, Bytes, B256, U256};
+use alloy_primitives::{keccak256, map::B256Map, Address, Bytes, FixedBytes, B256, U256};
 use alloy_rlp::Decodable;
 use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
 use reth_chainspec::ChainSpec;
@@ -281,9 +281,6 @@ pub fn verify_execution_witness(
     trie.reveal_witness(pre_state_root, &state_witness)
         .map_err(|_e| StatelessValidationError::WitnessRevealFailed { pre_state_root })?;
 
-    let mut accounts: BTreeMap<Address, Option<TrieAccount>> = BTreeMap::new();
-    let mut storage_slots: BTreeMap<(Address, U256), U256> = BTreeMap::new();
-
     let (accounts, storage_slots) = fetch_all_accounts_and_storage_slots(&witness.keys, &trie)
         .map_err(StatelessValidationError::from)?;
 
@@ -350,6 +347,32 @@ fn fetch_all_accounts_and_storage_slots(
 {
     let mut accounts: BTreeMap<Address, Option<TrieAccount>> = BTreeMap::new();
     let mut storage_slots: BTreeMap<(Address, U256), U256> = BTreeMap::new();
+
+    // TODO: We could remove the need of this by having the ExecutionWitness
+    // TODO: have a map of keys instead of a vector. ie address -> {storage_slots}
+    let mut current_address: Option<Address> = None;
+
+    for key in keys {
+        if key.len() == 20 {
+            let fixed_key = FixedBytes::<20>::try_from(key.as_ref()).unwrap();
+            let address = Address::from(fixed_key);
+
+            current_address = Some(address);
+
+            let account = fetch_account(address, trie)?;
+            accounts.insert(address, account);
+        } else if key.len() == 32 {
+            let fixed_key = FixedBytes::<32>::try_from(key.as_ref()).unwrap();
+            let slot_key: U256 = fixed_key.into();
+
+            let address = current_address.expect("execution witness is malformed");
+
+            let slot_value = fetch_storage_slot(address, slot_key, trie)?;
+            storage_slots.insert((address, slot_key), slot_value);
+        } else {
+            panic!("unexpected key length: execution witness is malformed")
+        }
+    }
 
     Ok((accounts, storage_slots))
 }
