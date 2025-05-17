@@ -364,6 +364,6 @@ fn fetch_storage_slot(
     address: Address,
     slot: U256,
     trie: &SparseStateTrie,
-) -> Result<Option<U256>, ProviderError> {
+) -> Result<U256, ProviderError> {
     todo!()
 }
