@@ -599,9 +599,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types-any"
-version = "1.0.0"
+version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3363303ce692d443631ab61dc033056a32041f76971d6491969b06945cf8b5e"
+checksum = "518c67d8465f885c7524f0fe2cc32861635e9409a6f2efc015e306ca8d73f377"
 dependencies = [
  "alloy-consensus-any",
  "alloy-rpc-types-eth",
@@ -9049,6 +9049,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-optimism-network"
+version = "1.4.1"
+dependencies = [
+ "alloy-consensus",
+ "op-alloy-consensus",
+ "reth-eth-wire-types",
+ "reth-optimism-primitives",
+]
+
+[[package]]
 name = "reth-optimism-node"
 version = "1.4.1"
 dependencies = [
@@ -9079,7 +9089,9 @@ dependencies = [
  "reth-optimism-consensus",
  "reth-optimism-evm",
  "reth-optimism-forks",
+ "reth-optimism-network",
  "reth-optimism-node",
+ "reth-optimism-node-types",
  "reth-optimism-payload-builder",
  "reth-optimism-primitives",
  "reth-optimism-rpc",
@@ -9099,11 +9111,26 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "reth-trie-common",
- "reth-trie-db",
  "revm",
  "serde",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "reth-optimism-node-types"
+version = "1.4.1"
+dependencies = [
+ "alloy-rpc-types-engine",
+ "op-alloy-rpc-types-engine",
+ "reth-node-api",
+ "reth-optimism-chainspec",
+ "reth-optimism-payload-builder",
+ "reth-optimism-primitives",
+ "reth-primitives-traits",
+ "reth-storage-api",
+ "reth-trie-db",
+ "serde",
 ]
 
 [[package]]
@@ -9201,6 +9228,10 @@ dependencies = [
  "reqwest",
  "reth-chain-state",
  "reth-chainspec",
+ "reth-consensus",
+ "reth-db",
+ "reth-db-api",
+ "reth-db-common",
  "reth-evm",
  "reth-network-api",
  "reth-node-api",
@@ -9208,10 +9239,14 @@ dependencies = [
  "reth-optimism-chainspec",
  "reth-optimism-evm",
  "reth-optimism-forks",
+ "reth-optimism-network",
+ "reth-optimism-node",
+ "reth-optimism-node-types",
  "reth-optimism-payload-builder",
  "reth-optimism-primitives",
  "reth-optimism-txpool",
  "reth-primitives-traits",
+ "reth-provider",
  "reth-rpc",
  "reth-rpc-api",
  "reth-rpc-engine-api",

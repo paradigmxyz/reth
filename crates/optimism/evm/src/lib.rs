@@ -21,7 +21,7 @@ use op_alloy_consensus::EIP1559ParamError;
 use op_revm::{OpSpecId, OpTransaction};
 use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, EvmEnv};
-use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_chainspec::{OpChainSpec, BASE_MAINNET, OP_DEV, OP_MAINNET};
 use reth_optimism_consensus::next_block_base_fee;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives};
@@ -214,6 +214,24 @@ where
         }
     }
 }
+
+impl OpEvmConfig<OpChainSpec> {
+    /// Returns config for [`OP_MAINNET`].
+    pub fn op_mainnet() -> Self {
+        Self::optimism(OP_MAINNET.clone())
+    }
+
+    /// Returns config for [`BASE_MAINNET`].
+    pub fn base_mainnet() -> Self {
+        Self::optimism(BASE_MAINNET.clone())
+    }
+
+    /// Returns config for [`OP_DEV`].
+    pub fn op_dev() -> Self {
+        Self::optimism(OP_DEV.clone())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
