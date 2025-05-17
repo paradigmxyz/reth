@@ -59,3 +59,21 @@ pub struct ClientInput {
     /// ExecutionWitness for the stateless validation function
     pub witness: ExecutionWitness,
 }
+
+/// Tracks the amount of cycles a region of code takes up
+/// in a zkvm environment and is no-op otherwise.
+#[macro_export]
+macro_rules! track_cycles {
+    ($name:expr, $body:expr) => {{
+        #[cfg(target_os = "zkvm")]
+        {
+            tracing::info!("cycle-tracker-report-start: {}", $name);
+            let result = $body;
+            tracing::info!("cycle-tracker-report-end: {}", $name);
+            result
+        }
+
+        #[cfg(not(target_os = "zkvm"))]
+        $body
+    }};
+}
