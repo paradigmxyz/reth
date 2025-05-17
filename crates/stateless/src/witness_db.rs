@@ -31,10 +31,14 @@ pub(crate) struct WitnessDatabase<'a> {
     bytecode: B256Map<Bytecode>,
     /// The sparse Merkle Patricia Trie containing account and storage state.
     /// This is used to provide account/storage values during EVM execution.
-    /// TODO: Ideally we do not have this trie and instead a simple map.
-    /// TODO: Then as a corollary we can avoid unnecessary hashing in `Database::storage`
-    /// TODO: and `Database::basic` without needing to cache the hashed Addresses and Keys
+    /// TODO: This will be removed, once `accounts` and `storage_slots`
+    /// TODO: properly implemented
     trie: &'a SparseStateTrie,
+
+    #[allow(dead_code)] // TODO: remove once we refactor code to use accounts
+    accounts: BTreeMap<Address, Option<TrieAccount>>,
+    #[allow(dead_code)] // TODO: remove once we refactor code to use storage_slots
+    storage_slots: BTreeMap<(Address, U256), U256>,
 }
 
 impl<'a> WitnessDatabase<'a> {
@@ -53,10 +57,18 @@ impl<'a> WitnessDatabase<'a> {
     ///    the block limit.
     pub(crate) const fn new(
         trie: &'a SparseStateTrie,
+        accounts: BTreeMap<Address, Option<TrieAccount>>,
+        storage_slots: BTreeMap<(Address, U256), U256>,
         bytecode: B256Map<Bytecode>,
         ancestor_hashes: BTreeMap<u64, B256>,
     ) -> Self {
-        Self { trie, block_hashes_by_block_number: ancestor_hashes, bytecode }
+        Self {
+            trie,
+            block_hashes_by_block_number: ancestor_hashes,
+            bytecode,
+            accounts,
+            storage_slots,
+        }
     }
 }
 
@@ -72,6 +84,11 @@ impl Database for WitnessDatabase<'_> {
         let hashed_address = keccak256(address);
 
         if let Some(bytes) = self.trie.get_account_value(&hashed_address) {
+            assert!(
+                self.accounts.contains_key(&address),
+                "expected accounts map to contain {address}"
+            );
+
             let account = TrieAccount::decode(&mut bytes.as_slice())?;
             return Ok(Some(AccountInfo {
                 balance: account.balance,
@@ -81,11 +98,26 @@ impl Database for WitnessDatabase<'_> {
             }));
         }
 
+        // Lint is okay here because,once debug assertions pass
+        // we will refactor this function to use self.accounts
+        #[allow(unreachable_code)]
         if !self.trie.check_valid_account_witness(hashed_address) {
+            unreachable!("witness completeness is checked before this method is called. ExecutionWitness:keys is missing {address}");
             return Err(ProviderError::TrieWitnessError(format!(
                 "incomplete account witness for {hashed_address:?}"
             )));
         }
+
+        // If we get here then the account is not available and the path from the root to
+        // that witness is complete.
+        //
+        // This means that the account map, should have the key, but its value should be marked as
+        // None.
+        let account = self
+            .accounts
+            .get(&address)
+            .unwrap_or_else(|| panic!("{address} is missing from the accounts list."));
+        assert!(account.is_none(), "{address} should be empty");
 
         Ok(None)
     }
