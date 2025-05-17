@@ -111,23 +111,6 @@ where
         }
     }
 
-    /// Process incoming event.
-    pub async fn on_event<Client, P>(
-        &mut self,
-        event: CanonStateNotification<N>,
-        client: &Client,
-        pool: &P,
-        drift_monitor: &mut DriftMonitor,
-    ) where
-        Client: reth_storage_api::StateProviderFactory + ChainSpecProvider + Clone + 'static,
-        P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
-    {
-        if !self.process_reorg(event.clone(), client, pool, drift_monitor).await {
-            // if not a reorg, try as a commit
-            self.process_commit(event, client, pool, drift_monitor);
-        }
-    }
-
     /// Returns a Future for processing an event
     ///
     /// This is used by the `PoolMaintainer` to manually poll the event processing
