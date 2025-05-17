@@ -17,6 +17,7 @@ pub mod import;
 pub mod import_era;
 pub mod init_cmd;
 pub mod init_state;
+pub mod launcher;
 pub mod node;
 pub mod p2p;
 pub mod prune;

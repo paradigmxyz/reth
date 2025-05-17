@@ -1,0 +1,21 @@
+[package]
+name = "reth-tracing-otlp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[dependencies]
+opentelemetry_sdk = "0.29.0"
+opentelemetry = "0.29.1"
+opentelemetry-otlp = "0.29.0"
+tracing-opentelemetry = "0.30.0"
+tracing-subscriber.workspace = true
+tracing.workspace = true
+opentelemetry-semantic-conventions = "0.29.0"
+
+[lints]
+workspace = true
