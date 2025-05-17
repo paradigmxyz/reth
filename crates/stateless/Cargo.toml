@@ -18,6 +18,7 @@ alloy-rlp.workspace = true
 alloy-trie.workspace = true
 alloy-consensus.workspace = true
 alloy-rpc-types-debug.workspace = true
+alloy-eips.workspace = true
 
 # reth
 reth-ethereum-consensus.workspace = true

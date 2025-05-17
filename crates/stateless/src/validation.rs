@@ -350,6 +350,9 @@ fn fetch_all_accounts_and_storage_slots(
     let mut accounts: BTreeMap<Address, Option<TrieAccount>> = BTreeMap::new();
     let mut storage_slots: BTreeMap<(Address, U256), U256> = BTreeMap::new();
 
+    // Add the system contract caller
+    accounts.insert(alloy_eips::eip4788::SYSTEM_ADDRESS, None);
+
     // TODO: We could remove the need of this by having the ExecutionWitness
     // TODO: have a map of keys instead of a vector. ie address -> {storage_slots}
     let mut current_address: Option<Address> = None;
