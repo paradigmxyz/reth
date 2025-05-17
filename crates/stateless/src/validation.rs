@@ -1,17 +1,18 @@
 use crate::{witness_db::WitnessDatabase, ExecutionWitness};
 use alloc::{
     collections::BTreeMap,
+    format,
     string::{String, ToString},
     sync::Arc,
     vec::Vec,
 };
 use alloy_consensus::{Block, BlockHeader, Header};
-use alloy_primitives::{keccak256, map::B256Map, Address, B256, U256};
+use alloy_primitives::{keccak256, map::B256Map, Address, Bytes, B256, U256};
 use alloy_rlp::Decodable;
 use alloy_trie::TrieAccount;
 use reth_chainspec::ChainSpec;
 use reth_consensus::{Consensus, HeaderValidator};
-use reth_errors::ConsensusError;
+use reth_errors::{ConsensusError, ProviderError};
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
 use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::{execute::Executor, ConfigureEvm};
@@ -85,6 +86,10 @@ pub enum StatelessValidationError {
         /// The expected pre-state root from the previous block
         expected: B256,
     },
+
+    /// Trie related errors that can occur during validation of the execution witness
+    #[error("could not validate the execution witness")]
+    TrieWitness(#[from] ProviderError),
 }
 
 /// Performs stateless validation of a block using the provided witness data.
@@ -279,8 +284,8 @@ pub fn verify_execution_witness(
     let mut accounts: BTreeMap<Address, Option<TrieAccount>> = BTreeMap::new();
     let mut storage_slots: BTreeMap<(Address, U256), U256> = BTreeMap::new();
 
-    // TODO: Add code here that iterates through all of the keys that will be accessed and check
-    // that they have valid witnesses
+    let (accounts, storage_slots) = fetch_all_accounts_and_storage_slots(&witness.keys, &trie)
+        .map_err(StatelessValidationError::from)?;
 
     // Calculate the root
     let computed_root = trie
@@ -336,4 +341,29 @@ fn compute_ancestor_hashes(
     }
 
     Ok(ancestor_hashes)
+}
+
+fn fetch_all_accounts_and_storage_slots(
+    keys: &[Bytes],
+    trie: &SparseStateTrie,
+) -> Result<(BTreeMap<Address, Option<TrieAccount>>, BTreeMap<(Address, U256), U256>), ProviderError>
+{
+    let mut accounts: BTreeMap<Address, Option<TrieAccount>> = BTreeMap::new();
+    let mut storage_slots: BTreeMap<(Address, U256), U256> = BTreeMap::new();
+
+    Ok((accounts, storage_slots))
+}
+
+fn fetch_account(
+    address: Address,
+    trie: &SparseStateTrie,
+) -> Result<Option<TrieAccount>, ProviderError> {
+    Ok(None)
+}
+fn fetch_storage_slot(
+    address: Address,
+    slot: U256,
+    trie: &SparseStateTrie,
+) -> Result<Option<U256>, ProviderError> {
+    todo!()
 }
