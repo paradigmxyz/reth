@@ -245,6 +245,7 @@ fn validate_block_consensus(
 /// for the given `pre_state_root`.
 // Note: This approach might be inefficient for ZKVMs requiring minimal memory operations, which
 // would explain why they have for the most part re-implemented this function.
+#[allow(clippy::type_complexity)] // TODO: use a struct
 pub fn verify_execution_witness(
     witness: &ExecutionWitness,
     pre_state_root: B256,
@@ -340,6 +341,7 @@ fn compute_ancestor_hashes(
     Ok(ancestor_hashes)
 }
 
+#[allow(clippy::type_complexity)] // TODO: use a struct
 fn fetch_all_accounts_and_storage_slots(
     keys: &[Bytes],
     trie: &SparseStateTrie,

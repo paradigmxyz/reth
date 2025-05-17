@@ -35,7 +35,9 @@ pub(crate) struct WitnessDatabase<'a> {
     /// TODO: properly implemented
     trie: &'a SparseStateTrie,
 
+    #[allow(dead_code)] // TODO: remove once we refactor code to use accounts
     accounts: BTreeMap<Address, Option<TrieAccount>>,
+    #[allow(dead_code)] // TODO: remove once we refactor code to use storage_slots
     storage_slots: BTreeMap<(Address, U256), U256>,
 }
 
@@ -83,7 +85,7 @@ impl Database for WitnessDatabase<'_> {
 
         if let Some(bytes) = self.trie.get_account_value(&hashed_address) {
             assert!(
-                self.accounts.get(&address).is_some(),
+                self.accounts.contains_key(&address),
                 "expected accounts map to contain {address}"
             );
 
@@ -96,6 +98,9 @@ impl Database for WitnessDatabase<'_> {
             }));
         }
 
+        // Lint is okay here because,once debug assertions pass
+        // we will refactor this function to use self.accounts
+        #[allow(unreachable_code)]
         if !self.trie.check_valid_account_witness(hashed_address) {
             unreachable!("witness completeness is checked before this method is called. ExecutionWitness:keys is missing {address}");
             return Err(ProviderError::TrieWitnessError(format!(
@@ -111,7 +116,7 @@ impl Database for WitnessDatabase<'_> {
         let account = self
             .accounts
             .get(&address)
-            .expect(&alloc::format!("{address} is missing from the accounts list."));
+            .unwrap_or_else(|| panic!("{address} is missing from the accounts list."));
         assert!(account.is_none(), "{address} should be empty");
 
         Ok(None)
