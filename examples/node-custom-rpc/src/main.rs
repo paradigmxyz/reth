@@ -109,7 +109,7 @@ where
             let sink = match pending_subscription_sink.accept().await {
                 Ok(sink) => sink,
                 Err(e) => {
-                    println!("failed to accept subscription: {}", e);
+                    println!("failed to accept subscription: {e}");
                     return;
                 }
             };
