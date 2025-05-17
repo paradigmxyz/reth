@@ -10037,6 +10037,8 @@ dependencies = [
  "reth-revm",
  "reth-trie-common",
  "reth-trie-sparse",
+ "serde",
+ "serde_with",
  "thiserror 2.0.12",
 ]
 

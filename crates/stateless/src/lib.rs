@@ -42,3 +42,17 @@ pub(crate) mod witness_db;
 
 #[doc(inline)]
 pub use alloy_rpc_types_debug::ExecutionWitness;
+
+use reth_ethereum_primitives::Block;
+use reth_primitives_traits::RecoveredBlock;
+
+#[serde_with::serde_as]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct ClientInput {
+    #[serde_as(
+        as = "reth_primitives_traits::serde_bincode_compat::RecoveredBlock<reth_ethereum_primitives::Block>"
+    )]
+    pub block: RecoveredBlock<Block>,
+
+    pub witness: ExecutionWitness,
+}
