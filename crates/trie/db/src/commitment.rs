@@ -10,7 +10,7 @@ use reth_trie::{
 /// The `StateCommitment` trait provides associated types for state commitment operations.
 pub trait StateCommitment: std::fmt::Debug + Clone + Send + Sync + Unpin + 'static {
     /// The state root type.
-    type StateRoot<'a, TX: DbTx + 'a>: DatabaseStateRoot<'a, TX>;
+    type StateRoot<'a, TX: DbTx + 'a>: DatabaseStateRoot;
     /// The storage root type.
     type StorageRoot<'a, TX: DbTx + 'a>: DatabaseStorageRoot<'a, TX>;
     /// The state proof type.

@@ -11,7 +11,7 @@ use reth_db_api::{
 };
 use reth_provider::{BlockNumReader, HeaderProvider, ProviderError};
 use reth_trie::StateRoot;
-use reth_trie_db::DatabaseStateRoot;
+use reth_trie_db::StateRootFromTx;
 use std::sync::Arc;
 use tracing::*;
 

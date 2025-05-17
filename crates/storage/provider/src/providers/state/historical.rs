@@ -27,6 +27,7 @@ use reth_trie::{
 use reth_trie_db::{
     DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,
     DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness, StateCommitment,
+    StateRootFromTx,
 };
 use std::fmt::Debug;
 
@@ -291,13 +292,15 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StateRootP
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         let mut revert_state = self.revert_state()?;
         revert_state.extend(hashed_state);
-        StateRoot::overlay_root(self.tx(), revert_state)
+        StateRoot::from_tx(self.tx())
+            .overlay_root(revert_state)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
     fn state_root_from_nodes(&self, mut input: TrieInput) -> ProviderResult<B256> {
         input.prepend(self.revert_state()?);
-        StateRoot::overlay_root_from_nodes(self.tx(), input)
+        StateRoot::from_tx(self.tx())
+            .overlay_root_from_nodes(input)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
@@ -307,7 +310,8 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StateRootP
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let mut revert_state = self.revert_state()?;
         revert_state.extend(hashed_state);
-        StateRoot::overlay_root_with_updates(self.tx(), revert_state)
+        StateRoot::from_tx(self.tx())
+            .overlay_root_with_updates(revert_state)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
@@ -316,7 +320,8 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StateRootP
         mut input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         input.prepend(self.revert_state()?);
-        StateRoot::overlay_root_from_nodes_with_updates(self.tx(), input)
+        StateRoot::from_tx(self.tx())
+            .overlay_root_from_nodes_with_updates(input)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 }
