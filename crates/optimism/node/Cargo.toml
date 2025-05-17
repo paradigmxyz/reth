@@ -84,6 +84,7 @@ alloy-network.workspace = true
 alloy-consensus.workspace = true
 futures.workspace = true
 alloy-eips.workspace = true
+tempfile.workspace = true
 
 [features]
 default = ["reth-codec"]
