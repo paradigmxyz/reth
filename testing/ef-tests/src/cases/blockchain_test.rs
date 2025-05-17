@@ -11,7 +11,7 @@ use reth_consensus::{Consensus, HeaderValidator};
 use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert_genesis_state};
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
 use reth_ethereum_primitives::Block;
-use reth_evm::execute::{BlockExecutorProvider, Executor};
+use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_primitives_traits::{RecoveredBlock, SealedBlock};
 use reth_provider::{
@@ -23,7 +23,6 @@ use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord
 use reth_stateless::{validation::stateless_validation, ExecutionWitness};
 use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
 use reth_trie_db::DatabaseStateRoot;
-
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 
 /// A handler for the blockchain test suite.
@@ -138,6 +137,90 @@ impl BlockchainTestCase {
     }
 }
 
+impl BlockchainTestCase {
+    /// Returns `true` if the fork is not supported.
+    const fn excluded_fork(network: ForkSpec) -> bool {
+        matches!(
+            network,
+            ForkSpec::ByzantiumToConstantinopleAt5 |
+                ForkSpec::Constantinople |
+                ForkSpec::ConstantinopleFix |
+                ForkSpec::MergeEOF |
+                ForkSpec::MergeMeterInitCode |
+                ForkSpec::MergePush0
+        )
+    }
+
+    /// Checks if the test case is a particular test called `UncleFromSideChain`
+    ///
+    /// This fixture fails as expected, however it fails at the wrong block number.
+    /// Given we no longer have uncle blocks, this test case was pulled out such
+    /// that we ensure it still fails as expected, however we do not check the block number.
+    #[inline]
+    fn is_uncle_sidechain_case(name: &str) -> bool {
+        name.contains("UncleFromSideChain")
+    }
+
+    /// If the test expects an exception, return the block number
+    /// at which it must occur together with the original message.
+    ///
+    /// Note: There is a +1 here because the genesis block is not included
+    /// in the set of blocks, so the first block is actually block number 1
+    /// and not block number 0.
+    #[inline]
+    fn expected_failure(case: &BlockchainTest) -> Option<(u64, String)> {
+        case.blocks.iter().enumerate().find_map(|(idx, blk)| {
+            blk.expect_exception.as_ref().map(|msg| ((idx + 1) as u64, msg.clone()))
+        })
+    }
+
+    /// Execute a single `BlockchainTest`, validating the outcome against the
+    /// expectations encoded in the JSON file.
+    fn run_single_case(name: &str, case: &BlockchainTest) -> Result<(), Error> {
+        let expectation = Self::expected_failure(case);
+        match run_case(case) {
+            // All blocks executed successfully.
+            Ok(()) => {
+                // Check if the test case specifies that it should have failed
+                if let Some((block, msg)) = expectation {
+                    Err(Error::Assertion(format!(
+                        "Test case: {name}\nExpected failure at block {block} - {msg}, but all blocks succeeded",
+                    )))
+                } else {
+                    Ok(())
+                }
+            }
+
+            // A block processing failure occurred.
+            Err(Error::BlockProcessingFailed { block_number }) => match expectation {
+                // It happened on exactly the block we were told to fail on
+                Some((expected, _)) if block_number == expected => Ok(()),
+
+                // Uncle side‑chain edge case, we accept as long as it failed.
+                // But we don't check the exact block number.
+                _ if Self::is_uncle_sidechain_case(name) => Ok(()),
+
+                // Expected failure, but block number does not match
+                Some((expected, _)) => Err(Error::Assertion(format!(
+                    "Test case: {name}\nExpected failure at block {expected}\nGot failure at block {block_number}",
+                ))),
+
+                // No failure expected at all - bubble up original error.
+                None => Err(Error::BlockProcessingFailed { block_number }),
+            },
+
+            // Non‑processing error – forward as‑is.
+            //
+            // This should only happen if we get an unexpected error from processing the block.
+            // Since it is unexpected, we treat it as a test failure.
+            //
+            // One reason for this happening is when one forgets to wrap the error from `run_case`
+            // so that it produces a `Error::BlockProcessingFailed`
+            Err(other) => Err(other),
+        }
+    }
+}
+
 impl Case for BlockchainTestCase {
     fn load(path: &Path) -> Result<Self, Error> {
         Ok(Self {
@@ -237,7 +320,7 @@ pub fn run_case(
         // Execute the block
         let state_provider = provider.latest();
         let state_db = StateProviderDatabase(&state_provider);
-        let executor = executor_provider.executor(state_db);
+        let executor = executor_provider.batch_executor(state_db);
 
         let output = executor
             .execute_with_state_closure(&(*block).clone(), |statedb: &State<_>| {
@@ -256,14 +339,11 @@ pub fn run_case(
         let state = state_provider.witness(Default::default(), hashed_state)?;
         let mut exec_witness = ExecutionWitness { state, codes, keys, headers: Default::default() };
 
-        let smallest = match lowest_block_number {
-            Some(smallest) => smallest,
-            None => {
-                // Return only the parent header, if there were no calls to the
-                // BLOCKHASH opcode.
-                block_number.saturating_sub(1)
-            }
-        };
+        let smallest = lowest_block_number.unwrap_or_else(|| {
+            // Return only the parent header, if there were no calls to the
+            // BLOCKHASH opcode.
+            block_number.saturating_sub(1)
+        });
 
         let range = smallest..block_number;
 
@@ -318,24 +398,18 @@ pub fn run_case(
     // - Either an issue with the test setup
     // - Possibly an error in the test case where the post-state root in the last block does not
     //   match the post-state values.
-    match case.post_state.as_ref() {
-        Some(expected_post_state) => {
-            for (&address, account) in expected_post_state {
-                account.assert_db(address, provider.tx_ref())?;
-            }
-        }
-        None => {
-            // Do nothing
-        }
-    };
+    let expected_post_state = case.post_state.as_ref().ok_or(Error::MissingPostState)?;
+    for (&address, account) in expected_post_state {
+        account.assert_db(address, provider.tx_ref())?;
+    }
 
     // Now validate using the stateless client if everything else passes
-    for (block, execution_witness) in &program_inputs {
-        stateless_validation(block.clone(), execution_witness.clone(), chain_spec.clone())
+    for (block, execution_witness) in program_inputs {
+        stateless_validation(block, execution_witness, chain_spec.clone())
             .expect("stateless validation failed");
     }
 
-    Ok(program_inputs)
+    Ok(())
 }
 
 fn decode_blocks(
@@ -369,7 +443,6 @@ fn pre_execution_checks(
     let consensus: EthBeaconConsensus<ChainSpec> = EthBeaconConsensus::new(chain_spec);
 
     let sealed_header = block.sealed_header();
-    let header = block.header();
 
     <EthBeaconConsensus<ChainSpec> as Consensus<Block>>::validate_body_against_header(
         &consensus,
@@ -377,7 +450,6 @@ fn pre_execution_checks(
         sealed_header,
     )?;
     consensus.validate_header_against_parent(sealed_header, parent.sealed_header())?;
-    consensus.validate_header_with_total_difficulty(header, block.difficulty)?;
     consensus.validate_header(sealed_header)?;
     consensus.validate_block_pre_execution(block)?;
 

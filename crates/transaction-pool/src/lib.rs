@@ -173,7 +173,7 @@ pub use crate::{
     },
 };
 use crate::{identifier::TransactionId, pool::PoolInner};
-use alloy_eips::eip4844::{BlobAndProofV1, BlobTransactionSidecar};
+use alloy_eips::eip4844::{BlobAndProofV1, BlobAndProofV2, BlobTransactionSidecar};
 use alloy_primitives::{Address, TxHash, B256, U256};
 use aquamarine as _;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
@@ -247,8 +247,13 @@ where
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = V::Transaction>,
     ) -> Vec<(TxHash, TransactionValidationOutcome<V::Transaction>)> {
-        futures_util::future::join_all(transactions.into_iter().map(|tx| self.validate(origin, tx)))
+        self.pool
+            .validator()
+            .validate_transactions(transactions.into_iter().map(|tx| (origin, tx)).collect())
             .await
+            .into_iter()
+            .map(|tx| (tx.tx_hash(), tx))
+            .collect()
     }
 
     /// Validates the given transaction
@@ -602,11 +607,18 @@ where
         self.pool.blob_store().get_exact(tx_hashes)
     }
 
-    fn get_blobs_for_versioned_hashes(
+    fn get_blobs_for_versioned_hashes_v1(
         &self,
         versioned_hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
-        self.pool.blob_store().get_by_versioned_hashes(versioned_hashes)
+        self.pool.blob_store().get_by_versioned_hashes_v1(versioned_hashes)
+    }
+
+    fn get_blobs_for_versioned_hashes_v2(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Option<Vec<BlobAndProofV2>>, BlobStoreError> {
+        self.pool.blob_store().get_by_versioned_hashes_v2(versioned_hashes)
     }
 }
 

@@ -21,7 +21,6 @@ reth-fs-util.workspace = true
 reth-errors.workspace = true
 reth-storage-errors.workspace = true
 reth-storage-api = { workspace = true, features = ["std", "db-api"] }
-reth-network-p2p.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-db-api.workspace = true
 reth-prune-types.workspace = true
@@ -42,9 +41,6 @@ alloy-consensus.workspace = true
 revm-database.workspace = true
 revm-state = { workspace = true, optional = true }
 
-# async
-tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
-
 # tracing
 tracing.workspace = true
 
@@ -53,7 +49,6 @@ reth-metrics.workspace = true
 metrics.workspace = true
 
 # misc
-auto_impl.workspace = true
 itertools.workspace = true
 notify = { workspace = true, default-features = false, features = ["macos_fsevent"] }
 parking_lot.workspace = true
@@ -63,6 +58,7 @@ eyre.workspace = true
 
 # test-utils
 reth-ethereum-engine-primitives = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["sync"], optional = true }
 
 # parallel utils
 rayon.workspace = true
@@ -84,6 +80,7 @@ assert_matches.workspace = true
 rand.workspace = true
 eyre.workspace = true
 
+tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 alloy-consensus.workspace = true
 
 [features]
@@ -96,7 +93,6 @@ test-utils = [
     "reth-ethereum-primitives/test-utils",
     "reth-chainspec/test-utils",
     "reth-evm/test-utils",
-    "reth-network-p2p/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-codecs/test-utils",
     "reth-db-api/test-utils",
@@ -104,4 +100,5 @@ test-utils = [
     "reth-prune-types/test-utils",
     "reth-stages-types/test-utils",
     "revm-state",
+    "tokio",
 ]

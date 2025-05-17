@@ -85,11 +85,11 @@ fn bench_get_seq_raw(c: &mut Criterion) {
     c.bench_function("bench_get_seq_raw", |b| {
         b.iter(|| unsafe {
             txn.txn_execute(|txn| {
-                mdbx_cursor_open(txn, dbi, &mut cursor);
+                mdbx_cursor_open(txn, dbi, &raw mut cursor);
                 let mut i = 0;
                 let mut count = 0u32;
 
-                while mdbx_cursor_get(cursor, &mut key, &mut data, MDBX_NEXT) == 0 {
+                while mdbx_cursor_get(cursor, &raw mut key, &raw mut data, MDBX_NEXT) == 0 {
                     i += key.iov_len + data.iov_len;
                     count += 1;
                 }

@@ -300,10 +300,10 @@ impl StageUnitCheckpoint {
     /// range.
     pub const fn set_block_range(&mut self, from: u64, to: u64) -> Option<CheckpointBlockRange> {
         match self {
-            Self::Account(AccountHashingCheckpoint { ref mut block_range, .. }) |
-            Self::Storage(StorageHashingCheckpoint { ref mut block_range, .. }) |
-            Self::Execution(ExecutionCheckpoint { ref mut block_range, .. }) |
-            Self::IndexHistory(IndexHistoryCheckpoint { ref mut block_range, .. }) => {
+            Self::Account(AccountHashingCheckpoint { block_range, .. }) |
+            Self::Storage(StorageHashingCheckpoint { block_range, .. }) |
+            Self::Execution(ExecutionCheckpoint { block_range, .. }) |
+            Self::IndexHistory(IndexHistoryCheckpoint { block_range, .. }) => {
                 let old_range = *block_range;
                 *block_range = CheckpointBlockRange { from, to };
 

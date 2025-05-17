@@ -11,8 +11,10 @@
 pub mod common;
 pub mod config_cmd;
 pub mod db;
+pub mod download;
 pub mod dump_genesis;
 pub mod import;
+pub mod import_era;
 pub mod init_cmd;
 pub mod init_state;
 pub mod node;

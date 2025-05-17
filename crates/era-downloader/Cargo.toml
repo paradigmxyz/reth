@@ -1,5 +1,6 @@
 [package]
 name = "reth-era-downloader"
+description = "An asynchronous stream interface for downloading ERA1 files"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,6 +10,12 @@ repository.workspace = true
 exclude.workspace = true
 
 [dependencies]
+# alloy
+alloy-primitives.workspace = true
+
+# reth
+reth-fs-util.workspace = true
+
 # http
 bytes.workspace = true
 reqwest.workspace = true
@@ -17,11 +24,15 @@ reqwest.features = ["stream", "rustls-tls-native-roots"]
 
 # async
 tokio.workspace = true
-tokio.features = ["fs", "io-util"]
+tokio.features = ["fs", "io-util", "macros"]
 futures-util.workspace = true
 
 # errors
 eyre.workspace = true
+
+# crypto
+sha2.workspace = true
+sha2.features = ["std"]
 
 [dev-dependencies]
 tokio.workspace = true

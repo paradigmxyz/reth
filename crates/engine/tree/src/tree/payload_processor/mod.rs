@@ -31,11 +31,14 @@ use reth_trie_parallel::{
 use std::{
     collections::VecDeque,
     sync::{
+        atomic::AtomicBool,
         mpsc,
         mpsc::{channel, Sender},
         Arc,
     },
 };
+
+use super::precompile_cache::PrecompileCacheMap;
 
 pub mod executor;
 pub mod multiproof;
@@ -53,23 +56,34 @@ pub struct PayloadProcessor<N, Evm> {
     trie_metrics: MultiProofTaskMetrics,
     /// Cross-block cache size in bytes.
     cross_block_cache_size: u64,
-    /// Whether transactions should be executed on prewarming task.
-    use_transaction_prewarming: bool,
+    /// Whether transactions should not be executed on prewarming task.
+    disable_transaction_prewarming: bool,
     /// Determines how to configure the evm for execution.
     evm_config: Evm,
+    /// whether precompile cache should be enabled.
+    precompile_cache_enabled: bool,
+    /// Precompile cache map.
+    precompile_cache_map: PrecompileCacheMap,
     _marker: std::marker::PhantomData<N>,
 }
 
 impl<N, Evm> PayloadProcessor<N, Evm> {
     /// Creates a new payload processor.
-    pub fn new(executor: WorkloadExecutor, evm_config: Evm, config: &TreeConfig) -> Self {
+    pub fn new(
+        executor: WorkloadExecutor,
+        evm_config: Evm,
+        config: &TreeConfig,
+        precompile_cache_map: PrecompileCacheMap,
+    ) -> Self {
         Self {
             executor,
             execution_cache: Default::default(),
             trie_metrics: Default::default(),
             cross_block_cache_size: config.cross_block_cache_size(),
-            use_transaction_prewarming: config.use_caching_and_prewarming(),
+            disable_transaction_prewarming: config.disable_caching_and_prewarming(),
             evm_config,
+            precompile_cache_enabled: config.precompile_cache_enabled(),
+            precompile_cache_map,
             _marker: Default::default(),
         }
     }
@@ -170,7 +184,7 @@ where
             multi_proof_task.run();
         });
 
-        let sparse_trie_task = SparseTrieTask::new(
+        let mut sparse_trie_task = SparseTrieTask::new(
             self.executor.clone(),
             sparse_trie_rx,
             proof_task.handle(),
@@ -236,7 +250,7 @@ where
             + Clone
             + 'static,
     {
-        if !self.use_transaction_prewarming {
+        if self.disable_transaction_prewarming {
             // if no transactions should be executed we clear them but still spawn the task for
             // caching updates
             transactions.clear();
@@ -251,6 +265,9 @@ where
             cache_metrics: cache_metrics.clone(),
             provider: provider_builder,
             metrics: PrewarmMetrics::default(),
+            terminate_execution: Arc::new(AtomicBool::new(false)),
+            precompile_cache_enabled: self.precompile_cache_enabled,
+            precompile_cache_map: self.precompile_cache_map.clone(),
         };
 
         let prewarm_task = PrewarmCacheTask::new(
@@ -418,12 +435,11 @@ impl ExecutionCache {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use crate::tree::{
         payload_processor::{
             evm_state_to_hashed_post_state, executor::WorkloadExecutor, PayloadProcessor,
         },
+        precompile_cache::PrecompileCacheMap,
         StateProviderBuilder, TreeConfig,
     };
     use alloy_evm::block::StateChangeSource;
@@ -443,6 +459,7 @@ mod tests {
     use reth_trie::{test_utils::state_root, HashedPostState, TrieInput};
     use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
     use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
+    use std::sync::Arc;
 
     fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {
         let mut rng = generators::rng();
@@ -546,6 +563,7 @@ mod tests {
             WorkloadExecutor::default(),
             EthEvmConfig::new(factory.chain_spec()),
             &TreeConfig::default(),
+            PrecompileCacheMap::default(),
         );
         let provider = BlockchainProvider::new(factory).unwrap();
         let mut handle = payload_processor.spawn(

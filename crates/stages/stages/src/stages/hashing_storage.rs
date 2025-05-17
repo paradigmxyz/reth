@@ -220,7 +220,7 @@ mod tests {
         models::StoredBlockBodyIndices,
     };
     use reth_ethereum_primitives::Block;
-    use reth_primitives_traits::{SealedBlock, SignedTransaction};
+    use reth_primitives_traits::SealedBlock;
     use reth_provider::providers::StaticFileWriter;
     use reth_testing_utils::generators::{
         self, random_block_range, random_contract_account_range, BlockRangeParams,

@@ -289,16 +289,26 @@ impl NodeState {
         if self.current_stage.is_none() {
             match event {
                 ConsensusLayerHealthEvent::NeverSeen => {
-                    warn!("Post-merge network, but never seen beacon client. Please launch one to follow the chain!")
+                    warn!(
+                        "Post-merge network, but never seen beacon client. Please launch one to follow the chain!"
+                    )
                 }
                 ConsensusLayerHealthEvent::HasNotBeenSeenForAWhile(period) => {
-                    warn!(?period, "Post-merge network, but no beacon client seen for a while. Please launch one to follow the chain!")
+                    warn!(
+                        ?period,
+                        "Post-merge network, but no beacon client seen for a while. Please launch one to follow the chain!"
+                    )
                 }
                 ConsensusLayerHealthEvent::NeverReceivedUpdates => {
-                    warn!("Beacon client online, but never received consensus updates. Please ensure your beacon client is operational to follow the chain!")
+                    warn!(
+                        "Beacon client online, but never received consensus updates. Please ensure your beacon client is operational to follow the chain!"
+                    )
                 }
                 ConsensusLayerHealthEvent::HaveNotReceivedUpdatesForAWhile(period) => {
-                    warn!(?period, "Beacon client online, but no consensus updates received for a while. This may be because of a reth error, or an error in the beacon client! Please investigate reth and beacon client logs!")
+                    warn!(
+                        ?period,
+                        "Beacon client online, but no consensus updates received for a while. This may be because of a reth error, or an error in the beacon client! Please investigate reth and beacon client logs!"
+                    )
                 }
             }
         }

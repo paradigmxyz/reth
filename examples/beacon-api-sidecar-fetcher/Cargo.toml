@@ -7,7 +7,7 @@ license.workspace = true
 
 [dependencies]
 reth.workspace = true
-reth-ethereum = { workspace = true, features = ["node", "pool"] }
+reth-ethereum = { workspace = true, features = ["node", "pool", "cli"] }
 
 alloy-rpc-types-beacon.workspace = true
 alloy-primitives.workspace = true

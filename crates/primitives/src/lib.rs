@@ -4,7 +4,6 @@
 //!
 //! ## Feature Flags
 //!
-//! - `alloy-compat`: Adds compatibility conversions for certain alloy types.
 //! - `arbitrary`: Adds `proptest` and `arbitrary` support for primitive types.
 //! - `test-utils`: Export utilities for testing
 //! - `reth-codec`: Enables db codec support for reth types including zstd compression for certain

@@ -27,7 +27,7 @@ use std::{
     pin::{pin, Pin},
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc,
+        Arc, OnceLock,
     },
     task::{ready, Context, Poll},
 };
@@ -44,6 +44,9 @@ pub mod shutdown;
 
 #[cfg(feature = "rayon")]
 pub mod pool;
+
+/// Global [`TaskExecutor`] instance that can be accessed from anywhere.
+static GLOBAL_EXECUTOR: OnceLock<TaskExecutor> = OnceLock::new();
 
 /// A type that can spawn tasks.
 ///
@@ -176,7 +179,7 @@ pub struct TaskManager {
 // === impl TaskManager ===
 
 impl TaskManager {
-    /// Returns a [`TaskManager`] over the currently running Runtime.
+    /// Returns a new [`TaskManager`] over the currently running Runtime.
     ///
     /// # Panics
     ///
@@ -187,17 +190,25 @@ impl TaskManager {
     }
 
     /// Create a new instance connected to the given handle's tokio runtime.
+    ///
+    /// This also sets the global [`TaskExecutor`].
     pub fn new(handle: Handle) -> Self {
         let (panicked_tasks_tx, panicked_tasks_rx) = unbounded_channel();
         let (signal, on_shutdown) = signal();
-        Self {
+        let manager = Self {
             handle,
             panicked_tasks_tx,
             panicked_tasks_rx,
             signal: Some(signal),
             on_shutdown,
             graceful_tasks: Arc::new(AtomicUsize::new(0)),
-        }
+        };
+
+        let _ = GLOBAL_EXECUTOR
+            .set(manager.executor())
+            .inspect_err(|_| error!("Global executor already set"));
+
+        manager
     }
 
     /// Returns a new [`TaskExecutor`] that can spawn new tasks onto the tokio runtime this type is
@@ -304,6 +315,23 @@ pub struct TaskExecutor {
 // === impl TaskExecutor ===
 
 impl TaskExecutor {
+    /// Attempts to get the current `TaskExecutor` if one has been initialized.
+    ///
+    /// Returns an error if no [`TaskExecutor`] has been initialized via [`TaskManager`].
+    pub fn try_current() -> Result<Self, NoCurrentTaskExecutorError> {
+        GLOBAL_EXECUTOR.get().cloned().ok_or_else(NoCurrentTaskExecutorError::default)
+    }
+
+    /// Returns the current `TaskExecutor`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no global executor has been initialized. Use [`try_current`](Self::try_current)
+    /// for a non-panicking version.
+    pub fn current() -> Self {
+        Self::try_current().unwrap()
+    }
+
     /// Returns the [Handle] to the tokio runtime.
     pub const fn handle(&self) -> &Handle {
         &self.handle
@@ -644,6 +672,12 @@ enum TaskKind {
     Blocking,
 }
 
+/// Error returned by `try_current` when no task executor has been configured.
+#[derive(Debug, Default, thiserror::Error)]
+#[error("No current task executor available.")]
+#[non_exhaustive]
+pub struct NoCurrentTaskExecutorError;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -782,5 +816,13 @@ mod tests {
 
         manager.graceful_shutdown_with_timeout(timeout);
         assert!(!val.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn can_access_global() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let handle = runtime.handle().clone();
+        let _manager = TaskManager::new(handle);
+        let _executor = TaskExecutor::try_current().unwrap();
     }
 }

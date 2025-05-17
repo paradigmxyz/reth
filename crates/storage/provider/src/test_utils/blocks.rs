@@ -94,7 +94,7 @@ pub(crate) static TEST_BLOCK: LazyLock<SealedBlock<reth_ethereum_primitives::Blo
                 hex!("cf7b274520720b50e6a4c3e5c4d553101f44945396827705518ce17cb7219a42").into(),
             ),
             BlockBody {
-                transactions: vec![TransactionSigned::new(
+                transactions: vec![TransactionSigned::new_unhashed(
             Transaction::Legacy(TxLegacy {
                 gas_price: 10,
                 gas_limit: 400_000,
@@ -111,8 +111,7 @@ pub(crate) static TEST_BLOCK: LazyLock<SealedBlock<reth_ethereum_primitives::Blo
                 )
                 .unwrap(),
                 false,
-            ),
-            b256!("0x3541dd1d17e76adeb25dcf2b0a9b60a1669219502e58dcf26a2beafbfb550397"),
+            )
         )],
                 ..Default::default()
             },

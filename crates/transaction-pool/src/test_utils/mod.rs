@@ -3,13 +3,16 @@
 use crate::{blobstore::InMemoryBlobStore, noop::MockTransactionValidator, Pool, PoolConfig};
 use std::ops::Deref;
 
-mod gen;
-pub use gen::*;
+mod tx_gen;
+pub use tx_gen::*;
 
 mod mock;
 pub use mock::*;
 
 mod pool;
+
+mod okvalidator;
+pub use okvalidator::*;
 
 /// A [Pool] used for testing
 pub type TestPool =

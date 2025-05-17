@@ -5,7 +5,7 @@ use std::sync::Arc;
 use alloy_primitives::TxHash;
 use alloy_rpc_types_eth::{
     pubsub::{Params, PubSubSyncStatus, SubscriptionKind, SyncStatusMetadata},
-    FilteredParams, Header, Log,
+    Filter, Header, Log,
 };
 use futures::StreamExt;
 use jsonrpsee::{
@@ -105,11 +105,11 @@ where
         SubscriptionKind::Logs => {
             // if no params are provided, used default filter params
             let filter = match params {
-                Some(Params::Logs(filter)) => FilteredParams::new(Some(*filter)),
+                Some(Params::Logs(filter)) => *filter,
                 Some(Params::Bool(_)) => {
                     return Err(invalid_params_rpc_err("Invalid params for logs"))
                 }
-                _ => FilteredParams::default(),
+                _ => Default::default(),
             };
             pipe_from_stream(accepted_sink, pubsub.log_stream(filter)).await
         }
@@ -159,8 +159,13 @@ where
             let current_sub_res = pubsub.sync_status(initial_sync_status);
 
             // send the current status immediately
-            let msg = SubscriptionMessage::from_json(&current_sub_res)
-                .map_err(SubscriptionSerializeError::new)?;
+            let msg = SubscriptionMessage::new(
+                accepted_sink.method_name(),
+                accepted_sink.subscription_id(),
+                &current_sub_res,
+            )
+            .map_err(SubscriptionSerializeError::new)?;
+
             if accepted_sink.send(msg).await.is_err() {
                 return Ok(())
             }
@@ -174,8 +179,13 @@ where
 
                     // send a new message now that the status changed
                     let sync_status = pubsub.sync_status(current_syncing);
-                    let msg = SubscriptionMessage::from_json(&sync_status)
-                        .map_err(SubscriptionSerializeError::new)?;
+                    let msg = SubscriptionMessage::new(
+                        accepted_sink.method_name(),
+                        accepted_sink.subscription_id(),
+                        &sync_status,
+                    )
+                    .map_err(SubscriptionSerializeError::new)?;
+
                     if accepted_sink.send(msg).await.is_err() {
                         break
                     }
@@ -227,7 +237,12 @@ where
                         break  Ok(())
                     },
                 };
-                let msg = SubscriptionMessage::from_json(&item).map_err(SubscriptionSerializeError::new)?;
+                let msg = SubscriptionMessage::new(
+                    sink.method_name(),
+                    sink.subscription_id(),
+                    &item
+                ).map_err(SubscriptionSerializeError::new)?;
+
                 if sink.send(msg).await.is_err() {
                     break Ok(());
                 }
@@ -308,7 +323,7 @@ where
     }
 
     /// Returns a stream that yields all logs that match the given filter.
-    fn log_stream(&self, filter: FilteredParams) -> impl Stream<Item = Log> {
+    fn log_stream(&self, filter: Filter) -> impl Stream<Item = Log> {
         BroadcastStream::new(self.eth_api.provider().subscribe_to_canonical_state())
             .map(move |canon_state| {
                 canon_state.expect("new block subscription never ends").block_receipts()

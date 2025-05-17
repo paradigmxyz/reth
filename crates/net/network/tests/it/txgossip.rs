@@ -9,7 +9,6 @@ use reth_network::{
     NetworkEvent, NetworkEventListenerProvider, Peers,
 };
 use reth_network_api::{events::PeerEvent, PeerKind, PeersInfo};
-use reth_primitives_traits::SignedTransaction;
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 use reth_transaction_pool::{test_utils::TransactionGenerator, PoolTransaction, TransactionPool};
 use std::sync::Arc;
@@ -35,8 +34,8 @@ async fn test_tx_gossip() {
     let mut peer0_tx_listener = peer0.pool().unwrap().pending_transactions_listener();
     let mut peer1_tx_listener = peer1.pool().unwrap().pending_transactions_listener();
 
-    let mut gen = TransactionGenerator::new(rand::rng());
-    let tx = gen.gen_eip1559_pooled();
+    let mut tx_gen = TransactionGenerator::new(rand::rng());
+    let tx = tx_gen.gen_eip1559_pooled();
 
     // ensure the sender has balance
     let sender = tx.sender();
@@ -74,8 +73,8 @@ async fn test_tx_propagation_policy_trusted_only() {
     let mut peer0_tx_listener = peer_0_handle.pool().unwrap().pending_transactions_listener();
     let mut peer1_tx_listener = peer_1_handle.pool().unwrap().pending_transactions_listener();
 
-    let mut gen = TransactionGenerator::new(rand::rng());
-    let tx = gen.gen_eip1559_pooled();
+    let mut tx_gen = TransactionGenerator::new(rand::rng());
+    let tx = tx_gen.gen_eip1559_pooled();
 
     // ensure the sender has balance
     let sender = tx.sender();
@@ -101,8 +100,8 @@ async fn test_tx_propagation_policy_trusted_only() {
     peer_0_handle.network().add_trusted_peer(*peer_1_handle.peer_id(), peer_1_handle.local_addr());
     join!(event_stream_0.next_session_established(), event_stream_1.next_session_established());
 
-    let mut gen = TransactionGenerator::new(rand::rng());
-    let tx = gen.gen_eip1559_pooled();
+    let mut tx_gen = TransactionGenerator::new(rand::rng());
+    let tx = tx_gen.gen_eip1559_pooled();
 
     // ensure the sender has balance
     let sender = tx.sender();
@@ -115,7 +114,8 @@ async fn test_tx_propagation_policy_trusted_only() {
 
     // ensure peer1 now receives the pending txs from peer0
     let mut buff = Vec::with_capacity(2);
-    peer1_tx_listener.recv_many(&mut buff, 2).await;
+    buff.push(peer1_tx_listener.recv().await.unwrap());
+    buff.push(peer1_tx_listener.recv().await.unwrap());
 
     assert!(buff.contains(&hash_1));
 }
@@ -139,10 +139,10 @@ async fn test_4844_tx_gossip_penalization() {
 
     let mut peer1_tx_listener = peer1.pool().unwrap().pending_transactions_listener();
 
-    let mut gen = TransactionGenerator::new(rand::rng());
+    let mut tx_gen = TransactionGenerator::new(rand::rng());
 
     // peer 0 will be penalized for sending txs[0] over gossip
-    let txs = vec![gen.gen_eip4844_pooled(), gen.gen_eip1559_pooled()];
+    let txs = vec![tx_gen.gen_eip4844_pooled(), tx_gen.gen_eip1559_pooled()];
 
     for tx in &txs {
         let sender = tx.sender();

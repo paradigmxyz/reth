@@ -90,7 +90,9 @@ pub fn get_fields(data: &Data) -> FieldList {
 
                 match &variant.fields {
                     syn::Fields::Named(_) => {
-                        panic!("Not allowed to have Enum Variants with multiple named fields. Make it a struct instead.")
+                        panic!(
+                            "Not allowed to have Enum Variants with multiple named fields. Make it a struct instead."
+                        )
                     }
                     syn::Fields::Unnamed(data_fields) => {
                         assert_eq!(
@@ -221,7 +223,7 @@ mod tests {
     use syn::parse2;
 
     #[test]
-    fn gen() {
+    fn compact_codec() {
         let f_struct = quote! {
              #[derive(Debug, PartialEq, Clone)]
              pub struct TestStruct {

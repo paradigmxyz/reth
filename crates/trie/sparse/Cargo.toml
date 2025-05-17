@@ -16,7 +16,7 @@ workspace = true
 reth-primitives-traits.workspace = true
 reth-execution-errors.workspace = true
 reth-trie-common.workspace = true
-reth-tracing = { workspace = true, optional = true }
+tracing.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
@@ -38,6 +38,7 @@ reth-testing-utils.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-trie-db = { workspace = true, features = ["test-utils"] }
+reth-tracing.workspace = true
 
 arbitrary.workspace = true
 assert_matches.workspace = true
@@ -58,8 +59,7 @@ std = [
     "reth-trie-common/std",
     "alloy-primitives/std",
     "alloy-rlp/std",
-    "reth-tracing",
-    "metrics",
+    "tracing/std",
 ]
 metrics = ["dep:reth-metrics", "dep:metrics", "std"]
 test-utils = [

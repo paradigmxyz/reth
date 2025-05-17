@@ -4,7 +4,7 @@
 use alloc::{collections::btree_map::BTreeMap, format};
 use alloy_primitives::{keccak256, map::B256Map, Address, B256, U256};
 use alloy_rlp::Decodable;
-use alloy_trie::TrieAccount;
+use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
 use reth_errors::ProviderError;
 use reth_revm::{bytecode::Bytecode, state::AccountInfo, Database};
 use reth_trie_sparse::SparseStateTrie;
@@ -70,46 +70,65 @@ impl Database for WitnessDatabase<'_> {
     /// Returns `Ok(None)` if the account is not found in the trie.
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         let hashed_address = keccak256(address);
-        let Some(bytes) = self.trie.get_account_value(&hashed_address) else { return Ok(None) };
-        let account = TrieAccount::decode(&mut bytes.as_slice())?;
-        let account_info = AccountInfo {
-            balance: account.balance,
-            nonce: account.nonce,
-            code_hash: account.code_hash,
-            code: None,
-        };
-        Ok(Some(account_info))
+
+        if let Some(bytes) = self.trie.get_account_value(&hashed_address) {
+            let account = TrieAccount::decode(&mut bytes.as_slice())?;
+            return Ok(Some(AccountInfo {
+                balance: account.balance,
+                nonce: account.nonce,
+                code_hash: account.code_hash,
+                code: None,
+            }));
+        }
+
+        if !self.trie.check_valid_account_witness(hashed_address) {
+            return Err(ProviderError::TrieWitnessError(format!(
+                "incomplete account witness for {hashed_address:?}"
+            )));
+        }
+
+        Ok(None)
     }
 
     /// Get storage value of an account at a specific slot.
     ///
-    ///  Returns `U256::ZERO` if the slot is not found in the trie.
+    /// Returns `U256::ZERO` if the slot is not found in the trie.
     fn storage(&mut self, address: Address, slot: U256) -> Result<U256, Self::Error> {
-        let slot = B256::from(slot);
         let hashed_address = keccak256(address);
-        let hashed_slot = keccak256(slot);
-        let value =
-            if let Some(value) = self.trie.get_storage_slot_value(&hashed_address, &hashed_slot) {
-                U256::decode(&mut value.as_slice())?
-            } else {
-                U256::ZERO
-            };
-        Ok(value)
+        let hashed_slot = keccak256(B256::from(slot));
+
+        if let Some(raw) = self.trie.get_storage_slot_value(&hashed_address, &hashed_slot) {
+            return Ok(U256::decode(&mut raw.as_slice())?)
+        }
+
+        // Storage slot value is not present in the trie, validate that the witness is complete.
+        // If the account exists in the trie...
+        if let Some(bytes) = self.trie.get_account_value(&hashed_address) {
+            // ...check that its storage is either empty or the storage trie was sufficiently
+            // revealed...
+            let account = TrieAccount::decode(&mut bytes.as_slice())?;
+            if account.storage_root != EMPTY_ROOT_HASH &&
+                !self.trie.check_valid_storage_witness(hashed_address, hashed_slot)
+            {
+                return Err(ProviderError::TrieWitnessError(format!(
+                    "incomplete storage witness: prover must supply exclusion proof for slot {hashed_slot:?} in account {hashed_address:?}"
+                )));
+            }
+        } else if !self.trie.check_valid_account_witness(hashed_address) {
+            // ...else if account is missing, validate that the account trie was sufficiently
+            // revealed.
+            return Err(ProviderError::TrieWitnessError(format!(
+                "incomplete account witness for {hashed_address:?}"
+            )));
+        }
+
+        Ok(U256::ZERO)
     }
 
     /// Get account code by its hash from the provided bytecode map.
     ///
     /// Returns an error if the bytecode for the given hash is not found in the map.
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        // TODO: This was added because the beacon root contract was not being included
-        // TODO: in the witness, when there were no transactions. See `notxs.json` in
-        // TODO: the execution spec tests. Once it is fixed, we can remove this.
-        use alloy_eips::eip4788::BEACON_ROOTS_CODE;
-        let beacon_root_hash = keccak256(BEACON_ROOTS_CODE.clone());
-        if code_hash == beacon_root_hash {
-            return Ok(Bytecode::new_raw(BEACON_ROOTS_CODE.clone()));
-        }
-
         let bytecode = self.bytecode.get(&code_hash).ok_or_else(|| {
             ProviderError::TrieWitnessError(format!("bytecode for {code_hash} not found"))
         })?;

@@ -16,7 +16,17 @@ pub struct TransactionTestContext;
 impl TransactionTestContext {
     /// Creates a static transfer and signs it, returning an envelope.
     pub async fn transfer_tx(chain_id: u64, wallet: PrivateKeySigner) -> TxEnvelope {
-        let tx = tx(chain_id, 21000, None, None, 0);
+        let tx = tx(chain_id, 21000, None, None, 0, Some(20e9 as u128));
+        Self::sign_tx(wallet, tx).await
+    }
+
+    /// Same as `transfer_tx`, but could set max fee per gas.
+    pub async fn transfer_tx_with_gas_fee(
+        chain_id: u64,
+        max_fee_per_gas: Option<u128>,
+        wallet: PrivateKeySigner,
+    ) -> TxEnvelope {
+        let tx = tx(chain_id, 21000, None, None, 0, max_fee_per_gas);
         Self::sign_tx(wallet, tx).await
     }
 
@@ -33,7 +43,7 @@ impl TransactionTestContext {
         init_code: Bytes,
         wallet: PrivateKeySigner,
     ) -> TxEnvelope {
-        let tx = tx(chain_id, gas, Some(init_code), None, 0);
+        let tx = tx(chain_id, gas, Some(init_code), None, 0, Some(20e9 as u128));
         Self::sign_tx(wallet, tx).await
     }
 
@@ -61,7 +71,14 @@ impl TransactionTestContext {
         let signature = wallet
             .sign_hash_sync(&authorization.signature_hash())
             .expect("could not sign authorization");
-        let tx = tx(chain_id, 48100, None, Some(authorization.into_signed(signature)), 0);
+        let tx = tx(
+            chain_id,
+            48100,
+            None,
+            Some(authorization.into_signed(signature)),
+            0,
+            Some(20e9 as u128),
+        );
         Self::sign_tx(wallet, tx).await
     }
 
@@ -82,7 +99,7 @@ impl TransactionTestContext {
         chain_id: u64,
         wallet: PrivateKeySigner,
     ) -> eyre::Result<TxEnvelope> {
-        let mut tx = tx(chain_id, 210000, None, None, 0);
+        let mut tx = tx(chain_id, 210000, None, None, 0, Some(20e9 as u128));
 
         let mut builder = SidecarBuilder::<SimpleCoder>::new();
         builder.ingest(b"dummy blob");
@@ -115,8 +132,10 @@ impl TransactionTestContext {
         wallet: PrivateKeySigner,
         nonce: u64,
     ) -> Bytes {
-        let l1_block_info = Bytes::from_static(&hex!("7ef9015aa044bae9d41b8380d781187b426c6fe43df5fb2fb57bd4466ef6a701e1f01e015694deaddeaddeaddeaddeaddeaddeaddeaddead000194420000000000000000000000000000000000001580808408f0d18001b90104015d8eb900000000000000000000000000000000000000000000000000000000008057650000000000000000000000000000000000000000000000000000000063d96d10000000000000000000000000000000000000000000000000000000000009f35273d89754a1e0387b89520d989d3be9c37c1f32495a88faf1ea05c61121ab0d1900000000000000000000000000000000000000000000000000000000000000010000000000000000000000002d679b567db6187c0c8323fa982cfb88b74dbcc7000000000000000000000000000000000000000000000000000000000000083400000000000000000000000000000000000000000000000000000000000f4240"));
-        let tx = tx(chain_id, 210000, Some(l1_block_info), None, nonce);
+        let l1_block_info = Bytes::from_static(&hex!(
+            "7ef9015aa044bae9d41b8380d781187b426c6fe43df5fb2fb57bd4466ef6a701e1f01e015694deaddeaddeaddeaddeaddeaddeaddeaddead000194420000000000000000000000000000000000001580808408f0d18001b90104015d8eb900000000000000000000000000000000000000000000000000000000008057650000000000000000000000000000000000000000000000000000000063d96d10000000000000000000000000000000000000000000000000000000000009f35273d89754a1e0387b89520d989d3be9c37c1f32495a88faf1ea05c61121ab0d1900000000000000000000000000000000000000000000000000000000000000010000000000000000000000002d679b567db6187c0c8323fa982cfb88b74dbcc7000000000000000000000000000000000000000000000000000000000000083400000000000000000000000000000000000000000000000000000000000f4240"
+        ));
+        let tx = tx(chain_id, 210000, Some(l1_block_info), None, nonce, Some(20e9 as u128));
         let signer = EthereumWallet::from(wallet);
         <TransactionRequest as TransactionBuilder<Ethereum>>::build(tx, &signer)
             .await
@@ -150,13 +169,14 @@ fn tx(
     data: Option<Bytes>,
     delegate_to: Option<SignedAuthorization>,
     nonce: u64,
+    max_fee_per_gas: Option<u128>,
 ) -> TransactionRequest {
     TransactionRequest {
         nonce: Some(nonce),
         value: Some(U256::from(100)),
         to: Some(TxKind::Call(Address::random())),
         gas: Some(gas),
-        max_fee_per_gas: Some(20e9 as u128),
+        max_fee_per_gas,
         max_priority_fee_per_gas: Some(20e9 as u128),
         chain_id: Some(chain_id),
         input: TransactionInput { input: None, data },

@@ -77,7 +77,7 @@ where
     fn next(&mut self, _ctx: ()) -> Option<Self::Transaction> {
         loop {
             let tx = self.best.next()?;
-            if self.invalid.contains(&tx.sender()) {
+            if self.invalid.contains(tx.sender_ref()) {
                 continue
             }
             return Some(tx.transaction.clone())

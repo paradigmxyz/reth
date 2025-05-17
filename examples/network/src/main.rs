@@ -39,7 +39,7 @@ async fn main() -> eyre::Result<()> {
     // interact with the network
     let mut events = handle.event_listener();
     while let Some(event) = events.next().await {
-        println!("Received event: {:?}", event);
+        println!("Received event: {event:?}");
     }
 
     Ok(())

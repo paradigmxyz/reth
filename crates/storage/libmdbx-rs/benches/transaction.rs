@@ -49,7 +49,7 @@ fn bench_get_rand_raw(c: &mut Criterion) {
                     key_val.iov_len = key.len();
                     key_val.iov_base = key.as_bytes().as_ptr().cast_mut().cast();
 
-                    mdbx_get(txn, dbi, &key_val, &mut data_val);
+                    mdbx_get(txn, dbi, &raw const key_val, &raw mut data_val);
 
                     i += key_val.iov_len;
                 }
@@ -98,7 +98,7 @@ fn bench_put_rand_raw(c: &mut Criterion) {
         b.iter(|| unsafe {
             let mut txn: *mut MDBX_txn = ptr::null_mut();
             env.with_raw_env_ptr(|env| {
-                mdbx_txn_begin_ex(env, ptr::null_mut(), 0, &mut txn, ptr::null_mut());
+                mdbx_txn_begin_ex(env, ptr::null_mut(), 0, &raw mut txn, ptr::null_mut());
 
                 let mut i = 0;
                 for (key, data) in &items {
@@ -107,7 +107,7 @@ fn bench_put_rand_raw(c: &mut Criterion) {
                     data_val.iov_len = data.len();
                     data_val.iov_base = data.as_bytes().as_ptr().cast_mut().cast();
 
-                    i += mdbx_put(txn, dbi, &key_val, &mut data_val, 0);
+                    i += mdbx_put(txn, dbi, &raw const key_val, &raw mut data_val, 0);
                 }
                 assert_eq!(0, i);
                 mdbx_txn_abort(txn);

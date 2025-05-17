@@ -7,7 +7,10 @@ use crate::{
     ReceiptProvider, StageCheckpointReader, StatsReader, TransactionVariant, TransactionsProvider,
     TransactionsProviderExt, WithdrawalsProvider,
 };
-use alloy_consensus::{transaction::TransactionMeta, Header};
+use alloy_consensus::{
+    transaction::{SignerRecoverable, TransactionMeta},
+    Header,
+};
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals, BlockHashOrNumber};
 use alloy_primitives::{
     b256, keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
@@ -250,7 +253,7 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
     /// Creates a new [`StaticFileProviderInner`].
     fn new(path: impl AsRef<Path>, access: StaticFileAccess) -> ProviderResult<Self> {
         let _lock_file = if access.is_read_write() {
-            StorageLock::try_acquire(path.as_ref())?.into()
+            StorageLock::try_acquire(path.as_ref()).map_err(ProviderError::other)?.into()
         } else {
             None
         };

@@ -6,15 +6,16 @@ use alloc::{
     vec::Vec,
 };
 use alloy_consensus::{Block, BlockHeader, Header};
-use alloy_primitives::{keccak256, map::B256Map, B256, U256};
+use alloy_primitives::{keccak256, map::B256Map, B256};
 use alloy_rlp::Decodable;
 use reth_chainspec::ChainSpec;
 use reth_consensus::{Consensus, HeaderValidator};
 use reth_errors::ConsensusError;
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
-use reth_evm::execute::{BlockExecutorProvider, Executor};
+use reth_ethereum_primitives::TransactionSigned;
+use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_evm_ethereum::execute::EthExecutorProvider;
-use reth_primitives::{RecoveredBlock, TransactionSigned};
+use reth_primitives_traits::RecoveredBlock;
 use reth_revm::state::Bytecode;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 use reth_trie_sparse::{blinded::DefaultBlindedProviderFactory, SparseStateTrie};
@@ -156,15 +157,14 @@ pub fn stateless_validation(
     };
 
     // First verify that the pre-state reads are correct
-    let (mut sparse_trie, bytecode) =
-        track_cycles!("verify-witness", verify_execution_witness(&witness, pre_state_root)?);
+    let (mut sparse_trie, bytecode) = verify_execution_witness(&witness, pre_state_root)?;
 
     // Create an in-memory database that will use the reads to validate the block
     let db = WitnessDatabase::new(&sparse_trie, bytecode, ancestor_hashes);
 
     // Execute the block
     let basic_block_executor = EthExecutorProvider::ethereum(chain_spec.clone());
-    let executor = basic_block_executor.executor(db);
+    let executor = basic_block_executor.batch_executor(db);
     let output = executor
         .execute(&current_block)
         .map_err(|e| StatelessValidationError::StatelessExecutionFailed(e.to_string()))?;
@@ -212,9 +212,6 @@ fn validate_block_consensus(
     block: &RecoveredBlock<Block<TransactionSigned>>,
 ) -> Result<(), StatelessValidationError> {
     let consensus = EthBeaconConsensus::new(chain_spec);
-
-    // For the beacon chain, total difficulty is ignored.
-    consensus.validate_header_with_total_difficulty(block.header(), U256::MAX)?;
 
     consensus.validate_header(block.sealed_header())?;
 

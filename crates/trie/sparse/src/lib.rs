@@ -5,20 +5,6 @@
 
 extern crate alloc;
 
-/// A macro that expands to a trace! call when std feature is enabled,
-/// and does nothing when `no_std` is enabled.
-#[macro_export]
-macro_rules! trace {
-    ($($args:tt)*) => {
-        #[cfg(feature = "std")]
-        reth_tracing::tracing::trace!($($args)*);
-        #[cfg(not(feature = "std"))]
-        {
-            // Currently in no_std, trace! is a noop
-        };
-    };
-}
-
 mod state;
 pub use state::*;
 
@@ -27,6 +13,7 @@ pub use trie::*;
 
 pub mod blinded;
 
+#[cfg(feature = "metrics")]
 mod metrics;
 
 /// Re-export sparse trie error types.

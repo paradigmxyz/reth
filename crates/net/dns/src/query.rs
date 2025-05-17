@@ -135,11 +135,11 @@ impl<K: EnrKeyUnambiguous> Query<K> {
     /// Advances the query
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<QueryOutcome<K>> {
         match self {
-            Self::Root(ref mut query) => {
+            Self::Root(query) => {
                 let outcome = ready!(query.as_mut().poll(cx));
                 Poll::Ready(QueryOutcome::Root(outcome))
             }
-            Self::Entry(ref mut query) => {
+            Self::Entry(query) => {
                 let outcome = ready!(query.as_mut().poll(cx));
                 Poll::Ready(QueryOutcome::Entry(outcome))
             }

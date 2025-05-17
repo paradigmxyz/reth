@@ -39,11 +39,13 @@ pub(crate) async fn advance_with_random_transactions<Provider>(
 where
     Provider: FullProvider<NodeTypesWithDBAdapter<EthereumNode, TmpDB>>,
 {
-    let provider = ProviderBuilder::new().on_http(node.rpc_url());
-    let signers = Wallet::new(1).with_chain_id(provider.get_chain_id().await?).gen();
+    let provider = ProviderBuilder::new().connect_http(node.rpc_url());
+    let signers = Wallet::new(1).with_chain_id(provider.get_chain_id().await?).wallet_gen();
 
     // simple contract which writes to storage on any call
-    let dummy_bytecode = bytes!("6080604052348015600f57600080fd5b50602880601d6000396000f3fe4360a09081523360c0526040608081905260e08152902080805500fea164736f6c6343000810000a");
+    let dummy_bytecode = bytes!(
+        "6080604052348015600f57600080fd5b50602880601d6000396000f3fe4360a09081523360c0526040608081905260e08152902080805500fea164736f6c6343000810000a"
+    );
     let mut call_destinations = signers.iter().map(|s| s.address()).collect::<Vec<_>>();
 
     for _ in 0..num_blocks {
@@ -113,7 +115,9 @@ where
                 NetworkWallet::<Ethereum>::sign_request(&EthereumWallet::new(signer.clone()), tx)
                     .await?;
 
-            pending.push(provider.send_tx_envelope(tx).await?);
+            if let Ok(res) = provider.send_tx_envelope(tx).await {
+                pending.push(res);
+            }
         }
 
         let payload = node.build_and_submit_payload().await?;

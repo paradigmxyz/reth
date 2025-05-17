@@ -1,5 +1,5 @@
 use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError};
-use alloy_eips::eip4844::{BlobAndProofV1, BlobTransactionSidecar};
+use alloy_eips::eip4844::{BlobAndProofV1, BlobAndProofV2, BlobTransactionSidecar};
 use alloy_primitives::B256;
 use std::sync::Arc;
 
@@ -54,11 +54,18 @@ impl BlobStore for NoopBlobStore {
         Err(BlobStoreError::MissingSidecar(txs[0]))
     }
 
-    fn get_by_versioned_hashes(
+    fn get_by_versioned_hashes_v1(
         &self,
         versioned_hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
         Ok(vec![None; versioned_hashes.len()])
+    }
+
+    fn get_by_versioned_hashes_v2(
+        &self,
+        _versioned_hashes: &[B256],
+    ) -> Result<Option<Vec<BlobAndProofV2>>, BlobStoreError> {
+        Ok(None)
     }
 
     fn data_size_hint(&self) -> Option<usize> {

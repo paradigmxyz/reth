@@ -1,8 +1,11 @@
-use crate::{conditional::MaybeConditionalTransaction, interop::MaybeInteropTransaction};
+use crate::{
+    conditional::MaybeConditionalTransaction, estimated_da_size::DataAvailabilitySized,
+    interop::MaybeInteropTransaction,
+};
 use alloy_consensus::{
     transaction::Recovered, BlobTransactionSidecar, BlobTransactionValidationError, Typed2718,
 };
-use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization};
+use alloy_eips::{eip2718::WithEncoded, eip2930::AccessList, eip7702::SignedAuthorization};
 use alloy_primitives::{Address, Bytes, TxHash, TxKind, B256, U256};
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
 use c_kzg::KzgSettings;
@@ -106,6 +109,12 @@ impl<Cons, Pooled> MaybeInteropTransaction for OpPooledTransaction<Cons, Pooled>
     }
 }
 
+impl<Cons: SignedTransaction, Pooled> DataAvailabilitySized for OpPooledTransaction<Cons, Pooled> {
+    fn estimated_da_size(&self) -> u64 {
+        self.estimated_compressed_size()
+    }
+}
+
 impl<Cons, Pooled> PoolTransaction for OpPooledTransaction<Cons, Pooled>
 where
     Cons: SignedTransaction + From<Pooled>,
@@ -121,6 +130,11 @@ where
 
     fn into_consensus(self) -> Recovered<Self::Consensus> {
         self.inner.transaction
+    }
+
+    fn into_consensus_with2718(self) -> WithEncoded<Recovered<Self::Consensus>> {
+        let encoding = self.encoded_2718().clone();
+        self.inner.transaction.into_encoded_with(encoding)
     }
 
     fn from_pooled(tx: Recovered<Self::Pooled>) -> Self {
@@ -271,11 +285,14 @@ where
 /// Helper trait to provide payload builder with access to conditionals and encoded bytes of
 /// transaction.
 pub trait OpPooledTx:
-    MaybeConditionalTransaction + MaybeInteropTransaction + PoolTransaction
+    MaybeConditionalTransaction + MaybeInteropTransaction + PoolTransaction + DataAvailabilitySized
 {
 }
 impl<T> OpPooledTx for T where
-    T: MaybeConditionalTransaction + MaybeInteropTransaction + PoolTransaction
+    T: MaybeConditionalTransaction
+        + MaybeInteropTransaction
+        + PoolTransaction
+        + DataAvailabilitySized
 {
 }
 

@@ -26,6 +26,7 @@ alloy-consensus.workspace = true
 tracing.workspace = true
 
 [features]
+default = ["std"]
 std = [
     "alloy-consensus/std",
     "alloy-eips/std",

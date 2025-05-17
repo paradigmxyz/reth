@@ -6,7 +6,8 @@ use alloy_primitives::{hex, B256};
 use alloy_rpc_client::{BuiltInConnectionString, ClientBuilder, RpcClient as Client};
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
 use alloy_transport_http::Http;
-use std::{str::FromStr, sync::Arc};
+use reth_optimism_txpool::supervisor::metrics::SequencerMetrics;
+use std::{str::FromStr, sync::Arc, time::Instant};
 use thiserror::Error;
 use tracing::warn;
 
@@ -16,6 +17,9 @@ pub enum Error {
     /// Invalid scheme
     #[error("Invalid scheme of sequencer url: {0}")]
     InvalidScheme(String),
+    /// Invalid header or value provided.
+    #[error("Invalid header: {0}")]
+    InvalidHeader(String),
     /// Invalid url
     #[error("Invalid sequencer url: {0}")]
     InvalidUrl(String),
@@ -41,22 +45,59 @@ pub struct SequencerClient {
     inner: Arc<SequencerClientInner>,
 }
 
+impl SequencerClientInner {
+    /// Creates a new instance with the given endpoint and client.
+    pub(crate) fn new(sequencer_endpoint: String, client: Client) -> Self {
+        let metrics = SequencerMetrics::default();
+        Self { sequencer_endpoint, client, metrics }
+    }
+}
+
 impl SequencerClient {
     /// Creates a new [`SequencerClient`] for the given URL.
     ///
     /// If the URL is a websocket endpoint we connect a websocket instance.
     pub async fn new(sequencer_endpoint: impl Into<String>) -> Result<Self, Error> {
+        Self::new_with_headers(sequencer_endpoint, Default::default()).await
+    }
+
+    /// Creates a new `SequencerClient` for the given URL with the given headers
+    ///
+    /// This expects headers in the form: `header=value`
+    pub async fn new_with_headers(
+        sequencer_endpoint: impl Into<String>,
+        headers: Vec<String>,
+    ) -> Result<Self, Error> {
         let sequencer_endpoint = sequencer_endpoint.into();
         let endpoint = BuiltInConnectionString::from_str(&sequencer_endpoint)?;
         if let BuiltInConnectionString::Http(url) = endpoint {
-            let client = reqwest::Client::builder()
+            let mut builder = reqwest::Client::builder()
                 // we force use tls to prevent native issues
-                .use_rustls_tls()
-                .build()?;
+                .use_rustls_tls();
+
+            if !headers.is_empty() {
+                let mut header_map = reqwest::header::HeaderMap::new();
+                for header in headers {
+                    if let Some((key, value)) = header.split_once('=') {
+                        header_map.insert(
+                            key.trim()
+                                .parse::<reqwest::header::HeaderName>()
+                                .map_err(|err| Error::InvalidHeader(err.to_string()))?,
+                            value
+                                .trim()
+                                .parse::<reqwest::header::HeaderValue>()
+                                .map_err(|err| Error::InvalidHeader(err.to_string()))?,
+                        );
+                    }
+                }
+                builder = builder.default_headers(header_map);
+            }
+
+            let client = builder.build()?;
             Self::with_http_client(url, client)
         } else {
             let client = ClientBuilder::default().connect_with(endpoint).await?;
-            let inner = SequencerClientInner { sequencer_endpoint, client };
+            let inner = SequencerClientInner::new(sequencer_endpoint, client);
             Ok(Self { inner: Arc::new(inner) })
         }
     }
@@ -75,7 +116,7 @@ impl SequencerClient {
         let is_local = http_client.guess_local();
         let client = ClientBuilder::default().transport(http_client, is_local);
 
-        let inner = SequencerClientInner { sequencer_endpoint, client };
+        let inner = SequencerClientInner::new(sequencer_endpoint, client);
         Ok(Self { inner: Arc::new(inner) })
     }
 
@@ -89,8 +130,13 @@ impl SequencerClient {
         &self.inner.client
     }
 
+    /// Returns a reference to the [`SequencerMetrics`] for tracking client metrics.
+    fn metrics(&self) -> &SequencerMetrics {
+        &self.inner.metrics
+    }
+
     /// Sends a [`alloy_rpc_client::RpcCall`] request to the sequencer endpoint.
-    async fn send_rpc_call<Params: RpcSend, Resp: RpcRecv>(
+    pub async fn request<Params: RpcSend, Resp: RpcRecv>(
         &self,
         method: &str,
         params: Params,
@@ -110,16 +156,17 @@ impl SequencerClient {
 
     /// Forwards a transaction to the sequencer endpoint.
     pub async fn forward_raw_transaction(&self, tx: &[u8]) -> Result<B256, SequencerClientError> {
+        let start = Instant::now();
         let rlp_hex = hex::encode_prefixed(tx);
         let tx_hash =
-            self.send_rpc_call("eth_sendRawTransaction", (rlp_hex,)).await.inspect_err(|err| {
+            self.request("eth_sendRawTransaction", (rlp_hex,)).await.inspect_err(|err| {
                 warn!(
                     target: "rpc::eth",
                     %err,
                     "Failed to forward transaction to sequencer",
                 );
             })?;
-
+        self.metrics().record_forward_latency(start.elapsed());
         Ok(tx_hash)
     }
 
@@ -129,9 +176,10 @@ impl SequencerClient {
         tx: &[u8],
         condition: TransactionConditional,
     ) -> Result<B256, SequencerClientError> {
+        let start = Instant::now();
         let rlp_hex = hex::encode_prefixed(tx);
         let tx_hash = self
-            .send_rpc_call("eth_sendRawTransactionConditional", (rlp_hex, condition))
+            .request("eth_sendRawTransactionConditional", (rlp_hex, condition))
             .await
             .inspect_err(|err| {
                 warn!(
@@ -140,6 +188,7 @@ impl SequencerClient {
                     "Failed to forward transaction conditional for sequencer",
                 );
             })?;
+        self.metrics().record_forward_latency(start.elapsed());
         Ok(tx_hash)
     }
 }
@@ -150,6 +199,8 @@ struct SequencerClientInner {
     sequencer_endpoint: String,
     /// The client
     client: Client,
+    // Metrics for tracking sequencer forwarding
+    metrics: SequencerMetrics,
 }
 
 #[cfg(test)]

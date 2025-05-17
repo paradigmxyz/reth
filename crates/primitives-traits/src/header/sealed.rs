@@ -99,6 +99,11 @@ impl<H: Sealable> SealedHeader<H> {
         let hash = self.hash();
         (self.header, hash)
     }
+
+    /// Returns references to both the header and hash without taking ownership.
+    pub fn split_ref(&self) -> (&H, &BlockHash) {
+        (self.header(), self.hash_ref())
+    }
 }
 
 impl<H: Sealable> SealedHeader<&H> {

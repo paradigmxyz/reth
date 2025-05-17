@@ -201,6 +201,11 @@ where
         self.identifiers.write().sender_id_or_create(addr)
     }
 
+    /// Returns the internal [`SenderId`]s for the given addresses.
+    pub fn get_sender_ids(&self, addrs: impl IntoIterator<Item = Address>) -> Vec<SenderId> {
+        self.identifiers.write().sender_ids_or_create(addrs)
+    }
+
     /// Returns all senders in the pool
     pub fn unique_senders(&self) -> HashSet<Address> {
         self.get_pool_data().unique_senders()
@@ -439,6 +444,8 @@ where
                 state_nonce,
                 transaction,
                 propagate,
+                bytecode_hash,
+                authorities,
             } => {
                 let sender_id = self.get_sender_id(transaction.sender());
                 let transaction_id = TransactionId::new(sender_id, transaction.nonce());
@@ -461,9 +468,10 @@ where
                     propagate,
                     timestamp: Instant::now(),
                     origin,
+                    authority_ids: authorities.map(|auths| self.get_sender_ids(auths)),
                 };
 
-                let added = pool.add_transaction(tx, balance, state_nonce)?;
+                let added = pool.add_transaction(tx, balance, state_nonce, bytecode_hash)?;
                 let hash = *added.hash();
 
                 // transaction was successfully inserted into the pool
@@ -726,6 +734,9 @@ where
     }
 
     /// Removes and returns all matching transactions from the pool.
+    ///
+    /// This behaves as if the transactions got discarded (_not_ mined), effectively introducing a
+    /// nonce gap for the given transactions.
     pub fn remove_transactions(
         &self,
         hashes: Vec<TxHash>,
@@ -1249,11 +1260,13 @@ mod tests {
                 [TransactionValidationOutcome::Valid {
                     balance: U256::from(1_000),
                     state_nonce: 0,
+                    bytecode_hash: None,
                     transaction: ValidTransaction::ValidWithSidecar {
                         transaction: tx,
                         sidecar: sidecar.clone(),
                     },
                     propagate: true,
+                    authorities: None,
                 }],
             );
         }
