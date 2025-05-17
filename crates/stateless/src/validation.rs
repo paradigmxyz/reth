@@ -358,6 +358,19 @@ fn fetch_account(
     address: Address,
     trie: &SparseStateTrie,
 ) -> Result<Option<TrieAccount>, ProviderError> {
+    let hashed_address = keccak256(address);
+
+    if let Some(bytes) = trie.get_account_value(&hashed_address) {
+        let account = TrieAccount::decode(&mut bytes.as_slice())?;
+        return Ok(Some(account));
+    }
+
+    if !trie.check_valid_account_witness(hashed_address) {
+        return Err(ProviderError::TrieWitnessError(format!(
+            "incomplete account witness for {hashed_address:?}"
+        )));
+    }
+
     Ok(None)
 }
 fn fetch_storage_slot(
