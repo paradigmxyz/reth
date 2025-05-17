@@ -5,17 +5,17 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
-use alloy_consensus::{Block, BlockHeader, Header};
+use alloy_consensus::{BlockHeader, Header};
 use alloy_primitives::{keccak256, map::B256Map, B256};
 use alloy_rlp::Decodable;
 use reth_chainspec::ChainSpec;
 use reth_consensus::{Consensus, HeaderValidator};
 use reth_errors::ConsensusError;
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
-use reth_ethereum_primitives::TransactionSigned;
+use reth_ethereum_primitives::Block as EthereumBlock;
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_evm_ethereum::execute::EthExecutorProvider;
-use reth_primitives_traits::RecoveredBlock;
+use reth_primitives_traits::{block::error::BlockRecoveryError, Block, RecoveredBlock};
 use reth_revm::state::Bytecode;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 use reth_trie_sparse::{blinded::DefaultBlindedProviderFactory, SparseStateTrie};
@@ -84,6 +84,10 @@ pub enum StatelessValidationError {
         /// The expected pre-state root from the previous block
         expected: B256,
     },
+
+    /// Error when recovering signers
+    #[error("error recovering the signers in the block")]
+    SignerRecovery(#[from] BlockRecoveryError<EthereumBlock>),
 }
 
 /// Performs stateless validation of a block using the provided witness data.
@@ -122,10 +126,13 @@ pub enum StatelessValidationError {
 /// If all steps succeed the function returns `Some` containing the hash of the validated
 /// `current_block`.
 pub fn stateless_validation(
-    current_block: RecoveredBlock<Block<TransactionSigned>>,
+    current_block: EthereumBlock,
     witness: ExecutionWitness,
     chain_spec: Arc<ChainSpec>,
 ) -> Result<B256, StatelessValidationError> {
+    let current_block =
+        current_block.try_into_recovered().map_err(StatelessValidationError::from)?;
+
     let mut ancestor_headers: Vec<Header> = witness
         .headers
         .iter()
@@ -209,7 +216,7 @@ pub fn stateless_validation(
 /// transition function.
 fn validate_block_consensus(
     chain_spec: Arc<ChainSpec>,
-    block: &RecoveredBlock<Block<TransactionSigned>>,
+    block: &RecoveredBlock<EthereumBlock>,
 ) -> Result<(), StatelessValidationError> {
     let consensus = EthBeaconConsensus::new(chain_spec);
 
@@ -295,7 +302,7 @@ pub fn verify_execution_witness(
 /// If both checks pass, it returns a [`BTreeMap`] mapping the block number of each
 /// ancestor header to its corresponding block hash.
 fn compute_ancestor_hashes(
-    current_block: &RecoveredBlock<Block<TransactionSigned>>,
+    current_block: &RecoveredBlock<EthereumBlock>,
     ancestor_headers: &[Header],
 ) -> Result<BTreeMap<u64, B256>, StatelessValidationError> {
     let mut ancestor_hashes = BTreeMap::new();
