@@ -1,4 +1,4 @@
-use crate::chainspec::CustomChainSpec;
+use crate::{chainspec::CustomChainSpec, primitives::CustomNodePrimitives};
 use alloy_consensus::{Block, Header};
 use alloy_evm::{
     block::{
@@ -8,8 +8,11 @@ use alloy_evm::{
     precompiles::PrecompilesMap,
     Database, Evm, EvmEnv,
 };
-use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpEvm};
+use alloy_op_evm::{
+    block::receipt_builder::OpReceiptBuilder, OpBlockExecutionCtx, OpBlockExecutor, OpEvm,
+};
 use op_revm::{OpSpecId, OpTransaction};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_ethereum::{
     evm::primitives::{
         execute::{BlockAssembler, BlockAssemblerInput},
@@ -23,8 +26,9 @@ use reth_op::{
     node::{
         OpBlockAssembler, OpEvmConfig, OpEvmFactory, OpNextBlockEnvAttributes, OpRethReceiptBuilder,
     },
-    DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned,
+    DepositReceipt, OpReceipt, OpTransactionSigned,
 };
+use reth_primitives_traits::NodePrimitives;
 use revm::{
     context::{result::ExecutionResult, TxEnv},
     database::State,
@@ -78,6 +82,12 @@ pub struct CustomBlockAssembler {
     inner: OpBlockAssembler<CustomChainSpec>,
 }
 
+impl CustomBlockAssembler {
+    pub fn new(inner: OpBlockAssembler<CustomChainSpec>) -> Self {
+        Self { inner }
+    }
+}
+
 impl<F> BlockAssembler<F> for CustomBlockAssembler
 where
     F: for<'a> BlockExecutorFactory<
@@ -103,6 +113,12 @@ where
 pub struct CustomEvmConfig {
     inner: OpEvmConfig,
     block_assembler: CustomBlockAssembler,
+}
+
+impl CustomEvmConfig {
+    pub fn new(inner: OpEvmConfig, block_assembler: CustomBlockAssembler) -> Self {
+        Self { inner, block_assembler }
+    }
 }
 
 impl BlockExecutorFactory for CustomEvmConfig {
@@ -136,7 +152,7 @@ impl BlockExecutorFactory for CustomEvmConfig {
 }
 
 impl ConfigureEvm for CustomEvmConfig {
-    type Primitives = OpPrimitives;
+    type Primitives = CustomNodePrimitives;
     type Error = <OpEvmConfig as ConfigureEvm>::Error;
     type NextBlockEnvCtx = <OpEvmConfig as ConfigureEvm>::NextBlockEnvCtx;
     type BlockExecutorFactory = Self;
