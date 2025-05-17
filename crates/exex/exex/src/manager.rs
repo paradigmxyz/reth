@@ -1358,7 +1358,7 @@ mod tests {
         // WAL shouldn't contain the genesis notification, because it's finalized
         assert_eq!(
             exex_manager.wal.iter_notifications()?.collect::<WalResult<Vec<_>>>()?,
-            [notification.clone()]
+            std::slice::from_ref(&notification)
         );
 
         finalized_headers_tx.send(Some(block.clone_sealed_header()))?;
@@ -1366,7 +1366,7 @@ mod tests {
         // WAL isn't finalized because the ExEx didn't emit the `FinishedHeight` event
         assert_eq!(
             exex_manager.wal.iter_notifications()?.collect::<WalResult<Vec<_>>>()?,
-            [notification.clone()]
+            std::slice::from_ref(&notification)
         );
 
         // Send a `FinishedHeight` event with a non-canonical block
@@ -1380,7 +1380,7 @@ mod tests {
         // non-canonical block
         assert_eq!(
             exex_manager.wal.iter_notifications()?.collect::<WalResult<Vec<_>>>()?,
-            [notification]
+            std::slice::from_ref(&notification)
         );
 
         // Send a `FinishedHeight` event with a canonical block
