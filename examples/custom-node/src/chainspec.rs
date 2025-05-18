@@ -42,8 +42,6 @@ impl Hardforks for CustomChainSpec {
 }
 
 impl EthChainSpec for CustomChainSpec {
-    type Header = CustomHeader;
-
     fn base_fee_params_at_block(
         &self,
         block_number: u64,
@@ -82,10 +80,6 @@ impl EthChainSpec for CustomChainSpec {
         self.genesis_header.hash()
     }
 
-    fn genesis_header(&self) -> &Self::Header {
-        &self.genesis_header
-    }
-
     fn final_paris_total_difficulty(&self) -> Option<revm_primitives::U256> {
         self.inner.get_final_paris_total_difficulty()
     }
@@ -101,8 +95,18 @@ impl EthereumHardforks for CustomChainSpec {
 }
 
 impl EthChainInitSpec for CustomChainSpec {
+    type Header = CustomHeader;
+
     fn genesis(&self) -> &Genesis {
         self.inner.genesis()
+    }
+
+    fn genesis_header(&self) -> &Self::Header {
+        &self.genesis_header
+    }
+
+    fn genesis_hash(&self) -> revm_primitives::B256 {
+        self.genesis_header.hash()
     }
 
     fn bootnodes(&self) -> Option<Vec<NodeRecord>> {

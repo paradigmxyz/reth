@@ -89,13 +89,12 @@ where
         + HashingWriter
         + StateWriter
         + AsRef<PF::ProviderRW>,
-    PF::ChainSpec:
-        EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader> + EthChainInitSpec,
+    PF::ChainSpec: EthChainInitSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
 {
     let chain = factory.chain_spec();
 
     let genesis = chain.genesis();
-    let hash = chain.genesis_hash();
+    let hash = EthChainInitSpec::genesis_hash(&chain);
 
     // Check if we already have the genesis header or if we have the wrong one.
     match factory.block_hash(0) {
@@ -335,7 +334,7 @@ pub fn insert_genesis_header<Provider, Spec>(
 where
     Provider: StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Compact>>
         + DBProvider<Tx: DbTxMut>,
-    Spec: EthChainSpec<Header = <Provider::Primitives as NodePrimitives>::BlockHeader>,
+    Spec: EthChainInitSpec<Header = <Provider::Primitives as NodePrimitives>::BlockHeader>,
 {
     let (header, block_hash) = (chain.genesis_header(), chain.genesis_hash());
     let static_file_provider = provider.static_file_provider();

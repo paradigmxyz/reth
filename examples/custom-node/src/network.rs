@@ -38,7 +38,7 @@ impl CustomNetworkBuilder {
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<NetworkConfig<<Node as FullNodeTypes>::Provider, CustomNetworkPrimitives>>
     where
-        Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks + EthChainInitSpec>>,
+        Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
     {
         let args = &ctx.config().network;
         let network_builder = ctx

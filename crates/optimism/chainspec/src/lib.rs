@@ -227,8 +227,6 @@ impl OpChainSpec {
 }
 
 impl EthChainSpec for OpChainSpec {
-    type Header = Header;
-
     fn chain(&self) -> Chain {
         self.inner.chain()
     }
@@ -264,10 +262,6 @@ impl EthChainSpec for OpChainSpec {
         });
 
         Box::new(DisplayHardforks::new(op_forks))
-    }
-
-    fn genesis_header(&self) -> &Self::Header {
-        self.inner.genesis_header()
     }
 
     fn is_optimism(&self) -> bool {
@@ -420,8 +414,18 @@ impl From<ChainSpec> for OpChainSpec {
 }
 
 impl EthChainInitSpec for OpChainSpec {
+    type Header = Header;
+
     fn genesis(&self) -> &Genesis {
         self.inner.genesis()
+    }
+
+    fn genesis_hash(&self) -> B256 {
+        self.inner.genesis_hash()
+    }
+
+    fn genesis_header(&self) -> &Self::Header {
+        self.inner.genesis_header()
     }
 
     fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
@@ -509,7 +513,7 @@ mod tests {
     #[test]
     fn base_mainnet_forkids() {
         let mut base_mainnet = OpChainSpecBuilder::base_mainnet().build();
-        base_mainnet.inner.genesis_header.set_hash(BASE_MAINNET.genesis_hash());
+        base_mainnet.inner.genesis_header.set_hash(EthChainInitSpec::genesis_hash(&*BASE_MAINNET));
         test_fork_ids(
             &BASE_MAINNET,
             &[
@@ -617,7 +621,7 @@ mod tests {
         let mut op_mainnet = OpChainSpecBuilder::optimism_mainnet().build();
         // for OP mainnet we have to do this because the genesis header can't be properly computed
         // from the genesis.json file
-        op_mainnet.inner.genesis_header.set_hash(OP_MAINNET.genesis_hash());
+        op_mainnet.inner.genesis_header.set_hash(EthChainInitSpec::genesis_hash(&*OP_MAINNET));
         test_fork_ids(
             &op_mainnet,
             &[
