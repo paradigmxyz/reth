@@ -784,7 +784,7 @@ where
 /// A noop Builder that satisfies the [`EngineApiBuilder`] trait without actually configuring an
 /// engine API module
 ///
-/// This is intended to be used as a workaround for re-using all the existing ethereum node launch
+/// This is intended to be used as a workaround for reusing all the existing ethereum node launch
 /// utilities which require an engine API.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
