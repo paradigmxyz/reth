@@ -19,7 +19,7 @@ use core::{
     marker::PhantomData,
     ops::{RangeBounds, RangeInclusive},
 };
-use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, MAINNET};
+use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, EthGenesis, MAINNET};
 use reth_db_models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{
@@ -107,8 +107,8 @@ impl<ChainSpec: Send + Sync, N: Send + Sync> BlockNumReader for NoopProvider<Cha
     }
 }
 
-impl<ChainSpec: EthChainSpec + 'static, N: Debug + Send + Sync + 'static> ChainSpecProvider
-    for NoopProvider<ChainSpec, N>
+impl<ChainSpec: EthChainSpec + EthGenesis + 'static, N: Debug + Send + Sync + 'static>
+    ChainSpecProvider for NoopProvider<ChainSpec, N>
 {
     type ChainSpec = ChainSpec;
 

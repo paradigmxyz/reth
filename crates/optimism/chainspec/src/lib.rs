@@ -61,7 +61,8 @@ pub use base_sepolia::BASE_SEPOLIA;
 use derive_more::{Constructor, Deref, From, Into};
 use reth_chainspec::{
     BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract,
-    DisplayHardforks, EthChainSpec, EthereumHardforks, ForkFilter, ForkId, Hardforks, Head,
+    DisplayHardforks, EthChainSpec, EthGenesis, EthereumHardforks, ForkFilter, ForkId, Hardforks,
+    Head,
 };
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition};
 use reth_network_peers::NodeRecord;
@@ -269,10 +270,6 @@ impl EthChainSpec for OpChainSpec {
         self.inner.genesis_header()
     }
 
-    fn genesis(&self) -> &Genesis {
-        self.inner.genesis()
-    }
-
     fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
         self.inner.bootnodes()
     }
@@ -423,6 +420,12 @@ impl From<Genesis> for OpChainSpec {
 impl From<ChainSpec> for OpChainSpec {
     fn from(value: ChainSpec) -> Self {
         Self { inner: value }
+    }
+}
+
+impl EthGenesis for OpChainSpec {
+    fn genesis(&self) -> &Genesis {
+        self.inner.genesis()
     }
 }
 

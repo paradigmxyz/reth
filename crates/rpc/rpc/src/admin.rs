@@ -7,7 +7,9 @@ use alloy_rpc_types_admin::{
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks, ForkCondition};
+use reth_chainspec::{
+    EthChainSpec, EthGenesis, EthereumHardfork, EthereumHardforks, ForkCondition,
+};
 use reth_network_api::{NetworkInfo, Peers};
 use reth_network_peers::{id2pk, AnyNode, NodeRecord};
 use reth_network_types::PeerKind;
@@ -35,7 +37,7 @@ impl<N, ChainSpec> AdminApi<N, ChainSpec> {
 impl<N, ChainSpec> AdminApiServer for AdminApi<N, ChainSpec>
 where
     N: NetworkInfo + Peers + 'static,
-    ChainSpec: EthChainSpec + EthereumHardforks + Send + Sync + 'static,
+    ChainSpec: EthChainSpec + EthGenesis + EthereumHardforks + Send + Sync + 'static,
 {
     /// Handler for `admin_addPeer`
     fn add_peer(&self, record: NodeRecord) -> RpcResult<bool> {
