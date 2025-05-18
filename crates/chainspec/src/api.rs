@@ -12,9 +12,6 @@ use reth_network_peers::NodeRecord;
 /// Trait representing type configuring a chain spec.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait EthChainSpec: Send + Sync + Unpin + Debug {
-    /// The header type of the network.
-    type Header;
-
     /// Returns the [`Chain`] object this spec targets.
     fn chain(&self) -> Chain;
 
@@ -44,9 +41,6 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     /// Returns a string representation of the hardforks.
     fn display_hardforks(&self) -> Box<dyn Display>;
 
-    /// The genesis header.
-    fn genesis_header(&self) -> &Self::Header;
-
     /// Returns `true` if this chain contains Optimism configuration.
     fn is_optimism(&self) -> bool {
         self.chain().is_optimism()
@@ -67,16 +61,23 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
 /// to initialize the chain and not for block validation.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait EthChainInitSpec {
+    /// The header type of the network.
+    type Header;
+
     /// The genesis block specification.
     fn genesis(&self) -> &Genesis;
+
+    /// The genesis header.
+    fn genesis_header(&self) -> &Self::Header;
+
+    /// The genesis hash.
+    fn genesis_hash(&self) -> B256;
 
     /// The bootnodes for the chain, if any.
     fn bootnodes(&self) -> Option<Vec<NodeRecord>>;
 }
 
 impl EthChainSpec for ChainSpec {
-    type Header = Header;
-
     fn chain(&self) -> Chain {
         self.chain
     }
@@ -119,10 +120,6 @@ impl EthChainSpec for ChainSpec {
         Box::new(Self::display_hardforks(self))
     }
 
-    fn genesis_header(&self) -> &Self::Header {
-        self.genesis_header()
-    }
-
     fn is_optimism(&self) -> bool {
         false
     }
@@ -133,8 +130,18 @@ impl EthChainSpec for ChainSpec {
 }
 
 impl EthChainInitSpec for ChainSpec {
+    type Header = Header;
+
     fn genesis(&self) -> &Genesis {
         self.genesis()
+    }
+
+    fn genesis_hash(&self) -> B256 {
+        self.genesis_hash()
+    }
+
+    fn genesis_header(&self) -> &Self::Header {
+        self.genesis_header()
     }
 
     fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
