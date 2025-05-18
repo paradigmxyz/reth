@@ -393,7 +393,7 @@ clippy:
 	-- -D warnings
 
 lint-codespell: ensure-codespell
-	codespell --skip "*.json" --skip "./testing/ef-tests/ethereum-tests"
+	codespell --skip "*.json" --skip "./testing/ef-tests/ethereum-tests" -L wit
 
 ensure-codespell:
 	@if ! command -v codespell &> /dev/null; then \
