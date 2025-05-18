@@ -43,6 +43,11 @@ pub(crate) mod witness_db;
 /// ForkSpec module
 /// This is needed because ChainSpec is not serializable (neither is genesis)
 ///
+/// Note: There is an exact copy of ForkSpec in `ef-tests` but since ef-tests is not no_std
+/// we cannot pull that in since we need ForkSpec in the guest program.
+///
+/// We convert the ef-tests version of ForkSpec in the host into the one located in here.
+///
 /// When we parse execution spec tests, we get back a ForkSpec, that we then pass into
 /// the guest program and convert it into a ChainSpec. If someone is using Hoodi/Mainnet
 /// etc, then this may not be needed, as you can just do ChainSpec::mainnet() in the guest program
