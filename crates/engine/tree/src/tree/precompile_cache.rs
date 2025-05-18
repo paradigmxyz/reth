@@ -3,8 +3,12 @@
 use alloy_primitives::Bytes;
 use reth_evm::precompiles::{DynPrecompile, Precompile};
 use revm::precompile::{PrecompileOutput, PrecompileResult};
-use revm_primitives::{Address, HashMap};
-use std::{hash::Hash, sync::Arc};
+use revm_primitives::Address;
+use std::{
+    collections::HashMap,
+    hash::Hash,
+    sync::Arc,
+};
 use parking_lot::RwLock;
 use schnellru::LruMap;
 
@@ -47,6 +51,8 @@ where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     fn get(&self, key: &CacheKey<S>) -> Option<CacheEntry> {
+        // LruMap's get() method requires a mutable reference since it updates the LRU order
+        // So we need to use a write lock here
         self.0.read().get(key).cloned()
     }
 
@@ -169,13 +175,12 @@ where
     }
 }
 
-// Remove this implementation if not needed in the generic version
-// or adapt to work with the generic key
-// impl std::borrow::Borrow<[u8]> for CacheKey {
-//     fn borrow(&self) -> &[u8] {
-//         self.0.as_ref()
-//     }
-// }
+// We can add the Borrow trait implementation for the generic CacheKey
+impl<S> std::borrow::Borrow<[u8]> for CacheKey<S> {
+    fn borrow(&self) -> &[u8] {
+        self.0.1.as_ref() // Access the Bytes part of the tuple
+    }
+}
 
 /// Metrics for the cached precompile.
 #[derive(reth_metrics::Metrics, Clone)]
