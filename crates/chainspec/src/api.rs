@@ -64,12 +64,12 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     fn final_paris_total_difficulty(&self) -> Option<U256>;
 }
 
-/// Trait representing a type for initializing the genesis state
+/// Trait representing a type for initializing the chain
 ///
 /// Note: This is not a part of `EthChainSpec` because it is only needed
-/// to initialize the genesis state and not for block validation.
+/// to initialize the chain and not for block validation.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait EthGenesis {
+pub trait EthChainInitSpec {
     /// The genesis block specification.
     fn genesis(&self) -> &Genesis;
 }
@@ -136,7 +136,7 @@ impl EthChainSpec for ChainSpec {
     }
 }
 
-impl EthGenesis for ChainSpec {
+impl EthChainInitSpec for ChainSpec {
     fn genesis(&self) -> &Genesis {
         self.genesis()
     }

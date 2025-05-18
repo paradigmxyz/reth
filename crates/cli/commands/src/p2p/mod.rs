@@ -5,7 +5,7 @@ use std::{path::PathBuf, sync::Arc};
 use alloy_eips::BlockHashOrNumber;
 use backon::{ConstantBuilder, Retryable};
 use clap::{Parser, Subcommand};
-use reth_chainspec::{EthChainSpec, EthGenesis, EthereumHardforks, Hardforks};
+use reth_chainspec::{EthChainSpec, EthChainInitSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::{get_secret_key, hash_or_num_value_parser};
 use reth_config::Config;
@@ -74,7 +74,7 @@ pub enum Subcommands {
     Rlpx(rlpx::Command),
 }
 
-impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthGenesis + Hardforks + EthereumHardforks>>
+impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthChainInitSpec + Hardforks + EthereumHardforks>>
     Command<C>
 {
     /// Execute `p2p` command

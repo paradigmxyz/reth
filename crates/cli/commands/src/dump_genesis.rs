@@ -2,7 +2,7 @@
 use std::sync::Arc;
 
 use clap::Parser;
-use reth_chainspec::{EthChainSpec, EthGenesis};
+use reth_chainspec::{EthChainSpec, EthChainInitSpec};
 use reth_cli::chainspec::ChainSpecParser;
 
 /// Dumps genesis block JSON configuration to stdout
@@ -21,7 +21,7 @@ pub struct DumpGenesisCommand<C: ChainSpecParser> {
     chain: Arc<C::ChainSpec>,
 }
 
-impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthGenesis>> DumpGenesisCommand<C> {
+impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthChainInitSpec>> DumpGenesisCommand<C> {
     /// Execute the `dump-genesis` command
     pub async fn execute(self) -> eyre::Result<()> {
         println!("{}", serde_json::to_string_pretty(self.chain.genesis())?);

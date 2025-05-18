@@ -14,7 +14,7 @@ pub use reth_primitives_traits::{
     Block, BlockBody, FullBlock, FullNodePrimitives, FullReceipt, FullSignedTx, NodePrimitives,
 };
 
-use reth_chainspec::{EthChainSpec, EthGenesis};
+use reth_chainspec::{EthChainSpec, EthChainInitSpec};
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_primitives::EngineTypes;
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};
@@ -30,7 +30,7 @@ pub trait NodeTypes: Clone + Debug + Send + Sync + Unpin + 'static {
     type Primitives: NodePrimitives;
     /// The type used for configuration of the EVM.
     type ChainSpec: EthChainSpec<Header = <Self::Primitives as NodePrimitives>::BlockHeader>
-        + EthGenesis;
+        + EthChainInitSpec;
     /// The type used to perform state commitment operations.
     type StateCommitment: StateCommitment;
     /// The type responsible for writing chain primitives to storage.
@@ -127,7 +127,7 @@ impl<P, C, SC, S, PL> AnyNodeTypes<P, C, SC, S, PL> {
 impl<P, C, SC, S, PL> NodeTypes for AnyNodeTypes<P, C, SC, S, PL>
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
-    C: EthChainSpec<Header = P::BlockHeader> + Clone + EthGenesis + 'static,
+    C: EthChainSpec<Header = P::BlockHeader> + Clone + EthChainInitSpec + 'static,
     SC: StateCommitment,
     S: Default + Clone + Send + Sync + Unpin + Debug + 'static,
     PL: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = P>> + Send + Sync + Unpin + 'static,
@@ -189,7 +189,7 @@ impl<P, E, C, SC, S, PL> NodeTypes for AnyNodeTypesWithEngine<P, E, C, SC, S, PL
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
     E: EngineTypes + Send + Sync + Unpin,
-    C: EthChainSpec<Header = P::BlockHeader> + Clone + EthGenesis + 'static,
+    C: EthChainSpec<Header = P::BlockHeader> + Clone + EthChainInitSpec + 'static,
     SC: StateCommitment,
     S: Default + Clone + Send + Sync + Unpin + Debug + 'static,
     PL: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = P>> + Send + Sync + Unpin + 'static,

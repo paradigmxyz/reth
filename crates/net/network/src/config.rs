@@ -6,7 +6,7 @@ use crate::{
     transactions::TransactionsManagerConfig,
     NetworkHandle, NetworkManager,
 };
-use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthGenesis, Hardforks};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthChainInitSpec, Hardforks};
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOVERY_ADDRESS};
 use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
@@ -547,7 +547,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         chain_spec: Arc<ChainSpec>,
     ) -> NetworkConfig<NoopProvider<ChainSpec>, N>
     where
-        ChainSpec: EthChainSpec + EthGenesis + Hardforks + 'static,
+        ChainSpec: EthChainSpec + EthChainInitSpec + Hardforks + 'static,
     {
         self.build(NoopProvider::eth(chain_spec))
     }
@@ -572,7 +572,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     /// establishing a connection.
     pub fn build<C>(self, client: C) -> NetworkConfig<C, N>
     where
-        C: ChainSpecProvider<ChainSpec: Hardforks + EthGenesis>,
+        C: ChainSpecProvider<ChainSpec: Hardforks + EthChainInitSpec>,
     {
         let peer_id = self.get_peer_id();
         let chain_spec = client.chain_spec();

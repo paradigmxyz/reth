@@ -3,7 +3,7 @@ use alloy_evm::eth::spec::EthExecutorSpec;
 
 use crate::{
     constants::{MAINNET_DEPOSIT_CONTRACT, MAINNET_PRUNE_DELETE_LIMIT},
-    EthChainSpec, EthGenesis,
+    EthChainSpec, EthChainInitSpec,
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, NamedChain};
@@ -772,7 +772,7 @@ impl EthereumHardforks for ChainSpec {
 #[auto_impl::auto_impl(&, Arc)]
 pub trait ChainSpecProvider: Debug + Send + Sync {
     /// The chain spec type.
-    type ChainSpec: EthChainSpec + EthGenesis + 'static;
+    type ChainSpec: EthChainSpec + EthChainInitSpec + 'static;
 
     /// Get an [`Arc`] to the chainspec.
     fn chain_spec(&self) -> Arc<Self::ChainSpec>;

@@ -2,7 +2,7 @@
 use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use clap::Parser;
 use itertools::Itertools;
-use reth_chainspec::EthGenesis;
+use reth_chainspec::EthChainInitSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_db::{mdbx::tx::Tx, static_file::iter_static_files, DatabaseError};
 use reth_db_api::{

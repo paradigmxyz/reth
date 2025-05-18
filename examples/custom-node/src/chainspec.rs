@@ -1,7 +1,7 @@
 use crate::primitives::CustomHeader;
 use alloy_genesis::Genesis;
 use reth_ethereum::{
-    chainspec::{EthChainSpec, EthGenesis, EthereumHardforks, Hardfork, Hardforks},
+    chainspec::{EthChainInitSpec, EthChainSpec, EthereumHardforks, Hardfork, Hardforks},
     primitives::SealedHeader,
 };
 use reth_network_peers::NodeRecord;
@@ -104,7 +104,7 @@ impl EthereumHardforks for CustomChainSpec {
     }
 }
 
-impl EthGenesis for CustomChainSpec {
+impl EthChainInitSpec for CustomChainSpec {
     fn genesis(&self) -> &Genesis {
         self.inner.genesis()
     }
