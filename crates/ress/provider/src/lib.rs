@@ -188,8 +188,8 @@ where
         };
 
         // Insert witness into the cache.
-        let wit = Arc::new(witness.clone());
-        self.witness_cache.lock().insert(block_hash, wit);
+        let cached_witness = Arc::new(witness.clone());
+        self.witness_cache.lock().insert(block_hash, cached_witness);
 
         Ok(witness)
     }
