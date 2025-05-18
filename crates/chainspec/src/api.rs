@@ -47,9 +47,6 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     /// The genesis header.
     fn genesis_header(&self) -> &Self::Header;
 
-    /// The genesis block specification.
-    fn genesis(&self) -> &Genesis;
-
     /// The bootnodes for the chain, if any.
     fn bootnodes(&self) -> Option<Vec<NodeRecord>>;
 
@@ -65,6 +62,16 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
 
     /// Returns the final total difficulty if the Paris hardfork is known.
     fn final_paris_total_difficulty(&self) -> Option<U256>;
+}
+
+/// Trait representing a type for initializing the genesis state
+///
+/// Note: This is not a part of `EthChainSpec` because it is only needed
+/// to initialize the genesis state and not for block validation.
+#[auto_impl::auto_impl(&, Arc)]
+pub trait EthGenesis {
+    /// The genesis block specification.
+    fn genesis(&self) -> &Genesis;
 }
 
 impl EthChainSpec for ChainSpec {
@@ -116,10 +123,6 @@ impl EthChainSpec for ChainSpec {
         self.genesis_header()
     }
 
-    fn genesis(&self) -> &Genesis {
-        self.genesis()
-    }
-
     fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
         self.bootnodes()
     }
@@ -130,5 +133,11 @@ impl EthChainSpec for ChainSpec {
 
     fn final_paris_total_difficulty(&self) -> Option<U256> {
         self.paris_block_and_final_difficulty.map(|(_, final_difficulty)| final_difficulty)
+    }
+}
+
+impl EthGenesis for ChainSpec {
+    fn genesis(&self) -> &Genesis {
+        self.genesis()
     }
 }
