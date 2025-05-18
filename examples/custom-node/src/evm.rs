@@ -1,5 +1,8 @@
-use crate::{chainspec::CustomChainSpec, primitives::CustomNodePrimitives};
-use alloy_consensus::{Block, Header};
+use crate::{
+    chainspec::CustomChainSpec,
+    primitives::{block::Block, CustomHeader, CustomNodePrimitives, CustomTransaction},
+};
+use alloy_consensus::Header;
 use alloy_evm::{
     block::{
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
@@ -44,7 +47,7 @@ where
     DB: Database + 'db,
     E: Evm<DB = &'db mut State<DB>, Tx = OpTransaction<TxEnv>>,
 {
-    type Transaction = OpTransactionSigned;
+    type Transaction = CustomTransaction;
     type Receipt = OpReceipt;
     type Evm = E;
 
@@ -96,14 +99,15 @@ where
         Receipt: Receipt + DepositReceipt,
     >,
 {
-    // TODO: use custom block here
-    type Block = Block<OpTransactionSigned>;
+    type Block = Block;
 
     fn assemble_block(
         &self,
         input: BlockAssemblerInput<'_, '_, F>,
     ) -> Result<Self::Block, BlockExecutionError> {
         let block = self.inner.assemble_block(input)?;
+        let block = block.convert_transactions::<CustomTransaction>();
+        let block = block.map_header(CustomHeader::from);
 
         Ok(block)
     }
@@ -180,7 +184,7 @@ impl ConfigureEvm for CustomEvmConfig {
 
     fn context_for_block(
         &self,
-        block: &SealedBlock<Block<OpTransactionSigned>>,
+        block: &SealedBlock<alloy_consensus::Block<OpTransactionSigned>>,
     ) -> OpBlockExecutionCtx {
         self.inner.context_for_block(block)
     }
