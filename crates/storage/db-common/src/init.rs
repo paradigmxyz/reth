@@ -3,7 +3,7 @@
 use alloy_consensus::BlockHeader;
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{map::HashMap, Address, B256, U256};
-use reth_chainspec::{EthChainSpec, EthChainInitSpec};
+use reth_chainspec::{EthChainInitSpec, EthChainSpec};
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
 use reth_db_api::{tables, transaction::DbTxMut, DatabaseError};

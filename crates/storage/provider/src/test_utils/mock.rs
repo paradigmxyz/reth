@@ -13,7 +13,7 @@ use alloy_primitives::{
 };
 use parking_lot::Mutex;
 use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions};
-use reth_chainspec::{ChainInfo, EthChainSpec, EthChainInitSpec};
+use reth_chainspec::{ChainInfo, EthChainInitSpec, EthChainSpec};
 use reth_db_api::{
     mock::{DatabaseMock, TxMock},
     models::{AccountBeforeTx, StoredBlockBodyIndices},

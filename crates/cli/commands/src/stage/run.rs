@@ -6,7 +6,7 @@ use crate::common::{AccessRights, CliNodeComponents, CliNodeTypes, Environment, 
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::Sealable;
 use clap::Parser;
-use reth_chainspec::{EthChainSpec, EthChainInitSpec, EthereumHardforks, Hardforks};
+use reth_chainspec::{EthChainInitSpec, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
@@ -101,8 +101,9 @@ pub struct Command<C: ChainSpecParser> {
     network: NetworkArgs,
 }
 
-impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthChainInitSpec + Hardforks + EthereumHardforks>>
-    Command<C>
+impl<
+        C: ChainSpecParser<ChainSpec: EthChainSpec + EthChainInitSpec + Hardforks + EthereumHardforks>,
+    > Command<C>
 {
     /// Execute `stage` command
     pub async fn execute<N, Comp, F, P>(self, ctx: CliContext, components: F) -> eyre::Result<()>

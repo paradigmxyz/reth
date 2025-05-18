@@ -19,7 +19,7 @@ use core::{
     marker::PhantomData,
     ops::{RangeBounds, RangeInclusive},
 };
-use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, EthChainInitSpec, MAINNET};
+use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainInitSpec, EthChainSpec, MAINNET};
 use reth_db_models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{

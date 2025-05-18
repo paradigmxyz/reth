@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::common::{CliNodeComponents, CliNodeTypes};
 use clap::{Parser, Subcommand};
-use reth_chainspec::{EthChainSpec, EthChainInitSpec, EthereumHardforks, Hardforks};
+use reth_chainspec::{EthChainInitSpec, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_eth_wire::NetPrimitivesFor;
@@ -39,8 +39,9 @@ pub enum Subcommands<C: ChainSpecParser> {
     Unwind(unwind::Command<C>),
 }
 
-impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthChainInitSpec + Hardforks + EthereumHardforks>>
-    Command<C>
+impl<
+        C: ChainSpecParser<ChainSpec: EthChainSpec + EthChainInitSpec + Hardforks + EthereumHardforks>,
+    > Command<C>
 {
     /// Execute `stage` command
     pub async fn execute<N, Comp, F, P>(self, ctx: CliContext, components: F) -> eyre::Result<()>

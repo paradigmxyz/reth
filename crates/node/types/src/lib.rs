@@ -14,7 +14,7 @@ pub use reth_primitives_traits::{
     Block, BlockBody, FullBlock, FullNodePrimitives, FullReceipt, FullSignedTx, NodePrimitives,
 };
 
-use reth_chainspec::{EthChainSpec, EthChainInitSpec};
+use reth_chainspec::{EthChainInitSpec, EthChainSpec};
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_primitives::EngineTypes;
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};

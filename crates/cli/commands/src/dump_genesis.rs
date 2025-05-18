@@ -2,7 +2,7 @@
 use std::sync::Arc;
 
 use clap::Parser;
-use reth_chainspec::{EthChainSpec, EthChainInitSpec};
+use reth_chainspec::{EthChainInitSpec, EthChainSpec};
 use reth_cli::chainspec::ChainSpecParser;
 
 /// Dumps genesis block JSON configuration to stdout
