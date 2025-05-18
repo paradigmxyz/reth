@@ -3,11 +3,8 @@
 use reth_evm::precompiles::{DynPrecompile, Precompile};
 use revm::precompile::{PrecompileOutput, PrecompileResult};
 use revm_primitives::{Address, Bytes};
-use std::{
-    collections::HashMap,
-    hash::Hash,
-    sync::{Arc, RwLock},
-};
+use schnellru::LruMap;
+use std::{collections::HashMap, hash::Hash, sync::Arc};
 
 /// Stores caches for each precompile.
 #[derive(Debug, Clone, Default)]
@@ -21,31 +18,26 @@ impl PrecompileCacheMap {
 
 /// Cache for precompiles, for each input stores the result.
 #[derive(Debug, Clone)]
-pub struct PrecompileCache(
-    Arc<RwLock<HashMap<CacheKey, CacheEntry, alloy_primitives::map::DefaultHashBuilder>>>,
-);
+pub struct PrecompileCache(Arc<parking_lot::RwLock<LruMap<CacheKey, CacheEntry>>>);
 
 impl Default for PrecompileCache {
     fn default() -> Self {
-        Self(Arc::new(RwLock::new(HashMap::with_hasher(
-            alloy_primitives::map::DefaultHashBuilder::default(),
-        ))))
+        Self(Arc::new(parking_lot::RwLock::new(LruMap::new(schnellru::ByLength::new(100_000)))))
     }
 }
 
 impl PrecompileCache {
     fn get(&self, key: &[u8]) -> Option<CacheEntry> {
-        self.0.read().ok()?.get(key).cloned()
+        let lookup_key = CacheKey(Bytes::copy_from_slice(key));
+        self.0.write().get(&lookup_key).cloned()
     }
 
     fn insert(&self, key: CacheKey, value: CacheEntry) {
-        if let Ok(mut map) = self.0.write() {
-            map.insert(key, value);
-        }
+        self.0.write().insert(key, value);
     }
 
     fn weighted_size(&self) -> u64 {
-        self.0.read().map(|map| map.len() as u64).unwrap_or(0)
+        self.0.read().len() as u64
     }
 }
 
@@ -135,12 +127,6 @@ impl Precompile for CachedPrecompile {
     }
 }
 
-impl std::borrow::Borrow<[u8]> for CacheKey {
-    fn borrow(&self) -> &[u8] {
-        self.0.as_ref()
-    }
-}
-
 /// Metrics for the cached precompile.
 #[derive(reth_metrics::Metrics, Clone)]
 #[metrics(scope = "sync.caching")]
@@ -153,7 +139,7 @@ pub(crate) struct CachedPrecompileMetrics {
 
     /// Precompile cache size
     ///
-    /// NOTE: this uses the moka caches`weighted_size` method to calculate size.
+    /// Tracks the number of items currently stored in the precompile LRU cache.
     precompile_cache_size: metrics::Gauge,
 
     /// Precompile execution errors.
