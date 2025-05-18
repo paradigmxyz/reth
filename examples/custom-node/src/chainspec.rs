@@ -62,10 +62,6 @@ impl EthChainSpec for CustomChainSpec {
         self.inner.base_fee_params_at_timestamp(timestamp)
     }
 
-    fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
-        self.inner.bootnodes()
-    }
-
     fn chain(&self) -> reth_ethereum::chainspec::Chain {
         self.inner.chain()
     }
@@ -107,6 +103,10 @@ impl EthereumHardforks for CustomChainSpec {
 impl EthChainInitSpec for CustomChainSpec {
     fn genesis(&self) -> &Genesis {
         self.inner.genesis()
+    }
+
+    fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
+        self.inner.bootnodes()
     }
 }
 

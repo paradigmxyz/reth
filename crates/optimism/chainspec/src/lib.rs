@@ -270,10 +270,6 @@ impl EthChainSpec for OpChainSpec {
         self.inner.genesis_header()
     }
 
-    fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
-        self.inner.bootnodes()
-    }
-
     fn is_optimism(&self) -> bool {
         true
     }
@@ -426,6 +422,10 @@ impl From<ChainSpec> for OpChainSpec {
 impl EthChainInitSpec for OpChainSpec {
     fn genesis(&self) -> &Genesis {
         self.inner.genesis()
+    }
+
+    fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
+        self.inner.bootnodes()
     }
 }
 

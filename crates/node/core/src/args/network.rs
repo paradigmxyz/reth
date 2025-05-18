@@ -7,7 +7,7 @@ use std::{
 };
 
 use clap::Args;
-use reth_chainspec::EthChainSpec;
+use reth_chainspec::EthChainInitSpec;
 use reth_config::Config;
 use reth_discv4::{NodeRecord, DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
 use reth_discv5::{
@@ -220,7 +220,7 @@ impl NetworkArgs {
     pub fn network_config<N: NetworkPrimitives>(
         &self,
         config: &Config,
-        chain_spec: impl EthChainSpec,
+        chain_spec: impl EthChainInitSpec,
         secret_key: SecretKey,
         default_peers_file: PathBuf,
     ) -> NetworkConfigBuilder<N> {

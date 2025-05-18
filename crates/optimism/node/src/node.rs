@@ -7,7 +7,7 @@ use crate::{
     OpEngineApiBuilder, OpEngineTypes,
 };
 use op_alloy_consensus::{interop::SafetyLevel, OpPooledTransaction};
-use reth_chainspec::{EthChainSpec, Hardforks};
+use reth_chainspec::{EthChainInitSpec, Hardforks};
 use reth_evm::{ConfigureEvm, EvmFactory, EvmFactoryFor};
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives, PeersInfo};
 use reth_node_api::{
@@ -767,7 +767,7 @@ impl OpNetworkBuilder {
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<NetworkConfig<<Node as FullNodeTypes>::Provider, OpNetworkPrimitives>>
     where
-        Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
+        Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks + EthChainInitSpec>>,
     {
         let Self { disable_txpool_gossip, disable_discovery_v4 } = self.clone();
         let args = &ctx.config().network;
