@@ -47,9 +47,6 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     /// The genesis header.
     fn genesis_header(&self) -> &Self::Header;
 
-    /// The bootnodes for the chain, if any.
-    fn bootnodes(&self) -> Option<Vec<NodeRecord>>;
-
     /// Returns `true` if this chain contains Optimism configuration.
     fn is_optimism(&self) -> bool {
         self.chain().is_optimism()
@@ -72,6 +69,9 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
 pub trait EthChainInitSpec {
     /// The genesis block specification.
     fn genesis(&self) -> &Genesis;
+
+    /// The bootnodes for the chain, if any.
+    fn bootnodes(&self) -> Option<Vec<NodeRecord>>;
 }
 
 impl EthChainSpec for ChainSpec {
@@ -123,10 +123,6 @@ impl EthChainSpec for ChainSpec {
         self.genesis_header()
     }
 
-    fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
-        self.bootnodes()
-    }
-
     fn is_optimism(&self) -> bool {
         false
     }
@@ -139,5 +135,9 @@ impl EthChainSpec for ChainSpec {
 impl EthChainInitSpec for ChainSpec {
     fn genesis(&self) -> &Genesis {
         self.genesis()
+    }
+
+    fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
+        self.bootnodes()
     }
 }
