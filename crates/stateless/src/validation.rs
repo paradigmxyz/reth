@@ -1,6 +1,7 @@
 use crate::{witness_db::WitnessDatabase, ExecutionWitness};
 use alloc::{
     collections::BTreeMap,
+    fmt::Debug,
     string::{String, ToString},
     sync::Arc,
     vec::Vec,
@@ -8,13 +9,12 @@ use alloc::{
 use alloy_consensus::{Block, BlockHeader, Header};
 use alloy_primitives::{keccak256, map::B256Map, B256};
 use alloy_rlp::Decodable;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, HeaderValidator};
 use reth_errors::ConsensusError;
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
-use reth_ethereum_primitives::TransactionSigned;
+use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_primitives_traits::RecoveredBlock;
 use reth_revm::state::Bytecode;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
@@ -121,10 +121,14 @@ pub enum StatelessValidationError {
 ///
 /// If all steps succeed the function returns `Some` containing the hash of the validated
 /// `current_block`.
-pub fn stateless_validation(
+pub fn stateless_validation<
+    ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug,
+    E: ConfigureEvm<Primitives = EthPrimitives> + Clone + 'static,
+>(
     current_block: RecoveredBlock<Block<TransactionSigned>>,
     witness: ExecutionWitness,
     chain_spec: Arc<ChainSpec>,
+    evm_config: E,
 ) -> Result<B256, StatelessValidationError> {
     let mut ancestor_headers: Vec<Header> = witness
         .headers
@@ -163,8 +167,7 @@ pub fn stateless_validation(
     let db = WitnessDatabase::new(&sparse_trie, bytecode, ancestor_hashes);
 
     // Execute the block
-    let basic_block_executor = EthExecutorProvider::ethereum(chain_spec.clone());
-    let executor = basic_block_executor.batch_executor(db);
+    let executor = evm_config.batch_executor(db);
     let output = executor
         .execute(&current_block)
         .map_err(|e| StatelessValidationError::StatelessExecutionFailed(e.to_string()))?;
@@ -207,7 +210,7 @@ pub fn stateless_validation(
 ///
 /// This function acts as a preliminary validation before executing and validating the state
 /// transition function.
-fn validate_block_consensus(
+fn validate_block_consensus<ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug>(
     chain_spec: Arc<ChainSpec>,
     block: &RecoveredBlock<Block<TransactionSigned>>,
 ) -> Result<(), StatelessValidationError> {
