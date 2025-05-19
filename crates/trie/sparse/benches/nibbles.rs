@@ -57,7 +57,7 @@ fn generate_prefixed_nibbles(
     (nibbles1, nibbles2)
 }
 
-fn bench_common_prefixes(c: &mut Criterion) {
+fn bench_common_prefix_length(c: &mut Criterion) {
     let mut rng = rand::rng();
 
     for size in [32, 64] {
@@ -76,12 +76,12 @@ fn bench_common_prefixes(c: &mut Criterion) {
             group.bench_with_input(
                 BenchmarkId::new("Nibbles", prefix_percent),
                 &prefix_percent,
-                |b, _| b.iter(|| nybbles1.eq(&nybbles2)),
+                |b, _| b.iter(|| nybbles1.common_prefix_length(&nybbles2)),
             );
             group.bench_with_input(
                 BenchmarkId::new("PackedNibbles", prefix_percent),
                 &prefix_percent,
-                |b, _| b.iter(|| packed1.eq(&packed2)),
+                |b, _| b.iter(|| packed1.common_prefix_length(&packed2)),
             );
         }
         group.finish();
@@ -215,7 +215,7 @@ fn bench_ord(c: &mut Criterion) {
 criterion_group!(
     benches,
     bench_eq,
-    bench_common_prefixes,
+    bench_common_prefix_length,
     bench_clone,
     bench_slice,
     bench_starts_with,

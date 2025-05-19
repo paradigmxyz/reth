@@ -55,7 +55,6 @@ impl PartialOrd for PackedNibbles {
     }
 }
 
-// TODO: this can be optimized
 impl Ord for PackedNibbles {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         // Get the lengths of both byte sequences
@@ -209,19 +208,23 @@ impl PackedNibbles {
 
     /// Returns the length of the common prefix between this [`PackedNibbles`] and `other`.
     pub fn common_prefix_length(&self, other: &Self) -> usize {
-        let len = core::cmp::min(self.len(), other.len());
+        let self_len = self.nibbles.len();
+        let other_len = other.nibbles.len();
+        let min_len = core::cmp::min(self_len, other_len);
 
-        // TODO: this can be optimized
+        for i in 0..min_len {
+            let self_nibble = self.nibbles[i];
+            let other_nibble = self.nibbles[i];
+            if self_nibble != other_nibble {
+                if self_nibble & 0xF0 != other_nibble & 0xF0 {
+                    return i * 2
+                }
 
-        // Compare each nibble individually until a mismatch is found
-        for i in 0..len {
-            if self.get_nibble(i) != other.get_nibble(i) {
-                return i;
+                return i * 2 + 1
             }
         }
 
-        // If no mismatch is found, return the minimum length
-        len
+        min_len * 2
     }
 
     /// Returns the last nibble in this [`PackedNibbles`], or `None` if empty.
