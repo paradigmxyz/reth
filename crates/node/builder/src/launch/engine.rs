@@ -35,7 +35,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use crate::{
     common::{Attached, LaunchContextWith, WithConfigs},
     hooks::NodeHooks,
-    rpc::{EngineValidatorAddOn, RethRpcAddOns, RpcHandle},
+    rpc::{EngineValidatorAddOn, RethRpcAddOns, RpcHandleProvider},
     setup::build_networked_pipeline,
     AddOns, AddOnsContext, ExExLauncher, FullNode, LaunchContext, LaunchNode, NodeAdapter,
     NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
@@ -77,6 +77,12 @@ where
         + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
     LocalPayloadAttributesBuilder<Types::ChainSpec>: PayloadAttributesBuilder<
         <<Types as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
+    >,
+    <AO as reth_node_api::NodeAddOns<
+        NodeAdapter<T, <CB as NodeComponentsBuilder<T>>::Components>,
+    >>::Handle: RpcHandleProvider<
+        NodeAdapter<T, <CB as NodeComponentsBuilder<T>>::Components>,
+        <AO as RethRpcAddOns<NodeAdapter<T, <CB as NodeComponentsBuilder<T>>::Components>>>::EthApi,
     >,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
@@ -279,8 +285,7 @@ where
             ),
         );
 
-        let RpcHandle { rpc_server_handles, rpc_registry, engine_events, beacon_engine_handle } =
-            add_ons.launch_add_ons(add_ons_ctx).await?;
+        let add_ons_handle = add_ons.launch_add_ons(add_ons_ctx).await?;
 
         // Run consensus engine to completion
         let initial_target = ctx.initial_backfill_target()?;
@@ -369,12 +374,7 @@ where
             task_executor: ctx.task_executor().clone(),
             config: ctx.node_config().clone(),
             data_dir: ctx.data_dir().clone(),
-            add_ons_handle: RpcHandle {
-                rpc_server_handles,
-                rpc_registry,
-                engine_events,
-                beacon_engine_handle,
-            },
+            add_ons_handle,
         };
         // Notify on node started
         on_node_started.on_event(FullNode::clone(&full_node))?;

@@ -6,7 +6,7 @@ use crate::{
     common::WithConfigs,
     components::NodeComponentsBuilder,
     node::FullNode,
-    rpc::{RethRpcAddOns, RethRpcServerHandles, RpcContext},
+    rpc::{RethRpcAddOns, RethRpcServerHandles, RpcContext, RpcHandleProvider},
     BlockReaderFor, DebugNode, DebugNodeLauncher, EngineNodeLauncher, LaunchNode, Node,
 };
 use alloy_eips::eip4844::env_settings::EnvKzgSettings;
@@ -49,6 +49,14 @@ pub use states::*;
 // Note: we need to hardcode this because custom components might depend on it in associated types.
 pub type RethFullAdapter<DB, Types> =
     FullNodeTypesAdapter<Types, DB, BlockchainProvider<NodeTypesWithDBAdapter<Types, DB>>>;
+
+/// A full node adapter for a reth node with the builtin provider type
+type FullNodeAdapter<N, DB> = NodeAdapter<
+    RethFullAdapter<DB, N>,
+    <<N as Node<RethFullAdapter<DB, N>>>::ComponentsBuilder as NodeComponentsBuilder<
+        RethFullAdapter<DB, N>,
+    >>::Components,
+>;
 
 #[expect(clippy::doc_markdown)]
 #[cfg_attr(doc, aquamarine::aquamarine)]
@@ -350,11 +358,10 @@ where
     >
     where
         N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec> + NodeTypesForProvider,
-        N::AddOns: RethRpcAddOns<
-            NodeAdapter<
-                RethFullAdapter<DB, N>,
-                <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
-            >,
+        N::AddOns: RethRpcAddOns<FullNodeAdapter<N, DB>>,
+        <N::AddOns as NodeAddOns<FullNodeAdapter<N, DB>>>::Handle: RpcHandleProvider<
+            FullNodeAdapter<N, DB>,
+            <N::AddOns as RethRpcAddOns<FullNodeAdapter<N, DB>>>::EthApi,
         >,
         N::Primitives: FullNodePrimitives,
         EngineNodeLauncher: LaunchNode<
@@ -407,6 +414,12 @@ where
     T: FullNodeTypes,
     CB: NodeComponentsBuilder<T>,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>,
+    <AO as NodeAddOns<
+        NodeAdapter<T, <CB as NodeComponentsBuilder<T>>::Components>,
+    >>::Handle: RpcHandleProvider<
+        NodeAdapter<T, <CB as NodeComponentsBuilder<T>>::Components>,
+        <AO as RethRpcAddOns<NodeAdapter<T, <CB as NodeComponentsBuilder<T>>::Components>>>::EthApi,
+    >,
 {
     /// Returns a reference to the node builder's config.
     pub const fn config(&self) -> &NodeConfig<<T::Types as NodeTypes>::ChainSpec> {

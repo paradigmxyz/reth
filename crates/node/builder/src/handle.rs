@@ -3,11 +3,18 @@ use std::fmt;
 use reth_node_api::FullNodeComponents;
 use reth_node_core::exit::NodeExitFuture;
 
-use crate::{node::FullNode, rpc::RethRpcAddOns};
+use crate::{
+    node::FullNode,
+    rpc::{RethRpcAddOns, RpcHandleProvider},
+};
 
 /// A Handle to the launched node.
 #[must_use = "Needs to await the node exit future"]
-pub struct NodeHandle<Node: FullNodeComponents, AddOns: RethRpcAddOns<Node>> {
+pub struct NodeHandle<Node: FullNodeComponents, AddOns: RethRpcAddOns<Node>>
+where
+    <AddOns as reth_node_api::NodeAddOns<Node>>::Handle:
+        RpcHandleProvider<Node, <AddOns as RethRpcAddOns<Node>>::EthApi>,
+{
     /// All node components.
     pub node: FullNode<Node, AddOns>,
     /// The exit future of the node.
@@ -18,6 +25,8 @@ impl<Node, AddOns> NodeHandle<Node, AddOns>
 where
     Node: FullNodeComponents,
     AddOns: RethRpcAddOns<Node>,
+    <AddOns as reth_node_api::NodeAddOns<Node>>::Handle:
+        RpcHandleProvider<Node, <AddOns as RethRpcAddOns<Node>>::EthApi>,
 {
     /// Waits for the node to exit, if it was configured to exit.
     pub async fn wait_for_node_exit(self) -> eyre::Result<()> {
@@ -29,6 +38,8 @@ impl<Node, AddOns> fmt::Debug for NodeHandle<Node, AddOns>
 where
     Node: FullNodeComponents,
     AddOns: RethRpcAddOns<Node>,
+    <AddOns as reth_node_api::NodeAddOns<Node>>::Handle:
+        RpcHandleProvider<Node, <AddOns as RethRpcAddOns<Node>>::EthApi>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("NodeHandle")

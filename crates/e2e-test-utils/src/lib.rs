@@ -5,9 +5,10 @@ use reth_chainspec::{ChainSpec, EthChainSpec};
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_network_api::test_utils::PeersHandleProvider;
+use reth_node_api::NodeAddOns;
 use reth_node_builder::{
     components::NodeComponentsBuilder,
-    rpc::{EngineValidatorAddOn, RethRpcAddOns},
+    rpc::{EngineValidatorAddOn, RethRpcAddOns, RpcHandleProvider},
     EngineNodeLauncher, FullNodeTypesAdapter, Node, NodeAdapter, NodeBuilder, NodeComponents,
     NodeConfig, NodeHandle, NodePrimitives, NodeTypes, NodeTypesWithDBAdapter,
     PayloadAttributesBuilder, PayloadTypes,
@@ -55,6 +56,7 @@ where
     N::AddOns: RethRpcAddOns<Adapter<N>> + EngineValidatorAddOn<Adapter<N>>,
     LocalPayloadAttributesBuilder<N::ChainSpec>:
         PayloadAttributesBuilder<<<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes>,
+    TmpNodeAddOnsHandle<N>: RpcHandleProvider<Adapter<N>, TmpNodeEthApi<N>>,
 {
     let tasks = TaskManager::current();
     let exec = tasks.executor();
@@ -117,6 +119,7 @@ where
     N: NodeBuilderHelper,
     LocalPayloadAttributesBuilder<N::ChainSpec>:
         PayloadAttributesBuilder<<N::Payload as PayloadTypes>::PayloadAttributes>,
+    TmpNodeAddOnsHandle<N>: RpcHandleProvider<Adapter<N>, TmpNodeEthApi<N>>,
 {
     let tasks = TaskManager::current();
     let exec = tasks.executor();
@@ -197,6 +200,14 @@ pub type Adapter<N, Provider = BlockchainProvider<NodeTypesWithDBAdapter<N, TmpD
     >>::Components,
 >;
 
+/// Type alias for a `NodeHandle` for a `TmpNodeAdapter`.
+pub type TmpNodeAddOnsHandle<N> =
+    <<N as Node<TmpNodeAdapter<N>>>::AddOns as NodeAddOns<Adapter<N>>>::Handle;
+
+/// Type alias for the `EthApi` for a `TmpNodeAdapter`.
+pub type TmpNodeEthApi<N> =
+    <<N as Node<TmpNodeAdapter<N>>>::AddOns as RethRpcAddOns<Adapter<N>>>::EthApi;
+
 /// Type alias for a type of `NodeHelper`
 pub type NodeHelperType<N, Provider = BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>> =
     NodeTestContext<Adapter<N, Provider>, <N as Node<TmpNodeAdapter<N, Provider>>>::AddOns>;
@@ -234,6 +245,7 @@ where
         >,
     LocalPayloadAttributesBuilder<Self::ChainSpec>:
         PayloadAttributesBuilder<<Self::Payload as PayloadTypes>::PayloadAttributes>,
+    TmpNodeAddOnsHandle<Self>: RpcHandleProvider<Adapter<Self>, TmpNodeEthApi<Self>>,
 {
 }
 
@@ -269,5 +281,6 @@ where
         >,
     LocalPayloadAttributesBuilder<Self::ChainSpec>:
         PayloadAttributesBuilder<<Self::Payload as PayloadTypes>::PayloadAttributes>,
+    TmpNodeAddOnsHandle<Self>: RpcHandleProvider<Adapter<Self>, TmpNodeEthApi<Self>>,
 {
 }

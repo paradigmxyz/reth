@@ -2,7 +2,8 @@
 
 use crate::{
     testsuite::actions::{Action, ActionBox},
-    NodeBuilderHelper, PayloadAttributesBuilder,
+    Adapter, NodeBuilderHelper, PayloadAttributesBuilder, RpcHandleProvider, TmpNodeAddOnsHandle,
+    TmpNodeEthApi,
 };
 use alloy_primitives::B256;
 use eyre::Result;
@@ -138,6 +139,7 @@ impl<I: 'static> TestBuilder<I> {
         LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
             <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
         >,
+        TmpNodeAddOnsHandle<N>: RpcHandleProvider<Adapter<N>, TmpNodeEthApi<N>>,
     {
         let mut setup = self.setup.take();
 

@@ -346,6 +346,20 @@ where
     }
 }
 
+/// Trait to provide access to the RPC handle.
+pub trait RpcHandleProvider<Node: FullNodeComponents, EthApi: EthApiTypes> {
+    /// Returns the rpc server handles.
+    fn rpc_handle(&self) -> &RpcHandle<Node, EthApi>;
+}
+
+impl<Node: FullNodeComponents, EthApi: EthApiTypes> RpcHandleProvider<Node, EthApi>
+    for RpcHandle<Node, EthApi>
+{
+    fn rpc_handle(&self) -> &Self {
+        self
+    }
+}
+
 /// Node add-ons containing RPC server configuration, with customizable eth API handler.
 ///
 /// This struct can be used to provide the RPC server functionality. It is responsible for launching
@@ -586,8 +600,9 @@ where
 
 /// Helper trait implemented for add-ons producing [`RpcHandle`]. Used by common node launcher
 /// implementations.
-pub trait RethRpcAddOns<N: FullNodeComponents>:
-    NodeAddOns<N, Handle = RpcHandle<N, Self::EthApi>>
+pub trait RethRpcAddOns<N: FullNodeComponents>: NodeAddOns<N>
+where
+    Self::Handle: RpcHandleProvider<N, Self::EthApi>,
 {
     /// eth API implementation.
     type EthApi: EthApiTypes;

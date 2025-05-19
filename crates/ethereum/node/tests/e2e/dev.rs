@@ -3,9 +3,10 @@ use alloy_genesis::Genesis;
 use alloy_primitives::{b256, hex};
 use futures::StreamExt;
 use reth_chainspec::ChainSpec;
-use reth_node_api::{BlockBody, FullNodeComponents, FullNodePrimitives, NodeTypes};
+use reth_node_api::{BlockBody, FullNodeComponents, FullNodePrimitives, NodeAddOns, NodeTypes};
 use reth_node_builder::{
-    rpc::RethRpcAddOns, EngineNodeLauncher, FullNode, NodeBuilder, NodeConfig, NodeHandle,
+    rpc::{RethRpcAddOns, RpcHandleProvider},
+    EngineNodeLauncher, FullNode, NodeBuilder, NodeConfig, NodeHandle,
 };
 use reth_node_core::args::DevArgs;
 use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
@@ -48,6 +49,7 @@ where
     N: FullNodeComponents<Provider: CanonStateSubscriptions>,
     AddOns: RethRpcAddOns<N, EthApi: EthTransactions>,
     N::Types: NodeTypes<Primitives: FullNodePrimitives>,
+    <AddOns as NodeAddOns<N>>::Handle: RpcHandleProvider<N, <AddOns as RethRpcAddOns<N>>::EthApi>,
 {
     let mut notifications = node.provider.canonical_state_stream();
 
@@ -56,7 +58,7 @@ where
         "02f876820a28808477359400847735940082520894ab0840c0e43688012c1adb0f5e3fc665188f83d28a029d394a5d630544000080c080a0a044076b7e67b5deecc63f61a8d7913fab86ca365b344b5759d1fe3563b4c39ea019eab979dd000da04dfc72bb0377c092d30fd9e1cab5ae487de49586cc8b0090"
     );
 
-    let eth_api = node.rpc_registry.eth_api();
+    let eth_api = node.rpc_handle().rpc_registry.eth_api();
 
     let hash = eth_api.send_raw_transaction(raw_tx.into()).await.unwrap();
 

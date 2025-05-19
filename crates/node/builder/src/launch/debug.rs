@@ -1,5 +1,8 @@
 use super::LaunchNode;
-use crate::{rpc::RethRpcAddOns, EngineNodeLauncher, Node, NodeHandle};
+use crate::{
+    rpc::{RethRpcAddOns, RpcHandleProvider},
+    EngineNodeLauncher, Node, NodeHandle,
+};
 use alloy_provider::network::AnyNetwork;
 use jsonrpsee::core::{DeserializeOwned, Serialize};
 use reth_chainspec::EthChainSpec;
@@ -36,10 +39,16 @@ where
     N: FullNodeComponents<Types: DebugNode<N>>,
     AddOns: RethRpcAddOns<N>,
     L: LaunchNode<Target, Node = NodeHandle<N, AddOns>>,
+    <AddOns as reth_node_api::NodeAddOns<N>>::Handle:
+        RpcHandleProvider<N, <AddOns as RethRpcAddOns<N>>::EthApi>,
 {
     type Node = NodeHandle<N, AddOns>;
 
-    async fn launch_node(self, target: Target) -> eyre::Result<Self::Node> {
+    async fn launch_node(self, target: Target) -> eyre::Result<Self::Node>
+    where
+        <AddOns as reth_node_api::NodeAddOns<N>>::Handle:
+            RpcHandleProvider<N, <AddOns as RethRpcAddOns<N>>::EthApi>,
+    {
         let handle = self.inner.launch_node(target).await?;
 
         let config = &handle.node.config;
@@ -57,7 +66,7 @@ where
                 .await?;
 
             let rpc_consensus_client = DebugConsensusClient::new(
-                handle.node.add_ons_handle.beacon_engine_handle.clone(),
+                handle.node.rpc_handle().beacon_engine_handle.clone(),
                 Arc::new(block_provider),
             );
 
@@ -89,7 +98,7 @@ where
                 N::Types::rpc_to_primitive_block,
             );
             let rpc_consensus_client = DebugConsensusClient::new(
-                handle.node.add_ons_handle.beacon_engine_handle.clone(),
+                handle.node.rpc_handle().beacon_engine_handle.clone(),
                 Arc::new(block_provider),
             );
             handle.node.task_executor.spawn_critical("etherscan consensus client", async move {

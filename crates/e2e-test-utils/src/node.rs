@@ -13,7 +13,10 @@ use reth_node_api::{
     Block, BlockBody, BlockTy, EngineApiMessageVersion, FullNodeComponents, PayloadTypes,
     PrimitivesTy,
 };
-use reth_node_builder::{rpc::RethRpcAddOns, FullNode, NodeTypes};
+use reth_node_builder::{
+    rpc::{RethRpcAddOns, RpcHandleProvider},
+    FullNode, NodeTypes,
+};
 use reth_node_core::primitives::SignedTransaction;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_provider::{
@@ -33,6 +36,7 @@ pub struct NodeTestContext<Node, AddOns>
 where
     Node: FullNodeComponents,
     AddOns: RethRpcAddOns<Node>,
+    AddOns::Handle: RpcHandleProvider<Node, <AddOns as RethRpcAddOns<Node>>::EthApi>,
 {
     /// The core structure representing the full node.
     pub inner: FullNode<Node, AddOns>,
@@ -53,6 +57,7 @@ where
     Node::Types: NodeTypes<ChainSpec: EthereumHardforks, Payload = Payload>,
     Node::Network: PeersHandleProvider,
     AddOns: RethRpcAddOns<Node>,
+    AddOns::Handle: RpcHandleProvider<Node, <AddOns as RethRpcAddOns<Node>>::EthApi>,
 {
     /// Creates a new test node
     pub async fn new(
@@ -67,7 +72,7 @@ where
             )
             .await?,
             network: NetworkTestContext::new(node.network.clone()),
-            rpc: RpcTestContext { inner: node.add_ons_handle.rpc_registry },
+            rpc: RpcTestContext { inner: node.add_ons_handle.rpc_handle().rpc_registry.clone() },
             canonical_stream: node.provider.canonical_state_stream(),
         })
     }
@@ -258,6 +263,7 @@ where
     pub async fn update_forkchoice(&self, current_head: B256, new_head: B256) -> eyre::Result<()> {
         self.inner
             .add_ons_handle
+            .rpc_handle()
             .beacon_engine_handle
             .fork_choice_updated(
                 ForkchoiceState {
@@ -283,6 +289,7 @@ where
         let block_hash = payload.block().hash();
         self.inner
             .add_ons_handle
+            .rpc_handle()
             .beacon_engine_handle
             .new_payload(Payload::block_to_payload(payload.block().clone()))
             .await?;
