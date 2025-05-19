@@ -8,14 +8,13 @@ use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{Account, AccountInfo, EIP1186AccountProofResponse};
 use alloy_serde::JsonStorageKey;
 use futures::Future;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
 use reth_evm::{ConfigureEvm, EvmEnvFor};
-use reth_provider::{
-    BlockIdReader, BlockNumReader, ChainSpecProvider, StateProvider, StateProviderBox,
-    StateProviderFactory,
-};
 use reth_rpc_eth_types::{EthApiError, PendingBlockEnv, RpcInvalidTransactionError};
+use reth_storage_api::{
+    BlockIdReader, BlockNumReader, StateProvider, StateProviderBox, StateProviderFactory,
+};
 use reth_transaction_pool::TransactionPool;
 
 /// Helper methods for `eth_` methods relating to state (accounts).
