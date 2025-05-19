@@ -17,6 +17,7 @@ use reth_codecs::{
 };
 use reth_ethereum::primitives::{serde_bincode_compat::SerdeBincodeCompat, InMemorySize};
 use reth_op::primitives::{Extended, SignedTransaction};
+use revm::context::TxEnv;
 use revm_primitives::{Address, Bytes};
 use serde::{Deserialize, Serialize};
 

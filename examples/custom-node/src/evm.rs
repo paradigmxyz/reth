@@ -9,11 +9,12 @@ use alloy_evm::{
         BlockExecutorFor, ExecutableTx, OnStateHook,
     },
     precompiles::PrecompilesMap,
-    Database, Evm, EvmEnv,
+    Database, Evm, EvmEnv, FromRecoveredTx, FromTxWithEncoded,
 };
 use alloy_op_evm::{
     block::receipt_builder::OpReceiptBuilder, OpBlockExecutionCtx, OpBlockExecutor, OpEvm,
 };
+use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
 use op_revm::{OpSpecId, OpTransaction};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_ethereum::{
@@ -32,11 +33,94 @@ use reth_op::{
     DepositReceipt, OpReceipt, OpTransactionSigned,
 };
 use reth_primitives_traits::NodePrimitives;
-use revm::{
-    context::{result::ExecutionResult, TxEnv},
-    database::State,
-};
+use reth_revm::context::TxEnv;
+use revm::{context::result::ExecutionResult, database::State};
 use std::sync::Arc;
+
+pub struct CustomTxEnv(TxEnv);
+
+impl revm::context::Transaction for CustomTxEnv {
+    type AccessListItem<'a>
+        = <TxEnv as revm::context::Transaction>::AccessListItem<'a>
+    where
+        Self: 'a;
+    type Authorization<'a>
+        = <TxEnv as revm::context::Transaction>::Authorization<'a>
+    where
+        Self: 'a;
+
+    fn tx_type(&self) -> u8 {
+        self.0.tx_type()
+    }
+
+    fn caller(&self) -> Address {
+        self.0.caller()
+    }
+
+    fn gas_limit(&self) -> u64 {
+        self.0.gas_limit()
+    }
+
+    fn value(&self) -> U256 {
+        self.0.value()
+    }
+
+    fn input(&self) -> &Bytes {
+        self.0.input()
+    }
+
+    fn nonce(&self) -> u64 {
+        self.0.nonce()
+    }
+
+    fn kind(&self) -> TxKind {
+        self.0.kind()
+    }
+
+    fn chain_id(&self) -> Option<u64> {
+        self.0.chain_id()
+    }
+
+    fn gas_price(&self) -> u128 {
+        self.0.gas_price()
+    }
+
+    fn access_list(&self) -> Option<impl Iterator<Item = Self::AccessListItem<'_>>> {
+        self.0.access_list()
+    }
+
+    fn blob_versioned_hashes(&self) -> &[B256] {
+        self.0.blob_versioned_hashes()
+    }
+
+    fn max_fee_per_blob_gas(&self) -> u128 {
+        self.0.max_fee_per_blob_gas()
+    }
+
+    fn authorization_list_len(&self) -> usize {
+        self.0.authorization_list_len()
+    }
+
+    fn authorization_list(&self) -> impl Iterator<Item = Self::Authorization<'_>> {
+        self.0.authorization_list()
+    }
+
+    fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        self.0.max_priority_fee_per_gas()
+    }
+}
+
+impl FromRecoveredTx<CustomTransaction> for CustomTxEnv {
+    fn from_recovered_tx(tx: &CustomTransaction, sender: Address) -> Self {
+        todo!()
+    }
+}
+
+impl FromTxWithEncoded<CustomTransaction> for CustomTxEnv {
+    fn from_encoded_tx(tx: &CustomTransaction, sender: Address, encoded: Bytes) -> Self {
+        todo!()
+    }
+}
 
 pub struct CustomBlockExecutor<Evm> {
     inner: OpBlockExecutor<Evm, OpRethReceiptBuilder, Arc<OpChainSpec>>,
@@ -45,7 +129,7 @@ pub struct CustomBlockExecutor<Evm> {
 impl<'db, DB, E> BlockExecutor for CustomBlockExecutor<E>
 where
     DB: Database + 'db,
-    E: Evm<DB = &'db mut State<DB>, Tx = OpTransaction<TxEnv>>,
+    E: Evm<DB = &'db mut State<DB>, Tx = OpTransaction<CustomTxEnv>>,
 {
     type Transaction = CustomTransaction;
     type Receipt = OpReceipt;
