@@ -26,13 +26,12 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
-use reth_rpc_server_types::result::internal_rpc_err;
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use std::{sync::Arc, time::Instant};
 use tokio::sync::oneshot;
-use tracing::{trace, warn};
+use tracing::{debug, trace, warn};
 
 /// The Engine API response sender.
 pub type EngineApiSender<Ok> = oneshot::Sender<EngineApiResult<Ok>>;
@@ -40,7 +39,7 @@ pub type EngineApiSender<Ok> = oneshot::Sender<EngineApiResult<Ok>>;
 /// The upper limit for payload bodies request.
 const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
 
-/// The upper limit blobs `eth_getBlobs`.
+/// The upper limit for blobs in `engine_getBlobsVx`.
 const MAX_BLOB_LIMIT: usize = 128;
 
 /// The Engine API implementation that grants the Consensus layer access to data and
@@ -389,6 +388,42 @@ where
         res
     }
 
+    /// Helper function for retrieving the build payload by id.
+    async fn get_built_payload(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<EngineT::BuiltPayload> {
+        self.inner
+            .payload_store
+            .resolve(payload_id)
+            .await
+            .ok_or(EngineApiError::UnknownPayload)?
+            .map_err(|_| EngineApiError::UnknownPayload)
+    }
+
+    /// Helper function for validating the payload timestamp and retrieving & converting the payload
+    /// into desired envelope.
+    async fn get_payload_inner<R>(
+        &self,
+        payload_id: PayloadId,
+        version: EngineApiMessageVersion,
+    ) -> EngineApiResult<R>
+    where
+        EngineT::BuiltPayload: TryInto<R>,
+    {
+        // First we fetch the payload attributes to check the timestamp
+        let attributes = self.get_payload_attributes(payload_id).await?;
+
+        // validate timestamp according to engine rules
+        validate_payload_timestamp(&self.inner.chain_spec, version, attributes.timestamp())?;
+
+        // Now resolve the payload
+        self.get_built_payload(payload_id).await?.try_into().map_err(|_| {
+            warn!(?version, "could not transform built payload");
+            EngineApiError::UnknownPayload
+        })
+    }
+
     /// Returns the most recent version of the payload that is available in the corresponding
     /// payload build process at the time of receiving this call.
     ///
@@ -402,17 +437,10 @@ where
         &self,
         payload_id: PayloadId,
     ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV1> {
-        self.inner
-            .payload_store
-            .resolve(payload_id)
-            .await
-            .ok_or(EngineApiError::UnknownPayload)?
-            .map_err(|_| EngineApiError::UnknownPayload)?
-            .try_into()
-            .map_err(|_| {
-                warn!("could not transform built payload into ExecutionPayloadV1");
-                EngineApiError::UnknownPayload
-            })
+        self.get_built_payload(payload_id).await?.try_into().map_err(|_| {
+            warn!(version = ?EngineApiMessageVersion::V1, "could not transform built payload");
+            EngineApiError::UnknownPayload
+        })
     }
 
     /// Metrics version of `get_payload_v1`
@@ -437,28 +465,7 @@ where
         &self,
         payload_id: PayloadId,
     ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV2> {
-        // First we fetch the payload attributes to check the timestamp
-        let attributes = self.get_payload_attributes(payload_id).await?;
-
-        // validate timestamp according to engine rules
-        validate_payload_timestamp(
-            &self.inner.chain_spec,
-            EngineApiMessageVersion::V2,
-            attributes.timestamp(),
-        )?;
-
-        // Now resolve the payload
-        self.inner
-            .payload_store
-            .resolve(payload_id)
-            .await
-            .ok_or(EngineApiError::UnknownPayload)?
-            .map_err(|_| EngineApiError::UnknownPayload)?
-            .try_into()
-            .map_err(|_| {
-                warn!("could not transform built payload into ExecutionPayloadV2");
-                EngineApiError::UnknownPayload
-            })
+        self.get_payload_inner(payload_id, EngineApiMessageVersion::V2).await
     }
 
     /// Metrics version of `get_payload_v2`
@@ -483,28 +490,7 @@ where
         &self,
         payload_id: PayloadId,
     ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV3> {
-        // First we fetch the payload attributes to check the timestamp
-        let attributes = self.get_payload_attributes(payload_id).await?;
-
-        // validate timestamp according to engine rules
-        validate_payload_timestamp(
-            &self.inner.chain_spec,
-            EngineApiMessageVersion::V3,
-            attributes.timestamp(),
-        )?;
-
-        // Now resolve the payload
-        self.inner
-            .payload_store
-            .resolve(payload_id)
-            .await
-            .ok_or(EngineApiError::UnknownPayload)?
-            .map_err(|_| EngineApiError::UnknownPayload)?
-            .try_into()
-            .map_err(|_| {
-                warn!("could not transform built payload into ExecutionPayloadV3");
-                EngineApiError::UnknownPayload
-            })
+        self.get_payload_inner(payload_id, EngineApiMessageVersion::V3).await
     }
 
     /// Metrics version of `get_payload_v3`
@@ -529,28 +515,7 @@ where
         &self,
         payload_id: PayloadId,
     ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV4> {
-        // First we fetch the payload attributes to check the timestamp
-        let attributes = self.get_payload_attributes(payload_id).await?;
-
-        // validate timestamp according to engine rules
-        validate_payload_timestamp(
-            &self.inner.chain_spec,
-            EngineApiMessageVersion::V4,
-            attributes.timestamp(),
-        )?;
-
-        // Now resolve the payload
-        self.inner
-            .payload_store
-            .resolve(payload_id)
-            .await
-            .ok_or(EngineApiError::UnknownPayload)?
-            .map_err(|_| EngineApiError::UnknownPayload)?
-            .try_into()
-            .map_err(|_| {
-                warn!("could not transform built payload into ExecutionPayloadV3");
-                EngineApiError::UnknownPayload
-            })
+        self.get_payload_inner(payload_id, EngineApiMessageVersion::V4).await
     }
 
     /// Metrics version of `get_payload_v4`
@@ -561,6 +526,33 @@ where
         let start = Instant::now();
         let res = Self::get_payload_v4(self, payload_id).await;
         self.inner.metrics.latency.get_payload_v4.record(start.elapsed());
+        res
+    }
+
+    /// Handler for `engine_getPayloadV5`
+    ///
+    /// Returns the most recent version of the payload that is available in the corresponding
+    /// payload build process at the time of receiving this call.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/15399c2e2f16a5f800bf3f285640357e2c245ad9/src/engine/osaka.md#engine_getpayloadv5>
+    ///
+    /// Note:
+    /// > Provider software MAY stop the corresponding build process after serving this call.
+    pub async fn get_payload_v5(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV5> {
+        self.get_payload_inner(payload_id, EngineApiMessageVersion::V5).await
+    }
+
+    /// Metrics version of `get_payload_v5`
+    pub async fn get_payload_v5_metered(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV5> {
+        let start = Instant::now();
+        let res = Self::get_payload_v5(self, payload_id).await;
+        self.inner.metrics.latency.get_payload_v5.record(start.elapsed());
         res
     }
 
@@ -784,7 +776,7 @@ where
 
         self.inner
             .tx_pool
-            .get_blobs_for_versioned_hashes(&versioned_hashes)
+            .get_blobs_for_versioned_hashes_v1(&versioned_hashes)
             .map_err(|err| EngineApiError::Internal(Box::new(err)))
     }
 
@@ -803,6 +795,55 @@ where
 
             self.inner.metrics.blob_metrics.blob_count.increment(blobs_found as u64);
             self.inner.metrics.blob_metrics.blob_misses.increment(blobs_missed as u64);
+        }
+
+        res
+    }
+
+    fn get_blobs_v2(
+        &self,
+        versioned_hashes: Vec<B256>,
+    ) -> EngineApiResult<Option<Vec<BlobAndProofV2>>> {
+        if versioned_hashes.len() > MAX_BLOB_LIMIT {
+            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() })
+        }
+
+        self.inner
+            .tx_pool
+            .get_blobs_for_versioned_hashes_v2(&versioned_hashes)
+            .map_err(|err| EngineApiError::Internal(Box::new(err)))
+    }
+
+    fn get_blobs_v2_metered(
+        &self,
+        versioned_hashes: Vec<B256>,
+    ) -> EngineApiResult<Option<Vec<BlobAndProofV2>>> {
+        let hashes_len = versioned_hashes.len();
+        let start = Instant::now();
+        let res = Self::get_blobs_v2(self, versioned_hashes);
+        self.inner.metrics.latency.get_blobs_v2.record(start.elapsed());
+
+        if let Ok(blobs) = &res {
+            let blobs_found = blobs.iter().flatten().count();
+
+            self.inner
+                .metrics
+                .blob_metrics
+                .get_blobs_requests_blobs_total
+                .increment(hashes_len as u64);
+            self.inner
+                .metrics
+                .blob_metrics
+                .get_blobs_requests_blobs_in_blobpool_total
+                .increment(blobs_found as u64);
+
+            if blobs_found == hashes_len {
+                self.inner.metrics.blob_metrics.get_blobs_requests_success_total.increment(1);
+            } else {
+                self.inner.metrics.blob_metrics.get_blobs_requests_failure_total.increment(1);
+            }
+        } else {
+            self.inner.metrics.blob_metrics.get_blobs_requests_failure_total.increment(1);
         }
 
         res
@@ -977,7 +1018,7 @@ where
         &self,
         payload_id: PayloadId,
     ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV2> {
-        trace!(target: "rpc::engine", "Serving engine_getPayloadV2");
+        debug!(target: "rpc::engine", id = %payload_id, "Serving engine_getPayloadV2");
         Ok(self.get_payload_v2_metered(payload_id).await?)
     }
 
@@ -1013,6 +1054,23 @@ where
     ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV4> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV4");
         Ok(self.get_payload_v4_metered(payload_id).await?)
+    }
+
+    /// Handler for `engine_getPayloadV5`
+    ///
+    /// Returns the most recent version of the payload that is available in the corresponding
+    /// payload build process at the time of receiving this call.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/15399c2e2f16a5f800bf3f285640357e2c245ad9/src/engine/osaka.md#engine_getpayloadv5>
+    ///
+    /// Note:
+    /// > Provider software MAY stop the corresponding build process after serving this call.
+    async fn get_payload_v5(
+        &self,
+        payload_id: PayloadId,
+    ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV5> {
+        trace!(target: "rpc::engine", "Serving engine_getPayloadV5");
+        Ok(self.get_payload_v5_metered(payload_id).await?)
     }
 
     /// Handler for `engine_getPayloadBodiesByHashV1`
@@ -1077,10 +1135,10 @@ where
 
     async fn get_blobs_v2(
         &self,
-        _versioned_hashes: Vec<B256>,
-    ) -> RpcResult<Vec<Option<BlobAndProofV2>>> {
+        versioned_hashes: Vec<B256>,
+    ) -> RpcResult<Option<Vec<BlobAndProofV2>>> {
         trace!(target: "rpc::engine", "Serving engine_getBlobsV2");
-        Err(internal_rpc_err("unimplemented"))
+        Ok(self.get_blobs_v2_metered(versioned_hashes)?)
     }
 }
 

@@ -323,7 +323,7 @@ RPC:
           Set the maximum RPC response payload size for both HTTP and WS in megabytes
 
           [default: 160]
-          [aliases: rpc.returndata.limit]
+          [aliases: --rpc.returndata.limit]
 
       --rpc.max-subscriptions-per-connection <RPC_MAX_SUBSCRIPTIONS_PER_CONNECTION>
           Set the maximum concurrent subscriptions per connection
@@ -363,7 +363,7 @@ RPC:
           [default: 50000000]
 
       --rpc.txfeecap <TX_FEE_CAP>
-          Maximum eth transaction fee that can be sent via the RPC APIs (0 = no cap)
+          Maximum eth transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap)
 
           [default: 1.0]
 
@@ -697,6 +697,9 @@ Pruning:
       --prune.receipts.before <BLOCK_NUMBER>
           Prune receipts before the specified block number. The specified block number is not pruned
 
+      --prune.receiptslogfilter <FILTER_CONFIG>
+          Configure receipts log filter. Format: <`address`>:<`prune_mode`>[,<`address`>:<`prune_mode`>...] Where <`prune_mode`> can be 'full', 'distance:<`blocks`>', or 'before:<`block_number`>'
+
       --prune.accounthistory.full
           Prunes all account history
 
@@ -714,9 +717,6 @@ Pruning:
 
       --prune.storagehistory.before <BLOCK_NUMBER>
           Prune storage history before the specified block number. The specified block number is not pruned
-
-      --prune.receiptslogfilter <FILTER_CONFIG>
-          Configure receipts log filter. Format: <`address`>:<`prune_mode`>[,<`address`>:<`prune_mode`>...] Where <`prune_mode`> can be 'full', 'distance:<`blocks`>', or 'before:<`block_number`>'
 
 Engine:
       --engine.persistence-threshold <PERSISTENCE_THRESHOLD>

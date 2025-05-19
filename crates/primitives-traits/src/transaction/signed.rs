@@ -104,6 +104,7 @@ pub trait SignedTransaction:
     /// ensuring that the signature has a low `s` value_ (EIP-2).
     ///
     /// Returns `RecoveryError` if the transaction's signature is invalid.
+    #[deprecated(note = "Use try_into_recovered_unchecked instead")]
     #[auto_impl(keep_default_for(&, Arc))]
     fn into_recovered_unchecked(self) -> Result<Recovered<Self>, RecoveryError> {
         self.recover_signer_unchecked().map(|signer| Recovered::new_unchecked(self, signer))
@@ -114,6 +115,14 @@ pub trait SignedTransaction:
     /// Note: assumes the given signer is the signer of this transaction.
     #[auto_impl(keep_default_for(&, Arc))]
     fn with_signer(self, signer: Address) -> Recovered<Self> {
+        Recovered::new_unchecked(self, signer)
+    }
+
+    /// Returns the [`Recovered`] transaction with the given signer, using a reference to self.
+    ///
+    /// Note: assumes the given signer is the signer of this transaction.
+    #[auto_impl(keep_default_for(&, Arc))]
+    fn with_signer_ref(&self, signer: Address) -> Recovered<&Self> {
         Recovered::new_unchecked(self, signer)
     }
 }

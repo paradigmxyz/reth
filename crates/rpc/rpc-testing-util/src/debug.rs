@@ -132,11 +132,13 @@ where
         let stream =
             futures::stream::iter(blocks.into_iter().map(move |(block, opts)| async move {
                 let trace_future = match block {
-                    BlockId::Hash(hash) => self.debug_trace_block_by_hash(hash.block_hash, opts),
-                    BlockId::Number(tag) => self.debug_trace_block_by_number(tag, opts),
+                    BlockId::Hash(hash) => {
+                        self.debug_trace_block_by_hash(hash.block_hash, opts).await
+                    }
+                    BlockId::Number(tag) => self.debug_trace_block_by_number(tag, opts).await,
                 };
 
-                match trace_future.await {
+                match trace_future {
                     Ok(result) => Ok((result, block)),
                     Err(err) => Err((err, block)),
                 }

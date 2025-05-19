@@ -179,7 +179,11 @@ pub struct TaskManager {
 // === impl TaskManager ===
 
 impl TaskManager {
-    /// Returns a new [`TaskManager`] over the currently running Runtime.
+    /// Returns a __new__ [`TaskManager`] over the currently running Runtime.
+    ///
+    /// This must be polled for the duration of the program.
+    ///
+    /// To obtain the current [`TaskExecutor`] see [`TaskExecutor::current`].
     ///
     /// # Panics
     ///

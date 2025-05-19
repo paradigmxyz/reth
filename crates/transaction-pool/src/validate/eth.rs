@@ -104,6 +104,19 @@ where
     ) -> Vec<TransactionValidationOutcome<Tx>> {
         self.inner.validate_batch(transactions)
     }
+
+    /// Validates all given transactions with origin.
+    ///
+    /// Returns all outcomes for the given transactions in the same order.
+    ///
+    /// See also [`Self::validate_one`]
+    pub fn validate_all_with_origin(
+        &self,
+        origin: TransactionOrigin,
+        transactions: Vec<Tx>,
+    ) -> Vec<TransactionValidationOutcome<Tx>> {
+        self.inner.validate_batch_with_origin(origin, transactions)
+    }
 }
 
 impl<Client, Tx> TransactionValidator for EthTransactionValidator<Client, Tx>
@@ -126,6 +139,14 @@ where
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
         self.validate_all(transactions)
+    }
+
+    async fn validate_transactions_with_origin(
+        &self,
+        origin: TransactionOrigin,
+        transactions: Vec<Self::Transaction>,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        self.validate_all_with_origin(origin, transactions)
     }
 
     fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
@@ -604,6 +625,19 @@ where
             .collect()
     }
 
+    /// Validates all given transactions with origin.
+    fn validate_batch_with_origin(
+        &self,
+        origin: TransactionOrigin,
+        transactions: Vec<Tx>,
+    ) -> Vec<TransactionValidationOutcome<Tx>> {
+        let mut provider = None;
+        transactions
+            .into_iter()
+            .map(|tx| self.validate_one_with_provider(origin, tx, &mut provider))
+            .collect()
+    }
+
     fn on_new_head_block<T: BlockHeader>(&self, new_tip_block: &T) {
         // update all forks
         if self.chain_spec().is_cancun_active_at_timestamp(new_tip_block.timestamp()) {
@@ -1055,6 +1089,7 @@ mod tests {
     use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, U256};
     use reth_ethereum_primitives::PooledTransaction;
+    use reth_primitives_traits::SignedTransaction;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 
     fn get_transaction() -> EthPooledTransaction {

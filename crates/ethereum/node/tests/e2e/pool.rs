@@ -18,7 +18,81 @@ use reth_transaction_pool::{
     EthPooledTransaction, Pool, PoolTransaction, TransactionOrigin, TransactionPool,
     TransactionPoolExt,
 };
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
+
+// Test that stale transactions could be correctly evicted.
+#[tokio::test]
+async fn maintain_txpool_stale_eviction() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+    let tasks = TaskManager::current();
+    let executor = tasks.executor();
+
+    let txpool = Pool::new(
+        OkValidator::default(),
+        CoinbaseTipOrdering::default(),
+        InMemoryBlobStore::default(),
+        Default::default(),
+    );
+
+    // Directly generate a node to simulate various traits such as `StateProviderFactory` required
+    // by the pool maintenance task
+    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(genesis)
+            .cancun_activated()
+            .build(),
+    );
+    let node_config = NodeConfig::test()
+        .with_chain(chain_spec)
+        .with_unused_ports()
+        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
+    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
+        .testing_node(executor.clone())
+        .node(EthereumNode::default())
+        .launch()
+        .await?;
+
+    let node = NodeTestContext::new(node, eth_payload_attributes).await?;
+
+    let wallet = Wallet::default();
+
+    let config = reth_transaction_pool::maintain::MaintainPoolConfig {
+        max_tx_lifetime: Duration::from_secs(1),
+        ..Default::default()
+    };
+
+    executor.spawn_critical(
+        "txpool maintenance task",
+        reth_transaction_pool::maintain::maintain_transaction_pool_future(
+            node.inner.provider.clone(),
+            txpool.clone(),
+            node.inner.provider.clone().canonical_state_stream(),
+            executor.clone(),
+            config,
+        ),
+    );
+
+    // create a tx with insufficient gas fee and it will be parked
+    let envelop =
+        TransactionTestContext::transfer_tx_with_gas_fee(1, Some(8_u128), wallet.inner).await;
+    let tx = Recovered::new_unchecked(
+        EthereumTxEnvelope::<TxEip4844>::from(envelop.clone()),
+        Default::default(),
+    );
+    let pooled_tx = EthPooledTransaction::new(tx.clone(), 200);
+
+    txpool.add_transaction(TransactionOrigin::External, pooled_tx).await.unwrap();
+    assert_eq!(txpool.len(), 1);
+
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+    // stale tx should be evicted
+    assert_eq!(txpool.len(), 0);
+
+    Ok(())
+}
 
 // Test that the pool's maintenance task can correctly handle `CanonStateNotification::Reorg` events
 #[tokio::test]
