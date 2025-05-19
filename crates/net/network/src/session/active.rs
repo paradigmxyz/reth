@@ -254,6 +254,11 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             EthMessage::Receipts(resp) => {
                 on_response!(resp, GetReceipts)
             }
+            EthMessage::Receipts69(resp) => {
+                // TODO: remove mandatory blooms
+                let resp = resp.map(|receipts| receipts.into_with_bloom());
+                on_response!(resp, GetReceipts)
+            }
             EthMessage::Other(bytes) => self.try_emit_broadcast(PeerMessage::Other(bytes)).into(),
         }
     }
