@@ -1,6 +1,9 @@
 //! Abstraction over primitive types in network messages.
 
-use alloy_consensus::{RlpDecodableReceipt, RlpEncodableReceipt, TxReceipt};
+use alloy_consensus::{
+    EthereumTxEnvelope, RlpDecodableReceipt, RlpEncodableReceipt, TxEip4844WithSidecar, TxReceipt,
+};
+use alloy_eips::eip7594::BlobTransactionSidecarVariant;
 use alloy_rlp::{Decodable, Encodable};
 use core::fmt::Debug;
 use reth_primitives_traits::{Block, BlockBody, BlockHeader, NodePrimitives, SignedTransaction};
@@ -66,6 +69,7 @@ impl NetworkPrimitives for EthNetworkPrimitives {
     type BlockBody = reth_ethereum_primitives::BlockBody;
     type Block = reth_ethereum_primitives::Block;
     type BroadcastedTransaction = reth_ethereum_primitives::TransactionSigned;
-    type PooledTransaction = reth_ethereum_primitives::PooledTransaction;
+    type PooledTransaction =
+        EthereumTxEnvelope<TxEip4844WithSidecar<BlobTransactionSidecarVariant>>;
     type Receipt = reth_ethereum_primitives::Receipt;
 }

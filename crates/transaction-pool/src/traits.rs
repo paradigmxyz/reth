@@ -9,15 +9,15 @@ use crate::{
     AllTransactionsEvents,
 };
 use alloy_consensus::{
-    error::ValueError, transaction::PooledTransaction, BlockHeader, Signed, Typed2718,
+    error::ValueError, BlockHeader, EthereumTxEnvelope, Signed, TxEip4844WithSidecar, Typed2718,
 };
 use alloy_eips::{
     eip2718::Encodable2718,
     eip2930::AccessList,
     eip4844::{
-        env_settings::KzgSettings, BlobAndProofV1, BlobAndProofV2, BlobTransactionSidecar,
-        BlobTransactionValidationError,
+        env_settings::KzgSettings, BlobAndProofV1, BlobAndProofV2, BlobTransactionValidationError,
     },
+    eip7594::BlobTransactionSidecarVariant,
     eip7702::SignedAuthorization,
 };
 use alloy_primitives::{Address, Bytes, TxHash, TxKind, B256, U256};
@@ -474,26 +474,26 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     fn get_blob(
         &self,
         tx_hash: TxHash,
-    ) -> Result<Option<Arc<BlobTransactionSidecar>>, BlobStoreError>;
+    ) -> Result<Option<Arc<BlobTransactionSidecarVariant>>, BlobStoreError>;
 
-    /// Returns all [BlobTransactionSidecar] for the given transaction hashes if they exists in the
-    /// blob store.
+    /// Returns all [BlobTransactionSidecarVariant] for the given transaction hashes if they exists
+    /// in the blob store.
     ///
     /// This only returns the blobs that were found in the store.
     /// If there's no blob it will not be returned.
     fn get_all_blobs(
         &self,
         tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<(TxHash, Arc<BlobTransactionSidecar>)>, BlobStoreError>;
+    ) -> Result<Vec<(TxHash, Arc<BlobTransactionSidecarVariant>)>, BlobStoreError>;
 
-    /// Returns the exact [BlobTransactionSidecar] for the given transaction hashes in the order
-    /// they were requested.
+    /// Returns the exact [BlobTransactionSidecarVariant] for the given transaction hashes in the
+    /// order they were requested.
     ///
     /// Returns an error if any of the blobs are not found in the blob store.
     fn get_all_blobs_exact(
         &self,
         tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError>;
+    ) -> Result<Vec<Arc<BlobTransactionSidecarVariant>>, BlobStoreError>;
 
     /// Return the [`BlobAndProofV1`]s for a list of blob versioned hashes.
     fn get_blobs_for_versioned_hashes_v1(
@@ -640,7 +640,7 @@ pub struct NewBlobSidecar {
     /// hash of the EIP-4844 transaction.
     pub tx_hash: TxHash,
     /// the blob transaction sidecar.
-    pub sidecar: Arc<BlobTransactionSidecar>,
+    pub sidecar: Arc<BlobTransactionSidecarVariant>,
 }
 
 /// Where the transaction originates from.
@@ -1052,7 +1052,7 @@ pub trait EthPoolTransaction: PoolTransaction {
     /// transaction: [`Typed2718::is_eip4844`].
     fn try_into_pooled_eip4844(
         self,
-        sidecar: Arc<BlobTransactionSidecar>,
+        sidecar: Arc<BlobTransactionSidecarVariant>,
     ) -> Option<Recovered<Self::Pooled>>;
 
     /// Tries to convert the `Consensus` type with a blob sidecar into the `Pooled` type.
@@ -1060,13 +1060,13 @@ pub trait EthPoolTransaction: PoolTransaction {
     /// Returns `None` if passed transaction is not a blob transaction.
     fn try_from_eip4844(
         tx: Recovered<Self::Consensus>,
-        sidecar: BlobTransactionSidecar,
+        sidecar: BlobTransactionSidecarVariant,
     ) -> Option<Self>;
 
     /// Validates the blob sidecar of the transaction with the given settings.
     fn validate_blob(
         &self,
-        blob: &BlobTransactionSidecar,
+        blob: &BlobTransactionSidecarVariant,
         settings: &KzgSettings,
     ) -> Result<(), BlobTransactionValidationError>;
 }
@@ -1134,7 +1134,7 @@ impl PoolTransaction for EthPooledTransaction {
 
     type Consensus = TransactionSigned;
 
-    type Pooled = PooledTransaction;
+    type Pooled = EthereumTxEnvelope<TxEip4844WithSidecar<BlobTransactionSidecarVariant>>;
 
     fn clone_into_consensus(&self) -> Recovered<Self::Consensus> {
         self.transaction().clone()
@@ -1148,7 +1148,7 @@ impl PoolTransaction for EthPooledTransaction {
         let encoded_length = tx.encode_2718_len();
         let (tx, signer) = tx.into_parts();
         match tx {
-            PooledTransaction::Eip4844(tx) => {
+            EthereumTxEnvelope::Eip4844(tx) => {
                 // include the blob sidecar
                 let (tx, sig, hash) = tx.into_parts();
                 let (tx, blob) = tx.into_parts();
@@ -1291,7 +1291,7 @@ impl EthPoolTransaction for EthPooledTransaction {
 
     fn try_into_pooled_eip4844(
         self,
-        sidecar: Arc<BlobTransactionSidecar>,
+        sidecar: Arc<BlobTransactionSidecarVariant>,
     ) -> Option<Recovered<Self::Pooled>> {
         let (signed_transaction, signer) = self.into_consensus().into_parts();
         let pooled_transaction =
@@ -1302,7 +1302,7 @@ impl EthPoolTransaction for EthPooledTransaction {
 
     fn try_from_eip4844(
         tx: Recovered<Self::Consensus>,
-        sidecar: BlobTransactionSidecar,
+        sidecar: BlobTransactionSidecarVariant,
     ) -> Option<Self> {
         let (tx, signer) = tx.into_parts();
         tx.try_into_pooled_eip4844(sidecar)
@@ -1313,7 +1313,7 @@ impl EthPoolTransaction for EthPooledTransaction {
 
     fn validate_blob(
         &self,
-        sidecar: &BlobTransactionSidecar,
+        sidecar: &BlobTransactionSidecarVariant,
         settings: &KzgSettings,
     ) -> Result<(), BlobTransactionValidationError> {
         match self.transaction.inner().as_eip4844() {
@@ -1334,12 +1334,12 @@ pub enum EthBlobTransactionSidecar {
     /// without the blob sidecar
     Missing,
     /// The eip-4844 transaction was pulled from the network and still has its blob sidecar
-    Present(BlobTransactionSidecar),
+    Present(BlobTransactionSidecarVariant),
 }
 
 impl EthBlobTransactionSidecar {
     /// Returns the blob sidecar if it is present
-    pub const fn maybe_sidecar(&self) -> Option<&BlobTransactionSidecar> {
+    pub const fn maybe_sidecar(&self) -> Option<&BlobTransactionSidecarVariant> {
         match self {
             Self::Present(sidecar) => Some(sidecar),
             _ => None,

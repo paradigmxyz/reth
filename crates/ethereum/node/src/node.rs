@@ -2,14 +2,15 @@
 
 pub use crate::{payload::EthereumPayloadBuilder, EthereumEngineValidator};
 use crate::{EthEngineTypes, EthEvmConfig};
-use alloy_eips::{eip7840::BlobParams, merge::EPOCH_SLOTS};
+use alloy_consensus::{EthereumTxEnvelope, TxEip4844WithSidecar};
+use alloy_eips::{eip7594::BlobTransactionSidecarVariant, eip7840::BlobParams, merge::EPOCH_SLOTS};
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
-use reth_ethereum_primitives::{EthPrimitives, PooledTransaction, TransactionSigned};
+use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes};
 use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, NodePrimitives, TxTy};
@@ -431,7 +432,10 @@ impl<Node, Pool> NetworkBuilder<Node, Pool> for EthereumNetworkBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
     Pool: TransactionPool<
-            Transaction: PoolTransaction<Consensus = TxTy<Node::Types>, Pooled = PooledTransaction>,
+            Transaction: PoolTransaction<
+                Consensus = TxTy<Node::Types>,
+                Pooled = EthereumTxEnvelope<TxEip4844WithSidecar<BlobTransactionSidecarVariant>>,
+            >,
         > + Unpin
         + 'static,
 {

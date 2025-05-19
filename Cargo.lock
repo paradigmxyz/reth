@@ -113,8 +113,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus"
 version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "785982a9b7b86d3fdf4ca43eb9a82447ccb7188ea78804ce64b6d6d82cc3e202"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fsidecar-generic-round2#3831dd6eb154135fb26965b39b0954e1787b6472"
 dependencies = [
  "alloy-eips 1.0.3",
  "alloy-primitives",
@@ -137,9 +136,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-consensus-any"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c47aad4cec26c92e8de55404e19324cfc5228f2e7ca2a9aae5fcf19b6b830817"
+version = "1.0.3"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fsidecar-generic-round2#3831dd6eb154135fb26965b39b0954e1787b6472"
 dependencies = [
  "alloy-consensus",
  "alloy-eips 1.0.3",
@@ -153,14 +151,13 @@ dependencies = [
 [[package]]
 name = "alloy-contract"
 version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39564a2dcb9412294c70f6a797ccbf411586f4fe8ab01efb03bb3cabd0b42023"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fsidecar-generic-round2#3831dd6eb154135fb26965b39b0954e1787b6472"
 dependencies = [
  "alloy-consensus",
  "alloy-dyn-abi",
  "alloy-json-abi",
  "alloy-network",
- "alloy-network-primitives",
+ "alloy-network-primitives 1.0.3",
  "alloy-primitives",
  "alloy-provider",
  "alloy-rpc-types-eth",
@@ -256,8 +253,7 @@ dependencies = [
 [[package]]
 name = "alloy-eips"
 version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f29e7fda66a9d3315db883947a21b79f018cf6d873ee51660a93cb712696928"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fsidecar-generic-round2#3831dd6eb154135fb26965b39b0954e1787b6472"
 dependencies = [
  "alloy-eip2124",
  "alloy-eip2930",
@@ -298,8 +294,7 @@ dependencies = [
 [[package]]
 name = "alloy-genesis"
 version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfc71c06880f44758e8c748db17f3e4661240bfa06f665089097e8cdd0583ca4"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fsidecar-generic-round2#3831dd6eb154135fb26965b39b0954e1787b6472"
 dependencies = [
  "alloy-eips 1.0.3",
  "alloy-primitives",
@@ -337,8 +332,7 @@ dependencies = [
 [[package]]
 name = "alloy-json-rpc"
 version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "265ebe8c014bf3f1c7872a208e6fd3a157b93405ec826383492dbe31085197aa"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fsidecar-generic-round2#3831dd6eb154135fb26965b39b0954e1787b6472"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
@@ -351,14 +345,13 @@ dependencies = [
 [[package]]
 name = "alloy-network"
 version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a9d67becc5c6dd5c85e0f4a9cda0a1f4d5805749b8b4da906d96947ef801dd5"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fsidecar-generic-round2#3831dd6eb154135fb26965b39b0954e1787b6472"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
  "alloy-eips 1.0.3",
  "alloy-json-rpc",
- "alloy-network-primitives",
+ "alloy-network-primitives 1.0.3",
  "alloy-primitives",
  "alloy-rpc-types-any",
  "alloy-rpc-types-eth",
@@ -379,6 +372,18 @@ name = "alloy-network-primitives"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f98e721eb32b8e6a4bc6b3a86cc0fea418657b3665e5534d049a5cb1499cb9b"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips 1.0.3",
+ "alloy-primitives",
+ "alloy-serde 1.0.3",
+ "serde",
+]
+
+[[package]]
+name = "alloy-network-primitives"
+version = "1.0.3"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fsidecar-generic-round2#3831dd6eb154135fb26965b39b0954e1787b6472"
 dependencies = [
  "alloy-consensus",
  "alloy-eips 1.0.3",
@@ -449,15 +454,14 @@ dependencies = [
 [[package]]
 name = "alloy-provider"
 version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4af4bd045e414b3b52e929d31a9413bf072dd78cee9b962eb2d9fc5e500c3ccb"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fsidecar-generic-round2#3831dd6eb154135fb26965b39b0954e1787b6472"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
  "alloy-eips 1.0.3",
  "alloy-json-rpc",
  "alloy-network",
- "alloy-network-primitives",
+ "alloy-network-primitives 1.0.3",
  "alloy-primitives",
  "alloy-pubsub",
  "alloy-rpc-client",
@@ -492,8 +496,7 @@ dependencies = [
 [[package]]
 name = "alloy-pubsub"
 version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfbb328bc2538e10b17570eae25e5ecb2cdb97b729caa115617e124b05e9463e"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fsidecar-generic-round2#3831dd6eb154135fb26965b39b0954e1787b6472"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -535,8 +538,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-client"
 version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6707200ade3dd821585ec208022a273889f328ee1e76014c9a81820ef6d3c48d"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fsidecar-generic-round2#3831dd6eb154135fb26965b39b0954e1787b6472"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -563,8 +565,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types"
 version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a891e871830c1ef6e105a08f615fbb178b2edc4c75c203bf47c64dfa21acd849"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fsidecar-generic-round2#3831dd6eb154135fb26965b39b0954e1787b6472"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
@@ -576,8 +577,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-admin"
 version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a151f6fe7fec5969bfcfdf2de4e1cbcc809c4e13a2fdd14f9da8339a12d0053"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fsidecar-generic-round2#3831dd6eb154135fb26965b39b0954e1787b6472"
 dependencies = [
  "alloy-genesis",
  "alloy-primitives",
@@ -588,8 +588,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-anvil"
 version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f7e3f1efdb3ef6f2e0e09036099933f9d96ff1d3129be4b2e5394550a58b39d"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fsidecar-generic-round2#3831dd6eb154135fb26965b39b0954e1787b6472"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -599,9 +598,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types-any"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3363303ce692d443631ab61dc033056a32041f76971d6491969b06945cf8b5e"
+version = "1.0.3"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fsidecar-generic-round2#3831dd6eb154135fb26965b39b0954e1787b6472"
 dependencies = [
  "alloy-consensus-any",
  "alloy-rpc-types-eth",
@@ -611,8 +609,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-beacon"
 version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "def573959c8954ebf3b51074e5215241bf252ac383bd4daf0e24f697c6688712"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fsidecar-generic-round2#3831dd6eb154135fb26965b39b0954e1787b6472"
 dependencies = [
  "alloy-eips 1.0.3",
  "alloy-primitives",
@@ -629,8 +626,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-debug"
 version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5cc83d5587cdfcfb3f9cfb83484c319ce1f5eec4da11c357153725785c17433c"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fsidecar-generic-round2#3831dd6eb154135fb26965b39b0954e1787b6472"
 dependencies = [
  "alloy-primitives",
  "serde",
@@ -639,8 +635,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-engine"
 version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85872461c13427e7715809871dfff8945df9309169e378a8737c8b0880a72b1b"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fsidecar-generic-round2#3831dd6eb154135fb26965b39b0954e1787b6472"
 dependencies = [
  "alloy-consensus",
  "alloy-eips 1.0.3",
@@ -661,19 +656,18 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-eth"
 version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "117b370f315c7f6c856c51d840fef8728f9738ce46f5f48c2f6a901da454da81"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fsidecar-generic-round2#3831dd6eb154135fb26965b39b0954e1787b6472"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
  "alloy-eips 1.0.3",
- "alloy-network-primitives",
+ "alloy-network-primitives 1.0.3",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-serde 1.0.3",
  "alloy-sol-types",
  "arbitrary",
- "itertools 0.14.0",
+ "itertools 0.13.0",
  "jsonrpsee-types",
  "serde",
  "serde_json",
@@ -683,8 +677,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-mev"
 version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1cfd78b3b0043b341005ab177902ab61a0bb264a72982e590e5b3afba1461e42"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fsidecar-generic-round2#3831dd6eb154135fb26965b39b0954e1787b6472"
 dependencies = [
  "alloy-consensus",
  "alloy-eips 1.0.3",
@@ -698,8 +691,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-trace"
 version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "356253f9ad65afe964733c6c3677a70041424359bd6340ab5597ff37185c1a82"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fsidecar-generic-round2#3831dd6eb154135fb26965b39b0954e1787b6472"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -712,8 +704,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-txpool"
 version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d17e23d6d3e3fafaed4e4950c93172ee23ec665f54ca644dbdab418f90d24e46"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fsidecar-generic-round2#3831dd6eb154135fb26965b39b0954e1787b6472"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -735,8 +726,7 @@ dependencies = [
 [[package]]
 name = "alloy-serde"
 version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcfe8652fc1500463a9193e90feb4628f243f5758e54abd41fa6310df80d3de9"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fsidecar-generic-round2#3831dd6eb154135fb26965b39b0954e1787b6472"
 dependencies = [
  "alloy-primitives",
  "arbitrary",
@@ -747,8 +737,7 @@ dependencies = [
 [[package]]
 name = "alloy-signer"
 version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "167a38442a3626ef0bf8295422f339b1392f56574c13017f2718bf5bdf878c6a"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fsidecar-generic-round2#3831dd6eb154135fb26965b39b0954e1787b6472"
 dependencies = [
  "alloy-primitives",
  "async-trait",
@@ -762,8 +751,7 @@ dependencies = [
 [[package]]
 name = "alloy-signer-local"
 version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92f04bf5386358318a17d189bb56bc1ef00320de4aa9ce939ae8cf76e3178ca0"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fsidecar-generic-round2#3831dd6eb154135fb26965b39b0954e1787b6472"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -851,8 +839,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport"
 version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4f91badc9371554f9f5e1c4d0731c208fcfb14cfd1583af997425005a962689"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fsidecar-generic-round2#3831dd6eb154135fb26965b39b0954e1787b6472"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -874,8 +861,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-http"
 version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ca577cff7579e39d3b4312dcd68809bd1ca693445cfdcf53f4f466a9b6b3df3"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fsidecar-generic-round2#3831dd6eb154135fb26965b39b0954e1787b6472"
 dependencies = [
  "alloy-json-rpc",
  "alloy-transport",
@@ -889,8 +875,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-ipc"
 version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aed6f489a90092929a480cbe30d16a147fa89f859f8d9ef26f60555681503c8b"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fsidecar-generic-round2#3831dd6eb154135fb26965b39b0954e1787b6472"
 dependencies = [
  "alloy-json-rpc",
  "alloy-pubsub",
@@ -909,8 +894,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-ws"
 version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30aa80247a43d71bf683294907e74c634be7b4307d02530c856fac7fc4c2566a"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fsidecar-generic-round2#3831dd6eb154135fb26965b39b0954e1787b6472"
 dependencies = [
  "alloy-pubsub",
  "alloy-transport",
@@ -6000,7 +5984,7 @@ checksum = "15ede8322c10c21249de4fced204e2af4978972e715afee34b6fe684d73880cf"
 dependencies = [
  "alloy-consensus",
  "alloy-eips 1.0.3",
- "alloy-network-primitives",
+ "alloy-network-primitives 1.0.0",
  "alloy-primitives",
  "alloy-rpc-types-eth",
  "alloy-serde 1.0.3",

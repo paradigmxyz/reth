@@ -3,6 +3,7 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::{
     eip2718::Encodable2718,
     eip4844::{env_settings::EnvKzgSettings, BlobTransactionSidecar},
+    eip7594::BlobTransactionSidecarVariant,
 };
 use alloy_primitives::{Address, Bytes, B256};
 use alloy_rlp::Decodable;
@@ -163,7 +164,10 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     let encoded_length = pooled.encode_2718_len();
 
                     // insert the blob into the store
-                    blob_store.insert(*transaction.tx_hash(), sidecar)?;
+                    blob_store.insert(
+                        *transaction.tx_hash(),
+                        BlobTransactionSidecarVariant::Eip4844(sidecar),
+                    )?;
 
                     encoded_length
                 }
