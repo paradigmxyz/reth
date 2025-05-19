@@ -13,7 +13,7 @@ use super::{
     Transactions,
 };
 use crate::{
-    status::StatusMessage, EthNetworkPrimitives, EthVersion, NetworkPrimitives, NewBlockRange,
+    status::StatusMessage, BlockRangeUpdate, EthNetworkPrimitives, EthVersion, NetworkPrimitives,
     RawCapabilityMessage, Receipts69, SharedTransactions,
 };
 use alloc::{boxed::Box, sync::Arc};
@@ -127,7 +127,7 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                 if version < EthVersion::Eth69 {
                     return Err(MessageError::Invalid(version, EthMessageID::BlockRangeUpdate))
                 }
-                EthMessage::BlockRangeUpdate(NewBlockRange::decode(buf)?)
+                EthMessage::BlockRangeUpdate(BlockRangeUpdate::decode(buf)?)
             }
             EthMessageID::Other(_) => {
                 let raw_payload = Bytes::copy_from_slice(buf);
@@ -279,7 +279,7 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
         feature = "serde",
         serde(bound = "N::BroadcastedTransaction: serde::Serialize + serde::de::DeserializeOwned")
     )]
-    BlockRangeUpdate(NewBlockRange),
+    BlockRangeUpdate(BlockRangeUpdate),
     /// Represents an encoded message that doesn't match any other variant
     Other(RawCapabilityMessage),
 }

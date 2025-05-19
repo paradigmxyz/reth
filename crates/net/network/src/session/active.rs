@@ -300,10 +300,10 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             PeerMessage::SendTransactions(msg) => {
                 self.queued_outgoing.push_back(EthBroadcastMessage::Transactions(msg).into());
             }
+            PeerMessage::BlockRangeUpdated(_) => {}
             PeerMessage::ReceivedTransaction(_) => {
                 unreachable!("Not emitted by network")
             }
-            PeerMessage::BlockRangeUpdated(_) => {}
             PeerMessage::Other(other) => {
                 self.queued_outgoing.push_back(OutgoingMessage::Raw(other));
             }

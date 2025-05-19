@@ -8,10 +8,10 @@ use alloy_consensus::{BlockHeader, ReceiptWithBloom};
 use alloy_primitives::{Bytes, B256};
 use futures::FutureExt;
 use reth_eth_wire::{
-    message::RequestPair, BlockBodies, BlockHeaders, EthMessage, EthNetworkPrimitives,
-    GetBlockBodies, GetBlockHeaders, NetworkPrimitives, NewBlock, NewBlockHashes, NewBlockRange,
-    NewPooledTransactionHashes, NodeData, PooledTransactions, Receipts, SharedTransactions,
-    Transactions,
+    message::RequestPair, BlockBodies, BlockHeaders, BlockRangeUpdate, EthMessage,
+    EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, NetworkPrimitives, NewBlock,
+    NewBlockHashes, NewPooledTransactionHashes, NodeData, PooledTransactions, Receipts,
+    SharedTransactions, Transactions,
 };
 use reth_eth_wire_types::RawCapabilityMessage;
 use reth_network_api::PeerRequest;
@@ -57,7 +57,7 @@ pub enum PeerMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// All `eth` request variants.
     EthRequest(PeerRequest<N>),
     /// Announces when `BlockRange` is updated.
-    BlockRangeUpdated(NewBlockRange),
+    BlockRangeUpdated(BlockRangeUpdate),
     /// Any other or manually crafted eth message.
     ///
     /// Caution: It is expected that this is a valid `eth_` capability message.
