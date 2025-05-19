@@ -35,8 +35,6 @@ use revm::context::{Block, BlockEnv};
 use scroll_alloy_hardforks::ScrollHardforks;
 use std::{boxed::Box, sync::Arc, vec, vec::Vec};
 
-const SCROLL_GAS_LIMIT_10M: u64 = 10_000_000;
-
 /// A type that returns the [`PayloadTransactions`] that should be included in the pool.
 pub trait ScrollPayloadTransactions<Transaction>: Clone + Send + Sync + Unpin + 'static {
     /// Returns an iterator that yields the transaction in the order they should get included in the
@@ -136,10 +134,15 @@ where
         let state = StateProviderDatabase::new(&state_provider);
 
         if ctx.attributes().no_tx_pool {
-            builder.build(state, &state_provider, ctx)
+            builder.build(state, &state_provider, ctx, self.builder_config.clone())
         } else {
             // sequencer mode we can reuse cachedreads from previous runs
-            builder.build(cached_reads.as_db_mut(state), &state_provider, ctx)
+            builder.build(
+                cached_reads.as_db_mut(state),
+                &state_provider,
+                ctx,
+                self.builder_config.clone(),
+            )
         }
         .map(|out| out.with_cached_reads(cached_reads))
     }
@@ -219,6 +222,7 @@ impl<Txs> ScrollBuilder<'_, Txs> {
         db: impl Database<Error = ProviderError>,
         state_provider: impl StateProvider,
         ctx: ScrollPayloadBuilderCtx<EvmConfig, ChainSpec>,
+        builder_config: ScrollBuilderConfig,
     ) -> Result<BuildOutcomeKind<ScrollBuiltPayload>, PayloadBuilderError>
     where
         EvmConfig: ConfigureEvm<
@@ -233,7 +237,7 @@ impl<Txs> ScrollBuilder<'_, Txs> {
 
         let mut db = State::builder().with_database(db).with_bundle_update().build();
 
-        let mut builder = ctx.block_builder(&mut db)?;
+        let mut builder = ctx.block_builder(&mut db, builder_config)?;
 
         // 1. apply pre-execution changes
         builder.apply_pre_execution_changes().map_err(|err| {
@@ -367,6 +371,7 @@ where
     pub fn block_builder<'a, DB: Database>(
         &'a self,
         db: &'a mut State<DB>,
+        builder_config: ScrollBuilderConfig,
     ) -> Result<impl BlockBuilder<Primitives = Evm::Primitives> + 'a, PayloadBuilderError> {
         // get the base fee for the attributes.
         let base_fee: u64 = if self.chain_spec.is_curie_active_at_block(self.parent().number + 1) {
@@ -385,7 +390,7 @@ where
                 ScrollNextBlockEnvAttributes {
                     timestamp: self.attributes().timestamp(),
                     suggested_fee_recipient: self.attributes().suggested_fee_recipient(),
-                    gas_limit: SCROLL_GAS_LIMIT_10M,
+                    gas_limit: builder_config.desired_gas_limit,
                     base_fee,
                 },
             )
