@@ -13,10 +13,10 @@ use reth_chainspec::ChainSpec;
 use reth_consensus::{Consensus, HeaderValidator};
 use reth_errors::ConsensusError;
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
-use reth_ethereum_primitives::Block as EthereumBlock;
+use reth_ethereum_primitives::Block;
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_evm_ethereum::execute::EthExecutorProvider;
-use reth_primitives_traits::{block::error::BlockRecoveryError, Block, RecoveredBlock};
+use reth_primitives_traits::{block::error::BlockRecoveryError, Block as _, RecoveredBlock};
 use reth_revm::state::Bytecode;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 use reth_trie_sparse::{blinded::DefaultBlindedProviderFactory, SparseStateTrie};
@@ -88,7 +88,7 @@ pub enum StatelessValidationError {
 
     /// Error when recovering signers
     #[error("error recovering the signers in the block")]
-    SignerRecovery(#[from] Box<BlockRecoveryError<EthereumBlock>>),
+    SignerRecovery(#[from] Box<BlockRecoveryError<Block>>),
 }
 
 /// Performs stateless validation of a block using the provided witness data.
@@ -127,7 +127,7 @@ pub enum StatelessValidationError {
 /// If all steps succeed the function returns `Some` containing the hash of the validated
 /// `current_block`.
 pub fn stateless_validation(
-    current_block: EthereumBlock,
+    current_block: Block,
     witness: ExecutionWitness,
     chain_spec: Arc<ChainSpec>,
 ) -> Result<B256, StatelessValidationError> {
@@ -218,7 +218,7 @@ pub fn stateless_validation(
 /// transition function.
 fn validate_block_consensus(
     chain_spec: Arc<ChainSpec>,
-    block: &RecoveredBlock<EthereumBlock>,
+    block: &RecoveredBlock<Block>,
 ) -> Result<(), StatelessValidationError> {
     let consensus = EthBeaconConsensus::new(chain_spec);
 
@@ -304,7 +304,7 @@ pub fn verify_execution_witness(
 /// If both checks pass, it returns a [`BTreeMap`] mapping the block number of each
 /// ancestor header to its corresponding block hash.
 fn compute_ancestor_hashes(
-    current_block: &RecoveredBlock<EthereumBlock>,
+    current_block: &RecoveredBlock<Block>,
     ancestor_headers: &[Header],
 ) -> Result<BTreeMap<u64, B256>, StatelessValidationError> {
     let mut ancestor_hashes = BTreeMap::new();
