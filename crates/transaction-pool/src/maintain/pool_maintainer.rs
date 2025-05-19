@@ -28,7 +28,7 @@ use tracing::{debug, trace};
 
 /// Builder for creating a customizable pool maintainer
 #[derive(Debug)]
-pub struct PoolMaintainerBuilder<N, Client, P, St, Tasks>
+pub(crate) struct PoolMaintainerBuilder<N, Client, P, St, Tasks>
 where
     N: NodePrimitives,
     Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static,
@@ -51,7 +51,7 @@ where
     Tasks: TaskSpawner + 'static,
 {
     /// Creates a new `PoolMaintainerBuilder`.
-    pub const fn new(
+    pub(crate) const fn new(
         client: Client,
         pool: P,
         events: St,
@@ -62,7 +62,7 @@ where
     }
 
     /// Build the pool maintainer with custom component factory
-    pub fn build_with_factory<F, M, C>(
+    pub(crate) fn build_with_factory<F, M, C>(
         self,
         factory: F,
     ) -> PoolMaintainer<N, Client, P, St, Tasks, M, C>
@@ -94,7 +94,7 @@ where
     }
 
     /// Build the pool maintainer with the default components
-    pub fn build(self) -> PoolMaintainer<N, Client, P, St, Tasks> {
+    pub(crate) fn build(self) -> PoolMaintainer<N, Client, P, St, Tasks> {
         // Use the default component factory to create standard components
         self.build_with_factory(super::interfaces::DefaultComponentFactory)
     }
@@ -129,8 +129,15 @@ impl std::fmt::Debug for PoolMaintainerState {
 
 /// The main pool maintainer
 #[derive(Debug)]
-pub struct PoolMaintainer<N, Client, P, St, Tasks, M = DriftMonitor, C = CanonEventProcessor<N>>
-where
+pub(crate) struct PoolMaintainer<
+    N,
+    Client,
+    P,
+    St,
+    Tasks,
+    M = DriftMonitor,
+    C = CanonEventProcessor<N>,
+> where
     N: NodePrimitives,
     P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
     M: DriftMonitoring<Client> + Send + Clone + 'static,

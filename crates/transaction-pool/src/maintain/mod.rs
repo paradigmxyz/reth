@@ -7,6 +7,7 @@ use crate::{
 };
 use alloy_rlp::Encodable;
 use futures_util::{future::BoxFuture, Stream};
+use pool_maintainer::PoolMaintainerBuilder;
 use reth_chain_state::CanonStateNotification;
 use reth_chainspec::ChainSpecProvider;
 use reth_fs_util::FsPathError;
@@ -83,9 +84,6 @@ impl LocalTransactionBackupConfig {
         Self { transactions_path: Some(transactions_path) }
     }
 }
-
-// Re-export PoolMaintainer for public use
-pub use pool_maintainer::{PoolMaintainer, PoolMaintainerBuilder};
 
 /// Returns a spawnable future for maintaining the state of the transaction pool.
 pub fn maintain_transaction_pool_future<N, Client, P, St, Tasks>(
