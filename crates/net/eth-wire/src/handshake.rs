@@ -6,7 +6,7 @@ use crate::{
 use bytes::{Bytes, BytesMut};
 use futures::{Sink, SinkExt, Stream};
 use reth_eth_wire_types::{
-    DisconnectReason, EthMessage, EthNetworkPrimitives, ProtocolMessage, StatusMessage,
+    DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, ProtocolMessage, StatusMessage,
     UnifiedStatus,
 };
 use reth_ethereum_forks::ForkFilter;
@@ -87,7 +87,8 @@ where
     ) -> Result<UnifiedStatus, EthStreamError> {
         let unauth = self.0;
 
-        let status: StatusMessage = unified_status.into();
+        let status = unified_status.into_message();
+
         // Send our status message
         let status_msg = alloy_rlp::encode(ProtocolMessage::<EthNetworkPrimitives>::from(
             EthMessage::Status(status),
@@ -204,7 +205,7 @@ where
                     return Err(err.into());
                 }
 
-                Ok(their_status_message.into())
+                Ok(UnifiedStatus::from_message(their_status_message))
             }
             _ => {
                 unauth

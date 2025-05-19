@@ -847,8 +847,8 @@ mod tests {
     use reth_ecies::stream::ECIESStream;
     use reth_eth_wire::{
         handshake::EthHandshake, EthNetworkPrimitives, EthStream, GetBlockBodies,
-        HelloMessageWithProtocols, P2PStream, Status, UnauthedEthStream, UnauthedP2PStream,
-        UnifiedStatusBuilder,
+        HelloMessageWithProtocols, P2PStream, Status, StatusBuilder, UnauthedEthStream,
+        UnauthedP2PStream,
     };
     use reth_ethereum_forks::EthereumHardfork;
     use reth_network_peers::pk2id;
@@ -1001,7 +1001,7 @@ mod tests {
                 hello: eth_hello(&secret_key),
                 secret_key,
                 local_peer_id,
-                status: UnifiedStatusBuilder::default().build(),
+                status: StatusBuilder::default().build(),
                 fork_filter: MAINNET
                     .hardfork_fork_filter(EthereumHardfork::Frontier)
                     .expect("The Frontier fork filter should exist on mainnet"),

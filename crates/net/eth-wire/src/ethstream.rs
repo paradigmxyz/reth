@@ -91,7 +91,7 @@ where
         fork_filter: ForkFilter,
     ) -> Result<(EthStream<S, N>, UnifiedStatus), EthStreamError> {
         trace!(
-            status = %Into::<StatusMessage>::into(status),
+            status = %status.into_message(),
             "sending eth status to peer"
         );
         EthereumEthHandshake(&mut self.inner).eth_handshake(status, fork_filter).await?;

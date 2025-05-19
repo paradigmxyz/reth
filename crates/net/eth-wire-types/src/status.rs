@@ -30,11 +30,11 @@ pub struct UnifiedStatus {
 
 /// Builder type for constructing a [`UnifiedStatus`] message.
 #[derive(Debug, Default)]
-pub struct UnifiedStatusBuilder {
+pub struct StatusBuilder {
     status: UnifiedStatus,
 }
 
-impl UnifiedStatusBuilder {
+impl StatusBuilder {
     /// Consumes the builder and returns the constructed [`UnifiedStatus`].
     pub fn build(self) -> UnifiedStatus {
         self.status
@@ -109,7 +109,7 @@ impl Default for UnifiedStatus {
 
 impl UnifiedStatus {
     /// Helper for creating the UnifiedStatus builder
-    pub fn builder() -> UnifiedStatusBuilder {
+    pub fn builder() -> StatusBuilder {
         Default::default()
     }
 
@@ -139,6 +139,66 @@ impl UnifiedStatus {
     /// Sets the [`EthVersion`] for the status.
     pub fn set_eth_version(&mut self, v: EthVersion) {
         self.version = v;
+    }
+
+    /// Consume this `UnifiedStatus` and produce the legacy `Status`.
+    pub fn into_legacy(self) -> Status {
+        Status {
+            version: self.version,
+            chain: self.chain,
+            genesis: self.genesis,
+            forkid: self.forkid,
+            blockhash: self.blockhash,
+            total_difficulty: self.total_difficulty.unwrap_or(U256::ZERO),
+        }
+    }
+
+    /// Consume this `UnifiedStatus` and produce the `StatusEth69`.
+    pub fn into_eth69(self) -> StatusEth69 {
+        StatusEth69 {
+            version: self.version,
+            chain: self.chain,
+            genesis: self.genesis,
+            forkid: self.forkid,
+            earliest: self.earliest_block.unwrap_or(0),
+            latest: self.latest_block.unwrap_or(0),
+            blockhash: self.blockhash,
+        }
+    }
+
+    /// Convert this `UnifiedStatus` into the appropriate `StatusMessage` variant based on version.
+    pub fn into_message(self) -> StatusMessage {
+        if self.version == EthVersion::Eth69 {
+            StatusMessage::Eth69(self.into_eth69())
+        } else {
+            StatusMessage::Legacy(self.into_legacy())
+        }
+    }
+
+    /// Build a `UnifiedStatus` from a received `StatusMessage`.
+    pub fn from_message(msg: StatusMessage) -> Self {
+        match msg {
+            StatusMessage::Legacy(s) => UnifiedStatus {
+                version: s.version,
+                chain: s.chain,
+                genesis: s.genesis,
+                forkid: s.forkid,
+                blockhash: s.blockhash,
+                total_difficulty: Some(s.total_difficulty),
+                earliest_block: None,
+                latest_block: None,
+            },
+            StatusMessage::Eth69(e) => UnifiedStatus {
+                version: e.version,
+                chain: e.chain,
+                genesis: e.genesis,
+                forkid: e.forkid,
+                blockhash: e.blockhash,
+                total_difficulty: None,
+                earliest_block: Some(e.earliest),
+                latest_block: Some(e.latest),
+            },
+        }
     }
 }
 
@@ -398,58 +458,6 @@ impl Display for StatusMessage {
         match self {
             StatusMessage::Legacy(s) => Display::fmt(s, f),
             StatusMessage::Eth69(s69) => Display::fmt(s69, f),
-        }
-    }
-}
-
-impl From<UnifiedStatus> for StatusMessage {
-    fn from(s: UnifiedStatus) -> Self {
-        if s.version == EthVersion::Eth69 {
-            StatusMessage::Eth69(StatusEth69 {
-                version: s.version,
-                chain: s.chain,
-                genesis: s.genesis,
-                forkid: s.forkid,
-                earliest: s.earliest_block.unwrap_or(0),
-                latest: s.latest_block.unwrap_or(0),
-                blockhash: s.blockhash,
-            })
-        } else {
-            StatusMessage::Legacy(Status {
-                version: s.version,
-                chain: s.chain,
-                total_difficulty: s.total_difficulty.unwrap_or(U256::ZERO),
-                blockhash: s.blockhash,
-                genesis: s.genesis,
-                forkid: s.forkid,
-            })
-        }
-    }
-}
-
-impl From<StatusMessage> for UnifiedStatus {
-    fn from(msg: StatusMessage) -> Self {
-        match msg {
-            StatusMessage::Legacy(s) => UnifiedStatus {
-                version: s.version,
-                chain: s.chain,
-                genesis: s.genesis,
-                forkid: s.forkid,
-                blockhash: s.blockhash,
-                total_difficulty: Some(s.total_difficulty),
-                earliest_block: None,
-                latest_block: None,
-            },
-            StatusMessage::Eth69(e) => UnifiedStatus {
-                version: e.version,
-                chain: e.chain,
-                genesis: e.genesis,
-                forkid: e.forkid,
-                blockhash: e.blockhash,
-                total_difficulty: None,
-                earliest_block: Some(e.earliest),
-                latest_block: Some(e.latest),
-            },
         }
     }
 }
