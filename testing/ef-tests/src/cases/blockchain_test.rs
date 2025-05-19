@@ -321,7 +321,7 @@ pub fn run_case(
 
     // Now validate using the stateless client if everything else passes
     for (block, execution_witness) in &program_inputs {
-        stateless_validation(block.clone(), execution_witness.clone(), chain_spec.clone())
+        stateless_validation(block.into_block(), execution_witness, chain_spec.clone())
             .expect("stateless validation failed");
     }
 
