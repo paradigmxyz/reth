@@ -105,7 +105,7 @@ pub enum StatelessValidationError {
 ///    from `ancestor_headers`. Verifies the provided [`ExecutionWitness`] against this root using
 ///    [`verify_execution_witness`].
 ///
-/// 3. **Chain Verification:** The code currently does not verify the [`ChainSpec`] and expects a
+/// 3. **Chain Verification:** The code currently does not verify the [`EthChainSpec`] and expects a
 ///    higher level function to assert that this is correct by, for example, asserting that it is
 ///    equal to the Ethereum Mainnet `ChainSpec` or asserting against the genesis hash that this
 ///    `ChainSpec` defines.
