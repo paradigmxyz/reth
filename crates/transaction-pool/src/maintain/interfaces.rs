@@ -136,6 +136,28 @@ where
     where
         M: DriftMonitoring<Client> + 'a;
 
+    /// Process a reorg event - returns true if the event was a reorg and was processed
+    fn process_reorg<'a, M>(
+        &'a mut self,
+        event: CanonStateNotification<N>,
+        client: &'a Client,
+        pool: &'a P,
+        drift_monitor: &'a mut M,
+    ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>>
+    where
+        M: DriftMonitoring<Client> + 'a;
+
+    /// Process a commit event - returns true if the event was a commit and was processed
+    fn process_commit<'a, M>(
+        &'a mut self,
+        event: CanonStateNotification<N>,
+        client: &'a Client,
+        pool: &'a P,
+        drift_monitor: &'a mut M,
+    ) -> bool
+    where
+        M: DriftMonitoring<Client> + 'a;
+
     /// Update finalized blocks and return finalized blob hashes if any
     fn update_finalized(&mut self, client: &Client) -> Option<BlobStoreUpdates>;
 
@@ -165,6 +187,32 @@ where
                 self.process_commit(event, client, pool, drift_monitor);
             }
         })
+    }
+
+    fn process_reorg<'a, M>(
+        &'a mut self,
+        event: CanonStateNotification<N>,
+        client: &'a Client,
+        pool: &'a P,
+        drift_monitor: &'a mut M,
+    ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>>
+    where
+        M: DriftMonitoring<Client> + Send + 'a,
+    {
+        Box::pin(async move { self.process_reorg(event, client, pool, drift_monitor).await })
+    }
+
+    fn process_commit<'a, M>(
+        &'a mut self,
+        event: CanonStateNotification<N>,
+        client: &'a Client,
+        pool: &'a P,
+        drift_monitor: &'a mut M,
+    ) -> bool
+    where
+        M: DriftMonitoring<Client> + 'a,
+    {
+        self.process_commit(event, client, pool, drift_monitor)
     }
 
     fn update_finalized(&mut self, client: &Client) -> Option<BlobStoreUpdates> {

@@ -200,32 +200,41 @@ where
 
     /// Handle a canon event
     fn handle_canon_event(&mut self, event: CanonStateNotification<N>) {
-        let event_clone = event.clone();
+        match &event {
+            CanonStateNotification::Reorg { old: _, new: _ } => {
+                let fut = self.canon_processor.process_reorg(
+                    event.clone(),
+                    &self.client,
+                    &self.pool,
+                    &mut self.drift_monitor,
+                );
 
-        let client = self.client.clone();
-        let pool = self.pool.clone();
-        let mut drift_monitor = self.drift_monitor.clone();
-        let mut canon_processor = self.canon_processor.clone();
+                // TODO: do not block here
+                tokio::task::block_in_place(move || {
+                    tokio::runtime::Handle::current().block_on(fut);
+                });
+            }
+            CanonStateNotification::Commit { new } => {
+                self.canon_processor.process_commit(
+                    event.clone(),
+                    &self.client,
+                    &self.pool,
+                    &mut self.drift_monitor,
+                );
 
-        // spawn a task to handle the async processing
-        self.task_spawner.spawn(Box::pin(async move {
-            canon_processor.process_event(event_clone, &client, &pool, &mut drift_monitor).await;
-        }));
+                let (blocks, _) = new.inner();
+                let block = blocks.tip();
+                // mark affected accounts as dirty for reload
+                let affected_accounts: HashSet<_> = block
+                    .body()
+                    .transactions()
+                    .iter()
+                    .filter_map(|tx| tx.recover_signer().ok())
+                    .collect();
 
-        // for commit events, marking the accounts as dirty is synchronous
-        if let CanonStateNotification::Commit { new } = &event {
-            let (blocks, _) = new.inner();
-            let block = blocks.tip();
-            // Mark affected accounts as dirty for reload
-            let affected_accounts: HashSet<_> = block
-                .body()
-                .transactions()
-                .iter()
-                .filter_map(|tx| tx.recover_signer().ok())
-                .collect();
-
-            if !affected_accounts.is_empty() {
-                self.drift_monitor.add_dirty_addresses(affected_accounts);
+                if !affected_accounts.is_empty() {
+                    self.drift_monitor.add_dirty_addresses(affected_accounts);
+                }
             }
         }
     }
@@ -315,7 +324,6 @@ where
                     }
                 }
             }
-            // Don't need to return here, can continue with the rest of processing
         }
 
         // Poll events stream
