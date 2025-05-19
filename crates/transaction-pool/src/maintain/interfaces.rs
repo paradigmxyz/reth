@@ -125,17 +125,6 @@ where
     Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static,
     P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
 {
-    /// Process a canonical chain event
-    fn process_event<'a, M>(
-        &'a mut self,
-        event: CanonStateNotification<N>,
-        client: &'a Client,
-        pool: &'a P,
-        drift_monitor: &'a mut M,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>
-    where
-        M: DriftMonitoring<Client> + 'a;
-
     /// Process a reorg event - returns true if the event was a reorg and was processed
     fn process_reorg<'a, M>(
         &'a mut self,
@@ -171,24 +160,6 @@ where
     Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static,
     P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
 {
-    fn process_event<'a, M>(
-        &'a mut self,
-        event: CanonStateNotification<N>,
-        client: &'a Client,
-        pool: &'a P,
-        drift_monitor: &'a mut M,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>
-    where
-        M: DriftMonitoring<Client> + Send + 'a,
-    {
-        Box::pin(async move {
-            if !self.process_reorg(event.clone(), client, pool, drift_monitor).await {
-                // if not a reorg, try as a commit
-                self.process_commit(event, client, pool, drift_monitor);
-            }
-        })
-    }
-
     fn process_reorg<'a, M>(
         &'a mut self,
         event: CanonStateNotification<N>,
