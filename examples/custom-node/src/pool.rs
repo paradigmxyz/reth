@@ -10,6 +10,7 @@ use reth_node_builder::{
 use reth_op::{
     node::txpool::{
         conditional::MaybeConditionalTransaction,
+        estimated_da_size::DataAvailabilitySized,
         interop::MaybeInteropTransaction,
         supervisor::{SupervisorClient, DEFAULT_SUPERVISOR_URL},
         OpPooledTransaction, OpTransactionPool, OpTransactionValidator,
@@ -85,7 +86,8 @@ where
         NodePrimitives<SignedTx = Extended<OpTxEnvelope, CustomTransactionEnvelope>>,
     T: EthPoolTransaction<Consensus = Extended<OpTxEnvelope, CustomTransactionEnvelope>>
         + MaybeConditionalTransaction
-        + MaybeInteropTransaction,
+        + MaybeInteropTransaction
+        + DataAvailabilitySized,
 {
     type Pool = OpTransactionPool<Node::Provider, DiskFileBlobStore, T>;
 

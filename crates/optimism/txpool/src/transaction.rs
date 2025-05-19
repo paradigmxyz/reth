@@ -5,7 +5,11 @@ use crate::{
 use alloy_consensus::{
     transaction::Recovered, BlobTransactionSidecar, BlobTransactionValidationError, Typed2718,
 };
-use alloy_eips::{eip2718::WithEncoded, eip2930::AccessList, eip7702::SignedAuthorization};
+use alloy_eips::{
+    eip2718::{Encodable2718, WithEncoded},
+    eip2930::AccessList,
+    eip7702::SignedAuthorization,
+};
 use alloy_primitives::{Address, Bytes, TxHash, TxKind, B256, U256};
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
 use c_kzg::KzgSettings;
@@ -15,9 +19,12 @@ use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use reth_transaction_pool::{
     EthBlobTransactionSidecar, EthPoolTransaction, EthPooledTransaction, PoolTransaction,
 };
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc, OnceLock,
+use std::{
+    borrow::Cow,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, OnceLock,
+    },
 };
 
 /// Marker for no-interop transactions
@@ -287,6 +294,14 @@ where
 pub trait OpPooledTx:
     MaybeConditionalTransaction + MaybeInteropTransaction + PoolTransaction + DataAvailabilitySized
 {
+    /// Returns the EIP-2718 encoded bytes of the transaction.
+    fn encoded_2718(&self) -> Cow<'_, Bytes> {
+        let mut encoded = Vec::with_capacity(self.encoded_length());
+        let tx = self.clone_into_consensus();
+        tx.encode_2718(&mut encoded);
+
+        Cow::Owned(Bytes::copy_from_slice(&encoded))
+    }
 }
 impl<T> OpPooledTx for T where
     T: MaybeConditionalTransaction

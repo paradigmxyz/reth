@@ -42,6 +42,7 @@ use reth_optimism_rpc::{
 };
 use reth_optimism_txpool::{
     conditional::MaybeConditionalTransaction,
+    estimated_da_size::DataAvailabilitySized,
     interop::MaybeInteropTransaction,
     supervisor::{SupervisorClient, DEFAULT_SUPERVISOR_URL},
     OpPooledTx,
@@ -538,7 +539,8 @@ where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec: OpHardforks>>,
     T: EthPoolTransaction<Consensus = TxTy<Node::Types>>
         + MaybeConditionalTransaction
-        + MaybeInteropTransaction,
+        + MaybeInteropTransaction
+        + DataAvailabilitySized,
 {
     type Pool = OpTransactionPool<Node::Provider, DiskFileBlobStore, T>;
 
