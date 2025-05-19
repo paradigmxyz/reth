@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use alloy_consensus::{
-    EthereumTxEnvelope, Header, TxEip1559, TxEip2930, TxEip4844, TxEip4844Variant,
-    TxEip4844WithSidecar, TxEip7702, TxLegacy, TxType,
+    transaction::TxEip4844Sidecar, EthereumTxEnvelope, Header, TxEip1559, TxEip2930, TxEip4844,
+    TxEip4844Variant, TxEip4844WithSidecar, TxEip7702, TxLegacy, TxType,
 };
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::{Signature, TxHash, B256};
