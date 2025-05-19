@@ -3,6 +3,7 @@ use crate::{
     primitives::{block::Block, tx, CustomHeader, CustomNodePrimitives, CustomTransaction},
 };
 use alloy_consensus::Header;
+use alloy_eips::Encodable2718;
 use alloy_evm::{
     block::{
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
@@ -15,6 +16,7 @@ use alloy_op_evm::{
     block::receipt_builder::OpReceiptBuilder, OpBlockExecutionCtx, OpBlockExecutor, OpEvm,
 };
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
+use op_alloy_consensus::OpTxEnvelope;
 use op_revm::{OpSpecId, OpTransaction};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_ethereum::{
@@ -112,13 +114,58 @@ impl revm::context::Transaction for CustomTxEnv {
 
 impl FromRecoveredTx<CustomTransaction> for CustomTxEnv {
     fn from_recovered_tx(tx: &CustomTransaction, sender: Address) -> Self {
-        todo!()
+        match tx {
+            CustomTransaction::BuiltIn(tx) => CustomTxEnv(TxEnv::from_recovered_tx(tx, sender)),
+            CustomTransaction::Other(_) => todo!(),
+        }
     }
 }
 
 impl FromTxWithEncoded<CustomTransaction> for CustomTxEnv {
     fn from_encoded_tx(tx: &CustomTransaction, sender: Address, encoded: Bytes) -> Self {
-        todo!()
+        match tx {
+            CustomTransaction::BuiltIn(tx) => {
+                CustomTxEnv(TxEnv::from_encoded_tx(tx, sender, encoded))
+            }
+            CustomTransaction::Other(_) => todo!(),
+        }
+    }
+}
+
+pub struct CustomEvmTransaction(OpTransaction<CustomTxEnv>);
+
+impl FromRecoveredTx<CustomTransaction> for CustomEvmTransaction {
+    fn from_recovered_tx(tx: &CustomTransaction, sender: Address) -> Self {
+        match tx {
+            CustomTransaction::BuiltIn(tx) => {
+                let tx = OpTransaction::<TxEnv>::from_recovered_tx(tx, sender);
+
+                CustomEvmTransaction(OpTransaction {
+                    base: CustomTxEnv(tx.base),
+                    enveloped_tx: tx.enveloped_tx,
+                    deposit: tx.deposit,
+                })
+            }
+            CustomTransaction::Other(_) => todo!(),
+        }
+    }
+}
+
+impl FromTxWithEncoded<CustomTransaction> for CustomEvmTransaction {
+    fn from_encoded_tx(tx: &CustomTransaction, sender: Address, encoded: Bytes) -> Self {
+        match tx {
+            CustomTransaction::BuiltIn(tx) => {
+                let encoded = tx.encoded_2718();
+                let tx = OpTransaction::<TxEnv>::from_encoded_tx(tx, sender, encoded.into());
+
+                CustomEvmTransaction(OpTransaction {
+                    base: CustomTxEnv(tx.base),
+                    enveloped_tx: tx.enveloped_tx,
+                    deposit: tx.deposit,
+                })
+            }
+            CustomTransaction::Other(_) => todo!(),
+        }
     }
 }
 
@@ -129,7 +176,7 @@ pub struct CustomBlockExecutor<Evm> {
 impl<'db, DB, E> BlockExecutor for CustomBlockExecutor<E>
 where
     DB: Database + 'db,
-    E: Evm<DB = &'db mut State<DB>, Tx = OpTransaction<CustomTxEnv>>,
+    E: Evm<DB = &'db mut State<DB>, Tx = CustomEvmTransaction>,
 {
     type Transaction = CustomTransaction;
     type Receipt = OpReceipt;
