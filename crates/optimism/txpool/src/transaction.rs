@@ -277,18 +277,26 @@ where
     }
 }
 
-/// Helper trait to provide payload builder with access to conditionals and encoded bytes of
-/// transaction.
+/// Helper trait to provide payload builder with access to conditionals, encoded bytes of
+/// transaction, and other optimism-specific properties.
 pub trait OpPooledTx:
     MaybeConditionalTransaction + MaybeInteropTransaction + PoolTransaction + DataAvailabilitySized
 {
+    /// Returns the EIP-2718 encoded bytes of the transaction.
+    /// This may return a cached value to avoid redundant encoding.
+    fn encoded_2718(&self) -> &[u8];
 }
-impl<T> OpPooledTx for T where
-    T: MaybeConditionalTransaction
-        + MaybeInteropTransaction
-        + PoolTransaction
-        + DataAvailabilitySized
+
+impl<Cons, Pooled> OpPooledTx for OpPooledTransaction<Cons, Pooled> 
+where
+    Cons: SignedTransaction + From<Pooled>,
+    Pooled: SignedTransaction + TryFrom<Cons>,
+    <Pooled as TryFrom<Cons>>::Error: core::error::Error,
 {
+    fn encoded_2718(&self) -> &[u8] {
+        // Use the lazily computed value
+        self.encoded_2718().as_ref()
+    }
 }
 
 #[cfg(test)]
