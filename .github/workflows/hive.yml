@@ -62,17 +62,19 @@ jobs:
           - sim: ethereum/sync
           - sim: devp2p
             limit: discv4
-          - sim: devp2p
-            limit: eth
-            include:
-              # failures tracked in https://github.com/paradigmxyz/reth/issues/14825
-              - Status
-              - GetBlockHeaders
-              - ZeroRequestID
-              - GetBlockBodies
-              - MaliciousHandshake
-              - Transaction
-              - NewPooledTxs
+          # started failing after https://github.com/ethereum/go-ethereum/pull/31843, no
+          # action on our side, remove from here when we get unxpected passes on these tests
+          # - sim: devp2p
+          #  limit: eth
+          #  include:
+          #    - MaliciousHandshake
+          #    # failures tracked in https://github.com/paradigmxyz/reth/issues/14825
+          #    - Status
+          #    - GetBlockHeaders
+          #    - ZeroRequestID
+          #    - GetBlockBodies
+          #    - Transaction
+          #    - NewPooledTxs
           - sim: devp2p
             limit: discv5
             include:
