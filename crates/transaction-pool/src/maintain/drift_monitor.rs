@@ -245,7 +245,7 @@ impl Future for DriftMonitor {
                 Poll::Ready(Ok(Ok(accounts))) => {
                     // reloaded accounts successfully
                     // extend accounts we failed to load from database
-                    self.dirty_addresses.extend(accounts.failed_to_load.iter());
+                    self.dirty_addresses.extend(accounts.failed_to_load.iter().copied());
                     return Poll::Ready(DriftMonitorResult::AccountsLoaded(accounts));
                 }
                 Poll::Ready(Ok(Err(res))) => {
