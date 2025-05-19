@@ -50,16 +50,21 @@ macro_rules! impl_in_mem_size {
     };
 }
 
-impl_in_mem_size!(
-    Header,
-    TxLegacy,
-    TxEip2930,
-    TxEip1559,
-    TxEip7702,
-    TxEip4844,
-    TxEip4844Variant,
-    TxEip4844WithSidecar
-);
+impl_in_mem_size!(Header, TxLegacy, TxEip2930, TxEip1559, TxEip7702, TxEip4844,);
+
+impl<T: TxEip4844Sidecar> InMemorySize for TxEip4844Variant<T> {
+    #[inline]
+    fn size(&self) -> usize {
+        Self::size(self)
+    }
+}
+
+impl<T: TxEip4844Sidecar> InMemorySize for TxEip4844WithSidecar<T> {
+    #[inline]
+    fn size(&self) -> usize {
+        Self::size(self)
+    }
+}
 
 #[cfg(feature = "op")]
 impl_in_mem_size_size_of!(op_alloy_consensus::OpTxType);
