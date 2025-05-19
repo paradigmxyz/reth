@@ -1,16 +1,18 @@
 use crate::{witness_db::WitnessDatabase, ExecutionWitness};
 use alloc::{
     collections::BTreeMap,
+    format,
     string::{String, ToString},
     sync::Arc,
     vec::Vec,
 };
 use alloy_consensus::{Block, BlockHeader, Header};
-use alloy_primitives::{keccak256, map::B256Map, B256};
+use alloy_primitives::{keccak256, map::B256Map, Address, Bytes, FixedBytes, B256, U256};
 use alloy_rlp::Decodable;
+use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
 use reth_chainspec::ChainSpec;
 use reth_consensus::{Consensus, HeaderValidator};
-use reth_errors::ConsensusError;
+use reth_errors::{ConsensusError, ProviderError};
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
 use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::{execute::Executor, ConfigureEvm};
@@ -84,6 +86,10 @@ pub enum StatelessValidationError {
         /// The expected pre-state root from the previous block
         expected: B256,
     },
+
+    /// Trie related errors that can occur during validation of the execution witness
+    #[error("could not validate the execution witness")]
+    TrieWitness(#[from] ProviderError),
 }
 
 /// Performs stateless validation of a block using the provided witness data.
@@ -123,9 +129,13 @@ pub enum StatelessValidationError {
 /// `current_block`.
 pub fn stateless_validation(
     current_block: RecoveredBlock<Block<TransactionSigned>>,
-    witness: ExecutionWitness,
+    mut witness: ExecutionWitness,
     chain_spec: Arc<ChainSpec>,
 ) -> Result<B256, StatelessValidationError> {
+    // Add coinbase account to keys that should be checked
+    let coinbase = current_block.header().beneficiary;
+    witness.keys.push(coinbase.0.into());
+
     let mut ancestor_headers: Vec<Header> = witness
         .headers
         .iter()
@@ -157,10 +167,11 @@ pub fn stateless_validation(
     };
 
     // First verify that the pre-state reads are correct
-    let (mut sparse_trie, bytecode) = verify_execution_witness(&witness, pre_state_root)?;
+    let (mut sparse_trie, accounts, storage_slots, bytecode) =
+        verify_execution_witness(&witness, pre_state_root)?;
 
     // Create an in-memory database that will use the reads to validate the block
-    let db = WitnessDatabase::new(&sparse_trie, bytecode, ancestor_hashes);
+    let db = WitnessDatabase::new(&sparse_trie, accounts, storage_slots, bytecode, ancestor_hashes);
 
     // Execute the block
     let basic_block_executor = EthExecutorProvider::ethereum(chain_spec.clone());
@@ -238,10 +249,19 @@ fn validate_block_consensus(
 /// for the given `pre_state_root`.
 // Note: This approach might be inefficient for ZKVMs requiring minimal memory operations, which
 // would explain why they have for the most part re-implemented this function.
+#[allow(clippy::type_complexity)] // TODO: use a struct
 pub fn verify_execution_witness(
     witness: &ExecutionWitness,
     pre_state_root: B256,
-) -> Result<(SparseStateTrie, B256Map<Bytecode>), StatelessValidationError> {
+) -> Result<
+    (
+        SparseStateTrie,
+        BTreeMap<Address, Option<TrieAccount>>,
+        BTreeMap<(Address, U256), U256>,
+        B256Map<Bytecode>,
+    ),
+    StatelessValidationError,
+> {
     let mut trie = SparseStateTrie::new(DefaultBlindedProviderFactory);
     let mut state_witness = B256Map::default();
     let mut bytecode = B256Map::default();
@@ -266,13 +286,16 @@ pub fn verify_execution_witness(
     trie.reveal_witness(pre_state_root, &state_witness)
         .map_err(|_e| StatelessValidationError::WitnessRevealFailed { pre_state_root })?;
 
+    let (accounts, storage_slots) = fetch_all_accounts_and_storage_slots(&witness.keys, &trie)
+        .map_err(StatelessValidationError::from)?;
+
     // Calculate the root
     let computed_root = trie
         .root()
         .map_err(|_e| StatelessValidationError::StatelessPreStateRootCalculationFailed)?;
 
     if computed_root == pre_state_root {
-        Ok((trie, bytecode))
+        Ok((trie, accounts, storage_slots, bytecode))
     } else {
         Err(StatelessValidationError::PreStateRootMismatch {
             got: computed_root,
@@ -320,4 +343,100 @@ fn compute_ancestor_hashes(
     }
 
     Ok(ancestor_hashes)
+}
+
+#[allow(clippy::type_complexity)] // TODO: use a struct
+fn fetch_all_accounts_and_storage_slots(
+    keys: &[Bytes],
+    trie: &SparseStateTrie,
+) -> Result<(BTreeMap<Address, Option<TrieAccount>>, BTreeMap<(Address, U256), U256>), ProviderError>
+{
+    let mut accounts: BTreeMap<Address, Option<TrieAccount>> = BTreeMap::new();
+    let mut storage_slots: BTreeMap<(Address, U256), U256> = BTreeMap::new();
+
+    // Add the system contract caller
+    accounts.insert(alloy_eips::eip4788::SYSTEM_ADDRESS, None);
+
+    // TODO: We could remove the need of this by having the ExecutionWitness
+    // TODO: have a map of keys instead of a vector. ie address -> {storage_slots}
+    let mut current_address: Option<Address> = None;
+
+    for key in keys {
+        if key.len() == 20 {
+            let fixed_key = FixedBytes::<20>::try_from(key.as_ref()).unwrap();
+            let address = Address::from(fixed_key);
+
+            current_address = Some(address);
+
+            let account = fetch_account(address, trie)?;
+            accounts.insert(address, account);
+        } else if key.len() == 32 {
+            let fixed_key = FixedBytes::<32>::try_from(key.as_ref()).unwrap();
+            let slot_key: U256 = fixed_key.into();
+
+            let address = current_address.expect("execution witness is malformed");
+
+            let slot_value = fetch_storage_slot(address, slot_key, trie)?;
+            storage_slots.insert((address, slot_key), slot_value);
+        } else {
+            panic!("unexpected key length: execution witness is malformed")
+        }
+    }
+
+    Ok((accounts, storage_slots))
+}
+
+fn fetch_account(
+    address: Address,
+    trie: &SparseStateTrie,
+) -> Result<Option<TrieAccount>, ProviderError> {
+    let hashed_address = keccak256(address);
+
+    if let Some(bytes) = trie.get_account_value(&hashed_address) {
+        let account = TrieAccount::decode(&mut bytes.as_slice())?;
+        return Ok(Some(account));
+    }
+
+    if !trie.check_valid_account_witness(hashed_address) {
+        return Err(ProviderError::TrieWitnessError(format!(
+            "incomplete account witness for {hashed_address:?}"
+        )));
+    }
+
+    Ok(None)
+}
+fn fetch_storage_slot(
+    address: Address,
+    slot: U256,
+    trie: &SparseStateTrie,
+) -> Result<U256, ProviderError> {
+    let hashed_address = keccak256(address);
+    let hashed_slot = keccak256(B256::from(slot));
+
+    if let Some(raw) = trie.get_storage_slot_value(&hashed_address, &hashed_slot) {
+        return Ok(U256::decode(&mut raw.as_slice())?)
+    }
+
+    // Storage slot value is not present in the trie, validate that the witness is complete.
+    // If the account exists in the trie...
+    if let Some(bytes) = trie.get_account_value(&hashed_address) {
+        // ...check that its storage is either empty or the storage trie was sufficiently
+        // revealed...
+        let account = TrieAccount::decode(&mut bytes.as_slice())?;
+        if account.storage_root != EMPTY_ROOT_HASH &&
+            !trie.check_valid_storage_witness(hashed_address, hashed_slot)
+        {
+            return Err(ProviderError::TrieWitnessError(format!(
+                "incomplete storage witness: prover must supply exclusion proof for slot {hashed_slot:?} in account {hashed_address:?}"
+            )));
+        }
+    } else if !trie.check_valid_account_witness(hashed_address) {
+        // ...else if account is missing, validate that the account trie was sufficiently
+        // revealed.
+        return Err(ProviderError::TrieWitnessError(format!(
+            "incomplete account witness for {hashed_address:?}"
+        )));
+    }
+
+    Ok(U256::ZERO)
 }
