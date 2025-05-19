@@ -389,3 +389,6 @@ impl<T: TransactionEnv> TransactionEnv for op_revm::OpTransaction<T> {
         self.base.set_access_list(access_list);
     }
 }
+
+#[cfg(feature = "metrics")]
+pub use metrics::{ExecutorMetrics, MeteredStateHook};

@@ -73,6 +73,39 @@ impl ExecutorMetrics {
     }
 }
 
+/// Wrapper struct that combines metrics and state hook
+pub struct MeteredStateHook {
+    /// Metrics for the executor
+    pub metrics: ExecutorMetrics,
+    /// The inner state hook to delegate to
+    pub inner_hook: Box<dyn alloy_evm::block::OnStateHook>,
+}
+
+impl std::fmt::Debug for MeteredStateHook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MeteredStateHook")
+            .field("metrics", &self.metrics)
+            .field("inner_hook", &"<dyn OnStateHook>")
+            .finish()
+    }
+}
+
+impl alloy_evm::block::OnStateHook for MeteredStateHook {
+    fn on_state(&mut self, source: alloy_evm::block::StateChangeSource, state: &revm::state::EvmState) {
+        // Update the metrics for the number of accounts, storage slots and bytecodes loaded
+        let accounts = state.keys().len();
+        let storage_slots = state.values().map(|account| account.storage.len()).sum::<usize>();
+        let bytecodes = state.values().filter(|account| !account.info.is_empty_code_hash()).count();
+
+        self.metrics.accounts_loaded_histogram.record(accounts as f64);
+        self.metrics.storage_slots_loaded_histogram.record(storage_slots as f64);
+        self.metrics.bytecodes_loaded_histogram.record(bytecodes as f64);
+
+        // Call the original state hook
+        self.inner_hook.on_state(source, state);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

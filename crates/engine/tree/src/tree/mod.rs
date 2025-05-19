@@ -9,7 +9,7 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::{merge::EPOCH_SLOTS, BlockNumHash, NumHash};
-use alloy_evm::block::{BlockExecutor, OnStateHook, StateChangeSource};
+use alloy_evm::block::{BlockExecutor, OnStateHook};
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
@@ -30,7 +30,7 @@ use reth_engine_primitives::{
     ExecutionPayload, ForkchoiceStateTracker, OnForkChoiceUpdated,
 };
 use reth_errors::{ConsensusError, ProviderResult};
-use reth_evm::{ConfigureEvm, Evm, metrics::ExecutorMetrics};
+use reth_evm::{ConfigureEvm, Evm, MeteredStateHook};
 use revm::database::Database;
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::BlockExecutionOutput;
@@ -50,7 +50,7 @@ use reth_stages_api::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_db::{DatabaseHashedPostState, StateCommitment};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use revm::{database::states::bundle_state::BundleRetention, state::EvmState};
+use revm::database::states::bundle_state::BundleRetention;
 use state::TreeState;
 use std::{
     fmt::Debug,
@@ -66,28 +66,6 @@ use tokio::sync::{
 };
 use tracing::*;
 use core::borrow::BorrowMut;
-
-/// Wrapper struct that combines metrics and state hook
-struct MeteredStateHook {
-    metrics: ExecutorMetrics,
-    inner_hook: Box<dyn OnStateHook>,
-}
-
-impl OnStateHook for MeteredStateHook {
-    fn on_state(&mut self, source: StateChangeSource, state: &EvmState) {
-        // Update the metrics for the number of accounts, storage slots and bytecodes loaded
-        let accounts = state.keys().len();
-        let storage_slots = state.values().map(|account| account.storage.len()).sum::<usize>();
-        let bytecodes = state.values().filter(|account| !account.info.is_empty_code_hash()).count();
-
-        self.metrics.accounts_loaded_histogram.record(accounts as f64);
-        self.metrics.storage_slots_loaded_histogram.record(storage_slots as f64);
-        self.metrics.bytecodes_loaded_histogram.record(bytecodes as f64);
-
-        // Call the original state hook
-        self.inner_hook.on_state(source, state);
-    }
-}
 
 mod block_buffer;
 mod cached_state;
@@ -4289,88 +4267,9 @@ mod tests {
         test_harness.send_fcu(fork_tip_hash, ForkchoiceStatus::Invalid).await;
     }
 
-    /// A mock executor that simulates state changes
-    struct MockExecutor {
-        state: EvmState,
-        hook: Option<Box<dyn OnStateHook>>,
-        evm: EthEvm<State<EmptyDB>, NoOpInspector>,
-    }
+    // MockExecutor implementation has been removed in favor of using the one from reth_evm::metrics
 
-    impl MockExecutor {
-        fn new(state: EvmState) -> Self {
-            let db = State::builder()
-                .with_database(EmptyDB::default())
-                .with_bundle_update()
-                .without_state_clear()
-                .build();
-            let evm = EthEvm::new(
-                Context::mainnet().with_db(db).build_mainnet_with_inspector(NoOpInspector {}),
-                false,
-            );
-            Self { state, hook: None, evm }
-        }
-    }
-
-    impl BlockExecutor for MockExecutor {
-        type Transaction = TransactionSigned;
-        type Receipt = Receipt;
-        type Evm = EthEvm<State<EmptyDB>, NoOpInspector>;
-
-        fn apply_pre_execution_changes(&mut self) -> Result<(), reth_execution_errors::BlockExecutionError> {
-            Ok(())
-        }
-
-        fn execute_transaction_with_result_closure(
-            &mut self,
-            _tx: impl alloy_evm::block::ExecutableTx<Self>,
-            _f: impl FnOnce(&revm::context::result::ExecutionResult<<Self::Evm as Evm>::HaltReason>),
-        ) -> Result<u64, reth_execution_errors::BlockExecutionError> {
-            Ok(0)
-        }
-
-        fn finish(
-            self,
-        ) -> Result<(Self::Evm, BlockExecutionResult<Self::Receipt>), reth_execution_errors::BlockExecutionError> {
-            let Self { evm, hook, .. } = self;
-
-            // Call hook with our mock state
-            if let Some(mut hook) = hook {
-                hook.on_state(StateChangeSource::Transaction(0), &self.state);
-            }
-
-            Ok((
-                evm,
-                BlockExecutionResult {
-                    receipts: vec![],
-                    requests: Requests::default(),
-                    gas_used: 0,
-                },
-            ))
-        }
-
-        fn set_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {
-            self.hook = hook;
-        }
-
-        fn evm(&self) -> &Self::Evm {
-            &self.evm
-        }
-
-        fn evm_mut(&mut self) -> &mut Self::Evm {
-            &mut self.evm
-        }
-    }
-
-    struct ChannelStateHook {
-        output: i32,
-        sender: mpsc::Sender<i32>,
-    }
-
-    impl OnStateHook for ChannelStateHook {
-        fn on_state(&mut self, _source: StateChangeSource, _state: &EvmState) {
-            let _ = self.sender.send(self.output);
-        }
-    }
+    // ChannelStateHook implementation has been removed - reusing from reth_evm::metrics tests
 
     fn setup_test_recorder() -> Snapshotter {
         let recorder = DebuggingRecorder::new();
