@@ -208,7 +208,7 @@ impl<Tx> ProofTaskTx<Tx>
 where
     Tx: DbTx,
 {
-    fn create_factories(
+    const fn create_factories(
         &self,
     ) -> (
         InMemoryTrieCursorFactory<'_, DatabaseTrieCursorFactory<'_, Tx>>,
