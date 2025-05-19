@@ -55,6 +55,8 @@ pub struct ProtocolMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
 
 impl<N: NetworkPrimitives> ProtocolMessage<N> {
     /// Create a new `ProtocolMessage` from a message type and message rlp bytes.
+    ///
+    /// This will enforce decoding according to the given [`EthVersion`] of the connection.
     pub fn decode_message(version: EthVersion, buf: &mut &[u8]) -> Result<Self, MessageError> {
         let message_type = EthMessageID::decode(buf)?;
 
@@ -113,8 +115,14 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                 EthMessage::NodeData(RequestPair::decode(buf)?)
             }
             EthMessageID::GetReceipts => EthMessage::GetReceipts(RequestPair::decode(buf)?),
-            EthMessageID::Receipts => EthMessage::Receipts(RequestPair::decode(buf)?),
-            EthMessageID::Receipts69 => EthMessage::Receipts69(RequestPair::decode(buf)?),
+            EthMessageID::Receipts => {
+                if version < EthVersion::Eth69 {
+                    EthMessage::Receipts(RequestPair::decode(buf)?)
+                } else {
+                    // with eth69, receipts no longer include the bloom
+                    EthMessage::Receipts69(RequestPair::decode(buf)?)
+                }
+            }
             EthMessageID::Other(_) => {
                 let raw_payload = Bytes::copy_from_slice(buf);
                 buf.advance(raw_payload.len());
@@ -439,8 +447,6 @@ pub enum EthMessageID {
     GetReceipts = 0x0f,
     /// Represents receipts.
     Receipts = 0x10,
-    /// Represents receipts for eth/69.
-    Receipts69 = 0x11,
     /// Represents unknown message types.
     Other(u8),
 }
@@ -464,7 +470,6 @@ impl EthMessageID {
             Self::NodeData => 0x0e,
             Self::GetReceipts => 0x0f,
             Self::Receipts => 0x10,
-            Self::Receipts69 => 0x11,
             Self::Other(value) => *value, // Return the stored `u8`
         }
     }
@@ -546,6 +551,17 @@ pub struct RequestPair<T> {
 
     /// the request or response message payload
     pub message: T,
+}
+
+impl<T> RequestPair<T> {
+    /// Converts the message type with the given closure.
+    pub fn map<F, R>(self, f: F) -> RequestPair<R>
+    where
+        F: FnOnce(T) -> R,
+    {
+        let Self { request_id, message } = self;
+        RequestPair { request_id, message: f(message) }
+    }
 }
 
 /// Allows messages with request ids to be serialized into RLP bytes.
