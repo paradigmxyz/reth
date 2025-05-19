@@ -30,7 +30,7 @@ use reth_engine_primitives::{
     ExecutionPayload, ForkchoiceStateTracker, OnForkChoiceUpdated,
 };
 use reth_errors::{ConsensusError, ProviderResult};
-use reth_evm::{ConfigureEvm, Evm};
+use reth_evm::{ConfigureEvm, Evm, SpecFor};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes, PayloadTypes};
 use reth_primitives_traits::{
@@ -225,6 +225,7 @@ pub struct EngineApiTreeHandler<N, P, T, V, C>
 where
     N: NodePrimitives,
     T: PayloadTypes,
+    C: ConfigureEvm<Primitives = N> + 'static,
 {
     provider: P,
     consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
@@ -269,13 +270,14 @@ where
     /// The EVM configuration.
     evm_config: C,
     /// Precompile cache map.
-    precompile_cache_map: PrecompileCacheMap,
+    precompile_cache_map: PrecompileCacheMap<SpecFor<C>>,
 }
 
-impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C: Debug> std::fmt::Debug
+impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
     for EngineApiTreeHandler<N, P, T, V, C>
 where
     N: NodePrimitives,
+    C: Debug + ConfigureEvm<Primitives = N>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineApiTreeHandler")
@@ -2293,6 +2295,7 @@ where
                 CachedPrecompile::wrap(
                     precompile,
                     self.precompile_cache_map.cache_for_address(*address),
+                    *self.evm_config.evm_env(block.header()).spec_id(),
                 )
             });
         }
