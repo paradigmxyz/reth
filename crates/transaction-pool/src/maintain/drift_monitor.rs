@@ -107,6 +107,19 @@ pub struct DriftMonitor {
     metrics: MaintainPoolMetrics,
 }
 
+impl Clone for DriftMonitor {
+    fn clone(&self) -> Self {
+        Self {
+            state: self.state,
+            dirty_addresses: self.dirty_addresses.clone(),
+            max_reload_accounts: self.max_reload_accounts,
+            reload_accounts_fut: Fuse::terminated(),
+            first_event: self.first_event,
+            metrics: self.metrics.clone(),
+        }
+    }
+}
+
 impl DriftMonitor {
     /// Create a new drift monitor
     pub fn new(max_reload_accounts: usize, metrics: MaintainPoolMetrics) -> Self {

@@ -18,7 +18,7 @@ use std::{collections::HashSet, sync::Arc};
 use tracing::{debug, trace};
 
 /// Tracks the last finalized block for update processing
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FinalizedBlockTracker {
     last_finalized_block: Option<BlockNumber>,
 }
@@ -75,7 +75,7 @@ impl Default for CanonEventProcessorConfig {
 }
 
 /// Processor for canonical state events in the transaction pool
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CanonEventProcessor<N>
 where
     N: NodePrimitives,

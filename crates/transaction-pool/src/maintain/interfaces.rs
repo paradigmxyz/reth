@@ -21,7 +21,7 @@ use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use std::{collections::HashSet, pin::Pin};
 
 /// Trait defining the interface for a drift monitor
-pub trait DriftMonitoring<Client>: Future<Output = DriftMonitorResult> {
+pub trait DriftMonitoring<Client>: Future<Output = DriftMonitorResult> + Send {
     /// Returns true if the monitor is currently reloading accounts
     fn is_reloading(&self) -> bool;
 
@@ -132,7 +132,7 @@ where
         client: &'a Client,
         pool: &'a P,
         drift_monitor: &'a mut M,
-    ) -> Pin<Box<dyn Future<Output = ()> + 'a>>
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>
     where
         M: DriftMonitoring<Client> + 'a;
 
@@ -155,9 +155,9 @@ where
         client: &'a Client,
         pool: &'a P,
         drift_monitor: &'a mut M,
-    ) -> Pin<Box<dyn Future<Output = ()> + 'a>>
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>
     where
-        M: DriftMonitoring<Client> + 'a,
+        M: DriftMonitoring<Client> + Send + 'a,
     {
         Box::pin(async move {
             if !self.process_reorg(event.clone(), client, pool, drift_monitor).await {
@@ -204,7 +204,7 @@ where
 }
 
 /// Default implementation of the component factory
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DefaultComponentFactory;
 
 impl<N, Client, P>

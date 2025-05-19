@@ -8,7 +8,7 @@ use reth_primitives_traits::{Block, BlockBody, SignedTransaction};
 use std::collections::BTreeMap;
 
 /// The type that is used to track canonical blob transactions.
-#[derive(Debug, Default, Eq, PartialEq)]
+#[derive(Debug, Default, Eq, PartialEq, Clone)]
 pub struct BlobStoreCanonTracker {
     /// Keeps track of the blob transactions included in blocks.
     blob_txs_in_blocks: BTreeMap<BlockNumber, Vec<B256>>,
