@@ -295,20 +295,18 @@ pub trait OpPooledTx:
     MaybeConditionalTransaction + MaybeInteropTransaction + PoolTransaction + DataAvailabilitySized
 {
     /// Returns the EIP-2718 encoded bytes of the transaction.
-    fn encoded_2718(&self) -> Cow<'_, Bytes> {
-        let mut encoded = Vec::with_capacity(self.encoded_length());
-        let tx = self.clone_into_consensus();
-        tx.encode_2718(&mut encoded);
-
-        Cow::Owned(Bytes::copy_from_slice(&encoded))
-    }
+    fn encoded_2718(&self) -> Cow<'_, Bytes>;
 }
-impl<T> OpPooledTx for T where
-    T: MaybeConditionalTransaction
-        + MaybeInteropTransaction
-        + PoolTransaction
-        + DataAvailabilitySized
+
+impl<Cons, Pooled> OpPooledTx for OpPooledTransaction<Cons, Pooled>
+where
+    Cons: SignedTransaction + From<Pooled>,
+    Pooled: SignedTransaction + TryFrom<Cons>,
+    <Pooled as TryFrom<Cons>>::Error: core::error::Error,
 {
+    fn encoded_2718(&self) -> Cow<'_, Bytes> {
+        Cow::Borrowed(self.encoded_2718())
+    }
 }
 
 #[cfg(test)]

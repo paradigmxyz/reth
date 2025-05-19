@@ -41,9 +41,6 @@ use reth_optimism_rpc::{
     OpEthApi, OpEthApiError, SequencerClient,
 };
 use reth_optimism_txpool::{
-    conditional::MaybeConditionalTransaction,
-    estimated_da_size::DataAvailabilitySized,
-    interop::MaybeInteropTransaction,
     supervisor::{SupervisorClient, DEFAULT_SUPERVISOR_URL},
     OpPooledTx,
 };
@@ -537,10 +534,7 @@ impl<T> OpPoolBuilder<T> {
 impl<Node, T> PoolBuilder<Node> for OpPoolBuilder<T>
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec: OpHardforks>>,
-    T: EthPoolTransaction<Consensus = TxTy<Node::Types>>
-        + MaybeConditionalTransaction
-        + MaybeInteropTransaction
-        + DataAvailabilitySized,
+    T: EthPoolTransaction<Consensus = TxTy<Node::Types>> + OpPooledTx,
 {
     type Pool = OpTransactionPool<Node::Provider, DiskFileBlobStore, T>;
 
