@@ -7,9 +7,7 @@ use reth_primitives_traits::{Block, BlockBody, BlockHeader, NodePrimitives, Sign
 
 /// Abstraction over primitive types which might appear in network messages. See
 /// [`crate::EthMessage`] for more context.
-pub trait NetworkPrimitives:
-    Send + Sync + Unpin + Clone + Debug + PartialEq + Eq + 'static
-{
+pub trait NetworkPrimitives: Send + Sync + Unpin + Clone + Debug + 'static {
     /// The block header type.
     type BlockHeader: BlockHeader + 'static;
 

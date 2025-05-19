@@ -18,11 +18,11 @@ use reth_consensus::{Consensus, FullConsensus};
 use reth_errors::{ConsensusError, RethResult};
 use reth_ethereum_payload_builder::EthereumBuilderConfig;
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
-use reth_evm::execute::{BlockExecutorProvider, Executor};
+use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
 use reth_node_api::{BlockTy, EngineApiMessageVersion, PayloadBuilderAttributes};
-use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthExecutorProvider};
+use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig};
 use reth_primitives_traits::{Block as _, SealedBlock, SealedHeader, SignedTransaction};
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
@@ -143,8 +143,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         for tx_bytes in &self.transactions {
             debug!(target: "reth::cli", bytes = ?tx_bytes, "Decoding transaction");
             let transaction = TransactionSigned::decode(&mut &Bytes::from_str(tx_bytes)?[..])?
-                .try_clone_into_recovered()
-                .map_err(|e| eyre::eyre!("failed to recover tx: {e}"))?;
+                .try_into_recovered()
+                .map_err(|tx| eyre::eyre!("failed to recover tx: {}", tx.tx_hash()))?;
 
             let encoded_length = match transaction.inner() {
                 TransactionSigned::Eip4844(tx) => {
@@ -225,8 +225,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
                 let state_provider = blockchain_db.latest()?;
                 let db = StateProviderDatabase::new(&state_provider);
-                let executor =
-                    EthExecutorProvider::ethereum(provider_factory.chain_spec()).executor(db);
+                let evm_config = EthEvmConfig::ethereum(provider_factory.chain_spec());
+                let executor = evm_config.batch_executor(db);
 
                 let block_execution_output = executor.execute(&block_with_senders)?;
                 let execution_outcome =

@@ -6,7 +6,7 @@ use reth_consensus::noop::NoopConsensus;
 use reth_engine_primitives::BeaconConsensusEngineHandle;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_ethereum_primitives::EthPrimitives;
-use reth_evm::execute::BasicBlockExecutorProvider;
+
 use reth_evm_ethereum::EthEvmConfig;
 use reth_network_api::noop::NoopNetwork;
 use reth_node_ethereum::EthereumEngineValidator;
@@ -118,22 +118,14 @@ pub async fn launch_http_ws_same_port(modules: impl Into<RpcModuleSelection>) ->
 }
 
 /// Returns an [`RpcModuleBuilder`] with testing components.
-pub fn test_rpc_builder() -> RpcModuleBuilder<
-    EthPrimitives,
-    NoopProvider,
-    TestPool,
-    NoopNetwork,
-    TokioTaskExecutor,
-    EthEvmConfig,
-    BasicBlockExecutorProvider<EthEvmConfig>,
-    NoopConsensus,
-> {
+pub fn test_rpc_builder(
+) -> RpcModuleBuilder<EthPrimitives, NoopProvider, TestPool, NoopNetwork, EthEvmConfig, NoopConsensus>
+{
     RpcModuleBuilder::default()
         .with_provider(NoopProvider::default())
         .with_pool(TestPoolBuilder::default().into())
         .with_network(NoopNetwork::default())
-        .with_executor(TokioTaskExecutor::default())
+        .with_executor(Box::new(TokioTaskExecutor::default()))
         .with_evm_config(EthEvmConfig::mainnet())
-        .with_block_executor(BasicBlockExecutorProvider::new(EthEvmConfig::mainnet()))
         .with_consensus(NoopConsensus::default())
 }

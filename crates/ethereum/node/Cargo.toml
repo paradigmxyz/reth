@@ -67,6 +67,7 @@ alloy-contract.workspace = true
 alloy-rpc-types-beacon = { workspace = true, features = ["ssz"] }
 alloy-rpc-types-engine.workspace = true
 alloy-rpc-types-eth.workspace = true
+alloy-consensus.workspace = true
 
 futures.workspace = true
 tokio.workspace = true
@@ -75,9 +76,7 @@ rand.workspace = true
 
 [features]
 default = []
-js-tracer = [
-    "reth-node-builder/js-tracer",
-]
+js-tracer = ["reth-node-builder/js-tracer"]
 test-utils = [
     "reth-node-builder/test-utils",
     "reth-chainspec/test-utils",

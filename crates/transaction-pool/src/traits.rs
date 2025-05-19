@@ -12,10 +12,10 @@ use alloy_consensus::{
     error::ValueError, transaction::PooledTransaction, BlockHeader, Signed, Typed2718,
 };
 use alloy_eips::{
-    eip2718::Encodable2718,
+    eip2718::{Encodable2718, WithEncoded},
     eip2930::AccessList,
     eip4844::{
-        env_settings::KzgSettings, BlobAndProofV1, BlobTransactionSidecar,
+        env_settings::KzgSettings, BlobAndProofV1, BlobAndProofV2, BlobTransactionSidecar,
         BlobTransactionValidationError,
     },
     eip7702::SignedAuthorization,
@@ -495,11 +495,19 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         tx_hashes: Vec<TxHash>,
     ) -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError>;
 
-    /// Return the [`BlobTransactionSidecar`]s for a list of blob versioned hashes.
-    fn get_blobs_for_versioned_hashes(
+    /// Return the [`BlobAndProofV1`]s for a list of blob versioned hashes.
+    fn get_blobs_for_versioned_hashes_v1(
         &self,
         versioned_hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError>;
+
+    /// Return the [`BlobAndProofV2`]s for a list of blob versioned hashes.
+    /// Blobs and proofs are returned only if they are present for _all_ of the requested versioned
+    /// hashes.
+    fn get_blobs_for_versioned_hashes_v2(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Option<Vec<BlobAndProofV2>>, BlobStoreError>;
 }
 
 /// Extension for [TransactionPool] trait that allows to set the current block info.
@@ -971,6 +979,14 @@ pub trait PoolTransaction:
 
     /// Define a method to convert from the `Self` type to `Consensus`
     fn into_consensus(self) -> Recovered<Self::Consensus>;
+
+    /// Converts the transaction into consensus format while preserving the EIP-2718 encoded bytes.
+    /// This is used to optimize transaction execution by reusing cached encoded bytes instead of
+    /// re-encoding the transaction. The cached bytes are particularly useful in payload building
+    /// where the same transaction may be executed multiple times.
+    fn into_consensus_with2718(self) -> WithEncoded<Recovered<Self::Consensus>> {
+        self.into_consensus().into_encoded()
+    }
 
     /// Define a method to convert from the `Pooled` type to `Self`
     fn from_pooled(pooled: Recovered<Self::Pooled>) -> Self;

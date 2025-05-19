@@ -1,7 +1,7 @@
 //! A simple diskstore for blobs
 
 use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize};
-use alloy_eips::eip4844::{BlobAndProofV1, BlobTransactionSidecar};
+use alloy_eips::eip4844::{BlobAndProofV1, BlobAndProofV2, BlobTransactionSidecar};
 use alloy_primitives::{TxHash, B256};
 use parking_lot::{Mutex, RwLock};
 use schnellru::{ByLength, LruMap};
@@ -127,7 +127,7 @@ impl BlobStore for DiskFileBlobStore {
         self.inner.get_exact(txs)
     }
 
-    fn get_by_versioned_hashes(
+    fn get_by_versioned_hashes_v1(
         &self,
         versioned_hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
@@ -178,6 +178,13 @@ impl BlobStore for DiskFileBlobStore {
         }
 
         Ok(result)
+    }
+
+    fn get_by_versioned_hashes_v2(
+        &self,
+        _versioned_hashes: &[B256],
+    ) -> Result<Option<Vec<BlobAndProofV2>>, BlobStoreError> {
+        Ok(None)
     }
 
     fn data_size_hint(&self) -> Option<usize> {

@@ -16,7 +16,7 @@ use crate::{
 };
 use alloy_eips::{
     eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M,
-    eip4844::{BlobAndProofV1, BlobTransactionSidecar},
+    eip4844::{BlobAndProofV1, BlobAndProofV2, BlobTransactionSidecar},
 };
 use alloy_primitives::{Address, TxHash, B256, U256};
 use reth_eth_wire_types::HandleMempoolData;
@@ -323,11 +323,18 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         Err(BlobStoreError::MissingSidecar(tx_hashes[0]))
     }
 
-    fn get_blobs_for_versioned_hashes(
+    fn get_blobs_for_versioned_hashes_v1(
         &self,
         versioned_hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
         Ok(vec![None; versioned_hashes.len()])
+    }
+
+    fn get_blobs_for_versioned_hashes_v2(
+        &self,
+        _versioned_hashes: &[B256],
+    ) -> Result<Option<Vec<BlobAndProofV2>>, BlobStoreError> {
+        Ok(None)
     }
 }
 
@@ -360,12 +367,14 @@ impl<T: EthPoolTransaction> TransactionValidator for MockTransactionValidator<T>
         TransactionValidationOutcome::Valid {
             balance: U256::MAX,
             state_nonce: 0,
+            bytecode_hash: None,
             transaction: ValidTransaction::new(transaction, maybe_sidecar),
             propagate: match origin {
                 TransactionOrigin::External => true,
                 TransactionOrigin::Local => self.propagate_local,
                 TransactionOrigin::Private => false,
             },
+            authorities: None,
         }
     }
 }
