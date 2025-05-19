@@ -285,6 +285,7 @@ impl<S> P2PStream<S> {
     ///
     /// If the provided capacity is `0`.
     pub const fn set_outgoing_message_buffer_capacity(&mut self, capacity: usize) {
+        assert_ne!(capacity, 0);
         self.outgoing_message_buffer_capacity = capacity;
     }
 
