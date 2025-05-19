@@ -9,10 +9,8 @@ use reth_node_builder::{
 };
 use reth_op::{
     node::txpool::{
-        conditional::MaybeConditionalTransaction,
-        interop::MaybeInteropTransaction,
         supervisor::{SupervisorClient, DEFAULT_SUPERVISOR_URL},
-        OpPooledTransaction, OpTransactionPool, OpTransactionValidator,
+        OpPooledTransaction, OpPooledTx, OpTransactionPool, OpTransactionValidator,
     },
     pool::{
         blobstore::DiskFileBlobStore, CoinbaseTipOrdering, EthPoolTransaction,
@@ -84,8 +82,7 @@ where
     <Node::Types as NodeTypes>::Primitives:
         NodePrimitives<SignedTx = Extended<OpTxEnvelope, CustomTransactionEnvelope>>,
     T: EthPoolTransaction<Consensus = Extended<OpTxEnvelope, CustomTransactionEnvelope>>
-        + MaybeConditionalTransaction
-        + MaybeInteropTransaction,
+        + OpPooledTx,
 {
     type Pool = OpTransactionPool<Node::Provider, DiskFileBlobStore, T>;
 
