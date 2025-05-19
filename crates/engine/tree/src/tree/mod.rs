@@ -9,7 +9,7 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::{merge::EPOCH_SLOTS, BlockNumHash, NumHash};
-use alloy_evm::block::BlockExecutor;
+use alloy_evm::block::{BlockExecutor, OnStateHook, StateChangeSource};
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
@@ -30,11 +30,14 @@ use reth_engine_primitives::{
     ExecutionPayload, ForkchoiceStateTracker, OnForkChoiceUpdated,
 };
 use reth_errors::{ConsensusError, ProviderResult};
-use reth_evm::{ConfigureEvm, Evm};
+use reth_evm::{ConfigureEvm, Evm, metrics::ExecutorMetrics};
+use revm::database::Database;
+use reth_execution_errors::BlockExecutionError;
+use reth_execution_types::BlockExecutionOutput;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes, PayloadTypes};
 use reth_primitives_traits::{
-    Block, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
+    Block, BlockBody, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
 use reth_provider::{
     providers::ConsistentDbView, BlockNumReader, BlockReader, DBProvider, DatabaseProviderFactory,
@@ -47,6 +50,7 @@ use reth_stages_api::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_db::{DatabaseHashedPostState, StateCommitment};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
+use revm::{database::states::bundle_state::BundleRetention, state::EvmState};
 use state::TreeState;
 use std::{
     fmt::Debug,
@@ -61,6 +65,33 @@ use tokio::sync::{
     oneshot::{self, error::TryRecvError},
 };
 use tracing::*;
+use core::borrow::BorrowMut;
+
+/// Wrapper struct that combines metrics and state hook
+struct MeteredStateHook {
+    metrics: ExecutorMetrics,
+    inner_hook: Box<dyn OnStateHook>,
+}
+
+impl OnStateHook for MeteredStateHook {
+    fn on_state(&mut self, source: StateChangeSource, state: &EvmState) {
+        // Update the metrics for the number of accounts, storage slots and bytecodes loaded
+        let accounts = state.keys().len();
+        let storage_slots = state.values().map(|account| account.storage.len()).sum::<usize>();
+        let bytecodes = state
+            .values()
+            .filter(|account| !account.info.is_empty_code_hash())
+            .collect::<Vec<_>>()
+            .len();
+
+        self.metrics.accounts_loaded_histogram.record(accounts as f64);
+        self.metrics.storage_slots_loaded_histogram.record(storage_slots as f64);
+        self.metrics.bytecodes_loaded_histogram.record(bytecodes as f64);
+
+        // Call the original state hook
+        self.inner_hook.on_state(source, state);
+    }
+}
 
 mod block_buffer;
 mod cached_state;
@@ -83,7 +114,6 @@ pub use invalid_headers::InvalidHeaderCache;
 pub use payload_processor::*;
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
-use reth_evm::execute::BlockExecutionOutput;
 
 pub mod state;
 
@@ -2295,7 +2325,7 @@ where
         }
 
         let execution_start = Instant::now();
-        let output = self.metrics.executor.execute_metered(
+        let output = self.execute_metered(
             executor,
             block,
             Box::new(handle.state_hook()),
@@ -2711,12 +2741,80 @@ where
         debug!(target: "engine::tree", %hash, "no canonical state found for block");
         Ok(None)
     }
+
+    fn metered<F, R, B>(&self, block: &RecoveredBlock<B>, f: F) -> R 
+    where 
+        F: FnOnce() -> R, 
+        B: reth_primitives_traits::Block, 
+    { 
+        // Execute the block and record the elapsed time. 
+        let execute_start = Instant::now(); 
+        let output = f(); 
+        let execution_duration = execute_start.elapsed().as_secs_f64(); 
+ 
+        // Update gas metrics. 
+        self.metrics.executor.gas_processed_total.increment(block.header().gas_used()); 
+        self.metrics.executor.gas_per_second.set(block.header().gas_used() as f64 / execution_duration); 
+        self.metrics.executor.gas_used_histogram.record(block.header().gas_used() as f64); 
+        self.metrics.executor.execution_histogram.record(execution_duration); 
+        self.metrics.executor.execution_duration.set(execution_duration); 
+ 
+        output 
+    } 
+ 
+    /// Execute the given block using the provided [`BlockExecutor`] and update metrics for the 
+    /// execution. 
+    /// 
+    /// Compared to [`Self::metered_one`], this method additionally updates metrics for the number 
+    /// of accounts, storage slots and bytecodes loaded and updated. 
+    fn execute_metered<E, DB>( 
+        &self, 
+        executor: E, 
+        input: &RecoveredBlock<impl Block<Body: BlockBody<Transaction = E::Transaction>>>, 
+        state_hook: Box<dyn OnStateHook>, 
+    ) -> Result<BlockExecutionOutput<E::Receipt>, BlockExecutionError> 
+    where 
+        DB: Database, 
+        E: BlockExecutor<Evm: Evm<DB: BorrowMut<State<DB>>>>, 
+    { 
+        // clone here is cheap, all the metrics are Option<Arc<_>>. additionally 
+        // they are globally registered so that the data recorded in the hook will 
+        // be accessible. 
+        let wrapper = MeteredStateHook { metrics: self.metrics.executor.clone(), inner_hook: state_hook }; 
+ 
+        let mut executor = executor.with_state_hook(Some(Box::new(wrapper))); 
+ 
+        // Use metered to execute and track timing/gas metrics 
+        let (mut db, result) = self.metered(input, || { 
+            executor.apply_pre_execution_changes()?; 
+            for tx in input.transactions_recovered() { 
+                executor.execute_transaction(tx)?; 
+            } 
+            executor.finish().map(|(evm, result)| (evm.into_db(), result)) 
+        })?; 
+ 
+        // merge transactions into bundle state 
+        db.borrow_mut().merge_transitions(BundleRetention::Reverts); 
+        let output = BlockExecutionOutput { result, state: db.borrow_mut().take_bundle() }; 
+ 
+        // Update the metrics for the number of accounts, storage slots and bytecodes updated 
+        let accounts = output.state.state.len(); 
+        let storage_slots = 
+            output.state.state.values().map(|account| account.storage.len()).sum::<usize>(); 
+        let bytecodes = output.state.contracts.len(); 
+ 
+        self.metrics.executor.accounts_updated_histogram.record(accounts as f64); 
+        self.metrics.executor.storage_slots_updated_histogram.record(storage_slots as f64); 
+        self.metrics.executor.bytecodes_updated_histogram.record(bytecodes as f64); 
+ 
+        Ok(output) 
+    }
 }
 
 /// Block inclusion can be valid, accepted, or invalid. Invalid blocks are returned as an error
 /// variant.
 ///
-/// If we don't know the block's parent, we return `Disconnected`, as we can't claim that the block
+/// If we don't know the block's parent, we return `Disconnected`, as we can't claim that the block
 /// is valid or not.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BlockStatus {
@@ -2774,10 +2872,13 @@ mod tests {
     use super::*;
     use crate::persistence::PersistenceAction;
     use alloy_consensus::Header;
+    use alloy_eips::eip7685::Requests;
+    use alloy_evm::EthEvm;
     use alloy_primitives::{
         map::{HashMap, HashSet},
-        Bytes, B256,
+        Bytes, B256, U256,
     };
+    use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshotter};
     use alloy_rlp::Decodable;
     use alloy_rpc_types_engine::{
         CancunPayloadFields, ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1,
@@ -2789,16 +2890,24 @@ mod tests {
     use reth_engine_primitives::ForkchoiceStatus;
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_engine_primitives::EthEngineTypes;
-    use reth_ethereum_primitives::{Block, EthPrimitives};
+    use reth_ethereum_primitives::{Block, EthPrimitives, Receipt, TransactionSigned};
     use reth_evm_ethereum::MockEvmConfig;
+    use reth_execution_types::BlockExecutionResult;
     use reth_node_ethereum::EthereumEngineValidator;
     use reth_primitives_traits::Block as _;
     use reth_provider::test_utils::MockEthProvider;
     use reth_trie::{updates::TrieUpdates, HashedPostState};
+    use revm::{
+        database::State,
+        database_interface::EmptyDB,
+        inspector::NoOpInspector,
+        state::{Account, AccountInfo, AccountStatus, EvmStorage, EvmStorageSlot},
+        Context, MainBuilder, MainContext,
+    };
     use std::{
         collections::BTreeMap,
         str::FromStr,
-        sync::mpsc::{channel, Sender},
+        sync::mpsc::{channel, Sender, self},
     };
 
     /// This is a test channel that allows you to `release` any value that is in the channel.
@@ -4179,5 +4288,207 @@ mod tests {
         // Try to do a forkchoice update to a block after the invalid one
         let fork_tip_hash = side_chain.last().unwrap().hash();
         test_harness.send_fcu(fork_tip_hash, ForkchoiceStatus::Invalid).await;
+    }
+
+    /// A mock executor that simulates state changes
+    struct MockExecutor {
+        state: EvmState,
+        hook: Option<Box<dyn OnStateHook>>,
+        evm: EthEvm<State<EmptyDB>, NoOpInspector>,
+    }
+
+    impl MockExecutor {
+        fn new(state: EvmState) -> Self {
+            let db = State::builder()
+                .with_database(EmptyDB::default())
+                .with_bundle_update()
+                .without_state_clear()
+                .build();
+            let evm = EthEvm::new(
+                Context::mainnet().with_db(db).build_mainnet_with_inspector(NoOpInspector {}),
+                false,
+            );
+            Self { state, hook: None, evm }
+        }
+    }
+
+    impl BlockExecutor for MockExecutor {
+        type Transaction = TransactionSigned;
+        type Receipt = Receipt;
+        type Evm = EthEvm<State<EmptyDB>, NoOpInspector>;
+
+        fn apply_pre_execution_changes(&mut self) -> Result<(), reth_execution_errors::BlockExecutionError> {
+            Ok(())
+        }
+
+        fn execute_transaction_with_result_closure(
+            &mut self,
+            _tx: impl alloy_evm::block::ExecutableTx<Self>,
+            _f: impl FnOnce(&revm::context::result::ExecutionResult<<Self::Evm as Evm>::HaltReason>),
+        ) -> Result<u64, reth_execution_errors::BlockExecutionError> {
+            Ok(0)
+        }
+
+        fn finish(
+            self,
+        ) -> Result<(Self::Evm, BlockExecutionResult<Self::Receipt>), reth_execution_errors::BlockExecutionError> {
+            let Self { evm, hook, .. } = self;
+
+            // Call hook with our mock state
+            if let Some(mut hook) = hook {
+                hook.on_state(StateChangeSource::Transaction(0), &self.state);
+            }
+
+            Ok((
+                evm,
+                BlockExecutionResult {
+                    receipts: vec![],
+                    requests: Requests::default(),
+                    gas_used: 0,
+                },
+            ))
+        }
+
+        fn set_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {
+            self.hook = hook;
+        }
+
+        fn evm(&self) -> &Self::Evm {
+            &self.evm
+        }
+
+        fn evm_mut(&mut self) -> &mut Self::Evm {
+            &mut self.evm
+        }
+    }
+
+    struct ChannelStateHook {
+        output: i32,
+        sender: mpsc::Sender<i32>,
+    }
+
+    impl OnStateHook for ChannelStateHook {
+        fn on_state(&mut self, _source: StateChangeSource, _state: &EvmState) {
+            let _ = self.sender.send(self.output);
+        }
+    }
+
+    fn setup_test_recorder() -> Snapshotter {
+        let recorder = DebuggingRecorder::new();
+        let snapshotter = recorder.snapshotter();
+        recorder.install().unwrap();
+        snapshotter
+    }
+
+    #[test]
+    fn test_tree_executor_metrics_hook_metrics_recorded() {
+        let snapshotter = setup_test_recorder();
+        let metrics = EngineApiMetrics::default();
+        let tree_handler = EngineApiTreeHandler::<EthPrimitives, MockEthProvider, EthEngineTypes, EthereumEngineValidator, MockEvmConfig> {
+            metrics,
+            provider: MockEthProvider::default(),
+            consensus: Arc::new(EthBeaconConsensus::default()),
+            payload_validator: EthereumEngineValidator::default(),
+            state: EngineApiTreeState::new(10, 10, BlockNumHash::default(), EngineApiKind::Consensus),
+            incoming_tx: channel().0,
+            incoming: channel().1,
+            outgoing: unbounded_channel().0,
+            persistence: PersistenceHandle::default(),
+            persistence_state: PersistenceState::default(),
+            backfill_sync_state: BackfillSyncState::default(),
+            canonical_in_memory_state: CanonicalInMemoryState::default(),
+            payload_builder: PayloadBuilderHandle::default(),
+            config: TreeConfig::default(),
+            invalid_block_hook: Box::new(NoopInvalidBlockHook),
+            engine_kind: EngineApiKind::Consensus,
+            payload_processor: PayloadProcessor::default(),
+            evm_config: MockEvmConfig::default(),
+            precompile_cache: PrecompileCache::default(),
+        };
+
+        let input = RecoveredBlock::<reth_ethereum_primitives::Block>::default();
+
+        let (tx, _rx) = mpsc::channel();
+        let expected_output = 42;
+        let state_hook = Box::new(ChannelStateHook { sender: tx, output: expected_output });
+
+        let state = {
+            let mut state = EvmState::default();
+            let storage =
+                EvmStorage::from_iter([(U256::from(1), EvmStorageSlot::new(U256::from(2)))]);
+            state.insert(
+                Default::default(),
+                Account {
+                    info: AccountInfo {
+                        balance: U256::from(100),
+                        nonce: 10,
+                        code_hash: B256::random(),
+                        code: Default::default(),
+                    },
+                    storage,
+                    status: AccountStatus::Loaded,
+                },
+            );
+            state
+        };
+        let executor = MockExecutor::new(state);
+        let _result = tree_handler.execute_metered::<_, EmptyDB>(executor, &input, state_hook).unwrap();
+
+        let snapshot = snapshotter.snapshot().into_vec();
+
+        for metric in snapshot {
+            let metric_name = metric.0.key().name();
+            if metric_name == "sync.execution.accounts_loaded_histogram" ||
+                metric_name == "sync.execution.storage_slots_loaded_histogram" ||
+                metric_name == "sync.execution.bytecodes_loaded_histogram"
+            {
+                if let DebugValue::Histogram(vs) = metric.3 {
+                    assert!(
+                        vs.iter().any(|v| v.into_inner() > 0.0),
+                        "metric {metric_name} not recorded"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_tree_executor_metrics_hook_called() {
+        let metrics = EngineApiMetrics::default();
+        let tree_handler = EngineApiTreeHandler::<EthPrimitives, MockEthProvider, EthEngineTypes, EthereumEngineValidator, MockEvmConfig> {
+            metrics,
+            provider: MockEthProvider::default(),
+            consensus: Arc::new(EthBeaconConsensus::default()),
+            payload_validator: EthereumEngineValidator::default(),
+            state: EngineApiTreeState::new(10, 10, BlockNumHash::default(), EngineApiKind::Consensus),
+            incoming_tx: channel().0,
+            incoming: channel().1,
+            outgoing: unbounded_channel().0,
+            persistence: PersistenceHandle::default(),
+            persistence_state: PersistenceState::default(),
+            backfill_sync_state: BackfillSyncState::default(),
+            canonical_in_memory_state: CanonicalInMemoryState::default(),
+            payload_builder: PayloadBuilderHandle::default(),
+            config: TreeConfig::default(),
+            invalid_block_hook: Box::new(NoopInvalidBlockHook),
+            engine_kind: EngineApiKind::Consensus,
+            payload_processor: PayloadProcessor::default(),
+            evm_config: MockEvmConfig::default(),
+            precompile_cache: PrecompileCache::default(),
+        };
+
+        let input = RecoveredBlock::<reth_ethereum_primitives::Block>::default();
+
+        let (tx, rx) = mpsc::channel();
+        let expected_output = 42;
+        let state_hook = Box::new(ChannelStateHook { sender: tx, output: expected_output });
+
+        let state = EvmState::default();
+
+        let executor = MockExecutor::new(state);
+        let _result = tree_handler.execute_metered::<_, EmptyDB>(executor, &input, state_hook).unwrap();
+
+        let actual_output = rx.try_recv().unwrap();
+        assert_eq!(actual_output, expected_output);
     }
 }
