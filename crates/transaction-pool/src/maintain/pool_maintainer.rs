@@ -100,6 +100,33 @@ where
     }
 }
 
+/// Current state of the maintainer Future
+enum PoolMaintainerState {
+    /// Waiting for any of the futures to be ready
+    Waiting,
+    /// Processing a reorg event
+    ProcessingReorg { future: Pin<Box<dyn Future<Output = ()> + Send + 'static>> },
+    /// Processing stale transaction eviction
+    ProcessingStaleEviction,
+    /// Finished (stream ended)
+    Finished,
+}
+
+impl std::fmt::Debug for PoolMaintainerState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Waiting => write!(f, "PoolMaintainerState::Waiting"),
+            Self::ProcessingReorg { .. } => {
+                write!(f, "PoolMaintainerState::ProcessingReorg {{ future: <future> }}")
+            }
+            Self::ProcessingStaleEviction => {
+                write!(f, "PoolMaintainerState::ProcessingStaleEviction")
+            }
+            Self::Finished => write!(f, "PoolMaintainerState::Finished"),
+        }
+    }
+}
+
 /// The main pool maintainer
 #[derive(Debug)]
 pub struct PoolMaintainer<N, Client, P, St, Tasks, M = DriftMonitor, C = CanonEventProcessor<N>>
@@ -122,11 +149,11 @@ where
     canon_processor: C,
     stale_eviction_interval: time::Interval,
 
-    // To flag if we're processing stale transactions
-    processing_stale: bool,
-
     // Initialization flag
     initialized: bool,
+
+    // Current state of the state machine
+    state: PoolMaintainerState,
 
     _phantom: std::marker::PhantomData<N>,
 }
@@ -163,8 +190,8 @@ where
             drift_monitor,
             canon_processor,
             stale_eviction_interval,
-            processing_stale: false,
             initialized: false,
+            state: PoolMaintainerState::Waiting,
             _phantom: std::marker::PhantomData,
         }
     }
@@ -202,17 +229,19 @@ where
     fn handle_canon_event(&mut self, event: CanonStateNotification<N>) {
         match &event {
             CanonStateNotification::Reorg { old: _, new: _ } => {
-                let fut = self.canon_processor.process_reorg(
-                    event.clone(),
-                    &self.client,
-                    &self.pool,
-                    &mut self.drift_monitor,
-                );
+                let mut canon_processor = self.canon_processor.clone();
+                let client = self.client.clone();
+                let pool = self.pool.clone();
+                let mut drift_monitor = self.drift_monitor.clone();
 
-                // TODO: do not block here
-                tokio::task::block_in_place(move || {
-                    tokio::runtime::Handle::current().block_on(fut);
-                });
+                let fut = async move {
+                    canon_processor
+                        .process_reorg(event.clone(), &client, &pool, &mut drift_monitor)
+                        .await;
+                };
+
+                // transition to the ProcessingReorg state
+                self.state = PoolMaintainerState::ProcessingReorg { future: Box::pin(fut) };
             }
             CanonStateNotification::Commit { new } => {
                 self.canon_processor.process_commit(
@@ -258,98 +287,115 @@ where
         // initialize on first poll
         this.initialize();
 
-        // If we're marked as processing stale, run the stale processing
-        if this.processing_stale {
-            let stale_txs: Vec<_> = this
-                .pool
-                .queued_transactions()
-                .into_iter()
-                .filter(|tx| {
-                    (tx.origin.is_external() || this.config.no_local_exemptions) &&
-                        tx.timestamp.elapsed() > this.config.max_tx_lifetime
-                })
-                .map(|tx| *tx.hash())
-                .collect();
+        loop {
+            match &mut this.state {
+                PoolMaintainerState::Waiting => {
+                    trace!(target: "txpool", state=?this.drift_monitor.state(), "awaiting new block or reorg");
 
-            debug!(target: "txpool", count=%stale_txs.len(), "removing stale transactions");
-            this.pool.remove_transactions(stale_txs);
+                    this.drift_monitor.update_metrics();
+                    let pool_info = this.pool.block_info();
 
-            // Clear the stale processing flag
-            this.processing_stale = false;
-        }
-
-        trace!(target: "txpool", state=?this.drift_monitor.state(), "awaiting new block or reorg");
-
-        this.drift_monitor.update_metrics();
-        let pool_info = this.pool.block_info();
-
-        // If drifted, mark all senders as dirty
-        if this.drift_monitor.state().is_drifted() {
-            this.drift_monitor.set_dirty_addresses(this.pool.unique_senders());
-            this.drift_monitor.set_state(PoolDriftState::InSync);
-        }
-
-        // Start reloading accounts if needed
-        if this.drift_monitor.has_dirty_addresses() && !this.drift_monitor.is_reloading() {
-            this.drift_monitor.start_reload_accounts(
-                this.client.clone(),
-                pool_info.last_seen_block_hash,
-                &this.task_spawner,
-            );
-        }
-
-        // Check for finalized blocks and clean up blobs if needed
-        if let Some(BlobStoreUpdates::Finalized(blobs)) =
-            this.canon_processor.update_finalized(&this.client)
-        {
-            this.pool.delete_blobs(blobs.clone());
-            let pool = this.pool.clone();
-            this.task_spawner.spawn_blocking(Box::pin(async move {
-                debug!(target: "txpool", finalized_blobs=%blobs.len(), "cleaning up blob store");
-                pool.cleanup_blobs();
-            }));
-        }
-
-        // Poll drift monitor
-        let drift_poll = Pin::new(&mut this.drift_monitor).poll(cx);
-        if drift_poll.is_ready() {
-            // We can process the result immediately
-            if let Poll::Ready(result) = drift_poll {
-                match result {
-                    DriftMonitorResult::AccountsLoaded(accounts) => {
-                        this.pool.update_accounts(accounts.accounts);
+                    // If drifted, mark all senders as dirty
+                    if this.drift_monitor.state().is_drifted() {
+                        this.drift_monitor.set_dirty_addresses(this.pool.unique_senders());
+                        this.drift_monitor.set_state(PoolDriftState::InSync);
                     }
-                    DriftMonitorResult::Failed => {
-                        debug!(target: "txpool", "Account reload failed");
+
+                    // Start reloading accounts if needed
+                    if this.drift_monitor.has_dirty_addresses() &&
+                        !this.drift_monitor.is_reloading()
+                    {
+                        this.drift_monitor.start_reload_accounts(
+                            this.client.clone(),
+                            pool_info.last_seen_block_hash,
+                            &this.task_spawner,
+                        );
+                    }
+
+                    // Check for finalized blocks and clean up blobs if needed
+                    if let Some(BlobStoreUpdates::Finalized(blobs)) =
+                        this.canon_processor.update_finalized(&this.client)
+                    {
+                        this.pool.delete_blobs(blobs.clone());
+                        let pool = this.pool.clone();
+                        this.task_spawner.spawn_blocking(Box::pin(async move {
+                            debug!(target: "txpool", finalized_blobs=%blobs.len(), "cleaning up blob store");
+                            pool.cleanup_blobs();
+                        }));
+                    }
+
+                    // Poll drift monitor
+                    let drift_poll = Pin::new(&mut this.drift_monitor).poll(cx);
+                    if let Poll::Ready(result) = drift_poll {
+                        match result {
+                            DriftMonitorResult::AccountsLoaded(accounts) => {
+                                this.pool.update_accounts(accounts.accounts);
+                            }
+                            DriftMonitorResult::Failed => {
+                                debug!(target: "txpool", "Account reload failed");
+                            }
+                        }
+                        // Continue to process more states if possible
+                        continue;
+                    }
+
+                    // Poll events stream
+                    let events_poll = Pin::new(&mut this.events).poll_next(cx);
+                    if let Poll::Ready(ev) = events_poll {
+                        if let Some(event) = ev {
+                            this.drift_monitor.on_first_event();
+                            this.handle_canon_event(event);
+                            // If handle_canon_event transitioned to a new state, process it right
+                            // away
+                            continue;
+                        }
+                        // Stream ended
+                        this.state = PoolMaintainerState::Finished;
+                        continue;
+                    }
+
+                    // poll interval for stale eviction
+                    let interval_poll = Pin::new(&mut this.stale_eviction_interval).poll_tick(cx);
+                    if interval_poll.is_ready() {
+                        // transition to removing stale transactions
+                        this.state = PoolMaintainerState::ProcessingStaleEviction;
+                        continue;
+                    }
+
+                    return Poll::Pending;
+                }
+                PoolMaintainerState::ProcessingReorg { future } => {
+                    match future.as_mut().poll(cx) {
+                        Poll::Ready(_) => {
+                            // reorg processing is complete, return to idle
+                            this.state = PoolMaintainerState::Waiting;
+                        }
+                        Poll::Pending => {
+                            // reorg is still processing, keep waiting
+                            return Poll::Pending;
+                        }
                     }
                 }
+                PoolMaintainerState::ProcessingStaleEviction => {
+                    let stale_txs: Vec<_> = this
+                        .pool
+                        .queued_transactions()
+                        .into_iter()
+                        .filter(|tx| {
+                            (tx.origin.is_external() || this.config.no_local_exemptions) &&
+                                tx.timestamp.elapsed() > this.config.max_tx_lifetime
+                        })
+                        .map(|tx| *tx.hash())
+                        .collect();
+
+                    debug!(target: "txpool", count=%stale_txs.len(), "removing stale transactions");
+                    this.pool.remove_transactions(stale_txs);
+
+                    // return to idle state
+                    this.state = PoolMaintainerState::Waiting;
+                }
+                PoolMaintainerState::Finished => return Poll::Ready(()),
             }
         }
-
-        // Poll events stream
-        let events_poll = Pin::new(&mut this.events).poll_next(cx);
-        if let Poll::Ready(ev) = events_poll {
-            if ev.is_none() {
-                // The stream ended
-                return Poll::Ready(());
-            }
-
-            this.drift_monitor.on_first_event();
-
-            if let Some(event) = ev {
-                // Process the event immediately
-                this.handle_canon_event(event);
-            }
-        }
-
-        // Poll interval for stale eviction
-        let interval_poll = Pin::new(&mut this.stale_eviction_interval).poll_tick(cx);
-        if interval_poll.is_ready() {
-            // Mark that we're going to process stale transactions
-            this.processing_stale = true;
-        }
-
-        // Nothing is ready, return pending
-        Poll::Pending
     }
 }
