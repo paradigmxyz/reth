@@ -121,15 +121,16 @@ pub enum StatelessValidationError {
 ///
 /// If all steps succeed the function returns `Some` containing the hash of the validated
 /// `current_block`.
-pub fn stateless_validation<
-    ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug,
-    E: ConfigureEvm<Primitives = EthPrimitives> + Clone + 'static,
->(
+pub fn stateless_validation<ChainSpec, E>(
     current_block: RecoveredBlock<Block<TransactionSigned>>,
     witness: ExecutionWitness,
     chain_spec: Arc<ChainSpec>,
     evm_config: E,
-) -> Result<B256, StatelessValidationError> {
+) -> Result<B256, StatelessValidationError>
+where
+    ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug,
+    E: ConfigureEvm<Primitives = EthPrimitives> + Clone + 'static,
+{
     let mut ancestor_headers: Vec<Header> = witness
         .headers
         .iter()
@@ -210,10 +211,13 @@ pub fn stateless_validation<
 ///
 /// This function acts as a preliminary validation before executing and validating the state
 /// transition function.
-fn validate_block_consensus<ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug>(
+fn validate_block_consensus<ChainSpec>(
     chain_spec: Arc<ChainSpec>,
     block: &RecoveredBlock<Block<TransactionSigned>>,
-) -> Result<(), StatelessValidationError> {
+) -> Result<(), StatelessValidationError>
+where
+    ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug,
+{
     let consensus = EthBeaconConsensus::new(chain_spec);
 
     consensus.validate_header(block.sealed_header())?;
