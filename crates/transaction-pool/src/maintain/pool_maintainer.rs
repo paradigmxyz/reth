@@ -331,6 +331,8 @@ where
                                 state = PoolMaintainerState::Waiting;
                             }
                             Poll::Pending => {
+                                // Store the in-progress future in the state
+                                state = PoolMaintainerState::ProcessingCanonEventFuture(event_processor);
                                 return Poll::Pending;
                             }
                         }
