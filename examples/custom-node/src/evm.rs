@@ -1,6 +1,6 @@
 use crate::{
     chainspec::CustomChainSpec,
-    primitives::{block::Block, CustomHeader, CustomNodePrimitives, CustomTransaction},
+    primitives::{block::Block, tx, CustomHeader, CustomNodePrimitives, CustomTransaction},
 };
 use alloy_consensus::Header;
 use alloy_evm::{
@@ -103,10 +103,20 @@ where
 
     fn assemble_block(
         &self,
-        input: BlockAssemblerInput<'_, '_, F>,
+        mut input: BlockAssemblerInput<'_, '_, F, CustomHeader>,
     ) -> Result<Self::Block, BlockExecutionError> {
-        let block = self.inner.assemble_block(input)?;
-        let block = block.convert_transactions::<CustomTransaction>();
+        let inner_input = BlockAssemblerInput {
+            evm_env: input.evm_env,
+            execution_ctx: input.execution_ctx,
+            parent: &input.parent.inner,
+            transactions: input.transactions,
+            output: input.output,
+            bundle_state: input.bundle_state,
+            state_provider: input.state_provider,
+            state_root: input.state_root,
+        };
+        let block = self.inner.assemble_block(inner_input)?;
+        let block = block.map_transactions(tx::from);
         let block = block.map_header(CustomHeader::from);
 
         Ok(block)

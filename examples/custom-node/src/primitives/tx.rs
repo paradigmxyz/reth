@@ -20,12 +20,10 @@ use reth_op::primitives::{Extended, SignedTransaction};
 use revm_primitives::{Address, Bytes};
 use serde::{Deserialize, Serialize};
 
-pub struct CustomTransaction(ExtendedOpTxEnvelope<CustomTransactionEnvelope>);
+pub type CustomTransaction = ExtendedOpTxEnvelope<CustomTransactionEnvelope>;
 
-impl From<OpTxEnvelope> for CustomTransaction {
-    fn from(value: OpTxEnvelope) -> Self {
-        Self(Extended::BuiltIn(value))
-    }
+pub(crate) fn from(value: OpTxEnvelope) -> CustomTransaction {
+    Extended::BuiltIn(value)
 }
 
 /// A [`SignedTransaction`] implementation that combines the [`OpTxEnvelope`] and another
