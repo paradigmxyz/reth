@@ -636,6 +636,7 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
     ///
     /// Panics if the buffer capacity is 0.
     pub const fn set_message_buffer_capacity(mut self, c: u32) -> Self {
+        assert_ne!(c, 0);
         self.settings.message_buffer_capacity = c;
         self
     }
