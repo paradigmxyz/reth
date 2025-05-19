@@ -667,4 +667,3 @@ impl<V, T: TransactionOrdering, S> Clone for Pool<V, T, S> {
         Self { pool: Arc::clone(&self.pool) }
     }
 }
-pub mod maintain_old;
