@@ -1,8 +1,8 @@
 //! Support for processing canonical state updates for the transaction pool
 
-use super::drift_monitor::{load_accounts, DriftMonitor, LoadedAccounts};
 use crate::{
     blobstore::{BlobStoreCanonTracker, BlobStoreUpdates},
+    maintain::drift_monitor::{load_accounts, DriftMonitor, LoadedAccounts, PoolDriftState},
     metrics::MaintainPoolMetrics,
     traits::{CanonicalStateUpdate, EthPoolTransaction, TransactionPool, TransactionPoolExt},
     BlockInfo, PoolTransaction, PoolUpdateKind,
@@ -134,6 +134,30 @@ where
         }
     }
 
+    /// Returns a Future for processing an event with a generic drift monitor
+    ///
+    /// This is used by custom implementations with the `DriftMonitoring` trait
+    pub fn process_event_with_monitor<'a, Client, P, M>(
+        &'a mut self,
+        event: CanonStateNotification<N>,
+        client: &'a Client,
+        pool: &'a P,
+        drift_monitor: &'a mut M,
+    ) -> impl std::future::Future<Output = ()> + 'a
+    where
+        Client: reth_storage_api::StateProviderFactory + ChainSpecProvider + Clone + 'static,
+        P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
+        M: super::interfaces::DriftMonitoring<Client> + 'a,
+    {
+        let event_clone = event.clone();
+        async move {
+            if !self.process_reorg(event_clone, client, pool, drift_monitor).await {
+                // if not a reorg, try as a commit
+                self.process_commit(event, client, pool, drift_monitor);
+            }
+        }
+    }
+
     /// Update finalized blocks and return finalized blob hashes if any
     pub fn update_finalized<Client>(&mut self, client: &Client) -> Option<BlobStoreUpdates>
     where
@@ -152,17 +176,18 @@ where
         Some(updates)
     }
 
-    /// Process a reorg event
-    async fn process_reorg<Client, P>(
+    /// Process a reorg event with a generic drift monitor implementing `DriftMonitoring`
+    pub(crate) async fn process_reorg<Client, P, M>(
         &mut self,
         event: CanonStateNotification<N>,
         client: &Client,
         pool: &P,
-        drift_monitor: &mut DriftMonitor,
+        drift_monitor: &mut M,
     ) -> bool
     where
         Client: reth_storage_api::StateProviderFactory + ChainSpecProvider + Clone + 'static,
         P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
+        M: super::interfaces::DriftMonitoring<Client>,
     {
         match event {
             CanonStateNotification::Reorg { old, new } => {
@@ -178,7 +203,7 @@ where
                     new_first.parent_hash() == pool_info.last_seen_block_hash)
                 {
                     // the new block points to a higher block than the oldest block in the old chain
-                    drift_monitor.set_state(super::drift_monitor::PoolDriftState::Drifted);
+                    drift_monitor.set_state(PoolDriftState::Drifted);
                 }
 
                 let chain_spec = client.chain_spec();
@@ -290,17 +315,18 @@ where
         }
     }
 
-    /// Process a commit event
-    fn process_commit<Client, P>(
+    /// Process a commit event with a generic drift monitor implementing `DriftMonitoring`
+    pub(crate) fn process_commit<Client, P, M>(
         &mut self,
         event: CanonStateNotification<N>,
         client: &Client,
         pool: &P,
-        drift_monitor: &mut DriftMonitor,
+        drift_monitor: &mut M,
     ) -> bool
     where
         Client: ChainSpecProvider,
         P: TransactionPoolExt,
+        M: super::interfaces::DriftMonitoring<Client>,
     {
         match event {
             CanonStateNotification::Commit { new } => {
@@ -331,7 +357,7 @@ where
                 // initial sync or long re-sync
                 let depth = tip.number().abs_diff(pool_info.last_seen_block_number);
                 if depth > self.config.max_update_depth {
-                    drift_monitor.set_state(super::drift_monitor::PoolDriftState::Drifted);
+                    drift_monitor.set_state(PoolDriftState::Drifted);
                     debug!(target: "txpool", ?depth, "skipping deep canonical update");
                     let info = BlockInfo {
                         block_gas_limit: tip.header().gas_limit(),
@@ -362,7 +388,7 @@ where
                     // we received a new canonical chain commit but the commit is not canonical with
                     // the pool's block, this could happen after initial sync or
                     // long re-sync
-                    drift_monitor.set_state(super::drift_monitor::PoolDriftState::Drifted);
+                    drift_monitor.set_state(PoolDriftState::Drifted);
                 }
 
                 // Canonical update

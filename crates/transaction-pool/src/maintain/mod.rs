@@ -19,6 +19,7 @@ use tracing::{debug, error, info, trace, warn};
 
 mod canon_processor;
 mod drift_monitor;
+mod interfaces;
 mod pool_maintainer;
 #[cfg(test)]
 mod tests;
@@ -26,6 +27,9 @@ mod tests;
 // Re-export key components
 pub use canon_processor::{CanonEventProcessor, CanonEventProcessorConfig, FinalizedBlockTracker};
 pub use drift_monitor::{DriftMonitor, LoadedAccounts, PoolDriftState};
+pub use interfaces::{
+    CanonProcessing, DefaultComponentFactory, DriftMonitoring, PoolMaintainerComponentFactory,
+};
 
 /// Maximum amount of time non-executable transaction are queued.
 pub const MAX_QUEUED_TRANSACTION_LIFETIME: Duration = Duration::from_secs(3 * 60 * 60);
@@ -81,7 +85,7 @@ impl LocalTransactionBackupConfig {
 }
 
 // Re-export PoolMaintainer for public use
-pub use pool_maintainer::{PoolMaintainer, PoolMaintainerBuilder, PoolMaintainerHooks};
+pub use pool_maintainer::{PoolMaintainer, PoolMaintainerBuilder};
 
 /// Returns a spawnable future for maintaining the state of the transaction pool.
 pub fn maintain_transaction_pool_future<N, Client, P, St, Tasks>(

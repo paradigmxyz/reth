@@ -2,8 +2,8 @@ use crate::{
     blobstore::BlobStoreUpdates,
     maintain::{
         drift_monitor::{DriftMonitor, DriftMonitorResult},
-        CanonEventProcessor, CanonEventProcessorConfig, LoadedAccounts, MaintainPoolConfig,
-        PoolDriftState,
+        interfaces::{CanonProcessing, DriftMonitoring, PoolMaintainerComponentFactory},
+        CanonEventProcessor, CanonEventProcessorConfig, MaintainPoolConfig, PoolDriftState,
     },
     metrics::MaintainPoolMetrics,
     traits::TransactionPoolExt,
@@ -25,102 +25,12 @@ use std::{
 use tokio::time;
 use tracing::{debug, trace};
 
-/// Hook that takes a drift monitor reference
-type DriftMonitorHook = Box<dyn FnMut(&DriftMonitor) + Send>;
-
-/// Hook that takes loaded accounts and pool references
-type AccountsLoadedHook<P> = Box<dyn FnMut(&LoadedAccounts, &P) + Send>;
-
-/// Hook that takes canon event, pool, and drift monitor references
-type CanonEventHook<N, P> =
-    Box<dyn FnMut(&CanonStateNotification<N>, &P, &mut DriftMonitor) + Send>;
-
-/// Hook that takes a size parameter
-type SizeHook = Box<dyn FnMut(usize) + Send>;
-
-/// Hook that takes transaction hashes and pool reference
-type TxHashesHook<P> = Box<dyn FnMut(&[alloy_primitives::TxHash], &P) + Send>;
-
-/// Hook that takes drift monitor and pool references
-type LoopIterationHook<P> = Box<dyn FnMut(&DriftMonitor, &P) + Send>;
-
-/// Event hooks for customizing pool maintenance behavior
-pub struct PoolMaintainerHooks<N, P>
-where
-    N: NodePrimitives,
-    P: TransactionPoolExt,
-{
-    /// Called when drift is detected (pool is out of sync with state)
-    pub on_drift_detected: Option<DriftMonitorHook>,
-
-    /// Called when accounts are successfully loaded from state
-    pub on_accounts_loaded: Option<AccountsLoadedHook<P>>,
-
-    /// Called when account reload fails
-    pub on_accounts_failed: Option<DriftMonitorHook>,
-
-    /// Called when a canonical state event is received
-    pub on_canon_event: Option<CanonEventHook<N, P>>,
-
-    /// Called before processing stale transaction eviction
-    pub on_stale_eviction_start: Option<SizeHook>,
-
-    /// Called after stale transactions are removed
-    pub on_stale_eviction_complete: Option<TxHashesHook<P>>,
-
-    /// Called when blob store cleanup occurs
-    pub on_blob_cleanup: Option<SizeHook>,
-
-    /// Called on each loop iteration with current state
-    pub on_loop_iteration: Option<LoopIterationHook<P>>,
-}
-
-impl<N, P> Default for PoolMaintainerHooks<N, P>
-where
-    N: NodePrimitives,
-    P: TransactionPoolExt,
-{
-    fn default() -> Self {
-        Self {
-            on_drift_detected: None,
-            on_accounts_loaded: None,
-            on_accounts_failed: None,
-            on_canon_event: None,
-            on_stale_eviction_start: None,
-            on_stale_eviction_complete: None,
-            on_blob_cleanup: None,
-            on_loop_iteration: None,
-        }
-    }
-}
-
-impl<N, P> std::fmt::Debug for PoolMaintainerHooks<N, P>
-where
-    N: NodePrimitives,
-    P: TransactionPoolExt,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PoolMaintainerHooks")
-            .field("on_drift_detected", &self.on_drift_detected.as_ref().map(|_| "Fn"))
-            .field("on_accounts_loaded", &self.on_accounts_loaded.as_ref().map(|_| "Fn"))
-            .field("on_accounts_failed", &self.on_accounts_failed.as_ref().map(|_| "Fn"))
-            .field("on_canon_event", &self.on_canon_event.as_ref().map(|_| "Fn"))
-            .field("on_stale_eviction_start", &self.on_stale_eviction_start.as_ref().map(|_| "Fn"))
-            .field(
-                "on_stale_eviction_complete",
-                &self.on_stale_eviction_complete.as_ref().map(|_| "Fn"),
-            )
-            .field("on_blob_cleanup", &self.on_blob_cleanup.as_ref().map(|_| "Fn"))
-            .field("on_loop_iteration", &self.on_loop_iteration.as_ref().map(|_| "Fn"))
-            .finish()
-    }
-}
-
 /// Builder for creating a customizable pool maintainer
 #[derive(Debug)]
 pub struct PoolMaintainerBuilder<N, Client, P, St, Tasks>
 where
     N: NodePrimitives,
+    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static,
     P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
 {
     client: Client,
@@ -128,7 +38,6 @@ where
     events: St,
     task_spawner: Tasks,
     config: MaintainPoolConfig,
-    hooks: PoolMaintainerHooks<N, P>,
     _phantom: std::marker::PhantomData<N>,
 }
 
@@ -141,112 +50,79 @@ where
     Tasks: TaskSpawner + 'static,
 {
     /// Creates a new `PoolMaintainerBuilder`.
-    pub fn new(
+    pub const fn new(
         client: Client,
         pool: P,
         events: St,
         task_spawner: Tasks,
         config: MaintainPoolConfig,
     ) -> Self {
-        Self {
-            client,
-            pool,
-            events,
-            task_spawner,
-            config,
-            hooks: PoolMaintainerHooks::default(),
-            _phantom: std::marker::PhantomData,
-        }
+        Self { client, pool, events, task_spawner, config, _phantom: std::marker::PhantomData }
     }
 
-    /// Set a hook that's called when drift is detected
-    pub fn on_drift_detected<F>(mut self, hook: F) -> Self
+    /// Build the pool maintainer with custom component factory
+    pub fn build_with_factory<F, M, C>(
+        self,
+        factory: F,
+    ) -> PoolMaintainer<N, Client, P, St, Tasks, M, C>
     where
-        F: FnMut(&DriftMonitor) + Send + 'static,
+        F: PoolMaintainerComponentFactory<N, Client, P, M, C>,
+        M: DriftMonitoring<Client>,
+        C: CanonProcessing<N, Client, P>,
     {
-        self.hooks.on_drift_detected = Some(Box::new(hook));
-        self
-    }
+        let metrics = MaintainPoolMetrics::default();
+        let MaintainPoolConfig { max_reload_accounts, max_update_depth, .. } = self.config;
 
-    /// Set a hook that's called when accounts are successfully loaded
-    pub fn on_accounts_loaded<F>(mut self, hook: F) -> Self
-    where
-        F: FnMut(&LoadedAccounts, &P) + Send + 'static,
-    {
-        self.hooks.on_accounts_loaded = Some(Box::new(hook));
-        self
-    }
+        let drift_monitor = factory.create_drift_monitor(max_reload_accounts, metrics.clone());
+        let canon_processor_config = CanonEventProcessorConfig { max_update_depth };
+        let canon_processor = factory.create_canon_processor(
+            self.client.finalized_block_number().ok().flatten(),
+            canon_processor_config,
+            metrics,
+        );
 
-    /// Set a hook that's called when account reload fails
-    pub fn on_accounts_failed<F>(mut self, hook: F) -> Self
-    where
-        F: FnMut(&DriftMonitor) + Send + 'static,
-    {
-        self.hooks.on_accounts_failed = Some(Box::new(hook));
-        self
-    }
-
-    /// Set a hook that's called for each canonical state event
-    pub fn on_canon_event<F>(mut self, hook: F) -> Self
-    where
-        F: FnMut(&CanonStateNotification<N>, &P, &mut DriftMonitor) + Send + 'static,
-    {
-        self.hooks.on_canon_event = Some(Box::new(hook));
-        self
-    }
-
-    /// Set a hook that's called before stale transaction eviction
-    pub fn on_stale_eviction_start<F>(mut self, hook: F) -> Self
-    where
-        F: FnMut(usize) + Send + 'static,
-    {
-        self.hooks.on_stale_eviction_start = Some(Box::new(hook));
-        self
-    }
-
-    /// Set a hook that's called after stale transactions are removed
-    pub fn on_stale_eviction_complete<F>(mut self, hook: F) -> Self
-    where
-        F: FnMut(&[alloy_primitives::TxHash], &P) + Send + 'static,
-    {
-        self.hooks.on_stale_eviction_complete = Some(Box::new(hook));
-        self
-    }
-
-    /// Set a hook that's called on blob store cleanup
-    pub fn on_blob_cleanup<F>(mut self, hook: F) -> Self
-    where
-        F: FnMut(usize) + Send + 'static,
-    {
-        self.hooks.on_blob_cleanup = Some(Box::new(hook));
-        self
-    }
-
-    /// Set a hook that's called on each loop iteration
-    pub fn on_loop_iteration<F>(mut self, hook: F) -> Self
-    where
-        F: FnMut(&DriftMonitor, &P) + Send + 'static,
-    {
-        self.hooks.on_loop_iteration = Some(Box::new(hook));
-        self
-    }
-
-    /// Build the pool maintainer with the configured hooks
-    pub fn build(self) -> PoolMaintainer<N, Client, P, St, Tasks> {
-        PoolMaintainer::new_with_hooks(
+        PoolMaintainer::new_with_custom_components(
             self.client,
             self.pool,
             self.events,
             self.task_spawner,
             self.config,
-            self.hooks,
+            drift_monitor,
+            canon_processor,
         )
     }
+
+    /// Build the pool maintainer with the default components
+    pub fn build(self) -> PoolMaintainer<N, Client, P, St, Tasks> {
+        // Use the default component factory to create standard components
+        self.build_with_factory(super::interfaces::DefaultComponentFactory)
+    }
+}
+
+/// Current state of the maintainer Future
+enum PoolMaintainerState<N: NodePrimitives> {
+    /// Waiting for any of the futures to be ready
+    Waiting,
+    /// Processing a `DriftMonitor` update
+    ProcessingDriftMonitor,
+    /// Processing a `CanonState` event
+    ProcessingCanonEvent(Option<CanonStateNotification<N>>),
+    /// Processing stale transaction eviction
+    ProcessingStaleEviction,
+    /// Finished (stream ended)
+    Finished,
 }
 
 /// The main pool maintainer
 #[derive(Debug)]
-pub struct PoolMaintainer<N: NodePrimitives, Client, P: TransactionPoolExt, St, Tasks> {
+pub struct PoolMaintainer<N, Client, P, St, Tasks, M = DriftMonitor, C = CanonEventProcessor<N>>
+where
+    N: NodePrimitives,
+    P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
+    M: DriftMonitoring<Client>,
+    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static,
+    C: CanonProcessing<N, Client, P>,
+{
     client: Client,
     pool: P,
     events: St,
@@ -254,10 +130,9 @@ pub struct PoolMaintainer<N: NodePrimitives, Client, P: TransactionPoolExt, St, 
     config: MaintainPoolConfig,
 
     // Internal state
-    drift_monitor: DriftMonitor,
-    canon_processor: CanonEventProcessor<N>,
+    drift_monitor: M,
+    canon_processor: C,
     stale_eviction_interval: time::Interval,
-    hooks: PoolMaintainerHooks<N, P>,
 
     // Initialization flag
     initialized: bool,
@@ -265,32 +140,26 @@ pub struct PoolMaintainer<N: NodePrimitives, Client, P: TransactionPoolExt, St, 
     _phantom: std::marker::PhantomData<N>,
 }
 
-impl<N, Client, P, St, Tasks> PoolMaintainer<N, Client, P, St, Tasks>
+impl<N, Client, P, St, Tasks, M, C> PoolMaintainer<N, Client, P, St, Tasks, M, C>
 where
     N: NodePrimitives,
     Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static,
     P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
+    M: DriftMonitoring<Client>,
+    C: CanonProcessing<N, Client, P>,
 {
-    fn new_with_hooks(
+    /// Create a pool maintainer with custom components
+    fn new_with_custom_components(
         client: Client,
         pool: P,
         events: St,
         task_spawner: Tasks,
         config: MaintainPoolConfig,
-        hooks: PoolMaintainerHooks<N, P>,
+        drift_monitor: M,
+        canon_processor: C,
     ) -> Self {
-        let metrics = MaintainPoolMetrics::default();
-        let MaintainPoolConfig { max_reload_accounts, max_update_depth, .. } = config;
-
-        let drift_monitor = DriftMonitor::new(max_reload_accounts, metrics.clone());
-        let canon_processor_config = CanonEventProcessorConfig { max_update_depth };
-        let canon_processor = CanonEventProcessor::new(
-            client.finalized_block_number().ok().flatten(),
-            canon_processor_config,
-            metrics,
-        );
         let stale_eviction_interval = time::interval(config.max_tx_lifetime);
 
         Self {
@@ -302,7 +171,6 @@ where
             drift_monitor,
             canon_processor,
             stale_eviction_interval,
-            hooks,
             initialized: false,
             _phantom: std::marker::PhantomData,
         }
@@ -338,27 +206,15 @@ where
     }
 }
 
-/// Current state of the maintainer Future
-enum PoolMaintainerState<N: NodePrimitives> {
-    /// Waiting for any of the futures to be ready
-    Waiting,
-    /// Processing a `DriftMonitor` update
-    ProcessingDriftMonitor,
-    /// Processing a `CanonState` event
-    ProcessingCanonEvent(Option<CanonStateNotification<N>>),
-    /// Processing stale transaction eviction
-    ProcessingStaleEviction,
-    /// Finished (stream ended)
-    Finished,
-}
-
-impl<N, Client, P, St, Tasks> Future for PoolMaintainer<N, Client, P, St, Tasks>
+impl<N, Client, P, St, Tasks, M, C> Future for PoolMaintainer<N, Client, P, St, Tasks, M, C>
 where
     N: NodePrimitives,
     Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + Unpin + 'static,
     P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + Unpin + 'static,
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
+    M: DriftMonitoring<Client> + Unpin,
+    C: CanonProcessing<N, Client, P> + Unpin,
 {
     type Output = ();
 
@@ -375,22 +231,16 @@ where
                 PoolMaintainerState::Waiting => {
                     trace!(target: "txpool", state=?this.drift_monitor.state(), "awaiting new block or reorg");
 
-                    if let Some(ref mut hook) = this.hooks.on_loop_iteration {
-                        hook(&this.drift_monitor, &this.pool);
-                    }
-
                     this.drift_monitor.update_metrics();
                     let pool_info = this.pool.block_info();
 
+                    // If drifted, mark all senders as dirty
                     if this.drift_monitor.state().is_drifted() {
-                        if let Some(ref mut hook) = this.hooks.on_drift_detected {
-                            hook(&this.drift_monitor);
-                        }
-
                         this.drift_monitor.set_dirty_addresses(this.pool.unique_senders());
                         this.drift_monitor.set_state(PoolDriftState::InSync);
                     }
 
+                    // Start reloading accounts if needed
                     if this.drift_monitor.has_dirty_addresses() &&
                         !this.drift_monitor.is_reloading()
                     {
@@ -401,29 +251,26 @@ where
                         );
                     }
 
+                    // Check for finalized blocks and clean up blobs if needed
                     if let Some(BlobStoreUpdates::Finalized(blobs)) =
                         this.canon_processor.update_finalized(&this.client)
                     {
-                        if let Some(ref mut hook) = this.hooks.on_blob_cleanup {
-                            hook(blobs.len());
-                        }
-
-                        this.pool.delete_blobs(blobs);
+                        this.pool.delete_blobs(blobs.clone());
                         let pool = this.pool.clone();
                         this.task_spawner.spawn_blocking(Box::pin(async move {
-                            debug!(target: "txpool", "cleaning up blob store");
+                            debug!(target: "txpool", finalized_blobs=%blobs.len(), "cleaning up blob store");
                             pool.cleanup_blobs();
                         }));
                     }
 
-                    // poll drift monitor
+                    // Poll drift monitor
                     let drift_poll = Pin::new(&mut this.drift_monitor).poll(cx);
                     if drift_poll.is_ready() {
                         state = PoolMaintainerState::ProcessingDriftMonitor;
                         continue;
                     }
 
-                    // poll events stream
+                    // Poll events stream
                     let events_poll = Pin::new(&mut this.events).poll_next(cx);
                     match events_poll {
                         Poll::Ready(ev) => {
@@ -433,32 +280,26 @@ where
                         Poll::Pending => {}
                     }
 
-                    // poll interval for stale eviction
+                    // Poll interval for stale eviction
                     let interval_poll = Pin::new(&mut this.stale_eviction_interval).poll_tick(cx);
                     if interval_poll.is_ready() {
                         state = PoolMaintainerState::ProcessingStaleEviction;
                         continue;
                     }
 
-                    // nothing is ready, return pending
+                    // Nothing is ready, return pending
                     return Poll::Pending;
                 }
 
                 PoolMaintainerState::ProcessingDriftMonitor => {
-                    // we know the drift monitor is ready at this point
+                    // We know the drift monitor is ready at this point
                     if let Poll::Ready(result) = Pin::new(&mut this.drift_monitor).poll(cx) {
                         match result {
                             DriftMonitorResult::AccountsLoaded(accounts) => {
-                                if let Some(ref mut hook) = this.hooks.on_accounts_loaded {
-                                    hook(&accounts, &this.pool);
-                                }
                                 this.pool.update_accounts(accounts.accounts);
                             }
                             DriftMonitorResult::Failed => {
-                                if let Some(ref mut hook) = this.hooks.on_accounts_failed {
-                                    hook(&this.drift_monitor);
-                                }
-                                debug!(target: "txpool", dirty_addresses=%this.drift_monitor.dirty_address_count(), "Account reload failed");
+                                debug!(target: "txpool", "Account reload failed");
                             }
                         }
                     }
@@ -468,7 +309,7 @@ where
 
                 PoolMaintainerState::ProcessingCanonEvent(ev) => {
                     if ev.is_none() {
-                        // the stream ended, transition to Finished state
+                        // The stream ended, transition to Finished state
                         state = PoolMaintainerState::Finished;
                         continue;
                     }
@@ -476,20 +317,15 @@ where
                     this.drift_monitor.on_first_event();
 
                     if let Some(event) = ev {
-                        if let Some(ref mut hook) = this.hooks.on_canon_event {
-                            hook(&event, &this.pool, &mut this.drift_monitor);
-                        }
-
-                        // manual implementation of processing the event with CanonProcessor
-                        // box the future to make it Unpin
-                        let mut event_processor = Box::pin(this.canon_processor.process_event(
+                        // Process the event using the canon processor through the trait interface
+                        let mut event_processor = this.canon_processor.process_event(
                             event,
                             &this.client,
                             &this.pool,
                             &mut this.drift_monitor,
-                        ));
+                        );
 
-                        // poll the pinned future directly
+                        // Poll the pinned future directly
                         match event_processor.as_mut().poll(cx) {
                             Poll::Ready(_) => {
                                 state = PoolMaintainerState::Waiting;
@@ -515,16 +351,8 @@ where
                         .map(|tx| *tx.hash())
                         .collect();
 
-                    if let Some(ref mut hook) = this.hooks.on_stale_eviction_start {
-                        hook(stale_txs.len());
-                    }
-
                     debug!(target: "txpool", count=%stale_txs.len(), "removing stale transactions");
-                    this.pool.remove_transactions(stale_txs.clone());
-
-                    if let Some(ref mut hook) = this.hooks.on_stale_eviction_complete {
-                        hook(&stale_txs, &this.pool);
-                    }
+                    this.pool.remove_transactions(stale_txs);
 
                     // Go back to waiting state
                     state = PoolMaintainerState::Waiting;
