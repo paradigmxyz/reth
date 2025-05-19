@@ -765,6 +765,27 @@ impl FromIterator<(TxHash, Eth68TxMetadata)> for RequestTxHashes {
     }
 }
 
+/// This informs peers of the updated block range the node can provide blocks for.
+/// See [EIP-7642](https://eips.ethereum.org/EIPS/eip-7642).
+#[derive(Clone, Debug, PartialEq, Eq, Default, RlpEncodableWrapper, RlpDecodable)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct NewBlockRange {
+    /// New [`BlockRange`].
+    pub block_range: BlockRange,
+}
+
+/// The earliest block, the latest block and hash of the latest block which can be provided.
+#[derive(Clone, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct BlockRange {
+    /// The earliest block which is available.
+    pub earliest: u64,
+    /// The latest block which is available.
+    pub latest: u64,
+    /// Latest available block's hash.
+    pub latest_hash: B256,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

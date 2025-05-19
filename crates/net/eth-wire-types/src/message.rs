@@ -13,7 +13,7 @@ use super::{
     Transactions,
 };
 use crate::{
-    status::StatusMessage, EthNetworkPrimitives, EthVersion, NetworkPrimitives,
+    status::StatusMessage, EthNetworkPrimitives, EthVersion, NetworkPrimitives, NewBlockRange,
     RawCapabilityMessage, Receipts69, SharedTransactions,
 };
 use alloc::{boxed::Box, sync::Arc};
@@ -127,7 +127,7 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                 if version < EthVersion::Eth69 {
                     return Err(MessageError::Invalid(version, EthMessageID::BlockRangeUpdate))
                 }
-                EthMessage::BlockRangeUpdate(Transactions::decode(buf)?)
+                EthMessage::BlockRangeUpdate(NewBlockRange::decode(buf)?)
             }
             EthMessageID::Other(_) => {
                 let raw_payload = Bytes::copy_from_slice(buf);
@@ -207,7 +207,7 @@ impl<N: NetworkPrimitives> From<EthBroadcastMessage<N>> for ProtocolBroadcastMes
 /// [`NewPooledTransactionHashes68`] is defined.
 ///
 /// The `eth/69` announces the historical block range served by the node. Removes total difficulty
-/// information. And removes the Bloom field from receipts transfered over the protocol.
+/// information. And removes the Bloom field from receipts transferred over the protocol.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
@@ -279,7 +279,7 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
         feature = "serde",
         serde(bound = "N::BroadcastedTransaction: serde::Serialize + serde::de::DeserializeOwned")
     )]
-    BlockRangeUpdate(Transactions<N::BroadcastedTransaction>),
+    BlockRangeUpdate(NewBlockRange),
     /// Represents an encoded message that doesn't match any other variant
     Other(RawCapabilityMessage),
 }

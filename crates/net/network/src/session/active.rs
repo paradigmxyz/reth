@@ -259,6 +259,9 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 let resp = resp.map(|receipts| receipts.into_with_bloom());
                 on_response!(resp, GetReceipts)
             }
+            EthMessage::BlockRangeUpdate(msg) => {
+                self.try_emit_broadcast(PeerMessage::BlockRangeUpdated(msg)).into()
+            }
             EthMessage::Other(bytes) => self.try_emit_broadcast(PeerMessage::Other(bytes)).into(),
         }
     }
@@ -300,6 +303,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             PeerMessage::ReceivedTransaction(_) => {
                 unreachable!("Not emitted by network")
             }
+            PeerMessage::BlockRangeUpdated(_) => {}
             PeerMessage::Other(other) => {
                 self.queued_outgoing.push_back(OutgoingMessage::Raw(other));
             }
