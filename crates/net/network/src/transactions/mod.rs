@@ -1995,12 +1995,12 @@ mod tests {
         },
         NetworkConfigBuilder, NetworkManager,
     };
-    use alloy_consensus::{transaction::PooledTransaction, TxEip1559, TxLegacy};
+    use alloy_consensus::{TxEip1559, TxLegacy};
     use alloy_primitives::{hex, Signature, TxKind, U256};
     use alloy_rlp::Decodable;
     use futures::FutureExt;
     use reth_chainspec::MIN_TRANSACTION_GAS;
-    use reth_ethereum_primitives::{Transaction, TransactionSigned};
+    use reth_ethereum_primitives::{PooledTransactionVariant, Transaction, TransactionSigned};
     use reth_network_api::{NetworkInfo, PeerKind};
     use reth_network_p2p::{
         error::{RequestError, RequestResult},
@@ -2236,10 +2236,10 @@ mod tests {
         let PeerRequest::GetPooledTransactions { request, response } = req else { unreachable!() };
         assert_eq!(request, GetPooledTransactions::from(txs_hashes.clone()));
 
-        let message: Vec<PooledTransaction> = txs
+        let message: Vec<PooledTransactionVariant> = txs
             .into_iter()
             .map(|tx| {
-                PooledTransaction::try_from(tx)
+                PooledTransactionVariant::try_from(tx)
                     .expect("Failed to convert MockTransaction to PooledTransaction")
             })
             .collect();
@@ -2399,7 +2399,8 @@ mod tests {
 
         let request = GetPooledTransactions(vec![*tx.get_hash()]);
 
-        let (send, receive) = oneshot::channel::<RequestResult<PooledTransactions>>();
+        let (send, receive) =
+            oneshot::channel::<RequestResult<PooledTransactions<PooledTransactionVariant>>>();
 
         transactions.on_network_tx_event(NetworkTransactionEvent::GetPooledTransactions {
             peer_id: *handle1.peer_id(),
@@ -2510,11 +2511,11 @@ mod tests {
             .expect("peer_1 session should receive request with buffered hashes");
         let PeerRequest::GetPooledTransactions { response, .. } = req else { unreachable!() };
 
-        let message: Vec<PooledTransaction> = txs
+        let message: Vec<PooledTransactionVariant> = txs
             .into_iter()
             .take(1)
             .map(|tx| {
-                PooledTransaction::try_from(tx)
+                PooledTransactionVariant::try_from(tx)
                     .expect("Failed to convert MockTransaction to PooledTransaction")
             })
             .collect();

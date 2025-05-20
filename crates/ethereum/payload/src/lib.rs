@@ -23,7 +23,7 @@ use reth_evm::{
     ConfigureEvm, Evm, NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::EthEvmConfig;
-use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
+use reth_payload_builder::{BlobSidecars, EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_primitives_traits::transaction::error::InvalidTransactionError;
@@ -295,12 +295,12 @@ where
         .then_some(execution_result.requests);
 
     // initialize empty blob sidecars at first. If cancun is active then this will
-    let mut blob_sidecars = Vec::new();
+    let mut blob_sidecars = BlobSidecars::Empty;
 
     // only determine cancun fields when active
     if chain_spec.is_cancun_active_at_timestamp(attributes.timestamp) {
         // grab the blob sidecars from the executed txs
-        blob_sidecars = pool
+        let sidecars = pool
             .get_all_blobs_exact(
                 block
                     .body()
@@ -310,6 +310,16 @@ where
                     .collect(),
             )
             .map_err(PayloadBuilderError::other)?;
+
+        blob_sidecars = sidecars
+            .into_iter()
+            .map(|sidecar| {
+                Arc::unwrap_or_clone(sidecar)
+                    .into_eip4844()
+                    .ok_or_else(|| PayloadBuilderError::MissingPayload) // TODO: fixme
+            })
+            .collect::<Result<Vec<_>, PayloadBuilderError>>()?
+            .into();
     }
 
     let sealed_block = Arc::new(block.sealed_block().clone());
@@ -317,7 +327,7 @@ where
 
     let payload = EthBuiltPayload::new(attributes.id, sealed_block, total_fees, requests)
         // add blob sidecars from the executed txs
-        .with_sidecars(blob_sidecars.into_iter().map(Arc::unwrap_or_clone).collect::<Vec<_>>());
+        .with_sidecars(blob_sidecars);
 
     Ok(BuildOutcome::Better { payload, cached_reads })
 }
