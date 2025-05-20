@@ -3645,7 +3645,7 @@ dependencies = [
  "alloy-chains",
  "alloy-consensus",
  "alloy-dyn-abi",
- "alloy-eips 1.0.3",
+ "alloy-eips 1.0.5",
  "alloy-evm",
  "alloy-genesis",
  "alloy-json-abi",
@@ -6604,8 +6604,8 @@ dependencies = [
  "alloy-network-primitives",
  "alloy-primitives",
  "alloy-rpc-types-eth",
- "alloy-serde",
- "derive_more",
+ "alloy-serde 1.0.5",
+ "derive_more 2.0.1",
  "op-alloy-consensus",
  "serde",
  "serde_json",
@@ -7277,14 +7277,6 @@ dependencies = [
 
 [[package]]
 name = "prost"
-<<<<<<< HEAD
-version = "0.13.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2796faa41db3ec313a31f7624d9286acf277b52de526150b7e69f3debf891ee5"
-dependencies = [
- "bytes",
- "prost-derive",
-=======
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce49aefe0a6144a45de32927c77bd2859a5f7677b55f220ae5b744e87389c212"
@@ -7325,19 +7317,10 @@ dependencies = [
  "quote",
  "sha2 0.9.9",
  "syn 1.0.109",
->>>>>>> 85644a84c (sync)
 ]
 
 [[package]]
 name = "prost-derive"
-<<<<<<< HEAD
-version = "0.13.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
-dependencies = [
- "anyhow",
- "itertools 0.14.0",
-=======
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "537aa19b95acde10a12fec4301466386f757403de4cd4e5b4fa78fb5ecb18f72"
@@ -7357,15 +7340,12 @@ checksum = "81bddcdb20abf9501610992b6759a4c888aef7d1a7247ef75e2404275ac24af1"
 dependencies = [
  "anyhow",
  "itertools 0.10.5",
->>>>>>> 85644a84c (sync)
  "proc-macro2",
  "quote",
  "syn 2.0.101",
 ]
 
 [[package]]
-<<<<<<< HEAD
-=======
 name = "prost-types"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7385,7 +7365,6 @@ dependencies = [
 ]
 
 [[package]]
->>>>>>> 85644a84c (sync)
 name = "pulldown-cmark"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11985,7 +11964,7 @@ version = "2.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "897b2245f0b511c87893af39b033e5ca9cce68824c4d7e7630b5a1d339658d02"
 dependencies = [
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "core-foundation 0.9.4",
  "core-foundation-sys",
  "libc",
@@ -11999,7 +11978,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "271720403f46ca04f7ba6f55d438f8bd878d6b8ca0a1046e8228c4145bcbb316"
 dependencies = [
  "bitflags 2.9.1",
- "core-foundation",
+ "core-foundation 0.10.0",
  "core-foundation-sys",
  "libc",
  "security-framework-sys",
@@ -13251,7 +13230,7 @@ dependencies = [
  "async-compression",
  "base64 0.22.1",
  "bitflags 2.9.1",
- "bytes",
+ "bytes 1.10.1",
  "futures-core",
  "futures-util",
  "http 1.3.1",
