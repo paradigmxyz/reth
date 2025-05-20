@@ -659,16 +659,20 @@ where
 
     fn on_new_head_block<T: BlockHeader>(&self, new_tip_block: &T) {
         // update all forks
-        if self.chain_spec().is_cancun_active_at_timestamp(new_tip_block.timestamp()) {
-            self.fork_tracker.cancun.store(true, std::sync::atomic::Ordering::Relaxed);
-        }
-
         if self.chain_spec().is_shanghai_active_at_timestamp(new_tip_block.timestamp()) {
             self.fork_tracker.shanghai.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
+        if self.chain_spec().is_cancun_active_at_timestamp(new_tip_block.timestamp()) {
+            self.fork_tracker.cancun.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+
         if self.chain_spec().is_prague_active_at_timestamp(new_tip_block.timestamp()) {
             self.fork_tracker.prague.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+
+        if self.chain_spec().is_osaka_active_at_timestamp(new_tip_block.timestamp()) {
+            self.fork_tracker.osaka.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
         if let Some(blob_params) =
