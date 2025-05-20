@@ -215,6 +215,20 @@ fn bench_ord(c: &mut Criterion) {
 fn bench_clone_2(c: &mut Criterion) {
     let mut group = c.benchmark_group("clone_2");
 
+    group.bench_function(BenchmarkId::new("smallvec", 32), |b| {
+        struct SmallVecData(smallvec::SmallVec<[u8; 32]>);
+
+        impl Clone for SmallVecData {
+            #[inline(always)]
+            fn clone(&self) -> Self {
+                Self(smallvec::SmallVec::from_slice(&self.0))
+            }
+        }
+
+        let data = SmallVecData(smallvec::smallvec![1; 32]);
+        b.iter(|| black_box(&data).clone())
+    });
+
     group.bench_function(BenchmarkId::new("smallvec", 64), |b| {
         struct SmallVecData(smallvec::SmallVec<[u8; 64]>);
 
@@ -235,11 +249,25 @@ fn bench_clone_2(c: &mut Criterion) {
         impl Clone for TinyVecData {
             #[inline(always)]
             fn clone(&self) -> Self {
-                Self(unsafe { core::ptr::read(&self.0) })
+                Self(self.0)
             }
         }
 
         let data = TinyVecData(tinyvec::array_vec![1; 32]);
+        b.iter(|| black_box(&data).clone());
+    });
+
+    group.bench_function(BenchmarkId::new("tinyvec", 64), |b| {
+        struct TinyVecData(tinyvec::ArrayVec<[u8; 64]>);
+
+        impl Clone for TinyVecData {
+            #[inline(always)]
+            fn clone(&self) -> Self {
+                Self(self.0)
+            }
+        }
+
+        let data = TinyVecData(tinyvec::array_vec![1; 64]);
         b.iter(|| black_box(&data).clone());
     });
 
