@@ -12,7 +12,7 @@ on:
       dry_run:
         description: "Enable dry run mode (builds artifacts but skips uploads and release creation)"
         type: boolean
-        default: true
+        default: false
 
 env:
   REPO_NAME: ${{ github.repository_owner }}/reth
@@ -24,6 +24,15 @@ env:
   DOCKER_OP_IMAGE_NAME_URL: ghcr.io/${{ github.repository_owner }}/op-reth
 
 jobs:
+  dry-run:
+    name: check dry run
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "Dry run value: ${{ github.event.inputs.dry_run }}"
+          echo "Dry run enabled: ${{ github.event.inputs.dry_run == 'true'}}"
+          echo "Dry run disabled: ${{ github.event.inputs.dry_run != 'true'}}"
+
   extract-version:
     name: extract version
     runs-on: ubuntu-latest
@@ -103,14 +112,14 @@ jobs:
         shell: bash
 
       - name: Upload artifact
-        if: ${{ github.event.inputs.dry_run == 'false' }}
+        if: ${{ github.event.inputs.dry_run != 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz
           path: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz
 
       - name: Upload signature
-        if: ${{ github.event.inputs.dry_run == 'false' }}
+        if: ${{ github.event.inputs.dry_run != 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz.asc
@@ -120,7 +129,7 @@ jobs:
     name: draft release
     needs: [build, extract-version]
     runs-on: ubuntu-latest
-    if: ${{ github.event.inputs.dry_run == 'false' }}
+    if: ${{ github.event.inputs.dry_run != 'true' }}
     env:
       VERSION: ${{ needs.extract-version.outputs.VERSION }}
     permissions:

@@ -247,6 +247,9 @@ RPC:
 
           [default: 8545]
 
+      --http.disable-compression
+          Disable compression for HTTP responses
+
       --http.api <HTTP_API>
           Rpc Modules to be configured for the HTTP server
 
@@ -323,7 +326,7 @@ RPC:
           Set the maximum RPC response payload size for both HTTP and WS in megabytes
 
           [default: 160]
-          [aliases: rpc.returndata.limit]
+          [aliases: --rpc.returndata.limit]
 
       --rpc.max-subscriptions-per-connection <RPC_MAX_SUBSCRIPTIONS_PER_CONNECTION>
           Set the maximum concurrent subscriptions per connection
