@@ -1,7 +1,7 @@
 use crate::{
     chainspec::CustomChainSpec,
     primitives::{
-        CustomHeader, CustomNodePrimitives, CustomTransactionEnvelope, ExtendedOpTxEnvelope,
+        CustomHeader, CustomNodePrimitives, CustomTransaction, CustomTransactionEnvelope,
     },
 };
 use alloy_consensus::{Block, BlockBody};
@@ -22,9 +22,9 @@ pub struct CustomNetworkPrimitives;
 
 impl NetworkPrimitives for CustomNetworkPrimitives {
     type BlockHeader = CustomHeader;
-    type BlockBody = BlockBody<ExtendedOpTxEnvelope<CustomTransactionEnvelope>, CustomHeader>;
-    type Block = Block<ExtendedOpTxEnvelope<CustomTransactionEnvelope>, CustomHeader>;
-    type BroadcastedTransaction = ExtendedOpTxEnvelope<CustomTransactionEnvelope>;
+    type BlockBody = BlockBody<CustomTransaction, CustomHeader>;
+    type Block = Block<CustomTransaction, CustomHeader>;
+    type BroadcastedTransaction = CustomTransaction;
     type PooledTransaction = Extended<OpPooledTransaction, CustomTransactionEnvelope>;
     type Receipt = OpReceipt;
 }
