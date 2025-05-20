@@ -7,6 +7,8 @@ on:
   push:
     tags:
       - v*
+    branches:
+      - dry_run*
   workflow_dispatch:
     inputs:
       dry_run:
@@ -29,7 +31,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: |
-          echo "Dry run: ${{ github.event.inputs.dry_run }}"
+          echo "Dry run value: ${{ github.event.inputs.dry_run }}"
+          echo "Dry run enabled: ${{ github.event.inputs.dry_run == 'true'}}"
+          echo "Dry run disabled: ${{ github.event.inputs.dry_run != 'true'}}"
 
   extract-version:
     name: extract version
@@ -110,14 +114,14 @@ jobs:
         shell: bash
 
       - name: Upload artifact
-        if: ${{ github.event.inputs.dry_run == 'false' }}
+        if: ${{ github.event.inputs.dry_run != 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz
           path: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz
 
       - name: Upload signature
-        if: ${{ github.event.inputs.dry_run == 'false' }}
+        if: ${{ github.event.inputs.dry_run != 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz.asc
@@ -127,7 +131,7 @@ jobs:
     name: draft release
     needs: [build, extract-version]
     runs-on: ubuntu-latest
-    if: ${{ github.event.inputs.dry_run == 'false' }}
+    if: ${{ github.event.inputs.dry_run != 'true' }}
     env:
       VERSION: ${{ needs.extract-version.outputs.VERSION }}
     permissions:
