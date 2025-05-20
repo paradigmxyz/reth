@@ -12,7 +12,8 @@ use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{
     handshake::{EthHandshake, EthRlpxHandshake},
-    EthNetworkPrimitives, HelloMessage, HelloMessageWithProtocols, NetworkPrimitives, UnifiedStatus,
+    EthNetworkPrimitives, HelloMessage, HelloMessageWithProtocols, NetworkPrimitives,
+    UnifiedStatus,
 };
 use reth_ethereum_forks::{ForkFilter, Head};
 use reth_network_peers::{mainnet_nodes, pk2id, sepolia_nodes, PeerId, TrustedPeer};
@@ -37,7 +38,7 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The client type that can interact with the chain.
     ///
     /// This type is used to fetch the block number after we established a session and received the
-    /// [Status] block hash.
+    /// [`UnifiedStatus`] block hash.
     pub client: C,
     /// The node's secret key, from which the node's identity is derived.
     pub secret_key: SecretKey,
@@ -296,7 +297,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
 
     /// Sets the highest synced block.
     ///
-    /// This is used to construct the appropriate [`ForkFilter`] and [`Status`] message.
+    /// This is used to construct the appropriate [`ForkFilter`] and [`UnifiedStatus`] message.
     ///
     /// If not set, this defaults to the genesis specified by the current chain specification.
     pub const fn set_head(mut self, head: Head) -> Self {
@@ -740,13 +741,13 @@ mod tests {
         let fork_filter = config.fork_filter;
 
         // assert that there are no other forks
-        assert_eq!(status.forkid().next, 0);
+        assert_eq!(status.forkid.next, 0);
 
         // assert the same thing for the fork_filter
         assert_eq!(fork_filter.current().next, 0);
 
         // check status and fork_filter forkhash
-        assert_eq!(status.forkid().hash, genesis_fork_hash);
+        assert_eq!(status.forkid.hash, genesis_fork_hash);
         assert_eq!(fork_filter.current().hash, genesis_fork_hash);
     }
 

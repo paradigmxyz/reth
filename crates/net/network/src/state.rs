@@ -82,7 +82,7 @@ pub struct NetworkState<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The client type that can interact with the chain.
     ///
     /// This type is used to fetch the block number after we established a session and received the
-    /// [Status] block hash.
+    /// [`UnifiedStatus`] block hash.
     client: BlockNumReader,
     /// Network discovery.
     discovery: Discovery,

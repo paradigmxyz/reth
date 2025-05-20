@@ -20,8 +20,8 @@ use crate::{
     capability::{SharedCapabilities, SharedCapability, UnsupportedCapabilityError},
     errors::{EthStreamError, P2PStreamError},
     p2pstream::DisconnectP2P,
-    CanDisconnect, Capability, DisconnectReason, EthStream, P2PStream, UnifiedStatus,
-    UnauthedEthStream,
+    CanDisconnect, Capability, DisconnectReason, EthStream, P2PStream, UnauthedEthStream,
+    UnifiedStatus,
 };
 use bytes::{Bytes, BytesMut};
 use futures::{Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt};

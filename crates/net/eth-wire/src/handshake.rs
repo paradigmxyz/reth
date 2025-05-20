@@ -6,7 +6,7 @@ use crate::{
 use bytes::{Bytes, BytesMut};
 use futures::{Sink, SinkExt, Stream};
 use reth_eth_wire_types::{
-    DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, ProtocolMessage, StatusMessage,
+    DisconnectReason, EthMessage, EthNetworkPrimitives, ProtocolMessage, StatusMessage,
     UnifiedStatus,
 };
 use reth_ethereum_forks::ForkFilter;
