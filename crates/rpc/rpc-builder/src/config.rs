@@ -192,6 +192,7 @@ impl RethRpcServerConfig for RpcServerArgs {
                 .with_http_address(socket_address)
                 .with_http(self.http_ws_server_builder())
                 .with_http_cors(self.http_corsdomain.clone())
+                .with_http_disable_compression(self.http_disable_compression)
                 .with_ws_cors(self.ws_allowed_origins.clone());
         }
 
