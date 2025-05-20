@@ -226,7 +226,7 @@ fn bench_clone_2(c: &mut Criterion) {
         }
 
         let data = SmallVecData(smallvec::smallvec![1; 32]);
-        b.iter(|| black_box(data.clone()))
+        b.iter(|| black_box(&data).clone())
     });
 
     group.bench_function(BenchmarkId::new("smallvec", 64), |b| {
@@ -239,8 +239,8 @@ fn bench_clone_2(c: &mut Criterion) {
             }
         }
 
-        let data = SmallVecData(smallvec::smallvec![1; 64]);
-        b.iter(|| black_box(data.clone()))
+        let data = SmallVecData(smallvec::smallvec![1; 32]);
+        b.iter(|| black_box(&data).clone())
     });
 
     group.bench_function(BenchmarkId::new("tinyvec", 32), |b| {
@@ -254,7 +254,7 @@ fn bench_clone_2(c: &mut Criterion) {
         }
 
         let data = TinyVecData(tinyvec::array_vec![1; 32]);
-        b.iter(|| black_box(data.clone()));
+        b.iter(|| black_box(&data).clone());
     });
 
     group.bench_function(BenchmarkId::new("tinyvec", 64), |b| {
@@ -268,7 +268,7 @@ fn bench_clone_2(c: &mut Criterion) {
         }
 
         let data = TinyVecData(tinyvec::array_vec![1; 64]);
-        b.iter(|| black_box(data.clone()));
+        b.iter(|| black_box(&data).clone());
     });
 
     group.finish();
