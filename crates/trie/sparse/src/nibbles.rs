@@ -11,6 +11,7 @@ use tinyvec::ArrayVec;
 const CAPACITY_BYTES: usize = 32;
 
 /// A representation for nibbles, that uses an even/odd flag.
+#[repr(C)] // We when to preserve the order of fields in the memory layout
 #[derive(Clone, Copy, Hash, PartialEq, Eq)]
 pub struct PackedNibbles {
     /// The even/odd flag, indicating whether the length is even or odd.
