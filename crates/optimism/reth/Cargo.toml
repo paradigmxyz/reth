@@ -32,6 +32,7 @@ reth-rpc-eth-types = { workspace = true, optional = true }
 reth-rpc-builder = { workspace = true, optional = true }
 reth-transaction-pool = { workspace = true, optional = true }
 reth-trie = { workspace = true, optional = true }
+reth-node-builder = { workspace = true, optional = true }
 
 # reth-op
 reth-optimism-primitives.workspace = true
@@ -98,6 +99,7 @@ node = [
     "evm",
     "node-api",
     "dep:reth-optimism-node",
+    "dep:reth-node-builder",
     "rpc",
     "trie",
 ]
