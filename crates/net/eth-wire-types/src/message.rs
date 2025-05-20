@@ -14,7 +14,7 @@ use super::{
 };
 use crate::{
     status::StatusMessage, EthNetworkPrimitives, EthVersion, NetworkPrimitives,
-    RawCapabilityMessage, SharedTransactions,
+    RawCapabilityMessage, Receipts69, SharedTransactions,
 };
 use alloc::{boxed::Box, sync::Arc};
 use alloy_primitives::{
@@ -55,6 +55,8 @@ pub struct ProtocolMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
 
 impl<N: NetworkPrimitives> ProtocolMessage<N> {
     /// Create a new `ProtocolMessage` from a message type and message rlp bytes.
+    ///
+    /// This will enforce decoding according to the given [`EthVersion`] of the connection.
     pub fn decode_message(version: EthVersion, buf: &mut &[u8]) -> Result<Self, MessageError> {
         let message_type = EthMessageID::decode(buf)?;
 
@@ -113,7 +115,14 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                 EthMessage::NodeData(RequestPair::decode(buf)?)
             }
             EthMessageID::GetReceipts => EthMessage::GetReceipts(RequestPair::decode(buf)?),
-            EthMessageID::Receipts => EthMessage::Receipts(RequestPair::decode(buf)?),
+            EthMessageID::Receipts => {
+                if version < EthVersion::Eth69 {
+                    EthMessage::Receipts(RequestPair::decode(buf)?)
+                } else {
+                    // with eth69, receipts no longer include the bloom
+                    EthMessage::Receipts69(RequestPair::decode(buf)?)
+                }
+            }
             EthMessageID::Other(_) => {
                 let raw_payload = Bytes::copy_from_slice(buf);
                 buf.advance(raw_payload.len());
@@ -173,7 +182,7 @@ impl<N: NetworkPrimitives> From<EthBroadcastMessage<N>> for ProtocolBroadcastMes
     }
 }
 
-/// Represents a message in the eth wire protocol, versions 66, 67 and 68.
+/// Represents a message in the eth wire protocol, versions 66, 67, 68 and 69.
 ///
 /// The ethereum wire protocol is a set of messages that are broadcast to the network in two
 /// styles:
@@ -190,6 +199,9 @@ impl<N: NetworkPrimitives> From<EthBroadcastMessage<N>> for ProtocolBroadcastMes
 /// The `eth/68` changes only `NewPooledTransactionHashes` to include `types` and `sized`. For
 /// it, `NewPooledTransactionHashes` is renamed as [`NewPooledTransactionHashes66`] and
 /// [`NewPooledTransactionHashes68`] is defined.
+///
+/// The `eth/69` announces the historical block range served by the node. Removes total difficulty
+/// information. And removes the Bloom field from receipts transfered over the protocol.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
@@ -250,6 +262,12 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
         serde(bound = "N::Receipt: serde::Serialize + serde::de::DeserializeOwned")
     )]
     Receipts(RequestPair<Receipts<N::Receipt>>),
+    /// Represents a Receipts request-response pair for eth/69.
+    #[cfg_attr(
+        feature = "serde",
+        serde(bound = "N::Receipt: serde::Serialize + serde::de::DeserializeOwned")
+    )]
+    Receipts69(RequestPair<Receipts69<N::Receipt>>),
     /// Represents an encoded message that doesn't match any other variant
     Other(RawCapabilityMessage),
 }
@@ -274,7 +292,7 @@ impl<N: NetworkPrimitives> EthMessage<N> {
             Self::GetNodeData(_) => EthMessageID::GetNodeData,
             Self::NodeData(_) => EthMessageID::NodeData,
             Self::GetReceipts(_) => EthMessageID::GetReceipts,
-            Self::Receipts(_) => EthMessageID::Receipts,
+            Self::Receipts(_) | Self::Receipts69(_) => EthMessageID::Receipts,
             Self::Other(msg) => EthMessageID::Other(msg.id as u8),
         }
     }
@@ -323,6 +341,7 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::NodeData(data) => data.encode(out),
             Self::GetReceipts(request) => request.encode(out),
             Self::Receipts(receipts) => receipts.encode(out),
+            Self::Receipts69(receipt69) => receipt69.encode(out),
             Self::Other(unknown) => out.put_slice(&unknown.payload),
         }
     }
@@ -344,6 +363,7 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::NodeData(data) => data.length(),
             Self::GetReceipts(request) => request.length(),
             Self::Receipts(receipts) => receipts.length(),
+            Self::Receipts69(receipt69) => receipt69.length(),
             Self::Other(unknown) => unknown.length(),
         }
     }
@@ -531,6 +551,17 @@ pub struct RequestPair<T> {
 
     /// the request or response message payload
     pub message: T,
+}
+
+impl<T> RequestPair<T> {
+    /// Converts the message type with the given closure.
+    pub fn map<F, R>(self, f: F) -> RequestPair<R>
+    where
+        F: FnOnce(T) -> R,
+    {
+        let Self { request_id, message } = self;
+        RequestPair { request_id, message: f(message) }
+    }
 }
 
 /// Allows messages with request ids to be serialized into RLP bytes.

@@ -65,7 +65,7 @@ async fn main() -> eyre::Result<()> {
         // Rest is just noops that do nothing
         .with_noop_pool()
         .with_noop_network()
-        .with_executor(TokioTaskExecutor::default())
+        .with_executor(Box::new(TokioTaskExecutor::default()))
         .with_evm_config(EthEvmConfig::new(spec.clone()))
         .with_consensus(EthBeaconConsensus::new(spec.clone()));
 

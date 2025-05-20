@@ -13,7 +13,7 @@ use alloy_evm::Database;
 use alloy_primitives::{keccak256, map::B256Set, B256};
 use itertools::Itertools;
 use metrics::{Gauge, Histogram};
-use reth_evm::{ConfigureEvm, Evm, EvmFor};
+use reth_evm::{ConfigureEvm, Evm, EvmFor, SpecFor};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{header::SealedHeaderFor, NodePrimitives, SignedTransaction};
 use reth_provider::{BlockReader, StateCommitmentProvider, StateProviderFactory, StateReader};
@@ -34,7 +34,11 @@ use tracing::{debug, trace};
 /// individually in parallel.
 ///
 /// Note: This task runs until cancelled externally.
-pub(super) struct PrewarmCacheTask<N: NodePrimitives, P, Evm> {
+pub(super) struct PrewarmCacheTask<N, P, Evm>
+where
+    N: NodePrimitives,
+    Evm: ConfigureEvm<Primitives = N>,
+{
     /// The executor used to spawn execution tasks.
     executor: WorkloadExecutor,
     /// Shared execution cache.
@@ -196,7 +200,11 @@ where
 
 /// Context required by tx execution tasks.
 #[derive(Debug, Clone)]
-pub(super) struct PrewarmContext<N: NodePrimitives, P, Evm> {
+pub(super) struct PrewarmContext<N, P, Evm>
+where
+    N: NodePrimitives,
+    Evm: ConfigureEvm<Primitives = N>,
+{
     pub(super) header: SealedHeaderFor<N>,
     pub(super) evm_config: Evm,
     pub(super) cache: ProviderCaches,
@@ -207,7 +215,7 @@ pub(super) struct PrewarmContext<N: NodePrimitives, P, Evm> {
     /// An atomic bool that tells prewarm tasks to not start any more execution.
     pub(super) terminate_execution: Arc<AtomicBool>,
     pub(super) precompile_cache_enabled: bool,
-    pub(super) precompile_cache_map: PrecompileCacheMap,
+    pub(super) precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
 }
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
@@ -258,11 +266,16 @@ where
         evm_env.cfg_env.disable_nonce_check = true;
 
         // create a new executor and disable nonce checks in the env
+        let spec_id = *evm_env.spec_id();
         let mut evm = evm_config.evm_with_env(state_provider, evm_env);
 
         if precompile_cache_enabled {
             evm.precompiles_mut().map_precompiles(|address, precompile| {
-                CachedPrecompile::wrap(precompile, precompile_cache_map.cache_for_address(*address))
+                CachedPrecompile::wrap(
+                    precompile,
+                    precompile_cache_map.cache_for_address(*address),
+                    spec_id,
+                )
             });
         }
 
