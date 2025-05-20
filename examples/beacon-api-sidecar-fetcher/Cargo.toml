@@ -12,6 +12,7 @@ reth-ethereum = { workspace = true, features = ["node", "pool", "cli"] }
 alloy-rpc-types-beacon.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
+alloy-eips.workspace = true
 
 clap.workspace = true
 eyre.workspace = true
