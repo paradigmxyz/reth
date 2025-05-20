@@ -243,7 +243,7 @@ pub trait EngineApi<Engine: EngineTypes> {
     ) -> RpcResult<Option<Vec<BlobAndProofV2>>>;
 }
 
-/// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
+/// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/docs/reference/json-rpc-api>
 ///
 /// This also includes additional eth functions required by optimism.
 ///
