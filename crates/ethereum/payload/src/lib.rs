@@ -10,7 +10,6 @@
 #![allow(clippy::useless_let_if_seq)]
 
 use alloy_consensus::Transaction;
-use alloy_eips::eip7594::BlobTransactionSidecarVariant;
 use alloy_primitives::U256;
 use reth_basic_payload_builder::{
     is_better_payload, BuildArguments, BuildOutcome, MissingPayloadBehaviour, PayloadBuilder,
@@ -316,14 +315,7 @@ where
 
         // Add blob tx sidecar to the payload.
         if let Some(sidecar) = blob_tx_sidecar {
-            match sidecar.as_ref() {
-                BlobTransactionSidecarVariant::Eip4844(sidecar) => {
-                    blob_sidecars.push_eip4844_sidecar(sidecar.clone());
-                }
-                BlobTransactionSidecarVariant::Eip7594(sidecar) => {
-                    blob_sidecars.push_eip7594_sidecar(sidecar.clone());
-                }
-            };
+            blob_sidecars.push_sidecar_variant(sidecar.as_ref().clone());
         }
     }
 

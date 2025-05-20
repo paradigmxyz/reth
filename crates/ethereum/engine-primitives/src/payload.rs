@@ -2,7 +2,9 @@
 
 use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::{
-    eip4844::BlobTransactionSidecar, eip4895::Withdrawals, eip7594::BlobTransactionSidecarEip7594,
+    eip4844::BlobTransactionSidecar,
+    eip4895::Withdrawals,
+    eip7594::{BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant},
     eip7685::Requests,
 };
 use alloy_primitives::{Address, B256, U256};
@@ -267,6 +269,19 @@ impl BlobSidecars {
                 sidecars.push(sidecar);
             }
             Self::Eip4844(_) => {}
+        }
+    }
+
+    /// Push a [`BlobSidecarVariant`]. Ignores the item if sidecars already contain the opposite
+    /// type.
+    pub fn push_sidecar_variant(&mut self, sidecar: BlobTransactionSidecarVariant) {
+        match sidecar {
+            BlobTransactionSidecarVariant::Eip4844(sidecar) => {
+                self.push_eip4844_sidecar(sidecar);
+            }
+            BlobTransactionSidecarVariant::Eip7594(sidecar) => {
+                self.push_eip7594_sidecar(sidecar);
+            }
         }
     }
 }
