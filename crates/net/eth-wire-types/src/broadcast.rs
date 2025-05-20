@@ -769,6 +769,7 @@ impl FromIterator<(TxHash, Eth68TxMetadata)> for RequestTxHashes {
 /// See [BlockRangeUpdate](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#blockrangeupdate-0x11).
 #[derive(Clone, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 pub struct BlockRangeUpdate {
     /// The earliest block which is available.
     pub earliest: u64,

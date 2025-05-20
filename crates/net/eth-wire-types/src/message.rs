@@ -463,6 +463,8 @@ pub enum EthMessageID {
     /// Represents receipts.
     Receipts = 0x10,
     /// Block range update.
+    ///
+    /// Introduced in Eth69
     BlockRangeUpdate = 0x11,
     /// Represents unknown message types.
     Other(u8),
@@ -494,7 +496,7 @@ impl EthMessageID {
 
     /// Returns the max value.
     pub const fn max() -> u8 {
-        Self::BlockRangeUpdate.to_u8()
+        Self::Receipts.to_u8()
     }
 }
 
