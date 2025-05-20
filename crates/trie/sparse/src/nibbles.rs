@@ -214,7 +214,7 @@ impl PackedNibbles {
 
         for i in 0..min_len {
             let self_nibble = self.nibbles[i];
-            let other_nibble = self.nibbles[i];
+            let other_nibble = other.nibbles[i];
             if self_nibble != other_nibble {
                 if self_nibble & 0xF0 != other_nibble & 0xF0 {
                     return i * 2
