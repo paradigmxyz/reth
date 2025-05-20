@@ -272,8 +272,8 @@ impl BlobSidecars {
         }
     }
 
-    /// Push a [`BlobSidecarVariant`]. Ignores the item if sidecars already contain the opposite
-    /// type.
+    /// Push a [`BlobTransactionSidecarVariant`]. Ignores the item if sidecars already contain the
+    /// opposite type.
     pub fn push_sidecar_variant(&mut self, sidecar: BlobTransactionSidecarVariant) {
         match sidecar {
             BlobTransactionSidecarVariant::Eip4844(sidecar) => {
