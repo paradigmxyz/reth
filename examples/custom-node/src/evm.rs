@@ -155,7 +155,6 @@ impl FromTxWithEncoded<CustomTransaction> for CustomEvmTransaction {
     fn from_encoded_tx(tx: &CustomTransaction, sender: Address, encoded: Bytes) -> Self {
         match tx {
             CustomTransaction::BuiltIn(tx) => {
-                let encoded = tx.encoded_2718();
                 let tx = OpTransaction::<TxEnv>::from_encoded_tx(tx, sender, encoded.into());
 
                 CustomEvmTransaction(OpTransaction {
