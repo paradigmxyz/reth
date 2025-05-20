@@ -1173,7 +1173,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
         self
     }
 
-    /// Configure the http response woule be compressed or not
+    /// Configure whether HTTP responses should be compressed
     pub fn with_http_disable_compression(mut self, http_disable_compression: bool) -> Self {
         self.http_disable_compression = http_disable_compression;
         self
@@ -1274,9 +1274,10 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
     /// Returns a [`CompressionLayer`] that adds compression support (gzip, deflate, brotli, zstd)
     /// based on the client's `Accept-Encoding` header
     fn maybe_compression_layer(disable_compression: bool) -> Option<CompressionLayer> {
-        match disable_compression {
-            true => None,
-            false => Some(CompressionLayer::new()),
+        if disable_compression {
+            None
+        } else {
+            Some(CompressionLayer::new())
         }
     }
 
