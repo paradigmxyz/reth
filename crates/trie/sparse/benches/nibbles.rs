@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, Bencher, BenchmarkId, Criterion};
 use nybbles::Nibbles;
 use rand::Rng;
 use reth_trie_sparse::PackedNibbles;
@@ -212,6 +212,68 @@ fn bench_ord(c: &mut Criterion) {
     }
 }
 
+fn bench_clone_2(c: &mut Criterion) {
+    let mut group = c.benchmark_group("clone_2");
+
+    group.bench_function(BenchmarkId::new("smallvec", 32), |b| {
+        struct SmallVecData(smallvec::SmallVec<[u8; 32]>);
+
+        impl Clone for SmallVecData {
+            #[inline(never)]
+            fn clone(&self) -> Self {
+                Self(smallvec::SmallVec::from_slice(&self.0))
+            }
+        }
+
+        let data = SmallVecData(smallvec::smallvec![1; 32]);
+        b.iter(|| data.clone())
+    });
+
+    group.bench_function(BenchmarkId::new("smallvec", 64), |b| {
+        struct SmallVecData(smallvec::SmallVec<[u8; 64]>);
+
+        impl Clone for SmallVecData {
+            #[inline(never)]
+            fn clone(&self) -> Self {
+                Self(smallvec::SmallVec::from_slice(&self.0))
+            }
+        }
+
+        let data = SmallVecData(smallvec::smallvec![1; 64]);
+        b.iter(|| data.clone())
+    });
+
+    group.bench_function(BenchmarkId::new("tinyvec", 32), |b| {
+        struct TinyVecData(tinyvec::ArrayVec<[u8; 32]>);
+
+        impl Clone for TinyVecData {
+            #[inline(never)]
+            fn clone(&self) -> Self {
+                Self(self.0)
+            }
+        }
+
+        let data = TinyVecData(tinyvec::array_vec![1; 32]);
+        b.iter(|| data.clone());
+    });
+
+    group.bench_function(BenchmarkId::new("tinyvec", 64), |b| {
+        struct TinyVecData(tinyvec::ArrayVec<[u8; 64]>);
+
+        impl Clone for TinyVecData {
+            #[inline(never)]
+            fn clone(&self) -> Self {
+                Self(self.0)
+            }
+        }
+
+        let data = TinyVecData(tinyvec::array_vec![1; 64]);
+        b.iter(|| data.clone());
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_eq,
@@ -219,6 +281,7 @@ criterion_group!(
     bench_clone,
     bench_slice,
     bench_starts_with,
-    bench_ord
+    bench_ord,
+    bench_clone_2,
 );
 criterion_main!(benches);
