@@ -54,7 +54,7 @@ pub struct RpcServerArgs {
     #[arg(long = "http.port", default_value_t = constants::DEFAULT_HTTP_RPC_PORT)]
     pub http_port: u16,
 
-    /// Http server should compress responses or not
+    /// Disable compression for HTTP responses
     #[arg(long = "http.disable-compression", default_value_t = false)]
     pub http_disable_compression: bool,
 

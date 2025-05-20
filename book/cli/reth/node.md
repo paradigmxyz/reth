@@ -248,7 +248,7 @@ RPC:
           [default: 8545]
 
       --http.disable-compression
-          Http server should compress responses or not
+          Disable compression for HTTP responses
 
       --http.api <HTTP_API>
           Rpc Modules to be configured for the HTTP server
