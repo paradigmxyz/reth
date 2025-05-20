@@ -131,7 +131,7 @@ where
         let sharded_key = decode_key(k)?;
         let new_list = BlockNumberList::decompress_owned(v)?;
 
-        if index > 0 && index % interval == 0 && total_entries > 1000 {
+        if index > 0 && index % interval == 0 && total_entries > 10 {
             info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
         }
 
