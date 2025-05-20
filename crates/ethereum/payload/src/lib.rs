@@ -244,29 +244,33 @@ where
                 continue
             }
 
-            let mut blob_sidecar_error = None;
-            if let Some(sidecar) = pool.get_blob(*tx.hash()).map_err(PayloadBuilderError::other)? {
+            let blob_sidecar_result = 'sidecar: {
+                let Some(sidecar) =
+                    pool.get_blob(*tx.hash()).map_err(PayloadBuilderError::other)?
+                else {
+                    break 'sidecar Err(Eip4844PoolTransactionError::MissingEip4844BlobSidecar)
+                };
+
                 if chain_spec.is_osaka_active_at_timestamp(attributes.timestamp) {
                     if sidecar.is_eip7594() {
-                        blob_tx_sidecar = Some(sidecar);
+                        Ok(sidecar)
                     } else {
-                        blob_sidecar_error =
-                            Some(Eip4844PoolTransactionError::UnexpectedEip4844SidecarAfterOsaka);
+                        Err(Eip4844PoolTransactionError::UnexpectedEip4844SidecarAfterOsaka)
                     }
                 } else if sidecar.is_eip4844() {
-                    blob_tx_sidecar = Some(sidecar);
+                    Ok(sidecar)
                 } else {
-                    blob_sidecar_error =
-                        Some(Eip4844PoolTransactionError::UnexpectedEip7594SidecarBeforeOsaka);
+                    Err(Eip4844PoolTransactionError::UnexpectedEip7594SidecarBeforeOsaka)
                 }
-            } else {
-                blob_sidecar_error = Some(Eip4844PoolTransactionError::MissingEip4844BlobSidecar);
-            }
+            };
 
-            if let Some(error) = blob_sidecar_error {
-                best_txs.mark_invalid(&pool_tx, InvalidPoolTransactionError::Eip4844(error));
-                continue
-            }
+            blob_tx_sidecar = match blob_sidecar_result {
+                Ok(sidecar) => Some(sidecar),
+                Err(error) => {
+                    best_txs.mark_invalid(&pool_tx, InvalidPoolTransactionError::Eip4844(error));
+                    continue
+                }
+            };
         }
 
         let gas_used = match builder.execute_transaction(tx.clone()) {
