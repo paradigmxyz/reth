@@ -563,10 +563,29 @@ where
                         )
                     }
                 }
-                EthBlobTransactionSidecar::Present(blob) => {
+                EthBlobTransactionSidecar::Present(sidecar) => {
                     let now = Instant::now();
+
+                    if self.fork_tracker.is_osaka_activated() {
+                        if sidecar.is_eip4844() {
+                            return TransactionValidationOutcome::Invalid(
+                                transaction,
+                                InvalidPoolTransactionError::Eip4844(
+                                    Eip4844PoolTransactionError::UnexpectedEip4844SidecarAfterOsaka,
+                                ),
+                            )
+                        }
+                    } else if sidecar.is_eip7594() {
+                        return TransactionValidationOutcome::Invalid(
+                            transaction,
+                            InvalidPoolTransactionError::Eip4844(
+                                Eip4844PoolTransactionError::UnexpectedEip7594SidecarBeforeOsaka,
+                            ),
+                        )
+                    }
+
                     // validate the blob
-                    if let Err(err) = transaction.validate_blob(&blob, self.kzg_settings.get()) {
+                    if let Err(err) = transaction.validate_blob(&sidecar, self.kzg_settings.get()) {
                         return TransactionValidationOutcome::Invalid(
                             transaction,
                             InvalidPoolTransactionError::Eip4844(
@@ -577,7 +596,7 @@ where
                     // Record the duration of successful blob validation as histogram
                     self.validation_metrics.blob_validation_duration.record(now.elapsed());
                     // store the extracted blob
-                    maybe_blob_sidecar = Some(blob);
+                    maybe_blob_sidecar = Some(sidecar);
                 }
             }
         }
