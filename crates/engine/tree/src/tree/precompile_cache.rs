@@ -53,7 +53,7 @@ where
     fn get(&self, key: &CacheKey<S>) -> Option<CacheEntry> {
         // LruMap's get() method requires a mutable reference since it updates the LRU order
         // So we need to use a write lock here
-        self.0.read().get(key).cloned()
+        self.0.write().get(key).cloned()
     }
 
     fn insert(&self, key: CacheKey<S>, value: CacheEntry) {
