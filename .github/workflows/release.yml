@@ -33,6 +33,7 @@ jobs:
       - run: |
           echo "Dry run value: ${{ github.event.inputs.dry_run }}"
           echo "Dry run enabled: ${{ github.event.inputs.dry_run == 'true'}}"
+          echo "Dry run disabled: ${{ github.event.inputs.dry_run != 'true'}}"
 
   extract-version:
     name: extract version
