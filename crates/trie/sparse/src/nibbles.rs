@@ -681,4 +681,58 @@ mod tests {
             PackedNibbles::from_nibbles(1..64)
         );
     }
+
+    #[test]
+    fn test_packed_nibbles_common_prefix_length() {
+        // Test with empty nibbles
+        let empty = PackedNibbles::default();
+        assert_eq!(empty.common_prefix_length(&empty), 0);
+
+        // Test with same nibbles
+        let a = PackedNibbles::from_nibbles([1, 2, 3, 4]);
+        let b = PackedNibbles::from_nibbles([1, 2, 3, 4]);
+        assert_eq!(a.common_prefix_length(&b), 4);
+        assert_eq!(b.common_prefix_length(&a), 4);
+
+        // Test with partial common prefix (byte aligned)
+        let c = PackedNibbles::from_nibbles([1, 2, 3, 4]);
+        let d = PackedNibbles::from_nibbles([1, 2, 5, 6]);
+        assert_eq!(c.common_prefix_length(&d), 2);
+        assert_eq!(d.common_prefix_length(&c), 2);
+
+        // Test with partial common prefix (half-byte aligned)
+        let e = PackedNibbles::from_nibbles([1, 2, 3, 4]);
+        let f = PackedNibbles::from_nibbles([1, 2, 3, 7]);
+        assert_eq!(e.common_prefix_length(&f), 3);
+        assert_eq!(f.common_prefix_length(&e), 3);
+
+        // Test with no common prefix
+        let g = PackedNibbles::from_nibbles([5, 6, 7, 8]);
+        let h = PackedNibbles::from_nibbles([1, 2, 3, 4]);
+        assert_eq!(g.common_prefix_length(&h), 0);
+        assert_eq!(h.common_prefix_length(&g), 0);
+
+        // Test with different lengths but common prefix
+        let i = PackedNibbles::from_nibbles([1, 2, 3, 4, 5, 6]);
+        let j = PackedNibbles::from_nibbles([1, 2, 3]);
+        assert_eq!(i.common_prefix_length(&j), 3);
+        assert_eq!(j.common_prefix_length(&i), 3);
+
+        // Test with odd number of nibbles
+        let k = PackedNibbles::from_nibbles([1, 2, 3]);
+        let l = PackedNibbles::from_nibbles([1, 2, 7]);
+        assert_eq!(k.common_prefix_length(&l), 2);
+        assert_eq!(l.common_prefix_length(&k), 2);
+
+        // Test with half-byte difference in first byte
+        let m = PackedNibbles::from_nibbles([1, 2, 3, 4]);
+        let n = PackedNibbles::from_nibbles([5, 2, 3, 4]);
+        assert_eq!(m.common_prefix_length(&n), 0);
+        assert_eq!(n.common_prefix_length(&m), 0);
+
+        // Test with one empty and one non-empty
+        let o = PackedNibbles::from_nibbles([1, 2, 3, 4]);
+        assert_eq!(o.common_prefix_length(&empty), 0);
+        assert_eq!(empty.common_prefix_length(&o), 0);
+    }
 }
