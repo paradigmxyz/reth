@@ -243,6 +243,32 @@ impl BlobSidecars {
     pub const fn eip7594(sidecars: Vec<BlobTransactionSidecarEip7594>) -> Self {
         Self::Eip7594(sidecars)
     }
+
+    /// Push EIP-4844 blob sidecar. Ignores the item if sidecars already contain EIP-7594 sidecars.
+    pub fn push_eip4844_sidecar(&mut self, sidecar: BlobTransactionSidecar) {
+        match self {
+            Self::Empty => {
+                *self = Self::Eip4844(Vec::from([sidecar]));
+            }
+            Self::Eip4844(sidecars) => {
+                sidecars.push(sidecar);
+            }
+            Self::Eip7594(_) => {}
+        }
+    }
+
+    /// Push EIP-7594 blob sidecar. Ignores the item if sidecars already contain EIP-4844 sidecars.
+    pub fn push_eip7594_sidecar(&mut self, sidecar: BlobTransactionSidecarEip7594) {
+        match self {
+            Self::Empty => {
+                *self = Self::Eip7594(Vec::from([sidecar]));
+            }
+            Self::Eip7594(sidecars) => {
+                sidecars.push(sidecar);
+            }
+            Self::Eip4844(_) => {}
+        }
+    }
 }
 
 impl From<Vec<BlobTransactionSidecar>> for BlobSidecars {

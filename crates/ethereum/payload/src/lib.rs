@@ -9,7 +9,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![allow(clippy::useless_let_if_seq)]
 
-use alloy_consensus::{Transaction, Typed2718};
+use alloy_consensus::Transaction;
+use alloy_eips::eip7594::BlobTransactionSidecarVariant;
 use alloy_primitives::U256;
 use reth_basic_payload_builder::{
     is_better_payload, BuildArguments, BuildOutcome, MissingPayloadBehaviour, PayloadBuilder,
@@ -188,7 +189,12 @@ where
         PayloadBuilderError::Internal(err.into())
     })?;
 
+    // initialize empty blob sidecars at first. If cancun is active then this will be populated by
+    // blob sidecars if any.
+    let mut blob_sidecars = BlobSidecars::Empty;
+
     let mut block_blob_count = 0;
+
     let blob_params = chain_spec.blob_params_at_timestamp(attributes.timestamp);
     let max_blob_count =
         blob_params.as_ref().map(|params| params.max_blob_count).unwrap_or_default();
@@ -216,6 +222,7 @@ where
 
         // There's only limited amount of blob space available per block, so we need to check if
         // the EIP-4844 can still fit in the block
+        let mut blob_tx_sidecar = None;
         if let Some(blob_tx) = tx.as_eip4844() {
             let tx_blob_count = blob_tx.tx().blob_versioned_hashes.len() as u64;
 
@@ -234,6 +241,30 @@ where
                         },
                     ),
                 );
+                continue
+            }
+
+            let mut blob_sidecar_error = None;
+            if let Some(sidecar) = pool.get_blob(*tx.hash()).map_err(PayloadBuilderError::other)? {
+                if chain_spec.is_osaka_active_at_timestamp(attributes.timestamp) {
+                    if sidecar.is_eip7594() {
+                        blob_tx_sidecar = Some(sidecar);
+                    } else {
+                        blob_sidecar_error =
+                            Some(Eip4844PoolTransactionError::UnexpectedEip4844SidecarAfterOsaka);
+                    }
+                } else if sidecar.is_eip4844() {
+                    blob_tx_sidecar = Some(sidecar);
+                } else {
+                    blob_sidecar_error =
+                        Some(Eip4844PoolTransactionError::UnexpectedEip7594SidecarBeforeOsaka);
+                }
+            } else {
+                blob_sidecar_error = Some(Eip4844PoolTransactionError::MissingEip4844BlobSidecar);
+            }
+
+            if let Some(error) = blob_sidecar_error {
+                best_txs.mark_invalid(&pool_tx, InvalidPoolTransactionError::Eip4844(error));
                 continue
             }
         }
@@ -278,6 +309,18 @@ where
             tx.effective_tip_per_gas(base_fee).expect("fee is always valid; execution succeeded");
         total_fees += U256::from(miner_fee) * U256::from(gas_used);
         cumulative_gas_used += gas_used;
+
+        // Add blob tx sidecar to the payload.
+        if let Some(sidecar) = blob_tx_sidecar {
+            match sidecar.as_ref() {
+                BlobTransactionSidecarVariant::Eip4844(sidecar) => {
+                    blob_sidecars.push_eip4844_sidecar(sidecar.clone());
+                }
+                BlobTransactionSidecarVariant::Eip7594(sidecar) => {
+                    blob_sidecars.push_eip7594_sidecar(sidecar.clone());
+                }
+            };
+        }
     }
 
     // check if we have a better block
@@ -293,34 +336,6 @@ where
     let requests = chain_spec
         .is_prague_active_at_timestamp(attributes.timestamp)
         .then_some(execution_result.requests);
-
-    // initialize empty blob sidecars at first. If cancun is active then this will
-    let mut blob_sidecars = BlobSidecars::Empty;
-
-    // only determine cancun fields when active
-    if chain_spec.is_cancun_active_at_timestamp(attributes.timestamp) {
-        // grab the blob sidecars from the executed txs
-        let sidecars = pool
-            .get_all_blobs_exact(
-                block
-                    .body()
-                    .transactions()
-                    .filter(|tx| tx.is_eip4844())
-                    .map(|tx| *tx.tx_hash())
-                    .collect(),
-            )
-            .map_err(PayloadBuilderError::other)?;
-
-        blob_sidecars = sidecars
-            .into_iter()
-            .map(|sidecar| {
-                Arc::unwrap_or_clone(sidecar)
-                    .into_eip4844()
-                    .ok_or_else(|| PayloadBuilderError::MissingPayload) // TODO: fixme
-            })
-            .collect::<Result<Vec<_>, PayloadBuilderError>>()?
-            .into();
-    }
 
     let sealed_block = Arc::new(block.sealed_block().clone());
     debug!(target: "payload_builder", id=%attributes.id, sealed_block_header = ?sealed_block.sealed_header(), "sealed built block");
