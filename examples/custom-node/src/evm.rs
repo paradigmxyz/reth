@@ -114,21 +114,19 @@ impl revm::context::Transaction for CustomTxEnv {
 
 impl FromRecoveredTx<CustomTransaction> for CustomTxEnv {
     fn from_recovered_tx(tx: &CustomTransaction, sender: Address) -> Self {
-        match tx {
-            CustomTransaction::BuiltIn(tx) => CustomTxEnv(TxEnv::from_recovered_tx(tx, sender)),
-            CustomTransaction::Other(_) => todo!(),
-        }
+        CustomTxEnv(match tx {
+            CustomTransaction::BuiltIn(tx) => TxEnv::from_recovered_tx(tx, sender),
+            CustomTransaction::Other(tx) => TxEnv::from_recovered_tx(tx, sender),
+        })
     }
 }
 
 impl FromTxWithEncoded<CustomTransaction> for CustomTxEnv {
     fn from_encoded_tx(tx: &CustomTransaction, sender: Address, encoded: Bytes) -> Self {
-        match tx {
-            CustomTransaction::BuiltIn(tx) => {
-                CustomTxEnv(TxEnv::from_encoded_tx(tx, sender, encoded))
-            }
-            CustomTransaction::Other(_) => todo!(),
-        }
+        CustomTxEnv(match tx {
+            CustomTransaction::BuiltIn(tx) => TxEnv::from_encoded_tx(tx, sender, encoded),
+            CustomTransaction::Other(tx) => TxEnv::from_encoded_tx(tx, sender, encoded),
+        })
     }
 }
 
