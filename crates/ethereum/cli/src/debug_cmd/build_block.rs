@@ -1,8 +1,8 @@
 //! Command for debugging block building.
 use alloy_consensus::BlockHeader;
 use alloy_eips::{
-    eip2718::Encodable2718,
-    eip4844::{env_settings::EnvKzgSettings, BlobTransactionSidecar},
+    eip2718::Encodable2718, eip4844::env_settings::EnvKzgSettings,
+    eip7594::BlobTransactionSidecarVariant,
 };
 use alloy_primitives::{Address, Bytes, B256};
 use alloy_rlp::Decodable;
@@ -152,8 +152,10 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                         eyre::eyre!("encountered a blob tx. `--blobs-bundle-path` must be provided")
                     })?;
 
-                    let sidecar: BlobTransactionSidecar =
-                        blobs_bundle.pop_sidecar(tx.tx().blob_versioned_hashes.len());
+                    let sidecar: BlobTransactionSidecarVariant =
+                        BlobTransactionSidecarVariant::Eip4844(
+                            blobs_bundle.pop_sidecar(tx.tx().blob_versioned_hashes.len()),
+                        );
 
                     let pooled = transaction
                         .clone()

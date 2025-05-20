@@ -3247,6 +3247,7 @@ name = "example-beacon-api-sidecar-fetcher"
 version = "0.1.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips 1.0.5",
  "alloy-primitives",
  "alloy-rpc-types-beacon",
  "clap",
