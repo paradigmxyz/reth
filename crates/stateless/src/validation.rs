@@ -1,4 +1,4 @@
-use crate::{witness_db::WitnessDatabase, ExecutionWitness};
+use crate::{track_cycles, witness_db::WitnessDatabase, ExecutionWitness};
 use alloc::{
     boxed::Box,
     collections::BTreeMap,
@@ -166,7 +166,8 @@ pub fn stateless_validation(
     };
 
     // First verify that the pre-state reads are correct
-    let (mut sparse_trie, bytecode) = verify_execution_witness(&witness, pre_state_root)?;
+    let (mut sparse_trie, bytecode) =
+        track_cycles!("verify-witness", verify_execution_witness(&witness, pre_state_root)?);
 
     // Create an in-memory database that will use the reads to validate the block
     let db = WitnessDatabase::new(&sparse_trie, bytecode, ancestor_hashes);
