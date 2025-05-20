@@ -174,11 +174,10 @@ where
     /// Handler for `ots_getBlockDetails`
     async fn get_block_details(
         &self,
-        block_number: u64,
+        block_number: BlockNumberOrTag,
     ) -> RpcResult<BlockDetails<RpcHeader<Eth::NetworkTypes>>> {
+        let block = self.eth.block_by_number(block_number, true);
         let block_id = block_number.into();
-        let block = self.eth.block_by_number(block_id, true);
-        let block_id = block_id.into();
         let receipts = self.eth.block_receipts(block_id);
         let (block, receipts) = futures::try_join!(block, receipts)?;
         self.block_details(

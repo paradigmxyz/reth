@@ -451,7 +451,13 @@ where
 
     OtterscanClient::<Transaction, Header>::trace_transaction(client, tx_hash).await.unwrap();
 
-    OtterscanClient::<Transaction, Header>::get_block_details(client, block_number)
+    OtterscanClient::<Transaction, Header>::get_block_details(
+        client,
+        BlockNumberOrTag::Number(block_number),
+    )
+    .await
+    .unwrap_err();
+    OtterscanClient::<Transaction, Header>::get_block_details(client, BlockNumberOrTag::default())
         .await
         .unwrap_err();
 
