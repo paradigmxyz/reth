@@ -470,33 +470,33 @@ alloy-trie = { version = "0.8.1", default-features = false }
 
 alloy-hardforks = "0.2.0"
 
-alloy-consensus = { version = "1.0.4", default-features = false }
-alloy-contract = { version = "1.0.4", default-features = false }
-alloy-eips = { version = "1.0.4", default-features = false }
-alloy-genesis = { version = "1.0.4", default-features = false }
-alloy-json-rpc = { version = "1.0.4", default-features = false }
-alloy-network = { version = "1.0.4", default-features = false }
-alloy-network-primitives = { version = "1.0.4", default-features = false }
-alloy-provider = { version = "1.0.4", features = ["reqwest"], default-features = false }
-alloy-pubsub = { version = "1.0.4", default-features = false }
-alloy-rpc-client = { version = "1.0.4", default-features = false }
-alloy-rpc-types = { version = "1.0.4", features = ["eth"], default-features = false }
-alloy-rpc-types-admin = { version = "1.0.4", default-features = false }
-alloy-rpc-types-anvil = { version = "1.0.4", default-features = false }
-alloy-rpc-types-beacon = { version = "1.0.4", default-features = false }
-alloy-rpc-types-debug = { version = "1.0.4", default-features = false }
-alloy-rpc-types-engine = { version = "1.0.4", default-features = false }
-alloy-rpc-types-eth = { version = "1.0.4", default-features = false }
-alloy-rpc-types-mev = { version = "1.0.4", default-features = false }
-alloy-rpc-types-trace = { version = "1.0.4", default-features = false }
-alloy-rpc-types-txpool = { version = "1.0.4", default-features = false }
-alloy-serde = { version = "1.0.4", default-features = false }
-alloy-signer = { version = "1.0.4", default-features = false }
-alloy-signer-local = { version = "1.0.4", default-features = false }
-alloy-transport = { version = "1.0.4" }
-alloy-transport-http = { version = "1.0.4", features = ["reqwest-rustls-tls"], default-features = false }
-alloy-transport-ipc = { version = "1.0.4", default-features = false }
-alloy-transport-ws = { version = "1.0.4", default-features = false }
+alloy-consensus = { version = "1.0.5", default-features = false }
+alloy-contract = { version = "1.0.5", default-features = false }
+alloy-eips = { version = "1.0.5", default-features = false }
+alloy-genesis = { version = "1.0.5", default-features = false }
+alloy-json-rpc = { version = "1.0.5", default-features = false }
+alloy-network = { version = "1.0.5", default-features = false }
+alloy-network-primitives = { version = "1.0.5", default-features = false }
+alloy-provider = { version = "1.0.5", features = ["reqwest"], default-features = false }
+alloy-pubsub = { version = "1.0.5", default-features = false }
+alloy-rpc-client = { version = "1.0.5", default-features = false }
+alloy-rpc-types = { version = "1.0.5", features = ["eth"], default-features = false }
+alloy-rpc-types-admin = { version = "1.0.5", default-features = false }
+alloy-rpc-types-anvil = { version = "1.0.5", default-features = false }
+alloy-rpc-types-beacon = { version = "1.0.5", default-features = false }
+alloy-rpc-types-debug = { version = "1.0.5", default-features = false }
+alloy-rpc-types-engine = { version = "1.0.5", default-features = false }
+alloy-rpc-types-eth = { version = "1.0.5", default-features = false }
+alloy-rpc-types-mev = { version = "1.0.5", default-features = false }
+alloy-rpc-types-trace = { version = "1.0.5", default-features = false }
+alloy-rpc-types-txpool = { version = "1.0.5", default-features = false }
+alloy-serde = { version = "1.0.5", default-features = false }
+alloy-signer = { version = "1.0.5", default-features = false }
+alloy-signer-local = { version = "1.0.5", default-features = false }
+alloy-transport = { version = "1.0.5" }
+alloy-transport-http = { version = "1.0.5", features = ["reqwest-rustls-tls"], default-features = false }
+alloy-transport-ipc = { version = "1.0.5", default-features = false }
+alloy-transport-ws = { version = "1.0.5", default-features = false }
 
 # op
 alloy-op-evm = { version = "0.8.1", default-features = false }
@@ -700,33 +700,33 @@ walkdir = "2.3.3"
 vergen-git2 = "1.0.5"
 
 [patch.crates-io]
- alloy-consensus = { git = "https://github.com/alloy-rs/alloy", branch = "matt/check-each-bloom-individually" }
- alloy-contract = { git = "https://github.com/alloy-rs/alloy", branch = "matt/check-each-bloom-individually" }
- alloy-eips = { git = "https://github.com/alloy-rs/alloy", branch = "matt/check-each-bloom-individually" }
- alloy-genesis = { git = "https://github.com/alloy-rs/alloy", branch = "matt/check-each-bloom-individually" }
- alloy-json-rpc = { git = "https://github.com/alloy-rs/alloy", branch = "matt/check-each-bloom-individually" }
- alloy-network = { git = "https://github.com/alloy-rs/alloy", branch = "matt/check-each-bloom-individually" }
- alloy-network-primitives = { git = "https://github.com/alloy-rs/alloy", branch = "matt/check-each-bloom-individually" }
- alloy-provider = { git = "https://github.com/alloy-rs/alloy", branch = "matt/check-each-bloom-individually" }
- alloy-pubsub = { git = "https://github.com/alloy-rs/alloy", branch = "matt/check-each-bloom-individually" }
- alloy-rpc-client = { git = "https://github.com/alloy-rs/alloy", branch = "matt/check-each-bloom-individually" }
- alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", branch = "matt/check-each-bloom-individually" }
- alloy-rpc-types-admin = { git = "https://github.com/alloy-rs/alloy", branch = "matt/check-each-bloom-individually" }
- alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", branch = "matt/check-each-bloom-individually" }
- alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", branch = "matt/check-each-bloom-individually" }
- alloy-rpc-types-debug = { git = "https://github.com/alloy-rs/alloy", branch = "matt/check-each-bloom-individually" }
- alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", branch = "matt/check-each-bloom-individually" }
- alloy-rpc-types-eth = { git = "https://github.com/alloy-rs/alloy", branch = "matt/check-each-bloom-individually" }
- alloy-rpc-types-mev = { git = "https://github.com/alloy-rs/alloy", branch = "matt/check-each-bloom-individually" }
- alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", branch = "matt/check-each-bloom-individually" }
- alloy-rpc-types-txpool = { git = "https://github.com/alloy-rs/alloy", branch = "matt/check-each-bloom-individually" }
- alloy-serde = { git = "https://github.com/alloy-rs/alloy", branch = "matt/check-each-bloom-individually" }
- alloy-signer = { git = "https://github.com/alloy-rs/alloy", branch = "matt/check-each-bloom-individually" }
- alloy-signer-local = { git = "https://github.com/alloy-rs/alloy", branch = "matt/check-each-bloom-individually" }
- alloy-transport = { git = "https://github.com/alloy-rs/alloy", branch = "matt/check-each-bloom-individually" }
- alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", branch = "matt/check-each-bloom-individually" }
- alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", branch = "matt/check-each-bloom-individually" }
- alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", branch = "matt/check-each-bloom-individually" }
+# alloy-consensus = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
+# alloy-contract = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
+# alloy-eips = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
+# alloy-genesis = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
+# alloy-json-rpc = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
+# alloy-network = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
+# alloy-network-primitives = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
+# alloy-provider = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
+# alloy-pubsub = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
+# alloy-rpc-client = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
+# alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
+# alloy-rpc-types-admin = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
+# alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
+# alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
+# alloy-rpc-types-debug = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
+# alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
+# alloy-rpc-types-eth = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
+# alloy-rpc-types-mev = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
+# alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
+# alloy-rpc-types-txpool = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
+# alloy-serde = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
+# alloy-signer = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
+# alloy-signer-local = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
+# alloy-transport = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
+# alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
+# alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
+# alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
 #
 # op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", rev = "ad607c1" }
 # op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", rev = "ad607c1" }
