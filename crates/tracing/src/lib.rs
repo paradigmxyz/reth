@@ -177,7 +177,7 @@ pub trait Tracer: Sized {
     ///
     /// # Returns
     /// An `eyre::Result` which is `Ok` with an optional `WorkerGuard` if a file layer is used,
-    /// or an `Err` in case of an error during initialization. Initialize the logging configuration.
+    /// or an `Err` in case of an error during initialization.
     fn init(self) -> eyre::Result<Option<WorkerGuard>> {
         self.init_with_layers(Layers::new())
     }
