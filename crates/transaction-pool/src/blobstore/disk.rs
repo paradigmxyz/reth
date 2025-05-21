@@ -173,7 +173,7 @@ impl BlobStore for DiskFileBlobStore {
         }
 
         if !missing_tx_hashes.is_empty() {
-        // if we have missing blobs, try to read them from disk and try again
+            // if we have missing blobs, try to read them from disk and try again
             let blobs_from_disk = self.inner.read_many_decoded(missing_tx_hashes);
             for (_, blob_sidecar) in blobs_from_disk {
                 if let Some(blob_sidecar) = blob_sidecar.as_eip4844() {
