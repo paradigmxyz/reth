@@ -44,7 +44,6 @@ pub(crate) mod witness_db;
 pub use alloy_rpc_types_debug::ExecutionWitness;
 
 use reth_ethereum_primitives::Block;
-use reth_primitives_traits::RecoveredBlock;
 
 /// ClientInput is a convenience structure for serializing the input needed
 /// for the stateless validation function.
@@ -53,9 +52,9 @@ use reth_primitives_traits::RecoveredBlock;
 pub struct ClientInput {
     /// The block being executed in the stateless validation function
     #[serde_as(
-        as = "reth_primitives_traits::serde_bincode_compat::RecoveredBlock<reth_ethereum_primitives::Block>"
+        as = "reth_primitives_traits::serde_bincode_compat::Block<reth_ethereum_primitives::TransactionSigned, alloy_consensus::Header>"
     )]
-    pub block: RecoveredBlock<Block>,
+    pub block: Block,
     /// ExecutionWitness for the stateless validation function
     pub witness: ExecutionWitness,
 }
