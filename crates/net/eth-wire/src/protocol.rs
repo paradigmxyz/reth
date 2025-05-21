@@ -53,8 +53,8 @@ impl Protocol {
 
     /// The number of values needed to represent all message IDs of capability.
     pub fn messages(&self) -> u8 {
-        if self.cap.is_eth() {
-            return EthMessageID::max() + 1
+        if let Some(version) = self.cap.eth_version() {
+            return EthMessageID::max(version) + 1;
         }
         self.messages
     }

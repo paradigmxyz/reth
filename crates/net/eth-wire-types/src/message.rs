@@ -495,8 +495,13 @@ impl EthMessageID {
     }
 
     /// Returns the max value.
-    pub const fn max() -> u8 {
-        Self::Receipts.to_u8()
+    pub fn max(version: EthVersion) -> u8 {
+        match version {
+            EthVersion::Eth66 | EthVersion::Eth67 | EthVersion::Eth68 => {
+                EthMessageID::Receipts.to_u8()
+            }
+            EthVersion::Eth69 => EthMessageID::BlockRangeUpdate.to_u8(),
+        }
     }
 }
 

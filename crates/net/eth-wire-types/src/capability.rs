@@ -123,6 +123,21 @@ impl Capability {
     pub fn is_eth(&self) -> bool {
         self.is_eth_v66() || self.is_eth_v67() || self.is_eth_v68()
     }
+
+    /// Returns the EthVersion if this is an eth capability.
+    pub fn eth_version(&self) -> Option<EthVersion> {
+        if self.name != "eth" {
+            return None;
+        }
+
+        match self.version {
+            66 => Some(EthVersion::Eth66),
+            67 => Some(EthVersion::Eth67),
+            68 => Some(EthVersion::Eth68),
+            69 => Some(EthVersion::Eth69),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for Capability {
