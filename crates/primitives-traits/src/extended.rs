@@ -3,7 +3,7 @@ use crate::{
     transaction::signed::{RecoveryError, SignedTransaction},
 };
 use alloc::vec::Vec;
-use alloy_consensus::{transaction::SignerRecoverable, Transaction};
+use alloy_consensus::{transaction::SignerRecoverable, EthereumTxEnvelope, Transaction};
 use alloy_eips::{
     eip2718::{Eip2718Error, Eip2718Result, IsTyped2718},
     eip2930::AccessList,
@@ -264,6 +264,12 @@ where
     }
 }
 
+impl<Eip4844, Tx> From<EthereumTxEnvelope<Eip4844>> for Extended<EthereumTxEnvelope<Eip4844>, Tx> {
+    fn from(value: EthereumTxEnvelope<Eip4844>) -> Self {
+        Self::BuiltIn(value)
+    }
+}
+
 #[cfg(feature = "op")]
 mod op {
     use crate::Extended;
@@ -307,6 +313,12 @@ mod op {
                     "Cannot convert custom transaction to OpPooledTransaction",
                 )),
             }
+        }
+    }
+
+    impl<Tx> From<OpTxEnvelope> for Extended<OpTxEnvelope, Tx> {
+        fn from(value: OpTxEnvelope) -> Self {
+            Self::BuiltIn(value)
         }
     }
 }

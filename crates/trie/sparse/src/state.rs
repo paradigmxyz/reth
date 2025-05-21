@@ -9,14 +9,15 @@ use alloy_primitives::{
     Bytes, B256,
 };
 use alloy_rlp::{Decodable, Encodable};
+use alloy_trie::proof::DecodedProofNodes;
 use core::{fmt, iter::Peekable};
 use reth_execution_errors::{SparseStateTrieErrorKind, SparseStateTrieResult, SparseTrieErrorKind};
 use reth_primitives_traits::Account;
 use reth_trie_common::{
     proof::ProofNodes,
     updates::{StorageTrieUpdates, TrieUpdates},
-    MultiProof, Nibbles, RlpNode, StorageMultiProof, TrieAccount, TrieMask, TrieNode,
-    EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    DecodedMultiProof, DecodedStorageMultiProof, MultiProof, Nibbles, RlpNode, StorageMultiProof,
+    TrieAccount, TrieMask, TrieNode, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use tracing::trace;
 
@@ -282,7 +283,20 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     /// Reveal unknown trie paths from multiproof.
     /// NOTE: This method does not extensively validate the proof.
     pub fn reveal_multiproof(&mut self, multiproof: MultiProof) -> SparseStateTrieResult<()> {
-        let MultiProof {
+        // first decode the multiproof
+        let decoded_multiproof = multiproof.try_into()?;
+
+        // then reveal the decoded multiproof
+        self.reveal_decoded_multiproof(decoded_multiproof)
+    }
+
+    /// Reveal unknown trie paths from decoded multiproof.
+    /// NOTE: This method does not extensively validate the proof.
+    pub fn reveal_decoded_multiproof(
+        &mut self,
+        multiproof: DecodedMultiProof,
+    ) -> SparseStateTrieResult<()> {
+        let DecodedMultiProof {
             account_subtree,
             storages,
             branch_node_hash_masks,
@@ -290,7 +304,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         } = multiproof;
 
         // first reveal the account proof nodes
-        self.reveal_account_multiproof(
+        self.reveal_decoded_account_multiproof(
             account_subtree,
             branch_node_hash_masks,
             branch_node_tree_masks,
@@ -298,7 +312,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
 
         // then reveal storage proof nodes for each storage trie
         for (account, storage_subtree) in storages {
-            self.reveal_storage_multiproof(account, storage_subtree)?;
+            self.reveal_decoded_storage_multiproof(account, storage_subtree)?;
         }
 
         Ok(())
@@ -311,12 +325,28 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
         branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
     ) -> SparseStateTrieResult<()> {
-        let DecodedProofNodes {
+        // decode the multiproof first
+        let decoded_multiproof = account_subtree.try_into()?;
+        self.reveal_decoded_account_multiproof(
+            decoded_multiproof,
+            branch_node_hash_masks,
+            branch_node_tree_masks,
+        )
+    }
+
+    /// Reveals a decoded account multiproof.
+    pub fn reveal_decoded_account_multiproof(
+        &mut self,
+        account_subtree: DecodedProofNodes,
+        branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
+        branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
+    ) -> SparseStateTrieResult<()> {
+        let FilteredProofNodes {
             nodes,
             new_nodes,
             total_nodes: _total_nodes,
             skipped_nodes: _skipped_nodes,
-        } = decode_proof_nodes(account_subtree, &self.revealed_account_paths)?;
+        } = filter_revealed_nodes(account_subtree, &self.revealed_account_paths)?;
         #[cfg(feature = "metrics")]
         {
             self.metrics.increment_total_account_nodes(_total_nodes as u64);
@@ -367,14 +397,25 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         account: B256,
         storage_subtree: StorageMultiProof,
     ) -> SparseStateTrieResult<()> {
+        // decode the multiproof first
+        let decoded_multiproof = storage_subtree.try_into()?;
+        self.reveal_decoded_storage_multiproof(account, decoded_multiproof)
+    }
+
+    /// Reveals a decoded storage multiproof for the given address.
+    pub fn reveal_decoded_storage_multiproof(
+        &mut self,
+        account: B256,
+        storage_subtree: DecodedStorageMultiProof,
+    ) -> SparseStateTrieResult<()> {
         let revealed_nodes = self.revealed_storage_paths.entry(account).or_default();
 
-        let DecodedProofNodes {
+        let FilteredProofNodes {
             nodes,
             new_nodes,
             total_nodes: _total_nodes,
             skipped_nodes: _skipped_nodes,
-        } = decode_proof_nodes(storage_subtree.subtree, revealed_nodes)?;
+        } = filter_revealed_nodes(storage_subtree.subtree, revealed_nodes)?;
         #[cfg(feature = "metrics")]
         {
             self.metrics.increment_total_storage_nodes(_total_nodes as u64);
@@ -829,9 +870,9 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     }
 }
 
-/// Result of [`decode_proof_nodes`].
+/// Result of [`filter_revealed_nodes`].
 #[derive(Debug, PartialEq, Eq)]
-struct DecodedProofNodes {
+struct FilteredProofNodes {
     /// Filtered, decoded and sorted proof nodes.
     nodes: Vec<(Nibbles, TrieNode)>,
     /// Number of nodes in the proof.
@@ -843,20 +884,20 @@ struct DecodedProofNodes {
     new_nodes: usize,
 }
 
-/// Decodes the proof nodes returning additional information about the number of total, skipped, and
-/// new nodes.
-fn decode_proof_nodes(
-    proof_nodes: ProofNodes,
+/// Filters the decoded nodes that are already revealed and returns additional information about the
+/// number of total, skipped, and new nodes.
+fn filter_revealed_nodes(
+    proof_nodes: DecodedProofNodes,
     revealed_nodes: &HashSet<Nibbles>,
-) -> alloy_rlp::Result<DecodedProofNodes> {
-    let mut result = DecodedProofNodes {
+) -> alloy_rlp::Result<FilteredProofNodes> {
+    let mut result = FilteredProofNodes {
         nodes: Vec::with_capacity(proof_nodes.len()),
         total_nodes: 0,
         skipped_nodes: 0,
         new_nodes: 0,
     };
 
-    for (path, bytes) in proof_nodes.into_inner() {
+    for (path, node) in proof_nodes.into_inner() {
         result.total_nodes += 1;
         // If the node is already revealed, skip it.
         if revealed_nodes.contains(&path) {
@@ -864,7 +905,6 @@ fn decode_proof_nodes(
             continue
         }
 
-        let node = TrieNode::decode(&mut &bytes[..])?;
         result.new_nodes += 1;
         // If it's a branch node, increase the number of new nodes by the number of children
         // according to the state mask.
@@ -892,7 +932,7 @@ mod tests {
     use assert_matches::assert_matches;
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use reth_primitives_traits::Account;
-    use reth_trie::{updates::StorageTrieUpdates, HashBuilder, EMPTY_ROOT_HASH};
+    use reth_trie::{updates::StorageTrieUpdates, HashBuilder, MultiProof, EMPTY_ROOT_HASH};
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
         BranchNode, LeafNode, StorageMultiProof, TrieMask,
@@ -987,7 +1027,7 @@ mod tests {
         };
 
         // Reveal multiproof and check that the state trie contains the leaf node and value
-        sparse.reveal_multiproof(multiproof.clone()).unwrap();
+        sparse.reveal_decoded_multiproof(multiproof.clone().try_into().unwrap()).unwrap();
         assert!(sparse
             .state_trie_ref()
             .unwrap()
@@ -1014,7 +1054,7 @@ mod tests {
 
         // Reveal multiproof again and check that the state trie still does not contain the leaf
         // node and value, because they were already revealed before
-        sparse.reveal_multiproof(multiproof).unwrap();
+        sparse.reveal_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
         assert!(!sparse
             .state_trie_ref()
             .unwrap()
@@ -1066,7 +1106,7 @@ mod tests {
         };
 
         // Reveal multiproof and check that the storage trie contains the leaf node and value
-        sparse.reveal_multiproof(multiproof.clone()).unwrap();
+        sparse.reveal_decoded_multiproof(multiproof.clone().try_into().unwrap()).unwrap();
         assert!(sparse
             .storage_trie_ref(&B256::ZERO)
             .unwrap()
@@ -1096,7 +1136,7 @@ mod tests {
 
         // Reveal multiproof again and check that the storage trie still does not contain the leaf
         // node and value, because they were already revealed before
-        sparse.reveal_multiproof(multiproof).unwrap();
+        sparse.reveal_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
         assert!(!sparse
             .storage_trie_ref(&B256::ZERO)
             .unwrap()
@@ -1166,34 +1206,38 @@ mod tests {
 
         let mut sparse = SparseStateTrie::default().with_updates(true);
         sparse
-            .reveal_multiproof(MultiProof {
-                account_subtree: proof_nodes,
-                branch_node_hash_masks: HashMap::from_iter([(
-                    Nibbles::from_nibbles([0x1]),
-                    TrieMask::new(0b00),
-                )]),
-                branch_node_tree_masks: HashMap::default(),
-                storages: HashMap::from_iter([
-                    (
-                        address_1,
-                        StorageMultiProof {
-                            root,
-                            subtree: storage_proof_nodes.clone(),
-                            branch_node_hash_masks: storage_branch_node_hash_masks.clone(),
-                            branch_node_tree_masks: HashMap::default(),
-                        },
-                    ),
-                    (
-                        address_2,
-                        StorageMultiProof {
-                            root,
-                            subtree: storage_proof_nodes,
-                            branch_node_hash_masks: storage_branch_node_hash_masks,
-                            branch_node_tree_masks: HashMap::default(),
-                        },
-                    ),
-                ]),
-            })
+            .reveal_decoded_multiproof(
+                MultiProof {
+                    account_subtree: proof_nodes,
+                    branch_node_hash_masks: HashMap::from_iter([(
+                        Nibbles::from_nibbles([0x1]),
+                        TrieMask::new(0b00),
+                    )]),
+                    branch_node_tree_masks: HashMap::default(),
+                    storages: HashMap::from_iter([
+                        (
+                            address_1,
+                            StorageMultiProof {
+                                root,
+                                subtree: storage_proof_nodes.clone(),
+                                branch_node_hash_masks: storage_branch_node_hash_masks.clone(),
+                                branch_node_tree_masks: HashMap::default(),
+                            },
+                        ),
+                        (
+                            address_2,
+                            StorageMultiProof {
+                                root,
+                                subtree: storage_proof_nodes,
+                                branch_node_hash_masks: storage_branch_node_hash_masks,
+                                branch_node_tree_masks: HashMap::default(),
+                            },
+                        ),
+                    ]),
+                }
+                .try_into()
+                .unwrap(),
+            )
             .unwrap();
 
         assert_eq!(sparse.root().unwrap(), root);
@@ -1235,7 +1279,7 @@ mod tests {
     }
 
     #[test]
-    fn test_decode_proof_nodes() {
+    fn test_filter_revealed_nodes() {
         let revealed_nodes = HashSet::from_iter([Nibbles::from_nibbles([0x0])]);
         let leaf = TrieNode::Leaf(LeafNode::new(Nibbles::default(), alloy_rlp::encode([])));
         let leaf_encoded = alloy_rlp::encode(&leaf);
@@ -1243,17 +1287,17 @@ mod tests {
             vec![RlpNode::from_rlp(&leaf_encoded), RlpNode::from_rlp(&leaf_encoded)],
             TrieMask::new(0b11),
         ));
-        let proof_nodes = ProofNodes::from_iter([
-            (Nibbles::default(), alloy_rlp::encode(&branch).into()),
-            (Nibbles::from_nibbles([0x0]), leaf_encoded.clone().into()),
-            (Nibbles::from_nibbles([0x1]), leaf_encoded.into()),
+        let proof_nodes = alloy_trie::proof::DecodedProofNodes::from_iter([
+            (Nibbles::default(), branch.clone()),
+            (Nibbles::from_nibbles([0x0]), leaf.clone()),
+            (Nibbles::from_nibbles([0x1]), leaf.clone()),
         ]);
 
-        let decoded = decode_proof_nodes(proof_nodes, &revealed_nodes).unwrap();
+        let decoded = filter_revealed_nodes(proof_nodes, &revealed_nodes).unwrap();
 
         assert_eq!(
             decoded,
-            DecodedProofNodes {
+            FilteredProofNodes {
                 nodes: vec![(Nibbles::default(), branch), (Nibbles::from_nibbles([0x1]), leaf)],
                 // Branch, leaf, leaf
                 total_nodes: 3,

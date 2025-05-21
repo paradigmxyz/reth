@@ -72,6 +72,6 @@ impl NetworkPrimitives for EthNetworkPrimitives {
     type BlockBody = reth_ethereum_primitives::BlockBody;
     type Block = reth_ethereum_primitives::Block;
     type BroadcastedTransaction = reth_ethereum_primitives::TransactionSigned;
-    type PooledTransaction = reth_ethereum_primitives::PooledTransaction;
+    type PooledTransaction = reth_ethereum_primitives::PooledTransactionVariant;
     type Receipt = reth_ethereum_primitives::Receipt;
 }

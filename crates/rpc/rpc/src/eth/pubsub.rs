@@ -36,8 +36,6 @@ use tracing::error;
 pub struct EthPubSub<Eth> {
     /// All nested fields bundled together.
     inner: Arc<EthPubSubInner<Eth>>,
-    /// The type that's used to spawn subscription tasks.
-    subscription_task_spawner: Box<dyn TaskSpawner>,
 }
 
 // === impl EthPubSub ===
@@ -52,8 +50,8 @@ impl<Eth> EthPubSub<Eth> {
 
     /// Creates a new, shareable instance.
     pub fn with_spawner(eth_api: Eth, subscription_task_spawner: Box<dyn TaskSpawner>) -> Self {
-        let inner = EthPubSubInner { eth_api };
-        Self { inner: Arc::new(inner), subscription_task_spawner }
+        let inner = EthPubSubInner { eth_api, subscription_task_spawner };
+        Self { inner: Arc::new(inner) }
     }
 }
 
@@ -76,7 +74,7 @@ where
     ) -> jsonrpsee::core::SubscriptionResult {
         let sink = pending.accept().await?;
         let pubsub = self.inner.clone();
-        self.subscription_task_spawner.spawn(Box::pin(async move {
+        self.inner.subscription_task_spawner.spawn(Box::pin(async move {
             let _ = handle_accepted(pubsub, sink, kind, params).await;
         }));
 
@@ -262,6 +260,8 @@ impl<Eth> std::fmt::Debug for EthPubSub<Eth> {
 struct EthPubSubInner<EthApi> {
     /// The `eth` API.
     eth_api: EthApi,
+    /// The type that's used to spawn subscription tasks.
+    subscription_task_spawner: Box<dyn TaskSpawner>,
 }
 
 // == impl EthPubSubInner ===
