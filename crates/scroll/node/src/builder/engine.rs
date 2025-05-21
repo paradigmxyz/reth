@@ -1,7 +1,9 @@
+use alloy_consensus::BlockHeader;
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::{ExecutionData, PayloadError};
 use reth_node_api::{
-    MessageValidationKind, NewPayloadError, PayloadValidator, VersionSpecificValidationError,
+    InvalidPayloadAttributesError, MessageValidationKind, NewPayloadError, PayloadAttributes,
+    PayloadTypes, PayloadValidator, VersionSpecificValidationError,
 };
 use reth_node_builder::{
     rpc::EngineValidatorBuilder, AddOnsContext, EngineApiMessageVersion,
@@ -9,7 +11,7 @@ use reth_node_builder::{
     FullNodeComponents, PayloadOrAttributes,
 };
 use reth_node_types::NodeTypes;
-use reth_primitives_traits::{Block as _, RecoveredBlock};
+use reth_primitives_traits::{Block, RecoveredBlock};
 use reth_scroll_chainspec::ScrollChainSpec;
 use reth_scroll_engine_primitives::{try_into_block, ScrollEngineTypes};
 use reth_scroll_primitives::{ScrollBlock, ScrollPrimitives};
@@ -91,6 +93,17 @@ where
             ));
         }
 
+        Ok(())
+    }
+
+    fn validate_payload_attributes_against_header(
+        &self,
+        attr: &<Types as PayloadTypes>::PayloadAttributes,
+        header: &<Self::Block as Block>::Header,
+    ) -> Result<(), InvalidPayloadAttributesError> {
+        if attr.timestamp() < header.timestamp() {
+            return Err(InvalidPayloadAttributesError::InvalidTimestamp);
+        }
         Ok(())
     }
 }
