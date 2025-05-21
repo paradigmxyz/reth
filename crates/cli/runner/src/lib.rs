@@ -175,14 +175,10 @@ where
         let fut = pin!(fut);
         tokio::select! {
             task_manager_result = tasks => {
-                match task_manager_result {
-                    Ok(()) => {
-                        return Ok(());
-                    }
-                    Err(panicked_error) => {
-                        error!(target: "reth::cli", ?panicked_error, "Critical task panicked");
-                        return Err(panicked_error.into());
-                    }
+                if let Err(panicked_error) = task_manager_result {
+                    return Err(panicked_error.into());
+                } else {
+                    debug!(target: "reth::cli", "TaskManager resolved without error.")
                 }
             },
             res = fut => res?,

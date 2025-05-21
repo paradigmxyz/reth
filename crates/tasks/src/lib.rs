@@ -616,8 +616,13 @@ impl TaskExecutor {
     /// with `Ok(())` and also propogate its internal shutdown signal to all managed tasks.
     pub fn request_graceful_shutdown(
         &self,
-    ) -> Result<(), tokio::sync::mpsc::error::SendError<TaskEvent>> {
-        self.panicked_tasks_tx.send(TaskEvent::GracefulShutdown)
+    ) -> Result<GracefulShutdown, tokio::sync::mpsc::error::SendError<TaskEvent>> {
+        self.panicked_tasks_tx.send(TaskEvent::GracefulShutdown)?;
+
+        Ok(GracefulShutdown::new(
+            self.on_shutdown.clone(),
+            GracefulShutdownGuard::new(Arc::clone(&self.graceful_tasks)),
+        ))
     }
 }
 
@@ -876,7 +881,7 @@ mod tests {
         let manager_future_handle = runtime.spawn(task_manager);
 
         let send_result = executor.request_graceful_shutdown();
-        assert!(send_result.is_ok(), "Sending the graceful shutdown signal should succeed");
+        assert!(send_result.is_ok(), "Sending the graceful shutdown signal should succeed and return a GracefulShutdown future");
 
         let manager_final_result = runtime.block_on(manager_future_handle);
 
