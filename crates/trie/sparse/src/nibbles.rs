@@ -199,63 +199,13 @@ impl PackedNibbles {
             return *self;
         }
 
-        let nibble_count = end - start;
+        let nibble_len = end - start;
+        let bit_len = nibble_len * 4;
+        let shift_right_bits = len * 4 - end * 4;
+        let mask = (U256::from(1) << U256::from(bit_len)) - U256::from(1);
+        let nibbles = (self.nibbles >> shift_right_bits) & mask;
 
-        let from_byte = start / 2;
-        let to_byte = end.div_ceil(2);
-
-        let byte_count = to_byte - from_byte;
-
-        let bytes: [u8; 32] = self.nibbles.to_be_bytes();
-
-        let mut out = Vec::with_capacity(byte_count);
-        unsafe {
-            // SAFETY: `out` is a valid contiguous slice of length
-            // `CAPACITY_BYTES` non-overlapping with `self.nibbles`.
-            core::ptr::copy_nonoverlapping(
-                bytes.as_ptr().add(from_byte),
-                out.as_mut_ptr(),
-                byte_count,
-            );
-        }
-
-        // Patch first and/or last byte, if needed.
-        let start_odd = start % 2 != 0;
-        let end_odd = end % 2 != 0;
-
-        // If we start on an odd nibble, we need to shift everything left by 4 bits.
-        //
-        // For `out = [0x12, 0x34]`, it will be turned into `[0x23, 0x40]`.
-        if start_odd {
-            if byte_count > 1 {
-                for i in 0..byte_count - 1 {
-                    // SAFETY: all accesses are within bounds, because `out` is initialized with
-                    // exactly `byte_count` bytes.
-                    unsafe {
-                        let next = *out.get_unchecked(i + 1);
-                        let current = out.get_unchecked_mut(i);
-                        *current = (*current << 4) | (next >> 4);
-                    }
-                }
-            }
-            // SAFETY: access is within bounds, because `out` is initialized with exactly
-            // `byte_count` bytes.
-            let last = unsafe { out.get_unchecked_mut(byte_count - 1) };
-            *last <<= 4;
-        }
-
-        if end_odd {
-            // SAFETY: access is within bounds, because `out` is initialized with exactly
-            // `byte_count` bytes.
-            let last = unsafe { out.get_unchecked_mut(byte_count - 1) };
-            *last &= 0xF0;
-        }
-
-        // SAFETY: We've already checked that the length is valid, and we're setting the length
-        // to a smaller value.
-        unsafe { out.set_len(nibble_count.div_ceil(2)) };
-
-        Self { length: nibble_count as u8, nibbles: U256::from_be_bytes(bytes) }
+        Self { length: nibble_len as u8, nibbles }
     }
 
     /// Extends this [`PackedNibbles`] with the given [`PackedNibbles`].

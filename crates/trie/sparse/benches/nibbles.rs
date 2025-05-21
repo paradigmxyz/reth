@@ -169,7 +169,7 @@ criterion_group!(
     bench_eq,
     bench_common_prefix_length,
     bench_clone,
-    // bench_slice,
+    bench_slice,
     bench_starts_with,
     bench_ord,
 );
