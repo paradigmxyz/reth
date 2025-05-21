@@ -137,8 +137,10 @@ impl BlobStore for DiskFileBlobStore {
         &self,
         versioned_hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
+        // the response must always be the same len as the request, misses must be None
         let mut result = vec![None; versioned_hashes.len()];
 
+        // first scan all cached full sidecars
         for (_tx_hash, blob_sidecar) in self.inner.blob_cache.lock().iter() {
             if let Some(blob_sidecar) = blob_sidecar.as_eip4844() {
                 for (hash_idx, match_result) in
@@ -148,11 +150,13 @@ impl BlobStore for DiskFileBlobStore {
                 }
             }
 
+            // return early if all blobs are found.
             if result.iter().all(|blob| blob.is_some()) {
                 return Ok(result);
             }
         }
 
+        // not all versioned hashes were be found, try to look up a matching tx
         let mut missing_tx_hashes = Vec::new();
 
         {
@@ -160,6 +164,7 @@ impl BlobStore for DiskFileBlobStore {
             for (idx, _) in
                 result.iter().enumerate().filter(|(_, blob_and_proof)| blob_and_proof.is_none())
             {
+                // this is safe because the result vec has the same len
                 let versioned_hash = versioned_hashes[idx];
                 if let Some(tx_hash) = versioned_to_txhashes.get(&versioned_hash).copied() {
                     missing_tx_hashes.push(tx_hash);
@@ -168,6 +173,7 @@ impl BlobStore for DiskFileBlobStore {
         }
 
         if !missing_tx_hashes.is_empty() {
+        // if we have missing blobs, try to read them from disk and try again
             let blobs_from_disk = self.inner.read_many_decoded(missing_tx_hashes);
             for (_, blob_sidecar) in blobs_from_disk {
                 if let Some(blob_sidecar) = blob_sidecar.as_eip4844() {
