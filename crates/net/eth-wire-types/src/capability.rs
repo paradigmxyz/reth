@@ -124,7 +124,7 @@ impl Capability {
         self.is_eth_v66() || self.is_eth_v67() || self.is_eth_v68()
     }
 
-    /// Returns the EthVersion if this is an eth capability.
+    /// Returns the [`EthVersion`] if this is an eth capability.
     pub fn eth_version(&self) -> Option<EthVersion> {
         if self.name != "eth" {
             return None;
