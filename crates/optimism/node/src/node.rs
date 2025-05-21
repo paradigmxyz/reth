@@ -509,7 +509,7 @@ impl<T> Clone for OpPoolBuilder<T> {
             pool_config_overrides: self.pool_config_overrides.clone(),
             enable_tx_conditional: self.enable_tx_conditional,
             supervisor_http: self.supervisor_http.clone(),
-            supervisor_safety_level: self.supervisor_safety_level.clone(),
+            supervisor_safety_level: self.supervisor_safety_level,
             _pd: core::marker::PhantomData,
         }
     }
