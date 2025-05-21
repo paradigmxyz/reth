@@ -3473,6 +3473,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-ex-engine-api-ext"
+version = "0.0.0"
+dependencies = [
+ "alloy-rpc-types-engine",
+ "async-trait",
+ "clap",
+ "example-custom-node",
+ "eyre",
+ "futures",
+ "jsonrpsee",
+ "reth-db",
+ "reth-ethereum",
+ "reth-node-api",
+ "reth-node-builder",
+ "reth-op",
+ "reth-optimism-chainspec",
+ "reth-optimism-consensus",
+ "reth-optimism-node",
+ "reth-provider",
+ "reth-rpc-api",
+ "reth-tracing",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "example-exex-hello-world"
 version = "0.0.0"
 dependencies = [
