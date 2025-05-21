@@ -121,7 +121,7 @@ impl Capability {
     /// Whether this is any eth version.
     #[inline]
     pub fn is_eth(&self) -> bool {
-        self.is_eth_v66() || self.is_eth_v67() || self.is_eth_v68()
+        self.eth_version().is_some()
     }
 
     /// Returns the [`EthVersion`] if this is an eth capability.
