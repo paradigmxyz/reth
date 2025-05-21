@@ -746,7 +746,7 @@ where
 }
 
 /// A basic optimism network builder.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default)]
 pub struct OpNetworkBuilder<NetworkP = OpNetworkPrimitives, PooledTx = OpPooledTransaction> {
     /// Disable transaction pool gossip
     pub disable_txpool_gossip: bool,
@@ -756,6 +756,17 @@ pub struct OpNetworkBuilder<NetworkP = OpNetworkPrimitives, PooledTx = OpPooledT
     _np: PhantomData<NetworkP>,
     /// Marker for the pooled transaction type
     _pt: PhantomData<PooledTx>,
+}
+
+impl<NetworkP, PooledTx> Clone for OpNetworkBuilder<NetworkP, PooledTx> {
+    fn clone(&self) -> Self {
+        Self {
+            disable_txpool_gossip: self.disable_txpool_gossip,
+            disable_discovery_v4: self.disable_discovery_v4,
+            _np: PhantomData,
+            _pt: PhantomData,
+        }
+    }
 }
 
 impl<NetworkP, PooledTx> OpNetworkBuilder<NetworkP, PooledTx> {
@@ -776,14 +787,14 @@ impl<NetworkP: NetworkPrimitives, PooledTx> OpNetworkBuilder<NetworkP, PooledTx>
     where
         Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
     {
-        let Self { disable_txpool_gossip, disable_discovery_v4, .. } = self;
+        let Self { disable_txpool_gossip, disable_discovery_v4, .. } = self.clone();
         let args = &ctx.config().network;
         let network_builder = ctx
             .network_config_builder()?
             // apply discovery settings
             .apply(|mut builder| {
                 let rlpx_socket = (args.addr, args.port).into();
-                if *disable_discovery_v4 || args.discovery.disable_discovery {
+                if disable_discovery_v4 || args.discovery.disable_discovery {
                     builder = builder.disable_discv4_discovery();
                 }
                 if !args.discovery.disable_discovery {
@@ -807,7 +818,7 @@ impl<NetworkP: NetworkPrimitives, PooledTx> OpNetworkBuilder<NetworkP, PooledTx>
         // When `sequencer_endpoint` is configured, the node will forward all transactions to a
         // Sequencer node for execution and inclusion on L1, and disable its own txpool
         // gossip to prevent other parties in the network from learning about them.
-        network_config.tx_gossip_disabled = *disable_txpool_gossip;
+        network_config.tx_gossip_disabled = disable_txpool_gossip;
 
         Ok(network_config)
     }
