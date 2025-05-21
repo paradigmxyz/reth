@@ -177,8 +177,6 @@ where
             task_manager_result = tasks => {
                 if let Err(panicked_error) = task_manager_result {
                     return Err(panicked_error.into());
-                } else {
-                    debug!(target: "reth::cli", "TaskManager resolved without error.")
                 }
             },
             res = fut => res?,
