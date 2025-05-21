@@ -94,10 +94,10 @@ where
     C: ChainSpecParser<ChainSpec = OpChainSpec>,
     Ext: clap::Args + fmt::Debug,
 {
-    /// Configures the CLI and returns a CliApp instance.
+    /// Configures the CLI and returns a [`CliApp`] instance.
     ///
     /// This method is used to prepare the CLI for execution by wrapping it in a
-    /// CliApp that can be further configured before running.
+    /// [`CliApp`] that can be further configured before running.
     pub fn configure(self) -> CliApp<C, Ext> {
         CliApp::new(self)
     }

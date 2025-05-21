@@ -1,6 +1,6 @@
-//! Provides a tracing layer for OpenTelemetry that exports spans to an OTLP endpoint.
+//! Provides a tracing layer for `OpenTelemetry` that exports spans to an OTLP endpoint.
 //!
-//! This module simplifies the integration of OpenTelemetry tracing with OTLP export in Rust
+//! This module simplifies the integration of `OpenTelemetry` tracing with OTLP export in Rust
 //! applications. It allows for easily capturing and exporting distributed traces to compatible
 //! backends like Jaeger, Zipkin, or any other OpenTelemetry-compatible tracing system.
 
@@ -15,9 +15,9 @@ use tracing::Subscriber;
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::registry::LookupSpan;
 
-/// Creates a tracing [OpenTelemetryLayer] that exports spans to an OTLP endpoint.
+/// Creates a tracing [`OpenTelemetryLayer`] that exports spans to an OTLP endpoint.
 ///
-/// This layer can be added to a [tracing_subscriber::Registry] to enable OpenTelemetry tracing
+/// This layer can be added to a [`tracing_subscriber::Registry`] to enable `OpenTelemetry` tracing
 /// with OTLP export.
 pub fn layer<S>(service_name: impl Into<Value>) -> OpenTelemetryLayer<S, SdkTracer>
 where
