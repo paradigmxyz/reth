@@ -211,7 +211,7 @@ pub trait BlockBuilder {
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError>;
 
     /// Invokes [`BlockExecutor::execute_transaction_with_commit_condition`] and saves the
-    /// transaction in internal state only if the transaction was committedc.
+    /// transaction in internal state only if the transaction was committed.
     fn execute_transaction_with_commit_condition(
         &mut self,
         tx: impl ExecutorTx<Self::Executor>,
