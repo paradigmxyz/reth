@@ -11,9 +11,7 @@ fn generate_nibbles(rng: &mut impl Rng, length: usize) -> (Nibbles, PackedNibble
 
     // Create instances of both types with same values
     let nybbles_nibbles = Nibbles::from_nibbles_unchecked(nibbles.clone());
-    assert_eq!(nybbles_nibbles.as_slice().len(), length);
     let packed_nibbles = PackedNibbles::from_nibbles(nibbles);
-    assert_eq!(packed_nibbles.as_slice().len(), length / 2);
 
     (nybbles_nibbles, packed_nibbles)
 }
@@ -171,7 +169,7 @@ criterion_group!(
     bench_eq,
     bench_common_prefix_length,
     bench_clone,
-    bench_slice,
+    // bench_slice,
     bench_starts_with,
     bench_ord,
 );

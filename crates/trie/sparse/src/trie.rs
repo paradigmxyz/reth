@@ -316,8 +316,8 @@ impl<P> fmt::Debug for RevealedSparseTrie<P> {
 
 /// This encodes packed nibbles into a hex string.
 fn encode_packed_nibbles(packed: &PackedNibbles) -> String {
-    let actual_len = packed.nibbles.len() + if packed.even { 0 } else { 1 };
-    let encoded = hex::encode(&packed.nibbles);
+    let actual_len = packed.length as usize;
+    let encoded = format!("{:x}", &packed.nibbles);
     encoded[..actual_len].to_string();
     encoded
 }
@@ -3706,9 +3706,7 @@ mod tests {
         first_path.extend_path(&second_path);
         let expected: PackedNibbles =
             PackedNibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x5, 0x6]).into();
-        let hex_expected = hex::encode(expected.nibbles.clone());
-        let hex_first_path = hex::encode(first_path.nibbles.clone());
-        assert_eq!(first_path, expected, "Expected: {hex_expected}, got: {hex_first_path}");
+        assert_eq!(first_path, expected, "Expected: {expected:?}, got: {first_path:?}");
     }
 
     #[test]
@@ -3719,9 +3717,7 @@ mod tests {
         first_path.extend_path(&second_path);
         let expected: PackedNibbles =
             PackedNibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7]).into();
-        let hex_expected = hex::encode(expected.nibbles.clone());
-        let hex_first_path = hex::encode(first_path.nibbles.clone());
-        assert_eq!(first_path, expected, "Expected: {hex_expected}, got: {hex_first_path}");
+        assert_eq!(first_path, expected, "Expected: {expected:?}, got: {first_path:?}");
     }
 
     #[test]
@@ -3731,9 +3727,7 @@ mod tests {
 
         first_path.extend_path(&second_path);
         let expected: PackedNibbles = PackedNibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x5]).into();
-        let hex_expected = hex::encode(expected.nibbles.clone());
-        let hex_first_path = hex::encode(first_path.nibbles.clone());
-        assert_eq!(first_path, expected, "Expected: {hex_expected}, got: {hex_first_path}");
+        assert_eq!(first_path, expected, "Expected: {expected:?}, got: {first_path:?}");
     }
 
     #[test]
@@ -3743,9 +3737,7 @@ mod tests {
 
         first_path.extend_path(&second_path);
         let expected: PackedNibbles = PackedNibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]).into();
-        let hex_expected = hex::encode(expected.nibbles.clone());
-        let hex_first_path = hex::encode(first_path.nibbles.clone());
-        assert_eq!(first_path, expected, "Expected: {hex_expected}, got: {hex_first_path}");
+        assert_eq!(first_path, expected, "Expected: {expected:?}, got: {first_path:?}");
     }
 
     #[test]
@@ -3755,9 +3747,7 @@ mod tests {
 
         first_path.extend_path(&second_path);
         let expected: PackedNibbles = PackedNibbles::from_nibbles([0x1, 0x2, 0x3]).into();
-        let hex_expected = hex::encode(expected.nibbles.clone());
-        let hex_first_path = hex::encode(first_path.nibbles.clone());
-        assert_eq!(first_path, expected, "Expected: {hex_expected}, got: {hex_first_path}");
+        assert_eq!(first_path, expected, "Expected: {expected:?}, got: {first_path:?}");
     }
 
     #[test]
@@ -3767,9 +3757,7 @@ mod tests {
 
         first_path.extend_path(&second_path);
         let expected: PackedNibbles = PackedNibbles::from_nibbles([0x1, 0x2]).into();
-        let hex_expected = hex::encode(expected.nibbles.clone());
-        let hex_first_path = hex::encode(first_path.nibbles.clone());
-        assert_eq!(first_path, expected, "Expected: {hex_expected}, got: {hex_first_path}");
+        assert_eq!(first_path, expected, "Expected: {expected:?}, got: {first_path:?}");
     }
 
     #[test]
@@ -3777,7 +3765,6 @@ mod tests {
         let mut nibbles = PackedNibbles::default();
         nibbles.push_unchecked(0x1);
         assert_eq!(nibbles, PackedNibbles::from_nibbles([0x1]).into());
-        println!("{nibbles:?}");
 
         nibbles.push_unchecked(0x2);
         assert_eq!(nibbles, PackedNibbles::from_nibbles([0x1, 0x2]).into());

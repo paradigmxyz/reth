@@ -125,7 +125,7 @@ impl<'a> ExtensionNodeRef<'a> {
 }
 
 pub fn encode_path_leaf(nibbles: &PackedNibbles, is_leaf: bool) -> SmallVec<[u8; 36]> {
-    let odd_nibbles = !nibbles.even;
+    let odd_nibbles = nibbles.length % 2 != 0;
     let encoded_len = nibbles.len() / 2 + 1;
     // SAFETY: `len` is calculated correctly.
     unsafe {
