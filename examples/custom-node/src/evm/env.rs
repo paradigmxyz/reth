@@ -5,7 +5,17 @@ use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
 use op_revm::OpTransaction;
 use reth_ethereum::evm::revm::context::TxEnv;
 
-pub struct CustomTxEnv(TxEnv);
+/// An Optimism extended Ethereum transaction that can be fed to [`Evm`] because it contains
+/// [`CustomTxEnv`].
+///
+/// [`Evm`]: alloy_evm::Evm
+pub type CustomEvmTransaction = OpTransaction<CustomTxEnv>;
+
+/// A transaction environment is a set of information related to an Ethereum transaction that can be
+/// fed to [`Evm`] for execution.
+///
+/// [`Evm`]: alloy_evm::Evm
+pub struct CustomTxEnv(pub TxEnv);
 
 impl revm::context::Transaction for CustomTxEnv {
     type AccessListItem<'a>
