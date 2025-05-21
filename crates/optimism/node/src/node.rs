@@ -56,7 +56,7 @@ use reth_transaction_pool::{
 };
 use reth_trie_db::MerklePatriciaTrie;
 use revm::context::TxEnv;
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
 
 /// Marker trait for Optimism node types with standard engine, chain spec, and primitives.
 pub trait OpNodeTypes:
@@ -128,10 +128,7 @@ impl OpNode {
             .payload(BasicPayloadServiceBuilder::new(
                 OpPayloadBuilder::new(compute_pending_block).with_da_config(self.da_config.clone()),
             ))
-            .network(OpNetworkBuilder {
-                disable_txpool_gossip,
-                disable_discovery_v4: !discovery_v4,
-            })
+            .network(OpNetworkBuilder::new(disable_txpool_gossip, !discovery_v4))
             .consensus(OpConsensusBuilder::default())
     }
 
@@ -747,32 +744,46 @@ where
 
 /// A basic optimism network builder.
 #[derive(Debug, Default, Clone)]
-pub struct OpNetworkBuilder {
+pub struct OpNetworkBuilder<NetworkPrimitives = OpNetworkPrimitives, PooledTx = OpPooledTransaction>
+{
     /// Disable transaction pool gossip
     pub disable_txpool_gossip: bool,
     /// Disable discovery v4
     pub disable_discovery_v4: bool,
+    /// Marker for the network primitives type
+    _np: PhantomData<NetworkPrimitives>,
+    /// Marker for the pooled transaction type
+    _pt: PhantomData<PooledTx>,
 }
 
-impl OpNetworkBuilder {
+impl<NetworkPrimitives, PooledTx> OpNetworkBuilder<NetworkPrimitives, PooledTx> {
+    /// Creates a new `OpNetworkBuilder`.
+    pub const fn new(disable_txpool_gossip: bool, disable_discovery_v4: bool) -> Self {
+        Self { disable_txpool_gossip, disable_discovery_v4, _np: PhantomData, _pt: PhantomData }
+    }
+}
+
+impl<NetworkPrimitives: reth_network::NetworkPrimitives, PooledTx>
+    OpNetworkBuilder<NetworkPrimitives, PooledTx>
+{
     /// Returns the [`NetworkConfig`] that contains the settings to launch the p2p network.
     ///
     /// This applies the configured [`OpNetworkBuilder`] settings.
     pub fn network_config<Node>(
         &self,
         ctx: &BuilderContext<Node>,
-    ) -> eyre::Result<NetworkConfig<<Node as FullNodeTypes>::Provider, OpNetworkPrimitives>>
+    ) -> eyre::Result<NetworkConfig<<Node as FullNodeTypes>::Provider, NetworkPrimitives>>
     where
         Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
     {
-        let Self { disable_txpool_gossip, disable_discovery_v4 } = self.clone();
+        let Self { disable_txpool_gossip, disable_discovery_v4, .. } = self;
         let args = &ctx.config().network;
         let network_builder = ctx
             .network_config_builder()?
             // apply discovery settings
             .apply(|mut builder| {
                 let rlpx_socket = (args.addr, args.port).into();
-                if disable_discovery_v4 || args.discovery.disable_discovery {
+                if *disable_discovery_v4 || args.discovery.disable_discovery {
                     builder = builder.disable_discv4_discovery();
                 }
                 if !args.discovery.disable_discovery {
@@ -796,24 +807,31 @@ impl OpNetworkBuilder {
         // When `sequencer_endpoint` is configured, the node will forward all transactions to a
         // Sequencer node for execution and inclusion on L1, and disable its own txpool
         // gossip to prevent other parties in the network from learning about them.
-        network_config.tx_gossip_disabled = disable_txpool_gossip;
+        network_config.tx_gossip_disabled = *disable_txpool_gossip;
 
         Ok(network_config)
     }
 }
 
-impl<Node, Pool> NetworkBuilder<Node, Pool> for OpNetworkBuilder
+impl<Node, Pool, NetworkPrimitives, PooledTx> NetworkBuilder<Node, Pool>
+    for OpNetworkBuilder<NetworkPrimitives, PooledTx>
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
     Pool: TransactionPool<
-            Transaction: PoolTransaction<
-                Consensus = TxTy<Node::Types>,
-                Pooled = OpPooledTransaction,
-            >,
+            Transaction: PoolTransaction<Consensus = TxTy<Node::Types>, Pooled = PooledTx>,
         > + Unpin
         + 'static,
+    NetworkPrimitives: reth_network::NetworkPrimitives<
+        PooledTransaction = PooledTx,
+        Block = alloy_consensus::Block<op_alloy_consensus::OpTxEnvelope>,
+        BlockBody = alloy_consensus::BlockBody<op_alloy_consensus::OpTxEnvelope>,
+        BlockHeader = alloy_consensus::Header,
+        Receipt = reth_optimism_primitives::OpReceipt,
+        BroadcastedTransaction = op_alloy_consensus::OpTxEnvelope,
+    >,
+    PooledTx: Send,
 {
-    type Network = NetworkHandle<OpNetworkPrimitives>;
+    type Network = NetworkHandle<NetworkPrimitives>;
 
     async fn build_network(
         self,
