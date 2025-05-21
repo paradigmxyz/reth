@@ -453,7 +453,7 @@ mod tests {
         .decoded_multiproof(targets.clone())
         .unwrap();
 
-        let sequential_result_raw= Proof::new(trie_cursor_factory, hashed_cursor_factory)
+        let sequential_result_raw = Proof::new(trie_cursor_factory, hashed_cursor_factory)
             .multiproof(targets.clone())
             .unwrap(); // targets might be consumed by parallel_result
         let sequential_result_decoded: DecodedMultiProof = sequential_result_raw
