@@ -10036,7 +10036,6 @@ dependencies = [
  "reth-ethereum-consensus",
  "reth-ethereum-primitives",
  "reth-evm",
- "reth-evm-ethereum",
  "reth-primitives-traits",
  "reth-revm",
  "reth-trie-common",

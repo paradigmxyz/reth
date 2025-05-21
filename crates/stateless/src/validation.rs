@@ -2,6 +2,7 @@ use crate::{witness_db::WitnessDatabase, ExecutionWitness};
 use alloc::{
     boxed::Box,
     collections::BTreeMap,
+    fmt::Debug,
     string::{String, ToString},
     sync::Arc,
     vec::Vec,
@@ -9,13 +10,12 @@ use alloc::{
 use alloy_consensus::{BlockHeader, Header};
 use alloy_primitives::{keccak256, map::B256Map, B256};
 use alloy_rlp::Decodable;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, HeaderValidator};
 use reth_errors::ConsensusError;
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
-use reth_ethereum_primitives::Block;
+use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_primitives_traits::{block::error::BlockRecoveryError, Block as _, RecoveredBlock};
 use reth_revm::state::Bytecode;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
@@ -110,7 +110,7 @@ pub enum StatelessValidationError {
 ///    from `ancestor_headers`. Verifies the provided [`ExecutionWitness`] against this root using
 ///    [`verify_execution_witness`].
 ///
-/// 3. **Chain Verification:** The code currently does not verify the [`ChainSpec`] and expects a
+/// 3. **Chain Verification:** The code currently does not verify the [`EthChainSpec`] and expects a
 ///    higher level function to assert that this is correct by, for example, asserting that it is
 ///    equal to the Ethereum Mainnet `ChainSpec` or asserting against the genesis hash that this
 ///    `ChainSpec` defines.
@@ -126,11 +126,16 @@ pub enum StatelessValidationError {
 ///
 /// If all steps succeed the function returns `Some` containing the hash of the validated
 /// `current_block`.
-pub fn stateless_validation(
+pub fn stateless_validation<ChainSpec, E>(
     current_block: Block,
     witness: ExecutionWitness,
     chain_spec: Arc<ChainSpec>,
-) -> Result<B256, StatelessValidationError> {
+    evm_config: E,
+) -> Result<B256, StatelessValidationError>
+where
+    ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug,
+    E: ConfigureEvm<Primitives = EthPrimitives> + Clone + 'static,
+{
     let current_block = current_block
         .try_into_recovered()
         .map_err(|err| StatelessValidationError::SignerRecovery(Box::new(err)))?;
@@ -172,8 +177,7 @@ pub fn stateless_validation(
     let db = WitnessDatabase::new(&sparse_trie, bytecode, ancestor_hashes);
 
     // Execute the block
-    let basic_block_executor = EthExecutorProvider::ethereum(chain_spec.clone());
-    let executor = basic_block_executor.batch_executor(db);
+    let executor = evm_config.executor(db);
     let output = executor
         .execute(&current_block)
         .map_err(|e| StatelessValidationError::StatelessExecutionFailed(e.to_string()))?;
@@ -216,10 +220,13 @@ pub fn stateless_validation(
 ///
 /// This function acts as a preliminary validation before executing and validating the state
 /// transition function.
-fn validate_block_consensus(
+fn validate_block_consensus<ChainSpec>(
     chain_spec: Arc<ChainSpec>,
     block: &RecoveredBlock<Block>,
-) -> Result<(), StatelessValidationError> {
+) -> Result<(), StatelessValidationError>
+where
+    ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug,
+{
     let consensus = EthBeaconConsensus::new(chain_spec);
 
     consensus.validate_header(block.sealed_header())?;
