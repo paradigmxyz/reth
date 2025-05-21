@@ -123,7 +123,7 @@ pub use storage::StorageEntry;
 pub mod sync;
 
 mod extended;
-pub use extended::ExtendedTxEnvelope;
+pub use extended::Extended;
 /// Common header types
 pub mod header;
 pub use header::{Header, HeaderError, SealedHeader, SealedHeaderFor};

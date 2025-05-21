@@ -3,7 +3,7 @@
 
 use alloy_consensus::transaction::TransactionMeta;
 use futures::Future;
-use reth_provider::{ProviderReceipt, ProviderTx, ReceiptProvider, TransactionsProvider};
+use reth_storage_api::{ProviderReceipt, ProviderTx, ReceiptProvider, TransactionsProvider};
 
 use crate::{EthApiTypes, RpcNodeCoreExt, RpcReceipt};
 

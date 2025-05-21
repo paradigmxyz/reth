@@ -176,6 +176,12 @@ pub enum Eip4844PoolTransactionError {
     /// would introduce gap in the nonce sequence.
     #[error("nonce too high")]
     Eip4844NonceGap,
+    /// Thrown if blob transaction has an EIP-7594 style sidecar before Osaka.
+    #[error("unexpected eip-7594 sidecar before osaka")]
+    UnexpectedEip7594SidecarBeforeOsaka,
+    /// Thrown if blob transaction has an EIP-4844 style sidecar after Osaka.
+    #[error("unexpected eip-4844 sidecar after osaka")]
+    UnexpectedEip4844SidecarAfterOsaka,
 }
 
 /// Represents all errors that can happen when validating transactions for the pool for EIP-7702
@@ -342,6 +348,12 @@ impl InvalidPoolTransactionError {
                     Eip4844PoolTransactionError::TooManyEip4844Blobs { .. } => {
                         // this is a malformed transaction and should not be sent over the network
                         true
+                    }
+                    Eip4844PoolTransactionError::UnexpectedEip4844SidecarAfterOsaka |
+                    Eip4844PoolTransactionError::UnexpectedEip7594SidecarBeforeOsaka => {
+                        // for now we do not want to penalize peers for broadcasting different
+                        // sidecars
+                        false
                     }
                 }
             }

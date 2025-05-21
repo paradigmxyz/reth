@@ -25,7 +25,6 @@ use reth_rpc_builder::{
 };
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_eth_types::{cache::cache_new_blocks_task, EthConfig, EthStateCache};
-use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, info};
 use std::{
@@ -194,7 +193,6 @@ pub struct RpcRegistry<Node: FullNodeComponents, EthApi: EthApiTypes> {
         Node::Provider,
         Node::Pool,
         Node::Network,
-        TaskExecutor,
         EthApi,
         Node::Evm,
         Node::Consensus,
@@ -210,7 +208,6 @@ where
         Node::Provider,
         Node::Pool,
         Node::Network,
-        TaskExecutor,
         EthApi,
         Node::Evm,
         Node::Consensus,
@@ -511,7 +508,7 @@ where
             .with_provider(node.provider().clone())
             .with_pool(node.pool().clone())
             .with_network(node.network().clone())
-            .with_executor(node.task_executor().clone())
+            .with_executor(Box::new(node.task_executor().clone()))
             .with_evm_config(node.evm_config().clone())
             .with_consensus(node.consensus().clone())
             .build_with_auth_server(module_config, engine_api, eth_api);
@@ -787,7 +784,7 @@ where
 /// A noop Builder that satisfies the [`EngineApiBuilder`] trait without actually configuring an
 /// engine API module
 ///
-/// This is intended to be used as a workaround for re-using all the existing ethereum node launch
+/// This is intended to be used as a workaround for reusing all the existing ethereum node launch
 /// utilities which require an engine API.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]

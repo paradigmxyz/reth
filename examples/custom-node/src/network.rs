@@ -1,7 +1,7 @@
 use crate::{
     chainspec::CustomChainSpec,
     primitives::{
-        CustomHeader, CustomNodePrimitives, CustomTransactionEnvelope, ExtendedOpTxEnvelope,
+        CustomHeader, CustomNodePrimitives, CustomTransaction, CustomTransactionEnvelope,
     },
 };
 use alloy_consensus::{Block, BlockBody};
@@ -14,7 +14,7 @@ use reth_ethereum::{
     pool::{PoolTransaction, TransactionPool},
 };
 use reth_node_builder::{components::NetworkBuilder, BuilderContext};
-use reth_op::{primitives::ExtendedTxEnvelope, OpReceipt};
+use reth_op::{primitives::Extended, OpReceipt};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -22,10 +22,10 @@ pub struct CustomNetworkPrimitives;
 
 impl NetworkPrimitives for CustomNetworkPrimitives {
     type BlockHeader = CustomHeader;
-    type BlockBody = BlockBody<ExtendedOpTxEnvelope<CustomTransactionEnvelope>, CustomHeader>;
-    type Block = Block<ExtendedOpTxEnvelope<CustomTransactionEnvelope>, CustomHeader>;
-    type BroadcastedTransaction = ExtendedOpTxEnvelope<CustomTransactionEnvelope>;
-    type PooledTransaction = ExtendedTxEnvelope<OpPooledTransaction, CustomTransactionEnvelope>;
+    type BlockBody = BlockBody<CustomTransaction, CustomHeader>;
+    type Block = Block<CustomTransaction, CustomHeader>;
+    type BroadcastedTransaction = CustomTransaction;
+    type PooledTransaction = Extended<OpPooledTransaction, CustomTransactionEnvelope>;
     type Receipt = OpReceipt;
 }
 
@@ -79,7 +79,7 @@ where
     Pool: TransactionPool<
             Transaction: PoolTransaction<
                 Consensus = TxTy<Node::Types>,
-                Pooled = ExtendedTxEnvelope<OpPooledTransaction, CustomTransactionEnvelope>,
+                Pooled = Extended<OpPooledTransaction, CustomTransactionEnvelope>,
             >,
         > + Unpin
         + 'static,
