@@ -1,9 +1,10 @@
 use crate::evm::{CustomEvmTransaction, CustomTxEnv};
-use alloy_evm::{Database, Evm, EvmEnv};
+use alloy_evm::{precompiles::PrecompilesMap, Database, Evm, EvmEnv, EvmFactory};
 use alloy_primitives::{Address, Bytes, TxKind, U256};
 use op_alloy_consensus::OpTxType;
 use op_revm::{
-    precompiles::OpPrecompiles, L1BlockInfo, OpHaltReason, OpSpecId, OpTransactionError,
+    precompiles::OpPrecompiles, transaction::deposit::DepositTransactionParts, DefaultOp,
+    L1BlockInfo, OpBuilder, OpHaltReason, OpSpecId, OpTransactionError,
 };
 use reth_ethereum::evm::revm::{
     context::{result::ResultAndState, BlockEnv, CfgEnv, TxEnv},
@@ -11,7 +12,11 @@ use reth_ethereum::evm::revm::{
     interpreter::{interpreter::EthInterpreter, InterpreterResult},
     Context, Inspector, Journal,
 };
-use revm::{context_interface::result::EVMError, handler::EvmTr, ExecuteEvm, InspectEvm};
+use revm::{
+    context_interface::result::EVMError, handler::EvmTr, inspector::NoOpInspector, ExecuteEvm,
+    InspectEvm,
+};
+use std::error::Error;
 
 /// EVM context contains data that EVM needs for execution of [`CustomEvmTransaction`].
 pub type CustomContext<DB> =
@@ -155,5 +160,66 @@ where
 
     fn inspector_mut(&mut self) -> &mut Self::Inspector {
         &mut self.inner.0.inspector
+    }
+}
+
+pub struct CustomEvmFactory;
+
+impl EvmFactory for CustomEvmFactory {
+    type Evm<DB: Database, I: Inspector<CustomContext<DB>>> = CustomEvm<DB, I, Self::Precompiles>;
+    type Context<DB: Database> = CustomContext<DB>;
+    type Tx = CustomEvmTransaction;
+    type Error<DBError: Error + Send + Sync + 'static> = EVMError<DBError, OpTransactionError>;
+    type HaltReason = OpHaltReason;
+    type Spec = OpSpecId;
+    type Precompiles = PrecompilesMap;
+
+    fn create_evm<DB: Database>(
+        &self,
+        db: DB,
+        input: EvmEnv<Self::Spec>,
+    ) -> Self::Evm<DB, NoOpInspector> {
+        let spec_id = input.cfg_env.spec;
+        CustomEvm {
+            inner: Context::op()
+                .with_tx(CustomEvmTransaction {
+                    base: CustomTxEnv::default(),
+                    enveloped_tx: Some(vec![0x00].into()),
+                    deposit: DepositTransactionParts::default(),
+                })
+                .with_db(db)
+                .with_block(input.block_env)
+                .with_cfg(input.cfg_env)
+                .build_op_with_inspector(NoOpInspector {})
+                .with_precompiles(PrecompilesMap::from_static(
+                    OpPrecompiles::new_with_spec(spec_id).precompiles(),
+                )),
+            inspect: false,
+        }
+    }
+
+    fn create_evm_with_inspector<DB: Database, I: Inspector<Self::Context<DB>>>(
+        &self,
+        db: DB,
+        input: EvmEnv<Self::Spec>,
+        inspector: I,
+    ) -> Self::Evm<DB, I> {
+        let spec_id = input.cfg_env.spec;
+        CustomEvm {
+            inner: Context::op()
+                .with_tx(CustomEvmTransaction {
+                    base: CustomTxEnv::default(),
+                    enveloped_tx: Some(vec![0x00].into()),
+                    deposit: DepositTransactionParts::default(),
+                })
+                .with_db(db)
+                .with_block(input.block_env)
+                .with_cfg(input.cfg_env)
+                .build_op_with_inspector(inspector)
+                .with_precompiles(PrecompilesMap::from_static(
+                    OpPrecompiles::new_with_spec(spec_id).precompiles(),
+                )),
+            inspect: true,
+        }
     }
 }
