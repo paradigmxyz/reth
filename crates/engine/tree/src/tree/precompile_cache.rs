@@ -1,27 +1,38 @@
 //! Contains a precompile cache that is backed by a moka cache.
 
+use alloy_primitives::Bytes;
 use reth_evm::precompiles::{DynPrecompile, Precompile};
 use revm::precompile::{PrecompileOutput, PrecompileResult};
-use revm_primitives::{Address, Bytes, HashMap};
-use std::sync::Arc;
+use revm_primitives::{Address, HashMap};
+use std::{hash::Hash, sync::Arc};
 
 /// Stores caches for each precompile.
 #[derive(Debug, Clone, Default)]
-pub struct PrecompileCacheMap(HashMap<Address, PrecompileCache>);
+pub struct PrecompileCacheMap<S>(HashMap<Address, PrecompileCache<S>>)
+where
+    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone;
 
-impl PrecompileCacheMap {
-    pub(crate) fn cache_for_address(&mut self, address: Address) -> PrecompileCache {
+impl<S> PrecompileCacheMap<S>
+where
+    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
+{
+    pub(crate) fn cache_for_address(&mut self, address: Address) -> PrecompileCache<S> {
         self.0.entry(address).or_default().clone()
     }
 }
 
 /// Cache for precompiles, for each input stores the result.
 #[derive(Debug, Clone)]
-pub struct PrecompileCache(
-    Arc<mini_moka::sync::Cache<CacheKey, CacheEntry, alloy_primitives::map::DefaultHashBuilder>>,
-);
+pub struct PrecompileCache<S>(
+    Arc<mini_moka::sync::Cache<CacheKey<S>, CacheEntry, alloy_primitives::map::DefaultHashBuilder>>,
+)
+where
+    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone;
 
-impl Default for PrecompileCache {
+impl<S> Default for PrecompileCache<S>
+where
+    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
+{
     fn default() -> Self {
         Self(Arc::new(
             mini_moka::sync::CacheBuilder::new(100_000)
@@ -30,12 +41,15 @@ impl Default for PrecompileCache {
     }
 }
 
-impl PrecompileCache {
-    fn get(&self, key: &CacheKey) -> Option<CacheEntry> {
+impl<S> PrecompileCache<S>
+where
+    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
+{
+    fn get(&self, key: &CacheKey<S>) -> Option<CacheEntry> {
         self.0.get(key)
     }
 
-    fn insert(&self, key: CacheKey, value: CacheEntry) {
+    fn insert(&self, key: CacheKey<S>, value: CacheEntry) {
         self.0.insert(key, value);
     }
 
@@ -44,9 +58,16 @@ impl PrecompileCache {
     }
 }
 
-/// Cache key, precompile call input.
+/// Cache key, spec id and precompile call input. spec id is included in the key to account for
+/// precompile repricing across fork activations.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct CacheKey(alloy_primitives::Bytes);
+pub struct CacheKey<S>((S, Bytes));
+
+impl<S> CacheKey<S> {
+    const fn new(spec_id: S, input: Bytes) -> Self {
+        Self((spec_id, input))
+    }
+}
 
 /// Cache entry, precompile successful output.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,23 +85,35 @@ impl CacheEntry {
 
 /// A cache for precompile inputs / outputs.
 #[derive(Debug)]
-pub(crate) struct CachedPrecompile {
+pub(crate) struct CachedPrecompile<S>
+where
+    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
+{
     /// Cache for precompile results and gas bounds.
-    cache: PrecompileCache,
+    cache: PrecompileCache<S>,
     /// The precompile.
     precompile: DynPrecompile,
     /// Cache metrics.
     metrics: CachedPrecompileMetrics,
+    /// Spec id associated to the EVM from which this cached precompile was created.
+    spec_id: S,
 }
 
-impl CachedPrecompile {
+impl<S> CachedPrecompile<S>
+where
+    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
+{
     /// `CachedPrecompile` constructor.
-    pub(crate) fn new(precompile: DynPrecompile, cache: PrecompileCache) -> Self {
-        Self { precompile, cache, metrics: Default::default() }
+    pub(crate) fn new(precompile: DynPrecompile, cache: PrecompileCache<S>, spec_id: S) -> Self {
+        Self { precompile, cache, spec_id, metrics: Default::default() }
     }
 
-    pub(crate) fn wrap(precompile: DynPrecompile, cache: PrecompileCache) -> DynPrecompile {
-        let wrapped = Self::new(precompile, cache);
+    pub(crate) fn wrap(
+        precompile: DynPrecompile,
+        cache: PrecompileCache<S>,
+        spec_id: S,
+    ) -> DynPrecompile {
+        let wrapped = Self::new(precompile, cache, spec_id);
         move |data: &[u8], gas_limit: u64| -> PrecompileResult { wrapped.call(data, gas_limit) }
             .into()
     }
@@ -103,9 +136,12 @@ impl CachedPrecompile {
     }
 }
 
-impl Precompile for CachedPrecompile {
+impl<S> Precompile for CachedPrecompile<S>
+where
+    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
+{
     fn call(&self, data: &[u8], gas_limit: u64) -> PrecompileResult {
-        let key = CacheKey(Bytes::copy_from_slice(data));
+        let key = CacheKey::new(self.spec_id.clone(), Bytes::copy_from_slice(data));
 
         if let Some(entry) = &self.cache.get(&key) {
             self.increment_by_one_precompile_cache_hits();
@@ -154,6 +190,7 @@ pub(crate) struct CachedPrecompileMetrics {
 mod tests {
     use super::*;
     use revm::precompile::PrecompileOutput;
+    use revm_primitives::hardfork::SpecId;
 
     #[test]
     fn test_precompile_cache_basic() {
@@ -162,9 +199,10 @@ mod tests {
         }
         .into();
 
-        let cache = CachedPrecompile::new(dyn_precompile, PrecompileCache::default());
+        let cache =
+            CachedPrecompile::new(dyn_precompile, PrecompileCache::default(), SpecId::PRAGUE);
 
-        let key = CacheKey(b"test_input".into());
+        let key = CacheKey::new(SpecId::PRAGUE, b"test_input".into());
 
         let output = PrecompileOutput {
             gas_used: 50,
@@ -215,10 +253,16 @@ mod tests {
         }
         .into();
 
-        let wrapped_precompile1 =
-            CachedPrecompile::wrap(precompile1, cache_map.cache_for_address(address1));
-        let wrapped_precompile2 =
-            CachedPrecompile::wrap(precompile2, cache_map.cache_for_address(address2));
+        let wrapped_precompile1 = CachedPrecompile::wrap(
+            precompile1,
+            cache_map.cache_for_address(address1),
+            SpecId::PRAGUE,
+        );
+        let wrapped_precompile2 = CachedPrecompile::wrap(
+            precompile2,
+            cache_map.cache_for_address(address2),
+            SpecId::PRAGUE,
+        );
 
         // first invocation of precompile1 (cache miss)
         let result1 = wrapped_precompile1.call(input_data, gas_limit).unwrap();

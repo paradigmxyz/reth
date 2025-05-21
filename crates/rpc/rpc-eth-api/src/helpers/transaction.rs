@@ -18,12 +18,12 @@ use alloy_rpc_types_eth::{transaction::TransactionRequest, BlockNumberOrTag, Tra
 use futures::Future;
 use reth_node_api::BlockBody;
 use reth_primitives_traits::{RecoveredBlock, SignedTransaction};
-use reth_provider::{
+use reth_rpc_eth_types::{utils::binary_search, EthApiError, SignError, TransactionSource};
+use reth_rpc_types_compat::transaction::TransactionCompat;
+use reth_storage_api::{
     BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
     TransactionsProvider,
 };
-use reth_rpc_eth_types::{utils::binary_search, EthApiError, SignError, TransactionSource};
-use reth_rpc_types_compat::transaction::TransactionCompat;
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 use std::sync::Arc;
 

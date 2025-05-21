@@ -24,6 +24,7 @@ use reth_execution_types::ExecutionOutcome;
 use reth_node_types::NodeTypes;
 use reth_primitives_traits::{
     Account, Bytecode, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
+    SignerRecoverable,
 };
 use reth_prune_types::PruneModes;
 use reth_stages_types::{StageCheckpoint, StageId};

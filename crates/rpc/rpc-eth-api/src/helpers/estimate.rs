@@ -8,7 +8,6 @@ use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_errors::ProviderError;
 use reth_evm::{Database, EvmEnvFor, TransactionEnv, TxEnvFor};
-use reth_provider::StateProvider;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_eth_types::{
     error::api::FromEvmHalt,
@@ -16,6 +15,7 @@ use reth_rpc_eth_types::{
     EthApiError, RevertError, RpcInvalidTransactionError,
 };
 use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
+use reth_storage_api::StateProvider;
 use revm::context_interface::{result::ExecutionResult, Transaction};
 use tracing::trace;
 
