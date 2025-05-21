@@ -20,6 +20,9 @@ use reth_op::primitives::{Extended, SignedTransaction};
 use revm_primitives::{Address, Bytes};
 use serde::{Deserialize, Serialize};
 
+/// An [`OpTxEnvelope`] that is [`Extended`] by one more variant of [`CustomTransactionEnvelope`].
+pub type CustomTransaction = ExtendedOpTxEnvelope<CustomTransactionEnvelope>;
+
 /// A [`SignedTransaction`] implementation that combines the [`OpTxEnvelope`] and another
 /// transaction type.
 pub type ExtendedOpTxEnvelope<T> = Extended<OpTxEnvelope, T>;

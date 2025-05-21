@@ -5,7 +5,10 @@ use alloc::{boxed::Box, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::eip2718::WithEncoded;
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory};
-use alloy_evm::{block::ExecutableTx, Evm, EvmEnv, EvmFactory};
+use alloy_evm::{
+    block::{CommitChanges, ExecutableTx},
+    Evm, EvmEnv, EvmFactory,
+};
 use alloy_primitives::B256;
 use core::fmt::Debug;
 pub use reth_execution_errors::{
@@ -207,19 +210,35 @@ pub trait BlockBuilder {
     /// Invokes [`BlockExecutor::apply_pre_execution_changes`].
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError>;
 
+    /// Invokes [`BlockExecutor::execute_transaction_with_commit_condition`] and saves the
+    /// transaction in internal state only if the transaction was committed.
+    fn execute_transaction_with_commit_condition(
+        &mut self,
+        tx: impl ExecutorTx<Self::Executor>,
+        f: impl FnOnce(
+            &ExecutionResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::HaltReason>,
+        ) -> CommitChanges,
+    ) -> Result<Option<u64>, BlockExecutionError>;
+
     /// Invokes [`BlockExecutor::execute_transaction_with_result_closure`] and saves the
     /// transaction in internal state.
     fn execute_transaction_with_result_closure(
         &mut self,
         tx: impl ExecutorTx<Self::Executor>,
         f: impl FnOnce(&ExecutionResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::HaltReason>),
-    ) -> Result<u64, BlockExecutionError>;
+    ) -> Result<u64, BlockExecutionError> {
+        self.execute_transaction_with_commit_condition(tx, |res| {
+            f(res);
+            CommitChanges::Yes
+        })
+        .map(Option::unwrap_or_default)
+    }
 
     /// Invokes [`BlockExecutor::execute_transaction`] and saves the transaction in
     /// internal state.
     fn execute_transaction(
         &mut self,
-        tx: Recovered<TxTy<Self::Primitives>>,
+        tx: impl ExecutorTx<Self::Executor>,
     ) -> Result<u64, BlockExecutionError> {
         self.execute_transaction_with_result_closure(tx, |_| ())
     }
@@ -316,15 +335,21 @@ where
         self.executor.apply_pre_execution_changes()
     }
 
-    fn execute_transaction_with_result_closure(
+    fn execute_transaction_with_commit_condition(
         &mut self,
         tx: impl ExecutorTx<Self::Executor>,
-        f: impl FnOnce(&ExecutionResult<<F::EvmFactory as EvmFactory>::HaltReason>),
-    ) -> Result<u64, BlockExecutionError> {
-        let gas_used =
-            self.executor.execute_transaction_with_result_closure(tx.as_executable(), f)?;
-        self.transactions.push(tx.into_recovered());
-        Ok(gas_used)
+        f: impl FnOnce(
+            &ExecutionResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::HaltReason>,
+        ) -> CommitChanges,
+    ) -> Result<Option<u64>, BlockExecutionError> {
+        if let Some(gas_used) =
+            self.executor.execute_transaction_with_commit_condition(tx.as_executable(), f)?
+        {
+            self.transactions.push(tx.into_recovered());
+            Ok(Some(gas_used))
+        } else {
+            Ok(None)
+        }
     }
 
     fn finish(

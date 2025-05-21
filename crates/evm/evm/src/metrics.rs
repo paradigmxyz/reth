@@ -110,12 +110,13 @@ impl alloy_evm::block::OnStateHook for MeteredStateHook {
 mod tests {
     use super::*;
     use alloy_eips::eip7685::Requests;
-    use alloy_evm::{block::StateChangeSource, EthEvm};
+    use alloy_evm::{block::{CommitChanges, StateChangeSource}, EthEvm};
     use alloy_primitives::{B256, U256};
     use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshotter};
     use reth_ethereum_primitives::{Receipt, TransactionSigned};
     use reth_execution_types::BlockExecutionResult;
     use revm::{
+        context::result::ExecutionResult,
         database::State,
         database_interface::EmptyDB,
         inspector::NoOpInspector,
@@ -155,12 +156,12 @@ mod tests {
             Ok(())
         }
 
-        fn execute_transaction_with_result_closure(
+        fn execute_transaction_with_commit_condition(
             &mut self,
             _tx: impl alloy_evm::block::ExecutableTx<Self>,
-            _f: impl FnOnce(&revm::context::result::ExecutionResult<<Self::Evm as alloy_evm::Evm>::HaltReason>),
-        ) -> Result<u64, reth_execution_errors::BlockExecutionError> {
-            Ok(0)
+            _f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> CommitChanges,
+        ) -> Result<Option<u64>, BlockExecutionError> {
+            Ok(Some(0))
         }
 
         fn finish(
