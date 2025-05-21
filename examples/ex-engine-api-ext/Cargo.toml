@@ -20,10 +20,9 @@ reth-optimism-node.workspace = true
 reth-optimism-chainspec.workspace = true
 reth-op = { workspace = true, features = ["full", "cli"] }
 
-
 example-custom-node = { path = "../custom-node" }
 
-# alloy 
+# alloy
 alloy-rpc-types-engine.workspace = true
 
 async-trait.workspace = true
@@ -33,5 +32,3 @@ jsonrpsee.workspace = true
 futures.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["sync"] }
-
-
