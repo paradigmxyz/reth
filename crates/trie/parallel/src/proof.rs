@@ -280,8 +280,7 @@ where
 
                             raw_fallback_proof.try_into().map_err(|e_rlp: alloy_rlp::Error| {
                                 ParallelStateRootError::Other(format!(
-                                    "Failed to decode fallback storage proof for {}: {}",
-                                    hashed_address, e_rlp
+                                    "Failed to decode fallback storage proof for {hashed_address}: {e_rlp}",
                                 ))
                             })?
                         }
@@ -312,8 +311,7 @@ where
         let decoded_account_subtree = DecodedProofNodes::try_from(account_subtree_raw_nodes)
             .map_err(|e_rlp: alloy_rlp::Error| {
                 ParallelStateRootError::Other(format!(
-                    "Failed to decode account subtree nodes: {}",
-                    e_rlp
+                    "Failed to decode account subtree nodes: {e_rlp}",
                 ))
             })?;
 
