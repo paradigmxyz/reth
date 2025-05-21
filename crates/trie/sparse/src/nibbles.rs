@@ -129,18 +129,28 @@ impl PackedNibbles {
         // Calculate the max bit length of two U256s
         let self_bit_len = self.bit_len();
         let other_bit_len = other.bit_len();
-        let max_bit_len = self_bit_len.max(other_bit_len);
 
-        // Get both U256s to the same bit length, and then XOR them
-        let self_adjusted = self.nibbles << (max_bit_len - self_bit_len);
-        let other_adjusted = other.nibbles << (max_bit_len - other_bit_len);
-        let xor = self_adjusted ^ other_adjusted;
+        if self_bit_len == 0 || other_bit_len == 0 {
+            return 0
+        }
 
-        // Calculate the number of leading zeros, excluding those that were already present
-        let zeros = xor.leading_zeros() - (U256::BITS - max_bit_len);
+        if self_bit_len == other_bit_len && self.nibbles == other.nibbles {
+            return self_bit_len / 4;
+        }
 
-        //
-        zeros.min(self_bit_len.min(other_bit_len)) / 4
+        // align the shorter U256
+        let diff = self_bit_len as isize - other_bit_len as isize;
+        let (lhs, rhs, max_bits) = if diff < 0 {
+            (self.nibbles << -diff, other.nibbles, other_bit_len)
+        } else {
+            (self.nibbles, other.nibbles << diff, self_bit_len)
+        };
+
+        // count equal leading bits
+        let leading = (lhs ^ rhs).leading_zeros().saturating_sub(U256::BITS - max_bits);
+
+        // clamp to the shorter of two sequences and convert to nibbles
+        leading.min(self_bit_len.min(other_bit_len)) / 4
     }
 
     /// Returns the last nibble in this [`PackedNibbles`], or `None` if empty.
@@ -200,10 +210,17 @@ impl PackedNibbles {
         }
 
         let nibble_len = end - start;
-        let bit_len = nibble_len * 4;
+
         let shift_right_bits = len * 4 - end * 4;
-        let mask = (U256::from(1) << U256::from(bit_len)) - U256::from(1);
-        let nibbles = (self.nibbles >> shift_right_bits) & mask;
+        let shifted = self.nibbles >> shift_right_bits;
+
+        let bit_len = nibble_len * 4;
+        let nibbles = if bit_len == 256 {
+            shifted
+        } else {
+            // TODO: these masks can be pre-calculated, but shifts aren't const
+            shifted & (U256::MAX >> (256 - bit_len))
+        };
 
         Self { length: nibble_len as u8, nibbles }
     }
