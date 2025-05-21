@@ -30,7 +30,6 @@ fn main() {
 
     let (_tx, _rx) = oneshot::channel::<Arc<dyn IntoEngineApiRpcModule + Send + Sync>>();
 
-    // let (_tx, _rx) = oneshot::channel();
     // let builder_with_sender = default_builder.with_sender(tx);
 
     let _builder = NodeBuilder::new(config)
