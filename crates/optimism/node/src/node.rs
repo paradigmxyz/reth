@@ -9,7 +9,10 @@ use crate::{
 use op_alloy_consensus::{interop::SafetyLevel, OpPooledTransaction};
 use reth_chainspec::{EthChainSpec, Hardforks};
 use reth_evm::{ConfigureEvm, EvmFactory, EvmFactoryFor};
-use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives, PeersInfo};
+use reth_network::{
+    primitives::NetPrimitivesFor, NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives,
+    PeersInfo,
+};
 use reth_node_api::{
     AddOnsContext, FullNodeComponents, KeyHasherTy, NodeAddOns, NodePrimitives, PrimitivesTy, TxTy,
 };
@@ -816,19 +819,16 @@ impl<NetworkPrimitives: reth_network::NetworkPrimitives, PooledTx>
 impl<Node, Pool, NetworkPrimitives, PooledTx> NetworkBuilder<Node, Pool>
     for OpNetworkBuilder<NetworkPrimitives, PooledTx>
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
     Pool: TransactionPool<
             Transaction: PoolTransaction<Consensus = TxTy<Node::Types>, Pooled = PooledTx>,
         > + Unpin
         + 'static,
     NetworkPrimitives: reth_network::NetworkPrimitives<
-        PooledTransaction = PooledTx,
-        Block = alloy_consensus::Block<op_alloy_consensus::OpTxEnvelope>,
-        BlockBody = alloy_consensus::BlockBody<op_alloy_consensus::OpTxEnvelope>,
-        BlockHeader = alloy_consensus::Header,
-        Receipt = reth_optimism_primitives::OpReceipt,
-        BroadcastedTransaction = op_alloy_consensus::OpTxEnvelope,
-    >,
+            PooledTransaction = PooledTx,
+            BroadcastedTransaction = <<Node::Types as NodeTypes>::Primitives as NodePrimitives>::SignedTx
+        >
+        + NetPrimitivesFor<PrimitivesTy<Node::Types>>,
     PooledTx: Send,
 {
     type Network = NetworkHandle<NetworkPrimitives>;
