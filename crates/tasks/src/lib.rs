@@ -264,13 +264,7 @@ impl Future for TaskManager {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match ready!(self.as_mut().get_mut().panicked_tasks_rx.poll_recv(cx)) {
             Some(TaskEvent::Panic(err)) => Poll::Ready(Err(err)),
-            Some(TaskEvent::GracefulShutdown) => {
-                if let Some(signal) = self.get_mut().signal.take() {
-                    signal.fire();
-                }
-                Poll::Ready(Ok(()))
-            }
-            None => {
+            Some(TaskEvent::GracefulShutdown) | None => {
                 if let Some(signal) = self.get_mut().signal.take() {
                     signal.fire();
                 }
@@ -281,7 +275,7 @@ impl Future for TaskManager {
 }
 
 /// Error with the name of the task that panicked and an error downcasted to string, if possible.
-#[derive(Debug, thiserror::Error, PartialEq)]
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub struct PanickedTaskError {
     task_name: &'static str,
     error: Option<String>,
@@ -312,12 +306,12 @@ impl PanickedTaskError {
     }
 }
 
-/// Represents the events that the TaskManager's main future can receive.
+/// Represents the events that the `TaskManager`'s main future can receive.
 #[derive(Debug)]
 pub enum TaskEvent {
     /// Indicates that a critical task has panicked.
     Panic(PanickedTaskError),
-    /// A signal requesting a graceful shutdown of the TaskManager.
+    /// A signal requesting a graceful shutdown of the `TaskManager`.
     GracefulShutdown,
 }
 
@@ -616,9 +610,9 @@ impl TaskExecutor {
         self.handle.spawn(fut)
     }
 
-    /// Sends a request to the TaskManager to initiate a graceful shutdown.
+    /// Sends a request to the `TaskManager` to initiate a graceful shutdown.
     ///
-    /// The TaskManager upon receiving this event, will terminate its own future
+    /// The `TaskManager` upon receiving this event, will terminate its own future
     /// with `Ok(())` and also propogate its internal shutdown signal to all managed tasks.
     pub fn request_graceful_shutdown(
         &self,
