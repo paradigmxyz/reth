@@ -168,7 +168,7 @@ where
     let db = WitnessDatabase::new(&sparse_trie, bytecode, ancestor_hashes);
 
     // Execute the block
-    let executor = evm_config.batch_executor(db);
+    let executor = evm_config.executor(db);
     let output = executor
         .execute(&current_block)
         .map_err(|e| StatelessValidationError::StatelessExecutionFailed(e.to_string()))?;
