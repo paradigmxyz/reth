@@ -136,8 +136,8 @@ impl PackedNibbles {
             return false;
         }
 
-        (self.nibbles >> (self.bit_len().saturating_sub(other.bit_len()))) & other.nibbles ==
-            other.nibbles
+        let shift_right_bits = self.bit_len() - other.bit_len();
+        (self.nibbles >> shift_right_bits) & other.nibbles == other.nibbles
     }
 
     /// Returns the total number of nibbles in this [`PackedNibbles`].
