@@ -273,14 +273,13 @@ where
                 as u64;
 
             let entities_checkpoint = EntitiesCheckpoint {
-                // This is fine because we are processing all the accounts and storage slots in
-                // chunks
+                // This is fine because `range` doesn't have an upper bound, so in this `else`
+                // branch we're just hashing all remaining accounts and storage slots we have in the
+                // database.
                 processed: total_hashed_entries,
                 total: total_hashed_entries,
             };
-
-            // Clear existing checkpoints
-            self.save_execution_checkpoint(provider, None)?;
+            // Save the checkpoint
             (final_root, entities_checkpoint)
         };
 
@@ -474,6 +473,65 @@ mod tests {
 
         // Validate the stage execution
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
+    }
+
+    #[tokio::test]
+    async fn execute_chunked_merkle() {
+        let (previous_stage, stage_progress) = (100, 500);
+        let threshold = 100;
+
+        // Set up the runner
+        let mut runner =
+            MerkleTestRunner { db: TestStageDB::default(), clean_threshold: threshold };
+
+        let input = ExecInput {
+            target: Some(previous_stage),
+            checkpoint: Some(StageCheckpoint::new(stage_progress)),
+        };
+
+        runner.seed_execution(input).expect("failed to seed execution");
+        let rx = runner.execute(input);
+
+        // Assert the successful result
+        let result = rx.await.unwrap();
+        assert_matches!(
+            result,
+            Ok(ExecOutput {
+                checkpoint: StageCheckpoint {
+                    block_number,
+                    stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
+                        processed,
+                        total
+                    }))
+                },
+                done: true
+            }) if block_number == previous_stage && processed == total &&
+                total == (
+                    runner.db.table::<tables::HashedAccounts>().unwrap().len() +
+                    runner.db.table::<tables::HashedStorages>().unwrap().len()
+                ) as u64
+        );
+
+        // Validate the stage execution
+        let provider = runner.db.factory.provider().unwrap();
+        let header = provider.header_by_number(previous_stage).unwrap().unwrap();
+        let expected_root = header.state_root;
+
+        let actual_root = runner
+            .db
+            .query(|tx| {
+                Ok(StateRoot::incremental_root_with_updates(
+                    tx,
+                    stage_progress + 1..=previous_stage,
+                ))
+            })
+            .unwrap();
+
+        assert_eq!(
+            actual_root.unwrap().0,
+            expected_root,
+            "State root mismatch after chunked processing"
+        );
     }
 
     struct MerkleTestRunner {
