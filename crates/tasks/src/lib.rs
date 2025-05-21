@@ -308,7 +308,7 @@ impl PanickedTaskError {
 
 /// Represents the events that the `TaskManager`'s main future can receive.
 #[derive(Debug)]
-pub enum TaskEvent {
+enum TaskEvent {
     /// Indicates that a critical task has panicked.
     Panic(PanickedTaskError),
     /// A signal requesting a graceful shutdown of the `TaskManager`.
@@ -616,8 +616,10 @@ impl TaskExecutor {
     /// with `Ok(())` and also propogate its internal shutdown signal to all managed tasks.
     pub fn request_graceful_shutdown(
         &self,
-    ) -> Result<GracefulShutdown, tokio::sync::mpsc::error::SendError<TaskEvent>> {
-        self.panicked_tasks_tx.send(TaskEvent::GracefulShutdown)?;
+    ) -> Result<GracefulShutdown, tokio::sync::mpsc::error::SendError<()>> {
+        self.panicked_tasks_tx
+            .send(TaskEvent::GracefulShutdown)
+            .map_err(|_send_error_with_task_event| tokio::sync::mpsc::error::SendError(()))?;
 
         Ok(GracefulShutdown::new(
             self.on_shutdown.clone(),
