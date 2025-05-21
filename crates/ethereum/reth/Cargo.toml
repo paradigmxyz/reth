@@ -33,6 +33,7 @@ reth-rpc-eth-types = { workspace = true, optional = true }
 reth-rpc-builder = { workspace = true, optional = true }
 reth-exex = { workspace = true, optional = true }
 reth-trie = { workspace = true, optional = true }
+reth-node-builder = { workspace = true, optional = true }
 
 # reth-ethereum
 reth-ethereum-primitives.workspace = true
@@ -84,6 +85,7 @@ test-utils = [
     "reth-trie?/test-utils",
     "reth-transaction-pool?/test-utils",
     "reth-evm-ethereum?/test-utils",
+    "reth-node-builder?/test-utils",
 ]
 
 full = [
@@ -113,6 +115,7 @@ node = [
     "evm",
     "node-api",
     "dep:reth-node-ethereum",
+    "dep:reth-node-builder",
     "rpc",
     "trie",
 ]

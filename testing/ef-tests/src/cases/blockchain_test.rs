@@ -320,7 +320,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     // Now validate using the stateless client if everything else passes
     for (block, execution_witness) in program_inputs {
         stateless_validation(
-            block,
+            block.into_block(),
             execution_witness,
             chain_spec.clone(),
             EthEvmConfig::new(chain_spec.clone()),

@@ -392,6 +392,17 @@ clippy:
 	--all-features \
 	-- -D warnings
 
+clippy-op-dev:
+	cargo +nightly clippy \
+	--bin op-reth \
+	--workspace \
+	--lib \
+	--examples \
+	--tests \
+	--benches \
+	--locked \
+	--all-features
+
 lint-codespell: ensure-codespell
 	codespell --skip "*.json" --skip "./testing/ef-tests/ethereum-tests"
 

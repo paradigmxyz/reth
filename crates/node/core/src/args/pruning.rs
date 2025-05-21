@@ -132,7 +132,7 @@ impl PruningArgs {
             self.receipts_log_filter.as_ref().filter(|c| !c.is_empty()).cloned()
         {
             config.segments.receipts_log_filter = receipt_logs;
-            // need to remove the receipts segment filter entirely because that takes precendence
+            // need to remove the receipts segment filter entirely because that takes precedence
             // over the logs filter
             config.segments.receipts.take();
         }
