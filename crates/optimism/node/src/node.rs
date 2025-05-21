@@ -760,12 +760,7 @@ pub struct OpNetworkBuilder<NetworkP = OpNetworkPrimitives, PooledTx = OpPooledT
 
 impl<NetworkP, PooledTx> Clone for OpNetworkBuilder<NetworkP, PooledTx> {
     fn clone(&self) -> Self {
-        Self {
-            disable_txpool_gossip: self.disable_txpool_gossip,
-            disable_discovery_v4: self.disable_discovery_v4,
-            _np: PhantomData,
-            _pt: PhantomData,
-        }
+        Self::new(self.disable_txpool_gossip, self.disable_discovery_v4)
     }
 }
 
