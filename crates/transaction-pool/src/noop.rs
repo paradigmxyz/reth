@@ -16,7 +16,8 @@ use crate::{
 };
 use alloy_eips::{
     eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M,
-    eip4844::{BlobAndProofV1, BlobAndProofV2, BlobTransactionSidecar},
+    eip4844::{BlobAndProofV1, BlobAndProofV2},
+    eip7594::BlobTransactionSidecarVariant,
 };
 use alloy_primitives::{Address, TxHash, B256, U256};
 use reth_eth_wire_types::HandleMempoolData;
@@ -302,21 +303,21 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
     fn get_blob(
         &self,
         _tx_hash: TxHash,
-    ) -> Result<Option<Arc<BlobTransactionSidecar>>, BlobStoreError> {
+    ) -> Result<Option<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
         Ok(None)
     }
 
     fn get_all_blobs(
         &self,
         _tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<(TxHash, Arc<BlobTransactionSidecar>)>, BlobStoreError> {
+    ) -> Result<Vec<(TxHash, Arc<BlobTransactionSidecarVariant>)>, BlobStoreError> {
         Ok(vec![])
     }
 
     fn get_all_blobs_exact(
         &self,
         tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError> {
+    ) -> Result<Vec<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
         if tx_hashes.is_empty() {
             return Ok(vec![])
         }

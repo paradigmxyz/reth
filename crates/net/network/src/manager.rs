@@ -613,6 +613,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             PeerMessage::SendTransactions(_) => {
                 unreachable!("Not emitted by session")
             }
+            PeerMessage::BlockRangeUpdated(_) => {}
             PeerMessage::Other(other) => {
                 debug!(target: "net", message_id=%other.id, "Ignoring unsupported message");
             }

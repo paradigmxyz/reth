@@ -173,7 +173,10 @@ pub use crate::{
     },
 };
 use crate::{identifier::TransactionId, pool::PoolInner};
-use alloy_eips::eip4844::{BlobAndProofV1, BlobAndProofV2, BlobTransactionSidecar};
+use alloy_eips::{
+    eip4844::{BlobAndProofV1, BlobAndProofV2},
+    eip7594::BlobTransactionSidecarVariant,
+};
 use alloy_primitives::{Address, TxHash, B256, U256};
 use aquamarine as _;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
@@ -589,21 +592,21 @@ where
     fn get_blob(
         &self,
         tx_hash: TxHash,
-    ) -> Result<Option<Arc<BlobTransactionSidecar>>, BlobStoreError> {
+    ) -> Result<Option<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
         self.pool.blob_store().get(tx_hash)
     }
 
     fn get_all_blobs(
         &self,
         tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<(TxHash, Arc<BlobTransactionSidecar>)>, BlobStoreError> {
+    ) -> Result<Vec<(TxHash, Arc<BlobTransactionSidecarVariant>)>, BlobStoreError> {
         self.pool.blob_store().get_all(tx_hashes)
     }
 
     fn get_all_blobs_exact(
         &self,
         tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError> {
+    ) -> Result<Vec<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
         self.pool.blob_store().get_exact(tx_hashes)
     }
 

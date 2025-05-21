@@ -250,6 +250,12 @@ impl From<ParallelStateRootError> for ProviderError {
     }
 }
 
+impl From<alloy_rlp::Error> for ParallelStateRootError {
+    fn from(error: alloy_rlp::Error) -> Self {
+        Self::Provider(ProviderError::Rlp(error))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

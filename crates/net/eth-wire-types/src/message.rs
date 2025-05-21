@@ -13,7 +13,7 @@ use super::{
     Transactions,
 };
 use crate::{
-    status::StatusMessage, EthNetworkPrimitives, EthVersion, NetworkPrimitives,
+    status::StatusMessage, BlockRangeUpdate, EthNetworkPrimitives, EthVersion, NetworkPrimitives,
     RawCapabilityMessage, Receipts69, SharedTransactions,
 };
 use alloc::{boxed::Box, sync::Arc};
@@ -123,6 +123,12 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                     EthMessage::Receipts69(RequestPair::decode(buf)?)
                 }
             }
+            EthMessageID::BlockRangeUpdate => {
+                if version < EthVersion::Eth69 {
+                    return Err(MessageError::Invalid(version, EthMessageID::BlockRangeUpdate))
+                }
+                EthMessage::BlockRangeUpdate(BlockRangeUpdate::decode(buf)?)
+            }
             EthMessageID::Other(_) => {
                 let raw_payload = Bytes::copy_from_slice(buf);
                 buf.advance(raw_payload.len());
@@ -201,7 +207,7 @@ impl<N: NetworkPrimitives> From<EthBroadcastMessage<N>> for ProtocolBroadcastMes
 /// [`NewPooledTransactionHashes68`] is defined.
 ///
 /// The `eth/69` announces the historical block range served by the node. Removes total difficulty
-/// information. And removes the Bloom field from receipts transfered over the protocol.
+/// information. And removes the Bloom field from receipts transferred over the protocol.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
@@ -268,6 +274,12 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
         serde(bound = "N::Receipt: serde::Serialize + serde::de::DeserializeOwned")
     )]
     Receipts69(RequestPair<Receipts69<N::Receipt>>),
+    /// Represents a `BlockRangeUpdate` message broadcast to the network.
+    #[cfg_attr(
+        feature = "serde",
+        serde(bound = "N::BroadcastedTransaction: serde::Serialize + serde::de::DeserializeOwned")
+    )]
+    BlockRangeUpdate(BlockRangeUpdate),
     /// Represents an encoded message that doesn't match any other variant
     Other(RawCapabilityMessage),
 }
@@ -293,6 +305,7 @@ impl<N: NetworkPrimitives> EthMessage<N> {
             Self::NodeData(_) => EthMessageID::NodeData,
             Self::GetReceipts(_) => EthMessageID::GetReceipts,
             Self::Receipts(_) | Self::Receipts69(_) => EthMessageID::Receipts,
+            Self::BlockRangeUpdate(_) => EthMessageID::BlockRangeUpdate,
             Self::Other(msg) => EthMessageID::Other(msg.id as u8),
         }
     }
@@ -342,6 +355,7 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::GetReceipts(request) => request.encode(out),
             Self::Receipts(receipts) => receipts.encode(out),
             Self::Receipts69(receipt69) => receipt69.encode(out),
+            Self::BlockRangeUpdate(block_range_update) => block_range_update.encode(out),
             Self::Other(unknown) => out.put_slice(&unknown.payload),
         }
     }
@@ -364,6 +378,7 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::GetReceipts(request) => request.length(),
             Self::Receipts(receipts) => receipts.length(),
             Self::Receipts69(receipt69) => receipt69.length(),
+            Self::BlockRangeUpdate(block_range_update) => block_range_update.length(),
             Self::Other(unknown) => unknown.length(),
         }
     }
@@ -447,6 +462,10 @@ pub enum EthMessageID {
     GetReceipts = 0x0f,
     /// Represents receipts.
     Receipts = 0x10,
+    /// Block range update.
+    ///
+    /// Introduced in Eth69
+    BlockRangeUpdate = 0x11,
     /// Represents unknown message types.
     Other(u8),
 }
@@ -470,6 +489,7 @@ impl EthMessageID {
             Self::NodeData => 0x0e,
             Self::GetReceipts => 0x0f,
             Self::Receipts => 0x10,
+            Self::BlockRangeUpdate => 0x11,
             Self::Other(value) => *value, // Return the stored `u8`
         }
     }
@@ -507,6 +527,7 @@ impl Decodable for EthMessageID {
             0x0e => Self::NodeData,
             0x0f => Self::GetReceipts,
             0x10 => Self::Receipts,
+            0x11 => Self::BlockRangeUpdate,
             unknown => Self::Other(*unknown),
         };
         buf.advance(1);
@@ -534,6 +555,7 @@ impl TryFrom<usize> for EthMessageID {
             0x0e => Ok(Self::NodeData),
             0x0f => Ok(Self::GetReceipts),
             0x10 => Ok(Self::Receipts),
+            0x11 => Ok(Self::BlockRangeUpdate),
             _ => Err("Invalid message ID"),
         }
     }
