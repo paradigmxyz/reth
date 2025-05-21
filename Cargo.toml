@@ -66,6 +66,7 @@ members = [
     "crates/node/api/",
     "crates/node/builder/",
     "crates/node/core/",
+    "crates/node/ethstats",
     "crates/node/events/",
     "crates/node/metrics",
     "crates/node/types",
@@ -575,6 +576,7 @@ quote = "1.0"
 # tokio
 tokio = { version = "1.44.2", default-features = false }
 tokio-stream = "0.1.11"
+tokio-tungstenite = "0.26.2"
 tokio-util = { version = "0.7.4", features = ["codec"] }
 
 # async

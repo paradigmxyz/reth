@@ -8820,6 +8820,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-node-ethstats"
+version = "1.4.3"
+dependencies = [
+ "alloy-consensus",
+ "alloy-primitives",
+ "futures-util",
+ "http",
+ "reth-storage-api",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.12",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "reth-node-events"
 version = "1.4.3"
 dependencies = [
@@ -11966,6 +11984,7 @@ dependencies = [
  "futures-util",
  "log",
  "rustls",
+ "rustls-native-certs",
  "rustls-pki-types",
  "tokio",
  "tokio-rustls",
