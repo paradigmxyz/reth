@@ -747,35 +747,32 @@ where
 
 /// A basic optimism network builder.
 #[derive(Debug, Default, Clone)]
-pub struct OpNetworkBuilder<NetworkPrimitives = OpNetworkPrimitives, PooledTx = OpPooledTransaction>
-{
+pub struct OpNetworkBuilder<NetworkP = OpNetworkPrimitives, PooledTx = OpPooledTransaction> {
     /// Disable transaction pool gossip
     pub disable_txpool_gossip: bool,
     /// Disable discovery v4
     pub disable_discovery_v4: bool,
     /// Marker for the network primitives type
-    _np: PhantomData<NetworkPrimitives>,
+    _np: PhantomData<NetworkP>,
     /// Marker for the pooled transaction type
     _pt: PhantomData<PooledTx>,
 }
 
-impl<NetworkPrimitives, PooledTx> OpNetworkBuilder<NetworkPrimitives, PooledTx> {
+impl<NetworkP, PooledTx> OpNetworkBuilder<NetworkP, PooledTx> {
     /// Creates a new `OpNetworkBuilder`.
     pub const fn new(disable_txpool_gossip: bool, disable_discovery_v4: bool) -> Self {
         Self { disable_txpool_gossip, disable_discovery_v4, _np: PhantomData, _pt: PhantomData }
     }
 }
 
-impl<NetworkPrimitives: reth_network::NetworkPrimitives, PooledTx>
-    OpNetworkBuilder<NetworkPrimitives, PooledTx>
-{
+impl<NetworkP: NetworkPrimitives, PooledTx> OpNetworkBuilder<NetworkP, PooledTx> {
     /// Returns the [`NetworkConfig`] that contains the settings to launch the p2p network.
     ///
     /// This applies the configured [`OpNetworkBuilder`] settings.
     pub fn network_config<Node>(
         &self,
         ctx: &BuilderContext<Node>,
-    ) -> eyre::Result<NetworkConfig<<Node as FullNodeTypes>::Provider, NetworkPrimitives>>
+    ) -> eyre::Result<NetworkConfig<<Node as FullNodeTypes>::Provider, NetworkP>>
     where
         Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
     {
@@ -816,22 +813,22 @@ impl<NetworkPrimitives: reth_network::NetworkPrimitives, PooledTx>
     }
 }
 
-impl<Node, Pool, NetworkPrimitives, PooledTx> NetworkBuilder<Node, Pool>
-    for OpNetworkBuilder<NetworkPrimitives, PooledTx>
+impl<Node, Pool, NetworkP, PooledTx> NetworkBuilder<Node, Pool>
+    for OpNetworkBuilder<NetworkP, PooledTx>
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
     Pool: TransactionPool<
             Transaction: PoolTransaction<Consensus = TxTy<Node::Types>, Pooled = PooledTx>,
         > + Unpin
         + 'static,
-    NetworkPrimitives: reth_network::NetworkPrimitives<
+    NetworkP: NetworkPrimitives<
             PooledTransaction = PooledTx,
             BroadcastedTransaction = <<Node::Types as NodeTypes>::Primitives as NodePrimitives>::SignedTx
         >
         + NetPrimitivesFor<PrimitivesTy<Node::Types>>,
     PooledTx: Send,
 {
-    type Network = NetworkHandle<NetworkPrimitives>;
+    type Network = NetworkHandle<NetworkP>;
 
     async fn build_network(
         self,
