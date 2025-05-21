@@ -175,9 +175,7 @@ where
         let fut = pin!(fut);
         tokio::select! {
             task_manager_result = tasks => {
-                if let Err(panicked_error) = task_manager_result {
-                    return Err(panicked_error.into());
-                }
+                task_manager_result.map_err(|panicked_error| panicked_error.into())?;
             },
             res = fut => res?,
         }
