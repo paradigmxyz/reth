@@ -6,6 +6,32 @@ use core::{
 use alloy_primitives::U256;
 use reth_trie_common::Nibbles;
 
+static SLICE_MASKS: [U256; 65] = {
+    const fn shr(input: U256, rhs: usize) -> U256 {
+        let (limbs, bits) = (rhs / 64, rhs % 64);
+        let input_limbs = input.into_limbs();
+        let word_bits = 64;
+        let mut result_limbs = U256::ZERO.into_limbs();
+        let mut carry = 0;
+        let mut i = 0;
+        while i < U256::LIMBS - limbs {
+            let x = input_limbs[U256::LIMBS - 1 - i];
+            result_limbs[U256::LIMBS - 1 - i - limbs] = (x >> bits) | carry;
+            carry = (x << (word_bits - bits - 1)) << 1;
+            i += 1;
+        }
+        U256::from_limbs(result_limbs)
+    }
+
+    let mut masks = [U256::ZERO; 65];
+    let mut i = 0;
+    while i <= 64 {
+        masks[i] = if i == 64 { U256::MAX } else { shr(U256::MAX, 256 - (i * 4)) };
+        i += 1;
+    }
+    masks
+};
+
 /// A representation for nibbles, that uses an even/odd flag.
 #[repr(C)] // We when to preserve the order of fields in the memory layout
 #[derive(Default, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -110,7 +136,7 @@ impl PackedNibbles {
             return false;
         }
 
-        (self.nibbles >> ((self.bit_len()).saturating_sub(other.bit_len()))) & other.nibbles ==
+        (self.nibbles >> (self.bit_len().saturating_sub(other.bit_len()))) & other.nibbles ==
             other.nibbles
     }
 
@@ -215,12 +241,7 @@ impl PackedNibbles {
         let shifted = self.nibbles >> shift_right_bits;
 
         let bit_len = nibble_len * 4;
-        let nibbles = if bit_len == 256 {
-            shifted
-        } else {
-            // TODO: these masks can be pre-calculated, but shifts aren't const
-            shifted & (U256::MAX >> (256 - bit_len))
-        };
+        let nibbles = if bit_len == 256 { shifted } else { shifted & SLICE_MASKS[nibble_len] };
 
         Self { length: nibble_len as u8, nibbles }
     }
