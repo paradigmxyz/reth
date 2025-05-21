@@ -174,8 +174,16 @@ where
     {
         let fut = pin!(fut);
         tokio::select! {
-            err = tasks => {
-                return Err(err.into())
+            task_manager_result = tasks => {
+                match task_manager_result {
+                    Ok(()) => {
+                        return Ok(());
+                    }
+                    Err(panicked_error) => {
+                        error!(target: "reth::cli", ?panicked_error, "Critical task panicked");
+                        return Err(panicked_error.into());
+                    }
+                }
             },
             res = fut => res?,
         }
