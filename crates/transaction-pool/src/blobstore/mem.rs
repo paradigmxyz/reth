@@ -143,7 +143,11 @@ impl BlobStore for InMemoryBlobStore {
                 break;
             }
         }
-        Ok(Some(result.into_iter().flatten().collect()))
+        if result.iter().all(|blob| blob.is_some()) {
+            Ok(Some(result.into_iter().map(Option::unwrap).collect()))
+        } else {
+            Ok(None)
+        }
     }
 
     fn data_size_hint(&self) -> Option<usize> {
