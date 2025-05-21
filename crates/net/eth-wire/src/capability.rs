@@ -132,7 +132,7 @@ impl SharedCapability {
     }
 
     /// Returns the number of protocol messages supported by this capability.
-    pub fn num_messages(&self) -> u8 {
+    pub const fn num_messages(&self) -> u8 {
         match self {
             Self::Eth { version, .. } => EthMessageID::max(*version) + 1,
             Self::UnknownCapability { messages, .. } => *messages,
