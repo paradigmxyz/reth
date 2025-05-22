@@ -265,6 +265,6 @@ mod tests {
         assert_eq!(EthVersion::Eth66.total_messages(), 15);
         assert_eq!(EthVersion::Eth67.total_messages(), 13);
         assert_eq!(EthVersion::Eth68.total_messages(), 13);
-        assert_eq!(EthVersion::Eth69.total_messages(), 11);
+        assert_eq!(EthVersion::Eth69.total_messages(), 12);
     }
 }
