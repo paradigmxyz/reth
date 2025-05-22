@@ -124,6 +124,42 @@ impl PackedNibbles {
         self.length == 0
     }
 
+    /// Returns the total number of nibbles in this [`PackedNibbles`].
+    pub const fn len(&self) -> usize {
+        self.length as usize
+    }
+
+    /// Returns a slice of the underlying bytes.
+    pub const fn as_slice(&self) -> &[u8] {
+        self.nibbles.as_le_slice()
+    }
+
+    /// Gets the nibble at the given position.
+    /// # Panics
+    ///
+    /// Panics if the position is out of bounds.
+    pub const fn get_nibble(&self, pos: usize) -> u8 {
+        let byte_pos = pos / 2;
+        let byte = self.nibbles.byte(byte_pos);
+
+        if pos % 2 == 0 {
+            // For even positions, return the high nibble
+            (byte & 0xF0) >> 4
+        } else {
+            // For odd positions, return the low nibble
+            byte & 0x0F
+        }
+    }
+
+    /// Returns the last nibble in this [`PackedNibbles`], or `None` if empty.
+    pub const fn last(&self) -> Option<u8> {
+        if self.is_empty() {
+            return None;
+        }
+
+        Some(self.get_nibble(self.len() - 1))
+    }
+
     /// Returns `true` if this [`PackedNibbles`] starts with the nibbles in `other`.
     pub fn starts_with(&self, other: &Self) -> bool {
         // If other is empty, it's a prefix of any sequence
@@ -138,16 +174,6 @@ impl PackedNibbles {
 
         let shift_right_bits = self.bit_len() - other.bit_len();
         (self.nibbles >> shift_right_bits) == other.nibbles
-    }
-
-    /// Returns the total number of nibbles in this [`PackedNibbles`].
-    pub const fn len(&self) -> usize {
-        self.length as usize
-    }
-
-    /// Returns a slice of the underlying bytes.
-    pub const fn as_slice(&self) -> &[u8] {
-        self.nibbles.as_le_slice()
     }
 
     /// Returns the length of the common prefix between this [`PackedNibbles`] and `other`.
@@ -177,32 +203,6 @@ impl PackedNibbles {
 
         // clamp to the shorter of two sequences and convert to nibbles
         leading.min(self_bit_len.min(other_bit_len)) / 4
-    }
-
-    /// Returns the last nibble in this [`PackedNibbles`], or `None` if empty.
-    pub const fn last(&self) -> Option<u8> {
-        if self.is_empty() {
-            return None;
-        }
-
-        Some(self.get_nibble(self.len() - 1))
-    }
-
-    /// Gets the nibble at the given position.
-    /// # Panics
-    ///
-    /// Panics if the position is out of bounds.
-    pub const fn get_nibble(&self, pos: usize) -> u8 {
-        let byte_pos = pos / 2;
-        let byte = self.nibbles.byte(byte_pos);
-
-        if pos % 2 == 0 {
-            // For even positions, return the high nibble
-            (byte & 0xF0) >> 4
-        } else {
-            // For odd positions, return the low nibble
-            byte & 0x0F
-        }
     }
 
     /// Creates a new [`PackedNibbles`] containing the nibbles in the specified range.
@@ -246,18 +246,6 @@ impl PackedNibbles {
         Self { length: nibble_len as u8, nibbles }
     }
 
-    /// Extends this [`PackedNibbles`] with the given [`PackedNibbles`].
-    pub fn extend_path(&mut self, other: &Self) {
-        if other.is_empty() {
-            // If `other` is empty, we can just return
-            return;
-        }
-
-        self.nibbles <<= other.bit_len();
-        self.nibbles |= other.nibbles;
-        self.length += other.length;
-    }
-
     /// Pushes a single nibble to the end of the nibbles.
     ///
     /// This will only look at the low nibble of the byte passed, i.e. for `0x02` the nibble `2`
@@ -270,6 +258,18 @@ impl PackedNibbles {
         }
         self.nibbles |= U256::from(nibble & 0x0F);
         self.length += 1;
+    }
+
+    /// Extends this [`PackedNibbles`] with the given [`PackedNibbles`].
+    pub fn extend_path(&mut self, other: &Self) {
+        if other.is_empty() {
+            // If `other` is empty, we can just return
+            return;
+        }
+
+        self.nibbles <<= other.bit_len();
+        self.nibbles |= other.nibbles;
+        self.length += other.length;
     }
 
     /// Truncates this [`PackedNibbles`] to the specified length.
