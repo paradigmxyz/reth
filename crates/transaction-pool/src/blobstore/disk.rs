@@ -217,7 +217,7 @@ impl BlobStore for DiskFileBlobStore {
             }
         }
 
-        // not all versioned hashes were be found, try to look up a matching tx
+        // not all versioned hashes were found, try to look up a matching tx
         let mut missing_tx_hashes = Vec::new();
 
         {
