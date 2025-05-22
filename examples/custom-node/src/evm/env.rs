@@ -15,6 +15,7 @@ pub type CustomEvmTransaction = OpTransaction<CustomTxEnv>;
 /// fed to [`Evm`] for execution.
 ///
 /// [`Evm`]: alloy_evm::Evm
+#[derive(Default)]
 pub struct CustomTxEnv(pub TxEnv);
 
 impl revm::context::Transaction for CustomTxEnv {
